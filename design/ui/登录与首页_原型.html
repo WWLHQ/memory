@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>首页原型 — 多 Agent 记忆助手</title>
+<style>
+  :root{--bg:#0f1419;--panel:#1a212b;--panel2:#202833;--line:#2b3441;--txt:#e6edf3;--muted:#8b98a7;--dim:#5b6675;--accent:#4d9fff;--ok:#3ecf8e;--warn:#ffd166;--err:#ff5c5c}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.55 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1180px;margin:0 auto;padding:18px}
+  h1{font-size:18px;margin:0 0 2px}
+  .sub{color:var(--muted);font-size:12px;margin-bottom:14px}
+  .section-title{font-size:13px;color:var(--muted);font-weight:600;margin:18px 0 8px;text-transform:uppercase;letter-spacing:.5px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:8px 0}
+  .pill{font-size:11px;padding:3px 9px;border-radius:6px;background:var(--panel2);border:1px solid var(--line);color:var(--muted)}
+  .pill.on{color:var(--txt);border-color:var(--accent)}
+  .pill.ok{color:var(--ok);border-color:#1e4a36;background:#12324a}
+  .pill.gold{color:#ffe6a8;border-color:#6b5a1e;background:#3a2f10}
+  .pill.red{color:#ffb0b0;border-color:#6b2e2e;background:#3a1616}
+  input[type=text],input[type=password]{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:7px;padding:8px 10px;font-size:13px;flex:1;min-width:180px}
+  input:focus{outline:none;border-color:var(--accent)}
+  .btn{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:8px 14px;cursor:pointer;font-size:13px}
+  .btn.primary{background:var(--accent);color:#04121f;border-color:var(--accent);font-weight:600}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .err{font-size:12px;color:var(--warn);margin-top:6px;min-height:16px}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 16px;font-size:13px;z-index:80;display:none}
+  .gains{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  @media(max-width:820px){.gains{grid-template-columns:1fr 1fr}}
+  .gain{background:var(--panel2);border-radius:10px;padding:12px}
+  .gain h3{font-size:12px;margin:0 0 6px;color:var(--txt)}
+  .gain .big{font-size:22px;font-weight:800;font-family:monospace;color:var(--ok)}
+  .gain .desc{font-size:10px;color:var(--muted);margin-top:4px}
+  .gain.off{opacity:.4}
+  .dash-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:700px){.dash-grid{grid-template-columns:1fr}}
+  .stat{background:var(--panel2);border-radius:10px;padding:12px}
+  .stat h3{font-size:12px;margin:0 0 8px;color:var(--txt)}
+  .stat .k{font-size:11px;color:var(--muted)}
+  .stat .v{font-size:16px;font-weight:700;font-family:monospace;margin:2px 0 8px}
+  .list{font-size:12px;line-height:1.7}
+  .list .item{padding:5px 0;border-bottom:1px dashed var(--line)}
+  .list .item:last-child{border-bottom:0}
+  .list .rid{font-family:monospace;color:var(--accent);cursor:pointer;font-size:11px}
+  .list .item.err .v{color:var(--err)}
+  .note{font-size:11px;color:var(--dim);margin-top:10px;line-height:1.6}
+  /* 顶栏（登录态自适应） */
+  .topbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+  .topbar .hi{font-size:14px;font-weight:600}
+  /* 未登录占位 */
+  .off-placeholder{grid-column:1/-1;background:var(--panel2);border:1px dashed var(--line);border-radius:10px;padding:20px;text-align:center;color:var(--dim);font-size:13px}
+  /* 登录卡片（弹出） */
+  .login-modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:50}
+  .login-modal.show{display:flex}
+  .login-box{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;width:340px}
+  .login-box h3{font-size:15px;margin:0 0 14px;display:flex;justify-content:space-between;align-items:center}
+  .login-box .close{cursor:pointer;color:var(--muted);font-size:18px}
+  .lbl{font-size:12px;color:var(--muted);width:80px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>首页 · 可交互原型</h1>
+  <div class="sub">按《UI 页面设计》§0.2 首页（落地页，直接进入，不阻塞登录）+ §0.3 登录卡片（顶栏点击弹出）· 未登录时功能区灰置只读 · 团队由管理员分配（P12），用户侧只读</div>
+
+  <div class="section-title">首页（P0，落地页 = 直接进入）</div>
+  <div class="card">
+    <!-- 顶栏（登录态自适应） -->
+    <div class="topbar" id="topbar">
+      <!-- 未登录 -->
+      <span class="hi" id="hiUnauth">欢迎使用记忆助手 · 当前未登录 · 当前端[桌面]</span>
+      <button class="btn primary" id="btnOpenLogin">▶ 登录</button>
+      <!-- 已登录 -->
+      <span class="hi" id="hiAuth" style="display:none">你好，user_001 · 团队 team_001（管理员分配 · 只读）· 当前端[桌面·主源]</span>
+      <span class="pill ok" id="syncPill" style="display:none">已同步 · 刚刚</span>
+      <button class="btn" id="btnLogout" style="display:none;padding:4px 10px;font-size:11px">登出</button>
+    </div>
+
+    <!-- 功能区：未登录灰置 / 已登录数据 -->
+    <div class="gains" id="gains" style="margin:10px 0">
+      <div class="off-placeholder" id="offPlaceholder">未登录，登录后可查看功劳 / 异常 / 活跃 / 待办</div>
+      <div class="gain" data-on style="display:none"><h3>🪙 Token 节省</h3><div class="big">-58%</div><div class="desc">payload 780/1500 · 极简 ≤600t</div></div>
+      <div class="gain" data-on style="display:none"><h3>⚡ 效率提升</h3><div class="big">-34%</div><div class="desc">免重复背景交代 · 踩坑复用</div></div>
+      <div class="gain" data-on style="display:none"><h3>🔁 跨 Agent 复用</h3><div class="big">3.2×</div><div class="desc">1 次沉淀 · 4 端共享（19.4）</div></div>
+      <div class="gain" data-on style="display:none"><h3>💸 模型成本（反代理 19.8）</h3><div class="big">省¥19/月</div><div class="desc">auto 先免费后低价 · 单价≤¥0.02/千</div></div>
+    </div>
+    <div class="dash-grid" id="dashGrid">
+      <div class="off-placeholder" id="offPlaceholder2" style="grid-column:1/-1">（未登录灰置）异常速览 / 活跃记忆 / 待办</div>
+      <div class="stat" data-on style="display:none">
+        <h3>⛔ 异常速览（置顶）</h3>
+        <div class="list">
+          <div class="item err"><div class="v">Codex 熔断 OPEN</div><div class="k">desktop/Codex · 连续失败≥5 <span class="rid">req_x1</span> [跳 P10]</div></div>
+          <div class="item err"><div class="v">web 同步对账超时</div><div class="k">sync_fail · form:web <span class="rid">req_x2</span> [跳 P15]</div></div>
+          <div class="item"><div class="v">反代理 claude-free 额度 90%</div><div class="k">临 proxy_budget <span class="rid">req_x3</span> [跳 P13]</div></div>
+        </div>
+      </div>
+      <div class="stat" data-on style="display:none">
+        <h3>📊 近 1h 召回 Top3 + 待办</h3>
+        <div class="list">
+          <div class="item"><div class="v">为什么上次重构失败</div><div class="k">命中3条 · decay=hot · <span class="rid">req_001</span></div></div>
+          <div class="item"><div class="v">项目技术栈约束</div><div class="k">命中2条 · decay=warm · <span class="rid">req_002</span></div></div>
+          <div class="item"><div class="v">⚖️ 待裁决 3 条 [跳 P8]</div><div class="k">9.7 冲突队列 · <span class="rid">req_003</span></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="note">
+      红线：① 首页数字全部可点溯源到 request_id / 审计（4.3）；② 离线端（移动）显示"离线 N 条待回传"（pending_sync，19.11 §5）；③ 不暴露内部参数名（17.3，用业务文案）；④ 团队只读（管理员分配，P12）；⑤ <b>首页不阻塞登录</b>——未登录也能进首页，功能区灰置只读，仅顶栏「▶ 登录」可点。
+    </div>
+  </div>
+
+  <div class="section-title">登录卡片（§0.3，顶栏点击「▶ 登录」弹出，非独立前置页）</div>
+  <div class="note">团队 team_id 由管理员在账号与安全页（P12）分配，卡片内只读展示、不可选择。</div>
+</div>
+
+<!-- 登录卡片（弹出） -->
+<div class="login-modal" id="loginModal">
+  <div class="login-box">
+    <h3>登录（确定同步身份）<span class="close" id="btnCloseLogin">×</span></h3>
+    <div class="row">
+      <span class="lbl">账号</span>
+      <input type="text" id="acc" placeholder="user_001 或邮箱" value="user_001" />
+    </div>
+    <div class="row">
+      <span class="lbl">密码</span>
+      <input type="password" id="pwd" placeholder="········" value="pass_001" />
+    </div>
+    <div class="row">
+      <span class="lbl">端形态</span>
+      <span class="pill on">自动识别 = 桌面端</span>
+    </div>
+    <div class="row">
+      <span class="lbl">团队</span>
+      <span class="pill">team_001（管理员分配 · 只读 · P12）</span>
+    </div>
+    <div class="row">
+      <button class="btn primary" id="btnLogin">登 录</button>
+      <button class="btn" id="btnScan">扫码（Web）</button>
+      <button class="btn" id="btnKey">系统密钥（mac/CLI）</button>
+    </div>
+    <div class="err" id="loginErr"></div>
+    <div class="note">
+      红线：① 登录必记审计（<code>action=login · form:desktop</code>，4.3）；② 密码哈希存储、传输加密（4.1）；③ 同步身份=账号（user_id + 管理员分配的 team_id），同账号跨端自动同步；④ 团队只读、管理员分配（P12，<code>action=team_assign</code> 记审计）。
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+function toast(m){const t=document.getElementById("toast");t.textContent=m;t.style.display="block";clearTimeout(t._x);t._x=setTimeout(()=>t.style.display="none",2600);}
+
+const modal=document.getElementById("loginModal");
+function setAuthed(v){
+  // 顶栏
+  document.getElementById("hiUnauth").style.display=v?"none":"inline";
+  document.getElementById("btnOpenLogin").style.display=v?"none":"inline-block";
+  document.getElementById("hiAuth").style.display=v?"inline":"none";
+  document.getElementById("syncPill").style.display=v?"inline-block":"none";
+  document.getElementById("btnLogout").style.display=v?"inline-block":"none";
+  // 功能区：未登录灰置占位，已登录数据
+  document.getElementById("offPlaceholder").style.display=v?"none":"block";
+  document.getElementById("offPlaceholder2").style.display=v?"none":"block";
+  document.querySelectorAll("#gains .gain").forEach(g=>g.style.display=v?"block":"none");
+  document.querySelectorAll("#dashGrid .stat").forEach(s=>s.style.display=v?"block":"none");
+}
+// 首页 → 弹出登录卡片（顶栏「▶ 登录」）
+document.getElementById("btnOpenLogin").addEventListener("click",()=>modal.classList.add("show"));
+document.getElementById("btnCloseLogin").addEventListener("click",()=>modal.classList.remove("show"));
+// 登录
+document.getElementById("btnLogin").addEventListener("click",()=>{
+  const acc=document.getElementById("acc").value.trim();
+  const pwd=document.getElementById("pwd").value;
+  if(!acc){document.getElementById("loginErr").textContent="账号不能为空";return;}
+  if(!pwd){document.getElementById("loginErr").textContent="密码不能为空";return;}
+  if(pwd==="wrong"){document.getElementById("loginErr").textContent="密码错误，已记审计（错 5 次锁 15min）";toast("登录失败：密码错误（审计 action=login_fail）");return;}
+  document.getElementById("loginErr").textContent="";
+  setAuthed(true);
+  modal.classList.remove("show");
+  document.getElementById("syncPill").textContent="已同步 · 刚刚";
+  toast("登录成功：同步身份 "+acc+" + team_001（管理员分配，只读）· 审计 action=login · form:desktop");
+});
+document.getElementById("btnScan").addEventListener("click",()=>{toast("Web 扫码登录：同账号 user_001（审计 form:web）");});
+document.getElementById("btnKey").addEventListener("click",()=>{toast("mac/CLI 系统密钥登录：memagent login（非交互 token，审计 form:cli）");});
+// 登出
+document.getElementById("btnLogout").addEventListener("click",()=>{
+  setAuthed(false);
+  toast("已登出（审计 action=logout · form:desktop）");
+});
+// 首页数字溯源（已登录态）
+document.querySelectorAll("#dashGrid .rid").forEach(e=>e.addEventListener("click",()=>{
+  toast("弹审计窗口（独立 modal，非常驻）定位 "+e.textContent+" 全链路（18.2-E）");
+}));
+// 初始：直接进入首页（未登录态，不阻塞）
+setAuthed(false);
+</script>
+</body>
+</html>

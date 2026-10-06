@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>检索页原型 — 多 Agent 记忆助手</title>
+<style>
+  :root{
+    --bg:#0f1419; --panel:#1a212b; --panel2:#202833; --line:#2b3441;
+    --txt:#e6edf3; --muted:#8b98a7; --dim:#5b6675;
+    --hot:#ff5c5c; --warm:#ff9f43; --cold:#4d9fff; --arch:#8b98a7; --dorm:#3f4a5a;
+    --ok:#3ecf8e; --warn:#ffd166; --err:#ff5c5c; --info:#4d9fff;
+    --accent:#4d9fff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+    font:14px/1.55 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1180px;margin:0 auto;padding:18px}
+  h1{font-size:18px;margin:0 0 2px}
+  .sub{color:var(--muted);font-size:12px;margin-bottom:14px}
+  .row{display:flex;gap:10px;flex-wrap:wrap}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+  .casebar{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+  .casebtn{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+    border-radius:8px;padding:6px 10px;cursor:pointer;font-size:12px}
+  .casebtn:hover{border-color:var(--accent)}
+  .casebtn.active{background:var(--accent);color:#04121f;border-color:var(--accent);font-weight:600}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:4px}
+  input,select{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+    border-radius:8px;padding:8px 10px;font-size:14px;width:100%}
+  input:disabled,select:disabled{opacity:.5}
+  .ql{display:grid;grid-template-columns:1fr 160px 190px 96px;gap:8px;align-items:end}
+  .ql .q{grid-column:1/2}
+  .hint{font-size:11px;color:var(--dim);margin-top:4px}
+  .btn{background:var(--accent);color:#04121f;border:none;border-radius:8px;padding:9px 14px;
+    font-weight:600;cursor:pointer;font-size:14px}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .banner{margin-top:14px}
+  .chip{display:inline-block;border-radius:20px;padding:2px 9px;font-size:11px;font-weight:600;margin-right:6px}
+  .chip.scene{background:#2b3a4d;color:#bcd}
+  .chip.mode{background:#20303d;color:#7fd}
+  .chip.kw{background:#233;font-size:11px}
+  .chip.cold{background:#12324a;color:#8cc7ff}
+  .chip.thin{background:#3a2f10;color:#ffd166}
+  .banner .meta{color:var(--muted);font-size:12px;margin-top:6px}
+  .req{cursor:pointer;color:var(--accent);font-family:monospace}
+  .warnbar{background:#3a2f10;border:1px solid #6b5a1e;border-radius:8px;padding:9px 11px;
+    margin-top:10px;font-size:13px;color:#ffe6a8}
+  .grid{display:grid;grid-template-columns:1fr 320px;gap:14px;margin-top:14px}
+  @media(max-width:900px){.grid{grid-template-columns:1fr}}
+  .mem{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px}
+  .mem.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+  .mem .top{display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap}
+  .mem .id{font-family:monospace;font-size:11px;color:var(--dim)}
+  .tempo{font-size:10px;padding:1px 7px;border-radius:5px;font-weight:700}
+  .t-hot{background:#3a1616;color:#ff8a8a}.t-warm{background:#3a2a16;color:#ffb454}
+  .t-cold{background:#122c44;color:#7cc0ff}.t-arch{background:#2a2f38;color:#a9b4c2}
+  .t-dorm{background:#232a35;color:#7a8698}
+  .icon{font-size:12px}
+  .mem .body{color:var(--txt);margin:4px 0}
+  .mem .placeholder{color:#8cc7ff;font-style:italic}
+  .mem .ph-tag{font-size:10px;color:#7cc0ff;border:1px solid #2a4a66;border-radius:4px;padding:0 5px;margin-left:6px}
+  .bars{display:flex;gap:14px;margin-top:8px;font-size:11px;color:var(--muted)}
+  .bar{flex:1}
+  .bar .tr{height:6px;background:var(--panel2);border-radius:4px;overflow:hidden;margin-top:3px}
+  .bar .fill{height:100%;border-radius:4px}
+  .f-hot{background:var(--hot)} .f-imp{background:var(--warm)} .f-conf{background:var(--ok)}
+  .score{font-family:monospace;font-size:13px;color:var(--txt);font-weight:700}
+  .conflict{background:#3a2f10;border-left:3px solid var(--warn);border-radius:6px;padding:7px 10px;margin-top:8px;font-size:12px;color:#ffe6a8}
+  .mem .acts{display:flex;gap:8px;margin-top:10px}
+  .mem .acts button{background:var(--panel2);border:1px solid var(--line);color:var(--muted);
+    border-radius:7px;padding:4px 9px;cursor:pointer;font-size:12px}
+  .mem .acts button:hover{color:var(--txt);border-color:var(--accent)}
+  .ctx{position:sticky;top:12px;align-self:start}
+  .ctx .sec{margin-bottom:10px}
+  .ctx h3{font-size:12px;color:var(--muted);margin:0 0 5px;font-weight:600}
+  .ctx .kv{font-size:12px;color:var(--muted);margin:2px 0}
+  .ctx .hl{color:#ffe6a8}
+  .ctx .lk{color:var(--accent);cursor:pointer;font-size:12px}
+  .budget{margin-top:14px}
+  .brow{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:700px){.brow{grid-template-columns:1fr}}
+  .btok{font-size:12px;color:var(--muted);margin-bottom:4px;display:flex;justify-content:space-between}
+  .bbar{height:8px;background:var(--panel2);border-radius:5px;overflow:hidden;position:relative}
+  .bbar .f{height:100%;border-radius:5px}
+  .soft1500{background:linear-gradient(90deg,#3ecf8e,#ffd166 70%,#ff5c5c)}
+  .marks{position:relative;height:8px}
+  .funnel{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--muted);margin-top:8px}
+  .funnel .n{background:var(--panel2);border-radius:6px;padding:3px 9px;font-family:monospace;color:var(--txt)}
+  .breach{background:#3a1616;border:1px solid #6b2e2e;border-radius:8px;padding:9px;margin-top:10px;font-size:12px;color:#ffb0b0}
+  .empty{background:var(--panel);border:1px dashed var(--line);border-radius:10px;padding:34px;text-align:center;color:var(--muted)}
+  .empty .big{font-size:26px;margin-bottom:8px}
+  .reload{margin-top:12px}
+  .reload button{background:var(--panel2);border:1px solid var(--line);color:var(--accent);
+    border-radius:8px;padding:6px 14px;cursor:pointer;font-size:13px}
+  .audit{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;z-index:50}
+  .audit.show{display:block}
+  .audit .pane{position:absolute;right:0;top:0;bottom:0;width:520px;max-width:92%;background:var(--panel);
+    border-left:1px solid var(--line);padding:16px;overflow:auto}
+  .audit h2{font-size:15px;margin:0 0 4px}
+  .audit .rid{font-family:monospace;color:var(--accent);font-size:12px;margin-bottom:12px}
+  .alog{font-family:monospace;font-size:11px;background:var(--panel2);border-radius:8px;padding:10px;margin-bottom:10px}
+  .alrow{padding:5px 0;border-bottom:1px dashed var(--line)}
+  .alrow:last-child{border:none}
+  .alrow .act{color:var(--warn)}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--panel2);
+    border:1px solid var(--line);border-radius:8px;padding:9px 16px;font-size:13px;z-index:80;display:none}
+  .legend{font-size:11px;color:var(--dim);margin-top:8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>检索页 · 前端原型</h1>
+  <div class="sub">按《检索页字段级交互规格》§9 八条验收用例实现 · scene/mode 联动 + 状态机 + 异常态 + 预算三档 + request_id 跳审计</div>
+
+  <!-- 验收用例场景切换 -->
+  <div class="casebar" id="casebar">
+    <button class="casebtn" data-case="c2">用例2 · 短查询极简</button>
+    <button class="casebtn" data-case="c3">用例3 · 极简逃生阀</button>
+    <button class="casebtn" data-case="c4">用例4 · 预算裁剪</button>
+    <button class="casebtn" data-case="c5">用例5 · 硬熔断</button>
+    <button class="casebtn" data-case="c6">用例6 · 超时回退</button>
+    <button class="casebtn" data-case="c7">用例7 · pinned 置顶</button>
+    <button class="casebtn" data-case="c8">用例8 · 冲突仲裁</button>
+    <button class="casebtn active" data-case="c1">用例1 · 自动分流(critical)</button>
+  </div>
+
+  <!-- 查询栏 -->
+  <div class="card ql">
+    <div class="q">
+      <label>query</label>
+      <input id="query" placeholder="输入问题…" />
+      <div class="hint" id="queryhint"></div>
+    </div>
+    <div>
+      <label>scene</label>
+      <select id="scene">
+        <option value="default">default</option>
+        <option value="task_start">task_start</option>
+        <option value="history_query">history_query</option>
+        <option value="critical">critical</option>
+      </select>
+    </div>
+    <div>
+      <label>mode（默认自动）</label>
+      <select id="mode">
+        <option value="">自动（null）</option>
+        <option value="top_insight">顶层洞察</option>
+        <option value="fact_first">事实优先</option>
+        <option value="event_replay">事件复盘</option>
+        <option value="pattern_reasoning">模式推理</option>
+        <option value="minimal">极简轻量</option>
+      </select>
+    </div>
+    <div>
+      <button class="btn" id="go">检索</button>
+    </div>
+  </div>
+  <div class="legend">联动规则：scene=critical 禁用「极简」（16.5）；query <30 字(中)/<12 词(英) 提示将触发极简（2.4.4）。</div>
+
+  <!-- 结果区 -->
+  <div id="stage"></div>
+
+  <!-- request 审计抽屉 -->
+  <div class="audit" id="audit">
+    <div class="pane">
+      <h2>审计日志 · 独立窗口（页面 11）</h2>
+      <div class="rid" id="auditRid">request_id: —</div>
+      <div class="alog" id="auditLog"></div>
+      <div class="reload"><button onclick="document.getElementById('audit').classList.remove('show')">关闭</button></div>
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+/* ============ 模式元数据（2.4.3 五模式）============ */
+const MODES={
+  top_insight:{name:"顶层洞察",w:[0.20,0.40,0.10,0.30]},
+  fact_first:{name:"事实优先",w:[0.10,0.20,0.40,0.30]},
+  event_replay:{name:"事件复盘",w:[0.40,0.15,0.15,0.30]},
+  pattern_reasoning:{name:"模式推理",w:[0.15,0.25,0.10,0.40]},
+  minimal:{name:"极简轻量",w:[0.10,0.20,0.35,0.35]},
+};
+/* scene → 预算/默认模式/重排/禁极简（2.4.1 + 2.4.4） */
+const SCENES={
+  default:{budget:800,def:"minimal",rerank:false,noMinimal:false},
+  task_start:{budget:1200,def:"top_insight",rerank:false,noMinimal:false},
+  history_query:{budget:2000,def:"event_replay",rerank:true,noMinimal:false},
+  critical:{budget:2500,def:"fact_first",rerank:true,noMinimal:true},
+};
+/* 语言长度阈值（2.4.4 工程约束4） */
+const MIN_LEN_ZH=30, MIN_LEN_EN=12;
+
+/* ============ 单条记忆 mock（17.4 字段）============ */
+const MEMS=[
+  {id:"mem_001",class:"hot",content:"PostgreSQL 连接池默认 max=10，高并发下需调至 50 并启用 wait_timeout",pinned:true,locked:false,fresh:.82,imp:.7,conf:.9,tags:["postgresql","连接池"]},
+  {id:"mem_042",class:"warm",content:"项目采用 SQLite + JSON 存储（MVP 阶段）",pinned:false,locked:false,fresh:.55,imp:.5,conf:.7,tags:["存储"]},
+  {id:"mem_051",class:"warm",content:"项目已迁移到 PostgreSQL + pgvector（进阶阶段）",pinned:false,locked:true,fresh:.61,imp:.8,conf:.6,tags:["存储","迁移"]},
+  {id:"mem_073",class:"cold",content:"L2摘要: Redis 连接超时 → 改为 5s + 重试（Cold 层占位符）",pinned:false,locked:false,fresh:.2,imp:.4,conf:.5,tags:["redis"]},
+  {id:"mem_090",class:"dormant",content:"L2摘要: 2024-03 性能调优（dormant 强信号补查占位符）",pinned:false,locked:false,fresh:.1,imp:.3,conf:.4,tags:["性能"]},
+];
+
+/* ============ §9 八条验收用例场景 ============ */
+const CASES={
+  c1:{ // 用例1：自动分流 critical
+    query:"P0 故障，核对昨天发布三模块有没有报错",scene:"critical",mode:"",
+    effMode:"fact_first",effModeReason:"事实 3 分命中（核对+报错+故障）",
+    kws:["核对","报错","故障"],secondary:null,
+    hits:["mem_001","mem_042"],payload:620,stage1:6,stage2:3,rerank:true,breach:false,
+    breachDetail:[],evidenceThin:false,coldRecall:false,fallback:false,
+  },
+  c2:{ // 用例2：短查询极简
+    query:"修一下这个空指针",scene:"default",mode:"",
+    effMode:"minimal",effModeReason:"长度<30 字触发极简",kws:[],secondary:null,
+    hits:["mem_042","mem_001"],payload:540,stage1:4,stage2:2,rerank:false,breach:false,
+    breachDetail:[],evidenceThin:false,coldRecall:false,fallback:false,
+  },
+  c3:{ // 用例3：极简逃生阀
+    query:"为什么当时选了 FastAPI",scene:"default",mode:"minimal",
+    effMode:"minimal",effModeReason:"显式指定极简",kws:[],
+    secondary:{mode:"fact_first",note:"辅助参考：L2 摘要 ≤200t，冲突以主模式为准"},
+    hits:["mem_073"],payload:580,stage1:2,stage2:1,rerank:false,breach:false,
+    breachDetail:[],evidenceThin:true,coldRecall:true,fallback:false,
+  },
+  c4:{ // 用例4：预算裁剪
+    query:"查一下项目所有历史架构决策",scene:"history_query",mode:"",
+    effMode:"event_replay",effModeReason:"复盘 2 分命中（历史+架构+决策）",kws:["历史","架构","决策"],secondary:null,
+    hits:["mem_001","mem_042","mem_051","mem_073","mem_090"],payload:1720,stage1:12,stage2:5,
+    rerank:true,breach:true,breachDetail:[{layer:"L5",count:2},{layer:"L2",count:1}],
+    evidenceThin:false,coldRecall:true,fallback:false,
+  },
+  c5:{ // 用例5：硬熔断
+    query:"导出全部记忆完整原文",scene:"default",mode:"",
+    errorType:"hardBreach",
+  },
+  c6:{ // 用例6：超时回退
+    query:"检索所有项目上下文",scene:"task_start",mode:"",
+    errorType:"timeout",
+    effMode:"top_insight",effModeReason:"已回退第二层轻量打分",kws:[],
+    hits:["mem_001","mem_042"],payload:480,stage1:5,stage2:2,rerank:false,breach:false,
+    breachDetail:[],evidenceThin:false,coldRecall:false,fallback:true,
+  },
+  c7:{ // 用例7：pinned 置顶
+    query:"PostgreSQL 连接池",scene:"default",mode:"",
+    effMode:"fact_first",effModeReason:"事实 1 分命中（单字词高置信）",kws:["连接池"],secondary:null,
+    hits:["mem_042","mem_001"],payload:510,stage1:5,stage2:2,rerank:false,breach:false, // mem_001 pinned 应排第一
+    breachDetail:[],evidenceThin:false,coldRecall:false,fallback:false,
+  },
+  c8:{ // 用例8：冲突仲裁
+    query:"项目用什么存储",scene:"default",mode:"",
+    effMode:"fact_first",effModeReason:"事实命中（存储）",kws:["存储"],secondary:null,
+    hits:["mem_042","mem_051"],payload:530,stage1:4,stage2:2,rerank:false,breach:false,
+    breachDetail:[],evidenceThin:false,coldRecall:false,fallback:false,
+    conflict:{a:"mem_042",b:"mem_051",mode:"fact_first",verdict:"以 mem_051（PostgreSQL）为准，mem_042（SQLite）作历史参考"},
+  },
+};
+
+/* ============ 状态机 + 渲染 ============ */
+let state="IDLE", selected=null, curCase=CASES.c1, ridCounter=0;
+
+function $(id){return document.getElementById(id);}
+
+function isShort(q){
+  const s=q.trim();
+  if(!s)return false;
+  // 粗略语言检测：含中文字符按字，否则按词
+  const zh=(s.match(/[\u4e00-\u9fa5]/g)||[]).length;
+  if(zh>0) return s.length<MIN_LEN_ZH;
+  return s.split(/\s+/).filter(Boolean).length<MIN_LEN_EN;
+}
+
+function syncQueryHint(){
+  const q=$("query").value, h=$("queryhint");
+  if(isShort(q)&&q.trim())h.textContent="⚠ 短查询（<30字）→ 将触发极简候选（2.4.4）";
+  else h.textContent="";
+}
+
+function syncSceneMode(){
+  const scene=$("scene").value, modeSel=$("mode");
+  const noMin=SCENES[scene].noMinimal;
+  const mi=modeSel.querySelector('option[value="minimal"]');
+  mi.disabled=noMin;
+  if(noMin&&modeSel.value==="minimal"){modeSel.value="";toast("critical 禁用极简，已改回自动（16.5）");}
+}
+
+function toast(msg){const t=$("toast");t.textContent=msg;t.style.display="block";
+  clearTimeout(t._x);t._x=setTimeout(()=>t.style.display="none",2400);}
+
+/* 选场景时把对应 query/scene/mode 写入输入框（便于演示） */
+function loadCase(id){
+  document.querySelectorAll(".casebtn").forEach(b=>b.classList.toggle("active",b.dataset.case===id));
+  const c=Object.assign({},CASES[id]);
+  curCase=c;
+  $("query").value=c.query; $("scene").value=c.scene; $("mode").value=c.mode||"";
+  syncSceneMode(); syncQueryHint();
+  runRecall(c);
+}
+
+function runRecall(c){
+  curCase=c; c.request_id="req_"+(++ridCounter)+"_"+(c.effMode||"auto").replace(/[^a-z]/gi,"");
+  state="LOADING"; renderLoading();
+  setTimeout(()=>{ state="RESULT"; selected=null; renderResult(c); }, 420);
+}
+
+function renderLoading(){
+  $("stage").innerHTML=`<div class="card" style="text-align:center;padding:40px;color:var(--muted)">召回中…（骨架屏）</div>`;
+}
+
+function tempoColor(cls){return cls;}
+function bar(f){return `<div class="bar"><div>${f}</div><div class="tr"><div class="fill ${f.hot?'f-hot':f.imp?'f-imp':'f-conf'}" style="width:${Math.round(f.v*100)}%"></div></div></div>`;}
+
+function renderResult(c){
+  const sceneMeta=SCENES[$("scene").value];
+  let html="";
+
+  if(c.errorType==="hardBreach"){
+    html=`<div class="banner">
+        <div class="warnbar" style="background:#3a1616;border-color:#6b2e2e;color:#ffb0b0">
+          🔴 召回超硬熔断上限（payload>3000，2.4.1），本次已降级为「无记忆」响应。请缩小范围或拆分查询。
+        </div>
+      </div>
+      <div class="empty" style="margin-top:12px">
+        <div class="big">⛔</div>
+        <div>payload_tokens 触发 3000 硬熔断</div>
+        <div class="legend">已记审计 action=recall_breach · 禁用检索 3s</div>
+      </div>`;
+    $("stage").innerHTML=html; return;
+  }
+
+  if(c.fallback){
+    html+=`<div class="warnbar">⏱ 召回超时，已回退到第二层轻量打分结果（17.8 rerank_fallback）。</div>`;
+  }
+
+  // 横幅
+  const modeName=MODES[c.effMode]?MODES[c.effMode].name:c.effMode;
+  const effLabel=c.effMode+"（自动"+(c.fallback?"·超时回退":"")+"）";
+  html+=`<div class="card banner">
+    <div>
+      <span class="chip scene">场景: ${$("scene").value}</span>
+      <span class="chip mode">模式: ${modeName}</span>
+      ${c.coldRecall?'<span class="chip cold">已补查 Cold/dormant 层</span>':""}
+      ${c.evidenceThin?'<span class="chip thin">证据不足</span>':""}
+    </div>
+    <div class="meta">
+      命中关键词：${c.kws.length?c.kws.map(k=>`<span class="chip kw">${k}</span>`).join(""):'<span style="color:var(--dim)">无（走 scene 默认）</span>'}
+      · <span class="req" onclick="openAudit('${c.request_id}')">request_id: ${c.request_id}</span>
+      ${c.secondary?`<br>次模式参考: ${MODES[c.secondary.mode].name} — ${c.secondary.note}（2.4.3 ≤200t 占位符）`:""}
+    </div>
+    ${c.evidenceThin?`
+      <div class="warnbar">⚠ ${$("scene").value==="critical"
+        ? "合规场景证据不足：已强制开启 LLM 重排，建议切事实优先 + 重排确认（2.4.3 边界约束3）"
+        : "证据不足：已追加 1 条 Cold 摘要作辅助参考。建议切事实优先模式重试（2.4.3 逃生阀）"}
+        <div class="reload"><button onclick="switchFactFirst()">切事实优先重试</button></div>
+      </div>`:""}
+  </div>`;
+
+  // 结果列表
+  const list=MEMS.filter(m=>c.hits.includes(m.id));
+  // 排序：pinned 置顶，其余按 conf 次级（演示）
+  list.sort((a,b)=>{
+    if(a.pinned!==b.pinned)return a.pinned?-1:1;
+    return b.conf-a.conf;
+  });
+
+  html+=`<div class="grid"><div>`;
+  if(list.length===0){
+    html+=`<div class="empty"><div class="big">🔍</div>没有可靠的记忆证据。<div class="reload"><button onclick="switchFactFirst()">切事实优先扩大召回</button></div></div>`;
+  } else {
+    list.forEach(m=>{
+      const isCold=m.class==="cold"||m.class==="dormant";
+      html+=`<div class="mem" id="mem-${m.id}" onclick="selectMem('${m.id}')">
+        <div class="top">
+          <span class="id">${m.id}</span>
+          <span class="tempo t-${m.class}">${m.class}</span>
+          ${isCold?'<span class="ph-tag">补查占位符</span>':""}
+          ${m.pinned?'<span class="icon" title="pinned 置顶（17.8 免检进候选）">📌</span>':""}
+          ${m.locked?'<span class="icon" title="locked 豁免后台任务（17.4）">🔒</span>':""}
+          <span class="score" style="margin-left:auto">${(m.conf*0.9+m.fresh*0.1).toFixed(2)}</span>
+        </div>
+        <div class="body ${isCold?'placeholder':''}">${m.content}</div>
+        ${isCold?`<div class="hint">L2 摘要占位符 ≤200t（15.3 / 2.4.2 规则1：L1 原文不进在线上下文）</div>`:""}
+        ${c.conflict&&c.conflict.a===m.id?`<div class="conflict">⚡ 冲突：${c.conflict.a}(${m.content.slice(0,12)}…) vs ${c.conflict.b}(…) → 本模式=${c.conflict.mode} → ${c.conflict.verdict}</div>`:""}
+        <div class="bars">
+          ${bar({hot:1,v:m.fresh,label:"fresh"})}
+          ${bar({imp:1,v:m.imp,label:"imp"})}
+          ${bar({conf:1,v:m.conf,label:"conf"})}
+        </div>
+        <div class="acts">
+          <button onclick="event.stopPropagation();act('记住','${m.id}')">📌 记住</button>
+          <button onclick="event.stopPropagation();act('忘记','${m.id}')">⌫ 忘记</button>
+          <button onclick="event.stopPropagation();toast('已预填反馈（跳用户反馈页·页面9）')">☆ 反馈</button>
+        </div>
+      </div>`;
+    });
+  }
+  html+=`</div><div class="card ctx" id="ctx">${ctxDefault()}</div></div>`;
+
+  // 预算面板
+  const p=c.payload;
+  const pct=Math.min(100,p/3000*100);
+  html+=`<div class="card budget">
+    <div class="brow">
+      <div>
+        <div class="btok"><span>payload_tokens（软上限 1500）</span><span style="font-family:monospace">${p} / 1500</span></div>
+        <div class="bbar"><div class="f ${p>=2000?'':''}" style="width:${Math.min(100,p/3000*100)}%;background:${p>2000?'var(--err)':p>1500?'var(--warn)':'var(--ok)'}"></div></div>
+        <div class="legend">阈值：1500 软上限裁剪 · 2000 告警 · 3000 硬熔断（2.4.1）</div>
+      </div>
+      <div>
+        <div class="btok"><span>召回漏斗 stage1 → stage2</span><span style="font-family:monospace">${c.stage1} → ${c.stage2}</span></div>
+        <div class="funnel"><span class="n">${c.stage1}</span>粗召回 <span>→</span> <span class="n">${c.stage2}</span> 打分 TopK</div>
+        <div class="hint">rerank=${c.rerank?"ON":"OFF"}${c.fallback?" · rerank_fallback":""}（17.8）</div>
+      </div>
+    </div>
+    ${c.breach?`<div class="breach">📉 超支被裁（budget_breach=true）：${c.breachDetail.map(d=>`${d.layer} × ${d.count} 条`).join(" · ")} — 未进上下文（2.4.1 裁剪顺序）</div>`:""}
+  </div>`;
+
+  $("stage").innerHTML=html;
+}
+
+function ctxDefault(){return `<h3>上下文面板</h3><div class="kv">点选左侧任一记忆查看完整内容 / 关联 / 命中定位</div>`;}
+function selectMem(id){
+  document.querySelectorAll(".mem").forEach(e=>e.classList.toggle("sel",e.id==="mem-"+id));
+  const m=MEMS.find(x=>x.id===id);selected=id;
+  const c=currentCase();
+  const isCold=m.class==="cold"||m.class==="dormant";
+  const hitLine=(c.kws&&c.kws.length)?`<div class="kv">命中片段：<span class="hl">${m.content.match(new RegExp("("+c.kws.join("|")+")")||[m.content.slice(0,8)])[0]||"…"}</span>（定位）</div>`:"";
+  $("ctx").innerHTML=`
+    <h3>完整内容 · ${m.id}</h3>
+    <div class="kv ${isCold?'':''}" style="color:var(--txt)">${m.content}</div>
+    ${isCold?'<div class="hint">Cold/dormant：仅 L2 占位符。原文 <span class="lk" onclick="toast(\'审计展开 L1（2.4.2 规则1 例外③溯源）\')">审计展开</span></div>':""}
+    <div class="sec"><h3>参数（只读）</h3>
+      <div class="kv">decay_class: ${m.class}</div>
+      <div class="kv">pinned: ${m.pinned} · locked: ${m.locked}</div>
+      <div class="kv">fresh ${m.fresh} · imp ${m.imp} · conf ${m.conf}</div>
+    </div>
+    <div class="sec"><h3>关联记忆</h3>
+      <div class="kv">合并谱系：无（17.9）</div>
+      ${hitLine}
+    </div>
+    <div class="sec"><h3>跳转</h3>
+      <div><span class="lk" onclick="toast('跳生命周期页调参（带 memory_id · 页面4）')">在生命周期页调参 →</span></div>
+      <div><span class="lk" onclick="openAudit('${currentCase().request_id}')">查该条审计 →</span></div>
+    </div>`;
+}
+
+function currentCase(){return curCase;}
+function makeRid(){return "req_"+Date.now().toString(36);let r=makeRid();return r;}
+
+function act(name,id){toast(`已「${name}」${id}（17.3：${name==="记住"?"提升优先级":name==="忘记"?"降权不删除":""}，写审计 4.3）`);}
+function switchFactFirst(){$("mode").value="fact_first";const c=currentCase();c.mode="fact_first";toast("已切事实优先模式重发（2.4.3 切模式=下一次请求）");runRecall({...c,evidenceThin:false,coldRecall:false,fallback:false});}
+
+function openAudit(rid){
+  $("auditRid").textContent="request_id: "+rid;
+  const c=curCase;
+  $("auditLog").innerHTML=`
+    <div class="alrow">10:23:01 · <span class="act">mode_dispatch</span> · mode=${c.effMode||"auto"} · ${c.kws.join(",")||"—"}</div>
+    ${c.coldRecall?`<div class="alrow">10:23:02 · <span class="act">cold_recall</span> · count=1 · explicit=false</div>`:""}
+    ${c.rerank?`<div class="alrow">10:23:03 · <span class="act">rerank_on</span> · Top5→3</div>`:""}
+    ${c.breach?`<div class="alrow">10:23:04 · <span class="act">recall_breach</span> · ${c.breachDetail.map(d=>d.layer+"x"+d.count).join(",")}</div>`:""}
+    ${c.evidenceThin?`<div class="alrow">10:23:05 · <span class="act">evidence_thin</span> · payload=${c.payload}</div>`:""}
+    <div class="alrow">10:23:06 · <span class="act">recall</span> · payload_tokens=${c.payload} · request_id=${rid}</div>`;
+  $("audit").classList.add("show");
+}
+$("audit").addEventListener("click",e=>{if(e.target===$("audit"))$("audit").classList.remove("show");});
+
+/* ============ 事件绑定 ============ */
+$("query").addEventListener("input",syncQueryHint);
+$("scene").addEventListener("change",syncSceneMode);
+$("mode").addEventListener("change",()=>{if($("mode").value==="minimal"&&SCENES[$("scene").value].noMinimal){$("mode").value="";toast("critical 禁用极简（16.5）");}});
+$("go").addEventListener("click",()=>{
+  const q=$("query").value.trim();if(!q){toast("query 必填");return;}
+  let c={query:q,scene:$("scene").value,mode:$("mode").value,
+    effMode:$("mode").value||SCENES[$("scene").value].def,effModeReason:"auto",kws:[],secondary:null,
+    hits:["mem_001"],payload:400,stage1:4,stage2:1,rerank:SCENES[$("scene").value].rerank,breach:false,
+    breachDetail:[],evidenceThin:false,coldRecall:false,fallback:false};
+  runRecall(c);
+});
+document.querySelectorAll(".casebtn").forEach(b=>b.addEventListener("click",()=>loadCase(b.dataset.case)));
+
+/* 初始载入用例1 */
+syncSceneMode();
+loadCase("c1");
+</script>
+</body>
+</html>

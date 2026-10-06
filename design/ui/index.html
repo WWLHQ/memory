@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>记忆助手 · UI 原型通览演示</title>
+<style>
+  :root{--bg:#0b0f14;--panel:#141b24;--line:#243040;--txt:#e6edf3;--muted:#8b98a7;--dim:#5b6675;--accent:#4d9fff}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.5 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;height:100vh;overflow:hidden}
+  .top{height:52px;background:var(--panel);border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 16px;gap:12px}
+  .top .logo{font-weight:700;font-size:15px}
+  .top .tag{font-size:11px;color:var(--muted)}
+  .top .right{margin-left:auto;font-size:11px;color:var(--dim)}
+  .body{display:flex;height:calc(100vh - 52px)}
+  .nav{width:230px;background:var(--panel);border-right:1px solid var(--line);padding:14px 10px;overflow:auto}
+  .nav .grp{font-size:10px;color:var(--dim);letter-spacing:.6px;text-transform:uppercase;margin:14px 8px 6px}
+  .nav .grp:first-child{margin-top:2px}
+  .nav .item{display:flex;gap:9px;align-items:center;padding:9px 10px;border-radius:9px;cursor:pointer;color:var(--muted);font-size:13px;border:1px solid transparent;margin-bottom:2px}
+  .nav .item:hover{background:#1b2430}
+  .nav .item.active{background:#16222f;color:var(--txt);border-color:var(--line)}
+  .nav .item .ic{width:20px;text-align:center;font-size:15px}
+  .nav .item .desc{font-size:10px;color:var(--dim);display:block;margin-top:1px}
+  .main{flex:1;display:flex;flex-direction:column;min-width:0}
+  .stagebar{height:40px;background:var(--panel);border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 14px;gap:10px;font-size:12px;color:var(--muted)}
+  .stagebar .cur{color:var(--txt);font-weight:600}
+  .stagebar .act{margin-left:auto;display:flex;gap:8px}
+  .stagebar .act button{background:#1b2430;border:1px solid var(--line);color:var(--txt);border-radius:7px;padding:4px 10px;font-size:12px;cursor:pointer}
+  .stagebar .act button:hover{border-color:var(--accent)}
+  .view{flex:1;background:#fff}
+  .view iframe{width:100%;height:100%;border:0;display:block}
+  .view .placeholder{height:100%;display:flex;align-items:center;justify-content:center;color:var(--dim);flex-direction:column;gap:12px;font-size:14px}
+  .view .placeholder .big{font-size:40px}
+  .legend{padding:8px 14px;background:var(--panel);border-top:1px solid var(--line);font-size:11px;color:var(--dim);line-height:1.6}
+  @media(max-width:760px){.nav{width:64px}.nav .item{padding:8px 6px}.nav .item .desc,.nav .item .lbl,.nav .grp{display:none}.nav .item .ic{font-size:18px}}
+</style>
+</head>
+<body>
+  <div class="top">
+    <span class="logo">🧠 多 Agent 记忆助手 · UI 原型通览</span>
+    <span class="tag">按规格书 19.x + UI 页面设计</span>
+    <span class="right">9 个可交互原型 · 9 个视图 · iframe 隔离</span>
+  </div>
+  <div class="body">
+    <div class="nav" id="nav">
+      <div class="grp">界面原型</div>
+      <div class="item active" data-view="login">
+        <span class="ic">🏠</span>
+        <span class="lbl">首页 + 登录卡片<span class="desc">P0 落地页含登录态 · 团队管理员分配 · 功劳收口</span></span>
+      </div>
+      <div class="item" data-view="recall">
+        <span class="ic">🔎</span>
+        <span class="lbl">检索页<span class="desc">8 条验收用例 · 透明化召回</span></span>
+      </div>
+      <div class="item" data-view="agent">
+        <span class="ic">🔌</span>
+        <span class="lbl">Agent 接入配置页<span class="desc">⚡一键接入 · 双通道 · 隔离 · 效果证据</span></span>
+      </div>
+      <div class="item" data-view="inline">
+        <span class="ic">🧠</span>
+        <span class="lbl">Agent 界面内联标识<span class="desc">让功劳当场可见（19.7）</span></span>
+      </div>
+      <div class="item" data-view="story">
+        <span class="ic">🎬</span>
+        <span class="lbl">故事线连续播放<span class="desc">任务→召回→沉淀→跨Agent→看板</span></span>
+      </div>
+      <div class="item" data-view="mech">
+        <span class="ic">⚙️</span>
+        <span class="lbl">机制演示<span class="desc">生命周期·冲突·双通道·效果看板</span></span>
+      </div>
+      <div class="item" data-view="purify">
+        <span class="ic">🧹</span>
+        <span class="lbl">自我净化·生长·大模型<span class="desc">查重嫁接 / 自生长 / LLM 配置</span></span>
+      </div>
+      <div class="item" data-view="conflict">
+        <span class="ic">⚖️</span>
+        <span class="lbl">冲突裁决（P8）<span class="desc">自动 LWW + 9.7 人工队列</span></span>
+      </div>
+      <div class="item" data-view="logs">
+        <span class="ic">📋</span>
+        <span class="lbl">日志记录页 P15<span class="desc">全动作日志 + 异常 + 审计弹出 + 审计禁简删</span></span>
+      </div>
+      <div class="grp">规格书</div>
+      <div class="item" data-view="audit">
+        <span class="ic">🧾</span>
+        <span class="lbl">审计日志页 P11<span class="desc">request_id 全链路 + append-only + 删除需 Admin 权限</span></span>
+      </div>
+      <div class="item" data-view="timeline">
+        <span class="ic">📈</span>
+        <span class="lbl">三根线全链路时序<span class="desc">19.6 Mermaid 时序图</span></span>
+      </div>
+      <div class="grp">说明</div>
+      <div class="item" data-view="about">
+        <span class="ic">ℹ️</span>
+        <span class="lbl">演示说明与文档索引<span class="desc">字段级规格 / 红线</span></span>
+      </div>
+    </div>
+    <div class="main">
+      <div class="stagebar" id="stagebar"></div>
+      <div class="view" id="view"></div>
+      <div class="legend" id="legend"></div>
+    </div>
+  </div>
+
+<script>
+const VIEWS={
+  login:{title:"首页（P0 落地页）原型",file:"登录与首页_原型.html",
+    legend:"首页 P0（落地页 = 直接进入，不阻塞登录；未登录时功能区灰置只读，顶栏「▶ 登录」弹出登录卡片 §0.3）；已登录显示当前端&同步状态+功劳4卡+异常速览+活跃记忆+待办，数字可溯源 request_id（弹审计 modal，非常驻）。团队由管理员在 P12 分配，用户侧只读。对应《UI 页面设计》§0.2/§0.3。"},
+  recall:{title:"检索页原型",file:"检索页_原型.html",
+    legend:"检索页：scene/mode 联动 + 8 条验收用例 + 预算三档 + evidence_thin 逃生阀 + request_id 跳审计。对应《检索页字段级交互规格》。"},
+  agent:{title:"Agent 接入配置页原型",file:"Agent接入页_原型.html",
+    legend:"Agent 接入：<b>⚡ 一键接入（19.9）</b>——自动发现本机 Agent（MCP 注册表 / 本机进程 / Webhook 心跳）→ 打标 P0/P1/P2 → 按默认值直接绑定 → 测通记审计，无需逐个配置，可一键撤销；MVP 两家（deepseek harness P0 + Claude Code P1）· 双通道降级 · project_id/user_id 隔离 · 密钥脱敏 · 效果证据区。对应《Agent接入页字段级交互规格》。"},
+  inline:{title:"Agent 界面内联记忆标识原型",file:"Agent界面内联标识_原型.html",
+    legend:"内联标识（19.7）：🧠 注入 / ⚡ 省 token / 📎 免重复 / ⚠ 老化证据，嵌进 Agent 原窗口，让用户当场看到功劳。对应《Agent界面内联记忆标识》。"},
+  mech:{title:"机制演示原型",file:"机制演示_原型.html",
+    legend:"机制演示（4 项）：① 生命周期衰减状态机（可自动播放 hot→dormant）② 冲突裁决左右分栏 ③ 双通道采集降级动效 ④ 效果看板（命中质量/token/效率/复用可量化）。"},
+  story:{title:"故事线连续播放",file:"故事线_原型.html",
+    legend:"故事线：任务开始→召回注入→沉淀写入→跨 Agent 召回→看板收口，一键连续播放，直观展示三根线（project_id/session_id/request_id）串起多 Agent 记忆闭环。"},
+  purify:{title:"自我净化·生长·大模型配置",file:"净化生长与大模型_原型.html",
+    legend:"自我净化与生长（6.1/6.2/7.1/7.2/13.3）+ 大模型配置（13.2/6.1/2.4.3/7.2）：五维查重+短路嫁接 · 自生长五项优化+收益曲线 · 向量模型与本地/网络 LLM 按用途配置。"},
+  logs:{title:"日志记录页（P15）原型",file:"日志记录页_原型.html",
+    legend:"P15 日志记录页：全软件所有动作的记录（非只异常）· 异常置顶 6 分类（熔断/同步失败/额度超限/L0 解密/向量报错/冲突挂起）· 审计日志点才弹出 modal（非常驻）· 日志/审计同目录独立文件 · 审计 append-only 禁简单删除需 Admin 权限 + 二次确认 + 写审计 audit_delete。对应《日志记录页字段级交互规格》。"},
+  conflict:{title:"冲突裁决（P8）原型",file:"冲突裁决页_原型.html",
+    legend:"P8 冲突裁决页：9.7 冲突检测 + 自动 LWW（vector clock 因果判定）+ 语义冲突进人工队列（dispute_flag）· 待决队列按 team_id 过滤 · 裁决动作写审计（action=dispute_resolve）· 与生命周期状态机联动。"},
+  timeline:{title:"三根线全链路时序图（19.6）",type:"timeline"},
+  audit:{title:"审计日志页（P11）原型",file:"审计日志页_原型.html",
+    legend:"P11 审计日志页（4.3/4.3.1/4.3.2）：request_id 全链路追溯（点 request_id 看一条记忆从召回→重排→payload→审计写的完整链路）· 全动作审计表（4.3.1 枚举：recall/write/auto_bind/sync_*/llm_proxy/l0_view/login/team_assign…）· 审计 append-only 禁简单删除——普通用户无删除按钮，Admin 权限 + 二次确认 + 删除本身写 audit_delete（不可无痕）。与 P15 互补（日志=事件流，审计=单条全链路）。"},
+  about:{title:"演示说明与文档索引",type:"about"},
+};
+
+const view=document.getElementById("view"),stagebar=document.getElementById("stagebar"),legend=document.getElementById("legend");
+const LEGEND={
+  login:"首页 P0（落地页，直接进入，不阻塞登录；未登录功能区灰置，顶栏「▶ 登录」弹出卡片）+ 功劳收口；团队由管理员 P12 分配。",
+  recall:"检索页：scene/mode 联动 + 8 条验收用例 + 预算三档 + evidence_thin 逃生阀 + request_id 跳审计。对应《检索页字段级交互规格》。",
+  agent:"Agent 接入：⚡ 一键接入（19.9）自动发现 + 默认绑定 + 可撤销 · MVP 两家 · 双通道降级 · project_id/user_id 隔离 · 密钥脱敏 · 效果证据区。对应《Agent接入页字段级交互规格》。",
+  inline:"内联标识（19.7）：🧠 注入 / ⚡ 省 token / 📎 免重复 / ⚠ 老化证据，嵌进 Agent 原窗口，让用户当场看到功劳。",
+  mech:"机制演示（4 项）：① 生命周期衰减状态机 ② 冲突裁决左右分栏 ③ 双通道采集降级动效 ④ 效果看板（命中质量/token/效率/复用可量化）。",
+  story:"故事线：任务开始→召回注入→沉淀写入→跨 Agent 召回→看板收口，一键连续播放，展示三根线串起多 Agent 记忆闭环。",
+  purify:"自我净化与生长 + 大模型配置：五维查重/短路嫁接 · 自生长五项优化+收益曲线（调权重前后 Δ）· 向量模型与本地/网络 LLM 按用途配置（含回退）。",
+  logs:"P15 日志记录页：全动作日志 + 异常置顶 + 审计弹出 modal（非常驻）+ 审计 append-only 禁简单删除需 Admin 权限。",
+  conflict:"P8 冲突裁决：9.7 自动 LWW + 仅语义冲突人工 · dispute_flag 待决队列 · 裁决写审计 dispute_resolve。",
+  timeline:"19.6 全链路：同一 project_id=P1 记忆空间被 Claude Code 与 Codex 先后读写。三根线：project_id 贯穿共享域、session_id 串会话、request_id 各记审计。",
+  audit:"P11 审计日志页：request_id 全链路追溯 + 全动作审计表（4.3.1）+ 审计 append-only 禁简单删除（Admin 权限 + 二次确认 + audit_delete 不可无痕）。",
+  about:"文档索引：规格书（含第 19 章）/ 12 页 UI 设计 / 12 页字段级交互规格 / 3 份可交互原型。"
+};
+
+function open(key){
+  document.querySelectorAll(".item").forEach(i=>i.classList.toggle("active",i.dataset.view===key));
+  const v=VIEWS[key];
+  stagebar.innerHTML=`<span class="cur">${v.title}</span><span class="act">
+     ${key!=="about"?`<button data-a="reload">↻ 重载</button><a class="open" style="color:var(--accent);text-decoration:none">新标签打开 ↗</a>`:""}</span>`;
+  legend.textContent=LEGEND[key]||"";
+
+  if(v.file){
+    view.innerHTML=`<iframe src="${v.file}"></iframe>`;
+    const f=view.querySelector("iframe");
+    stagebar.querySelector('[data-a="reload"]')?.addEventListener("click",()=>{f.src=f.src;});
+    stagebar.querySelector(".open")?.addEventListener("click",()=>window.open(v.file,"_blank"));
+    // iframe 内自带深色背景，避免白边
+    view.style.background="#0f1419";
+    return;
+  }
+  view.style.background="#fff";
+  renderCustom(key);
+}
+
+function renderCustom(key){
+  if(key==="timeline"){
+    view.innerHTML=`
+      <div style="padding:24px;color:#1a212b;font-family:system-ui">
+        <h3 style="margin:0 0 6px;color:#111">19.6 全链路时序（Mermaid 渲染）</h3>
+        <p style="color:#5b6675;font-size:13px">同一 project_id=P1 记忆空间被 Claude Code 与 Codex 先后读写，三根线贯穿。</p>
+        <div style="background:#fff;border:1px solid #243040;border-radius:10px;padding:14px;overflow:auto">
+          <pre class="mermaid" id="mm">
+sequenceDiagram
+    autonumber
+    actor U as 用户
+    participant CC as Claude Code(P1)
+    participant MEM as 记忆助手(MCP)
+    participant DB as 记忆库(P1 共享域)
+    participant AUD as 审计日志
+    participant CX as Codex(P2)
+    U->>CC: "为什么当时选了 FastAPI?"
+    CC->>MEM: recall_memory(project_id=P1, user_id=U1, session_id=S1)
+    MEM->>DB: 按 P1 过滤共享域 + U1 过滤个人偏好
+    DB-->>MEM: Top-K 命中
+    MEM->>AUD: 写审计 request_id=req_001
+    MEM-->>CC: hits + payload + req_001
+    CC-->>U: 基于"问题+记忆"回答
+    CC->>MEM: write_memory(project_id=P1, session_id=S1)
+    MEM->>DB: L1-L6 精炼入库
+    MEM->>AUD: 写审计 request_id=req_002
+    MEM-->>CC: memory_id=mem_001
+    CX->>MEM: recall_memory(project_id=P1)
+    MEM->>DB: 命中 mem_001
+    MEM->>AUD: 写审计 request_id=req_003
+    MEM-->>CX: 返回 mem_001(项目级共享生效)
+          </pre>
+        </div>
+      </div>`;
+    loadMermaid();
+    return;
+  }
+  if(key==="audit"){
+    view.innerHTML=`
+      <div style="padding:24px;color:#1a212b;font-family:system-ui;max-width:760px;margin:auto">
+        <h3 style="margin:0 0 4px;color:#111">审计日志 · 独立窗口（4.3 / 18.2-E）</h3>
+        <p style="color:#5b6675;font-size:13px">按 request_id 展开一次请求的全部审计行。点左侧 request_id 可切换。</p>
+        <div style="display:flex;gap:14px">
+          <div style="width:150px">
+            <div style="font-size:12px;color:#5b6675;margin-bottom:6px">request_id</div>
+            <div class="rid" data-rid="req_001" style="padding:6px 8px;border:1px solid #243040;border-radius:7px;cursor:pointer;font-family:monospace;font-size:12px;background:#fff">req_001</div>
+            <div class="rid" data-rid="req_002" style="margin-top:6px;padding:6px 8px;border:1px solid #243040;border-radius:7px;cursor:pointer;font-family:monospace;font-size:12px;background:#fff">req_002</div>
+            <div class="rid" data-rid="req_003" style="margin-top:6px;padding:6px 8px;border:1px solid #243040;border-radius:7px;cursor:pointer;font-family:monospace;font-size:12px;background:#fff">req_003</div>
+          </div>
+          <div id="alogs" style="flex:1;font-family:monospace;font-size:12px;background:#fff;border:1px solid #243040;border-radius:9px;padding:12px"></div>
+        </div>
+      </div>`;
+    const LOGS={
+      req_001:["10:23:01 mode_dispatch mode=auto kws=[核对,报错]","10:23:01 cold_recall count=1 explicit=false","10:23:02 recall payload=620 request_id=req_001"],
+      req_002:["10:24:05 write memory_id=mem_001 layers=L1..L6","10:24:05 recall_breach L5x2 L2x1 (payload>1500)","10:24:06 audit request_id=req_002"],
+      req_003:["10:25:11 recall project_id=P1 hit=mem_001 (跨 Agent 共享)","10:25:11 rerank_on Top5->3","10:25:12 audit request_id=req_003"]
+    };
+    function draw(r){document.querySelectorAll(".rid").forEach(e=>e.style.background=(e.dataset.rid===r?"#16222f":"#fff"));document.getElementById("alogs").innerHTML=LOGS[r].map(l=>`<div style="padding:5px 0;border-bottom:1px dashed #243040">${l}</div>`).join("");}
+    view.querySelectorAll(".rid").forEach(e=>e.addEventListener("click",()=>draw(e.dataset.rid)));
+    draw("req_001");
+    return;
+  }
+  // about
+  view.innerHTML=`
+    <div style="padding:24px;color:#1a212b;font-family:system-ui;max-width:760px;margin:auto">
+      <h3 style="color:#111">演示说明与文档索引</h3>
+      <p style="color:#5b6675;font-size:13px">本壳把 9 份可交互原型 + 3 个规格/说明视图合在一处通览。iframe 隔离，互不干扰。</p>
+      <h4 style="font-size:13px;margin:14px 0 6px">配套文档（工作区内）</h4>
+      <ul style="color:#1a212b;font-size:13px;line-height:1.9;padding-left:20px">
+        <li>需求规格书.md（含第 19 章 Agent 接入：19.1–19.11，含 19.6 时序 / 19.7 内联标识 / 19.8 反代理 / 19.9 一键接入 / 19.10 端谱 / 19.11 技术架构）</li>
+        <li>需求规格书_UI页面设计.md（15 页组件/字段/线框，含日志记录页 P15）</li>
+        <li>需求规格书_检索页字段级交互规格.md</li>
+        <li>需求规格书_Agent接入页字段级交互规格.md（含 19.9 一键接入 / 19.10 端谱 / 红线 R8–R10）</li>
+        <li>需求规格书_其余页面字段级交互规格.md（写入/生命周期/参数/监控/裁决/记忆管理/反馈/审计/账号）</li>
+        <li>需求规格书_大模型与净化生长页字段级交互规格.md（13.2 大模型配置 + 反代理多源 + 6.1/7.1 净化生长）</li>
+        <li>需求规格书_Agent界面内联记忆标识.md（19.7 全文）</li>
+        <li><b>需求规格书_内核API契约.md</b>（memagent-core 接口 + schema + 错误码 + 各端 Provider，19.11）</li>
+        <li><b>需求规格书_同步机制详细设计.md</b>（全端同账号云同步：主源/镜像/离线回传/冲突裁决/对账，19.10/19.11）</li>
+        <li><b>需求规格书_日志记录页字段级交互规格.md</b>（P15 全动作日志+异常+审计弹出+审计禁简删需权限）</li>
+        <li><b>需求规格书_冲突裁决页字段级交互规格.md</b>（P8 9.7 LWW+人工队列 + dispute_flag + 裁决审计）</li>
+        <li>可交互原型：检索页 / Agent 接入配置页 / Agent 界面内联标识 / 机制演示 / 故事线 / 净化生长与大模型 / 日志记录页 P15 / 审计日志页 P11 / 冲突裁决 P8（9 份 HTML）</li>
+      </ul>
+      <h4 style="font-size:13px;margin:14px 0 6px">红线速记</h4>
+      <ul style="color:#1a212b;font-size:13px;line-height:1.9;padding-left:20px">
+        <li>G1 租户 ID 全局注入禁手填 · G2 读写必带 project_id · G3 cold 仅 L2 占位符</li>
+        <li>G4 locked 豁免后台 · G5 pinned 免检置顶 · G6 全操作写审计 · G7 不向用户暴露参数名</li>
+        <li><b>G8 内核与 UI 零耦合（端壳只调 API）· G9 反代理路由全端一致 · G10 L0 需授权+密码方可查 · G11 桌面=P0 主源，同账号全端同步</b></li>
+      </ul>
+    </div>`;
+}
+
+function loadMermaid(){
+  if(window.__mmLoaded)return;window.__mmLoaded=true;
+  const s=document.createElement("script");
+  s.src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js";
+  s.onload=()=>{mermaid.initialize({startOnLoad:false,theme:"neutral"});mermaid.run({querySelector:".mermaid"});};
+  s.onerror=()=>{document.getElementById("mm").outerHTML="<pre style='font-size:12px;color:#5b6675'>（Mermaid 离线未加载，以下为源码）\n</pre>"+document.getElementById("mm").textContent;} ;
+  document.head.appendChild(s);
+}
+
+document.querySelectorAll(".item").forEach(i=>i.addEventListener("click",()=>open(i.dataset.view)));
+open("login");
+</script>
+</body>
+</html>

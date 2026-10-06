@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>审计日志页（P11）原型 — 多 Agent 记忆助手</title>
+<style>
+  :root{--bg:#0f1419;--panel:#1a212b;--panel2:#202833;--line:#2b3441;--txt:#e6edf3;--muted:#8b98a7;--dim:#5b6675;--accent:#4d9fff;--ok:#3ecf8e;--warn:#ffd166;--err:#ff5c5c}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.55 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1180px;margin:0 auto;padding:18px}
+  h1{font-size:18px;margin:0 0 2px}
+  .sub{color:var(--muted);font-size:12px;margin-bottom:14px}
+  .section-title{font-size:13px;color:var(--muted);font-weight:600;margin:18px 0 8px;text-transform:uppercase;letter-spacing:.5px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:8px 0}
+  .pill{font-size:11px;padding:3px 9px;border-radius:6px;background:var(--panel2);border:1px solid var(--line);color:var(--muted)}
+  .pill.on{color:var(--txt);border-color:var(--accent)}
+  .pill.ok{color:var(--ok);border-color:#1e4a36;background:#12324a}
+  .pill.gold{color:#ffe6a8;border-color:#6b5a1e;background:#3a2f10}
+  .pill.red{color:#ffb0b0;border-color:#6b2e2e;background:#3a1616}
+  input[type=text],select{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:7px;padding:7px 10px;font-size:12px}
+  input:focus,select:focus{outline:none;border-color:var(--accent)}
+  .btn{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:7px 12px;cursor:pointer;font-size:12px}
+  .btn.primary{background:var(--accent);color:#04121f;border-color:var(--accent);font-weight:600}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .sw{display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 16px;font-size:13px;z-index:80;display:none}
+  /* 审计链时间线 */
+  .chain{display:flex;flex-direction:column;gap:0}
+  .chain-item{display:flex;gap:12px;position:relative;padding:10px 0 10px 0}
+  .chain-item .axis{width:2px;background:var(--line);margin:4px 9px 4px auto;flex:none}
+  .chain-item .node{flex:1}
+  .chain-item .ts{font-family:monospace;font-size:11px;color:var(--muted)}
+  .chain-item .act{font-weight:600;font-size:13px}
+  .chain-item .detail{font-size:12px;color:var(--muted);margin-top:3px;background:var(--panel2);border-radius:8px;padding:8px 10px}
+  .chain-item .detail code{color:var(--accent);font-family:monospace;font-size:11px}
+  .chain-item.hl .act{color:var(--accent)}
+  /* 审计表 */
+  .audit-table{width:100%;border-collapse:collapse;font-size:12px}
+  .audit-table th{text-align:left;font-size:11px;color:var(--dim);padding:6px 8px;border-bottom:1px solid var(--line);font-weight:600}
+  .audit-table td{padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+  .audit-table tr.hl td{background:#14263a}
+  .audit-table .rid{font-family:monospace;color:var(--accent);cursor:pointer;font-size:11px}
+  .audit-table .del{color:var(--err);font-weight:600}
+  .empty{text-align:center;padding:20px;color:var(--dim);font-size:12px}
+  .note{font-size:11px;color:var(--dim);margin-top:10px;line-height:1.6}
+  .savebox{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:12px;font-size:12px}
+  .savebox h3{font-size:13px;margin:0 0 8px}
+  .savebox code{color:var(--accent);font-family:monospace;font-size:11px}
+  .savebox .k{color:var(--muted);font-size:11px;margin-bottom:6px}
+  .savebox .warn{color:var(--warn)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>审计日志页（P11）· 可交互原型</h1>
+  <div class="sub">按《UI 页面设计》P11 + 4.3/4.3.1/4.3.2：request_id 全链路追溯 · 全动作审计枚举 · 审计 append-only 禁简单删除（需 Admin 权限 + 二次确认 + 删除本身记审计）· 与 P15 日志页互补（日志=事件流，审计=单条记忆全链路）</div>
+
+  <div class="section-title">① request_id 全链路追溯（点 request_id 看一条记忆从召回到审计的完整链路）</div>
+  <div class="card">
+    <div class="row">
+      <span class="pill on">request_id</span>
+      <input type="text" id="ridInput" value="req_001" style="width:160px;font-family:monospace" />
+      <button class="btn primary" id="btnTrace">查全链路</button>
+      <span class="pill">来源：日志页 P15 点击 [查阅审计] 跳转 / 手动输入</span>
+    </div>
+    <div id="chainBox"></div>
+    <div class="note">
+      链路数据源 <code>audit.log</code>（append-only，4.3.2）；本窗口由 P15 日志页"查阅审计"**弹出**（非常驻，R-LOG6），也可独立打开。
+      全动作枚举见 4.3.1（recall/write/gc/auto_bind/unbound/sync_*/llm_proxy/llm_fallback/l0_view/login/team_assign…）。
+    </div>
+  </div>
+
+  <div class="section-title">② 审计日志表（全动作 · append-only · 禁简单删除）</div>
+  <div class="card">
+    <div class="row">
+      <span class="pill">端</span>
+      <select id="fForm"><option value="all">全部</option><option value="desktop">desktop</option><option value="web">web</option><option value="cli">cli</option></select>
+      <span class="pill">动作</span>
+      <select id="fAction"><option value="all">全部（4.3.1 枚举）</option><option>recall</option><option>write</option><option>auto_bind</option><option>sync_up</option><option>llm_proxy</option><option>l0_view</option><option>login</option><option>team_assign</option></select>
+      <span class="pill">时间</span>
+      <select id="fTime"><option>24h</option><option>7d</option><option>30d</option></select>
+      <span style="margin-left:auto"><label class="sw"><input type="checkbox" id="fAdmin" /> 切换 Admin 权限</label></span>
+    </div>
+    <div id="auditTable"></div>
+
+    <div class="savebox">
+      <h3>🔒 删除策略（4.3.2 · R-LOG8）</h3>
+      <div class="k">审计日志 <b>append-only，禁止简单删除</b>：普通用户界面无删除按钮；删除/归档需 <b>Admin 权限 + 二次确认</b>，且删除动作本身写审计 <code>action=audit_delete</code>（记录删除者/时间/范围），<span class="warn">删除不可无痕</span>（保留删除记录）。软件日志 <code>software.log</code> 与审计日志 <code>audit.log</code> 同目录独立文件（<code>&lt;安装根&gt;/logs/</code>）。</div>
+      <div class="row">
+        <button class="btn" id="btnDelAudit" disabled>删除审计日志（需 Admin）</button>
+        <button class="btn" id="btnArchiveAudit" disabled>归档审计日志（需 Admin）</button>
+      </div>
+      <div class="note" id="delNote">当前为普通用户：删除/归档按钮灰置（无权限）。勾选右上"切换 Admin 权限"后可见并操作。</div>
+    </div>
+
+    <div class="note">
+      红线：① 审计是 <b>append-only</b>，普通用户无删除入口；② Admin 删除/归档需二次确认 + 写 <code>audit_delete</code>（不可无痕）；③ 每条审计必带 <code>request_id</code> + <code>form</code>（可归因哪个端）；④ 与 P15 互补：P15 看事件流，P11 看单条记忆全链路。
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+function toast(m){const t=document.getElementById("toast");t.textContent=m;t.style.display="block";clearTimeout(t._x);t._x=setTimeout(()=>t.style.display="none",2600);}
+
+/* 全链路数据（按 request_id） */
+const CHAINS={
+  req_001:[
+    {ts:"10:21:30",act:"recall",detail:"project_id=P1 · query「为什么上次重构失败」· 命中 3 条（跨 Agent 共享 19.4）"},
+    {ts:"10:21:30",act:"rerank_on",detail:"LLM 重排 Top5→3 · <code>agent:claude-free</code>（反代理 19.8 · 花 ¥0 · auto 先免费）"},
+    {ts:"10:21:31",act:"payload",detail:"payload=780t ≤ 1500 软上限（2.4.1 三档预算）· pipeline_llm=120t"},
+    {ts:"10:21:31",act:"audit_write",detail:"request_id=req_001 串起全链路（18.2-E）· form:desktop"}
+  ],
+  req_003:[
+    {ts:"10:20:15",act:"llm_proxy",detail:"反代理借用 <code>agent:claude:claude-free</code> 完成重排（花 ¥0 · 生效模式 auto）"},
+    {ts:"10:20:15",act:"quota_check",detail:"claude-free 余量 312/450 · 未超 proxy_budget · 未超 proxy_price_cap ¥0.02/千"},
+    {ts:"10:20:16",act:"audit_write",detail:"request_id=req_003 · form:web"}
+  ],
+  req_007:[
+    {ts:"10:16:30",act:"auto_bind",detail:"一键接入（19.9）自动发现 Claude Code · 打标 P1 · signal=MCP 注册表"},
+    {ts:"10:16:30",act:"default_apply",detail:"默认：只读召回 + project 共享 + 双通道（19.4/19.5）· 该 Agent 免费模型进 19.8 映射池"},
+    {ts:"10:16:31",act:"verify",detail:"测通 ✓ · <code>form:desktop</code> · 记审计 auto_bind（可撤销 unbound）"}
+  ],
+};
+function trace(){
+  const rid=document.getElementById("ridInput").value.trim();
+  const box=document.getElementById("chainBox");
+  const items=CHAINS[rid];
+  if(!items){box.innerHTML='<div class="empty">无该 request_id 的审计链路（'+rid+'）· 仅 software.log 记录</div>';return;}
+  box.innerHTML='<div class="chain">'+items.map((it,i)=>`
+    <div class="chain-item ${i===items.length-1?"hl":""}">
+      <div class="node">
+        <div class="ts">${it.ts}</div>
+        <div class="act">${i===0?'● ':''}${it.act}</div>
+        <div class="detail">${it.detail}</div>
+      </div>
+      ${i<items.length-1?'<div class="axis"></div>':''}
+    </div>`).join("")+'</div>';
+}
+document.getElementById("btnTrace").addEventListener("click",()=>{trace();toast("已定位 "+document.getElementById("ridInput").value.trim()+" 全链路（audit.log，append-only）");});
+
+/* 审计表（全动作） */
+const AUDIT=[
+  {ts:"10:25:12",form:"desktop",action:"open_circuit",res:"Codex",rid:"req_x1",note:"熔断 OPEN（5.2）"},
+  {ts:"10:24:40",form:"web",action:"sync_fail",res:"team_001",rid:"req_x2",note:"对账超时"},
+  {ts:"10:23:10",form:"desktop",action:"llm_proxy_quota",res:"claude-free",rid:"req_x3",note:"额度 90%"},
+  {ts:"10:21:30",form:"desktop",action:"recall",res:"P1",rid:"req_001",note:"命中 3 条"},
+  {ts:"10:21:02",form:"desktop",action:"write",res:"pitfall#42",rid:"req_002",note:"去重新建"},
+  {ts:"10:19:48",form:"desktop",action:"l0_view",res:"L0",rid:"req_004",note:"管理员授权+密码"},
+  {ts:"10:18:20",form:"desktop",action:"login",res:"user_001",rid:"req_005",note:"同步身份确定"},
+  {ts:"10:17:55",form:"desktop",action:"team_assign",res:"user_002→team_002",rid:"req_006",note:"管理员分配"},
+  {ts:"10:16:30",form:"desktop",action:"auto_bind",res:"Claude Code",rid:"req_007",note:"一键接入 P1"},
+  {ts:"10:15:10",form:"cli",action:"sync_up",res:"team_001",rid:"req_008",note:"上行 12 条"},
+];
+function renderTable(){
+  const form=document.getElementById("fForm").value;
+  const action=document.getElementById("fAction").value;
+  const rows=AUDIT.filter(a=>(form==="all"||a.form===form)&&(action==="all"||a.action===action));
+  const el=document.getElementById("auditTable");
+  if(!rows.length){el.innerHTML='<div class="empty">无匹配审计记录</div>';return;}
+  el.innerHTML=`<table class="audit-table"><thead><tr>
+    <th>时间</th><th>端 form</th><th>动作 action</th><th>资源</th><th>request_id</th><th>备注</th>
+  </tr></thead><tbody>`+rows.map(a=>`<tr>
+    <td>${a.ts}</td><td><span class="pill">${a.form}</span></td>
+    <td><b>${a.action}</b></td><td>${a.res}</td>
+    <td><span class="rid" data-rid="${a.rid}">${a.rid}</span></td><td>${a.note}</td>
+  </tr>`).join("")+'</tbody></table>';
+  el.querySelectorAll("[data-rid]").forEach(e=>e.addEventListener("click",()=>{
+    document.getElementById("ridInput").value=e.dataset.rid;
+    trace();
+    document.getElementById("chainBox").scrollIntoView({behavior:"smooth",block:"center"});
+  }));
+}
+["fForm","fAction","fTime"].forEach(id=>document.getElementById(id).addEventListener("change",renderTable));
+
+/* Admin 权限：删除/归档（R-LOG8） */
+const adminCk=document.getElementById("fAdmin");
+const delBtn=document.getElementById("btnDelAudit"),arcBtn=document.getElementById("btnArchiveAudit");
+adminCk.addEventListener("change",()=>{
+  const on=adminCk.checked;
+  delBtn.disabled=!on;arcBtn.disabled=!on;
+  document.getElementById("delNote").textContent=on
+    ?"Admin 权限：删除/归档可用。删除需二次确认 + 写审计 audit_delete（不可无痕）。"
+    :"当前为普通用户：删除/归档按钮灰置（无权限）。勾选右上『切换 Admin 权限』后可见并操作。";
+});
+delBtn.addEventListener("click",()=>{
+  if(confirm("删除审计日志需 Admin 权限 + 二次确认。\n此操作将写审计 action=audit_delete（记录删除者/时间/范围），不可无痕。\n确认继续？")){
+    toast("已删除选中审计（Admin）· 写审计 audit_delete · 删除记录保留（不可无痕）");
+  }
+});
+arcBtn.addEventListener("click",()=>{
+  if(confirm("归档审计日志需 Admin 权限 + 二次确认。\n归档写审计 action=audit_archive。\n确认继续？")){
+    toast("已归档审计日志（Admin）· 写审计 audit_archive · 归档位置可查（4.3.2）");
+  }
+});
+
+trace();
+renderTable();
+</script>
+</body>
+</html>

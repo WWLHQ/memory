@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Agent 接入配置页原型 — 多 Agent 记忆助手</title>
+<style>
+  :root{
+    --bg:#0f1419; --panel:#1a212b; --panel2:#202833; --line:#2b3441;
+    --txt:#e6edf3; --muted:#8b98a7; --dim:#5b6675; --accent:#4d9fff;
+    --ok:#3ecf8e; --warn:#ffd166; --err:#ff5c5c;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+    font:14px/1.55 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1180px;margin:0 auto;padding:18px}
+  h1{font-size:18px;margin:0 0 2px}
+  .sub{color:var(--muted);font-size:12px;margin-bottom:14px}
+  .section-title{font-size:13px;color:var(--muted);font-weight:600;margin:18px 0 8px;text-transform:uppercase;letter-spacing:.5px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+  .card.degraded{border-color:#6b5a1e}
+  .card.failed{border-color:#6b2e2e}
+  .top{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+  .badge{font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px;border:1px solid var(--line)}
+  .badge.p0{background:#12324a;color:#8cc7ff}.badge.p1{background:#1a3320;color:#7fe0a0}
+  .badge.p2{background:#3a2f10;color:#ffd166}.badge.p3{background:var(--panel2);color:var(--muted)}
+  .agent-name{font-weight:700;font-size:15px}
+  .method{font-size:11px;color:var(--muted)}
+  .statusdot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:5px}
+  .st-connected{background:var(--ok)}.st-degraded{background:var(--warn)}.st-onboard{background:var(--dim)}
+  .metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:10px 0}
+  @media(max-width:700px){.metrics{grid-template-columns:repeat(2,1fr)}}
+  .metric{background:var(--panel2);border-radius:8px;padding:8px 10px}
+  .metric .k{font-size:11px;color:var(--muted)}
+  .metric .v{font-size:16px;font-weight:700;margin-top:2px;font-family:monospace}
+  .metric .v.warn{color:var(--warn)}.metric .v.err{color:var(--err)}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}
+  .pill{font-size:11px;padding:3px 9px;border-radius:6px;background:var(--panel2);border:1px solid var(--line);color:var(--muted)}
+  .pill.on{color:var(--txt);border-color:var(--accent)}
+  .pill.red{color:#ffb0b0;border-color:#6b2e2e;background:#3a1616}
+  .pill.gold{color:#ffe6a8;border-color:#6b5a1e;background:#3a2f10}
+  .sw{display:flex;align-items:center;gap:7px;font-size:12px;cursor:pointer;user-select:none}
+  .sw input{width:auto;cursor:pointer}
+  .btns{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+  .btn{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:7px 12px;cursor:pointer;font-size:12px}
+  .btn.primary{background:var(--accent);color:#04121f;border-color:var(--accent);font-weight:600}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .err-msg{font-size:12px;color:var(--warn);margin-top:8px;display:none}
+  .err-msg.show{display:block}
+  .test{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:10px;font-size:12px}
+  .test .rid{font-family:monospace;color:var(--accent);cursor:pointer}
+  .inject{background:#12283a;border:1px solid #2a4a66;border-radius:6px;padding:7px;margin-top:7px;color:#8cc7ff;font-size:11px}
+  .warn{background:#3a2f10;border:1px solid #6b5a1e;border-radius:8px;padding:9px 11px;margin-top:10px;font-size:12px;color:#ffe6a8;display:none}
+  .warn.show{display:block}
+  .errbox{background:#3a1616;border:1px solid #6b2e2e;border-radius:8px;padding:9px 11px;margin-top:10px;font-size:12px;color:#ffb0b0;display:none}
+  .errbox.show{display:block}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 16px;font-size:13px;z-index:80;display:none}
+  /* 19.9 一键接入 */
+  .stages{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:10px 0}
+  @media(max-width:700px){.stages{grid-template-columns:repeat(2,1fr)}}
+  .stage{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px;font-size:11px;color:var(--muted);text-align:center;transition:.25s}
+  .stage b{display:block;font-size:12px;color:var(--txt);margin-bottom:2px}
+  .stage.done{border-color:var(--accent);background:#14263a;color:var(--txt)}
+  .found{display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 11px;margin:6px 0;font-size:12px}
+  .found.unbound{opacity:.6;border-style:dashed}
+  /* 效果证据 */
+  .gains{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  @media(max-width:820px){.gains{grid-template-columns:1fr}}
+  .gain{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .gain h3{font-size:13px;margin:0 0 8px;color:var(--txt);display:flex;align-items:center;gap:6px}
+  .gain .big{font-size:26px;font-weight:800;font-family:monospace;color:var(--ok);margin:4px 0}
+  .gain .desc{font-size:11px;color:var(--muted);line-height:1.5}
+  .gain .desc b{color:var(--txt)}
+  .gain .src{font-size:10px;color:var(--dim);margin-top:6px}
+  .note{font-size:11px;color:var(--dim);margin-top:14px;line-height:1.6}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Agent 接入配置页 · 可交互原型</h1>
+  <div class="sub">按《Agent 接入页字段级交互规格》实现 · MVP 两家起步（deepseek harness P0 + Claude Code P1）· 一键接入 · 双通道降级 · 隔离开关 · 密钥脱敏 · 效果证据</div>
+
+  <div class="section-title">⚡ 一键接入本机 Agent（19.9）· 自动发现 + 默认绑定，不用逐个设置</div>
+  <div class="card" id="onboard">
+    <div class="top">
+      <button class="btn primary" id="btnDiscover">⚡ 自动发现并接入本机 Agent</button>
+      <span class="pill on" id="formBadge" style="margin-left:auto">当前形态：桌面端（全量发现可用）</span>
+    </div>
+    <div class="top" style="margin-bottom:6px">
+      <span style="font-size:11px;color:var(--muted)">发现信号源（按 19.10 形态置灰）：</span>
+      <label class="sw"><input type="checkbox" class="sig" value="mcp" checked>MCP 注册表</label>
+      <label class="sw"><input type="checkbox" class="sig" value="proc" checked>本机进程</label>
+      <label class="sw"><input type="checkbox" class="sig" value="hb" checked>Webhook 心跳</label>
+      <label class="sw"><input type="checkbox" class="sig" value="manual">手动兜底</label>
+      <span class="pill" id="scanState" style="margin-left:auto">待扫描</span>
+    </div>
+    <div class="stages" id="stages">
+      <div class="stage" data-s="scan"><b>① 扫</b>发现注册信号</div>
+      <div class="stage" data-s="tag"><b>② 分</b>自动打标 P0/P1/P2</div>
+      <div class="stage" data-s="bind"><b>③ 绑</b>按默认值绑定</div>
+      <div class="stage" data-s="verify"><b>④ 验</b>测通 + 记审计</div>
+    </div>
+    <div id="found"></div>
+    <div class="note">
+      原理：<b>发现</b>是技术活（扫本机注册信号），<b>绑定</b>是信任活（全用 19.4/19.5 最合理默认值）——
+      所以发现即绑定、绑即可用，用户<b>不需要逐项理解配置</b>。
+      默认值：隔离 project_id 共享 + user_id 偏好 · 双通道（Webhook 主 + API 补偿）· 该 Agent 免费/低价模型自动进 19.8 全量映射池。
+      安全兜底：自动绑定默认<b>只开只读召回</b>，写入/反代理 P0/P1 按 19.2 放行、<b>P2 须用户确认</b>；每个绑定<b>可一键撤销</b>（审计 unbound）。
+      有信号的一律自动，仅<b>无信号</b>的 Agent 才需手填端点。
+    </div>
+  </div>
+
+  <div class="section-title">宿主 Agent 接入卡片（19.2 / 19.3 / 5.2）</div>
+  <div id="cards"></div>
+
+  <div class="section-title">效果证据 · 用户可感知的「省」与「快」（token / 效率 / 模型成本）</div>
+  <div class="gains" id="gains"></div>
+  <div class="note">
+    说明：终端用户感知不到「记忆助手」本身（19.1 透明），他感知到的是 <b>Agent 变聪明了、变省了</b>。
+    以上证据链来自检索页预算面板（payload / pipeline token）、极简模式短查询（≤600t，2.4.1）、次模式（≤200t 占位符注入，2.4.3）、
+    跨会话背景免重复交代（9.1）、踩坑复用（9.3）、决策追溯（9.4）、跨 Agent 共享（19.4）、模型成本节省（19.8），
+    审计页可按 request_id 逐项核对（4.3 / 18.2-E）。
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============ 19.2 接入优先级 + 3 家 Agent 接入数据 ============ */
+const AGENTS=[
+  {name:"deepseek harness",badge:"p0",label:"MVP·P0",method:"MCP + Webhook 直连（自有）",
+   conn:99.2,circuit:"CLOSED",latency:1.2,fail:0,recover:0,tenant:"ent_001 / team_001",
+   tools:{recall:{on:true,topk:5,scene:"task_start",mode:""},write:{on:true,category:"work"},pref:{on:true}},
+   iso:{projShare:true,prefCross:true},
+   chan:{webhook:true,api:true,recon:"5min"},key:{mask:"[API_KEY:harness]",last:"32 天前",grace:24},
+   state:"connected"},
+  {name:"Claude Code",badge:"p1",label:"MVP·P1",method:"MCP 工具 + 会话日志兜底（第三方样板）",
+   conn:98.1,circuit:"CLOSED",latency:1.4,fail:0,recover:0,tenant:"ent_001 / team_001",
+   tools:{recall:{on:true,topk:5,scene:"default",mode:""},write:{on:true,category:"work"},pref:{on:true}},
+   iso:{projShare:true,prefCross:true},
+   chan:{webhook:true,api:true,recon:"5min"},key:{mask:"[API_KEY:claude]",last:"5 天前",grace:24},
+   state:"connected"},
+  {name:"Codex",badge:"p2",label:"兜底·P2",method:"MCP（若支持）+ API 拉取兜底",
+   conn:93.5,circuit:"OPEN",latency:6.1,fail:5,recover:60,tenant:"ent_001 / team_001",
+   tools:{recall:{on:true,topk:5,scene:"default",mode:""},write:{on:true,category:"work"},pref:false},
+   iso:{projShare:true,prefCross:true},
+   chan:{webhook:false,api:true,recon:"5min"},key:{mask:"[API_KEY:codex]",last:"92 天前",grace:24},
+   state:"degraded"},
+];
+
+/* ============ 19.9 一键接入：发现结果 ============ */
+const DISCOVERED=[
+  {name:"deepseek harness",badge:"p0",label:"MVP·P0",signal:"MCP 注册表 + 本机进程",bound:true,ok:true},
+  {name:"Claude Code",badge:"p1",label:"MVP·P1",signal:"MCP 注册表 + Webhook 心跳",bound:true,ok:true},
+  {name:"Codex",badge:"p2",label:"兜底·P2",signal:"本机进程 + API 拉取兜底",bound:true,ok:false},
+  {name:"Cursor",badge:"p3",label:"扩展·P3",signal:"未发现信号",bound:false,ok:false},
+];
+
+/* 效果证据（19.1 / 9.x / 2.4.x / 19.8 反代理） */
+const GAINS=[
+  {icon:"🪙",title:"Token 节省",big:"-58%",
+    desc:"本周期 Agent 平均每次召回 <b>payload 780/1500</b>；极简模式短查询仅 <b>≤600t</b>，对比全量召回数千 token。次模式注入 <b>≤200t 占位符</b>而非全文。",
+    src:"2.4.1 三档预算 / 2.4.3 占位符注入 / 检索页预算面板"},
+  {icon:"⚡",title:"效率提升",big:"-34% 背景交代",
+    desc:"跨会话已记住项目技术栈/约束/决策，<b>新会话免重复贴说明</b>；踩坑库自动召回，<b>少犯同类错</b>；决策可追溯，问「为什么」直接给依据。",
+    src:"9.1 跨会话 / 9.3 踩坑 / 9.4 决策"},
+  {icon:"🔁",title:"跨 Agent 复用",big:"1 次沉淀 · 4 端共享",
+    desc:"Claude Code 记的踩坑，Codex 同 project_id 直接命中——<b>一次沉淀，多处省</b>；个人偏好按 user_id 跨 Agent/项目共享。",
+    src:"19.4 project_id 共享域 / user_id 偏好"},
+  {icon:"💸",title:"模型成本节省（反代理 19.8）",big:"¥0 · 省 ¥19/月",
+    desc:"自动选择<b>先免费、后低价</b>：本周期跨 3 Agent 反代理 480 次（claude-free 免费 312 + gpt4o-mini 低价 168），不额外掏模型钱。低价源单价上限 <b>¥0.02/千</b>（用户设，不可超），成本封顶 ¥3/月。",
+    src:"19.8 proxy_select_mode=auto · 免费优先 · proxy_price_cap 用户定"},
+];
+
+function toast(m){const t=document.getElementById("toast");t.textContent=m;t.style.display="block";clearTimeout(t._x);t._x=setTimeout(()=>t.style.display="none",2600);}
+
+/* ============ 19.9 一键接入：扫 → 分 → 绑 → 验 ============ */
+let discovering=false;
+function renderFound(){
+  const box=document.getElementById("found");box.innerHTML="";
+  const sigs=[...document.querySelectorAll(".sig:checked")].map(x=>x.value);
+  DISCOVERED.forEach((d,i)=>{
+    const div=document.createElement("div");
+    div.className="found"+(d.bound?"":" unbound");
+    const st=d.bound?(d.ok?'<span class="pill on">自动发现 · 已绑定 ✓</span>':'<span class="pill gold">自动发现 · 已绑定 ⚠ 待手动补</span>')
+                    :'<span class="pill">未发现信号 · 需手填端点</span>';
+    div.innerHTML=`
+      <span class="badge ${d.badge}">${d.label}</span>
+      <span class="agent-name" style="font-size:13px">${d.name}</span>
+      <span class="method">信号：${d.signal}</span>
+      <span style="margin-left:auto">${st}</span>
+      ${d.bound?`<button class="btn" data-unbind="${i}" style="padding:4px 10px">撤销</button>`:""}`;
+    box.appendChild(div);
+  });
+  box.querySelectorAll("[data-unbind]").forEach(b=>b.addEventListener("click",()=>{
+    const d=DISCOVERED[+b.dataset.unbind];
+    d.bound=false;
+    const ag=AGENTS.find(x=>x.name===d.name);
+    if(ag){ag.state="onboard";renderCards();}
+    toast("已撤销 "+d.name+" 的自动绑定（审计 unbound）；恢复需重跑一键接入");
+    renderFound();
+  }));
+}
+function discover(){
+  if(discovering)return;
+  discovering=true;
+  const btn=document.getElementById("btnDiscover");btn.disabled=true;
+  document.getElementById("found").innerHTML="";
+  const stages=[...document.querySelectorAll(".stage")];
+  const labels=["扫描注册信号中…","自动打标 P0/P1/P2 中…","按默认值绑定中…","测通并写审计中…"];
+  stages.forEach(s=>s.classList.remove("done"));
+  stages.forEach((s,i)=>{
+    setTimeout(()=>{
+      s.classList.add("done");
+      document.getElementById("scanState").textContent=labels[i];
+      if(i===stages.length-1){
+        DISCOVERED.forEach(d=>{const ag=AGENTS.find(x=>x.name===d.name);if(ag&&d.bound)ag.state=(d.ok?"connected":"degraded");});
+        renderFound();
+        const n=DISCOVERED.filter(d=>d.bound).length;
+        document.getElementById("scanState").textContent="完成 · 发现并绑定 "+n+" 个 · 已记审计 auto_bind";
+        toast("一键接入完成：自动发现 "+n+" 个 Agent 并绑定（审计 auto_bind），立即可用");
+        discovering=false;btn.disabled=false;
+      }
+    },430*(i+1));
+  });
+}
+
+/* ============ 渲染卡片 ============ */
+function renderCards(){
+  const c=document.getElementById("cards");c.innerHTML="";
+  AGENTS.forEach((a,idx)=>{
+    const connClass=a.conn<95?"warn":"";
+    const deg=a.state==="degraded";
+    const div=document.createElement("div");
+    div.className="card"+(deg?" degraded":"");
+    const stTxt=a.state==="connected"?"已连通":(a.state==="degraded"?"降级（仅补偿）":"未配置");
+    div.innerHTML=`
+      <div class="top">
+        <span class="badge ${a.badge}">${a.label}</span>
+        <span class="agent-name">${a.name}</span>
+        <span class="method">${a.method}</span>
+        <span style="margin-left:auto"><span class="statusdot st-${a.state==="connected"?"connected":a.state==="degraded"?"degraded":"onboard"}"></span>${stTxt}</span>
+      </div>
+      <div class="metrics">
+        <div class="metric"><div class="k">连通成功率（&lt;95% ⚠）</div><div class="v ${connClass}">${a.conn}%</div></div>
+        <div class="metric"><div class="k">熔断状态（5.2）</div><div class="v" style="color:${a.circuit==="OPEN"?"var(--err)":a.circuit==="HALF_OPEN"?"var(--warn)":"var(--ok)"}">${a.circuit}</div></div>
+        <div class="metric"><div class="k">平均延迟（&gt;5s ⚠）</div><div class="v ${a.latency>5?"warn":""}">${a.latency}s</div></div>
+        <div class="metric"><div class="k">租户（只读·全局）</div><div class="v" style="font-size:12px">${a.tenant}</div></div>
+      </div>
+      <div class="row">
+        <span style="font-size:11px;color:var(--muted)">MCP 工具（19.5，须带 project_id）：</span>
+        <label class="sw"><input type="checkbox" data-tool="recall" ${a.tools.recall.on?"checked":""}>recall_memory top_k=${a.tools.recall.topk} scene=${a.tools.recall.scene}</label>
+        <label class="sw"><input type="checkbox" data-tool="write" ${a.tools.write.on?"checked":""}>write_memory</label>
+        <label class="sw"><input type="checkbox" data-tool="pref" ${a.tools.pref.on?"checked":""}>get_user_preferences</label>
+      </div>
+      <div class="row">
+        <span style="font-size:11px;color:var(--muted)">隔离粒度（19.4）：</span>
+        <label class="sw"><input type="checkbox" data-iso="projShare" ${a.iso.projShare?"checked":""}>项目层按 project_id 跨 Agent 共享</label>
+        <label class="sw"><input type="checkbox" data-iso="prefCross" ${a.iso.prefCross?"checked":""}>个人偏好跨项目共享（user_id 级）</label>
+      </div>
+      <div class="row">
+        <span style="font-size:11px;color:var(--muted)">采集通道（19.3）：</span>
+        <label class="sw"><input type="checkbox" data-chan="webhook" ${a.chan.webhook?"checked":""}>主 Webhook</label>
+        <label class="sw"><input type="checkbox" data-chan="api" ${a.chan.api?"checked":""}>补偿 API 拉取</label>
+        <span class="pill">对账 ${a.chan.recon}</span>
+        <span class="pill on">SHA-256 幂等（不可关）</span>
+      </div>
+      <div class="row">
+        <span style="font-size:11px;color:var(--muted)">密钥（4.1 脱敏）：</span>
+        <span class="pill on" data-mask>${a.key.mask}</span>
+        <span class="pill">轮换宽限 ${a.key.grace}h · 上次 ${a.key.last}</span>
+        ${a.key.last.includes("92")?'<span class="pill gold">⚠ 超 90 天未轮换</span>':""}
+      </div>
+      <div class="warn ${deg?"show":""}">${deg?"⚠ 主通道 Webhook 熔断 OPEN，已降级为仅补偿通道（5min 延迟，数据完整性不受影响 · 5.4）":" "}</div>
+      <div class="errbox" data-err></div>
+      <div class="test" data-test>
+        接入测试：<span class="rid" data-rid>req_test_${idx+1}</span>
+        <div class="inject" data-inject>注入预览：将注入 <b>5</b> 条记忆到 Agent prompt（payload ≈ 780 tokens）</div>
+      </div>
+      <div class="btns">
+        <button class="btn primary" data-act="test" ${a.circuit==="OPEN"?'disabled title="熔断 OPEN 已停止主通道"':""}>▶ 测试接入</button>
+        <button class="btn" data-act="rotate">轮换密钥</button>
+        <button class="btn" data-act="save">保存配置</button>
+      </div>`;
+    c.appendChild(div);
+    bindCard(div,idx);
+  });
+}
+
+function bindCard(div,idx){
+  const a=AGENTS[idx];
+  // 工具开关 → 校验 critical 极简（R3）
+  div.querySelectorAll("input[data-tool]").forEach(el=>el.addEventListener("change",()=>{
+    if(el.dataset.tool==="recall"){
+      a.tools.recall.on=el.checked;
+      // R3：scene=critical 时 mode 不得为 minimal
+      if(a.tools.recall.scene==="critical"&&a.tools.recall.mode==="minimal"){
+        a.tools.recall.mode="";toast("critical 禁极简，已回落自动（16.5）");
+      }
+      updateInject(div);
+    }
+    if(el.dataset.tool==="write")a.tools.write.on=el.checked;
+    if(el.dataset.tool==="pref")a.tools.pref.on=el.checked;
+    checkDualChannel(div);
+  }));
+  // 隔离开关
+  div.querySelectorAll("input[data-iso]").forEach(el=>el.addEventListener("change",()=>{
+    a.iso[el.dataset.iso]=el.checked;
+    toast(el.dataset.iso==="projShare"?(el.checked?"已开启 project_id 跨 Agent 共享":"已关闭：该项目记忆不再跨 Agent 共享")
+      :(el.checked?"个人偏好跨 Agent/项目共享（user_id 级）":"个人偏好随项目隔离"));
+  }));
+  // 通道开关 → R4 双通道至少开一
+  div.querySelectorAll("input[data-chan]").forEach(el=>el.addEventListener("change",()=>{
+    a.chan[el.dataset.chan]=el.checked;
+    checkDualChannel(div);
+  }));
+  // 操作
+  div.querySelectorAll("[data-act]").forEach(b=>b.addEventListener("click",()=>act(b.dataset.act,idx,div)));
+  // rid 跳审计
+  div.querySelector("[data-rid]")?.addEventListener("click",()=>toast("开审计页（独立窗口）定位 "+a.name+" 的 request_id 链路（18.2-E）"));
+}
+
+function checkDualChannel(div){
+  const idx=[...document.getElementById("cards").children].indexOf(div);
+  const a=AGENTS[idx];
+  if(!a.chan.webhook&&!a.chan.api){
+    div.querySelector("[data-err]").textContent="R4：双通道（Webhook + API 拉取）至少开一，记忆库需可采集（5.1）";
+    div.querySelector("[data-err]").classList.add("show");
+    div.querySelectorAll('[data-act="save"]').forEach(b=>b.disabled=true);
+  }else{
+    div.querySelector("[data-err]").classList.remove("show");
+    div.querySelectorAll('[data-act="save"]').forEach(b=>b.disabled=false);
+  }
+}
+
+function act(act,idx,div){
+  const a=AGENTS[idx];
+  if(act==="test"){
+    if(a.circuit==="OPEN")return;
+    toast("测试成功："+a.name+" → req_test，已记审计（4.3）");
+    div.querySelector("[data-inject]").style.display="block";
+  }
+  if(act==="rotate"){a.key.last="刚轮换";div.querySelector("[data-mask]").textContent=a.key.mask+"（新）";toast("已轮换，旧 Key "+a.key.grace+"h 内有效（4.1）");}
+  if(act==="save"){
+    if(a.tools.write.on&&!a.iso.projShare){toast("R2：记忆读写须带 project_id（关闭共享后请确认 project_id 仍可解析）");return;}
+    toast("已保存 "+a.name+" 接入配置");
+  }
+}
+
+function updateInject(div){
+  div.querySelector("[data-inject]").innerHTML="注入预览：将注入 <b>5</b> 条记忆到 Agent prompt（payload ≈ 780 tokens）";
+}
+
+/* ============ 效果证据 ============ */
+function renderGains(){
+  const g=document.getElementById("gains");g.innerHTML="";
+  GAINS.forEach(x=>{
+    const d=document.createElement("div");d.className="gain";
+    d.innerHTML=`<h3>${x.icon} ${x.title}</h3><div class="big">${x.big}</div><div class="desc">${x.desc}</div><div class="src">依据：${x.src}</div>`;
+    g.appendChild(d);
+  });
+}
+
+document.getElementById("btnDiscover").addEventListener("click",discover);
+document.querySelectorAll(".sig").forEach(s=>s.addEventListener("change",()=>{if(!discovering)renderFound();}));
+
+/* 19.10/19.11 按端置灰：当前=桌面端（全量可用）。
+   端谱（方案A + TS 内核 + Rust/WASM 向量层）：
+   desktop(全量) / web(关本机进程) / mobile(关本机进程+注册表) / mac(全量) /
+   linux(CLI装Linux,关Webhook心跳改命令) / cli(关心跳改命令)。
+   原型在桌面端，故全部可用；切其他端时对应信号源自动置灰。 */
+(function applyForm(){
+  const FORM="desktop"; // desktop | web | mobile | mac | linux | cli
+  const disable={web:["proc"],mobile:["proc","mcp"],linux:["hb"],cli:["hb"]}[FORM]||[];
+  const badge=document.getElementById("formBadge");
+  const label={desktop:"当前端：桌面（全量发现可用）",web:"当前端：Web（仅注册表+心跳）",
+    mobile:"当前端：移动端（仅心跳+手动）",mac:"当前端：macOS（全量发现可用）",
+    linux:"当前端：Linux 系统（CLI，系统注册+进程，无 GUI）",cli:"当前端：CLI（注册+进程，命令触发）"}[FORM];
+  if(badge)badge.textContent=label;
+  disable.forEach(v=>{
+    const el=document.querySelector('.sig[value="'+v+'"]');
+    if(el){el.checked=false;el.disabled=true;el.parentElement.style.opacity=.4;}
+  });
+})();
+
+renderCards();
+renderGains();
+</script>
+</body>
+</html>

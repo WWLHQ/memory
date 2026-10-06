@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>冲突裁决页（P8）原型 — 多 Agent 记忆助手</title>
+<style>
+  :root{--bg:#0f1419;--panel:#1a212b;--panel2:#202833;--line:#2b3441;--txt:#e6edf3;--muted:#8b98a7;--dim:#5b6675;--accent:#4d9fff;--ok:#3ecf8e;--warn:#ffd166;--err:#ff5c5c}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.55 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1180px;margin:0 auto;padding:18px}
+  h1{font-size:18px;margin:0 0 2px}
+  .sub{color:var(--muted);font-size:12px;margin-bottom:14px}
+  .section-title{font-size:13px;color:var(--muted);font-weight:600;margin:18px 0 8px;text-transform:uppercase;letter-spacing:.5px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:8px 0}
+  .pill{font-size:11px;padding:3px 9px;border-radius:6px;background:var(--panel2);border:1px solid var(--line);color:var(--muted)}
+  .pill.on{color:var(--txt);border-color:var(--accent)}
+  .pill.ok{color:var(--ok);border-color:#1e4a36;background:#12324a}
+  .pill.gold{color:#ffe6a8;border-color:#6b5a1e;background:#3a2f10}
+  .pill.red{color:#ffb0b0;border-color:#6b2e2e;background:#3a1616}
+  .pill.info{color:#8cc7ff;border-color:#2a4a66;background:#12283a}
+  select,input[type=text]{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:7px;padding:7px 10px;font-size:12px}
+  input:focus,select:focus{outline:none;border-color:var(--accent)}
+  .btn{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:7px 12px;cursor:pointer;font-size:12px}
+  .btn.primary{background:var(--accent);color:#04121f;border-color:var(--accent);font-weight:600}
+  .btn.ok{background:#1e4a36;border-color:#3ecf8e;color:#3ecf8e}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 16px;font-size:13px;z-index:80;display:none}
+  /* 裁决队列 */
+  .dispute-item{border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px}
+  .dispute-item.conflict{border-color:#6b5a1e;background:#2a2f1a}
+  .dispute-item.resolved{opacity:.6}
+  .dispute-item .head{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+  .dispute-item .head .id{font-family:monospace;color:var(--accent);font-size:11px}
+  .dispute-item .head .tag{font-size:11px;padding:2px 8px;border-radius:6px}
+  .dispute-item .head .tag.new{background:#12324a;color:#8cc7ff;border:1px solid #2a4a66}
+  .dispute-item .head .tag.old{background:#3a1616;color:#ffb0b0;border:1px solid #6b2e2e}
+  .dispute-item .head .tag.semi{background:#3a2f10;color:#ffe6a8;border:1px solid #6b5a1e}
+  .dispute-item .body{display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:12px}
+  @media(max-width:760px){.dispute-item .body{grid-template-columns:1fr}}
+  .dispute-item .side{background:var(--panel2);border-radius:8px;padding:10px}
+  .dispute-item .side h4{font-size:12px;margin:0 0 6px;color:var(--warn)}
+  .dispute-item .side p{margin:0 0 6px;color:var(--muted);font-size:11px}
+  .dispute-item .side .meta{font-family:monospace;font-size:10px;color:var(--dim)}
+  .dispute-item .actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+  .note{font-size:11px;color:var(--dim);margin-top:10px;line-height:1.6}
+  .empty{text-align:center;padding:20px;color:var(--dim);font-size:12px}
+  .auto-tag{font-size:10px;padding:2px 6px;border-radius:4px;background:#12324a;color:#8cc7ff}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>冲突裁决页（P8）· 可交互原型</h1>
+  <div class="sub">按 9.7 冲突裁决机制：自动 LWW（vector clock 因果判定）+ 仅语义冲突进人工队列（dispute_flag）· 仲裁写审计 action=dispute_resolve · 与生命周期联动（败者转 archived）</div>
+
+  <div class="section-title">① 待决队列（dispute_flag=true，人工介入）</div>
+  <div class="card">
+    <div class="row">
+      <span class="pill">团队</span><select id="fTeam"><option value="all">全部</option><option selected>team_001</option><option>team_002</option></select>
+      <span class="pill">类型</span><select id="fType"><option value="all">全部</option><option selected>语义冲突</option><option>高置信版本碰撞</option></select>
+      <span style="margin-left:auto"><span class="pill gold" id="pendingCount">待决 2 条</span></span>
+    </div>
+    <div id="disputeList"></div>
+    <div class="note">
+      裁决规则（9.7）：① 自动 LWW（vector clock 因果判定），同字段不同值取晚者；② **语义冲突 / 高置信版本碰撞** → 进本队列人工裁决；③ 败者记忆转 archived（9.7 生命周期），不物理删除；④ 每次裁决写审计 <code>action=dispute_resolve</code>（18.2-E）。
+    </div>
+  </div>
+
+  <div class="section-title">② 已决记录（归档到 9.7 裁决历史）</div>
+  <div class="card" id="resolvedCard">
+    <div class="empty" id="resolvedEmpty">暂无已决记录</div>
+    <div id="resolvedList"></div>
+  </div>
+
+  <div class="section-title">③ 自动裁决统计（LWW 生效占比）</div>
+  <div class="card">
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+      <div style="background:var(--panel2);border-radius:10px;padding:12px">
+        <div class="k" style="font-size:11px;color:var(--muted)">近 7 日裁决总次数</div>
+        <div style="font-size:26px;font-weight:800;font-family:monospace;color:var(--txt)">23</div>
+      </div>
+      <div style="background:var(--panel2);border-radius:10px;padding:12px">
+        <div class="k" style="font-size:11px;color:var(--muted)">自动 LWW 生效</div>
+        <div style="font-size:26px;font-weight:800;font-family:monospace;color:var(--ok)">19（83%）</div>
+      </div>
+      <div style="background:var(--panel2);border-radius:10px;padding:12px">
+        <div class="k" style="font-size:11px;color:var(--muted)">人工裁决介入</div>
+        <div style="font-size:26px;font-weight:800;font-family:monospace;color:var(--warn)">4（17%）</div>
+      </div>
+    </div>
+    <div class="note">LWW 默认策略（9.7 §2）：同 mem_id 同字段 → vector clock 有偏序则取晚者；无偏序或语义互斥 → 进本队列人工裁决。若你的记忆“每条都很贵、误覆盖代价高”，可改保守策略“全人工裁决”（9.7 §3）。</div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+function toast(m){const t=document.getElementById("toast");t.textContent=m;t.style.display="block";clearTimeout(t._x);t._x=setTimeout(()=>t.style.display="none",2600);}
+
+/* 待决队列 */
+const DISPUTES=[
+  {
+    id:"disp_001",type:"semantic_conflict",team:"team_001",
+    new:{mem_id:"mem_207",version:12,form:"desktop",author:"Codex",content:"重构应使用 Next.js，因为 SSR 性能更优",ts:"10:15:00"},
+    old:{mem_id:"mem_101",version:8,form:"web",author:"Claude Code",content:"项目必须用 FastAPI 因为团队熟悉 Python 生态",ts:"10:12:00"},
+    reason:"语义互斥：Next.js vs FastAPI 技术栈冲突",
+    autoVerdict:null
+  },
+  {
+    id:"disp_002",type:"high_conflict",team:"team_001",
+    new:{mem_id:"mem_303",version:5,form:"cli",author:"user_002",content:"项目预算上限为 ¥5000/月",ts:"10:10:00"},
+    old:{mem_id:"mem_304",version:5,form:"web",author:"user_001",content:"项目预算上限为 ¥8000/月",ts:"10:09:00"},
+    reason:"同字段不同值，无 vector clock 因果（两端并发修改）",
+    autoVerdict:null
+  }
+];
+
+/* 已决历史 */
+let RESOLVED=[
+  {id:"disp_000",new:{mem_id:"mem_150",version:10,form:"desktop",author:"Claude Code",content:"上次重构失败原因是未做单元测试"},old:{mem_id:"mem_149",version:9,form:"web",author:"Codex",content:"上次重构失败原因是未做代码评审"},reason:"LLM 自动裁决：test 维度 > review 维度",verdict:"new_wins",ts:"09:55:00",action:"auto_lww"}
+];
+
+function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+
+function renderDisputes(){
+  const list=document.getElementById("disputeList");
+  const type=document.getElementById("fType").value;
+  const team=document.getElementById("fTeam").value;
+  const rows=DISPUTES.filter(d=>(type==="all"||d.type===type)&&(team==="all"||d.team===team));
+  document.getElementById("pendingCount").textContent="待决 "+rows.length+" 条";
+  if(!rows.length){list.innerHTML='<div class="empty">无匹配待决记录</div>';return;}
+  list.innerHTML=rows.map((d,i)=>`
+    <div class="dispute-item ${d.resolved?"resolved":"conflict"}">
+      <div class="head">
+        <span class="id">${esc(d.id)}</span>
+        <span class="tag ${d.type==="semantic_conflict"?"old":"new"}">${esc(d.type==="semantic_conflict"?"语义冲突":"版本碰撞")}</span>
+        <span class="pill">${esc(d.team)}</span>
+        <span class="auto-tag">${esc(d.reason)}</span>
+      </div>
+      <div class="body">
+        <div class="side">
+          <h4>❌ 旧版（败方候选）</h4>
+          <p><b>${esc(d.old.mem_id)}</b> v${d.old.version} · <code>${esc(d.old.form)}</code> · ${esc(d.old.author)}</p>
+          <p>${esc(d.old.content)}</p>
+          <div class="meta">ts: ${esc(d.old.ts)}</div>
+        </div>
+        <div class="side">
+          <h4>✅ 新版（胜方候选）</h4>
+          <p><b>${esc(d.new.mem_id)}</b> v${d.new.version} · <code>${esc(d.new.form)}</code> · ${esc(d.new.author)}</p>
+          <p>${esc(d.new.content)}</p>
+          <div class="meta">ts: ${esc(d.new.ts)}</div>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn ok" onclick="resolve(${i},'new')">✅ 采纳新版（mem_${d.old.mem_id}→archived）</button>
+        <button class="btn" onclick="resolve(${i},'old')">❌ 采纳旧版（mem_${d.new.mem_id}→archived）</button>
+        <button class="btn" onclick="resolve(${i},'merge')">🔀 合并（保留两边，新建 merged）</button>
+        <button class="btn" onclick="resolve(${i},'reject')">⏸️ 挂起（继续等待证据）</button>
+      </div>
+    </div>`).join("");
+}
+
+function resolve(idx,verdict){
+  const d=DISPUTES[idx];if(!d)return;
+  const winner=verdict==="new"?d.new:verdict==="old"?d.old:null;
+  const loser=verdict==="new"?d.old:verdict==="old"?d.new:null;
+  const memo=winner?(winner.mem_id+":「"+winner.content.substring(0,20)+"…」"):("合并新建");
+  const audit=`action=dispute_resolve · dispute_id=${d.id} · verdict=${verdict} · winner=${memo} · form:${d.old.form}`;
+  const entry={id:d.id,new:{mem_id:d.new.mem_id,content:d.new.content,ts:d.new.ts,form:d.new.form,author:d.new.author},old:{mem_id:d.old.mem_id,content:d.old.content,ts:d.old.ts,form:d.old.form,author:d.old.author},reason:d.reason,verdict,ts:new Date().toLocaleTimeString("zh-CN",{hour12:false}),action:"dispute_resolve"};
+  RESOLVED.unshift(entry);
+  DISPUTES.splice(idx,1);
+  document.getElementById("resolvedEmpty").style.display="block";
+  renderDisputes();renderResolved();
+  toast(audit);
+}
+
+function renderResolved(){
+  const list=document.getElementById("resolvedList");
+  if(!RESOLVED.length){document.getElementById("resolvedEmpty").style.display="block";list.innerHTML="";return;}
+  document.getElementById("resolvedEmpty").style.display="none";
+  list.innerHTML=RESOLVED.slice(0,5).map(r=>`
+    <div class="dispute-item resolved">
+      <div class="head">
+        <span class="id">${esc(r.id)}</span>
+        <span class="auto-tag">${esc(r.action)}</span>
+        <span class="pill ok">已裁决</span>
+        <span style="margin-left:auto;font-family:monospace;font-size:11px;color:var(--dim)">${esc(r.ts)}</span>
+      </div>
+      <div style="font-size:11px;color:var(--muted)">
+        ${r.verdict==="new"?`✅ 采纳新版 <b>${esc(r.new.mem_id)}</b>`:r.verdict==="old"?`❌ 采纳旧版 <b>${esc(r.old.mem_id)}</b>`:`🔀 合并新建`}
+        · 败者转 archived（9.7 生命周期）
+      </div>
+      <div class="meta" style="font-family:monospace;font-size:10px;color:var(--dim);margin-top:6px">${esc(r.reason)} · audit: ${esc(r.action)}</div>
+    </div>`).join("");
+}
+["fType","fTeam"].forEach(id=>document.getElementById(id).addEventListener("change",()=>renderDisputes()));
+renderDisputes();renderResolved();
+</script>
+</body>
+</html>

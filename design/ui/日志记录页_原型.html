@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>日志记录页（P15）原型 — 多 Agent 记忆助手</title>
+<style>
+  :root{--bg:#0f1419;--panel:#1a212b;--panel2:#202833;--line:#2b3441;--txt:#e6edf3;--muted:#8b98a7;--dim:#5b6675;--accent:#4d9fff;--ok:#3ecf8e;--warn:#ffd166;--err:#ff5c5c}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.55 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1180px;margin:0 auto;padding:18px}
+  h1{font-size:18px;margin:0 0 2px}
+  .sub{color:var(--muted);font-size:12px;margin-bottom:14px}
+  .section-title{font-size:13px;color:var(--muted);font-weight:600;margin:18px 0 8px;text-transform:uppercase;letter-spacing:.5px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:8px 0}
+  .pill{font-size:11px;padding:3px 9px;border-radius:6px;background:var(--panel2);border:1px solid var(--line);color:var(--muted)}
+  .pill.on{color:var(--txt);border-color:var(--accent)}
+  .pill.ok{color:var(--ok);border-color:#1e4a36;background:#12324a}
+  .pill.gold{color:#ffe6a8;border-color:#6b5a1e;background:#3a2f10}
+  .pill.red{color:#ffb0b0;border-color:#6b2e2e;background:#3a1616}
+  .pill.info{color:#8cc7ff;border-color:#2a4a66;background:#12283a}
+  input[type=text],select{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:7px;padding:7px 10px;font-size:12px}
+  input:focus,select:focus{outline:none;border-color:var(--accent)}
+  .btn{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:7px 12px;cursor:pointer;font-size:12px}
+  .btn.primary{background:var(--accent);color:#04121f;border-color:var(--accent);font-weight:600}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .sw{display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;user-select:none}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 16px;font-size:13px;z-index:80;display:none}
+  /* 过滤区 */
+  .filters{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:10px 12px;background:var(--panel2);border-radius:10px;margin-bottom:12px}
+  .filters .fl{font-size:11px;color:var(--muted);width:46px}
+  .tabs{display:flex;gap:6px;margin-bottom:10px}
+  .tab{font-size:12px;padding:5px 12px;border-radius:7px;cursor:pointer;background:var(--panel2);border:1px solid var(--line);color:var(--muted)}
+  .tab.active{color:var(--txt);border-color:var(--accent);background:#14263a}
+  .tab .cnt{color:var(--dim);font-size:10px;margin-left:4px}
+  .tab.err-tab .cnt{color:var(--err)}
+  /* 异常置顶聚合 */
+  .agg{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px}
+  @media(max-width:760px){.agg{grid-template-columns:1fr}}
+  .agg-card{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:12px}
+  .agg-card .t{font-weight:600;color:var(--err);font-size:12px;margin-bottom:4px}
+  .agg-card .n{font-size:22px;font-weight:800;font-family:monospace;color:var(--err)}
+  .agg-card .k{color:var(--muted);font-size:10px;margin-top:2px}
+  .agg-card .fix{margin-top:6px;font-size:11px}
+  /* 日志列表 */
+  .logrow{display:flex;gap:10px;align-items:center;padding:8px 10px;border-bottom:1px solid var(--line);font-size:12px;flex-wrap:wrap}
+  .logrow:last-child{border-bottom:0}
+  .logrow.err{background:#2a1212}
+  .logrow .dot{width:8px;height:8px;border-radius:50%;flex:none}
+  .dot.info{background:var(--accent)}.dot.warn{background:var(--warn)}.dot.error{background:var(--err)}
+  .logrow .ts{font-family:monospace;color:var(--muted);width:78px;flex:none}
+  .logrow .act{font-weight:600;width:120px;flex:none}
+  .logrow .rid{font-family:monospace;color:var(--accent);cursor:pointer;font-size:11px}
+  .logrow .msg{color:var(--muted);flex:1;min-width:140px}
+  .logrow .extra{width:100%;font-size:11px;color:var(--dim);background:#12283a;border-radius:6px;padding:6px 8px;margin-top:4px}
+  .logrow .audit-btn{margin-left:auto}
+  /* 保存/删除策略 */
+  .savebox{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+  @media(max-width:760px){.savebox{grid-template-columns:1fr}}
+  .savebox .sb{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:12px}
+  .savebox .sb h3{font-size:13px;margin:0 0 8px}
+  .savebox .sb .k{color:var(--muted);font-size:11px;margin-bottom:6px}
+  .savebox .sb code{color:var(--accent);font-family:monospace;font-size:11px}
+  .savebox .sb .audit-only{color:var(--warn)}
+  /* 审计 modal（弹出，非常驻） */
+  .audit-modal{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;align-items:center;justify-content:center;z-index:60}
+  .audit-modal.show{display:flex}
+  .audit-box{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;width:520px;max-width:92vw;max-height:80vh;overflow:auto}
+  .audit-box h3{font-size:14px;margin:0 0 10px;display:flex;justify-content:space-between;align-items:center}
+  .audit-box .close{cursor:pointer;color:var(--muted);font-size:20px}
+  .audit-box .chain{font-family:monospace;font-size:11px;line-height:1.9;background:var(--panel2);border-radius:8px;padding:10px}
+  .audit-box .chain .hl{color:var(--accent)}
+  .audit-box .note{font-size:11px;color:var(--dim);margin-top:10px}
+  .note{font-size:11px;color:var(--dim);margin-top:10px;line-height:1.6}
+  .empty{text-align:center;padding:20px;color:var(--dim);font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>日志记录页（P15）· 可交互原型</h1>
+  <div class="sub">按《日志记录页字段级交互规格》：全软件所有动作的记录（非只异常）· 异常置顶 · 审计日志点击才弹出（非常驻）· 日志/审计同目录独立文件 · 审计 append-only 禁简单删除需权限</div>
+
+  <div class="section-title">P15 日志记录页</div>
+  <div class="card">
+    <!-- 快捷 Tab -->
+    <div class="tabs">
+      <div class="tab active" data-tab="all">全部动作<span class="cnt" id="cntAll">24</span></div>
+      <div class="tab err-tab" data-tab="err">⛔ 仅异常<span class="cnt" id="cntErr">4</span></div>
+      <div class="tab" data-tab="l0">L0 查阅</div>
+    </div>
+
+    <!-- 过滤区 -->
+    <div class="filters">
+      <span class="fl">级别</span>
+      <select id="fLevel"><option value="all">全部</option><option value="info">info</option><option value="warn">warn</option><option value="error">error</option></select>
+      <span class="fl">端</span>
+      <select id="fForm"><option value="all">全部</option><option value="desktop">desktop</option><option value="web">web</option><option value="mobile">mobile</option><option value="cli">cli</option></select>
+      <span class="fl">动作</span>
+      <select id="fAction"><option value="all">全部</option><option>recall</option><option>write</option><option>sync_fail</option><option>llm_proxy</option><option>l0_view</option><option>login</option><option>team_assign</option></select>
+      <span class="fl">时间</span>
+      <select id="fTime"><option>5min</option><option selected>1h</option><option>24h</option><option>7d</option></select>
+      <span class="fl">关键词</span>
+      <input type="text" id="fKw" placeholder="request_id / mem_id / agent" style="flex:1;min-width:140px" />
+      <label class="sw" style="margin-left:auto"><input type="checkbox" id="fErrOnly" /> 仅异常</label>
+    </div>
+
+    <!-- 异常置顶聚合 -->
+    <div class="agg" id="agg">
+      <div class="agg-card"><div class="t">熔断 OPEN</div><div class="n">1</div><div class="k">desktop/Codex · 连续失败≥5（5.2）</div><div class="fix">跳 P10 Agent 接入</div></div>
+      <div class="agg-card"><div class="t">同步失败</div><div class="n">1</div><div class="k">sync_fail · form:web · 对账超时</div><div class="fix">[重试同步]</div></div>
+      <div class="agg-card"><div class="t">反代理额度超限</div><div class="n">1</div><div class="k">claude-free 额度 90%（19.8）</div><div class="fix">跳 P13 大模型配置</div></div>
+      <div class="agg-card"><div class="t">冲突挂起</div><div class="n">1</div><div class="k">9.7 自动裁决失败</div><div class="fix">跳 P8 裁决页</div></div>
+    </div>
+
+    <!-- 日志列表 -->
+    <div id="loglist"></div>
+
+    <!-- 保存 & 删除策略（4.3.2） -->
+    <div class="savebox">
+      <div class="sb">
+        <h3>📁 保存位置（4.3.2 · R-LOG7）</h3>
+        <div class="k">软件日志 + 审计日志 <b>同目录独立文件</b>保存：</div>
+        <code>&lt;安装根&gt;/logs/software.log</code><br/>
+        <code>&lt;安装根&gt;/logs/audit.log</code><br/>
+        <div class="k" style="margin-top:6px">CLI/Linux：<code>~/.config/memagent/logs/</code> 或 <code>/var/log/memagent/</code></div>
+      </div>
+      <div class="sb">
+        <h3>🗑 删除策略（R-LOG8）</h3>
+        <div class="k"><b>软件日志</b>：可滚动删除（普通权限），保留 30 天</div>
+        <button class="btn" id="btnCleanSoft">清理过期软件日志</button>
+        <div class="k audit-only" style="margin-top:10px"><b>审计日志</b>：<b>append-only，禁止简单删除</b>（无普通删除按钮）；删除/归档需 <b>Admin 权限 + 二次确认</b>，且删除动作本身写审计 <code>action=audit_delete</code>（不可无痕）</div>
+        <button class="btn" id="btnCleanAudit">归档审计日志（需 Admin）</button>
+      </div>
+    </div>
+
+    <div class="note">
+      红线：R-LOG1 error 恒置顶 · R-LOG2 每条必带 request_id · R-LOG3 L0 必须授权+密码 · R-LOG4 跨端限同账号 · R-LOG5 保留期可配 · R-LOG6 审计查阅非常驻（点才弹）· R-LOG7 日志/审计同目录独立文件 · R-LOG8 审计禁简单删除需权限。
+    </div>
+  </div>
+</div>
+
+<!-- 审计 modal（点击日志"查阅审计"才弹出，非常驻，R-LOG6） -->
+<div class="audit-modal" id="auditModal">
+  <div class="audit-box">
+    <h3>审计链路（独立 modal，非常驻）<span class="close" id="auditClose">×</span></h3>
+    <div class="chain" id="auditChain"></div>
+    <div class="note">数据来源 <code>audit.log</code>（append-only）。本窗口仅"查阅审计"时弹出，关闭即收起，不常驻界面（R-LOG6）。审计删除需 Admin 权限 + 二次确认 + 写审计 <code>audit_delete</code>（R-LOG8）。</div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+function toast(m){const t=document.getElementById("toast");t.textContent=m;t.style.display="block";clearTimeout(t._x);t._x=setTimeout(()=>t.style.display="none",2600);}
+
+/* 全软件所有动作日志（非只异常）—— 对应 4.3.1 审计动作枚举 */
+const LOGS=[
+  // 异常（error，置顶）
+  {ts:"10:25:12",level:"error",form:"desktop",action:"open_circuit",agent:"Codex",rid:"req_x1",msg:"主通道 Webhook 连续失败≥5，熔断 OPEN（5.2）",extra:"fail=5 · 已降级为仅补偿通道 · 延迟 5min"},
+  {ts:"10:24:40",level:"error",form:"web",action:"sync_fail",rid:"req_x2",msg:"同步对账超时，5min 短周期未对齐",extra:"端=web · 待每日全量对账补回 · sha256 校验未过"},
+  {ts:"10:23:10",level:"warn",form:"desktop",action:"llm_proxy_quota",agent:"claude-free",rid:"req_x3",msg:"反代理 claude-free 免费额度达 90%（proxy_budget）",extra:"余量 31/450 · 临 proxy_budget，建议提前切其他源"},
+  {ts:"10:22:00",level:"error",form:"desktop",action:"conflict_pending",rid:"req_x4",msg:"语义冲突自动裁决失败，挂起 9.7 队列",extra:"old_id=mem_101 · new_id=mem_207 · 待 P8 人工裁决"},
+  // 常规动作（info）
+  {ts:"10:21:30",level:"info",form:"desktop",action:"recall",rid:"req_001",msg:"召回「为什么上次重构失败」命中 3 条（payload 780t）",extra:"decay=hot · 跨 Agent 共享（19.4）"},
+  {ts:"10:21:02",level:"info",form:"desktop",action:"write",rid:"req_002",msg:"写入踩坑记忆 pitfall#42（去重新建）",extra:"dedup=new · sim=0.21"},
+  {ts:"10:20:15",level:"info",form:"web",action:"llm_proxy",agent:"claude:claude-free",rid:"req_003",msg:"反代理借用 claude-free 完成重排（花 ¥0 · auto 先免费）",extra:"llm_proxy_source=agent:claude-free · 生效模式 auto"},
+  {ts:"10:19:48",level:"info",form:"desktop",action:"l0_view",rid:"req_004",msg:"管理员授权 + 密码解开 L0 原始对话",extra:"l0_auth 本次会话有效 · 审计 l0_view"},
+  {ts:"10:18:20",level:"info",form:"desktop",action:"login",rid:"req_005",msg:"登录成功（同步身份 user_001 + team_001）",extra:"form:desktop · 审计 action=login"},
+  {ts:"10:17:55",level:"info",form:"desktop",action:"team_assign",rid:"req_006",msg:"管理员分配 user_002 → team_002",extra:"action=team_assign · 用户侧只读"},
+  {ts:"10:16:30",level:"info",form:"desktop",action:"auto_bind",agent:"Claude Code",rid:"req_007",msg:"一键接入自动发现并绑定 Claude Code（P1）",extra:"signal=MCP 注册表 · form:desktop · 默认只读召回"},
+  {ts:"10:15:10",level:"info",form:"cli",action:"sync_up",rid:"req_008",msg:"CLI 端 `memagent sync` 上行 12 条（team_001 隔离）",extra:"form:cli · sha256 幂等 · 不混入个人库"},
+  {ts:"10:14:00",level:"info",form:"desktop",action:"gc",rid:"req_009",msg:"生命周期 GC：3 条转 cold，1 条 archived（9.7）",extra:"decay 衰减 · 半衰期 7d"},
+  {ts:"10:12:45",level:"warn",form:"mobile",action:"pending_sync",rid:"req_010",msg:"移动端离线，3 条待回传（pending_sync=1）",extra:"断网 · 联网后批量幂等回传"},
+];
+
+/* 审计链路（按 request_id） */
+const AUDIT={
+  req_001:["10:21:30 recall project_id=P1 hit=3 (跨 Agent 共享)","10:21:30 rerank_on Top5->3","10:21:31 payload=780t ≤1500 软上限","10:21:31 audit request_id=req_001"],
+  req_003:["10:20:15 llm_proxy source=agent:claude-free","10:20:15 花费¥0 · 生效模式 auto","10:20:15 未超 proxy_price_cap ¥0.02/千","10:20:16 audit request_id=req_003"],
+  req_007:["10:16:30 auto_bind agent:Claude Code signal=MCP 注册表","10:16:30 默认：只读召回 + project 共享 + 双通道","10:16:31 测通 ✓ · form:desktop","10:16:31 audit request_id=req_007"],
+  req_x2:["10:24:40 sync_down 失败：web 端对账超时","10:24:40 标记 pending · 待每日全量对账","10:24:41 审计 sync_fail · form:web"],
+};
+
+function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+
+function renderLogs(){
+  const list=document.getElementById("loglist");
+  const kw=(document.getElementById("fKw").value||"").toLowerCase();
+  const level=document.getElementById("fLevel").value;
+  const form=document.getElementById("fForm").value;
+  const action=document.getElementById("fAction").value;
+  const errOnly=document.getElementById("fErrOnly").checked;
+  const rows=LOGS.filter(l=>{
+    if(level!=="all"&&l.level!==level)return false;
+    if(form!=="all"&&l.form!==form)return false;
+    if(action!=="all"&&l.action!==action)return false;
+    if(errOnly&&l.level!=="error")return false;
+    if(kw&&!(l.rid.toLowerCase().includes(kw)||(l.agent||"").toLowerCase().includes(kw)||l.msg.toLowerCase().includes(kw)))return false;
+    return true;
+  });
+  // error 恒置顶（R-LOG1），同级按 ts 倒序
+  rows.sort((a,b)=>{
+    if(a.level==="error"&&b.level!=="error")return -1;
+    if(b.level==="error"&&a.level!=="error")return 1;
+    return b.ts.localeCompare(a.ts);
+  });
+  document.getElementById("cntAll").textContent=LOGS.length;
+  document.getElementById("cntErr").textContent=LOGS.filter(l=>l.level==="error").length;
+  if(!rows.length){list.innerHTML='<div class="empty">无匹配日志（试试清空关键词 / 级别）</div>';return;}
+  list.innerHTML=rows.map(l=>`
+    <div class="logrow ${l.level==="error"?"err":""}">
+      <span class="dot ${l.level}"></span>
+      <span class="ts">${l.ts} UTC</span>
+      <span class="pill ${l.level==="error"?"red":l.level==="warn"?"gold":"info"}">${l.level}</span>
+      <span class="pill">${l.form}</span>
+      <span class="act">${l.action}</span>
+      <span class="msg">${esc(l.msg)}</span>
+      <span class="rid" data-rid="${l.rid}">${l.rid} [查阅审计]</span>
+      ${l.extra?`<div class="extra">${esc(l.extra)}</div>`:""}
+    </div>`).join("");
+  // 查阅审计（弹出 modal，非常驻）
+  list.querySelectorAll("[data-rid]").forEach(e=>e.addEventListener("click",()=>openAudit(e.dataset.rid)));
+}
+
+function openAudit(rid){
+  const chain=AUDIT[rid]||["（无该 request_id 的审计链路，仅软件日志记录）","request_id="+rid];
+  document.getElementById("auditChain").innerHTML=chain.map((s,i)=>`<div class="${i===chain.length-1?"hl":""}">${esc(s)}</div>`).join("");
+  document.getElementById("auditModal").classList.add("show");
+}
+document.getElementById("auditClose").addEventListener("click",()=>document.getElementById("auditModal").classList.remove("show"));
+document.getElementById("auditModal").addEventListener("click",e=>{if(e.target.id==="auditModal")e.target.classList.remove("show");});
+
+// Tab 切换
+document.querySelectorAll(".tab").forEach(t=>t.addEventListener("click",()=>{
+  document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
+  t.classList.add("active");
+  document.getElementById("fErrOnly").checked=(t.dataset.tab==="err");
+  document.getElementById("fLevel").value=t.dataset.tab==="err"?"error":(t.dataset.tab==="l0"?"all":"all");
+  if(t.dataset.tab==="l0"){document.getElementById("fAction").value="l0_view";}else{document.getElementById("fAction").value="all";}
+  renderLogs();
+}));
+// 过滤联动
+["fLevel","fForm","fAction","fTime","fKw"].forEach(id=>document.getElementById(id).addEventListener("input",renderLogs));
+document.getElementById("fErrOnly").addEventListener("change",renderLogs);
+
+// 保存/删除（R-LOG7/R-LOG8）
+document.getElementById("btnCleanSoft").addEventListener("click",()=>{toast("已清理过期软件日志（保留 30 天，普通权限）");});
+document.getElementById("btnCleanAudit").addEventListener("click",()=>{
+  if(confirm("归档审计日志需 Admin 权限 + 二次确认。\n此操作将写审计 action=audit_delete（不可无痕）。\n确认继续？")){
+    toast("Admin 权限校验通过：审计已归档，写审计 audit_delete（记录删除者/时间/范围，不可无痕）");
+  }
+});
+
+renderLogs();
+</script>
+</body>
+</html>

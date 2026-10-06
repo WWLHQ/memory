@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>机制演示 — 多 Agent 记忆助手</title>
+<style>
+  :root{--bg:#0f1419;--panel:#1a212b;--panel2:#202833;--line:#2b3441;
+    --txt:#e6edf3;--muted:#8b98a7;--dim:#5b6675;--accent:#4d9fff;
+    --ok:#3ecf8e;--warn:#ffd166;--err:#ff5c5c;--mem:#9d6bff}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.55 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1180px;margin:0 auto;padding:18px}
+  h1{font-size:17px;margin:0 0 2px}
+  .sub{color:var(--muted);font-size:12px;margin-bottom:14px}
+  .tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+  .tab{background:var(--panel2);border:1px solid var(--line);color:var(--muted);border-radius:9px;padding:8px 13px;cursor:pointer;font-size:13px}
+  .tab.active{background:var(--accent);color:#04121f;border-color:var(--accent);font-weight:600}
+  .panel{display:none}.panel.show{display:block}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+  .h{font-size:13px;color:var(--txt);font-weight:600;margin:0 0 10px;display:flex;gap:8px;align-items:center}
+  .h .ref{font-size:10px;color:var(--dim);font-weight:400}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--accent);border-radius:8px;padding:9px 16px;font-size:13px;z-index:80;display:none}
+
+  /* ① 生命周期 */
+  .stateflow{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+  .state{position:relative;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:10px 14px;font-size:13px;font-weight:600;min-width:96px;text-align:center;transition:.25s}
+  .state .n{font-size:10px;color:var(--muted);font-weight:400;margin-top:2px}
+  .state.hot{border-color:var(--err)}.state.warm{border-color:var(--warn)}
+  .state.cold{border-color:#4d9fff}.state.archived{border-color:var(--muted)}.state.dormant{border-color:var(--dim)}
+  .state.here{box-shadow:0 0 0 2px var(--accent);background:#16222f}
+  .state.here .n{color:var(--accent)}
+  .arrow{align-self:center;color:var(--dim);font-size:16px}
+  .ctrl{background:var(--panel2);border-radius:10px;padding:14px;margin-top:8px}
+  .ctrl .row{display:flex;gap:14px;align-items:center;margin:10px 0;flex-wrap:wrap}
+  .ctrl label{font-size:12px;color:var(--muted);width:74px}
+  .ctrl input[type=range]{flex:1;min-width:140px;accent-color:var(--accent)}
+  .ctrl .val{font-family:monospace;font-size:13px;color:var(--accent);width:54px}
+  .fresh-track{height:10px;background:var(--panel2);border-radius:6px;overflow:hidden;margin-top:6px}
+  .fresh-fill{height:100%;background:linear-gradient(90deg,var(--err),var(--warn),var(--ok));transition:width .3s}
+  .memrow{font-size:12px;color:var(--muted);margin:4px 0;display:flex;gap:8px;align-items:center}
+  .memrow .mid{font-family:monospace;color:var(--txt)}
+  .memrow .badge{font-size:10px;padding:1px 7px;border-radius:5px;font-weight:700}
+  .b-hot{background:#3a1616;color:#ff8a8a}.b-warm{background:#3a2a16;color:#ffb454}
+  .b-cold{background:#122c44;color:#7cc0ff}.b-dorm{background:#232a35;color:#7a8698}
+  .note{font-size:11px;color:var(--dim);margin-top:8px}
+
+  /* ② 冲突裁决 */
+  .duel{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:700px){.duel{grid-template-columns:1fr}}
+  .duel .side{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px}
+  .duel .side.new{border-color:#2a4a30}
+  .duel .side .t{font-size:12px;color:var(--muted);margin-bottom:6px}
+  .duel .side .val{font-size:14px;color:var(--txt);font-family:monospace}
+  .duel .side .meta{font-size:11px;color:var(--dim);margin-top:6px}
+  .duel .side .win{display:none;color:var(--ok);font-weight:700;font-size:12px;margin-top:8px}
+  .duel .side.win .win{display:block}
+  .duel .side.win{border-color:var(--ok);box-shadow:0 0 0 1px var(--ok)}
+  .auditline{font-family:monospace;font-size:11px;background:var(--panel2);border-radius:7px;padding:8px 10px;margin-top:12px;color:var(--muted);display:none}
+  .auditline.show{display:block}
+  .auditline .a{color:var(--warn)}
+  .resolve-btns{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+  .resolve-btns button{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:7px 12px;cursor:pointer;font-size:12px}
+  .resolve-btns button:hover{border-color:var(--accent)}
+  .resolve-btns button.on{border-color:var(--ok);color:var(--ok)}
+
+  /* ③ 双通道降级 */
+  .timeline{display:flex;gap:0;align-items:stretch;margin:14px 0;flex-wrap:wrap}
+  .tstep{flex:1;min-width:150px;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:11px;position:relative;margin-right:10px}
+  .tstep:last-child{margin-right:0}
+  .tstep .tt{font-size:11px;color:var(--muted);font-family:monospace}
+  .tstep .td{font-size:12px;color:var(--txt);margin-top:4px;line-height:1.5}
+  .tstep.main-ok{border-top:3px solid var(--ok)}
+  .tstep.main-broken{border-top:3px solid var(--err)}
+  .tstep.compensate{border-top:3px solid var(--warn)}
+  .tstep.ok{border-top:3px solid var(--ok)}
+  .tstep .tag{font-size:10px;padding:1px 6px;border-radius:4px;margin-top:6px;display:inline-block}
+  .tag.red{background:#3a1616;color:#ff8a8a}.tag.gold{background:#3a2f10;color:#ffe6a8}.tag.green{background:#1a3320;color:#7fe0a0}
+  .pulse{animation:pulse 1s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+  .recon{margin-top:12px;font-size:12px;color:var(--muted)}
+  .recon .bar{height:8px;background:var(--panel2);border-radius:5px;overflow:hidden;margin-top:5px}
+  .recon .bar .f{height:100%;width:0;background:var(--ok);transition:width 1.2s ease}
+
+  /* ④ 效果看板 */
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px}
+  @media(max-width:820px){.kpis{grid-template-columns:repeat(2,1fr)}}
+  .kpi{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:13px}
+  .kpi .k{font-size:11px;color:var(--muted)}
+  .kpi .v{font-size:24px;font-weight:800;font-family:monospace;margin:4px 0}
+  .kpi .v.good{color:var(--ok)}.kpi .v.mem{color:var(--mem)}
+  .kpi .d{font-size:10px;color:var(--dim)}
+  .kpi .d.up{color:var(--ok)}
+  .charts{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+  @media(max-width:1000px){.charts{grid-template-columns:1fr 1fr}}
+  @media(max-width:760px){.charts{grid-template-columns:1fr}}
+  .chart{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:14px}
+  .chart h4{font-size:12px;margin:0 0 10px;color:var(--txt)}
+  .bars{display:flex;gap:8px;align-items:flex-end;height:110px}
+  .bars .b{flex:1;background:linear-gradient(180deg,var(--accent),#2a4a66);border-radius:4px 4px 0 0;position:relative;transition:height .8s ease;min-width:26px}
+  .bars .b .v{position:absolute;top:-16px;left:0;right:0;text-align:center;font-size:9px;color:var(--muted);font-family:monospace}
+  .bars .b .l{position:absolute;bottom:-16px;left:0;right:0;text-align:center;font-size:9px;color:var(--dim)}
+  .donut{width:120px;height:120px;border-radius:50%;margin:0 auto;position:relative;background:conic-gradient(var(--ok) 0 62%,var(--warn) 62% 86%,var(--err) 86% 100%)}
+  .donut::after{content:"";position:absolute;inset:24px;background:var(--panel2);border-radius:50%}
+  .legend{display:flex;gap:14px;font-size:11px;color:var(--muted);margin-top:12px;flex-wrap:wrap}
+  .legend .sw{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:4px;vertical-align:middle}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>机制演示 · 让底层机制也「看得懂」</h1>
+  <div class="sub">把产品核心机制做成可交互演示：① 记忆生命周期衰减 ② 冲突裁决 ③ 双通道采集降级 ④ 效果看板（功劳可量化）</div>
+
+  <div class="tabs" id="tabs">
+    <div class="tab active" data-p="life">① 生命周期状态机（9.10/17.5）</div>
+    <div class="tab" data-p="conflict">② 冲突裁决（9.7/16.2）</div>
+    <div class="tab" data-p="channel">③ 双通道采集降级（19.3/5.1）</div>
+    <div class="tab" data-p="board">④ 效果看板（功劳可量化）</div>
+  </div>
+
+  <!-- ① 生命周期 -->
+  <div class="panel show" id="p-life">
+    <div class="card">
+      <div class="h">记忆衰减状态机 <span class="ref">9.10 六态 · 拖动半衰期/最近访问，看一条记忆如何从 hot 滑向 dormant</span></div>
+      <div class="stateflow" id="flow">
+        <div class="state hot" data-s="hot">hot<span class="n">高活跃</span></div><span class="arrow">→</span>
+        <div class="state warm" data-s="warm">warm<span class="n">中活跃</span></div><span class="arrow">→</span>
+        <div class="state cold" data-s="cold">cold<span class="n">补查层</span></div><span class="arrow">→</span>
+        <div class="state archived" data-s="archived">archived<span class="n">压缩归档</span></div><span class="arrow">→</span>
+        <div class="state dormant" data-s="dormant">dormant<span class="n">深层睡眠</span></div>
+      </div>
+      <div class="ctrl">
+        <div class="row"><label>半衰期</label><input type="range" id="hl" min="1" max="365" value="30"><span class="val" id="hlv">30d</span></div>
+        <div class="row"><label>最近访问</label><input type="range" id="age" min="0" max="365" value="45"><span class="val" id="agev">45d</span></div>
+        <div class="row"><label>新鲜度</label>
+          <div style="flex:1"><div class="fresh-track"><div class="fresh-fill" id="freshfill" style="width:59%"></div></div></div>
+          <span class="val" id="freshv">0.59</span>
+        </div>
+        <div class="row" style="align-items:center">
+          <button class="tab" id="autoplay" style="background:var(--panel2);border:1px solid var(--accent);color:var(--txt);border-radius:8px;padding:6px 12px;cursor:pointer;font-size:12px;font-weight:600">▶ 自动衰减播放（age 0→365）</button>
+          <span class="note" style="margin:0">看一条热记忆随时间自然滑向 cold/dormant；pinned/locked 记忆不会迁移（17.4）。</span>
+        </div>
+        <div id="memlist">
+          <div class="memrow"><span class="mid">mem_001</span> PostgreSQL 连接池 <span class="badge b-hot" id="b1">hot</span></div>
+          <div class="memrow"><span class="mid">mem_042</span> SQLite+JSON 存储 <span class="badge b-cold" id="b2">cold</span></div>
+          <div class="memrow"><span class="mid">mem_073</span> Redis 超时 <span class="badge b-dorm" id="b3">dormant</span></div>
+        </div>
+        <div class="note">规则：decay_class 按新鲜度 + 半衰期判定（17.7）。dormant 强信号放行阈值 sim≥0.9（15.3）；pinned/locked 豁免后台迁移（17.4）。拖动上方滑杆实时看 mem_001 的层级变化。</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ② 冲突裁决 -->
+  <div class="panel" id="p-conflict">
+    <div class="card">
+      <div class="h">记忆冲突裁决 <span class="ref">9.7 / 16.2 · 新旧值对比 + 三模式裁决 + 成对审计</span></div>
+      <div class="note" style="margin:0 0 10px">conflict_type=direct_contradiction · conflict_score=0.82（>0.7 触发，9.7）</div>
+      <div class="duel">
+        <div class="side old" id="s-old">
+          <div class="t">旧值 <span style="font-family:monospace">mem_042</span></div>
+          <div class="val">"项目采用 SQLite + JSON 存储"</div>
+          <div class="meta">source=conversation · confidence=0.7 · 90 天前</div>
+          <div class="win">✓ 裁决保留旧值（user_confirm）</div>
+        </div>
+        <div class="side new" id="s-new">
+          <div class="t">新值 <span style="font-family:monospace">mem_051</span></div>
+          <div class="val">"项目已迁移到 PostgreSQL + pgvector"</div>
+          <div class="meta">source=api · confidence=0.6 · 3 天前</div>
+          <div class="win">✓ 裁决采纳新值（auto_override），旧值→deprecated</div>
+        </div>
+      </div>
+      <div class="resolve-btns">
+        <button data-r="new">采纳新值（auto_override）</button>
+        <button data-r="old">保留旧值（user_confirm）</button>
+        <button data-r="merge">合并两者（merge）</button>
+      </div>
+      <div class="auditline" id="aconflict"></div>
+      <div class="note">裁决后 old_id / new_id 成对写审计（18.4 约束5）；auto_override 提升新值 trust_score +0.1（9.7）。</div>
+    </div>
+  </div>
+
+  <!-- ③ 双通道降级 -->
+  <div class="panel" id="p-channel">
+    <div class="card">
+      <div class="h">双链路采集与故障降级 <span class="ref">19.3 / 5.1 / 5.2 · 主通道熔断 → 补偿通道接管 → 对账补齐</span></div>
+      <div class="stateflow">
+        <div class="state" style="border-color:var(--ok)">主通道 Webhook<span class="n">实时推 · 带 session_id/request_id</span></div>
+        <div class="state" style="border-color:var(--warn)">补偿 API 拉取<span class="n">5min 对账 · SHA-256 幂等</span></div>
+      </div>
+      <div class="timeline" id="tl">
+        <div class="tstep main-ok" id="ts1"><div class="tt">T0</div><div class="td">Claude Code 会话事件，主通道 Webhook 实时推送成功</div><span class="tag green">✓ 已采集</span></div>
+        <div class="tstep main-broken pulse" id="ts2"><div class="tt">T0+2min</div><div class="td">网络抖动，主通道连续失败 ≥5 → 熔断 OPEN（5.2）</div><span class="tag red" id="ts2tag">⚠ 熔断 OPEN</span></div>
+        <div class="tstep compensate" id="ts3"><div class="tt">T0+5min</div><div class="td">补偿通道 API 拉取接管，按 session_id 对账，幂等补齐缺失</div><span class="tag gold">接管中</span></div>
+        <div class="tstep ok" id="ts4"><div class="tt">T0+6min</div><div class="td">数据完整性 100%，无丢失（5.4 保真）；主通道恢复后自动回切</div><span class="tag green">✓ 补齐</span></div>
+      </div>
+      <div class="recon">
+        对账补齐进度（5min 短周期）
+        <div class="bar"><div class="f" id="reconbar"></div></div>
+      </div>
+      <div class="note">结论：双通道并行——主 Webhook + 补偿 API 拉取，5min 对账 + 每日全量。Webhook 丢一条，补偿通道 5min 内补齐不漏，记忆库完整性 > 实时性（19.3）。</div>
+      <div style="margin-top:12px"><button class="tab" id="replay" style="background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:7px 12px;cursor:pointer;font-size:12px">↻ 重放降级动效</button></div>
+    </div>
+  </div>
+
+  <!-- ④ 效果看板 -->
+  <div class="panel" id="p-board">
+    <div class="card">
+      <div class="h">效果看板 · 功劳可量化 <span class="ref">命中质量 / token / 效率 / 复用 / 沉淀 · 数据源：审计 4.3 + 监控 12.1 + 7.1 反馈</span></div>
+      <div class="kpis">
+        <div class="kpi"><div class="k">召回命中率（12.1）</div><div class="v good">87%</div><div class="d up">近 1h 命中 / 阈值 &lt;60% 告警 · 越高越帮上忙</div></div>
+        <div class="kpi"><div class="k">Top-1 置信度</div><div class="v good">0.83</div><div class="d up">最相关那条越准 · 低则触发证据警示</div></div>
+        <div class="kpi"><div class="k">证据充分度</div><div class="v good">81%</div><div class="d up">= 1 − evidence_thin 率（2.4.3）· 越高越少瞎猜</div></div>
+        <div class="kpi"><div class="k">平均召回 payload</div><div class="v good">780<small style="font-size:12px">/1500</small></div><div class="d up">↓ 省 58% token（2.4.1）</div></div>
+        <div class="kpi"><div class="k">背景交代耗时</div><div class="v good">-34%</div><div class="d up">跨会话免重复贴说明（9.1）</div></div>
+        <div class="kpi"><div class="k">同类错误复发</div><div class="v good">-41%</div><div class="d up">踩坑库召回命中（9.3）</div></div>
+        <div class="kpi"><div class="k">跨 Agent 复用率</div><div class="v mem">3.2×</div><div class="d">1 次沉淀 · 4 端共享（19.4）</div></div>
+        <div class="kpi"><div class="k">单条沉淀复用次数</div><div class="v mem">21</div><div class="d">access_count 最高记忆被跨 Agent 召回 21 次（17.4）</div></div>
+        <div class="kpi"><div class="k">自生长收益（7.2）</div><div class="v good">Δ+13%</div><div class="d up">权重回归后 命中率 74%→87% · 记 weight_tuned 审计</div></div>
+        <div class="kpi"><div class="k">模型成本节省（19.8）</div><div class="v mem">¥0</div><div class="d up">自动选先免费后低价，跨 3 Agent 480 次 · 低价单价≤用户上限 ¥0.02/千 · 省约 ¥19</div></div>
+      </div>
+      <div class="charts">
+        <div class="chart">
+          <h4>近 7 日命中率 vs 证据充分度（%）</h4>
+          <div class="bars" id="bars">
+            <div class="b" style="height:74%"><span class="v">74</span><span class="l">一</span></div>
+            <div class="b" style="height:81%"><span class="v">81</span><span class="l">二</span></div>
+            <div class="b" style="height:88%"><span class="v">88</span><span class="l">三</span></div>
+            <div class="b" style="height:69%"><span class="v">69</span><span class="l">四</span></div>
+            <div class="b" style="height:92%"><span class="v">92</span><span class="l">五</span></div>
+            <div class="b" style="height:85%"><span class="v">85</span><span class="l">六</span></div>
+            <div class="b" style="height:87%"><span class="v">87</span><span class="l">日</span></div>
+          </div>
+          <div class="legend" style="margin-top:22px">
+            <span><span class="sw" style="background:var(--accent)"></span>命中率（12.1，&lt;60% 告警）</span>
+            <span><span class="sw" style="background:var(--mem)"></span>证据充分度（= 1 − evidence_thin，2.4.3）</span>
+          </div>
+        </div>
+        <div class="chart">
+          <h4>自生长收益 · 权重回归前后命中率（7.2）</h4>
+          <div class="growth-line" id="growthline">
+            <svg viewBox="0 0 300 120" style="width:100%;height:120px">
+              <line x1="20" y1="100" x2="280" y2="100" stroke="var(--line)"/>
+              <line x1="20" y1="20" x2="20" y2="100" stroke="var(--line)"/>
+              <!-- 回归前 74% -->
+              <polyline points="20,56 70,56 110,56" fill="none" stroke="#5b6675" stroke-width="2" stroke-dasharray="4 3"/>
+              <text x="24" y="52" fill="#8b98a7" font-size="9">前 74%</text>
+              <!-- 回归后爬升 87% -->
+              <polyline points="110,56 150,44 190,36 230,30 280,27" fill="none" stroke="var(--ok)" stroke-width="3"/>
+              <text x="238" y="24" fill="#3ecf8e" font-size="9">后 87%</text>
+              <!-- 回归触发点 -->
+              <line x1="110" y1="20" x2="110" y2="100" stroke="var(--warn)" stroke-dasharray="3 3"/>
+              <text x="114" y="30" fill="#ffd166" font-size="9">weight_tuned（每周日 03:00，13.3）</text>
+              <circle cx="280" cy="27" r="3" fill="var(--ok)"/>
+            </svg>
+          </div>
+          <div class="note">自生长引擎每周基于 confirm/reject 分布回归调 mode_weights（7.2），调参记审计。收益 Δ+13% 即"记忆助手越用越准"的量化证明。</div>
+        </div>
+        <div class="chart">
+          <h4>用户反馈分布（13.7 / 7.1）</h4>
+          <div class="donut"></div>
+          <div class="legend">
+            <span><span class="sw" style="background:var(--ok)"></span>confirm 62%</span>
+            <span><span class="sw" style="background:var(--warn)"></span>disputed 24%</span>
+            <span><span class="sw" style="background:var(--err)"></span>reject 14%</span>
+          </div>
+          <div class="note">disputed 进入冲突裁决队列（P7）；confirm/reject 驱动 7.2 自生长调权重。反馈正比 confirm/(confirm+reject)=62/76≈82%，越高记忆越可信。</div>
+        </div>
+      </div>
+      <div class="note" style="margin-top:14px">数据源：命中率/延迟 p99 来自监控 12.1；evidence_thin 来自 2.4.3；token 来自 2.4.1 三档预算；复用来自 access_count（17.4）+ 19.4 跨 Agent 共享；自生长收益来自 7.2 权重回归（记 weight_tuned 审计）。每个数字可点 request_id 进审计（4.3 / 18.2-E）溯源。</div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+function toast(m){const t=document.getElementById("toast");t.textContent=m;t.style.display="block";clearTimeout(t._x);t._x=setTimeout(()=>t.style.display="none",2600);}
+
+/* tabs */
+document.getElementById("tabs").querySelectorAll(".tab").forEach(t=>t.addEventListener("click",()=>{
+  document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
+  t.classList.add("active");
+  document.querySelectorAll(".panel").forEach(p=>p.classList.remove("show"));
+  document.getElementById("p-"+t.dataset.p).classList.add("show");
+  if(t.dataset.p==="channel")playRecon();
+}));
+
+/* ① 生命周期 */
+const hl=document.getElementById("hl"),age=document.getElementById("age");
+function classify(fresh){
+  if(fresh>=0.5)return["hot","b-hot"];
+  if(fresh>=0.25)return["warm","b-warm"];
+  if(fresh>=0.12)return["cold","b-cold"];
+  if(fresh>=0.05)return["archived","b-cold"];
+  return["dormant","b-dorm"];
+}
+let lastClass="";
+function life(){
+  const h=+hl.value,a=+age.value;
+  const fresh=Math.pow(0.5,a/h);            // 17.5 freshness = 0.5^(age/half_life)
+  document.getElementById("hlv").textContent=h+"d";
+  document.getElementById("agev").textContent=a+"d";
+  document.getElementById("freshv").textContent=fresh.toFixed(2);
+  document.getElementById("freshfill").style.width=(Math.max(5,Math.min(100,fresh*100)))+"%";
+  const [cls,badge]=classify(fresh);
+  const b1=document.getElementById("b1");b1.textContent=cls;b1.className="badge "+badge;
+  document.querySelectorAll("#flow .state").forEach(s=>s.classList.toggle("here",s.dataset.s===cls));
+  if(cls!==lastClass&&lastClass!==""){toast(`mem_001 迁移：${lastClass} → ${cls}（后台每日层迁移，17.10）`);}
+  lastClass=cls;
+}
+hl.addEventListener("input",life);age.addEventListener("input",life);life();
+
+/* 生命周期自动衰减播放 */
+let playTimer=null;
+document.getElementById("autoplay").addEventListener("click",function(){
+  const btn=this;
+  if(playTimer){clearInterval(playTimer);playTimer=null;btn.textContent="▶ 自动衰减播放（age 0→365）";return;}
+  btn.textContent="⏸ 停止";
+  let a=0;
+  document.getElementById("age").value=0;life();
+  playTimer=setInterval(()=>{
+    a+=5;if(a>=365)a=0;
+    document.getElementById("age").value=a;life();
+    if(a>=365){clearInterval(playTimer);playTimer=null;btn.textContent="▶ 自动衰减播放（age 0→365）";}
+  },60);
+});
+
+/* ② 冲突裁决 */
+const ACONF=document.getElementById("aconflict"),sNew=document.getElementById("s-new"),sOld=document.getElementById("s-old");
+document.querySelectorAll("[data-r]").forEach(b=>b.addEventListener("click",()=>{
+  const r=b.dataset.r;
+  document.querySelectorAll("[data-r]").forEach(x=>x.classList.remove("on"));b.classList.add("on");
+  sNew.classList.remove("win");sOld.classList.remove("win");
+  if(r==="new"){sNew.classList.add("win");
+    ACONF.innerHTML=`<span class="a">audit:</span> action=dispute · old_id=mem_042 new_id=mem_051 · new.trust_score +0.1 · 旧值→deprecated（9.7 auto_override）`;
+    toast("已采纳新值 mem_051，旧值 mem_042 标记 deprecated，写审计（18.4 成对）");}
+  else if(r==="old"){sOld.classList.add("win");
+    ACONF.innerHTML=`<span class="a">audit:</span> action=dispute · 保留 mem_042 · 新值 mem_051 挂 dispute 待后续（user_confirm）`;
+    toast("已保留旧值，新值挂 dispute，写审计");}
+  else{
+    ACONF.innerHTML=`<span class="a">audit:</span> action=merge · merged_into=mem_060（摘要）· 来源 [mem_042, mem_051] 均 deprecated（15.2 合并谱系）`;
+    toast("已合并为摘要 mem_060，原文保留 Cold 层（17.9）");}
+  ACONF.classList.add("show");
+}));
+
+/* ③ 双通道降级动效 */
+function playRecon(){
+  const bar=document.getElementById("reconbar");bar.style.width="0%";
+  const ts2=document.getElementById("ts2"),ts3=document.getElementById("ts3"),ts4=document.getElementById("ts4");
+  const tag2=document.getElementById("ts2tag");
+  ts3.classList.remove("compensate");ts4.classList.remove("ok");
+  ts3.querySelector(".tag").textContent="接管中";ts3.querySelector(".tag").className="tag gold";
+  ts4.querySelector(".tag").textContent="等待";ts4.querySelector(".tag").className="tag gold";
+  tag2.textContent="⚠ 熔断 OPEN";tag2.className="tag red";ts2.classList.add("pulse");
+  setTimeout(()=>{bar.style.width="100%";ts2.classList.remove("pulse");tag2.textContent="已降级";tag2.className="tag gold";},900);
+  setTimeout(()=>{ts4.querySelector(".tag").textContent="✓ 补齐";ts4.querySelector(".tag").className="tag green";ts3.querySelector(".tag").textContent="已完成";toast("对账补齐完成，数据完整性 100%（5.4）");},1900);
+}
+document.getElementById("replay").addEventListener("click",playRecon);
+playRecon();
+
+/* ④ 看板：进入时重放柱状 */
+const bars=document.getElementById("bars");
+function animBars(){bars.querySelectorAll(".b").forEach((b,i)=>{const h=b.style.height;b.style.height="0%";requestAnimationFrame(()=>setTimeout(()=>b.style.height=h,80*i));});}
+document.querySelectorAll(".tab").forEach(t=>{if(t.dataset.p==="board")t.addEventListener("click",()=>setTimeout(animBars,60));});
+</script>
+</body>
+</html>

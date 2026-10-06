@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Agent 接入配置页（接原型）</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 16px; }
+    .agent-card { border: 1px solid #ccc; border-radius: 8px; padding: 10px; margin: 8px 0; }
+    .badge { padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+    .status-CONNECTED { background: #d6f5d6; } .status-DEGRADED { background: #ffe2b3; }
+    .status-CONFIGURED { background: #e6e6ff; } .status-ONBOARD { background: #eee; }
+    .priority-P0 { background: #ffd6d6; } .priority-P1 { background: #d6e4ff; } .priority-P2 { background: #eee; }
+    .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
+    .circuit-CLOSED { background: #2ecc71; } .circuit-OPEN { background: #e74c3c; } .circuit-HALF_OPEN { background: #f1c40f; }
+    .warn { color: #e67e22; } .readonly { color: #888; } .desensitize { font-family: monospace; }
+    .oneclick-progress .seg { display: inline-block; padding: 4px 8px; margin-right: 4px; border: 1px solid #999; border-radius: 4px; }
+    .oneclick-progress .seg.done { background: #d6f5d6; }
+    .oneclick-progress .seg.fail { background: #ffd6d6; }
+    button { margin-right: 6px; }
+  </style>
+</head>
+<body>
+  <button id="oneclick">⚡ 一键自动发现并接入本机 Agent</button>
+  <div id="app"></div>
+  <p style="color:#888">原型参考：<code>design/ui/Agent接入页_原型.html</code>；本页由 <code>src/agentOnboard/*</code> 模块渲染，逻辑核心零依赖。</p>
+  <script type="module" src="./browser.js"></script>
+</body>
+</html>

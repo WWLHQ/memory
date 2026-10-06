@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>自我净化与生长 + 大模型配置 — 多 Agent 记忆助手</title>
+<style>
+  :root{--bg:#0f1419;--panel:#1a212b;--panel2:#202833;--line:#2b3441;
+    --txt:#e6edf3;--muted:#8b98a7;--dim:#5b6675;--accent:#4d9fff;
+    --ok:#3ecf8e;--warn:#ffd166;--err:#ff5c5c;--mem:#9d6bff}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.55 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1180px;margin:0 auto;padding:18px}
+  h1{font-size:17px;margin:0 0 2px}
+  .sub{color:var(--muted);font-size:12px;margin-bottom:14px}
+  .tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+  .tab{background:var(--panel2);border:1px solid var(--line);color:var(--muted);border-radius:9px;padding:8px 13px;cursor:pointer;font-size:13px}
+  .tab.active{background:var(--accent);color:#04121f;border-color:var(--accent);font-weight:600}
+  .panel{display:none}.panel.show{display:block}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+  .h{font-size:13px;font-weight:600;margin:0 0 10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .h .ref{font-size:10px;color:var(--dim);font-weight:400}
+  .note{font-size:11px;color:var(--dim);margin-top:10px;line-height:1.6}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--accent);border-radius:8px;padding:9px 16px;font-size:13px;z-index:80;display:none}
+
+  /* 净化：五维 */
+  .dims{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px}
+  @media(max-width:820px){.dims{grid-template-columns:repeat(2,1fr)}}
+  .dim{background:var(--panel2);border-radius:9px;padding:10px}
+  .dim .n{font-size:11px;color:var(--muted)}
+  .dim .w{font-size:10px;color:var(--dim);float:right}
+  .dim .tr{height:7px;background:#16222f;border-radius:4px;overflow:hidden;margin-top:6px}
+  .dim .tr .f{height:100%;background:linear-gradient(90deg,var(--accent),var(--mem))}
+  .thresh{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+  .thresh .th{font-size:11px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:3px 8px;font-family:monospace;color:var(--muted)}
+  .thresh .th b{color:var(--accent)}
+  .graft{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:10px 0;font-size:12px}
+  .graft .node{background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:5px 9px}
+  .graft .node.hit{border-color:var(--ok);color:var(--ok)}
+  .graft .ar{color:var(--dim)}
+  .statline{font-size:12px;color:var(--muted);margin-top:8px}
+  .statline b{color:var(--txt);font-family:monospace}
+
+  /* 生长 */
+  .growth-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px}
+  @media(max-width:820px){.growth-grid{grid-template-columns:repeat(2,1fr)}}
+  .opt{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:10px}
+  .opt .t{font-size:11px;color:var(--txt);font-weight:600}
+  .opt .c{font-size:10px;color:var(--dim);margin-top:3px;line-height:1.4}
+  .opt .st{font-size:10px;margin-top:6px;padding:1px 7px;border-radius:4px;display:inline-block}
+  .st.on{background:#1a3320;color:#7fe0a0}.st.idle{background:var(--panel2);color:var(--dim);border:1px solid var(--line)}
+  .growth-curve{background:var(--panel2);border-radius:10px;padding:12px;margin-top:10px}
+  .growth-curve svg{width:100%;height:130px}
+  .delta{font-size:22px;font-weight:800;color:var(--ok);font-family:monospace}
+  .btn{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:7px 12px;cursor:pointer;font-size:12px}
+  .btn.primary{background:var(--accent);color:#04121f;border-color:var(--accent);font-weight:600}
+  .btn:hover{border-color:var(--accent)}
+  .sched{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .sched .s{font-size:11px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:3px 9px;color:var(--muted)}
+  .sched .s b{color:var(--accent)}
+
+  /* 大模型配置 */
+  .vec{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:14px}
+  .vec .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:13px}
+  .vec select{background:var(--panel);border:1px solid var(--line);color:var(--txt);border-radius:7px;padding:6px 9px}
+  .vec .dim-note{font-size:11px;color:var(--dim);margin-top:6px}
+  .llm-tbl{width:100%;border-collapse:collapse;font-size:12px}
+  .llm-tbl th{text-align:left;color:var(--muted);font-weight:600;padding:7px 8px;border-bottom:1px solid var(--line);font-size:11px}
+  .llm-tbl td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
+  .llm-tbl .use{color:var(--txt);font-weight:600}
+  .pick{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .pick .sw{font-size:11px;color:var(--muted);cursor:pointer;user-select:none;display:flex;gap:4px;align-items:center}
+  .pick .sw input{accent-color:var(--accent)}
+  .epi{font-family:monospace;font-size:11px;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:4px 8px;color:var(--muted);margin-top:5px;display:none}
+  .epi.show{display:block}
+  .net-on .epi{display:block}
+  .param-row{margin-top:6px;font-size:11px;color:var(--dim);display:flex;gap:10px;flex-wrap:wrap}
+  .fb{font-size:10px;background:#3a2f10;color:#ffe6a8;border:1px solid #6b5a1e;border-radius:5px;padding:1px 6px;display:none}
+  .fb.show{display:inline-block}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>自我净化与生长 + 大模型配置 · 可交互原型</h1>
+  <div class="sub">自净化（6.1 五维查重 / 6.2 短路嫁接）· 自生长（7.1 反馈 / 7.2 自动优化 / 7.2 收益）· 大模型（13.2 向量 + 本地/网络 LLM，按用途）</div>
+
+  <div class="tabs" id="tabs">
+    <div class="tab active" data-p="purify">🧹 自我净化（6.1/6.2）</div>
+    <div class="tab" data-p="grow">🌱 自生长（7.1/7.2/13.3）</div>
+    <div class="tab" data-p="llm">🧩 大模型配置（13.2/6.1/2.4.3）</div>
+  </div>
+
+  <!-- 净化 -->
+  <div class="panel show" id="p-purify">
+    <div class="card">
+      <div class="h">逐层查重（五维综合评分）<span class="ref">6.1 · 每层阈值不同</span></div>
+      <div class="dims">
+        <div class="dim"><div class="n">semantic <span class="w">35%</span></div><div class="tr"><div class="f" style="width:82%"></div></div></div>
+        <div class="dim"><div class="n">keyword <span class="w">20%</span></div><div class="tr"><div class="f" style="width:74%"></div></div></div>
+        <div class="dim"><div class="n">entity <span class="w">15%</span></div><div class="tr"><div class="f" style="width:68%"></div></div></div>
+        <div class="dim"><div class="n">structure <span class="w">10%</span></div><div class="tr"><div class="f" style="width:55%"></div></div></div>
+        <div class="dim"><div class="n">llm_judge <span class="w">20%</span></div><div class="tr"><div class="f" style="width:91%"></div></div></div>
+      </div>
+      <div class="note" id="dimnote" style="margin-top:0">权重按层级可调（每层不同）。综合分 <b id="dimscore" style="color:var(--txt)">0.86</b> ≥ <span id="dimth">L3 阈值 0.80</span> → 判为重复。</div>
+      <div class="thresh">
+        <span class="th">L1 <b>0.70</b></span><span class="th">L2 <b>0.75</b></span><span class="th">L3 <b>0.80</b></span>
+        <span class="th">L4 <b>0.85</b></span><span class="th">L5 <b>0.90</b></span><span class="th">L6 <b>0.90</b></span>
+      </div>
+      <div class="h" style="margin-top:14px">短路嫁接（6.2）<span class="ref">逐层查重，命中即合并停止</span></div>
+      <div class="graft">
+        <span class="node">写入</span><span class="ar">→</span>
+        <span class="node">L1 查重</span><span class="ar">→</span>
+        <span class="node">L2 查重</span><span class="ar">→</span>
+        <span class="node hit">L3 查重 · 命中</span><span class="ar">→</span>
+        <span class="node">合并到 L3 · 停止</span>
+      </div>
+      <div class="statline">近 24h：短路命中 <b>31</b> 条（L3 ×18 / L4 ×9 / L2 ×4）· 自动合并 <b>47</b> 条（15.2）· 查重耗时 <b>180ms</b></div>
+      <div style="margin-top:12px"><button class="btn" id="rejudge">↻ 重新判重（换一条样本）</button></div>
+    </div>
+  </div>
+
+  <!-- 生长 -->
+  <div class="panel" id="p-grow">
+    <div class="card">
+      <div class="h">反馈指标（7.1 检索后自动记录）<span class="ref">驱动五项优化</span></div>
+      <div class="growth-grid">
+        <div class="opt"><div class="t">命中率</div><div class="c">hit_rate</div><div class="st on">87%</div></div>
+        <div class="opt"><div class="t">确认 / 拒绝</div><div class="c">132 / 18</div><div class="st on">正比 88%</div></div>
+        <div class="opt"><div class="t">低质占比</div><div class="c">low_quality_ratio</div><div class="st on">0.31</div></div>
+        <div class="opt"><div class="t">L6 命中</div><div class="c">level_stats.L6</div><div class="st on">0.52</div></div>
+        <div class="opt"><div class="t">检索耗时</div><div class="c">latency p99</div><div class="st on">145ms</div></div>
+      </div>
+
+      <div class="h" style="margin-top:14px">五项自动优化（7.2）<span class="ref">命中即触发，记审计</span></div>
+      <div class="growth-grid">
+        <div class="opt"><div class="t">① 降阈值</div><div class="c">hit_rate&lt;0.3 触发</div><div class="st idle">未触发</div></div>
+        <div class="opt"><div class="t">② 优化关键词提取</div><div class="c">L6&lt;0.5 → refine</div><div class="st on">优化中</div></div>
+        <div class="opt"><div class="t">③ 加速遗忘</div><div class="c">低质&gt;0.4 触发</div><div class="st idle">未触发</div></div>
+        <div class="opt"><div class="t">④ 预建索引</div><div class="c">Top20 高频查询</div><div class="st on">已建 20</div></div>
+        <div class="opt"><div class="t">⑤ 权重回归</div><div class="c">每周 mode_weights</div><div class="st on">本周已跑</div></div>
+      </div>
+
+      <div class="h" style="margin-top:14px">自生长收益（7.2 权重回归前后）<span class="ref">记 weight_tuned 审计 · 联动效果看板</span></div>
+      <div class="growth-curve">
+        <div style="display:flex;gap:18px;align-items:center;margin-bottom:8px">
+          <div>调权重前 <b style="color:var(--muted)">74%</b> → 后 <b style="color:var(--ok)" id="gafter">87%</b></div>
+          <div class="delta" id="gdelta">Δ +13%</div>
+          <button class="btn primary" id="rungrow">▶ 手动触发一次自生长</button>
+        </div>
+        <svg viewBox="0 0 320 130" preserveAspectRatio="none">
+          <line x1="24" y1="110" x2="300" y2="110" stroke="var(--line)"/>
+          <line x1="24" y1="24" x2="24" y2="110" stroke="var(--line)"/>
+          <polyline points="24,62 90,62 150,62" fill="none" stroke="#5b6675" stroke-width="2" stroke-dasharray="4 3"/>
+          <text x="30" y="58" fill="#8b98a7" font-size="9">前 74%</text>
+          <polyline id="gline" points="150,62 200,48 250,40 300,34" fill="none" stroke="var(--ok)" stroke-width="3"/>
+          <text x="258" y="30" fill="#3ecf8e" font-size="9">后 87%</text>
+          <line x1="150" y1="24" x2="150" y2="110" stroke="var(--warn)" stroke-dasharray="3 3"/>
+          <text x="154" y="34" fill="#ffd166" font-size="9">weight_tuned（每周日 03:00，13.3）</text>
+        </svg>
+      </div>
+      <div class="sched">
+        <span class="s">每日 <b>02:00</b> 衰减</span>
+        <span class="s">每日 <b>08:00</b> 裁决提醒</span>
+        <span class="s">每周日 <b>03:00</b> 自生长</span>
+        <span class="s">每月 1 日 <b>04:00</b> 归档</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 大模型配置 -->
+  <div class="panel" id="p-llm">
+    <div class="card">
+      <div class="h">向量模型（embedding，13.2）<span class="ref">双路召回的向量辅路（2.3）</span></div>
+      <div class="vec">
+        <div class="row">
+          模型
+          <select id="vecsel">
+            <option value="384">SentenceTransformer（MVP · 384d · 本地）</option>
+            <option value="1024" selected>bge-m3（进阶 · 1024d · 本地）</option>
+            <option value="768">DeepSeek embedding（可选 · 768d · 云端）</option>
+          </select>
+          <button class="btn" id="reindex">切换 / 重建索引</button>
+          <button class="btn" id="testvec">连通测试</button>
+        </div>
+        <div class="dim-note" id="vecnote">当前 1024 维 · 本地部署 · 零依赖。改维度需重建向量索引（提示数据量估算）。</div>
+      </div>
+
+      <div class="h" style="margin-top:14px">LLM 模型（本地 + 网络，按用途配置）<span class="ref">6.1 查重 / 2.4.3 重排 / 7.2 回归 / 15.3 摘要</span></div>
+      <table class="llm-tbl">
+        <thead><tr><th>用途</th><th>本地模型</th><th>网络大模型</th><th>参数</th></tr></thead>
+        <tbody id="llmrows">
+          <tr data-use="write">
+            <td class="use">写入提取<br><span style="font-weight:400;color:var(--dim);font-size:10px">L1→L6 精炼（2.2）</span></td>
+            <td><div class="pick"><label class="sw"><input type="checkbox" class="loc" checked> llama3:8b</label></div></td>
+            <td><div class="pick">
+              <label class="sw"><input type="checkbox" class="net"> DeepSeek-V3</label>
+              <div class="epi">端点 https://api.deepseek.com · Key [API_KEY:deepseek]（脱敏）</div>
+            </div></td>
+            <td><div class="param-row">温度 <input style="width:46px;background:var(--panel);border:1px solid var(--line);color:var(--txt);border-radius:5px;padding:3px" value="0.2"> 超时 30s</div></td>
+          </tr>
+          <tr data-use="judge" class="net-on">
+            <td class="use">查重 llm_judge<br><span style="font-weight:400;color:var(--dim);font-size:10px">6.1 权重 20%</span></td>
+            <td><div class="pick"><label class="sw"><input type="checkbox" class="loc"> llama3:8b</label></div></td>
+            <td><div class="pick">
+              <label class="sw"><input type="checkbox" class="net" checked> DeepSeek-V3</label>
+              <div class="epi">端点 https://api.deepseek.com · Key [API_KEY:deepseek]</div>
+            </div></td>
+            <td><div class="param-row">温度 0.0（判重需确定性）</div></td>
+          </tr>
+          <tr data-use="rerank">
+            <td class="use">LLM 重排<br><span style="font-weight:400;color:var(--dim);font-size:10px">2.4.3 / 17.8 · critical 默认开</span></td>
+            <td><div class="pick"><label class="sw"><input type="checkbox" class="loc" checked> llama3:8b</label></div></td>
+            <td><div class="pick">
+              <label class="sw"><input type="checkbox" class="net"> 网络可选</label>
+              <div class="epi">失败自动回退本地（审计 llm_fallback）</div>
+            </div></td>
+            <td><div class="param-row">critical 闸门 ON · 会话 LLM 调用阈值内才触发</div></td>
+          </tr>
+          <tr data-use="growth">
+            <td class="use">自生长回归<br><span style="font-weight:400;color:var(--dim);font-size:10px">7.2 每周调 mode_weights</span></td>
+            <td><div class="pick"><label class="sw"><input type="checkbox" class="loc" checked> 本地回归</label></div></td>
+            <td><div class="pick">
+              <label class="sw"><input type="checkbox" class="net"> 可选</label>
+              <div class="epi">基于 confirm/reject 分布回归，记审计 weight_tuned</div>
+            </div></td>
+            <td><div class="param-row">每周日 03:00（13.3）</div></td>
+          </tr>
+      <!-- 反代理：全量模型映射 + auto/manual 选择模式 + 低价单价上限 -->
+      <div class="h" style="margin-top:14px">LLM 反代理（全量模型映射 · 19.8，可跨 Agent）<span class="ref">所有已接入 Agent 的免费/低价模型列全，用户自己选 or 系统自动选</span></div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">选择模式（每用途可定，用户随时切换，记审计）</div>
+      <div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+        <label class="sw" style="font-size:13px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 12px;cursor:pointer"><input type="radio" name="selmode" id="selauto" checked> auto · 系统自动选（先免费后低价）</label>
+        <label class="sw" style="font-size:13px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 12px;cursor:pointer"><input type="radio" name="selmode" id="selmanual"> manual · 用户自己定（按下方勾选）</label>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;font-size:12px;color:var(--muted);flex-wrap:wrap">
+        低价单价上限 <input type="number" id="pricecap" value="0.02" min="0" step="0.01" style="width:70px;background:var(--panel);border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:4px;font-size:12px"> ¥/千
+        <span class="note" style="margin:0">（用户定，<b>不可超</b>；=0 禁用所有付费低价，仅用免费）</span>
+        <span id="pricewarn" style="font-size:11px;color:var(--warn)"></span>
+      </div>
+      <table class="llm-tbl" id="maptable">
+        <thead><tr><th></th><th>Agent</th><th>模型</th><th>档位</th><th>单价</th><th>免费额度/余量</th></tr></thead>
+        <tbody>
+          <tr data-proxy="1"><td><input type="checkbox" class="mapck" checked></td><td>claude-code</td><td>claude-free</td><td>免费</td><td>¥0</td><td>312/450</td></tr>
+          <tr data-proxy="1"><td><input type="checkbox" class="mapck"></td><td>codex</td><td>gpt4o-mini</td><td>低价</td><td>¥0.01/千</td><td>成本余量 210/280（¥3 上限）</td></tr>
+          <tr data-proxy="1"><td><input type="checkbox" class="mapck"></td><td>deepseek-harness</td><td>ds-lite</td><td>免费</td><td>¥0</td><td>88/500</td></tr>
+        </tbody>
+      </table>
+      <div class="note" id="proxynote">
+        auto：系统<b>先免费、后低价</b>——免费额度耗尽才用低价，且低价只挑单价 ≤ 上方上限的（R12 不可越限）。当前上限 ¥0.02/千。
+        manual：按上方勾选来源调用，勾选源超限/失败才回退本地。
+        <br>额度/成本保护：proxy_budget 450（留 10% 余量）· proxy_cost_cap ¥3/月；调用方仍是记忆助手（不串味，借算力≠共享记忆，19.4）。审计 llm_proxy_source + 花费 + 生效模式。
+      </div>
+      <div class="note">
+        规则：每个用途可独立选本地 / 网络 / <b>反代理</b>模型；网络或反代理不可用时<b>自动回退本地</b>（记审计 <span class="fb show" id="fb">llm_fallback</span>）。
+        反代理（19.8）可<b>跨 Agent</b>挂多个<b>免费或低价</b>模型源（宿主 + 第三方 + 开放端点的未接入 Agent）；auto 时<b>先免费后低价、低价受用户单价上限约束（不可超）</b>，逐源留 10% 余量；调用方仍是记忆助手（不串味，借算力≠共享记忆，19.4）。
+        网络模型端点 / Key 恒脱敏显示（4.1 L1 脱敏）。
+        向量改维度 → 提示重建索引耗时；LLM 温度按用途给默认（判重 0.0、生成 0.2）。
+      </div>
+      <div style="margin-top:12px">
+        <button class="btn primary" id="testllm">▶ 测试所有 LLM 连通</button>
+        <button class="btn" id="savecfg">保存配置</button>
+      </div>
+      <div class="note" id="cfgresult" style="display:none"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+function toast(m){const t=document.getElementById("toast");t.textContent=m;t.style.display="block";clearTimeout(t._x);t._x=setTimeout(()=>t.style.display="none",2600);}
+document.getElementById("tabs").querySelectorAll(".tab").forEach(t=>t.addEventListener("click",()=>{
+  document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));t.classList.add("active");
+  document.querySelectorAll(".panel").forEach(p=>p.classList.remove("show"));
+  document.getElementById("p-"+t.dataset.p).classList.add("show");
+}));
+
+/* 净化：重判 */
+document.getElementById("rejudge").addEventListener("click",()=>{
+  const samples=[
+    {score:.92,layer:"L2",th:.75},
+    {score:.78,layer:"L4",th:.85},
+    {score:.96,layer:"L1",th:.70},
+    {score:.88,layer:"L5",th:.90},
+  ];
+  const s=samples[Math.floor(Math.random()*samples.length)];
+  const hit=s.score>=s.th;
+  const nodes=document.querySelectorAll(".graft .node");
+  nodes[4].textContent=(hit?s.layer:"L6")+" 查重 · "+(hit?"命中":"未命中");
+  nodes[4].classList.toggle("hit",hit);
+  nodes[5].textContent=hit?("合并到 "+s.layer+" · 停止"):"L6 完成 · 建图";
+  document.getElementById("dimscore").textContent=s.score.toFixed(2);
+  document.getElementById("dimth").textContent=s.layer+" 阈值 "+s.th.toFixed(2);
+  toast("样本 "+s.layer+" 综合分 "+s.score.toFixed(2)+"（阈值 "+s.th.toFixed(2)+"）→ "+(hit?"短路合并到 "+s.layer:"未命中，继续下层"));
+});
+
+/* 生长：手动触发 */
+document.getElementById("rungrow").addEventListener("click",function(){
+  const before=74, after=Math.min(96,before+13+Math.floor(Math.random()*4));
+  const dy=after-before;
+  document.getElementById("gline").setAttribute("points","150,62 200,"+(62-dy*.8)+" 250,"+(58-dy*.8)+" 300,"+(56-dy*.8));
+  document.getElementById("gafter").textContent=after+"%";
+  document.getElementById("gdelta").textContent="Δ +"+dy+"%";
+  toast("已运行一次自生长：权重回归命中率 74%→"+after+"%（记 weight_tuned 审计，7.2）");
+});
+
+/* 大模型：向量选择 */
+const VEC={384:"384 维 · 本地 · 零依赖",1024:"1024 维 · 本地 · 进阶",768:"768 维 · 云端 · 需 Key（脱敏 [API_KEY:deepseek]）"};
+document.getElementById("vecsel").addEventListener("change",function(){
+  document.getElementById("vecnote").textContent="当前 "+VEC[this.value]+"。"+(this.value==="768"?"云端模型需填 Key，切换后向量索引维度变更，需重建。":"本地部署，改维度需重建向量索引。");
+});
+document.getElementById("reindex").addEventListener("click",()=>toast("开始重建向量索引（约 3 分钟，基于当前维度 "+document.getElementById("vecsel").value+"d）…"));
+document.getElementById("testvec").addEventListener("click",()=>toast("向量模型连通测试：嵌入 128 条样例，延迟 42ms ✓"));
+
+/* LLM 表：本地/网络联动 + fallback 标记 */
+document.querySelectorAll("#llmrows tr").forEach(tr=>{
+  const net=tr.querySelector(".net"),loc=tr.querySelector(".loc");
+  function sync(){
+    const netOn=net.checked;
+    tr.classList.toggle("net-on",netOn);
+    const noLocal=!loc.checked&&netOn;
+    tr.querySelector(".fb")?.classList.toggle("show",noLocal);
+  }
+  net.addEventListener("change",sync);loc.addEventListener("change",sync);sync();
+});
+
+/* 反代理：全量模型映射 + auto/manual 选择模式 + 低价单价上限（19.8） */
+const selauto=document.getElementById("selauto"),selmanual=document.getElementById("selmanual"),proxynote=document.getElementById("proxynote"),pricecap=document.getElementById("pricecap"),pricewarn=document.getElementById("pricewarn");
+const PROXYSRC=[{agent:"claude-code",model:"claude-free",tier:"免费",price:0},
+                {agent:"codex",model:"gpt4o-mini",tier:"低价",price:0.01},
+                {agent:"deepseek-harness",model:"ds-lite",tier:"免费",price:0}];
+function syncProxy(){
+  const checked=[...document.querySelectorAll(".mapck:checked")];
+  const names=checked.map(c=>{const r=c.closest("tr");return r.querySelector("td:nth-child(3)").textContent;});
+  const auto=selauto.checked;
+  const cap=parseFloat(pricecap.value)||0;
+  // 低价源是否被单价上限排除（R12 不可越限）
+  const lowExcluded=PROXYSRC.filter(s=>s.price>0&&s.price>cap).map(s=>s.model);
+  pricewarn.textContent=cap===0?"上限=0：禁用所有付费低价，auto 仅用免费源":(lowExcluded.length?"· 超限被排除："+lowExcluded.join("、"):"");
+  proxynote.innerHTML = auto
+    ? `auto：系统<b>先免费、后低价</b>——免费额度耗尽才用低价，且低价只挑单价 ≤ ${cap.toFixed(2)} ¥/千（R12 不可越限）。${lowExcluded.length?(" 当前被排除："+lowExcluded.join("、")+"."):""}上限=0 时仅用免费源。`
+    : `manual：按你勾选的 <b style="color:var(--txt)">${names.length}</b> 个来源调用（${names.join("、")||"未勾选"}），勾选源超限/失败才回退本地。`
+    +`<br>额度/成本保护：proxy_budget 450（留 10% 余量）· proxy_cost_cap ¥3/月；调用方仍是记忆助手（不串味，借算力≠共享记忆，19.4）。审计 llm_proxy_source + 花费 + 生效模式=${auto?"auto":"manual"}。`;
+  document.querySelectorAll("#maptable .mapck").forEach(c=>{if(!auto&&!c.checked)c.closest("tr").style.opacity=0.45;else c.closest("tr").style.opacity=1;});
+}
+selauto.addEventListener("change",syncProxy);
+selmanual.addEventListener("change",syncProxy);
+pricecap.addEventListener("input",syncProxy);
+document.querySelectorAll(".mapck").forEach(c=>c.addEventListener("change",syncProxy));
+syncProxy();
+document.getElementById("testllm").addEventListener("click",()=>{
+  const nets=[...document.querySelectorAll(".net")].filter(c=>c.checked).length;
+  toast("LLM 连通测试：本地模型 4/4 ✓；网络 DeepSeek-V3 "+(nets?"✓（延迟 180ms）":"未启用")+"；网络不可用时自动回退本地（审计 llm_fallback）");
+});
+document.getElementById("savecfg").addEventListener("click",()=>{
+  const r=document.getElementById("cfgresult");
+  r.style.display="block";r.innerHTML="✓ 已保存大模型配置：向量 "+document.getElementById("vecsel").value+"d · LLM 按用途 4 项（判重 0.0 / 生成 0.2）· 回退策略已启用。写审计 action=model_config。";
+});
+</script>
+</body>
+</html>

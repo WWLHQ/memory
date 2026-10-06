@@ -1,0 +1,2 @@
+# 生成产物（由 tools/generate.py 从 specs/ 重建，勿手改/勿提交）
+build/

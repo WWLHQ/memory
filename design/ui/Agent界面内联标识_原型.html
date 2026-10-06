@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Agent 界面内联记忆标识原型 — 让用户看到记忆助手的功劳</title>
+<style>
+  :root{--bg:#0f1419;--panel:#1a212b;--panel2:#202833;--line:#2b3441;
+    --txt:#e6edf3;--muted:#8b98a7;--dim:#5b6675;--accent:#4d9fff;
+    --mem:#9d6bff;--ok:#3ecf8e;--warn:#ffd166;--err:#ff5c5c}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+    font:14px/1.6 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:880px;margin:0 auto;padding:18px}
+  h1{font-size:17px;margin:0 0 2px}
+  .sub{color:var(--muted);font-size:12px;margin-bottom:14px}
+  .agentframe{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  .agenthead{background:var(--panel2);padding:12px 16px;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:center}
+  .agenthead .logo{font-weight:700}
+  .agenthead .who{font-size:12px;color:var(--muted)}
+  .bgmark{margin:0 16px;background:#12324a;border:1px solid #2a4a66;color:#8cc7ff;border-radius:8px;padding:8px 11px;font-size:12px;cursor:pointer}
+  .bgmark .more{color:#7cc0ff;text-decoration:underline;cursor:pointer}
+  .bgmark ul{margin:6px 0 0;padding-left:18px;list-style:none;display:none}
+  .bgmark.open ul{display:block}
+  .chat{padding:14px 16px}
+  .msg{margin-bottom:14px}
+  .msg .role{font-size:11px;color:var(--dim);margin-bottom:3px}
+  .bubble{background:var(--panel2);border-radius:10px;padding:10px 13px;max-width:92%}
+  .bubble.user{background:#20303d;margin-left:auto}
+  .bubble .ans{margin:4px 0}
+  .mem-tag{display:inline-block;font-size:10px;background:#2a1f3a;color:#c9a6ff;border:1px solid #4a3566;border-radius:5px;padding:0 5px;margin:0 2px;cursor:pointer;vertical-align:middle}
+  .mem-tag.warm{background:#3a2a16;color:#ffb454;border-color:#5a4420}
+  .mem-tag.cold{background:#122c44;color:#7cc0ff;border-color:#2a4a66}
+  .mem-tag.dormant{background:#232a35;color:#7a8698;border-color:#3a4453}
+  .warn-tag{display:inline-block;font-size:10px;background:#3a2f10;color:#ffe6a8;border:1px solid #6b5a1e;border-radius:5px;padding:0 5px;margin-left:4px;cursor:pointer}
+  .pop{position:absolute;background:var(--panel);border:1px solid var(--accent);border-radius:10px;padding:11px;width:280px;z-index:40;box-shadow:0 8px 30px rgba(0,0,0,.5);font-size:12px}
+  .pop h4{margin:0 0 6px;font-size:12px;color:var(--accent)}
+  .pop .m{color:var(--muted);margin:3px 0}
+  .pop .m b{color:var(--txt)}
+  .pop .acts{display:flex;gap:6px;margin-top:9px;flex-wrap:wrap}
+  .pop .acts button{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:3px 8px;font-size:11px;cursor:pointer}
+  .pop .acts button:hover{border-color:var(--accent)}
+  .savebar{margin:0 16px;background:#123020;border:1px solid #2a4a30;color:#9fe8c0;border-radius:8px;padding:8px 11px;font-size:12px}
+  .tokbar{margin:12px 16px 0;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 11px;font-size:12px;color:var(--muted);cursor:pointer}
+  .tokbar .big{color:var(--ok);font-weight:700;font-family:monospace}
+  .tokbar ul{margin:5px 0 0;padding-left:18px;font-size:11px}
+  .legend{margin-top:14px;font-size:11px;color:var(--dim);line-height:1.7}
+  .legend b{color:var(--muted)}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--accent);border-radius:8px;padding:9px 16px;font-size:13px;z-index:80;display:none}
+  .togglebar{display:flex;gap:16px;margin:0 16px 10px;font-size:12px;color:var(--muted);align-items:center}
+  .togglebar label{cursor:pointer;user-select:none}
+  .hidden{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Agent 界面内联记忆标识 · 可交互原型</h1>
+  <div class="sub">按《需求规格书_Agent界面内联记忆标识》(19.7) 实现 · 在 <b>Claude Code 风格窗口</b>里直接展示「这次回答/省 token 是记忆助手的功劳」· 用户可当场干预</div>
+
+  <div class="agentframe">
+    <div class="agenthead">
+      <span class="logo">◆ Claude Code</span>
+      <span class="who">MVP·P1 · 记忆助手 MCP 已接入</span>
+      <span style="margin-left:auto" class="who">project=P1 · user=U1</span>
+    </div>
+
+    <!-- ③ 背景免重复标记 -->
+    <div class="bgmark" id="bgmark">
+      📎 已带项目背景 <b>8</b> 条（技术栈 · 约束 · 近 5 决策）
+      <span class="more" id="bgmore">展开</span>
+      <ul>
+        <li>技术栈：Python 3.11 / FastAPI / PostgreSQL（记忆 mem_002）</li>
+        <li>约束：API 响应 &lt;200ms（mem_005）</li>
+        <li>决策：2025-07-05 选 FastAPI 而非 Django（性能优先）（mem_009）</li>
+        <li>踩坑：Redis 连接超时 → 5s + 重试（mem_014）</li>
+      </ul>
+    </div>
+
+    <div class="chat">
+      <!-- 用户 -->
+      <div class="msg"><div class="role">你</div>
+        <div class="bubble user">为什么当时选了 FastAPI 而不是 Django？</div>
+      </div>
+
+      <!-- Agent 回答，内联记忆注入标记 -->
+      <div class="msg"><div class="role">Claude Code · 基于记忆回答</div>
+        <div class="bubble">
+          <div class="ans">因为项目要求 API 响应 &lt;200ms<span class="mem-tag cold" data-mid="mem_005">🧠</span>，而你们 2025-07-05 记录过「选 FastAPI 而非 Django，性能优先」这一决策<span class="mem-tag" data-mid="mem_009">🧠</span>。FastAPI 的异步 + Pydantic 校验正契合该约束<span class="warn-tag" data-mid="mem_009">⚠ 45 天前</span>。</div>
+          <div class="ans">若当前代码已改动，建议校验最新配置<span class="mem-tag warm" data-mid="mem_021">🧠</span>。</div>
+        </div>
+      </div>
+
+      <!-- ② Token 节省标记 -->
+      <div class="tokbar" id="tokbar">
+        ⚡ 本次召回 <span class="big">payload 780/1500</span>，省 <span class="big">1,420</span> token（极简 + 占位符注入）
+        <span style="cursor:pointer;color:var(--accent)">分解 ▾</span>
+        <ul id="tokdetail" class="hidden">
+          <li>极简模式短查询：只回 ≤600t（2.4.1）</li>
+          <li>次模式注入用 L2 占位符 ≤200t，非全文（2.4.3）</li>
+          <li>命中 mem_009 衰减层=cold，仅给 L2 摘要（15.3）</li>
+        </ul>
+      </div>
+
+      <!-- 写入沉淀标记 -->
+      <div class="savebar">💾 会话中识别到 1 条新结论，已自动 write_memory（mem_030 · L1–L6 精炼 · project=P1），写审计 req_018</div>
+    </div>
+  </div>
+
+  <!-- 内联标识开关（19.7 可开关 + 诚实约束） -->
+  <div class="togglebar">
+    <span>内联标识（19.7）：</span>
+    <label><input type="radio" name="lvl" value="full" checked> 完整（full）</label>
+    <label><input type="radio" name="lvl" value="token"> 仅 token（token_only）</label>
+    <label><input type="radio" name="lvl" value="off"> 关闭（off）</label>
+  </div>
+  <div class="legend">
+    <b>🧠 记忆注入</b>：hover 看 memory_id + L2 摘要 + 衰减层，可「记住/忘记/标错」（13.7 反馈）·
+    <b>⚡ Token 节省</b>：本次省了多少 + 分解 · <b>📎 背景免重复</b>：新会话自动带项目背景 ·
+    <b>⚠ 老化/证据</b>：命中过期（9.6 aging_hint）或证据不足（2.4.3 evidence_thin，<b>必显示不可关</b>）·
+    每处可点 request_id 跳审计（4.3）。
+  </div>
+</div>
+
+<div class="pop hidden" id="pop"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const MEM={
+  mem_005:{content:"约束：API 响应时间 < 200ms（10.3 性能验收）",layer:"cold",aging:"",
+    req:"req_017"},
+  mem_009:{content:"2025-07-05：选 FastAPI 而非 Django（性能优先，10.x 决策记录）",layer:"",aging:"45 天前记录，代码可能已改动，请校验（9.6 aging_hint）",req:"req_017"},
+  mem_021:{content:"L2 摘要：当前 FastAPI 版本与连接池配置（45 天）",layer:"warm",aging:"7 天前创建，如未更新可能已过时（9.6）",req:"req_017"},
+  mem_030:{content:"新结论：本次会话识别的优化点（自动写入）",layer:"hot",aging:"",req:"req_018"},
+};
+function toast(m){const t=document.getElementById("toast");t.textContent=m;t.style.display="block";clearTimeout(t._x);t._x=setTimeout(()=>t.style.display="none",2600);}
+
+function layerLabel(l){return l?"decay_class="+l:"decay_class=hot";}
+function showPop(tag,evt){
+  const id=tag.dataset.mid, m=MEM[id], p=document.getElementById("pop");
+  p.innerHTML=`
+    <h4>🧠 记忆注入 · ${id}</h4>
+    <div class="m">摘要：<b>${m.content}</b></div>
+    <div class="m">层：${layerLabel(m.layer)}（cold 仅 L2 占位符，15.3）</div>
+    ${m.aging?`<div class="m" style="color:var(--warn)">⚠ ${m.aging}</div>`:""}
+    <div class="m">request_id: <a href="javascript:void(0)" onclick="toast('开审计页定位 ${m.req}（18.2-E）');return false" style="color:var(--accent)">${m.req}</a></div>
+    <div class="acts">
+      <button onclick="fb('${id}','confirm')">记住 +0.1</button>
+      <button onclick="fb('${id}','reject')">忘记 −0.05</button>
+      <button onclick="fb('${id}','disputed')">这条记错了</button>
+    </div>`;
+  const x=Math.min(evt.clientX, window.innerWidth-300), y=evt.clientY+16;
+  p.style.left=x+"px";p.style.top=y+"px";p.classList.remove("hidden");
+}
+function fb(id,action){
+  const m=MEM[id];
+  const txt=action==="confirm"?"已「记住」"+id+"（17.3 提升优先级，confirm +0.1 → 7.2 自生长）"
+    :action==="reject"?"已「忘记」"+id+"（17.3 降权不删除，reject −0.05）"
+    :"已标错 "+id+"（→ 冲突裁决队列 P7，disputed）";
+  toast(txt+" · 写审计 4.3");
+  document.getElementById("pop").classList.add("hidden");
+}
+document.querySelectorAll(".mem-tag").forEach(t=>{
+  t.addEventListener("click",e=>showPop(t,e));
+  t.addEventListener("mouseenter",e=>{if(document.querySelector('.pop:not(.hidden)'))return;showPop(t,e);});
+});
+document.addEventListener("click",e=>{if(!e.target.closest(".mem-tag")&&!e.target.closest(".pop"))document.getElementById("pop").classList.add("hidden");});
+document.querySelectorAll(".warn-tag").forEach(t=>t.addEventListener("click",e=>showPop(t,e)));
+
+// 背景标记展开
+const bgmore=document.getElementById("bgmore"),bgmark=document.getElementById("bgmark");
+bgmore.addEventListener("click",()=>{bgmark.classList.toggle("open");bgmore.textContent=bgmark.classList.contains("open")?"收起":"展开";});
+
+// token 分解
+const tokbar=document.getElementById("tokbar"),tokdetail=document.getElementById("tokdetail");
+tokbar.addEventListener("click",()=>tokdetail.classList.toggle("hidden"));
+
+// 内联标识可开关（19.7，诚实约束：evidence_thin/warn 不可关）
+document.querySelectorAll('input[name="lvl"]').forEach(r=>r.addEventListener("change",()=>{
+  const v=r.value;
+  document.querySelectorAll(".mem-tag").forEach(t=>t.classList.toggle("hidden",v==="off"));
+  document.querySelectorAll(".tokbar").forEach(t=>t.classList.toggle("hidden",v==="off"||v==="token"?false:true));
+  // token_only：隐藏 🧠 但保留 ⚡ 与 ⚠
+  document.querySelectorAll(".mem-tag").forEach(t=>{
+    if(v==="token")t.classList.add("hidden");
+    else t.classList.remove("hidden");
+  });
+  document.querySelectorAll(".tokbar").forEach(t=>t.classList.toggle("hidden",v==="off"));
+  document.querySelectorAll(".savebar").forEach(t=>t.classList.toggle("hidden",v==="off"));
+  // 诚实约束：⚠ 老化/证据 恒显示（不可关）
+  document.querySelectorAll(".warn-tag").forEach(t=>t.classList.remove("hidden"));
+  toast(v==="full"?"内联标识：完整显示":v==="token"?"内联标识：仅 token 节省（🧠 隐藏，⚠ 仍显示）":"内联标识：关闭（⚠ 证据警示仍强制显示 · 19.7 诚实约束）");
+}));
+</script>
+</body>
+</html>

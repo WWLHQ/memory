@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>故事线播放 · 多 Agent 记忆助手</title>
+<style>
+  :root{--bg:#0b0f14;--panel:#141b24;--panel2:#202833;--line:#243040;
+    --txt:#e6edf3;--muted:#8b98a7;--dim:#5b6675;--accent:#4d9fff;
+    --ok:#3ecf8e;--warn:#ffd166;--err:#ff5c5c;--mem:#9d6bff}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.55 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:980px;margin:0 auto;padding:18px}
+  h1{font-size:18px;margin:0 0 2px}
+  .sub{color:var(--muted);font-size:12px;margin-bottom:14px}
+
+  /* 播放控制条 */
+  .playerbar{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px}
+  .acts{display:flex;gap:6px;margin-bottom:12px}
+  .act{flex:1;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;cursor:pointer;font-size:11px;color:var(--muted);position:relative}
+  .act .no{font-family:monospace;font-size:10px;color:var(--dim)}
+  .act .ttl{color:var(--txt);font-weight:600;font-size:12px;margin-top:2px}
+  .act.active{border-color:var(--accent);background:#16222f;color:var(--txt)}
+  .act.active .no{color:var(--accent)}
+  .act.done{border-color:#2a4a30}
+  .act.done::after{content:"✓";position:absolute;right:8px;top:6px;color:var(--ok);font-size:11px}
+  .ctrl{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .btn{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:8px 14px;cursor:pointer;font-size:13px}
+  .btn.primary{background:var(--accent);color:#04121f;border-color:var(--accent);font-weight:600}
+  .speed{font-size:12px;color:var(--muted)}
+  .speed select{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:5px}
+  .prog{flex:1;min-width:120px;height:6px;background:var(--panel2);border-radius:4px;overflow:hidden}
+  .prog .f{height:100%;width:0;background:var(--accent);transition:width .3s}
+
+  /* 舞台 */
+  .stage{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;min-height:360px;position:relative}
+  .stage .cap{font-size:12px;color:var(--muted);margin-bottom:12px}
+  .scene{display:none;animation:fade .5s ease}
+  .scene.show{display:block}
+  @keyframes fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  .scene h2{font-size:15px;margin:0 0 10px;color:var(--txt)}
+  .scene h2 .tag{font-size:10px;background:var(--panel2);border:1px solid var(--line);border-radius:5px;padding:1px 7px;color:var(--muted);margin-left:8px;vertical-align:middle}
+
+  /* ① 任务开始：Agent 窗口 + 背景注入 */
+  .agentwin{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px}
+  .agentwin .head{display:flex;gap:8px;font-size:12px;color:var(--muted);margin-bottom:8px}
+  .agentwin .head .logo{font-weight:700;color:var(--txt)}
+  .bg{background:#12324a;border:1px solid #2a4a66;color:#8cc7ff;border-radius:8px;padding:8px 11px;font-size:12px;margin-bottom:8px}
+  .bg .n{color:var(--txt);font-weight:700}
+  .bubble{background:#20303d;border-radius:9px;padding:8px 11px;font-size:13px;max-width:92%}
+  .bubble.user{margin-left:auto;background:#20384a}
+  .step{opacity:0;transition:opacity .4s}
+  .step.on{opacity:1}
+  .msg{margin:8px 0}
+  .msg .role{font-size:10px;color:var(--dim);margin-bottom:2px}
+
+  /* ② 召回注入：横幅 + 结果 */
+  .banner{background:#16222f;border:1px solid var(--accent);border-radius:9px;padding:9px 11px;font-size:12px;margin-bottom:10px}
+  .banner .chip{display:inline-block;border-radius:14px;padding:1px 8px;font-size:10px;font-weight:600;margin-right:6px}
+  .chip.sc{background:#2b3a4d;color:#9cc}.chip.md{background:#1a3320;color:#9f9}
+  .res{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:10px;font-size:12px;margin-bottom:8px}
+  .res .mid{font-family:monospace;color:var(--dim);font-size:10px}
+  .res .layer{font-size:10px;padding:1px 6px;border-radius:4px;font-weight:700;margin-left:6px}
+  .res .l-hot{background:#3a1616;color:#ff8a8a}.res .l-warm{background:#3a2a16;color:#ffb454}.res .l-cold{background:#122c44;color:#7cc0ff}
+  .tok{font-size:11px;color:var(--muted);margin-top:6px}
+  .tok b{color:var(--ok)}
+
+  /* ③ 沉淀 */
+  .writebox{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:13px}
+  .writebox .layers{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+  .writebox .layers span{font-family:monospace;font-size:11px;background:#16222f;border:1px solid var(--line);border-radius:6px;padding:2px 8px;color:var(--muted)}
+  .audit{font-family:monospace;font-size:11px;color:var(--muted);margin-top:8px;background:#10161d;border-radius:6px;padding:6px 9px}
+  .audit .a{color:var(--warn)}
+
+  /* ④ 跨 Agent */
+  .swim{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px}
+  @media(max-width:680px){.swim{grid-template-columns:1fr}}
+  .swim .ag{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px}
+  .swim .ag .t{font-weight:700;font-size:13px;margin-bottom:4px}
+  .swim .ag .s{font-size:11px;color:var(--muted)}
+  .swim .ag .hit{margin-top:8px;background:#123020;border:1px solid #2a4a30;border-radius:7px;padding:7px 9px;font-size:12px;color:#9fe8c0;display:none}
+  .swim .ag .hit.on{display:block}
+  .swim .ag .req{font-family:monospace;font-size:11px;color:var(--accent);margin-top:6px}
+
+  /* ⑤ 看板收口 */
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  @media(max-width:680px){.kpis{grid-template-columns:repeat(2,1fr)}}
+  .kpi{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:11px}
+  .kpi .k{font-size:11px;color:var(--muted)}
+  .kpi .v{font-size:22px;font-weight:800;font-family:monospace;margin:3px 0}
+  .kpi .v.good{color:var(--ok)}.kpi .v.mem{color:var(--mem)}
+  .kpi .d{font-size:10px;color:var(--dim)}
+  .note{font-size:11px;color:var(--dim);margin-top:12px;line-height:1.6}
+  .lines{margin-top:10px;background:#10161d;border-radius:8px;padding:10px;font-size:12px}
+  .lines .l{padding:4px 0;border-bottom:1px dashed var(--line);font-family:monospace}
+  .lines .l:last-child{border:none}
+  .lines .k{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>故事线播放 · 记忆助手的功劳闭环</h1>
+  <div class="sub">任务开始 → 召回注入 → 沉淀写入 → 跨 Agent 召回 → 看板收口 · 一键连续播放，直观展示「三根线」如何串起多 Agent 记忆</div>
+
+  <div class="playerbar">
+    <div class="acts" id="acts">
+      <div class="act" data-i="0"><span class="no">ACT 1</span><div class="ttl">任务开始</div></div>
+      <div class="act" data-i="1"><span class="no">ACT 2</span><div class="ttl">召回注入</div></div>
+      <div class="act" data-i="2"><span class="no">ACT 3</span><div class="ttl">沉淀写入</div></div>
+      <div class="act" data-i="3"><span class="no">ACT 4</span><div class="ttl">跨 Agent 召回</div></div>
+      <div class="act" data-i="4"><span class="no">ACT 5</span><div class="ttl">看板收口</div></div>
+    </div>
+    <div class="ctrl">
+      <button class="btn primary" id="play">▶ 连续播放</button>
+      <button class="btn" id="step">单步 →</button>
+      <button class="btn" id="restart">↻ 重置</button>
+      <div class="prog"><div class="f" id="progf"></div></div>
+      <div class="speed">速度 <select id="spd"><option value="2600">慢</option><option value="1800" selected>中</option><option value="1000">快</option></select></div>
+    </div>
+  </div>
+
+  <div class="stage">
+    <!-- ACT 1 -->
+    <div class="scene" data-s="0">
+      <h2>任务开始 <span class="tag">9.1 跨会话 · session_id=S1</span></h2>
+      <div class="cap">用户在 Claude Code 里开始任务，Agent 自动带入项目背景（用户没再贴说明）</div>
+      <div class="agentwin">
+        <div class="head"><span class="logo">◆ Claude Code</span><span class="step" data-s="0">MVP·P1 · 记忆助手 MCP 已接入 · project=P1 · user=U1</span></div>
+        <div class="bg step" data-s="0">📎 已带项目背景 <span class="n">8</span> 条：技术栈 · 约束&lt;200ms · 近 5 决策 · 踩坑(Redis 超时)（9.1 load_project_context）</div>
+        <div class="msg"><div class="role">你</div><div class="bubble user step" data-s="0">为什么当时选了 FastAPI 而不是 Django？</div></div>
+      </div>
+      <div class="note">关键：背景是 Agent 经 MCP <b>recall_memory(scene=task_start)</b> 自动注入的，对终端用户透明（19.1）。</div>
+    </div>
+
+    <!-- ACT 2 -->
+    <div class="scene" data-s="1">
+      <h2>召回注入 <span class="tag">13.5 · 2.4.4 自动分流</span></h2>
+      <div class="cap">Agent 判断这是"查历史决策"，调 recall_memory；记忆助手返回 Top-K 并注入 prompt</div>
+      <div class="banner step" data-s="1"><span class="chip sc">scene=history_query</span><span class="chip md">mode=事件复盘(自动)</span>命中[历史, 决策]</div>
+      <div class="res step" data-s="1"><span class="mid">mem_009</span><span class="layer l-warm">warm</span> 2025-07-05：选 FastAPI 而非 Django（性能优先）<br><span class="tok">payload 780/1500 · ⚡ 省 1,420 token · request_id=req_001</span></div>
+      <div class="res step" data-s="1"><span class="mid">mem_005</span><span class="layer l-cold">cold</span> L2 摘要：约束 API 响应 &lt;200ms（补查 Cold 层）<br><span class="tok">cold_recall=true · 仅 L2 占位符（15.3）</span></div>
+      <div class="note">命中注入 Claude Code 的 <b>prompt 上下文</b>，Agent 在原窗口回答（19.1，不替换输入框）。审计记 req_001。</div>
+    </div>
+
+    <!-- ACT 3 -->
+    <div class="scene" data-s="2">
+      <h2>沉淀写入 <span class="tag">13.6 · 2.2 一次性精炼</span></h2>
+      <div class="cap">会话中出现新结论，Agent 判断值得记，调 write_memory</div>
+      <div class="writebox step" data-s="2">
+        新结论：「本次确认 FastAPI 异步 + Pydantic 校验契合 &lt;200ms 约束，建议沉淀为项目规范」
+        <div class="layers"><span>L1 脱敏</span><span>L2 摘要</span><span>L3 得失</span><span>L4 模式</span><span>L5 洞察</span><span>L6 索引</span></div>
+        <div class="audit step" data-s="2"><span class="a">audit:</span> action=write · memory_id=mem_030 · project_id=P1 · request_id=req_002 · 查重=非重复</div>
+      </div>
+      <div class="note">写入带 <b>project_id=P1</b>（19.4 共享域），其它 Agent 后续可召回（下一幕）。</div>
+    </div>
+
+    <!-- ACT 4 -->
+    <div class="scene" data-s="3">
+      <h2>跨 Agent 召回 <span class="tag">19.4 · project_id 共享</span></h2>
+      <div class="cap">Codex 处理同一项目 P1，直接命中 Claude Code 刚沉淀的 mem_030</div>
+      <div class="swim">
+        <div class="ag step" data-s="3">
+          <div class="t">◆ Claude Code（P1）</div>
+          <div class="s">MVP·P1 · 刚写入 mem_030（req_002）</div>
+          <div class="req">write_memory(project_id=P1)</div>
+        </div>
+        <div class="ag step" data-s="3">
+          <div class="t">◆ Codex（P2 兜底）</div>
+          <div class="s">处理项目 P1 → 调 recall_memory(project_id=P1)</div>
+          <div class="hit on">✓ 命中 mem_030（同 project_id 共享域）· request_id=req_003</div>
+          <div class="req">recall_memory(project_id=P1) → mem_030</div>
+        </div>
+      </div>
+      <div class="note"><b>跨 Agent 共享的核心证据</b>：同一 project_id=P1，一个 Agent 写、另一个 Agent 读。这就是"一次沉淀、多处省"。</div>
+    </div>
+
+    <!-- ACT 5 -->
+    <div class="scene" data-s="4">
+      <h2>看板收口 · 功劳可量化 <span class="tag">12.1 / 18.2-E</span></h2>
+      <div class="cap">所有动作收口到指标与审计——回答"用户怎么切实知道是记忆助手的功劳"</div>
+      <div class="kpis">
+        <div class="kpi"><div class="k">召回命中率</div><div class="v good">87%</div><div class="d">12.1 阈值 &lt;60% 告警</div></div>
+        <div class="kpi"><div class="k">Top-1 置信度</div><div class="v good">0.83</div><div class="d">越高越准</div></div>
+        <div class="kpi"><div class="k">token 节省</div><div class="v good">-58%</div><div class="d">payload 780/1500</div></div>
+        <div class="kpi"><div class="k">跨 Agent 复用</div><div class="v mem">3.2×</div><div class="d">1 沉淀 · 4 端共享</div></div>
+      </div>
+      <div class="lines step" data-s="4">
+        <div class="l"><span class="k">三根线收束</span> · project_id=P1 贯穿①②③④ 共享域</div>
+        <div class="l"><span class="k">session_id=S1</span> 串 ①②（Claude Code 自己的会话）</div>
+        <div class="l"><span class="k">request_id</span> · req_001(召回) / req_002(写入) / req_003(跨Agent召回) 各记审计</div>
+        <div class="l">→ 审计页可按 request_id 还原"哪个 Agent 在哪个会话召回了哪条记忆"</div>
+      </div>
+      <div class="note">命中质量（命中率/置信度/证据充分度）+ 成本（token 节省）+ 价值（复用次数/踩坑规避）——每条可点 request_id 溯源。</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const scenes=[...document.querySelectorAll(".scene")];
+const acts=[...document.querySelectorAll(".act")];
+const progf=document.getElementById("progf");
+const spd=document.getElementById("spd");
+let cur=0, playing=false, timer=null;
+
+function show(i){
+  cur=i;
+  scenes.forEach(s=>s.classList.toggle("show",s.dataset.s==String(i)));
+  acts.forEach((a,j)=>{a.classList.toggle("active",j===i);a.classList.toggle("done",j<i);});
+  progf.style.width=((i)/(scenes.length-1)*100)+"%";
+  // 播放该幕内的 step
+  playSceneSteps(i);
+}
+function playSceneSteps(i){
+  const scene=scenes[i];
+  const steps=[...scene.querySelectorAll(".step")];
+  steps.forEach(s=>s.classList.remove("on"));
+  steps.forEach((s,k)=>setTimeout(()=>{s.classList.add("on");},300+k*420));
+}
+function next(){if(cur<scenes.length-1){show(cur+1);}else{stop();}}
+function start(){
+  if(playing)return;playing=true;document.getElementById("play").textContent="⏸ 暂停";
+  (function loop(){if(!playing)return;show(cur);next();if(cur>=scenes.length-1){stop();return;}timer=setTimeout(loop,+spd.value);})();
+}
+function stop(){playing=false;document.getElementById("play").textContent="▶ 连续播放";if(timer)clearTimeout(timer);}
+function reset(){stop();show(0);}
+
+document.getElementById("play").addEventListener("click",()=>playing?stop():(stop(),start()));
+document.getElementById("step").addEventListener("click",()=>{stop();next();if(cur>=scenes.length-1)stop();});
+document.getElementById("restart").addEventListener("click",reset);
+acts.forEach(a=>a.addEventListener("click",()=>{stop();show(+a.dataset.i);}));
+
+show(0);
+</script>
+</body>
+</html>
