@@ -23,7 +23,28 @@
 <body>
   <button id="oneclick">⚡ 一键自动发现并接入本机 Agent</button>
   <div id="app"></div>
+  <div id="boot-status" style="color:#888;font-size:13px"></div>
   <p style="color:#888">原型参考：<code>design/ui/Agent接入页_原型.html</code>；本页由 <code>src/agentOnboard/*</code> 模块渲染，逻辑核心零依赖。</p>
+  <!-- 非模块诊断层：捕获脚本未加载 / 运行时异常，避免"静默无反应" -->
+  <script>
+    window.__painted = false;
+    window.addEventListener('error', function (e) {
+      var b = document.getElementById('boot-status');
+      if (b) b.innerHTML = '<span style="color:#e74c3c">⚠ 脚本异常：' +
+        (e.message || e.filename || 'unknown') + '</span>';
+    });
+    window.addEventListener('DOMContentLoaded', function () {
+      var b = document.getElementById('boot-status');
+      if (b) b.textContent = '模块加载中…（ES module 需经 http 打开，file:// 直开会失败）';
+      setTimeout(function () {
+        if (!window.__painted && b) {
+          b.innerHTML = '<span style="color:#e67e22">⚠ 模块未在 2 秒内完成渲染。' +
+            '请用本地静态服务器打开：<code>python -m http.server</code> → ' +
+            '<code>http://localhost:&lt;port&gt;/src/agentOnboard/app.html</code></span>';
+        }
+      }, 2000);
+    });
+  </script>
   <script type="module" src="./browser.js"></script>
 </body>
 </html>

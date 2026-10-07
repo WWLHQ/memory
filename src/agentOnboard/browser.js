@@ -22,6 +22,7 @@ function paint() {
   const cards = [...svc.cards.values()];
   app.innerHTML = renderOnboardPage({ cards, form });
   wire(app);
+  window.__painted = true;
 }
 
 function wire(root) {
