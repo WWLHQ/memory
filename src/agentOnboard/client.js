@@ -5,7 +5,9 @@
 export class AgentOnboardClient {
   constructor(baseUrl, fetchImpl = globalThis.fetch) {
     this.baseUrl = String(baseUrl).replace(/\/+$/, '');
-    this._fetch = fetchImpl;
+    // 必须绑定到 globalThis：浏览器 fetch 要求 this 为 Window，
+    // 若以 this._fetch(...) 调用（this=本实例）会报 "Illegal invocation"。
+    this._fetch = fetchImpl.bind(globalThis);
     /** @type {Map<string, object>} 本地镜像，随每次响应更新 */
     this.cards = new Map();
   }

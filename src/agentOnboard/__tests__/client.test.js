@@ -56,6 +56,17 @@ test('HTTP 客户端全链路 + 审计持久化跨重启', async () => {
   await s2.stop();
 });
 
+test('fetch 调用不丢 this 绑定（浏览器 fetch 需 this=Window，否则 Illegal invocation）', async () => {
+  // 模拟浏览器 Window.fetch：this 非 globalThis 即报 Illegal invocation
+  function windowishFetch() {
+    if (this !== globalThis) throw new TypeError("Failed to execute 'fetch' on 'Window': Illegal invocation");
+    return Promise.resolve({ ok: true, json: async () => ({ ok: true, cards: [] }) });
+  }
+  const c = new AgentOnboardClient('http://example.test', windowishFetch);
+  const cards = await c.getCards();
+  assert.deepEqual(cards, []);
+});
+
 test('非法配置经 HTTP 返回 violations（与内存实现一致）', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'ab-client2-'));
   const dataFile = join(dir, 'b.json');
