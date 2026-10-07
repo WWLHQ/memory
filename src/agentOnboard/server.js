@@ -94,6 +94,8 @@ export function createServer({ port = 0, dataFile = DEFAULT_DATA_FILE } = {}) {
         out = service.revokeBind(decodeURIComponent(parts[1]));
       } else if (req.method === 'GET' && parts[0] === 'audit') {
         out = { ok: true, audit: service.getAudit() };
+      } else if (req.method === 'GET' && parts[0] === 'agents' && parts.length === 1) {
+        out = { ok: true, cards: [...service.cards.values()] }; // 初始加载用，前端填后端即显示已有卡片
       } else {
         res.statusCode = 404;
         res.end(JSON.stringify({ ok: false, error: 'not_found' }));

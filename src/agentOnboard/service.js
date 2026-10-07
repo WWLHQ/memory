@@ -34,6 +34,11 @@ export class AgentOnboardService {
     return this.audit;
   }
 
+  getCards() {
+    if (this.backend) return this.backend.getCards(); // async
+    return [...this.cards.values()];
+  }
+
   /**
    * 配置一家 Agent 卡片。校验通过 → CONFIGURED，否则返回 violations（R1–R10）。
    * 对应 AC-003.1/AC-003.5/AC-003.6/AC-003.7/AC-003.9。

@@ -56,6 +56,14 @@ export class AgentOnboardClient {
     return out.ok ? out.audit : [];
   }
 
+  async getCards() {
+    const out = await this._get('/agents');
+    if (out.ok && Array.isArray(out.cards)) {
+      for (const c of out.cards) this.cards.set(c.agent_name, c);
+    }
+    return [...this.cards.values()];
+  }
+
   async _post(path, body = {}) {
     const r = await this._fetch(this.baseUrl + path, {
       method: 'POST',

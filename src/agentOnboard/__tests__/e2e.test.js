@@ -148,5 +148,10 @@ test('T15 真实后端全链路 (HTTP)：configure→test→rotate→revoke→on
   // Claude Code 已 revokeBind → 不存在
   const tClaude = await svc2.testConnect('Claude Code');
   assert.equal(tClaude.ok, false, 'revokeBind 持久化（卡片已删）');
+  // GET /agents：初始加载即显示已有卡片（前端填后端不点 ⚡ 也有数据）
+  const all = await svc2.getCards();
+  assert.ok(all.some((c) => c.agent_name === 'deepseek harness'), 'getCards 含 deepseek');
+  assert.ok(all.some((c) => c.agent_name === 'Codex'), 'getCards 含 Codex');
+  assert.equal(all.some((c) => c.agent_name === 'Claude Code'), false, 'revokeBind 持久化（GET /agents 不含 Claude）');
   await s2.stop();
 });

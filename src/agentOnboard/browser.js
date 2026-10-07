@@ -38,17 +38,24 @@ function setStatus(msg, color) {
 function paint() {
   const app = document.getElementById('app');
   const svc = getSvc();
-  const cards = [...svc.cards.values()];
+  let cards = [];
+  let err = null;
+  try {
+    cards = await svc.getCards();
+  } catch (e) {
+    err = e;
+  }
   app.innerHTML = renderOnboardPage({ cards, form });
   window.__painted = true;
-  setStatus(_backendUrl ? `已渲染（后端：${_backendUrl}）` : '已渲染（内存模式）', '#2ecc71');
+  if (err) setStatus(`加载卡片失败：${err && err.message || err}（后端不可达或跨域被拦？）`, '#e74c3c');
+  else setStatus(_backendUrl ? `已渲染（后端：${_backendUrl}）` : '已渲染（内存模式）', '#2ecc71');
   wire(app);
 }
 
 async function onAct(btn, fn) {
   try {
     await fn(getSvc());
-    paint();
+    await paint();
   } catch (e) {
     setStatus(`操作失败：${e && e.message || e}（后端不可达或跨域被拦？）`, '#e74c3c');
   }
