@@ -30,18 +30,28 @@ function detectForm() {
   return 'desktop';
 }
 
+function setStatus(msg, color) {
+  const b = document.getElementById('boot-status');
+  if (b) b.innerHTML = msg ? `<span style="color:${color || '#888'}">${msg}</span>` : '';
+}
+
 function paint() {
   const app = document.getElementById('app');
   const svc = getSvc();
   const cards = [...svc.cards.values()];
   app.innerHTML = renderOnboardPage({ cards, form });
   window.__painted = true;
+  setStatus(_backendUrl ? `已渲染（后端：${_backendUrl}）` : '已渲染（内存模式）', '#2ecc71');
   wire(app);
 }
 
 async function onAct(btn, fn) {
-  await fn(getSvc());
-  paint();
+  try {
+    await fn(getSvc());
+    paint();
+  } catch (e) {
+    setStatus(`操作失败：${e && e.message || e}（后端不可达或跨域被拦？）`, '#e74c3c');
+  }
 }
 
 function wire(root) {

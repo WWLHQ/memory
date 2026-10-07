@@ -51,7 +51,16 @@ export function createServer({ port = 0, dataFile = DEFAULT_DATA_FILE } = {}) {
   };
 
   const server = http.createServer(async (req, res) => {
+    // CORS：前端静态页（另一端口/源）需跨域调本服务；预检 OPTIONS 直接放行。
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     res.setHeader('Content-Type', 'application/json');
+    if (req.method === 'OPTIONS') {
+      res.statusCode = 204;
+      res.end();
+      return;
+    }
     let body = {};
     if (req.method === 'POST' || req.method === 'DELETE') {
       try {

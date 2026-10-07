@@ -42,9 +42,19 @@ export function renderCard(card) {
   const latencyWarn = card.avgLatency != null && card.avgLatency > 5 ? ' warn' : '';
   const latencyText = card.avgLatency != null ? `平均延迟 ${card.avgLatency}s` : '平均延迟 —';
   const tenant = card.enterprise_id ? `企业 ${card.enterprise_id} / 团队 ${card.team_id}` : '全局租户上下文';
-  // R5/R6 密钥恒脱敏
-  const keyText = card.apiKeyPlaintext ? '[API_KEY:service]' : (card.keySet ? '[API_KEY:service]' : '未配置');
+  // R5/R6 密钥恒脱敏；轮换/吊销后展示副作用，让操作有可见反馈
+  const grace = card.keyGraceUntil
+    ? new Date(card.keyGraceUntil).toLocaleString('zh-CN', { hour12: false })
+    : '';
+  let keyText = '未配置';
+  if (card.keyRevoked) keyText = '已吊销（立即失效）';
+  else if (card.keyRotatedAt) keyText = `已轮换（旧 Key 宽限至 ${grace}）`;
+  else if (card.keySet) keyText = '[API_KEY:service]';
+  const lastTest = card.requestId
+    ? `最近测试：${card.requestId} → ${STATUS_TEXT[card.status] || card.status}`
+    : '最近测试：未测试';
   const testDisabled = card.circuit === 'OPEN' ? ' disabled' : '';
+  const revokeDisabled = card.keyRevoked ? ' disabled' : '';
   return `
 <div class="agent-card" data-agent="${card.agent_name}">
   <div class="card-head">
@@ -59,11 +69,12 @@ export function renderCard(card) {
     <div class="latency${latencyWarn}">${latencyText}</div>
     <div class="tenant readonly">${tenant}（只读）</div>
     <div class="key desensitize">API Key：${keyText}</div>
+    <div class="last-test">${lastTest}</div>
   </div>
   <div class="card-ops">
     <button data-act="test"${testDisabled}>测试</button>
     <button data-act="rotate">轮换</button>
-    <button data-act="revoke">吊销</button>
+    <button data-act="revoke"${revokeDisabled}>吊销</button>
   </div>
 </div>`;
 }
