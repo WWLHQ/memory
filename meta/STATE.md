@@ -22,11 +22,14 @@
 
 ## 现状（压缩）
 - 门禁：`validate_project.py` 全绿（41 链接 / 36 编号 / 0 失败）；`generate.py` 重建 `build/`
+- **编码阶段已启动（验证拆分+CI 有效）**：T1（接入卡片类型契约）按 CODING_SOP 7 步走通——`src/types/agentOnboard.js` + `types.test.js`（6 例绿），全量 `npm test` 45 例绿；已 `git init` + 单 commit。CI（`.github/workflows/ci.yml`）启用 `npm test`(setup-node@22) + `validate` + `generate --check` 三道门禁；负向测试证明：篡改 build→`generate --check` 退 1、索引死链→`validate` 报失败 1，均能拦住。
+- **拆分/流程修正**：T1 验收命令从原稿 `npx tsc` 改为可跑的 `node --test`（贴合零依赖 JS 工具链）——验证发现任务验收命令必须与实际工具链一致才可执行。
 - **REQ-003（Agent 接入页）已全量跑通**（零依赖 Node 22 `node:test`）：
   - 代码 `src/agentOnboard/`：stateMachine(`transition` T2) + validators(`validateOnboard` R1–R10 T9) + formMatrix(按端置灰 T10) + render(T3~T8/T10) + service(`AgentOnboardService` T11/T12) + app.html/browser.js（接原型）
   - 字段级 AC/TC：AC-003.1~.10、TC-003.1~.12
   - 测试 **39 例全绿**（`npm test`）；code-map REQ-003 已回填「文件→函数→测试命令」
 - 技术栈务实约定：**纯 ESM JS + Node 内置 node:test**，渲染层用「state→HTML 字符串」纯函数（零 jsdom）；真实后端接入时把 `AgentOnboardService` 存储/审计替换为 API 即可
+- **T2 状态机表驱动重构已定稿（45/45 全绿）**：`stateMachine.js` 由 switch 改为 `TRANSITIONS` 转移表 + `transition()` 查表；`CIRCUIT_OPEN` 按规格 §0「任意态→DEGRADED」在 `transition()` 顶层特判（强制降级不丢数据，R5/R6），并移除表中冗余 `CIRCUIT_OPEN` 条目以防未来漂移。回归修复前 `transition(ONBOARD,'CIRCUIT_OPEN')` 误返 `ONBOARD`、1 例失败；修复后 `npm test` 45 pass 0 fail。
 
 ## 下一步
 - 对 **REQ-004~REQ-012** 做同样动作：补字段级 AC/TC + 跑通一个功能（参考 REQ-003）

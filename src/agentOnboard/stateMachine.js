@@ -16,35 +16,34 @@ export const AgentStatus = Object.freeze({
 });
 
 /**
+ * 状态转移表（对应规格 §0 状态图；T2 表驱动，便于扩展与审阅）。
+ * 键=当前态，值={事件: 下一态}；未列出的事件→保持原态（幂等安全）。
+ */
+export const TRANSITIONS = Object.freeze({
+  ONBOARD: { CONFIGURE: 'CONFIGURED' },
+  CONFIGURED: {
+    TEST_PASS: 'CONNECTED',
+    TEST_FAIL: 'DEGRADED', // 测试失败→降级（仅补偿通道）
+    CIRCUIT_HALF_OPEN: 'DEGRADED',
+  },
+  DEGRADED: {
+    CIRCUIT_CLOSE: 'CONNECTED', // 熔断恢复→连通
+    TEST_PASS: 'CONNECTED',
+    TEST_FAIL: 'DEGRADED',
+    CIRCUIT_HALF_OPEN: 'DEGRADED',
+    CONFIGURE: 'CONFIGURED',
+  },
+});
+
+/**
  * 计算一次事件后的卡片状态。
  * @param {string} status 当前状态（AgentStatus 之一）
  * @param {string} event 事件名：CONFIGURE | TEST_PASS | TEST_FAIL | CIRCUIT_OPEN | CIRCUIT_HALF_OPEN | CIRCUIT_CLOSE
  * @returns {string} 新状态（未知事件原样返回，幂等安全）
  */
 export function transition(status, event) {
-  switch (event) {
-    case 'CONFIGURE':
-      // 仅在未配置态可进入已配置；已配置/已连通不回退
-      return status === AgentStatus.ONBOARD ? AgentStatus.CONFIGURED : status;
-    case 'TEST_PASS':
-      // 已配置或降级态测试通过 → 连通
-      return status === AgentStatus.CONFIGURED || status === AgentStatus.DEGRADED
-        ? AgentStatus.CONNECTED
-        : status;
-    case 'TEST_FAIL':
-      // 已配置态测试失败 → 降级（仅补偿通道）
-      return status === AgentStatus.CONFIGURED ? AgentStatus.DEGRADED : status;
-    case 'CIRCUIT_OPEN':
-      // 主通道熔断 OPEN → 强制降级（R5/R6），无论当前态
-      return AgentStatus.DEGRADED;
-    case 'CIRCUIT_HALF_OPEN':
-      // 半开仍视为降级，待恢复
-      return AgentStatus.DEGRADED;
-    case 'CIRCUIT_CLOSE':
-      // 熔断恢复：降级 → 连通
-      return status === AgentStatus.DEGRADED ? AgentStatus.CONNECTED : status;
-    default:
-      // 未知事件：保持现状（不抛错，便于前端忽略脏事件）
-      return status;
-  }
+  // 规格 §0：主通道熔断 OPEN 时，无论当前态一律强制降级（R5/R6 自动降级不丢数据）。
+  if (event === 'CIRCUIT_OPEN') return AgentStatus.DEGRADED;
+  const next = TRANSITIONS[status] && TRANSITIONS[status][event];
+  return next || status; // 未定义事件：保持现状（不抛错，前端可忽略脏事件）
 }
