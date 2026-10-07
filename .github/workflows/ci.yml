@@ -29,6 +29,10 @@ jobs:
         run: python tools/validate_project.py
         # 退出码非 0（存在失败项）即阻断合入
 
-      - name: 重建同步门禁（build/ 必须与 specs/ 一致）
+      - name: 从 specs 重建 build/（证明 SSOT → 产物可复现；build/ 不入库）
+        run: python tools/generate.py
+        # 生成 build/SPEC.md、build/TRACE.md、build/SPEC.html
+
+      - name: 重建同步门禁（build/ 须与 specs/ 一致）
         run: python tools/generate.py --check
-        # build/ 与 specs/ 不同步则退出 1，提醒先本地重新生成并提交
+        # 先生成再校验：确保 CI 全新 checkout 下 build/ 存在且一致；不同步则退出 1
