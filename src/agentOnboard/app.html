@@ -21,7 +21,10 @@
   </style>
 </head>
 <body>
-  <button id="oneclick">⚡ 一键自动发现并接入本机 Agent</button>
+  <div style="margin-bottom:8px">
+    <label>后端地址（留空=内存模式）：<input id="backend" type="text" placeholder="http://localhost:PORT" size="40" /></label>
+    <button id="oneclick">⚡ 一键自动发现并接入本机 Agent</button>
+  </div>
   <div id="app"></div>
   <div id="boot-status" style="color:#888;font-size:13px"></div>
   <p style="color:#888">原型参考：<code>design/ui/Agent接入页_原型.html</code>；本页由 <code>src/agentOnboard/*</code> 模块渲染，逻辑核心零依赖。</p>

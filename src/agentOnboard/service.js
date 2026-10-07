@@ -10,10 +10,19 @@ function rid() {
 }
 
 export class AgentOnboardService {
-  constructor() {
-    /** @type {Map<string, object>} */
-    this.cards = new Map();
-    this.audit = [];
+  /**
+   * @param {object|null} [backend] 可选后端（如 AgentOnboardClient）。为空则走零依赖内存实现（向后兼容）。
+   * 注入后端时，所有方法委托给 backend（天然异步），cards 复用 backend 的本地镜像 Map 供渲染。
+   */
+  constructor(backend = null) {
+    this.backend = backend || null;
+    if (this.backend) {
+      this.cards = backend.cards; // 复用客户端本地镜像
+    } else {
+      /** @type {Map<string, object>} */
+      this.cards = new Map();
+      this.audit = [];
+    }
   }
 
   _audit(action, detail) {
@@ -21,6 +30,7 @@ export class AgentOnboardService {
   }
 
   getAudit() {
+    if (this.backend) return this.backend.getAudit(); // async
     return this.audit;
   }
 
@@ -29,6 +39,7 @@ export class AgentOnboardService {
    * 对应 AC-003.1/AC-003.5/AC-003.6/AC-003.7/AC-003.9。
    */
   configure(input) {
+    if (this.backend) return this.backend.configure(input); // async
     const card = { ...input, status: AgentStatus.ONBOARD };
     const { ok, violations } = validateOnboard(card);
     if (!ok) return { ok: false, violations };
@@ -43,6 +54,7 @@ export class AgentOnboardService {
    * 对应 AC-003.3 / AC-003.8。
    */
   testConnect(agentName) {
+    if (this.backend) return this.backend.testConnect(agentName); // async
     const card = this.cards.get(agentName);
     if (!card) return { ok: false, reason: 'no-card' };
     const requestId = rid();
@@ -56,6 +68,7 @@ export class AgentOnboardService {
   }
 
   rotateKey(agentName) {
+    if (this.backend) return this.backend.rotateKey(agentName); // async
     const card = this.cards.get(agentName);
     if (!card) return { ok: false };
     card.keyRotatedAt = Date.now();
@@ -65,6 +78,7 @@ export class AgentOnboardService {
   }
 
   revokeKey(agentName) {
+    if (this.backend) return this.backend.revokeKey(agentName); // async
     const card = this.cards.get(agentName);
     if (!card) return { ok: false };
     card.apiKeyPlaintext = null;
@@ -79,6 +93,7 @@ export class AgentOnboardService {
    * form: 当前端（审计记 form，19.11）
    */
   oneClickOnboard(agents, form = 'desktop') {
+    if (this.backend) return this.backend.oneClickOnboard(agents, form); // async
     const result = [];
     for (const a of agents) {
       // R8 默认只读召回；P2 写须确认（未确认则禁写）
@@ -118,6 +133,7 @@ export class AgentOnboardService {
 
   /** 撤销自动绑定（R9 / 审计 unbound） */
   revokeBind(agentName) {
+    if (this.backend) return this.backend.revokeBind(agentName); // async
     const existed = this.cards.delete(agentName);
     if (existed) this._audit('unbound', { agent: agentName });
     return { ok: existed };
