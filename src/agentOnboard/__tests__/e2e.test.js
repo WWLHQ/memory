@@ -6,6 +6,11 @@ import assert from 'node:assert/strict';
 import { AgentOnboardService } from '../service.js';
 import { renderCard } from '../render.js';
 import { signalSourcesForForm } from '../formMatrix.js';
+import { createServer } from '../server.js';
+import { AgentOnboardClient } from '../client.js';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 function card(name, priority) {
   return {
@@ -85,4 +90,63 @@ test('§8 审计记端（19.11）：auto_bind 审计含 form，可归因发现�
   svc.oneClickOnboard([{ name: 'A', priority: 'P0', signal: 'x' }], 'web');
   const bind = svc.getAudit().find((x) => x.action === 'auto_bind');
   assert.ok(bind && bind.form === 'web');
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// T15 真实后端全链路 E2E（接 T13 服务 + T14 客户端注入点）
+// 起真实 HTTP 服务，经 AgentOnboardService(backend=AgentOnboardClient) 跑
+// configure→testConnect→rotateKey→revokeKey→oneClickOnboard→revokeBind 全链路，
+// 并验证审计/卡片 JSON 持久化跨服务重启。
+// ───────────────────────────────────────────────────────────────────────────
+test('T15 真实后端全链路 (HTTP)：configure→test→rotate→revoke→oneClick→revokeBind + 持久化跨重启', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ab-e2e-'));
+  const dataFile = join(dir, 'e2e.json');
+
+  const s1 = await createServer({ port: 0, dataFile });
+  // 走 T14 注入点：service 包 client，等价于前端改调真实后端
+  const svc = new AgentOnboardService(new AgentOnboardClient(s1.url));
+
+  const cfg = await svc.configure(card('deepseek harness', 'P0'));
+  assert.equal(cfg.ok, true);
+  const t = await svc.testConnect('deepseek harness');
+  assert.equal(t.card.status, 'CONNECTED');
+  const r = await svc.rotateKey('deepseek harness');
+  assert.equal(r.ok, true);
+  const rv = await svc.revokeKey('deepseek harness');
+  assert.equal(rv.ok, true);
+
+  const disc = await svc.oneClickOnboard(
+    [
+      { name: 'Claude Code', priority: 'P1', signal: '本机进程' },
+      { name: 'Codex', priority: 'P2', signal: 'Webhook心跳' },
+    ],
+    'desktop',
+  );
+  assert.equal(disc.ok, true);
+  assert.equal(disc.cards.length, 2);
+
+  const rb = await svc.revokeBind('Claude Code');
+  assert.equal(rb.ok, true);
+
+  // 审计含全链路动作（后端异步返回 Promise）
+  const audit = await svc.getAudit();
+  for (const a of ['configure', 'test', 'rotate', 'revoke', 'auto_bind', 'unbound']) {
+    assert.ok(audit.some((x) => x.action === a), `审计缺 ${a}`);
+  }
+
+  await s1.stop();
+
+  // 重启：JSON 持久化恢复卡片 + 审计
+  const s2 = await createServer({ port: 0, dataFile });
+  const svc2 = new AgentOnboardService(new AgentOnboardClient(s2.url));
+  const audit2 = await svc2.getAudit();
+  assert.ok(audit2.length >= 6, '重启后审计仍在');
+  // 深度卡片仍存在且吊销状态持久化
+  const t2 = await svc2.testConnect('deepseek harness');
+  assert.equal(t2.ok, true, '重启后 deepseek 卡片仍在');
+  assert.equal(t2.card.keyRevoked, true, '吊销持久化');
+  // Claude Code 已 revokeBind → 不存在
+  const tClaude = await svc2.testConnect('Claude Code');
+  assert.equal(tClaude.ok, false, 'revokeBind 持久化（卡片已删）');
+  await s2.stop();
 });

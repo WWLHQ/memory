@@ -23,8 +23,8 @@
 ## 现状（压缩 · 2026-10-07 更新）
 - **远端**：已推 GitHub `https://github.com/WWLHQ/memory`（默认分支 `main`），GitHub Actions 三道门禁（`npm test` / `validate_project.py` / `generate.py --check`）。
 - **CI 真实生效已验证**：首跑 push 因 `build/` 未生成（`--check` 红）被拦 → 修 ci.yml「先 `generate` 再 `--check`」→ PR #1 合并 → push 与 PR 双触发均 **success**。证明门禁能拦错也能过。
-- **REQ-003 编码完成（逻辑层 100%）+ 真实后端已接入（T13/T14）**：T1–T12 全落地；T13 零依赖 HTTP 后端（`server.js`，JSON 持久化 `.data/`，提交 `554e20f`）；T14 HTTP 客户端（`client.js`，同接口 + `service.js` 注入点 + `app.html` 后端地址配置，提交待 push）；`npm test` **49/49 绿**；`specs/code-map.md` 已补映射（本地提交 `94ecf71`）。
-- **完成度边界（重要）**：① 实现=**纯 ESM JS**（HTML 字符串渲染），≠规格 `AGENT-ONBOARD.md` 的 TS+React 单组件；② 真实后端=**可选**：`app.html` 后端地址留空走内存、`http://host:port` 走 T13 真实后端（T14），但默认仍是内存 mock；③ E2E 为 `node:test` 逻辑级，非真浏览器。→ 按"规格 React+默认真后端+真浏览器 E2E"口径还差这三块；T15 将把 `e2e.test.js` 升为真实链路。
+- **REQ-003 编码完成（逻辑层 100%）+ 真实后端全链路已接入（T13/T14/T15）**：T1–T12 全落地；T13 零依赖 HTTP 后端（`server.js`，JSON 持久化 `.data/`，提交 `554e20f`）；T14 HTTP 客户端（`client.js` + `service.js` 注入点 + `app.html` 后端地址配置，提交 `62eb3be`）；T15 升级 `e2e.test.js` 为"起真实服务 + T14 注入点跑全链路 + 持久化跨重启"（提交待 push）；`npm test` **50/50 绿**；`specs/code-map.md` 已补映射（本地提交 `94ecf71`）。
+- **完成度边界（重要）**：① 实现=**纯 ESM JS**（HTML 字符串渲染），≠规格 `AGENT-ONBOARD.md` 的 TS+React 单组件；② 真实后端=**可选**：`app.html` 后端地址留空走内存、`http://host:port` 走 T13 真实后端（T14），但默认仍是内存 mock；③ E2E 现已是**真实 HTTP 链路**（T15，非逻辑级 mock），但仍非"真浏览器点击级"（无头浏览器 Playwright 未引入）。→ 按"规格 React + 默认真后端 + 真浏览器点击 E2E"口径还差 TS/React 替换与 Playwright 点击级 E2E 两块。
 - **提交约定**：每次提交必须写提交日志（conventional commit，见 MEMORY.md）；T3–T12 已在 initial commit `04cb27b` 打包，决策**不重写历史**、改 code-map 标注任务归属。
 - **未推/未跟踪**：本地 `94ecf71`（code-map）、`554e20f`（T13）、T14 提交待 push（本机无凭据）；`.workbuddy/memory/` 未跟踪（agent 工作记忆）。
 
