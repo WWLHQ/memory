@@ -35,7 +35,7 @@ function setStatus(msg, color) {
   if (b) b.innerHTML = msg ? `<span style="color:${color || '#888'}">${msg}</span>` : '';
 }
 
-function paint() {
+async function paint() {
   const app = document.getElementById('app');
   const svc = getSvc();
   let cards = [];
