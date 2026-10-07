@@ -21,9 +21,16 @@ jobs:
         with:
           node-version: "22"
 
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 类型门禁（TS strict · 规格 T1 的 tsc --noEmit）
+        run: npm run typecheck
+        # 类型不通过即阻断合入：这是 TS 方案的核心价值
+
       - name: 原子任务验收（每个 T 的验收命令即对应测试，CI 红 = 该任务未通过）
         run: npm test
-        # 零依赖：Node 22 内置 node:test，无需 npm install
+        # vitest + @testing-library/react（jsdom）
 
       - name: 完整性 / 正确性门禁
         run: python tools/validate_project.py

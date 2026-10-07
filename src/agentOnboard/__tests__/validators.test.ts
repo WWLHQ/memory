@@ -1,10 +1,10 @@
 // TC-003.2~TC-003.11 校验规则 R1-R10（对应 AC-003.1/AC-003.4/AC-003.5/AC-003.6/AC-003.7/AC-003.8）
-import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { validateOnboard } from '../validators.js';
+import { validateOnboard } from '../validators.ts';
+import type { AgentCardCandidate } from '../../types/agentOnboard.ts';
 
 // 一个"全绿"基线卡片
-const okCard = {
+const okCard: AgentCardCandidate = {
   tenantManual: false,
   mcpTools: {
     recall_memory: { project_id: 'p1', scene: 'default', mode: null },
@@ -21,7 +21,7 @@ const okCard = {
   discover: { enabled: true, crossMachine: false },
 };
 
-function viol(card) {
+function viol(card: AgentCardCandidate): string[] {
   const r = validateOnboard(card);
   return r.violations.filter((v) => !v.ok).map((v) => v.rule);
 }
@@ -37,12 +37,12 @@ test('R1 手填租户 → 失败', () => {
 });
 
 test('R2 缺 project_id → 失败', () => {
-  const c = { ...okCard, mcpTools: { ...okCard.mcpTools, recall_memory: { scene: 'default', mode: null } } };
+  const c: AgentCardCandidate = { ...okCard, mcpTools: { ...okCard.mcpTools, recall_memory: { scene: 'default', mode: null } } };
   assert.deepEqual(viol(c), ['R2']);
 });
 
 test('R3 scene=critical + mode=minimal → 失败', () => {
-  const c = { ...okCard, mcpTools: { ...okCard.mcpTools, recall_memory: { project_id: 'p1', scene: 'critical', mode: 'minimal' } } };
+  const c: AgentCardCandidate = { ...okCard, mcpTools: { ...okCard.mcpTools, recall_memory: { project_id: 'p1', scene: 'critical', mode: 'minimal' } } };
   assert.deepEqual(viol(c), ['R3']);
 });
 
@@ -64,7 +64,7 @@ test('R7 测试但未记 request_id → 失败', () => {
 
 test('R8 一键非只读召回 / P2 写未确认 → 失败', () => {
   assert.deepEqual(viol({ ...okCard, oneClick: { ...okCard.oneClick, defaultReadOnly: false } }), ['R8']);
-  const c2 = { ...okCard, oneClick: { ...okCard.oneClick, p2Write: true, p2Confirm: false } };
+  const c2: AgentCardCandidate = { ...okCard, oneClick: { ...okCard.oneClick, p2Write: true, p2Confirm: false } };
   assert.deepEqual(viol(c2), ['R8']);
 });
 

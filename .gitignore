@@ -4,6 +4,9 @@ build/
 # 真实后端本地持久化（运行时生成，勿提交）
 .data/
 
+# 构建产物
+dist/
+
 # Playwright
 node_modules/
 test-results/

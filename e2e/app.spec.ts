@@ -1,18 +1,19 @@
 // REQ-003 真浏览器点击级 E2E（对齐 design/ui/Agent接入页_原型.html）
 // 覆盖：首屏渲染、一键接入四段动画、R3/R4 校验、测试/轮换/保存 联动真实后端、撤销绑定、隔离 toast。
 // 关键回归：Codex tools.pref=false → 勾选不得抛 "Cannot create property 'on' on boolean"。
+// 被测对象 = Vite 构建产物（dist/），即TS+React 真实页面。
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { test, expect, disconnectBrowser } from './harness.js';
-import { startStatic } from './servers.js';
-import { createServer as createBackend } from '../src/agentOnboard/server.js';
+import { test, expect, disconnectBrowser, collectErrors } from './harness.ts';
+import { startStatic, type StaticServer } from './servers.ts';
+import { createServer as createBackend, type RunningServer } from '../src/agentOnboard/server.ts';
 
-const APP = '/src/agentOnboard/app.html';
+const APP = '/index.html';
 
-let staticSrv;
-let backend;
+let staticSrv: StaticServer;
+let backend: RunningServer;
 test.beforeAll(async () => {
-  staticSrv = await startStatic(8123);
+  staticSrv = await startStatic(8123, 'dist'); // 服务 Vite 构建产物
   backend = await createBackend({ port: 8200, dataFile: join(tmpdir(), `e2e-agent-onboard-${Date.now()}.json`) });
 });
 test.afterAll(async () => {
@@ -21,12 +22,6 @@ test.afterAll(async () => {
   await staticSrv.stop();
   await disconnectBrowser();
 });
-
-function collectErrors(page) {
-  const errors = [];
-  page.on('pageerror', (e) => errors.push(e.message || String(e)));
-  return errors;
-}
 
 test.describe('REQ-003 Agent 接入页 · 点击级 E2E', () => {
   test('首屏渲染：3 宿主卡片 + 4 效果证据 + 4 发现项，无脚本异常', async ({ page }) => {
@@ -81,7 +76,7 @@ test.describe('REQ-003 Agent 接入页 · 点击级 E2E', () => {
 
   test('操作联动：测试/轮换/保存 触发 toast，并打到真实后端 :8200', async ({ page }) => {
     const errors = collectErrors(page);
-    const calls = [];
+    const calls: string[] = [];
     page.on('request', (r) => { if (r.url().includes(':8200')) calls.push(`${r.method()} ${r.url()}`); });
     await page.goto(APP);
     const card = page.locator('#cards > .card').nth(0);

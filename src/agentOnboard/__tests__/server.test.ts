@@ -1,11 +1,10 @@
 // TC（接真实后端 · T13）：真实后端 HTTP 服务往返 + 持久化
 // 零依赖：node:http 服务；node:test + fetch（Node 22 内置）。
-import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createServer } from '../server.js';
+import { createServer } from '../server.ts';
 
 const VALID = {
   agent_name: 'a1',
@@ -67,6 +66,6 @@ test('T13 非法配置 → 422 + violations', async () => {
   assert.equal(res.status, 422);
   const j = await res.json();
   assert.equal(j.ok, false);
-  assert.ok(j.violations.some((v) => v.rule === 'R1'));
+  assert.ok(j.violations.some((v: { rule: string }) => v.rule === 'R1'));
   await h.stop();
 });

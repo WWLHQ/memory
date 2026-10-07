@@ -1,17 +1,17 @@
 // TC-003.12 端到端（T12）：覆盖 §8 验收用例（逻辑+服务层，零依赖）
 // 说明：真正的浏览器点击级 E2E 需无头浏览器(Playwright)，需联网安装；此处以
 // "service + render 驱动 §8 场景" 在 Node 内验证业务正确性，等价于无 UI 的 E2E。
-import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { AgentOnboardService } from '../service.js';
-import { signalSourcesForForm } from '../formMatrix.js';
-import { createServer } from '../server.js';
-import { AgentOnboardClient } from '../client.js';
+import { AgentOnboardService } from '../service.ts';
+import type { AgentCardInput, Priority } from '../../types/agentOnboard.ts';
+import { signalSourcesForForm } from '../formMatrix.ts';
+import { createServer } from '../server.ts';
+import { AgentOnboardClient } from '../client.ts';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-function card(name, priority) {
+function card(name: string, priority: Priority): AgentCardInput {
   return {
     agent_name: name, priority, accessMode: 'MCP+Webhook',
     enterprise_id: 'e1', team_id: 't1', tenantManual: false,
@@ -26,21 +26,21 @@ test('§8 MVP 接入：deepseek(P0)+Claude(P1) 双通道 → 两卡片 CONNECTED
   svc.configure(card('Claude Code', 'P1'));
   svc.testConnect('deepseek harness');
   svc.testConnect('Claude Code');
-  assert.equal(svc.cards.get('deepseek harness').status, 'CONNECTED');
-  assert.equal(svc.cards.get('Claude Code').status, 'CONNECTED');
-  // 服务层字段正确（渲染层由 render.test.js 按原型 proto 形状覆盖）
-  assert.equal(svc.cards.get('deepseek harness').priority, 'P0');
-  assert.equal(svc.cards.get('Claude Code').priority, 'P1');
-  assert.equal(svc.cards.get('deepseek harness').channels.webhook, true);
+  assert.equal(svc.cards.get('deepseek harness')!.status, 'CONNECTED');
+  assert.equal(svc.cards.get('Claude Code')!.status, 'CONNECTED');
+  // 服务层字段正确（渲染层由 AgentCard.test.tsx 按原型 proto 形状覆盖）
+  assert.equal(svc.cards.get('deepseek harness')!.priority, 'P0');
+  assert.equal(svc.cards.get('Claude Code')!.priority, 'P1');
+  assert.equal(svc.cards.get('deepseek harness')!.channels!.webhook, true);
 });
 
 test('§8 双通道兜底：主通道熔断 OPEN → DEGRADED 仅补偿', () => {
   const svc = new AgentOnboardService();
   svc.configure(card('deepseek harness', 'P0')); // 先正常配置
-  svc.cards.get('deepseek harness').circuit = 'OPEN'; // 运行期熔断
+  svc.cards.get('deepseek harness')!.circuit = 'OPEN'; // 运行期熔断
   svc.testConnect('deepseek harness');
-  assert.equal(svc.cards.get('deepseek harness').status, 'DEGRADED');
-  assert.equal(svc.cards.get('deepseek harness').channels.webhook, true); // 补偿仍在
+  assert.equal(svc.cards.get('deepseek harness')!.status, 'DEGRADED');
+  assert.equal(svc.cards.get('deepseek harness')!.channels!.webhook, true); // 补偿仍在
 });
 
 test('§8 一键接入：3 个本机 Agent 自动出现卡片（P0/P1/P2），默认只读召回 + 双通道 + project 共享', () => {
@@ -54,10 +54,10 @@ test('§8 一键接入：3 个本机 Agent 自动出现卡片（P0/P1/P2），�
     'desktop',
   );
   for (const n of ['deepseek harness', 'Claude Code', 'Codex']) {
-    const c = svc.cards.get(n);
+    const c = svc.cards.get(n)!;
     assert.equal(c.status, 'CONNECTED');
-    assert.equal(c.channels.webhook && c.channels.apiPull, true); // 双通道
-    assert.equal(c.mcpTools.recall_memory.project_id, 'p1'); // project 共享
+    assert.equal(c.channels!.webhook && c.channels!.apiPull, true); // 双通道
+    assert.equal(c.mcpTools!.recall_memory!.project_id, 'p1'); // project 共享
   }
 });
 
@@ -71,13 +71,13 @@ test('§8 撤销自动绑定：其余绑定不受影响', () => {
 
 test('§8 P2 敏感动作：默认不开写；确认后才放行', () => {
   const svc = new AgentOnboardService();
-  const r = svc.oneClickOnboard([{ name: 'Codex', priority: 'P2', signal: 'Webhook心跳' }], 'desktop');
+  const r = svc.oneClickOnboard([{ name: 'Codex', priority: 'P2', signal: 'Webhook心跳' }], 'desktop') as { ok: boolean; cards: import('../../types/agentOnboard.ts').AgentCard[] };
   const codex = r.cards[0];
-  assert.equal(codex.oneClick.p2Write, false); // 默认只读召回
+  assert.equal(codex.oneClick!.p2Write, false); // 默认只读召回
   // 用户确认路径（真实 UI 弹确认框）：置 p2Confirm 后允许写
-  codex.oneClick.p2Confirm = true;
-  codex.oneClick.p2Write = true;
-  assert.equal(codex.oneClick.p2Write, true);
+  codex.oneClick!.p2Confirm = true;
+  codex.oneClick!.p2Write = true;
+  assert.equal(codex.oneClick!.p2Write, true);
 });
 
 test('§8 按端置灰（19.10）：Web 端关「本机进程」；CLI 端关「Webhook 心跳」改命令', () => {
@@ -89,7 +89,7 @@ test('§8 按端置灰（19.10）：Web 端关「本机进程」；CLI 端关「
 test('§8 审计记端（19.11）：auto_bind 审计含 form，可归因发现于哪个端', () => {
   const svc = new AgentOnboardService();
   svc.oneClickOnboard([{ name: 'A', priority: 'P0', signal: 'x' }], 'web');
-  const bind = svc.getAudit().find((x) => x.action === 'auto_bind');
+  const bind = (svc.getAudit() as import('../service.ts').AuditEntry[]).find((x) => x.action === 'auto_bind');
   assert.ok(bind && bind.form === 'web');
 });
 
@@ -110,7 +110,7 @@ test('T15 真实后端全链路 (HTTP)：configure→test→rotate→revoke→on
   const cfg = await svc.configure(card('deepseek harness', 'P0'));
   assert.equal(cfg.ok, true);
   const t = await svc.testConnect('deepseek harness');
-  assert.equal(t.card.status, 'CONNECTED');
+  assert.equal(t.card!.status, 'CONNECTED');
   const r = await svc.rotateKey('deepseek harness');
   assert.equal(r.ok, true);
   const rv = await svc.revokeKey('deepseek harness');
@@ -145,7 +145,7 @@ test('T15 真实后端全链路 (HTTP)：configure→test→rotate→revoke→on
   // 深度卡片仍存在且吊销状态持久化
   const t2 = await svc2.testConnect('deepseek harness');
   assert.equal(t2.ok, true, '重启后 deepseek 卡片仍在');
-  assert.equal(t2.card.keyRevoked, true, '吊销持久化');
+  assert.equal(t2.card!.keyRevoked, true, '吊销持久化');
   // Claude Code 已 revokeBind → 不存在
   const tClaude = await svc2.testConnect('Claude Code');
   assert.equal(tClaude.ok, false, 'revokeBind 持久化（卡片已删）');

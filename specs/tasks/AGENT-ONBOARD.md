@@ -3,7 +3,7 @@
 > 本文件是 `meta/TASK_SPLITTING.md` 规范在 **REQ-003（Agent 接入配置页）** 上的真实再创作。
 > 来源：[需求规格书_Agent接入页字段级交互规格.md](需求规格书_Agent接入页字段级交互规格.md)（第 0~9 章）、[需求规格书.md](需求规格书.md) 第 19 章、[需求规格书_UI页面设计.md](需求规格书_UI页面设计.md) 第 10 章、[设计/ui/Agent接入页_原型.html](设计/ui/Agent接入页_原型.html)。
 > 拆分原则：越底层越先（类型/状态机纯逻辑）→ 越纯越先（校验/脱敏）→ UI 组件 → 集成 → E2E。每个任务可被一条命令验收，单独提交。
-> 技术栈：TS 内核 + Rust/WASM 向量层（19.11）；测试命令以 `npm test -- <tag>` 约定（脚手架见 T1）。
+> 技术栈：TS 内核 + React 19 UI + Rust/WASM 向量层（19.11）；验收命令：`npm run typecheck`（tsc strict）/ `npm test`（vitest）/ `npm run test:e2e`（Playwright）。
 
 ---
 
@@ -17,8 +17,8 @@
   - `McpToolConfig`（`recall_memory`/`write_memory`/`get_user_preferences` + project_id/user_id 必填标记）
   - `ChannelConfig`（主 Webhook + 补偿 API 拉取、对账周期、SHA-256 幂等开关）
   - `KeyMgmt`（脱敏占位、轮换宽限期、最后轮换时间）
-- 验收：`node --test src/types/__tests__/types.test.js`（零依赖，替代 tsc；与原稿等价，已按实际工具链修正）
-- 边界：仅 `src/types/`、`src/types/agentOnboard.js`
+- 验收：`npm run typecheck`（tsc --noEmit，规格原定的编译期门禁）+ `npm test`（`src/types/__tests__/types.test.ts`）
+- 边界：仅 `src/types/`、`src/types/agentOnboard.ts`
 - 依赖：无；被 T2~T10 全部依赖
 - 提交：`feat: define Agent onboard types`（message 含 T1）
 
@@ -120,7 +120,7 @@
 ## T11 集成测试（卡片 → 接口 → 审计链路）
 - 目标：把 T3~T10 各面板接到真实/模拟接口，验证端到端数据流与审计写入
 - 输入：T3~T10 全部组件与 validators；规格 §8 验收用例（MVP 接入、隔离配置、project 必填、双通道兜底、密钥脱敏、测试链路、一键接入、撤销、P2 确认）
-- 输出：`src/web/AgentOnboard/__tests__/onboard.integration.tsx` 集成测试：
+- 输出：`src/web/AgentOnboard/__tests__/AgentOnboardPage.test.tsx` 集成测试：
   - 配 deepseek+Claude Code 双通道 → 两卡片 CONNECTED，P0/P1 徽标
   - 删 recall 的 project_id → 禁保存（复用 T9 R2）
   - 主通道熔断 → DEGRADED 仅补偿
@@ -148,27 +148,27 @@
 ## T13 接入真实后端 HTTP 服务（零依赖）
 - 目标：提供 Agent 接入的**真实后端**（HTTP + 持久化），替换内存 mock；零依赖、可本地/CI 运行
 - 输入：无（独立服务）；可配置端口（测试用 0 随机端口）与数据文件路径
-- 输出：`src/agentOnboard/server.js`（`createServer()` 暴露 start/stop + `url`）：端点 `POST /agents`(configure)、`POST /agents/:name/test`(testConnect)、`POST /agents/:name/rotate-key`、`POST /agents/:name/revoke-key`、`POST /discover`(oneClickOnboard)、`DELETE /agents/:name`(revokeBind)、`GET /audit`；状态用 `node:fs` 持久化到 `.data/agent-onboard.json`（复用 `AgentOnboardService` 业务内核，不重复校验/状态机逻辑）
-- 验收：`node --test src/agentOnboard/__tests__/server.test.js`（启服务→各端点往返→进程重启后数据/审计仍在）
-- 边界：仅 `server.js` + 其测试 + `.data/`（gitignore）；**不改** service.js / 前端 / 校验 / 状态机
+- 输出：`src/agentOnboard/server.ts`（`createServer()` 暴露 start/stop + `url`）：端点 `POST /agents`(configure)、`POST /agents/:name/test`(testConnect)、`POST /agents/:name/rotate-key`、`POST /agents/:name/revoke-key`、`POST /discover`(oneClickOnboard)、`DELETE /agents/:name`(revokeBind)、`GET /audit`；状态用 `node:fs` 持久化到 `.data/agent-onboard.json`（复用 `AgentOnboardService` 业务内核，不重复校验/状态机逻辑）
+- 验收：`vitest run src/agentOnboard/__tests__/server.test.ts`（启服务→各端点往返→进程重启后数据/审计仍在）
+- 边界：仅 `server.ts` + 其测试 + `.data/`（gitignore）；**不改** service.ts / 前端 / 校验 / 状态机
 - 依赖：T11（复用 `AgentOnboardService`）；被 T14 依赖
 - 提交：`feat: agent onboard http backend (T13)`
 
 ## T14 前端/客户端改调真实后端
 - 目标：提供 HTTP 客户端，使前端与测试通过真实后端跑接入链路；保留内存实现作 fallback
 - 输入：T13 服务；可配置 `baseUrl`（默认内存 fallback，离线可用）
-- 输出：`src/agentOnboard/client.js`（`AgentOnboardClient`，与 `AgentOnboardService` 同接口：`configure/testConnect/rotateKey/revokeKey/oneClickOnboard/revokeBind/getAudit`，走 `fetch`）；`service.js` 构造器加可选 `backend` 注入（默认内存，向后兼容，不破坏现有 service.test.js）；`app.html` 增加后端地址配置项
-- 验收：`node --test src/agentOnboard/__tests__/client.test.js`（指向 T13 服务走 HTTP、审计持久化生效；默认内存用例仍绿）
-- 边界：仅 `client.js` + `service.js` 注入点 + `app.html` 配置 + 测试；不动校验/状态机/渲染/server
+- 输出：`src/agentOnboard/client.ts`（`AgentOnboardClient`，与 `AgentOnboardService` 同接口：`configure/testConnect/rotateKey/revokeKey/oneClickOnboard/revokeBind/getAudit`，走 `fetch`）；`service.ts` 构造器加可选 `backend` 注入（泛型 `AgentOnboardService<B>`：B=null 同步 /注入后端异步，默认内存向后兼容，不破坏现有 service.test.ts）；UI 侧用 `useBackendMirror.ts` 挂载后端（默认 http://localhost:8200，可用 `?backend=` 覆盖）
+- 验收：`vitest run src/agentOnboard/__tests__/client.test.ts`（指向 T13 服务走 HTTP、审计持久化生效；默认内存用例仍绿）
+- 边界：仅 `client.ts` + `service.ts` 注入点 + `useBackendMirror.ts` + 测试；不动校验/状态机/UI 组件/server
 - 依赖：T13；被 T15 依赖
 - 提交：`feat: agent onboard http client (T14)`
 
 ## T15 真实后端全链路 E2E
 - 目标：起 T13 服务，用 T14 客户端跑 configure→testConnect→rotateKey→revokeKey→oneClickOnboard→revokeBind 全链路 + 审计持久化跨重启
 - 输入：T13 + T14；规格 §8 验收用例
-- 输出：增强 `src/agentOnboard/__tests__/e2e.test.js`，启真实 server 跑全链路；`app.html` 接后端地址
-- 验收：`node --test src/agentOnboard/__tests__/e2e.test.js`（全链路绿 + 重启后审计/卡片仍在）
-- 边界：仅 `e2e.test.js` + `app.html` 配置；不改业务逻辑
+- 输出：增强 `src/agentOnboard/__tests__/e2e.test.ts`，启真实 server 跑全链路；`app.html` 接后端地址
+- 验收：`vitest run src/agentOnboard/__tests__/e2e.test.ts`（全链路绿 + 重启后审计/卡片仍在）
+- 边界：仅 `e2e.test.ts` + `useBackendMirror.ts`；不改业务逻辑
 - 依赖：T13, T14
 - 提交：`test: agent onboard real-backend e2e (T15)`
 
