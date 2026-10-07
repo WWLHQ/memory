@@ -1,152 +1,103 @@
 // Agent 接入页 UI 渲染（REQ-003 T3~T8 / T10 / 接原型 HTML）
-// 纯函数：state -> HTML 字符串，便于单测（无需浏览器/jsdom）。
-// 浏览器入口 src/agentOnboard/browser.js 直接调用本模块把字符串塞进 DOM，即"接原型"。
+// 纯函数：proto 形状的数据 -> HTML 字符串，便于单测（无需浏览器/jsdom）。
+// ⚠ 严格对齐 design/ui/Agent接入页_原型.html：结构/样式 class/文案/交互点(data-tool/data-iso/data-chan/data-act/data-rid/data-inject/data-err/data-mask) 均与原型一致，禁止偏离。
 //
-// 原型参考：design/ui/Agent接入页_原型.html（AGENTS/DISCOVERED 数组 + renderCards/bindCard/act）
-
-import { AgentStatus } from './stateMachine.js';
-import { signalSourcesForForm, isSourceGrayed } from './formMatrix.js';
-
-const STATUS_TEXT = {
-  ONBOARD: '未配置',
-  CONFIGURED: '已配置',
-  CONNECTED: '连通',
-  DEGRADED: '降级',
-};
-const CIRCUIT_TEXT = { CLOSED: '正常', OPEN: '熔断OPEN', HALF_OPEN: '半开' };
-
-/** 状态徽标 */
-export function renderStatusBadge(status) {
-  return `<span class="badge status-${status}" data-status="${status}">${STATUS_TEXT[status] || status}</span>`;
-}
-
-/** 优先级徽标：MVP·P0 / MVP·P1 / 兜底·P2 / 扩展·P3 */
-export function renderPriorityBadge(priority) {
-  const label = { P0: 'MVP·P0', P1: 'MVP·P1', P2: '兜底·P2', P3: '扩展·P3' }[priority] || priority;
-  return `<span class="badge priority-${priority}" data-priority="${priority}">${label}</span>`;
-}
-
-/** 熔断状态点 */
-export function renderCircuitDot(circuit) {
-  return `<span class="dot circuit-${circuit}" title="${CIRCUIT_TEXT[circuit] || circuit}" data-circuit="${circuit}"></span>`;
-}
+// 原型参考：design/ui/Agent接入页_原型.html（AGENTS/DISCOVERED/GAINS + renderCards/bindCard/act/discover）
 
 /**
- * 单家 Agent 接入卡片（AC-003.1~AC-003.3 / AC-003.7 / AC-003.8）
- * 字段级：agent_name 枚举、接入方式、连通成功率(<95% 告警)、平均延迟(>5s 告警)、
- *  enterprise_id/team_id 只读、熔断状态点、单 Agent 操作(测试/轮换/吊销)。
+ * 单家宿主 Agent 接入卡片（对齐原型 renderCards，19.2/19.3/5.2）。
+ * a 字段（proto 形状）：name, badge, label, method, conn, circuit, latency,
+ *   tenant, tools{recall{on,topk,scene,mode},write{on,category},pref{on}},
+ *   iso{projShare,prefCross}, chan{webhook,api,recon}, key{mask,last,grace}, state(connected|degraded|onboard)
  */
-export function renderCard(card) {
-  const rateWarn = card.connectRate != null && card.connectRate < 95 ? ' warn' : '';
-  const rateText = card.connectRate != null ? `连通成功率 ${card.connectRate}%` : '连通成功率 —';
-  const latencyWarn = card.avgLatency != null && card.avgLatency > 5 ? ' warn' : '';
-  const latencyText = card.avgLatency != null ? `平均延迟 ${card.avgLatency}s` : '平均延迟 —';
-  const tenant = card.enterprise_id ? `企业 ${card.enterprise_id} / 团队 ${card.team_id}` : '全局租户上下文';
-  // R5/R6 密钥恒脱敏；轮换/吊销后展示副作用，让操作有可见反馈
-  const grace = card.keyGraceUntil
-    ? new Date(card.keyGraceUntil).toLocaleString('zh-CN', { hour12: false })
-    : '';
-  let keyText = '未配置';
-  if (card.keyRevoked) keyText = '已吊销（立即失效）';
-  else if (card.keyRotatedAt) keyText = `已轮换（旧 Key 宽限至 ${grace}）`;
-  else if (card.keySet) keyText = '[API_KEY:service]';
-  const lastTest = card.requestId
-    ? `最近测试：${card.requestId} → ${STATUS_TEXT[card.status] || card.status}`
-    : '最近测试：未测试';
-  const testDisabled = card.circuit === 'OPEN' ? ' disabled' : '';
-  const revokeDisabled = card.keyRevoked ? ' disabled' : '';
+export function renderCard(a) {
+  const connClass = a.conn < 95 ? 'warn' : '';
+  const deg = a.state === 'degraded';
+  const stTxt = a.state === 'connected' ? '已连通' : (a.state === 'degraded' ? '降级（仅补偿）' : '未配置');
+  const stDot = a.state === 'connected' ? 'connected' : a.state === 'degraded' ? 'degraded' : 'onboard';
+  const circuitColor = a.circuit === 'OPEN' ? 'var(--err)' : a.circuit === 'HALF_OPEN' ? 'var(--warn)' : 'var(--ok)';
   return `
-<div class="agent-card" data-agent="${card.agent_name}">
-  <div class="card-head">
-    <strong>${card.agent_name}</strong>
-    ${renderPriorityBadge(card.priority)}
-    ${renderStatusBadge(card.status)}
-    ${renderCircuitDot(card.circuit || 'CLOSED')}
+<div class="card${deg ? ' degraded' : ''}" data-agent="${a.name}">
+  <div class="top">
+    <span class="badge ${a.badge}">${a.label}</span>
+    <span class="agent-name">${a.name}</span>
+    <span class="method">${a.method}</span>
+    <span style="margin-left:auto"><span class="statusdot st-${stDot}"></span>${stTxt}</span>
   </div>
-  <div class="card-body">
-    <div>接入方式：${card.accessMode || 'MCP+Webhook'}</div>
-    <div class="rate${rateWarn}">${rateText}</div>
-    <div class="latency${latencyWarn}">${latencyText}</div>
-    <div class="tenant readonly">${tenant}（只读）</div>
-    <div class="key desensitize">API Key：${keyText}</div>
-    <div class="last-test">${lastTest}</div>
+  <div class="metrics">
+    <div class="metric"><div class="k">连通成功率（&lt;95% ⚠）</div><div class="v ${connClass}">${a.conn}%</div></div>
+    <div class="metric"><div class="k">熔断状态（5.2）</div><div class="v" style="color:${circuitColor}">${a.circuit}</div></div>
+    <div class="metric"><div class="k">平均延迟（&gt;5s ⚠）</div><div class="v ${a.latency > 5 ? 'warn' : ''}">${a.latency}s</div></div>
+    <div class="metric"><div class="k">租户（只读·全局）</div><div class="v" style="font-size:12px">${a.tenant}</div></div>
   </div>
-  <div class="card-ops">
-    <button data-act="test"${testDisabled}>测试</button>
-    <button data-act="rotate">轮换</button>
-    <button data-act="revoke"${revokeDisabled}>吊销</button>
+  <div class="row">
+    <span style="font-size:11px;color:var(--muted)">MCP 工具（19.5，须带 project_id）：</span>
+    <label class="sw"><input type="checkbox" data-tool="recall" ${a.tools.recall.on ? 'checked' : ''}>recall_memory top_k=${a.tools.recall.topk} scene=${a.tools.recall.scene}</label>
+    <label class="sw"><input type="checkbox" data-tool="write" ${a.tools.write.on ? 'checked' : ''}>write_memory</label>
+    <label class="sw"><input type="checkbox" data-tool="pref" ${a.tools.pref.on ? 'checked' : ''}>get_user_preferences</label>
+  </div>
+  <div class="row">
+    <span style="font-size:11px;color:var(--muted)">隔离粒度（19.4）：</span>
+    <label class="sw"><input type="checkbox" data-iso="projShare" ${a.iso.projShare ? 'checked' : ''}>项目层按 project_id 跨 Agent 共享</label>
+    <label class="sw"><input type="checkbox" data-iso="prefCross" ${a.iso.prefCross ? 'checked' : ''}>个人偏好跨项目共享（user_id 级）</label>
+  </div>
+  <div class="row">
+    <span style="font-size:11px;color:var(--muted)">采集通道（19.3）：</span>
+    <label class="sw"><input type="checkbox" data-chan="webhook" ${a.chan.webhook ? 'checked' : ''}>主 Webhook</label>
+    <label class="sw"><input type="checkbox" data-chan="api" ${a.chan.api ? 'checked' : ''}>补偿 API 拉取</label>
+    <span class="pill">对账 ${a.chan.recon}</span>
+    <span class="pill on">SHA-256 幂等（不可关）</span>
+  </div>
+  <div class="row">
+    <span style="font-size:11px;color:var(--muted)">密钥（4.1 脱敏）：</span>
+    <span class="pill on" data-mask>${a.key.mask}</span>
+    <span class="pill">轮换宽限 ${a.key.grace}h · 上次 ${a.key.last}</span>
+    ${a.key.last.includes('92') ? '<span class="pill gold">⚠ 超 90 天未轮换</span>' : ''}
+  </div>
+  <div class="warn ${deg ? 'show' : ''}">${deg ? '⚠ 主通道 Webhook 熔断 OPEN，已降级为仅补偿通道（5min 延迟，数据完整性不受影响 · 5.4）' : ' '}</div>
+  <div class="errbox" data-err></div>
+  <div class="test" data-test>
+    接入测试：<span class="rid" data-rid>req_test_${a.name}</span>
+    <div class="inject" data-inject>注入预览：将注入 <b>5</b> 条记忆到 Agent prompt（payload ≈ 780 tokens）</div>
+  </div>
+  <div class="btns">
+    <button class="btn primary" data-act="test" ${a.circuit === 'OPEN' ? 'disabled title="熔断 OPEN 已停止主通道"' : ''}>▶ 测试接入</button>
+    <button class="btn" data-act="rotate">轮换密钥</button>
+    <button class="btn" data-act="save">保存配置</button>
   </div>
 </div>`;
 }
 
 /**
- * 一键全量接入四段进度条（AC-003.4 / T4）
- * segments: [{key:'扫'|'分'|'绑'|'验', done:boolean, fail?:boolean}]
+ * 一键接入·发现结果列表（对齐原型 renderFound / DISCOVERED）。
+ * list 项：{name, badge, label, signal, bound, ok}
  */
-export function renderOneClickProgress(segments) {
-  const segs = segments
-    .map((s) => `<span class="seg ${s.done ? 'done' : ''} ${s.fail ? 'fail' : ''}" data-seg="${s.key}">${s.key}</span>`)
-    .join('');
-  return `<div class="oneclick-progress">${segs}</div>`;
-}
-
-/**
- * 自动绑定结果卡（AC-003.4 / R8 只读召回 / R9 可撤销）
- */
-export function renderAutoBindCard(card) {
-  const readonly = card.oneClick?.defaultReadOnly ? '只读召回' : '可读写';
-  const revocable = card.oneClick?.bindRevocable ? '可撤销' : '不可撤销';
-  return `
-<div class="autobind-card" data-agent="${card.agent_name}">
-  ${renderPriorityBadge(card.priority)} ${renderStatusBadge(card.status)}
-  <span class="mode">${readonly}</span>
-  <span class="revoke">${revocable}</span>
-  <button data-act="revoke-bind">撤销</button>
+export function renderFound(list = []) {
+  return list.map((d, i) => {
+    const st = d.bound
+      ? (d.ok ? '<span class="pill on">自动发现 · 已绑定 ✓</span>' : '<span class="pill gold">自动发现 · 已绑定 ⚠ 待手动补</span>')
+      : '<span class="pill">未发现信号 · 需手填端点</span>';
+    return `
+<div class="found${d.bound ? '' : ' unbound'}" data-disc="${i}">
+  <span class="badge ${d.badge}">${d.label}</span>
+  <span class="agent-name" style="font-size:13px">${d.name}</span>
+  <span class="method">信号：${d.signal}</span>
+  <span style="margin-left:auto">${st}</span>
+  ${d.bound ? `<button class="btn" data-unbind="${i}" style="padding:4px 10px">撤销</button>` : ''}
 </div>`;
+  }).join('\n');
 }
 
 /**
- * 测试面板（AC-003.8 / R7 request_id 审计）
+ * 效果证据（对齐原型 renderGains / GAINS）。
+ * g 项：{icon, title, big, desc, src}
  */
-export function renderTestPanel(card) {
-  const reqId = card.requestId ? `<code data-request-id>${card.requestId}</code>` : '未生成';
-  const preview = card.tested ? `将注入 N 条，payload ≈ ${card.previewTokens || 'X'} tokens` : '未测试';
-  return `
-<div class="test-panel" data-agent="${card.agent_name}">
-  <div>注入预览：${preview}</div>
-  <div>request_id：${reqId}</div>
-  <div>连通结果：${STATUS_TEXT[card.status] || card.status}</div>
-</div>`;
-}
-
-/**
- * 当前端徽标 + 信号源勾选区（AC-003.10 / 19.10 / T10）
- */
-export function renderFormBadge(form) {
-  const sources = signalSourcesForForm(form)
-    .map((s) => `<label><input type="checkbox" data-signal="${s}" checked> ${s}</label>`)
-    .join('');
-  const grayed = SIGNAL_SOURCES_EXTRA(form);
-  return `
-<div class="form-badge" data-form="${form}">当前端：${form}${grayed}</div>
-<div class="signal-sources">${sources}</div>`;
-}
-function SIGNAL_SOURCES_EXTRA(form) {
-  // 列出被置灰项（仅展示提示）
-  const all = ['MCP注册表', '本机进程', 'Webhook心跳', '手动兜底'];
-  const gray = all.filter((s) => isSourceGrayed(form, s));
-  return gray.length ? `（置灰：${gray.join('、')}）` : '';
-}
-
-/**
- * 整页组合（接原型 HTML 的布局）
- */
-export function renderOnboardPage({ cards = [], form = 'desktop', segments, autoBinds = [] }) {
-  const header = `<header><h1>Agent 接入配置页</h1>${renderFormBadge(form)}</header>`;
-  const oneClick = renderOneClickProgress(segments || [
-    { key: '扫', done: false }, { key: '分', done: false }, { key: '绑', done: false }, { key: '验', done: false },
-  ]);
-  const cardList = cards.map(renderCard).join('\n');
-  const binds = autoBinds.map(renderAutoBindCard).join('\n');
-  return `<section class="onboard-page">${header}${oneClick}<div class="cards">${cardList}</div><div class="autobinds">${binds}</div></section>`;
+export function renderGains(g = []) {
+  return g.map((x) => `
+<div class="gain">
+  <h3>${x.icon} ${x.title}</h3>
+  <div class="big">${x.big}</div>
+  <div class="desc">${x.desc}</div>
+  <div class="src">依据：${x.src}</div>
+</div>`).join('\n');
 }

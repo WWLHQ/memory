@@ -4,7 +4,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { AgentOnboardService } from '../service.js';
-import { renderCard } from '../render.js';
 import { signalSourcesForForm } from '../formMatrix.js';
 import { createServer } from '../server.js';
 import { AgentOnboardClient } from '../client.js';
@@ -29,8 +28,10 @@ test('§8 MVP 接入：deepseek(P0)+Claude(P1) 双通道 → 两卡片 CONNECTED
   svc.testConnect('Claude Code');
   assert.equal(svc.cards.get('deepseek harness').status, 'CONNECTED');
   assert.equal(svc.cards.get('Claude Code').status, 'CONNECTED');
-  assert.match(renderCard(svc.cards.get('deepseek harness')), /data-priority="P0"/);
-  assert.match(renderCard(svc.cards.get('Claude Code')), /data-priority="P1"/);
+  // 服务层字段正确（渲染层由 render.test.js 按原型 proto 形状覆盖）
+  assert.equal(svc.cards.get('deepseek harness').priority, 'P0');
+  assert.equal(svc.cards.get('Claude Code').priority, 'P1');
+  assert.equal(svc.cards.get('deepseek harness').channels.webhook, true);
 });
 
 test('§8 双通道兜底：主通道熔断 OPEN → DEGRADED 仅补偿', () => {

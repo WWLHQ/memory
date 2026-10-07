@@ -5,6 +5,11 @@
   "type": "module",
   "description": "多 Agent 记忆助手 - REQ-003 Agent 接入逻辑核心（状态机 + 校验器 R1-R10），零依赖 node:test 跑通",
   "scripts": {
-    "test": "node --test src/agentOnboard/__tests__/*.test.js src/types/__tests__/*.test.js"
+    "test": "node --test src/agentOnboard/__tests__/*.test.js src/types/__tests__/*.test.js",
+    "test:e2e": "node e2e/run.mjs",
+    "test:e2e:install": "playwright install chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
   }
 }

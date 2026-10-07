@@ -1,81 +1,81 @@
-// TC-003 UI 渲染（对应 AC-003.1/AC-003.3/AC-003.4/AC-003.7/AC-003.8/AC-003.10）
+// TC-003 UI 渲染（对齐原型 renderCards/renderFound/renderGains）
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  renderCard,
-  renderStatusBadge,
-  renderPriorityBadge,
-  renderOneClickProgress,
-  renderTestPanel,
-  renderFormBadge,
-  renderOnboardPage,
-} from '../render.js';
-import { signalSourcesForForm } from '../formMatrix.js';
+import { renderCard, renderFound, renderGains } from '../render.js';
 
 const card = {
-  agent_name: 'deepseek harness',
-  priority: 'P0',
-  status: 'CONNECTED',
-  circuit: 'CLOSED',
-  connectRate: 98,
-  avgLatency: 2,
-  enterprise_id: 'e1',
-  team_id: 't1',
-  accessMode: 'MCP+Webhook',
-  apiKeyPlaintext: null,
-  keySet: true,
-  requestId: 'req_abc',
-  tested: true,
-  previewTokens: 12,
+  name: 'deepseek harness', badge: 'p0', label: 'MVP·P0', method: 'MCP + Webhook 直连（自有）',
+  conn: 99.2, circuit: 'CLOSED', latency: 1.2, tenant: 'ent_001 / team_001',
+  tools: { recall: { on: true, topk: 5, scene: 'task_start', mode: '' }, write: { on: true, category: 'work' }, pref: { on: true } },
+  iso: { projShare: true, prefCross: true },
+  chan: { webhook: true, api: true, recon: '5min' }, key: { mask: '[API_KEY:harness]', last: '32 天前', grace: 24 },
+  state: 'connected',
 };
 
-test('renderCard 含状态/优先级徽标与只读租户（AC-003.1/AC-003.3）', () => {
+test('renderCard 含原型徽标/状态点/工具-隔离-通道-操作交互点', () => {
   const html = renderCard(card);
-  assert.match(html, /data-status="CONNECTED"/);
-  assert.match(html, /data-priority="P0"/);
-  assert.match(html, /只读/); // enterprise/team 只读
+  assert.match(html, /class="badge p0"/);
+  assert.match(html, /statusdot st-connected/);
+  assert.match(html, /data-tool="recall"/);
+  assert.match(html, /data-tool="write"/);
+  assert.match(html, /data-iso="projShare"/);
+  assert.match(html, /data-chan="webhook"/);
+  assert.match(html, /data-act="test"/);
+  assert.match(html, /data-mask/);
+  assert.match(html, /只读/); // 租户只读展示
 });
 
-test('renderCard 密钥恒脱敏不回显明文（AC-003.7 / R5）', () => {
+test('renderCard 密钥恒脱敏不回显明文（R5）', () => {
   const html = renderCard(card);
-  assert.match(html, /\[API_KEY:service\]/);
+  assert.match(html, /\[API_KEY:harness\]/);
   assert.doesNotMatch(html, /sk-/); // 绝不出现明文
 });
 
-test('renderCard 熔断 OPEN 时禁用测试按钮（AC-003.3 / R6）', () => {
-  const html = renderCard({ ...card, circuit: 'OPEN' });
+test('renderCard 熔断 OPEN 时禁用测试按钮（R6）', () => {
+  const html = renderCard({ ...card, circuit: 'OPEN', state: 'degraded' });
   assert.match(html, /data-act="test" disabled/);
 });
 
-test('renderCard 连通率<95% / 延迟>5s 告警态（AC-003.1）', () => {
-  const html = renderCard({ ...card, connectRate: 90, avgLatency: 6 });
-  assert.match(html, /class="rate warn"/);
-  assert.match(html, /class="latency warn"/);
+test('renderCard 降级态加 .degraded 并显示降级告警（5.4）', () => {
+  const html = renderCard({ ...card, circuit: 'OPEN', state: 'degraded' });
+  assert.match(html, /class="card degraded"/);
+  assert.match(html, /class="warn show"/);
 });
 
-test('renderOneClickProgress 四段（AC-003.4 / T4）', () => {
-  const html = renderOneClickProgress([{ key: '扫', done: true }, { key: '分', done: true }, { key: '绑', done: false }, { key: '验', done: false }]);
-  assert.match(html, /data-seg="扫"/);
-  assert.match(html, /data-seg="验"/);
-  assert.match(html, /seg done/);
+test('renderCard 连通率<95% / 延迟>5s 告警态', () => {
+  const html = renderCard({ ...card, conn: 90, latency: 6 });
+  assert.match(html, /class="v warn"/);
 });
 
-test('renderTestPanel 含 request_id（AC-003.8 / R7）', () => {
-  const html = renderTestPanel(card);
-  assert.match(html, /data-request-id/);
-  assert.match(html, /req_abc/);
+test('renderCard 超 90 天未轮换显示 gold 告警', () => {
+  const html = renderCard({ ...card, key: { ...card.key, last: '92 天前' } });
+  assert.match(html, /class="pill gold"/);
 });
 
-test('renderFormBadge 按端置灰（AC-003.10 / 19.10）', () => {
-  const web = renderFormBadge('web');
-  assert.match(web, /当前端：web/);
-  assert.match(web, /置灰：本机进程/); // Web 端关本机进程
-  assert.deepEqual(signalSourcesForForm('web').includes('本机进程'), false);
-  assert.deepEqual(signalSourcesForForm('desktop').length, 4); // 桌面全开
+test('renderCard 容忍 tools.pref 为布尔 false（Codex 原型数据，不抛错且未勾选）', () => {
+  const html = renderCard({ ...card, tools: { ...card.tools, pref: false } });
+  assert.match(html, /data-tool="pref"/);
+  // 未勾选：pref 输入框不含 checked
+  const prefInput = html.match(/<input[^>]*data-tool="pref"[^>]*>/)[0];
+  assert.doesNotMatch(prefInput, /checked/);
 });
 
-test('renderOnboardPage 组合整页', () => {
-  const html = renderOnboardPage({ cards: [card], form: 'desktop' });
-  assert.match(html, /Agent 接入配置页/);
-  assert.match(html, /data-agent="deepseek harness"/);
+test('renderFound 已绑定/未绑定两种态（含 data-unbind）', () => {
+  const html = renderFound([
+    { name: 'deepseek harness', badge: 'p0', label: 'MVP·P0', signal: 'MCP 注册表 + 本机进程', bound: true, ok: true },
+    { name: 'Cursor', badge: 'p3', label: '扩展·P3', signal: '未发现信号', bound: false, ok: false },
+  ]);
+  assert.match(html, /class="found"/);
+  assert.match(html, /class="found unbound"/);
+  assert.match(html, /data-unbind="0"/);
+  assert.match(html, /自动发现 · 已绑定 ✓/);
+  assert.match(html, /未发现信号 · 需手填端点/);
+});
+
+test('renderGains 效果证据四卡', () => {
+  const html = renderGains([
+    { icon: '🪙', title: 'Token 节省', big: '-58%', desc: 'payload 780/1500', src: '2.4.1' },
+  ]);
+  assert.match(html, /class="gain"/);
+  assert.match(html, /class="big">-58%/);
 });

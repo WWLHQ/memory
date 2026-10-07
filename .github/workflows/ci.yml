@@ -36,3 +36,22 @@ jobs:
       - name: 重建同步门禁（build/ 须与 specs/ 一致）
         run: python tools/generate.py --check
         # 先生成再校验：确保 CI 全新 checkout 下 build/ 存在且一致；不同步则退出 1
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: 安装 E2E 依赖
+        run: npm ci
+
+      - name: 安装 Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: 真浏览器点击级 E2E（REQ-003 接原型）
+        run: npm run test:e2e
+        # 覆盖：一键接入四段动画 / R3·R4 校验 / 测试·轮换·保存打到真实后端 / 撤销绑定 / 无脚本异常

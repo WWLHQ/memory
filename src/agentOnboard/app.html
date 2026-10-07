@@ -1,53 +1,153 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Agent 接入配置页（接原型）</title>
-  <style>
-    body { font-family: system-ui, sans-serif; margin: 16px; }
-    .agent-card { border: 1px solid #ccc; border-radius: 8px; padding: 10px; margin: 8px 0; }
-    .badge { padding: 2px 6px; border-radius: 4px; font-size: 12px; }
-    .status-CONNECTED { background: #d6f5d6; } .status-DEGRADED { background: #ffe2b3; }
-    .status-CONFIGURED { background: #e6e6ff; } .status-ONBOARD { background: #eee; }
-    .priority-P0 { background: #ffd6d6; } .priority-P1 { background: #d6e4ff; } .priority-P2 { background: #eee; }
-    .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
-    .circuit-CLOSED { background: #2ecc71; } .circuit-OPEN { background: #e74c3c; } .circuit-HALF_OPEN { background: #f1c40f; }
-    .warn { color: #e67e22; } .readonly { color: #888; } .desensitize { font-family: monospace; }
-    .oneclick-progress .seg { display: inline-block; padding: 4px 8px; margin-right: 4px; border: 1px solid #999; border-radius: 4px; }
-    .oneclick-progress .seg.done { background: #d6f5d6; }
-    .oneclick-progress .seg.fail { background: #ffd6d6; }
-    button { margin-right: 6px; }
-  </style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Agent 接入配置页原型 — 多 Agent 记忆助手</title>
+<style>
+  :root{
+    --bg:#0f1419; --panel:#1a212b; --panel2:#202833; --line:#2b3441;
+    --txt:#e6edf3; --muted:#8b98a7; --dim:#5b6675; --accent:#4d9fff;
+    --ok:#3ecf8e; --warn:#ffd166; --err:#ff5c5c;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+    font:14px/1.55 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1180px;margin:0 auto;padding:18px}
+  h1{font-size:18px;margin:0 0 2px}
+  .sub{color:var(--muted);font-size:12px;margin-bottom:14px}
+  .section-title{font-size:13px;color:var(--muted);font-weight:600;margin:18px 0 8px;text-transform:uppercase;letter-spacing:.5px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+  .card.degraded{border-color:#6b5a1e}
+  .card.failed{border-color:#6b2e2e}
+  .top{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+  .badge{font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px;border:1px solid var(--line)}
+  .badge.p0{background:#12324a;color:#8cc7ff}.badge.p1{background:#1a3320;color:#7fe0a0}
+  .badge.p2{background:#3a2f10;color:#ffd166}.badge.p3{background:var(--panel2);color:var(--muted)}
+  .agent-name{font-weight:700;font-size:15px}
+  .method{font-size:11px;color:var(--muted)}
+  .statusdot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:5px}
+  .st-connected{background:var(--ok)}.st-degraded{background:var(--warn)}.st-onboard{background:var(--dim)}
+  .metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:10px 0}
+  @media(max-width:700px){.metrics{grid-template-columns:repeat(2,1fr)}}
+  .metric{background:var(--panel2);border-radius:8px;padding:8px 10px}
+  .metric .k{font-size:11px;color:var(--muted)}
+  .metric .v{font-size:16px;font-weight:700;margin-top:2px;font-family:monospace}
+  .metric .v.warn{color:var(--warn)}.metric .v.err{color:var(--err)}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}
+  .pill{font-size:11px;padding:3px 9px;border-radius:6px;background:var(--panel2);border:1px solid var(--line);color:var(--muted)}
+  .pill.on{color:var(--txt);border-color:var(--accent)}
+  .pill.red{color:#ffb0b0;border-color:#6b2e2e;background:#3a1616}
+  .pill.gold{color:#ffe6a8;border-color:#6b5a1e;background:#3a2f10}
+  .sw{display:flex;align-items:center;gap:7px;font-size:12px;cursor:pointer;user-select:none}
+  .sw input{width:auto;cursor:pointer}
+  .btns{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+  .btn{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:7px 12px;cursor:pointer;font-size:12px}
+  .btn.primary{background:var(--accent);color:#04121f;border-color:var(--accent);font-weight:600}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .err-msg{font-size:12px;color:var(--warn);margin-top:8px;display:none}
+  .err-msg.show{display:block}
+  .test{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;margin-top:10px;font-size:12px}
+  .test .rid{font-family:monospace;color:var(--accent);cursor:pointer}
+  .inject{background:#12283a;border:1px solid #2a4a66;border-radius:6px;padding:7px;margin-top:7px;color:#8cc7ff;font-size:11px}
+  .warn{background:#3a2f10;border:1px solid #6b5a1e;border-radius:8px;padding:9px 11px;margin-top:10px;font-size:12px;color:#ffe6a8;display:none}
+  .warn.show{display:block}
+  .errbox{background:#3a1616;border:1px solid #6b2e2e;border-radius:8px;padding:9px 11px;margin-top:10px;font-size:12px;color:#ffb0b0;display:none}
+  .errbox.show{display:block}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 16px;font-size:13px;z-index:80;display:none}
+  /* 19.9 一键接入 */
+  .stages{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:10px 0}
+  @media(max-width:700px){.stages{grid-template-columns:repeat(2,1fr)}}
+  .stage{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px;font-size:11px;color:var(--muted);text-align:center;transition:.25s}
+  .stage b{display:block;font-size:12px;color:var(--txt);margin-bottom:2px}
+  .stage.done{border-color:var(--accent);background:#14263a;color:var(--txt)}
+  .found{display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 11px;margin:6px 0;font-size:12px}
+  .found.unbound{opacity:.6;border-style:dashed}
+  /* 效果证据 */
+  .gains{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  @media(max-width:820px){.gains{grid-template-columns:1fr}}
+  .gain{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .gain h3{font-size:13px;margin:0 0 8px;color:var(--txt);display:flex;align-items:center;gap:6px}
+  .gain .big{font-size:26px;font-weight:800;font-family:monospace;color:var(--ok);margin:4px 0}
+  .gain .desc{font-size:11px;color:var(--muted);line-height:1.5}
+  .gain .desc b{color:var(--txt)}
+  .gain .src{font-size:10px;color:var(--dim);margin-top:6px}
+  .note{font-size:11px;color:var(--dim);margin-top:14px;line-height:1.6}
+</style>
 </head>
 <body>
-  <div style="margin-bottom:8px">
-    <label>后端地址（留空=内存模式）：<input id="backend" type="text" value="http://localhost:8200" placeholder="http://localhost:PORT" size="40" /></label>
-    <button id="oneclick">⚡ 一键自动发现并接入本机 Agent</button>
+<div class="wrap">
+  <h1>Agent 接入配置页 · 可交互原型</h1>
+  <div class="sub">按《Agent 接入页字段级交互规格》实现 · MVP 两家起步（deepseek harness P0 + Claude Code P1）· 一键接入 · 双通道降级 · 隔离开关 · 密钥脱敏 · 效果证据</div>
+
+  <div class="section-title">⚡ 一键接入本机 Agent（19.9）· 自动发现 + 默认绑定，不用逐个设置</div>
+  <div class="card" id="onboard">
+    <div class="top">
+      <button class="btn primary" id="btnDiscover">⚡ 自动发现并接入本机 Agent</button>
+      <span class="pill on" id="formBadge" style="margin-left:auto">当前形态：桌面端（全量发现可用）</span>
+    </div>
+    <div class="top" style="margin-bottom:6px">
+      <span style="font-size:11px;color:var(--muted)">发现信号源（按 19.10 形态置灰）：</span>
+      <label class="sw"><input type="checkbox" class="sig" value="mcp" checked>MCP 注册表</label>
+      <label class="sw"><input type="checkbox" class="sig" value="proc" checked>本机进程</label>
+      <label class="sw"><input type="checkbox" class="sig" value="hb" checked>Webhook 心跳</label>
+      <label class="sw"><input type="checkbox" class="sig" value="manual">手动兜底</label>
+      <span class="pill" id="scanState" style="margin-left:auto">待扫描</span>
+    </div>
+    <div class="stages" id="stages">
+      <div class="stage" data-s="scan"><b>① 扫</b>发现注册信号</div>
+      <div class="stage" data-s="tag"><b>② 分</b>自动打标 P0/P1/P2</div>
+      <div class="stage" data-s="bind"><b>③ 绑</b>按默认值绑定</div>
+      <div class="stage" data-s="verify"><b>④ 验</b>测通 + 记审计</div>
+    </div>
+    <div id="found"></div>
+    <div class="note">
+      原理：<b>发现</b>是技术活（扫本机注册信号），<b>绑定</b>是信任活（全用 19.4/19.5 最合理默认值）——
+      所以发现即绑定、绑即可用，用户<b>不需要逐项理解配置</b>。
+      默认值：隔离 project_id 共享 + user_id 偏好 · 双通道（Webhook 主 + API 补偿）· 该 Agent 免费/低价模型自动进 19.8 全量映射池。
+      安全兜底：自动绑定默认<b>只开只读召回</b>，写入/反代理 P0/P1 按 19.2 放行、<b>P2 须用户确认</b>；每个绑定<b>可一键撤销</b>（审计 unbound）。
+      有信号的一律自动，仅<b>无信号</b>的 Agent 才需手填端点。
+    </div>
   </div>
-  <div id="app"></div>
-  <div id="boot-status" style="color:#888;font-size:13px"></div>
-  <p style="color:#888">原型参考：<code>design/ui/Agent接入页_原型.html</code>；本页由 <code>src/agentOnboard/*</code> 模块渲染，逻辑核心零依赖。</p>
-  <!-- 非模块诊断层：捕获脚本未加载 / 运行时异常，避免"静默无反应" -->
-  <script>
-    window.__painted = false;
-    window.addEventListener('error', function (e) {
-      var b = document.getElementById('boot-status');
-      if (b) b.innerHTML = '<span style="color:#e74c3c">⚠ 脚本异常：' +
-        (e.message || e.filename || 'unknown') + '</span>';
-    });
-    window.addEventListener('DOMContentLoaded', function () {
-      var b = document.getElementById('boot-status');
-      if (b) b.textContent = '模块加载中…（ES module 需经 http 打开，file:// 直开会失败）';
-      setTimeout(function () {
-        if (!window.__painted && b) {
-          b.innerHTML = '<span style="color:#e67e22">⚠ 模块未在 2 秒内完成渲染。' +
-            '请用本地静态服务器打开：<code>python -m http.server</code> → ' +
-            '<code>http://localhost:&lt;port&gt;/src/agentOnboard/app.html</code></span>';
-        }
-      }, 2000);
-    });
-  </script>
-  <script type="module" src="./browser.js"></script>
+
+  <div class="section-title">宿主 Agent 接入卡片（19.2 / 19.3 / 5.2）</div>
+  <div id="cards"></div>
+
+  <div class="section-title">效果证据 · 用户可感知的「省」与「快」（token / 效率 / 模型成本）</div>
+  <div class="gains" id="gains"></div>
+  <div class="note">
+    说明：终端用户感知不到「记忆助手」本身（19.1 透明），他感知到的是 <b>Agent 变聪明了、变省了</b>。
+    以上证据链来自检索页预算面板（payload / pipeline token）、极简模式短查询（≤600t，2.4.1）、次模式（≤200t 占位符注入，2.4.3）、
+    跨会话背景免重复交代（9.1）、踩坑复用（9.3）、决策追溯（9.4）、跨 Agent 共享（19.4）、模型成本节省（19.8），
+    审计页可按 request_id 逐项核对（4.3 / 18.2-E）。
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<!-- 真实后端接入点（隐藏；默认本地 T13 服务，不影响原型视觉）。留空走内存模式。 -->
+<input id="backend" type="hidden" value="http://localhost:8200" />
+<div id="boot-status" style="position:fixed;top:8px;right:8px;font-size:12px;color:var(--muted);z-index:90"></div>
+
+<!-- 非模块诊断层：捕获脚本未加载 / 运行时异常，避免"静默无反应" -->
+<script>
+  window.__painted = false;
+  window.addEventListener('error', function (e) {
+    var b = document.getElementById('boot-status');
+    if (b) b.innerHTML = '<span style="color:#ff5c5c">⚠ 脚本异常：' +
+      (e.message || e.filename || 'unknown') + '</span>';
+  });
+  window.addEventListener('DOMContentLoaded', function () {
+    var b = document.getElementById('boot-status');
+    if (b) b.textContent = '模块加载中…（ES module 需经 http 打开，file:// 直开会失败）';
+    setTimeout(function () {
+      if (!window.__painted && b) {
+        b.innerHTML = '<span style="color:#ffd166">⚠ 模块未在 2 秒内完成渲染。' +
+          '请用本地静态服务器打开：<code>python -m http.server</code> → ' +
+          '<code>http://localhost:&lt;port&gt;/src/agentOnboard/app.html</code></span>';
+      }
+    }, 2000);
+  });
+</script>
+<script type="module" src="./browser.js"></script>
 </body>
 </html>
