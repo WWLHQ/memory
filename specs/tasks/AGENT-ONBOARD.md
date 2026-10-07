@@ -145,6 +145,35 @@
 
 ---
 
+## T13 接入真实后端 HTTP 服务（零依赖）
+- 目标：提供 Agent 接入的**真实后端**（HTTP + 持久化），替换内存 mock；零依赖、可本地/CI 运行
+- 输入：无（独立服务）；可配置端口（测试用 0 随机端口）与数据文件路径
+- 输出：`src/agentOnboard/server.js`（`createServer()` 暴露 start/stop + `url`）：端点 `POST /agents`(configure)、`POST /agents/:name/test`(testConnect)、`POST /agents/:name/rotate-key`、`POST /agents/:name/revoke-key`、`POST /discover`(oneClickOnboard)、`DELETE /agents/:name`(revokeBind)、`GET /audit`；状态用 `node:fs` 持久化到 `.data/agent-onboard.json`（复用 `AgentOnboardService` 业务内核，不重复校验/状态机逻辑）
+- 验收：`node --test src/agentOnboard/__tests__/server.test.js`（启服务→各端点往返→进程重启后数据/审计仍在）
+- 边界：仅 `server.js` + 其测试 + `.data/`（gitignore）；**不改** service.js / 前端 / 校验 / 状态机
+- 依赖：T11（复用 `AgentOnboardService`）；被 T14 依赖
+- 提交：`feat: agent onboard http backend (T13)`
+
+## T14 前端/客户端改调真实后端
+- 目标：提供 HTTP 客户端，使前端与测试通过真实后端跑接入链路；保留内存实现作 fallback
+- 输入：T13 服务；可配置 `baseUrl`（默认内存 fallback，离线可用）
+- 输出：`src/agentOnboard/client.js`（`AgentOnboardClient`，与 `AgentOnboardService` 同接口：`configure/testConnect/rotateKey/revokeKey/oneClickOnboard/revokeBind/getAudit`，走 `fetch`）；`service.js` 构造器加可选 `backend` 注入（默认内存，向后兼容，不破坏现有 service.test.js）；`app.html` 增加后端地址配置项
+- 验收：`node --test src/agentOnboard/__tests__/client.test.js`（指向 T13 服务走 HTTP、审计持久化生效；默认内存用例仍绿）
+- 边界：仅 `client.js` + `service.js` 注入点 + `app.html` 配置 + 测试；不动校验/状态机/渲染/server
+- 依赖：T13；被 T15 依赖
+- 提交：`feat: agent onboard http client (T14)`
+
+## T15 真实后端全链路 E2E
+- 目标：起 T13 服务，用 T14 客户端跑 configure→testConnect→rotateKey→revokeKey→oneClickOnboard→revokeBind 全链路 + 审计持久化跨重启
+- 输入：T13 + T14；规格 §8 验收用例
+- 输出：增强 `src/agentOnboard/__tests__/e2e.test.js`，启真实 server 跑全链路；`app.html` 接后端地址
+- 验收：`node --test src/agentOnboard/__tests__/e2e.test.js`（全链路绿 + 重启后审计/卡片仍在）
+- 边界：仅 `e2e.test.js` + `app.html` 配置；不改业务逻辑
+- 依赖：T13, T14
+- 提交：`test: agent onboard real-backend e2e (T15)`
+
+---
+
 ## 依赖 DAG（有向无环图）
 
 ```
