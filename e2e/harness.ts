@@ -33,12 +33,17 @@ export const test = base.extend({
 /**
  * 断开 CDP 连接。CDP 连接是长连接，不主动断开会吊住 worker 进程（teardown 卡死）。
  * 对 connectOverCDP 的 browser 调 close() 只会断开、不会杀掉外部 Chromium。
+ * 注意：本机偶发 close() 挂起（iframe 页面残留连接），加 3s 超时兜底——
+ * worker 进程退出后 CDP socket 自然释放，不影响外部 Chromium 存活。
  */
 export async function disconnectBrowser(): Promise<void> {
   if (!cached) return;
   const b = cached;
   cached = null;
-  await b.close();
+  await Promise.race([
+    b.close(),
+    new Promise<void>((r) => setTimeout(r, 3000)),
+  ]);
 }
 
 /** 收集页面运行时异常（用于断言"无脚本异常"） */

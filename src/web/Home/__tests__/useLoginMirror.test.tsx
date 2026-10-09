@@ -28,22 +28,18 @@ function stubFetch(fn: unknown) {
 }
 
 describe('T11 前端登录 API client', () => {
-  let originalLocation: PropertyDescriptor | undefined;
-
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn());
   });
   afterEach(() => {
     vi.unstubAllGlobals();
-    if (originalLocation) {
-      Object.defineProperty(window, 'location', originalLocation);
-      originalLocation = undefined;
-    }
+    // 恢复无 query 的干净 URL
+    window.history.replaceState(null, '', '/');
   });
 
+  /** jsdom 30 中 window.location 不可重定义，改用 history API 修改 search */
   function setQuery(q: string) {
-    originalLocation = Object.getOwnPropertyDescriptor(window, 'location');
-    Object.defineProperty(window, 'location', { value: { search: q }, configurable: true });
+    window.history.replaceState(null, '', q);
   }
 
   it('login() → fetch POST /api/login 请求体含 account/password', async () => {

@@ -42,15 +42,16 @@ test.afterAll(async () => {
 });
 
 test.describe('REQ-005 首页与登录卡片 · 点击级 E2E', () => {
-  test('① 首屏进入不阻塞登录（未登录灰置）', async ({ page }) => {
+  test('① 首屏进入不阻塞登录（未登录显示登录门控）', async ({ page }) => {
     const errors = collectErrors(page);
     await page.goto(APP);
-    // 未登录：欢迎语 + ▶ 登录 可见；功能区灰置占位
+    // 未登录：欢迎语 + ▶ 登录 可见；登录门控遮罩替代仪表盘
     await expect(page.locator('#hiUnauth')).toBeVisible();
     await expect(page.locator('#btnOpenLogin')).toBeVisible();
-    await expect(page.locator('#offPlaceholder')).toBeVisible();
+    await expect(page.locator('#authGate')).toBeVisible();
     // 已登录态元素不应出现（不阻塞、不预载）
     await expect(page.locator('#hiAuth')).toHaveCount(0);
+    await expect(page.locator('#dashGrid')).toHaveCount(0);
     expect(errors).toEqual([]);
   });
 
@@ -152,9 +153,9 @@ test.describe('REQ-005 首页与登录卡片 · 点击级 E2E', () => {
     await expect(page.locator('#hiAuth')).toContainText('e2e_user');
 
     await page.click('#btnLogout');
-    // 回未登录灰置
+    // 回未登录门控态
     await expect(page.locator('#hiUnauth')).toBeVisible();
-    await expect(page.locator('#offPlaceholder')).toBeVisible();
+    await expect(page.locator('#authGate')).toBeVisible();
     await expect(page.locator('#hiAuth')).toHaveCount(0);
     expect(errors).toEqual([]);
   });

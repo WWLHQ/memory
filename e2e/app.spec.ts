@@ -24,6 +24,14 @@ test.afterAll(async () => {
 });
 
 test.describe('REQ-003 Agent 接入页 · 点击级 E2E', () => {
+  // 登录门控（REQ-005）：AgentOnboardPage 未登录时显示 .auth-gate 拦截。
+  // 这里预置 session 模拟"已登录"（登录流程由 home/register/crossTabAuth spec 覆盖）。
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem('session:realpage', 'e2e-session-agentonboard');
+    });
+  });
+
   test('首屏渲染：3 宿主卡片 + 4 效果证据 + 4 发现项，无脚本异常', async ({ page }) => {
     const errors = collectErrors(page);
     await page.goto(APP);

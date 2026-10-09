@@ -39,6 +39,23 @@ export default async function globalSetup() {
   child.unref();
 
   await waitForCDP();
-  writeFileSync(CDE_FILE, JSON.stringify({ wsEndpoint: `http://127.0.0.1:${PORT}`, pid: child.pid }, null, 2));
-  console.error(`[e2e] Chromium CDP 就绪：http://127.0.0.1:${PORT} (pid=${child.pid})`);
+  // 预取 webSocketDebuggerUrl：Chromium 在首个 CDP 客户端断开后，
+  // HTTP 发现端点（/json/version）会 404，后续 worker 必须直接走 ws:// 连接。
+  const wsEndpoint = await new Promise((resolve, reject) => {
+    const req = http.get({ host: '127.0.0.1', port: PORT, path: '/json/version' }, (res) => {
+      let data = '';
+      res.on('data', (c) => (data += c));
+      res.on('end', () => {
+        try {
+          const j = JSON.parse(data);
+          resolve(j.webSocketDebuggerUrl);
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+    req.on('error', reject);
+  });
+  writeFileSync(CDE_FILE, JSON.stringify({ wsEndpoint, pid: child.pid }, null, 2));
+  console.error(`[e2e] Chromium CDP 就绪：${wsEndpoint} (pid=${child.pid})`);
 }

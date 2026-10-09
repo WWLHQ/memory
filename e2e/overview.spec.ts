@@ -26,14 +26,20 @@ test.afterAll(async () => {
 test.describe('REQ-003 + REQ-005 通览页 · 点击级 E2E', () => {
   test('左导航切换两视图，iframe 正确加载首页与接入页', async ({ page }) => {
     const errors = collectErrors(page);
+    // 登录门控（REQ-005）：非登录视图需先有 session。
+    // 这里模拟"已在首页登录过"的状态（登录/注册流程由 home/register/crossTabAuth spec 覆盖）。
+    await page.addInitScript(() => {
+      localStorage.setItem('session:realpage', 'e2e-session-overview');
+    });
     // ?backend= 透传给 iframe 内的子页面，使其指向本 spec 的独立后端
     await page.goto(`http://localhost:${STATIC_PORT}/overview.html?backend=http://localhost:${BACKEND_PORT}`);
 
     await expect(page.locator('.top .logo')).toContainText('记忆助手');
 
     // 默认视图：首页 + 登录卡片（REQ-005）
+    // 已注入 session → 首页直接进入已登录态（跨 iframe 登录态共享的正确行为）
     await expect(page.locator('#stage')).toHaveAttribute('src', /\/index\.html/);
-    await expect(page.frameLocator('#stage').locator('#btnOpenLogin')).toBeVisible();
+    await expect(page.frameLocator('#stage').locator('#btnLogout')).toBeVisible();
 
     // 切到接入配置页（REQ-003）
     await page.click('.nav .item:has-text("Agent 接入配置页")');

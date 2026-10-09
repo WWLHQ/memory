@@ -21,6 +21,10 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
+    // vmThreads 池：同一 VM 上下文内共享模块实例，避免 'vitest' 被双实例化
+    // （否则测试文件静态 import { describe } from 'vitest' 拿到的 runner 未初始化，
+    //  报 "Cannot read properties of undefined (reading 'config')"）
+    pool: 'vmThreads',
     setupFiles: ['./src/web/test-setup.ts'],
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
   },
