@@ -29,7 +29,7 @@
 - **门禁命令**：`npm run verify` = `typecheck`(tsc --noEmit, strict) → `test`(vitest) → `validate_project.py` → `generate.py --check`。CI 已加 `npm ci` + `typecheck` + vitest + e2e job。
 - `npm test` **71/71绿**（新增 28 例：AgentCard 10 + 其余组件 11 + 页面集成 7）。
 - **提交约定**：每次提交必须写提交日志（conventional commit，见 MEMORY.md）；T3–T12 已在 initial commit `04cb27b` 打包，决策**不重写历史**、改 code-map 标注任务归属。
-- **未推**：本地领先 origin/main 多个提交（含 `947353f` UI 对齐原型 + TS/React 迁移），本机无凭据；`.workbuddy/memory/` 未跟踪（agent 工作记忆）。
+- **已推**：2026-10-07 通过 SSH（`git@github.com:WWLHQ/memory.git`，密钥 `C:\Users\LHQ\.ssh\id_ed25519_github_push`）将本地 12 个提交全部推上 `origin/main`（含 `947353f`、`554e20f`…`c7c1476`），`git fetch` 后 `ahead 0` 确认同步。备注：本沙箱出网仅 SSH(22) 可达 GitHub，HTTPS(443) 被本地代理封死；`.workbuddy/memory/` 仍为未跟踪（agent 工作记忆，按需提交）。
 
 ## 下一步
 - 候选：① 接真实后端（替换 `service.js` 内存为 API）；② 真浏览器 E2E（Playwright 跑 `app.html`）；③ 确认 JS 方案并更新规格消除偏离；④ 推进 REQ-004~REQ-012（补 AC/TC + 跑通一个功能）。

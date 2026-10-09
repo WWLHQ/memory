@@ -8,6 +8,7 @@
 - 测试（示例）：[specs/test-plan.md](specs/test-plan.md)
 - 任务拆分示例：[specs/tasks/USER-REGISTER.md](specs/tasks/USER-REGISTER.md)
 - 任务拆分（REQ-003 Agent 接入页）：[specs/tasks/AGENT-ONBOARD.md](specs/tasks/AGENT-ONBOARD.md)
+- 任务拆分（REQ-005 首页与登录卡片）：[specs/tasks/HOME-LOGIN.md](specs/tasks/HOME-LOGIN.md)
 - 代码映射（可追溯）：[specs/code-map.md](specs/code-map.md)
 - 项目需求规格（导入，待结构化）：
   - [需求规格书.md](specs/需求规格书.md)

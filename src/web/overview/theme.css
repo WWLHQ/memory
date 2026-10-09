@@ -1,0 +1,31 @@
+/* 通览演示页样式 —— 逐字提取自 design/ui/index.html */
+
+  :root{--bg:#0b0f14;--panel:#141b24;--line:#243040;--txt:#e6edf3;--muted:#8b98a7;--dim:#5b6675;--accent:#4d9fff}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.5 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;height:100vh;overflow:hidden}
+  .top{height:52px;background:var(--panel);border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 16px;gap:12px}
+  .top .logo{font-weight:700;font-size:15px}
+  .top .tag{font-size:11px;color:var(--muted)}
+  .top .right{margin-left:auto;font-size:11px;color:var(--dim)}
+  .body{display:flex;height:calc(100vh - 52px)}
+  .nav{width:230px;background:var(--panel);border-right:1px solid var(--line);padding:14px 10px;overflow:auto}
+  .nav .grp{font-size:10px;color:var(--dim);letter-spacing:.6px;text-transform:uppercase;margin:14px 8px 6px}
+  .nav .grp:first-child{margin-top:2px}
+  .nav .item{display:flex;gap:9px;align-items:center;padding:9px 10px;border-radius:9px;cursor:pointer;color:var(--muted);font-size:13px;border:1px solid transparent;margin-bottom:2px}
+  .nav .item:hover{background:#1b2430}
+  .nav .item.active{background:#16222f;color:var(--txt);border-color:var(--line)}
+  .nav .item .ic{width:20px;text-align:center;font-size:15px}
+  .nav .item .desc{font-size:10px;color:var(--dim);display:block;margin-top:1px}
+  .main{flex:1;display:flex;flex-direction:column;min-width:0}
+  .stagebar{height:40px;background:var(--panel);border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 14px;gap:10px;font-size:12px;color:var(--muted)}
+  .stagebar .cur{color:var(--txt);font-weight:600}
+  .stagebar .act{margin-left:auto;display:flex;gap:8px}
+  .stagebar .act button{background:#1b2430;border:1px solid var(--line);color:var(--txt);border-radius:7px;padding:4px 10px;font-size:12px;cursor:pointer}
+  .stagebar .act button:hover{border-color:var(--accent)}
+  .view{flex:1;background:#fff}
+  .view iframe{width:100%;height:100%;border:0;display:block}
+  .view .placeholder{height:100%;display:flex;align-items:center;justify-content:center;color:var(--dim);flex-direction:column;gap:12px;font-size:14px}
+  .view .placeholder .big{font-size:40px}
+  .legend{padding:8px 14px;background:var(--panel);border-top:1px solid var(--line);font-size:11px;color:var(--dim);line-height:1.6}
+  @media(max-width:760px){.nav{width:64px}.nav .item{padding:8px 6px}.nav .item .desc,.nav .item .lbl,.nav .grp{display:none}.nav .item .ic{font-size:18px}}
+

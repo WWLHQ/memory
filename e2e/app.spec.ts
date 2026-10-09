@@ -8,7 +8,7 @@ import { test, expect, disconnectBrowser, collectErrors } from './harness.ts';
 import { startStatic, type StaticServer } from './servers.ts';
 import { createServer as createBackend, type RunningServer } from '../src/agentOnboard/server.ts';
 
-const APP = '/index.html';
+const APP = '/agentonboard.html';
 
 let staticSrv: StaticServer;
 let backend: RunningServer;

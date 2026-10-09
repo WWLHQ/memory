@@ -5,6 +5,11 @@ on:
     branches: [main, master]
   pull_request:
 
+# 同分支的新推送会取消旧的在跑流程，避免排队浪费
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   quality-gate:
     runs-on: ubuntu-latest
@@ -20,6 +25,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: "npm"
 
       - name: 安装依赖
         run: npm ci
@@ -52,13 +58,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: "npm"
 
       - name: 安装 E2E 依赖
         run: npm ci
 
-      - name: 安装 Chromium
+      - name: 缓存 Playwright Chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: pw-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: 安装 Chromium（含系统依赖）
         run: npx playwright install --with-deps chromium
 
-      - name: 真浏览器点击级 E2E（REQ-003 接原型）
+      - name: 真浏览器点击级 E2E（REQ-003 + REQ-005 接原型）
         run: npm run test:e2e
-        # 覆盖：一键接入四段动画 / R3·R4 校验 / 测试·轮换·保存打到真实后端 / 撤销绑定 / 无脚本异常
+        # 覆盖：一键接入四段动画 / R3·R4 校验 / 测试·轮换·保存打到真实后端 / 撤销绑定 / 通览页两视图切换 / 无脚本异常
+        # run.mjs 会先 vite build 产物到 dist/，再由 globalSetup 拉起 headless Chromium（CDP），spec 自起后端与静态服务。
