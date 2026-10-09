@@ -17,11 +17,11 @@ interface View {
 const VIEWS: View[] = [
   { id: 'login', ic: '🏠', lbl: '首页 + 登录卡片', desc: 'P0 落地页含登录态 · 团队管理员分配 · 功劳收口', src: '/index.html', req: 'REQ-005' },
   { id: 'agent', ic: '🔌', lbl: 'Agent 接入配置页', desc: '⚡一键接入 · 双通道 · 隔离 · 效果证据', src: '/agentonboard.html', req: 'REQ-003' },
+  { id: 'inline', ic: '🧠', lbl: 'Agent 界面内联标识', desc: '让功劳当场可见（19.7）· 对话内联 🧠/⚡/📎/⚠️ · 可干预', src: '/inlineattribution.html', req: 'REQ-004' },
 ];
 
 const PLANNED: View[] = [
   { id: 'recall', ic: '🔎', lbl: '检索页', desc: '8 条验收用例 · 透明化召回', src: null, req: '规划中' },
-  { id: 'inline', ic: '🧠', lbl: 'Agent 界面内联标识', desc: '让功劳当场可见（19.7）', src: null, req: '规划中' },
   { id: 'audit', ic: '📋', lbl: '审计日志页', desc: 'request_id 可溯源 · 4.3 统一审计', src: null, req: '规划中' },
 ];
 
@@ -37,8 +37,8 @@ export function Overview() {
     <>
       <div className="top">
         <span className="logo">🧠 多 Agent 记忆助手 · UI 通览</span>
-        <span className="tag">REQ-005 首页 / REQ-003 接入页</span>
-        <span className="right">2 个已落地视图 · iframe 隔离</span>
+        <span className="tag">REQ-005 首页 / REQ-003 接入页 / REQ-004 内联标识</span>
+        <span className="right">3 个已落地视图 · iframe 隔离</span>
       </div>
       <div className="body">
         <div className="nav" id="nav">

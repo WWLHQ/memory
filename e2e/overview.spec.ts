@@ -40,6 +40,11 @@ test.describe('REQ-003 + REQ-005 通览页 · 点击级 E2E', () => {
     await expect(page.locator('#stage')).toHaveAttribute('src', /\/agentonboard\.html/);
     await expect(page.frameLocator('#stage').locator('#cards > .card')).toHaveCount(3);
 
+    // 切到内联标识演示页（REQ-004，已从规划中提升为已落地）
+    await page.click('.nav .item:has-text("Agent 界面内联标识")');
+    await expect(page.locator('#stage')).toHaveAttribute('src', /\/inlineattribution\.html/);
+    await expect(page.frameLocator('#stage').locator('.mem-tag')).toHaveCount(3);
+
     expect(errors).toEqual([]);
   });
 });

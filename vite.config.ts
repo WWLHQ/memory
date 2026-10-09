@@ -13,6 +13,7 @@ export default defineConfig({
         main: 'index.html',
         agentonboard: 'agentonboard.html',
         overview: 'overview.html',
+        inlineattribution: 'inlineAttribution.html',
       },
     },
   },

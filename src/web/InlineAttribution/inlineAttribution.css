@@ -1,0 +1,81 @@
+/* REQ-004 宿主演示页样式 —— 逐字提取/适配自 design/ui/Agent界面内联标识_原型.html
+   覆盖 MemoryInjectionTag / AgingWarnTag / TokenSavingBar / BackgroundChip /
+   AttributionSummary / AttributionToggle 所用全部 class。 */
+:root{
+  --bg:#0f1419;--panel:#1a212b;--panel2:#202833;--line:#2b3441;
+  --txt:#e6edf3;--muted:#8b98a7;--dim:#5b6675;--accent:#4d9fff;
+  --mem:#9d6bff;--ok:#3ecf8e;--warn:#ffd166;--err:#ff5c5c
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);
+  font:14px/1.6 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+
+.wrap{max-width:880px;margin:0 auto;padding:18px}
+h1{font-size:17px;margin:0 0 2px}
+.sub{color:var(--muted);font-size:12px;margin-bottom:14px}
+
+.agentframe{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.agenthead{background:var(--panel2);padding:12px 16px;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:center}
+.agenthead .logo{font-weight:700}
+.agenthead .who{font-size:12px;color:var(--muted)}
+.agenthead .who.right{margin-left:auto}
+
+/* ③ 背景免重复标记 */
+.bgmark{margin:0 16px;background:#12324a;border:1px solid #2a4a66;color:#8cc7ff;border-radius:8px;padding:8px 11px;font-size:12px;cursor:pointer}
+.bgmark .more{color:#7cc0ff;text-decoration:underline;cursor:pointer}
+.bgmark ul{margin:6px 0 0;padding-left:18px;list-style:none}
+.bgmark b{color:#cfe8ff}
+
+.chat{padding:14px 16px}
+.msg{margin-bottom:14px}
+.msg .role{font-size:11px;color:var(--dim);margin-bottom:3px}
+.bubble{background:var(--panel2);border-radius:10px;padding:10px 13px;max-width:92%}
+.bubble.user{background:#20303d;margin-left:auto}
+.bubble .ans{margin:4px 0}
+
+/* ① 记忆注入标记 */
+.mem-tag-wrap{position:relative;display:inline-block;margin:0 2px;vertical-align:middle}
+.mem-tag{display:inline-block;font-size:10px;background:#2a1f3a;color:#c9a6ff;border:1px solid #4a3566;border-radius:5px;padding:0 5px;cursor:pointer;vertical-align:middle}
+.mem-tag.warm{background:#3a2a16;color:#ffb454;border-color:#5a4420}
+.mem-tag.cold{background:#122c44;color:#7cc0ff;border-color:#2a4a66}
+.mem-tag.dormant{background:#232a35;color:#7a8698;border-color:#3a4453}
+
+/* ④ 老化 / 证据警示 */
+.warn-tag{display:inline-block;font-size:10px;background:#3a2f10;color:#ffe6a8;border:1px solid #6b5a1e;border-radius:5px;padding:0 5px;margin-left:4px;cursor:pointer}
+.warn-tag .warn-acts{margin-left:6px}
+.warn-tag .warn-acts button{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:2px 6px;font-size:10px;cursor:pointer;margin-left:3px}
+.warn-tag .warn-acts button:hover{border-color:var(--accent)}
+
+/* ① 弹层 */
+.pop{position:absolute;top:18px;left:0;background:var(--panel);border:1px solid var(--accent);border-radius:10px;padding:11px;width:280px;z-index:40;box-shadow:0 8px 30px rgba(0,0,0,.5);font-size:12px;white-space:normal}
+.pop h4{margin:0 0 6px;font-size:12px;color:var(--accent)}
+.pop .m{color:var(--muted);margin:3px 0}
+.pop .m b{color:var(--txt)}
+.pop .m.warn{color:var(--warn)}
+.pop .acts{display:flex;gap:6px;margin-top:9px;flex-wrap:wrap}
+.pop .acts button{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:3px 8px;font-size:11px;cursor:pointer}
+.pop .acts button:hover{border-color:var(--accent)}
+
+/* ② Token 节省标记 */
+.tokbar{margin:12px 16px 0;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 11px;font-size:12px;color:var(--muted);cursor:pointer}
+.tokbar .big{color:var(--ok);font-weight:700;font-family:monospace}
+.tokbar .tokbar-more{color:var(--accent);margin-left:4px}
+.tokbar ul{margin:5px 0 0;padding-left:18px;font-size:11px;list-style:none}
+
+/* ⑧ 写入沉淀标记 + 每回答贡献摘要 */
+.savebar{margin:0 16px;background:#123020;border:1px solid #2a4a30;color:#9fe8c0;border-radius:8px;padding:8px 11px;font-size:12px;cursor:pointer}
+.attr-summary{margin:10px 16px 0;font-size:12px}
+.attr-summary-line{color:var(--muted)}
+
+/* ⑨ 可开关控件 */
+.attr-toggle{display:flex;gap:16px;margin:0 16px 10px;font-size:12px;color:var(--muted);align-items:center}
+.attr-toggle-label{user-select:none}
+.attr-toggle-opt{cursor:pointer;user-select:none}
+
+/* 图例 */
+.legend{margin-top:14px;font-size:11px;color:var(--dim);line-height:1.7}
+.legend b{color:var(--muted)}
+
+/* toast */
+.toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--accent);border-radius:8px;padding:9px 16px;font-size:13px;z-index:80;max-width:80vw}
+.hidden{display:none!important}
