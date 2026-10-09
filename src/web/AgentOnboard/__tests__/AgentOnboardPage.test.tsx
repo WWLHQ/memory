@@ -4,6 +4,9 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AgentOnboardPage } from '../AgentOnboardPage.tsx';
+import { setTestOverride } from '../../Home/crossTabAuth.ts';
+// 测试环境无 sessionStorage，强制 hasActiveSession()=true 绕过登录门控
+setTestOverride(true);
 
 test('首屏：3 宿主卡片 + 4 效果证据 + 4 发现项 + 端徽标', () => {
   render(<AgentOnboardPage />);

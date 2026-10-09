@@ -21,12 +21,13 @@
   .btn:disabled{opacity:.45;cursor:not-allowed}
   .err{font-size:12px;color:var(--warn);margin-top:6px;min-height:16px}
   .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 16px;font-size:13px;z-index:80;display:none}
-  .gains{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .gains{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:12px}
   @media(max-width:820px){.gains{grid-template-columns:1fr 1fr}}
-  .gain{background:var(--panel2);border-radius:10px;padding:12px}
+  .gain{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px}
   .gain h3{font-size:12px;margin:0 0 6px;color:var(--txt)}
   .gain .big{font-size:22px;font-weight:800;font-family:monospace;color:var(--ok)}
   .gain .desc{font-size:10px;color:var(--muted);margin-top:4px}
+  .gain .src{font-size:10px;color:var(--dim);margin-top:6px}
   .gain.off{opacity:.4}
   .dash-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
   @media(max-width:700px){.dash-grid{grid-template-columns:1fr}}
@@ -43,8 +44,8 @@
   /* 顶栏（登录态自适应） */
   .topbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
   .topbar .hi{font-size:14px;font-weight:600}
-  /* 未登录占位 */
-  .off-placeholder{grid-column:1/-1;background:var(--panel2);border:1px dashed var(--line);border-radius:10px;padding:20px;text-align:center;color:var(--dim);font-size:13px}
+  /* 未登录占位（区分于已登录数据区） */
+  .off-placeholder{grid-column:1/-1;background:var(--panel2);border:2px dashed var(--line);border-radius:10px;padding:20px;text-align:center;color:var(--dim);font-size:13px}
   /* 登录卡片（弹出） */
   .login-modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:50}
   .login-modal.show{display:flex}
@@ -57,3 +58,8 @@
 /* React 挂载补充：#root 包裹 + 原型 .wrap 容器（对齐原型 max-width:1180px 居中） */
 #root { min-height: 100vh; }
 .home { max-width: 1180px; margin: 0 auto; padding: 18px; }
+/* 未登录门控遮罩 */
+.auth-gate{min-height:calc(100vh - 80px);display:flex;align-items:center;justify-content:center;padding:24px 18px}
+.gate-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:28px 32px;text-align:center;max-width:420px}
+.gate-card h2{margin:0 0 8px;font-size:18px}
+.gate-card p{margin:0 0 18px;color:var(--muted);font-size:13px;line-height:1.6}

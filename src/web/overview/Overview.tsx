@@ -1,7 +1,9 @@
 // REQ-003 + REQ-005 配合展示（通览演示页）
 // 结构/样式对齐 design/ui/index.html：顶部 logo 条 + 左侧视图导航 + 右侧 iframe 舞台。
 // 仅收录已真实落地的视图；未实现的原型视图标注「规划中」并禁用，避免给出不可用入口。
+// 登录门控：点击非登录视图时若未登录 → 自动切回登录视图并 toast 提示。
 import { useState } from 'react';
+import { hasActiveSession } from '../Home/crossTabAuth.ts';
 import './theme.css';
 
 interface View {
@@ -33,6 +35,20 @@ export function Overview() {
   const backend = new URLSearchParams(location.search).get('backend');
   const withBackend = (src: string) => (backend ? `${src}?backend=${encodeURIComponent(backend)}` : src);
 
+  // 登录门控：非登录视图需先登录；未登录时点击 → 切回登录视图
+  function handleNavClick(v: typeof VIEWS[number]) {
+    if (v.id === 'login') {
+      setActive(v.id);
+      return;
+    }
+    if (!hasActiveSession()) {
+      alert('请先登录后再访问该页面。\n\n点击确定后跳转至「首页 + 登录卡片」。');
+      setActive('login');
+      return;
+    }
+    setActive(v.id);
+  }
+
   return (
     <>
       <div className="top">
@@ -47,7 +63,7 @@ export function Overview() {
           <div
             key={v.id}
             className={`item${v.id === active ? ' active' : ''}`}
-            onClick={() => setActive(v.id)}
+            onClick={() => handleNavClick(v)}
           >
             <span className="ic">{v.ic}</span>
             <span className="lbl">

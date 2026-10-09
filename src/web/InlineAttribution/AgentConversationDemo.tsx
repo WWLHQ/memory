@@ -3,6 +3,10 @@
 // 示例数据对齐原型 design/ui/Agent界面内联标识_原型.html 的 MEM。
 import { useState } from 'react';
 import './inlineAttribution.css';
+// 内联标识演示页不要求登录（pure UI demo），显式跳过门控
+import { TenantProvider, type LoginFn, type LogoutFn } from '../Home/tenantContext.tsx';
+const DUMMY_LOGIN: LoginFn = () => ({ ok: true, context: { enterprise_id: 'demo', team_id: 'demo', user_id: 'guest', perspective: 'personal', session_id: `guest-${Date.now()}` }, audit: { action: 'login', form: 'desktop', account: 'guest', at: Date.now() } });
+const DUMMY_LOGOUT: LogoutFn = () => {};
 import { AttributionConfigProvider } from './AttributionConfig.tsx';
 import { AttributionToggle } from './AttributionToggle.tsx';
 import { BackgroundChip } from './BackgroundChip.tsx';
@@ -122,6 +126,7 @@ export function AgentConversationDemo() {
   }
 
   return (
+    <TenantProvider loginFn={DUMMY_LOGIN} onLogout={DUMMY_LOGOUT}>
     <AttributionConfigProvider>
       <div className="wrap">
         <h1>Agent 界面内联记忆标识 · 演示</h1>
@@ -129,6 +134,7 @@ export function AgentConversationDemo() {
           按《需求规格书_Agent界面内联记忆标识》(19.7) 实现 · 在 Claude Code 风格窗口里直接展示「这次回答/省 token 是记忆助手的功劳」· 用户可当场干预
         </div>
 
+        {/* 主体：对话流 + Toggle + 图例 */}
         <div className="agentframe">
           <div className="agenthead">
             <span className="logo">◆ Claude Code</span>
@@ -136,6 +142,7 @@ export function AgentConversationDemo() {
             <span className="who right">project=P1 · user=U1</span>
           </div>
 
+          {/* ⑨ 内联标识 Toggle（顶部控制） */}
           <AttributionToggle
             onChange={(lvl) =>
               showToast(
@@ -198,5 +205,6 @@ export function AgentConversationDemo() {
 
       {toast && <div className="toast" role="status">{toast}</div>}
     </AttributionConfigProvider>
+    </TenantProvider>
   );
 }

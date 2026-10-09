@@ -7,7 +7,9 @@
 import { createServer as httpCreateServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { login, exportLockSnapshot, importLockSnapshot, registerAccount, resetAuthStore } from '../auth/loginService.ts';
+import { hashPassword } from '../auth/hash.ts';
 import type { Form } from '../types/agentOnboard.ts';
 import type { TenantContext, LoginAudit } from '../types/home.ts';
 
@@ -59,6 +61,9 @@ export function createServer(opts: ServerOptions): Server {
 
   const sessions = new Map<string, Session>();
 
+  // 验证码存储（简单实现，生产环境应存入 Redis/DB）
+  const captchaStore = new Map<string, { code: string; expiresAt: number }>();
+
   function persistAudit(): void {
     writeFileSync(auditFile, JSON.stringify(audit, null, 2));
   }
@@ -94,6 +99,72 @@ export function createServer(opts: ServerOptions): Server {
 
     Promise.resolve()
       .then(async () => {
+        if (req.method === 'POST' && path === '/api/register') {
+          const body = await readJsonBody(req);
+          const account = typeof body.account === 'string' ? body.account : '';
+          const password = typeof body.password === 'string' ? body.password : '';
+          const confirmPassword = typeof body.confirmPassword === 'string' ? body.confirmPassword : '';
+          const captchaCode = typeof body.captchaCode === 'string' ? body.captchaCode : '';
+          const captchaId = typeof body.captchaId === 'string' ? body.captchaId : '';
+
+          if (!account || !password || !confirmPassword || !captchaCode) {
+            send(res, 400, { reason: 'empty' });
+            return;
+          }
+
+          // 账号格式校验：手机号或邮箱
+          const isPhone = /^1[3-9]\d{9}$/.test(account);
+          const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(account);
+          if (!isPhone && !isEmail) {
+            send(res, 400, { reason: 'invalid_account', message: '账号必须是手机号或邮箱' });
+            return;
+          }
+
+          // 密码长度校验
+          if (password.length < 6) {
+            send(res, 400, { reason: 'weak_password', message: '密码至少 6 位' });
+            return;
+          }
+
+          // 确认密码校验
+          if (password !== confirmPassword) {
+            send(res, 400, { reason: 'password_mismatch', message: '两次密码不一致' });
+            return;
+          }
+
+          // 验证码校验（简单实现：前端生成，后端验证）
+          const storedCaptcha = captchaStore.get(captchaId);
+          if (!storedCaptcha || storedCaptcha.code !== captchaCode) {
+            send(res, 400, { reason: 'invalid_captcha', message: '验证码错误' });
+            return;
+          }
+          captchaStore.delete(captchaId); // 一次性使用
+
+          // 检查账号是否已存在
+          const checkResult = login({ account, password: 'dummy', form: 'desktop' });
+          if (checkResult.ok || checkResult.reason === 'wrong') {
+            send(res, 409, { reason: 'exists', message: '账号已存在' });
+            return;
+          }
+
+          // 新用户注册
+          const teamId = `personal-${account}`;
+          registerAccount(account, hashPassword(password), { enterprise_id: 'local', team_id: teamId, perspective: 'personal' });
+          persistLock();
+          appendAudit({ action: 'login', form: 'desktop', account, at: Date.now() });
+          send(res, 200, { ok: true, team_id: teamId, message: '注册成功' });
+          return;
+        }
+
+        if (req.method === 'GET' && path === '/api/captcha') {
+          // 生成验证码
+          const id = randomUUID();
+          const code = String(Math.floor(100000 + Math.random() * 900000));
+          captchaStore.set(id, { code, expiresAt: Date.now() + 5 * 60 * 1000 }); // 5分钟有效
+          send(res, 200, { id, code }); // 测试用返回 code，生产环境应只返回 id
+          return;
+        }
+
         if (req.method === 'POST' && path === '/api/login') {
           const body = await readJsonBody(req);
           const account = typeof body.account === 'string' ? body.account : '';

@@ -4,6 +4,7 @@
 import { useCallback } from 'react';
 import type { LoginForm, TenantContext } from '../../types/home.ts';
 import type { LoginFn, LogoutFn } from './tenantContext.tsx';
+import { getStoredSessionId, storeSessionId, clearStoredSessionId } from './crossTabAuth.ts';
 
 const DEFAULT_BACKEND = 'http://localhost:8200';
 
@@ -15,13 +16,17 @@ function resolveBackendFromQuery(): string | undefined {
 }
 
 /** 后端不可用时的本地只读占位上下文（团队只读占位，fire-and-forget 降级） */
-function placeholderContext(input: LoginForm): TenantContext {
+function placeholderContext(input: LoginForm): { context: TenantContext; sessionId: string } {
+  const sid = `local-${Date.now()}`;
   return {
-    enterprise_id: 'local',
-    team_id: 'local-readonly',
-    user_id: input.account || 'local-guest',
-    perspective: 'personal',
-    session_id: `local-${Date.now()}`,
+    context: {
+      enterprise_id: 'local',
+      team_id: 'local-readonly',
+      user_id: input.account || 'local-guest',
+      perspective: 'personal',
+      session_id: sid,
+    },
+    sessionId: sid,
   };
 }
 
@@ -44,26 +49,41 @@ export function useLoginMirror(opts: UseLoginMirrorOptions = {}): { login: Login
     try {
       const res = await fetch(`${backend}/api/login`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          // 跨 iframe 登录态桥：把上游页面写入 sessionStorage 的权威 sessionId 透传给后端
+          // 当前后端暂不识别该头，仅作未来接入预留。
+          'X-Auth-Session': getStoredSessionId() ?? '',
+        },
         body: JSON.stringify({ account: input.account, password: input.password, form: input.form }),
       });
       if (res.ok) {
-        const body = (await res.json()) as { context: TenantContext; audit?: typeof audit };
+        const body = (await res.json()) as { context: TenantContext; sessionId?: string; audit?: typeof audit };
+        // 同步权威 session 到其他 iframe
+        if (body.sessionId) storeSessionId(body.sessionId);
         return { ok: true, context: body.context, audit: body.audit ?? audit };
       }
       // 后端不可用/401 → 回退本地只读占位（不崩）
-      return { ok: true, context: placeholderContext(input), audit };
+      const placeholder = placeholderContext(input);
+      storeSessionId(placeholder.sessionId);
+      return { ok: true, context: placeholder.context, audit };
     } catch {
-      return { ok: true, context: placeholderContext(input), audit };
+      const placeholder = placeholderContext(input);
+      storeSessionId(placeholder.sessionId);
+      return { ok: true, context: placeholder.context, audit };
     }
   }, [backend]);
 
   const logout = useCallback<LogoutFn>(async () => {
     try {
-      await fetch(`${backend}/api/logout`, { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+      await fetch(`${backend}/api/logout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Auth-Session': getStoredSessionId() ?? '' },
+      });
     } catch {
       /* fire-and-forget：失败忽略 */
     }
+    clearStoredSessionId();
   }, [backend]);
 
   return { login, logout };

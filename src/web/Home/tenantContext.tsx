@@ -52,7 +52,23 @@ export interface TenantProviderProps {
 }
 
 export function TenantProvider({ children, loginFn = defaultLogin, onLogout }: TenantProviderProps) {
-  const [context, setContext] = useState<TenantContext | null>(null);
+  // 从 localStorage 恢复登录态（跨 iframe 共享）
+  const getSessionId = () => {
+    if (typeof localStorage === 'undefined') return null;
+    return localStorage.getItem('session:realpage');
+  };
+  const [context, setContext] = useState<TenantContext | null>(() => {
+    const sid = getSessionId();
+    if (!sid) return null;
+    // 有 session 但无 context 记录时，生成一个占位 context
+    return {
+      enterprise_id: 'local',
+      team_id: 'local-readonly',
+      user_id: 'restored-user',
+      perspective: 'personal',
+      session_id: sid,
+    };
+  });
 
   const login = useCallback<LoginFn>(async (input) => {
     // 兼容同步 loginFn（T3 本地内核）与异步 loginFn（T11 后端镜像：返回 Promise<LoginResult>）

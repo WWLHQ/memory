@@ -4,7 +4,7 @@
 // 未登录不阻塞：功能区灰置占位，仅顶栏「▶ 登录」可点（红线⑤）。
 // 边界：仅 src/web/Home/HomePage.tsx + 测试（不改 auth/后端）。
 import { useState } from 'react';
-import { TenantProvider, useLogout, type LoginFn, type LogoutFn } from './tenantContext.tsx';
+import { TenantProvider, useLogout, useTenant, type LoginFn, type LogoutFn } from './tenantContext.tsx';
 import { TopBar } from './TopBar.tsx';
 import { Dashboard } from './Dashboard.tsx';
 import { LoginModal } from './LoginModal.tsx';
@@ -23,11 +23,38 @@ export interface HomePageProps {
   loginFn?: LoginFn;
   /** 注入登出副作用（T11 后端写审计）；缺省无操作 */
   onLogout?: LogoutFn;
+  /** 是否要求登录才能查看首页内容（默认 true）；false 时跳过门控（如内联标识演示页） */
+  requireLogin?: boolean;
 }
 
-function HomeInner({ raw, sync, onTrace }: HomePageProps) {
+function HomeInner({ raw, sync, onTrace, requireLogin = true }: HomePageProps) {
   const [open, setOpen] = useState(false);
   const logout = useLogout();
+  const ctx = useTenant();
+
+  // 未登录 + 要求登录：只显示 TopBar + 登录遮罩，不渲染 Dashboard
+  if (requireLogin && !ctx) {
+    return (
+      <div className="home" id="home">
+        <TopBar onLogin={() => setOpen(true)} onLogout={logout} sync={sync} />
+        <div className="auth-gate" id="authGate">
+          <div className="gate-card">
+            <h2>请先登录</h2>
+            <p>登录后查看你的功劳 / 异常 / 活跃记忆 / 待办</p>
+            <button className="btn primary" id="btnOpenLoginFromGate" type="button" onClick={() => setOpen(true)}>
+              ▶ 登录
+            </button>
+          </div>
+        </div>
+        <LoginModal
+          open={open}
+          onClose={() => setOpen(false)}
+          onSuccess={() => setOpen(false)}
+          form={(sync?.form ?? 'desktop') as Form}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="home" id="home">

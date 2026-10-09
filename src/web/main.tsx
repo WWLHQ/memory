@@ -42,6 +42,9 @@ function App() {
   // useLoginMirror 自动读取 URL ?backend= 作为后端地址（缺省 http://localhost:8200）
   const mirror = useLoginMirror();
   const [traceId, setTraceId] = useState<string | null>(null);
+  // 未登录门控：首页 / AgentOnboard 等受保护页面默认 requireLogin=true；
+  // 内联标识演示页（inlineattribution.html）不要求登录，传 false 即可。
+  const requireLogin = new URLSearchParams(location.search).get('requireLogin') !== 'false';
 
   return (
     <>
@@ -51,6 +54,7 @@ function App() {
         loginFn={mirror.login}
         onLogout={mirror.logout}
         onTrace={(id) => setTraceId(id)}
+        requireLogin={requireLogin}
       />
       {traceId && (
         <div className="audit-modal" id="auditModal" role="dialog" onClick={() => setTraceId(null)}>

@@ -45,11 +45,15 @@ describe('T9 首页装配容器', () => {
     resetAuthStore();
   });
 
-  it('初始渲染未登录态（灰置），不阻塞登录', () => {
+  it('初始渲染未登录态：显示门控遮罩 + ▶ 登录，不渲染 Dashboard', () => {
     const { container } = render(<HomePage raw={raw} sync={sync} loginFn={localLogin} />);
     expect(container.querySelector('#hiUnauth')).not.toBeNull();
     expect(container.querySelector('#btnOpenLogin')).not.toBeNull();
-    expect(container.querySelector('#offPlaceholder')).not.toBeNull();
+    // 未登录 + requireLogin=true：显示门控遮罩
+    expect(container.querySelector('#authGate')).not.toBeNull();
+    // Dashboard 数据区不应出现
+    expect(container.querySelector('#gains')).toBeNull();
+    expect(container.querySelector('#dashGrid')).toBeNull();
     // 已登录专属元素尚未出现
     expect(container.querySelector('#hiAuth')).toBeNull();
     expect(container.querySelector('#btnLogout')).toBeNull();
@@ -79,7 +83,7 @@ describe('T9 首页装配容器', () => {
     expect(container.querySelector('.login-modal.show')).toBeNull();
   });
 
-  it('登出 → 回灰置', async () => {
+  it('登出 → 回到门控遮罩', async () => {
     const { container } = render(<HomePage raw={raw} sync={sync} loginFn={localLogin} />);
     fireEvent.click(container.querySelector('#btnOpenLogin')!);
     typeInto(container, 'acc', ACCOUNT);
@@ -91,7 +95,8 @@ describe('T9 首页装配容器', () => {
     // 登出
     fireEvent.click(container.querySelector('#btnLogout')!);
     expect(container.querySelector('#hiUnauth')).not.toBeNull();
-    expect(container.querySelector('#offPlaceholder')).not.toBeNull();
+    expect(container.querySelector('#authGate')).not.toBeNull();
+    expect(container.querySelector('#gains')).toBeNull();
     expect(container.querySelector('#hiAuth')).toBeNull();
   });
 

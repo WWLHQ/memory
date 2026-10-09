@@ -3,6 +3,7 @@
 // 业务内核复用 src/agentOnboard/*（状态机/校验/服务），此处只做"原型逻辑 → React state"的翻译。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DiscoveredAgent, Form, UiAgentCard } from '../../types/agentOnboard.ts';
+import { hasActiveSession } from '../Home/crossTabAuth.ts';
 import { AgentCard, toolRef } from './AgentCard.tsx';
 import { OneClickOnboard } from './OneClickOnboard.tsx';
 import { Gains } from './Gains.tsx';
@@ -164,6 +165,31 @@ export function AgentOnboardPage() {
     backend.unbind(d.name);
     toast(`已撤销 ${d.name} 的自动绑定（审计 unbound）；恢复需重跑一键接入`);
   };
+
+  // 登录门控：未登录 → 提示并阻断
+  if (!hasActiveSession()) {
+    return (
+      <div className="wrap">
+        <div className="auth-gate">
+          <div className="gate-card">
+            <h2>请先登录</h2>
+            <p>登录后可访问 Agent 接入配置页（REQ-003）。点击确定跳转至首页登录后重试。</p>
+            <button
+              className="btn primary"
+              id="btnGotoLoginFromAgent"
+              type="button"
+              onClick={() => {
+                if (window.opener) window.close();
+                else window.location.href = '/index.html';
+              }}
+            >
+              → 前往登录页
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="wrap">

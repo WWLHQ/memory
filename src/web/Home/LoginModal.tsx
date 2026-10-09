@@ -3,7 +3,8 @@
 // 行为：默认隐藏（无 .show）；open→.login-modal.show；校验非空；密码错记审计+锁定提示；成功 onSuccess(context)；
 // 端形态自动识别只读（无输入控件）+ 团队只读（无编辑控件）；扫码/系统密钥走回调+toast。
 // 登录动作经 T5 useLogin（注入 loginFn 便于测试 mock）；审计由 T3/T10 落盘，本组件只消费结果文案。
-import { useState } from 'react';
+// 新增：支持用户自助注册（POST /api/register），账号支持手机号/邮箱，含验证码+确认密码
+import { useState, useEffect } from 'react';
 import { useLogin } from './tenantContext.tsx';
 import type { TenantContext } from '../../types/home.ts';
 import type { Form } from '../../types/agentOnboard.ts';
@@ -46,10 +47,35 @@ export function LoginModal({ open, onClose, onSuccess, onScan, onKey, form }: Lo
   const login = useLogin();
   const [account, setAccount] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [captchaCode, setCaptchaCode] = useState('');
+  const [captchaId, setCaptchaId] = useState('');
+  const [captchaText, setCaptchaText] = useState('');
   const [err, setErr] = useState('');
   const [toast, setToast] = useState('');
+  const [isRegister, setIsRegister] = useState(false);
 
   const detectedForm = form ?? detectForm();
+
+  // 获取验证码
+  useEffect(() => {
+    if (!isRegister) return;
+    fetchCaptcha();
+  }, [isRegister]);
+
+  async function fetchCaptcha() {
+    try {
+      const backend = new URLSearchParams(window.location.search).get('backend') ?? 'http://localhost:8200';
+      const res = await fetch(`${backend}/api/captcha`);
+      const body = await res.json();
+      if (body.id) {
+        setCaptchaId(body.id);
+        setCaptchaText(body.code); // 测试用，生产环境不返回 code
+      }
+    } catch {
+      // 验证码获取失败不影响主流程
+    }
+  }
 
   async function handleLogin() {
     if (!account.trim()) {
@@ -75,11 +101,72 @@ export function LoginModal({ open, onClose, onSuccess, onScan, onKey, form }: Lo
     }
   }
 
+  async function handleRegister() {
+    if (!account.trim()) {
+      setErr('账号不能为空');
+      return;
+    }
+    // 账号格式校验
+    const isPhone = /^1[3-9]\d{9}$/.test(account);
+    const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(account);
+    if (!isPhone && !isEmail) {
+      setErr('账号必须是手机号或邮箱');
+      return;
+    }
+    if (password.length < 6) {
+      setErr('密码至少 6 位');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setErr('两次密码不一致');
+      return;
+    }
+    if (!captchaCode) {
+      setErr('请输入验证码');
+      return;
+    }
+    try {
+      const backend = new URLSearchParams(window.location.search).get('backend') ?? 'http://localhost:8200';
+      const res = await fetch(`${backend}/api/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          account: account.trim(),
+          password,
+          confirmPassword,
+          captchaCode,
+          captchaId,
+        }),
+      });
+      const body = await res.json();
+      if (res.ok && body.ok) {
+        setErr('');
+        setToast(`注册成功！团队 ID: ${body.team_id}，请登录`);
+        setIsRegister(false);
+      } else if (body.reason === 'exists') {
+        setErr(body.message ?? '账号已存在，请直接登录');
+      } else if (body.reason === 'invalid_captcha') {
+        setErr(body.message ?? '验证码错误');
+        await fetchCaptcha(); // 刷新验证码
+      } else if (body.reason === 'password_mismatch') {
+        setErr(body.message ?? '两次密码不一致');
+      } else if (body.reason === 'weak_password') {
+        setErr(body.message ?? '密码至少 6 位');
+      } else if (body.reason === 'invalid_account') {
+        setErr(body.message ?? '账号必须是手机号或邮箱');
+      } else {
+        setErr(body.message ?? '注册失败，请重试');
+      }
+    } catch {
+      setErr('网络错误，请检查后端是否启动');
+    }
+  }
+
   return (
     <div className={`login-modal${open ? ' show' : ''}`} id="loginModal">
       <div className="login-box">
         <h3>
-          登录（确定同步身份）
+          {isRegister ? '注册新账号' : '登录（确定同步身份）'}
           <span className="close" id="btnCloseLogin" role="button" tabIndex={0} onClick={onClose}>
             ×
           </span>
@@ -89,7 +176,7 @@ export function LoginModal({ open, onClose, onSuccess, onScan, onKey, form }: Lo
           <input
             type="text"
             id="acc"
-            placeholder="user_001 或邮箱"
+            placeholder={isRegister ? '手机号或邮箱' : 'user_001 或邮箱'}
             value={account}
             onChange={(e) => setAccount(e.target.value)}
           />
@@ -99,35 +186,101 @@ export function LoginModal({ open, onClose, onSuccess, onScan, onKey, form }: Lo
           <input
             type="password"
             id="pwd"
-            placeholder="········"
+            placeholder={isRegister ? '至少 6 位' : '········'}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
         </div>
-        <div className="row" id="rowForm">
-          <span className="lbl">端形态</span>
-          <span className="pill on">自动识别 = {FORM_LABEL[detectedForm]}</span>
-        </div>
-        <div className="row" id="rowTeam">
-          <span className="lbl">团队</span>
-          <span className="pill">团队（管理员分配 · 只读 · P12）</span>
-        </div>
+        {isRegister && (
+          <>
+            <div className="row">
+              <span className="lbl">确认密码</span>
+              <input
+                type="password"
+                id="confirmPwd"
+                placeholder="再次输入密码"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+              />
+            </div>
+            <div className="row">
+              <span className="lbl">验证码</span>
+              <input
+                type="text"
+                id="captcha"
+                placeholder={captchaText ? `输入: ${captchaText}` : '获取验证码'}
+                value={captchaCode}
+                onChange={(e) => setCaptchaCode(e.target.value)}
+                style={{ flex: 2 }}
+              />
+              <button
+                className="btn"
+                type="button"
+                onClick={fetchCaptcha}
+                style={{ whiteSpace: 'nowrap', fontSize: 11 }}
+              >
+                {captchaText ? `${captchaText} 换` : '获取验证码'}
+              </button>
+            </div>
+          </>
+        )}
+        {!isRegister && (
+          <>
+            <div className="row" id="rowForm">
+              <span className="lbl">端形态</span>
+              <span className="pill on">自动识别 = {FORM_LABEL[detectedForm]}</span>
+            </div>
+            <div className="row" id="rowTeam">
+              <span className="lbl">团队</span>
+              <span className="pill">团队（管理员分配 · 只读 · P12）</span>
+            </div>
+          </>
+        )}
         <div className="row">
-          <button className="btn primary" id="btnLogin" type="button" onClick={handleLogin}>
-            登 录
-          </button>
-          <button className="btn" id="btnScan" type="button" onClick={() => { onScan?.(); setToast('Web 扫码登录：同账号（审计 form:web）'); }}>
-            扫码（Web）
-          </button>
-          <button className="btn" id="btnKey" type="button" onClick={() => { onKey?.(); setToast('mac/CLI 系统密钥登录：非交互 token（审计 form:cli）'); }}>
-            系统密钥（mac/CLI）
-          </button>
+          {isRegister ? (
+            <>
+              <button className="btn primary" id="btnRegister" type="button" onClick={handleRegister}>
+                注 册
+              </button>
+              <button className="btn" type="button" onClick={() => setIsRegister(false)}>
+                返回登录
+              </button>
+            </>
+          ) : (
+            <>
+              <button className="btn primary" id="btnLogin" type="button" onClick={handleLogin}>
+                登 录
+              </button>
+              <button className="btn" id="btnScan" type="button" onClick={() => { onScan?.(); setToast('Web 扫码登录：同账号（审计 form:web）'); }}>
+                扫码（Web）
+              </button>
+              <button className="btn" id="btnKey" type="button" onClick={() => { onKey?.(); setToast('mac/CLI 系统密钥登录：非交互 token（审计 form:cli）'); }}>
+                系统密钥（mac/CLI）
+              </button>
+            </>
+          )}
         </div>
         <div className="err" id="loginErr">
           {err}
         </div>
         <div className="toast" id="toast" style={{ display: toast ? 'block' : 'none' }}>
           {toast}
+        </div>
+        <div className="row" style={{ marginTop: 12, justifyContent: 'center' }}>
+          <button
+            className="btn"
+            style={{ fontSize: 11, color: 'var(--muted)', border: 'none', background: 'transparent' }}
+            type="button"
+            onClick={() => {
+              setIsRegister(!isRegister);
+              setErr('');
+              setToast('');
+              setConfirmPassword('');
+              setCaptchaCode('');
+            }}
+          >
+            {isRegister ? '已有账号？返回登录' : '没有账号？点击注册'}
+          </button>
         </div>
       </div>
     </div>
