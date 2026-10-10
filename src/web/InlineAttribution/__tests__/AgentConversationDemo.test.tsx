@@ -1,5 +1,5 @@
 // REQ-004 T11 宿主集成冒烟：AgentConversationDemo 渲染四类标识 + 开关降级
-import { render, screen, within, fireEvent } from '@testing-library/react';
+import { render, screen, within, fireEvent, waitFor } from '@testing-library/react';
 import { AgentConversationDemo } from '../AgentConversationDemo.tsx';
 
 describe('AgentConversationDemo 宿主集成', () => {
@@ -25,11 +25,11 @@ describe('AgentConversationDemo 宿主集成', () => {
     expect(screen.getAllByText(/⚠️/).length).toBeGreaterThanOrEqual(2);
   });
 
-  it('点 🧠 弹层可触发记住反馈 toast', () => {
+  it('点 🧠 弹层可触发记住反馈 toast（内核 _feedback 回执驱动）', async () => {
     render(<AgentConversationDemo />);
     fireEvent.click(screen.getAllByText('🧠')[0]);
     const pop = screen.getByText(/记忆注入 · mem_005/).closest('.pop') as HTMLElement;
     fireEvent.click(within(pop).getByText('记住 +0.1'));
-    expect(screen.getByText(/已「记住」mem_005/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(/已「记住」mem_005/)).toBeInTheDocument());
   });
 });

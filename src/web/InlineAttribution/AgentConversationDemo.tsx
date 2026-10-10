@@ -14,7 +14,8 @@ import { MemoryInjectionTag } from './MemoryInjectionTag.tsx';
 import { AgingWarnTag } from './AgingWarnTag.tsx';
 import { TokenSavingBar } from './TokenSavingBar.tsx';
 import { AttributionSummary } from './AttributionSummary.tsx';
-import { applyFeedback, LocalMockFeedbackPort } from '../../inlineAttribution/feedback.ts';
+import { applyFeedback } from '../../inlineAttribution/feedback.ts';
+import { coreInlineAuditCount, coreInlineFeedback } from './coreInline.ts';
 import type {
   AgingWarnMark,
   BackgroundMark,
@@ -98,28 +99,31 @@ const ANSWER_SEGS: Seg[] = [
 
 export function AgentConversationDemo() {
   const [toast, setToast] = useState<string | null>(null);
-  // 反馈端口（本地 mock；真实内核端口留待 REQ-007）
-  const port = new LocalMockFeedbackPort((req, delta) => {
-    const label =
-      delta.action === 'confirm'
-        ? `已「记住」${req}（confirm +0.1 → 7.2 自生长）`
-        : delta.action === 'reject'
-          ? `已「忘记」${req}（reject −0.05 → stale）`
-          : `已标错 ${req}（→ 冲突裁决队列 P7，disputed）`;
-    showToast(`${label} · 写审计 4.3（累计 ${port.audits.length} 条）`);
-  });
 
   function showToast(msg: string) {
     setToast(msg);
     window.setTimeout(() => setToast(null), 2600);
   }
 
-  function handleFeedback(id: string, action: FeedbackAction) {
-    const delta = applyFeedback(action);
-    port.writeAudit(id, delta); // onWrite 内已 toast
+  // 干预反馈真写内核（ma._feedback：confirm +0.1 / reject −0.05 / disputed 挂 9.7），trust_delta 以回执为准
+  async function handleFeedback(id: string, action: FeedbackAction) {
+    try {
+      const r = await coreInlineFeedback(id, action);
+      const pct = r.trust_delta >= 0 ? `+${r.trust_delta.toFixed(2)}` : r.trust_delta.toFixed(2);
+      const label =
+        action === 'confirm'
+          ? `已「记住」${id}（confirm ${pct} → 7.2 自生长）`
+          : action === 'reject'
+            ? `已「忘记」${id}（reject ${pct} → stale）`
+            : `已标错 ${id}（→ 冲突裁决队列 P7，disputed）`;
+      const total = await coreInlineAuditCount();
+      showToast(`${label} · 写审计 4.3（累计 ${total} 条）`);
+    } catch {
+      showToast('反馈失败：内核暂不可达');
+    }
   }
   function handleOpenAudit(req: string) {
-    showToast(`开审计页定位 ${req}（REQ-011 审计页，占位）`);
+    showToast(`开审计页定位 ${req}（审计已在内核账本 4.3）`);
   }
   function handleSwitchFactFirst(req: string) {
     showToast(`切事实优先重试（${req}）`);
