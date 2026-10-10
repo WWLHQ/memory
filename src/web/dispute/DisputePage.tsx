@@ -1,8 +1,11 @@
 // 冲突裁决页 T5：完整编排 + mirror
-import { useState, useRef } from 'react';
+// 初始渲染用种子；队列 = 内核 SyncHub 真实冲突（并发版本 push 产出），
+// 裁决走 hub.resolve + ma._memoryOp（auto_override/merge 落定出队，user_confirm/hold 保持 pending）。
+import { useEffect, useState, useRef } from 'react';
 import { SEED_CONFLICTS } from './seed.ts';
 import { queueSort, auditPair } from './logic.ts';
 import { useDisputeMirror } from './useDisputeMirror.ts';
+import { coreConflicts, coreVerdict } from './coreDispute.ts';
 import { DisputeQueue } from './DisputeQueue.tsx';
 import { DisputeVerdict } from './DisputeVerdict.tsx';
 import { useToast } from './useToast.tsx';
@@ -19,7 +22,7 @@ interface AuditEvt {
 }
 
 export function DisputePage() {
-  const [list] = useState<ConflictRecord[]>(SEED_CONFLICTS);
+  const [list, setList] = useState<ConflictRecord[]>(SEED_CONFLICTS);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [auditLog, setAuditLog] = useState<AuditEvt[]>([]);
   const { node: toast, show } = useToast();
@@ -30,13 +33,26 @@ export function DisputePage() {
   const filtered = queueSort(list, now);
   const selected = list.find((r) => r.id === selectedId) ?? null;
 
-  const handleVerdict = (v: Verdict, _result: unknown, reqId: string) => {
+  // 挂载同步：队列以内核 SyncHub pending 冲突为准（初始种子渲染，内容一致无跳变）
+  useEffect(() => {
+    let alive = true;
+    coreConflicts().then((live) => { if (alive && live.length > 0) setList(live); });
+    return () => { alive = false; };
+  }, []);
+
+  const handleVerdict = async (v: Verdict, _result: unknown, reqId: string) => {
     if (!selected) return;
+    const out = await coreVerdict(selected, v);
     const evt = auditPair(selected, v, reqId);
-    setAuditLog((prev) => [evt, ...prev]);
+    setAuditLog((prev) => [{ ...evt, note: out.merged_mem_id ? `${evt.note}（合并记忆 ${out.merged_mem_id}）` : evt.note }, ...prev]);
     // G6 上抛：safe-noop（mirror 为 safe-noop）
     mirror.audit('dispute', selected as any, null as any);
     show(`${evt.note}（${reqId}）`);
+    // 内核裁决后刷新队列：resolved 出队；user_confirm/hold 保持 pending（真实语义）
+    const live = await coreConflicts();
+    setList(live);
+    // 已选冲突若已出队，清空选中
+    setSelectedId((cur) => (live.some((r) => r.id === cur) ? cur : null));
   };
 
   return (

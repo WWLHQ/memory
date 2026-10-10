@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { DisputePage } from '../DisputePage.tsx';
 import { DisputeQueue } from '../DisputeQueue.tsx';
 import { DisputeVerdict } from '../DisputeVerdict.tsx';
@@ -7,14 +7,14 @@ import { SEED_CONFLICTS } from '../seed.ts';
 
 const NOW = new Date('2026-10-10T09:00:00.000Z').getTime();
 
-describe('DisputePage (P7-T5 编排)', () => {
-  it('挂载渲染标题与队列', () => {
+describe('DisputePage (P7-T5 编排，队列来自内核 SyncHub)', () => {
+  it('挂载渲染标题与队列（种子直渲 + 内核队列挂载同步）', async () => {
     render(<DisputePage />);
     expect(screen.getByTestId('dispute-page')).toBeInTheDocument();
     expect(screen.getByText(/冲突裁决页/)).toBeInTheDocument();
     expect(screen.getByText(/REQ-006/)).toBeInTheDocument();
     expect(screen.getByTestId('queue')).toBeInTheDocument();
-    // 种子 5 条全 dispute_flag=true
+    // 种子 5 条全 dispute_flag=true（内核队列内容一致）
     expect(screen.getAllByTestId(/^queue-item-/).length).toBe(5);
   });
 
@@ -31,14 +31,23 @@ describe('DisputePage (P7-T5 编排)', () => {
     expect(screen.getByTestId('verdict-hold')).toBeInTheDocument();
   });
 
-  it('裁决后出现成对审计历史 + toast', () => {
+  it('裁决走内核（hub.resolve + _memoryOp）→ 成对审计历史 + toast', async () => {
     render(<DisputePage />);
     fireEvent.click(screen.getAllByTestId(/^queue-item-/)[0]);
     fireEvent.click(screen.getByTestId('verdict-auto_override'));
+    await waitFor(() => expect(screen.getByTestId('toast')).toHaveTextContent(/旧值 deprecated/));
     expect(screen.getByTestId('audit-log')).toBeInTheDocument();
-    expect(screen.getByTestId('toast')).toHaveTextContent(/旧值 deprecated/);
     // 审计行含 request_id（18.2-E）
     expect(screen.getByTestId('audit-row-0')).toHaveTextContent(/req_d/);
+  });
+
+  it('hold 保持 pending（队列不出队，真实语义）', async () => {
+    render(<DisputePage />);
+    fireEvent.click(screen.getAllByTestId(/^queue-item-/)[0]);
+    fireEvent.click(screen.getByTestId('verdict-hold'));
+    await waitFor(() => expect(screen.getByTestId('toast')).toHaveTextContent(/维持 dispute/));
+    // 冲突仍在队列（SyncHub pending 不变）
+    expect(screen.getAllByTestId(/^queue-item-/).length).toBeGreaterThanOrEqual(1);
   });
 });
 
