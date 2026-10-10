@@ -32,3 +32,5 @@
 - **项目文件夹保持纯净**：与项目无关的文件及时清理，不留在仓库根目录。
 - Windows 下避免产生 `nul` 垃圾文件（Git Bash 里 `> NUL` 会生成名为 nul 的实体文件，应使用 `> /dev/null`）。
 - 验收收尾时默认执行一轮垃圾清扫并汇报清理清单，再走 commit。
+- **入口 html / 产物文件名一律全小写**：Windows 文件系统大小写不敏感会掩盖 URL 与文件名的大小写错位，Linux CI 上直接 404（P13 时期 inlineAttribution.html 教训，5726a35 修复）。新增页面入口时命名前先确认。
+- 跨平台排查 CI 失败：本地 WSL Ubuntu clone 到 ~/ 本地盘（勿在 /mnt 挂载盘 npm ci，会 EIO 损坏 Windows node_modules）跑 CI 同款命令（--workers=1）即可复刻；node_modules 损坏用 npm install 增量修复。

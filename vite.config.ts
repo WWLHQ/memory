@@ -26,6 +26,7 @@ export default defineConfig({
         retrieval: 'retrieval.html',
         logs: 'logs.html',
         models: 'models.html',
+        growth: 'growth.html',
       },
     },
   },
