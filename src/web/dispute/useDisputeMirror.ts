@@ -1,6 +1,7 @@
 // 冲突裁决页后端镜像（T5）：沿用 useBackendMirror 的 ?backend= 覆盖模式。
 // ⚠ 本地内存态为真相；home server 暂无 dispute 端点，故 mirror 为 safe-noop（fire-and-forget，失败静默）。
 import { useEffect, useRef } from 'react';
+import { mirrorReport } from '../mirrorClient.ts';
 import type { ConflictRecord } from './types.ts';
 
 export function resolveBackendUrl(): string {
@@ -23,8 +24,11 @@ export function useDisputeMirror(): DisputeMirror {
   }, []);
 
   return {
-    audit: (_action, _rec, _verdict) => {
-      // safe-noop
+    audit: (action, rec, verdict) => {
+      // G6 上抛：18.4 约束5 成对审计（old_id/new_id 必须成对出现）
+      mirrorReport('dispute', action, undefined, {
+        conflict_id: rec.id, old_id: rec.old_id, new_id: rec.new_id, verdict,
+      });
     },
   };
 }

@@ -1,6 +1,7 @@
 // 写入页后端镜像（T5）：沿用 ?backend= 覆盖模式。
 // ⚠ 本地内存态为真相；home server 暂无 write/memory 端点，故 mirror 为 safe-noop（fire-and-forget，失败静默）。
 import { useEffect, useRef } from 'react';
+import { mirrorReport } from '../mirrorClient.ts';
 
 export function resolveBackendUrl(): string {
   if (typeof location === 'undefined') return '';
@@ -23,8 +24,9 @@ export function useWriteMirror(): WriteMirror {
   }, []);
 
   return {
-    audit: () => {
-      // safe-noop：保持原型同步交互，不阻塞 UI。
+    audit: (action) => {
+      // G6 上抛：write dedup 回执（后端不在时静默）
+      mirrorReport('write', action);
     },
   };
 }

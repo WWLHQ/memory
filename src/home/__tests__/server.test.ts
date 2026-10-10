@@ -126,3 +126,60 @@ describe('T10 登录后端 HTTP 服务', () => {
     expect(audit.filter((a) => a.action === 'login_fail').length).toBeGreaterThanOrEqual(5);
   });
 });
+
+describe('mirror 审计上抛端点（REQ-006 G6 持久账本）', () => {
+  beforeEach(async () => {
+    resetAuthStore();
+    tmp = mkdtempSync(join(tmpdir(), 'home-srv-'));
+    dataFile = join(tmp, 'audit.json');
+    registerAccount(ACCOUNT, hashPassword('pw'), { enterprise_id: 'ent_001', team_id: TEAM, perspective: 'team' });
+    server = createServer({ port: 0, dataFile });
+    base = await listen(server);
+  });
+
+  it('POST /api/mirror/audit 上抛 → 200 + seq 自增；GET 回填可查', async () => {
+    const r1 = await fetch(`${base}/api/mirror/audit`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: 'memory', action: 'memory_forget', payload: { mem_id: 'mem_002', op: 'forget' } }),
+    });
+    expect(r1.status).toBe(200);
+    expect(((await r1.json()) as { seq: number }).seq).toBe(1);
+
+    const r2 = await fetch(`${base}/api/mirror/audit`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: 'dispute', action: 'dispute', request_id: 'req_d1', payload: { old_id: 'a', new_id: 'b', verdict: 'auto_override' } }),
+    });
+    expect(((await r2.json()) as { seq: number }).seq).toBe(2);
+
+    const q = (await (await fetch(`${base}/api/mirror/audit`)).json()) as { items: Array<{ source: string; action: string }>; total: number };
+    expect(q.total).toBe(2);
+    expect(q.items.map((i) => i.action)).toEqual(['memory_forget', 'dispute']);
+
+    // source 过滤
+    const q2 = (await (await fetch(`${base}/api/mirror/audit?source=memory`)).json()) as { items: unknown[]; total: number };
+    expect(q2.items.length).toBe(1);
+  });
+
+  it('持久化：重启后 mirror 账本保留（home-mirror.json）', async () => {
+    await fetch(`${base}/api/mirror/audit`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: 'feedback', action: 'feedback', request_id: 'req_fb1' }),
+    });
+    await close(server);
+    const server2 = createServer({ port: 0, dataFile });
+    base = await listen(server2);
+    server = server2;
+
+    const q = (await (await fetch(`${base}/api/mirror/audit?source=feedback`)).json()) as { items: Array<{ request_id?: string }>; total: number };
+    expect(q.total).toBe(1);
+    expect(q.items[0].request_id).toBe('req_fb1');
+  });
+
+  it('缺字段容错：空 body → source/action 落 unknown，不 500', async () => {
+    const r = await fetch(`${base}/api/mirror/audit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    expect(r.status).toBe(200);
+    const q = (await (await fetch(`${base}/api/mirror/audit`)).json()) as { items: Array<{ source: string; action: string }> };
+    expect(q.items[0].source).toBe('unknown');
+    expect(q.items[0].action).toBe('unknown');
+  });
+});

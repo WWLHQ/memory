@@ -1,5 +1,6 @@
 // 账号与安全页后端镜像（T4）：safe-noop 模式。
 import { useEffect, useRef } from 'react';
+import { mirrorReport } from '../mirrorClient.ts';
 
 export function resolveBackendUrl(): string {
   if (typeof location === 'undefined') return '';
@@ -21,8 +22,9 @@ export function useSecurityMirror(): SecurityMirror {
   }, []);
 
   return {
-    audit: (_action, _requestId) => {
-      // safe-noop
+    audit: (action, requestId) => {
+      // G6 上抛：安全配置变更（后端不在时静默）
+      mirrorReport('security', action, requestId);
     },
   };
 }

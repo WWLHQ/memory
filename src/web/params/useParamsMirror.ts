@@ -1,5 +1,6 @@
 // 全局参数页后端镜像（T4）：沿用 ?backend= 覆盖 + safe-noop 模式。
 import { useEffect, useRef } from 'react';
+import { mirrorReport } from '../mirrorClient.ts';
 import type { DevParams, KbPolicyRow, NormalConfig } from './types.ts';
 
 export function resolveBackendUrl(): string {
@@ -22,8 +23,9 @@ export function useParamsMirror(): ParamsMirror {
   }, []);
 
   return {
-    save: (_cfg, _kbs, _dev, _requestId) => {
-      // safe-noop：本地态为真相。
+    save: (cfg, kbs, dev, requestId) => {
+      // G6 上抛：params_save（配置快照随 payload 持久到 home server 账本）
+      mirrorReport('params', 'params_save', requestId, { cfg, kbs, dev });
     },
   };
 }

@@ -1,5 +1,6 @@
 // 用户反馈页后端镜像（T4）：safe-noop 模式。
 import { useEffect, useRef } from 'react';
+import { mirrorReport } from '../mirrorClient.ts';
 import type { FeedbackRecord } from './types.ts';
 
 export function resolveBackendUrl(): string {
@@ -22,8 +23,11 @@ export function useFeedbackMirror(): FeedbackMirror {
   }, []);
 
   return {
-    audit: (_action, _rec, _requestId) => {
-      // safe-noop
+    audit: (action, rec, requestId) => {
+      // G6 上抛：13.7 反馈 + 17.4 trust_delta（request_id 继承召回链路）
+      mirrorReport('feedback', action, requestId, {
+        memory_id: rec.memory_id, fb_action: rec.action, rating: rec.rating, trust_delta: rec.trust_delta,
+      });
     },
   };
 }

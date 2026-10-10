@@ -1,6 +1,7 @@
 // 记忆管理页后端镜像（T5）：沿用 useBackendMirror 的 ?backend= 覆盖模式。
 // ⚠ 本地内存态为真相；home server 暂无 memory 端点，故 mirror 为 safe-noop（fire-and-forget，失败静默）。
 import { useEffect, useRef } from 'react';
+import { mirrorReport } from '../mirrorClient.ts';
 import type { MemoryOp, MemoryRecord } from './types.ts';
 
 /** 默认本地后端；?backend= 可覆盖（与原型语义优先一致） */
@@ -25,8 +26,9 @@ export function useMemoryMirror(): MemoryMirror {
   }, []);
 
   return {
-    audit: (_action, _rec, _op) => {
-      // safe-noop：保持原型同步交互，不阻塞 UI。
+    audit: (action, rec, op) => {
+      // G6 上抛：home server /api/mirror/audit（后端不在时静默）
+      mirrorReport('memory', action, undefined, { mem_id: rec.id, op });
     },
   };
 }

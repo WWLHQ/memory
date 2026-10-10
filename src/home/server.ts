@@ -2,6 +2,8 @@
 // 风格对齐 REQ-003 server.ts：node:http + JSON 持久化 + CORS。
 // 端点：POST /api/login（校验账号密码，调 T3 login，返回 TenantContext + 写审计 action=login）
 //       POST /api/logout（写审计 action=logout）  GET /api/me（登录态返回 context，未登录 401）
+//       POST /api/mirror/audit（REQ-006 端壳 mirror 上抛：G6 全动作审计持久账本）
+//       GET  /api/mirror/audit?source=&limit=（上抛回填查询）
 // 锁定表持久化：每次登录后把 T3 锁定态快照写入 .data/home-locks.json，启动时 importLockSnapshot 恢复。
 // 审计写入统一 audit 表（4.3.1 枚举 login/logout/login_fail/team_assign）。
 import { createServer as httpCreateServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
@@ -12,6 +14,16 @@ import { login, exportLockSnapshot, importLockSnapshot, registerAccount, resetAu
 import { hashPassword } from '../auth/hash.ts';
 import type { Form } from '../types/agentOnboard.ts';
 import type { TenantContext, LoginAudit } from '../types/home.ts';
+
+/** 端壳 mirror 上抛条目（G6：全动作、成对/上下文放 payload） */
+export interface MirrorAuditEntry {
+  seq: number;
+  source: string;                 // 来源页：memory/lifecycle/dispute/audit/write/feedback/params/security
+  action: string;                 // 端动作枚举（memory_forget / lifecycle_change / dispute / audit_query…）
+  request_id?: string;
+  payload?: unknown;
+  ts: number;
+}
 
 export interface ServerOptions {
   /** 监听端口；测试用 0（随机端口） */
@@ -58,6 +70,14 @@ export function createServer(opts: ServerOptions): Server {
   } catch {
     /* 无锁定快照则跳过 */
   }
+  // mirror 上抛账本持久化（REQ-006 端壳 G6）
+  const mirrorFile = join(dirname(auditFile), 'home-mirror.json');
+  let mirrorAudit: MirrorAuditEntry[] = [];
+  try {
+    mirrorAudit = JSON.parse(readFileSync(mirrorFile, 'utf8')) as MirrorAuditEntry[];
+  } catch {
+    mirrorAudit = [];
+  }
 
   const sessions = new Map<string, Session>();
 
@@ -73,6 +93,9 @@ export function createServer(opts: ServerOptions): Server {
   function appendAudit(a: LoginAudit): void {
     audit.push(a);
     persistAudit();
+  }
+  function persistMirror(): void {
+    writeFileSync(mirrorFile, JSON.stringify(mirrorAudit, null, 2));
   }
   function send(res: ServerResponse, code: number, body: unknown): void {
     res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -208,6 +231,32 @@ export function createServer(opts: ServerOptions): Server {
           } else {
             send(res, 401, { ok: false });
           }
+          return;
+        }
+
+        // REQ-006 端壳 mirror 上抛（G6 全动作审计持久账本）
+        if (req.method === 'POST' && path === '/api/mirror/audit') {
+          const body = await readJsonBody(req);
+          const entry: MirrorAuditEntry = {
+            seq: mirrorAudit.length + 1,
+            source: typeof body.source === 'string' ? body.source : 'unknown',
+            action: typeof body.action === 'string' ? body.action : 'unknown',
+            request_id: typeof body.request_id === 'string' ? body.request_id : undefined,
+            payload: body.payload ?? null,
+            ts: Date.now(),
+          };
+          mirrorAudit.push(entry);
+          persistMirror();
+          send(res, 200, { ok: true, seq: entry.seq });
+          return;
+        }
+
+        if (req.method === 'GET' && path === '/api/mirror/audit') {
+          const q = new URL(url, 'http://localhost').searchParams;
+          const source = q.get('source');
+          const limit = Math.max(1, Math.min(500, Number(q.get('limit') ?? 50) || 50));
+          const items = mirrorAudit.filter((e) => !source || e.source === source).slice(-limit);
+          send(res, 200, { items, total: mirrorAudit.length });
           return;
         }
 

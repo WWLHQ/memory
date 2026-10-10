@@ -1,6 +1,7 @@
 // 生命周期页后端镜像（T5）：沿用 ?backend= 覆盖模式。
 // ⚠ 本地种子为真相；home server 暂无 lifecycle 端点，故 mirror 为 safe-noop（fire-and-forget，失败静默）。
 import { useEffect, useRef } from 'react';
+import { mirrorReport } from '../mirrorClient.ts';
 
 export function resolveBackendUrl(): string {
   if (typeof location === 'undefined') return '';
@@ -19,5 +20,5 @@ export function useLifecycleMirror(): LifecycleMirror {
   useEffect(() => {
     // 预留：未来 home server 提供 /api/lifecycle 时在此回填（失败静默）。
   }, []);
-  return { audit: () => { /* safe-noop */ } };
+  return { audit: (action, requestId) => mirrorReport('lifecycle', action, requestId) };
 }
