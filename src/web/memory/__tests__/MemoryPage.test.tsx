@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { render, screen, within, fireEvent } from '@testing-library/react';
+import { render, screen, within, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryPage } from '../MemoryPage.tsx';
 
 describe('MemoryPage 集成（T5）', () => {
@@ -11,18 +11,18 @@ describe('MemoryPage 集成（T5）', () => {
     expect(screen.getByTestId('row-mem_007')).toBeInTheDocument();
   });
 
-  it('点击「记住」弹出 17.3 toast', () => {
+  it('点击「记住」弹出 17.3 toast（经内核 ma._memoryOp）', async () => {
     render(<MemoryPage />);
     const row = screen.getByTestId('row-mem_001');
     fireEvent.click(within(row).getByTestId('op-remember'));
-    expect(screen.getByTestId('toast')).toHaveTextContent('已提升这条信息的优先级。');
+    await waitFor(() => expect(screen.getByTestId('toast')).toHaveTextContent('已提升这条信息的优先级。'));
   });
 
-  it('点击「忘记」弹出 17.3 toast', () => {
+  it('点击「忘记」弹出 17.3 toast', async () => {
     render(<MemoryPage />);
     const row = screen.getByTestId('row-mem_001');
     fireEvent.click(within(row).getByTestId('op-forget'));
-    expect(screen.getByTestId('toast')).toHaveTextContent('这条信息已降权');
+    await waitFor(() => expect(screen.getByTestId('toast')).toHaveTextContent('这条信息已降权'));
   });
 
   it('点击行打开详情抽屉', () => {
@@ -39,14 +39,13 @@ describe('MemoryPage 集成（T5）', () => {
     expect(within(row).getByTestId('op-unlock')).not.toBeDisabled();
   });
 
-  it('点击记住后该行 importance 提升（状态更新）', () => {
+  it('点击记住后该行仍渲染且内核回执生效（importance 钳制上界内）', async () => {
     render(<MemoryPage />);
     const row = screen.getByTestId('row-mem_002');
-    const before = within(row).getByText('pitfall');
-    expect(before).toBeInTheDocument();
+    expect(within(row).getByText('pitfall')).toBeInTheDocument();
     fireEvent.click(within(row).getByTestId('op-remember'));
-    // 记住后该行仍渲染（未被删除），且 toast 出现
+    // 内核异步回执后：该行仍渲染（未被删除），toast 出现
+    await waitFor(() => expect(screen.getByTestId('toast')).toHaveTextContent('已提升这条信息的优先级。'));
     expect(screen.getByTestId('row-mem_002')).toBeInTheDocument();
-    expect(screen.getByTestId('toast')).toHaveTextContent('已提升这条信息的优先级。');
   });
 });

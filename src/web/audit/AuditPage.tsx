@@ -1,26 +1,34 @@
 // 审计日志页（REQ-006 / P11）· 完整编排（T5）
 // 过滤栏(T3) + 列表(T4) + 导出 CSV/JSON（§P11）+ toast + 后端 mirror 注入点。
-// 数据本地种子为真相；request_id 链路追踪（18.2-E）。
-import { useMemo, useState } from 'react';
+// 审计流来自内核 InMemoryStorage（append-only，挂载拉取）；request_id 链路追踪（18.2-E）。
+import { useEffect, useMemo, useState } from 'react';
 import { FilterBar } from './FilterBar.tsx';
 import { AuditTable } from './AuditTable.tsx';
 import { useToast } from './useToast.tsx';
 import { useAuditMirror } from './useAuditMirror.ts';
 import { chainByRequest, exportCsv, exportJson, filterEntries } from './logic.ts';
-import { SEED_AUDIT } from './seed.ts';
-import type { AuditFilter } from './types.ts';
+import { coreLoadAudit } from './coreAudit.ts';
+import type { AuditFilter, AuditEntry } from './types.ts';
 
 export function AuditPage() {
+  const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [filter, setFilter] = useState<AuditFilter>({});
   const [applied, setApplied] = useState<AuditFilter>({});
   const [chainId, setChainId] = useState<string | null>(null);
   const toast = useToast();
   const mirror = useAuditMirror();
 
+  // 数据源 = 内核审计账本
+  useEffect(() => {
+    let alive = true;
+    coreLoadAudit().then((l) => { if (alive) setEntries(l); });
+    return () => { alive = false; };
+  }, []);
+
   const displayed = useMemo(() => {
-    if (chainId) return chainByRequest(SEED_AUDIT, chainId);
-    return filterEntries(SEED_AUDIT, applied);
-  }, [applied, chainId]);
+    if (chainId) return chainByRequest(entries, chainId);
+    return filterEntries(entries, applied);
+  }, [entries, applied, chainId]);
 
   function handleQuery() {
     setChainId(null);

@@ -76,17 +76,19 @@ export function AuditModal({ requestId, onClose }: { requestId: string; onClose:
   );
 }
 
-export function L0AuthCard({ state, message, onAuth }: {
+export function L0AuthCard({ state, message, onAuth, sample }: {
   state: { role: 'admin' | 'member'; unlocked: boolean; failCount: number; lockedUntil: number | null };
   message: string | null;
   onAuth: (pwd: string) => void;
+  /** 解锁后的 L0 原文（内核 browse 回填；缺省用演示样例） */
+  sample?: string;
 }) {
   const [pwd, setPwd] = useState('');
   return (
     <div className="card" data-testid="l0-card">
       <div className="row-head"><b>L0 查阅授权（§2.4，R-LOG3）</b></div>
       <div className="row">
-        <span className="mid" data-testid="l0-sample">mem_005 生产库连接串：<b>{state.unlocked ? 'tcp://prod-db:5432/app' : '[L0 已加密 · 需授权]'}</b></span>
+        <span className="mid" data-testid="l0-sample">mem_005 生产库连接串：<b>{state.unlocked ? (sample ?? 'tcp://prod-db:5432/app') : '[L0 已加密 · 需授权]'}</b></span>
       </div>
       <div className="row">
         <span className="dim">角色：{state.role === 'admin' ? '管理员' : '普通成员（恒遮罩）'}</span>

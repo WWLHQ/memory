@@ -1,12 +1,14 @@
 // 生命周期页（REQ-006 / P4）· 完整编排（T5）
 // 列表（勾选批量）+ 选中联动（状态查看器 LifecycleCard + 调参面板 ParamPanel）
-// + 批量迁移（stale→archived 等，写审计 lifecycle_change + request_id，9.10.4/18.2-E）+ mirror 注入点。
-import { useMemo, useState } from 'react';
+// + 批量迁移（写审计 lifecycle_change + request_id，9.10.4/18.2-E）+ mirror 注入点。
+// 初始渲染用种子；迁移/调参经 ma._memoryOp 走内核（G4/钳制/温度映射/审计真实发生）。
+import { useState } from 'react';
 import { LifecycleCard } from './LifecycleCard.tsx';
 import { ParamPanel } from './ParamPanel.tsx';
 import { useToast } from './useToast.tsx';
 import { useLifecycleMirror } from './useLifecycleMirror.ts';
-import { applyLifecycle, canMigrate, importanceLevel } from './logic.ts';
+import { canMigrate, importanceLevel } from './logic.ts';
+import { coreLifeOp } from './coreLifecycle.ts';
 import { SEED_LIFECYCLE } from './seed.ts';
 import type { LifeOp, LifecycleRecord, MemoryStatus } from './types.ts';
 
@@ -20,41 +22,44 @@ export function LifecyclePage() {
 
   const selected = records.find((r) => r.id === selectedId) ?? null;
 
-  const reqId = useMemo(() => `req_lc_${Math.random().toString(36).slice(2, 8)}`, []);
+  // 展示用 request_id：首次操作后回填内核真实 request_id（ULID）
+  const [reqId, setReqId] = useState(() => `req_lc_${Math.random().toString(36).slice(2, 8)}`);
 
-  function applySingle(rec: LifecycleRecord, op: Parameters<typeof applyLifecycle>[2]) {
-    const res = applyLifecycle(records, rec, op, reqId);
+  async function applySingle(rec: LifecycleRecord, op: Parameters<typeof coreLifeOp>[2]) {
+    const res = await coreLifeOp(records, rec, op);
+    if (res.request_id) setReqId(res.request_id);
     if (!res.ok) {
       toast.show(res.message ?? '操作未生效');
       return;
     }
     const byId = new Map(res.affected.map((r) => [r.id, r]));
     setRecords((list) => list.map((r) => byId.get(r.id) ?? r));
-    mirror.audit(res.audit, reqId);
+    mirror.audit(res.audit, res.request_id || reqId);
   }
 
-  function handleMigrate(target: MemoryStatus) {
+  async function handleMigrate(target: MemoryStatus) {
     if (!selected) return;
-    applySingle(selected, { kind: 'migrate', target });
+    await applySingle(selected, { kind: 'migrate', target });
     toast.show(`已迁移 ${selected.id} → ${target}`);
   }
 
   function handleParam(patch: Partial<Pick<LifecycleRecord, 'half_life_days' | 'confidence' | 'importance' | 'pinned' | 'locked'>>) {
     if (!selected) return;
     const op: LifeOp = { kind: 'param', ...patch };
-    applySingle(selected, op);
+    void applySingle(selected, op);
   }
 
-  function handleBatch() {
+  async function handleBatch() {
     if (checked.size === 0) {
       toast.show('请先勾选要批量迁移的记忆');
       return;
     }
-    const res = applyLifecycle(records, selected ?? records[0], { kind: 'batch_migrate', ids: [...checked], target: batchTarget }, reqId);
+    const res = await coreLifeOp(records, selected ?? records[0], { kind: 'batch_migrate', ids: [...checked], target: batchTarget });
+    if (res.request_id) setReqId(res.request_id);
     const byId = new Map(res.affected.map((r) => [r.id, r]));
     setRecords((list) => list.map((r) => byId.get(r.id) ?? r));
     setChecked(new Set());
-    mirror.audit(res.audit, reqId);
+    mirror.audit(res.audit, res.request_id || reqId);
     toast.show(`批量迁移 ${res.affected.length} 条 → ${batchTarget}`);
   }
 

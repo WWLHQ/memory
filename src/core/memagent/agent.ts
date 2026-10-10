@@ -1,13 +1,13 @@
 // createMemAgent（§1 入口）：内核装配 + 9 核心API + 全动作审计（§3.2）
 import { MemAgentError } from './errors.ts';
 import { routeProxy } from './llm.ts';
-import { coreBrowse, coreGc, coreWrite } from './memories.ts';
+import { coreBrowse, coreGc, coreMemoryOp, coreWrite } from './memories.ts';
 import { hardFilter, scoreMemory } from './forgetting.ts';
 import { cosine, embedSync } from './vector.ts';
 import { ulid } from './ulid.ts';
 import type {
   AuditRecord, BrowseResult, DiscoverReq, DiscoverResult, DiscoverSignal, Form, GcReq, GcReport,
-  Hit, LogItem, LogPage, LogReq, MemAgent, MemAgentOptions, MemReq, Memory, Pref, RecallReq,
+  Hit, LogItem, LogPage, LogReq, MemAgent, MemAgentOptions, MemOp, MemOpPatch, MemOpResult, MemReq, Memory, Pref, RecallReq,
   RecallResult, SyncReq, SyncReport, WriteResult,
 } from './types.ts';
 
@@ -31,6 +31,11 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent {
 
   function newRequestId(): string {
     return `req_${ulid()}`;
+  }
+
+  /** 单记忆操作（17.3/P4）：locked 约束 + 钳制 + 版本 + 审计，端壳状态变更唯一通道 */
+  async function memoryOp(mem_id: string, op: MemOp, patch?: MemOpPatch): Promise<MemOpResult> {
+    return coreMemoryOp(mem_id, op, { storage, vector, request_id: newRequestId(), now: Date.now() }, patch);
   }
 
   async function audit(
@@ -260,5 +265,5 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent {
     return mem;
   }
 
-  return { recall, write, gc, getPrefs, discover, sync, browse, logs, unbind, _seedMemory: seedMemory };
+  return { recall, write, gc, getPrefs, discover, sync, browse, logs, unbind, _seedMemory: seedMemory, _memoryOp: memoryOp };
 }

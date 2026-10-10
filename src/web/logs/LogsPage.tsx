@@ -1,29 +1,47 @@
 // 日志记录页（REQ-011 / P15）T4 编排
-import { useMemo, useState } from 'react';
-import type { L0State, LogFilter } from './types.ts';
-import { SEED_LOGS } from './seed.ts';
+// 审计流来自内核 InMemoryStorage（append-only）；L0 解锁走 ma.browse 真实写 l0_view 审计。
+import { useEffect, useMemo, useState } from 'react';
+import type { L0State, LogEntry, LogFilter } from './types.ts';
 import { ensureRequestId, filterLogs, l0Auth } from './logic.ts';
+import { coreL0Unlock, coreLoadLogs } from './coreLogs.ts';
 import { LogFilterBar } from './LogFilterBar.tsx';
 import { AuditModal, ErrorAggr, L0AuthCard, LogTable } from './LogCards.tsx';
 import { useToast } from './useToast.tsx';
 import './extras.css';
 
 export function LogsPage() {
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [l0Sample, setL0Sample] = useState<string | undefined>(undefined);
   const [filter, setFilter] = useState<LogFilter>({ level: 'all', form: 'all', actions: [], window: '24h', keyword: '', onlyAbnormal: false });
   const [auditRid, setAuditRid] = useState<string | null>(null);
   const [l0, setL0] = useState<L0State>({ role: 'admin', unlocked: false, failCount: 0, lockedUntil: null });
   const [l0Msg, setL0Msg] = useState<string | null>(null);
   const { node: toast, show } = useToast();
 
-  const { fixed, missing } = useMemo(() => ensureRequestId(SEED_LOGS), []);
-  const now = Date.now();
-  const logs = useMemo(() => filterLogs(fixed, filter, now), [fixed, filter, now]);
+  // 数据源 = 内核审计账本（挂载拉取；L0 解锁后刷新可见新增 l0_view）
+  useEffect(() => {
+    let alive = true;
+    coreLoadLogs().then((l) => { if (alive) setLogs(l); });
+    return () => { alive = false; };
+  }, []);
 
-  const handleAuth = (pwd: string) => {
+  const { fixed, missing } = useMemo(() => ensureRequestId(logs), [logs]);
+  const now = Date.now();
+  const shown = useMemo(() => filterLogs(fixed, filter, now), [fixed, filter, now]);
+
+  const handleAuth = async (pwd: string) => {
     const r = l0Auth(pwd, l0);
     setL0(r.state);
     setL0Msg(r.message);
-    if (r.ok) show('l0_view 已记审计（4.3）');
+    if (r.ok) {
+      // 真实内核授权：browse 写 l0_view 审计 + 回填解密样例（端壳剥 ENC 包装）
+      const k = await coreL0Unlock(pwd);
+      if (k.ok) {
+        setL0Sample(k.sample?.replace(/^ENC\((.*)\)$/, '$1'));
+        coreLoadLogs().then(setLogs); // 日志流实时可见新增 l0_view
+      }
+      show('l0_view 已记审计（4.3）');
+    }
   };
 
   return (
@@ -37,10 +55,10 @@ export function LogsPage() {
         </div>
       )}
 
-      <L0AuthCard state={l0} message={l0Msg} onAuth={handleAuth} />
-      <LogFilterBar filter={filter} onChange={setFilter} count={logs.length} />
-      <ErrorAggr logs={logs} onJump={(t) => show(`跳转处置：${t}（占位）`)} />
-      <LogTable logs={logs} onAudit={(rid) => setAuditRid(rid)} />
+      <L0AuthCard state={l0} message={l0Msg} onAuth={handleAuth} sample={l0Sample} />
+      <LogFilterBar filter={filter} onChange={setFilter} count={shown.length} />
+      <ErrorAggr logs={shown} onJump={(t) => show(`跳转处置：${t}（占位）`)} />
+      <LogTable logs={shown} onAudit={(rid) => setAuditRid(rid)} />
 
       {auditRid && <AuditModal requestId={auditRid} onClose={() => setAuditRid(null)} />}
       <div className="card">

@@ -192,7 +192,8 @@ export interface LogPage {
 /** ---------- 审计（§3.2，全动作可查 4.3/18.2-E） ---------- */
 export type AuditAction =
   | 'recall' | 'write' | 'gc' | 'auto_bind' | 'unbound' | 'sync'
-  | 'llm_proxy' | 'llm_fallback' | 'log_view' | 'l0_view';
+  | 'llm_proxy' | 'llm_fallback' | 'log_view' | 'l0_view'
+  | 'memory_op';
 
 export interface AuditRef {
   request_id: string;
@@ -243,6 +244,31 @@ export interface Memory {
   sha256?: string;                // 内容指纹（5.4 幂等）
   vclock?: Record<string, number>;// 向量时钟 {端: 版本}（§3.1）
   updated_at?: number;            // 最近修改（LWW 判序用，§4）
+}
+
+/** ---------- 记忆操作（17.3，P8 三操作/P4 调参共用一条内核通道） ---------- */
+export type MemOp =
+  | 'remember' | 'forget' | 'pin' | 'unpin' | 'lock' | 'unlock'
+  | 'archive' | 'restore' | 'delete'
+  | 'param'      // 调参（P4 面板）：patch 部分字段
+  | 'migrate';   // 层迁移（P4）：patch.decay_class 目标温度
+
+export interface MemOpPatch {
+  importance?: number;
+  confidence?: number;
+  half_life_days?: number;
+  pinned?: boolean;
+  locked?: boolean;
+  decay_class?: DecayClass;
+}
+
+export interface MemOpResult {
+  ok: boolean;
+  /** G4：locked 拒绝（仅 unlock 放行） */
+  blocked_locked?: boolean;
+  /** 操作后记录；delete 后为 null */
+  mem: Memory | null;
+  request_id: string;
 }
 
 /** ---------- Provider 注入（§5） ---------- */
@@ -331,4 +357,6 @@ export interface MemAgent {
   unbind(agent: string): Promise<void>;
   /** 测试/演示辅助：灌入种子记忆 */
   _seedMemory(m: Partial<Memory> & Pick<Memory, 'content' | 'category' | 'project_id'>): Promise<Memory>;
+  /** 单记忆操作（17.3/P4）：端壳状态变更统一走内核（G4 约束 + 钳制 + 版本 + 审计） */
+  _memoryOp(mem_id: string, op: MemOp, patch?: MemOpPatch): Promise<MemOpResult>;
 }

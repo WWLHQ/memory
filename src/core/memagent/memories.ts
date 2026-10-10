@@ -1,9 +1,13 @@
-// 内核记忆业务（§3 schema + 行为红线）：write 查重短路嫁接 / browse L0 授权 / gc 衰减
+// 内核记忆业务（§3 schema + 行为红线）：write 查重短路嫁接 / browse L0 授权 / gc 衰减 / memoryOp 17.3 操作
 import type {
   AuditRef, BrowseReq, BrowseResult, BrowseRow, Category, DecayClass,
-  GcReq, GcReport, Layer, Memory, StorageBackend, VectorBackend,
+  GcReq, GcReport, Layer, MemOp, MemOpPatch, MemOpResult, Memory, StorageBackend, VectorBackend,
 } from './types.ts';
 import { cosine, embedSync } from './vector.ts';
+
+/** 17.4 钳制：importance 下限 0.1 / confidence 下限 0.05（2.4.2 规则4） */
+const CLAMP = { importance: [0.1, 1] as const, confidence: [0.05, 1] as const };
+const clamp = (v: number, [lo, hi]: readonly [number, number]) => Math.max(lo, Math.min(hi, v));
 
 /** 查重阈值（6.1 演示取 L2 档 0.75；实际按目标层） */
 export const DUP_THRESHOLD = 0.75;
@@ -135,4 +139,79 @@ export async function coreGc(
     detail: { decayed, conflicts_resolved: 0 },
   });
   return { decayed, merged: 0, conflicts_resolved: 0, request_id, audit: auditRef };
+}
+
+/**
+ * 单记忆操作（17.3 / P4 调参迁移）：端壳状态变更唯一通道。
+ * G4：locked 仅可 unlock；每次变更新增审计 memory_op（detail.op 归因）+ 版本推进（同步用）。
+ */
+export async function coreMemoryOp(
+  mem_id: string,
+  op: MemOp,
+  ctx: { storage: StorageBackend; vector: VectorBackend; request_id: string; now: number },
+  patch: MemOpPatch = {},
+): Promise<MemOpResult> {
+  const { storage, vector, request_id, now } = ctx;
+  const m = await storage.getMemory(mem_id);
+  if (!m) return { ok: false, mem: null, request_id };
+
+  // G4：locked 豁免一切后台/手动操作，仅可解锁（17.7 迁移规则同源）
+  if (m.locked && op !== 'unlock') {
+    await storage.appendAudit({
+      request_id, action: 'memory_op', ts: now, project_id: m.project_id,
+      detail: { op, blocked: 'locked', mem_id },
+    });
+    return { ok: false, blocked_locked: true, mem: m, request_id };
+  }
+
+  const bump = (di: number, dc: number): Memory => ({
+    ...m,
+    importance: clamp((m.importance ?? 0.5) + di, CLAMP.importance),
+    confidence: clamp((m.confidence ?? 0.5) + dc, CLAMP.confidence),
+    reinforce_count: (m.reinforce_count ?? 0) + (di > 0 ? 1 : 0),
+  });
+
+  let next: Memory | null = m;
+  switch (op) {
+    case 'remember': next = bump(+0.2, +0.2); break;          // 强化：升权 + reinforce 分家（17.4）
+    case 'forget': next = bump(-0.2, -0.2); break;            // 降权不删（17.3）
+    case 'pin': next = { ...m, pinned: true }; break;
+    case 'unpin': next = { ...m, pinned: false }; break;
+    case 'lock': next = { ...m, locked: true }; break;
+    case 'unlock': next = { ...m, locked: false }; break;
+    case 'archive': next = { ...m, decay_class: 'archived' }; break;
+    case 'restore': next = { ...m, decay_class: 'hot' }; break; // 恢复即回温（15.3）
+    case 'param': {                                            // P4 调参：内核钳制兜底
+      next = {
+        ...m,
+        importance: patch.importance !== undefined ? clamp(patch.importance, CLAMP.importance) : m.importance,
+        confidence: patch.confidence !== undefined ? clamp(patch.confidence, CLAMP.confidence) : m.confidence,
+        half_life_days: patch.half_life_days !== undefined ? Math.max(1, patch.half_life_days) : m.half_life_days,
+        pinned: patch.pinned ?? m.pinned,
+        locked: patch.locked ?? m.locked,
+      };
+      break;
+    }
+    case 'migrate':                                            // P4 层迁移：目标温度由端壳六态映射
+      next = { ...m, decay_class: patch.decay_class ?? m.decay_class };
+      break;
+    case 'delete':                                             // 彻底删除：主表 + 向量索引同步清理
+      await storage.deleteMemory(mem_id);
+      await vector.remove(mem_id);
+      await storage.appendAudit({
+        request_id, action: 'memory_op', ts: now, project_id: m.project_id,
+        detail: { op, deleted: true, mem_id },
+      });
+      return { ok: true, mem: null, request_id };
+  }
+
+  if (next) {
+    next = { ...next, version: m.version + 1, updated_at: now };
+    await storage.putMemory(next);
+  }
+  await storage.appendAudit({
+    request_id, action: 'memory_op', ts: now, project_id: m.project_id,
+    detail: { op, mem_id, importance: next?.importance, confidence: next?.confidence, decay_class: next?.decay_class },
+  });
+  return { ok: true, mem: next, request_id };
 }

@@ -1,13 +1,14 @@
 // 记忆管理页（REQ-006 / P8）· 完整编排（T5）
 // 列表(T3) + 操作(T4) + 详情/编辑抽屉 + toast + 后端 mirror 注入点。
-// 数据本地内存态为真相；操作经 applyOp 改 state 并触发 17.3 toast + G6 审计上抛。
+// 初始渲染用种子；17.3 操作经 ma._memoryOp 走内核（G4/钳制/版本/审计真实发生），回执驱动状态。
 import { useState } from 'react';
 import { MemoryTable } from './MemoryTable.tsx';
 import { MemoryActions } from './MemoryActions.tsx';
 import { MemoryDrawer } from './MemoryDrawer.tsx';
 import { useToast } from './useToast.tsx';
 import { useMemoryMirror } from './useMemoryMirror.ts';
-import { applyOp, OP_TOAST } from './logic.ts';
+import { OP_TOAST } from './logic.ts';
+import { coreApplyOp } from './coreMemoryOps.ts';
 import { SEED_MEMORIES } from './seed.ts';
 import type { MemoryOp, MemoryRecord } from './types.ts';
 
@@ -19,10 +20,10 @@ export function MemoryPage() {
 
   const selected = memories.find((m) => m.id === selectedId) ?? null;
 
-  function handleAction(rec: MemoryRecord, op: MemoryOp) {
-    const res = applyOp(rec, op);
+  async function handleAction(rec: MemoryRecord, op: MemoryOp) {
+    const res = await coreApplyOp(rec, op);
     if (!res.ok) {
-      // locked 约束拒绝
+      // locked 约束拒绝（内核 G4）
       toast.show('已锁定，先解锁才能操作。');
       return;
     }
