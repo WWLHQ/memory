@@ -1,0 +1,84 @@
+/*
+ * 记忆管理页样式 —— 复用本项目暗色设计系统（与 AgentOnboard/theme.css 同源变量）。
+ * 新增的记忆专属 class 见下方；通用变量/base 抄自 design/ui 原型体系，禁止擅自改 base。
+ */
+:root {
+  --bg:#0f1419; --panel:#1a212b; --panel2:#202833; --line:#2b3441;
+  --txt:#e6edf3; --muted:#8b98a7; --dim:#5b6675; --accent:#4d9fff;
+  --ok:#3ecf8e; --warn:#ffd166; --err:#ff5c5c;
+}
+* { box-sizing:border-box; }
+body {
+  margin:0; background:var(--bg); color:var(--txt);
+  font:14px/1.55 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
+}
+.wrap { max-width:1180px; margin:0 auto; padding:18px; }
+h1 { font-size:18px; margin:0 0 2px; }
+.sub { color:var(--muted); font-size:12px; margin-bottom:14px; }
+.section-title {
+  font-size:13px; color:var(--muted); font-weight:600;
+  margin:18px 0 8px; text-transform:uppercase; letter-spacing:.5px;
+}
+.card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:14px; }
+.badge {
+  font-size:10px; font-weight:700; padding:2px 8px;
+  border-radius:6px; border:1px solid var(--line);
+}
+.badge.p0 { background:#12324a; color:#8cc7ff; }
+.badge.p1 { background:#1a3320; color:#7fe0a0; }
+.badge.p2 { background:#3a2f10; color:#ffd166; }
+.badge.p3 { background:var(--panel2); color:var(--muted); }
+
+/* 记忆专属：表格 */
+.mtable { width:100%; border-collapse:collapse; font-size:12.5px; }
+.mtable th, .mtable td { padding:9px 10px; text-align:left; border-bottom:1px solid var(--line); vertical-align:top; }
+.mtable th { color:var(--muted); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.4px; cursor:default; }
+.mtable tr:hover { background:var(--panel2); }
+.mtable tr.pinned { background:#14263a; }
+.mtable .mid { font-family:monospace; color:var(--accent); font-size:11px; }
+.mtable .content { max-width:320px; }
+.mtable .tags .pill { margin:1px 3px 1px 0; }
+
+/* 温度/状态徽标 */
+.temp { font-size:11px; padding:2px 8px; border-radius:6px; border:1px solid var(--line); }
+.temp.hot { background:#3a1616; color:#ffb0b0; border-color:#6b2e2e; }
+.temp.warm { background:#3a2f10; color:#ffe6a8; border-color:#6b5a1e; }
+.temp.cold { background:#13283a; color:#8cc7ff; border-color:#2a4a66; }
+.temp.archived { background:var(--panel2); color:var(--dim); }
+.temp.dormant { background:#232323; color:#9b9b9b; border-color:#444; }
+.status { font-size:11px; padding:2px 8px; border-radius:6px; border:1px solid var(--line); color:var(--muted); }
+.icon { font-size:13px; margin-right:3px; }
+.icon.locked { color:var(--warn); }
+.icon.pinned { color:var(--accent); }
+.icon.archived { color:var(--dim); }
+
+/* 进度条（importance/confidence/freshness） */
+.bar { height:6px; border-radius:4px; background:var(--panel2); overflow:hidden; min-width:60px; }
+.bar > i { display:block; height:100%; background:var(--accent); }
+.bar.warn > i { background:var(--warn); }
+.bar.err > i { background:var(--err); }
+
+/* 操作区 */
+.actions { display:flex; gap:6px; flex-wrap:wrap; }
+.btn {
+  background:var(--panel2); border:1px solid var(--line); color:var(--txt);
+  border-radius:8px; padding:6px 10px; cursor:pointer; font-size:11.5px;
+}
+.btn.primary { background:var(--accent); color:#04121f; border-color:var(--accent); font-weight:600; }
+.btn.danger { color:#ffb0b0; border-color:#6b2e2e; }
+.btn:disabled { opacity:.4; cursor:not-allowed; }
+
+/* 详情抽屉 */
+.drawer { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; margin-top:14px; }
+.drawer .kv { display:grid; grid-template-columns:140px 1fr; gap:6px 12px; font-size:12px; }
+.drawer .kv b { color:var(--muted); font-weight:600; }
+.toast {
+  position:fixed; bottom:18px; left:50%; transform:translateX(-50%);
+  background:var(--panel2); border:1px solid var(--line); border-radius:8px;
+  padding:9px 16px; font-size:13px; z-index:80;
+}
+.pill {
+  font-size:11px; padding:3px 9px; border-radius:6px;
+  background:var(--panel2); border:1px solid var(--line); color:var(--muted);
+}
+.note { font-size:11px; color:var(--dim); margin-top:14px; line-height:1.6; }
