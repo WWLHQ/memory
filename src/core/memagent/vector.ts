@@ -14,9 +14,23 @@ function hashToken(tok: string): number {
   return Math.abs(h) % DIM;
 }
 
+/** 分词：英文按词、中文按 2-gram（中文整句单 token 会让向量无法区分） */
+export function tokenize(text: string): string[] {
+  const tokens: string[] = [];
+  for (const seg of text.toLowerCase().split(/\s+/).filter(Boolean)) {
+    if (/[\u4e00-\u9fff]/.test(seg)) {
+      for (let i = 0; i < seg.length - 1; i++) tokens.push(seg.slice(i, i + 2));
+      if (seg.length === 1) tokens.push(seg);
+    } else {
+      tokens.push(seg);
+    }
+  }
+  return tokens;
+}
+
 export function embedSync(text: string): number[] {
   const vec = new Array<number>(DIM).fill(0);
-  for (const tok of text.toLowerCase().split(/\s+/).filter(Boolean)) {
+  for (const tok of tokenize(text)) {
     vec[hashToken(tok)] += 1;
   }
   const norm = Math.sqrt(vec.reduce((a, b) => a + b * b, 0)) || 1;

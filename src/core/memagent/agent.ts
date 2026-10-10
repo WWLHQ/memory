@@ -2,7 +2,8 @@
 import { MemAgentError } from './errors.ts';
 import { routeProxy } from './llm.ts';
 import { coreBrowse, coreGc, coreWrite } from './memories.ts';
-import { embedSync } from './vector.ts';
+import { hardFilter, scoreMemory } from './forgetting.ts';
+import { cosine, embedSync } from './vector.ts';
 import { ulid } from './ulid.ts';
 import type {
   AuditRecord, BrowseResult, DiscoverReq, DiscoverResult, DiscoverSignal, Form, GcReq, GcReport,
@@ -44,6 +45,7 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent {
 
   async function recall(req: RecallReq): Promise<RecallResult> {
     const request_id = newRequestId();
+    const now = Date.now();
     const topK = req.top_k ?? 5;
     if (topK < 1 || topK > 10) throw new MemAgentError('E_VECTOR', 'top_k 须在 1–10');
     // 16.5：critical 禁 minimal（模式分流红线）
@@ -52,23 +54,72 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent {
     if (scene === 'critical' && mode === 'minimal') {
       mode = 'fact_first'; // 禁 minimal → 降为事实优先
     }
-    const scored = await vector.search(await (async () => {
-      const [v] = await vector.embed([req.query]);
-      return v;
-    })(), topK, { project_id: req.project_id });
-    const hits: Hit[] = [];
-    for (const s of scored) {
-      const m = await storage.getMemory(s.mem_id);
-      if (!m) continue;
-      hits.push({
-        mem_id: m.mem_id, content: m.content, layer: m.layer, decay_class: m.decay_class,
-        pinned: m.pinned, locked: m.locked, score: Math.round(s.score * 1000) / 1000,
-        evidence_ref: `l0:${m.mem_id}`,
-      });
+    const [qvec] = await vector.embed([req.query]);
+    const all = await storage.listMemories({ project_id: req.project_id });
+    const minimal = mode === 'minimal';
+
+    // 17.8 第一层：硬过滤（pinned 免检直进候选；默认只扫 Hot/Warm，AC-11）
+    const candidates = all.filter((m) => hardFilter(m) && (!minimal || m.decay_class === 'hot' || m.decay_class === 'warm'));
+
+    // 17.8 第二层：轻量打分（relevance=cosine × 17.5 四分量，pinned +0.15）
+    const scored = candidates
+      .map((m) => ({
+        m,
+        relevance: m.embedding ? cosine(qvec, m.embedding) : 0,
+      }))
+      .map(({ m, relevance }) => ({ m, relevance, score: scoreMemory(m, relevance, now) }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, topK);
+
+    let hits: Hit[] = scored.map(({ m, score }) => ({
+      mem_id: m.mem_id, content: m.content, layer: m.layer, decay_class: m.decay_class,
+      pinned: m.pinned, locked: m.locked, score: Math.round(score * 1000) / 1000,
+      evidence_ref: `l0:${m.mem_id}`,
+    }));
+
+    let payload_tokens = hits.reduce((a, h) => a + estTokens(h.content), 0);
+    // 2.4.1/R9：超硬熔断 3000t → 按分数从低到高丢弃直到预算内
+    if (payload_tokens > BUDGET.hard) {
+      const sorted = [...hits].sort((a, b) => a.score - b.score);
+      let pt = payload_tokens;
+      const drop = new Set<string>();
+      for (const h of sorted) {
+        if (pt <= BUDGET.hard) break;
+        pt -= estTokens(h.content);
+        drop.add(h.mem_id);
+      }
+      hits = hits.filter((h) => !drop.has(h.mem_id));
+      payload_tokens = hits.reduce((a, h) => a + estTokens(h.content), 0);
     }
-    const payload_tokens = hits.reduce((a, h) => a + estTokens(h.content), 0);
+
+    // 2.4.3 逃生阀：零命中/全低分 → 补查 cold（15.3：sim≥0.85 强信号放行）
+    let evidence_thin: boolean | undefined;
+    if (hits.length === 0 || hits.every((h) => h.score < 0.3)) {
+      evidence_thin = true;
+      const backfill = all
+        .filter((m) => !minimal && (m.decay_class === 'cold' || m.decay_class === 'archived' || m.decay_class === 'dormant') && m.embedding)
+        .map((m) => ({ m, sim: cosine(qvec, m.embedding!) }))
+        .filter(({ sim }) => sim >= 0.85)
+        .sort((a, b) => b.sim - a.sim)
+        .slice(0, 3);
+      if (backfill.length > 0) {
+        for (const { m, sim } of backfill) {
+          hits.push({
+            mem_id: m.mem_id, content: m.content, layer: m.layer, decay_class: m.decay_class,
+            pinned: m.pinned, locked: m.locked, score: Math.round(scoreMemory(m, sim, now) * 1000) / 1000,
+            evidence_ref: `l0:${m.mem_id}`,
+          });
+        }
+      }
+    }
+
+    // 17.4：召回命中计数（不含 confirm/reinforce）
+    for (const h of hits) {
+      const m = await storage.getMemory(h.mem_id);
+      if (m) await storage.putMemory({ ...m, access_count: (m.access_count ?? 0) + 1, last_access_time: now });
+    }
+
     const budgetStatus = payload_tokens >= BUDGET.hard ? 'fused' : payload_tokens >= BUDGET.warn ? 'warn' : 'ok';
-    const evidence_thin = hits.length === 0 || hits.every((h) => h.score < 0.3);
     const result: RecallResult = {
       hits, payload_tokens, pipeline_llm_tokens: 0,
       budget: { soft: 1500, warn: 2000, hard: 3000, status: budgetStatus },

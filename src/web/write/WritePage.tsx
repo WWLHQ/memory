@@ -1,6 +1,6 @@
 // 写入页（REQ-006 / P2）· 完整编排（T5）
 // 表单(T3) + 查重卡(T4) + 写入回执（memory_id + L1–L6 折叠，L1 仅审计展开）+ toast + 后端 mirror。
-// 数据本地内存态为真相；操作经校验后生成回执并触发审计上抛（G6）。
+// T7 接真内核：提交走 memagent-core ma.write（查重 new/merged/duplicated 真实判定）。
 import { useState } from 'react';
 import { WriteForm } from './WriteForm.tsx';
 import { DedupCard } from './DedupCard.tsx';
@@ -8,6 +8,7 @@ import { useToast } from './useToast.tsx';
 import { useWriteMirror } from './useWriteMirror.ts';
 import { composeReceipt, scoreDedup, validateDraft } from './logic.ts';
 import { SEED_EXISTING } from './seed.ts';
+import { coreWrite } from './coreWrite.ts';
 import type { LayerName, MemoryDraft, WriteReceipt } from './types.ts';
 
 // 全局注入（演示值；真实环境由租户上下文注入，禁手填，R2）
@@ -32,10 +33,29 @@ export function WritePage() {
       toast.show(v.errors.join('；'));
       return;
     }
-    const r = composeReceipt(draft.content, result.is_duplicate ? dedupAction : 'create');
-    setReceipt(r);
-    mirror.audit(`memory_${r.dedup_action}`);
-    toast.show('已写入记忆。');
+    // 查重卡动作（实时五维）仅供参考；提交以内核 dedup 为准（短路嫁接 6.2）
+    const intended = result.is_duplicate ? dedupAction : 'create';
+    void (async () => {
+      try {
+        const cw = await coreWrite({
+          content: draft.content, category: draft.category,
+          project_id: draft.project_id, session_id: draft.session_id, source: draft.source,
+        });
+        const r = composeReceipt(draft.content, cw.dedup_action);
+        setReceipt({ ...r, memory_id: cw.mem_id });
+        mirror.audit(`memory_${cw.dedup_action}`);
+        toast.show(
+          cw.dedup_action === 'create'
+            ? '已写入记忆。'
+            : cw.dedup_action === 'merge'
+              ? `与既有记忆相似（sim=${cw.sim.toFixed(2)}），已合并写入。`
+              : `与既有记忆完全重复（sim=${cw.sim.toFixed(2)}），保留原记忆。`,
+        );
+      } catch (e) {
+        toast.show(`写入失败：${String(e)}`);
+      }
+    })();
+    void intended;
   }
 
   return (
