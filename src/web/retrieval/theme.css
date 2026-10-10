@@ -1,0 +1,72 @@
+/*
+ * 生命周期页样式 —— 复用本项目暗色设计系统（与 memory/write/audit/theme.css 同源变量）。
+ */
+:root {
+  --bg:#0f1419; --panel:#1a212b; --panel2:#202833; --line:#2b3441;
+  --txt:#e6edf3; --muted:#8b98a7; --dim:#5b6675; --accent:#4d9fff;
+  --ok:#3ecf8e; --warn:#ffd166; --err:#ff5c5c;
+}
+* { box-sizing:border-box; }
+body {
+  margin:0; background:var(--bg); color:var(--txt);
+  font:14px/1.55 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
+}
+.wrap { max-width:1180px; margin:0 auto; padding:18px; }
+h1 { font-size:18px; margin:0 0 2px; }
+.sub { color:var(--muted); font-size:12px; margin-bottom:14px; }
+.card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:14px; }
+.badge { font-size:10px; font-weight:700; padding:2px 8px; border-radius:6px; border:1px solid var(--line); }
+.badge.p2 { background:#3a2f10; color:#ffd166; }
+.section-title { font-size:13px; color:var(--muted); font-weight:600; margin:16px 0 8px; text-transform:uppercase; letter-spacing:.5px; }
+.row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:8px 0; }
+.mid { font-family:monospace; font-size:11px; }
+.dim { color:var(--dim); }
+
+/* 六态 */
+.status { display:inline-block; font-size:11px; padding:2px 9px; border-radius:6px; border:1px solid var(--line); color:var(--muted); }
+.status.active { background:#1a3320; color:#7fe0a0; border-color:#2e5a3a; }
+.status.hibernating { background:#3a2f10; color:#ffd166; border-color:#6b5a1e; }
+.status.archived { background:var(--panel2); color:var(--dim); }
+.status.deprecated { background:#3a1616; color:#ffb0b0; border-color:#6b2e2e; }
+.status.stale { background:#13283a; color:#8cc7ff; border-color:#2a4a66; }
+.status.dormant { background:#232323; color:#9b9b9b; border-color:#444; }
+.temp { font-size:11px; padding:2px 8px; border-radius:6px; border:1px solid var(--line); }
+.temp.hot { background:#3a1616; color:#ffb0b0; border-color:#6b2e2e; }
+.temp.warm { background:#3a2f10; color:#ffe6a8; border-color:#6b5a1e; }
+.temp.cold { background:#13283a; color:#8cc7ff; border-color:#2a4a66; }
+
+/* 列表 */
+.ltable { width:100%; border-collapse:collapse; font-size:12.5px; }
+.ltable th, .ltable td { padding:9px 10px; text-align:left; border-bottom:1px solid var(--line); vertical-align:top; }
+.ltable th { color:var(--muted); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.4px; }
+.ltable tr:hover { background:var(--panel2); }
+.ltable .mid { font-family:monospace; color:var(--accent); font-size:11px; }
+.ltable tr.sel { outline:2px solid var(--accent); }
+.ltable input[type=checkbox] { cursor:pointer; }
+
+/* 迁移按钮 */
+.mig { display:flex; gap:6px; flex-wrap:wrap; }
+.btn {
+  background:var(--panel2); border:1px solid var(--line); color:var(--txt);
+  border-radius:8px; padding:6px 10px; cursor:pointer; font-size:11.5px;
+}
+.btn.primary { background:var(--accent); color:#04121f; border-color:var(--accent); font-weight:600; }
+.btn:disabled { opacity:.4; cursor:not-allowed; }
+
+/* 调参面板 */
+.panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; }
+/* 状态查看器与调参面板等高（用户验收反馈）：面板填满 flex 父容器 */
+.panel { flex:1; }
+.panel .kv { display:grid; grid-template-columns:150px 1fr; gap:6px 12px; font-size:12px; margin:10px 0; }
+.panel .kv b { color:var(--muted); font-weight:600; }
+.slider { display:flex; align-items:center; gap:8px; margin:8px 0; }
+.slider label { font-size:11px; color:var(--muted); min-width:72px; }
+.slider input[type=range] { flex:1; accent-color:var(--accent); }
+.slider .val { font-family:monospace; font-size:11px; color:var(--accent); min-width:44px; text-align:right; }
+.panel .freshness { font-size:12px; color:var(--muted); margin:8px 0; }
+.panel.locked { opacity:.55; }
+.locked-hint { font-size:11px; color:var(--warn); margin:6px 0; display:none; }
+.locked-hint.show { display:block; }
+.sw { display:inline-flex; align-items:center; gap:6px; font-size:12px; cursor:pointer; user-select:none; }
+.toast { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:9px 16px; font-size:13px; z-index:80; }
+.note { font-size:11px; color:var(--dim); margin-top:14px; line-height:1.6; }
