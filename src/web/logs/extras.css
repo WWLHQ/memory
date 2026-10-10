@@ -1,0 +1,12 @@
+/* 日志页补充样式 */
+.dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
+.dot.info { background:var(--accent); }
+.dot.warn { background:var(--warn); }
+.dot.error { background:var(--err); }
+tr.err-row { background:#2a1414; }
+tr.err-row td { color:#ffc9c9; }
+tr.err-row .note { color:#d8a0a0; }
+.modal-mask { position:fixed; inset:0; background:rgba(0,0,0,.55); display:flex; align-items:center; justify-content:center; z-index:100; }
+.modal { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:18px; width:min(560px, 92vw); }
+.mid { color:var(--accent); }
+a.mid { text-decoration:underline; text-underline-offset:2px; }
