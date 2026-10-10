@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { SecurityPage } from '../SecurityPage.tsx';
+import { coreLoadSecurityAudit } from '../coreSecurity.ts';
 
 describe('SecurityPage (P12-T4 编排)', () => {
   beforeEach(() => {
@@ -33,12 +34,17 @@ describe('SecurityPage (P12-T4 编排)', () => {
     expect(screen.getByTestId('remove-user_001')).toBeEnabled();
   });
 
-  it('轮换/吊销出 toast + request_id；吊销后状态更新', () => {
+  it('轮换/吊销出 toast + request_id；吊销后状态更新；操作真写内核审计账本', async () => {
     render(<SecurityPage />);
     fireEvent.click(screen.getByTestId('rotate-key_001'));
-    expect(screen.getByTestId('toast')).toHaveTextContent(/req_s\d/);
+    await waitFor(() => expect(screen.getByTestId('toast')).toHaveTextContent(/req_s\d/));
     fireEvent.click(screen.getByTestId('revoke-key_001'));
     expect(screen.getByTestId('key-key_001')).toHaveTextContent('已吊销');
+    // 内核账本可查（rotate/revoke 均落 security_change 审计）
+    await waitFor(async () => {
+      const log = await coreLoadSecurityAudit();
+      expect(log.filter((e) => e.op === 'security_change').length).toBeGreaterThanOrEqual(2);
+    });
   });
 
   it('超 90 天密钥显示警示', () => {

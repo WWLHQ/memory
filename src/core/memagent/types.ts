@@ -196,7 +196,8 @@ export type AuditAction =
   | 'memory_op'
   | 'param_save'
   | 'growth_op'
-  | 'monitor_alert';
+  | 'monitor_alert'
+  | 'security_change';
 
 export interface AuditRef {
   request_id: string;
