@@ -1,6 +1,7 @@
 # REQ-008 云同步 任务拆分（同步机制详细设计 §1–§8）
 
-> 落 `src/core/memagent/sync.ts`（内核扩展）。三项锁定：桌面主源 / 自动 LWW / 中枢账本。契约级用内存 SyncHub 扮演 Postgres 中枢（接口同构，未来换真库）。
+> 落 `src/core/memagent/sync.ts`（内核扩展）。三项锁定：桌面主源 / 自动 LWW / 中枢账本。契约级用内存 SyncHub 扮演 Postgres 中枢（接口同构）。
+> **PgSyncHub 落地（`src/core/memagent/pgSyncHub.ts`）**：基于 @electric-sql/pglite（进程内真 Postgres WASM，无参=内存库 / 传 dataDir=落盘持久化），五表账本 hub_memories（镜像+全局单调 version_seq+#loser# 墓碑）/ hub_seen（sha256 幂等）/ hub_conflicts（9.7 裁决队列）/ hub_audits（§6 审计）/ hub_meta（cursor）；与内存版接口同构语义一致（push 全分支 / pull 隔离增量 / reconcile 指纹校验 / resolve 败者归档），引擎 syncUp/syncDown/reconcile 接受双 Hub（`AnySyncHub`）。
 
 ## T1 数据模型扩展（§3.1）
 - Memory 补可选：pending_sync（离线回传标记）/ sha256（内容指纹幂等）/ vclock（{端:版本} 向量时钟）

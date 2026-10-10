@@ -241,6 +241,15 @@ export class SyncHub {
   getCursor(): number {
     return this.cursor;
   }
+
+  /** 审计游标 + 截取（syncUp 引擎统一走这两个方法，PgSyncHub 同名异步实现） */
+  auditCount(): number {
+    return this.audits.length;
+  }
+
+  auditsFrom(start: number): SyncAudit[] {
+    return this.audits.slice(start);
+  }
 }
 
 // ---------- 各端引擎（§3.2/§3.3/§5） ----------
@@ -261,29 +270,32 @@ export interface SyncUpReport {
   audits: SyncAudit[];
 }
 
+/** 中枢联合：内存版（同步返回）与 Postgres 版（异步返回）接口同构，引擎函数双兼容 */
+export type AnySyncHub = SyncHub | import('./pgSyncHub.ts').PgSyncHub;
+
 /** 上行（桌面实时 / Web 即时 / 移动批量回传 / CLI 命令触发） */
-export async function syncUp(local: { listMemories(f: { project_id?: string }): Promise<Memory[]>; putMemory(m: Memory): Promise<void> }, hub: SyncHub, form: Form, filter?: { onlyPending?: boolean }): Promise<SyncUpReport> {
+export async function syncUp(local: { listMemories(f: { project_id?: string }): Promise<Memory[]>; putMemory(m: Memory): Promise<void> }, hub: AnySyncHub, form: Form, filter?: { onlyPending?: boolean }): Promise<SyncUpReport> {
   const mems = await local.listMemories({});
   const report: SyncUpReport = { applied: 0, dedup: 0, conflicts: [], lww: 0, audits: [] };
-  const auditStart = hub.audits.length;
+  const auditStart = await hub.auditCount();
   for (const m of mems) {
     if (filter?.onlyPending && !m.pending_sync) continue;
     if (m.mem_id.includes('#loser#')) continue; // 败者不回传
     const stamped = stampForSync(m, form);
-    const r = hub.push(stamped, form);
+    const r = await hub.push(stamped, form);
     await local.putMemory({ ...stamped, pending_sync: false }); // §5：回传后清 pending_sync
     if (r === 'applied') report.applied++;
     else if (r === 'dedup') report.dedup++;
     else if (r === 'lww') report.lww++;
-    else report.conflicts.push(...hub.listConflicts().filter((c) => c.mem_id === m.mem_id).map((c) => c.conflict_id));
+    else report.conflicts.push(...(await hub.listConflicts()).filter((c) => c.mem_id === m.mem_id).map((c) => c.conflict_id));
   }
-  report.audits = hub.audits.slice(auditStart); // 本轮产生的审计（§6 form 归因）
+  report.audits = await hub.auditsFrom(auditStart); // 本轮产生的审计（§6 form 归因）
   return report;
 }
 
 /** 下行（§3.3）：镜像增量 → 本地落盘（补"自己没的、别人改的"） */
-export async function syncDown(hub: SyncHub, local: { putMemory(m: Memory): Promise<void>; getMemory(id: string): Promise<Memory | null> }, scope: { team_id: string; user_id?: string }, since: number, form: Form = 'web'): Promise<{ pulled: number; cursor: number }> {
-  const { items, cursor } = hub.pull(scope, since, form);
+export async function syncDown(hub: AnySyncHub, local: { putMemory(m: Memory): Promise<void>; getMemory(id: string): Promise<Memory | null> }, scope: { team_id: string; user_id?: string }, since: number, form: Form = 'web'): Promise<{ pulled: number; cursor: number }> {
+  const { items, cursor } = await hub.pull(scope, since, form);
   let pulled = 0;
   for (const m of items) {
     const existing = await local.getMemory(m.mem_id);
@@ -296,8 +308,8 @@ export async function syncDown(hub: SyncHub, local: { putMemory(m: Memory): Prom
 }
 
 /** 每日全量对账（§3.4）：补漏 + 指纹校验 */
-export async function reconcile(hub: SyncHub, local: { putMemory(m: Memory): Promise<void>; getMemory(id: string): Promise<Memory | null> }, scope: { team_id: string; user_id?: string }): Promise<{ backfilled: number; integrity_issues: string[] }> {
-  const { items, missing_local } = hub.reconcile(scope);
+export async function reconcile(hub: AnySyncHub, local: { putMemory(m: Memory): Promise<void>; getMemory(id: string): Promise<Memory | null> }, scope: { team_id: string; user_id?: string }): Promise<{ backfilled: number; integrity_issues: string[] }> {
+  const { items, missing_local } = await hub.reconcile(scope);
   let backfilled = 0;
   for (const m of items) {
     const existing = await local.getMemory(m.mem_id);

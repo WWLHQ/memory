@@ -23,7 +23,7 @@ status: draft
 | REQ-005 | [需求规格书_UI页面设计.md](需求规格书_UI页面设计.md) | [登录与首页_原型.html](design/ui/登录与首页_原型.html) / [index.html](design/ui/index.html) | 原子任务：[HOME-LOGIN.md](tasks/HOME-LOGIN.md)（T1–T12，**已拆分未实现**：租户上下文类型 / 密码哈希 / 登录业务+锁定 / Dashboard 聚合 / 租户 Provider / TopBar / Dashboard 区块 / 登录弹卡 / HomePage 装配 / 登录后端 / 前端镜像 / E2E） |
 | REQ-006 | [需求规格书_其余页面字段级交互规格.md](需求规格书_其余页面字段级交互规格.md) | [冲突裁决页_原型.html](design/ui/冲突裁决页_原型.html) | - |
 | REQ-007 | [需求规格书_内核API契约.md](需求规格书_内核API契约.md) | - | 原子任务：[CORE-AGENT.md](tasks/CORE-AGENT.md)（T2 storage 扩展：[sqliteStorage.ts](../../src/core/memagent/sqliteStorage.ts) SqliteStorage，§5.3 桌面/CLI 本地库 = P0 主源，node:sqlite 零依赖） |
-| REQ-008 | [需求规格书_同步机制详细设计.md](需求规格书_同步机制详细设计.md) | - | - |
+| REQ-008 | [需求规格书_同步机制详细设计.md](需求规格书_同步机制详细设计.md) | - | 原子任务：[SYNC.md](tasks/SYNC.md)（[sync.ts](../../src/core/memagent/sync.ts) 内存 SyncHub + [pgSyncHub.ts](../../src/core/memagent/pgSyncHub.ts) PgSyncHub（pglite Postgres 中枢落地，§2 五表账本）） |
 | REQ-009 | [需求规格书_大模型与净化生长页字段级交互规格.md](需求规格书_大模型与净化生长页字段级交互规格.md) | [净化生长与大模型_原型.html](design/ui/净化生长与大模型_原型.html) | - |
 | REQ-010 | [需求规格书_新增章节_十七_遗忘机制与用户体验设计.md](需求规格书_新增章节_十七_遗忘机制与用户体验设计.md) | [故事线_原型.html](design/ui/故事线_原型.html) / [机制演示_原型.html](design/ui/机制演示_原型.html) | - |
 | REQ-011 | [需求规格书_日志记录页字段级交互规格.md](需求规格书_日志记录页字段级交互规格.md) | [日志记录页_原型.html](design/ui/日志记录页_原型.html) / [审计日志页_原型.html](design/ui/审计日志页_原型.html) | - |
