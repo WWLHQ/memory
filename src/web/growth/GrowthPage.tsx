@@ -1,6 +1,6 @@
 // 自我净化与生长页（REQ-009 / P14）T4 编排
-// 本地内存态为真相；mirror 为 safe-noop（fire-and-forget），与 dispute/logs/models 同模式。
-import { useMemo, useState } from 'react';
+// 动作审计走内核账本（growth_op 真写 + 挂载回放）+ mirror 上抛；指标卡为演示快照（内核无此统计口径）。
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   DeltaPoint, DimKey, DimWeights, GrowthAuditEntry, Layer, LayerThresholds, ScheduleItem,
 } from './types.ts';
@@ -11,6 +11,8 @@ import {
   appendTunedPoint, auditOptimization, evaluateOptimizations, growthDelta,
   shortCircuitPath, validateSchedule, validateThresholds, validateWeights,
 } from './logic.ts';
+import { coreGrowthAudit, coreLoadGrowthAudit } from './coreGrowth.ts';
+import { useGrowthMirror } from './useGrowthMirror.ts';
 import { DedupCard, DevTunePanel, ShortCircuitFlow } from './DedupCards.tsx';
 import { DeltaPanel, GrowthCards, OptimizationList, ScheduleTimeline } from './GrowthPanels.tsx';
 import { useToast } from './useToast.tsx';
@@ -25,6 +27,21 @@ export function GrowthPage() {
   const [series, setSeries] = useState<DeltaPoint[]>(SEED_DELTA.map((p) => ({ ...p })));
   const [audit, setAudit] = useState<GrowthAuditEntry[]>([]);
   const { node: toast, show } = useToast();
+  const reportMirror = useGrowthMirror();
+  const seq = useRef(0);
+
+  // 挂载回放：内核账本中的 growth_op 历史（重进页面不丢）
+  useEffect(() => {
+    let alive = true;
+    coreLoadGrowthAudit()
+      .then((entries) => {
+        if (alive && entries.length > 0) setAudit((a) => [...entries.slice().reverse(), ...a]);
+      })
+      .catch(() => {}); // 内核不可达 → 空审计起步（safe-noop 语义）
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const sample = SAMPLES[sampleIdx];
   const opts = useMemo(() => evaluateOptimizations(metrics), [metrics]);
@@ -47,27 +64,46 @@ export function GrowthPage() {
     setThresholds((t) => ({ ...t, [l]: v }));
   }
 
-  function handleManualTrigger() {
-    // R4：手动触发 = 等价一次 ⑤ 权重回归，写 weight_tuned 审计；曲线追加 is_tuned 点
+  async function handleManualTrigger() {
+    // R4：手动触发 = 等价一次 ⑤ 权重回归，写 weight_tuned 审计（内核账本）；曲线追加 is_tuned 点
     const entry = auditOptimization(
       { auditName: 'weight_tuned', action: 'regress_mode_weights', key: 'regress_weights' },
       { trigger: 'manual', delta_before: delta },
       true,
     );
-    setAudit((a) => [entry, ...a]);
-    setSeries((s) => appendTunedPoint(s, `${s.length + 1}`, Math.min(0.06, delta * 1.4)));
-    show('已手动触发一次自生长（等价 ⑤ 回归）· 审计 weight_tuned');
+    seq.current += 1;
+    try {
+      await coreGrowthAudit(entry, `req_g${seq.current}`);
+      reportMirror('weight_tuned', `req_g${seq.current}`, entry);
+      setAudit((a) => [entry, ...a]);
+      setSeries((s) => appendTunedPoint(s, `${s.length + 1}`, Math.min(0.06, delta * 1.4)));
+      show('已手动触发一次自生长（等价 ⑤ 回归）· 审计 weight_tuned');
+    } catch {
+      show('触发失败：内核暂不可达');
+    }
   }
 
-  function handleToggle(key: ScheduleItem['key']) {
+  async function handleToggle(key: ScheduleItem['key']) {
     const next = schedule.map((s) => (s.key === key ? { ...s, enabled: !s.enabled } : s));
     const check = validateSchedule(next);
     if (!check.ok) {
       show(check.msg);
       return;
     }
-    setSchedule(next);
-    show(`调度已更新：${key} ${next.find((s) => s.key === key)?.enabled ? '启用' : '停用'}（记审计 schedule_changed）`);
+    seq.current += 1;
+    const entry: GrowthAuditEntry = {
+      event: 'schedule_changed', action: `toggle_${key}`,
+      payload: JSON.stringify({ key, enabled: next.find((s) => s.key === key)?.enabled }),
+      at: Date.now(),
+    };
+    try {
+      await coreGrowthAudit(entry, `req_g${seq.current}`);
+      reportMirror('schedule_changed', `req_g${seq.current}`, entry);
+      setSchedule(next);
+      show(`调度已更新：${key} ${next.find((s) => s.key === key)?.enabled ? '启用' : '停用'}（记审计 schedule_changed）`);
+    } catch {
+      show('调度更新失败：内核暂不可达');
+    }
   }
 
   return (
@@ -78,7 +114,7 @@ export function GrowthPage() {
           <input type="checkbox" data-testid="dev-mode" checked={devMode} onChange={(e) => setDevMode(e.target.checked)} /> 开发者模式（G7）
         </label>
       </h1>
-      <div className="sub">自净化（6.1 五维 + 6.2 短路嫁接）+ 自生长（7.1 指标 + 7.2 优化与收益 + 13.3 调度）</div>
+      <div className="sub">自净化（6.1 五维 + 6.2 短路嫁接）+ 自生长（7.1 指标为演示快照 · 动作审计为内核账本）</div>
 
       {(devMode && (!wCheck.ok || !tCheck.ok)) && (
         <div className="card" data-testid="tune-errors" style={{ borderColor: 'var(--danger,#ff5d5d)' }}>
