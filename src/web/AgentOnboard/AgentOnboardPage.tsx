@@ -46,7 +46,7 @@ export function AgentOnboardPage() {
       return {
         ...a,
         ...(c.circuit ? { circuit: c.circuit as UiAgentCard['circuit'] } : {}),
-        ...(c.priority ? { badge: c.priority.toLowerCase() } : {}),
+        ...(c.priority ? { badge: c.priority.toLowerCase() as UiAgentCard['badge'] } : {}),
       };
     }));
   }, []);

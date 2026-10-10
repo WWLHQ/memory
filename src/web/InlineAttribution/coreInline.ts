@@ -22,7 +22,7 @@ function getCtx(): Promise<InlineCtx> {
         llm: new FakeLlmProvider(), vector: new JsVectorBackend(), storage,
       });
       // 对话标记引用的记忆实体（mem_id 与演示标记一致，反馈真命中）
-      await ma._seedMemory({ mem_id: 'mem_005', content: '约束：API 响应时间 < 200ms（10.3 性能验收）', category: 'constraint', project_id: 'P1', decay_class: 'cold', confidence: 0.6 });
+      await ma._seedMemory({ mem_id: 'mem_005', content: '约束：API 响应时间 < 200ms（10.3 性能验收）', category: 'fact', project_id: 'P1', decay_class: 'cold', confidence: 0.6 });
       await ma._seedMemory({ mem_id: 'mem_009', content: '2025-07-05：选 FastAPI 而非 Django（性能优先，10.x 决策记录）', category: 'decision', project_id: 'P1', decay_class: 'hot', confidence: 0.6 });
       await ma._seedMemory({ mem_id: 'mem_021', content: 'L2 摘要：当前 FastAPI 版本与连接池配置（45 天）', category: 'context', project_id: 'P1', decay_class: 'warm', confidence: 0.6 });
       await ma._seedMemory({ mem_id: 'mem_030', content: '新结论：本次会话识别的优化点（自动写入）', category: 'fact', project_id: 'P1', confidence: 0.6 });

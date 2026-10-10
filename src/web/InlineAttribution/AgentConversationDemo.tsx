@@ -14,7 +14,6 @@ import { MemoryInjectionTag } from './MemoryInjectionTag.tsx';
 import { AgingWarnTag } from './AgingWarnTag.tsx';
 import { TokenSavingBar } from './TokenSavingBar.tsx';
 import { AttributionSummary } from './AttributionSummary.tsx';
-import { applyFeedback } from '../../inlineAttribution/feedback.ts';
 import { coreInlineAuditCount, coreInlineFeedback } from './coreInline.ts';
 import type {
   AgingWarnMark,

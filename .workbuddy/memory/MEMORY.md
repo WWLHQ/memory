@@ -34,3 +34,8 @@
 - 验收收尾时默认执行一轮垃圾清扫并汇报清理清单，再走 commit。
 - **入口 html / 产物文件名一律全小写**：Windows 文件系统大小写不敏感会掩盖 URL 与文件名的大小写错位，Linux CI 上直接 404（P13 时期 inlineAttribution.html 教训，5726a35 修复）。新增页面入口时命名前先确认。
 - 跨平台排查 CI 失败：本地 WSL Ubuntu clone 到 ~/ 本地盘（勿在 /mnt 挂载盘 npm ci，会 EIO 损坏 Windows node_modules）跑 CI 同款命令（--workers=1）即可复刻；node_modules 损坏用 npm install 增量修复。
+
+## WSL Linux 复刻环境（2026-10-10 建立）
+- WSL2 Ubuntu 26.04.1，node v20.20.2（⚠️ 无 node:sqlite，22.13+ 才有——sqliteStorage 测试跳过或升 node 22）；用户 lhq，sudo 需密码（不能 playwright install --with-deps 自动化）
+- E2E 复刻工作区：~/memory-wsl（git clone 自 Windows 仓库，勿共用 node_modules）；playwright chromium 系统库 Ubuntu 26.04 已齐，headless 直启 OK
+- 基线：npm run test:e2e 85/85（27.4s）全绿；pglite/pgSyncHub 6/6 Linux 全绿
