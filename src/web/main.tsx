@@ -1,10 +1,12 @@
 // 应用入口（REQ-005 首页路由 · T12 路由决策：首页 = HomePage，覆盖 REQ-003 默认页）
 // 挂载 HomePage，注入 T11 后端镜像 useLoginMirror（自动读 URL ?backend= 覆盖地址，缺省 :8200）；
-// 提供种子 feed 与 .rid 溯源审计 modal。AgentOnboard 页迁至 agentonboard.html 入口（保留 REQ-003 验证）。
+// 四卡为原型 §0.2 快照（UI 硬约束）；.rid 溯源真查 home server mirror 账本（coreHome）。
+// AgentOnboard 页迁至 agentonboard.html 入口（保留 REQ-003 验证）。
 import { StrictMode, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { HomePage } from './Home/HomePage.tsx';
 import { useLoginMirror } from './Home/useLoginMirror.ts';
+import { coreTraceLookup, type TraceHit } from './Home/coreHome.ts';
 import './Home/theme.css'; // REQ-005 原型主题（逐字提取自 design/ui/登录与首页_原型.html）
 import type { RawHomeFeed } from '../home/dashboard.ts';
 import type { SyncState } from '../types/home.ts';
@@ -42,9 +44,18 @@ function App() {
   // useLoginMirror 自动读取 URL ?backend= 作为后端地址（缺省 http://localhost:8200）
   const mirror = useLoginMirror();
   const [traceId, setTraceId] = useState<string | null>(null);
+  const [traceHits, setTraceHits] = useState<TraceHit[] | null>(null);
   // 未登录门控：首页 / AgentOnboard 等受保护页面默认 requireLogin=true；
   // 内联标识演示页（inlineattribution.html）不要求登录，传 false 即可。
   const requireLogin = new URLSearchParams(location.search).get('requireLogin') !== 'false';
+
+  const onTrace = (id: string) => {
+    setTraceId(id);
+    setTraceHits(null);
+    coreTraceLookup(id) // 真查 home 账本（失败/未收录 → 空数组）
+      .then((hits) => setTraceHits(hits))
+      .catch(() => setTraceHits([]));
+  };
 
   return (
     <>
@@ -53,7 +64,7 @@ function App() {
         sync={SEED_SYNC}
         loginFn={mirror.login}
         onLogout={mirror.logout}
-        onTrace={(id) => setTraceId(id)}
+        onTrace={onTrace}
         requireLogin={requireLogin}
       />
       {traceId && (
@@ -61,6 +72,15 @@ function App() {
           <div className="audit-box" onClick={(e) => e.stopPropagation()}>
             <h3>溯源审计</h3>
             <div className="audit-rid" id="auditRid">request_id: {traceId}</div>
+            {traceHits !== null && (
+              <div id="auditHits" style={{ fontSize: 12, marginTop: 6 }}>
+                {traceHits.length === 0
+                  ? <span className="dim">home 账本未收录该 request_id（页面动作在内核账本留痕）</span>
+                  : traceHits.map((h, i) => (
+                    <div key={i}>#{h.seq ?? '-'} [{h.source}] {h.action}</div>
+                  ))}
+              </div>
+            )}
             <button className="btn" id="btnCloseAudit" type="button" onClick={() => setTraceId(null)}>关闭</button>
           </div>
         </div>
