@@ -1,0 +1,69 @@
+/*
+ * 冲突裁决页样式 —— 复用本项目暗色设计系统（与 memory/write/audit/theme.css 同源变量）。
+ */
+:root {
+  --bg:#0f1419; --panel:#1a212b; --panel2:#202833; --line:#2b3441;
+  --txt:#e6edf3; --muted:#8b98a7; --dim:#5b6675; --accent:#4d9fff;
+  --ok:#3ecf8e; --warn:#ffd166; --err:#ff5c5c;
+}
+* { box-sizing:border-box; }
+body {
+  margin:0; background:var(--bg); color:var(--txt);
+  font:14px/1.55 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
+}
+.wrap { max-width:1180px; margin:0 auto; padding:18px; }
+h1 { font-size:18px; margin:0 0 2px; }
+.sub { color:var(--muted); font-size:12px; margin-bottom:14px; }
+.card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:14px; }
+.badge { font-size:10px; font-weight:700; padding:2px 8px; border-radius:6px; border:1px solid var(--line); }
+.badge.p2 { background:#3a2f10; color:#ffd166; }
+.row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:8px 0; }
+.dim { color:var(--dim); }
+.mid { font-family:monospace; font-size:11px; color:var(--accent); }
+
+/* 冲突类型徽标 */
+.ctype { font-size:11px; padding:2px 8px; border-radius:6px; border:1px solid var(--line); }
+.ctype.direct_contradiction { background:#3a1616; color:#ffb0b0; border-color:#6b2e2e; }
+.ctype.partial_overlap { background:#3a2f10; color:#ffe6a8; border-color:#6b5a1e; }
+.ctype.context_dependent { background:#13283a; color:#8cc7ff; border-color:#2a4a66; }
+.ctype.uncertain { background:var(--panel2); color:var(--muted); }
+
+/* 左右分栏对比 */
+.compare { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:10px 0; }
+.compare .side { background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:10px; }
+.compare .side.old { border-color:#6b2e2e; }
+.compare .side.new { border-color:#2e5a3a; }
+.compare .side b { font-size:12px; display:block; margin-bottom:4px; }
+.compare .side .v { font-size:12px; color:var(--txt); }
+.compare .conf { font-size:11px; color:var(--muted); margin-top:6px; font-family:monospace; }
+
+.overdue { color:var(--warn); font-size:11px; }
+.overdue.hot { color:var(--err); font-weight:700; }
+
+/* 队列卡片 */
+.queue { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:10px; }
+.queue .item { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px; cursor:pointer; }
+.queue .item.selected { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
+.queue .item.overdue { border-color:#6b5a1e; background:#231f10; }
+.queue .empty { color:var(--dim); padding:14px; text-align:center; }
+.row-head { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
+.score { font-family:monospace; font-size:11px; color:var(--muted); }
+.overdue-badge { font-size:10px; font-weight:700; padding:2px 7px; border-radius:6px; background:#3a1616; color:var(--err); border:1px solid #6b2e2e; }
+.side .meta { font-family:monospace; font-size:10px; color:var(--muted); display:block; margin-bottom:4px; }
+
+/* 裁决按钮 */
+.verdict { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+.btn { background:var(--panel2); border:1px solid var(--line); color:var(--txt); border-radius:8px; padding:7px 12px; cursor:pointer; font-size:12px; }
+.btn.primary { background:var(--accent); color:#04121f; border-color:var(--accent); font-weight:600; }
+.btn.danger { color:#ffb0b0; border-color:#6b2e2e; }
+.btn:disabled { opacity:.4; cursor:not-allowed; }
+
+/* 队列表 */
+.dtable { width:100%; border-collapse:collapse; font-size:12.5px; }
+.dtable th, .dtable td { padding:8px 10px; text-align:left; border-bottom:1px solid var(--line); vertical-align:top; }
+.dtable th { color:var(--muted); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.4px; }
+.dtable tr:hover { background:var(--panel2); }
+.dtable tr.overdue { background:#3a2f10; }
+
+.toast { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:9px 16px; font-size:13px; z-index:80; }
+.note { font-size:11px; color:var(--dim); margin-top:14px; line-height:1.6; }
