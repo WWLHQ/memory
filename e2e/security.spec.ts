@@ -43,7 +43,7 @@ test.describe('账号与安全页', () => {
 
   test('密钥脱敏 + 90 天警示 + 吊销确认', async ({ page }) => {
     await page.goto(APP);
-    page.on('dialog', (d) => d.accept());
+    // accept 由 harness 全局容错接管；此处无需重复挂监听
     await expect(page.locator('[data-testid="key-key_002"]')).toContainText(/未轮换/);
     await page.locator('[data-testid="revoke-key_001"]').click();
     await expect(page.locator('[data-testid="key-key_001"]')).toContainText('已吊销');

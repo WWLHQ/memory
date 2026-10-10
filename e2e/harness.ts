@@ -14,9 +14,37 @@ let cached: Browser | null = null;
 async function externalBrowser(): Promise<Browser> {
   if (!cached) {
     const { wsEndpoint } = JSON.parse(readFileSync(WS_FILE, 'utf-8')) as { wsEndpoint: string };
-    cached = await chromium.connectOverCDP(wsEndpoint);
+    // connectOverCDP 偶发被扩展 service worker 目标打断（"targetInfo: ..."），
+    // 重连一次通常即可绕过（SW 目标已在上次连接中处理完）。
+    let lastErr: unknown;
+    for (let i = 0; i < 3; i++) {
+      try {
+        cached = await chromium.connectOverCDP(wsEndpoint);
+        break;
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    if (!cached) throw lastErr;
+    hookDialogAccept(cached);
   }
   return cached;
+}
+
+/**
+ * 多 worker 共享一个 CDP 浏览器：每个连接都会交叉 auto-attach 到所有页面。
+ * 未挂 dialog 监听器的 Playwright 连接收到 dialog 事件会【自动 dismiss】，
+ * 与页面属主 worker 的 accept 竞速 → confirm 变 cancel，用例必挂。
+ * 解法：每个 worker 对其可见的所有 context/page 一律挂容错 accept
+ *（项目内 dialog 均为「确认继续」语义），所有会话行为一致，竞态消除。
+ */
+function hookDialogAccept(browser: Browser): void {
+  const hook = (ctx: import('@playwright/test').BrowserContext) => {
+    ctx.on('page', (p) => p.on('dialog', (d) => { d.accept().catch(() => { /* 已被处理 */ }); }));
+    for (const p of ctx.pages()) p.on('dialog', (d) => { d.accept().catch(() => { /* 已被处理 */ }); });
+  };
+  for (const ctx of browser.contexts()) hook(ctx);
+  browser.on('context', hook);
 }
 
 export const test = base.extend({
@@ -24,6 +52,7 @@ export const test = base.extend({
     const browser = await externalBrowser();
     const context = await browser.newContext({ baseURL: BASE_URL });
     const page = await context.newPage();
+    // accept 已由 hookDialogAccept 在 browser/context 级统一接管
     await use(page);
     await page.close();
     await context.close();
