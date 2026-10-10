@@ -195,7 +195,8 @@ export type AuditAction =
   | 'llm_proxy' | 'llm_fallback' | 'log_view' | 'l0_view'
   | 'memory_op'
   | 'param_save'
-  | 'growth_op';
+  | 'growth_op'
+  | 'monitor_alert';
 
 export interface AuditRef {
   request_id: string;

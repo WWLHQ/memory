@@ -1,22 +1,40 @@
 // 监控仪表盘（REQ-006 / P6）T4 编排
-import { useState } from 'react';
-import { AGENT_OPTIONS, SEED_ALERTS, SEED_METRICS } from './seed.ts';
+// 告警时间线走内核账本（monitor_alert 真写 + 挂载回放）+ mirror 上抛；指标卡为演示快照。
+import { useEffect, useState } from 'react';
+import { AGENT_OPTIONS, SEED_METRICS } from './seed.ts';
 import { filterAlerts } from './logic.ts';
+import { coreLoadAlerts } from './coreMonitor.ts';
+import { useMonitorMirror } from './useMonitorMirror.ts';
 import { MetricGrid } from './MetricGrid.tsx';
 import { AlertTimeline } from './AlertTimeline.tsx';
 import { useToast } from './useToast.tsx';
-import type { MonitorFilter } from './types.ts';
+import type { AlertItem, MonitorFilter } from './types.ts';
 
 export function MonitorPage() {
   const [filter, setFilter] = useState<MonitorFilter>({ level: 'all', window: '24h', agent: 'all' });
+  const [alertsAll, setAlertsAll] = useState<AlertItem[]>([]);
   const { node: toast, show } = useToast();
+  useMonitorMirror(filter);
 
-  const alerts = filterAlerts(SEED_ALERTS, filter);
+  // 挂载回放：内核账本中的告警（种子保真 + 运行时新增）
+  useEffect(() => {
+    let alive = true;
+    coreLoadAlerts()
+      .then((items) => {
+        if (alive) setAlertsAll(items);
+      })
+      .catch(() => {}); // 内核不可达 → 空时间线（safe-noop 语义）
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const alerts = filterAlerts(alertsAll, filter);
 
   return (
     <div className="wrap" data-testid="monitor-page">
       <h1>📡 监控仪表盘 <span className="badge p2">REQ-006 · P6</span></h1>
-      <div className="sub">12.1 指标卡（6 组 14 项）+ 12.2 告警时间线 · 数据本地种子为真相</div>
+      <div className="sub">12.1 指标卡（6 组 14 项，演示快照）+ 12.2 告警时间线（内核账本）</div>
 
       <div className="card">
         <div className="row-head"><b>筛选（12.2）</b></div>
