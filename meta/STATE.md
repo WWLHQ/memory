@@ -35,6 +35,37 @@
 - 候选：① 接真实后端（替换 `service.js` 内存为 API）；② 真浏览器 E2E（Playwright 跑 `app.html`）；③ 确认 JS 方案并更新规格消除偏离；④ 推进 REQ-004~REQ-012（补 AC/TC + 跑通一个功能）。
 - 推远端需 PAT(repo+workflow)，或用户本机 `git push`。
 
+---
+
+## 流程固化（2026-10-10 更新）
+
+- **全生命周期工作流已固化为强制 SOP**：新增 [`meta/WORKFLOW_SOP.md`](WORKFLOW_SOP.md)（主流程），
+  串起 `TASK_SPLITTING`（任务长什么样）→ `CODING_SOP`（单任务 7 步）→ **自检门禁** → 人工验收 → 提交 → 收尾。
+- **铁律（已验证）**：交人验收**之前**必须先在本机跑绿 `typecheck + vitest + e2e(--workers=1) + verify`，
+  E2E 不得出现静默 SIGTERM；门禁全绿 + 人点头后才 commit（中文 message，一个任务一个 commit）。
+- **当前真实项目状态（2026-10-10）**：REQ-003/004/005 + 用户注册已**编码完成并经人工验收通过**，
+  自检全绿（`npm test` 178/178、`npm run test:e2e` 24/24、`npm run verify` 通过）。
+  关键修复沉淀于 `.workbuddy/memory/pitfalls-2026-10-09.md`（#1~#13，含 vitest vmThreads、npm arborist、
+  jsdom window.location、E2E SIGTERM 三层根因、登录门控脱节、CORS 白名单漏头真实 BUG）。
+  全部改动已提交（最新 `b4d0f78`，14 文件）。
+- **下一步待选 REQ**：REQ-012 检索页 / REQ-011 日志记录页 / REQ-006 其余页面（用户已选「先人工验收再开发」节奏）。
+
+---
+
+## REQ-006 子页批量（2026-10-10，待人工验收 · 挂起）
+
+- **P8 记忆管理页 / P2 写入页 / P11 审计日志页 / P4 生命周期页** 均已按固化流程走完 ①拆分(T1–T5) → ②编码 → ③自检门禁全绿；
+  **用户暂不方便验收，四页挂起、未提交**（验收通过后按 ⑥ 各自中文 commit）。
+- **新增入口**：`memory.html` / `write.html` / `audit.html` / `lifecycle.html`（Vite 多入口 7 个）；
+  Overview 已落地视图 3→7（memory/write/audit/lifecycle 加入，audit 已从 PLANNED 移除）。
+- **任务拆分文档**：`specs/tasks/{MEMORY-MANAGE,WRITE-PAGE,AUDIT-LOG,LIFECYCLE}.md`。
+- **P4 生命周期页覆盖**：六态机(9.10)迁移 + 调参面板(17.4/17.5，locked 全置灰 G4，freshness=0.5^(age/hl) 实时预览) +
+  deprecated 替代跳转(9.7) + N/M(90/180)参数 + 批量迁移(9.10.4，写审计 lifecycle_change + request_id)。
+- **自检门禁（全绿）**：`typecheck` ✅；`vitest` **302 例**（P4 34 + memory 33 + write 27 + audit 28 + 其余）；`validate` 0 失败；`generate --check` ✅；e2e 单 spec 全绿（memory 4 / write 3 / audit 4 / lifecycle 4）。
+  ⚠ 全量 e2e 中 `app.spec` 因 :8200 被手动验收用的 dev backend 占用而 EADDRINUSE —— 环境耦合非回归，停 backend 后全绿。
+- **本地预览**（vite dev + home backend 已起）：`http://localhost:5180/{memory,write,audit,lifecycle}.html`。
+- **新增坑**：Playwright strict mode 下同 request_id 多行的 testid 必须带行索引；同文案多处出现时断言改用 getAllByText/first。
+
 ## 简写对照（中文）
 | 简写 | 中文 | | 简写 | 中文 |
 |------|------|---|------|------|

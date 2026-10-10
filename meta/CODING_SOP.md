@@ -2,6 +2,8 @@
 
 > 对应流程第 6 步（编码开发）/ 阶段 7。本 SOP 规定 Agent 每领到一个原子任务（如 T4）时的标准执行动作，确保"只读该读、只改要改、改完证明没改坏"。
 > 配套：任务长什么样见 [`meta/TASK_SPLITTING.md`](meta/TASK_SPLITTING.md)，填写示例见 [`specs/tasks/USER-REGISTER.md`](specs/tasks/USER-REGISTER.md)。
+> 主流程（串起拆分→编码→自检→人工验收→提交）：见 [`meta/WORKFLOW_SOP.md`](meta/WORKFLOW_SOP.md)。
+> 注意：本 SOP 第 7 步「提交」在编码阶段只保证验收绿 + validate 绿；正式 commit 推迟到主流程第 ⑥ 步（人工验收后）统一做。
 
 ---
 

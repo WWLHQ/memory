@@ -26,3 +26,9 @@
 
 ## 实现与规格的差异（REQ-003）
 - `specs/tasks/AGENT-ONBOARD.md` 按 TS+React 拆 `src/web/AgentOnboard/*.tsx` 单组件；**实际落地为纯 ESM JS**（零依赖、Node 内置 `node:test`），UI 合并进 `src/agentOnboard/render.js`、集成进 `service.js`、端矩阵进 `formMatrix.js`、`validators.js` 承载 R1–R10、`e2e.test.js` 承载 T12。可追溯映射以实际 JS 为准（见 `specs/code-map.md` REQ-003 任务级表）。
+
+## 项目纯净度约定（用户 2026-10-10 明确）
+- **验收/验证完成后，验证用的临时文件必须删除**（如 test-results/、失败截图、临时 html/log、一次性脚本）。
+- **项目文件夹保持纯净**：与项目无关的文件及时清理，不留在仓库根目录。
+- Windows 下避免产生 `nul` 垃圾文件（Git Bash 里 `> NUL` 会生成名为 nul 的实体文件，应使用 `> /dev/null`）。
+- 验收收尾时默认执行一轮垃圾清扫并汇报清理清单，再走 commit。
