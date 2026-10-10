@@ -193,7 +193,8 @@ export interface LogPage {
 export type AuditAction =
   | 'recall' | 'write' | 'gc' | 'auto_bind' | 'unbound' | 'sync'
   | 'llm_proxy' | 'llm_fallback' | 'log_view' | 'l0_view'
-  | 'memory_op';
+  | 'memory_op'
+  | 'param_save';
 
 export interface AuditRef {
   request_id: string;
