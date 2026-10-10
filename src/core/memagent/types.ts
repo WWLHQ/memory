@@ -228,6 +228,16 @@ export interface Memory {
   version: number;                // 同步用（REQ-008）
   created_by_agent?: string;
   created_at: number;
+  // ---- REQ-010 遗忘机制扩展（17.4，全部可选向后兼容） ----
+  importance?: number;            // 知识重要程度 0–1
+  confidence?: number;            // 可信度 0–1（confirm +0.1 / reject −0.05）
+  access_count?: number;          // 召回命中次数（不含 confirm/reinforce）
+  reinforce_count?: number;       // 用户确认/强化次数
+  half_life_days?: number;        // 半衰期（17.6 按类别默认策略）
+  last_access_time?: number;      // 最近访问
+  tags?: string[];                // 标签集合
+  merged_from?: string[];         // 被哪些原始记忆合并（17.9）
+  merged_into?: string;           // 是否被合并到某条摘要
 }
 
 /** ---------- Provider 注入（§5） ---------- */
