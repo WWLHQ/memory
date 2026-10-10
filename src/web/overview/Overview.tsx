@@ -25,11 +25,15 @@ const VIEWS: View[] = [
   { id: 'audit', ic: '📋', lbl: '审计日志页', desc: 'P11 · 4.3 统一审计 + request_id 追踪', src: '/audit.html', req: 'REQ-006' },
   { id: 'lifecycle', ic: '⏳', lbl: '生命周期页', desc: 'P4 · 六态机（9.10）+ 调参（17.4/17.5）', src: '/lifecycle.html', req: 'REQ-006' },
   { id: 'dispute', ic: '⚖️', lbl: '冲突裁决页', desc: 'P7 · 人工审核队列 + 9.7 三模式裁决', src: '/dispute.html', req: 'REQ-006' },
+  { id: 'params', ic: '🧩', lbl: '全局参数页', desc: 'P5 · 17.6 文案化配置 + 开发者模式', src: '/params.html', req: 'REQ-006' },
+  { id: 'monitor', ic: '📡', lbl: '监控仪表盘', desc: 'P6 · 12.1 指标卡 + 12.2 告警时间线', src: '/monitor.html', req: 'REQ-006' },
+  { id: 'feedback', ic: '💬', lbl: '用户反馈页', desc: 'P9 · 13.7 反馈表单 + 7.1/7.2 统计', src: '/feedback.html', req: 'REQ-006' },
+  { id: 'security', ic: '🔐', lbl: '账号与安全页', desc: 'P12 · 4.2 密码策略 + 18.2-A 用户团队', src: '/security.html', req: 'REQ-006' },
+  { id: 'recall', ic: '🔎', lbl: '检索页', desc: 'REQ-012 · 透明化召回 + 模式分流', src: '/retrieval.html', req: 'REQ-012' },
+  { id: 'logs', ic: '📜', lbl: '日志记录页', desc: 'REQ-011 P15 · 全动作事件流 + 异常聚合', src: '/logs.html', req: 'REQ-011' },
 ];
 
-const PLANNED: View[] = [
-  { id: 'recall', ic: '🔎', lbl: '检索页', desc: '8 条验收用例 · 透明化召回', src: null, req: '规划中' },
-];
+const PLANNED: View[] = [];
 
 export function Overview() {
   const [active, setActive] = useState('login');
@@ -58,7 +62,7 @@ export function Overview() {
       <div className="top">
         <span className="logo">🧠 多 Agent 记忆助手 · UI 通览</span>
         <span className="tag">REQ-005 首页 / REQ-003 接入页 / REQ-004 内联标识 / REQ-006 记忆·写入·审计·生命周期·冲突</span>
-        <span className="right">8 个已落地视图 · iframe 隔离</span>
+        <span className="right">12 个已落地视图 · iframe 隔离</span>
       </div>
       <div className="body">
         <div className="nav" id="nav">
