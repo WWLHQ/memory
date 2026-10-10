@@ -73,6 +73,16 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: 真浏览器点击级 E2E（REQ-003 + REQ-005 接原型）
-        run: npm run test:e2e
+        shell: bash
+        run: npm run test:e2e 2>&1 | tee /tmp/e2e.log; exit ${PIPESTATUS[0]}
         # 覆盖：一键接入四段动画 / R3·R4 校验 / 测试·轮换·保存打到真实后端 / 撤销绑定 / 通览页两视图切换 / 无脚本异常
         # run.mjs 会先 vite build 产物到 dist/，再由 globalSetup 拉起 headless Chromium（CDP），spec 自起后端与静态服务。
+
+      - name: 失败日志摘要（写入 Step Summary，公开可读）
+        if: failure()
+        shell: bash
+        run: |
+          echo "## E2E 失败日志（尾部 400 行）" >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          tail -400 /tmp/e2e.log >> "$GITHUB_STEP_SUMMARY" || echo "（日志文件缺失）" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
