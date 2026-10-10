@@ -9,6 +9,7 @@
 ## T2 基础设施
 - `ulid.ts`：时间戳+随机的单调 ULID
 - `storage.ts`：StorageBackend 接口（memories 增删改查 + audit append/query）+ InMemoryStorage（种子 5 条含 L0 加密）
+- `sqliteStorage.ts`：SqliteStorage（§5.3 桌面/CLI 本地库 = P0 主源）——node:sqlite 零依赖（Node ≥22.13），memories/audit 两表，领域列冗余索引供 Filter 下推，完整对象 JSON doc 保真存取，WAL 模式，close 幂等；与 InMemoryStorage 行为一致 + 落盘重启保留（`__tests__/sqliteStorage.test.ts`）
 - `vector.ts`：JsVectorBackend（hash bag-of-words 64 维 + cosine，起步实现；RustWasm 同构接口预留）
 - `llm.ts`：LlmProvider 接口 + FakeLlmProvider（listModels 含档位/单价/余量）；`routeProxy(sources, priceCap, costCap, usedToday)` → 先免费后低价 ≤cap → cost_cap → 回退本地（19.8，审计 llm_proxy_source/llm_fallback）
 

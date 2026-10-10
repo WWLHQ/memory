@@ -1,5 +1,5 @@
 // StorageBackend 接口实现（§5.3）：InMemoryStorage 用于测试/演示；
-// SqliteStorage / ServerStorage / SystemStorage 为各端实现（接口同构，后续接入）。
+// SqliteStorage（sqliteStorage.ts，桌面/CLI 本地库 = P0 主源）/ ServerStorage / SystemStorage 为各端实现（接口同构）。
 import type { AuditAction, AuditRecord, Filter, Memory, StorageBackend } from './types.ts';
 
 export class InMemoryStorage implements StorageBackend {
