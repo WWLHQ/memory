@@ -1,12 +1,12 @@
 // createMemAgent（§1 入口）：内核装配 + 9 核心API + 全动作审计（§3.2）
 import { MemAgentError } from './errors.ts';
 import { routeProxy } from './llm.ts';
-import { coreBrowse, coreGc, coreMemoryOp, coreWrite } from './memories.ts';
+import { coreBrowse, coreFeedback, coreGc, coreMemoryOp, coreWrite } from './memories.ts';
 import { hardFilter, scoreMemory } from './forgetting.ts';
 import { cosine, embedSync } from './vector.ts';
 import { ulid } from './ulid.ts';
 import type {
-  AuditRecord, BrowseResult, DiscoverReq, DiscoverResult, DiscoverSignal, Form, GcReq, GcReport,
+  AuditRecord, BrowseResult, DiscoverReq, DiscoverResult, DiscoverSignal, FeedbackKind, FeedbackResult, Form, GcReq, GcReport,
   Hit, LogItem, LogPage, LogReq, MemAgent, MemAgentOptions, MemOp, MemOpPatch, MemOpResult, MemReq, Memory, Pref, RecallReq,
   RecallResult, SyncReq, SyncReport, WriteResult,
 } from './types.ts';
@@ -36,6 +36,11 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent {
   /** 单记忆操作（17.3/P4）：locked 约束 + 钳制 + 版本 + 审计，端壳状态变更唯一通道 */
   async function memoryOp(mem_id: string, op: MemOp, patch?: MemOpPatch): Promise<MemOpResult> {
     return coreMemoryOp(mem_id, op, { storage, vector, request_id: newRequestId(), now: Date.now() }, patch);
+  }
+
+  /** 用户反馈（17.4）：trust_delta 内核计算（confirm +0.1 / reject −0.05 / disputed 挂裁决） */
+  async function feedback(mem_id: string, kind: FeedbackKind): Promise<FeedbackResult> {
+    return coreFeedback(mem_id, kind, { storage, request_id: newRequestId(), now: Date.now() });
   }
 
   async function audit(
@@ -265,5 +270,5 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent {
     return mem;
   }
 
-  return { recall, write, gc, getPrefs, discover, sync, browse, logs, unbind, _seedMemory: seedMemory, _memoryOp: memoryOp };
+  return { recall, write, gc, getPrefs, discover, sync, browse, logs, unbind, _seedMemory: seedMemory, _memoryOp: memoryOp, _feedback: feedback };
 }

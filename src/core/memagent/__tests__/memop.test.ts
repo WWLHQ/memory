@@ -1,6 +1,6 @@
 // coreMemoryOp 契约测试（17.3 / P4 调参迁移：G4 约束 + 钳制 + 版本 + 审计）
 import { describe, expect, it } from 'vitest';
-import { coreMemoryOp } from '../memories.ts';
+import { coreFeedback, coreMemoryOp } from '../memories.ts';
 import { InMemoryStorage } from '../storage.ts';
 import { JsVectorBackend, embedSync } from '../vector.ts';
 import type { Memory } from '../types.ts';
@@ -123,5 +123,51 @@ describe('coreMemoryOp（17.3 / P4）', () => {
     expect(audits[0].detail.op).toBe('remember');
     expect(audits[1].detail.op).toBe('archive');
     expect(audits[0].request_id).toBe('req_test1');
+  });
+});
+
+describe('coreFeedback（17.4 trust_delta）', () => {
+  it('confirm：confidence +0.1 + reinforce_count 分家 +1', async () => {
+    const s = new InMemoryStorage();
+    await s.putMemory(seed({ confidence: 0.6 }));
+    const r = await coreFeedback('m1', 'confirm', { storage: s, request_id: 'req_fb1', now: 0 });
+    expect(r.ok).toBe(true);
+    expect(r.trust_delta).toBe(0.1);
+    expect(r.mem?.confidence).toBeCloseTo(0.7);
+    expect(r.mem?.reinforce_count).toBe(1);
+    expect(r.mem?.version).toBe(2);
+  });
+
+  it('reject：confidence −0.05，下限钳制 0.05 不破底', async () => {
+    const s = new InMemoryStorage();
+    await s.putMemory(seed({ confidence: 0.08 }));
+    const r = await coreFeedback('m1', 'reject', { storage: s, request_id: 'req_fb2', now: 0 });
+    expect(r.trust_delta).toBe(-0.05);
+    expect(r.mem?.confidence).toBe(0.05);
+    // 连续 reject 不再下探
+    await coreFeedback('m1', 'reject', { storage: s, request_id: 'req_fb3', now: 0 });
+    const m = await s.getMemory('m1');
+    expect(m?.confidence).toBe(0.05);
+  });
+
+  it('disputed：trust 分不动，挂 9.7 裁决（conflict_id）', async () => {
+    const s = new InMemoryStorage();
+    await s.putMemory(seed({ confidence: 0.7 }));
+    const r = await coreFeedback('m1', 'disputed', { storage: s, request_id: 'req_fb4', now: 0 });
+    expect(r.trust_delta).toBe(0);
+    expect(r.mem?.confidence).toBeCloseTo(0.7);
+    expect(r.mem?.conflict_id).toMatch(/^cf_/);
+  });
+
+  it('反馈写 memory_op 审计（detail.trust_delta 归因）+ 未知 mem_id 拒绝', async () => {
+    const s = new InMemoryStorage();
+    await s.putMemory(seed());
+    await coreFeedback('m1', 'confirm', { storage: s, request_id: 'req_fb5', now: 0 });
+    const audits = await s.queryAudit({ action: 'memory_op' });
+    expect(audits[0].detail.op).toBe('confirm');
+    expect(audits[0].detail.trust_delta).toBe(0.1);
+    const bad = await coreFeedback('nope', 'confirm', { storage: s, request_id: 'req_fb6', now: 0 });
+    expect(bad.ok).toBe(false);
+    expect(bad.mem).toBeNull();
   });
 });

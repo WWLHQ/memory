@@ -271,6 +271,17 @@ export interface MemOpResult {
   request_id: string;
 }
 
+/** ---------- 用户反馈（17.4 trust_delta，P9 端壳提交） ---------- */
+export type FeedbackKind = 'confirm' | 'reject' | 'disputed';
+
+export interface FeedbackResult {
+  ok: boolean;
+  mem: Memory | null;
+  /** confirm +0.1 / reject −0.05 / disputed 0（内核计算，端壳不自行判定） */
+  trust_delta: number;
+  request_id: string;
+}
+
 /** ---------- Provider 注入（§5） ---------- */
 export interface ModelInfo {
   model: string;
@@ -359,4 +370,6 @@ export interface MemAgent {
   _seedMemory(m: Partial<Memory> & Pick<Memory, 'content' | 'category' | 'project_id'>): Promise<Memory>;
   /** 单记忆操作（17.3/P4）：端壳状态变更统一走内核（G4 约束 + 钳制 + 版本 + 审计） */
   _memoryOp(mem_id: string, op: MemOp, patch?: MemOpPatch): Promise<MemOpResult>;
+  /** 用户反馈（17.4）：confirm +0.1 / reject −0.05 / disputed 挂 9.7 裁决 */
+  _feedback(mem_id: string, kind: FeedbackKind): Promise<FeedbackResult>;
 }

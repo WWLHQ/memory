@@ -1,6 +1,7 @@
 // 内核记忆业务（§3 schema + 行为红线）：write 查重短路嫁接 / browse L0 授权 / gc 衰减 / memoryOp 17.3 操作
 import type {
   AuditRef, BrowseReq, BrowseResult, BrowseRow, Category, DecayClass,
+  FeedbackKind, FeedbackResult,
   GcReq, GcReport, Layer, MemOp, MemOpPatch, MemOpResult, Memory, StorageBackend, VectorBackend,
 } from './types.ts';
 import { cosine, embedSync } from './vector.ts';
@@ -214,4 +215,43 @@ export async function coreMemoryOp(
     detail: { op, mem_id, importance: next?.importance, confidence: next?.confidence, decay_class: next?.decay_class },
   });
   return { ok: true, mem: next, request_id };
+}
+
+/**
+ * 用户反馈（17.4 trust_delta，P9 提交入口）：
+ * confirm confidence +0.1（reinforce_count 分家计数）；
+ * reject confidence −0.05（下限钳制 0.05）；disputed 不动分，挂 9.7 裁决（conflict_id）。
+ */
+export async function coreFeedback(
+  mem_id: string,
+  kind: FeedbackKind,
+  ctx: { storage: StorageBackend; request_id: string; now: number },
+): Promise<FeedbackResult> {
+  const { storage, request_id, now } = ctx;
+  const m = await storage.getMemory(mem_id);
+  if (!m) return { ok: false, mem: null, trust_delta: 0, request_id };
+
+  let delta = 0;
+  let next: Memory = m;
+  if (kind === 'confirm') {
+    delta = 0.1;
+    next = {
+      ...m,
+      confidence: clamp((m.confidence ?? 0.5) + delta, CLAMP.confidence),
+      reinforce_count: (m.reinforce_count ?? 0) + 1, // 用户确认与召回命中分家（17.4）
+    };
+  } else if (kind === 'reject') {
+    delta = -0.05;
+    next = { ...m, confidence: clamp((m.confidence ?? 0.5) + delta, CLAMP.confidence) };
+  } else {
+    // disputed：转人工（P7 冲突裁决队列），trust 分不动
+    next = { ...m, conflict_id: m.conflict_id ?? `cf_${request_id.slice(-8)}` };
+  }
+  next = { ...next, version: m.version + 1, updated_at: now };
+  await storage.putMemory(next);
+  await storage.appendAudit({
+    request_id, action: 'memory_op', ts: now, project_id: m.project_id,
+    detail: { op: kind, trust_delta: delta, mem_id, confidence: next.confidence },
+  });
+  return { ok: true, mem: next, trust_delta: delta, request_id };
 }
