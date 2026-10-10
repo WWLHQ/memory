@@ -1,0 +1,55 @@
+/*
+ * 监控仪表盘样式 —— 复用本项目暗色设计系统（同源变量）。
+ * 用户验收反馈：字体整体提亮（--muted/--dim 各提一档），卡片与页面底色明显区分。
+ */
+:root {
+  --bg:#0f1419; --panel:#1a212b; --panel2:#202833; --line:#2b3441;
+  --txt:#e6edf3; --muted:#a9b6c4; --dim:#8b98a7; --accent:#4d9fff;
+  --ok:#3ecf8e; --warn:#ffd166; --err:#ff5c5c;
+}
+* { box-sizing:border-box; }
+body {
+  margin:0; background:var(--bg); color:var(--txt);
+  font:14px/1.55 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
+}
+.wrap { max-width:1180px; margin:0 auto; padding:18px; }
+h1 { font-size:18px; margin:0 0 2px; }
+.sub { color:var(--muted); font-size:12px; margin-bottom:14px; }
+.card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:14px; }
+.badge { font-size:10px; font-weight:700; padding:2px 8px; border-radius:6px; border:1px solid var(--line); }
+.badge.p2 { background:#3a2f10; color:#ffd166; }
+.row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:8px 0; }
+.mid { font-family:monospace; font-size:11px; }
+.dim { color:var(--dim); }
+.note { font-size:11px; color:var(--dim); margin-top:14px; line-height:1.6; }
+.btn {
+  background:var(--panel2); border:1px solid var(--line); color:var(--txt);
+  border-radius:8px; padding:6px 10px; cursor:pointer; font-size:11.5px;
+}
+.btn.primary { background:var(--accent); color:#04121f; border-color:var(--accent); font-weight:600; }
+.btn:disabled { opacity:.4; cursor:not-allowed; }
+.toast { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:9px 16px; font-size:13px; z-index:80; }
+
+/* ===== 监控专属 ===== */
+/* 卡片底色与页面底色 (#0f1419) 明显区分（验收反馈①），文字高对比（验收反馈②） */
+.mgrid { display:grid; grid-template-columns:repeat(auto-fill, minmax(210px, 1fr)); gap:10px; margin-top:10px; }
+.mcard { background:#2c3846; border:1px solid #45566b; border-radius:10px; padding:10px; color:var(--txt); }
+.mcard.crit { border-color:#a04040; background:#4a2020; }
+.mcard.warn { border-color:#a08030; background:#42351a; }
+.mcard .mval { font-size:20px; font-weight:700; margin:4px 0; color:#ffffff; }
+.mcard .dim, .mcard .note { color:#c3cfdc; }
+.mcard .note { margin-top:6px; }
+.level { font-size:14px; }
+.level.crit { color:#ff7b7b; }
+.level.warn { color:#ffd166; }
+.level.ok { color:#3ecf8e; }
+.tl { list-style:none; margin:10px 0 0; padding:0; }
+.tl-item { display:flex; gap:10px; padding:8px 0; border-bottom:1px solid var(--line); color:var(--txt); }
+.tl-item .dot { width:9px; height:9px; border-radius:50%; margin-top:6px; flex:none; }
+.tl-item.crit .dot { background:var(--err); }
+.tl-item.warn .dot { background:var(--warn); }
+.tl-item .note { color:var(--dim); margin-top:2px; }
+/* 跳转链接（验收反馈③）：深色/琥珀/红底上均高可读 */
+.mcard a { color:#bfe0ff; text-decoration:underline; text-underline-offset:2px; }
+.mcard a:hover { color:#e8f2ff; }
+.tl a { color:#bfe0ff; font-family:monospace; font-size:11px; text-decoration:underline; text-underline-offset:2px; }
