@@ -46,16 +46,26 @@ export interface BackendMirror {
 /**
  * 挂载一个后端镜像。返回的各方法均为 fire-and-forget：
  * 后端不可达时不抛、不阻塞 UI（原型语义优先）。
+ * onCards：挂载时后端已有卡片回填回调（合并式：按 agent_name 匹配，仅同步状态字段）。
  */
-export function useBackendMirror(): BackendMirror {
+export function useBackendMirror(onCards?: (cards: Array<{ agent_name: string; circuit?: string; priority?: string }>) => void): BackendMirror {
   const svcRef = useRef<ReturnType<typeof createService> | null>(null);
   if (!svcRef.current) svcRef.current = createService(resolveBackendUrl());
 
   useEffect(() => {
     const svc = svcRef.current!;
-    // 初始加载：拉取后端已有卡片（失败静默，页面仍与原型一致）
-    void Promise.resolve(svc.getCards()).catch(() => {});
-  }, []);
+    // 初始加载：拉取后端已有卡片 → 合并回填（失败静默，页面仍与原型一致）
+    void Promise.resolve(svc.getCards())
+      .then((cards) => {
+        if (!Array.isArray(cards) || cards.length === 0 || !onCards) return;
+        onCards(cards.map((c) => ({
+          agent_name: String((c as { agent_name?: string }).agent_name ?? ''),
+          circuit: (c as { circuit?: string }).circuit,
+          priority: (c as { priority?: string }).priority,
+        })));
+      })
+      .catch(() => {});
+  }, [onCards]);
 
   const bg = (fn: (svc: ReturnType<typeof createService>) => unknown) => {
     const svc = svcRef.current!;

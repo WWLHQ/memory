@@ -8,6 +8,7 @@ import { AgentCard, toolRef } from './AgentCard.tsx';
 import { OneClickOnboard } from './OneClickOnboard.tsx';
 import { Gains } from './Gains.tsx';
 import { SEED_AGENTS, SEED_DISCOVERED, SEED_GAINS } from './seed.ts';
+import { coreDiscover } from './coreOnboard.ts';
 import { useBackendMirror } from './useBackendMirror.ts';
 import './theme.css';
 
@@ -37,7 +38,19 @@ function checkR4(a: UiAgentCard): string | null {
 
 export function AgentOnboardPage() {
   const form = useMemo(detectForm, []);
-  const backend = useBackendMirror();
+  // 后端已有卡片合并回填：按 agent_name 匹配种子卡，仅同步 circuit/badge（不增删行数，原型语义优先）
+  const onCards = useCallback((cards: Array<{ agent_name: string; circuit?: string; priority?: string }>) => {
+    setAgents((prev) => prev.map((a) => {
+      const c = cards.find((x) => x.agent_name === a.name);
+      if (!c) return a;
+      return {
+        ...a,
+        ...(c.circuit ? { circuit: c.circuit as UiAgentCard['circuit'] } : {}),
+        ...(c.priority ? { badge: c.priority.toLowerCase() } : {}),
+      };
+    }));
+  }, []);
+  const backend = useBackendMirror(onCards);
   const [agents, setAgents] = useState<UiAgentCard[]>(SEED_AGENTS);
   const [discovered, setDiscovered] = useState<DiscoveredAgent[]>(SEED_DISCOVERED);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -138,19 +151,24 @@ export function AgentOnboardPage() {
         setStageIndex(i);
         setScanState(['扫描注册信号中…', '自动打标 P0/P1/P2 中…', '按默认值绑定中…', '测通并写审计中…'][i]);
         if (i === 3) {
-          setAgents((prev) => prev.map((a) => {
-            const d = SEED_DISCOVERED.find((x) => x.name === a.name);
-            if (!d || !d.bound) return a;
-            return { ...a, state: d.ok ? 'connected' : 'degraded' };
-          }));
-          const n = SEED_DISCOVERED.filter((d) => d.bound).length;
-          setScanState(`完成 · 发现并绑定 ${n} 个 · 已记审计 auto_bind`);
-          toast(`一键接入完成：自动发现 ${n} 个 Agent 并绑定（审计 auto_bind），立即可用`);
-          backend.discover(
-            SEED_DISCOVERED.filter((d) => d.bound).map((d) => ({ name: d.name, priority: d.badge.toUpperCase(), signal: d.signal })),
-            form,
-          );
-          setRunning(false);
+          // 第 4 段接真内核：ma.discover（desktop 全信号）→ 绑定数以内核回执为准（auto_bind 审计内核真写）
+          void coreDiscover()
+            .then((r) => {
+              const n = r.agents.length;
+              setAgents((prev) => prev.map((a) => {
+                const d = SEED_DISCOVERED.find((x) => x.name === a.name);
+                if (!d || !d.bound) return a;
+                return { ...a, state: d.ok ? 'connected' : 'degraded' };
+              }));
+              setScanState(`完成 · 发现并绑定 ${n} 个 · 已记审计 auto_bind`);
+              toast(`一键接入完成：自动发现 ${n} 个 Agent 并绑定（审计 auto_bind），立即可用`);
+              backend.discover(
+                SEED_DISCOVERED.filter((d) => d.bound).map((d) => ({ name: d.name, priority: d.badge.toUpperCase(), signal: d.signal })),
+                form,
+              );
+              setRunning(false);
+            })
+            .catch(() => setRunning(false)); // 内核不可达 → 停止演出（safe-noop 语义）
         }
       }, 430 * (i + 1));
     });
