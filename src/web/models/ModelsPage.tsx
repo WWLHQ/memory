@@ -1,9 +1,11 @@
 // 大模型配置页（REQ-009 / P13）T4 编排
-// 本地内存态为真相；mirror 为 safe-noop（fire-and-forget），与 dispute/logs 同模式。
-import { useMemo, useState } from 'react';
+// auto 择优走内核 routeProxy（19.8 统一路由）；模拟/保存写内核审计账本，回显从内核流加载；
+// manual 的 R7/C11 选择约束在页面逻辑层。初始渲染用种子，内容一致无跳变。
+import { useEffect, useMemo, useState } from 'react';
 import type { LlmUsage, ProxyAuditEntry, ProxySelectMode, ProxySource, UsageConfig, VectorModelKey } from './types.ts';
 import { SEED_SOURCES, SEED_USAGES, SEED_VECTOR_COUNT, SEED_VECTOR_KEY, USAGE_KEYS, USAGE_LABELS } from './seed.ts';
-import { auditProxy, autoPick, manualPick, validatePriceCap, validateUsage, vectorInfo } from './logic.ts';
+import { manualPick, validatePriceCap, validateUsage, vectorInfo } from './logic.ts';
+import { coreAuditProxy, coreAuditTail, coreSaveConfig, coreSimulateAuto } from './coreModels.ts';
 import { VectorCard } from './VectorCard.tsx';
 import { LlmUsageTable } from './LlmUsageTable.tsx';
 import { ProxyPanel } from './ProxyPanel.tsx';
@@ -21,6 +23,13 @@ export function ModelsPage() {
   const [auditLog, setAuditLog] = useState<ProxyAuditEntry[]>([]);
   const { node: toast, show } = useToast();
 
+  // 审计回显 = 内核审计流（挂载加载本会话历史）
+  useEffect(() => {
+    let alive = true;
+    coreAuditTail().then((tail) => { if (alive && tail.length > 0) setAuditLog(tail); });
+    return () => { alive = false; };
+  }, []);
+
   const vector = vectorInfo(vectorKey);
 
   const usageErrors = useMemo(
@@ -35,28 +44,43 @@ export function ModelsPage() {
     setUsages((m) => ({ ...m, [u]: { ...m[u], ...patch } }));
   }
 
-  function handleSave() {
+  async function handleSave() {
     const errs = [...usageErrors, ...(capCheck.ok ? [] : [capCheck.msg])];
     if (errs.length > 0) {
       show(`保存被拒绝：${errs[0]}`);
       return;
     }
-    pushAudit({ event: 'llm_proxy', llm_proxy_source: 'agent:local', cost: 0, mode: 'local', at: Date.now() });
+    const entry = await coreSaveConfig(vector.label, vector.dims);
+    pushAudit(entry);
     show(`已保存 model_config：向量=${vector.label}（${vector.dims} 维）· 4 用途校验通过 · fallback_local 恒开`);
   }
 
-  function handleSimulate() {
-    const pool = selectMode === 'auto' ? sources : sources.filter((s) => selected.includes(s.agent));
-    const r = selectMode === 'auto' ? autoPick(pool, priceCap, Date.now()) : manualPick(pool, priceCap, Date.now());
-    if (!r.source) {
-      pushAudit(auditProxy(null, 0, selectMode));
-      show(`回退本地：${r.reason}`);
+  async function handleSimulate() {
+    if (selectMode === 'auto') {
+      // 内核统一路由（19.8）：先免费 → 低价 ≤ cap → cost_cap → 回退本地
+      const out = await coreSimulateAuto(priceCap, costCap);
+      if (out.source) {
+        setSources((ss) => ss.map((s) => (s.agent === out.source!.agent ? { ...s, used: s.used + 1 } : s)));
+        pushAudit(out.audit);
+        show(`auto 命中：${out.source.agent}/${out.source.model} · 花费 ¥${out.cost.toFixed(4)} —— ${out.reason}`);
+      } else {
+        pushAudit(out.audit);
+        show(`回退本地：${out.reason}`);
+      }
       return;
     }
-    const cost = r.source.price / 1000; // 千次单价 → 单次花费
-    setSources((ss) => ss.map((s) => (s.agent === r.source!.agent ? { ...s, used: s.used + 1 } : s)));
-    pushAudit(auditProxy(r.source, cost, selectMode));
-    show(`${selectMode === 'auto' ? 'auto' : 'manual'} 命中：${r.source.agent}/${r.source.model} · 花费 ¥${cost.toFixed(4)} —— ${r.reason}`);
+    // manual：R7/C11 约束在页面逻辑层，审计写内核
+    const pool = sources.filter((s) => selected.includes(s.agent));
+    const r = manualPick(pool, priceCap, Date.now());
+    const cost = r.source ? r.source.price / 1000 : 0;
+    if (r.source) {
+      setSources((ss) => ss.map((s) => (s.agent === r.source!.agent ? { ...s, used: s.used + 1 } : s)));
+    }
+    const entry = await coreAuditProxy(r.source, cost, r.source ? 'manual' : 'local');
+    pushAudit(entry);
+    show(r.source
+      ? `manual 命中：${r.source.agent}/${r.source.model} · 花费 ¥${cost.toFixed(4)} —— ${r.reason}`
+      : `回退本地：${r.reason}`);
   }
 
   return (
