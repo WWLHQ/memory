@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { AgentConversationDemo } from './AgentConversationDemo.tsx';
 
 const el = document.getElementById('root');
-if (!el) throw new Error('#root 容器缺失（检查 inlineAttribution.html）');
+if (!el) throw new Error('#root 容器缺失（检查 inlineattribution.html）');
 
 createRoot(el).render(
   <StrictMode>

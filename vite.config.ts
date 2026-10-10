@@ -13,7 +13,7 @@ export default defineConfig({
         main: 'index.html',
         agentonboard: 'agentonboard.html',
         overview: 'overview.html',
-        inlineattribution: 'inlineAttribution.html',
+        inlineattribution: 'inlineattribution.html',
         memory: 'memory.html',
         write: 'write.html',
         audit: 'audit.html',
