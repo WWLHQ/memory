@@ -238,6 +238,11 @@ export interface Memory {
   tags?: string[];                // 标签集合
   merged_from?: string[];         // 被哪些原始记忆合并（17.9）
   merged_into?: string;           // 是否被合并到某条摘要
+  // ---- REQ-008 同步扩展（§3.1，全部可选向后兼容） ----
+  pending_sync?: boolean;         // 离线先写待回传（移动端 §5）
+  sha256?: string;                // 内容指纹（5.4 幂等）
+  vclock?: Record<string, number>;// 向量时钟 {端: 版本}（§3.1）
+  updated_at?: number;            // 最近修改（LWW 判序用，§4）
 }
 
 /** ---------- Provider 注入（§5） ---------- */
