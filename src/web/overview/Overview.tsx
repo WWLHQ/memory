@@ -31,6 +31,7 @@ const VIEWS: View[] = [
   { id: 'security', ic: '🔐', lbl: '账号与安全页', desc: 'P12 · 4.2 密码策略 + 18.2-A 用户团队', src: '/security.html', req: 'REQ-006' },
   { id: 'recall', ic: '🔎', lbl: '检索页', desc: 'REQ-012 · 透明化召回 + 模式分流', src: '/retrieval.html', req: 'REQ-012' },
   { id: 'logs', ic: '📜', lbl: '日志记录页', desc: 'REQ-011 P15 · 全动作事件流 + 异常聚合', src: '/logs.html', req: 'REQ-011' },
+  { id: 'models', ic: '🧬', lbl: '大模型配置页', desc: 'REQ-009 P13 · 向量模型 + 四用途 + 反代理映射', src: '/models.html', req: 'REQ-009' },
 ];
 
 const PLANNED: View[] = [];
@@ -62,7 +63,7 @@ export function Overview() {
       <div className="top">
         <span className="logo">🧠 多 Agent 记忆助手 · UI 通览</span>
         <span className="tag">REQ-005 首页 / REQ-003 接入页 / REQ-004 内联标识 / REQ-006 记忆·写入·审计·生命周期·冲突</span>
-        <span className="right">12 个已落地视图 · iframe 隔离</span>
+        <span className="right">15 个已落地视图 · iframe 隔离</span>
       </div>
       <div className="body">
         <div className="nav" id="nav">

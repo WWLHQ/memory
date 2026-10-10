@@ -219,3 +219,45 @@
 
 
 
+
+---
+
+# 第五批：P13 大模型配置页验收（2026-10-10 追加）
+
+> 入口：通览页第 15 视图「大模型配置页」，或直接 `/models.html`。对应 REQ-009 13.2 / 19.8，红线 R1–R12。
+
+## 向量模型卡（104–107）
+
+104. **C1 渲染**：页面标题「🧬 大模型配置页 · REQ-009 · P13」；向量模型下拉显示 st（本地）；维度 **384** · 部署「本地」；下方 4 用途表 + 反代理映射表 + 审计回显 + 保存卡齐全
+105. **连通测试**：点「连通测试」→ toast「连通测试通过：sentence-transformers（本地）（384 维 · 本地）」
+106. **C5 换维度**：下拉切 bge-m3 → 弹确认框「维度将从 384 变为 1024 …预计耗时约 6 分钟…确认切换？」；确认 → 下拉锁灰 + 进度条「⏳ 索引重建中」→ 约 2s 后完成 toast + 维度显示 1024；**R5**：重建期间下拉 disabled 无法切换
+107. **云端模型**：切 deepseek-embed（云端）→ 显示「云端 · 需配 API Key」+ Key 密码框出现（384→768 同样有重建确认）
+
+## LLM 四用途表（108–111）
+
+108. **C2/R4 judge 温度锁**：judge 行温度框 disabled 且恒 0（title 提示 R4）；write/rerank/growth 温度可编辑
+109. **R2 Key 脱敏**：write 行勾「网络」→ 端点输入启用；填 Key `sk-secret-123456` → 输入框变为脱敏文本 `[API_KEY:sk****]`，原文不可见
+110. **C3 端点校验**：write 只勾「网络」不填端点 → 顶部红色校验卡「C3 勾选网络模型必须填写端点 URL」；点保存 → toast「保存被拒绝」
+111. **R1 至少一模型**：write 本地/网络全不勾 → 校验卡出现「R1 每个用途至少要有一个可用模型」；fallback_local 行恒显示「恒开 ✓（R3，无关闭入口）」
+
+## 反代理面板（112–117）
+
+112. **映射表**：4 行 = claude-code/claude-free（免费）· cursor-trial/glm-free（免费，余量 -30 红）· codex/gpt4o-mini（¥0.01）· x-agent/deepseek-v3（¥0.03，余量负红 + 行半透明）；每行有预算条（余量/预算 0.9×额度）
+113. **C7 auto 择优**：默认 auto 模式点「模拟一次代理调用」→ toast「auto 命中：claude-code/claude-free · 花费 ¥0.0000 —— 免费优先」；审计回显出现 `llm_proxy · llm_proxy_source=agent:claude-code · cost · mode=auto`；余量 780 → 779
+114. **C8 超限剔除**：auto 下免费源耗尽场景（或手动只勾耗尽源）→ 回退本地，不选超限源
+115. **C9/R7 manual 拒付费**：切 manual，勾 x-agent（¥0.03 > cap 0.01）→ 模拟 → toast「R7 拒绝：勾选源 x-agent/deepseek-v3（¥0.03/千次 超 price_cap ¥0.01）」
+116. **C11 manual 不转其他**：manual 只勾 cursor-trial（余量已耗尽）→ 模拟 → toast「勾选源当日余量已耗尽 → 回退本地 fallback_local，不转未勾选源（C11）」；审计回显 `agent:local · mode=local`
+117. **C13 price_cap=0**：price_cap 输 0 → 出现提示「C13：price_cap=0 —— 仅免费源可代理，付费源一律回退本地」
+
+## 保存与审计（118–119）
+
+118. **合法保存**：全部校验过后点「保存 model_config」→ toast「已保存 model_config：向量=…（N 维）· 4 用途校验通过 · fallback_local 恒开」；审计回显出现 `model_config` 条目
+119. 收尾：回通览页确认 **15 个视图**全部可达；F12 无红色报错（mirror safe-noop 静默类可忽略）
+
+## 问题记录（第五批）
+
+| # | 页面 | 现象 | 截图/复现步骤 |
+|---|------|------|--------------|
+|   |      |      |              |
+
+> 通过后告知「验收通过」，P13 页 1 次 commit（含入口/导航/CI 修复）。

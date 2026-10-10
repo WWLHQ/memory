@@ -25,6 +25,7 @@ export default defineConfig({
         security: 'security.html',
         retrieval: 'retrieval.html',
         logs: 'logs.html',
+        models: 'models.html',
       },
     },
   },
