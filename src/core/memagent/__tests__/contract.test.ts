@@ -5,16 +5,18 @@ import { MemAgentError } from '../errors.ts';
 import { FakeLlmProvider, routeProxy } from '../llm.ts';
 import { InMemoryStorage } from '../storage.ts';
 import { JsVectorBackend, embedSync, cosine } from '../vector.ts';
-import type { ModelInfo } from '../types.ts';
+import type { L0AdminPort, L0Port, ModelInfo } from '../types.ts';
+import { createTestVault, TEST_ADMIN_PW } from './l0Kit.ts';
 
 const ACCOUNT = { user_id: 'u1', team_id: 't1', enterprise_id: 'e1' };
 
-function makeAgent(form: 'desktop' | 'web' | 'cli' = 'desktop') {
+function makeAgent(form: 'desktop' | 'web' | 'cli' = 'desktop', ports?: { l0?: L0Port; l0Admin?: L0AdminPort }) {
   return createMemAgent({
     form, account: ACCOUNT,
     llm: new FakeLlmProvider(),
     vector: new JsVectorBackend(),
     storage: new InMemoryStorage(),
+    ...ports,
   });
 }
 
@@ -69,21 +71,25 @@ describe('§8 契约级验收', () => {
     expect(cosine(a, c)).toBeLessThan(cosine(a, b));
   });
 
-  it('④ L0 查阅：错密码 → E_AUTH_L0 + 遮罩；对密码解开 + l0_view 审计', async () => {
-    const ma = makeAgent();
-    await ma._seedMemory({ content: 'secret db tcp://prod-db:5432/app', category: 'context', project_id: 'P1' });
-    // 错密码 → E_AUTH_L0
-    await expect(ma.browse({ layer: 'L0', project_id: 'P1', l0_auth: { password: 'bad' } }))
+  it('④ L0 查阅：错密码 → E_AUTH_L0 + 遮罩；对密码建连续会话解开 + l0_view 审计', async () => {
+    const { vault } = await createTestVault();
+    const ma = makeAgent('desktop', { l0: vault, l0Admin: vault });
+    // L0 真实 AES-256-GCM(v2) 加密入库（§4.1/§4.4）
+    await ma._seedMemory({ content: 'secret db tcp://prod-db:5432/app', category: 'context', project_id: 'P1', l0: true });
+    // 错密码 → E_AUTH_L0（解锁即失败，不创建会话）
+    await expect(ma.l0Unlock({ password: 'bad-password' }))
       .rejects.toMatchObject({ code: 'E_AUTH_L0' });
-    // 对密码（≥6 位）→ 解开
-    const ok = await ma.browse({ layer: 'L0', project_id: 'P1', l0_auth: { password: 'l0pass' } });
+    // 对密码 → 创建连续会话，凭 l0_session_id 解开
+    const unlock = await ma.l0Unlock({ password: TEST_ADMIN_PW });
+    const ok = await ma.browse({ layer: 'L0', project_id: 'P1', l0_auth: { l0_session_id: unlock.l0_session_id } });
     expect(ok.l0_masked).toBe(false);
     expect(ok.rows[0].content).toContain('tcp://prod-db:5432/app');
     expect(ok.audit.action).toBe('l0_view');
   });
 
   it('⑤ 日志页：level/form 过滤 + 异常置顶 + ref_audit 可跳', async () => {
-    const ma = makeAgent();
+    const { vault } = await createTestVault();
+    const ma = makeAgent('desktop', { l0: vault, l0Admin: vault });
     await ma.write({ content: 'some unique memory content alpha', category: 'fact', project_id: 'P1' });
     const page = await ma.logs({ limit: 50 });
     expect(page.items.length).toBeGreaterThan(0);
@@ -99,39 +105,58 @@ describe('§8 契约级验收', () => {
   });
 
   it('⑥ 能力降级：Web discover 自动剔除 proc（E_FORM_DISABLED 语义）', async () => {
+    const found: { name: string; signal: 'mcp' | 'proc' | 'hb' }[] = [
+      { name: 'real-mcp-client', signal: 'mcp' },
+      { name: 'local-proc', signal: 'proc' },
+      { name: 'hb-client', signal: 'hb' },
+    ];
     const web = makeAgent('web');
-    const r = await web.discover({ form: 'web', signals: ['mcp', 'proc', 'hb'] });
+    const r = await web.discover({ form: 'web', signals: ['mcp', 'proc', 'hb'], found });
     expect(r.skipped).toEqual(['proc']);
     expect(r.agents.map((a) => a.signal)).toEqual(['mcp', 'hb']);
     // 桌面端 proc 可用
     const desk = makeAgent('desktop');
-    const rd = await desk.discover({ form: 'desktop', signals: ['mcp', 'proc'] });
+    const rd = await desk.discover({ form: 'desktop', signals: ['mcp', 'proc'], found });
     expect(rd.skipped).toEqual([]);
     expect(rd.agents.map((a) => a.signal)).toContain('proc');
+    // 无真实候选 → 不虚构 agent
+    const empty = await desk.discover({ form: 'desktop', signals: ['mcp', 'proc'] });
+    expect(empty.agents).toEqual([]);
   });
 
-  it('写入查重：相似内容 → merged（版本+1）；完全相同 → duplicated', async () => {
-    const ma = makeAgent();
+  it('写入逐层查重：相似内容 → L1 分支嫁接（新记忆保留自身文本，目标 grafted_from 回指）', async () => {
+    const { vault } = await createTestVault();
+    const ma = makeAgent('desktop', { l0: vault, l0Admin: vault });
     const r1 = await ma.write({ content: 'deploy docker compose v2 for staging', category: 'fact', project_id: 'P1' });
     expect(r1.dedup.action).toBe('new');
-    // 极相似 → merged
+    // 极相似 → 命中 L1 阈值 0.70 → 分支嫁接并停止（不生成更深层）
     const r2 = await ma.write({ content: 'deploy docker compose v2 for staging!', category: 'fact', project_id: 'P1' });
-    expect(r2.dedup.action === 'merged' || r2.dedup.action === 'duplicated').toBe(true);
-    expect(r2.dedup.sim).toBeGreaterThanOrEqual(0.75);
+    expect(r2.dedup.action).toBe('grafted');
+    expect(r2.dedup.sim).toBeGreaterThanOrEqual(0.70);
+    expect(r2.dedup.graft_layer).toBe('L1');
+    expect(r2.dedup.graft_to).toBe(r1.mem_id);
+    expect(r2.mem_id).not.toBe(r1.mem_id);
+    expect(Object.keys(r2.layers ?? {})).toEqual(['content_l1']);
   });
 
-  it('gc 衰减推进 + locked/pinned 豁免；sync 版本冲突 → E_SYNC_CONFLICT', async () => {
+  it('gc 单一衰减引擎（17.7 固定天数）+ locked/pinned 豁免；sync 未接线 → E_NOT_IMPLEMENTED', async () => {
     const ma = makeAgent();
-    const m1 = await ma._seedMemory({ content: 'will decay normally', category: 'context', project_id: 'P1' });
-    await ma._seedMemory({ content: 'pinned never decays', category: 'fact', project_id: 'P1', pinned: true });
+    const DAY = 24 * 3600 * 1000;
+    // hot >3 天 → warm（D5：coreGc 与 forgetting.classifyLayer 同一引擎，按 created_at 固定天数）
+    const m1 = await ma._seedMemory({
+      content: 'will decay normally', category: 'context', project_id: 'P1',
+      half_life_days: 30, created_at: Date.now() - 4 * DAY,
+    });
+    await ma._seedMemory({ content: 'pinned never decays', category: 'fact', project_id: 'P1', pinned: true, created_at: Date.now() - 999 * DAY });
     const report = await ma.gc({ project_id: 'P1' });
-    expect(report.decayed).toBe(1); // 仅未 pinned 的推进 hot→warm
+    expect(report.decayed).toBe(1); // 仅未 pinned 且已过 3 天的那条推进 hot→warm
+    // 立即再次 gc：warm 未过 30 天且新鲜度足够 → 不再连续降档
     const after = await ma.gc({ project_id: 'P1' });
-    expect(after.decayed).toBeGreaterThanOrEqual(1);
+    expect(after.decayed).toBe(0);
     expect(m1.mem_id).toBeTruthy();
-    // 冲突 → E_SYNC_CONFLICT
+    // 同步中枢未接线 → 诚实报 E_NOT_IMPLEMENTED（绝不伪造 pushed/pulled 成功）
     await ma._seedMemory({ content: 'conflicted memory', category: 'fact', project_id: 'P2', conflict_id: 'cf1' });
-    await expect(ma.sync({ direction: 'push', project_id: 'P2' })).rejects.toMatchObject({ code: 'E_SYNC_CONFLICT' });
+    await expect(ma.sync({ direction: 'push', project_id: 'P2' })).rejects.toMatchObject({ code: 'E_NOT_IMPLEMENTED' });
   });
 });
 

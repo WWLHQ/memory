@@ -1,0 +1,251 @@
+// MCP 工具服务契约测试（§19.5）：三工具 schema + 参数校验 + 阶梯精炼管道 + 批次2 信任边界
+import { describe, expect, it, beforeAll, afterAll } from 'vitest';
+import { createConnection } from 'node:net';
+import { runMcpServer, type McpServerHandle } from '../mcp.ts';
+import { InMemoryStorage } from '../storage.ts';
+import type { L0Vault } from '../l0vault.ts';
+import { createTestVault } from './l0Kit.ts';
+
+const TOKEN = 'mcp-test-token-0123456789abcdef0123456789abcdef';
+
+interface RpcResult {
+  id?: number | string | null;
+  result?: unknown;
+  error?: { code: number; message: string };
+}
+
+function rpcCall(port: number, obj: Record<string, unknown>): Promise<RpcResult> {
+  return new Promise((resolve, reject) => {
+    const socket = createConnection(port, '127.0.0.1');
+    let buf = '';
+    socket.on('data', (c: Buffer) => {
+      buf += c.toString();
+      const line = buf.trim();
+      if (line.startsWith('{') && line.endsWith('}')) {
+        socket.end();
+        try { resolve(JSON.parse(line)); } catch { reject(new Error(`bad JSON: ${line}`)); }
+      }
+    });
+    socket.on('error', reject);
+    socket.write(JSON.stringify(obj) + '\n');
+  });
+}
+
+describe('MCP Server（§19.5）', () => {
+  let handle: McpServerHandle;
+  let PORT = 0;
+  const storage = new InMemoryStorage();
+  let vault: L0Vault;
+
+  beforeAll(async () => {
+    vault = (await createTestVault()).vault;
+    handle = runMcpServer({ port: 0, storage, token: TOKEN, l0: vault });
+    PORT = await handle.ready;
+  });
+
+  afterAll(() => {
+    handle?.stop();
+  });
+
+  it('无 token → -32001（MCP 端口不再对任意本机进程开放）', async () => {
+    const r = await rpcCall(PORT, { jsonrpc: '2.0', id: 0, method: 'tools/list' });
+    expect(r.error?.code).toBe(-32001);
+    expect(r.error?.message).toContain('token');
+  });
+
+  it('错误 token → -32001，且不会返回工具清单', async () => {
+    const r = await rpcCall(PORT, { jsonrpc: '2.0', id: 0, method: 'tools/list', params: { token: 'wrong-token'.repeat(4) } });
+    expect(r.error?.code).toBe(-32001);
+    expect(r.result).toBeUndefined();
+  });
+
+  it('tools/list 返回四个工具且 schema 正确', async () => {
+    const r = await rpcCall(PORT, { jsonrpc: '2.0', id: 1, method: 'tools/list', params: { token: TOKEN } });
+    const tools = (r.result as { tools: Array<{ name: string; inputSchema?: { required?: string[] } }> }).tools;
+    expect(tools.map((t) => t.name)).toEqual([
+      'recall_memory', 'write_memory', 'list_projects', 'get_user_preferences',
+    ]);
+    const recallTool = tools.find((t) => t.name === 'recall_memory')!;
+    expect(recallTool.inputSchema!.required).toEqual(['query']); // project_id 可省略（批次11）
+    const writeTool = tools.find((t) => t.name === 'write_memory')!;
+    const schema = writeTool.inputSchema!;
+    expect(schema.required).toContain('content');
+    expect(schema.required).toContain('project_id');
+  });
+
+  it('空账本 recall 省略 project_id → -32602 明示 project_id（不猜项目）', async () => {
+    const r = await rpcCall(PORT, {
+      jsonrpc: '2.0', id: 11, method: 'recall_memory', params: { query: '任意关键词', token: TOKEN },
+    });
+    expect(r.error?.code).toBe(-32602);
+    expect(r.error?.message).toContain('project_id');
+  });
+
+  it('write_memory：缺 project_id → -32602', async () => {
+    const r = await rpcCall(PORT, { jsonrpc: '2.0', id: 2, method: 'write_memory', params: { content: 'test', token: TOKEN } });
+    expect(r.error?.code).toBe(-32602);
+    expect(r.error?.message).toContain('project_id');
+  });
+
+  it('write_memory：缺 content → -32602', async () => {
+    const r = await rpcCall(PORT, { jsonrpc: '2.0', id: 3, method: 'write_memory', params: { project_id: 'P1', token: TOKEN } });
+    expect(r.error?.code).toBe(-32602);
+    expect(r.error?.message).toContain('content');
+  });
+
+  it('write_memory：非法 category → -32602（不静默落 pitfall）', async () => {
+    const r = await rpcCall(PORT, {
+      jsonrpc: '2.0', id: 32,
+      method: 'write_memory',
+      params: { content: '非法类别测试', project_id: 'P1', category: 'bug', token: TOKEN },
+    });
+    expect(r.error?.code).toBe(-32602);
+    expect(r.error?.message).toContain('category');
+  });
+
+  it('write_memory：冒用其它 user_id → -32602（租户闭包）', async () => {
+    const r = await rpcCall(PORT, {
+      jsonrpc: '2.0', id: 31,
+      method: 'write_memory',
+      params: { content: '跨租户写入', project_id: 'P1', user_id: 'u2', token: TOKEN },
+    });
+    expect(r.error?.code).toBe(-32602);
+    expect(r.error?.message).toContain('租户');
+  });
+
+  it('write_memory：合法入参 → 成功 + L0 阶梯管道 + 审计落库', async () => {
+    const r = await rpcCall(PORT, {
+      jsonrpc: '2.0', id: 4,
+      method: 'write_memory',
+      params: {
+        content: 'MCP 写入测试：联系人 张三，电话 13900001111',
+        project_id: 'P1',
+        category: 'pitfall',
+        session_id: 'sess-mcp-001',
+        source_agent: 'mcp-test',
+        token: TOKEN,
+      },
+    });
+    expect(r.error).toBeUndefined();
+    const result = r.result as { mem_id: string; dedup: { action: string } };
+    expect(result.dedup.action).toBe('new');
+    expect(result.mem_id).toMatch(/^mem_/);
+
+    // 验证 L0 已加密入库（非明文）
+    const mems = await storage.listMemories({});
+    const mcpMem = mems.find((m) => m.mem_id === result.mem_id)!;
+    expect(mcpMem).toBeDefined();
+    expect(mcpMem.content_l0_enc).not.toContain('张三');
+    expect(mcpMem.content_l0_enc).toContain('AES-256-GCM');
+
+    // 验证 L1 已脱敏
+    expect(mcpMem.content_l1).not.toContain('13900001111');
+    expect(mcpMem.content_l1).toContain('[电话]');
+
+    // 未接入真实 LLM → 只落 L1，不伪造 L2-L6
+    expect(mcpMem.layer).toBe('L1');
+    expect(mcpMem.refined_by).toBe('stub');
+    expect(mcpMem.content_l1).toBeDefined();
+    expect(mcpMem.content).toBe(mcpMem.content_l1);
+    expect(mcpMem.content_l2).toBeUndefined();
+    expect(mcpMem.content_l3).toBeUndefined();
+    expect(mcpMem.content_l4).toBeUndefined();
+    expect(mcpMem.content_l5).toBeUndefined();
+    expect(mcpMem.content_l6).toBeUndefined();
+
+    // 验证 source_agent 已记录
+    expect(mcpMem.created_by_agent).toBe('mcp-test');
+  });
+
+  it('get_user_preferences：缺 user_id → -32602', async () => {
+    const r = await rpcCall(PORT, { jsonrpc: '2.0', id: 5, method: 'get_user_preferences', params: { token: TOKEN } });
+    expect(r.error?.code).toBe(-32602);
+  });
+
+  it('get_user_preferences：读取其它租户 → -32602（租户闭包）', async () => {
+    const r = await rpcCall(PORT, { jsonrpc: '2.0', id: 51, method: 'get_user_preferences', params: { user_id: 'u2', token: TOKEN } });
+    expect(r.error?.code).toBe(-32602);
+    expect(r.error?.message).toContain('租户');
+  });
+
+  it('tools/call 代理：经 tools/call 调 write_memory 同样成功', async () => {
+    const r = await rpcCall(PORT, {
+      jsonrpc: '2.0', id: 6,
+      method: 'tools/call',
+      params: {
+        name: 'write_memory',
+        arguments: {
+          content: 'tools/call 路径测试',
+          project_id: 'P1',
+          category: 'fact',
+        },
+        token: TOKEN,
+      },
+    });
+    expect(r.error).toBeUndefined();
+    const result = r.result as { mem_id: string };
+    expect(result.mem_id).toMatch(/^mem_/);
+  });
+
+  it('未知方法 → -32601', async () => {
+    const r = await rpcCall(PORT, { jsonrpc: '2.0', id: 7, method: 'no_such_tool', params: { token: TOKEN } });
+    expect(r.error?.code).toBe(-32601);
+  });
+
+  it('initialize 握手返回 serverInfo + instructions（批次11）', async () => {
+    const r = await rpcCall(PORT, { jsonrpc: '2.0', id: 8, method: 'initialize', params: { token: TOKEN } });
+    expect(r.result).toBeDefined();
+    const init = r.result as { serverInfo: { name: string; version: string }; instructions: string };
+    expect(init.serverInfo.name).toBe('memagent-mcp');
+    expect(init.instructions).toContain('recall_memory');
+    expect(init.instructions).toContain('display.markdown');
+    expect(init.instructions).toContain('display.line');
+    expect(init.instructions).toContain('优先调用');
+  });
+
+  it('recall 省略 project_id → 唯一项目自动定位 + 提示行（金额未设单价 → null）', async () => {
+    const r = await rpcCall(PORT, {
+      jsonrpc: '2.0', id: 81, method: 'recall_memory', params: { query: 'MCP 写入测试', token: TOKEN },
+    });
+    expect(r.error).toBeUndefined();
+    const result = r.result as {
+      project_id: string; resolved_from: string; hits: unknown[];
+      savings: { saved_tokens: number; injected_tokens: number };
+      background: { items: unknown[] };
+      display: { line: string; markdown: string; money: unknown };
+    };
+    expect(result.project_id).toBe('P1');
+    expect(result.resolved_from).toBe('single_project');
+    expect(result.hits.length).toBeGreaterThan(0);
+    expect(result.savings.injected_tokens).toBeGreaterThan(0);
+    expect(result.savings.saved_tokens).toBeGreaterThanOrEqual(0);
+    expect(result.display.money).toBeNull();
+    expect(result.display.line).toContain('🧠 Memory');
+    // 批次13：TCP 与 HTTP 共用同一 payload → 折叠明细同样下发
+    expect(result.display.markdown).toContain('<details>');
+    expect(result.display.markdown).toContain('项目背景');
+  });
+
+  it('list_projects → 真实项目 P1', async () => {
+    const r = await rpcCall(PORT, { jsonrpc: '2.0', id: 82, method: 'list_projects', params: { token: TOKEN } });
+    const result = r.result as { total: number; projects: Array<{ project_id: string; memories: number }> };
+    expect(result.total).toBe(1);
+    expect(result.projects[0].project_id).toBe('P1');
+    expect(result.projects[0].memories).toBeGreaterThan(0);
+  });
+
+  it('单行超过上限 → -32600 并断开连接（防止大包吃满内存）', async () => {
+    const tiny = runMcpServer({ port: 0, storage: new InMemoryStorage(), token: TOKEN, maxLineBytes: 128 });
+    const port = await tiny.ready;
+    const out = await new Promise<string>((resolve) => {
+      const s = createConnection(port, '127.0.0.1');
+      let buf = '';
+      s.on('data', (c: Buffer) => { buf += c.toString(); });
+      s.on('close', () => resolve(buf));
+      s.on('error', () => resolve(buf));
+      s.write(JSON.stringify({ jsonrpc: '2.0', id: 9, method: 'initialize', params: { token: TOKEN, pad: 'x'.repeat(500) } }) + '\n');
+    });
+    expect(out).toContain('-32600');
+    tiny.stop();
+  });
+});

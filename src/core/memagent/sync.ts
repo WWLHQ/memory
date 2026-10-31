@@ -1,7 +1,7 @@
 // REQ-008 云同步（同步机制详细设计 §1–§8）：sha256 幂等 + 向量时钟 LWW + SyncHub 中枢 + 三端引擎
 // 三项锁定：桌面主源 / 自动 LWW（仅语义互斥进 9.7 队列）/ 中枢账本。内存 SyncHub 接口同构 Postgres 中枢。
 import { ulid } from './ulid.ts';
-import type { Form, Memory } from './types.ts';
+import type { Filter, Form, Memory } from './types.ts';
 
 // ---------- sha256（5.4 幂等指纹，纯 JS，浏览器 + Node 通用） ----------
 const K = new Uint32Array([
@@ -15,11 +15,12 @@ const K = new Uint32Array([
   0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
 ]);
 
-/** 纯 JS SHA-256（紧凑实现，仅供演示级指纹） */
+/** 纯 JS SHA-256（浏览器 + Node 通用；与 Node crypto 的十六进制结果一致） */
 export function sha256hex(msg: string): string {
   const bytes = new TextEncoder().encode(msg);
   const bitLen = bytes.length * 8;
-  const withPad = new Uint8Array(((bytes.length + 9) >> 6 << 6) || 64);
+  // 长度块 = 消息 + 0x80 + 8 字节长度，向上取整到 64 字节（56..63 边界必须进位）
+  const withPad = new Uint8Array(Math.ceil((bytes.length + 9) / 64) * 64);
   withPad.set(bytes);
   withPad[bytes.length] = 0x80;
   const dv = new DataView(withPad.buffer);
@@ -70,7 +71,7 @@ export function vcCompare(a: VClock, b: VClock): 'ahead' | 'behind' | 'concurren
 
 /** 递增本端时钟 */
 export function vcTick(clock: VClock | undefined, form: Form): VClock {
-  const c = { ...(clock ?? {}) };
+  const c: VClock = { ...clock };
   c[form] = (c[form] ?? 0) + 1;
   return c;
 }
@@ -100,6 +101,12 @@ export interface SyncAudit {
   ts: number;
   detail: Record<string, unknown>;
 }
+
+/** 上行结果（D2）：
+ *  applied = 中枢采纳本端；lww = 并发且本端赢；dedup = 同内容已被收录；
+ *  behind = 中枢更新（因果落后或 LWW 远端胜）→ 本地不得改动，等下行覆盖；
+ *  conflict = 挂 9.7 裁决队列 → 本地版本/pending 原样保留。 */
+export type PushOutcome = 'applied' | 'dedup' | 'behind' | 'conflict' | 'lww';
 
 // ---------- SyncHub（§2 服务端中枢：镜像 + 幂等账本 + 裁决） ----------
 export class SyncHub {
@@ -134,18 +141,19 @@ export class SyncHub {
    * 上行（§3.2）：sha256 幂等去重；向量时钟判冲突。
    * 返回：'applied' 已落镜像 / 'dedup' 幂等跳过 / 'conflict' 挂队列 / 'lww' LWW 覆盖
    */
-  push(mem: Memory, form: Form): 'applied' | 'dedup' | 'conflict' | 'lww' {
+  push(mem: Memory, form: Form): PushOutcome {
     const sha = mem.sha256 ?? sha256hex(mem.content);
     const sb = this.seenBucket(mem.team_id);
-    if (sb.get(sha) && sb.get(sha) !== mem.mem_id) return 'dedup'; // 不同 mem_id 同内容 → 幂等跳过
+    // 墓碑内容为空，所有墓碑 sha 相同 → 不能参与跨 mem_id 幂等去重，否则第二删除无法传播
+    if (!mem.deleted && sb.get(sha) && sb.get(sha) !== mem.mem_id) return 'dedup'; // 不同 mem_id 同内容 → 幂等跳过
 
     const bucket = this.bucket(mem.team_id);
     const remote = bucket.get(mem.mem_id);
     if (!remote) {
       bucket.set(mem.mem_id, { ...mem, sha256: sha });
       this.versions.set(mem.mem_id, ++this.cursor);
-      sb.set(sha, mem.mem_id);
-      this.audit({ action: 'sync_up', form, team_id: mem.team_id, mem_ids: [mem.mem_id], version: mem.version, sha256: sha, detail: { op: 'create' } });
+      if (!mem.deleted) sb.set(sha, mem.mem_id);
+      this.audit({ action: 'sync_up', form, team_id: mem.team_id, mem_ids: [mem.mem_id], version: mem.version, sha256: sha, detail: { op: mem.deleted ? 'tombstone' : 'create' } });
       return 'applied';
     }
 
@@ -154,12 +162,12 @@ export class SyncHub {
       // 因果占优 → 覆盖
       bucket.set(mem.mem_id, { ...mem, sha256: sha });
       this.versions.set(mem.mem_id, ++this.cursor);
-      sb.set(sha, mem.mem_id);
-      this.audit({ action: 'sync_up', form, team_id: mem.team_id, mem_ids: [mem.mem_id], version: mem.version, sha256: sha, detail: { op: 'overwrite', clock: cmp } });
+      if (!mem.deleted) sb.set(sha, mem.mem_id);
+      this.audit({ action: 'sync_up', form, team_id: mem.team_id, mem_ids: [mem.mem_id], version: mem.version, sha256: sha, detail: { op: mem.deleted ? 'tombstone' : 'overwrite', clock: cmp } });
       return 'applied';
     }
     if (cmp === 'behind') {
-      return 'dedup'; // 本地落后 → 中枢已是最新，无需处理
+      return 'behind'; // 本地落后 → 中枢已是最新；本地不得改动（D2）
     }
     // concurrent：§4 自动 LWW —— 时间戳晚者赢（带 vector clock 因果判定）
     if (mem.updated_at && remote.updated_at && mem.updated_at !== remote.updated_at) {
@@ -170,14 +178,14 @@ export class SyncHub {
         const loser = { ...remote, decay_class: 'archived' as const, version: remote.version + 1 };
         bucket.set(`${mem.mem_id}#loser#${ulid()}`, loser);
         this.versions.set(mem.mem_id, ++this.cursor);
-        sb.set(sha, mem.mem_id);
+        if (!mem.deleted) sb.set(sha, mem.mem_id);
         this.audit({ action: 'sync_up', form, team_id: mem.team_id, mem_ids: [mem.mem_id], version: mem.version, sha256: sha, detail: { op: 'lww', winner: 'local', loser_archived: true } });
         return 'lww';
       }
       this.audit({ action: 'sync_up', form, team_id: mem.team_id, mem_ids: [mem.mem_id], version: mem.version, sha256: sha, detail: { op: 'lww', winner: 'remote' } });
       // 败者（本次上行版本）同样转 archived，不物理删（9.7 对称）
       bucket.set(`${mem.mem_id}#loser#${ulid()}`, { ...mem, sha256: sha, decay_class: 'archived' as const, version: mem.version + 1 });
-      return 'dedup'; // 镜像版本更晚 → 本地版本将被下行覆盖
+      return 'behind'; // 镜像版本更晚 → 本地版本将被下行覆盖（本地不得改动）
     }
     // 全晚（时间戳相同无法判序）→ 9.7 裁决队列（P8）
     const c: SyncConflict = {
@@ -214,6 +222,7 @@ export class SyncHub {
     const losers = all.filter(([k, m]) => k.includes('#loser#') && m.decay_class === 'archived').map(([, m]) => m);
     const missing: string[] = [];
     for (const m of items) {
+      if (m.deleted) continue; // 墓碑无正文，不参与指纹校验
       if (!m.sha256 || m.sha256 !== sha256hex(m.content)) missing.push(m.mem_id); // 指纹不一致 → 需修复
     }
     this.audit({ action: 'sync_reconcile', form: 'desktop', team_id: scope.team_id, mem_ids: items.map((m) => m.mem_id), detail: { total: items.length, losers: losers.length, missing_local: missing.length } });
@@ -266,7 +275,7 @@ export function stampForSync(m: Memory, form: Form): Memory {
 }
 
 export interface SyncUpReport {
-  applied: number; dedup: number; conflicts: string[]; lww: number;
+  applied: number; dedup: number; behind: number; conflicts: string[]; lww: number;
   audits: SyncAudit[];
 }
 
@@ -274,32 +283,61 @@ export interface SyncUpReport {
 export type AnySyncHub = SyncHub | import('./pgSyncHub.ts').PgSyncHub;
 
 /** 上行（桌面实时 / Web 即时 / 移动批量回传 / CLI 命令触发） */
-export async function syncUp(local: { listMemories(f: { project_id?: string }): Promise<Memory[]>; putMemory(m: Memory): Promise<void> }, hub: AnySyncHub, form: Form, filter?: { onlyPending?: boolean }): Promise<SyncUpReport> {
-  const mems = await local.listMemories({});
-  const report: SyncUpReport = { applied: 0, dedup: 0, conflicts: [], lww: 0, audits: [] };
+export async function syncUp(local: { listMemories(f: Filter): Promise<Memory[]>; putMemory(m: Memory): Promise<void> }, hub: AnySyncHub, form: Form, filter?: { onlyPending?: boolean }): Promise<SyncUpReport> {
+  // 删除墓碑必须参与上行，否则删除无法传播（D2）；UI 默认列表仍不显示墓碑
+  const mems = await local.listMemories({ include_deleted: true });
+  const report: SyncUpReport = { applied: 0, dedup: 0, behind: 0, conflicts: [], lww: 0, audits: [] };
   const auditStart = await hub.auditCount();
   for (const m of mems) {
     if (filter?.onlyPending && !m.pending_sync) continue;
     if (m.mem_id.includes('#loser#')) continue; // 败者不回传
     const stamped = stampForSync(m, form);
     const r = await hub.push(stamped, form);
-    await local.putMemory({ ...stamped, pending_sync: false }); // §5：回传后清 pending_sync
-    if (r === 'applied') report.applied++;
-    else if (r === 'dedup') report.dedup++;
-    else if (r === 'lww') report.lww++;
-    else report.conflicts.push(...(await hub.listConflicts()).filter((c) => c.mem_id === m.mem_id).map((c) => c.conflict_id));
+    if (r === 'applied' || r === 'lww') {
+      // 中枢采纳本端（或本端 LWW 胜）→ 落版本戳并清 pending
+      await local.putMemory({ ...stamped, pending_sync: false });
+      if (r === 'applied') report.applied++;
+      else report.lww++;
+    } else if (r === 'dedup') {
+      // 同内容已被中枢收录：只清 pending，不推进本地版本
+      if (m.pending_sync) await local.putMemory({ ...m, pending_sync: false });
+      report.dedup++;
+    } else if (r === 'behind') {
+      // 中枢更新（本地落后 / LWW 远端胜）→ 本地原样保留，等下行覆盖
+      report.behind++;
+    } else {
+      // conflict → 本地 version/pending 一律不改，等 9.7 裁决
+      report.conflicts.push(...(await hub.listConflicts()).filter((c) => c.mem_id === m.mem_id).map((c) => c.conflict_id));
+    }
   }
   report.audits = await hub.auditsFrom(auditStart); // 本轮产生的审计（§6 form 归因）
   return report;
 }
 
-/** 下行（§3.3）：镜像增量 → 本地落盘（补"自己没的、别人改的"） */
-export async function syncDown(hub: AnySyncHub, local: { putMemory(m: Memory): Promise<void>; getMemory(id: string): Promise<Memory | null> }, scope: { team_id: string; user_id?: string }, since: number, form: Form = 'web'): Promise<{ pulled: number; cursor: number }> {
+type LocalSyncStore = {
+  putMemory(m: Memory): Promise<void>;
+  getMemory(id: string): Promise<Memory | null>;
+  listMemories?(f: Filter): Promise<Memory[]>;
+};
+
+/** 墓碑对 getMemory 不可见（D2）：下行/对账需含墓碑侧查，避免重复落盘或重复补单 */
+async function localExisting(local: LocalSyncStore, mem_id: string): Promise<Memory | null> {
+  const m = await local.getMemory(mem_id);
+  if (m) return m;
+  if (!local.listMemories) return null;
+  return (await local.listMemories({ include_deleted: true })).find((x) => x.mem_id === mem_id) ?? null;
+}
+
+/** 下行（§3.3）：镜像增量 → 本地落盘（补"自己没的、别人改的"，含删除墓碑） */
+export async function syncDown(hub: AnySyncHub, local: LocalSyncStore, scope: { team_id: string; user_id?: string }, since: number, form: Form = 'web'): Promise<{ pulled: number; cursor: number }> {
   const { items, cursor } = await hub.pull(scope, since, form);
   let pulled = 0;
   for (const m of items) {
-    const existing = await local.getMemory(m.mem_id);
-    if (!existing || existing.version < m.version) {
+    const existing = await localExisting(local, m.mem_id);
+    // 删除墓碑以中枢为准（D2）：resolve 会抬高胜者版本，若仍按 version 比较，
+    // 另一端随后的删除会因版本较低被跳过，删除无法传播。
+    const tombstoneWins = m.deleted && !existing?.deleted;
+    if (!existing || tombstoneWins || existing.version < m.version) {
       await local.putMemory({ ...m, pending_sync: false });
       pulled++;
     }
@@ -307,12 +345,12 @@ export async function syncDown(hub: AnySyncHub, local: { putMemory(m: Memory): P
   return { pulled, cursor };
 }
 
-/** 每日全量对账（§3.4）：补漏 + 指纹校验 */
-export async function reconcile(hub: AnySyncHub, local: { putMemory(m: Memory): Promise<void>; getMemory(id: string): Promise<Memory | null> }, scope: { team_id: string; user_id?: string }): Promise<{ backfilled: number; integrity_issues: string[] }> {
+/** 每日全量对账（§3.4）：补漏 + 指纹校验（墓碑同样参与补漏） */
+export async function reconcile(hub: AnySyncHub, local: LocalSyncStore, scope: { team_id: string; user_id?: string }): Promise<{ backfilled: number; integrity_issues: string[] }> {
   const { items, missing_local } = await hub.reconcile(scope);
   let backfilled = 0;
   for (const m of items) {
-    const existing = await local.getMemory(m.mem_id);
+    const existing = await localExisting(local, m.mem_id);
     if (!existing) {
       await local.putMemory({ ...m, pending_sync: false });
       backfilled++;

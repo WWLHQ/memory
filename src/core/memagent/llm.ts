@@ -4,6 +4,9 @@ import type { LlmProvider, ModelInfo } from './types.ts';
 
 /** 演示 Provider：fake 模型表（真实端各自实现 Desktop/Remote/System） */
 export class FakeLlmProvider implements LlmProvider {
+  /** 显式 stub：写入管线据此只落 L1，不伪造 L2–L6 */
+  readonly isStub = true;
+
   constructor(private models: ModelInfo[] = [
     { model: 'claude-free', tier: 'free', price: 0, quota: 1000, used: 100 },
     { model: 'gpt4o-mini', tier: 'cheap', price: 0.01, quota: 2000, used: 200 },

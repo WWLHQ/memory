@@ -95,15 +95,26 @@ describe('coreMemoryOp（17.3 / P4）', () => {
     expect(r.mem?.decay_class).toBe('cold');
   });
 
-  it('delete：主表 + 向量索引清理，返回 mem=null', async () => {
+  it('delete：墓碑隐藏 + 向量索引清理 + 待同步（D2 删除传播）', async () => {
     const s = new InMemoryStorage();
     const v = new JsVectorBackend();
-    await s.putMemory(seed());
+    await s.putMemory(seed({ content_orig: 'op target memory' }));
     await v.upsert('m1', 'op target memory', { project_id: 'P1', layer: 'L2' });
     const r = await coreMemoryOp('m1', 'delete', { storage: s, vector: v, request_id: 'req_test1', now: 0 });
     expect(r.ok).toBe(true);
     expect(r.mem).toBeNull();
     expect(await s.getMemory('m1')).toBeNull();
+    expect((await s.listMemories({})).length).toBe(0);
+    // 墓碑留档：正文/加密/原文/指纹清空，版本推进，待上行
+    const tomb = (await s.listMemories({ include_deleted: true })).find((m) => m.mem_id === 'm1');
+    expect(tomb?.deleted).toBe(true);
+    expect(tomb?.deleted_at).toBe(0);
+    expect(tomb?.content).toBe('');
+    expect(tomb?.content_orig).toBeUndefined();
+    expect(tomb?.content_l1).toBeUndefined();
+    expect(tomb?.sha256).toBeUndefined();
+    expect(tomb?.version).toBe(2);
+    expect(tomb?.pending_sync).toBe(true);
     const hits = await v.search(embedSync('op target memory'), 5, {});
     expect(hits.find((h) => h.mem_id === 'm1')).toBeUndefined();
   });

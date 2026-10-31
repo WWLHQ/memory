@@ -3,11 +3,16 @@ import { MemAgentError } from './errors.ts';
 import { routeProxy } from './llm.ts';
 import { coreBrowse, coreFeedback, coreGc, coreMemoryOp, coreWrite } from './memories.ts';
 import { hardFilter, scoreMemory } from './forgetting.ts';
-import { cosine, embedSync } from './vector.ts';
+import {
+  BACKGROUND_MAX_TOKENS, computeRecallSavings, estTokens, selectRecallBackground,
+} from './recallInsight.ts';
+import { cosine, embedSync, DEFAULT_VECTOR_DIM } from './vector.ts';
 import { ulid } from './ulid.ts';
 import type {
   AuditRecord, BrowseResult, DiscoverReq, DiscoverResult, DiscoverSignal, FeedbackKind, FeedbackResult, Form, GcReq, GcReport,
-  Hit, LogItem, LogPage, LogReq, MemAgent, MemAgentOptions, MemOp, MemOpPatch, MemOpResult, MemReq, Memory, Pref, RecallReq,
+  Hit, L0AccessRequest, L0AccessRequestResult, L0AdminPort, L0GrantReq, L0GrantResult, L0GrantView, L0HeartbeatResult,
+  L0MigrationResult, L0RequestView, L0UnlockReq, L0UnlockResult, L0VaultStatus,
+  LogItem, LogPage, LogReq, MemAgent, MemAgentOptions, MemOp, MemOpPatch, MemOpResult, MemReq, Memory, Pref, RecallReq,
   RecallResult, SyncReq, SyncReport, WriteResult,
 } from './types.ts';
 
@@ -21,9 +26,6 @@ const SIGNAL_CAPABILITY: Record<DiscoverSignal, Form[]> = {
 
 /** 召回预算（2.4.1）：soft 1500 / warn 2000 / hard 3000 */
 const BUDGET = { soft: 1500, warn: 2000, hard: 3000 } as const;
-
-/** 粗略 token 估算（契约级演示：≈ chars/2） */
-const estTokens = (s: string) => Math.ceil(s.length / 2);
 
 export function createMemAgent(opts: MemAgentOptions): MemAgent {
   const { form, account, llm, vector, storage } = opts;
@@ -86,25 +88,32 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent {
       pinned: m.pinned, locked: m.locked, score: Math.round(score * 1000) / 1000,
       evidence_ref: `l0:${m.mem_id}`,
     }));
+    // 背景去重口径：topK + 冷回填已考虑过的记忆都不得再以「背景」身份注入（防止被裁命中借道回灌）
+    const consideredIds = new Set(scored.map(({ m }) => m.mem_id));
 
-    let payload_tokens = hits.reduce((a, h) => a + estTokens(h.content), 0);
-    // 2.4.1/R9：超硬熔断 3000t → 按分数从低到高丢弃直到预算内
-    if (payload_tokens > BUDGET.hard) {
-      const sorted = [...hits].sort((a, b) => a.score - b.score);
-      let pt = payload_tokens;
+    // 2.4.1/R9：超硬熔断 3000t → 按分数从低到高丢弃直到预算内。
+    // 初始命中与冷回填后都必须走同一裁剪，payload_tokens 必须按最终 hits 重算。
+    const applyHardCap = (list: Hit[]): { hits: Hit[]; payload: number } => {
+      let payload = list.reduce((a, h) => a + estTokens(h.content), 0);
+      if (payload <= BUDGET.hard) return { hits: list, payload };
       const drop = new Set<string>();
-      for (const h of sorted) {
-        if (pt <= BUDGET.hard) break;
-        pt -= estTokens(h.content);
+      for (const h of [...list].sort((a, b) => a.score - b.score)) {
+        if (payload <= BUDGET.hard) break;
+        payload -= estTokens(h.content);
         drop.add(h.mem_id);
       }
-      hits = hits.filter((h) => !drop.has(h.mem_id));
-      payload_tokens = hits.reduce((a, h) => a + estTokens(h.content), 0);
-    }
+      const kept = list.filter((h) => !drop.has(h.mem_id));
+      return { hits: kept, payload: kept.reduce((a, h) => a + estTokens(h.content), 0) };
+    };
+    // 省量口径：硬熔断前（topK）的 token 快照；冷回填后再累加
+    let preCapTokens = hits.reduce((a, h) => a + estTokens(h.content), 0);
+    let capped = applyHardCap(hits);
+    hits = capped.hits;
+    let payload_tokens = capped.payload;
 
     // 2.4.3 逃生阀：零命中/全低分 → 补查 cold（15.3：sim≥0.85 强信号放行）
     let evidence_thin: boolean | undefined;
-    if (hits.length === 0 || hits.every((h) => h.score < 0.3)) {
+    if (hits.every((h) => h.score < 0.3)) {
       evidence_thin = true;
       const backfill = all
         .filter((m) => !minimal && (m.decay_class === 'cold' || m.decay_class === 'archived' || m.decay_class === 'dormant') && m.embedding)
@@ -119,9 +128,22 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent {
             pinned: m.pinned, locked: m.locked, score: Math.round(scoreMemory(m, sim, now) * 1000) / 1000,
             evidence_ref: `l0:${m.mem_id}`,
           });
+          consideredIds.add(m.mem_id);
         }
+        preCapTokens += backfill.reduce((a, { m }) => a + estTokens(m.content), 0);
+        // 补查也要守 3000t 硬熔断：回填后重算并按同一规则裁剪（否则逃生阀可击穿预算）
+        capped = applyHardCap(hits);
+        hits = capped.hits;
+        payload_tokens = capped.payload;
       }
     }
+
+    // 批次11：项目背景与省量（背景走硬熔断余量，payload + background 永不超过 3000t）
+    const background = selectRecallBackground(all, consideredIds, {
+      minimal,
+      maxTokens: Math.min(BACKGROUND_MAX_TOKENS, Math.max(0, BUDGET.hard - payload_tokens)),
+    });
+    const savings = computeRecallSavings({ memories: all, hits, background, preCapTokens });
 
     // 17.4：召回命中计数（不含 confirm/reinforce）
     for (const h of hits) {
@@ -136,26 +158,64 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent {
       evidence_thin,
       mode: mode ?? 'auto',
       request_id,
+      scanned_memories: all.length,
+      background,
+      savings,
     };
     await audit(request_id, 'recall', {
       query: req.query, hits: hits.length, payload_tokens, scene, mode: result.mode,
+      // 批次15：区分是哪个 Agent 真的调用了召回（未识别时不写，避免伪归属）
+      ...(req.client ? { client: req.client } : {}),
+      mems: hits.map((h) => h.mem_id),
+      scanned_memories: all.length,
+      background_tokens: background.tokens,
+      bg_mems: background.items.map((i) => i.mem_id),
+      corpus_tokens: savings.corpus_tokens,
+      injected_tokens: savings.injected_tokens,
+      saved_tokens: savings.saved_tokens,
+      budget_trimmed_tokens: savings.budget_trimmed_tokens,
     }, { project_id: req.project_id, user_id: req.user_id });
     return result;
   }
 
   async function write(req: MemReq): Promise<WriteResult> {
     const request_id = newRequestId();
-    // LLM 用途（write 抽取）走反代理路由（19.8），失败回退本地 → E_LLM_FALLBACK 语义
+    // LLM 用途（write 精炼）走反代理路由（19.8）；选中模型但精炼未产出 → 回退本地语义。
     const pick = routeProxy(llm.listModels(), /* price_cap */ 0.01, /* cost_cap */ 2, usedToday);
-    if (pick.model) {
-      await llm.call(pick.model, req.content, { request_id, usage: 'write' });
+    const r = await coreWrite(req, {
+      storage, vector, account, request_id, now: Date.now(), llm, llmModel: pick.model ?? undefined,
+      l0: opts.l0,
+    });
+    // 显式 stub = 本就没有真实 LLM，不属于"代理失败回退"，不写 llm_fallback 噪音。
+    // 逐层管道下只有真的调用过 LLM 却没产出 L2+ 才算回退（L1 层直接嫁接/过滤不算）。
+    const realLlm = llm.isStub !== true;
+    const attemptedLlm = (r.layer_decisions ?? []).some((d) => d.by === 'llm');
+    // Provider 未实现 refine/refineLayer → 管道在 L2 前 skipped（L1 直接嫁接不产生该决策）
+    const llmUnavailable = (r.layer_decisions ?? []).some((d) => d.action === 'skipped');
+    if (realLlm && pick.model && r.refined_by === 'llm') {
       usedToday += pick.cost;
-      await audit(request_id, 'llm_proxy', { source: pick.source, cost: pick.cost, mode: 'auto', reason: pick.reason });
-    } else {
-      await audit(request_id, 'llm_fallback', { source: pick.source, reason: pick.reason, code: 'E_LLM_FALLBACK' });
+      await audit(request_id, 'llm_proxy', {
+        llm_proxy_source: pick.source, source: pick.source, model: pick.model, cost: pick.cost, mode: 'auto',
+        reason: pick.reason, layers: Object.keys(r.layers ?? {}),
+      });
+    } else if (realLlm && pick.model && (attemptedLlm || llmUnavailable)) {
+      await audit(request_id, 'llm_fallback', {
+        llm_proxy_source: pick.source, source: pick.source, model: pick.model,
+        reason: r.refine_error ?? (llmUnavailable && !attemptedLlm
+          ? 'Provider 未实现 refine/refineLayer，无法生成 L2–L6'
+          : 'LLM 未产出合规的 L2–L6，已回退已生成层'),
+        code: 'E_LLM_FALLBACK', spec_violations: r.spec_violations ?? [],
+      });
+    } else if (realLlm && !pick.model && r.dedup.action !== 'filtered') {
+      await audit(request_id, 'llm_fallback', {
+        llm_proxy_source: pick.source, source: pick.source, reason: pick.reason, code: 'E_LLM_FALLBACK',
+      });
     }
-    const r = await coreWrite(req, { storage, vector, account, request_id, now: Date.now() });
-    return { ...r, audit: { request_id, action: 'write' } };
+    return {
+      ...r,
+      layers: r.layers ? { ...r.layers } : undefined,
+      audit: { request_id, action: 'write' as const },
+    };
   }
 
   async function gc(req: GcReq): Promise<GcReport> {
@@ -175,12 +235,13 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent {
     const request_id = newRequestId();
     const skipped: DiscoverSignal[] = [];
     const agents: DiscoverResult['agents'] = [];
+    // 只绑定调用方真实扫到的候选；能力不支持的信号整段剔除（E_FORM_DISABLED 语义）
     for (const sig of req.signals) {
-      if (!SIGNAL_CAPABILITY[sig].includes(req.form)) {
-        skipped.push(sig); // E_FORM_DISABLED 语义：能力自动剔除
-        continue;
-      }
-      agents.push({ name: `agent-${sig}-${agents.length + 1}`, signal: sig, bound: true });
+      if (!SIGNAL_CAPABILITY[sig].includes(req.form)) skipped.push(sig);
+    }
+    for (const f of req.found ?? []) {
+      if (skipped.includes(f.signal) || !req.signals.includes(f.signal)) continue;
+      agents.push({ name: f.name, signal: f.signal, bound: true });
     }
     for (const a of agents) {
       await audit(request_id, 'auto_bind', { agent: a.name, signal: a.signal, form: req.form }, { agent: a.name });
@@ -190,25 +251,23 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent {
 
   async function sync(req: SyncReq): Promise<SyncReport> {
     const request_id = newRequestId();
-    const mems = await storage.listMemories({ project_id: req.project_id });
-    const conflicts = mems.filter((m) => m.conflict_id).length;
-    if (conflicts > 0) {
-      // 版本冲突待裁决 → 进 9.7 裁决队列（P8）
-      throw new MemAgentError('E_SYNC_CONFLICT', '版本冲突待裁决', { conflicts, project_id: req.project_id });
-    }
-    const report: SyncReport = {
-      pushed: req.direction === 'push' ? mems.length : 0,
-      pulled: req.direction === 'pull' ? mems.length : 0,
-      conflicts: 0, request_id, audit: { request_id, action: 'sync' },
-    };
-    await audit(request_id, 'sync', { ...report, direction: req.direction });
-    return report;
+    // 云端同步本版本未实现（syncUp/syncDown/SyncHub 无生产调用方）。
+    // 禁止用本地条数伪造 pushed/pulled 成功 —— 明确报未实现并审计留痕。
+    await audit(request_id, 'sync', {
+      direction: req.direction, project_id: req.project_id,
+      implemented: false, reason: 'cloud sync not implemented in this version',
+    });
+    throw new MemAgentError('E_NOT_IMPLEMENTED', '云端同步未实现（本版本不提供云端同步）', {
+      direction: req.direction, project_id: req.project_id, request_id,
+    });
   }
 
   async function browse(req: Parameters<MemAgent['browse']>[0]): Promise<BrowseResult> {
     const request_id = newRequestId();
-    // 契约级演示：账号视为管理员（真实实现由端壳鉴权注入）
-    return coreBrowse(req, { storage, accountAdmin: true, request_id, now: Date.now() });
+    // L0 只认连续会话（coreBrowse 内校验 + 审计），DEK 由端壳主进程持有
+    return coreBrowse(req, {
+      storage, request_id, now: Date.now(), l0: opts.l0, user_id: account.user_id, form,
+    });
   }
 
   async function logs(req: LogReq): Promise<LogPage> {
@@ -245,7 +304,19 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent {
     await audit(request_id, 'unbound', { agent, form }, { agent });
   }
 
-  async function seedMemory(m: Partial<Memory> & Pick<Memory, 'content' | 'category' | 'project_id'>): Promise<Memory> {
+  /** 种子写入的 L0 加密：必须注入 L0Port（测试假实现），绝不接受明文密码 */
+  async function sealL0ForSeed(plain: string): Promise<string> {
+    if (!opts.l0) {
+      throw new MemAgentError('E_L0_LOCKED', 'L0 写密钥未接入：无法加密种子记忆（需注入 L0Port，§4.4.4）');
+    }
+    return opts.l0.seal(plain);
+  }
+
+  async function seedMemory(
+    m: Partial<Memory> & Pick<Memory, 'content' | 'category' | 'project_id'> & { l0?: boolean },
+  ): Promise<Memory> {
+    // L0：仅在显式 l0=true 且注入 L0Port 时加密（v2）；绝不接受明文密码
+    const l0Enc = m.content_l0_enc ?? (m.l0 ? await sealL0ForSeed(m.content) : undefined);
     const mem: Memory = {
       mem_id: m.mem_id ?? `mem_${ulid()}`,
       project_id: m.project_id,
@@ -254,21 +325,83 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent {
       team_id: account.team_id,
       category: m.category,
       layer: m.layer ?? 'L2',
-      content_l0_enc: m.content_l0_enc ?? `ENC(${m.content.slice(0, 32)})`,
+      content_l0_enc: l0Enc,
       content: m.content,
       decay_class: m.decay_class ?? 'hot',
       pinned: m.pinned ?? false,
       locked: m.locked ?? false,
       conflict_id: m.conflict_id,
+      half_life_days: m.half_life_days,
+      last_access_time: m.last_access_time,
       version: m.version ?? 1,
       created_by_agent: m.created_by_agent,
-      created_at: Date.now(),
+      created_at: m.created_at ?? Date.now(),
     };
-    mem.embedding = embedSync(m.content);
+    mem.embedding = embedSync(m.content, vector.dim ?? DEFAULT_VECTOR_DIM);
     await storage.putMemory(mem);
     await vector.upsert(mem.mem_id, m.content, { project_id: m.project_id, layer: mem.layer });
     return mem;
   }
 
-  return { recall, write, gc, getPrefs, discover, sync, browse, logs, unbind, _seedMemory: seedMemory, _memoryOp: memoryOp, _feedback: feedback };
+  // ─── L0 授权与会话（§4.4）：委托端壳 L0AdminPort；未接线显式 E_NOT_IMPLEMENTED ───
+  function l0Admin(): L0AdminPort {
+    if (!opts.l0Admin) {
+      throw new MemAgentError('E_NOT_IMPLEMENTED', 'L0 授权管理未接线：仅桌面端主进程提供（§4.4）');
+    }
+    return opts.l0Admin;
+  }
+
+  async function l0RequestAccess(req: L0AccessRequest): Promise<L0AccessRequestResult> {
+    return l0Admin().requestAccess({ ...req, user_id: account.user_id });
+  }
+  async function l0ListRequests(): Promise<L0RequestView[]> {
+    return l0Admin().listRequests();
+  }
+  async function l0ListGrants(): Promise<L0GrantView[]> {
+    return l0Admin().listGrants();
+  }
+  async function l0GrantAccess(req: L0GrantReq): Promise<L0GrantResult> {
+    return l0Admin().grantAccess({ ...req, admin_user_id: account.user_id });
+  }
+  async function l0DenyRequest(request_id: string, reason?: string): Promise<void> {
+    return l0Admin().denyRequest({ request_id, admin_user_id: account.user_id, reason });
+  }
+  async function l0RevokeGrant(grant_id: string, reason?: string): Promise<void> {
+    return l0Admin().revokeGrant({ grant_id, admin_user_id: account.user_id, reason });
+  }
+  async function l0Unlock(req: L0UnlockReq): Promise<L0UnlockResult> {
+    return l0Admin().unlock({ ...req, user_id: account.user_id });
+  }
+  async function l0Heartbeat(l0_session_id: string): Promise<L0HeartbeatResult> {
+    return l0Admin().heartbeat(l0_session_id);
+  }
+  async function l0Lock(l0_session_id: string): Promise<void> {
+    return l0Admin().lock(l0_session_id);
+  }
+  async function l0UnlockWrite(password: string): Promise<void> {
+    return l0Admin().unlockWrite({ password, admin_user_id: account.user_id });
+  }
+  async function l0LockWrite(): Promise<void> {
+    return l0Admin().lockWrite({ admin_user_id: account.user_id });
+  }
+  async function l0Status(): Promise<L0VaultStatus> {
+    return l0Admin().status();
+  }
+  async function l0SetupAdminPassword(password: string): Promise<void> {
+    return l0Admin().setupAdminPassword(password, account.user_id);
+  }
+  async function l0ChangeAdminPassword(oldPassword: string, newPassword: string): Promise<void> {
+    return l0Admin().changeAdminPassword(oldPassword, newPassword, account.user_id);
+  }
+  async function l0Migrate(oldPassword?: string): Promise<L0MigrationResult> {
+    return l0Admin().migrate({ admin_user_id: account.user_id, oldPassword });
+  }
+
+  return {
+    recall, write, gc, getPrefs, discover, sync, browse, logs, unbind,
+    l0RequestAccess, l0ListRequests, l0ListGrants, l0GrantAccess, l0DenyRequest, l0RevokeGrant,
+    l0Unlock, l0Heartbeat, l0Lock, l0UnlockWrite, l0LockWrite, l0Status,
+    l0SetupAdminPassword, l0ChangeAdminPassword, l0Migrate,
+    _seedMemory: seedMemory, _memoryOp: memoryOp, _feedback: feedback,
+  };
 }

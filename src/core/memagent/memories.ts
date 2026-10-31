@@ -1,124 +1,449 @@
-// 内核记忆业务（§3 schema + 行为红线）：write 查重短路嫁接 / browse L0 授权 / gc 衰减 / memoryOp 17.3 操作
+// 内核记忆业务（§3 schema + 行为红线）：write 逐层生成/查重/分支嫁接 / browse L0 授权 / gc 衰减 / memoryOp 17.3 操作
+import { isCategory } from './types.ts';
 import type {
-  AuditRef, BrowseReq, BrowseResult, BrowseRow, Category, DecayClass,
+  AuditRef, BrowseReq, BrowseResult, BrowseRow, Category, Form,
   FeedbackKind, FeedbackResult,
-  GcReq, GcReport, Layer, MemOp, MemOpPatch, MemOpResult, Memory, StorageBackend, VectorBackend,
+  GcReq, GcReport, L0Port, LayerDecision, LlmProvider, MemOp, MemOpPatch, MemOpResult, Memory,
+  StorageBackend, VectorBackend, WriteResult,
 } from './types.ts';
-import { cosine, embedSync } from './vector.ts';
+import { MemAgentError } from './errors.ts';
+import { embedSync, DEFAULT_VECTOR_DIM } from './vector.ts';
+import { checkL0ToL1Quality, filteredAuditDetail } from './qualityGate.ts';
+import {
+  LAYER_ORDER, checkLayerSpec, layerSpecOf,
+  type RefineLayer,
+} from './layerRules.ts';
+import { findDuplicate } from './dedup.ts';
+import { ulid } from './ulid.ts';
+import { sha256hex } from './sync.ts';
+import { classifyLayer } from './forgetting.ts';
+
+export { LAYER_SPECS, checkLayerSpec, sanitizeL1, layerSpecOf, meaningfulLength } from './layerRules.ts';
+export type { LayerSpec, RefineLayer } from './layerRules.ts';
 
 /** 17.4 钳制：importance 下限 0.1 / confidence 下限 0.05（2.4.2 规则4） */
 const CLAMP = { importance: [0.1, 1] as const, confidence: [0.05, 1] as const };
 const clamp = (v: number, [lo, hi]: readonly [number, number]) => Math.max(lo, Math.min(hi, v));
 
-/** 查重阈值（6.1 演示取 L2 档 0.75；实际按目标层） */
-export const DUP_THRESHOLD = 0.75;
-
-const DECAY_ORDER: DecayClass[] = ['hot', 'warm', 'cold', 'archived', 'dormant'];
-
-/** 五维查重（6.1 简化：语义一维 cosine，契约级演示；阈值按目标层） */
-export function dedupSim(text: string, other: Memory): number {
-  if (!other.embedding) return 0;
-  return cosine(embedSync(text), other.embedding);
+/** 向量后端维度（未声明 → JS 起步实现默认维度） */
+function dimOf(vector: { readonly dim?: number }): number {
+  return vector.dim ?? DEFAULT_VECTOR_DIM;
 }
 
-export async function coreWrite(
-  input: { content: string; category: Category; project_id: string; user_id?: string; session_id?: string; source_agent?: string },
-  ctx: { storage: StorageBackend; vector: VectorBackend; account: { user_id: string; team_id: string; enterprise_id: string }; request_id: string; now: number },
-): Promise<{ mem_id: string; dedup: { action: 'new' | 'merged' | 'duplicated'; sim: number } }> {
-  const { storage, vector, account, request_id, now } = ctx;
-  const existing = await storage.listMemories({ project_id: input.project_id });
-  // 短路嫁接（6.2）：按 L1→L6 逐层查重，命中层即合并停止
-  const layers: Exclude<Layer, 'L0'>[] = ['L1', 'L2', 'L3', 'L4', 'L5', 'L6'];
-  let best: { m: Memory; sim: number } | null = null;
-  for (const layer of layers) {
-    for (const m of existing.filter((x) => x.layer === layer)) {
-      const sim = dedupSim(input.content, m);
-      if (sim >= DUP_THRESHOLD && (!best || sim > best.sim)) best = { m, sim };
-    }
-    if (best) break; // 命中层即停（短路）
-  }
+const round3 = (v: number) => Math.round(v * 1000) / 1000;
 
+// ─── §2.2 逐层管道：L0 加密 → L1 脱敏 → L2…L6 逐层生成/校验/查重 ────────────────
+
+/** 已生成层 → layer_specs 版本记录（只记录真实产出的层） */
+function layerSpecsFrom(generated: Partial<Record<RefineLayer, string>>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const id of LAYER_ORDER) {
+    if (generated[id] !== undefined) out[id] = `v1:${layerSpecOf(id).name}`;
+  }
+  return out;
+}
+
+/** L6 输入：L1–L5 全部已生成层（阶梯收敛，不把 L0 送进 LLM） */
+function buildL6Input(generated: Partial<Record<RefineLayer, string>>): string {
+  return LAYER_ORDER
+    .filter((id) => id !== 'L6' && generated[id] !== undefined)
+    .map((id) => `[${id}] ${generated[id]}`)
+    .join('\n');
+}
+
+interface LayerGenerator {
+  /** 是否有真实 LLM 可生成 L2–L6（stub/无模型/未实现 → false） */
+  readonly canLlm: boolean;
+  call(layer: RefineLayer, input: string): Promise<string>;
+  calls(): number;
+}
+
+/**
+ * 逐层 LLM 调用器（§2.2 不变量 1）：L2–L6 每层一次，输入只能是上一层。
+ * 旧 Provider 只实现 refine（一次返回多层）时，仅以 L1 调用一次并按层取用，
+ * 保证 L0 原文永不送 LLM；新 Provider 应实现 refineLayer。
+ */
+function makeLayerGenerator(
+  llm: LlmProvider | undefined,
+  model: string | undefined,
+  category: Category,
+  request_id: string,
+): LayerGenerator {
+  const canLlm = Boolean(
+    llm && llm.isStub === false && model
+    && (typeof llm.refineLayer === 'function' || typeof llm.refine === 'function'),
+  );
+  let calls = 0;
+  let legacy: Promise<Partial<Record<RefineLayer, string>>> | null = null;
+  return {
+    canLlm,
+    calls: () => calls,
+    async call(layer, input) {
+      if (!llm || !model) return '';
+      if (typeof llm.refineLayer === 'function') {
+        calls++;
+        const out = await llm.refineLayer(model, layer, input, category, { request_id, usage: 'write' });
+        return typeof out === 'string' ? out.trim() : '';
+      }
+      if (!legacy) {
+        calls++;
+        legacy = llm.refine!(model, input, category, { request_id, usage: 'write' }).then((all) => {
+          const out: Partial<Record<RefineLayer, string>> = {};
+          for (const id of LAYER_ORDER) {
+            const v = all[`content_${id.toLowerCase()}` as keyof typeof all];
+            if (typeof v === 'string' && v.trim()) out[id] = v.trim();
+          }
+          return out;
+        });
+      }
+      const all = await legacy;
+      return all[layer] ?? '';
+    },
+  };
+}
+
+// ─── coreWrite ─────────────────────────────────────────────────────────────────
+
+export interface WriteInput {
+  content: string;
+  category: Category;
+  project_id: string;
+  user_id?: string;
+  session_id?: string;
+  source_agent?: string;
+}
+
+export interface WriteCtx {
+  storage: StorageBackend;
+  vector: VectorBackend;
+  account: { user_id: string; team_id: string; enterprise_id: string };
+  request_id: string;
+  now: number;
+  /** 仅当明确非 stub 的 Provider 注入时才生成 L2–L6；缺省/stub → 只落 L1 */
+  llm?: LlmProvider;
+  /** 反代理选中的模型（与 llm.refineLayer/refine 配对；缺省 = 不走 LLM） */
+  llmModel?: string;
+  /** L0 写密钥端口（§4.4.4）：缺省/未解锁 → E_L0_LOCKED，绝不落明文 */
+  l0?: L0Port;
+}
+
+/**
+ * 写入主流程（§2.2 不变量 1–8）：
+ *   质量门 → L1 → 逐层（生成 → 规格校验 → 该层查重）→ 命中即分支嫁接并停止。
+ * 新记忆保留自己的 L0/L1..Lk；目标记忆只刷新 grafted_from/confidence/last_access，
+ * L1–L6 文本一字不改（§6.2）。
+ */
+export async function coreWrite(input: WriteInput, ctx: WriteCtx): Promise<WriteResult> {
+  if (!isCategory(input.category)) {
+    throw new Error(`非法 category：${String(input.category)}（允许：fact/decision/pitfall/insight/preference/context）`);
+  }
+  const { storage, vector, account, request_id, now } = ctx;
+  const dim = dimOf(vector);
   const auditRef: AuditRef = { request_id, action: 'write' };
 
-  if (best) {
-    // merged：并入已有记忆（版本 +1，同步用）；sim=1 视为 duplicated
-    const action: 'merged' | 'duplicated' = best.sim >= 0.99 ? 'duplicated' : 'merged';
-    if (action === 'merged') {
-      const updated: Memory = { ...best.m, version: best.m.version + 1, created_at: best.m.created_at };
-      await storage.putMemory(updated);
-    }
+  // 1) L0→L1 质量门（§2.1）：必须在查重之前；噪声/无意义内容不落库
+  const quality = checkL0ToL1Quality(input.content);
+  if (!quality.ok) {
     await storage.appendAudit({
       ...auditRef, project_id: input.project_id, user_id: input.user_id, ts: now,
-      detail: { dedup: action, sim: best.sim, merged_into: best.m.mem_id },
+      detail: { ...filteredAuditDetail(input.content, quality.reason!), source_agent: input.source_agent, session_id: input.session_id },
     });
-    return { mem_id: best.m.mem_id, dedup: { action, sim: Math.round(best.sim * 1000) / 1000 } };
+    return {
+      mem_id: '',
+      dedup: { action: 'filtered', sim: -1 },
+      spec_violations: [`L0→L1 质量门拦截: ${quality.reason}`],
+      audit: auditRef,
+    };
+  }
+  const contentL1 = quality.content!;
+
+  // 1.5) L0 加密必须在任何 LLM 调用前确认（§4.4.4）：无写密钥 → E_L0_LOCKED，不落明文
+  if (!ctx.l0) {
+    throw new MemAgentError('E_L0_LOCKED', 'L0 写密钥未解锁：请管理员在安全页解锁后再写入（§4.4.4）');
+  }
+  let content_l0_enc: string;
+  try {
+    content_l0_enc = await ctx.l0.seal(input.content);
+  } catch (e) {
+    if (e instanceof MemAgentError) throw e;
+    throw new MemAgentError('E_L0_LOCKED', `L0 加密失败：${String((e as Error)?.message ?? e)}`);
   }
 
-  // 新建：L2 精炼层落位（契约级演示），L0 存加密原始对话
+  // 2) 查重候选：同 project、未删除；层文本由 findDuplicate 按层过滤（深层记忆也含浅层）
+  const candidates = (await storage.listMemories({ project_id: input.project_id })).filter((m) => !m.deleted);
+
+  // 3) 逐层生成 → 校验 → 查重；命中即嫁接停止（不再生成下一层）
+  const generator = makeLayerGenerator(ctx.llm, ctx.llmModel, input.category, request_id);
+  const generated: Partial<Record<RefineLayer, string>> = {};
+  const decisions: LayerDecision[] = [];
+  const violations: string[] = [];
+  let refineError: string | undefined;
+  let graft: { target: Memory; layer: RefineLayer; score: number; threshold: number } | null = null;
+
+  for (let i = 0; i < LAYER_ORDER.length; i++) {
+    const layer = LAYER_ORDER[i];
+    let text: string;
+    let by: 'local' | 'llm';
+
+    if (layer === 'L1') {
+      text = contentL1;
+      by = 'local';
+    } else {
+      if (!generator.canLlm) {
+        decisions.push({ layer, action: 'skipped', by: 'none', reason: '未接入真实 LLM：只落 L1（refined_by=stub）' });
+        break;
+      }
+      const upstream = layer === 'L6' ? buildL6Input(generated) : generated[LAYER_ORDER[i - 1]];
+      if (!upstream) {
+        decisions.push({ layer, action: 'stopped', by: 'none', reason: `缺少上游 ${LAYER_ORDER[i - 1]}，阶梯中断` });
+        break;
+      }
+      try {
+        text = await generator.call(layer, upstream);
+      } catch (e) {
+        refineError = String((e as Error)?.message ?? e);
+        decisions.push({ layer, action: 'invalid', by: 'llm', reason: `LLM 调用失败：${refineError}` });
+        break;
+      }
+      const bad = text ? checkLayerSpec(layerSpecOf(layer), text, upstream) : [`${layer} 产物为空`];
+      if (bad.length > 0) {
+        violations.push(...bad);
+        decisions.push({ layer, action: 'invalid', by: 'llm', reason: bad.join('；') });
+        break;
+      }
+      by = 'llm';
+    }
+
+    generated[layer] = text;
+    // 每层查重：命中 → 分支嫁接并停止；未命中 → 记录分数继续下一层
+    const dup = await findDuplicate(text, layer, candidates, {
+      dim, request_id, llm: ctx.llm, model: ctx.llmModel,
+    });
+    if (dup.best && dup.best.score >= dup.threshold) {
+      decisions.push({
+        layer, action: 'duplicate', by, score: dup.best.score, threshold: dup.threshold,
+        candidates: dup.evaluated, reason: `命中 ${dup.best.mem.mem_id}（分支嫁接）`,
+      });
+      graft = { target: dup.best.mem, layer, score: dup.best.score, threshold: dup.threshold };
+      break;
+    }
+    decisions.push({
+      layer, action: 'generated', by, score: dup.best?.score, threshold: dup.threshold,
+      candidates: dup.evaluated,
+    });
+  }
+
+  const produced = LAYER_ORDER.filter((id) => generated[id] !== undefined);
+  const deepest = produced[produced.length - 1] ?? 'L1';
+  const mainContent = generated[deepest]!;
+  const refinedBy: 'stub' | 'llm' = produced.some((id) => id !== 'L1') ? 'llm' : 'stub';
+
   const mem: Memory = {
-    mem_id: `mem_${request_id.slice(-8)}`,
+    mem_id: `mem_${ulid()}`,
     project_id: input.project_id,
     user_id: input.category === 'preference' ? input.user_id : undefined,
     enterprise_id: account.enterprise_id,
     team_id: account.team_id,
     category: input.category,
-    layer: 'L2',
-    content_l0_enc: `ENC(${input.content.slice(0, 32)})`,
-    content: input.content,
+    layer: deepest,
+    content_l0_enc,
+    // §4.4.6：v2 只存密文，content_orig 永不写入（旧数据走 l0MigrateLegacy）
+    content: mainContent,
+    content_l1: contentL1,
+    content_l2: generated.L2,
+    content_l3: generated.L3,
+    content_l4: generated.L4,
+    content_l5: generated.L5,
+    content_l6: generated.L6,
+    refined_by: refinedBy,
+    layer_specs: layerSpecsFrom(generated),
+    layers_generated_at: now,
+    graft_to: graft?.target.mem_id,
+    graft_layer: graft?.layer,
     decay_class: 'hot',
     pinned: false,
     locked: false,
     version: 1,
     created_by_agent: input.source_agent,
     created_at: now,
+    last_access_time: now,
+    updated_at: now,
+    sha256: sha256hex(mainContent),
   };
-  mem.embedding = embedSync(input.content);
+  mem.embedding = embedSync(contentL1, dim); // 语义向量从 L1 生成（§2.2 不变量 7）
   await storage.putMemory(mem);
-  await vector.upsert(mem.mem_id, input.content, { project_id: input.project_id, layer: mem.layer });
+  await vector.upsert(mem.mem_id, contentL1, { project_id: input.project_id, layer: deepest });
+
+  if (graft) {
+    // §6.2：目标只刷新嫁接分支/置信度/访问时间，L0/L1–L6 文本一字不改
+    const t = graft.target;
+    const updatedTarget: Memory = {
+      ...t,
+      grafted_from: [...(t.grafted_from ?? []), mem.mem_id],
+      confidence: clamp((t.confidence ?? 0.5) + 0.01, CLAMP.confidence),
+      last_access_time: now,
+      version: t.version + 1,
+      updated_at: now,
+    };
+    await storage.putMemory(updatedTarget);
+  }
+
+  // 层键沿用 Memory 字段名（content_l1..l6），与写入回执/Webhook 预览同一口径
+  const layersOut: Record<string, string> = {};
+  for (const id of produced) layersOut[`content_${id.toLowerCase()}`] = generated[id]!;
+
   await storage.appendAudit({
     ...auditRef, project_id: input.project_id, user_id: input.user_id, ts: now,
-    detail: { dedup: 'new', category: input.category },
+    detail: {
+      dedup: graft ? 'grafted' : 'new',
+      category: input.category,
+      l0_encrypted: true,
+      l0_envelope_v: 2,
+      layers: produced,
+      refined_by: refinedBy,
+      llm_calls: generator.calls(),
+      layer_decisions: decisions,
+      spec_violations: violations,
+      refine_error: refineError,
+      graft_to: graft?.target.mem_id,
+      graft_layer: graft?.layer,
+      score: graft ? round3(graft.score) : 0,
+      threshold: graft?.threshold,
+      mem_id: mem.mem_id,
+    },
   });
-  return { mem_id: mem.mem_id, dedup: { action: 'new', sim: 0 } };
-}
-
-/** browse（§4.1）：L0 需授权密码（默认仅管理员语义由调用方保证），错 → E_AUTH_L0；l0_view 写审计 */
-export async function coreBrowse(
-  req: BrowseReq,
-  ctx: { storage: StorageBackend; accountAdmin: boolean; request_id: string; now: number },
-): Promise<BrowseResult> {
-  const { storage, accountAdmin, request_id, now } = ctx;
-  const l0Masked = req.layer === 'L0';
-  let unmasked = false;
-
-  if (l0Masked) {
-    const pwd = req.l0_auth?.password;
-    if (accountAdmin && pwd && pwd.length >= 6) unmasked = true;
+  if (graft) {
     await storage.appendAudit({
-      request_id, action: 'l0_view', ts: now, project_id: req.project_id,
-      detail: { unmasked, authorized: accountAdmin, reason: unmasked ? '授权解开' : '遮罩保持' },
-    });
-    if (!unmasked) {
-      const err = new Error('[E_AUTH_L0] L0 未授权或密码错误') as Error & { code: string };
-      err.code = 'E_AUTH_L0';
-      throw err;
-    }
-  } else {
-    await storage.appendAudit({
-      request_id, action: 'log_view', ts: now, project_id: req.project_id,
-      detail: { layer: req.layer },
+      request_id, action: 'graft', ts: now, project_id: input.project_id, user_id: input.user_id,
+      detail: {
+        new_id: mem.mem_id, target_id: graft.target.mem_id, layer: graft.layer,
+        score: round3(graft.score), threshold: graft.threshold,
+      },
     });
   }
 
-  const mems = await storage.listMemories({ project_id: req.project_id });
-  const rows: BrowseRow[] = mems.map((m) => ({
-    mem_id: m.mem_id,
-    content: l0Masked ? (m.content_l0_enc ?? '') : m.content,
-  }));
-  return { rows, l0_masked: l0Masked && !unmasked, audit: { request_id, action: l0Masked ? 'l0_view' : 'log_view' } };
+  return {
+    mem_id: mem.mem_id,
+    dedup: graft
+      ? { action: 'grafted', sim: round3(graft.score), graft_to: graft.target.mem_id, graft_layer: graft.layer }
+      : { action: 'new', sim: 0 },
+    layers: layersOut,
+    refined_by: refinedBy,
+    spec_violations: violations,
+    refine_error: refineError,
+    layer_decisions: decisions,
+    audit: auditRef,
+  };
 }
 
-/** gc（9.7/6.2）：衰减 hot→warm→cold→archived 推进 + 冲突裁决计数（演示） */
+// ─── coreBrowse ────────────────────────────────────────────────────────────────
+
+/**
+ * browse（§4.1 / §4.4）：L0 查阅只认连续会话 `l0_session_id`（端壳主进程解密）。
+ * 无会话 → 全遮罩 + l0_auth_fail(no_grant)；会话过期 → l0_auth_fail(expired) + E_L0_EXPIRED；
+ * 任一命中记忆解密失败 → 整次 E_AUTH_L0（全有或全无），绝不返回部分明文。
+ */
+export async function coreBrowse(
+  req: BrowseReq,
+  ctx: { storage: StorageBackend; request_id: string; now: number; l0?: L0Port; user_id?: string; form?: Form },
+): Promise<BrowseResult> {
+  const { storage, request_id, now } = ctx;
+  const mems = await storage.listMemories({ project_id: req.project_id });
+  const isL0 = req.layer === 'L0';
+  const sessionId = req.l0_auth?.l0_session_id;
+
+  const FIELD: Record<string, keyof Memory> = {
+    L1: 'content_l1', L2: 'content_l2', L3: 'content_l3',
+    L4: 'content_l4', L5: 'content_l5', L6: 'content_l6',
+  };
+
+  if (!isL0) {
+    const rows = mems
+      .filter((m) => {
+        const v = m[FIELD[req.layer]] as string | undefined;
+        return typeof v === 'string' && v.trim().length > 0;
+      })
+      .map((m) => ({ mem_id: m.mem_id, content: (m[FIELD[req.layer]] as string) ?? '' }));
+    await storage.appendAudit({
+      request_id, action: 'log_view', ts: now, project_id: req.project_id, user_id: ctx.user_id,
+      detail: { layer: req.layer, form: ctx.form },
+    });
+    return { rows, l0_masked: false, audit: { request_id, action: 'log_view' } };
+  }
+
+  const maskedRows = (): BrowseRow[] => mems.map((m) => ({
+    mem_id: m.mem_id,
+    content: m.content_l0_enc ? '[L0 已加密 · 需授权]' : '',
+  }));
+
+  if (!sessionId || !ctx.l0) {
+    await storage.appendAudit({
+      request_id, action: 'l0_auth_fail', ts: now, project_id: req.project_id, user_id: ctx.user_id,
+      detail: { reason: 'no_grant', form: ctx.form, l0_session_id: sessionId },
+    });
+    return { rows: maskedRows(), l0_masked: true, audit: { request_id, action: 'l0_auth_fail' } };
+  }
+
+  let info: Awaited<ReturnType<NonNullable<L0Port['sessionInfo']>>> | undefined;
+  try {
+    info = await ctx.l0.sessionInfo?.(sessionId);
+  } catch (e) {
+    await storage.appendAudit({
+      request_id, action: 'l0_auth_fail', ts: now, project_id: req.project_id, user_id: ctx.user_id,
+      detail: { reason: 'expired', form: ctx.form, l0_session_id: sessionId },
+    });
+    throw e;
+  }
+  if (info && info.scope_project_ids[0] !== '*' && !info.scope_project_ids.includes(req.project_id)) {
+    await storage.appendAudit({
+      request_id, action: 'l0_auth_fail', ts: now, project_id: req.project_id, user_id: info.user_id,
+      detail: { reason: 'no_grant', form: ctx.form, grant_id: info.grant_id, l0_session_id: sessionId },
+    });
+    return { rows: maskedRows(), l0_masked: true, audit: { request_id, action: 'l0_auth_fail' } };
+  }
+
+  const encrypted = mems.filter((m) => Boolean(m.content_l0_enc));
+  const plain = new Map<string, string>();
+  try {
+    for (const m of encrypted) {
+      plain.set(m.mem_id, await ctx.l0.decrypt({
+        l0_session_id: sessionId, project_id: req.project_id, mem_id: m.mem_id, envelope: m.content_l0_enc!,
+      }));
+    }
+  } catch (e) {
+    const code = e instanceof MemAgentError ? e.code : 'E_AUTH_L0';
+    await storage.appendAudit({
+      request_id, action: 'l0_auth_fail', ts: now, project_id: req.project_id, user_id: info?.user_id ?? ctx.user_id,
+      detail: {
+        reason: code === 'E_L0_EXPIRED' ? 'expired' : 'decrypt_failed',
+        count: encrypted.length, form: ctx.form, grant_id: info?.grant_id, l0_session_id: sessionId,
+      },
+    });
+    throw e;
+  }
+
+  await storage.appendAudit({
+    request_id, action: 'l0_view', ts: now, project_id: req.project_id, user_id: info?.user_id ?? ctx.user_id,
+    detail: {
+      grant_id: info?.grant_id, l0_session_id: sessionId, project_id: req.project_id,
+      mem_ids: encrypted.map((m) => m.mem_id), form: ctx.form,
+    },
+  });
+  const rows: BrowseRow[] = mems.map((m) => ({
+    mem_id: m.mem_id,
+    content: m.content_l0_enc ? (plain.get(m.mem_id) ?? '') : '',
+  }));
+  return { rows, l0_masked: false, audit: { request_id, action: 'l0_view' } };
+}
+
+// ─── coreGc ────────────────────────────────────────────────────────────────────
+
+/**
+ * gc（9.7/6.2）：单一衰减引擎 = forgetting.ts `classifyLayer`（17.7 规则）。
+ * 半衰期解析统一为「显式 half_life_days 优先，否则 category policy」，
+ * 由 classifyLayer → freshnessOf 内部完成；locked/pinned 豁免同源。
+ * 同一时刻重复调用不会连续降档（时间未到 → 不推进）。
+ */
 export async function coreGc(
   req: GcReq,
   ctx: { storage: StorageBackend; request_id: string; now: number },
@@ -127,10 +452,9 @@ export async function coreGc(
   const mems = await storage.listMemories({ project_id: req.project_id });
   let decayed = 0;
   for (const m of mems) {
-    if (m.locked || m.pinned) continue; // 豁免（17.8/17.5）
-    const idx = DECAY_ORDER.indexOf(m.decay_class);
-    if (idx >= 0 && idx < DECAY_ORDER.length - 1) {
-      await storage.putMemory({ ...m, decay_class: DECAY_ORDER[idx + 1], version: m.version + 1 });
+    const next = classifyLayer(m, now);
+    if (next && next !== m.decay_class) {
+      await storage.putMemory({ ...m, decay_class: next, version: m.version + 1 });
       decayed++;
     }
   }
@@ -141,6 +465,8 @@ export async function coreGc(
   });
   return { decayed, merged: 0, conflicts_resolved: 0, request_id, audit: auditRef };
 }
+
+// ─── coreMemoryOp ──────────────────────────────────────────────────────────────
 
 /**
  * 单记忆操作（17.3 / P4 调参迁移）：端壳状态变更唯一通道。
@@ -196,14 +522,34 @@ export async function coreMemoryOp(
     case 'migrate':                                            // P4 层迁移：目标温度由端壳六态映射
       next = { ...m, decay_class: patch.decay_class ?? m.decay_class };
       break;
-    case 'delete':                                             // 彻底删除：主表 + 向量索引同步清理
-      await storage.deleteMemory(mem_id);
+    case 'delete': {                                           // 删除墓碑（D2）：清正文 + 待同步，删除可跨端传播
+      const tombstone: Memory = {
+        ...m,
+        content: '',
+        content_orig: undefined,
+        content_l0_enc: undefined,
+        content_l1: undefined,
+        content_l2: undefined,
+        content_l3: undefined,
+        content_l4: undefined,
+        content_l5: undefined,
+        content_l6: undefined,
+        embedding: undefined,
+        sha256: undefined,
+        deleted: true,
+        deleted_at: now,
+        pending_sync: true,
+        version: m.version + 1,
+        updated_at: now,
+      };
+      await storage.putMemory(tombstone);
       await vector.remove(mem_id);
       await storage.appendAudit({
         request_id, action: 'memory_op', ts: now, project_id: m.project_id,
-        detail: { op, deleted: true, mem_id },
+        detail: { op, deleted: true, mem_id, tombstone: true },
       });
       return { ok: true, mem: null, request_id };
+    }
   }
 
   if (next) {
@@ -216,6 +562,8 @@ export async function coreMemoryOp(
   });
   return { ok: true, mem: next, request_id };
 }
+
+// ─── coreFeedback ──────────────────────────────────────────────────────────────
 
 /**
  * 用户反馈（17.4 trust_delta，P9 提交入口）：

@@ -111,15 +111,64 @@ describe('17.9 合并与摘要', () => {
       mem({ content: 'deploy docker step two', category: 'decision' }),
       mem({ content: 'deploy docker step three', category: 'decision' }),
     ];
-    const built = buildSummary(group, NOW)!;
+    const built = buildSummary(group, NOW);
+    expect(built?.ok).toBe(true);
+    if (!built || !built.ok) throw new Error('应生成摘要');
     expect(built.summary.merged_from).toHaveLength(3);
     expect(built.summary.importance).toBe(0.9);
+    // 批次24 口径2：摘要作为新生成的层级记录，同样带自己的层级生成时间
+    expect(built.summary.layers_generated_at).toBe(NOW);
     expect(built.originals.every((o) => o.decay_class === 'cold' && o.merged_into === built.summary.mem_id)).toBe(true);
+  });
+
+  it('批次10：成员为噪声（寒暄/助手自述）→ 质量门拦截，不生成摘要', () => {
+    const group = [
+      mem({ content: '你好，我是一个 AI 助手', category: 'decision' }),
+      mem({ content: '你好，我是一个AI助手呀', category: 'decision' }),
+      mem({ content: '你好，我是一个 AI 语言模型', category: 'decision' }),
+    ];
+    const built = buildSummary(group, NOW);
+    expect(built && !built.ok).toBe(true);
+    if (!built || built.ok) throw new Error('应被质量门拦截');
+    expect(built.reason).toContain('质量门');
+  });
+
+  it('批次10：成员含真实技术内容 → 摘要落库且已脱敏', () => {
+    const group = [
+      mem({ content: '部署脚本必须校验 Redis 连接，联系人：张三', category: 'decision' }),
+      mem({ content: '部署脚本必须校验 Redis 连接，避免超时', category: 'decision' }),
+      mem({ content: '部署脚本必须校验 Redis 连接，电话 13800138000', category: 'decision' }),
+    ];
+    const built = buildSummary(group, NOW);
+    expect(built?.ok).toBe(true);
+    if (!built || !built.ok) throw new Error('应生成摘要');
+    expect(built.summary.content).toContain('部署脚本');
+    expect(built.summary.content).not.toContain('13800138000');
+    expect(built.summary.content).not.toContain('张三');
   });
   it('少于 3 条 / 锁定导致不足 3 条 → 不合并', () => {
     expect(buildSummary([mem(), mem()], NOW)).toBeNull();
     const locked = [mem({ locked: true }), mem({ locked: true }), mem()];
     expect(buildSummary(locked, NOW)).toBeNull();
+  });
+
+  it('跨项目/团队/租户混组 → 拒绝合并（摘要不得串档）', () => {
+    const base = { content: 'deploy docker guide part', category: 'decision' as const };
+    expect(buildSummary([
+      mem({ ...base, project_id: 'P1' }),
+      mem({ ...base, project_id: 'P2' }),
+      mem({ ...base, project_id: 'P1' }),
+    ], NOW)).toBeNull();
+    expect(buildSummary([
+      mem({ ...base, team_id: 't1' }),
+      mem({ ...base, team_id: 't2' }),
+      mem({ ...base, team_id: 't1' }),
+    ], NOW)).toBeNull();
+    expect(buildSummary([
+      mem({ ...base, enterprise_id: 'e1' }),
+      mem({ ...base, enterprise_id: 'e2' }),
+      mem({ ...base, enterprise_id: 'e1' }),
+    ], NOW)).toBeNull();
   });
 });
 
@@ -164,5 +213,42 @@ describe('17.10 后台周期任务', () => {
     expect(storage.size).toBe(4); // 3 原文 + 1 摘要（不删除）
     const d0 = await storage.getMemory('d0');
     expect(d0?.decay_class).toBe('cold');
+  });
+
+  it('批次10：噪声成员组 → 合并被质量门拦下，原文不动（审计记 summaries_filtered）', async () => {
+    const storage = new InMemoryStorage();
+    for (let i = 0; i < 3; i++) {
+      await storage.putMemory(mem({ mem_id: `n${i}`, content: '你好，我是一个 AI 助手', category: 'decision' }));
+    }
+    const r = await runForgettingCycle(storage, NOW);
+    expect(r.summaries_created).toBe(0);
+    expect(r.summaries_filtered).toBe(1);
+    expect(storage.size).toBe(3);
+    const [a] = await storage.queryAudit({ action: 'gc' });
+    expect(a.detail.summaries_filtered).toBe(1);
+    expect((a.detail.summary_filter_reasons as string[])[0]).toContain('质量门');
+  });
+
+  it('跨项目同内容不合并：分组键含租户/团队/项目（每项目仅 2 条 → 均不触发）', async () => {
+    const storage = new InMemoryStorage();
+    for (let i = 0; i < 2; i++) {
+      await storage.putMemory(mem({ mem_id: `p1_${i}`, project_id: 'P1', content: `deploy docker guide part ${i}`, category: 'decision' }));
+      await storage.putMemory(mem({ mem_id: `p2_${i}`, project_id: 'P2', content: `deploy docker guide part ${i}`, category: 'decision' }));
+    }
+    const r = await runForgettingCycle(storage, NOW);
+    expect(r.summaries_created).toBe(0);
+    expect(storage.size).toBe(4);
+  });
+
+  it('17.6 auto_merge=false 的类别（fact/context/preference）不自动合并', async () => {
+    for (const category of ['fact', 'context', 'preference'] as const) {
+      const storage = new InMemoryStorage();
+      for (let i = 0; i < 3; i++) {
+        await storage.putMemory(mem({ mem_id: `${category}${i}`, category, content: `sametopic content ${i}` }));
+      }
+      const r = await runForgettingCycle(storage, NOW);
+      expect(r.summaries_created).toBe(0);
+      expect(storage.size).toBe(3);
+    }
   });
 });

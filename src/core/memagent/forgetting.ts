@@ -1,6 +1,7 @@
 // REQ-010 遗忘机制后台任务（17.4–17.11）：新鲜度/打分/层迁移/合并摘要/周期任务
 // 约束：不物理删除（AC-01）、locked 豁免（AC-04）、失败不伤原文（AC-10）、可审计可关闭（AC-14）
 import { ulid } from './ulid.ts';
+import { checkL0ToL1Quality } from './qualityGate.ts';
 import type {
   AuditAction, AuditRecord, Category, DecayClass, Memory, StorageBackend,
 } from './types.ts';
@@ -127,11 +128,40 @@ export function reinforceOne(m: Memory, now: number): Memory {
   };
 }
 
-/** 17.9 合并组 → 摘要记忆（importance 取最高、merged_from 记来源、原文降 Cold 保留；失败不影响原文） */
-export function buildSummary(group: Memory[], now: number): { summary: Memory; originals: Memory[] } | null {
+/** buildSummary 结果：null = 条件不满足；ok:false = 质量门拦截（原文保持不动） */
+export type SummaryBuildResult =
+  | { ok: true; summary: Memory; originals: Memory[] }
+  | { ok: false; reason: string }
+  | null;
+
+/**
+ * 17.9 合并组 → 摘要记忆（importance 取最高、merged_from 记来源、原文降 Cold 保留；失败不影响原文）
+ * 批次10：自动摘要与手动写入共用 L0→L1 质量门——成员内容与聚合产物都必须过门，
+ * 否则跳过合并（原文不降级、不删除），由周期审计记录拦截原因。
+ */
+export function buildSummary(group: Memory[], now: number): SummaryBuildResult {
   if (group.length < 3) return null; // 17.9 触发条件：≥3 条相似
-  const keepLocked = group.filter((m) => !m.locked);      // 锁定原文不参与合并
+  // 跨项目/跨团队/跨租户绝不合并（摘要会继承首个成员的归属，混组会造成数据串档）
+  const scope = group[0];
+  const sameScope = group.filter(
+    (m) => m.project_id === scope.project_id
+      && m.team_id === scope.team_id
+      && m.enterprise_id === scope.enterprise_id,
+  );
+  if (sameScope.length !== group.length) return null;
+  const keepLocked = sameScope.filter((m) => !m.locked);  // 锁定原文不参与合并
   if (keepLocked.length < 3) return null;
+
+  const snippets: string[] = [];
+  for (const m of keepLocked) {
+    const q = checkL0ToL1Quality(m.content ?? '');
+    if (!q.ok) return { ok: false, reason: `成员内容未通过质量门：${q.reason}` };
+    snippets.push(q.content!.slice(0, 20));
+  }
+  const composed = `【摘要】${snippets.join(' / ')}`;
+  const gate = checkL0ToL1Quality(composed);
+  if (!gate.ok) return { ok: false, reason: `摘要聚合内容未通过质量门：${gate.reason}` };
+
   const maxImp = Math.max(...keepLocked.map((m) => m.importance ?? 0.5));
   const summary: Memory = {
     mem_id: `sum_${ulid(now)}`,
@@ -140,13 +170,14 @@ export function buildSummary(group: Memory[], now: number): { summary: Memory; o
     team_id: keepLocked[0].team_id,
     category: keepLocked[0].category,
     layer: 'L3',
-    content: `【摘要】${keepLocked.map((m) => m.content.slice(0, 20)).join(' / ')}`,
+    content: gate.content!,
     decay_class: 'warm',
     pinned: false,
     locked: false,
     importance: maxImp,
     confidence: 0.6,
     merged_from: keepLocked.map((m) => m.mem_id),
+    layers_generated_at: now,
     version: 1,
     created_at: now,
   };
@@ -154,13 +185,15 @@ export function buildSummary(group: Memory[], now: number): { summary: Memory; o
   const originals = keepLocked.map((m) => ({
     ...m, decay_class: 'cold' as DecayClass, merged_into: summary.mem_id, version: m.version + 1,
   }));
-  return { summary, originals };
+  return { ok: true, summary, originals };
 }
 
 export interface ForgettingCycleReport {
   freshness_updated: number;
   migrated: number;
   summaries_created: number;
+  /** 批次10：被 L0→L1 质量门拦下的合并组数（原文保持原状） */
+  summaries_filtered: number;
   merged_originals: number;
   compressed: number;
   request_id: string;
@@ -184,7 +217,8 @@ export async function runForgettingCycle(
 ): Promise<ForgettingCycleReport> {
   const request_id = `req_${ulid(now)}`;
   const report: ForgettingCycleReport = {
-    freshness_updated: 0, migrated: 0, summaries_created: 0, merged_originals: 0, compressed: 0, request_id,
+    freshness_updated: 0, migrated: 0, summaries_created: 0, summaries_filtered: 0,
+    merged_originals: 0, compressed: 0, request_id,
   };
   if (opts.enabled === false) {
     await auditWrite(storage, request_id, 'gc', { skipped: true, reason: 'auto_policy_disabled' }, now);
@@ -204,15 +238,25 @@ export async function runForgettingCycle(
   }
 
   // 2) 重复识别合并（17.9：同 category 相似 ≥3 → 摘要；演示用内容前缀聚类）
+  // 分组键必须含租户/团队/项目：只按 category+内容前缀分组会把不同项目、甚至不同租户的记忆
+  // 合成一条摘要（摘要继承首条归属），造成跨项目串档。auto_merge=false 的类别不自动合并
+  //（17.6；'cautious' 暂按不自动合并处理，需人工确认）。
   const live = (await storage.listMemories({})).filter((m) => !m.merged_into && !m.locked);
   const groups = new Map<string, Memory[]>();
   for (const m of live) {
-    const key = `${m.category}:${m.content.slice(0, 8)}`;
+    if (policyFor(m.category).auto_merge !== true) continue;
+    const key = [m.enterprise_id, m.team_id, m.project_id, m.category, m.content.slice(0, 8)].join('\u0000');
     groups.set(key, [...(groups.get(key) ?? []), m]);
   }
+  const filterReasons: string[] = [];
   for (const group of groups.values()) {
     const built = buildSummary(group, now);
     if (!built) continue;
+    if (!built.ok) {
+      report.summaries_filtered++;
+      filterReasons.push(built.reason);
+      continue;
+    }
     await storage.putMemory(built.summary);
     for (const o of built.originals) await storage.putMemory(o);
     report.summaries_created++;
@@ -227,7 +271,10 @@ export async function runForgettingCycle(
     report.compressed = colds.length;
   }
 
-  await auditWrite(storage, request_id, 'gc', { ...report, task: 'forgetting_cycle' }, now);
+  await auditWrite(storage, request_id, 'gc', {
+    ...report, task: 'forgetting_cycle', weeklyCompress: opts.weeklyCompress === true,
+    ...(filterReasons.length > 0 ? { summary_filter_reasons: filterReasons.slice(0, 10) } : {}),
+  }, now);
   return report;
 }
 

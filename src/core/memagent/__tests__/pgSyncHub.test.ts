@@ -44,8 +44,8 @@ describe('PgSyncHub 与内存 SyncHub 语义一致', () => {
 
     // ahead：本端时钟占优 → 覆盖 applied
     expect(await hub.push(mem({ mem_id: 'm1', content: 'second note', vclock: { desktop: 2 }, version: 2, updated_at: NOW + 1000 }), 'desktop')).toBe('applied');
-    // behind：落后中枢 → dedup
-    expect(await hub.push(mem({ mem_id: 'm1', content: 'stale note', vclock: { desktop: 1 }, version: 1 }), 'desktop')).toBe('dedup');
+    // behind：落后中枢 → behind（D2：同步层据此保留本地不动，只做下行拉取）
+    expect(await hub.push(mem({ mem_id: 'm1', content: 'stale note', vclock: { desktop: 1 }, version: 1 }), 'desktop')).toBe('behind');
 
     // concurrent + 本端 updated_at 更晚 → LWW 胜，败者 archived 留档（首推带 desktop 分量，二推 mobile 分量 → concurrent）
     expect(await hub.push(mem({ mem_id: 'm3', content: 'base v1', vclock: { desktop: 1 } }), 'desktop')).toBe('applied');
@@ -54,9 +54,9 @@ describe('PgSyncHub 与内存 SyncHub 语义一致', () => {
     expect(rec3.items.find((m) => m.mem_id === 'm3')!.content).toBe('later local edit');
     expect(rec3.losers.some((m) => m.mem_id === 'm3' && m.decay_class === 'archived')).toBe(true);
 
-    // concurrent + 镜像更晚 → dedup（本地败者同样留档）
+    // concurrent + 镜像更晚 → behind（本地败者留档，本端不再覆盖中枢）
     expect(await hub.push(mem({ mem_id: 'm4', content: 'remote wins base', vclock: { desktop: 1 } }), 'desktop')).toBe('applied');
-    expect(await hub.push(mem({ mem_id: 'm4', content: 'earlier local edit', vclock: { mobile: 1 }, version: 2, updated_at: NOW - 5000 }), 'mobile')).toBe('dedup');
+    expect(await hub.push(mem({ mem_id: 'm4', content: 'earlier local edit', vclock: { mobile: 1 }, version: 2, updated_at: NOW - 5000 }), 'mobile')).toBe('behind');
     const rec4 = await hub.reconcile({ team_id: 't1' });
     expect(rec4.items.find((m) => m.mem_id === 'm4')!.content).toBe('remote wins base');
     expect(rec4.losers.filter((m) => m.mem_id === 'm4')).toHaveLength(1);
@@ -159,7 +159,7 @@ describe('PgSyncHub 落盘持久化（dataDir）', () => {
     await hub2.resolve(pending[0].conflict_id, 'remote');
     expect(await hub2.listConflicts()).toHaveLength(0);
     await hub2.close();
-  });
+  }, 20_000); // PGlite(WASM) 启停在慢盘/并行负载下可超 5s 默认值
 });
 
 describe('PgSyncHub × 三端引擎集成（syncUp/syncDown/reconcile）', () => {
@@ -200,5 +200,5 @@ describe('PgSyncHub × 三端引擎集成（syncUp/syncDown/reconcile）', () =>
     expect(rc.backfilled).toBe(1);
     expect((await fresh.getMemory('only-hub'))!.content).toBe('hub only note');
     await pgHub2.close();
-  });
+  }, 20_000); // 同上：两次 PGlite 启停，慢盘/并行下超 5s
 });

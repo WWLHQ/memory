@@ -51,7 +51,8 @@ export class SqliteStorage implements StorageBackend {
     const row = this.db.prepare('SELECT doc FROM memories WHERE mem_id = ?').get(mem_id) as
       | { doc: string }
       | undefined;
-    return row ? (JSON.parse(row.doc) as Memory) : null;
+    const m = row ? (JSON.parse(row.doc) as Memory) : null;
+    return m && !m.deleted ? m : null; // 墓碑对常规读取不可见
   }
 
   async listMemories(filter: Filter): Promise<Memory[]> {
@@ -73,7 +74,9 @@ export class SqliteStorage implements StorageBackend {
     const rows = this.db
       .prepare(`SELECT doc FROM memories ${where} ORDER BY rowid`)
       .all(...params) as { doc: string }[];
-    return rows.map((r) => JSON.parse(r.doc) as Memory);
+    return rows
+      .map((r) => JSON.parse(r.doc) as Memory)
+      .filter((m) => filter.include_deleted || !m.deleted); // 墓碑默认隐藏（D2）
   }
 
   async deleteMemory(mem_id: string): Promise<void> {

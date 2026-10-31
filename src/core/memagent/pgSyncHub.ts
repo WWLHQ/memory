@@ -7,7 +7,7 @@ import { ulid } from './ulid.ts';
 import { sha256hex, type SyncAudit, type SyncConflict, vcCompare } from './sync.ts';
 import type { Form, Memory } from './types.ts';
 
-type PushResult = 'applied' | 'dedup' | 'conflict' | 'lww';
+type PushResult = 'applied' | 'dedup' | 'behind' | 'conflict' | 'lww';
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS hub_memories (
@@ -84,11 +84,13 @@ export class PgSyncHub {
   async push(mem: Memory, form: Form): Promise<PushResult> {
     const sha = mem.sha256 ?? sha256hex(mem.content);
 
-    // sha256 幂等去重（§5：不同 mem_id 同内容 → 跳过）
-    const seenRow = await this.db.query<{ mem_id: string }>(
-      'SELECT mem_id FROM hub_seen WHERE team_id = $1 AND sha256 = $2', [mem.team_id, sha],
-    );
-    if (seenRow.rows.length > 0 && seenRow.rows[0].mem_id !== mem.mem_id) return 'dedup';
+    // sha256 幂等去重（§5：不同 mem_id 同内容 → 跳过）；墓碑内容为空，不参与该去重
+    if (!mem.deleted) {
+      const seenRow = await this.db.query<{ mem_id: string }>(
+        'SELECT mem_id FROM hub_seen WHERE team_id = $1 AND sha256 = $2', [mem.team_id, sha],
+      );
+      if (seenRow.rows.length > 0 && seenRow.rows[0].mem_id !== mem.mem_id) return 'dedup';
+    }
 
     const remoteRow = await this.db.query<{ doc: Memory }>(
       'SELECT doc FROM hub_memories WHERE team_id = $1 AND key = $2', [mem.team_id, mem.mem_id],
@@ -102,11 +104,13 @@ export class PgSyncHub {
            version_seq = excluded.version_seq, sha256 = excluded.sha256, doc = excluded.doc`,
         [mem.team_id, mem.mem_id, seq, sha, JSON.stringify(m)],
       );
-      await this.db.query(
-        `INSERT INTO hub_seen (team_id, sha256, mem_id) VALUES ($1, $2, $3)
-         ON CONFLICT (team_id, sha256) DO UPDATE SET mem_id = excluded.mem_id`,
-        [mem.team_id, sha, mem.mem_id],
-      );
+      if (!mem.deleted) {
+        await this.db.query(
+          `INSERT INTO hub_seen (team_id, sha256, mem_id) VALUES ($1, $2, $3)
+           ON CONFLICT (team_id, sha256) DO UPDATE SET mem_id = excluded.mem_id`,
+          [mem.team_id, sha, mem.mem_id],
+        );
+      }
     };
     const putLoser = async (loser: Memory) => {
       const seq = await this.nextVersionSeq();
@@ -132,7 +136,7 @@ export class PgSyncHub {
       return 'applied';
     }
     if (cmp === 'behind') {
-      return 'dedup'; // 本地落后 → 中枢已是最新
+      return 'behind'; // 本地落后 → 中枢已是最新；本地不得改动（D2）
     }
     // concurrent：§4 自动 LWW —— 时间戳晚者赢
     if (mem.updated_at && remote.updated_at && mem.updated_at !== remote.updated_at) {
@@ -144,7 +148,7 @@ export class PgSyncHub {
       }
       await putLoser({ ...mem, sha256: sha, decay_class: 'archived' as const, version: mem.version + 1 }); // 败者（本次上行版本）对称留档
       await this.audit({ action: 'sync_up', form, team_id: mem.team_id, mem_ids: [mem.mem_id], version: mem.version, sha256: sha, detail: { op: 'lww', winner: 'remote' } });
-      return 'dedup'; // 镜像版本更晚 → 本地版本将被下行覆盖
+      return 'behind'; // 镜像版本更晚 → 本地版本将被下行覆盖（本地不得改动）
     }
     // 全晚（时间戳相同无法判序）→ 9.7 裁决队列
     const c: SyncConflict = {
@@ -178,15 +182,21 @@ export class PgSyncHub {
     );
     const items = rows.rows.filter((r) => !r.key.includes('#loser#')).map((r) => r.doc);
     const losers = rows.rows.filter((r) => r.key.includes('#loser#') && r.doc.decay_class === 'archived').map((r) => r.doc);
-    const missing = items.filter((m) => !m.sha256 || m.sha256 !== sha256hex(m.content)).map((m) => m.mem_id);
+    const missing = items
+      .filter((m) => !m.deleted) // 墓碑无正文，不参与指纹校验
+      .filter((m) => !m.sha256 || m.sha256 !== sha256hex(m.content))
+      .map((m) => m.mem_id);
     await this.audit({ action: 'sync_reconcile', form: 'desktop', team_id: scope.team_id, mem_ids: items.map((m) => m.mem_id), detail: { total: items.length, losers: losers.length, missing_local: missing.length } });
     return { items, losers, missing_local: missing };
   }
 
-  /** 9.7 裁决队列（仅 pending） */
-  async listConflicts(): Promise<SyncConflict[]> {
+  /** 9.7 裁决队列（仅 pending；可按 team 隔离） */
+  async listConflicts(team_id?: string): Promise<SyncConflict[]> {
     const rows = await this.db.query<{ doc: SyncConflict }>(
-      "SELECT doc FROM hub_conflicts WHERE status = 'pending' ORDER BY conflict_id",
+      `SELECT doc FROM hub_conflicts WHERE status = 'pending'
+       AND ($1::text IS NULL OR doc->>'team_id' = $1)
+       ORDER BY conflict_id`,
+      [team_id ?? null],
     );
     return rows.rows.map((r) => r.doc);
   }
@@ -222,16 +232,17 @@ export class PgSyncHub {
     return r.rows.length > 0 ? Number(r.rows[0].v) : 0;
   }
 
-  /** 审计游标（syncUp 引擎截取本轮审计用） */
+  /** 审计游标（syncUp 引擎截取本轮审计用）：返回最大 seq，与 auditsFrom 的 seq 口径一致 */
   async auditCount(): Promise<number> {
-    const r = await this.db.query<{ n: string }>('SELECT COUNT(*)::text AS n FROM hub_audits');
+    const r = await this.db.query<{ n: string }>('SELECT COALESCE(MAX(seq), 0)::text AS n FROM hub_audits');
     return Number(r.rows[0].n);
   }
 
-  async auditsFrom(start: number): Promise<SyncAudit[]> {
+  async auditsFrom(start: number, team_id?: string): Promise<SyncAudit[]> {
     const r = await this.db.query<SyncAudit & { ts: string }>(
       `SELECT request_id, action, form, team_id, mem_ids, version, sha256, ts, detail
-       FROM hub_audits WHERE seq > $1 ORDER BY seq`, [start],
+       FROM hub_audits WHERE seq > $1 AND ($2::text IS NULL OR team_id = $2)
+       ORDER BY seq`, [start, team_id ?? null],
     );
     return r.rows.map((row) => ({ ...row, ts: Number(row.ts) }));
   }
