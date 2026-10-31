@@ -50,6 +50,11 @@ export function statShare(list: FeedbackRecord[]): FeedbackStats {
 }
 
 /** 提交后的反馈记录（request_id 继承链路，fb_ 前缀） */
-export function composeRecord(d: FeedbackDraft, seq: number, requestId: string): FeedbackRecord {
-  return { ...d, id: `fb_${String(seq).padStart(3, '0')}`, trust_delta: trustDelta(d.action), created_at: new Date().toISOString(), ...(requestId ? {} : {}) };
+export function composeRecord(d: FeedbackDraft, requestId: string): FeedbackRecord {
+  return {
+    ...d,
+    id: requestId || `fb_${Date.now().toString(36)}`,
+    trust_delta: trustDelta(d.action),
+    created_at: new Date().toISOString(),
+  };
 }

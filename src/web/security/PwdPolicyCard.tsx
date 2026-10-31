@@ -1,23 +1,32 @@
 // P12-T3 密码策略 + 实时校验（4.2）
 import { useState } from 'react';
 import type { PwdPolicy } from './types.ts';
-import { PWD_HISTORY } from './seed.ts';
 import { validatePwd } from './logic.ts';
 
 interface Props {
   policy: PwdPolicy;
+  /** 历史密码（真实域数据；内核暂无此域模型 → 空数组，历史查重不生效但策略其余项照常校验） */
+  history?: string[];
+  /** 批次7：敏感操作仅管理员 → 非管理员只读（样例校验仍可用） */
+  readOnly?: boolean;
   onChange: (next: PwdPolicy, changed: string) => void;
 }
 
-export function PwdPolicyCard({ policy, onChange }: Props) {
+export function PwdPolicyCard({ policy, history = [], onChange, readOnly = false }: Props) {
   const [sample, setSample] = useState('');
-  const err = sample ? validatePwd(sample, policy, PWD_HISTORY) : null;
+  const err = sample ? validatePwd(sample, policy, history) : null;
   const toggle = (k: keyof PwdPolicy, label: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
     onChange({ ...policy, [k]: e.target.checked }, `${label}=${e.target.checked ? '开' : '关'}`);
 
   return (
     <div className="card" data-testid="pwd-policy">
       <b>密码策略（4.2）</b>
+      {readOnly && (
+        <div className="note" data-testid="pwd-policy-admin-required" style={{ color: 'var(--warn, #b8860b)' }}>
+          🔒 需管理员：修改密码策略仅管理员可操作（下方样例校验仍可用）。
+        </div>
+      )}
+      <fieldset disabled={readOnly} style={{ border: 0, padding: 0, margin: 0 }} data-testid="pwd-policy-controls">
       <div className="row">
         <label style={{ fontSize: 12 }}>长度
           <input type="number" min={8} max={64} value={policy.min_len} style={{ width: 52 }} data-testid="pwd-min"
@@ -36,6 +45,7 @@ export function PwdPolicyCard({ policy, onChange }: Props) {
           次不可重复
         </label>
       </div>
+      </fieldset>
       <div className="row">
         <label style={{ fontSize: 12 }}>试一试：</label>
         <input

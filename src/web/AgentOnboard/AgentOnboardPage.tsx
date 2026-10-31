@@ -1,15 +1,30 @@
 // Agent 接入配置页容器（REQ-003 接原型）
 // ⚠ 硬性约定：页面结构、class、文案、交互严格对齐 design/ui/Agent接入页_原型.html。
 // 业务内核复用 src/agentOnboard/*（状态机/校验/服务），此处只做"原型逻辑 → React state"的翻译。
+// 批次16：登录自动接入结果经 storage 事件即时恢复；失败提示「🔍 手动检测」；卡片接真实统计/熔断/延迟/租户。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { DiscoveredAgent, Form, UiAgentCard } from '../../types/agentOnboard.ts';
+import type {
+  AgentRealStats, DiscoveredAgent, Form, InstalledAgent, UiAgentCard,
+} from '../../types/agentOnboard.ts';
 import { hasActiveSession } from '../Home/crossTabAuth.ts';
 import { AgentCard, toolRef } from './AgentCard.tsx';
+import type { TestEvidence } from './TestPanel.tsx';
 import { OneClickOnboard } from './OneClickOnboard.tsx';
-import { Gains } from './Gains.tsx';
-import { SEED_AGENTS, SEED_DISCOVERED, SEED_GAINS } from './seed.ts';
-import { coreDiscover } from './coreOnboard.ts';
-import { useBackendMirror } from './useBackendMirror.ts';
+import { restoreCards, restoreDiscovered, makeCard, specOf } from './cards.ts';
+import { addAgentCard } from './store.ts';
+import {
+  ONBOARD_STATE_KEY, readOnboardState, writeOnboardState,
+  type OnboardMcpSummary, type OnboardState,
+} from './onboardState.ts';
+import { getOnboardInjectPreview } from './coreOnboard.ts';
+import { getKernelStorage } from '../kernel.ts';
+import { normalizeAgentKey, statsForAgent, useBackendMirror } from './useBackendMirror.ts';
+import {
+  ONBOARD_FAILURE_KEY, readOnboardFailure, resetAutoOnboardState, runAutoOnboard,
+} from './autoOnboard.ts';
+import { hostCapability } from '../../desktop/hostBridge.ts';
+import { useSessionContext } from '../shared/session.ts';
+import { McpClientsPanel } from './McpClientsPanel.tsx';
 import './theme.css';
 
 /** 19.10 运行时检测当前端；真实端壳注入，这里用 UA 粗判 */
@@ -22,7 +37,12 @@ export function detectForm(): Form {
   return 'desktop';
 }
 
-/** R2：写记忆须带 project_id（关掉共享后提示） */
+const RUNNING_STAGES = ['扫描注册信号中…', '自动打标 P0/P1/P2 中…', '按默认值绑定中…', '测通并写审计中…'];
+
+/** 启动补扫冷却窗口：近 60s 内已有成功结果/失败快照时直接复用，避免登录后 iframe 加载再扫一遍 */
+const AUTO_SCAN_REUSE_MS = 60_000;
+
+/** R2：记忆读写须带 project_id（关闭共享后请确认 project_id 仍可解析） */
 function checkR2(a: UiAgentCard): string | null {
   if (toolRef(a.tools.write).on && !a.iso.projShare) {
     return 'R2：记忆读写须带 project_id（关闭共享后请确认 project_id 仍可解析）';
@@ -30,36 +50,107 @@ function checkR2(a: UiAgentCard): string | null {
   return null;
 }
 
-/** R4：双通道至少开一 */
+/** R4：双通道至少开一个 */
 function checkR4(a: UiAgentCard): string | null {
-  if (!a.chan.webhook && !a.chan.api) return 'R4：双通道（Webhook + API 拉取）至少开一，记忆库需可采集（5.1）';
+  if (!a.chan.webhook && !a.chan.api) return 'R4：双通道（Webhook + API 拉取）至少开一个，否则记忆库无法采集（5.1）';
   return null;
+}
+
+/** 服务层真实状态 → 原型状态点；未知/缺省 → undefined（保持现状，不臆造连通） */
+function uiStateOf(status?: string): UiAgentCard['state'] | undefined {
+  switch (status) {
+    case 'CONNECTED': return 'connected';
+    case 'DEGRADED': return 'degraded';
+    case 'CONFIGURED':
+    case 'ONBOARD': return 'onboard';
+    default: return undefined;
+  }
+}
+
+/** 合并恢复卡片：保留内存中已改配置，只补新出现的卡片 */
+function mergeRestored(prev: UiAgentCard[], restored: UiAgentCard[]): UiAgentCard[] {
+  const seen = new Set(prev.map((a) => a.name.toLowerCase()));
+  const added = restored.filter((a) => !seen.has(a.name.toLowerCase()));
+  return added.length > 0 ? [...prev, ...added] : prev;
 }
 
 export function AgentOnboardPage() {
   const form = useMemo(detectForm, []);
-  // 后端已有卡片合并回填：按 agent_name 匹配种子卡，仅同步 circuit/badge（不增删行数，原型语义优先）
-  const onCards = useCallback((cards: Array<{ agent_name: string; circuit?: string; priority?: string }>) => {
+  const session = useSessionContext();
+  const tenantLabel = session.context
+    ? `${session.context.enterprise_id} / ${session.context.team_id}`
+    : undefined;
+  const initial = readOnboardState();
+  const initialFailure = readOnboardFailure();
+  /** 真实拨测失败原因（来自服务层 lastTest；UI 如实展示，不滞留「已连通」） */
+  const [failureReasons, setFailureReasons] = useState<Record<string, string>>({});
+  /** 后端审计汇总的真实指标（成功率 / 平均延时 / 最近轮换） */
+  const [stats, setStats] = useState<Record<string, AgentRealStats>>({});
+  // 后端已有卡片合并回填：按 agent_name 匹配本地卡片，同步 circuit/badge/status（不增删行数）
+  const onCards = useCallback((cards: Array<{
+    agent_name: string; circuit?: string; priority?: string; status?: string;
+    lastTest?: { ok: boolean; reason: string };
+  }>) => {
+    setFailureReasons((prev) => {
+      const next = { ...prev };
+      for (const c of cards) {
+        if (!c.lastTest) continue;
+        // 键按归一化名存，读取时同样归一化（避免大小写/空白不同导致失败原因丢失）
+        const key = normalizeAgentKey(c.agent_name);
+        if (c.lastTest.ok) delete next[key];
+        else next[key] = c.lastTest.reason;
+      }
+      return next;
+    });
     setAgents((prev) => prev.map((a) => {
-      const c = cards.find((x) => x.agent_name === a.name);
+      const key = normalizeAgentKey(a.name);
+      const c = cards.find((x) => normalizeAgentKey(x.agent_name) === key);
       if (!c) return a;
+      const state = uiStateOf(c.status);
       return {
         ...a,
         ...(c.circuit ? { circuit: c.circuit as UiAgentCard['circuit'] } : {}),
         ...(c.priority ? { badge: c.priority.toLowerCase() as UiAgentCard['badge'] } : {}),
+        ...(state ? { state } : {}),
       };
     }));
   }, []);
-  const backend = useBackendMirror(onCards);
-  const [agents, setAgents] = useState<UiAgentCard[]>(SEED_AGENTS);
-  const [discovered, setDiscovered] = useState<DiscoveredAgent[]>(SEED_DISCOVERED);
+  const backend = useBackendMirror(onCards, setStats);
+  const refreshBackend = backend.refresh;
+  // 初始态 = 用户真实接入过的卡片/发现行/安装痕迹（localStorage 持久化）
+  const [agents, setAgents] = useState<UiAgentCard[]>(restoreCards);
+  const [discovered, setDiscovered] = useState<DiscoveredAgent[]>(restoreDiscovered);
+  const [installed, setInstalled] = useState<InstalledAgent[]>(
+    () => initial?.installed ?? initialFailure?.installed ?? [],
+  );
+  const [installedProbes, setInstalledProbes] = useState<Record<string, string>>(
+    () => initial?.installedProbes ?? initialFailure?.installedProbes ?? {},
+  );
+  const [installedSource, setInstalledSource] = useState<'host' | 'browser' | null>(
+    () => (hostCapability() === 'none' ? 'browser' : initial?.source === 'host' ? 'host' : null),
+  );
+  const [installedBusy, setInstalledBusy] = useState(false);
+  const [mcpSummary, setMcpSummary] = useState<OnboardMcpSummary | null>(() => initial?.mcp ?? null);
+  const [failure, setFailure] = useState('');
+  const [autoOnboarded, setAutoOnboarded] = useState(() => !!initial);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [injectShown, setInjectShown] = useState<Record<string, boolean>>({});
+  /** 本次测试回执（后端 request_id / 后端不可达的未验证原因 + 账本 top5 注入预览） */
+  const [evidence, setEvidence] = useState<Record<string, TestEvidence>>({});
   const [running, setRunning] = useState(false);
-  const [stageIndex, setStageIndex] = useState(-1);
-  const [scanState, setScanState] = useState('待扫描');
+  const [stageIndex, setStageIndex] = useState(() => (initial ? 3 : -1));
+  const [scanState, setScanState] = useState(() => {
+    if (initialFailure) return `本次自动接入失败 · ${initialFailure.reason}`;
+    if (initial) return `完成 · 发现并绑定 ${initial.agentNames.length} 个 · 宿主真扫`;
+    return '待扫描';
+  });
   const [toastMsg, setToastMsg] = useState('');
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const stageTimers = useRef<Array<ReturnType<typeof setTimeout>>>([]);
+  /** 指标刷新重试定时器（接入写入与审计读取有毫秒级竞态，幂等重拉两次） */
+  const statTimers = useRef<Array<ReturnType<typeof setTimeout>>>([]);
+  /** 启动补扫只跑一次（StrictMode 双挂载 / 依赖变化不重复触发） */
+  const autoScanRef = useRef(false);
 
   const toast = useCallback((m: string) => {
     setToastMsg(m);
@@ -67,7 +158,71 @@ export function AgentOnboardPage() {
     toastTimer.current = setTimeout(() => setToastMsg(''), 2600);
   }, []);
 
-  useEffect(() => () => clearTimeout(toastTimer.current), []);
+  const clearStageTimers = useCallback(() => {
+    for (const t of stageTimers.current) clearTimeout(t);
+    stageTimers.current = [];
+  }, []);
+
+  /** 指标重拉：立即 + 800ms/2400ms 各补一次，覆盖 auto_bind 落盘与页面读取的竞态 */
+  const refreshStats = useCallback(() => {
+    for (const t of statTimers.current) clearTimeout(t);
+    statTimers.current = [];
+    void refreshBackend();
+    for (const ms of [800, 2400]) {
+      statTimers.current.push(setTimeout(() => { void refreshBackend(); }, ms));
+    }
+  }, [refreshBackend]);
+
+  useEffect(() => () => {
+    clearTimeout(toastTimer.current);
+    clearStageTimers();
+    for (const t of statTimers.current) clearTimeout(t);
+  }, [clearStageTimers]);
+
+  // 从别的窗口/页面回到接入页时重拉一次真实指标（不轮询，不伪造）
+  useEffect(() => {
+    const onVisible = () => { if (!document.hidden) refreshStats(); };
+    window.addEventListener('focus', onVisible);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('focus', onVisible);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [refreshStats]);
+
+  /** 把持久化接入状态同步到页面（登录自动接入完成 / 手动检测成功 / 跨 iframe storage 事件） */
+  const applyStoredState = useCallback((st: OnboardState) => {
+    setAgents((prev) => mergeRestored(prev, restoreCards()));
+    setDiscovered(restoreDiscovered());
+    setInstalled(st.installed ?? []);
+    setInstalledProbes(st.installedProbes ?? {});
+    setInstalledSource(st.source === 'host' ? 'host' : 'browser');
+    setMcpSummary(st.mcp ?? null);
+    setAutoOnboarded(true);
+    setFailure('');
+    setStageIndex(3);
+    setScanState(`完成 · 发现并绑定 ${st.agentNames.length} 个 · 宿主真扫`);
+    refreshStats();
+  }, [refreshStats]);
+
+  /** 登录自动接入在其他 iframe 完成后，storage 事件即时刷新（无需切页重扫） */
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== ONBOARD_STATE_KEY && e.key !== ONBOARD_FAILURE_KEY) return;
+      const st = readOnboardState();
+      if (st) applyStoredState(st);
+      const f = readOnboardFailure();
+      if (f) {
+        setFailure(f.reason);
+        setInstalled(f.installed ?? []);
+        setInstalledProbes(f.installedProbes ?? {});
+        setInstalledSource(f.source === 'browser' ? 'browser' : 'host');
+        setScanState(`本次自动接入失败 · ${f.reason}`);
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [applyStoredState]);
 
   /** 更新第 i 张卡片并重算 R4 */
   const patchAgent = useCallback((i: number, patch: (a: UiAgentCard) => UiAgentCard) => {
@@ -82,7 +237,7 @@ export function AgentOnboardPage() {
   /* ---------- 开关交互 ---------- */
   const onToolChange = (i: number, tool: 'recall' | 'write' | 'pref', checked: boolean) => {
     patchAgent(i, (a) => {
-      // 惰性提升布尔为对象：原型 pref 可能是 false，直接赋值会抛 TypeError
+      // 惰性提升布尔为对象：原型 pref 可能是 false，直接测值会报 TypeError
       if (tool === 'pref') a.tools.pref = { ...toolRef(a.tools.pref), on: checked };
       else if (tool === 'write') a.tools.write = { ...toolRef(a.tools.write), on: checked };
       else a.tools.recall = { ...a.tools.recall, on: checked };
@@ -118,17 +273,48 @@ export function AgentOnboardPage() {
   /* ---------- 操作按钮 ---------- */
   const onAct = (i: number, act: 'test' | 'rotate' | 'save') => {
     const a = agents[i];
+    if (!a) return;
     if (act === 'test') {
       if (a.circuit === 'OPEN') return;
-      toast(`测试成功：${a.name} → req_test，已记审计（4.3）`);
       setInjectShown((s) => ({ ...s, [a.name]: true }));
-      backend.test(a.name);
+      void backend.test(a.name).then(async (r) => {
+        const inject = await getOnboardInjectPreview(getKernelStorage()).catch(() => null);
+        setEvidence((e) => ({
+          ...e,
+          [a.name]: {
+            rid: r.requestId ?? null,
+            inject,
+            local: r.via === 'local',
+            ok: r.ok,
+            reason: r.reason,
+          },
+        }));
+        // 真实拨测结果落回卡片状态点：失败 → 降级，绝不滞留「已连通」
+        const st = uiStateOf(r.status);
+        if (st) patchAgent(i, (x) => ({ ...x, state: st }));
+        setFailureReasons((m) => {
+          const next = { ...m };
+          if (r.ok) delete next[a.name];
+          else next[a.name] = r.reason ?? '接入后端不可达，本地未验证';
+          return next;
+        });
+        void refreshStats(); // 指标（成功率/平均延时/最近测试）随真实审计刷新
+        toast(r.ok
+          ? `测试通过：${a.name}${r.requestId ? ` · ${r.requestId}` : ''} · ${r.rtt}ms（已记审计）`
+          : `测试未通过：${a.name} —— ${r.reason ?? '接入后端不可达，本地未验证'}`);
+      });
     }
     if (act === 'rotate') {
-      // 对齐原型 act('rotate')：脱敏值加「（新）」+ 上次轮换记为「刚轮换」
-      patchAgent(i, (x) => ({ ...x, key: { ...x.key, last: '刚轮换', rotated: true } }));
-      toast(`已轮换，旧 Key ${a.key.grace}h 内有效（4.1）`);
-      backend.rotate(a.name);
+      // 真实轮换回执成功后才更新脱敏值（对齐原型 act('rotate')：加「（新）」/「刚轮换」）
+      void backend.rotate(a.name).then((r) => {
+        if (!r.ok) {
+          toast(`轮换失败：${a.name} —— ${r.reason ?? '接入后端不可达，密钥未轮换'}`);
+          return;
+        }
+        patchAgent(i, (x) => ({ ...x, key: { ...x.key, last: '刚轮换', rotated: true } }));
+        refreshStats();
+        toast(`已轮换，旧 Key ${a.key.grace}h 内有效（4.1）`);
+      });
     }
     if (act === 'save') {
       const r2 = checkR2(a);
@@ -140,38 +326,98 @@ export function AgentOnboardPage() {
 
   const onRidClick = (name: string) => toast(`开审计页（独立窗口）定位 ${name} 的 request_id 链路（18.2-E）`);
 
-  /* ---------- 一键接入：扫→分→绑→验 ---------- */
-  const onDiscover = () => {
+  /* ---------- 自动接入：三路真扫 → 建卡 → auto_bind → 写 MCP ---------- */
+  const runPipeline = useCallback((mode: 'discover' | 'manual' | 'auto') => {
     if (running) return;
     setRunning(true);
+    setInstalledBusy(true);
+    setFailure('');
+    clearStageTimers();
+    if (mode === 'discover') {
+      setStageIndex(-1);
+      setScanState('待扫描');
+      [0, 1, 2].forEach((i) => {
+        stageTimers.current.push(setTimeout(() => {
+          setStageIndex(i);
+          setScanState(RUNNING_STAGES[i]);
+        }, 430 * (i + 1)));
+      });
+    } else if (mode === 'manual') {
+      setStageIndex(3);
+      setScanState('手动检测中…（宿主真扫 + 安装痕迹 + MCP 配置）');
+    } else {
+      setStageIndex(-1);
+      setScanState('启动后自动扫描…（宿主真扫 + 安装痕迹 + MCP 配置）');
+    }
+    const begin = () => {
+      setStageIndex(3);
+      setScanState('宿主真扫 + 安装痕迹 + MCP 配置中…');
+      void runAutoOnboard({
+        role: session.role,
+        sid: session.sid,
+        form,
+        trigger: mode === 'manual' ? 'manual' : mode === 'auto' ? 'auto' : 'rebind',
+      })
+        .then((out) => {
+          setInstalled(out.installed);
+          setInstalledProbes(out.installedProbes);
+          setInstalledSource(out.scan.capability === 'none' ? 'browser' : 'host');
+          if (!out.ok) {
+            const reason = out.reason ?? '未知原因';
+            setFailure(reason);
+            setScanState(`自动接入失败 · ${reason}`);
+            toast(`自动接入失败：${reason}（可点「🔍 手动检测」重试）`);
+            return;
+          }
+          if (out.state) applyStoredState(out.state);
+          const mcpNote = out.mcp?.changed.length ? `；MCP 已写入 ${out.mcp.changed.join('、')}` : '';
+          const mcpFailed = out.mcp?.failed.length ? `；${out.mcp.failed.length} 个客户端写入失败（见下方说明）` : '';
+          toast(`一键接入完成：自动发现 ${out.discovered.length} 个 Agent 并绑定${mcpNote}${mcpFailed}`);
+          if (!out.discovered.length) {
+            setScanState('完成 · 未发现本机 Agent 安装痕迹 · 宿主真扫');
+          }
+        })
+        .catch((e: unknown) => {
+          const reason = (e as Error)?.message ?? String(e);
+          setFailure(reason);
+          setScanState(`自动接入失败 · ${reason}`);
+          toast(`自动接入失败：${reason}`);
+        })
+        .finally(() => {
+          setRunning(false);
+          setInstalledBusy(false);
+        });
+    };
+    stageTimers.current.push(setTimeout(begin, mode === 'discover' ? 430 * 3 : 0));
+  }, [running, session.role, session.sid, form, toast, applyStoredState, clearStageTimers]);
+
+  // 批次18：应用重启恢复会话时没有登录事件 → 接入页挂载后补跑一轮三路真扫。
+  // 近 60s 内已有成功结果/失败快照则复用（登录后 iframe 加载不重复扫）；无会话交给登录门禁。
+  useEffect(() => {
+    if (autoScanRef.current) return;
+    if (!session.sid || session.loading) return;
+    autoScanRef.current = true;
+    const st = readOnboardState();
+    const failureSnap = readOnboardFailure();
+    const fresh = (at?: number) => typeof at === 'number' && Date.now() - at < AUTO_SCAN_REUSE_MS;
+    if (fresh(st?.lastOnboardAt) || fresh(failureSnap?.at)) return;
+    runPipeline('auto');
+  }, [session.sid, session.loading, runPipeline]);
+
+  const onDiscover = () => runPipeline('discover');
+  const onManualDetect = () => runPipeline('manual');
+
+  const onRebindAll = () => {
+    if (running) return;
+    for (const d of discovered) backend.unbind(d.name);
+    resetAutoOnboardState();
+    setAutoOnboarded(false);
+    setDiscovered([]);
+    setMcpSummary(null);
+    setFailure('');
     setStageIndex(-1);
-    setScanState('待扫描');
-    [0, 1, 2, 3].forEach((i) => {
-      setTimeout(() => {
-        setStageIndex(i);
-        setScanState(['扫描注册信号中…', '自动打标 P0/P1/P2 中…', '按默认值绑定中…', '测通并写审计中…'][i]);
-        if (i === 3) {
-          // 第 4 段接真内核：ma.discover（desktop 全信号）→ 绑定数以内核回执为准（auto_bind 审计内核真写）
-          void coreDiscover()
-            .then((r) => {
-              const n = r.agents.length;
-              setAgents((prev) => prev.map((a) => {
-                const d = SEED_DISCOVERED.find((x) => x.name === a.name);
-                if (!d || !d.bound) return a;
-                return { ...a, state: d.ok ? 'connected' : 'degraded' };
-              }));
-              setScanState(`完成 · 发现并绑定 ${n} 个 · 已记审计 auto_bind`);
-              toast(`一键接入完成：自动发现 ${n} 个 Agent 并绑定（审计 auto_bind），立即可用`);
-              backend.discover(
-                SEED_DISCOVERED.filter((d) => d.bound).map((d) => ({ name: d.name, priority: d.badge.toUpperCase(), signal: d.signal })),
-                form,
-              );
-              setRunning(false);
-            })
-            .catch(() => setRunning(false)); // 内核不可达 → 停止演出（safe-noop 语义）
-        }
-      }, 430 * (i + 1));
-    });
+    toast('已清除接入状态，重新扫描本机…');
+    runPipeline('discover');
   };
 
   const onUnbind = (i: number) => {
@@ -181,10 +427,34 @@ export function AgentOnboardPage() {
     setDiscovered(next);
     setAgents((prev) => prev.map((a) => (a.name === d.name ? { ...a, state: 'onboard' as const } : a)));
     backend.unbind(d.name);
+    // 持久化名单同步移除，避免刷新后又回到「已绑定」
+    const st = readOnboardState();
+    if (st) {
+      writeOnboardState({
+        ...st,
+        agentNames: st.agentNames.filter((n) => n !== d.name),
+        discovered: (st.discovered ?? []).filter((x) => x.name !== d.name),
+        seq: Date.now(),
+      });
+    }
     toast(`已撤销 ${d.name} 的自动绑定（审计 unbound）；恢复需重跑一键接入`);
   };
 
-  // 登录门控：未登录 → 提示并阻断
+  const onAddCardForInstalled = (f: InstalledAgent) => {
+    if (agents.some((a) => a.name.toLowerCase() === f.agent.toLowerCase())) {
+      toast(`${f.agent} 已有接入卡片（不重复新增）`);
+      return;
+    }
+    const spec = specOf(f.agent);
+    const card = makeCard(f.agent, { ...spec, badge: f.badge, label: f.label });
+    addAgentCard(f.agent, card);
+    setAgents((prev) => [...prev, card]);
+    backend.save(card);
+    refreshStats();
+    toast(`已新增接入卡片：${f.agent}（未连通；点「测试接入」验证）`);
+  };
+
+  // 登录门禁：未登录 → 提示并阻止
   if (!hasActiveSession()) {
     return (
       <div className="wrap">
@@ -209,6 +479,24 @@ export function AgentOnboardPage() {
     );
   }
 
+  const mcpText = mcpSummary
+    ? [
+        mcpSummary.wired.length > 0
+          ? `已写入 ${mcpSummary.wired.join('、')}${mcpSummary.changed.length > 0 ? `（本次新增 ${mcpSummary.changed.join('、')}）` : ''}`
+          : '',
+        mcpSummary.manual.length > 0 ? `需手工添加 ${mcpSummary.manual.join('、')}（无稳定可写配置）` : '',
+        mcpSummary.failed.length > 0
+          ? `失败 ${mcpSummary.failed.map((f) => `${f.client}（${f.reason}）`).join('；')}`
+          : '',
+      ].filter(Boolean).join(' · ')
+    : '';
+  const failureNode = failure ? (
+    <div className="warn show" data-testid="onboard-failure" style={{ marginBottom: 10 }}>
+      ⚠ 自动接入未完成：{failure}
+      <span style={{ marginLeft: 8 }}>请点击上方「🔍 手动检测」重试（逐路读取本机安装痕迹）。</span>
+    </div>
+  ) : null;
+
   return (
     <div className="wrap">
       <h1>Agent 接入配置页 · 可交互原型</h1>
@@ -217,6 +505,7 @@ export function AgentOnboardPage() {
       </div>
 
       <div className="section-title">⚡ 一键接入本机 Agent（19.9）· 自动发现 + 默认绑定，不用逐个设置</div>
+      {failureNode}
       <OneClickOnboard
         form={form}
         discovered={discovered}
@@ -226,9 +515,28 @@ export function AgentOnboardPage() {
         onDiscover={onDiscover}
         onUnbind={onUnbind}
         onSignalChange={() => { /* 信号源仅影响发现范围，原型默认全开即全部展示 */ }}
+        autoOnboarded={autoOnboarded}
+        onRebindAll={onRebindAll}
+        installedAgents={installed}
+        installedProbes={installedProbes}
+        installedSource={installedSource}
+        installedReason={failure || undefined}
+        installedBusy={installedBusy}
+        onManualDetect={onManualDetect}
+        onAddCardForInstalled={onAddCardForInstalled}
       />
+      {mcpText && (
+        <div className="note" data-testid="mcp-wire-summary" style={{ marginBottom: 10 }}>
+          🧠 MCP 接入（自动写入已连通 Agent）：{mcpText} · 端点 {mcpSummary?.endpoint}；
+          未列出的客户端在下方面板可查看真实状态与手工说明。
+        </div>
+      )}
 
       <div className="section-title">宿主 Agent 接入卡片（19.2 / 19.3 / 5.2）</div>
+      <div className="note" data-testid="card-metric-note" style={{ margin: '0 0 8px' }}>
+        连通成功率与平均延时只统计真实拨测样本（登录自动接入的 auto_bind + 手动「测试接入」），
+        不需要逐张点击测试；手动测试用于复查与排障，不点不影响接入和指标。
+      </div>
       <div id="cards">
         {agents.map((a, i) => (
           <AgentCard
@@ -238,6 +546,10 @@ export function AgentOnboardPage() {
             testDisabled={a.circuit === 'OPEN'}
             saveDisabled={!!errors[a.name]}
             injectVisible={!!injectShown[a.name]}
+            testEvidence={evidence[a.name]}
+            failureReason={failureReasons[normalizeAgentKey(a.name)]}
+            stats={statsForAgent(stats, a.name)}
+            tenantOverride={tenantLabel}
             onToolChange={(t, c) => onToolChange(i, t, c)}
             onIsoChange={(k, c) => onIsoChange(i, k, c)}
             onChanChange={(ch, c) => onChanChange(i, ch, c)}
@@ -247,14 +559,7 @@ export function AgentOnboardPage() {
         ))}
       </div>
 
-      <div className="section-title">效果证据 · 用户可感知的「省」与「快」（token / 效率 / 模型成本）</div>
-      <Gains gains={SEED_GAINS} />
-      <div className="note">
-        说明：终端用户感知不到「记忆助手」本身（19.1 透明），他感知到的是 <b>Agent 变聪明了、变省了</b>。
-        以上证据链来自检索页预算面板（payload / pipeline token）、极简模式短查询（≤600t，2.4.1）、次模式（≤200t 占位符注入，2.4.3）、
-        跨会话背景免重复交代（9.1）、踩坑复用（9.3）、决策追溯（9.4）、跨 Agent 共享（19.4）、模型成本节省（19.8），
-        审计页可按 request_id 逐项核对（4.3 / 18.2-E）。
-      </div>
+      <McpClientsPanel />
 
       <div className="toast" id="toast" style={toastMsg ? { display: 'block' } : { display: 'none' }}>
         {toastMsg}

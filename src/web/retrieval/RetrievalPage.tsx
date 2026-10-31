@@ -1,4 +1,5 @@
 // 检索页（REQ-012）T6 编排：查询栏 + 横幅 + 结果 + 预算 + 上下文 + 异常态
+// 数据源 = 内核账本（禁止注入种子；空库即 EMPTY 态）
 import { useState } from 'react';
 import { QueryBar, type QueryBarValue } from './QueryBar.tsx';
 import { ResultList } from './ResultList.tsx';
@@ -6,15 +7,13 @@ import { ModeBanner } from './ModeBanner.tsx';
 import { BudgetPanel } from './BudgetPanel.tsx';
 import { ContextPanel } from './ContextPanel.tsx';
 import { useRetrieval } from './useRetrieval.ts';
+import { coreReorderMemory } from './coreEngine.ts';
 import { useToast } from './useToast.tsx';
-import type { RetrievalHit } from './types.ts';
-import { SEED_HITS } from './seed.ts';
 
 export function RetrievalPage() {
   const [qv, setQv] = useState<QueryBarValue>({ query: '', scene: 'default', mode: null });
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [hits, setHits] = useState<RetrievalHit[]>([]);
   const { phase, errorKind, result, cooldown, search } = useRetrieval();
   const { node: toast } = useToast();
 
@@ -28,25 +27,29 @@ export function RetrievalPage() {
     search(qv.query, qv.scene, qv.mode, opts);
   };
 
-  // demo：记住/忘记直接改本地 hits（17.3 文案）
+  // 记住/忘记 = 内核 17.3 真操作（写账本 + memory_op 审计），随后重查以反映真实权重
   const remember = (id: string) => {
-    setHits((prev) => prev.map((h) => (h.memory_id === id ? { ...h, importance: Math.min(1, h.importance + 0.1), confidence: Math.min(1, h.confidence + 0.05), decay_class: 'hot' } : h)));
-    flash('已提升这条信息的优先级。');
+    void coreReorderMemory(id, 'remember').then((r) => {
+      flash(r.ok ? '已提升这条信息的优先级。' : '该记忆已锁定，无法调整权重。');
+      if (r.ok) doSearch();
+    });
   };
   const forget = (id: string) => {
-    setHits((prev) => prev.map((h) => (h.memory_id === id ? { ...h, importance: Math.max(0.1, h.importance - 0.1), confidence: Math.max(0.05, h.confidence - 0.05), decay_class: 'warm' } : h)));
-    flash('这条信息已降权，后续会较少主动出现。你可以稍后恢复。');
+    void coreReorderMemory(id, 'forget').then((r) => {
+      flash(r.ok ? '这条信息已降权，后续会较少主动出现。你可以稍后恢复。' : '该记忆已锁定，无法调整权重。');
+      if (r.ok) doSearch();
+    });
   };
   const feedback = (id: string) => flash(`跳反馈页预填 memory_id=${id}（占位）`);
 
   const loading = phase === 'LOADING';
-  const current = SEED_HITS.find((h) => h.memory_id === selectedId) ?? hits.find((h) => h.memory_id === selectedId) ?? null;
-  const displayHits = hits.length > 0 ? hits : result?.hits ?? [];
+  const displayHits = result?.hits ?? [];
+  const current = displayHits.find((h) => h.memory_id === selectedId) ?? null;
 
   return (
     <div className="wrap" data-testid="retrieval-page">
       <h1>🔎 检索页 <span className="badge p2">REQ-012</span></h1>
-      <div className="sub">透明化召回：scene/mode 分流（2.4.4）+ 预算三档（R9）+ 异常态（§6）· 数据本地种子为真相</div>
+      <div className="sub">透明化召回：scene/mode 分流（2.4.4）+ 预算三档（R9）+ 异常态（§6）· 数据真相 = 内核账本</div>
 
       <QueryBar
         value={qv}

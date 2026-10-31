@@ -72,9 +72,13 @@ h1{font-size:17px;margin:0 0 2px}
 .attr-toggle-label{user-select:none}
 .attr-toggle-opt{cursor:pointer;user-select:none}
 
-/* 图例 */
+/* 图例（窗口内嵌模式不再展示；保留兼容旧调用） */
 .legend{margin-top:14px;font-size:11px;color:var(--dim);line-height:1.7}
 .legend b{color:var(--muted)}
+
+/* §4 降级：off 级别的 1 行统计（回答前一行，可点展开） */
+.degrade-line{display:block;width:100%;text-align:left;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 11px;margin:10px 0 4px;font-size:12px;color:var(--muted);cursor:pointer}
+.degrade-line:hover{border-color:var(--accent);color:var(--txt)}
 
 /* toast */
 .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--accent);border-radius:8px;padding:9px 16px;font-size:13px;z-index:80;max-width:80vw}

@@ -1,10 +1,10 @@
 // 自我净化与生长页（REQ-009 / P14）接真内核：优化/调度动作审计真写 storage 账本
-// （action='growth_op'，detail.entry 保真），挂载回放；指标卡保留演示快照（诚实标注）。
+// （action='growth_op'，detail.entry 保真），挂载回放。
+// 与记忆库管理页一致：复用 InMemoryStorage 单例（桌面 Electron 下自动绑定主进程
+// FileStorage 持久账本；浏览器降级内存态）。数据真相 = 内核账本，无种子兜底。
 import type { MemAgent } from '../../core/memagent/types.ts';
-import { createMemAgent } from '../../core/memagent/agent.ts';
-import { InMemoryStorage } from '../../core/memagent/storage.ts';
-import { FakeLlmProvider } from '../../core/memagent/llm.ts';
-import { JsVectorBackend } from '../../core/memagent/vector.ts';
+import type { InMemoryStorage } from '../../core/memagent/storage.ts';
+import { getKernel, getKernelStorage } from '../kernel.ts';
 import type { GrowthAuditEntry } from './types.ts';
 
 interface GrowthCtx {
@@ -12,20 +12,8 @@ interface GrowthCtx {
   storage: InMemoryStorage;
 }
 
-let ctxP: Promise<GrowthCtx> | null = null;
-
-function getCtx(): Promise<GrowthCtx> {
-  if (!ctxP) {
-    ctxP = (async () => {
-      const storage = new InMemoryStorage();
-      const ma = createMemAgent({
-        form: 'web', account: { user_id: 'u_demo', team_id: 't_demo', enterprise_id: 'e_demo' },
-        llm: new FakeLlmProvider(), vector: new JsVectorBackend(), storage,
-      });
-      return { ma, storage };
-    })();
-  }
-  return ctxP;
+function getCtx(): GrowthCtx {
+  return { ma: getKernel(), storage: getKernelStorage() };
 }
 
 /** 动作审计真写内核账本（weight_tuned / schedule_changed / …），返回回执 */

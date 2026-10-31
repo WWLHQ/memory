@@ -3,7 +3,7 @@
 import type {
   DedupResult, ExistingMemory, LayerName, MemoryDraft, ValidationResult, WriteReceipt,
 } from './types.ts';
-import { LAYER_THRESHOLDS } from './seed.ts';
+import { LAYER_THRESHOLDS } from './spec.ts';
 
 /** 估算 token（展示用）：CJK ≈ 2 token/字，其它字符 ≈ 1.3 token/词 */
 export function estimateTokens(text: string): number {
@@ -42,55 +42,90 @@ export function jaccard(a: string, b: string): number {
 }
 
 /**
- * 查重评分（6.1 五维）：composite = 0.35*semantic + 0.20*keyword + 0.15*entity + 0.10*structure + 0.20*llm_judge
- * 相似度 s 越高各维越高；is_duplicate = composite ≥ 该层阈值。
+ * 查重预览（批次25 P0-3）：只报本地词面相似度这一个真实可算的数。
+ * 旧的「五维 + 综合分」是同一个 Jaccard 的五次仿射变换（含未接大模型却展示 llm_judge），已删除。
+ * 真正判重（语义/关键词/实体/结构 四维 + 逐层阈值）由内核 `src/core/memagent/dedup.ts` 在提交时执行；
+ * 对照层默认 L1 —— 未接入大模型时内核只对 L1 查重。
  */
 export function scoreDedup(
   content: string,
   existing: ExistingMemory[],
-  layer: LayerName = 'L3',
+  layer: LayerName = 'L1',
 ): DedupResult {
   const threshold = LAYER_THRESHOLDS[layer];
-  const best = existing
-    .map((e) => ({ e, s: jaccard(content, e.content) }))
-    .sort((a, b) => b.s - a.s)[0];
+  const best = content.trim().length === 0
+    ? undefined
+    : existing
+      .map((e) => ({ e, s: jaccard(content, e.content) }))
+      .sort((a, b) => b.s - a.s)[0];
 
-  const s = best ? best.s : 0;
-  const dims = {
-    semantic: round2(s * 0.9 + 0.05),
-    keyword: round2(s * 0.8 + 0.1),
-    entity: round2(s * 0.7),
-    structure: round2(s * 0.6 + 0.1),
-    llm_judge: round2(s * 0.85),
-  };
-  const composite = round2(
-    dims.semantic * 0.35 + dims.keyword * 0.2 + dims.entity * 0.15 + dims.structure * 0.1 + dims.llm_judge * 0.2,
-  );
+  const score = round2(best ? best.s : 0);
   return {
-    dims,
-    composite,
+    score,
+    layer,
     threshold,
-    is_duplicate: composite >= threshold,
+    is_duplicate: score >= threshold,
     matched: best && best.s > 0 ? best.e : undefined,
   };
 }
 
-/** 六维阈值（6.1 阈值表 L1 0.7…L6 0.9） */
+/** 该层查重阈值（内核单一真源 layerRules.DEDUP_THRESHOLDS） */
 export function thresholdForLayer(layer: LayerName): number {
   return LAYER_THRESHOLDS[layer];
 }
 
-/** 写入回执（13.6）：memory_id + L1–L6 逐层（L1 仅审计展开，15.3） */
-export function composeReceipt(content: string, dedupAction: WriteReceipt['dedup_action'] = 'create'): WriteReceipt {
-  const memory_id = `mem_${Math.abs(hash(content))}`;
+export interface ReceiptOptions {
+  /** 内核返回的真实 mem_id */
+  memoryId?: string;
+  /** 内核真实产出的层（未接入 LLM 时仅 content_l1） */
+  layers?: Record<string, string>;
+  refinedBy?: 'stub' | 'llm';
+}
+
+const LAYER_FIELD: Record<LayerName, string> = {
+  L1: 'content_l1', L2: 'content_l2', L3: 'content_l3',
+  L4: 'content_l4', L5: 'content_l5', L6: 'content_l6',
+};
+const LAYERS: LayerName[] = ['L1', 'L2', 'L3', 'L4', 'L5', 'L6'];
+
+/**
+ * 写入回执（13.6）：只展示内核真实产出的层。
+ * 未接入 LLM 时 L1 有值，L2–L6 明确标「未精炼（未接入 LLM）」，不再编造摘要。
+ */
+export function composeReceipt(
+  content: string,
+  dedupAction: WriteReceipt['dedup_action'] = 'create',
+  opts: ReceiptOptions = {},
+): WriteReceipt {
+  const memory_id = opts.memoryId ?? `mem_${Math.abs(hash(content))}`;
+  const refined_by = opts.refinedBy ?? 'stub';
+  const noNewLayers = dedupAction === 'merge' || dedupAction === 'keep';
   const layers = {} as WriteReceipt['layers'];
-  (['L1', 'L2', 'L3', 'L4', 'L5', 'L6'] as LayerName[]).forEach((ln) => {
+  for (const ln of LAYERS) {
+    const real = opts.layers?.[LAYER_FIELD[ln]];
+    const produced = !noNewLayers && typeof real === 'string' && real.trim().length > 0;
+    let summary: string;
+    if (produced) {
+      summary = ln === 'L1'
+        ? (dedupAction === 'graft'
+          ? 'L1 清洗脱敏（已分支嫁接到既有记忆，原文仅审计展开）'
+          : 'L1 清洗脱敏（原文仅审计展开，15.3）')
+        : `${ln} 真实精炼产物`;
+    } else if (noNewLayers) {
+      summary = ln === 'L1'
+        ? (dedupAction === 'merge' ? '已并入既有记忆（本次未新建层）' : '已保留原记忆（本次未新建层）')
+        : '本次未新建层';
+    } else {
+      summary = ln === 'L1' ? '未产出（未入库或被质量门拦截）' : '未精炼（未接入 LLM）';
+    }
     layers[ln] = {
-      summary: ln === 'L1' ? 'L1 原文（仅审计展开）' : `第 ${ln} 层精炼摘要`,
-      auditOnly: ln === 'L1',
+      summary,
+      produced,
+      auditOnly: ln === 'L1' && produced,
+      text: ln === 'L1' ? undefined : (produced ? real : undefined),
     };
-  });
-  return { memory_id, layers, dedup_action: dedupAction };
+  }
+  return { memory_id, layers, dedup_action: dedupAction, refined_by };
 }
 
 function round2(v: number): number {

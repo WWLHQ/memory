@@ -1,29 +1,55 @@
-// 生命周期页（REQ-006 / P4）· 完整编排（T5）
-// 列表（勾选批量）+ 选中联动（状态查看器 LifecycleCard + 调参面板 ParamPanel）
-// + 批量迁移（写审计 lifecycle_change + request_id，9.10.4/18.2-E）+ mirror 注入点。
-// 初始渲染用种子；迁移/调参经 ma._memoryOp 走内核（G4/钳制/温度映射/审计真实发生）。
-import { useState } from 'react';
+// 生命周期页（REQ-006 / P4）· 完整编排（T5）· 真实数据接真版
+// 列表 = 内核账本真实记忆（桌面 = 主进程 FileStorage 持久库；浏览器降级内存态，空账本诚实空态）。
+// 迁移/调参经 ma._memoryOp 走内核（G4/钳制/温度映射/审计真实发生，写回真实账本）。
+// 与记忆库管理页一致：禁止注入演示/种子数据 —— 列表只反映账本真实内容。
+import { useEffect, useMemo, useState } from 'react';
 import { LifecycleCard } from './LifecycleCard.tsx';
 import { ParamPanel } from './ParamPanel.tsx';
 import { useToast } from './useToast.tsx';
 import { useLifecycleMirror } from './useLifecycleMirror.ts';
+import { newRequestId } from '../kernel.ts';
 import { canMigrate, importanceLevel } from './logic.ts';
-import { coreLifeOp } from './coreLifecycle.ts';
-import { SEED_LIFECYCLE } from './seed.ts';
+import { coreListLifecycle, coreLifeOp } from './coreLifecycle.ts';
+import { LIFECYCLE_DEFAULT_PAGE_SIZE, LIFECYCLE_PAGE_SIZES, pagedList } from './lifecycleFilter.ts';
 import type { LifeOp, LifecycleRecord, MemoryStatus } from './types.ts';
 
 export function LifecyclePage() {
-  const [records, setRecords] = useState<LifecycleRecord[]>(SEED_LIFECYCLE);
-  const [selectedId, setSelectedId] = useState<string | null>(SEED_LIFECYCLE[0]?.id ?? null);
+  const [records, setRecords] = useState<LifecycleRecord[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [batchTarget, setBatchTarget] = useState<MemoryStatus>('archived');
+  const [loading, setLoading] = useState(true);
+  // 分页状态（复制记忆库管理页口径；默认每页 5 条）
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(LIFECYCLE_DEFAULT_PAGE_SIZE);
   const toast = useToast();
   const mirror = useLifecycleMirror();
+
+  // 当前页数据（纯函数分页；page 越界自动 clamp）
+  const paged = useMemo(() => pagedList(records, { page, pageSize }), [records, page, pageSize]);
+  const changePageSize = (n: number) => {
+    setPageSize(n);
+    setPage(1); // 改每页条数 → 回第 1 页（与记忆库管理页一致）
+  };
+
+  // 挂载：从真实账本读全量生命周期列表（无种子兜底；空账本 → 诚实空态）
+  useEffect(() => {
+    let alive = true;
+    coreListLifecycle()
+      .then((list) => {
+        if (!alive) return;
+        setRecords(list);
+        setSelectedId(list[0]?.id ?? null);
+      })
+      .catch(() => {}) // 内核不可达 → 保持空列表（safe-noop）
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, []);
 
   const selected = records.find((r) => r.id === selectedId) ?? null;
 
   // 展示用 request_id：首次操作后回填内核真实 request_id（ULID）
-  const [reqId, setReqId] = useState(() => `req_lc_${Math.random().toString(36).slice(2, 8)}`);
+  const [reqId, setReqId] = useState(() => newRequestId('req_lc'));
 
   async function applySingle(rec: LifecycleRecord, op: Parameters<typeof coreLifeOp>[2]) {
     const res = await coreLifeOp(records, rec, op);
@@ -40,7 +66,7 @@ export function LifecyclePage() {
   async function handleMigrate(target: MemoryStatus) {
     if (!selected) return;
     await applySingle(selected, { kind: 'migrate', target });
-    toast.show(`已迁移 ${selected.id} → ${target}`);
+    toast.show(`已迁移 ${selected.id} → ${target}（真实审计）`);
   }
 
   function handleParam(patch: Partial<Pick<LifecycleRecord, 'half_life_days' | 'confidence' | 'importance' | 'pinned' | 'locked'>>) {
@@ -60,9 +86,12 @@ export function LifecyclePage() {
     setRecords((list) => list.map((r) => byId.get(r.id) ?? r));
     setChecked(new Set());
     mirror.audit(res.audit, res.request_id || reqId);
-    toast.show(`批量迁移 ${res.affected.length} 条 → ${batchTarget}`);
+    toast.show(`批量迁移 ${res.affected.length} 条 → ${batchTarget}（真实审计）`);
   }
 
+  // 勾选操作：批量只作用于当前页（避免跨页误选），全选/取消勾选全表
+  const currentIds = new Set(paged.items.map((r) => r.id));
+  const allChecked = currentIds.size > 0 && selectedId !== null && currentIds.has(selectedId) ? paged.items.every((r) => checked.has(r.id)) : false;
   const toggle = (id: string) =>
     setChecked((s) => {
       const n = new Set(s);
@@ -70,18 +99,51 @@ export function LifecyclePage() {
       return n;
     });
 
+  const toggleAllPage = (v: boolean) =>
+    setChecked((s) => {
+      const n = new Set(s);
+      for (const r of paged.items) {
+        if (v) n.add(r.id); else n.delete(r.id);
+      }
+      return n;
+    });
+
+  if (loading) {
+    return (
+      <div className="wrap" data-testid="lifecycle-page">
+        <h1>⏳ 生命周期页 <span className="badge p2">REQ-006 · P4</span></h1>
+        <div className="note">加载真实账本中…</div>
+      </div>
+    );
+  }
+
+  if (records.length === 0) {
+    return (
+      <div className="wrap" data-testid="lifecycle-page">
+        <h1>⏳ 生命周期页 <span className="badge p2">REQ-006 · P4</span></h1>
+        <div className="card" data-testid="lifecycle-empty">
+          <b>当前记忆账本为空，无真实生命周期数据。</b>
+          <div className="note">
+            请先在「写入页」或「记忆库管理页」产生真实记忆，本页将自动列出全部真实记忆及其
+            温度（decay_class）/ 重要度 / 半衰期 / 访问与强化计数。空账本不伪造数据。
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="wrap" data-testid="lifecycle-page">
       <h1>⏳ 生命周期页 <span className="badge p2">REQ-006 · P4</span></h1>
-      <div className="sub">六态机（9.10）+ 调参（17.4/17.5）· 数据本地种子为真相 · request_id={reqId}</div>
+      <div className="sub">六态机（9.10）+ 调参（17.4/17.5）· 数据真相 = 内核账本（{records.length} 条真实记忆）· request_id={reqId}</div>
 
       <div className="card">
         <table className="ltable" data-testid="lifecycle-table">
           <thead>
             <tr>
-              <th><input type="checkbox" aria-label="全选" data-testid="check-all"
-                checked={checked.size === records.length && records.length > 0}
-                onChange={(e) => setChecked(e.target.checked ? new Set(records.map((r) => r.id)) : new Set())} /></th>
+              <th><input type="checkbox" aria-label="本页全选" data-testid="check-all"
+                checked={allChecked}
+                onChange={(e) => toggleAllPage(e.target.checked)} /></th>
               <th>ID</th>
               <th>状态</th>
               <th>温度</th>
@@ -90,7 +152,7 @@ export function LifecyclePage() {
             </tr>
           </thead>
           <tbody>
-            {records.map((r) => (
+            {paged.items.map((r) => (
               <tr key={r.id} className={r.id === selectedId ? 'sel' : ''} data-testid={`lrow-${r.id}`}
                 onClick={() => setSelectedId(r.id)}>
                 <td onClick={(e) => e.stopPropagation()}>
@@ -108,6 +170,91 @@ export function LifecyclePage() {
         </table>
       </div>
 
+      {/* 分页控件（复制记忆库管理页口径；默认每页 5 条；置于表格卡片与两个联动卡片中间） */}
+      <div
+        data-testid="pagination"
+        style={{
+          display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, marginBottom: 10,
+          fontSize: 12.5, color: 'var(--muted)', flexWrap: 'wrap',
+        }}
+      >
+        <label style={{ fontSize: 12 }} data-testid="filter-pagesize-label">
+          每页
+          <select
+            data-testid="filter-pagesize"
+            value={String(pageSize)}
+            onChange={(e) => changePageSize(Number(e.target.value))}
+            style={{ padding: '4px 6px', background: 'var(--panel2)', border: '1px solid var(--line)', borderRadius: 6, color: 'var(--txt)', fontSize: 12, margin: '0 4px' }}
+          >
+            {LIFECYCLE_PAGE_SIZES.map((n) => (
+              <option key={n} value={n}>{n} 条</option>
+            ))}
+          </select>
+        </label>
+        <button
+          className="btn"
+          data-testid="pg-first"
+          disabled={paged.page <= 1}
+          onClick={() => setPage(1)}
+          style={{ padding: '4px 12px', fontSize: 12 }}
+          title="首页"
+        >
+          ⏮ 首页
+        </button>
+        <button
+          className="btn"
+          data-testid="pg-prev"
+          disabled={paged.page <= 1}
+          onClick={() => setPage(paged.page - 1)}
+          style={{ padding: '4px 12px', fontSize: 12 }}
+          title="上一页"
+        >
+          ‹ 上一页
+        </button>
+        <span data-testid="pg-info">
+          第 <input
+            type="number"
+            min={1}
+            max={paged.totalPages}
+            data-testid="pg-goto-input"
+            value={paged.page}
+            style={{ width: 36, padding: '2px 4px', background: 'var(--panel2)', border: '1px solid var(--line)', borderRadius: 4, color: 'var(--txt)', fontSize: 12, textAlign: 'center' }}
+            onChange={(e) => {
+              const v = parseInt(e.target.value, 10);
+              if (!isNaN(v) && v >= 1 && v <= paged.totalPages) {
+                setPage(v);
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                const v = parseInt((e.target as HTMLInputElement).value, 10);
+                if (!isNaN(v) && v >= 1 && v <= paged.totalPages) setPage(v);
+              }
+            }}
+          /> / {paged.totalPages} 页 · 共 {paged.total} 条
+        </span>
+        <button
+          className="btn"
+          data-testid="pg-next"
+          disabled={paged.page >= paged.totalPages}
+          onClick={() => setPage(paged.page + 1)}
+          style={{ padding: '4px 12px', fontSize: 12 }}
+          title="下一页"
+        >
+          下一页 ›
+        </button>
+        <button
+          className="btn"
+          data-testid="pg-last"
+          disabled={paged.page >= paged.totalPages}
+          onClick={() => setPage(paged.totalPages)}
+          style={{ padding: '4px 12px', fontSize: 12 }}
+          title="尾页"
+        >
+          尾页 ⏭
+        </button>
+      </div>
+
       <div className="row" style={{ gap: 14, flexWrap: 'wrap', alignItems: 'stretch', margin: '0 0 14px' }}>
         {selected && (
           <div style={{ flex: 1, minWidth: 300, display: 'flex' }}>
@@ -123,7 +270,7 @@ export function LifecyclePage() {
 
       <div className="card">
         <div className="row" style={{ justifyContent: 'space-between' }}>
-          <b>批量迁移（9.10.4，写审计 lifecycle_change + {reqId}）</b>
+          <b>批量迁移（9.10.4，写真实审计 lifecycle_change + {reqId}）</b>
           <div className="row">
             <label style={{ fontSize: 12, color: 'var(--muted)' }}>目标态</label>
             <select data-testid="batch-target" value={batchTarget} onChange={(e) => setBatchTarget(e.target.value as MemoryStatus)}>

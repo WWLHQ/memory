@@ -1,6 +1,6 @@
 // 账号与安全页（REQ-006 / P12）纯逻辑层
 import type { ApiKey, PwdPolicy, TeamMember } from './types.ts';
-import { FORBIDDEN_PATTERNS } from './seed.ts';
+import { FORBIDDEN_PATTERNS } from './defaults.ts';
 
 /** 密码校验（4.2）：长度 8-64 / 字符类 / 禁用词 / 最近 N 次不可重复 */
 export function validatePwd(pwd: string, policy: PwdPolicy, history: string[]): string | null {

@@ -1,19 +1,22 @@
 // P14-T3 自生长侧组件：指标卡 + 五项优化 + Δ 收益曲线 + 调度时间轴（7.1/7.2/13.3）
 import type { DeltaPoint, GrowthAuditEntry, GrowthMetrics, OptimizationItem, ScheduleItem } from './types.ts';
 
-export function GrowthCards({ m }: { m: GrowthMetrics }) {
+export function GrowthCards({ m, empty }: { m: GrowthMetrics; empty?: boolean }) {
   const items: Array<[string, string, string, string]> = [
-    ['hit_rate', '检索命中率', m.hit_rate.toFixed(2), 'm-hit-rate'],
+    ['hit_rate', '检索命中率', m.hit_rate ? m.hit_rate.toFixed(2) : '—', 'm-hit-rate'],
     ['confirmed', '确认数（+0.1）', String(m.confirmed), 'm-confirmed'],
     ['rejected', '拒绝数（−0.05）', String(m.rejected), 'm-rejected'],
-    ['low_quality', '低质占比', m.low_quality_ratio.toFixed(2), 'm-lowq'],
+    ['low_quality', '低质占比（cold/dormant/archived）', m.low_quality_ratio.toFixed(2), 'm-lowq'],
     ['level_L6', 'L6 层命中', m.level_stats_L6.toFixed(2), 'm-l6'],
-    ['latency', '检索耗时', `${m.latency_ms}ms`, 'm-latency'],
+    ['latency', '检索耗时', m.latency_ms ? `${m.latency_ms}ms` : '—', 'm-latency'],
   ];
   return (
     <div className="card" data-testid="growth-cards">
-      <b>反馈指标（7.1，只读）</b>
-      <div className="note">每次检索自动记录，本页不可手改 —— 自生长收益 Δ 与五项优化的数据源。</div>
+      <b>反馈指标（7.1，只读 · 真实账本实算）</b>
+      <div className="note">
+        全部数字来自真实记忆账本：命中率 = recall/cold_recall 命中数 ÷ (命中+违约)；低质/L6 占比 = 记忆表真实衰减分层与层分布；
+        确认/拒绝 = 真实用户反馈审计条数；耗时账本未采样 → 显示「—」。{empty ? '当前账本为空，无真实数据。' : ''}
+      </div>
       <div className="row" style={{ gap: 16, marginTop: 8, flexWrap: 'wrap' }}>
         {items.map(([key, label, val, tid]) => (
           <span key={key} className="panel" style={{ padding: '8px 12px', minWidth: 120 }} data-testid={tid}>
@@ -84,31 +87,40 @@ export function DeltaPanel({
   const pts = series.map((p, i) => `${PAD + i * step},${H - PAD - (p.delta / max) * (H - PAD * 1.6)}`);
   return (
     <div className="card" data-testid="delta-panel">
-      <b>自生长收益（7.2 · 联动效果看板 KPI9）</b>
-      <div className="note">R3：Δ 取自真实 7 日反馈（7.1），不可手工填写；weight_tuned 触发点 = 每周日 03:00（13.3）。</div>
+      <b>自生长收益（7.2 · 联动效果看板 KPI9 · 真实账本）</b>
+      <div className="note">
+        Δ 取自真实 7 日反馈（7.1）；weight_tuned 触发点 = 每周日 03:00（13.3）。
+        曲线数据 = 真实 weight_tuned / growth_op 审计事件按日聚合，无记录则显示空态（不伪造数值）。
+      </div>
       <div className="row" style={{ alignItems: 'baseline', gap: 16, marginTop: 8 }}>
         <span data-testid="delta-value" style={{ fontSize: 26, fontWeight: 800, color: 'var(--ok,#5dd39e)' }}>
           Δ +{delta.toFixed(3)}
         </span>
-        <span className="dim">调权重后命中率 − 调权重前命中率</span>
+        <span className="dim">调权重后命中率 − 调权重前命中率（真实反馈差值）</span>
         <button className="btn" data-testid="manual-trigger" onClick={onManualTrigger}>⚡ 手动触发一次自生长</button>
       </div>
-      <svg data-testid="delta-chart" width="100%" viewBox={`0 0 ${W} ${H}`} style={{ marginTop: 8, maxWidth: W }}>
-        <line x1={PAD} y1={H - PAD} x2={W - PAD} y2={H - PAD} stroke="var(--border,#2a3442)" />
-        <polyline points={pts.join(' ')} fill="none" stroke="var(--accent,#4f8cff)" strokeWidth="2" />
-        {series.map((p, i) => (
-          <g key={`${p.day}-${i}`}>
-            <circle
-              cx={PAD + i * step} cy={H - PAD - (p.delta / max) * (H - PAD * 1.6)}
-              r={p.is_tuned ? 5 : 3}
-              fill={p.is_tuned ? 'var(--danger,#ff5d5d)' : 'var(--accent,#4f8cff)'}
-              data-testid={p.is_tuned ? 'tuned-point' : undefined}
-            />
-            <text x={PAD + i * step} y={H - 8} fontSize="10" fill="var(--muted,#a9b6c4)" textAnchor="middle">{p.day}</text>
-          </g>
-        ))}
-      </svg>
-      <div className="note">🔴 = weight_tuned 触发点 · 本会话审计：{audit.length} 条（R2）</div>
+      {series.length === 0 ? (
+        <div data-testid="delta-empty" className="note" style={{ padding: 16, textAlign: 'center', color: 'var(--muted)' }}>
+          暂无真实自生长调参记录（weight_tuned）。点击「手动触发」会产生第一条真实记录，或等待每周日 03:00 调度。
+        </div>
+      ) : (
+        <svg data-testid="delta-chart" width="100%" viewBox={`0 0 ${W} ${H}`} style={{ marginTop: 8, maxWidth: W }}>
+          <line x1={PAD} y1={H - PAD} x2={W - PAD} y2={H - PAD} stroke="var(--border,#2a3442)" />
+          <polyline points={pts.join(' ')} fill="none" stroke="var(--accent,#4f8cff)" strokeWidth="2" />
+          {series.map((p, i) => (
+            <g key={`${p.day}-${i}`}>
+              <circle
+                cx={PAD + i * step} cy={H - PAD - (p.delta / max) * (H - PAD * 1.6)}
+                r={p.is_tuned ? 5 : 3}
+                fill={p.is_tuned ? 'var(--danger,#ff5d5d)' : 'var(--accent,#4f8cff)'}
+                data-testid={p.is_tuned ? 'tuned-point' : undefined}
+              />
+              <text x={PAD + i * step} y={H - 8} fontSize="10" fill="var(--muted,#a9b6c4)" textAnchor="middle">{p.day}</text>
+            </g>
+          ))}
+        </svg>
+      )}
+      <div className="note">🔴 = weight_tuned 触发点 · 真实账本审计：{audit.length} 条（R2）</div>
       {audit.length > 0 && (
         <div className="note" data-testid="growth-audit" style={{ marginTop: 6 }}>
           {audit.slice(0, 3).map((a, i) => (

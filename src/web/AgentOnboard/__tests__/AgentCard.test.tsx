@@ -4,7 +4,7 @@ import type React from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AgentCard, toolRef } from '../AgentCard.tsx';
-import { SEED_AGENTS } from '../seed.ts';
+import { SEED_AGENTS } from './fixtures.ts';
 import type { UiAgentCard } from '../../../types/agentOnboard.ts';
 
 type Over = Partial<React.ComponentProps<typeof AgentCard>>;
@@ -41,6 +41,17 @@ test('渲染徽标/状态点/四项指标（AC-003.1/AC-003.3）', () => {
   expect(screen.getByText('ent_001 / team_001')).toBeInTheDocument();
 });
 
+test('tenantOverride：真实租户覆盖种子 tenant 字段', () => {
+  setup({}, { tenantOverride: 'ent_999 / team_42' });
+  expect(screen.getByText('ent_999 / team_42')).toBeInTheDocument();
+  expect(screen.queryByText('ent_001 / team_001')).not.toBeInTheDocument();
+});
+
+test('tenantOverride 缺省：回退种子 tenant', () => {
+  setup();
+  expect(screen.getByText('ent_001 / team_001')).toBeInTheDocument();
+});
+
 test('密钥恒脱敏不回显明文（R5）', () => {
   setup();
   expect(screen.getByText('[API_KEY:harness]')).toBeInTheDocument();
@@ -59,8 +70,8 @@ test('连通率<95% / 延迟>5s 告警态', () => {
   expect(document.querySelectorAll('.metric .v.warn').length).toBeGreaterThanOrEqual(1);
 });
 
-test('超 90 天未轮换显示 gold 告警', () => {
-  setup({ key: { mask: '[API_KEY:codex]', last: '92 天前', grace: 24 } });
+test('超 90 天未轮换显示 gold 告警（真实 lastRotateAt 口径）', () => {
+  setup({}, { stats: { tests: 0, passed: 0, lastRotateAt: Date.now() - 92 * 86_400_000 } });
   expect(document.querySelector('.pill.gold')).toBeTruthy();
 });
 

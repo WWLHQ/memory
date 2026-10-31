@@ -11,14 +11,24 @@ import { LoginModal } from './LoginModal.tsx';
 import type { SyncState } from '../../types/home.ts';
 import type { Form } from '../../types/agentOnboard.ts';
 import type { RawHomeFeed } from '../../home/dashboard.ts';
+import type { LayerGraph } from './layerGraph.ts';
+import type { Gain } from '../../types/agentOnboard.ts';
 
 export interface HomePageProps {
   /** 后端/镜像原始 feed（T4 消费） */
   raw: RawHomeFeed;
   /** 同步态；缺省桌面主源 */
   sync?: SyncState;
+  /** L1–L6 关系图谱（真实账本推导；缺省为空图谱） */
+  graph?: LayerGraph;
+  /** 效果证据四卡（内核账本真实聚合；缺省不渲染该区块） */
+  effectGains?: Gain[];
+  /** 内核账本读取失败的真实原因；有值 → Dashboard 明示「不是空账本」（批次25 P0-7） */
+  storageError?: string | null;
   /** 点击 .rid 溯源回调（弹审计 modal） */
   onTrace?: (requestId: string) => void;
+  /** 图谱刷新（重新读取内核账本） */
+  onRefreshGraph?: () => void | Promise<void>;
   /** 注入登录实现（T11 后端镜像 / 测试 mock）；缺省 T3 本地内核 */
   loginFn?: LoginFn;
   /** 注入登出副作用（T11 后端写审计）；缺省无操作 */
@@ -27,7 +37,7 @@ export interface HomePageProps {
   requireLogin?: boolean;
 }
 
-function HomeInner({ raw, sync, onTrace, requireLogin = true }: HomePageProps) {
+function HomeInner({ raw, sync, graph, effectGains, storageError, onTrace, onRefreshGraph, requireLogin = true }: HomePageProps) {
   const [open, setOpen] = useState(false);
   const logout = useLogout();
   const ctx = useTenant();
@@ -59,7 +69,15 @@ function HomeInner({ raw, sync, onTrace, requireLogin = true }: HomePageProps) {
   return (
     <div className="home" id="home">
       <TopBar onLogin={() => setOpen(true)} onLogout={logout} sync={sync} />
-      <Dashboard raw={raw} sync={sync} onTrace={onTrace ?? (() => {})} />
+      <Dashboard
+        raw={raw}
+        sync={sync}
+        graph={graph}
+        effectGains={effectGains}
+        storageError={storageError}
+        onRefreshGraph={onRefreshGraph}
+        onTrace={onTrace ?? (() => {})}
+      />
       <LoginModal
         open={open}
         onClose={() => setOpen(false)}

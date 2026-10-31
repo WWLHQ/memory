@@ -1,6 +1,6 @@
 // P13-T3 LLM 四用途表：本地/网络复选 + 端点/Key 脱敏槽 + 温度 + 超时 + fallback 恒开（R1/R2/R3/R4）
 import type { LlmUsage, UsageConfig } from './types.ts';
-import { USAGE_KEYS, USAGE_LABELS } from './seed.ts';
+import { USAGE_KEYS, USAGE_LABELS } from './catalog.ts';
 import { FALLBACK_ALWAYS_ON, maskKey } from './logic.ts';
 
 interface Props {

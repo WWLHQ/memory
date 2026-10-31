@@ -1,0 +1,176 @@
+// 统一内核接入口：全部页面共用同一份账本（唯一真相源）。
+// - Electron（顶层窗口 / 概览页 iframe）：InMemoryStorage 构造即绑定主进程 SqliteStorage，本模块只做单例收敛；
+// - 纯浏览器：本模块持有进程内唯一 InMemoryStorage，页面间不再各持一份空账本。
+// 身份不再写死 demo 账号：优先取真实登录（Home 登录成功后 bindTenant 落盘）或主进程按会话下发
+// （批次26-B P1-3 syncTenantFromHost，桌面壳内每次页面加载覆盖本地值）；否则生成一次本地身份并持久化（仅本机生效）。
+import type {
+  Account, Form, L0AdminPort, L0Port, LlmProvider, MemAgent, VectorBackend,
+} from '../core/memagent/types.ts';
+import { createMemAgent } from '../core/memagent/agent.ts';
+import { InMemoryStorage } from '../core/memagent/storage.ts';
+import { FakeLlmProvider } from '../core/memagent/llm.ts';
+import { JsVectorBackend } from '../core/memagent/vector.ts';
+import { ulid } from '../core/memagent/ulid.ts';
+import { configuredVectorDim } from './models/modelConfig.ts';
+import { HostL0Admin, HostL0Port, l0HostAvailable } from './shared/l0Port.ts';
+import { hostCall, hostCapability } from '../desktop/hostBridge.ts';
+import { currentSessionId } from './shared/session.ts';
+
+const TENANT_KEY = 'mam.tenant.v1';
+
+export interface KernelTenant {
+  user_id: string;
+  team_id: string;
+  enterprise_id: string;
+}
+
+let tenantCache: KernelTenant | null = null;
+
+function readPersistedTenant(): KernelTenant | null {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(TENANT_KEY);
+    if (!raw) return null;
+    const t = JSON.parse(raw) as Partial<KernelTenant>;
+    if (!t.user_id || !t.team_id || !t.enterprise_id) return null;
+    return { user_id: t.user_id, team_id: t.team_id, enterprise_id: t.enterprise_id };
+  } catch {
+    return null;
+  }
+}
+
+function persistTenant(t: KernelTenant): void {
+  if (typeof localStorage === 'undefined') return;
+  try { localStorage.setItem(TENANT_KEY, JSON.stringify(t)); } catch { /* 隐私模式/配额满：仅内存生效 */ }
+}
+
+/** 当前租户身份（首次调用生成并持久化，跨页面/跨重启稳定） */
+export function getTenant(): KernelTenant {
+  if (tenantCache) return tenantCache;
+  const persisted = readPersistedTenant();
+  if (persisted) { tenantCache = persisted; return tenantCache; }
+  const suffix = ulid().slice(-10).toLowerCase();
+  tenantCache = { user_id: `u_${suffix}`, team_id: `team_local`, enterprise_id: `ent_local` };
+  persistTenant(tenantCache);
+  return tenantCache;
+}
+
+/** 登录成功后绑定真实租户（Home 页调用；其余页面下次 getTenant 即生效） */
+export function bindTenant(t: Partial<KernelTenant> & Pick<KernelTenant, 'user_id'>): void {
+  const base = getTenant();
+  tenantCache = {
+    user_id: t.user_id,
+    team_id: t.team_id ?? base.team_id,
+    enterprise_id: t.enterprise_id ?? base.enterprise_id,
+  };
+  persistTenant(tenantCache);
+}
+
+/**
+ * 批次26-B P1-3：租户三元组由主进程按会话下发（真源 = home server 会话），渲染层不再自报。
+ * 桌面壳内每次页面加载都会用会话真值覆盖 mam.tenant.v1（改 localStorage 冒充租户立即被纠正）；
+ * 纯浏览器/未登录/调用失败 = 显式降级：沿用本地身份（仅本机账本生效，不冒充服务端身份）。
+ * 成功后重置内核单例：下个 getKernel 用真身份重装配（账本不清空）。
+ */
+export async function syncTenantFromHost(): Promise<boolean> {
+  if (hostCapability() === 'none') return false;
+  try {
+    const r = await hostCall<{ ok: boolean; tenant?: KernelTenant; error?: string }>('tenant:get', [currentSessionId()]);
+    if (!r?.ok || !r.tenant?.user_id || !r.tenant?.team_id || !r.tenant?.enterprise_id) return false;
+    tenantCache = { ...r.tenant };
+    persistTenant(tenantCache);
+    agentSingleton = null;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 内核写入用的账号三元组 */
+export function kernelAccount(): Account {
+  const t = getTenant();
+  return { user_id: t.user_id, team_id: t.team_id, enterprise_id: t.enterprise_id };
+}
+
+/** 页面形态（端壳）：全部 Web 页为 web；桌面壳内由 Electron 主进程侧判定，渲染层不区分 */
+export const KERNEL_FORM: Form = 'web';
+
+let storageSingleton: InMemoryStorage | null = null;
+
+/** 全局唯一账本（Electron→主进程持久库；浏览器→进程内单例） */
+export function getKernelStorage(): InMemoryStorage {
+  if (!storageSingleton) storageSingleton = new InMemoryStorage();
+  return storageSingleton;
+}
+
+let agentSingleton: MemAgent | null = null;
+
+export interface KernelOverrides {
+  llm?: LlmProvider;
+  vector?: VectorBackend;
+}
+
+let l0PortsOverride: { l0?: L0Port; l0Admin?: L0AdminPort } | null = null;
+
+/** 测试辅助：注入 L0 端口（页面测试用真 L0Vault）；生产代码不得调用 */
+export function setKernelL0ForTests(ports: { l0?: L0Port; l0Admin?: L0AdminPort } | null): void {
+  l0PortsOverride = ports;
+  agentSingleton = null;
+}
+
+/** L0 端口（§4.4）：桌面壳注入主进程 L0Vault 代理；纯浏览器不注入（写/查如实报错） */
+function hostL0Ports(): { l0?: L0Port; l0Admin?: L0AdminPort } {
+  if (l0PortsOverride) return l0PortsOverride;
+  if (!l0HostAvailable()) return {};
+  return { l0: new HostL0Port(), l0Admin: new HostL0Admin() };
+}
+
+/** 全局唯一内核实例；首次调用时的 llm/vector 覆盖生效（模型页等需要自定义路由输入的场景） */
+export function getKernel(overrides: KernelOverrides = {}): MemAgent {
+  if (!agentSingleton) {
+    agentSingleton = createMemAgent({
+      form: KERNEL_FORM,
+      account: kernelAccount(),
+      // 显式 stub 装配点：未接入真实 LLM，写记忆只落 L1
+      llm: overrides.llm ?? new FakeLlmProvider(),
+      // 维度取自模型配置页落盘值（Phase C3）：保存的向量维度真实参与内核构造
+      vector: overrides.vector ?? new JsVectorBackend(configuredVectorDim()),
+      storage: getKernelStorage(),
+      ...hostL0Ports(),
+    });
+  }
+  return agentSingleton;
+}
+
+/** 在既有账本上另建内核实例（模型页需要自己的反代理模型表，但账本仍共享） */
+export function createKernelOnSameStorage(overrides: KernelOverrides = {}): MemAgent {
+  return createMemAgent({
+    form: KERNEL_FORM,
+    account: kernelAccount(),
+    // 显式 stub 装配点（同上）
+    llm: overrides.llm ?? new FakeLlmProvider(),
+    vector: overrides.vector ?? new JsVectorBackend(configuredVectorDim()),
+    storage: getKernelStorage(),
+    ...hostL0Ports(),
+  });
+}
+
+/** 模型配置保存后重建全局内核：下次 getKernel 按新维度装配（账本不清空） */
+export function rebuildKernelFromModelConfig(): void {
+  agentSingleton = null;
+}
+
+/** 测试辅助：重置全局内核与账本（用例间隔离；生产代码不得调用） */
+export function resetKernelForTests(): void {
+  storageSingleton?.clearForTests();
+  agentSingleton = null;
+  l0PortsOverride = null;
+}
+
+/** 统一 request_id 生成（内核同一 ULID 口径；禁止页面自增计数器冒充） */
+export function newRequestId(prefix: string): string {
+  return `${prefix}_${ulid()}`;
+}
+
+// 模块加载即触发一次会话租户同步（桌面壳内用会话真值覆盖本地身份；纯浏览器模式 no-op）
+void syncTenantFromHost();

@@ -1,10 +1,10 @@
 // 用户反馈页（REQ-006 / P9）T4 编排
 // 提交走内核 ma._feedback（17.4 trust_delta 内核计算：confirm +0.1 / reject −0.05 / disputed 挂 9.7 裁决）。
-import { useState } from 'react';
-import { SEED_FEEDBACKS } from './seed.ts';
+// 历史记录：挂载从内核审计账本读取真实反馈记录（无种子兜底；空库即空列表）。
+import { useEffect, useState } from 'react';
 import { composeRecord, statShare, validateDraft } from './logic.ts';
 import { useFeedbackMirror } from './useFeedbackMirror.ts';
-import { coreSubmitFeedback } from './coreFeedback.ts';
+import { coreSubmitFeedback, coreLoadFeedbackRecords } from './coreFeedback.ts';
 import { FeedbackForm } from './FeedbackForm.tsx';
 import { StatCards } from './StatCards.tsx';
 import { useToast } from './useToast.tsx';
@@ -12,9 +12,18 @@ import type { FeedbackDraft, FeedbackRecord } from './types.ts';
 
 export function FeedbackPage() {
   const [draft, setDraft] = useState<FeedbackDraft>({ memory_id: '', action: 'confirm', rating: 3, comment: '' });
-  const [records, setRecords] = useState<FeedbackRecord[]>(SEED_FEEDBACKS);
+  const [records, setRecords] = useState<FeedbackRecord[]>([]);
   const { node: toast, show } = useToast();
   const mirror = useFeedbackMirror();
+
+  // 挂载回填：内核审计账本中的真实反馈记录
+  useEffect(() => {
+    let alive = true;
+    coreLoadFeedbackRecords()
+      .then((list) => { if (alive) setRecords(list); })
+      .catch(() => {}); // 内核不可达 → 保持空列表（safe-noop 语义）
+    return () => { alive = false; };
+  }, []);
 
   const stats = statShare(records);
   const v = validateDraft(draft);
@@ -30,8 +39,7 @@ export function FeedbackPage() {
       show('内核未找到该记忆，反馈未记录');
       return;
     }
-    const seq = records.length + 1;
-    const rec = composeRecord(draft, seq, out.request_id);
+    const rec = composeRecord(draft, out.request_id);
     setRecords([rec, ...records]);
     mirror.audit('feedback', rec, out.request_id); // G6 safe-noop
     const delta = out.trust_delta;

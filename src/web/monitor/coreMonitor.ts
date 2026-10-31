@@ -1,12 +1,11 @@
-// 监控仪表盘（REQ-006 / P6）接真内核：告警时间线存内核账本（action='monitor_alert'，
-// detail.entry 保真），挂载回放；指标卡保留演示快照（诚实标注，内核无对应统计口径）。
+// 监控仪表盘（REQ-006 / P6）接真内核：告警时间线读真实账本（action='monitor_alert'，只读回放，不再灌种子）。
+// 数据真相 = 内核账本（桌面 Electron 下 = 主进程 FileStorage 持久库；浏览器降级内存态，无告警诚实空态）。
+// 与记忆库管理页一致：禁止注入演示/种子告警 —— 时间线只反映真实账本 monitor_alert 审计；
+// 无告警 → 诚实空态（引导去真实操作产生告警，不伪造）。
 import type { MemAgent } from '../../core/memagent/types.ts';
 import { ulid } from '../../core/memagent/ulid.ts';
-import { createMemAgent } from '../../core/memagent/agent.ts';
-import { InMemoryStorage } from '../../core/memagent/storage.ts';
-import { FakeLlmProvider } from '../../core/memagent/llm.ts';
-import { JsVectorBackend } from '../../core/memagent/vector.ts';
-import { SEED_ALERTS } from './seed.ts';
+import type { InMemoryStorage } from '../../core/memagent/storage.ts';
+import { getKernel, getKernelStorage } from '../kernel.ts';
 import type { AlertItem } from './types.ts';
 
 interface MonitorCtx {
@@ -14,30 +13,11 @@ interface MonitorCtx {
   storage: InMemoryStorage;
 }
 
-let ctxP: Promise<MonitorCtx> | null = null;
-
-function getCtx(): Promise<MonitorCtx> {
-  if (!ctxP) {
-    ctxP = (async () => {
-      const storage = new InMemoryStorage();
-      const ma = createMemAgent({
-        form: 'web', account: { user_id: 'u_demo', team_id: 't_demo', enterprise_id: 'e_demo' },
-        llm: new FakeLlmProvider(), vector: new JsVectorBackend(), storage,
-      });
-      // 种子告警 → 内核账本（detail.entry 全字段保真，回放零损失；request_id/ts 沿用条目）
-      for (const e of SEED_ALERTS) {
-        await storage.appendAudit({
-          request_id: e.request_id ?? `req_mon_${ulid()}`, action: 'monitor_alert', form: 'web',
-          ts: Date.parse(e.ts) || Date.now(), detail: { entry: e },
-        });
-      }
-      return { ma, storage };
-    })();
-  }
-  return ctxP;
+function getCtx(): MonitorCtx {
+  return { ma: getKernel(), storage: getKernelStorage() };
 }
 
-/** 挂载回放：内核账本中的告警（种子 + 运行时新增），插入序 = 时间线序 */
+/** 挂载回放：真实账本中的告警（仅读，不写入；无告警 → 空数组诚实空态） */
 export async function coreLoadAlerts(): Promise<AlertItem[]> {
   const { storage } = await getCtx();
   const audits = await storage.queryAudit({ action: 'monitor_alert' });
@@ -46,7 +26,7 @@ export async function coreLoadAlerts(): Promise<AlertItem[]> {
     .filter((e): e is AlertItem => Boolean(e));
 }
 
-/** 运行时新增告警（供后续接入真实指标探测；当前页面只读回放） */
+/** 运行时新增告警（供真实指标探测接入；页面只读回放，当前无真实探测源 → 不调用） */
 export async function coreRaiseAlert(entry: AlertItem): Promise<{ total: number }> {
   const { storage } = await getCtx();
   await storage.appendAudit({

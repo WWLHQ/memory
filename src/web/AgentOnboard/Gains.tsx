@@ -4,11 +4,13 @@ import type { Gain } from '../../types/agentOnboard.ts';
 
 interface Props {
   gains: Gain[];
+  /** 容器 id（首页同时存在累计四卡与效果证据四卡，避免重复 id） */
+  id?: string;
 }
 
-export function Gains({ gains }: Props) {
+export function Gains({ gains, id = 'gains' }: Props) {
   return (
-    <div className="gains" id="gains">
+    <div className="gains" id={id}>
       {gains.map((g) => (
         <div className="gain" key={g.title}>
           <h3>{g.icon} {g.title}</h3>

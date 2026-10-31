@@ -2,11 +2,10 @@
 import { useEffect, useRef } from 'react';
 import { mirrorReport } from '../mirrorClient.ts';
 
+import { homeBaseUrl } from '../backend.ts';
+
 export function resolveBackendUrl(): string {
-  if (typeof location === 'undefined') return '';
-  const q = new URLSearchParams(location.search).get('backend');
-  if (q !== null) return q.trim();
-  return 'http://localhost:8200';
+  return homeBaseUrl();
 }
 
 export interface SecurityMirror {

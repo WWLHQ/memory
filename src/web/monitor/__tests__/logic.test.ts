@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { evalLevel, inWindow, filterAlerts, groupMetrics, percentile, levelBadge } from '../logic.ts';
-import { SEED_ALERTS, SEED_METRICS } from '../seed.ts';
+import { SEED_ALERTS, SEED_METRICS } from './fixtures.ts';
 import type { MetricCard } from '../types.ts';
 
 const NOW = new Date('2026-10-10T11:00:00Z').getTime();

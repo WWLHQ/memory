@@ -2,9 +2,11 @@
 // 职责：把登录得到的 TenantContext 注入 React 上下文，全页可读；团队只读、不可改（§0.1/18.2-A）。
 // useLogin 调用 T3 login 内核（纯逻辑）；后端落盘/镜像由 T9/T10 提供回调注入（T5 阶段 logout 仅清本地态）。
 // 不变量：注入的 context 经 Object.freeze，team_id 等只读字段无法改写（无 setter）。
-import { createContext, useContext, useState, useCallback, useMemo } from 'react';
+import { createContext, useContext, useState, useCallback, useMemo, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import type { TenantContext, LoginForm, LoginResult } from '../../types/home.ts';
+import { homeBaseUrl } from '../backend.ts';
+import { SESSION_STORAGE_KEY } from '../../shared/sessionKey.ts';
 
 /**
  * 登录实现：默认走动态 import 的 T3 本地内核。
@@ -49,13 +51,15 @@ export interface TenantProviderProps {
   loginFn?: LoginFn;
   /** 注入登出副作用（T9 后端），默认无操作 */
   onLogout?: LogoutFn;
+  /** 后端 URL（用于 /api/me 恢复租户上下文）；缺省从 ?backend= 读取 */
+  backendUrl?: string;
 }
 
-export function TenantProvider({ children, loginFn = defaultLogin, onLogout }: TenantProviderProps) {
+export function TenantProvider({ children, loginFn = defaultLogin, onLogout, backendUrl }: TenantProviderProps) {
   // 从 localStorage 恢复登录态（跨 iframe 共享）
   const getSessionId = () => {
     if (typeof localStorage === 'undefined') return null;
-    return localStorage.getItem('session:realpage');
+    return localStorage.getItem(SESSION_STORAGE_KEY);
   };
   const [context, setContext] = useState<TenantContext | null>(() => {
     const sid = getSessionId();
@@ -69,6 +73,20 @@ export function TenantProvider({ children, loginFn = defaultLogin, onLogout }: T
       session_id: sid,
     };
   });
+
+  // 有 session 但 context 是占位值时，异步调 /api/me 恢复真实租户上下文
+  useEffect(() => {
+    if (!context || context.user_id !== 'restored-user') return;
+    const sid = getSessionId();
+    if (!sid) return;
+    const base = backendUrl ?? homeBaseUrl();
+    fetch(`${base}/api/me`, { headers: { 'x-session-id': sid } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.context) setContext(freezeContext(data.context));
+      })
+      .catch(() => { /* 恢复失败：保持占位上下文 */ });
+  }, [context, backendUrl]);
 
   const login = useCallback<LoginFn>(async (input) => {
     // 兼容同步 loginFn（T3 本地内核）与异步 loginFn（T11 后端镜像：返回 Promise<LoginResult>）

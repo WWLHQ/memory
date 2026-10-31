@@ -8,6 +8,8 @@ import { useToast } from './useToast.tsx';
 import { useAuditMirror } from './useAuditMirror.ts';
 import { chainByRequest, exportCsv, exportJson, filterEntries } from './logic.ts';
 import { coreLoadAudit } from './coreAudit.ts';
+import { DEFAULT_PAGE_SIZE, paginate } from '../shared/paginate.ts';
+import { PageNav } from '../shared/PageNav.tsx';
 import type { AuditFilter, AuditEntry } from './types.ts';
 
 export function AuditPage() {
@@ -15,6 +17,7 @@ export function AuditPage() {
   const [filter, setFilter] = useState<AuditFilter>({});
   const [applied, setApplied] = useState<AuditFilter>({});
   const [chainId, setChainId] = useState<string | null>(null);
+  const [pager, setPager] = useState({ page: 1, pageSize: DEFAULT_PAGE_SIZE });
   const toast = useToast();
   const mirror = useAuditMirror();
 
@@ -30,18 +33,23 @@ export function AuditPage() {
     return filterEntries(entries, applied);
   }, [entries, applied, chainId]);
 
+  const paged = useMemo(() => paginate(displayed, pager), [displayed, pager]);
+
   function handleQuery() {
     setChainId(null);
     setApplied(filter);
+    setPager((p) => (p.page === 1 ? p : { ...p, page: 1 }));
     mirror.audit('audit_query');
   }
   function handleReset() {
     setFilter({});
     setApplied({});
     setChainId(null);
+    setPager((p) => (p.page === 1 ? p : { ...p, page: 1 }));
   }
   function handleToggleChain(requestId: string) {
     setChainId((cur) => (cur === requestId ? null : requestId));
+    setPager((p) => (p.page === 1 ? p : { ...p, page: 1 }));
     mirror.audit('audit_chain');
   }
 
@@ -63,7 +71,7 @@ export function AuditPage() {
   return (
     <div className="wrap" data-testid="audit-page">
       <h1>📋 审计日志页 <span className="badge p2">REQ-006 · P11</span></h1>
-      <div className="sub">4.3 统一审计 + request_id 链路追踪（18.2-E）· 数据本地种子为真相</div>
+      <div className="sub">4.3 统一审计 + request_id 链路追踪（18.2-E）· 数据真相 = 内核审计账本（append-only）</div>
 
       <FilterBar filter={filter} onChange={setFilter} onQuery={handleQuery} onReset={handleReset} />
 
@@ -71,11 +79,11 @@ export function AuditPage() {
         <div className="actions" style={{ marginBottom: 10 }}>
           <button type="button" className="btn" data-testid="export-csv"
             onClick={() => download('audit.csv', exportCsv(displayed), 'text/csv')}>
-            导出 CSV
+            导出 CSV（全部 {displayed.length} 条）
           </button>
           <button type="button" className="btn" data-testid="export-json"
             onClick={() => download('audit.json', exportJson(displayed), 'application/json')}>
-            导出 JSON
+            导出 JSON（全部 {displayed.length} 条）
           </button>
           {chainId && (
             <button type="button" className="btn" data-testid="clear-chain" onClick={() => setChainId(null)}>
@@ -83,7 +91,18 @@ export function AuditPage() {
             </button>
           )}
         </div>
-        <AuditTable entries={displayed} activeRequestId={chainId} onToggleChain={handleToggleChain} />
+        <AuditTable
+          entries={paged.items}
+          indexOffset={(paged.page - 1) * paged.pageSize}
+          activeRequestId={chainId}
+          onToggleChain={handleToggleChain}
+        />
+        <PageNav
+          paged={paged}
+          onPage={(page) => setPager((p) => ({ ...p, page }))}
+          onPageSize={(pageSize) => setPager({ page: 1, pageSize })}
+          note={`每页 ${paged.pageSize} 条 · 当前视图 ${displayed.length} 条`}
+        />
       </div>
 
       <div className="note">

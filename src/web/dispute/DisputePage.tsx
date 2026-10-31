@@ -1,11 +1,16 @@
-// 冲突裁决页 T5：完整编排 + mirror
-// 初始渲染用种子；队列 = 内核 SyncHub 真实冲突（并发版本 push 产出），
-// 裁决走 hub.resolve + ma._memoryOp（auto_override/merge 落定出队，user_confirm/hold 保持 pending）。
-import { useEffect, useState, useRef } from 'react';
-import { SEED_CONFLICTS } from './seed.ts';
+// 冲突裁决页 T5：完整编排 + mirror · 真实数据接真版
+// 队列 = 真实账本冲突（记忆表 conflict_id 标记 + conflict_resolve 审计「转人工」事件，
+// 桌面 Electron 下 = 主进程 FileStorage 持久库；浏览器降级内存态，无冲突诚实空态）。
+// 裁决走 ma._memoryOp / ma.write（真实写账本 + 审计：auto_override/merge 落定出队，
+// user_confirm/hold 写审计保持 pending）。
+// 与记忆库管理页一致：禁止注入演示/种子冲突 —— 队列只反映真实账本 pending 冲突；
+// 无真实冲突 → 诚实空态并引导去写入页产生真实记忆。
+// ⚠ 内核读不到（批次25 P0-7）→ 三态加载：显示内核原因 + 重试，绝不渲染成「无待裁决冲突」。
+import { useEffect, useState } from 'react';
 import { queueSort, auditPair } from './logic.ts';
 import { useDisputeMirror } from './useDisputeMirror.ts';
 import { coreConflicts, coreVerdict } from './coreDispute.ts';
+import { KernelLoadError, kernelErrorText, useKernelLoad } from '../shared/kernelLoad.tsx';
 import { DisputeQueue } from './DisputeQueue.tsx';
 import { DisputeVerdict } from './DisputeVerdict.tsx';
 import { useToast } from './useToast.tsx';
@@ -21,44 +26,85 @@ interface AuditEvt {
   note?: string;
 }
 
-export function DisputePage() {
-  const [list, setList] = useState<ConflictRecord[]>(SEED_CONFLICTS);
+const NO_CONFLICTS: ConflictRecord[] = [];
+
+export function DisputePage({ load = coreConflicts }: { load?: () => Promise<ConflictRecord[]> } = {}) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [auditLog, setAuditLog] = useState<AuditEvt[]>([]);
   const { node: toast, show } = useToast();
   const mirror = useDisputeMirror();
-  const requestSeq = useRef(0);
+
+  // 挂载：从真实账本读 pending 冲突队列（无种子兜底；读不到 = 错误态，不冒充无冲突）
+  const ledger = useKernelLoad<ConflictRecord[]>('dispute', load);
+  const { phase, data, error: loadError, retry } = ledger;
+  const conflicts = data ?? NO_CONFLICTS;
 
   const now = Date.now();
-  const filtered = queueSort(list, now);
-  const selected = list.find((r) => r.id === selectedId) ?? null;
+  const filtered = queueSort(conflicts, now);
+  const selected = conflicts.find((r) => r.id === selectedId) ?? null;
 
-  // 挂载同步：队列以内核 SyncHub pending 冲突为准（初始种子渲染，内容一致无跳变）
+  // 首次读到队列 → 默认选中第一条；裁决后出队 → 顺延选中
   useEffect(() => {
-    let alive = true;
-    coreConflicts().then((live) => { if (alive && live.length > 0) setList(live); });
-    return () => { alive = false; };
-  }, []);
+    if (phase !== 'ok') return;
+    setSelectedId((cur) => (conflicts.some((r) => r.id === cur) ? cur : conflicts[0]?.id ?? null));
+  }, [phase, conflicts]);
 
   const handleVerdict = async (v: Verdict, _result: unknown, reqId: string) => {
     if (!selected) return;
-    const out = await coreVerdict(selected, v);
-    const evt = auditPair(selected, v, reqId);
-    setAuditLog((prev) => [{ ...evt, note: out.merged_mem_id ? `${evt.note}（合并记忆 ${out.merged_mem_id}）` : evt.note }, ...prev]);
-    // G6 上抛：safe-noop（mirror 为 safe-noop）
-    mirror.audit('dispute', selected as any, null as any);
-    show(`${evt.note}（${reqId}）`);
-    // 内核裁决后刷新队列：resolved 出队；user_confirm/hold 保持 pending（真实语义）
-    const live = await coreConflicts();
-    setList(live);
-    // 已选冲突若已出队，清空选中
-    setSelectedId((cur) => (live.some((r) => r.id === cur) ? cur : null));
+    try {
+      const out = await coreVerdict(selected, v);
+      const evt = auditPair(selected, v, reqId);
+      setAuditLog((prev) => [{ ...evt, note: out.merged_mem_id ? `${evt.note}（合并记忆 ${out.merged_mem_id}）` : evt.note }, ...prev]);
+      // G6 上抛：safe-noop（mirror 为 safe-noop）
+      mirror.audit('dispute', selected as unknown as never, null as unknown as never);
+      show(`${evt.note}（${reqId}）`);
+      // 内核裁决后刷新队列：resolved 出队；user_confirm/hold 保持 pending（真实语义）
+      ledger.replace(await coreConflicts());
+    } catch (e) {
+      show(`裁决失败：${kernelErrorText(e)}`);
+    }
   };
+
+  if (phase === 'loading') {
+    return (
+      <div className="wrap" data-testid="dispute-page">
+        <h1>⚖️ 冲突裁决页 <span className="badge p2">REQ-006 · P7</span></h1>
+        <div className="note">加载真实账本中…</div>
+      </div>
+    );
+  }
+
+  if (phase === 'error') {
+    return (
+      <div className="wrap" data-testid="dispute-page">
+        <h1>⚖️ 冲突裁决页 <span className="badge p2">REQ-006 · P7</span></h1>
+        <KernelLoadError what="读取待裁决冲突队列" error={loadError} onRetry={retry} />
+        {toast}
+      </div>
+    );
+  }
+
+  if (conflicts.length === 0) {
+    return (
+      <div className="wrap" data-testid="dispute-page">
+        <h1>⚖️ 冲突裁决页 <span className="badge p2">REQ-006 · P7</span></h1>
+        <div className="card" data-testid="dispute-empty">
+          <b>当前账本无待裁决冲突。</b>
+          <div className="note">
+            队列只反映真实账本中 pending 的冲突（记忆表 conflict_id 标记 + conflict_resolve
+            「转人工」审计）。请先在「写入页」产生记忆，当不同端对同一记忆产生并发版本时，
+            内核会真实产出冲突进入本队列。空账本不伪造数据。
+          </div>
+        </div>
+        {toast}
+      </div>
+    );
+  }
 
   return (
     <div className="wrap" data-testid="dispute-page">
       <h1>⚖️ 冲突裁决页 <span className="badge p2">REQ-006 · P7</span></h1>
-      <div className="sub">人工审核队列（12.1）+ 9.7 三模式裁决 · 数据本地种子为真相</div>
+      <div className="sub">人工审核队列（12.1）+ 9.7 三模式裁决 · 数据真相 = 内核账本（{conflicts.length} 条真实待裁决）</div>
       <div className="card">
         <div className="row-head">
           <b>待裁决队列（{filtered.length}）</b>
@@ -81,7 +127,6 @@ export function DisputePage() {
           </div>
           <DisputeVerdict
             record={selected}
-            requestSeq={requestSeq.current + 1}
             onVerdict={handleVerdict}
           />
         </div>

@@ -53,8 +53,8 @@ textarea { resize:vertical; min-height:96px; }
 .dimrow .k { font-size:11px; color:var(--muted); display:flex; justify-content:space-between; }
 .bar { height:6px; border-radius:4px; background:var(--panel2); overflow:hidden; margin-top:3px; }
 .bar > i { display:block; height:100%; background:var(--accent); }
-.composite { font-size:13px; font-weight:700; margin:10px 0; }
-.composite.dup { color:var(--warn); }
+.verdict { font-size:13px; font-weight:700; margin:10px 0; }
+.verdict.dup { color:var(--warn); }
 .actions { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
 .btn {
   background:var(--panel2); border:1px solid var(--line); color:var(--txt);

@@ -37,6 +37,14 @@ export function validateNM(n: number, m: number): string | null {
   return n < m ? null : 'N 天须小于 M 天';
 }
 
+/** 成本单价校验（批次11）：null = 未设置（合法）；否则须为有限非负数 */
+export function validateUnitPrice(v: number | null | undefined): string | null {
+  if (v === null || v === undefined) return null;
+  if (!Number.isFinite(v)) return '成本单价须为数字';
+  if (v < 0) return '成本单价不可为负';
+  return null;
+}
+
 /** 全量校验：返回错误文案数组（空=可保存） */
 export function validateAll(cfg: NormalConfig, kbs: KbPolicyRow[], dev: DevParams): string[] {
   const errs: string[] = [];
@@ -50,6 +58,8 @@ export function validateAll(cfg: NormalConfig, kbs: KbPolicyRow[], dev: DevParam
   if (p) errs.push(p);
   const nm = validateNM(dev.n_days, dev.m_days);
   if (nm) errs.push(nm);
+  const price = validateUnitPrice(cfg.cost_cny_per_mtok);
+  if (price) errs.push(price);
   if (!cfg.auto_organize) errs.push('⚠ 自动整理已关闭：合并/摘要后台任务将停用（15.2/17.10）');
   return errs;
 }

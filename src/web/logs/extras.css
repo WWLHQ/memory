@@ -10,3 +10,38 @@ tr.err-row .note { color:#d8a0a0; }
 .modal { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:18px; width:min(560px, 92vw); }
 .mid { color:var(--accent); }
 a.mid { text-decoration:underline; text-underline-offset:2px; }
+
+/* 程序运行日志（批次17 建，批次19 迁入日志页，批次24 人话化 + 纵向滚动）：
+   正文区固定高度且常驻上下滚动条，一行一条，可回看窗口内全部日志 */
+.program-log { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:10px 12px; margin-bottom:14px; }
+.program-log-head { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+.program-log-head h3 { font-size:12px; margin:0; color:var(--txt); }
+.pl-sub { font-weight:400; color:var(--muted); margin-left:6px; }
+.pl-actions { display:flex; align-items:center; gap:8px; }
+.pl-meta { font-size:10px; color:var(--dim); font-family:monospace; }
+.program-log .btn { padding:4px 10px; font-size:11px; }
+.pl-actions .btn.active { background:var(--accent); border-color:var(--accent); color:#081018; font-weight:700; }
+.pl-body {
+  margin-top:8px; background:#0b1016; border:1px solid var(--line); border-radius:8px;
+  padding:6px 9px; font-family:monospace; font-size:11px; line-height:1.75;
+  height:240px; overflow-y:scroll; overflow-x:hidden; scrollbar-color:#3a4a5c #0b1016; scrollbar-width:thin;
+}
+.pl-body::-webkit-scrollbar { width:10px; }
+.pl-body::-webkit-scrollbar-track { background:#0b1016; }
+.pl-body::-webkit-scrollbar-thumb { background:#3a4a5c; border-radius:6px; }
+.pl-body::-webkit-scrollbar-thumb:hover { background:#54687d; }
+.pl-line { display:flex; gap:8px; white-space:nowrap; overflow:hidden; color:var(--muted); }
+.pl-line.warn { color:var(--warn); }
+.pl-line.error { color:#ffb0b0; }
+.pl-time { flex:0 0 auto; color:var(--dim); }
+.pl-level { flex:0 0 38px; font-weight:700; color:var(--dim); }
+.pl-level.warn { color:var(--warn); }
+.pl-level.error { color:var(--err); }
+.pl-scope { flex:0 0 auto; color:var(--accent); }
+.pl-msg { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pl-note { color:var(--dim); }
+.pl-body .pl-line.error .pl-note, .pl-body .pl-line.warn .pl-note { color:inherit; }
+.pl-empty { font-size:11px; color:var(--dim); margin-top:6px; padding:6px 2px; }
+.pl-empty.err { color:#ffb0b0; }
+.pl-alert { margin-top:8px; background:#3a1616; border:1px solid #6b2e2e; border-radius:8px; padding:8px 10px; display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; font-size:11px; color:#ffb0b0; }
+.pl-path { font-size:10px; color:var(--dim); margin-top:6px; font-family:monospace; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

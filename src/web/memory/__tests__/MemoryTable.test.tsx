@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryTable } from '../MemoryTable.tsx';
-import { SEED_MEMORIES } from '../seed.ts';
 import type { MemoryRecord } from '../types.ts';
 
 const mk = (over: Partial<MemoryRecord>): MemoryRecord => ({
@@ -13,9 +12,10 @@ const mk = (over: Partial<MemoryRecord>): MemoryRecord => ({
 });
 
 describe('MemoryTable (T3)', () => {
-  it('渲染全部种子行', () => {
-    render(<MemoryTable memories={SEED_MEMORIES} />);
-    for (const m of SEED_MEMORIES) expect(screen.getByTestId(`row-${m.id}`)).toBeInTheDocument();
+  it('渲染传入的记忆行（数据来自真实账本，无演示种子）', () => {
+    const list = [mk({ id: 'r1' }), mk({ id: 'r2' }), mk({ id: 'r3' })];
+    render(<MemoryTable memories={list} />);
+    for (const m of list) expect(screen.getByTestId(`row-${m.id}`)).toBeInTheDocument();
   });
 
   it('cold 记忆仅显示 L2 占位符（G3）', () => {

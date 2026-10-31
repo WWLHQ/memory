@@ -83,7 +83,7 @@ describe('T11 前端登录 API client', () => {
     expect(container.textContent).toBe('alice');
   });
 
-  it('失败（网络错误）→ 不崩，回退本地只读占位', async () => {
+  it('失败（网络错误）→ 如实失败 backend_unreachable，不本地放行', async () => {
     const fetchMock = vi.fn().mockRejectedValue(new Error('network down'));
     stubFetch(fetchMock);
     const { result } = renderHook(() => useLoginMirror());
@@ -91,25 +91,37 @@ describe('T11 前端登录 API client', () => {
     await act(async () => {
       res = await result.current.login(form);
     });
-    expect(res.ok).toBe(true);
-    if (res.ok) {
-      expect(res.context.user_id).toBe('alice');
-      expect(res.context.team_id).toBe('local-readonly');
-    }
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toBe('backend_unreachable');
   });
 
-  it('失败（401）→ 不崩，回退本地只读占位', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 401, json: async () => ({}) });
+  it('批次22：后端在线但来源被拒（POST 失败 + no-cors 探针可达）→ origin_blocked', async () => {
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError('Failed to fetch')) // CORS 预检被 403 → fetch reject
+      .mockResolvedValueOnce({ type: 'opaque', ok: false, status: 0 }); // no-cors 探针：服务在线即可达
     stubFetch(fetchMock);
     const { result } = renderHook(() => useLoginMirror());
     let res!: LoginResult;
     await act(async () => {
       res = await result.current.login(form);
     });
-    expect(res.ok).toBe(true);
-    if (res.ok) {
-      expect(res.context.team_id).toBe('local-readonly');
-    }
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toBe('origin_blocked');
+    const [healthUrl, healthInit] = fetchMock.mock.calls[1] as [string, { mode?: string }];
+    expect(healthUrl).toContain('/api/health');
+    expect(healthInit.mode).toBe('no-cors');
+  });
+
+  it('失败（401）→ 如实返回后端原因，不伪造登录成功', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 401, json: async () => ({ reason: 'wrong' }) });
+    stubFetch(fetchMock);
+    const { result } = renderHook(() => useLoginMirror());
+    let res!: LoginResult;
+    await act(async () => {
+      res = await result.current.login(form);
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toBe('wrong');
   });
 
   it('logout() → POST /api/logout', async () => {

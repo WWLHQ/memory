@@ -1,14 +1,11 @@
 // REQ-012 接真内核引擎（T7）：与 fakeEngine 同签名（async），内部走 memagent-core ma.recall
-// 数据源 = 内核 InMemoryStorage（SEED_HITS 灌入）；UI 类型/横幅/预算语义不变。
+// 数据源 = 内核 InMemoryStorage（禁止注入种子；空库即无命中，返回 EMPTY 态）；UI 类型/横幅/预算语义不变。
 import type { BudgetData, ModeBannerData, RetrievalHit, Scene, ModeSel } from './types.ts';
 import { autoDispatch, budgetLevel, resolveSceneBudget, sortHits, freshness } from './logic.ts';
-import { SEED_HITS } from './seed.ts';
 import type { Memory, RecallReq } from '../../core/memagent/types.ts';
-import { createMemAgent } from '../../core/memagent/agent.ts';
 import type { MemAgent } from '../../core/memagent/types.ts';
-import { FakeLlmProvider } from '../../core/memagent/llm.ts';
-import { InMemoryStorage } from '../../core/memagent/storage.ts';
-import { JsVectorBackend } from '../../core/memagent/vector.ts';
+import { getKernel, getKernelStorage } from '../kernel.ts';
+import type { InMemoryStorage } from '../../core/memagent/storage.ts';
 
 export interface EngineResult {
   hits: RetrievalHit[];
@@ -20,66 +17,69 @@ export interface EngineResult {
 
 const DAY = 24 * 3600 * 1000;
 
-/** 页面级共享内核实例（module singleton）：内存态为真相 */
-let agentP: Promise<MemAgent> | null = null;
-
-function getAgent(): Promise<MemAgent> {
-  if (!agentP) {
-    agentP = (async () => {
-      const ma = createMemAgent({
-        form: 'web', account: { user_id: 'u_demo', team_id: 't_demo', enterprise_id: 'e_demo' },
-        llm: new FakeLlmProvider(), vector: new JsVectorBackend(), storage: new InMemoryStorage(),
-      });
-      for (const h of SEED_HITS) {
-        const m: Partial<Memory> & Pick<Memory, 'content' | 'category' | 'project_id'> = {
-          mem_id: h.memory_id,
-          project_id: 'P1',
-          content: h.content,
-          category: h.tags.includes('pref') ? 'preference' : 'fact',
-          layer: 'L2',
-          decay_class: h.decay_class,
-          pinned: h.pinned,
-          locked: h.locked,
-          importance: h.importance,
-          confidence: h.confidence,
-          half_life_days: h.half_life_days,
-          last_access_time: Date.now() - h.age_days * DAY,
-          tags: h.tags,
-        };
-        await ma._seedMemory(m);
-      }
-      return ma;
-    })();
-  }
-  return agentP;
+function getStorage(): InMemoryStorage {
+  return getKernelStorage();
 }
 
+/** 内核单例由 kernel.ts 收敛；模型配置变更会重建单例，此处不得再缓存旧实例 */
+function getAgent(): Promise<MemAgent> {
+  return Promise.resolve(getKernel());
+}
+
+/**
+ * Hit → RetrievalHit 映射：真实字段优先（importance/confidence/half_life/tags/created_at），
+ * 冷/归档/休眠层或 L2 层 → l2_only=true；无种子兜底。
+ */
 function toRetrievalHit(
   h: { mem_id: string; content: string; decay_class: string; pinned: boolean; locked: boolean; score: number },
-  seed: (typeof SEED_HITS)[number] | undefined,
+  mem: Memory | null,
 ): RetrievalHit {
-  const age_days = seed?.age_days ?? 1;
+  const now = Date.now();
+  const lastAccess = mem?.last_access_time ?? mem?.created_at ?? now;
+  const age_days = Math.max(0, Math.round((now - lastAccess) / DAY));
+  const decayClass = h.decay_class as RetrievalHit['decay_class'];
+  // R2：cold/archived/dormant 仅 L2 摘要占位
+  const l2_only = decayClass === 'cold' || decayClass === 'archived' || decayClass === 'dormant';
+  const half_life_days = mem?.half_life_days ?? 30;
   return {
     memory_id: h.mem_id,
     content: h.content,
-    // R2：cold/archived/dormant 仅 L2 摘要占位
-    l2_only: seed?.l2_only ?? (h.decay_class === 'cold' || h.decay_class === 'archived' || h.decay_class === 'dormant'),
-    decay_class: h.decay_class as RetrievalHit['decay_class'],
+    l2_only,
+    decay_class: decayClass,
     pinned: h.pinned,
     locked: h.locked,
-    freshness: seed ? freshness(seed.age_days, seed.half_life_days) : 0.5,
-    importance: seed?.importance ?? 0.5,
-    confidence: seed?.confidence ?? 0.5,
+    freshness: freshness(age_days, half_life_days),
+    importance: mem?.importance ?? 0.5,
+    confidence: mem?.confidence ?? 0.5,
     score: h.score,
-    tags: seed?.tags ?? [],
-    conflict_note: seed?.conflict_note,
+    tags: mem?.tags ?? [],
+    conflict_note: mem?.conflict_id ? `[冲突] ${mem.conflict_id}` : undefined,
     age_days,
-    half_life_days: seed?.half_life_days ?? 30,
+    half_life_days,
   };
 }
 
-export async function coreEngine(query: string, scene: Scene, modeSel: ModeSel, _requestId: string): Promise<EngineResult> {
+/**
+ * 按 mem_id 从真实账本取完整记忆（用于补 importance/confidence/tags 等 Hit 未携带字段）。
+ * 空库返回 null，不伪造数据。
+ */
+async function loadMemByMids(mids: string[]): Promise<Map<string, Memory | null>> {
+  if (mids.length === 0) return new Map();
+  const mems = await getStorage().listMemories({});
+  const idx = new Map(mems.map((m) => [m.mem_id, m] as const));
+  const out = new Map<string, Memory | null>();
+  for (const mid of mids) out.set(mid, idx.get(mid) ?? null);
+  return out;
+}
+
+/** 检索结果「记住 / 忘记」：真走内核 17.3 操作（remember/forget 提升或降低权重并记 memory_op 审计） */
+export async function coreReorderMemory(memId: string, op: 'remember' | 'forget'): Promise<{ ok: boolean; blocked_locked: boolean }> {
   const ma = await getAgent();
+  const r = await ma._memoryOp(memId, op);
+  return { ok: r.ok, blocked_locked: Boolean(r.blocked_locked) };
+}
+
+export async function coreEngine(query: string, scene: Scene, modeSel: ModeSel, _requestId: string): Promise<EngineResult> {  const ma = await getAgent();
   const table = resolveSceneBudget(scene);
   const dispatch = modeSel ? { mode: modeSel, hit_keywords: [] as string[] } : autoDispatch(query, scene);
 
@@ -89,8 +89,9 @@ export async function coreEngine(query: string, scene: Scene, modeSel: ModeSel, 
   const req: RecallReq = { query, project_id: 'P1', scene: coreScene, mode: modeSel, top_k: 5 };
   const r = await ma.recall(req);
 
+  const memByMid = await loadMemByMids(r.hits.map((h) => h.mem_id));
   const hits: RetrievalHit[] = r.hits
-    .map((h) => toRetrievalHit(h, SEED_HITS.find((s) => s.memory_id === h.mem_id)));
+    .map((h) => toRetrievalHit(h, memByMid.get(h.mem_id) ?? null));
   const ordered = sortHits(hits);
 
   const payload = r.payload_tokens;

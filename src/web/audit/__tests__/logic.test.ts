@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { actionLabel, filterEntries, chainByRequest, exportCsv, exportJson } from '../logic.ts';
-import { SEED_AUDIT } from '../seed.ts';
+import { SEED_AUDIT } from './fixtures.ts';
 import type { AuditAction, AuditEntry, AuditFilter } from '../types.ts';
 
 const ent = (over: Partial<AuditEntry>): AuditEntry => ({

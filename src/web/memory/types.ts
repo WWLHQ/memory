@@ -47,6 +47,17 @@ export interface MemoryRecord {
   ageDays: number;
   /** 半衰期天数（17.5），下限钳制 >0 */
   halfLifeDays: number;
+  /** 采集来源（§19.3 双通道）：manual / webhook / mcp；undefined = 手动写入页 */
+  source_agent?: string;
+  /** 采集会话 ID（§5.4 幂等键的一部分） */
+  session_id?: string;
+  /** 精炼来源：stub = 未接入 LLM（仅 L1，列表标「未精炼」） */
+  refined_by?: 'stub' | 'llm';
+  /** 本组层内容（L1–L6）生成时间；undefined = 批次24 之前的历史行，未记录 */
+  layers_generated_at?: string;
+  /** 该记忆在内存身的层级（内核 layer 字段）。层级页据此判定可编辑层：
+   *  编辑只写主内容 + 这一层，其余层是派生视图（改它们会破坏 sha256/向量口径）。 */
+  layer?: 'L0' | 'L1' | 'L2' | 'L3' | 'L4' | 'L5' | 'L6';
 }
 
 /** 17.3 操作类型 */
@@ -68,4 +79,11 @@ export interface OpResult {
   audit: string;
   /** 是否被 locked 约束拒绝（G4） */
   ok: boolean;
+}
+
+/** 记忆账本位置（诚实标注「存储在哪」，非演示） */
+export interface MemoryStoreLocation {
+  kind: 'file' | 'memory' | 'unknown';
+  path?: string;
+  source: string;
 }

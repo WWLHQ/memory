@@ -16,6 +16,9 @@ export function KbPolicyTable({ rows, onChange }: Props) {
     <div className="card" data-testid="kb-table">
       <b>知识库策略表（17.6）</b>
       <div className="note">六类知识库分别控制遗忘与归档；行内即改，保存前校验。</div>
+      <div className="note dim">
+        当前内核仅按上方总开关「自动整理」调度遗忘；本表数值保存为偏好记忆，尚未接入遗忘/归档执行，改动不会立即影响记忆。
+      </div>
       <table className="ltable">
         <thead>
           <tr><th>知识库</th><th>半衰期（天）</th><th>归档阈值（天）</th><th>自动合并</th><th>校验</th></tr>

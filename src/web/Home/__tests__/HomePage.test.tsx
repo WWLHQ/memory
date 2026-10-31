@@ -59,6 +59,11 @@ describe('T9 首页装配容器', () => {
     expect(container.querySelector('#btnLogout')).toBeNull();
   });
 
+  it('程序运行日志窗口已迁至日志记录页：首页不再渲染', () => {
+    const { container } = render(<HomePage raw={raw} sync={sync} loginFn={localLogin} />);
+    expect(container.querySelector('#programLog')).toBeNull();
+  });
+
   it('点 ▶ 登录 → 弹出 LoginModal', () => {
     const { container } = render(<HomePage raw={raw} sync={sync} loginFn={localLogin} />);
     fireEvent.click(container.querySelector('#btnOpenLogin')!);

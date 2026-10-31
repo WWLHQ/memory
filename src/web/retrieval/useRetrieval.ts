@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from 'react';
 import type { ModeSel, Scene } from './types.ts';
 import { coreEngine } from './coreEngine.ts';
+import { newRequestId } from '../kernel.ts';
 
 export type Phase = 'IDLE' | 'LOADING' | 'RESULT' | 'EMPTY' | 'ERROR';
 
@@ -17,14 +18,14 @@ export function useRetrieval() {
   const [errorKind, setErrorKind] = useState<'timeout' | 'breach' | null>(null);
   const [result, setResult] = useState<Awaited<ReturnType<typeof coreEngine>> | null>(null);
   const seq = useRef(0);
-  const sessionRef = useRef(`sess_${Math.random().toString(36).slice(2, 8)}`);
+  const sessionRef = useRef(newRequestId('sess'));
   /** 硬熔断禁用检索 3s（§6） */
   const [cooldown, setCooldown] = useState(false);
 
   const search = useCallback((query: string, scene: Scene, mode: ModeSel, opts?: { forceBreach?: boolean; forceTimeout?: boolean }) => {
     if (cooldown) return;
     seq.current += 1;
-    const requestId = `req_r${seq.current}`;
+    const requestId = newRequestId('req');
     setPhase('LOADING');
     setErrorKind(null);
     // 引擎 = memagent-core 内核 recall（同步内存实现，微任务级）；setTimeout 模拟网络 + §6 超时/熔断触发

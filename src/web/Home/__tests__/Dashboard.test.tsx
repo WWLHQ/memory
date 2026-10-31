@@ -10,6 +10,7 @@ import { login as localLogin, registerAccount, resetAuthStore } from '../../../a
 import { hashPassword } from '../../../auth/hash.ts';
 import type { RawHomeFeed } from '../../../home/dashboard.ts';
 import type { SyncState } from '../../../types/home.ts';
+import type { Gain } from '../../../types/agentOnboard.ts';
 
 const ACCOUNT = 'user_001';
 
@@ -37,12 +38,15 @@ const onlineSync: SyncState = { form: 'desktop', role: 'primary', lastReconcileA
 const offlineSync: SyncState = { form: 'mobile', role: 'offline', lastReconcileAt: Date.now(), pendingSync: 5 };
 
 /** 已登录外壳：挂载即调 useLogin 注入上下文 */
-function LoggedInDashboard({ rawProp = raw, sync, onTrace }: { rawProp?: RawHomeFeed; sync?: SyncState; onTrace: (id: string) => void }) {
+function LoggedInDashboard({ rawProp = raw, sync, onTrace, effectGains, storageError }: {
+  rawProp?: RawHomeFeed; sync?: SyncState; onTrace: (id: string) => void; effectGains?: Gain[];
+  storageError?: string | null;
+}) {
   const login = useLogin();
   useEffect(() => {
     login({ account: ACCOUNT, password: 'pw', form: 'desktop' });
   }, [login]);
-  return <Dashboard raw={rawProp} sync={sync} onTrace={onTrace} />;
+  return <Dashboard raw={rawProp} sync={sync} onTrace={onTrace} effectGains={effectGains} storageError={storageError} />;
 }
 
 function renderUnauth(onTrace: (id: string) => void) {
@@ -52,10 +56,19 @@ function renderUnauth(onTrace: (id: string) => void) {
     </TenantProvider>,
   );
 }
-function renderAuth(opts: { sync?: SyncState; onTrace: (id: string) => void; rawProp?: RawHomeFeed } = { onTrace: () => {} }) {
+function renderAuth(opts: {
+  sync?: SyncState; onTrace: (id: string) => void; rawProp?: RawHomeFeed; effectGains?: Gain[];
+  storageError?: string | null;
+} = { onTrace: () => {} }) {
   return render(
     <TenantProvider loginFn={localLogin}>
-      <LoggedInDashboard sync={opts.sync} onTrace={opts.onTrace} rawProp={opts.rawProp} />
+      <LoggedInDashboard
+        sync={opts.sync}
+        onTrace={opts.onTrace}
+        rawProp={opts.rawProp}
+        effectGains={opts.effectGains}
+        storageError={opts.storageError}
+      />
     </TenantProvider>,
   );
 }
@@ -72,10 +85,11 @@ describe('T7 首页 Dashboard 区块组件', () => {
     const { container } = renderUnauth(onTrace);
     expect(container.querySelector('#offPlaceholder')).not.toBeNull();
     expect(container.querySelector('#offPlaceholder2')).not.toBeNull();
-    // 数据区不渲染
+    // 数据区不渲染（关系图谱同样不渲染，未登录不泄露账本）
     expect(container.querySelector('.gain')).toBeNull();
     expect(container.querySelector('.stat')).toBeNull();
     expect(container.querySelector('.rid')).toBeNull();
+    expect(container.querySelector('#layerGraph')).toBeNull();
     expect(onTrace).not.toHaveBeenCalled();
   });
 
@@ -123,5 +137,49 @@ describe('T7 首页 Dashboard 区块组件', () => {
   it('离线端（pendingSync>0）：显示「离线 N 条待回传」', () => {
     const { container } = renderAuth({ sync: offlineSync, onTrace: () => {} });
     expect(container.textContent).toContain('离线 5 条待回传');
+  });
+
+  it('同步未实现：待回传提示明确标注未实现，不得冒充离线', () => {
+    const unwired: SyncState = { form: 'desktop', role: 'primary', lastReconcileAt: 0, pendingSync: 2, wired: false };
+    const { container } = renderAuth({ sync: unwired, onTrace: () => {} });
+    expect(container.textContent).toContain('同步未实现（本版本不提供云端同步） · 2 条待回传');
+    expect(container.textContent).not.toContain('离线 2 条待回传');
+  });
+
+  it('内核读不到（storageError）→ 明示「不是账本为空」+ 真实原因（批次25 P0-7）', () => {
+    const { container } = renderAuth({ onTrace: () => {}, storageError: 'E_IPC_TIMEOUT 宿主桥 3s 未回话' });
+    expect(container.querySelector('[data-testid="kernel-error-banner"]')).not.toBeNull();
+    expect(container.textContent).toContain('内核账本没读到');
+    expect(container.textContent).toContain('E_IPC_TIMEOUT');
+  });
+
+  it('账本可读（storageError=null）→ 不显示错误横幅', () => {
+    const { container } = renderAuth({ onTrace: () => {} });
+    expect(container.querySelector('[data-testid="kernel-error-banner"]')).toBeNull();
+  });
+
+  it('已登录：渲染 L1–L6 图谱卡片（无图谱数据时诚实空态 + 六层结构）', () => {
+    const { container } = renderAuth({ onTrace: () => {} });
+    expect(container.querySelector('#layerGraph')).not.toBeNull();
+    expect(container.querySelectorAll('[data-graph-hub]')).toHaveLength(6);
+    expect(container.querySelector('#lgEmpty')?.textContent).toContain('暂无记忆');
+  });
+
+  it('效果证据四卡渲染在关系图谱上方，且与累计四卡各自独立 id', () => {
+    const effectGains: Gain[] = [
+      { icon: '🪙', title: 'Token 节省', big: '-80%', desc: 'payload 300/1500', src: '内核账本·实时' },
+      { icon: '⚡', title: '效率提升', big: '3 次命中', desc: '真实召回', src: '内核账本·实时' },
+      { icon: '🔁', title: '跨 Agent 复用', big: '2 条 · 1 域', desc: '共享', src: '内核账本·实时' },
+      { icon: '💸', title: '模型成本节省（反代理 19.8）', big: '1 次 · ¥0.02', desc: '反代理', src: '内核账本·实时' },
+    ];
+    const { container } = renderAuth({ onTrace: () => {}, effectGains });
+    expect(container.querySelector('#gains')).not.toBeNull();
+    expect(container.querySelectorAll('#effectGains > .gain')).toHaveLength(4);
+    const section = container.querySelector('#effectEvidence')!;
+    expect(section).not.toBeNull();
+    expect(section.textContent).toContain('-80%');
+    const graph = container.querySelector('#layerGraph')!;
+    // effectEvidence 必须在 layerGraph 之前（用户要求：移动到关系图谱卡片上方）
+    expect(section.compareDocumentPosition(graph) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

@@ -1,13 +1,24 @@
 // REQ-004 T10 宿主集成：Claude Code 风格对话演示页（exercise harness，不绑定业务页）
 // 把四类标识内联进会话气泡/头部/底部，外层包 AttributionConfigProvider + 挂 AttributionToggle。
-// 示例数据对齐原型 design/ui/Agent界面内联标识_原型.html 的 MEM。
-import { useState } from 'react';
+//
+// ⚠ 接真口径（与记忆库管理页 / 自我净化与生长页 / 生命周期页一致）：
+//   数据真相 = 内核账本（桌面 = 主进程 FileStorage 持久库；浏览器降级 = 内存态）。
+//   · 已接入 agent 列表 = 接入页持久化状态（agentOnboardState）∪ 本机检测扩展卡 ∪ 账本 created_by_agent，
+//     去重后呈现（useInlineReal.collectConnectedAgents）；
+//   · 记忆库统一且不区分来源：各 agent 的记忆都写入同一主进程持久账本，调用记忆都从这一份账本读 ——
+//     不按 created_by_agent / source_agent 过滤展示，账本里所有真实记忆对所有已接入 agent 一视同仁（统一召回池）；
+//     切换 agent 只改变窗口头部标识，注入 / 背景 / token / 写入沉淀全部来自同一共享账本（不随 agent 变化）；
+//   · 应用原则 = Claude Code 应用原则（§19.7 内联标识 + 2.4.1 预算 + 9.6 aging_hint + 7.2 反馈自生长）；
+//   · 无 agent / 账本为空 → 诚实空态，绝不硬编码演示数据。
+//   租户上下文：有真实登录态 → 经 ?backend= 调 /api/me 恢复真实租户；无登录态 → 演示占位（不阻塞 UI，§0.2 红线⑤）。
+//   规格 §4 降级：宿主不支持完整标记（off 级别）→ 退化为「回答前一行统计 + 可点展开」，不阻塞主输出；
+//   evidence_thin / aging 诚实约束项不可关闭。
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import './inlineAttribution.css';
 // 内联标识演示页不要求登录（pure UI demo），显式跳过门控
-import { TenantProvider, type LoginFn, type LogoutFn } from '../Home/tenantContext.tsx';
-const DUMMY_LOGIN: LoginFn = () => ({ ok: true, context: { enterprise_id: 'demo', team_id: 'demo', user_id: 'guest', perspective: 'personal', session_id: `guest-${Date.now()}` }, audit: { action: 'login', form: 'desktop', account: 'guest', at: Date.now() } });
-const DUMMY_LOGOUT: LogoutFn = () => {};
-import { AttributionConfigProvider } from './AttributionConfig.tsx';
+import { TenantProvider, useTenant } from '../Home/tenantContext.tsx';
+import { useLoginMirror } from '../Home/useLoginMirror.ts';
+import { AttributionConfigProvider, useAttributionConfig } from './AttributionConfig.tsx';
 import { AttributionToggle } from './AttributionToggle.tsx';
 import { BackgroundChip } from './BackgroundChip.tsx';
 import { MemoryInjectionTag } from './MemoryInjectionTag.tsx';
@@ -15,89 +26,48 @@ import { AgingWarnTag } from './AgingWarnTag.tsx';
 import { TokenSavingBar } from './TokenSavingBar.tsx';
 import { AttributionSummary } from './AttributionSummary.tsx';
 import { coreInlineAuditCount, coreInlineFeedback } from './coreInline.ts';
+import { loadRealInline, type ConnectedAgent, type RealInline } from './useInlineReal.ts';
+import { KernelLoadError, kernelErrorText, useKernelLoad } from '../shared/kernelLoad.tsx';
 import type {
   AgingWarnMark,
-  BackgroundMark,
   FeedbackAction,
   MemoryInjectionMark,
-  TokenSaving,
-  WriteBackMark,
 } from '../../types/inlineAttribution.ts';
 
-// ---- 示例数据（对齐原型 MEM） ----
-const BACKGROUND: BackgroundMark = {
-  count: 8,
-  items: [
-    { id: 'mem_002', kind: 'stack', text: 'Python 3.11 / FastAPI / PostgreSQL' },
-    { id: 'mem_005', kind: 'constraint', text: 'API 响应 <200ms' },
-    { id: 'mem_009', kind: 'decision', text: '2025-07-05 选 FastAPI 而非 Django（性能优先）' },
-    { id: 'mem_014', kind: 'pitfall', text: 'Redis 连接超时 → 5s + 重试' },
-  ],
-};
-
-const INJ_005: MemoryInjectionMark = {
-  memory_id: 'mem_005',
-  summaryL2: '约束：API 响应时间 < 200ms（10.3 性能验收）',
-  decay_class: 'cold',
-  aging_hint: '',
-  request_id: 'req_017',
-};
-const INJ_009: MemoryInjectionMark = {
-  memory_id: 'mem_009',
-  summaryL2: '2025-07-05：选 FastAPI 而非 Django（性能优先，10.x 决策记录）',
-  decay_class: 'hot',
-  aging_hint: '45 天前记录，代码可能已改动，请校验（9.6 aging_hint）',
-  request_id: 'req_017',
-};
-const INJ_021: MemoryInjectionMark = {
-  memory_id: 'mem_021',
-  summaryL2: 'L2 摘要：当前 FastAPI 版本与连接池配置（45 天）',
-  decay_class: 'warm',
-  aging_hint: '7 天前创建，如未更新可能已过时（9.6）',
-  request_id: 'req_017',
-};
-
-const TOKEN_SAVING: TokenSaving = {
-  actual_payload: 780,
-  full_baseline: 1500,
-  saved: 1420,
-  breakdown: [
-    { reason: '极简模式短查询：只回 ≤600t（2.4.1）', tokens: 600 },
-    { reason: '次模式注入用 L2 占位符 ≤200t，非全文（2.4.3）', tokens: 200 },
-    { reason: '命中 mem_009 衰减层=cold，仅给 L2 摘要（15.3）', tokens: 620 },
-  ],
-};
-
-const WRITE_BACK: WriteBackMark = {
-  memory_id: 'mem_030',
-  request_id: 'req_018',
-  summary: '新结论：本次会话识别的优化点（自动写入）',
-};
-
-// 回答段落：文本 + 可选内联注入标记 + 可选老化/证据警示
-interface Seg {
-  text: string;
-  injection?: MemoryInjectionMark;
-  aging?: AgingWarnMark;
+export function AgentConversationDemo() {
+  // 外层包 TenantProvider（有 session 时 /api/me 自动恢复真实租户；无则 null），
+  // 内层 Probe 读 useTenant() 注入 user_id，让数据里的 user 标识反映真实登录身份。
+  return (
+    <TenantWrapper>
+      <InlineInner />
+    </TenantWrapper>
+  );
 }
 
-const ANSWER_SEGS: Seg[] = [
-  { text: '因为项目要求 API 响应 <200ms', injection: INJ_005 },
-  {
-    text: '，而你们 2025-07-05 记录过「选 FastAPI 而非 Django，性能优先」这一决策',
-    injection: INJ_009,
-    aging: { kind: 'aging', text: '45 天前记录，代码可能已改动，请校验（9.6 aging_hint）', request_id: 'req_017' },
-  },
-  { text: '。FastAPI 的异步 + Pydantic 校验正契合该约束。' },
-  { text: '若当前代码已改动，建议校验最新配置', injection: INJ_021 },
-  {
-    text: '另：关于连接池上限，当前证据不足',
-    aging: { kind: 'evidence_thin', text: '证据不足：未命中权威来源，建议切事实优先重试（2.4.3）', request_id: 'req_017' },
-  },
-];
+/** 外层：接真实登录镜像（有 session 时 /api/me 恢复真实租户；无 session 时 null，不阻塞演示） */
+function TenantWrapper({ children }: { children: ReactNode }) {
+  const mirror = useLoginMirror();
+  return <TenantProvider loginFn={mirror.login} onLogout={mirror.logout}>{children}</TenantProvider>;
+}
 
-export function AgentConversationDemo() {
+/** 内层：读真实租户 user_id + 真实账本数据（接真口径）渲染 agent 切换器 + 对话头部与标记 */
+function InlineInner() {
+  const ctx = useTenant();
+  const userId = ctx?.user_id ?? 'U1';
   const [toast, setToast] = useState<string | null>(null);
+  const [agentName, setAgentName] = useState<string | null>(null);
+
+  // 真实数据：内核账本（接真口径；loadRealInline 不按 agent 过滤，召回池始终是全部真实记忆，
+  // 故只加载一次）。内核读不到 → 错误态显示原因 + 重试（批次25 P0-7），绝不渲染成「无已接入 agent」。
+  const load = useCallback(() => loadRealInline(), []);
+  const ledger = useKernelLoad<RealInline>('inline-demo', load);
+  const { phase, data: real, error: loadError, retry } = ledger;
+
+  // 读到真实 agent 列表 → 默认选中第一个
+  useEffect(() => {
+    if (phase !== 'ok' || !real) return;
+    setAgentName((cur) => cur ?? real.agents[0]?.name ?? null);
+  }, [phase, real]);
 
   function showToast(msg: string) {
     setToast(msg);
@@ -105,9 +75,14 @@ export function AgentConversationDemo() {
   }
 
   // 干预反馈真写内核（ma._feedback：confirm +0.1 / reject −0.05 / disputed 挂 9.7），trust_delta 以回执为准
+  // 诚实口径：账本无该记忆 → 明确提示「账本无此记忆」，绝不伪造成功
   async function handleFeedback(id: string, action: FeedbackAction) {
     try {
       const r = await coreInlineFeedback(id, action);
+      if (!r.ok) {
+        showToast(r.message ?? `反馈失败：${id}`);
+        return;
+      }
       const pct = r.trust_delta >= 0 ? `+${r.trust_delta.toFixed(2)}` : r.trust_delta.toFixed(2);
       const label =
         action === 'confirm'
@@ -117,8 +92,8 @@ export function AgentConversationDemo() {
             : `已标错 ${id}（→ 冲突裁决队列 P7，disputed）`;
       const total = await coreInlineAuditCount();
       showToast(`${label} · 写审计 4.3（累计 ${total} 条）`);
-    } catch {
-      showToast('反馈失败：内核暂不可达');
+    } catch (e) {
+      showToast(`反馈失败：${kernelErrorText(e)}`);
     }
   }
   function handleOpenAudit(req: string) {
@@ -128,86 +103,210 @@ export function AgentConversationDemo() {
     showToast(`切事实优先重试（${req}）`);
   }
 
-  return (
-    <TenantProvider loginFn={DUMMY_LOGIN} onLogout={DUMMY_LOGOUT}>
-    <AttributionConfigProvider>
+  // 当前选中 agent 的标签（badge/label 来自真实 agent 元数据）
+  const currentAgent = real?.agents.find((a) => a.name === agentName) ?? null;
+
+  if (phase === 'loading') {
+    return (
       <div className="wrap">
-        <h1>Agent 界面内联记忆标识 · 演示</h1>
-        <div className="sub">
-          按《需求规格书_Agent界面内联记忆标识》(19.7) 实现 · 在 Claude Code 风格窗口里直接展示「这次回答/省 token 是记忆助手的功劳」· 用户可当场干预
-        </div>
-
-        {/* 主体：对话流 + Toggle + 图例 */}
-        <div className="agentframe">
-          <div className="agenthead">
-            <span className="logo">◆ Claude Code</span>
-            <span className="who">MVP·P1 · 记忆助手 MCP 已接入</span>
-            <span className="who right">project=P1 · user=U1</span>
-          </div>
-
-          {/* ⑨ 内联标识 Toggle（顶部控制） */}
-          <AttributionToggle
-            onChange={(lvl) =>
-              showToast(
-                lvl === 'full'
-                  ? '内联标识：完整显示'
-                  : lvl === 'token_only'
-                    ? '内联标识：仅 token 节省（🧠 隐藏，⚠ 仍显示）'
-                    : '内联标识：关闭（⚠ 证据/老化警示仍强制显示 · 19.7 诚实约束）',
-              )
-            }
-          />
-
-          {/* ③ 背景免重复标记 */}
-          <BackgroundChip mark={BACKGROUND} />
-
-          <div className="chat">
-            {/* 用户 */}
-            <div className="msg">
-              <div className="role">你</div>
-              <div className="bubble user">为什么当时选了 FastAPI 而不是 Django？</div>
-            </div>
-
-            {/* Agent 回答，内联记忆注入 + 老化/证据警示 */}
-            <div className="msg">
-              <div className="role">Claude Code · 基于记忆回答</div>
-              <div className="bubble">
-                {ANSWER_SEGS.map((seg, i) => (
-                  <div className="ans" key={i}>
-                    {seg.text}
-                    {seg.injection && (
-                      <MemoryInjectionTag mark={seg.injection} onFeedback={handleFeedback} onOpenAudit={handleOpenAudit} />
-                    )}
-                    {seg.aging && (
-                      <AgingWarnTag
-                        mark={seg.aging}
-                        onFeedback={handleFeedback}
-                        onSwitchFactFirst={handleSwitchFactFirst}
-                      />
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* ② Token 节省标记 */}
-            <TokenSavingBar saving={TOKEN_SAVING} />
-
-            {/* ⑧ 每回答贡献摘要 + 💾 写入沉淀标记 */}
-            <AttributionSummary injections={[INJ_005, INJ_009, INJ_021]} saving={TOKEN_SAVING} writeBack={WRITE_BACK} onOpenAudit={handleOpenAudit} />
-          </div>
-        </div>
-
-        <div className="legend">
-          <b>🧠 记忆注入</b>：hover/click 看 memory_id + L2 摘要 + 衰减层，可「记住/忘记/标错」（13.7 反馈）·
-          <b>⚡ Token 节省</b>：本次省了多少 + 分解 · <b>📎 背景免重复</b>：新会话自动带项目背景 ·
-          <b>⚠ 老化/证据</b>：命中过期（9.6 aging_hint）或证据不足（2.4.3 evidence_thin，<b>必显示不可关</b>）·
-          每处可点 request_id 跳审计（4.3）。
-        </div>
+        <div className="note">加载真实账本中…</div>
+        {toast && <div className="toast" role="status">{toast}</div>}
       </div>
+    );
+  }
 
+  if (phase === 'error') {
+    return (
+      <div className="wrap">
+        <h1>◆ Agent 界面内联标识</h1>
+        <KernelLoadError what="读取共享记忆库" error={loadError} onRetry={retry} />
+        {toast && <div className="toast" role="status">{toast}</div>}
+      </div>
+    );
+  }
+
+  // 诚实空态：无任何已接入 agent（接入页从未接入 + 账本无 created_by_agent）
+  if (!real || (real.agents.length === 0)) {
+    return (
+      <div className="wrap">
+        <h1>◆ Agent 界面内联标识</h1>
+        <div className="card" data-testid="inline-empty">
+          <b>当前无任何已接入 agent。</b>
+          <div className="note">
+            请先在「Agent 接入配置页」完成一键接入（或本机检测到已安装 agent），
+            本页将自动列出所有已接入 agent 并展示其统一记忆库的内联标识。
+            空账本不伪造数据。
+          </div>
+        </div>
+        {toast && <div className="toast" role="status">{toast}</div>}
+      </div>
+    );
+  }
+
+  return (
+    <AttributionConfigProvider>
+      <InlineInnerBody
+        real={real}
+        agentName={agentName}
+        onAgentChange={setAgentName}
+        currentAgent={currentAgent}
+        userId={userId}
+        ctx={ctx}
+        showToast={showToast}
+        handleFeedback={handleFeedback}
+        handleOpenAudit={handleOpenAudit}
+        handleSwitchFactFirst={handleSwitchFactFirst}
+      />
       {toast && <div className="toast" role="status">{toast}</div>}
     </AttributionConfigProvider>
-    </TenantProvider>
+  );
+}
+
+/** 实际渲染体：在 AttributionConfigProvider 内部，可安全调用 useAttributionConfig。
+ *  所有标记数据来自 real（真实账本）；无数据时诚实空态。 */
+function InlineInnerBody({
+  real, agentName, onAgentChange, currentAgent,
+  userId, ctx, showToast, handleFeedback, handleOpenAudit, handleSwitchFactFirst,
+}: {
+  real: RealInline;
+  agentName: string | null;
+  onAgentChange: (n: string | null) => void;
+  currentAgent: ConnectedAgent | null;
+  userId: string;
+  ctx: ReturnType<typeof useTenant>;
+  showToast: (msg: string) => void;
+  handleFeedback: (id: string, action: FeedbackAction) => void;
+  handleOpenAudit: (req: string) => void;
+  handleSwitchFactFirst: (req: string) => void;
+}) {
+  const { level, setLevel } = useAttributionConfig();
+  const injections = real.injections; // 当前 agent 真实注入标记（无则空数组）
+  const hasData = injections.length > 0;
+
+  // 回答段落：真实数据驱动（按当前 agent 注入标记生成；无数据 → 诚实空态提示）
+  const segs: Array<{ text: string; injection?: MemoryInjectionMark; aging?: AgingWarnMark }> = useMemo(() => {
+    if (injections.length === 0) return [];
+    return injections.map((inj, i) => {
+      const aging = real.agingWarns[i];
+      return {
+        text: `基于记忆 ${inj.memory_id}（${inj.decay_class} 层）：`,
+        injection: inj,
+        aging,
+      };
+    });
+  }, [injections, real.agingWarns]);
+
+  return (
+    <div className="wrap">
+      <div className="agentframe">
+        {/* Agent 窗口头部：当前选中 agent（接真：所有已接入 agent 可切换，记忆库统一） */}
+        <div className="agenthead">
+          <span className="logo">◆ {currentAgent?.name ?? 'Agent'}</span>
+          <span className="who">{currentAgent?.label ?? '扩展'} · 记忆助手 MCP 已接入</span>
+          <span className="who right">project=P1 · user={userId}{ctx ? '' : '（演示占位）'}</span>
+        </div>
+
+        {/* 已接入 agent 切换器（统一记忆库·不区分来源：底层同一共享账本，所有已接入 agent 一视同仁，
+            切换 agent 只改变窗口头部标识，召回池始终是全部真实记忆） */}
+        <div
+          data-testid="agent-switcher"
+          style={{ display: 'flex', alignItems: 'center', gap: 6, margin: '10px 0', flexWrap: 'wrap', fontSize: 12, color: 'var(--muted)' }}
+        >
+          <b style={{ fontSize: 12 }}>已接入 Agent（{real.agents.length}）· 统一记忆库·不区分来源：</b>
+          <select
+            data-testid="agent-select"
+            value={agentName ?? ''}
+            onChange={(e) => onAgentChange(e.target.value || null)}
+            style={{
+              padding: '4px 8px', background: 'var(--panel2)', border: '1px solid var(--line)',
+              borderRadius: 6, color: 'var(--txt)', fontSize: 12, minWidth: 160,
+            }}
+          >
+            {real.agents.map((a) => (
+              <option key={a.name} value={a.name}>
+                {a.name}（{a.label}）
+              </option>
+            ))}
+          </select>
+          <span style={{ fontSize: 11 }}>
+            共享账本 {real.memCount} 条 · 所有已接入 agent 共用同一召回池（19.4 跨 Agent 共享·不区分来源）
+          </span>
+        </div>
+
+        {/* ⑨ 内联标识开关（嵌入窗口内，19.7 可开关；关闭 = 降级为统计行，非移除） */}
+        <AttributionToggle
+          onChange={(lvl) =>
+            showToast(
+              lvl === 'full'
+                ? '内联标识：完整显示'
+                : lvl === 'token_only'
+                  ? '内联标识：仅 token 节省（🧠 隐藏，⚠ 仍显示）'
+                  : '内联标识：降级为统计行（⚠ 证据/老化警示仍强制显示 · 19.7 诚实约束）',
+            )
+          }
+        />
+
+        {/* ③ 背景免重复标记（会话头部，真实账本最近 8 条该 agent 记忆） */}
+        <BackgroundChip mark={real.background} />
+
+        {/* ①④ 回答流：内联记忆注入 + 老化/证据警示（⚠ 恒显示） */}
+        <div className="chat">
+          {hasData ? (
+            <>
+              <div className="msg">
+                <div className="role">你</div>
+                <div className="bubble user">为什么当时选了 FastAPI 而不是 Django？</div>
+              </div>
+
+              {/* Agent 回答（主输出不被阻塞；注入标记来自真实账本） */}
+              <div className="msg">
+                <div className="role">{currentAgent?.name ?? 'Agent'} · 基于记忆回答（真实账本）</div>
+                <div className="bubble">
+                  {segs.map((seg, i) => (
+                    <div className="ans" key={i}>
+                      {seg.text}
+                      {seg.injection && (
+                        <MemoryInjectionTag mark={seg.injection} onFeedback={handleFeedback} onOpenAudit={handleOpenAudit} />
+                      )}
+                      {seg.aging && (
+                        <AgingWarnTag
+                          mark={seg.aging}
+                          onFeedback={handleFeedback}
+                          onSwitchFactFirst={handleSwitchFactFirst}
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* ② Token 节省 + ⑧ 贡献摘要/写入沉淀：完整显示；off 级别退化为 1 行统计（§4 降级） */}
+              <TokenSavingBar saving={real.tokenSaving} />
+              <AttributionSummary injections={injections} saving={real.tokenSaving} writeBack={real.writeBack} onOpenAudit={handleOpenAudit} />
+              {level === 'off' && (
+                <button
+                  type="button"
+                  className="degrade-line"
+                  onClick={() => setLevel('full')}
+                  title="完整标识已关闭（19.7 降级）· 点此恢复"
+                >
+                  本次回答由记忆助手支撑：{injections.length} 条注入 · 省 {real.tokenSaving.saved} token · 1 条自动写入（点击恢复完整标识 ▸）
+                </button>
+              )}
+            </>
+          ) : (
+            // 诚实空态：统一共享账本中无任何可读记忆（不区分来源 agent）
+            <div className="card" data-testid="inline-shared-empty" style={{ margin: '10px 0' }}>
+              <b>统一记忆库中暂无可读记忆（所有已接入 agent 共享）。</b>
+              <div className="note">
+                所有已接入 agent 的记忆都写入同一持久账本（19.4 跨 Agent 共享·不区分来源），
+                调用记忆都从这一份账本读。请通过 MCP write_memory 工具或写入页写入记忆后，
+                此处将自动展示真实注入标识。空账本不伪造数据。
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }

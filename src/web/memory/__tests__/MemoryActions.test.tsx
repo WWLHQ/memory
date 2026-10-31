@@ -34,6 +34,22 @@ describe('MemoryActions (T4)', () => {
     expect(onAction).toHaveBeenCalledWith('unlock');
   });
 
+  it('「📂 打开」按钮上抛 onOpenFile(rec)（locked 也可点，只读查看文件）', () => {
+    const onAction = vi.fn();
+    const onOpenFile = vi.fn();
+    const rec = mk({ id: 'm1' });
+    render(<MemoryActions rec={rec} onAction={onAction} onOpenFile={onOpenFile} />);
+    screen.getByTestId('op-open').click();
+    expect(onOpenFile).toHaveBeenCalledWith(rec);
+    expect(onAction).not.toHaveBeenCalled();
+    // locked 行：打开文件仍可点
+    const onOpenFile2 = vi.fn();
+    render(<MemoryActions rec={mk({ locked: true })} onAction={onAction} onOpenFile={onOpenFile2} />);
+    expect((screen.getAllByTestId('op-open')[1] as HTMLButtonElement).disabled).toBe(false);
+    screen.getAllByTestId('op-open')[1].click();
+    expect(onOpenFile2).toHaveBeenCalled();
+  });
+
   it('彻底删除需二次确认（确认则上抛 delete）', () => {
     const onAction = vi.fn();
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);

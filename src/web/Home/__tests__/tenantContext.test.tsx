@@ -116,4 +116,54 @@ describe('T5 全局租户上下文 Provider', () => {
     expect(onLogout).toHaveBeenCalledTimes(1);
     expect(result.current.t).toBeNull();
   });
+
+  it('有 session 但无 context 时，异步调 /api/me 恢复真实租户上下文', async () => {
+    // 设置 localStorage 有 session（模拟从首页登录后切换到接入页）
+    localStorage.setItem('session:realpage', 'sess_real_123');
+    // mock fetch 返回真实租户上下文
+    const realCtx = {
+      enterprise_id: 'ent_real',
+      team_id: 'team_real',
+      user_id: 'user_real',
+      perspective: 'team' as const,
+      session_id: 'sess_real_123',
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ context: realCtx }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(
+      () => useTenant(),
+      {
+        wrapper: ({ children }) => (
+          <TenantProvider loginFn={localLogin} backendUrl="http://localhost:8201">
+            {children}
+          </TenantProvider>
+        ),
+      },
+    );
+
+    // 初始是占位上下文
+    expect(result.current?.user_id).toBe('restored-user');
+
+    // 等待异步恢复完成
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 100));
+    });
+
+    // 恢复后是真实租户上下文
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8201/api/me',
+      expect.objectContaining({ headers: expect.objectContaining({ 'x-session-id': 'sess_real_123' }) }),
+    );
+    expect(result.current?.user_id).toBe('user_real');
+    expect(result.current?.enterprise_id).toBe('ent_real');
+    expect(result.current?.team_id).toBe('team_real');
+
+    // 清理
+    localStorage.removeItem('session:realpage');
+    vi.unstubAllGlobals();
+  });
 });

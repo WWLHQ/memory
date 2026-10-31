@@ -1,24 +1,39 @@
 // P14-T3 自净化侧组件：五维评分卡 + 短路嫁接流程 + 24h 统计 + 开发者调参（6.1/6.2，G7）
 import type { DedupSample, DimKey, DimWeights, LayerThresholds, ShortCircuitStep } from './types.ts';
-import { DIM_LABELS, LAYERS } from './seed.ts';
+import { DIM_LABELS, LAYERS } from './spec.ts';
 import { isDuplicate, layerThresholdOf, weightedScore } from './logic.ts';
 
 export function DedupCard({
   sample, weights, thresholds, onResample,
 }: {
-  sample: DedupSample;
+  sample: DedupSample | null;
   weights: DimWeights;
   thresholds: LayerThresholds;
   onResample: () => void;
 }) {
+  if (!sample) {
+    return (
+      <div className="card" data-testid="dedup-card">
+        <b>五维判重 · 当前样本</b>
+        <div className="note" data-testid="dedup-empty">
+          当前记忆账本为空，无真实判重样本。请先在「写入页」或「记忆库管理页」产生真实记忆，本页将自动取最近 4 条真实记忆作判重样本（五维实算）。
+        </div>
+        <div className="row" style={{ gap: 8, marginTop: 8 }}>
+          <button className="btn" data-testid="resample-btn" onClick={onResample}>🔄 重新判重</button>
+        </div>
+      </div>
+    );
+  }
   const score = weightedScore(sample.dims, weights);
   const threshold = layerThresholdOf(sample.target, thresholds);
   const dup = isDuplicate(score, threshold);
 
   return (
     <div className="card" data-testid="dedup-card">
-      <b>五维判重 · 当前样本</b>
-      <div className="note">五维权重来自 6.1（只读展示，开发者模式可调）；llm_judge 维度依赖 P13 的 judge 模型（温度恒 0）。</div>
+      <b>五维判重 · 当前样本（真实记忆）</b>
+      <div className="note">
+        样本 = 记忆表真实最近写入内容；semantic/keyword/entity/structure 实算，llm_judge 内核当前未接 judge 模型 → 记 0（诚实未测量）。
+      </div>
       <div className="row" style={{ alignItems: 'center', gap: 12 }}>
         <span style={{ flex: 1 }} data-testid="sample-label">{sample.label}</span>
         <button className="btn" data-testid="resample-btn" onClick={onResample}>🔄 重新判重</button>
@@ -68,13 +83,13 @@ export function ShortCircuitFlow({ steps, stats }: { steps: ShortCircuitStep[]; 
           </span>
         ))}
       </div>
-      {steps[steps.length - 1].action && (
+      {steps.length > 0 && steps[steps.length - 1].action && (
         <div className="note" style={{ marginTop: 6 }}>{steps[steps.length - 1].action}</div>
       )}
       <div className="row" style={{ gap: 22, marginTop: 10 }} data-testid="stats-24h">
-        <span>24h 短路命中：<b>{stats.short_circuit_hits}</b></span>
-        <span>合并数（15.2）：<b>{stats.merged}</b></span>
-        <span>平均查重耗时：<b>{stats.avg_cost_ms}ms</b></span>
+        <span>24h 短路命中（真实 filtered 审计）：<b>{stats.short_circuit_hits}</b></span>
+        <span>24h 合并数（真实 merge 审计）：<b>{stats.merged}</b></span>
+        <span>平均查重耗时：{stats.avg_cost_ms ? <b>{stats.avg_cost_ms}ms</b> : <b>—</b>}（账本未采样）</span>
       </div>
     </div>
   );

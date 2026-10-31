@@ -5,11 +5,10 @@ import { mirrorReport } from '../mirrorClient.ts';
 import type { MemoryOp, MemoryRecord } from './types.ts';
 
 /** 默认本地后端；?backend= 可覆盖（与原型语义优先一致） */
+import { homeBaseUrl } from '../backend.ts';
+
 export function resolveBackendUrl(): string {
-  if (typeof location === 'undefined') return '';
-  const q = new URLSearchParams(location.search).get('backend');
-  if (q !== null) return q.trim();
-  return 'http://localhost:8200';
+  return homeBaseUrl();
 }
 
 export interface MemoryMirror {

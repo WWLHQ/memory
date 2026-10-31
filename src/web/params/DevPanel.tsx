@@ -1,6 +1,6 @@
 // P5-T3 开发者模式（折叠面板，暴露底层参数；2.4.3 / 2.4.1 / 15.3 / 9.10 / 15.1）
 import type { DevParams } from './types.ts';
-import { LEVEL_MAPPING } from './seed.ts';
+import { LEVEL_MAPPING } from './defaults.ts';
 import { payloadOrdered, validateNM, validateWeights } from './logic.ts';
 
 interface Props {

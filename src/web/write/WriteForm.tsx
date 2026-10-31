@@ -1,7 +1,7 @@
 // 写入页（REQ-006 / P2）表单（T3）
 // 字段与校验严格对照 §P2；project_id 只读必填（R2）；content 实时 token + ≥500 字精炼提示。
 import type { MemoryCategory, MemoryDraft, SourceKind } from './types.ts';
-import { CATEGORY_PREVIEW, SEED_TAGS } from './seed.ts';
+import { CATEGORY_PREVIEW, TAG_SUGGESTIONS } from './spec.ts';
 import { estimateTokens, needsRefine, validateDraft } from './logic.ts';
 
 const CATEGORIES: MemoryCategory[] = ['decision', 'pitfall', 'preference', 'fact', 'project', 'feedback'];
@@ -31,7 +31,7 @@ export function WriteForm({
     <div className="card" data-testid="write-form">
       <div className="field">
         <label>内容 *<span className="hint">约 {tokens} token</span>
-          {refine && <span className="hint" data-testid="refine-hint">将精炼为 L1–L6（2.2）</span>}
+          {refine && <span className="hint" data-testid="refine-hint">将清洗脱敏为 L1；未接入 LLM，L2–L6 暂不生成</span>}
         </label>
         <textarea
           data-testid="f-content"
@@ -76,7 +76,7 @@ export function WriteForm({
           onChange={(e) => setTags(e.target.value)}
         />
         <div className="tags-input" data-testid="tag-suggest">
-          {SEED_TAGS.filter((t) => !draft.tags.includes(t)).slice(0, 8).map((t) => (
+          {TAG_SUGGESTIONS.filter((t) => !draft.tags.includes(t)).slice(0, 8).map((t) => (
             <span className="pill" key={t} data-testid={`suggest-${t}`} onClick={() => addTag(t)}>{t}</span>
           ))}
         </div>

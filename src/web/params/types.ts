@@ -8,12 +8,14 @@ export type Retention = 'long' | 'months' | 'weeks' | 'short';
 /** 重要程度档位 */
 export type ImportanceLevel = 'normal' | 'important' | 'locked';
 
-/** 普通配置（文案化四项） */
+/** 普通配置（文案化四项 + 批次11 成本单价） */
 export interface NormalConfig {
   forget_speed: ForgetSpeed;
   retention: Retention;
   auto_organize: boolean;
   importance: ImportanceLevel;
+  /** 成本单价（¥ / 百万 token）；null = 未设置，聊天提示不显示金额 */
+  cost_cny_per_mtok: number | null;
 }
 
 /** 知识库策略行（17.6 六类知识库） */

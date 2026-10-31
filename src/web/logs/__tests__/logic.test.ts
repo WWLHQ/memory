@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { ensureRequestId, classifyError, aggrErrors, filterLogs, l0Auth, canDeleteAudit, L0_PASSWORD } from '../logic.ts';
-import { SEED_LOGS } from '../seed.ts';
+import { ensureRequestId, classifyError, aggrErrors, filterLogs, l0Precheck, l0Record, canDeleteAudit } from '../logic.ts';
+import { SEED_LOGS } from './fixtures.ts';
 import type { L0State, LogFilter } from '../types.ts';
 
 const NOW = new Date('2026-10-10T12:00:00Z').getTime();
@@ -61,28 +61,37 @@ describe('异常聚合（§2.3）', () => {
   });
 });
 
-describe('l0Auth（R-LOG3）', () => {
+describe('l0Precheck / l0Record（R-LOG3，密码由内核校验）', () => {
   const base: L0State = { role: 'admin', unlocked: false, failCount: 0, lockedUntil: null };
-  it('密码对 → 解锁（会话级）', () => {
-    const r = l0Auth(L0_PASSWORD, base, NOW);
+  it('内核校验通过 → 解锁（会话级）', () => {
+    const r = l0Record(base, true, NOW);
     expect(r.ok).toBe(true);
     expect(r.state.unlocked).toBe(true);
     expect(r.message).toContain('l0_view');
   });
-  it('密码错 → 计数 + 已记审计', () => {
-    expect(l0Auth('wrong', base, NOW).message).toContain('已记审计');
+  it('内核校验失败 → 计数 + 已记审计', () => {
+    expect(l0Record(base, false, NOW).message).toContain('已记审计');
+    expect(l0Record(base, false, NOW).state.failCount).toBe(1);
   });
   it('连错 5 次 → 锁 15min', () => {
     let st = base;
-    for (let i = 0; i < 5; i++) st = l0Auth('wrong', st, NOW).state;
-    const r = l0Auth(L0_PASSWORD, st, NOW);
-    expect(r.ok).toBe(false);
-    expect(r.message).toContain('锁定');
+    for (let i = 0; i < 5; i++) st = l0Record(st, false, NOW).state;
+    const pre = l0Precheck(st, NOW);
+    expect(pre.blocked).toBe(true);
+    expect(pre.message).toContain('锁定');
   });
-  it('非管理员拒绝', () => {
-    const r = l0Auth(L0_PASSWORD, { ...base, role: 'member' }, NOW);
-    expect(r.ok).toBe(false);
-    expect(r.message).toContain('非管理员');
+  it('成员无 grant_id → 拒绝并提示先申请（§4.4.3）', () => {
+    const pre = l0Precheck({ ...base, role: 'member' }, NOW);
+    expect(pre.blocked).toBe(true);
+    expect(pre.message).toContain('查阅申请');
+  });
+  it('成员持 grant_id → 放行（密码仍由内核校验）', () => {
+    expect(l0Precheck({ ...base, role: 'member' }, NOW, 'grant_1').blocked).toBe(false);
+  });
+  it('未登录 → 拒绝（不伪造身份）', () => {
+    const pre = l0Precheck({ ...base, role: null }, NOW);
+    expect(pre.blocked).toBe(true);
+    expect(pre.message).toContain('未登录');
   });
 });
 

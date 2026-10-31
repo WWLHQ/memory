@@ -2,7 +2,7 @@
 // 结构/文案/交互点严格对齐 design/ui/登录与首页_原型.html：
 //   .topbar / .hi(#hiUnauth) / #btnOpenLogin / .hi(#hiAuth) / .pill.ok(#syncPill) / #btnLogout
 // 未登录「欢迎使用…未登录 · 当前端[桌面] · [▶ 登录]」；
-// 已登录「你好 user_001 · 团队 team_001（管理员分配 · 只读）· 当前端[桌面·主源] · 已同步 · [登出]」。
+// 已登录「你好 user_001 · 团队 team_001（管理员分配 · 只读）· 当前端[桌面·主源] · 同步未实现 · [登出]」。
 // 团队只读（无编辑控件）；登录/登出动作委托父级（T9 接线），自身只消费 useTenant 渲染。
 import { useTenant } from './tenantContext.tsx';
 import type { SyncState, SyncRole } from '../../types/home.ts';
@@ -22,12 +22,22 @@ const ROLE_LABEL: Record<SyncRole, string> = {
   offline: '离线',
 };
 
+/** 依据：真实 lastReconcileAt 渲染相对时间（不再写死「刚刚」） */
+function formatAgo(ts: number): string {
+  if (!ts) return '从未对账';
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 60) return '刚刚';
+  if (s < 3600) return `${Math.floor(s / 60)} 分钟前`;
+  if (s < 86400) return `${Math.floor(s / 3600)} 小时前`;
+  return `${Math.floor(s / 86400)} 天前`;
+}
+
 export interface TopBarProps {
   /** 点击「▶ 登录」回调（T9 弹登录卡片） */
   onLogin: () => void;
   /** 点击「登出」回调（T9 清会话 + useLogout） */
   onLogout: () => void;
-  /** 已登录时的同步态；默认主源已同步（桌面） */
+  /** 已登录时的同步态；wired=false（缺省）= 本版本不提供云端同步，不得显示「已同步」 */
   sync?: SyncState;
 }
 
@@ -49,15 +59,20 @@ export function TopBar({ onLogin, onLogout, sync }: TopBarProps) {
 
   const formLabel = sync ? FORM_LABEL[sync.form] : '桌面';
   const roleLabel = sync ? ROLE_LABEL[sync.role] : '主源';
+  // 云端同步本版本未实现：绝不以本地/旧审计冒充「已同步」，只如实标注未实现
   const syncText =
-    sync && sync.role === 'offline' ? `离线 ${sync.pendingSync} 条待回传` : '已同步 · 刚刚';
+    sync?.wired === true
+      ? `已同步 · ${formatAgo(sync.lastReconcileAt)}`
+      : sync && sync.role === 'offline'
+        ? `离线 ${sync.pendingSync} 条待回传 · 同步未实现（本版本不提供云端同步）`
+        : `同步未实现（本版本不提供云端同步）${sync && sync.pendingSync > 0 ? ` · ${sync.pendingSync} 条待回传` : ''}`;
 
   return (
     <div className="topbar" id="topbar">
       <span className="hi" id="hiAuth">
-        你好，{ctx.user_id} · 团队 {ctx.team_id}（管理员分配 · 只读）· 当前端[{formLabel}·{roleLabel}]
+        你好，{ctx.user_id}{ctx.role === 'admin' ? '（管理员）' : ''} · 团队 {ctx.team_id}（管理员分配 · 只读）· 当前端[{formLabel}·{roleLabel}]
       </span>
-      <span className="pill ok" id="syncPill">
+      <span className={sync?.wired === true ? 'pill ok' : 'pill'} id="syncPill">
         {syncText}
       </span>
       <button className="btn" id="btnLogout" type="button" onClick={onLogout}>

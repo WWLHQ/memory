@@ -1,6 +1,7 @@
 // 记忆管理页（REQ-006 / P8）入口：挂载 MemoryPage。
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import '../shared/actionLog.ts';
 import { MemoryPage } from './MemoryPage.tsx';
 import './theme.css';
 

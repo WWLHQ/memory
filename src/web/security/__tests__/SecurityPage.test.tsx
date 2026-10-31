@@ -2,9 +2,25 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { SecurityPage } from '../SecurityPage.tsx';
 import { coreLoadSecurityAudit } from '../coreSecurity.ts';
+import { resetKernelForTests, setKernelL0ForTests } from '../../kernel.ts';
+import { createTestVault } from '../../../core/memagent/__tests__/l0Kit.ts';
+
+// 批次7：页面按登录角色做门禁。单测不连后端，直接注入会话角色（真实校验在 home server / IPC）。
+const session = vi.hoisted(() => ({ role: 'admin' as 'admin' | 'member' | null }));
+vi.mock('../../shared/session.ts', () => ({
+  currentSessionId: () => (session.role ? 's_test' : null),
+  useSessionContext: () => ({
+    sid: session.role ? 's_test' : null,
+    context: session.role ? { user_id: 'u_test', role: session.role } : null,
+    role: session.role,
+    loading: false,
+  }),
+}));
 
 describe('SecurityPage (P12-T4 编排)', () => {
   beforeEach(() => {
+    resetKernelForTests(); // 账本从真空态起算（无种子）
+    session.role = 'admin';
     vi.spyOn(window, 'confirm').mockReturnValue(true);
   });
 
@@ -16,39 +32,82 @@ describe('SecurityPage (P12-T4 编排)', () => {
     expect(screen.getByTestId('role-matrix')).toBeInTheDocument();
     expect(screen.getByTestId('member-table')).toBeInTheDocument();
     expect(screen.getByTestId('key-table')).toBeInTheDocument();
+    // 批次24：遗留账本清理卡挂在安全页（浏览器环境如实不可用）
+    expect(screen.getByTestId('legacy-card')).toBeInTheDocument();
+    expect(screen.getByTestId('legacy-unavailable')).toBeInTheDocument();
   });
 
-  it('示例密码实时校验：禁用词/历史重复/通过', () => {
+  it('成员/密钥无内核域模型 → 真实空态（无演示行）', () => {
+    render(<SecurityPage />);
+    expect(screen.getByTestId('member-table').querySelectorAll('tbody tr')).toHaveLength(0);
+    expect(screen.getByTestId('key-table').querySelectorAll('tbody tr')).toHaveLength(0);
+  });
+
+  it('示例密码实时校验：禁用词拦截 + 合规通过', () => {
     render(<SecurityPage />);
     fireEvent.change(screen.getByTestId('pwd-sample'), { target: { value: 'MyPassword1!' } });
     expect(screen.getByTestId('pwd-err')).toHaveTextContent('含禁用词');
-    fireEvent.change(screen.getByTestId('pwd-sample'), { target: { value: 'Abcdef1!' } });
-    expect(screen.getByTestId('pwd-err')).toHaveTextContent('与历史重复');
+    fireEvent.change(screen.getByTestId('pwd-sample'), { target: { value: 'Abc' } });
+    expect(screen.getByTestId('pwd-err')).toHaveTextContent(/长度/);
     fireEvent.change(screen.getByTestId('pwd-sample'), { target: { value: 'N3w^Secret9' } });
     expect(screen.getByTestId('pwd-ok')).toHaveTextContent('通过');
   });
 
-  it('未共享成员删除按钮禁用（跨团队约束）', () => {
+  it('策略变更真写内核审计账本（security_change）+ toast 带真实 request_id', async () => {
     render(<SecurityPage />);
-    expect(screen.getByTestId('remove-user_002')).toBeDisabled();
-    expect(screen.getByTestId('remove-user_001')).toBeEnabled();
+    fireEvent.click(screen.getByTestId('pwd-special'));
+    await waitFor(() => expect(screen.getByTestId('toast')).toHaveTextContent(/req_/));
+    const log = await coreLoadSecurityAudit();
+    expect(log).toHaveLength(1);
+    expect(log[0].op).toBe('security_change');
   });
 
-  it('轮换/吊销出 toast + request_id；吊销后状态更新；操作真写内核审计账本', async () => {
+  it('多次安全操作逐条落账（append-only，不复写）', async () => {
     render(<SecurityPage />);
-    fireEvent.click(screen.getByTestId('rotate-key_001'));
-    await waitFor(() => expect(screen.getByTestId('toast')).toHaveTextContent(/req_s\d/));
-    fireEvent.click(screen.getByTestId('revoke-key_001'));
-    expect(screen.getByTestId('key-key_001')).toHaveTextContent('已吊销');
-    // 内核账本可查（rotate/revoke 均落 security_change 审计）
+    fireEvent.click(screen.getByTestId('pwd-upper'));
+    fireEvent.click(screen.getByTestId('pwd-digit'));
     await waitFor(async () => {
       const log = await coreLoadSecurityAudit();
-      expect(log.filter((e) => e.op === 'security_change').length).toBeGreaterThanOrEqual(2);
+      expect(log).toHaveLength(2);
     });
   });
 
-  it('超 90 天密钥显示警示', () => {
+  it('普通成员/未登录：策略只读（控件禁用）且不落账', async () => {
+    session.role = 'member';
     render(<SecurityPage />);
-    expect(screen.getByTestId('key-warn-1')).toHaveTextContent(/未轮换/);
+    expect(screen.getByTestId('pwd-policy-admin-required')).toBeInTheDocument();
+    expect(screen.getByTestId('pwd-policy-controls')).toBeDisabled();
+
+    fireEvent.click(screen.getByTestId('pwd-special'));
+    expect(await coreLoadSecurityAudit()).toHaveLength(0);
+  });
+
+  it('L0 管理（管理员）：首次设置管理密码 → 写密钥解锁 → 发放一次性授权', async () => {
+    const { vault } = await createTestVault({ setup: false });
+    setKernelL0ForTests({ l0: vault, l0Admin: vault });
+    render(<SecurityPage />);
+
+    await waitFor(() => expect(screen.getByTestId('l0-setup')).toBeInTheDocument());
+    fireEvent.change(screen.getByTestId('l0-setup-pw'), { target: { value: 'adminpass-9' } });
+    fireEvent.change(screen.getByTestId('l0-setup-pw2'), { target: { value: 'adminpass-9' } });
+    fireEvent.click(screen.getByTestId('l0-setup-submit'));
+    await waitFor(() => expect(screen.getByTestId('l0-status-has')).toHaveTextContent('已设置'));
+    expect(screen.getByTestId('l0-status-write')).toHaveTextContent('已解锁');
+
+    fireEvent.change(screen.getByTestId('l0-grantee'), { target: { value: 'u_reader' } });
+    fireEvent.change(screen.getByTestId('l0-scope'), { target: { value: 'P1, P2' } });
+    fireEvent.click(screen.getByTestId('l0-grant-submit'));
+    await waitFor(() => expect(screen.getByTestId('l0-issued')).toBeInTheDocument());
+    expect(screen.getByTestId('l0-issued-pw').textContent).toMatch(/[0-9a-f]{16,}/);
+    expect(screen.getByTestId('l0-grant-table').querySelectorAll('tbody tr')).toHaveLength(1);
+    expect(screen.getByTestId('l0-status-grants')).toHaveTextContent('有效授权 1');
+  });
+
+  it('L0 管理（非管理员）：仅只读提示，不展示管理表单', () => {
+    session.role = 'member';
+    render(<SecurityPage />);
+    expect(screen.getByTestId('l0-admin-required')).toBeInTheDocument();
+    expect(screen.queryByTestId('l0-setup')).toBeNull();
+    expect(screen.queryByTestId('l0-write')).toBeNull();
   });
 });

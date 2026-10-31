@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { trustDelta, validateDraft, statShare } from '../logic.ts';
-import { SEED_FEEDBACKS } from '../seed.ts';
+import { SEED_FEEDBACKS } from './fixtures.ts';
 import type { FeedbackDraft } from '../types.ts';
 
 const d = (over: Partial<FeedbackDraft>): FeedbackDraft => ({

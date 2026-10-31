@@ -1,6 +1,6 @@
 // REQ-011 T3 过滤区（§2.1 六维）
 import type { LogAction, LogFilter, LogForm, LogLevel } from './types.ts';
-import { ACTION_LABEL, FORM_LABEL } from './seed.ts';
+import { ACTION_LABEL, FORM_LABEL } from './labels.ts';
 
 interface Props {
   filter: LogFilter;
@@ -10,7 +10,11 @@ interface Props {
 
 const LEVELS: LogLevel[] = ['info', 'warn', 'error'];
 const FORMS: LogForm[] = ['desktop', 'web', 'mobile', 'mac', 'linux', 'cli'];
-const ACTIONS: LogAction[] = ['recall', 'write', 'gc', 'sync_up', 'sync_down', 'sync_fail', 'sync_reconcile', 'conflict_resolve', 'llm_proxy', 'llm_fallback', 'l0_view', 'login', 'team_assign'];
+const ACTIONS: LogAction[] = [
+  'recall', 'write', 'graft', 'gc', 'sync_up', 'sync_down', 'sync_fail', 'sync_reconcile',
+  'conflict_resolve', 'llm_proxy', 'llm_fallback', 'l0_view', 'l0_auth_request', 'l0_auth_grant',
+  'l0_auth_revoke', 'security_change', 'login', 'team_assign',
+];
 
 export function LogFilterBar({ filter, onChange, count }: Props) {
   const toggleAction = (a: LogAction) => {

@@ -19,6 +19,16 @@ export const ACTION_LABEL: Record<AuditAction, string> = {
   mode_dispatch: '模式分流',
   mode_fallback: '模式兜底',
   evidence_thin: '证据不足',
+  graft: '层级嫁接',
+  memory_op: '记忆操作',
+  l0_view: 'L0 查阅',
+  l0_auth_fail: 'L0 授权失败',
+  l0_auth_request: 'L0 授权申请',
+  l0_auth_grant: 'L0 授权发放',
+  l0_auth_deny: 'L0 授权拒绝',
+  l0_auth_revoke: 'L0 授权撤销',
+  l0_auth_expire: 'L0 授权过期',
+  security_change: '安全变更',
 };
 
 export function actionLabel(a: AuditAction): string {

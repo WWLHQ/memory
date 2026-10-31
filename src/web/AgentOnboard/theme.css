@@ -45,6 +45,8 @@ h1 { font-size:18px; margin:0 0 2px; }
 .metric .v { font-size:16px; font-weight:700; margin-top:2px; font-family:monospace; }
 .metric .v.warn { color:var(--warn); }
 .metric .v.err { color:var(--err); }
+/* 批次21：指标样本来源（审计次数/最近时间 或 暂无样本提示），让「—」可解释 */
+.metric-src { font-size:10px; color:var(--dim); margin:-4px 0 8px; line-height:1.5; }
 .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:8px 0; }
 .pill {
   font-size:11px; padding:3px 9px; border-radius:6px;
@@ -66,6 +68,11 @@ h1 { font-size:18px; margin:0 0 2px; }
 .err-msg.show { display:block; }
 .test { background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:10px; margin-top:10px; font-size:12px; }
 .test .rid { font-family:monospace; color:var(--accent); cursor:pointer; }
+/* 批次21：无真实回执时不显示成可点击链接（未测试/后端不可达/失败） */
+.test .rid.rid-muted { color:var(--muted); cursor:default; font-family:inherit; }
+.test .test-reason { margin-top:6px; color:var(--warn); font-size:11px; line-height:1.5; }
+/* 批次22：说明「测试接入」的真实用途与“不必逐张手点”，不点不影响自动接入/指标 */
+.test .test-hint { margin-top:6px; color:var(--dim); font-size:10px; line-height:1.5; }
 .inject {
   background:#12283a; border:1px solid #2a4a66; border-radius:6px;
   padding:7px; margin-top:7px; color:#8cc7ff; font-size:11px;
@@ -100,13 +107,30 @@ h1 { font-size:18px; margin:0 0 2px; }
   padding:9px 11px; margin:6px 0; font-size:12px;
 }
 .found.unbound { opacity:.6; border-style:dashed; }
-/* 效果证据 */
-.gains { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
-@media(max-width:820px) { .gains { grid-template-columns:1fr; } }
-.gain { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px; }
-.gain h3 { font-size:13px; margin:0 0 8px; color:var(--txt); display:flex; align-items:center; gap:6px; }
-.gain .big { font-size:26px; font-weight:800; font-family:monospace; color:var(--ok); margin:4px 0; }
-.gain .desc { font-size:11px; color:var(--muted); line-height:1.5; }
-.gain .desc b { color:var(--txt); }
-.gain .src { font-size:10px; color:var(--dim); margin-top:6px; }
+/* 批次19（用户确认的统一格式）：发现卡片与已安装卡片同构 ——
+ * 首行 badge + 名称 + 右侧状态/操作（与 MVP·P1 行平齐），次行信号/来源元信息。
+ * 仅作用于 .found-card，MCP 客户端行（#mcp-client-rows .found）保持原单行布局。 */
+.found-card { flex-direction:column; align-items:stretch; gap:6px; }
+.found-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.found-actions { margin-left:auto; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.found-meta { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+/* 批次22（用户显式要求「每个配置卡片大小要统一」）：
+ * MCP 客户端卡片改为等宽网格 + 等高卡片，操作按钮贴底；窄屏自动单列。 */
+#mcp-client-rows {
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(340px,1fr));
+  gap:10px;
+  margin:10px 0 4px;
+  align-items:stretch;
+}
+#mcp-client-rows .found {
+  flex-direction:column;
+  align-items:stretch;
+  gap:6px;
+  margin:0;
+  min-height:172px;
+}
+#mcp-client-rows .found .btns { margin-top:auto; }
+#mcp-client-rows .found .inject { max-height:160px; }
+.mcp-path { margin-left:auto; text-align:right; word-break:break-all; }
 .note { font-size:11px; color:var(--dim); margin-top:14px; line-height:1.6; }

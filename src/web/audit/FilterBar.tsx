@@ -7,6 +7,9 @@ const ACTIONS: AuditAction[] = [
   'recall', 'write', 'verify', 'dispute', 'archive', 'ban', 'merge',
   'recall_skip', 'recall_breach', 'rerank_on', 'rerank_fallback', 'cold_recall',
   'mode_dispatch', 'mode_fallback', 'evidence_thin',
+  'graft', 'memory_op',
+  'l0_view', 'l0_auth_fail', 'l0_auth_request', 'l0_auth_grant',
+  'l0_auth_deny', 'l0_auth_revoke', 'l0_auth_expire', 'security_change',
 ];
 
 export function FilterBar({

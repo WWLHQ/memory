@@ -1,7 +1,7 @@
 // 冲突裁决页（REQ-006 / P7）纯逻辑层
 // 全部为纯函数，便于单测覆盖（T2 验收）。
 import type { ConflictAudit, ConflictRecord, ConflictType, Verdict } from './types.ts';
-import { CONFIRM_TYPE_LABEL } from './seed.ts';
+import { CONFIRM_TYPE_LABEL } from './labels.ts';
 
 /** 冲突类型中文可读名（9.7 四类） */
 export function typeLabel(t: ConflictType): string {

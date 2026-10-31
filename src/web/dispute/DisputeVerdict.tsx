@@ -1,7 +1,9 @@
 // P7-T4 裁决操作组件
 // 选中冲突下展示 4 种裁决（9.7 三模式 + 保留），每个裁决生成成对审计对象（18.4 约束5）。
+import { useState } from 'react';
 import type { ConflictRecord, Verdict } from './types.ts';
 import { applyVerdict } from './logic.ts';
+import { newRequestId } from '../kernel.ts';
 
 export const VERDICTS: { key: Verdict; label: string; cls: string; desc: string }[] = [
   { key: 'auto_override', label: '自动覆盖', cls: 'primary', desc: '旧值 deprecated，新值信任 +0.1，回填 replaced_by' },
@@ -12,16 +14,16 @@ export const VERDICTS: { key: Verdict; label: string; cls: string; desc: string 
 
 interface Props {
   record: ConflictRecord;
-  requestSeq: number;
   onVerdict: (v: Verdict, result: ReturnType<typeof applyVerdict>, reqId: string) => void;
 }
 
-export function DisputeVerdict({ record, requestSeq, onVerdict }: Props) {
+export function DisputeVerdict({ record, onVerdict }: Props) {
+  const [lastRid, setLastRid] = useState(newRequestId('req'));
   return (
     <div className="verdict" data-testid="verdict-panel">
       <div className="row-head">
         <b>裁决 {record.id}</b>
-        <span className="mid">req = req_d{requestSeq}（18.2-E 链路）</span>
+        <span className="mid">req = {lastRid}（18.2-E 链路）</span>
       </div>
       <div className="verdict" data-testid="verdict-buttons">
         {VERDICTS.map((vb) => (
@@ -30,7 +32,11 @@ export function DisputeVerdict({ record, requestSeq, onVerdict }: Props) {
             className={`btn ${vb.cls}`}
             data-testid={`verdict-${vb.key}`}
             title={vb.desc}
-            onClick={() => onVerdict(vb.key, applyVerdict(record, vb.key), `req_d${requestSeq}`)}
+            onClick={() => {
+              const reqId = newRequestId('req');
+              setLastRid(reqId);
+              onVerdict(vb.key, applyVerdict(record, vb.key), reqId);
+            }}
           >
             {vb.label}
           </button>

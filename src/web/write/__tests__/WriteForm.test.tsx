@@ -30,7 +30,7 @@ describe('WriteForm (T3)', () => {
 
   it('content ≥500 字 → 精炼提示出现', () => {
     render(<WriteForm draft={{ ...base, content: '字'.repeat(500) }} onChange={vi.fn()} onSubmit={vi.fn()} />);
-    expect(screen.getByTestId('refine-hint')).toHaveTextContent('将精炼为 L1–L6');
+    expect(screen.getByTestId('refine-hint')).toHaveTextContent('将清洗脱敏为 L1');
   });
 
   it('类别预览随类别变化', () => {

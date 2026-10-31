@@ -1,6 +1,7 @@
 // P14 纯逻辑单测：覆盖 R1–R5 与 C1/C2/C4/C5/C6
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_THRESHOLDS, DEFAULT_WEIGHTS, SAMPLES, SEED_DELTA, SEED_METRICS, SEED_SCHEDULE } from '../seed.ts';
+import { DEFAULT_SCHEDULE, DEFAULT_THRESHOLDS, DEFAULT_WEIGHTS } from '../spec.ts';
+import { SAMPLES, SEED_DELTA, SEED_METRICS } from './fixtures.ts';
 import {
   appendTunedPoint, auditOptimization, evaluateOptimizations, growthDelta, isDuplicate,
   layerThresholdOf, shortCircuitPath, validateSchedule, validateThresholds, validateWeights,
@@ -109,18 +110,18 @@ describe('自生长收益（7.2 / R3 / R4）', () => {
 
 describe('调度（13.3 / R5）', () => {
   it('C6：停用衰减 → 拒', () => {
-    const bad = SEED_SCHEDULE.map((s) => (s.key === 'decay' ? { ...s, enabled: false } : s)) as ScheduleItem[];
+    const bad = DEFAULT_SCHEDULE.map((s) => (s.key === 'decay' ? { ...s, enabled: false } : s)) as ScheduleItem[];
     expect(validateSchedule(bad).ok).toBe(false);
     expect(validateSchedule(bad).msg).toContain('R5');
   });
 
   it('停用非必需项 → 通过', () => {
-    const ok = SEED_SCHEDULE.map((s) => (s.key === 'archive' ? { ...s, enabled: false } : s));
+    const ok = DEFAULT_SCHEDULE.map((s) => (s.key === 'archive' ? { ...s, enabled: false } : s));
     expect(validateSchedule(ok).ok).toBe(true);
   });
 
   it('衰减项标记为 required（不可停）', () => {
-    expect(SEED_SCHEDULE.find((s) => s.key === 'decay')?.required).toBe(true);
+    expect(DEFAULT_SCHEDULE.find((s) => s.key === 'decay')?.required).toBe(true);
   });
 });
 

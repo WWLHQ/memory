@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { typeLabel, overdueDays, isOverdue, applyVerdict, auditPair, queueSort } from '../logic.ts';
-import { SEED_CONFLICTS } from '../seed.ts';
+import { SEED_CONFLICTS } from './fixtures.ts';
 import type { ConflictRecord } from '../types.ts';
 
 const rec = (over: Partial<ConflictRecord>): ConflictRecord => ({

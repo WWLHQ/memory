@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   canMigrate, freshnessPreview, importanceLevel, staleCheck, applyLifecycle, STATUS_FLOW,
 } from '../logic.ts';
-import { SEED_LIFECYCLE } from '../seed.ts';
+import { SEED_LIFECYCLE } from './fixtures.ts';
 import type { LifecycleRecord } from '../types.ts';
 
 const rec = (over: Partial<LifecycleRecord>): LifecycleRecord => ({

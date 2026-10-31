@@ -1,38 +1,16 @@
 // 用户反馈页（REQ-006 / P9）接真内核：提交走 ma._feedback（17.4 trust_delta 内核计算）
-// module singleton：SEED_OPTIONS 灌入内核，confirm/reject/disputed 真实改记忆置信并写审计。
-import type { Memory } from '../../core/memagent/types.ts';
-import { createMemAgent } from '../../core/memagent/agent.ts';
+// module singleton：内核账本为唯一真相源（禁止注入种子）；confirm/reject/disputed 真实改记忆置信并写审计。
 import type { MemAgent } from '../../core/memagent/types.ts';
-import { FakeLlmProvider } from '../../core/memagent/llm.ts';
-import { InMemoryStorage } from '../../core/memagent/storage.ts';
-import { JsVectorBackend } from '../../core/memagent/vector.ts';
-import { SEED_OPTIONS } from './seed.ts';
-import type { FeedbackDraft } from './types.ts';
+import type { InMemoryStorage } from '../../core/memagent/storage.ts';
+import { getKernel, getKernelStorage } from '../kernel.ts';
+import type { FeedbackDraft, FeedbackRecord } from './types.ts';
 
-let agentP: Promise<MemAgent> | null = null;
+function getStorage(): InMemoryStorage {
+  return getKernelStorage();
+}
 
 function getAgent(): Promise<MemAgent> {
-  if (!agentP) {
-    agentP = (async () => {
-      const ma = createMemAgent({
-        form: 'web', account: { user_id: 'u_demo', team_id: 't_demo', enterprise_id: 'e_demo' },
-        llm: new FakeLlmProvider(), vector: new JsVectorBackend(), storage: new InMemoryStorage(),
-      });
-      for (const o of SEED_OPTIONS) {
-        const m: Partial<Memory> & Pick<Memory, 'content' | 'category' | 'project_id'> = {
-          mem_id: o.id,
-          project_id: 'P1',
-          content: o.summary,
-          category: o.id === 'mem_011' ? 'preference' : 'fact',
-          layer: 'L2',
-          confidence: 0.6, // 反馈前基线（17.4 confirm/reject 在此之上增减）
-        };
-        await ma._seedMemory(m);
-      }
-      return ma;
-    })();
-  }
-  return agentP;
+  return Promise.resolve(getKernel());
 }
 
 export interface FeedbackOutcome {
@@ -50,4 +28,42 @@ export async function coreSubmitFeedback(d: FeedbackDraft): Promise<FeedbackOutc
   const r = await ma._feedback(d.memory_id, d.action);
   if (!r.ok) return { ok: false, trust_delta: 0, request_id: r.request_id };
   return { ok: true, trust_delta: r.trust_delta, request_id: r.request_id, confidence: r.mem?.confidence };
+}
+
+/** memory_id 下拉选项 = 真实账本既有记忆（空库即空，无种子兜底） */
+export interface MemoryOption { id: string; summary: string }
+
+export async function coreListMemoryOptions(): Promise<MemoryOption[]> {
+  await getAgent();
+  const mems = await getStorage().listMemories({});
+  return mems
+    .filter((m) => !m.merged_into)
+    .map((m) => ({ id: m.mem_id, summary: (m.content_orig ?? m.content).slice(0, 60) }));
+}
+
+/**
+ * 反馈历史记录 = 内核审计账本中 action='memory_op'（op ∈ confirm/reject/disputed）的条目。
+ * 真实内核 ma._feedback 写审计格式：detail = { op, trust_delta, mem_id, confidence }。
+ * 页面 FeedbackRecord 中的 rating/comment 在真实内核无对应字段，统一回退默认值（rating=3，comment=''）。
+ * 空库即空列表，无种子兜底。
+ */
+export async function coreLoadFeedbackRecords(): Promise<FeedbackRecord[]> {
+  await getAgent();
+  const audits = await getStorage().queryAudit({ action: 'memory_op' });
+  const valid = audits.filter((a) => {
+    const op = (a.detail as { op?: string })?.op;
+    return op === 'confirm' || op === 'reject' || op === 'disputed';
+  });
+  return valid.map((a, idx) => {
+    const d = a.detail as { op?: string; trust_delta?: number; mem_id?: string };
+    return {
+      id: `fb_${String(valid.length - idx).padStart(3, '0')}`,
+      memory_id: d.mem_id ?? '',
+      action: (d.op ?? 'confirm') as FeedbackRecord['action'],
+      rating: 3, // 真实内核无 rating 字段，统一默认
+      comment: '', // 真实内核无 comment 字段
+      trust_delta: d.trust_delta ?? 0,
+      created_at: new Date(a.ts).toISOString(),
+    } satisfies FeedbackRecord;
+  }).reverse(); // 新记录在前
 }

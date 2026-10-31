@@ -1,6 +1,6 @@
 // P13 纯逻辑单测：覆盖 R1–R12 红线与 C3/C7/C8/C9/C11/C13 用例
 import { describe, expect, it } from 'vitest';
-import { SEED_SOURCES, SEED_USAGES } from '../seed.ts';
+import { DEFAULT_USAGES, PROXY_CATALOG } from '../catalog.ts';
 import {
   FALLBACK_ALWAYS_ON,
   auditProxy,
@@ -18,6 +18,7 @@ import {
 import type { ProxySource, UsageConfig } from '../types.ts';
 
 const NOW = 1_700_000_000_000;
+const PROXY_SOURCES: ProxySource[] = PROXY_CATALOG.map((c) => ({ ...c, used: 120 }));
 const src = (o: Partial<ProxySource>): ProxySource => ({
   agent: 'a', model: 'm', tier: 'free', price: 0, quota: 1000, used: 0, ...o,
 });
@@ -57,12 +58,12 @@ describe('用途校验（R1/C3/R4）', () => {
   });
 
   it('R4：judge 温度非 0 被归一化为 0', () => {
-    const r = validateUsage('judge', SEED_USAGES.judge);
+    const r = validateUsage('judge', DEFAULT_USAGES.judge);
     expect(r.normalized.temperature).toBe(0);
-    const hot = { ...SEED_USAGES.judge, temperature: 0.9 };
+    const hot = { ...DEFAULT_USAGES.judge, temperature: 0.9 };
     expect(validateUsage('judge', hot).normalized.temperature).toBe(0);
     // 其他用途温度不受锁
-    expect(validateUsage('write', SEED_USAGES.write).normalized.temperature).toBe(0.3);
+    expect(validateUsage('write', DEFAULT_USAGES.write).normalized.temperature).toBe(0.3);
   });
 
   it('R3：fallback_local 恒开', () => {
@@ -94,13 +95,13 @@ describe('反代理预算与资格（R7/R8/R12）', () => {
 
 describe('auto 择优（C7/C8/C13）', () => {
   it('C7：免费有余量者优先', () => {
-    const r = autoPick(SEED_SOURCES, 0.01, NOW);
+    const r = autoPick(PROXY_SOURCES, 0.01, NOW);
     expect(r.source?.agent).toBe('claude-code');
     expect(r.reason).toContain('免费优先');
   });
 
-  it('C8：余量耗尽的免费源被剔除（cursor-trial used 480 > 0.9×500）', () => {
-    const only = [src({ agent: 'cursor-trial', quota: 500, used: 480 })];
+  it('C8：余量耗尽的免费源被剔除', () => {
+    const only = [src({ agent: 'test-agent', quota: 500, used: 500 })];
     const r = autoPick(only, 0.02, NOW);
     expect(r.source).toBeNull();
     expect(r.reason).toContain('R12');
@@ -141,9 +142,9 @@ describe('manual 择优（C9/C11/R7）', () => {
   });
 });
 
-describe('审计与种子（R8/R10）', () => {
+describe('审计与反代理目录（R8/R10）', () => {
   it('R10：审计条目含 agent:<name> + 花费 + 模式', () => {
-    const e = auditProxy(SEED_SOURCES[2], 0.35, 'auto');
+    const e = auditProxy(PROXY_SOURCES[2], 0.35, 'auto');
     expect(e.event).toBe('llm_proxy');
     expect(e.llm_proxy_source).toBe('agent:codex');
     expect(e.cost).toBe(0.35);
@@ -153,8 +154,8 @@ describe('审计与种子（R8/R10）', () => {
     expect(local.mode).toBe('local');
   });
 
-  it('种子反代理映射：x-agent 演示超限（余量 < 0）', () => {
-    const x = SEED_SOURCES.find((s) => s.agent === 'x-agent')!;
-    expect(remainingOf(x)).toBeLessThan(0);
+  it('反代理目录：x-agent 低价源在额度内（余量 > 0）', () => {
+    const x = PROXY_SOURCES.find((s) => s.agent === 'x-agent')!;
+    expect(remainingOf(x)).toBeGreaterThan(0);
   });
 });

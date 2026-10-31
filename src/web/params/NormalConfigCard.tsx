@@ -1,6 +1,6 @@
 // P5-T3 普通配置卡（17.6 文案化，G7 不暴露参数名）
 import type { NormalConfig } from './types.ts';
-import { IMPORTANCE_LABEL, RETENTION_LABEL, SPEED_LABEL } from './seed.ts';
+import { IMPORTANCE_LABEL, RETENTION_LABEL, SPEED_LABEL } from './defaults.ts';
 import { retentionToArchive, speedToHalfLife } from './logic.ts';
 
 interface Props {
@@ -63,6 +63,20 @@ export function NormalConfigCard({ cfg, onChange }: Props) {
           </label>
         ))}
         <span className="dim">锁定 → 全局豁免后台任务</span>
+      </div>
+      <div className="row">
+        <label>成本单价</label>
+        <input
+          type="number" min={0} step={0.1} style={{ width: 96 }}
+          value={cfg.cost_cny_per_mtok ?? ''}
+          data-testid="cost-price"
+          onChange={(e) => {
+            const raw = e.target.value.trim();
+            const v = raw === '' ? null : Number(raw);
+            set({ cost_cny_per_mtok: Number.isFinite(v) ? v : null }, `成本单价=${raw === '' ? '未设置' : `¥${raw}/百万token`}`);
+          }}
+        />
+        <span className="dim">¥ / 百万 token；留空 = 不显示金额（聊天提示本次/今日/全部费用）</span>
       </div>
     </div>
   );

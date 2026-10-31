@@ -1,60 +1,89 @@
-// 自我净化与生长页（REQ-009 / P14）T4 编排
-// 动作审计走内核账本（growth_op 真写 + 挂载回放）+ mirror 上抛；指标卡为演示快照（内核无此统计口径）。
-import { useEffect, useMemo, useRef, useState } from 'react';
+// 自我净化与生长页（REQ-009 / P14）· 真实数据接真版
+// 设计约定（与记忆库管理页一致）：数据真相 = 内核账本（桌面 Electron 下 = 主进程
+// FileStorage 持久库；浏览器降级 = 内存态，未写入过即空账本 → 诚实空态，绝不伪造数据）。
+// 本页所有展示数字均由 loadRealGrowth() 从真实账本实算（见 useGrowthReal.ts）：
+//   · 指标卡 = 真实召回审计 + 真实记忆表
+//   · 判重样本 = 真实记忆内容（最近 4 条），五维实算
+//   · 24h 统计 = 真实 merge / filtered 审计条数
+//   · Δ 曲线 = 真实 weight_tuned / growth_op 审计事件（无记录则空态）
+//   · 调度 / 权重 / 阈值 = 真实配置（非演示数据）
+import { useEffect, useMemo, useState } from 'react';
 import type {
-  DeltaPoint, DimKey, DimWeights, GrowthAuditEntry, Layer, LayerThresholds, ScheduleItem,
+  DeltaPoint, DimKey, DimWeights, GrowthAuditEntry, GrowthMetrics,
+  Layer, LayerThresholds, ScheduleItem,
 } from './types.ts';
+import type { RealGrowth } from './useGrowthReal.ts';
 import {
-  DEDUP_STATS_24H, DEFAULT_THRESHOLDS, DEFAULT_WEIGHTS, SAMPLES, SEED_DELTA, SEED_METRICS, SEED_SCHEDULE,
-} from './seed.ts';
+  DEFAULT_SCHEDULE, DEFAULT_THRESHOLDS, DEFAULT_WEIGHTS,
+} from './spec.ts';
 import {
-  appendTunedPoint, auditOptimization, evaluateOptimizations, growthDelta,
+  auditOptimization, evaluateOptimizations, growthDelta,
   shortCircuitPath, validateSchedule, validateThresholds, validateWeights,
 } from './logic.ts';
-import { coreGrowthAudit, coreLoadGrowthAudit } from './coreGrowth.ts';
+import { coreGrowthAudit } from './coreGrowth.ts';
 import { useGrowthMirror } from './useGrowthMirror.ts';
+import { newRequestId } from '../kernel.ts';
+import { loadRealGrowthData } from './useGrowthReal.ts';
 import { DedupCard, DevTunePanel, ShortCircuitFlow } from './DedupCards.tsx';
 import { DeltaPanel, GrowthCards, OptimizationList, ScheduleTimeline } from './GrowthPanels.tsx';
 import { useToast } from './useToast.tsx';
 
+const EMPTY_METRICS: GrowthMetrics = {
+  hit_rate: 0, confirmed: 0, rejected: 0, low_quality_ratio: 0, level_stats_L6: 0, latency_ms: 0,
+};
+
 export function GrowthPage() {
-  const [sampleIdx, setSampleIdx] = useState(0);
   const [weights, setWeights] = useState<DimWeights>({ ...DEFAULT_WEIGHTS });
   const [thresholds, setThresholds] = useState<LayerThresholds>({ ...DEFAULT_THRESHOLDS });
   const [devMode, setDevMode] = useState(false);
-  const [metrics] = useState({ ...SEED_METRICS });
-  const [schedule, setSchedule] = useState<ScheduleItem[]>(SEED_SCHEDULE.map((s) => ({ ...s })));
-  const [series, setSeries] = useState<DeltaPoint[]>(SEED_DELTA.map((p) => ({ ...p })));
+  const [schedule, setSchedule] = useState<ScheduleItem[]>([]);
   const [audit, setAudit] = useState<GrowthAuditEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [real, setReal] = useState<RealGrowth | null>(null);
+  const [sampleIdx, setSampleIdx] = useState(0);
   const { node: toast, show } = useToast();
   const reportMirror = useGrowthMirror();
-  const seq = useRef(0);
 
-  // 挂载回放：内核账本中的 growth_op 历史（重进页面不丢）
+  // 挂载：加载真实账本（记忆表 + 全量审计 + growth_op 历史）
   useEffect(() => {
     let alive = true;
-    coreLoadGrowthAudit()
-      .then((entries) => {
-        if (alive && entries.length > 0) setAudit((a) => [...entries.slice().reverse(), ...a]);
-      })
-      .catch(() => {}); // 内核不可达 → 空审计起步（safe-noop 语义）
-    return () => {
-      alive = false;
-    };
+    (async () => {
+      try {
+        const r = await loadRealGrowthData();
+        if (!alive) return;
+        setReal(r);
+        setAudit(r.growthAudit.slice().reverse());
+        setSchedule(DEFAULT_SCHEDULE.map((s) => ({ ...s })));
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
+    return () => { alive = false; };
   }, []);
 
-  const sample = SAMPLES[sampleIdx];
+  const metrics = useMemo<GrowthMetrics>(() => real?.metrics ?? EMPTY_METRICS, [real]);
+  const dedupStats = real?.dedupStats ?? { short_circuit_hits: 0, merged: 0, avg_cost_ms: 0 };
+  const samples = real?.samples ?? [];
+  const series: DeltaPoint[] = real?.deltaSeries ?? [];
+  const empty = real ? !real.available : true;
+
+  const sample = samples.length > 0 ? samples[sampleIdx % samples.length] : null;
   const opts = useMemo(() => evaluateOptimizations(metrics), [metrics]);
-  const steps = useMemo(() => shortCircuitPath(sample, weights, thresholds), [sample, weights, thresholds]);
-  // R3：Δ 取自真实 7.1 反馈（演示值：调权重前 hit_rate=0.28，回归后 0.33）
-  const delta = useMemo(() => growthDelta(metrics.hit_rate, 0.33), [metrics]);
+  const steps = useMemo(
+    () => (sample ? shortCircuitPath(sample, weights, thresholds) : []),
+    [sample, weights, thresholds],
+  );
+  // R3：Δ 取自真实 7.1 反馈（调权重前后命中率差；最近一次 weight_tuned 审计的 payload）
+  const lastTuned = audit.filter((a) => a.event === 'weight_tuned').slice(0, 1)[0];
+  const deltaBefore = real && lastTuned ? extractDeltaBefore(lastTuned) : 0;
+  const delta = useMemo(() => growthDelta(deltaBefore, metrics.hit_rate), [deltaBefore, metrics.hit_rate]);
 
   const wCheck = validateWeights(weights);
   const tCheck = validateThresholds(thresholds);
   const sCheck = validateSchedule(schedule);
 
   function handleResample() {
-    setSampleIdx((i) => (i + 1) % SAMPLES.length);
+    if (samples.length > 1) setSampleIdx((i) => (i + 1) % samples.length);
   }
 
   function patchWeights(k: DimKey, v: number) {
@@ -65,19 +94,19 @@ export function GrowthPage() {
   }
 
   async function handleManualTrigger() {
-    // R4：手动触发 = 等价一次 ⑤ 权重回归，写 weight_tuned 审计（内核账本）；曲线追加 is_tuned 点
+    // 手动触发 = 等价一次 ⑤ 权重回归，写 weight_tuned 审计（真实内核账本）；曲线追加 is_tuned 点
     const entry = auditOptimization(
       { auditName: 'weight_tuned', action: 'regress_mode_weights', key: 'regress_weights' },
       { trigger: 'manual', delta_before: delta },
       true,
     );
-    seq.current += 1;
+    const requestId = newRequestId('req');
     try {
-      await coreGrowthAudit(entry, `req_g${seq.current}`);
-      reportMirror('weight_tuned', `req_g${seq.current}`, entry);
+      await coreGrowthAudit(entry, requestId);
+      reportMirror('weight_tuned', requestId, entry);
       setAudit((a) => [entry, ...a]);
-      setSeries((s) => appendTunedPoint(s, `${s.length + 1}`, Math.min(0.06, delta * 1.4)));
-      show('已手动触发一次自生长（等价 ⑤ 回归）· 审计 weight_tuned');
+      setReal(await loadRealGrowthData()); // 曲线/指标从真实账本重新实算（不手工拼点）
+      show('已手动触发一次自生长（等价 ⑤ 回归）· 真实审计 weight_tuned');
     } catch {
       show('触发失败：内核暂不可达');
     }
@@ -90,20 +119,29 @@ export function GrowthPage() {
       show(check.msg);
       return;
     }
-    seq.current += 1;
     const entry: GrowthAuditEntry = {
       event: 'schedule_changed', action: `toggle_${key}`,
       payload: JSON.stringify({ key, enabled: next.find((s) => s.key === key)?.enabled }),
       at: Date.now(),
     };
+    const requestId = newRequestId('req');
     try {
-      await coreGrowthAudit(entry, `req_g${seq.current}`);
-      reportMirror('schedule_changed', `req_g${seq.current}`, entry);
+      await coreGrowthAudit(entry, requestId);
+      reportMirror('schedule_changed', requestId, entry);
       setSchedule(next);
-      show(`调度已更新：${key} ${next.find((s) => s.key === key)?.enabled ? '启用' : '停用'}（记审计 schedule_changed）`);
+      show(`调度已更新：${key} ${next.find((s) => s.key === key)?.enabled ? '启用' : '停用'}（真实审计 schedule_changed）`);
     } catch {
       show('调度更新失败：内核暂不可达');
     }
+  }
+
+  if (loading) {
+    return (
+      <div className="wrap" data-testid="growth-page">
+        <h1>🌱 自我净化与生长页 <span className="badge p2">REQ-009 · P14</span></h1>
+        <div className="note">加载真实账本中…</div>
+      </div>
+    );
   }
 
   return (
@@ -114,7 +152,10 @@ export function GrowthPage() {
           <input type="checkbox" data-testid="dev-mode" checked={devMode} onChange={(e) => setDevMode(e.target.checked)} /> 开发者模式（G7）
         </label>
       </h1>
-      <div className="sub">自净化（6.1 五维 + 6.2 短路嫁接）+ 自生长（7.1 指标为演示快照 · 动作审计为内核账本）</div>
+      <div className="sub">
+        自净化（6.1 五维 + 6.2 短路嫁接）+ 自生长（7.1 指标 / 7.2 Δ / 13.3 调度 全部真实账本实算）·
+        账本规模：记忆 {real?.memCount ?? 0} 条 / 审计 {real?.auditCount ?? 0} 条
+      </div>
 
       {(devMode && (!wCheck.ok || !tCheck.ok)) && (
         <div className="card" data-testid="tune-errors" style={{ borderColor: 'var(--danger,#ff5d5d)' }}>
@@ -123,13 +164,13 @@ export function GrowthPage() {
       )}
 
       <DedupCard sample={sample} weights={weights} thresholds={thresholds} onResample={handleResample} />
-      <ShortCircuitFlow steps={steps} stats={DEDUP_STATS_24H} />
+      <ShortCircuitFlow steps={steps} stats={dedupStats} />
       <DevTunePanel
         devMode={devMode} weights={weights} thresholds={thresholds}
         onWeights={patchWeights} onThresholds={patchThresholds}
       />
 
-      <GrowthCards m={metrics} />
+      <GrowthCards m={metrics} empty={empty} />
       <OptimizationList opts={opts} />
       <DeltaPanel series={series} delta={delta} audit={audit} onManualTrigger={handleManualTrigger} />
       <ScheduleTimeline schedule={schedule} onToggle={handleToggle} />
@@ -138,10 +179,20 @@ export function GrowthPage() {
         <b>红线自检</b>
         <div className="note" data-testid="redline-status">
           R1 权重和={wCheck.sum.toFixed(3)} {wCheck.ok ? '✓' : '✗'} · 阈值单调 {tCheck.ok ? '✓' : '✗'} ·
-          R2 优化全记审计 ✓ · R3 Δ 取自真实反馈 ✓ · R5 调度 {sCheck.ok ? '合法 ✓' : sCheck.msg}
+          R2 优化全记真实审计 ✓ · R3 Δ 取自真实反馈 ✓ · R5 调度 {sCheck.ok ? '合法 ✓' : sCheck.msg}
         </div>
       </div>
       {toast}
     </div>
   );
+}
+
+/** 从真实 weight_tuned 审计的 payload 提取调权重前命中率（R3 真实差值来源） */
+function extractDeltaBefore(entry: GrowthAuditEntry): number {
+  try {
+    const p = JSON.parse(entry.payload) as { delta_before?: number };
+    return p.delta_before ?? 0;
+  } catch {
+    return 0;
+  }
 }

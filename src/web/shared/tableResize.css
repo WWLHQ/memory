@@ -1,0 +1,21 @@
+/* 可拖拽列宽 + 横向滚动表格（批次24）：日志记录页 / 审计日志页共用，记忆页沿用自身 .mtable 规则。
+   不定义任何颜色变量，只依赖各页主题已提供的 --line/--accent/--muted，可安全叠加在任一主题上。 */
+.tbl-scroll { overflow-x: auto; }
+table.col-fixed { width: 100%; border-collapse: collapse; table-layout: fixed; }
+table.col-fixed thead th {
+  position: relative; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--line);
+  color: var(--muted); font-weight: 600; font-size: 11.5px; letter-spacing: .4px;
+}
+table.col-fixed thead th .col-resize {
+  position: absolute; right: 0; top: 0; height: 100%; width: 6px; cursor: col-resize;
+}
+table.col-fixed thead th .col-resize:hover,
+table.col-fixed thead th .col-resize:active { background: var(--accent); opacity: .5; }
+table.col-fixed tbody td {
+  padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top;
+  overflow: hidden; word-break: break-word; font-size: 12.5px;
+}
+table.col-fixed tbody tr:hover { background: var(--panel2); }
+/* 列宽提示条（拖表头把手即固化） */
+.col-hint { font-size: 11px; color: var(--dim); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }

@@ -1,13 +1,11 @@
 // REQ-006 端壳 mirror 客户端（G6 审计上抛）：fire-and-forget，失败静默（safe-noop 语义保留）。
 // home server 端点：POST /api/mirror/audit（持久账本）；GET /api/mirror/audit（回填查询）。
 // 后端不在时（E2E/单测/离线演示）fetch 失败被吞掉，页面交互零影响。
+import { homeBaseUrl } from './backend.ts';
 
-/** ?backend= 覆盖地址（对齐各 useXxxMirror 的同名参数）；SSR/测试环境返回空串跳过上报 */
+/** home server 基址：?backend= 覆盖（对齐各 useXxxMirror）；SSR/测试环境返回空串跳过上报 */
 export function mirrorBackendUrl(): string {
-  if (typeof location === 'undefined') return '';
-  const q = new URLSearchParams(location.search).get('backend');
-  if (q !== null) return q.trim();
-  return 'http://localhost:8200';
+  return homeBaseUrl();
 }
 
 /** 上抛一条 mirror 审计（fire-and-forget，永不抛错） */

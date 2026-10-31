@@ -6,8 +6,7 @@
 //   - logout 时同时清除两处的 session。
 // 注意：使用 localStorage 而非 sessionStorage，确保同域下所有 iframe 都能读写同一份数据。
 import { useEffect, useRef } from 'react';
-
-const KEY = 'session:realpage';
+import { SESSION_STORAGE_KEY as KEY } from '../../shared/sessionKey.ts';
 
 export function getStoredSessionId(): string | null {
   if (typeof localStorage === 'undefined') return null;

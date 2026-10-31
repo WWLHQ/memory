@@ -1,6 +1,6 @@
 // P13 纯逻辑（T2）：向量模型信息 / Key 脱敏 / 用途校验 / 反代理择优与审计
 import type { LlmUsage, ProxyAuditEntry, ProxySelectMode, ProxySource, UsageConfig, VectorModelInfo, VectorModelKey } from './types.ts';
-import { VECTOR_MODELS } from './seed.ts';
+import { VECTOR_MODELS } from './catalog.ts';
 
 /** R3：fallback_local 恒开，无关闭入口 */
 export const FALLBACK_ALWAYS_ON = true;

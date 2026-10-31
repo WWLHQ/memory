@@ -1,6 +1,6 @@
 // P12-T3 角色矩阵（只读）+ 成员表（增删改/共享标记）+ 密钥表（轮换/吊销）
 import type { ApiKey, TeamMember } from './types.ts';
-import { ROLE_MATRIX } from './seed.ts';
+import { ROLE_MATRIX } from './defaults.ts';
 import { canCrossTeam, rotateWarn } from './logic.ts';
 
 export function RoleMatrixCard() {

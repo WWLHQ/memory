@@ -1,41 +1,37 @@
 // 内联标识演示页（REQ-004 / T10）接真内核：干预反馈走 ma._feedback（confirm +0.1 /
-// reject −0.05 / disputed 挂 9.7），记忆实体 seed 进内核（对话标记的 memory_id 真实存在）。
+// reject −0.05 / disputed 挂 9.7）。
+// 数据真相 = 内核账本（桌面 = 主进程 FileStorage 持久库；浏览器降级 = 内存态）。
+// 与记忆库管理页 / 自我净化与生长页一致：禁止注入演示/种子数据 ——
+// 反馈只对账本中真实存在的 memory_id 生效；账本无该记忆 → 诚实提示「账本无此记忆」，绝不伪造。
 import type { MemAgent } from '../../core/memagent/types.ts';
-import { createMemAgent } from '../../core/memagent/agent.ts';
-import { InMemoryStorage } from '../../core/memagent/storage.ts';
-import { FakeLlmProvider } from '../../core/memagent/llm.ts';
-import { JsVectorBackend } from '../../core/memagent/vector.ts';
+import type { InMemoryStorage } from '../../core/memagent/storage.ts';
+import { getKernel, getKernelStorage } from '../kernel.ts';
 
 interface InlineCtx {
   ma: MemAgent;
   storage: InMemoryStorage;
 }
 
-let ctxP: Promise<InlineCtx> | null = null;
-
-function getCtx(): Promise<InlineCtx> {
-  if (!ctxP) {
-    ctxP = (async () => {
-      const storage = new InMemoryStorage();
-      const ma = createMemAgent({
-        form: 'web', account: { user_id: 'U1', team_id: 't_demo', enterprise_id: 'e_demo' },
-        llm: new FakeLlmProvider(), vector: new JsVectorBackend(), storage,
-      });
-      // 对话标记引用的记忆实体（mem_id 与演示标记一致，反馈真命中）
-      await ma._seedMemory({ mem_id: 'mem_005', content: '约束：API 响应时间 < 200ms（10.3 性能验收）', category: 'fact', project_id: 'P1', decay_class: 'cold', confidence: 0.6 });
-      await ma._seedMemory({ mem_id: 'mem_009', content: '2025-07-05：选 FastAPI 而非 Django（性能优先，10.x 决策记录）', category: 'decision', project_id: 'P1', decay_class: 'hot', confidence: 0.6 });
-      await ma._seedMemory({ mem_id: 'mem_021', content: 'L2 摘要：当前 FastAPI 版本与连接池配置（45 天）', category: 'context', project_id: 'P1', decay_class: 'warm', confidence: 0.6 });
-      await ma._seedMemory({ mem_id: 'mem_030', content: '新结论：本次会话识别的优化点（自动写入）', category: 'fact', project_id: 'P1', confidence: 0.6 });
-      return { ma, storage };
-    })();
-  }
-  return ctxP;
+function getCtx(): InlineCtx {
+  return { ma: getKernel(), storage: getKernelStorage() };
 }
 
-/** 干预反馈真写内核：confirm +0.1 / reject −0.05（钳 0.05）/ disputed 挂 9.7 裁决队列 */
+/** 账本是否含某条记忆（真实校验，防伪造反馈） */
+export async function ledgerHasMemory(mem_id: string): Promise<boolean> {
+  const { storage } = await getCtx();
+  const m = await storage.getMemory(mem_id);
+  return m !== null;
+}
+
+/** 干预反馈真写内核：confirm +0.1 / reject −0.05（钳 0.05）/ disputed 挂 9.7 裁决队列
+ *  诚实口径：账本无该记忆 → ok=false + 明确提示（不伪造成功） */
 export async function coreInlineFeedback(
   memory_id: string, action: 'confirm' | 'reject' | 'disputed',
-): Promise<{ ok: boolean; trust_delta: number; request_id: string }> {
+): Promise<{ ok: boolean; trust_delta: number; request_id: string; message?: string }> {
+  const has = await ledgerHasMemory(memory_id);
+  if (!has) {
+    return { ok: false, trust_delta: 0, request_id: '', message: `账本无此记忆 ${memory_id}（真实账本校验）` };
+  }
   const { ma } = await getCtx();
   const r = await ma._feedback(memory_id, action);
   return { ok: r.ok, trust_delta: r.trust_delta, request_id: r.request_id };
@@ -45,4 +41,10 @@ export async function coreInlineFeedback(
 export async function coreInlineAuditCount(): Promise<number> {
   const { storage } = await getCtx();
   return (await storage.queryAudit({ action: 'memory_op' })).length;
+}
+
+/** 真实账本记忆总数（供页面副标题「数据真相 = 内核账本 N 条」展示） */
+export async function coreLedgerMemoryCount(): Promise<number> {
+  const { storage } = await getCtx();
+  return (await storage.listMemories({})).length;
 }

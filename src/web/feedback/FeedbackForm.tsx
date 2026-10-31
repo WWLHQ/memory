@@ -1,6 +1,8 @@
 // P9-T3 反馈表单（13.7）
+import { useEffect, useState } from 'react';
 import type { FeedbackDraft, FeedbackAction } from './types.ts';
-import { CTX, SEED_OPTIONS } from './seed.ts';
+import { getTenant } from '../kernel.ts';
+import { coreListMemoryOptions, type MemoryOption } from './coreFeedback.ts';
 
 interface Props {
   draft: FeedbackDraft;
@@ -9,7 +11,19 @@ interface Props {
 }
 
 export function FeedbackForm({ draft, onChange, onSubmit }: Props) {
-  const selected = SEED_OPTIONS.find((o) => o.id === draft.memory_id);
+  const [options, setOptions] = useState<MemoryOption[]>([]);
+
+  // 下拉候选 = 真实账本既有记忆（无种子兜底；空库即无候选）
+  useEffect(() => {
+    let alive = true;
+    void coreListMemoryOptions()
+      .then((opts) => { if (alive) setOptions(opts); })
+      .catch(() => { if (alive) setOptions([]); });
+    return () => { alive = false; };
+  }, []);
+
+  const selected = options.find((o) => o.id === draft.memory_id);
+  const tenant = getTenant();
   return (
     <div className="card" data-testid="feedback-form">
       <b>反馈表单（13.7）</b>
@@ -22,7 +36,7 @@ export function FeedbackForm({ draft, onChange, onSubmit }: Props) {
           onChange={(e) => onChange({ ...draft, memory_id: e.target.value })}
         >
           <option value="">— 请选择 —</option>
-          {SEED_OPTIONS.map((o) => <option key={o.id} value={o.id}>{o.id}</option>)}
+          {options.map((o) => <option key={o.id} value={o.id}>{o.id}</option>)}
         </select>
         {selected && <span className="dim" data-testid="memory-summary">{selected.summary}</span>}
       </div>
@@ -74,8 +88,8 @@ export function FeedbackForm({ draft, onChange, onSubmit }: Props) {
 
       <div className="row" data-testid="injected-ctx">
         <label style={{ width: 90 }}>注入（R1）</label>
-        <span className="mid">{CTX.user_id}</span>
-        <span className="mid">{CTX.enterprise_id}</span>
+        <span className="mid" data-testid="ctx-user">{tenant.user_id}</span>
+        <span className="mid" data-testid="ctx-enterprise">{tenant.enterprise_id}</span>
         <span className="dim">— 全局注入，禁手填</span>
       </div>
 

@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { applyOp, decayClass, sortMemories, summarizeContent, OP_TOAST } from '../logic.ts';
-import { SEED_MEMORIES } from '../seed.ts';
 import type { MemoryRecord, MemoryOp } from '../types.ts';
 
 const base: MemoryRecord = {
@@ -106,17 +105,30 @@ describe('OP_TOAST', () => {
   });
 });
 
-describe('SEED_MEMORIES', () => {
-  it('含 cold（仅 L2）样例且 mem_004 为 cold', () => {
-    const c = SEED_MEMORIES.find((m) => m.id === 'mem_004')!;
-    expect(decayClass(c)).toBe('cold');
-    expect(summarizeContent(c)).toContain('L2 占位符');
+// 纯函数测试数据：内联构造（不再依赖演示种子 —— 页面已禁止注入演示数据）
+const cold: MemoryRecord = { ...base, id: 'c1', ageDays: 300, halfLifeDays: 30 };
+const lockedRec: MemoryRecord = { ...base, id: 'l1', locked: true };
+const pinnedRec: MemoryRecord = { ...base, id: 'p1', pinned: true };
+const recs: MemoryRecord[] = [{ ...base, id: 'n1' }, pinnedRec];
+
+describe('decayClass（cold 样例）', () => {
+  it('ageDays 300 / halfLife 30 → cold，且仅出 L2 占位符', () => {
+    expect(decayClass(cold)).toBe('cold');
+    expect(summarizeContent(cold)).toContain('L2 占位符');
   });
-  it('含 locked 样例 mem_005', () => {
-    expect(SEED_MEMORIES.find((m) => m.id === 'mem_005')!.locked).toBe(true);
+});
+
+describe('locked 样例', () => {
+  it('locked 记录按 G4 仅可解锁', () => {
+    expect(lockedRec.locked).toBe(true);
+    expect(applyOp(lockedRec, 'remember').ok).toBe(false);
+    expect(applyOp(lockedRec, 'unlock').ok).toBe(true);
   });
-  it('含 pinned 样例且排序后置顶', () => {
-    const sorted = sortMemories(SEED_MEMORIES);
+});
+
+describe('sortMemories', () => {
+  it('pinned 排序后置顶', () => {
+    const sorted = sortMemories(recs);
     expect(sorted[0].pinned).toBe(true);
   });
 });

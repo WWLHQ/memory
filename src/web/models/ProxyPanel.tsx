@@ -102,7 +102,7 @@ export function ProxyPanel(p: Props) {
             <input type="radio" name="selmode" data-testid="mode-manual" checked={p.selectMode === 'manual'} onChange={() => p.onSelectMode('manual')} /> manual 指定
           </label>
         </span>
-        <button className="btn" data-testid="proxy-simulate" onClick={p.onSimulate}>模拟一次代理调用</button>
+        <button className="btn" data-testid="proxy-simulate" onClick={p.onSimulate}>模拟一次代理调用（dry-run · 不写账本）</button>
       </div>
 
       <div className="row" style={{ gap: 24, marginTop: 10, alignItems: 'center' }}>

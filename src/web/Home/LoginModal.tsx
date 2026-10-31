@@ -8,6 +8,10 @@ import { useState, useEffect } from 'react';
 import { useLogin } from './tenantContext.tsx';
 import type { TenantContext } from '../../types/home.ts';
 import type { Form } from '../../types/agentOnboard.ts';
+import { runAutoOnboardOnLogin } from '../AgentOnboard/autoOnboard.ts';
+import { getStoredSessionId } from './crossTabAuth.ts';
+import { bindTenant } from '../kernel.ts';
+import { homeBaseUrl } from '../backend.ts';
 
 const FORM_LABEL: Record<Form, string> = {
   desktop: '桌面端',
@@ -65,12 +69,12 @@ export function LoginModal({ open, onClose, onSuccess, onScan, onKey, form }: Lo
 
   async function fetchCaptcha() {
     try {
-      const backend = new URLSearchParams(window.location.search).get('backend') ?? 'http://localhost:8200';
+      const backend = homeBaseUrl();
       const res = await fetch(`${backend}/api/captcha`);
       const body = await res.json();
       if (body.id) {
         setCaptchaId(body.id);
-        setCaptchaText(body.code); // 测试用，生产环境不返回 code
+        setCaptchaText(body.code); // 本地应用无短信通道：验证码直出给本机用户
       }
     } catch {
       // 验证码获取失败不影响主流程
@@ -90,12 +94,33 @@ export function LoginModal({ open, onClose, onSuccess, onScan, onKey, form }: Lo
     if (res.ok) {
       setErr('');
       setToast('');
+      // 登录成功即把真实租户绑定到内核身份（后续写入/审计按真实 user/team/enterprise 记账）
+      bindTenant({
+        user_id: res.context.user_id,
+        team_id: res.context.team_id,
+        enterprise_id: res.context.enterprise_id,
+      });
       onSuccess(res.context);
+      // 登录瞬间即在后台跑「一键接入本机 Agent」扫描并持久化结果：
+      // 用户之后切到 Agent 接入页时直接显示「已自动接入」完成态，不用等切页才开始扫。
+      // 传真实会话（role/sid）：连通的 MCP 客户端才允许自动写入（管理员门槛由主进程二次校验）。
+      runAutoOnboardOnLogin({
+        role: res.context.role ?? null,
+        sid: res.context.session_id || getStoredSessionId(),
+        form: detectedForm,
+      });
     } else if (res.reason === 'locked') {
       const at = res.lockedUntil ? new Date(res.lockedUntil).toLocaleTimeString() : '稍后';
       setErr(`账号已锁定，请于 ${at} 后重试（错 5 次锁 15min）`);
     } else if (res.reason === 'no_account') {
       setErr('账号不存在，已记审计');
+    } else if (res.reason === 'origin_blocked') {
+      setErr(`本机登录后端在线（${homeBaseUrl().replace(/^https?:\/\//, '')}），但当前页面来源未被信任（CORS 白名单外）`
+        + '——该端口多半被安装版桌面端占用。桌面端请直接使用已登录的应用；开发调试请重跑 npm run dev'
+        + '（默认端口不受信时会自动换备用端口起登录服务，并带 ?backend= 打开页面）。');
+    } else if (res.reason === 'backend_unreachable') {
+      setErr(`登录后端未响应（${homeBaseUrl().replace(/^https?:\/\//, '')}）。`
+        + '请从桌面端打开本应用，或运行 npm run dev（自动拉起登录服务）/ npm run dev:backend（仅起服务）。');
     } else {
       setErr('密码错误，已记审计（错 5 次锁 15min）');
     }
@@ -126,7 +151,7 @@ export function LoginModal({ open, onClose, onSuccess, onScan, onKey, form }: Lo
       return;
     }
     try {
-      const backend = new URLSearchParams(window.location.search).get('backend') ?? 'http://localhost:8200';
+      const backend = homeBaseUrl();
       const res = await fetch(`${backend}/api/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -176,7 +201,7 @@ export function LoginModal({ open, onClose, onSuccess, onScan, onKey, form }: Lo
           <input
             type="text"
             id="acc"
-            placeholder={isRegister ? '手机号或邮箱' : 'user_001 或邮箱'}
+            placeholder="手机号或邮箱"
             value={account}
             onChange={(e) => setAccount(e.target.value)}
           />
@@ -233,6 +258,9 @@ export function LoginModal({ open, onClose, onSuccess, onScan, onKey, form }: Lo
             <div className="row" id="rowTeam">
               <span className="lbl">团队</span>
               <span className="pill">团队（管理员分配 · 只读 · P12）</span>
+            </div>
+            <div className="note" data-testid="admin-hint" style={{ fontSize: 11, color: 'var(--muted)' }}>
+              首次使用管理员：<code>admin</code> / <code>Admin@123456</code>（登录后请在「账号与安全」页修改默认密码）
             </div>
           </>
         )}

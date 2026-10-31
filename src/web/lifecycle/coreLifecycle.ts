@@ -1,15 +1,25 @@
 // 生命周期页（REQ-006 / P4）接真内核：迁移/调参/批量统一走 ma._memoryOp
-// module singleton：SEED_LIFECYCLE 灌入内核；六态→内核温度映射在此，锁定(G4)由内核拒绝。
+// 数据真相 = 内核账本（桌面 Electron 下 = 主进程 FileStorage 持久库；浏览器降级内存态）。
+// 与记忆库管理页一致：禁止注入演示/种子数据 —— 列表只反映账本真实内容；
+// 空账本 → 页面诚实空态并引导去写入页产生真实记忆。
 import type { MemAgent, Memory } from '../../core/memagent/types.ts';
-import { createMemAgent } from '../../core/memagent/agent.ts';
-import { FakeLlmProvider } from '../../core/memagent/llm.ts';
-import { InMemoryStorage } from '../../core/memagent/storage.ts';
-import { JsVectorBackend } from '../../core/memagent/vector.ts';
-import { SEED_LIFECYCLE } from './seed.ts';
+import type { InMemoryStorage } from '../../core/memagent/storage.ts';
+import { getKernel, getKernelStorage } from '../kernel.ts';
+import { policyFor } from '../../core/memagent/forgetting.ts';
 import { canMigrate } from './logic.ts';
 import type { LifeOp, LifecycleRecord, MemoryStatus, OpResult } from './types.ts';
 
 const DAY = 24 * 3600 * 1000;
+
+/** 内核五档温度（17.7）→ 页面六态（9.10.1）：读到的 decay_class 翻译成六态 chip。
+ *  诚实口径：内核无 stale/deprecated 独立标记，只翻译可推的 4 态（active/hibernating/archived/dormant）。 */
+export const DECAY_TO_STATUS: Record<Memory['decay_class'], MemoryStatus> = {
+  hot: 'active',
+  warm: 'active',
+  cold: 'hibernating',
+  archived: 'archived',
+  dormant: 'dormant',
+};
 
 /** 六态（9.10.1）→ 内核五档温度（17.7）：迁移时写 decay_class */
 export const STATUS_TO_DECAY: Record<MemoryStatus, Memory['decay_class']> = {
@@ -21,37 +31,40 @@ export const STATUS_TO_DECAY: Record<MemoryStatus, Memory['decay_class']> = {
   dormant: 'dormant',
 };
 
-let agentP: Promise<MemAgent> | null = null;
+/** 共享 storage（与全部页面同源） */
+function getStorage(): InMemoryStorage {
+  return getKernelStorage();
+}
 
+/** 内核单例由 kernel.ts 收敛；模型配置变更会重建单例，此处不得再缓存旧实例 */
 function getAgent(): Promise<MemAgent> {
-  if (!agentP) {
-    agentP = (async () => {
-      const ma = createMemAgent({
-        form: 'web', account: { user_id: 'u_demo', team_id: 't_demo', enterprise_id: 'e_demo' },
-        llm: new FakeLlmProvider(), vector: new JsVectorBackend(), storage: new InMemoryStorage(),
-      });
-      for (const r of SEED_LIFECYCLE) {
-        await ma._seedMemory({
-          mem_id: r.id,
-          project_id: 'P1',
-          content: r.content,
-          category: 'fact',
-          layer: 'L2',
-          decay_class: r.decay_class,
-          pinned: r.pinned,
-          locked: r.locked,
-          importance: r.importance,
-          confidence: r.confidence,
-          access_count: r.access_count,
-          reinforce_count: r.reinforce_count,
-          half_life_days: r.half_life_days,
-          last_access_time: Date.now() - r.ageDays * DAY,
-        });
-      }
-      return ma;
-    })();
-  }
-  return agentP;
+  return Promise.resolve(getKernel());
+}
+
+/** 内核 Memory → 页面 LifecycleRecord：六态由真实 decay_class 翻译；参数取真实字段 */
+export function toLifecycleRecord(m: Memory): LifecycleRecord {
+  const ageDays = Math.max(0, Math.floor((Date.now() - (m.created_at ?? Date.now())) / DAY));
+  return {
+    id: m.mem_id,
+    content: m.content,
+    status: DECAY_TO_STATUS[m.decay_class],
+    ageDays,
+    half_life_days: m.half_life_days ?? policyFor(m.category).half_life_days,
+    confidence: m.confidence ?? 0.5,
+    importance: m.importance ?? 0.5,
+    access_count: m.access_count ?? 0,
+    reinforce_count: m.reinforce_count ?? 0,
+    pinned: m.pinned,
+    locked: m.locked,
+    decay_class: m.decay_class,
+  };
+}
+
+/** 从真实账本读全量生命周期列表（页面唯一真相源，无种子兜底） */
+export async function coreListLifecycle(): Promise<LifecycleRecord[]> {
+  const storage = getStorage();
+  const mems = await storage.listMemories({});
+  return mems.map(toLifecycleRecord);
 }
 
 /** 内核 Memory → 页面 LifecycleRecord：温度/参数回填，六态由迁移目标回填 */
@@ -64,7 +77,7 @@ function mergeBack(prev: LifecycleRecord, m: Memory, status?: MemoryStatus): Lif
     pinned: m.pinned,
     locked: m.locked,
     decay_class: m.decay_class,
-    status: status ?? prev.status,
+    status: status ?? DECAY_TO_STATUS[m.decay_class],
   };
 }
 

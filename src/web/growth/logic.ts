@@ -3,7 +3,7 @@ import type {
   DedupSample, DeltaPoint, DimKey, DimWeights, GrowthAuditEntry, GrowthMetrics,
   Layer, LayerThresholds, OptimizationItem, ScheduleItem, ShortCircuitStep,
 } from './types.ts';
-import { LAYERS, OPT_CONDITIONS } from './seed.ts';
+import { LAYERS, OPT_CONDITIONS } from './spec.ts';
 
 /** 六维加权平均（6.1：五维权重，和=1.0） */
 export function weightedScore(dims: Record<DimKey, number>, w: DimWeights): number {

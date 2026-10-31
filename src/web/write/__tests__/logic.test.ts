@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   estimateTokens, needsRefine, validateDraft, scoreDedup, thresholdForLayer, composeReceipt, jaccard,
 } from '../logic.ts';
+import { DEDUP_THRESHOLDS } from '../../../core/memagent/layerRules.ts';
 import type { MemoryDraft } from '../types.ts';
 
 const draft = (over: Partial<MemoryDraft>): MemoryDraft => ({
@@ -50,40 +51,98 @@ describe('jaccard', () => {
   });
 });
 
-describe('scoreDedup', () => {
+describe('scoreDedup（批次25 P0-3：单值本地词面预览，不再伪造五维）', () => {
   const existing = [{ id: 'm1', content: '内存泄漏踩坑' }];
-  it('完全重复 → composite 高 → is_duplicate', () => {
+  it('完全重复 → 词面分 = 1 → 命中', () => {
     const r = scoreDedup('内存泄漏踩坑', existing, 'L3');
-    expect(r.composite).toBeGreaterThanOrEqual(r.threshold);
+    expect(r.score).toBe(1);
     expect(r.is_duplicate).toBe(true);
     expect(r.matched?.id).toBe('m1');
   });
-  it('完全不同 → composite 低 → 非重复', () => {
+  it('返回值只有词面分：没有 dims / composite 这类合成维度', () => {
+    const r = scoreDedup('内存泄漏踩坑', existing, 'L3');
+    expect(r).not.toHaveProperty('dims');
+    expect(r).not.toHaveProperty('composite');
+    expect(Object.keys(r).sort()).toEqual(['is_duplicate', 'layer', 'matched', 'score', 'threshold']);
+  });
+  it('部分重合 → 分数就是 Jaccard 本身（不做仿射放大）', () => {
+    const content = '内存泄漏踩坑复盘';
+    const r = scoreDedup(content, existing, 'L3');
+    expect(r.score).toBeCloseTo(jaccard(content, '内存泄漏踩坑'), 10);
+    // 词面 0.75 < L3 阈值 0.80 → 未命中（旧版把这 0.75 摊成五条维度分再加权，判定依据是假的）
+    expect(r.is_duplicate).toBe(false);
+  });
+  it('完全不同 → 0 分 → 非重复、无匹配', () => {
     const r = scoreDedup('天气晴朗宜出行', existing, 'L3');
+    expect(r.score).toBe(0);
     expect(r.is_duplicate).toBe(false);
     expect(r.matched).toBeUndefined();
   });
-  it('阈值随层升高（L1 0.7 … L6 0.9）', () => {
-    expect(thresholdForLayer('L1')).toBeLessThan(thresholdForLayer('L6'));
-    expect(thresholdForLayer('L6')).toBe(0.9);
-    expect(thresholdForLayer('L1')).toBe(0.7);
+  it('无候选（空账本）→ 0 分、未命中，不假装有比对对象', () => {
+    const r = scoreDedup('任意内容', [], 'L3');
+    expect(r.score).toBe(0);
+    expect(r.is_duplicate).toBe(false);
+    expect(r.matched).toBeUndefined();
   });
-  it('五维加权和 = composite', () => {
-    const r = scoreDedup('内存泄漏踩坑', existing, 'L3');
-    const expectComposite = Math.round(
-      (r.dims.semantic * 0.35 + r.dims.keyword * 0.2 + r.dims.entity * 0.15 + r.dims.structure * 0.1 + r.dims.llm_judge * 0.2) * 100,
-    ) / 100;
-    expect(r.composite).toBe(expectComposite);
+  it('阈值取内核单一真源 DEDUP_THRESHOLDS（页面不得另立一套；L5 曾写 0.88，内核是 0.90）', () => {
+    for (const ln of ['L1', 'L2', 'L3', 'L4', 'L5', 'L6'] as const) {
+      expect(thresholdForLayer(ln)).toBe(DEDUP_THRESHOLDS[ln]);
+    }
+    expect(thresholdForLayer('L5')).toBe(0.9);
+    expect(scoreDedup('内存泄漏踩坑', existing, 'L5').threshold).toBe(DEDUP_THRESHOLDS.L5);
+  });
+  it('默认按 L1 预览：未接入大模型时内核只对 L1 查重（原来是硬写 L3）', () => {
+    const r = scoreDedup('内存泄漏踩坑', existing);
+    expect(r.layer).toBe('L1');
+    expect(r.threshold).toBe(DEDUP_THRESHOLDS.L1);
   });
 });
 
 describe('composeReceipt', () => {
-  it('生成 memory_id 与 L1–L6 层，L1 仅审计展开', () => {
-    const r = composeReceipt('某记忆内容');
-    expect(r.memory_id).toMatch(/^mem_/);
+  it('无 LLM：只标 L1 产出，L2–L6 明确「未精炼」', () => {
+    const r = composeReceipt('某记忆内容', 'create', {
+      memoryId: 'mem_real_1',
+      layers: { content_l1: '某记忆内容' },
+      refinedBy: 'stub',
+    });
+    expect(r.memory_id).toBe('mem_real_1');
     expect(Object.keys(r.layers)).toEqual(['L1', 'L2', 'L3', 'L4', 'L5', 'L6']);
+    expect(r.layers.L1.produced).toBe(true);
     expect(r.layers.L1.auditOnly).toBe(true);
-    expect(r.layers.L2.auditOnly).toBeFalsy();
+    expect(r.layers.L1.text).toBeUndefined(); // L1 原文仅审计展开
+    for (const ln of ['L2', 'L3', 'L4', 'L5', 'L6'] as const) {
+      expect(r.layers[ln].produced).toBe(false);
+      expect(r.layers[ln].summary).toContain('未精炼');
+    }
+    expect(r.refined_by).toBe('stub');
     expect(r.dedup_action).toBe('create');
+  });
+
+  it('LLM 真实产物：对应层展示真实文本', () => {
+    const r = composeReceipt('x', 'create', {
+      layers: { content_l1: 'l1', content_l2: '真实 L2 摘要' },
+      refinedBy: 'llm',
+    });
+    expect(r.layers.L2.produced).toBe(true);
+    expect(r.layers.L2.text).toBe('真实 L2 摘要');
+    expect(r.layers.L3.produced).toBe(false);
+    expect(r.layers.L3.summary).toContain('未精炼');
+  });
+
+  it('合并/保留：回执说明本次未新建层', () => {
+    const r = composeReceipt('x', 'merge');
+    expect(r.layers.L1.produced).toBe(false);
+    expect(r.layers.L1.summary).toContain('未新建层');
+  });
+
+  it('分支嫁接：本次新建的分支层照实展示，不伪装成合并且不丢层', () => {
+    const r = composeReceipt('x', 'graft', {
+      layers: { content_l1: 'l1' },
+      refinedBy: 'stub',
+    });
+    expect(r.dedup_action).toBe('graft');
+    expect(r.layers.L1.produced).toBe(true);
+    expect(r.layers.L1.summary).toContain('分支嫁接');
+    expect(r.layers.L2.produced).toBe(false);
   });
 });

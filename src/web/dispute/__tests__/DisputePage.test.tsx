@@ -3,51 +3,54 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { DisputePage } from '../DisputePage.tsx';
 import { DisputeQueue } from '../DisputeQueue.tsx';
 import { DisputeVerdict } from '../DisputeVerdict.tsx';
-import { SEED_CONFLICTS } from '../seed.ts';
+import { SEED_CONFLICTS } from './fixtures.ts';
 
 const NOW = new Date('2026-10-10T09:00:00.000Z').getTime();
 
-describe('DisputePage (P7-T5 编排，队列来自内核 SyncHub)', () => {
-  it('挂载渲染标题与队列（种子直渲 + 内核队列挂载同步）', async () => {
+// 页面接真：队列 = 真实账本（jsdom/浏览器 = 内存态空账本 → 诚实空态，绝不伪造种子冲突）。
+// SEED_CONFLICTS 仅作单元测试夹具（DisputeQueue/DisputeVerdict 组件直渲用法），页面不渲染。
+describe('DisputePage (P7-T5 编排·真实账本接真版)', () => {
+  it('空账本（jsdom 内存态）→ 诚实空态（不渲染种子冲突）', async () => {
     render(<DisputePage />);
-    expect(screen.getByTestId('dispute-page')).toBeInTheDocument();
-    expect(screen.getByText(/冲突裁决页/)).toBeInTheDocument();
-    expect(screen.getByText(/REQ-006/)).toBeInTheDocument();
-    expect(screen.getByTestId('queue')).toBeInTheDocument();
-    // 种子 5 条全 dispute_flag=true（内核队列内容一致）
-    expect(screen.getAllByTestId(/^queue-item-/).length).toBe(5);
+    await waitFor(() => expect(screen.getByTestId('dispute-empty')).toBeInTheDocument());
+    expect(screen.getByTestId('dispute-empty')).toHaveTextContent('当前账本无待裁决冲突');
+    // 诚实口径：无真实冲突 → 不渲染种子 cf_001~cf_005 队列项
+    expect(screen.queryByTestId('queue')).toBeNull();
   });
 
-  it('点击队列项显示裁决面板', () => {
+  it('有真实冲突（coreConflicts 返回非空）→ 渲染队列 + 裁决面板', async () => {
+    // 注入 1 条真实冲突（模拟账本有 pending 冲突）
+    const live = [SEED_CONFLICTS[0]];
+    vi.spyOn(await import('../coreDispute.ts'), 'coreConflicts').mockResolvedValue(live);
     render(<DisputePage />);
+    await waitFor(() => expect(screen.getAllByTestId(/^queue-item-/).length).toBe(1));
+    expect(screen.getAllByTestId(/^queue-item-/)[0]).toHaveTextContent(SEED_CONFLICTS[0].old_content);
     fireEvent.click(screen.getAllByTestId(/^queue-item-/)[0]);
     expect(screen.getByTestId('verdict-panel')).toBeInTheDocument();
     expect(screen.getByTestId('panel-old')).toBeInTheDocument();
     expect(screen.getByTestId('panel-new')).toBeInTheDocument();
-    // 4 种裁决按钮（9.7）
-    expect(screen.getByTestId('verdict-auto_override')).toBeInTheDocument();
-    expect(screen.getByTestId('verdict-user_confirm')).toBeInTheDocument();
-    expect(screen.getByTestId('verdict-merge')).toBeInTheDocument();
-    expect(screen.getByTestId('verdict-hold')).toBeInTheDocument();
   });
 
-  it('裁决走内核（hub.resolve + _memoryOp）→ 成对审计历史 + toast', async () => {
+  it('裁决走内核（_memoryOp + 成对审计）→ 审计历史 + toast', async () => {
+    const live = [SEED_CONFLICTS[0]];
+    vi.spyOn(await import('../coreDispute.ts'), 'coreConflicts').mockResolvedValue(live);
     render(<DisputePage />);
+    await waitFor(() => expect(screen.getAllByTestId(/^queue-item-/).length).toBe(1));
     fireEvent.click(screen.getAllByTestId(/^queue-item-/)[0]);
     fireEvent.click(screen.getByTestId('verdict-auto_override'));
     await waitFor(() => expect(screen.getByTestId('toast')).toHaveTextContent(/旧值 deprecated/));
     expect(screen.getByTestId('audit-log')).toBeInTheDocument();
-    // 审计行含 request_id（18.2-E）
-    expect(screen.getByTestId('audit-row-0')).toHaveTextContent(/req_d/);
+    expect(screen.getByTestId('audit-row-0')).toHaveTextContent(/req_/);
   });
 
-  it('hold 保持 pending（队列不出队，真实语义）', async () => {
+  // 批次25 P0-7：内核读不到 ≠ 无待裁决冲突（原来 catch 里保持空列表 → 被说成「无冲突」）
+  it('内核不可达 → 显示内核原因与重试，绝不显示「无待裁决冲突」', async () => {
+    vi.spyOn(await import('../coreDispute.ts'), 'coreConflicts').mockRejectedValue(new Error('E_IPC_TIMEOUT 宿主桥 3s 未回话'));
     render(<DisputePage />);
-    fireEvent.click(screen.getAllByTestId(/^queue-item-/)[0]);
-    fireEvent.click(screen.getByTestId('verdict-hold'));
-    await waitFor(() => expect(screen.getByTestId('toast')).toHaveTextContent(/维持 dispute/));
-    // 冲突仍在队列（SyncHub pending 不变）
-    expect(screen.getAllByTestId(/^queue-item-/).length).toBeGreaterThanOrEqual(1);
+    await waitFor(() => expect(screen.getByTestId('kernel-error')).toBeInTheDocument());
+    expect(screen.getByTestId('kernel-error-reason')).toHaveTextContent('E_IPC_TIMEOUT');
+    expect(screen.queryByTestId('dispute-empty')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('queue')).not.toBeInTheDocument();
   });
 });
 
@@ -57,9 +60,8 @@ describe('DisputeQueue (T3)', () => {
     expect(screen.getByTestId('queue-empty')).toHaveTextContent(/暂无/);
   });
 
-  it('超期高亮 + 类型徽章渲染', () => {
+  it('超期高亮 + 类型徽章渲染（测试夹具 SEED_CONFLICTS，仅组件单测用）', () => {
     render(<DisputeQueue list={SEED_CONFLICTS} now={NOW} onSelect={() => {}} />);
-    // cf_002 created 2026-09-28 → 12d 超期
     const item = screen.getByText(/默认端口 8080/).closest('li');
     expect(item).toHaveClass('overdue');
     expect(screen.getAllByText('直接矛盾').length).toBe(2);
@@ -70,8 +72,8 @@ describe('DisputeQueue (T3)', () => {
 describe('DisputeVerdict (T4)', () => {
   const base = SEED_CONFLICTS[0];
   it('渲染 4 按钮与 request 预告', () => {
-    render(<DisputeVerdict record={base} requestSeq={1} onVerdict={() => {}} />);
-    expect(screen.getByText(/req_d1/)).toBeInTheDocument();
+    render(<DisputeVerdict record={base} onVerdict={() => {}} />);
+    expect(screen.getByText(/req_[0-9A-Z]+/)).toBeInTheDocument();
     expect(screen.getByTestId('verdict-panel')).toBeInTheDocument();
     expect(screen.getAllByTestId(/^verdict-(auto_override|user_confirm|merge|hold)$/).length).toBe(4);
   });

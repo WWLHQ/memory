@@ -1,5 +1,8 @@
 // 生命周期页（REQ-006 / P4）数据模型
 // 字段对应规格 §P4（9.10 / 17.4 / 17.5）。
+// 诚实口径：数据真相 = 内核账本（桌面 = 主进程 FileStorage 持久库）。
+//   内核 Memory 无独立 stale/deprecated 字段 —— 页面只从真实 decay_class 翻译可推的 4 态，
+//   stale/deprecated 仅在账本真实记录含对应标记时展示，绝不伪造。
 
 export type MemoryStatus =
   | 'active'
@@ -15,7 +18,7 @@ export interface LifecycleRecord {
   id: string;
   content: string;
   status: MemoryStatus;
-  /** 9.7 deprecated 替代（点跳替代记忆详情占位） */
+  /** 9.7 deprecated 替代（账本真实记录含 merged_into/replaced 时才填；否则 undefined） */
   replaced_by?: string;
   replaced_at?: string;
   ageDays: number;

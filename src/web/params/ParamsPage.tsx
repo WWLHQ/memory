@@ -1,58 +1,61 @@
 // 全局参数页（REQ-006 / P5）T4 编排
+// ⚠ 内核读不到（批次25 P0-7）：不再静默把默认值当成「已保存参数」——三态加载 + 来源说明 + 重试。
 import { useEffect, useRef, useState } from 'react';
-import { DEFAULT_CONFIG, DEFAULT_DEV, SEED_KB_POLICIES } from './seed.ts';
+import { DEFAULT_CONFIG, DEFAULT_DEV, DEFAULT_KB_POLICIES } from './defaults.ts';
 import { validateAll } from './logic.ts';
 import { useParamsMirror } from './useParamsMirror.ts';
 import { coreLoadParams, coreSaveParams } from './coreParams.ts';
+import { KernelLoadError, kernelErrorText, useKernelLoad } from '../shared/kernelLoad.tsx';
+import { newRequestId } from '../kernel.ts';
 import { NormalConfigCard } from './NormalConfigCard.tsx';
 import { KbPolicyTable } from './KbPolicyTable.tsx';
+import { KbManagementCard } from './KbManagementCard.tsx';
 import { DevPanel } from './DevPanel.tsx';
 import { useToast } from './useToast.tsx';
 import type { DevParams, KbPolicyRow, NormalConfig } from './types.ts';
 
-export function ParamsPage() {
+type ParamsSnapshot = Awaited<ReturnType<typeof coreLoadParams>>;
+
+export function ParamsPage({ load = coreLoadParams }: { load?: () => Promise<ParamsSnapshot> } = {}) {
   const [cfg, setCfg] = useState<NormalConfig>(DEFAULT_CONFIG);
-  const [kbs, setKbs] = useState<KbPolicyRow[]>(SEED_KB_POLICIES);
+  const [kbs, setKbs] = useState<KbPolicyRow[]>(DEFAULT_KB_POLICIES);
   const [dev, setDev] = useState<DevParams>(DEFAULT_DEV);
   const [changed, setChanged] = useState<string[]>([]);
   const { node: toast, show } = useToast();
   const mirror = useParamsMirror();
-  const seq = useRef(0);
+  const snapshot = useKernelLoad<ParamsSnapshot>('params', load);
+  const { phase, data: saved, error: loadError, retry } = snapshot;
+  const touchedRef = useRef(false);
 
-  // 挂载回填：内核 preference 快照（无快照 → 保持默认值）
+  // 挂载/重试回填：只有真读到内核快照才覆盖默认值（null = 内核里没有快照，保持默认并如实标注）；
+  // 用户一旦改过任意字段就不再回填，避免异步快照迟到后覆盖用户已输入的编辑。
   useEffect(() => {
-    let alive = true;
-    coreLoadParams()
-      .then((saved) => {
-        if (!saved || !alive) return;
-        setCfg(saved.cfg);
-        setKbs(saved.kbs);
-        setDev(saved.dev);
-      })
-      .catch(() => {}); // 内核不可达 → 保持默认（safe-noop 语义）
-    return () => {
-      alive = false;
-    };
-  }, []);
+    if (phase !== 'ok' || !saved || touchedRef.current) return;
+    setCfg(saved.cfg);
+    setKbs(saved.kbs);
+    setDev(saved.dev);
+  }, [phase, saved]);
 
   const errors = validateAll(cfg, kbs, dev);
 
-  const track = (label: string) => setChanged((prev) => [...new Set([...prev, label])]);
+  const track = (label: string) => {
+    touchedRef.current = true;
+    setChanged((prev) => [...new Set([...prev, label])]);
+  };
 
   const handleSave = async () => {
     if (errors.length > 0) {
       show(`保存被拦截：${errors[0]}`);
       return;
     }
-    seq.current += 1;
-    const requestId = `req_p${seq.current}`;
+    const requestId = newRequestId('req');
     try {
       const receipt = await coreSaveParams(cfg, kbs, dev, requestId); // 内核真写 + param_save 审计
       mirror.save(cfg, kbs, dev, receipt.request_id);
       show(`已保存全局参数（${receipt.request_id}）`);
       setChanged([]);
-    } catch {
-      show('保存失败：内核暂不可达');
+    } catch (e) {
+      show(`保存失败：${kernelErrorText(e)}`); // 内核真实原因，不写成「暂不可达」猜测
     }
   };
 
@@ -60,6 +63,15 @@ export function ParamsPage() {
     <div className="wrap" data-testid="params-page">
       <h1>🧩 全局参数页 <span className="badge p2">REQ-006 · P5</span></h1>
       <div className="sub">17.6 文案化配置（G7 不暴露参数名）· 内核 preference 快照为真相</div>
+
+      {phase === 'loading' && <div className="note" data-testid="params-loading">正在从内核读取已保存参数…</div>}
+      {phase === 'error' && <KernelLoadError what="读取内核已保存参数" error={loadError} onRetry={retry} />}
+      {phase === 'ok' && !saved && (
+        <div className="note" data-testid="params-default">
+          内核暂无已保存参数快照，下表是<b>默认值</b>（不是内核里的设置）。点「保存全局参数」即写入内核账本并记 param_save 审计。
+        </div>
+      )}
+      {phase === 'ok' && saved && <div className="note" data-testid="params-from-kernel">当前表单已回填内核中已保存的参数快照。</div>}
 
       <NormalConfigCard
         cfg={cfg}
@@ -69,6 +81,7 @@ export function ParamsPage() {
         rows={kbs}
         onChange={(next, label) => { setKbs(next); track(label); }}
       />
+      <KbManagementCard />
       <DevPanel
         dev={dev}
         onChange={(next, label) => { setDev(next); track(label); }}

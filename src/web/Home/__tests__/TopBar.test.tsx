@@ -90,6 +90,26 @@ describe('T6 首页顶栏组件', () => {
     expect(container.querySelector('#hiUnauth')).not.toBeNull();
   });
 
+  it('同步未实现：syncPill 明确标注「本版本不提供云端同步」，绝不显示「已同步」', () => {
+    const { container } = renderTopBar({
+      syncProp: { form: 'desktop', role: 'primary', lastReconcileAt: Date.now(), pendingSync: 2 },
+    });
+    fireEvent.click(container.querySelector('#btnOpenLogin')!);
+    const pill = container.querySelector('#syncPill')!;
+    expect(pill.textContent).toContain('同步未实现');
+    expect(pill.textContent).toContain('本版本不提供云端同步');
+    expect(pill.textContent).toContain('2 条待回传');
+    expect(pill.textContent).not.toContain('已同步');
+  });
+
+  it('wired=true 才显示「已同步 · 时间」', () => {
+    const { container } = renderTopBar({
+      syncProp: { form: 'desktop', role: 'primary', lastReconcileAt: Date.now(), pendingSync: 0, wired: true },
+    });
+    fireEvent.click(container.querySelector('#btnOpenLogin')!);
+    expect(container.querySelector('#syncPill')!.textContent).toContain('已同步');
+  });
+
   it('团队文案只读：hiAuth 含「只读」且无编辑控件', () => {
     const { container } = renderTopBar();
     fireEvent.click(container.querySelector('#btnOpenLogin')!);

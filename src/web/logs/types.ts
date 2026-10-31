@@ -5,12 +5,14 @@ export type LogLevel = 'info' | 'warn' | 'error';
 /** 端（19.10） */
 export type LogForm = 'desktop' | 'web' | 'mobile' | 'mac' | 'linux' | 'cli';
 
-/** 全动作枚举（4.3.1 全量子集，§0） */
+/** 全动作枚举（4.3.1 全量子集，§0）；与内核 AuditAction 保持同一口径 */
 export type LogAction =
-  | 'recall' | 'write' | 'gc' | 'auto_bind' | 'unbound'
+  | 'recall' | 'write' | 'graft' | 'gc' | 'auto_bind' | 'unbound'
   | 'sync_up' | 'sync_down' | 'sync_fail' | 'sync_reconcile'
   | 'conflict_resolve' | 'llm_proxy' | 'llm_fallback'
-  | 'l0_view' | 'l0_auth_fail' | 'login' | 'team_assign'
+  | 'l0_view' | 'l0_auth_fail' | 'l0_auth_request' | 'l0_auth_grant' | 'l0_auth_deny'
+  | 'l0_auth_revoke' | 'l0_auth_expire' | 'security_change' | 'memory_op'
+  | 'login' | 'team_assign'
   | 'mode_dispatch' | 'rerank_fallback' | 'audit_delete';
 
 export interface LogEntry {
@@ -40,9 +42,9 @@ export interface LogFilter {
   onlyAbnormal: boolean;
 }
 
-/** L0 授权状态（R-LOG3，会话级） */
+/** L0 授权状态（R-LOG3，会话级）；role=null 表示未登录/后端不可达 */
 export interface L0State {
-  role: 'admin' | 'member';
+  role: 'admin' | 'member' | null;
   unlocked: boolean;
   failCount: number;
   lockedUntil: number | null;

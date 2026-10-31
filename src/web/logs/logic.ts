@@ -81,18 +81,29 @@ export function filterLogs(list: LogEntry[], f: LogFilter, now = Date.now()): Lo
   return [...sortTs(keptErrors), ...sortTs(keptOthers)];
 }
 
-/** R-LOG3：L0 授权。密码固定 `l0pass`（demo）；错 5 次锁 15min；每次成功 l0_view 记审计 */
-export const L0_PASSWORD = 'l0pass';
+/** R-LOG3：L0 授权。密码校验由内核完成（crypto GCM 认证，绝不在页面硬编码口令）；
+ *  页面只负责角色门禁、失败累计与锁定策略。 */
 export const L0_MAX_FAIL = 5;
 export const L0_LOCK_MS = 15 * 60e3;
+export const L0_MIN_LEN = 8;
 
-export function l0Auth(pwd: string, state: L0State, now = Date.now()): { state: L0State; ok: boolean; message: string } {
-  if (state.role !== 'admin') return { state, ok: false, message: '非管理员：L0 恒遮罩，需管理员授权' };
+/** 预检：未登录 / 成员缺授权 / 锁定中 → 直接拒绝，不进入密码校验。
+ *  成员凭管理员发放的 grant_id + 一次性授权密码查阅（§4.4.2）。 */
+export function l0Precheck(state: L0State, now = Date.now(), grantId?: string): { blocked: boolean; message: string } {
+  if (state.role === null) return { blocked: true, message: '未登录：L0 查阅需管理员或已授权账号（登录后生效）' };
+  if (state.role === 'member' && !grantId?.trim()) {
+    return { blocked: true, message: '普通成员：请先提交查阅申请，并用管理员发放的 grant_id + 一次性密码查阅' };
+  }
   if (state.lockedUntil && now < state.lockedUntil) {
     const min = Math.ceil((state.lockedUntil - now) / 60e3);
-    return { state, ok: false, message: `已锁定（l0_auth_fail），剩余 ${min} 分钟` };
+    return { blocked: true, message: `已锁定（l0_auth_fail），剩余 ${min} 分钟` };
   }
-  if (pwd === L0_PASSWORD) {
+  return { blocked: false, message: '' };
+}
+
+/** 记账：verified 由内核 browse 结果决定（对密码解开 = true） */
+export function l0Record(state: L0State, verified: boolean, now = Date.now()): { state: L0State; ok: boolean; message: string } {
+  if (verified) {
     return { state: { ...state, unlocked: true, failCount: 0, lockedUntil: null }, ok: true, message: '已解锁（本次会话有效，l0_view 已记审计）' };
   }
   const failCount = state.failCount + 1;

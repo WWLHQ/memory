@@ -8,6 +8,9 @@ import { TenantProvider } from '../tenantContext.tsx';
 import { LoginModal } from '../LoginModal.tsx';
 import type { TenantContext, LoginResult } from '../../../types/home.ts';
 
+vi.mock('../../AgentOnboard/autoOnboard.ts', () => ({ runAutoOnboardOnLogin: vi.fn() }));
+import { runAutoOnboardOnLogin } from '../../AgentOnboard/autoOnboard.ts';
+
 const ctxSample: TenantContext = {
   enterprise_id: 'ent_001',
   team_id: 'team_001',
@@ -97,6 +100,19 @@ describe('T8 登录卡片组件', () => {
     });
     expect(onSuccess).toHaveBeenCalledTimes(1);
     expect(onSuccess).toHaveBeenCalledWith(ctxSample);
+  });
+
+  it('登录成功 → 后台触发自动接入，并传真实会话 role/sid/form', async () => {
+    vi.mocked(runAutoOnboardOnLogin).mockClear();
+    const { container } = render(<Harness />);
+    typeInto(container, 'acc', 'user_001');
+    typeInto(container, 'pwd', 'pw');
+    await act(async () => {
+      fireEvent.click(container.querySelector('#btnLogin')!);
+    });
+    expect(runAutoOnboardOnLogin).toHaveBeenCalledWith({
+      role: null, sid: 'sess_001', form: 'desktop',
+    });
   });
 
   it('端形态只读（自动识别，无输入控件）', () => {

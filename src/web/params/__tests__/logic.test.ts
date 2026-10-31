@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   speedToHalfLife, retentionToArchive, validateWeights, payloadOrdered,
-  validateKbRow, validateNM, validateAll, auditParams,
+  validateKbRow, validateNM, validateUnitPrice, validateAll, auditParams,
 } from '../logic.ts';
-import { DEFAULT_CONFIG, DEFAULT_DEV, SEED_KB_POLICIES } from '../seed.ts';
+import { DEFAULT_CONFIG, DEFAULT_DEV, DEFAULT_KB_POLICIES } from '../defaults.ts';
 
 
 describe('档位折算（17.6）', () => {
@@ -54,12 +54,30 @@ describe('validateKbRow / validateNM', () => {
   });
 });
 
+describe('validateUnitPrice（批次11 成本单价）', () => {
+  it('未设置（null）合法；0 与正数合法', () => {
+    expect(validateUnitPrice(null)).toBeNull();
+    expect(validateUnitPrice(0)).toBeNull();
+    expect(validateUnitPrice(10)).toBeNull();
+  });
+  it('负数/非有限数拒绝', () => {
+    expect(validateUnitPrice(-0.1)).toContain('不可为负');
+    expect(validateUnitPrice(Number.NaN)).toContain('须为数字');
+    expect(validateUnitPrice(Number.POSITIVE_INFINITY)).toContain('须为数字');
+  });
+  it('负数进入全量校验（保存拦截）', () => {
+    const errs = validateAll({ ...DEFAULT_CONFIG, cost_cny_per_mtok: -1 }, DEFAULT_KB_POLICIES, DEFAULT_DEV);
+    expect(errs.some((e) => e.includes('成本单价'))).toBe(true);
+  });
+});
+
 describe('validateAll / auditParams', () => {
   it('默认全量通过', () => {
-    expect(validateAll(DEFAULT_CONFIG, SEED_KB_POLICIES, DEFAULT_DEV)).toEqual([]);
+    expect(validateAll(DEFAULT_CONFIG, DEFAULT_KB_POLICIES, DEFAULT_DEV)).toEqual([]);
+    expect(DEFAULT_CONFIG.cost_cny_per_mtok).toBeNull();
   });
   it('关自动整理出现警示', () => {
-    const errs = validateAll({ ...DEFAULT_CONFIG, auto_organize: false }, SEED_KB_POLICIES, DEFAULT_DEV);
+    const errs = validateAll({ ...DEFAULT_CONFIG, auto_organize: false }, DEFAULT_KB_POLICIES, DEFAULT_DEV);
     expect(errs.some((e) => e.includes('自动整理'))).toBe(true);
   });
   it('审计对象 G6', () => {
@@ -72,7 +90,7 @@ describe('validateAll / auditParams', () => {
 
 describe('种子覆盖', () => {
   it('六类知识库', () => {
-    expect(SEED_KB_POLICIES.length).toBe(6);
+    expect(DEFAULT_KB_POLICIES.length).toBe(6);
   });
 });
 

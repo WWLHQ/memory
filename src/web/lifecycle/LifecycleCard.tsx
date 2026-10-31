@@ -2,7 +2,7 @@
 // §P4 状态查看器（只读）：六态机选中高亮、可执行迁移提示、deprecated 替代跳转、N/M 参数展示。
 import type { LifecycleRecord, MemoryStatus } from './types.ts';
 import { canMigrate, STATUS_FLOW } from './logic.ts';
-import { N_DAYS, M_DAYS } from './seed.ts';
+import { N_DAYS, M_DAYS } from './constants.ts';
 
 export function LifecycleCard({
   rec,

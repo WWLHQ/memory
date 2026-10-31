@@ -48,4 +48,6 @@ export interface ProxyAuditEntry {
   cost: number;
   mode: ProxySelectMode | 'local';
   at: number;
+  /** 账本事件种类：缺省 = 代理调用；model_config = 保存模型配置（param_save 审计回显） */
+  kind?: 'model_config';
 }

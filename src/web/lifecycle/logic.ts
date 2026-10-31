@@ -1,7 +1,7 @@
 // 生命周期页（REQ-006 / P4）纯逻辑层
 // 全部为纯函数，便于单测覆盖（T2 验收）。
 import type { LifeOp, LifecycleRecord, MemoryStatus, OpResult } from './types.ts';
-import { M_DAYS, N_DAYS } from './seed.ts';
+import { M_DAYS, N_DAYS } from './constants.ts';
 
 /** freshness = 0.5^(age/half)，下限 0.05（17.5） */
 export function freshnessPreview(ageDays: number, halfLifeDays: number): number {

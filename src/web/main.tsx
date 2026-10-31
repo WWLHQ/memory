@@ -1,53 +1,77 @@
 // 应用入口（REQ-005 首页路由 · T12 路由决策：首页 = HomePage，覆盖 REQ-003 默认页）
-// 挂载 HomePage，注入 T11 后端镜像 useLoginMirror（自动读 URL ?backend= 覆盖地址，缺省 :8200）；
-// 四卡为原型 §0.2 快照（UI 硬约束）；.rid 溯源真查 home server mirror 账本（coreHome）。
+// 挂载 HomePage，注入 T11 后端镜像 useLoginMirror（自动读 URL ?backend= 覆盖地址，缺省见 src/web/backend.ts）。
+// 首页全量「真实可算」：四卡（累计记忆/累计动作/近1h调用/待裁决）与异常速览 / 近 1h 召回 Top3 / 待裁决
+// 全部在挂载后异步由 getHomeFeed 从内核账本（storage）真实聚合；.rid 溯源真查 home server mirror 账本。
 // AgentOnboard 页迁至 agentonboard.html 入口（保留 REQ-003 验证）。
-import { StrictMode, useState } from 'react';
+import { StrictMode, useCallback, useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import './shared/actionLog.ts';
 import { HomePage } from './Home/HomePage.tsx';
 import { useLoginMirror } from './Home/useLoginMirror.ts';
-import { coreTraceLookup, type TraceHit } from './Home/coreHome.ts';
+import {
+  coreTraceLookup,
+  getHomeFeed,
+  fetchMirrorItems,
+  emptyGains,
+  emptySync,
+  type TraceHit,
+  type MirrorItem,
+} from './Home/coreHome.ts';
+import { emptyLayerGraph, type LayerGraph } from './Home/layerGraph.ts';
+import { emptyOnboardGains } from './AgentOnboard/coreOnboard.ts';
+import { getKernelStorage } from './kernel.ts';
 import './Home/theme.css'; // REQ-005 原型主题（逐字提取自 design/ui/登录与首页_原型.html）
 import type { RawHomeFeed } from '../home/dashboard.ts';
-import type { SyncState } from '../types/home.ts';
+import type { SyncState, LoginForm } from '../types/home.ts';
+import type { Gain } from '../types/agentOnboard.ts';
+import type { LoginFn } from './Home/tenantContext.tsx';
 
-/** 种子数据：逐字对齐 design/ui/登录与首页_原型.html 的 gains / 异常速览 / 活跃记忆 / 待办（UI 硬约束） */
-const SEED: RawHomeFeed = {
-  gains: [
-    { icon: '🪙', title: 'Token 节省', big: '-58%', desc: 'payload 780/1500 · 极简 ≤600t', src: '原型 §0.2' },
-    { icon: '⚡', title: '效率提升', big: '-34%', desc: '免重复背景交代 · 踩坑复用', src: '原型 §0.2' },
-    { icon: '🔁', title: '跨 Agent 复用', big: '3.2×', desc: '1 次沉淀 · 4 端共享（19.4）', src: '原型 §0.2' },
-    { icon: '💸', title: '模型成本（反代理 19.8）', big: '省¥19/月', desc: 'auto 先免费后低价 · 单价≤¥0.02/千', src: '原型 §0.2' },
-  ],
-  anomalies: [
-    { level: 'error', title: 'Codex 熔断 OPEN', detail: 'desktop/Codex · 连续失败≥5', request_id: 'req_x1', jump: 'P10' },
-    { level: 'error', title: 'Web 同步对账超时', detail: 'sync_fail · fontweb', request_id: 'req_x2', jump: 'P15' },
-    { level: 'warn', title: '反代理 claude-free 额度 90%', detail: '临 proxy_budget', request_id: 'req_x3', jump: 'P13' },
-  ],
-  activeMemories: [
-    { title: '为什么上次重构失败', hits: 12, decayClass: 'hot', request_id: 'req_001' },
-    { title: '项目技术栈约束', hits: 5, decayClass: 'warm', request_id: 'req_002' },
-  ],
-  todos: [
-    { label: '待裁决 3 条 [跳 P8]', detail: '9.7 冲突队列', request_id: 'req_003', kind: 'dispute' },
-  ],
-};
-
-const SEED_SYNC: SyncState = {
-  form: 'desktop',
-  role: 'primary',
-  lastReconcileAt: Date.now(),
-  pendingSync: 0,
+const EMPTY_FEED: RawHomeFeed = {
+  gains: emptyGains(),
+  anomalies: [],
+  activeMemories: [],
+  todos: [],
 };
 
 function App() {
-  // useLoginMirror 自动读取 URL ?backend= 作为后端地址（缺省 http://localhost:8200）
+  // 内核账本后端：Electron 下为 IpcStorageBackend（经 IPC 读主进程 SqliteStorage 真实账本）；
+  // 纯浏览器/测试下为本页内存实现（无内核数据时安全降级为空态）。
+  const storage = useMemo(() => getKernelStorage(), []);
   const mirror = useLoginMirror();
+  const [raw, setRaw] = useState<RawHomeFeed>(EMPTY_FEED);
+  const [sync, setSync] = useState<SyncState>(emptySync());
+  const [graph, setGraph] = useState<LayerGraph>(() => emptyLayerGraph());
+  const [effectGains, setEffectGains] = useState<Gain[]>(emptyOnboardGains);
+  const [storageError, setStorageError] = useState<string | null>(null);
   const [traceId, setTraceId] = useState<string | null>(null);
   const [traceHits, setTraceHits] = useState<TraceHit[] | null>(null);
-  // 未登录门控：首页 / AgentOnboard 等受保护页面默认 requireLogin=true；
-  // 内联标识演示页（inlineattribution.html）不要求登录，传 false 即可。
   const requireLogin = new URLSearchParams(location.search).get('requireLogin') !== 'false';
+
+  // 真实聚合（含 mirror 镜像兜底源）：挂载、登录成功、图谱刷新共用同一条读取路径
+  const loadFeed = useCallback(async () => {
+    const mirrorItems: MirrorItem[] = await fetchMirrorItems().catch(() => []);
+    return getHomeFeed(storage, { mirrorItems }).catch((e) => ({
+      raw: EMPTY_FEED,
+      sync: emptySync(),
+      graph: emptyLayerGraph(),
+      effectGains: emptyOnboardGains(),
+      storageError: (e as { message?: string })?.message ?? String(e),
+    }));
+  }, [storage]);
+
+  // 挂载后异步聚合真实 feed
+  useEffect(() => {
+    let alive = true;
+    loadFeed().then((res) => {
+      if (!alive) return;
+      setRaw(res.raw);
+      setSync(res.sync);
+      setGraph(res.graph);
+      setEffectGains(res.effectGains);
+      setStorageError(res.storageError);
+    });
+    return () => { alive = false; };
+  }, [loadFeed]);
 
   const onTrace = (id: string) => {
     setTraceId(id);
@@ -57,14 +81,40 @@ function App() {
       .catch(() => setTraceHits([]));
   };
 
+  // 登录成功后刷新真实 feed（内核账本可能已因本次会话动作发生变化）
+  const loginFn: LoginFn = async (input: LoginForm) => {
+    const r = await mirror.login(input);
+    const res = await loadFeed();
+    setRaw(res.raw);
+    setSync(res.sync);
+    setGraph(res.graph);
+    setEffectGains(res.effectGains);
+    setStorageError(res.storageError);
+    return r;
+  };
+
+  // 图谱「刷新」：重新读取内核账本（真实聚合，失败保持旧数据并以动作日志记录）
+  const refreshGraph = useCallback(async () => {
+    const res = await loadFeed();
+    setRaw(res.raw);
+    setSync(res.sync);
+    setGraph(res.graph);
+    setEffectGains(res.effectGains);
+    setStorageError(res.storageError);
+  }, [loadFeed]);
+
   return (
     <>
       <HomePage
-        raw={SEED}
-        sync={SEED_SYNC}
-        loginFn={mirror.login}
+        raw={raw}
+        sync={sync}
+        graph={graph}
+        effectGains={effectGains}
+        storageError={storageError}
+        loginFn={loginFn}
         onLogout={mirror.logout}
         onTrace={onTrace}
+        onRefreshGraph={refreshGraph}
         requireLogin={requireLogin}
       />
       {traceId && (

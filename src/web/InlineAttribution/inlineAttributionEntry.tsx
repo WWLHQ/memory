@@ -1,6 +1,7 @@
 // REQ-004 宿主演示页入口
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import '../shared/actionLog.ts';
 import { AgentConversationDemo } from './AgentConversationDemo.tsx';
 
 const el = document.getElementById('root');
