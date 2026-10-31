@@ -1,0 +1,309 @@
+// MCP 客户端 node 层单测（批次15）：临时 home 真读真写
+// 覆盖：状态扫描（已接入/缺令牌/无配置/冲突/无法解析/需手工）、备份 + 原子写入、拒绝覆盖、令牌不外泄。
+import { afterEach, describe, expect, test } from 'vitest';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { MCP_ENDPOINT, expandHome, scanMcpClients, snippetForClient, wireMcpClient } from '../mcpClients.ts';
+
+const TOKEN = 'node-token-xyz789';
+const temps: string[] = [];
+
+function tempHome(): string {
+  const d = mkdtempSync(join(tmpdir(), 'mam-mcpclients-'));
+  temps.push(d);
+  return d;
+}
+function write(home: string, rel: string, text: string): string {
+  const path = join(home, rel);
+  mkdirSync(join(path, '..'), { recursive: true });
+  writeFileSync(path, text, 'utf8');
+  return path;
+}
+afterEach(() => {
+  for (const d of temps.splice(0)) rmSync(d, { recursive: true, force: true });
+});
+
+function statusOf(home: string, id: string, opts: { currentToken?: string } = {}) {
+  // appData 也指到临时目录：隔离本机真实的 %APPDATA%/Trae CN/User/mcp.json
+  return scanMcpClients({ home, appData: home, ...opts }).clients.find((c) => c.id === id)!;
+}
+
+describe('scanMcpClients', () => {
+  test('无任何配置：所有客户端如实报告 no_config / manual，且不含令牌', () => {
+    const home = tempHome();
+    const scan = scanMcpClients({ home, appData: home });
+    expect(scan.endpoint).toBe(MCP_ENDPOINT);
+    expect(scan.clients.length).toBeGreaterThanOrEqual(10);
+
+    const qoder = scan.clients.find((c) => c.id === 'qoder-cn')!;
+    expect(qoder.state).toBe('no_config');
+    expect(qoder.installed).toBe(false);
+    expect(qoder.displayPath).toBe('~/.qoder-cn/settings.json');
+
+    // 批次27：Trae CN 有稳定配置路径（%APPDATA%），临时 home/appData 下为 no_config
+    const trae = scan.clients.find((c) => c.id === 'trae-cn')!;
+    expect(trae.state).toBe('no_config');
+    expect(trae.displayPath).toBe('%APPDATA%/Trae CN/User/mcp.json');
+    expect(trae.path).toBe(join(home, 'Trae CN/User/mcp.json'));
+
+    const dump = JSON.stringify(scan);
+    expect(dump).not.toContain(TOKEN);
+    expect(dump).not.toContain('Bearer ');
+  });
+
+  test('已接入 / 缺令牌 / 冲突 / 无法解析 按真实文件内容判定', () => {
+    const home = tempHome();
+    write(home, '.qoder-cn/settings.json', JSON.stringify({
+      mcpServers: { 'MultiAgent Memory': { type: 'http', url: MCP_ENDPOINT, headers: { Authorization: `Bearer ${TOKEN}` } } },
+    }));
+    // Claude Code 实测缺陷复现：条目存在但没有 headers → 401
+    write(home, '.claude.json', JSON.stringify({
+      mcpServers: { memagent: { type: 'http', url: MCP_ENDPOINT } },
+    }));
+    write(home, '.cursor/mcp.json', JSON.stringify({
+      mcpServers: { 'MultiAgent Memory': { url: 'http://127.0.0.1:9999/mcp' } },
+    }));
+    write(home, '.gemini/settings.json', '{bad');
+    write(home, '.codex/config.toml', [
+      '[mcp_servers.multiagent_memory]',
+      `url = "${MCP_ENDPOINT}"`,
+      `http_headers = { Authorization = "Bearer ${TOKEN}" }`,
+      '',
+    ].join('\n'));
+
+    expect(statusOf(home, 'qoder-cn').state).toBe('wired');
+    expect(statusOf(home, 'qoder-cn').hasAuth).toBe(true);
+    expect(statusOf(home, 'qoder-cn').installed).toBe(true);
+
+    expect(statusOf(home, 'claude-code').state).toBe('missing_auth');
+    expect(statusOf(home, 'claude-code').hasAuth).toBe(false);
+
+    const cursor = statusOf(home, 'cursor');
+    expect(cursor.state).toBe('conflict');
+    expect(cursor.foundUrl).toBe('http://127.0.0.1:9999/mcp');
+
+    expect(statusOf(home, 'gemini-cli').state).toBe('invalid');
+    expect(statusOf(home, 'gemini-cli').error).toBeTruthy();
+
+    expect(statusOf(home, 'codex').state).toBe('wired');
+
+    // 扫描结果（渲染层可见）绝不带令牌
+    expect(JSON.stringify(scanMcpClients({ home, appData: home }))).not.toContain(TOKEN);
+  });
+
+  test('超过 8 MiB 的配置 → invalid（拒绝读写）', () => {
+    const home = tempHome();
+    const huge = `{"pad":"${'x'.repeat(8 * 1024 * 1024 + 10)}"}`;
+    write(home, '.qoder-cn/settings.json', huge);
+    const st = statusOf(home, 'qoder-cn');
+    expect(st.state).toBe('invalid');
+    expect(st.error).toContain('8 MiB');
+  });
+});
+
+describe('snippetForClient', () => {
+  test('JSON/TOML/手工 三种片段都含真实令牌（仅返回给调用方）', () => {
+    expect(snippetForClient('qoder-cn', TOKEN)).toContain(`Bearer ${TOKEN}`);
+    expect(snippetForClient('codex', TOKEN)).toContain('http_headers');
+    expect(snippetForClient('trae-cn', TOKEN)).toContain(TOKEN);
+    expect(() => snippetForClient('nope', TOKEN)).toThrow('未知 MCP 客户端');
+  });
+});
+
+describe('wireMcpClient', () => {
+  test('无配置 → 新建目录/文件并写入（无备份），扫描转为 wired', () => {
+    const home = tempHome();
+    const r = wireMcpClient('cursor', TOKEN, { home, now: Date.UTC(2026, 9, 30, 16, 0, 0) });
+    expect(r.ok).toBe(true);
+    expect(r.changed).toBe(true);
+    expect(r.path).toBe(join(home, '.cursor/mcp.json'));
+    expect(r.backupPath).toBeUndefined();
+    expect(existsSync(r.path!)).toBe(true);
+
+    const text = readFileSync(r.path!, 'utf8');
+    expect(text).toContain(`Bearer ${TOKEN}`);
+    expect(statusOf(home, 'cursor').state).toBe('wired');
+    // 返回值不含令牌
+    expect(JSON.stringify(r)).not.toContain(TOKEN);
+  });
+
+  test('缺令牌 → 备份原文件后补齐 Authorization；再次执行幂等', () => {
+    const home = tempHome();
+    const original = JSON.stringify({ mcpServers: { memagent: { type: 'http', url: MCP_ENDPOINT } } }, null, 2);
+    const path = write(home, '.claude.json', original);
+
+    const r = wireMcpClient('claude-code', TOKEN, { home, now: Date.UTC(2026, 9, 30, 16, 30, 0) });
+    expect(r.ok).toBe(true);
+    expect(r.changed).toBe(true);
+    expect(r.backupPath).toBeTruthy();
+    expect(readFileSync(r.backupPath!, 'utf8')).toBe(original);
+    expect(statusOf(home, 'claude-code').state).toBe('wired');
+
+    const again = wireMcpClient('claude-code', TOKEN, { home });
+    expect(again).toMatchObject({ ok: true, changed: false, path });
+    const backups = readdirSync(home).filter((f) => f.startsWith('.claude.json.bak-'));
+    expect(backups).toHaveLength(1); // 幂等：不重复备份
+  });
+
+  test('同名条目指向其它端点 → 拒绝写入，文件保持原样', () => {
+    const home = tempHome();
+    const original = JSON.stringify({ mcpServers: { 'MultiAgent Memory': { url: 'http://other/mcp' } } });
+    const path = write(home, '.cursor/mcp.json', original);
+    const r = wireMcpClient('cursor', TOKEN, { home });
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('拒绝覆盖');
+    expect(readFileSync(path, 'utf8')).toBe(original);
+  });
+
+  test('无法解析 → 拒绝写入，绝不改坏文件', () => {
+    const home = tempHome();
+    write(home, '.qoder-cn/settings.json', '{bad');
+    const r = wireMcpClient('qoder-cn', TOKEN, { home });
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('无法解析');
+    expect(readFileSync(join(home, '.qoder-cn/settings.json'), 'utf8')).toBe('{bad');
+  });
+
+  test('TOML 客户端（Codex）：无配置 → 新建并写入；缺令牌 → 备份后补齐；幂等', () => {
+    const home = tempHome();
+    const first = wireMcpClient('codex', TOKEN, { home, now: Date.UTC(2026, 9, 30, 16, 0, 0) });
+    expect(first.ok).toBe(true);
+    expect(first.changed).toBe(true);
+    expect(first.path).toBe(join(home, '.codex/config.toml'));
+    expect(first.backupPath).toBeUndefined();
+    expect(statusOf(home, 'codex').state).toBe('wired');
+    expect(JSON.stringify(first)).not.toContain(TOKEN);
+
+    const again = wireMcpClient('codex', TOKEN, { home });
+    expect(again).toMatchObject({ ok: true, changed: false });
+  });
+
+  test('TOML 已有其它段/缺 Authorization → 备份后只补本段，其它配置不动', () => {
+    const home = tempHome();
+    const original = ['model = "gpt-5"', '', '[mcp_servers.multiagent_memory]', `url = "${MCP_ENDPOINT}"`, '', '[other]', 'key = "keep"', ''].join('\n');
+    const path = write(home, '.codex/config.toml', original);
+    const r = wireMcpClient('codex', TOKEN, { home, now: Date.UTC(2026, 9, 30, 17, 0, 0) });
+    expect(r.ok).toBe(true);
+    expect(r.changed).toBe(true);
+    expect(r.backupPath).toBeTruthy();
+    expect(readFileSync(r.backupPath!, 'utf8')).toBe(original);
+    const text = readFileSync(path, 'utf8');
+    expect(text).toContain('model = "gpt-5"');
+    expect(text).toContain('[other]\nkey = "keep"');
+    expect(statusOf(home, 'codex').state).toBe('wired');
+  });
+
+  test('TOML 同名段指向其它端点 → 拒绝写入，文件保持原样', () => {
+    const home = tempHome();
+    const original = '[mcp_servers.multiagent_memory]\nurl = "http://other/mcp"\n';
+    const path = write(home, '.codex/config.toml', original);
+    const r = wireMcpClient('codex', TOKEN, { home });
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('拒绝覆盖');
+    expect(readFileSync(path, 'utf8')).toBe(original);
+  });
+
+  test('无稳定配置路径客户端 → 拒绝自动写入（诚实提示手工）', () => {
+    const home = tempHome();
+    expect(wireMcpClient('workbuddy', TOKEN, { home })).toMatchObject({ ok: false });
+    expect(wireMcpClient('deepseek-harness', TOKEN, { home })).toMatchObject({ ok: false });
+  });
+});
+
+// ── 批次26-B P2-15：备份含明文令牌，最多保留 3 份，旧份自动清理；不留 .tmp 残留 ──
+describe('wireMcpClient P2-15 备份清理', () => {
+  test('连续 5 次写入 → 只保留最新 3 份备份，无 .tmp 残留', () => {
+    const home = tempHome();
+    for (let i = 0; i < 5; i++) {
+      // 每轮把文件退回「缺令牌」状态，迫使 wire 重新备份 + 写入
+      write(home, '.claude.json', JSON.stringify({ mcpServers: { memagent: { type: 'http', url: MCP_ENDPOINT } } }));
+      const r = wireMcpClient('claude-code', TOKEN, { home, now: Date.UTC(2026, 9, 30, 16, i, 0) });
+      expect(r.ok).toBe(true);
+      expect(r.changed).toBe(true);
+    }
+    const backups = readdirSync(home).filter((f) => f.startsWith('.claude.json.bak-')).sort();
+    expect(backups).toHaveLength(3);
+    // 保留的是时间戳最新的 3 份（最旧两份已被清理）
+    expect(backups[0]).toContain('2026-10-30T16-02');
+    expect(backups[2]).toContain('2026-10-30T16-04');
+    expect(readdirSync(home).some((f) => f.includes('.tmp-'))).toBe(false);
+  });
+});
+
+// ── 批次27：用户验收反馈「一键适配全部只出片段没真接入」——
+// ① Trae CN 实机确认稳定配置 %APPDATA%/Trae CN/User/mcp.json，升级为可自动写入；
+// ② 「已接入」须校验配置内令牌与当前 mcp-token.txt 一致，过期降级 missing_auth 让一键适配修复。
+describe('批次27 Trae CN 真写', () => {
+  test('%APPDATA% 路径展开', () => {
+    expect(expandHome('%APPDATA%/Trae CN/User/mcp.json', '/h', '/a')).toBe(join('/a', 'Trae CN/User/mcp.json'));
+    expect(expandHome('~/.x', '/h', '/a')).toBe(join('/h', '.x'));
+  });
+
+  test('Trae：已有其它服务器 → missing_entry；一键写入保留原条目并补本服务；复扫 wired', () => {
+    const home = tempHome();
+    const traeDir = join(home, 'Trae CN', 'User');
+    mkdirSync(traeDir, { recursive: true });
+    const original = JSON.stringify({ mcpServers: { 'mcp-obsidian': { command: 'npx', args: ['-y', 'obsidian-mcp'] } } }, null, 2);
+    writeFileSync(join(traeDir, 'mcp.json'), original, 'utf8');
+
+    expect(statusOf(home, 'trae-cn').state).toBe('missing_entry');
+    expect(statusOf(home, 'trae-cn').installed).toBe(true);
+
+    const r = wireMcpClient('trae-cn', TOKEN, { home, appData: home, now: Date.UTC(2026, 9, 31, 10, 0, 0) });
+    expect(r.ok).toBe(true);
+    expect(r.changed).toBe(true);
+    expect(r.backupPath).toBeTruthy();
+    expect(readFileSync(r.backupPath!, 'utf8')).toBe(original);
+    expect(JSON.stringify(r)).not.toContain(TOKEN);
+
+    const text = readFileSync(join(traeDir, 'mcp.json'), 'utf8');
+    const parsed = JSON.parse(text) as { mcpServers: Record<string, { url?: string; command?: string; headers?: Record<string, string> }> };
+    expect(parsed.mcpServers['mcp-obsidian'].command).toBe('npx'); // 其它条目原样保留
+    expect(parsed.mcpServers['MultiAgent Memory'].url).toBe(MCP_ENDPOINT);
+    expect(parsed.mcpServers['MultiAgent Memory'].headers?.Authorization).toBe(`Bearer ${TOKEN}`);
+    expect(statusOf(home, 'trae-cn').state).toBe('wired');
+  });
+
+  test('Trae：同名条目指向其它端点 → 拒绝覆盖', () => {
+    const home = tempHome();
+    const original = JSON.stringify({ mcpServers: { 'MultiAgent Memory': { url: 'http://other/mcp' } } });
+    const path = write(home, 'Trae CN/User/mcp.json', original);
+    const r = wireMcpClient('trae-cn', TOKEN, { home, appData: home });
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('拒绝覆盖');
+    expect(readFileSync(path, 'utf8')).toBe(original);
+  });
+});
+
+describe('批次27 令牌过期检测（防假「已接入」）', () => {
+  test('配置内令牌 ≠ 当前令牌 → 降级 missing_auth 并提示可修复；一键写入补齐后复扫 wired', () => {
+    const home = tempHome();
+    write(home, '.qoder-cn/settings.json', JSON.stringify({
+      mcpServers: { 'MultiAgent Memory': { type: 'http', url: MCP_ENDPOINT, headers: { Authorization: 'Bearer stale-token' } } },
+    }));
+
+    // 不传 currentToken（旧口径）：仍报 wired；传了才校验
+    expect(statusOf(home, 'qoder-cn').state).toBe('wired');
+    const stale = statusOf(home, 'qoder-cn', { currentToken: TOKEN });
+    expect(stale.state).toBe('missing_auth');
+    expect(stale.hasAuth).toBe(true);
+    expect(stale.note).toContain('不一致');
+    expect(JSON.stringify(stale)).not.toContain('stale-token');
+
+    const r = wireMcpClient('qoder-cn', TOKEN, { home, currentToken: TOKEN });
+    expect(r).toMatchObject({ ok: true, changed: true });
+    expect(statusOf(home, 'qoder-cn', { currentToken: TOKEN }).state).toBe('wired');
+  });
+
+  test('配置内令牌与当前一致 → 保持 wired（不误报）', () => {
+    const home = tempHome();
+    write(home, '.codex/config.toml', [
+      '[mcp_servers.multiagent_memory]',
+      `url = "${MCP_ENDPOINT}"`,
+      `http_headers = { Authorization = "Bearer ${TOKEN}" }`,
+      '',
+    ].join('\n'));
+    expect(statusOf(home, 'codex', { currentToken: TOKEN }).state).toBe('wired');
+  });
+});
