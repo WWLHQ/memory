@@ -118,6 +118,10 @@ describe('17.9 合并与摘要', () => {
     expect(built.summary.importance).toBe(0.9);
     // 批次24 口径2：摘要作为新生成的层级记录，同样带自己的层级生成时间
     expect(built.summary.layers_generated_at).toBe(NOW);
+    // 批次28-C：摘要=本地合成（无 LLM）→ layer L1 + content_l1 + refined_by stub，不再冒充 L3
+    expect(built.summary.layer).toBe('L1');
+    expect(built.summary.content_l1).toBe(built.summary.content);
+    expect(built.summary.refined_by).toBe('stub');
     expect(built.originals.every((o) => o.decay_class === 'cold' && o.merged_into === built.summary.mem_id)).toBe(true);
   });
 

@@ -17,6 +17,15 @@ export function isStubDeepLayered(m: Memory): boolean {
   return DEEP_FIELDS.some((k) => hasText(m[k]));
 }
 
+/** 批次28-C：误标层行判定 —— layer 标成 L2–L6 却没有任何深层正文、也不是真实 LLM 产物
+ *  （典型：批次28 前的合并摘要行 layer='L3' 且无 content_l1）。L0 密文行与真实 LLM 行不动。 */
+export function isMislabeledLayer(m: Memory): boolean {
+  if (m.layer === 'L1' || (m.layer as string) === 'L0') return false;
+  if (m.refined_by === 'llm' || m.refined_by === 'llm_partial') return false;
+  if (isStubDeepLayered(m)) return false; // 已由 stub 深层判定覆盖
+  return m.layer.startsWith('L');
+}
+
 /** 只读预览：账本里有多少条需要降级（不改任何数据） */
 export interface LegacyScan {
   scanned: number;
@@ -26,16 +35,27 @@ export interface LegacyScan {
   missing_l1: number;
   /** 命中行按原 layer 分布，如 { L2: 986 } */
   by_layer: Record<string, number>;
+  /** 批次28-C：其中「误标层行」（layer=L2–L6 却无深层正文，如旧摘要行）条数 */
+  mislabeled: number;
+}
+
+/** 该行的诚实 L1 正文：content_l1 优先；误标层行（真摘要）可用 content 兜底；
+ *  stub 深层行的 content 是假 L2 正文，绝不能当 L1 回填（保持 missing_l1 跳过口径） */
+function honestL1Of(m: Memory): string | null {
+  if (hasText(m.content_l1)) return m.content_l1;
+  if (isMislabeledLayer(m) && hasText(m.content)) return m.content;
+  return null;
 }
 
 export async function scanStubLayers(storage: StorageBackend, filter: Filter = {}): Promise<LegacyScan> {
   const list = await storage.listMemories({ ...filter });
-  const out: LegacyScan = { scanned: list.length, hits: 0, missing_l1: 0, by_layer: {} };
+  const out: LegacyScan = { scanned: list.length, hits: 0, missing_l1: 0, by_layer: {}, mislabeled: 0 };
   for (const m of list) {
-    if (!isStubDeepLayered(m)) continue;
+    if (!isStubDeepLayered(m) && !isMislabeledLayer(m)) continue;
     out.hits++;
     out.by_layer[m.layer] = (out.by_layer[m.layer] ?? 0) + 1;
-    if (!hasText(m.content_l1)) out.missing_l1++;
+    if (isMislabeledLayer(m)) out.mislabeled++;
+    if (!honestL1Of(m)) out.missing_l1++;
   }
   return out;
 }
@@ -74,23 +94,27 @@ export async function demoteStubLayers(ctx: LegacyDemoteCtx): Promise<LegacyDemo
 
   const list = await storage.listMemories({ ...filter });
   const report: LegacyDemoteReport = {
-    scanned: list.length, hits: 0, missing_l1: 0, by_layer: {},
+    scanned: list.length, hits: 0, missing_l1: 0, by_layer: {}, mislabeled: 0,
     demoted: 0, skipped: 0, sample_ids: [],
   };
 
   storage.beginBatch?.();
   try {
     for (const m of list) {
-      if (!isStubDeepLayered(m)) continue;
+      if (!isStubDeepLayered(m) && !isMislabeledLayer(m)) continue;
       report.hits++;
       report.by_layer[m.layer] = (report.by_layer[m.layer] ?? 0) + 1;
+      if (isMislabeledLayer(m)) report.mislabeled++;
 
-      if (!hasText(m.content_l1)) {
+      // 误标层行（如旧摘要行）可能没有 content_l1：正文在 content 里，用它诚实回填 L1；
+      // stub 深层行无 content_l1 仍跳过（其 content 是假 L2 正文，不能当 L1）。
+      const l1Source = honestL1Of(m);
+      if (!l1Source) {
         report.missing_l1++;
         report.skipped++;
         continue;
       }
-      const l1 = m.content_l1.trim();
+      const l1 = l1Source.trim();
       const next: Memory = {
         ...m,
         layer: 'L1',
@@ -130,6 +154,7 @@ export async function demoteStubLayers(ctx: LegacyDemoteCtx): Promise<LegacyDemo
       hits: report.hits,
       demoted: report.demoted,
       missing_l1: report.missing_l1,
+      mislabeled: report.mislabeled,
       by_layer: report.by_layer,
       sample_ids: report.sample_ids,
     },

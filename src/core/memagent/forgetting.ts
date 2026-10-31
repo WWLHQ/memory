@@ -2,6 +2,7 @@
 // 约束：不物理删除（AC-01）、locked 豁免（AC-04）、失败不伤原文（AC-10）、可审计可关闭（AC-14）
 import { ulid } from './ulid.ts';
 import { checkL0ToL1Quality } from './qualityGate.ts';
+import { layerSpecOf } from './layerRules.ts';
 import type {
   AuditAction, AuditRecord, Category, DecayClass, Memory, StorageBackend,
 } from './types.ts';
@@ -163,14 +164,20 @@ export function buildSummary(group: Memory[], now: number): SummaryBuildResult {
   if (!gate.ok) return { ok: false, reason: `摘要聚合内容未通过质量门：${gate.reason}` };
 
   const maxImp = Math.max(...keepLocked.map((m) => m.importance ?? 0.5));
+  // 批次28-C：摘要行曾打 layer:'L3' 且不带 content_l1/refined_by —— 未接 LLM 的本地摘要
+  // 却以深层身份出现，正是「没有 LLM 却有 L2-L6」的直接来源之一。本地合成属 L1 产物：
+  // layer=L1、正文落 content_l1、refined_by=stub，与写入路径同一口径。
   const summary: Memory = {
     mem_id: `sum_${ulid(now)}`,
     project_id: keepLocked[0].project_id,
     enterprise_id: keepLocked[0].enterprise_id,
     team_id: keepLocked[0].team_id,
     category: keepLocked[0].category,
-    layer: 'L3',
+    layer: 'L1',
     content: gate.content!,
+    content_l1: gate.content!,
+    layer_specs: { L1: `v1:${layerSpecOf('L1').name}` },
+    refined_by: 'stub',
     decay_class: 'warm',
     pinned: false,
     locked: false,

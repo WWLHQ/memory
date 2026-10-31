@@ -13,6 +13,7 @@ process.on('unhandledRejection', (reason) => {
 import { createServer, type HomeServer } from '../home/server.ts';
 import { createServer as createAgentOnboardServer } from '../agentOnboard/server.ts';
 import { FileStorage } from '../core/memagent/fileStorage.ts';
+import { validateAuditRecord as sharedValidateAuditRecord } from '../shared/auditShape.ts';
 import { scanHost } from './hostScan.ts';
 import { IPC, missingChannels, handleBootFailure } from './ipcChannels.ts';
 import { initActionLog, actionLog, actionLogError, tailActionLog } from './actionLog.ts';
@@ -850,6 +851,30 @@ function registerL0Ipc(vault: L0Vault): void {
  * 且可召回正文取的是 stub L2。这里提供只读预览 + 管理员执行两条通道，
  * 把这类行降级回真实的 L1；执行前自动备份，备份失败一律拒绝改写。
  */
+/**
+ * 遗留账本清理（批次24）：§2.2 规则落地前 stub 精炼器给历史行编满 L2–L6，
+ * 且可召回正文取的是 stub L2。这里提供只读预览 + 管理员执行两条通道，
+ * 把这类行降级回真实的 L1；执行前自动备份，备份失败一律拒绝改写。
+ */
+/** 批次28-C：启动自动清理（不再等管理员点卡）。命中才备份+改写；失败只记日志不影响启动。 */
+async function autoDemoteLegacyLayers(): Promise<void> {
+  try {
+    const scan = await scanStubLayers(storage);
+    if (scan.hits === 0) return;
+    const backupDir = await backupBeforeKernelChange('legacy-auto-demote', 'legacy:auto-demote-backup');
+    const now = Date.now();
+    const report = await demoteStubLayers({
+      storage, admin_user_id: 'system:startup', request_id: `req_legacy_auto_${now}`, now,
+    });
+    actionLog('kernel', 'legacy:auto-demote', {
+      scanned: report.scanned, hits: report.hits, demoted: report.demoted,
+      mislabeled: report.mislabeled, missing_l1: report.missing_l1, dir: backupDir,
+    });
+  } catch (e) {
+    actionLog('kernel', 'legacy:auto-demote-fail', { error: String((e as Error)?.message ?? e) }, { level: 'error' });
+  }
+}
+
 function registerLegacyIpc(): void {
   handleIpc(IPC.legacyScan, async (_e, sessionId?: string) => {
     const gate = requireSession(sessionId, IPC.legacyScan);
@@ -1083,23 +1108,9 @@ function requireDataPlaneSession(sessionId: unknown, channel: string): void {
 }
 
 /** 审计写形状校验（P1-2）：内核合法自报的 request_id（ulid/req_* 关联键，P0-2 依赖）放行，
- *  伪造的超长/非法字符 id、缺 action/ts 的记录整条拒绝 —— 不做语义猜测，只挡注入面。 */
-function validateAuditRecord(a: unknown): void {
-  const rec = a as { request_id?: unknown; action?: unknown; ts?: unknown; detail?: unknown } | null;
-  if (!rec || typeof rec !== 'object') throw new Error('审计记录形状非法（须为对象）');
-  if (typeof rec.action !== 'string' || rec.action.length === 0 || rec.action.length > 40) {
-    throw new Error('审计记录缺少合法 action');
-  }
-  if (typeof rec.request_id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(rec.request_id)) {
-    throw new Error('审计记录 request_id 非法（仅允许字母数字下划线连字符，≤64 字符）');
-  }
-  if (typeof rec.ts !== 'number' || !Number.isFinite(rec.ts)) {
-    throw new Error('审计记录缺少合法 ts');
-  }
-  if (rec.detail !== undefined && (typeof rec.detail !== 'object' || rec.detail === null)) {
-    throw new Error('审计记录 detail 须为对象');
-  }
-}
+ *  伪造的超长/非法字符 id、缺 action/ts 的记录整条拒绝 —— 不做语义猜测，只挡注入面。
+ *  批次28-A：实现抽到 shared/auditShape.ts，与 home server HTTP 数据面同口径。 */
+const validateAuditRecord = sharedValidateAuditRecord;
 
 async function registerStorageIpc(): Promise<void> {
   handleIpc(IPC.storagePutMemory, (_e, m) => storage.putMemory(m as Parameters<typeof storage.putMemory>[0]));
@@ -1445,6 +1456,10 @@ async function bootstrap(): Promise<void> {
     allowedOrigins: uiOrigins,
     // 未打包（npm run dev 配合桌面壳调试）时额外信任 Vite dev 源 5180；打包态严格只认自身静态端口
     allowDevOrigins: !app.isPackaged,
+    // 批次28-A：内核数据面 —— 浏览器页面凭登录会话直连本进程的 FileStorage；
+    // 桌面端持有写锁（唯一写者），HTTP 数据面与 IPC 数据面共用同一账本实例。
+    kernelStorage: storage,
+    kernelInfo: { readonly: storage.readOnly, db_path: DB_PATH },
     onLog: (scope, action, detail) => { actionLog(scope, action, detail); },
   });
   // 登录会话真源：敏感 IPC（数据位置/备份/安全）用 getSessionContext 校验管理员
@@ -1465,6 +1480,9 @@ async function bootstrap(): Promise<void> {
   await l0Vault.onAppRestart();
   registerL0Ipc(l0Vault);
   registerLegacyIpc();
+  // 批次28-C：遗留账本自动清理 —— 批次24 的清理卡要管理员手动点，实际一直没执行；
+  // 现在启动即扫描（stub 深层行 + 误标层行），命中就先备份再自动降级回 L1，审计可回查。
+  void autoDemoteLegacyLayers();
   // 空闲到期必须有主进程定时兜底：无人操作时也按 5min 清会话/DEK 并作废 grant（§4.4.3）
   const l0Sweeper = setInterval(() => {
     void l0Vault.sweep().catch((e) => { void mlog('l0:sweep-error', String((e as Error)?.message ?? e)); });

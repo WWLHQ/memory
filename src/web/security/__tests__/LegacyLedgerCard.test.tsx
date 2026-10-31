@@ -13,7 +13,7 @@ import { LegacyLedgerCard } from '../LegacyLedgerCard.tsx';
 import type { LegacyDemoteReport, LegacyScan } from '../../../core/memagent/legacyLayers.ts';
 const w = window as unknown as { __ELECTRON__?: boolean; api?: unknown };
 
-const SCAN: LegacyScan = { scanned: 1642, hits: 986, missing_l1: 2, by_layer: { L2: 986, L3: 986, L6: 4 } };
+const SCAN: LegacyScan = { scanned: 1642, hits: 986, missing_l1: 2, mislabeled: 4, by_layer: { L2: 986, L3: 986, L6: 4 } };
 const REPORT: LegacyDemoteReport = {
   ...SCAN, demoted: 984, skipped: 2, sample_ids: ['mem_0001', 'mem_0002'],
 };

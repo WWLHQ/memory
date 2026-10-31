@@ -1,7 +1,7 @@
 // 遗留账本清理回归（批次24）：只降级「未接 LLM 却带 L2–L6」的历史行；
 // 真实 LLM 产物/正常 L1 行不碰；缺 L1 的行跳过不伪造；重跑幂等；执行必须带管理员身份并留审计。
 import { describe, expect, it } from 'vitest';
-import { demoteStubLayers, isStubDeepLayered, scanStubLayers } from '../legacyLayers.ts';
+import { demoteStubLayers, isMislabeledLayer, isStubDeepLayered, scanStubLayers } from '../legacyLayers.ts';
 import { InMemoryStorage } from '../storage.ts';
 import { sha256hex } from '../sync.ts';
 import { embedSync } from '../vector.ts';
@@ -157,5 +157,47 @@ describe('demoteStubLayers 拒绝与边界', () => {
     const report = await run(storage);
     expect(report).toMatchObject({ scanned: 0, hits: 0, demoted: 0, sample_ids: [] });
     expect(await storage.queryAudit({ action: 'security_change' })).toHaveLength(1);
+  });
+});
+
+// 批次28-C：误标层行 —— layer 标成 L2–L6 却没有深层正文（批次28 前的合并摘要行 layer='L3'）。
+// 没接 LLM 却以深层身份出现，与 stub 深层行同属遗留脏数据；content 是真实本地正文，可诚实回填 L1。
+describe('批次28-C 误标层行（无深层正文却标 L2–L6）', () => {
+  const summaryRow = mem({
+    mem_id: 'mem_sum', layer: 'L3', content: '【摘要】docker 部署三步 / 令牌 12h 过期 / 提前刷新',
+    content_l1: undefined, content_l2: undefined, content_l3: undefined,
+    content_l4: undefined, content_l5: undefined, content_l6: undefined,
+  });
+
+  it('isMislabeledLayer：L2–L6 无深层正文且非 LLM 产物 → 命中；L0/L1/真实 LLM 行不命中', () => {
+    expect(isMislabeledLayer(summaryRow)).toBe(true);
+    expect(isMislabeledLayer(mem({ layer: 'L0' as Memory['layer'], content: '密文', content_l0_enc: '{}' }))).toBe(false);
+    expect(isMislabeledLayer(mem({ layer: 'L1', content: L1_TEXT }))).toBe(false);
+    expect(isMislabeledLayer(mem({ refined_by: 'llm' }))).toBe(false);
+  });
+
+  it('降级：用 content 诚实回填 L1（不伪造），layer 归 L1，审计带 mislabeled 计数', async () => {
+    const storage = await seeded([summaryRow]);
+    const preview = await scanStubLayers(storage);
+    expect(preview).toMatchObject({ scanned: 1, hits: 1, mislabeled: 1, missing_l1: 0, by_layer: { L3: 1 } });
+
+    const report = await run(storage);
+    expect(report).toMatchObject({ hits: 1, demoted: 1, mislabeled: 1 });
+    const after = await storage.getMemory('mem_sum');
+    expect(after?.layer).toBe('L1');
+    expect(after?.content).toContain('【摘要】docker 部署三步');
+    expect(after?.content_l1).toBe(after?.content);
+    expect(after?.refined_by).toBe('stub');
+    expect(after?.sha256).toBe(sha256hex(after!.content));
+
+    const rows = await storage.queryAudit({ action: 'security_change' });
+    expect(rows[0].detail).toMatchObject({ op: 'legacy_layer_demote', mislabeled: 1 });
+  });
+
+  it('stub 深层行缺 content_l1 时仍跳过：其 content 是假 L2 正文，绝不当 L1 回填', async () => {
+    const storage = await seeded([mem({ content_l1: undefined }), summaryRow]);
+    const report = await run(storage);
+    expect(report).toMatchObject({ scanned: 2, hits: 2, demoted: 1, skipped: 1, missing_l1: 1, mislabeled: 1 });
+    expect((await storage.getMemory('mem_legacy_1'))?.layer).toBe('L2');
   });
 });
