@@ -1,3 +1,7 @@
+---
+status: done
+---
+
 # Phase A 手动测试报告（2026-10-30）
 
 > 覆盖：A1 注册去接管 / A2 IPC 补齐 / A3 bootstrap 失败可见化 / A4 端口单一真源 / A5 CORS-Origin 收口，

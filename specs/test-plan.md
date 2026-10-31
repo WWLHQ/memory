@@ -62,6 +62,7 @@ status: active
 对应 AC-012：状态机与 scene 联动符合规格。
 
 ## TC-013 数据存放位置测试（批次 6）
+对应 AC-013：数据存放位置可指定、可迁移，且全部应用数据真实挂载在所选数据根。
 目标：安装后首次启动即引导用户指定数据根，且全部应用数据确实挂载在该位置。
 - 单元：`src/electron/__tests__/dataRoot.test.ts` 覆盖指针读写/损坏、路径校验（绝对/相对/UNC，win32/posix）、可写探测、旧数据探测、白名单迁移（默认跳过、旧 `dbDir`、覆盖前 `.bak`）。
 - 手测：见 `specs/MANUAL-TEST.md` §4.1 与 `specs/MANUAL-TEST-FIX-BATCH-6.md`。

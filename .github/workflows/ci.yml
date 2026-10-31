@@ -30,16 +30,14 @@ jobs:
       - name: 安装依赖
         run: npm ci
 
-      - name: 类型门禁（TS strict · 规格 T1 的 tsc --noEmit）
-        run: npm run typecheck
-        # 类型不通过即阻断合入：这是 TS 方案的核心价值
+      - name: 快速门禁（类型 + lint + 索引新鲜度 + 覆盖率阈值 = verify:fast）
+        run: npm run verify:fast
+        # 批次27 P0-9：由分散的 typecheck/lint/npm test 收敛为 verify:fast 口径，
+        # 补上覆盖率阈值与 code:index:check，与本地合入门禁完全一致
 
-      - name: 静态检查门禁（oxlint correctness 规则）
-        run: npm run lint
-
-      - name: 原子任务验收（每个 T 的验收命令即对应测试，CI 红 = 该任务未通过）
-        run: npm test
-        # vitest + @testing-library/react（jsdom）
+      - name: Electron 主进程构建验证（build:electron）
+        run: npm run build:electron
+        # 批次27 P0-9：主进程/IPC/preload 胶水此前在 CI 里从未编译验证
 
       - name: 完整性 / 正确性门禁
         run: python tools/validate_project.py

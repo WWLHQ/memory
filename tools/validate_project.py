@@ -175,6 +175,8 @@ def main(root: Path):
     # ---------- 6. frontmatter status ----------
     missing_status = []
     for p in root.glob("specs/*.md"):
+        if p.name == "code-index.generated.md":
+            continue  # 生成物：每次 npm run code:index -- --write 重写，不加 frontmatter
         st = frontmatter_status(p.read_text(encoding="utf-8", errors="ignore"))
         if st is None:
             missing_status.append(str(p.relative_to(root)))
