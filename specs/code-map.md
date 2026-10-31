@@ -173,6 +173,7 @@ status: draft
 | UI | `src/web/AgentOnboard/McpClientsPanel.tsx`：真实状态徽标、复制片段、一键接入/补齐、刷新、管理员门禁、浏览器降级说明；复用原型类名，不新增 CSS | `src/web/AgentOnboard/__tests__/McpClientsPanel.test.tsx` |
 | 调用方归因 | `RecallReq.client` + `agent.ts` 审计 `detail.client`；`mcpHttp.ts` 用 `initialize.clientInfo`（优先）/`User-Agent` 识别，`Mcp-Session-Id` 关联 | `mcpHttp.test.ts`（`Qoder/9.9.9`、`Cursor (UA)`） |
 | 客户端触发规则 | 根目录 `CLAUDE.md`（`@AGENTS.md` + 优先调用/回显）；`AGENTS.md §1.1/§9` 同步 | 人工（Claude Code 新会话） |
+| 审计证据升级（批次30） | `src/electron/mcpClients.ts` `applyRecallEvidence` + `scanMcpClients({recallEvidence})`：recall 审计 `detail.client` 按 `spec.id`/`auditClientIds` 匹配，manual/no_config/missing_entry/missing_auth → wired（note 注明「以审计为准」）；conflict/invalid 不升级；`main.ts §6c` 扫描时真查 `storage.queryAudit({action:'recall'})`（失败退回纯文件口径）；`McpClientSpec.auditClientIds`（deepseek-harness → `dsh-mcp-client`） | `src/electron/__tests__/mcpClients.test.ts`（批次30 五例：升级/不匹配不升级/conflict 保持/DSH 命中/空证据无影响） |
 
 > 诚实边界（批次15，28-D 更新）：自动写入只覆盖结构稳定的 JSON 客户端（含 Trae CN、WorkBuddy `~/.workbuddy/mcp.json`）与 Codex（TOML）；Zcode（应用内表单/JSON，无文件路径）与 deepseek harness（随宿主 Qoder 下发）给手工说明/宿主委托；28-E 起 Zcode「复制片段」输出与 WorkBuddy 同构的 mcpServers JSON（可直接粘贴）。状态扫描按文件内容判定，不保证客户端进程已重载配置（需重启客户端）。提示能否被普通成员复制（含令牌）由管理员门禁控制；令牌绝不进日志。
 
