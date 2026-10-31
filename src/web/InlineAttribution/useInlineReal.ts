@@ -10,7 +10,7 @@
 //     账本里所有真实记忆对所有已接入 agent 一视同仁（统一召回池）；
 //   · 无 agent / 账本为空 → 诚实空态，绝不硬编码演示数据。
 import type { Memory, AuditRecord } from '../../core/memagent/types.ts';
-import type { InMemoryStorage } from '../../core/memagent/storage.ts';
+import type { StorageBackend } from '../../core/memagent/types.ts';
 import { estTokens } from '../../core/memagent/recallInsight.ts';
 import { getKernelStorage } from '../kernel.ts';
 import type {
@@ -21,7 +21,7 @@ import type {
   WriteBackMark,
 } from '../../types/inlineAttribution.ts';
 
-export type RealStorage = Pick<InMemoryStorage, 'listMemories' | 'queryAudit'>;
+export type RealStorage = Pick<StorageBackend, 'listMemories' | 'queryAudit'>;
 
 function getRealStorage(): RealStorage {
   // 全站同一份账本（桌面 = 主进程持久库；浏览器 = 进程内单例）。

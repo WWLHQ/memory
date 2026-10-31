@@ -3,13 +3,13 @@
 // ⚠ 禁止注入演示/种子数据：日志完全来自真实操作（l0_view / 其他 audit 动作），空库即空列表。
 import type { MemAgent } from '../../core/memagent/types.ts';
 import type { AuditRecord } from '../../core/memagent/types.ts';
-import type { InMemoryStorage } from '../../core/memagent/storage.ts';
+import type { StorageBackend } from '../../core/memagent/types.ts';
 import { getKernel, getKernelStorage } from '../kernel.ts';
 import type { LogEntry } from './types.ts';
 
 interface LogsCtx {
   ma: MemAgent;
-  storage: InMemoryStorage;
+  storage: StorageBackend;
 }
 
 function getCtx(): LogsCtx {

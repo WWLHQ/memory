@@ -3,7 +3,7 @@
 // 与记忆库管理页一致：禁止注入演示/种子数据 —— 列表只反映账本真实内容；
 // 空账本 → 页面诚实空态并引导去写入页产生真实记忆。
 import type { MemAgent, Memory } from '../../core/memagent/types.ts';
-import type { InMemoryStorage } from '../../core/memagent/storage.ts';
+import type { StorageBackend } from '../../core/memagent/types.ts';
 import { getKernel, getKernelStorage } from '../kernel.ts';
 import { policyFor } from '../../core/memagent/forgetting.ts';
 import { canMigrate } from './logic.ts';
@@ -32,7 +32,7 @@ export const STATUS_TO_DECAY: Record<MemoryStatus, Memory['decay_class']> = {
 };
 
 /** 共享 storage（与全部页面同源） */
-function getStorage(): InMemoryStorage {
+function getStorage(): StorageBackend {
   return getKernelStorage();
 }
 

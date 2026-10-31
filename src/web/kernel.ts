@@ -4,7 +4,7 @@
 // 身份不再写死 demo 账号：优先取真实登录（Home 登录成功后 bindTenant 落盘）或主进程按会话下发
 // （批次26-B P1-3 syncTenantFromHost，桌面壳内每次页面加载覆盖本地值）；否则生成一次本地身份并持久化（仅本机生效）。
 import type {
-  Account, Form, L0AdminPort, L0Port, LlmProvider, MemAgent, MemAgentSeedHooks, VectorBackend,
+  Account, Form, L0AdminPort, L0Port, LlmProvider, MemAgent, MemAgentSeedHooks, StorageBackend, VectorBackend,
 } from '../core/memagent/types.ts';
 import { createMemAgent } from '../core/memagent/agent.ts';
 import { InMemoryStorage } from '../core/memagent/storage.ts';
@@ -15,6 +15,8 @@ import { configuredVectorDim } from './models/modelConfig.ts';
 import { HostL0Admin, HostL0Port, l0HostAvailable } from './shared/l0Port.ts';
 import { hostCall, hostCapability } from '../desktop/hostBridge.ts';
 import { currentSessionId } from './shared/session.ts';
+import { homeBaseUrl } from './backend.ts';
+import { HttpStorageBackend } from './httpStorage.ts';
 
 const TENANT_KEY = 'mam.tenant.v1';
 
@@ -95,12 +97,44 @@ export function kernelAccount(): Account {
 /** 页面形态（端壳）：全部 Web 页为 web；桌面壳内由 Electron 主进程侧判定，渲染层不区分 */
 export const KERNEL_FORM: Form = 'web';
 
-let storageSingleton: InMemoryStorage | null = null;
+let storageSingleton: StorageBackend | null = null;
+let inMemorySingleton: InMemoryStorage | null = null;
+let storageOverride: StorageBackend | null = null;
 
-/** 全局唯一账本（Electron→主进程持久库；浏览器→进程内单例） */
-export function getKernelStorage(): InMemoryStorage {
-  if (!storageSingleton) storageSingleton = new InMemoryStorage();
+/** 测试辅助：强制指定账本后端（jsdom 页面测试 mock 了登录会话时，仍用内存账本而不走 HTTP 数据面） */
+export function setKernelStorageForTests(storage: StorageBackend | null): void {
+  storageOverride = storage;
+  storageSingleton = null;
+  agentSingleton = null;
+}
+
+/**
+ * 批次28-A：全局唯一账本。三态选择——
+ * 1. Electron 壳内：InMemoryStorage 构造即绑定主进程 FileStorage（原有 IPC 数据面，不变）；
+ * 2. 纯浏览器 + 已有登录会话：HttpStorageBackend 经登录后端 /api/kernel/invoke 直连真实账本
+ *    （桌面端持锁时只读镜像，写入得到诚实 E_STORAGE_LOCKED 提示）；
+ * 3. 纯浏览器 + 未登录：进程内空账本（登录后 rebuildKernelForDataPlane() 切换）。
+ */
+export function getKernelStorage(): StorageBackend {
+  if (storageOverride) return storageOverride;
+  if (!storageSingleton) {
+    if (hostCapability() !== 'none' || !currentSessionId()) {
+      inMemorySingleton ??= new InMemoryStorage();
+      storageSingleton = inMemorySingleton;
+    } else {
+      storageSingleton = new HttpStorageBackend({ baseUrl: homeBaseUrl() });
+    }
+  }
   return storageSingleton;
+}
+
+/**
+ * 批次28-A：登录成功后重建内核数据面 —— 浏览器模式从「进程内空账本」切到
+ * 「HTTP 数据面直连真实账本」；桌面壳内调用无害（重新绑定同一 IPC 账本）。
+ */
+export function rebuildKernelForDataPlane(): void {
+  storageSingleton = null;
+  agentSingleton = null;
 }
 
 let agentSingleton: MemAgent | null = null;
@@ -167,9 +201,12 @@ export function rebuildKernelFromModelConfig(): void {
 
 /** 测试辅助：重置全局内核与账本（用例间隔离；生产代码不得调用） */
 export function resetKernelForTests(): void {
-  storageSingleton?.clearForTests();
+  inMemorySingleton?.clearForTests();
+  storageSingleton = null;
+  inMemorySingleton = null;
   agentSingleton = null;
   l0PortsOverride = null;
+  storageOverride = null;
 }
 
 /** 统一 request_id 生成（内核同一 ULID 口径；禁止页面自增计数器冒充） */

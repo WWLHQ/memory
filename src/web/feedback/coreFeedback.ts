@@ -1,11 +1,11 @@
 // 用户反馈页（REQ-006 / P9）接真内核：提交走 ma._feedback（17.4 trust_delta 内核计算）
 // module singleton：内核账本为唯一真相源（禁止注入种子）；confirm/reject/disputed 真实改记忆置信并写审计。
 import type { MemAgent } from '../../core/memagent/types.ts';
-import type { InMemoryStorage } from '../../core/memagent/storage.ts';
+import type { StorageBackend } from '../../core/memagent/types.ts';
 import { getKernel, getKernelStorage } from '../kernel.ts';
 import type { FeedbackDraft, FeedbackRecord } from './types.ts';
 
-function getStorage(): InMemoryStorage {
+function getStorage(): StorageBackend {
   return getKernelStorage();
 }
 

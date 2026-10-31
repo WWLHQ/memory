@@ -7,7 +7,8 @@ import userEvent from '@testing-library/user-event';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { AgentOnboardPage } from '../AgentOnboardPage.tsx';
 import { ONBOARD_STATE_KEY, writeOnboardState } from '../onboardState.ts';
-import { bindTenant, resetKernelForTests } from '../../kernel.ts';
+import { bindTenant, resetKernelForTests, setKernelStorageForTests } from '../../kernel.ts';
+import { InMemoryStorage } from '../../../core/memagent/storage.ts';
 import { setTestOverride } from '../../Home/crossTabAuth.ts';
 
 // 测试环境无 sessionStorage，强制 hasActiveSession()=true 绕过登录门控
@@ -89,6 +90,8 @@ function mockAgentBackend(route: (path: string) => BackendReply, cards: Array<Re
 
 beforeEach(() => {
   resetKernelForTests();
+  // 批次28-A：mock 会话会让账本走 HTTP 数据面，单测仍用内存账本
+  setKernelStorageForTests(new InMemoryStorage());
   localStorage.clear();
   bindTenant({ user_id: 'u_test', team_id: 'team_99', enterprise_id: 'ent_42' });
   setTestOverride(true);
@@ -366,6 +369,12 @@ describe('AgentOnboardPage', () => {
           format: 'json', installed: true, displayPath: '~/.claude.json', hasAuth: true,
           rulesHint: '仓库根 CLAUDE.md（@AGENTS.md）',
         },
+        {
+          // 批次28-B：deepseek harness 宿主继承 —— 宿主 Qoder 已接入即本客户端 wired（无需独立配置）
+          id: 'deepseek-harness', name: 'deepseek harness', badge: 'p0', state: 'wired', writable: true,
+          format: 'unknown', installed: true, displayPath: null, hasAuth: true,
+          rulesHint: '工作区 AGENTS.md',
+        },
       ],
     });
     render(<AgentOnboardPage />);
@@ -380,10 +389,10 @@ describe('AgentOnboardPage', () => {
     const claudeRow = document.querySelector('[data-disc="1"]') as HTMLElement;
     expect(claudeRow.textContent).toContain('安装痕迹（config）');
     expect(claudeRow.textContent).toContain('proc · claude.exe');
-    // 已 wired 的 Claude Code 计入「已写入」；无稳定配置的 deepseek harness 如实标「需手工」
+    // 已 wired 的 Claude Code 与宿主继承接通的 deepseek harness 都计入「已写入」
     const summary = document.querySelector('[data-testid="mcp-wire-summary"]') as HTMLElement;
     expect(summary.textContent).toContain('Claude Code');
-    expect(summary.textContent).toContain('需手工添加 deepseek harness');
+    expect(summary.textContent).toContain('deepseek harness');
   });
 
   it('非桌面壳（浏览器）：自动接入如实失败 → 失败提示 + 指向「手动检测」', async () => {

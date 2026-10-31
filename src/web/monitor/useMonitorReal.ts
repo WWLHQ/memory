@@ -9,11 +9,11 @@
 //     → 显示「—」并标注「未采集」，绝不伪造演示数字（与生长页 latency_ms 同口径）。
 //   · 告警时间线 = 真实账本 monitor_alert 审计（仅读，不再灌种子告警）。
 import type { Memory, AuditRecord } from '../../core/memagent/types.ts';
-import type { InMemoryStorage } from '../../core/memagent/storage.ts';
+import type { StorageBackend } from '../../core/memagent/types.ts';
 import { getKernelStorage } from '../kernel.ts';
 import type { AlertItem, MetricCard } from './types.ts';
 
-export type RealStorage = Pick<InMemoryStorage, 'listMemories' | 'queryAudit'>;
+export type RealStorage = Pick<StorageBackend, 'listMemories' | 'queryAudit'>;
 
 function getRealStorage(): RealStorage {
   // 全站同一份账本（桌面 = 主进程持久库；浏览器 = 进程内单例）。

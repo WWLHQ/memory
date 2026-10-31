@@ -4,12 +4,15 @@
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, expect, disconnectBrowser, collectErrors } from './harness.ts';
-import { startStatic, stopRunningServer, type StaticServer } from './servers.ts';
+import { startStatic, stopRunningServer, startHomeBackend, closeServer, type StaticServer } from './servers.ts';
 import { createServer as createBackend, type RunningServer } from '../src/agentOnboard/server.ts';
+import { ADMIN_ACCOUNT, DEFAULT_ADMIN_PASSWORD } from '../src/auth/loginService.ts';
 
 let staticSrv: StaticServer | undefined;
 let backend: RunningServer | undefined;
+let homeBackend: Awaited<ReturnType<typeof startHomeBackend>> | undefined;
 let APP = '';
+let ADMIN_SID = '';
 
 test.beforeAll(async () => {
   staticSrv = await startStatic(0, 'dist'); // 端口 0：不与桌面服务/其它 spec 争用
@@ -18,10 +21,25 @@ test.beforeAll(async () => {
     dataFile: join(tmpdir(), `e2e-overview-${Date.now()}.json`),
     allowedOrigins: [`http://localhost:${staticSrv.port}`], // A5：页面来源白名单
   });
-  APP = `http://localhost:${staticSrv.port}/overview.html?backend=http://localhost:${backend.port}`;
+  // 批次28-A：接入页 iframe 走 agentBackend；首页/内联标识等内核数据面走 home 后端（挂内存账本）。
+  // 内核数据面需真实会话（/api/kernel/invoke 会话门禁），这里以内置 admin 真登录取 sid。
+  homeBackend = await startHomeBackend({
+    dataFile: join(tmpdir(), `e2e-overview-home-${Date.now()}.json`),
+    allowedOrigins: [`http://localhost:${staticSrv.port}`],
+  });
+  const login = await fetch(`http://localhost:${homeBackend.port}/api/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ account: ADMIN_ACCOUNT, password: DEFAULT_ADMIN_PASSWORD, form: 'desktop' }),
+  });
+  const loginBody = (await login.json()) as { sessionId?: string };
+  if (!loginBody.sessionId) throw new Error(`overview spec admin login failed: ${login.status}`);
+  ADMIN_SID = loginBody.sessionId;
+  APP = `http://localhost:${staticSrv.port}/overview.html?backend=http://localhost:${homeBackend.port}&agentBackend=http://localhost:${backend.port}`;
 });
 test.afterAll(async () => {
   await stopRunningServer(backend);
+  await closeServer(homeBackend?.server);
   await staticSrv?.stop();
   await disconnectBrowser();
 });
@@ -32,14 +50,14 @@ test.describe('REQ-003 + REQ-005 通览页 · 点击级 E2E', () => {
     // 登录门控（REQ-005）：非登录视图需先有 session。
     // 这里模拟"已在首页登录过"的状态（登录/注册流程由 home/register/crossTabAuth spec 覆盖）。
     // 同时预置真实持久化接入名单（AI 接入页从 localStorage 恢复 3 张卡，非演示种子）。
-    await page.addInitScript(() => {
-      localStorage.setItem('session:realpage', 'e2e-session-overview');
+    await page.addInitScript(([sid]) => {
+      localStorage.setItem('session:realpage', sid as string);
       localStorage.setItem('agentOnboardState', JSON.stringify({
         lastOnboardAt: Date.now(),
         agentNames: ['deepseek harness', 'claude code', 'codex'],
         source: 'kernel',
       }));
-    });
+    }, [ADMIN_SID]);
     // ?backend= 透传给 iframe 内的子页面，使其指向本 spec 的独立后端
     await page.goto(APP);
 

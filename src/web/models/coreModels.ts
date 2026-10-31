@@ -5,7 +5,7 @@
 //  · manual 模式的 R7/C11 选择约束属端壳 UX（内核 routeProxy 无 manual 语义），仍在页面逻辑层。
 import type { ModelInfo } from '../../core/memagent/types.ts';
 import { routeProxy } from '../../core/memagent/llm.ts';
-import type { InMemoryStorage } from '../../core/memagent/storage.ts';
+import type { StorageBackend } from '../../core/memagent/types.ts';
 import { embedSync, JsVectorBackend } from '../../core/memagent/vector.ts';
 import { getKernelStorage, newRequestId, KERNEL_FORM, rebuildKernelFromModelConfig } from '../kernel.ts';
 import { PROXY_CATALOG } from './catalog.ts';
@@ -18,7 +18,7 @@ const DAY = 24 * 3600 * 1000;
 interface Ctx {
   models: ModelInfo[];   // 内核路由输入（used 由账本当日 llm_proxy 明细实算）
   usedToday: number;     // 19.8 cost_cap 口径（账本当日 llm_proxy 花费求和）
-  storage: InMemoryStorage;
+  storage: StorageBackend;
 }
 
 /** 当日账本中每个 model 的调用次数（llm_proxy 审计 detail.model） */

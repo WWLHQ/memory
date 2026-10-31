@@ -4,12 +4,12 @@
 // 与记忆库管理页 / 自我净化与生长页一致：禁止注入演示/种子数据 ——
 // 反馈只对账本中真实存在的 memory_id 生效；账本无该记忆 → 诚实提示「账本无此记忆」，绝不伪造。
 import type { MemAgent } from '../../core/memagent/types.ts';
-import type { InMemoryStorage } from '../../core/memagent/storage.ts';
+import type { StorageBackend } from '../../core/memagent/types.ts';
 import { getKernel, getKernelStorage } from '../kernel.ts';
 
 interface InlineCtx {
   ma: MemAgent;
-  storage: InMemoryStorage;
+  storage: StorageBackend;
 }
 
 function getCtx(): InlineCtx {

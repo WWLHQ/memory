@@ -479,3 +479,121 @@ describe('批次26-B P2-14/16/17（Host 绑定 / 限速 / 防枚举 / 默认口�
     expect(JSON.stringify(logs)).not.toContain(DEFAULT_ADMIN_PASSWORD); // 口令零落日志
   });
 });
+
+// ── 批次28-A：内核数据面（浏览器凭登录会话直连记忆账本）────────────────────
+
+async function loginSid(url: string): Promise<string> {
+  const r = await postLogin(url, ACCOUNT, 'pw');
+  expect(r.status).toBe(200);
+  return ((await r.json()) as { sessionId: string }).sessionId;
+}
+
+function invoke(url: string, sid: string, body: unknown) {
+  return fetch(`${url}/api/kernel/invoke`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-session-id': sid },
+    body: JSON.stringify(body),
+  });
+}
+
+describe('批次28-A 内核数据面端点', () => {
+  beforeEach(async () => {
+    resetAuthStore();
+    tmp = mkdtempSync(join(tmpdir(), 'home-srv-kernel-'));
+    dataFile = join(tmp, 'audit.json');
+    registerAccount(ACCOUNT, hashPassword('pw'), { enterprise_id: 'ent_001', team_id: TEAM, perspective: 'team' });
+    server = createServer({ port: 0, dataFile });
+    base = await listen(server);
+  });
+  afterEach(async () => {
+    await close(server);
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const MEM = {
+    mem_id: 'mem_k1', project_id: 'P1', enterprise_id: 'e1', team_id: 't1',
+    category: 'fact', layer: 'L1', content: '内核数据面直连测试记忆内容',
+    decay_class: 'hot', pinned: false, locked: false, version: 1,
+    created_at: 1_800_000_000_000,
+  } as const;
+
+  it('未挂 kernelStorage → /api/kernel/* 501 kernel_unavailable（诚实报错）', async () => {
+    const sid = await loginSid(base);
+    const inv = await invoke(base, sid, { method: 'listMemories', args: [{}] });
+    expect(inv.status).toBe(501);
+    expect(((await inv.json()) as { reason: string }).reason).toBe('kernel_unavailable');
+    const info = await fetch(`${base}/api/kernel/info`, { headers: { 'x-session-id': sid } });
+    expect(info.status).toBe(501);
+  });
+
+  it('无会话 → 401；未知方法 → 400；合法调用走通 putMemory/listMemories', async () => {
+    const { InMemoryStorage } = await import('../../core/memagent/storage.ts');
+    await close(server);
+    server = createServer({ port: 0, dataFile, kernelStorage: new InMemoryStorage() });
+    base = await listen(server);
+
+    const anon = await invoke(base, 'nope', { method: 'listMemories', args: [{}] });
+    expect(anon.status).toBe(401);
+
+    const sid = await loginSid(base);
+    const bad = await invoke(base, sid, { method: 'dropTable', args: [] });
+    expect(bad.status).toBe(400);
+
+    const put = await invoke(base, sid, { method: 'putMemory', args: [MEM] });
+    expect(put.status).toBe(200);
+    expect(((await put.json()) as { ok: boolean }).ok).toBe(true);
+
+    const list = await invoke(base, sid, { method: 'listMemories', args: [{}] });
+    const body = (await list.json()) as { ok: boolean; result: Array<{ mem_id: string }> };
+    expect(body.ok).toBe(true);
+    expect(body.result.map((m) => m.mem_id)).toEqual(['mem_k1']);
+  });
+
+  it('appendAudit 形状校验：非法审计行 400（伪造/畸形在服务端就拒收）', async () => {
+    const { InMemoryStorage } = await import('../../core/memagent/storage.ts');
+    await close(server);
+    server = createServer({ port: 0, dataFile, kernelStorage: new InMemoryStorage() });
+    base = await listen(server);
+    const sid = await loginSid(base);
+
+    const bad = await invoke(base, sid, { method: 'appendAudit', args: [{ request_id: 'req_x;DROP', action: 'memory_op', ts: 'not-a-number' }] });
+    expect(bad.status).toBe(400);
+    expect(((await bad.json()) as { ok: boolean }).ok).toBe(false);
+
+    const good = await invoke(base, sid, { method: 'appendAudit', args: [{ request_id: 'req_ok_1', action: 'memory_op', ts: Date.now(), project_id: 'P1', detail: { op: 'test' } }] });
+    expect(good.status).toBe(200);
+    expect(((await good.json()) as { ok: boolean }).ok).toBe(true);
+  });
+
+  it('只读 FileStorage 镜像：info 返回 readonly=true，putMemory 得到诚实的锁定错误文案', async () => {
+    const { FileStorage } = await import('../../core/memagent/fileStorage.ts');
+    const db = join(tmp, 'readonly-kernel.json');
+    const writer = new FileStorage(db);
+    await writer.putMemory({ ...MEM });
+    writer.close();
+
+    await close(server);
+    server = createServer({
+      port: 0, dataFile,
+      kernelStorage: new FileStorage(db, { readonly: true, reloadOnMtime: true }),
+      kernelInfo: { readonly: true, db_path: db },
+    });
+    base = await listen(server);
+    const sid = await loginSid(base);
+
+    const info = (await (await fetch(`${base}/api/kernel/info`, { headers: { 'x-session-id': sid } })).json()) as { available: boolean; readonly: boolean; db_path: string };
+    expect(info.available).toBe(true);
+    expect(info.readonly).toBe(true);
+    expect(info.db_path).toBe(db);
+
+    const put = await invoke(base, sid, { method: 'putMemory', args: [{ ...MEM, mem_id: 'mem_k2' }] });
+    const body = (await put.json()) as { ok: boolean; error?: string };
+    expect(body.ok).toBe(false);
+    expect(body.error).toContain('只读');
+
+    const list = await invoke(base, sid, { method: 'listMemories', args: [{}] });
+    const okBody = (await list.json()) as { ok: boolean; result: Array<{ mem_id: string }> };
+    expect(okBody.ok).toBe(true);
+    expect(okBody.result.map((m) => m.mem_id)).toEqual(['mem_k1']);
+  });
+});

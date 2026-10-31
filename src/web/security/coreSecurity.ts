@@ -4,12 +4,12 @@
 import type {
   L0GrantReq, L0GrantResult, L0GrantView, L0MigrationResult, L0RequestView, L0VaultStatus, MemAgent,
 } from '../../core/memagent/types.ts';
-import type { InMemoryStorage } from '../../core/memagent/storage.ts';
+import type { StorageBackend } from '../../core/memagent/types.ts';
 import { getKernel, getKernelStorage } from '../kernel.ts';
 
 interface SecurityCtx {
   ma: MemAgent;
-  storage: InMemoryStorage;
+  storage: StorageBackend;
 }
 
 function getCtx(): SecurityCtx {

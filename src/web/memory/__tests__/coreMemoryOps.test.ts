@@ -64,7 +64,7 @@ describe('coreUpdateContent：手动编辑过 L0→L1 质量门', () => {
     expect(audits[0].detail.embedding_recomputed).toBe(true);
   });
 
-  it('深层记录编辑 → 改写对应 content_lN，L1 与 embedding 保持不变', async () => {
+  it('批次28-C：stub 深层行编辑 → 归 L1（不再回写遗留深层字段），embedding 重算', async () => {
     const storage = getStorage();
     await storage.putMemory(mem({
       mem_id: 'm3', layer: 'L3', content: '旧分析内容', content_l1: 'L1 内容',
@@ -75,6 +75,26 @@ describe('coreUpdateContent：手动编辑过 L0→L1 质量门', () => {
     expect(r.ok).toBe(true);
 
     const saved = await storage.getMemory('m3');
+    expect(saved?.layer).toBe('L1');
+    expect(saved?.content_l1).toBe('分析结论：连接池过小导致超时，需扩容至 50');
+    expect(saved?.content_l3).toBeUndefined();
+    expect(saved?.embedding).not.toEqual([1, 0, 0, 0]);
+    const audits = await storage.queryAudit({ action: 'memory_op' });
+    expect(audits[0].detail.embedding_recomputed).toBe(true);
+  });
+
+  it('真实 LLM 产物的深层行编辑 → 仍改写对应 content_lN，L1 与 embedding 保持不变', async () => {
+    const storage = getStorage();
+    await storage.putMemory(mem({
+      mem_id: 'm3b', layer: 'L3', content: '旧分析内容', content_l1: 'L1 内容',
+      content_l3: '旧分析内容', refined_by: 'llm', embedding: [1, 0, 0, 0],
+    }));
+
+    const r = await coreUpdateContent('m3b', '分析结论：连接池过小导致超时，需扩容至 50');
+    expect(r.ok).toBe(true);
+
+    const saved = await storage.getMemory('m3b');
+    expect(saved?.layer).toBe('L3');
     expect(saved?.content_l3).toBe('分析结论：连接池过小导致超时，需扩容至 50');
     expect(saved?.content_l1).toBe('L1 内容');
     expect(saved?.embedding).toEqual([1, 0, 0, 0]);

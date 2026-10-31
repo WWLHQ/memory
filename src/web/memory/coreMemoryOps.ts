@@ -8,6 +8,7 @@ import type { MemAgent } from '../../core/memagent/types.ts';
 import { getKernel, getKernelStorage, newRequestId } from '../kernel.ts';
 import { policyFor } from '../../core/memagent/forgetting.ts';
 import { checkL0ToL1Quality, filteredAuditDetail } from '../../core/memagent/qualityGate.ts';
+import { layerSpecOf } from '../../core/memagent/layerRules.ts';
 import { embedSync } from '../../core/memagent/vector.ts';
 import { sha256hex } from '../../core/memagent/sync.ts';
 import { configuredVectorDim } from '../models/modelConfig.ts';
@@ -195,6 +196,10 @@ export async function coreUpdateContent(memId: string, content: string): Promise
   }
 
   const nextText = gate.content!;
+  // 批次28-C：layer 不是 L1 但并非真实 LLM 产物的行（refined_by 缺失/stub，如清理前的遗留行）
+  // 一律按 L1 处理 —— 手动编辑不再往遗留深层字段回写，避免「无 LLM 却保留 L2-L6」死灰复燃。
+  const isRealLlmProduct = m.refined_by === 'llm' || m.refined_by === 'llm_partial';
+  const effectiveLayer: Memory['layer'] = isRealLlmProduct ? m.layer : 'L1';
   const next: Memory = {
     ...m,
     content: nextText,
@@ -202,9 +207,21 @@ export async function coreUpdateContent(memId: string, content: string): Promise
     updated_at: now,
     layers_generated_at: now,   // 手动改写即重炼：层级生成时间跟着刷新（批次24 口径2）
     sha256: sha256hex(nextText),
-    ...layerContentPatch(m.layer, nextText),
+    ...(effectiveLayer === 'L1'
+      ? {
+          content_l1: nextText,
+          ...(m.layer !== 'L1'
+            ? {
+                layer: 'L1' as const,
+                content_l2: undefined, content_l3: undefined, content_l4: undefined,
+                content_l5: undefined, content_l6: undefined,
+                layer_specs: { L1: `v1:${layerSpecOf('L1').name}` },
+              }
+            : {}),
+        }
+      : layerContentPatch(effectiveLayer, nextText)),
   };
-  if (m.layer === 'L1') {
+  if (effectiveLayer === 'L1') {
     const dim = m.embedding && m.embedding.length > 0 ? m.embedding.length : configuredVectorDim();
     next.embedding = embedSync(nextText, dim);
   }
@@ -220,7 +237,7 @@ export async function coreUpdateContent(memId: string, content: string): Promise
       from_len: m.content.length, to_len: nextText.length,
       masked: nextText !== trimmed,
       l0_unchanged: true,
-      embedding_recomputed: m.layer === 'L1',
+      embedding_recomputed: effectiveLayer === 'L1',
     },
   });
   return { ok: true, rec: toRecord(next) };

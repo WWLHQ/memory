@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { createServer as createHomeServer } from '../src/home/server.ts';
 import type { HomeServer } from '../src/home/server.ts';
 import type { RunningServer } from '../src/agentOnboard/server.ts';
+import { InMemoryStorage } from '../src/core/memagent/storage.ts';
+import type { StorageBackend } from '../src/core/memagent/types.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const MIME: Record<string, string> = {
@@ -60,12 +62,20 @@ export function startStatic(port = 8123, subdir = ''): Promise<StaticServer> {
   })));
 }
 
-/** 启动 home 后端（端口 0 = 系统分配，避免与桌面 8200/8201 及 MCP 8202/8204 冲突） */
+/** 启动 home 后端（端口 0 = 系统分配，避免与桌面 8200/8201 及 MCP 8202/8204 冲突）。
+ *  批次28-A：与生产同构地挂上内核账本（缺省内存账本）——浏览器页面带会话后会走
+ *  /api/kernel/invoke 数据面，不挂账本会 501 让安全页等审计写入诚实失败。 */
 export async function startHomeBackend(opts: {
   dataFile: string;
   allowedOrigins?: string[];
+  kernelStorage?: StorageBackend;
 }): Promise<{ server: http.Server; homeServer: HomeServer; port: number; stop: () => Promise<void> }> {
-  const homeServer = createHomeServer({ dataFile: opts.dataFile, allowedOrigins: opts.allowedOrigins });
+  const homeServer = createHomeServer({
+    dataFile: opts.dataFile,
+    allowedOrigins: opts.allowedOrigins,
+    kernelStorage: opts.kernelStorage ?? new InMemoryStorage(),
+    kernelInfo: { readonly: false, db_path: 'e2e-in-memory' },
+  });
   await new Promise<void>((resolve, reject) => {
     homeServer.once('error', reject);
     homeServer.listen(0, () => resolve());

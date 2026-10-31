@@ -17,8 +17,10 @@ import {
 } from '../auth/loginService.ts';
 import { hashPassword } from '../auth/hash.ts';
 import { createOriginPolicy, rejectUntrustedOrigin, rejectUntrustedHost, applyCorsHeaders } from '../shared/localOrigin.ts';
+import { validateAuditRecord } from '../shared/auditShape.ts';
 import type { Form } from '../types/agentOnboard.ts';
 import type { TenantContext, LoginAudit, AccountRole } from '../types/home.ts';
+import type { StorageBackend } from '../core/memagent/types.ts';
 
 /** 端壳 mirror 上抛条目（G6：全动作、成对/上下文放 payload） */
 export interface MirrorAuditEntry {
@@ -49,6 +51,14 @@ export interface ServerOptions {
   adminPassword?: string;
   /** 动作日志回调（批次7）：主进程写入 actions.log；缺省静默 */
   onLog?: (scope: string, action: string, detail?: Record<string, unknown>) => void;
+  /**
+   * 批次28-A：内核数据面 —— 把进程内的记忆账本（StorageBackend）挂到 HTTP 端点，
+   * 浏览器页面凭登录会话直读/直写真实账本，而不是进程内空账本。
+   * 缺省未接线 → /api/kernel/* 返回 501 kernel_unavailable（诚实报错，不伪造数据）。
+   */
+  kernelStorage?: StorageBackend;
+  /** /api/kernel/info 用的静态描述（只读状态与账本路径）；未提供则不外泄 */
+  kernelInfo?: { readonly: boolean; db_path: string };
 }
 
 /** home server 句柄：在 Server 上附加会话查询（主进程做管理员 IPC 校验用） */
@@ -71,6 +81,11 @@ interface Session {
 /** 会话有效期（12 小时；过期后 /api/me 返回 401，前端重新登录） */
 const SESSION_TTL_MS = 12 * 3600 * 1000;
 const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
+
+/** 批次28-A：内核数据面白名单（只放六条存储方法；与 preload 数据面同一套边界） */
+const KERNEL_METHODS = [
+  'putMemory', 'getMemory', 'listMemories', 'deleteMemory', 'appendAudit', 'queryAudit',
+] as const;
 
 class BodyTooLargeError extends Error {}
 
@@ -428,6 +443,57 @@ export function createServer(opts: ServerOptions): HomeServer {
             send(res, 200, { context: s.context });
           } else {
             send(res, 401, { ok: false });
+          }
+          return;
+        }
+
+        // ── 批次28-A：内核数据面（浏览器凭登录会话直连记忆账本）──────────────
+        // appendAudit 走与 preload 数据面（批次26-B P1-2）同一形状校验，拒绝伪造/畸形审计行。
+        // 每次请求的来源/状态/耗时已由上方 home:http 日志统一留痕，这里不再逐调用刷日志。
+        if (req.method === 'GET' && path === '/api/kernel/info') {
+          const s = getSession(sessionIdOf(req));
+          if (!s) { send(res, 401, { ok: false, reason: 'no_session' }); return; }
+          if (!opts.kernelStorage) { send(res, 501, { ok: false, reason: 'kernel_unavailable' }); return; }
+          send(res, 200, {
+            ok: true,
+            available: true,
+            readonly: opts.kernelInfo?.readonly ?? false,
+            db_path: opts.kernelInfo?.db_path ?? null,
+          });
+          return;
+        }
+
+        if (req.method === 'POST' && path === '/api/kernel/invoke') {
+          const s = getSession(sessionIdOf(req));
+          if (!s) { send(res, 401, { ok: false, reason: 'no_session' }); return; }
+          if (!opts.kernelStorage) { send(res, 501, { ok: false, reason: 'kernel_unavailable' }); return; }
+          const body = await readJsonBody(req, maxBodyBytes);
+          const method = typeof body.method === 'string' ? body.method : '';
+          if (!(KERNEL_METHODS as readonly string[]).includes(method)) {
+            send(res, 400, { ok: false, error: `不支持的方法：${method || '(空)'}` });
+            return;
+          }
+          const args = Array.isArray(body.args) ? body.args : [];
+          if (method === 'appendAudit') {
+            try {
+              validateAuditRecord(args[0]);
+            } catch (e) {
+              send(res, 400, { ok: false, error: e instanceof Error ? e.message : 'invalid audit record' });
+              return;
+            }
+          }
+          try {
+            const member = opts.kernelStorage[method as keyof StorageBackend] as ((...a: unknown[]) => Promise<unknown>) | undefined;
+            if (typeof member !== 'function') {
+              send(res, 400, { ok: false, error: `不支持的方法：${method || '(空)'}` });
+              return;
+            }
+            // .call 以接收者调用（fn(...args) 会丢 this，内存后端字段全挂在实例上）
+            const result = await member.call(opts.kernelStorage, ...args);
+            send(res, 200, { ok: true, result });
+          } catch (e) {
+            // 只读镜像的写入拒绝（E_STORAGE_LOCKED 等）原样回传文案，前端如实提示
+            send(res, 200, { ok: false, error: e instanceof Error ? e.message : String(e) });
           }
           return;
         }

@@ -2,13 +2,13 @@
 // 查询经 storage.queryAudit（§3.2 全动作可查）。⚠ 禁止注入演示/种子数据：
 // 审计完全来自真实操作（内核写账本）；空库即空列表。
 import type { AuditRecord, MemAgent } from '../../core/memagent/types.ts';
-import type { InMemoryStorage } from '../../core/memagent/storage.ts';
+import type { StorageBackend } from '../../core/memagent/types.ts';
 import { getKernel, getKernelStorage, getTenant } from '../kernel.ts';
 import type { AuditEntry } from './types.ts';
 
 interface AuditCtx {
   ma: MemAgent;
-  storage: InMemoryStorage;
+  storage: StorageBackend;
 }
 
 function getCtx(): AuditCtx {

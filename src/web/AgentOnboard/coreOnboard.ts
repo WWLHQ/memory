@@ -3,7 +3,6 @@
 // 宿主真扫（discover 真实化）：Electron 下经 window.api.hostScan.run() 读主进程真实进程表/MCP；
 // 纯浏览器无此能力 → 降级内核 discover 并标注「数据来源：内核模拟」（非真实，UI 据此打徽标）。
 import type { MemAgent, StorageBackend, AuditRecord, Memory } from '../../core/memagent/types.ts';
-import type { InMemoryStorage } from '../../core/memagent/storage.ts';
 import { getKernel, getKernelStorage } from '../kernel.ts';
 import { hostCall, hostCapability } from '../../desktop/hostBridge.ts';
 import type { HostScanResult } from '../../desktop/hostScan.ts';
@@ -11,7 +10,7 @@ import type { Gain } from '../../types/agentOnboard.ts';
 
 interface OnboardCtx {
   ma: MemAgent;
-  storage: InMemoryStorage;
+  storage: StorageBackend;
 }
 
 function getCtx(): OnboardCtx {

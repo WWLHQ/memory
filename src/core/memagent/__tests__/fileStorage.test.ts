@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
-import { FileStorage, StorageCorruptError } from '../fileStorage.ts';
+import { FileStorage, StorageCorruptError, StorageLockedError } from '../fileStorage.ts';
 import type { Memory, AuditRecord } from '../types.ts';
 
 function mem(id: string, over: Partial<Memory> = {}): Memory {
@@ -274,5 +274,89 @@ describe('FileStorage · 写盘失败不静默丢批（批次25 P0-6）', () => 
     const s2 = new FileStorage(db);
     expect((await s2.getMemory('m1'))?.content).toBe('content-m1');
     expect((await s2.queryAudit({ request_id: 'r1' }))).toHaveLength(1);
+  });
+});
+
+// 批次28-A：写锁 + 只读镜像。单文件账本只允许一个写者；第二实例自动降级只读，
+// 防双写损坏；陈旧锁（持锁进程已死）自动回收；只读镜像可跟随 mtime 重载近实时反映写方。
+describe('FileStorage · 写锁与只读镜像（批次28-A）', () => {
+  let dir: string;
+  let db: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'filestorage-lock-'));
+    db = join(dir, 'memories.db.json');
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('持锁实例可写；同进程第二实例自动降级只读，写入抛 E_STORAGE_LOCKED', async () => {
+    const writer = new FileStorage(db);
+    await writer.putMemory(mem('m1', { content: 'writer-only' }));
+
+    const mirror = new FileStorage(db);
+    expect(mirror.readOnly).toBe(true);
+    expect(mirror.lockedBy?.pid).toBe(process.pid);
+    await expect(mirror.putMemory(mem('m2'))).rejects.toThrow(StorageLockedError);
+    await expect(mirror.putMemory(mem('m2'))).rejects.toThrow(/其它进程/);
+    // 只读镜像仍可读：读到写方已落盘的数据
+    expect((await mirror.getMemory('m1'))?.content).toBe('writer-only');
+    writer.close();
+  });
+
+  it('close 释放写锁后，新实例恢复可写（锁文件被清掉）', async () => {
+    const writer = new FileStorage(db);
+    expect(existsSync(`${db}.lock`)).toBe(true);
+    writer.close();
+    expect(existsSync(`${db}.lock`)).toBe(false);
+    const next = new FileStorage(db);
+    expect(next.readOnly).toBe(false);
+    await next.putMemory(mem('m1'));
+    next.close();
+  });
+
+  it('陈旧锁（持锁 pid 已死）→ 自动回收并取锁可写', async () => {
+    const deadPid = 999_999_999; // 假定不存在（进程号上限远低于此）
+    writeFileSync(`${db}.lock`, JSON.stringify({ pid: deadPid, at: Date.now() }), 'utf8');
+    const s = new FileStorage(db);
+    expect(s.readOnly).toBe(false);
+    expect(s.lockedBy).toBeNull();
+    await s.putMemory(mem('m1'));
+    s.close();
+  });
+
+  it('readonly 构造：不取锁、写拒绝（不带「其它进程」文案）、close 不落盘', async () => {
+    const writer = new FileStorage(db);
+    await writer.putMemory(mem('m1'));
+    writer.close();
+
+    const ro = new FileStorage(db, { readonly: true, reloadOnMtime: true });
+    expect(ro.readOnly).toBe(true);
+    expect(ro.lockedBy).toBeNull();
+    expect(existsSync(`${db}.lock`)).toBe(false); // 只读绝不抢写锁
+    await expect(ro.putMemory(mem('m2'))).rejects.toThrow(/只读模式/);
+    ro.close();
+  });
+
+  it('reloadOnMtime：写方更新账本后，镜像读操作看到新数据（mtime 触发重载）', async () => {
+    const writer = new FileStorage(db);
+    await writer.putMemory(mem('m1', { content: 'v1' }));
+
+    const mirror = new FileStorage(db, { readonly: true, reloadOnMtime: true });
+    expect((await mirror.getMemory('m1'))?.content).toBe('v1');
+
+    await writer.putMemory(mem('m2', { content: 'v2' }));
+    expect((await mirror.getMemory('m2'))?.content).toBe('v2');
+    expect((await mirror.listMemories({})).map((m) => m.mem_id)).toEqual(['m1', 'm2']);
+    writer.close();
+    mirror.close();
+  });
+
+  it('未开 reloadOnMtime 的只读实例：不跟随写方更新（保持构造时快照）', async () => {
+    const writer = new FileStorage(db);
+    await writer.putMemory(mem('m1'));
+    const mirror = new FileStorage(db, { readonly: true });
+    await writer.putMemory(mem('m2'));
+    expect(await mirror.getMemory('m2')).toBeNull();
+    writer.close();
+    mirror.close();
   });
 });

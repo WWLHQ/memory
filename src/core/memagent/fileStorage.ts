@@ -5,7 +5,7 @@
 //   · 单文件 <userData>/memories.db.json + 同步原子写（写 tmp → rename）保证崩溃一致性；
 //     桌面壳为单进程主源，无并发写竞争，故不需 WAL/锁。
 //   · 与 SqliteStorage 相同的方法签名 + 测试辅助（size/close），可被同一套测试消费（见 __tests__）。
-import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync, openSync, fsyncSync, closeSync, unlinkSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync, openSync, fsyncSync, closeSync, unlinkSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { AuditAction, AuditRecord, Filter, Memory, StorageBackend } from './types.ts';
 
@@ -35,6 +35,22 @@ export class StorageCorruptError extends Error {
   }
 }
 
+/** 批次28-A：只读存储上的写操作显式失败（web 镜像另一个进程的账本时），绝不静默假成功 */
+export class StorageLockedError extends Error {
+  readonly code = 'E_STORAGE_LOCKED';
+  constructor(message: string) {
+    super(message);
+    this.name = 'StorageLockedError';
+  }
+}
+
+export interface FileStorageOptions {
+  /** 只读模式（批次28-A）：绝不写盘、绝不取写锁；读操作可选跟随 mtime 重载 */
+  readonly?: boolean;
+  /** 只读模式下每次读前检查账本文件 mtime，变了就重载（镜像持有写锁的进程，近实时） */
+  reloadOnMtime?: boolean;
+}
+
 export class FileStorage implements StorageBackend {
   private doc: FileDoc;
   private open = true;
@@ -42,16 +58,100 @@ export class FileStorage implements StorageBackend {
    *  由 commitBatch() 一次性 persist（把 N 次全量同步写盘降为 1 次，避免卡死事件循环）。 */
   private batching = false;
   private dirty = false;
+  /** 批次28-A：生效的只读态（构造传入，或写锁被其它活进程持有时自动降级） */
+  private readonly mode: boolean;
+  private readonly reloadOnMtime: boolean;
+  private lastMtimeMs: number | null = null;
+  private lockPath: string;
+  private ownsLock = false;
+  /** 写锁被其它活进程持有 → 自动降级只读；只读构造不取锁恒为 null */
+  private lockHolder: { pid: number; at: number } | null = null;
 
-  constructor(private readonly dbPath: string) {
+  constructor(private readonly dbPath: string, opts: FileStorageOptions = {}) {
     const dir = dirname(dbPath);
     mkdirSync(dir, { recursive: true });
+    this.lockPath = `${dbPath}.lock`;
+    this.reloadOnMtime = opts.reloadOnMtime === true;
+    this.mode = opts.readonly === true || !this.acquireLock();
     this.doc = this.load();
+    this.lastMtimeMs = this.statMtime();
+  }
+
+  /** 独占写锁：<db>.lock（O_EXCL 原子创建，内容含 pid）。锁被活进程持有 → 自动只读；
+   *  陈旧锁（持锁进程已死）→ 打开并重取。True = 本进程持锁可写。 */
+  private acquireLock(): boolean {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const fd = openSync(this.lockPath, 'wx');
+        try {
+          writeFileSync(fd, JSON.stringify({ pid: process.pid, at: Date.now() }), 'utf8');
+        } finally {
+          closeSync(fd);
+        }
+        this.ownsLock = true;
+        return true;
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+        const holder = this.readLockHolder();
+        if (holder && this.pidAlive(holder.pid)) {
+          this.lockHolder = holder;
+          return false; // 其它活进程在写：本实例降级只读，绝不双写损坏账本
+        }
+        try { unlinkSync(this.lockPath); } catch { /* 陈旧锁删不掉：下一轮再试 */ }
+      }
+    }
+    return false;
+  }
+
+  private readLockHolder(): { pid: number; at: number } | null {
+    try {
+      const raw = JSON.parse(readFileSync(this.lockPath, 'utf8')) as { pid?: unknown; at?: unknown };
+      if (typeof raw?.pid === 'number') return { pid: raw.pid, at: typeof raw.at === 'number' ? raw.at : 0 };
+    } catch { /* 锁文件损坏视同陈旧 */ }
+    return null;
+  }
+
+  private pidAlive(pid: number): boolean {
+    try { process.kill(pid, 0); return true; } catch { return false; }
+  }
+
+  /** 只读写保护：统一报错文案（web 镜像只读 / 写锁被占），绝不静默假成功 */
+  private assertWritable(): void {
+    if (this.mode) {
+      throw new StorageLockedError(
+        this.lockHolder
+          ? '记忆库正被其它进程写入（桌面端运行中），当前为只读镜像；写入请用桌面端或 MCP。'
+          : '存储处于只读模式，不可写入。',
+      );
+    }
+  }
+
+  /** 只读镜像：账本文件 mtime 变化（桌面端写入）→ 整体重载，近实时反映写方数据 */
+  private maybeReload(): void {
+    if (!this.mode || !this.reloadOnMtime) return;
+    const mtime = this.statMtime();
+    if (mtime === null || mtime === this.lastMtimeMs) return;
+    this.doc = this.load();
+    this.lastMtimeMs = mtime;
+  }
+
+  private statMtime(): number | null {
+    try { return statSync(this.dbPath).mtimeMs; } catch { return null; }
+  }
+
+  /** 写锁持有者信息（只读降级时非空；设置页/诊断用） */
+  get readOnly(): boolean {
+    return this.mode;
+  }
+
+  get lockedBy(): { pid: number; at: number } | null {
+    return this.lockHolder;
   }
 
   /** 开启批量模式（会话采集等大批量入库场景）。需配合 commitBatch 结束。
    *  不清脏标记：上一次提交若因写盘失败被中止，这里的待落盘批次仍要由下次 commit 完成。 */
   beginBatch(): void {
+    this.assertWritable();
     this.batching = true;
   }
 
@@ -195,6 +295,7 @@ export class FileStorage implements StorageBackend {
   }
 
   async putMemory(m: Memory): Promise<void> {
+    this.assertWritable();
     const prev = this.doc.memories[m.mem_id];
     this.doc.memories[m.mem_id] = m;
     this.touchOrRollback(() => {
@@ -204,11 +305,13 @@ export class FileStorage implements StorageBackend {
   }
 
   async getMemory(mem_id: string): Promise<Memory | null> {
+    this.maybeReload();
     const m = this.doc.memories[mem_id];
     return m && !m.deleted ? m : null; // 墓碑对常规读取不可见
   }
 
   async listMemories(filter: Filter): Promise<Memory[]> {
+    this.maybeReload();
     const out: Memory[] = [];
     for (const m of Object.values(this.doc.memories)) {
       if (m.deleted && !filter.include_deleted) continue; // 墓碑默认隐藏（D2）
@@ -221,6 +324,7 @@ export class FileStorage implements StorageBackend {
   }
 
   async deleteMemory(mem_id: string): Promise<void> {
+    this.assertWritable();
     const prev = this.doc.memories[mem_id];
     if (prev === undefined) return; // 幂等：删不存在不抛
     delete this.doc.memories[mem_id];
@@ -230,6 +334,7 @@ export class FileStorage implements StorageBackend {
   }
 
   async appendAudit(a: AuditRecord): Promise<void> {
+    this.assertWritable();
     this.doc.audit.push(a); // append-only（4.3）
     this.touchOrRollback(() => {
       if (this.doc.audit[this.doc.audit.length - 1] === a) this.doc.audit.pop();
@@ -241,6 +346,7 @@ export class FileStorage implements StorageBackend {
     action?: AuditAction;
     since?: number;
   }): Promise<AuditRecord[]> {
+    this.maybeReload();
     return this.doc.audit.filter((a) => {
       if (filter.request_id && a.request_id !== filter.request_id) return false;
       if (filter.action && filter.action !== a.action) return false;
@@ -254,8 +360,13 @@ export class FileStorage implements StorageBackend {
    *  落盘失败时原样上抛且**不置为已关闭**：调用方可见、记录日志，障碍解除后可再次 close 重试。 */
   close(): void {
     if (!this.open) return;
+    if (this.mode) { this.open = false; return; } // 只读实例无待落盘批次，直接关闭
     this.commitBatch();
     this.open = false;
+    if (this.ownsLock) {
+      try { unlinkSync(this.lockPath); } catch { /* 锁文件删不掉：陈旧锁由下个实例按死 pid 判定 */ }
+      this.ownsLock = false;
+    }
   }
 
   /** 测试辅助：与 InMemoryStorage.size / SqliteStorage.size 语义一致 */

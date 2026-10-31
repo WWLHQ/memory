@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { SecurityPage } from '../SecurityPage.tsx';
 import { coreLoadSecurityAudit } from '../coreSecurity.ts';
-import { resetKernelForTests, setKernelL0ForTests } from '../../kernel.ts';
+import { resetKernelForTests, setKernelL0ForTests, setKernelStorageForTests } from '../../kernel.ts';
+import { InMemoryStorage } from '../../../core/memagent/storage.ts';
 import { createTestVault } from '../../../core/memagent/__tests__/l0Kit.ts';
 
 // 批次7：页面按登录角色做门禁。单测不连后端，直接注入会话角色（真实校验在 home server / IPC）。
@@ -20,6 +21,8 @@ vi.mock('../../shared/session.ts', () => ({
 describe('SecurityPage (P12-T4 编排)', () => {
   beforeEach(() => {
     resetKernelForTests(); // 账本从真空态起算（无种子）
+    // 批次28-A：mock 会话会让账本走 HTTP 数据面，单测仍用内存账本
+    setKernelStorageForTests(new InMemoryStorage());
     session.role = 'admin';
     vi.spyOn(window, 'confirm').mockReturnValue(true);
   });

@@ -8,7 +8,7 @@
 //   · Δ 曲线 = 真实 weight_tuned / growth_op 审计事件（无记录则空态）
 //   · 调度 = 真实配置（非演示数据）
 import type { Memory, AuditRecord } from '../../core/memagent/types.ts';
-import type { InMemoryStorage } from '../../core/memagent/storage.ts';
+import type { StorageBackend } from '../../core/memagent/types.ts';
 import { getKernelStorage } from '../kernel.ts';
 import type {
   DedupSample, DeltaPoint, DimKey, DimWeights, GrowthMetrics, LayerThresholds,
@@ -16,7 +16,7 @@ import type {
 } from './types.ts';
 import { DEFAULT_SCHEDULE, DEFAULT_THRESHOLDS, DEFAULT_WEIGHTS } from './spec.ts';
 
-export type RealStorage = Pick<InMemoryStorage, 'listMemories' | 'queryAudit'>;
+export type RealStorage = Pick<StorageBackend, 'listMemories' | 'queryAudit'>;
 
 const DAY = 24 * 3600 * 1000;
 

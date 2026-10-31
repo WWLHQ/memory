@@ -2,7 +2,7 @@
 // module singleton：共享 storage（桌面 Electron 下桥接到主进程 FileStorage 真实账本，与记忆管理页同源）。
 // ⚠ 禁止注入演示/种子数据：写入页只反映真实账本；查重由内核真实判定。
 import type { Category as CoreCategory } from '../../core/memagent/types.ts';
-import type { InMemoryStorage } from '../../core/memagent/storage.ts';
+import type { StorageBackend } from '../../core/memagent/types.ts';
 import { getKernel, getKernelStorage } from '../kernel.ts';
 import type { MemoryCategory } from './types.ts';
 import type { ExistingMemory } from './types.ts';
@@ -18,7 +18,7 @@ const CATEGORY_MAP: Record<MemoryCategory, CoreCategory> = {
 };
 
 /** 共享 storage（与全部页面同源：桌面 Electron 下都桥接到主进程 FileStorage 同一账本） */
-function getStorage(): InMemoryStorage {
+function getStorage(): StorageBackend {
   return getKernelStorage();
 }
 

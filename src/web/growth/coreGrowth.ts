@@ -3,13 +3,13 @@
 // 与记忆库管理页一致：复用 InMemoryStorage 单例（桌面 Electron 下自动绑定主进程
 // FileStorage 持久账本；浏览器降级内存态）。数据真相 = 内核账本，无种子兜底。
 import type { MemAgent } from '../../core/memagent/types.ts';
-import type { InMemoryStorage } from '../../core/memagent/storage.ts';
+import type { StorageBackend } from '../../core/memagent/types.ts';
 import { getKernel, getKernelStorage } from '../kernel.ts';
 import type { GrowthAuditEntry } from './types.ts';
 
 interface GrowthCtx {
   ma: MemAgent;
-  storage: InMemoryStorage;
+  storage: StorageBackend;
 }
 
 function getCtx(): GrowthCtx {

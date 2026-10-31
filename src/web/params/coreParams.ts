@@ -1,7 +1,7 @@
 // 全局参数页（REQ-006 / P5）接真内核：参数快照存内核 preference 记忆（params:v1: JSON，
 // pinned 防 gc），保存真写 storage 账本 + param_save 审计，加载 getPrefs 口径回填。
 import type { MemAgent, Memory } from '../../core/memagent/types.ts';
-import type { InMemoryStorage } from '../../core/memagent/storage.ts';
+import type { StorageBackend } from '../../core/memagent/types.ts';
 import { getKernel, getKernelStorage, getTenant, newRequestId } from '../kernel.ts';
 import { PARAMS_PREF_PREFIX as PREF_PREFIX, parseParamsSnapshot } from '../../core/memagent/paramsSnapshot.ts';
 import { normalizeUnitPrice } from '../../core/memagent/recallInsight.ts';
@@ -9,7 +9,7 @@ import type { DevParams, KbPolicyRow, NormalConfig } from './types.ts';
 
 interface ParamsCtx {
   ma: MemAgent;
-  storage: InMemoryStorage;
+  storage: StorageBackend;
 }
 
 function getCtx(): ParamsCtx {
@@ -24,7 +24,7 @@ function tryParsePayload(content: string): { cfg: NormalConfig; kbs: KbPolicyRow
   return parseParamsSnapshot(content) as { cfg: NormalConfig; kbs: KbPolicyRow[]; dev: DevParams } | null;
 }
 
-async function findParamsMemory(storage: InMemoryStorage): Promise<Memory | null> {
+async function findParamsMemory(storage: StorageBackend): Promise<Memory | null> {
   const mems = await storage.listMemories({});
   return mems.find((m) => m.category === 'preference' && m.user_id === 'system' && m.content.startsWith(PREF_PREFIX)) ?? null;
 }

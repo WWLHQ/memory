@@ -5,7 +5,7 @@ import { autoDispatch, budgetLevel, resolveSceneBudget, sortHits, freshness } fr
 import type { Memory, RecallReq } from '../../core/memagent/types.ts';
 import type { MemAgent } from '../../core/memagent/types.ts';
 import { getKernel, getKernelStorage } from '../kernel.ts';
-import type { InMemoryStorage } from '../../core/memagent/storage.ts';
+import type { StorageBackend } from '../../core/memagent/types.ts';
 
 export interface EngineResult {
   hits: RetrievalHit[];
@@ -17,7 +17,7 @@ export interface EngineResult {
 
 const DAY = 24 * 3600 * 1000;
 
-function getStorage(): InMemoryStorage {
+function getStorage(): StorageBackend {
   return getKernelStorage();
 }
 

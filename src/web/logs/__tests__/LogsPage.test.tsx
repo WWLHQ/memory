@@ -4,7 +4,8 @@ import { LogsPage } from '../LogsPage.tsx';
 import { LogTable, AuditModal } from '../LogCards.tsx';
 import { SEED_LOGS, seedL0Memory, seedLogsLedger } from './fixtures.ts';
 import { ensureRequestId } from '../logic.ts';
-import { getKernelStorage, getTenant, resetKernelForTests } from '../../kernel.ts';
+import { getKernelStorage, getTenant, resetKernelForTests, setKernelStorageForTests } from '../../kernel.ts';
+import { InMemoryStorage } from '../../../core/memagent/storage.ts';
 import { TEST_ADMIN_ID } from '../../../core/memagent/__tests__/l0Kit.ts';
 import type { L0Vault } from '../../../core/memagent/l0vault.ts';
 
@@ -27,6 +28,8 @@ describe('LogsPage (P15-T4 编排，审计流来自内核)', () => {
     sessionRole.value = 'admin';
     localStorage.clear();
     resetKernelForTests();
+    // 批次28-A：mock 会话会让账本走 HTTP 数据面，单测仍用内存账本（真 HTTP 行为在 server/httpStorage 单测覆盖）
+    setKernelStorageForTests(new InMemoryStorage());
     await seedLogsLedger();
     ({ vault } = await seedL0Memory());
   });
@@ -202,6 +205,7 @@ describe('AuditModal 审计全链路真查（批次25 P0-2）', () => {
     cleanup();
     localStorage.clear();
     resetKernelForTests();
+    setKernelStorageForTests(new InMemoryStorage());
   });
 
   it('按 request_id 真查账本：命中几行列几行，按时间升序', async () => {

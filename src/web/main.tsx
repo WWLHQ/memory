@@ -3,7 +3,7 @@
 // 首页全量「真实可算」：四卡（累计记忆/累计动作/近1h调用/待裁决）与异常速览 / 近 1h 召回 Top3 / 待裁决
 // 全部在挂载后异步由 getHomeFeed 从内核账本（storage）真实聚合；.rid 溯源真查 home server mirror 账本。
 // AgentOnboard 页迁至 agentonboard.html 入口（保留 REQ-003 验证）。
-import { StrictMode, useCallback, useEffect, useMemo, useState } from 'react';
+import { StrictMode, useCallback, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './shared/actionLog.ts';
 import { HomePage } from './Home/HomePage.tsx';
@@ -19,7 +19,7 @@ import {
 } from './Home/coreHome.ts';
 import { emptyLayerGraph, type LayerGraph } from './Home/layerGraph.ts';
 import { emptyOnboardGains } from './AgentOnboard/coreOnboard.ts';
-import { getKernelStorage } from './kernel.ts';
+import { getKernelStorage, rebuildKernelForDataPlane } from './kernel.ts';
 import './Home/theme.css'; // REQ-005 原型主题（逐字提取自 design/ui/登录与首页_原型.html）
 import type { RawHomeFeed } from '../home/dashboard.ts';
 import type { SyncState, LoginForm } from '../types/home.ts';
@@ -34,9 +34,6 @@ const EMPTY_FEED: RawHomeFeed = {
 };
 
 function App() {
-  // 内核账本后端：Electron 下为 IpcStorageBackend（经 IPC 读主进程 SqliteStorage 真实账本）；
-  // 纯浏览器/测试下为本页内存实现（无内核数据时安全降级为空态）。
-  const storage = useMemo(() => getKernelStorage(), []);
   const mirror = useLoginMirror();
   const [raw, setRaw] = useState<RawHomeFeed>(EMPTY_FEED);
   const [sync, setSync] = useState<SyncState>(emptySync());
@@ -47,17 +44,19 @@ function App() {
   const [traceHits, setTraceHits] = useState<TraceHit[] | null>(null);
   const requireLogin = new URLSearchParams(location.search).get('requireLogin') !== 'false';
 
-  // 真实聚合（含 mirror 镜像兜底源）：挂载、登录成功、图谱刷新共用同一条读取路径
+  // 真实聚合（含 mirror 镜像兜底源）：挂载、登录成功、图谱刷新共用同一条读取路径。
+  // 批次28-A：每次读取都现取内核账本——浏览器登录成功后数据面切到 HTTP 直连，
+  // 这里的 stale memo 会拿到旧空账本，所以不再用 useMemo 固定实例。
   const loadFeed = useCallback(async () => {
     const mirrorItems: MirrorItem[] = await fetchMirrorItems().catch(() => []);
-    return getHomeFeed(storage, { mirrorItems }).catch((e) => ({
+    return getHomeFeed(getKernelStorage(), { mirrorItems }).catch((e) => ({
       raw: EMPTY_FEED,
       sync: emptySync(),
       graph: emptyLayerGraph(),
       effectGains: emptyOnboardGains(),
       storageError: (e as { message?: string })?.message ?? String(e),
     }));
-  }, [storage]);
+  }, []);
 
   // 挂载后异步聚合真实 feed
   useEffect(() => {
@@ -84,6 +83,8 @@ function App() {
   // 登录成功后刷新真实 feed（内核账本可能已因本次会话动作发生变化）
   const loginFn: LoginFn = async (input: LoginForm) => {
     const r = await mirror.login(input);
+    // 批次28-A：浏览器模式登录成功即把内核数据面切到 HTTP 直连真实账本（桌面壳内无害）
+    rebuildKernelForDataPlane();
     const res = await loadFeed();
     setRaw(res.raw);
     setSync(res.sync);

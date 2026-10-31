@@ -4,13 +4,13 @@
 // 与记忆库管理页一致：禁止注入演示/种子冲突 —— 队列只反映真实账本中 pending 冲突；
 // 空账本/无冲突 → 页面诚实空态并引导去写入页产生真实记忆。
 import type { MemAgent } from '../../core/memagent/types.ts';
-import type { InMemoryStorage } from '../../core/memagent/storage.ts';
+import type { StorageBackend } from '../../core/memagent/types.ts';
 import { getKernel, getKernelStorage, newRequestId } from '../kernel.ts';
 import type { ConflictRecord, Verdict } from './types.ts';
 
 const DAY = 24 * 3600 * 1000;
 
-function getCtx(): { ma: MemAgent; storage: InMemoryStorage } {
+function getCtx(): { ma: MemAgent; storage: StorageBackend } {
   return { ma: getKernel(), storage: getKernelStorage() };
 }
 

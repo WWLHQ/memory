@@ -10,7 +10,7 @@ import type { TenantContext } from '../../types/home.ts';
 import type { Form } from '../../types/agentOnboard.ts';
 import { runAutoOnboardOnLogin } from '../AgentOnboard/autoOnboard.ts';
 import { getStoredSessionId } from './crossTabAuth.ts';
-import { bindTenant } from '../kernel.ts';
+import { bindTenant, rebuildKernelForDataPlane } from '../kernel.ts';
 import { homeBaseUrl } from '../backend.ts';
 
 const FORM_LABEL: Record<Form, string> = {
@@ -100,6 +100,8 @@ export function LoginModal({ open, onClose, onSuccess, onScan, onKey, form }: Lo
         team_id: res.context.team_id,
         enterprise_id: res.context.enterprise_id,
       });
+      // 批次28-A：浏览器模式登录成功即把内核数据面切到 HTTP 直连真实账本（桌面壳内无害）
+      rebuildKernelForDataPlane();
       onSuccess(res.context);
       // 登录瞬间即在后台跑「一键接入本机 Agent」扫描并持久化结果：
       // 用户之后切到 Agent 接入页时直接显示「已自动接入」完成态，不用等切页才开始扫。

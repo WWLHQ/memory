@@ -4,13 +4,13 @@
 // 无告警 → 诚实空态（引导去真实操作产生告警，不伪造）。
 import type { MemAgent } from '../../core/memagent/types.ts';
 import { ulid } from '../../core/memagent/ulid.ts';
-import type { InMemoryStorage } from '../../core/memagent/storage.ts';
+import type { StorageBackend } from '../../core/memagent/types.ts';
 import { getKernel, getKernelStorage } from '../kernel.ts';
 import type { AlertItem } from './types.ts';
 
 interface MonitorCtx {
   ma: MemAgent;
-  storage: InMemoryStorage;
+  storage: StorageBackend;
 }
 
 function getCtx(): MonitorCtx {
