@@ -116,8 +116,8 @@ export function LoginModal({ open, onClose, onSuccess, onScan, onKey, form }: Lo
       setErr('账号不存在，已记审计');
     } else if (res.reason === 'origin_blocked') {
       setErr(`本机登录后端在线（${homeBaseUrl().replace(/^https?:\/\//, '')}），但当前页面来源未被信任（CORS 白名单外）`
-        + '——该端口多半被安装版桌面端占用。桌面端请直接使用已登录的应用；开发调试请重跑 npm run dev'
-        + '（默认端口不受信时会自动换备用端口起登录服务，并带 ?backend= 打开页面）。');
+        + '——该端口多半被安装版桌面端占用。本页已自动探测备用端口（8211–8215）未发现受信的开发后端：'
+        + '请启动/重跑 npm run dev（自动拉起受信登录服务）；桌面端可直接使用已登录的应用。');
     } else if (res.reason === 'backend_unreachable') {
       setErr(`登录后端未响应（${homeBaseUrl().replace(/^https?:\/\//, '')}）。`
         + '请从桌面端打开本应用，或运行 npm run dev（自动拉起登录服务）/ npm run dev:backend（仅起服务）。');

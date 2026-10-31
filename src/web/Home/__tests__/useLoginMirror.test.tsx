@@ -140,13 +140,13 @@ describe('T11 前端登录 API client', () => {
     const fetchMock = vi.fn().mockResolvedValue(okBody(backendCtx));
     stubFetch(fetchMock);
 
-    // 1) ?backend= 覆盖默认
-    setQuery('?backend=http://example.com:9999');
+    // 1) ?backend= 覆盖默认（批次27 起登录地址也走 P1-1 回环白名单：外部主机拒绝回落默认）
+    setQuery('?backend=http://127.0.0.1:9999');
     const { result: r1 } = renderHook(() => useLoginMirror());
     await act(async () => {
       await r1.current.login(form);
     });
-    expect((fetchMock.mock.calls[0] as [string])[0]).toBe('http://example.com:9999/api/login');
+    expect((fetchMock.mock.calls[0] as [string])[0]).toBe('http://127.0.0.1:9999/api/login');
 
     // 2) opts.backend 优先于 ?backend=
     const { result: r2 } = renderHook(() => useLoginMirror({ backend: 'http://opt:1111' }));
@@ -157,3 +157,76 @@ describe('T11 前端登录 API client', () => {
   });
 });
 
+
+describe('批次27：默认后端被占（origin_blocked）时自动切受信 dev 后端', () => {
+  beforeEach(() => {
+    window.history.replaceState(null, '', '/');
+    sessionStorage.clear();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    window.history.replaceState(null, '', '/');
+    sessionStorage.clear();
+  });
+
+  function setQuery(q: string) {
+    window.history.replaceState(null, '', q);
+  }
+
+  it('默认后端在线但不放行本来源 → 自动探测 8211 命中并重试成功，会话记忆备用地址', async () => {
+    setQuery('');
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError('Failed to fetch')) // POST 默认 8201：CORS 拦截 → reject
+      .mockResolvedValueOnce({ ok: true, json: async () => undefined }) // no-cors 探针：在线（不透明响应）
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, service: 'home' }) }) // 8211 /api/health：受信 dev 后端
+      .mockResolvedValueOnce(okBody(backendCtx)); // POST 8211 /api/login：成功
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useLoginMirror());
+    let res: LoginResult | undefined;
+    await act(async () => {
+      res = await result.current.login(form);
+    });
+    expect(res?.ok).toBe(true);
+    if (res?.ok) expect(res.context.user_id).toBe('alice');
+    const loginUrls = fetchMock.mock.calls.filter((c) => String(c[0]).endsWith('/api/login'));
+    expect(loginUrls.map((c) => c[0])).toEqual([
+      'http://localhost:8201/api/login',
+      'http://127.0.0.1:8211/api/login',
+    ]);
+    // 会话记忆：随后无参读 homeBaseUrl 即备用地址（本文件 import 自 backend）
+    const { homeBaseUrl } = await import('../../backend.ts');
+    expect(homeBaseUrl()).toBe('http://127.0.0.1:8211');
+  });
+
+  it('探测未命中（无受信 dev 后端）→ 如实 origin_blocked，不冒充成功', async () => {
+    setQuery('');
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError('Failed to fetch')) // POST 默认
+      .mockResolvedValue({ ok: true, json: async () => undefined }); // 探针与 5 个备用端口探测全部「在线但不放行」
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useLoginMirror());
+    let res: LoginResult | undefined;
+    await act(async () => {
+      res = await result.current.login(form);
+    });
+    expect(res?.ok).toBe(false);
+    if (res && !res.ok) expect(res.reason).toBe('origin_blocked');
+  });
+
+  it('显式 opts.backend 不做自动切换（调用方明确指定即尊重）', async () => {
+    setQuery('');
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValue({ ok: true, json: async () => undefined });
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(() => useLoginMirror({ backend: 'http://opt:1111' }));
+    let res: LoginResult | undefined;
+    await act(async () => {
+      res = await result.current.login(form);
+    });
+    expect(res?.ok).toBe(false);
+    if (res && !res.ok) expect(res.reason).toBe('origin_blocked');
+    // 只有两类调用：login + 探针；没有 8211–8215 探测
+    expect(fetchMock.mock.calls.length).toBe(2);
+  });
+});
