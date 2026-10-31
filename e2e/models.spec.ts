@@ -1,19 +1,18 @@
-// E2E 测试：大模型配置页（REQ-009 / P13）自包含 :8141
+// E2E 测试：大模型配置页（REQ-009 / P13）自包含（系统分配端口）
 // 覆盖用例：C1 渲染 / C2 judge 温度锁 / C5 换维度重建提示+估时 / C6 重建中禁切换 / C7 auto 免费优先 / C13 price_cap=0 禁付费
 import { test, expect, disconnectBrowser, collectErrors } from './harness.ts';
 import { startStatic, type StaticServer } from './servers.ts';
 
-const STATIC_PORT = 8141;
-const APP = `http://localhost:${STATIC_PORT}/models.html`;
-
-let staticSrv: StaticServer;
+let APP = '';
+let staticSrv: StaticServer | undefined;
 
 test.beforeAll(async () => {
-  staticSrv = await startStatic(STATIC_PORT, 'dist');
+  staticSrv = await startStatic(0, 'dist'); // 端口 0：不与桌面服务/其它 spec 争用
+  APP = `http://localhost:${staticSrv.port}/models.html`;
 });
 
 test.afterAll(async () => {
-  await staticSrv.stop();
+  await staticSrv?.stop();
   await disconnectBrowser();
 });
 
@@ -39,7 +38,7 @@ test.describe('大模型配置页', () => {
     await expect(page.locator('[data-testid="usage-write-temp"]')).toBeEnabled();
   });
 
-  test('C5/C6 换维度 → 重建确认（含估时）→ 重建中禁切换 → 完成解锁', async ({ page }) => {
+  test('C5/C6 换维度 → 确认（含估时）→ 保存后真落盘，刷新仍生效', async ({ page }) => {
     await page.goto(APP);
     let dialogMsg = '';
     page.on('dialog', (d) => {
@@ -48,13 +47,16 @@ test.describe('大模型配置页', () => {
     });
     await page.locator('[data-testid="vector-select"]').selectOption('bge-m3');
     expect(dialogMsg).toContain('1024');
-    expect(dialogMsg).toContain('重建');
-    await expect(page.locator('[data-testid="rebuild-banner"]')).toBeVisible();
-    // R5：重建中 select 锁定
-    await expect(page.locator('[data-testid="vector-select"]')).toBeDisabled();
-    // 演示重建约 400ms/25% → 1.6s 内完成
-    await expect(page.locator('[data-testid="rebuild-banner"]')).toHaveCount(0, { timeout: 5000 });
+    expect(dialogMsg).toContain('重嵌入');
+    await expect(page.locator('[data-testid="vector-dims"]')).toContainText('1024');
+    // 保存前不伪造重建进度：选择即可继续操作（R5 锁定仅在真实保存期间）
     await expect(page.locator('[data-testid="vector-select"]')).toBeEnabled();
+    await page.locator('[data-testid="save-config"]').click();
+    await expect(page.locator('[data-testid="toast"]')).toContainText('已持久化');
+    await expect(page.locator('[data-testid="toast"]')).toContainText('1024 维');
+    // 真落盘：刷新后配置仍在（localStorage）
+    await page.reload();
+    await expect(page.locator('[data-testid="vector-select"]')).toHaveValue('bge-m3');
     await expect(page.locator('[data-testid="vector-dims"]')).toContainText('1024');
   });
 
@@ -67,38 +69,39 @@ test.describe('大模型配置页', () => {
     await expect(page.locator('[data-testid="usage-write-masked"]')).not.toContainText('secret-123456');
   });
 
-  test('C7 auto 择优：模拟调用命中免费源 claude-code + 审计回显（R10）', async ({ page }) => {
+  test('C7 auto 择优（dry-run）：命中免费源 claude-code，不写账本、不扣余量', async ({ page }) => {
     await page.goto(APP);
+    const remainBefore = await page.locator('[data-testid="proxy-remain-claude-code"]').textContent();
     await page.locator('[data-testid="proxy-simulate"]').click();
+    await expect(page.locator('[data-testid="toast"]')).toContainText('dry-run（未写账本）');
     await expect(page.locator('[data-testid="toast"]')).toContainText('claude-code/claude-free');
     await expect(page.locator('[data-testid="toast"]')).toContainText('免费优先');
-    await expect(page.locator('[data-testid="audit-echo"]')).toContainText('llm_proxy_source=agent:claude-code');
-    await expect(page.locator('[data-testid="audit-echo"]')).toContainText('mode=auto');
-    // 余量扣减：780（=0.9×1000−120）→ 779
-    await expect(page.locator('[data-testid="proxy-remain-claude-code"]')).toHaveText('779');
+    await expect(page.locator('[data-testid="audit-echo"]')).toContainText('暂无本会话审计条目');
+    await expect(page.locator('[data-testid="proxy-remain-claude-code"]')).toHaveText(remainBefore!);
   });
 
-  test('C8 超限源剔除：x-agent 余量红显，auto 不会命中', async ({ page }) => {
+  test('C8/R7 manual：勾选超 price_cap 的 cheap 源 → 拒绝并回退本地（dry-run）', async ({ page }) => {
     await page.goto(APP);
-    // 手动勾掉免费源只剩超限 x-agent（cheap 0.03 > cap 0.01 → R7 拒绝）
     await page.locator('[data-testid="mode-manual"]').check();
     await page.locator('[data-testid="proxy-check-claude-code"]').uncheck();
-    await page.locator('[data-testid="proxy-check-x-agent"]').check();
+    await page.locator('[data-testid="proxy-check-cursor-trial"]').uncheck();
+    await page.locator('[data-testid="proxy-check-codex"]').check();
+    await page.locator('[data-testid="price-cap"]').fill('0');
     await page.locator('[data-testid="proxy-simulate"]').click();
     await expect(page.locator('[data-testid="toast"]')).toContainText('R7 拒绝');
+    await expect(page.locator('[data-testid="toast"]')).toContainText('dry-run（未写账本）');
   });
 
-  test('C13 price_cap=0：仅免费提示 + cheap 源被禁（付费回退本地）', async ({ page }) => {
+  test('C13 price_cap=0：仅免费提示 + cheap 源被禁（manual 勾选被拒）', async ({ page }) => {
     await page.goto(APP);
     await page.locator('[data-testid="price-cap"]').fill('0');
     await expect(page.locator('[data-testid="free-only-hint"]')).toBeVisible();
-    // 剩余免费源耗尽场景：manual 只勾 cursor-trial（免费但超限）→ 回退本地
     await page.locator('[data-testid="mode-manual"]').check();
     await page.locator('[data-testid="proxy-check-claude-code"]').uncheck();
-    await page.locator('[data-testid="proxy-check-cursor-trial"]').check();
+    await page.locator('[data-testid="proxy-check-codex"]').check();
     await page.locator('[data-testid="proxy-simulate"]').click();
-    await expect(page.locator('[data-testid="toast"]')).toContainText('C11');
-    await expect(page.locator('[data-testid="audit-echo"]').first()).toContainText('agent:local');
+    await expect(page.locator('[data-testid="toast"]')).toContainText('R7 拒绝');
+    await expect(page.locator('[data-testid="audit-echo"]')).toContainText('暂无本会话审计条目');
   });
 
   test('R1/C3 保存门禁：全不勾被拒；勾网络无端点被拒；合法保存写审计', async ({ page }) => {

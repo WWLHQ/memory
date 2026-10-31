@@ -1,30 +1,27 @@
 // E2E 测试：用户注册功能（REQ-005 新增）
-// 自包含模式：自带静态服务（8129）+ home 后端（8205，含 /api/captcha /api/register）。
+// 自包含模式：静态服务 + home 后端（均系统分配端口，含 /api/captcha /api/register）。
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, expect, disconnectBrowser, collectErrors } from './harness.ts';
-import { startStatic, type StaticServer } from './servers.ts';
-import { createServer } from '../src/home/server.ts';
-import type { Server } from 'node:http';
+import { startStatic, startHomeBackend, closeServer, type StaticServer } from './servers.ts';
 
-const STATIC_PORT = 8129; // 避开 app 8123 / home 8124 / overview 8125 / xtab 8128
-const BACKEND_PORT = 8205; // 避开 app 8200 / home 8201 / overview 8202 / xtab 8204
-const APP = `http://localhost:${STATIC_PORT}/index.html?backend=http://localhost:${BACKEND_PORT}`;
-
-let staticSrv: StaticServer;
-let backend: Server;
+let staticSrv: StaticServer | undefined;
+let backend: Awaited<ReturnType<typeof startHomeBackend>> | undefined;
+let APP = '';
+// 账号表是 home 服务进程内全局 Map（跨 spec 共享）：固定手机号会与上次运行/其它 spec 冲突（409 已存在）。
+// 每次运行生成唯一 11 位手机号，确保注册用例可重复执行。
+const ACC = `138${String(Date.now()).slice(-8)}`;
 
 test.beforeAll(async () => {
+  staticSrv = await startStatic(0, 'dist'); // 端口 0：不与桌面服务/其它 spec 争用
   const dataFile = join(tmpdir(), `e2e-register-${Date.now()}.json`);
-  backend = createServer({ port: BACKEND_PORT, dataFile });
-  await new Promise<void>((res) => backend.listen(BACKEND_PORT, () => res()));
-  staticSrv = await startStatic(STATIC_PORT, 'dist');
+  backend = await startHomeBackend({ dataFile, allowedOrigins: [`http://localhost:${staticSrv.port}`] });
+  APP = `http://localhost:${staticSrv.port}/index.html?backend=http://localhost:${backend.port}`;
 });
 
 test.afterAll(async () => {
-  backend.closeAllConnections?.();
-  await new Promise<void>((res) => backend.close(() => res()));
-  await staticSrv.stop();
+  await closeServer(backend?.server);
+  await staticSrv?.stop();
   await disconnectBrowser();
 });
 
@@ -41,16 +38,14 @@ test.describe('用户注册功能', () => {
     await page.locator('button:has-text("注册")').click();
     await expect(page.locator('#btnRegister')).toBeVisible();
 
-    // 等待验证码加载
-    await page.waitForTimeout(500);
-
-    // 获取页面上显示的验证码
+    // 验证码异步加载：等到按钮文案出现 6 位数字再读取
     const captchaBtn = page.locator('button:has-text("换")');
+    await expect(captchaBtn).toHaveText(/\d{6}/, { timeout: 5000 });
     const captchaText = await captchaBtn.textContent();
     const captchaCode = captchaText?.match(/(\d{6})/)?.[1] ?? '';
 
     // 填写注册表单
-    await page.locator('#acc').fill('13800138001');
+    await page.locator('#acc').fill(ACC);
     await page.locator('#pwd').fill('password123');
     await page.locator('#confirmPwd').fill('password123');
     await page.locator('#captcha').fill(captchaCode);
@@ -64,13 +59,13 @@ test.describe('用户注册功能', () => {
     await expect(page.locator('#loginModal h3')).toContainText('登录');
 
     // 现在用新账号登录
-    await page.locator('#acc').fill('13800138001');
+    await page.locator('#acc').fill(ACC);
     await page.locator('#pwd').fill('password123');
     await page.locator('#btnLogin').click();
 
     // 登录成功
     await expect(page.locator('#hiAuth')).toBeVisible({ timeout: 5000 });
-    await expect(page.locator('#hiAuth')).toContainText('13800138001');
+    await expect(page.locator('#hiAuth')).toContainText(ACC);
     expect(errors).toEqual([]);
   });
 
@@ -79,8 +74,8 @@ test.describe('用户注册功能', () => {
     await page.locator('#btnOpenLogin').click();
     await page.locator('button:has-text("注册")').click();
 
-    await page.waitForTimeout(500);
     const captchaBtn = page.locator('button:has-text("换")');
+    await expect(captchaBtn).toHaveText(/\d{6}/, { timeout: 5000 });
     const captchaText = await captchaBtn.textContent();
     const captchaCode = captchaText?.match(/(\d{6})/)?.[1] ?? '';
 

@@ -1,49 +1,40 @@
-// E2E 测试：生命周期页（REQ-006 / P4）自包含：静态服务（8133）serving dist/lifecycle.html。
+// E2E 测试：生命周期页（REQ-006 / P4）自包含：静态服务（系统分配端口）serving dist/lifecycle.html。
+// 数据真相 = 内核账本（浏览器为进程内单例）：空账本 → 诚实空态，不渲染表格/卡片/调参面板。
 import { test, expect, disconnectBrowser, collectErrors } from './harness.ts';
 import { startStatic, type StaticServer } from './servers.ts';
 
-const STATIC_PORT = 8133; // 避开 audit 8132 / write 8131 / memory 8130 / register 8129
-const APP = `http://localhost:${STATIC_PORT}/lifecycle.html`;
-
-let staticSrv: StaticServer;
+let APP = '';
+let staticSrv: StaticServer | undefined;
 
 test.beforeAll(async () => {
-  staticSrv = await startStatic(STATIC_PORT, 'dist');
+  staticSrv = await startStatic(0, 'dist'); // 端口 0：不与桌面服务/其它 spec 争用
+  APP = `http://localhost:${staticSrv.port}/lifecycle.html`;
 });
 
 test.afterAll(async () => {
-  await staticSrv.stop();
+  await staticSrv?.stop();
   await disconnectBrowser();
 });
 
-test.describe('生命周期页', () => {
-  test('页面渲染与种子行', async ({ page }) => {
+test.describe('生命周期页 · 真实账本', () => {
+  test('空账本 → 诚实空态，无种子行/卡片/调参面板', async ({ page }) => {
     const errors = collectErrors(page);
     await page.goto(APP);
     await expect(page.locator('[data-testid="lifecycle-page"]')).toBeVisible();
-    await expect(page.locator('[data-testid="lifecycle-table"]')).toBeVisible();
-    await expect(page.locator('[data-testid^="lrow-mem_"]')).toHaveCount(7);
+    await expect(page.locator('[data-testid="lifecycle-empty"]')).toBeVisible();
+    await expect(page.locator('[data-testid="lifecycle-empty"]')).toContainText('当前记忆账本为空');
+    await expect(page.locator('[data-testid="lifecycle-table"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid^="lrow-"]')).toHaveCount(0);
+    // 无记录 → 不渲染选中卡片与调参面板（不伪造）
+    await expect(page.locator('[data-testid="status-card"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="param-panel"]')).toHaveCount(0);
     expect(errors).toEqual([]);
   });
 
-  test('选中联动卡片/调参面板', async ({ page }) => {
+  test('空账本无迁移/批量操作入口', async ({ page }) => {
     await page.goto(APP);
-    await expect(page.locator('[data-testid="status-card"]')).toBeVisible();
-    await expect(page.locator('[data-testid="param-panel"]')).toBeVisible();
-  });
-
-  test('单选迁移 active→hibernating', async ({ page }) => {
-    await page.goto(APP);
-    await page.locator('[data-testid="mig-hibernating"]').click();
-    await expect(page.locator('[data-testid="toast"]')).toContainText('mem_001 → hibernating');
-  });
-
-  test('批量迁移 stale→archived', async ({ page }) => {
-    await page.goto(APP);
-    await page.locator('[data-testid="chk-mem_015"]').check();
-    await page.locator('[data-testid="chk-mem_016"]').check(); // locked 跳过
-    await page.locator('[data-testid="batch-target"]').selectOption('archived');
-    await page.locator('[data-testid="batch-run"]').click();
-    await expect(page.locator('[data-testid="toast"]')).toContainText('批量迁移 1 条 → archived');
+    await expect(page.locator('[data-testid="mig-hibernating"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="batch-run"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="batch-target"]')).toHaveCount(0);
   });
 });

@@ -132,6 +132,9 @@ def render_spec_html(reqs, acs, tcs, trace_md):
 
 
 def main():
+    # Windows 控制台默认 GBK 无法输出 emoji，重配 stdout 为 UTF-8
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     check = "--check" in sys.argv
     reqs = parse_items(SPECS / "requirements.md")
     acs = parse_items(SPECS / "acceptance.md")

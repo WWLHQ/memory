@@ -34,6 +34,9 @@ jobs:
         run: npm run typecheck
         # 类型不通过即阻断合入：这是 TS 方案的核心价值
 
+      - name: 静态检查门禁（oxlint correctness 规则）
+        run: npm run lint
+
       - name: 原子任务验收（每个 T 的验收命令即对应测试，CI 红 = 该任务未通过）
         run: npm test
         # vitest + @testing-library/react（jsdom）
@@ -49,6 +52,23 @@ jobs:
       - name: 重建同步门禁（build/ 须与 specs/ 一致）
         run: python tools/generate.py --check
         # 先生成再校验：确保 CI 全新 checkout 下 build/ 存在且一致；不同步则退出 1
+
+  windows-gate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: Windows 门禁（类型 + lint + 单测 + 覆盖率阈值）
+        run: npm run verify:fast
+        # 覆盖 Linux 与 Windows 的路径/换行差异；覆盖率阈值低于 vite.config.ts 基线即失败
 
   e2e:
     runs-on: ubuntu-latest

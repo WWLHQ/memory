@@ -19,5 +19,5 @@
     "types": ["vitest/globals", "node"]
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "e2e/**/*.ts"],
-  "exclude": ["node_modules", "build"]
+  "exclude": ["node_modules", "build", "dist-electron", "src/electron"]
 }

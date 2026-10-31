@@ -4,22 +4,25 @@
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, expect, disconnectBrowser, collectErrors } from './harness.ts';
-import { startStatic, type StaticServer } from './servers.ts';
+import { startStatic, stopRunningServer, type StaticServer } from './servers.ts';
 import { createServer as createBackend, type RunningServer } from '../src/agentOnboard/server.ts';
 
-const STATIC_PORT = 8125; // 避开 app.spec 的 8123 / home.spec 的 8124
-const BACKEND_PORT = 8202; // 避开 app.spec 的 8200 / home.spec 的 8201，避免并发端口争用
-let staticSrv: StaticServer;
-let backend: RunningServer;
+let staticSrv: StaticServer | undefined;
+let backend: RunningServer | undefined;
+let APP = '';
 
 test.beforeAll(async () => {
-  staticSrv = await startStatic(STATIC_PORT, 'dist'); // 服务 Vite 构建产物（含 overview/index/agentonboard）
-  backend = await createBackend({ port: BACKEND_PORT, dataFile: join(tmpdir(), `e2e-overview-${Date.now()}.json`) });
+  staticSrv = await startStatic(0, 'dist'); // 端口 0：不与桌面服务/其它 spec 争用
+  backend = await createBackend({
+    port: 0,
+    dataFile: join(tmpdir(), `e2e-overview-${Date.now()}.json`),
+    allowedOrigins: [`http://localhost:${staticSrv.port}`], // A5：页面来源白名单
+  });
+  APP = `http://localhost:${staticSrv.port}/overview.html?backend=http://localhost:${backend.port}`;
 });
 test.afterAll(async () => {
-  backend.server.closeAllConnections?.();
-  await backend.stop();
-  await staticSrv.stop();
+  await stopRunningServer(backend);
+  await staticSrv?.stop();
   await disconnectBrowser();
 });
 
@@ -28,11 +31,17 @@ test.describe('REQ-003 + REQ-005 通览页 · 点击级 E2E', () => {
     const errors = collectErrors(page);
     // 登录门控（REQ-005）：非登录视图需先有 session。
     // 这里模拟"已在首页登录过"的状态（登录/注册流程由 home/register/crossTabAuth spec 覆盖）。
+    // 同时预置真实持久化接入名单（AI 接入页从 localStorage 恢复 3 张卡，非演示种子）。
     await page.addInitScript(() => {
       localStorage.setItem('session:realpage', 'e2e-session-overview');
+      localStorage.setItem('agentOnboardState', JSON.stringify({
+        lastOnboardAt: Date.now(),
+        agentNames: ['deepseek harness', 'claude code', 'codex'],
+        source: 'kernel',
+      }));
     });
     // ?backend= 透传给 iframe 内的子页面，使其指向本 spec 的独立后端
-    await page.goto(`http://localhost:${STATIC_PORT}/overview.html?backend=http://localhost:${BACKEND_PORT}`);
+    await page.goto(APP);
 
     await expect(page.locator('.top .logo')).toContainText('记忆助手');
 
@@ -41,15 +50,21 @@ test.describe('REQ-003 + REQ-005 通览页 · 点击级 E2E', () => {
     await expect(page.locator('#stage')).toHaveAttribute('src', /\/index\.html/);
     await expect(page.frameLocator('#stage').locator('#btnLogout')).toBeVisible();
 
-    // 切到接入配置页（REQ-003）
+    // 切到接入配置页（REQ-003）：持久化名单恢复 3 张卡（未拨测 → 未配置）
     await page.click('.nav .item:has-text("Agent 接入配置页")');
     await expect(page.locator('#stage')).toHaveAttribute('src', /\/agentonboard\.html/);
-    await expect(page.frameLocator('#stage').locator('#cards > .card')).toHaveCount(3);
+    const cards = page.frameLocator('#stage').locator('#cards > .card');
+    await expect(cards).toHaveCount(3);
+    await expect(cards.nth(0)).toContainText('未配置');
 
     // 切到内联标识演示页（REQ-004，已从规划中提升为已落地）
+    // 统一账本为空 → 已接入 agent 切换器 + 共享账本空态（不伪造 🧠 标记）
     await page.click('.nav .item:has-text("Agent 界面内联标识")');
     await expect(page.locator('#stage')).toHaveAttribute('src', /\/inlineattribution\.html/);
-    await expect(page.frameLocator('#stage').locator('.mem-tag')).toHaveCount(3);
+    const frame = page.frameLocator('#stage');
+    await expect(frame.locator('[data-testid="agent-switcher"]')).toBeVisible();
+    await expect(frame.locator('[data-testid="inline-shared-empty"]')).toBeVisible();
+    await expect(frame.locator('.mem-tag')).toHaveCount(0);
 
     expect(errors).toEqual([]);
   });

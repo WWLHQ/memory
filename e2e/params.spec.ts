@@ -1,18 +1,17 @@
-// E2E 测试：全局参数页（REQ-006 / P5）自包含 :8135
+// E2E 测试：全局参数页（REQ-006 / P5）自包含（系统分配端口）
 import { test, expect, disconnectBrowser, collectErrors } from './harness.ts';
 import { startStatic, type StaticServer } from './servers.ts';
 
-const STATIC_PORT = 8135;
-const APP = `http://localhost:${STATIC_PORT}/params.html`;
-
-let staticSrv: StaticServer;
+let APP = '';
+let staticSrv: StaticServer | undefined;
 
 test.beforeAll(async () => {
-  staticSrv = await startStatic(STATIC_PORT, 'dist');
+  staticSrv = await startStatic(0, 'dist'); // 端口 0：不与桌面服务/其它 spec 争用
+  APP = `http://localhost:${staticSrv.port}/params.html`;
 });
 
 test.afterAll(async () => {
-  await staticSrv.stop();
+  await staticSrv?.stop();
   await disconnectBrowser();
 });
 
@@ -35,12 +34,14 @@ test.describe('全局参数页', () => {
     await expect(page.locator('[data-testid="nm-check"]')).toContainText('N<M ✓');
   });
 
-  test('改遗忘速度 → 待保存 + 保存 toast（req_p1）', async ({ page }) => {
+  test('改遗忘速度 → 待保存 + 保存 toast（真实 req_ 回执）', async ({ page }) => {
     await page.goto(APP);
     await page.locator('[data-testid="speed-fast"]').check();
     await expect(page.locator('[data-testid="changed-list"]')).toContainText('遗忘速度=快');
     await page.locator('[data-testid="save-btn"]').click();
-    await expect(page.locator('[data-testid="toast"]')).toContainText(/req_p1/);
+    // 保存 = 内核真写 + param_save 审计，回执 request_id 为运行时生成（非固定种子）
+    await expect(page.locator('[data-testid="toast"]')).toContainText(/已保存全局参数（req_/);
+    await expect(page.locator('[data-testid="changed-list"]')).toHaveCount(0);
   });
 
   test('权重破坏 → 保存拦截', async ({ page }) => {

@@ -1,91 +1,87 @@
 // REQ-004 Agent 界面内联记忆标识 · 真浏览器点击级 E2E
-// 被测对象 = Vite 构建产物 dist/inlineattribution.html（纯 UI 演示，无需后端）。
-// 验证：四类标识渲染、开关降级（诚实约束）、弹层干预、背景展开、token 分解、无脚本异常。
+// 被测对象 = Vite 构建产物 dist/inlineattribution.html。
+// 数据真相 = 内核账本 + 接入页持久化名单（localStorage agentOnboardState）：
+//   · 无已接入 agent / 空账本 → 诚实空态，绝不硬编码演示标记；
+//   · 已接入 agent + 空账本 → 切换器渲染、共享账本空态（不伪造 🧠/⚠ 标记）；
+//   · 标识开关（19.7）在空账本下仍可切换，降级文案如实。
 import { test, expect, disconnectBrowser, collectErrors } from './harness.ts';
 import { startStatic, type StaticServer } from './servers.ts';
 
-const STATIC_PORT = 8126; // 避开 overview 8125 / app 8123 / home 8124
-let staticSrv: StaticServer;
+let APP = '';
+let staticSrv: StaticServer | undefined;
 
 test.beforeAll(async () => {
-  staticSrv = await startStatic(STATIC_PORT, 'dist'); // 服务 Vite 构建产物（含 inlineattribution）
+  staticSrv = await startStatic(0, 'dist'); // 端口 0：不与桌面服务/其它 spec 争用
+  APP = `http://localhost:${staticSrv.port}/inlineattribution.html`;
 });
 test.afterAll(async () => {
-  await staticSrv.stop();
+  await staticSrv?.stop();
   await disconnectBrowser();
 });
 
-test.describe('REQ-004 Agent 界面内联标识 · 点击级 E2E', () => {
-  test('四类标识渲染 + 背景展开 + token 分解（full 默认）', async ({ page }) => {
-    const errors = collectErrors(page);
-    await page.goto(`http://localhost:${STATIC_PORT}/inlineattribution.html`);
-
-    // ① 记忆注入 🧠 ×3
-    await expect(page.locator('.mem-tag')).toHaveCount(3);
-    // ③ 背景 📎
-    await expect(page.locator('.bgmark')).toBeVisible();
-    // ② Token 节省 ⚡
-    await expect(page.locator('.tokbar')).toBeVisible();
-    // ④ 老化/证据 ⚠️ ×2（aging + evidence_thin）
-    await expect(page.locator('.warn-tag')).toHaveCount(2);
-    // ⑧ 写入沉淀 💾
-    await expect(page.locator('.savebar')).toBeVisible();
-
-    // ③ 背景展开
-    await page.click('.bgmark .more');
-    await expect(page.locator('.bgmark ul li')).toHaveCount(4);
-
-    // ② token 分解展开
-    await page.click('.tokbar');
-    await expect(page.locator('.tokbar ul li')).toHaveCount(3);
-
-    expect(errors).toEqual([]);
+/** 模拟接入页已持久化的「已接入 agent」名单（真实 localStorage 键，跨 iframe 同款口径） */
+async function seedOnboardState(page: import('@playwright/test').Page): Promise<void> {
+  await page.addInitScript(() => {
+    localStorage.setItem('agentOnboardState', JSON.stringify({
+      lastOnboardAt: Date.now(),
+      agentNames: ['deepseek harness', 'claude code'],
+      source: 'kernel',
+    }));
   });
+}
 
-  test('① 弹层：memory_id / L2 / 衰减层 + 干预回调（toast）', async ({ page }) => {
+test.describe('REQ-004 Agent 界面内联标识 · 真实账本', () => {
+  test('无已接入 agent → 诚实空态（不渲染任何伪造标记）', async ({ page }) => {
     const errors = collectErrors(page);
-    await page.goto(`http://localhost:${STATIC_PORT}/inlineattribution.html`);
-
-    // 点第一个 🧠 开弹层
-    await page.locator('.mem-tag').first().hover();
-    const pop = page.locator('.pop').first();
-    await expect(pop).toBeVisible();
-    await expect(pop).toContainText('记忆注入 · mem_005');
-    await expect(pop).toContainText('decay_class=cold');
-    // request_id 跳审计回调
-    await pop.locator('a', { hasText: 'req_017' }).click();
-    await expect(page.locator('.toast')).toContainText('开审计页定位 req_017');
-    // 记住/忘记 干预回调
-    await page.locator('.mem-tag').first().hover();
-    await page.locator('.pop').first().getByText('记住 +0.1').click();
-    await expect(page.locator('.toast')).toContainText('已「记住」mem_005');
-
-    expect(errors).toEqual([]);
-  });
-
-  test('开关降级（19.7 诚实约束）：token_only / off', async ({ page }) => {
-    const errors = collectErrors(page);
-    await page.goto(`http://localhost:${STATIC_PORT}/inlineattribution.html`);
-
-    // token_only：①🧠 隐藏，⚡⚠💾 仍在
-    await page.check('.attr-toggle input[value="token_only"]');
-    await expect(page.locator('.mem-tag')).toHaveCount(0);
-    await expect(page.locator('.tokbar')).toBeVisible();
-    await expect(page.locator('.warn-tag')).toHaveCount(2);
-    await expect(page.locator('.savebar')).toBeVisible();
-
-    // off：①②③💾 隐藏，⚠ 恒显示（诚实约束）
-    await page.check('.attr-toggle input[value="off"]');
+    await page.goto(APP);
+    await expect(page.locator('[data-testid="inline-empty"]')).toBeVisible();
+    await expect(page.locator('[data-testid="inline-empty"]')).toContainText('当前无任何已接入 agent');
+    await expect(page.locator('[data-testid="inline-empty"]')).toContainText('空账本不伪造数据');
     await expect(page.locator('.mem-tag')).toHaveCount(0);
     await expect(page.locator('.tokbar')).toHaveCount(0);
-    await expect(page.locator('.bgmark')).toHaveCount(0);
+    await expect(page.locator('.warn-tag')).toHaveCount(0);
     await expect(page.locator('.savebar')).toHaveCount(0);
-    await expect(page.locator('.warn-tag')).toHaveCount(2); // 诚实约束：必显示
+    expect(errors).toEqual([]);
+  });
 
-    // 回到 full
+  test('已接入 agent + 空共享账本 → 切换器 + 统一账本空态', async ({ page }) => {
+    const errors = collectErrors(page);
+    await seedOnboardState(page);
+    await page.goto(APP);
+    await expect(page.locator('[data-testid="agent-switcher"]')).toBeVisible();
+    await expect(page.locator('[data-testid="agent-select"]')).toContainText('deepseek harness');
+    await expect(page.locator('[data-testid="agent-select"]')).toContainText('claude code');
+    // 统一共享账本为空 → 不渲染注入标记/背景/警示（诚实）
+    await expect(page.locator('[data-testid="inline-shared-empty"]')).toBeVisible();
+    await expect(page.locator('[data-testid="inline-shared-empty"]')).toContainText('统一记忆库中暂无可读记忆');
+    await expect(page.locator('.mem-tag')).toHaveCount(0);
+    await expect(page.locator('.warn-tag')).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
+  test('标识开关（19.7）：降级文案如实，空账本不因级别变化伪造标记', async ({ page }) => {
+    const errors = collectErrors(page);
+    await seedOnboardState(page);
+    await page.goto(APP);
+    await expect(page.locator('[data-testid="inline-shared-empty"]')).toBeVisible();
+
+    // token_only：🧠 隐藏、⚠ 仍显示（诚实约束）
+    await page.check('.attr-toggle input[value="token_only"]');
+    await expect(page.locator('.toast')).toContainText('仅 token 节省');
+    await expect(page.locator('.mem-tag')).toHaveCount(0);
+
+    // off：降级为统计行，⚠ 证据/老化警示仍强制显示
+    await page.check('.attr-toggle input[value="off"]');
+    await expect(page.locator('.toast')).toContainText('降级为统计行');
+    await expect(page.locator('.tokbar')).toHaveCount(0);
+    await expect(page.locator('.savebar')).toHaveCount(0);
+    // 空账本无可显示的警示数据（不伪造 ⚠）
+    await expect(page.locator('.warn-tag')).toHaveCount(0);
+
+    // 回到 full：文案确认，空账本仍无注入标记
     await page.check('.attr-toggle input[value="full"]');
-    await expect(page.locator('.mem-tag')).toHaveCount(3);
-
+    await expect(page.locator('.toast')).toContainText('完整显示');
+    await expect(page.locator('.mem-tag')).toHaveCount(0);
     expect(errors).toEqual([]);
   });
 });

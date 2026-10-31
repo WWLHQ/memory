@@ -188,6 +188,9 @@ def main(root: Path):
 
 
 def finish(r):
+    # Windows 控制台默认 GBK 无法输出 emoji，重配 stdout 为 UTF-8
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     print("-" * 48)
     print(f"检查项 {r.checks} | 失败 {len(r.errors)} | 警告 {len(r.warnings)}")
     if r.errors:

@@ -48,6 +48,7 @@ function hookDialogAccept(browser: Browser): void {
 }
 
 export const test = base.extend({
+  // oxlint-disable-next-line no-empty-pattern -- Playwright fixture 无依赖时的惯用签名
   page: async ({}, use) => {
     const browser = await externalBrowser();
     const context = await browser.newContext({ baseURL: BASE_URL });

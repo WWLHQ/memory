@@ -6,6 +6,22 @@ build/
 
 # 构建产物
 dist/
+dist-electron/
+release/
+release2/
+dist-package/
+dist-pkg-v2/
+
+# 一次性打包/调试目录（用完即删，勿入库）
+asar-run/
+asar-unpack/
+tmp-asar/
+dev-run/
+float-test/
+test-run/
+
+# AI 助手本地记忆（个人工作记录，不入库）
+.workbuddy/
 
 # Playwright
 node_modules/
@@ -13,3 +29,30 @@ test-results/
 playwright-report/
 playwright/.cache/
 e2e/.cde.json
+
+# 临时脚本 / 日志 / 探针（根目录一律不入库）
+/*.log
+/*.log.*
+/fix_*.py
+/fix_*.js
+/fix_*.ps1
+/check_*.py
+/trace_*.py
+/smart_trace*.py
+/analyze_*.py
+/test_*.py
+/test_*.js
+/test_*.mjs
+/diag*.js
+/diag*.mjs
+/diag*.png
+/probe_*.js
+/inspect_*.mjs
+/electron_node_test.js
+/main.cjs
+/preload.cjs
+/dev_run_capture.bat
+/smoke_test.bat
+
+# 批次5：覆盖率产物
+/coverage

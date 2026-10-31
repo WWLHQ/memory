@@ -1,20 +1,34 @@
 {
   "name": "multi-agent-memory",
-  "version": "0.0.1",
+  "productName": "MultiAgent Memory",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "多 Agent 记忆助手 - REQ-003 Agent 接入页（TS 内核 + React UI + 零依赖 HTTP 后端）",
+  "description": "多 Agent 记忆助手 - 多页面接入 + TS 内核 + Electron 端壳",
+  "main": "dist-electron/main.cjs",
   "scripts": {
+    "lint": "oxlint",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit",
-    "dev": "vite",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.electron.json",
+    "dev": "node tools/dev.mjs",
+    "dev:backend": "node tools/dev-backend.mjs",
     "build": "vite build",
+    "build:electron": "node tools/build-electron.cjs",
+    "package:win": "npm run build && npm run build:electron && node tools/package-win.cjs",
+    "prepackage": "npm run code:index -- --write",
+    "prepackage:win": "npm run code:index -- --write",
+    "package": "npm run build && npm run build:electron && node tools/prepare-electron-dist.cjs && node tools/package-builder.cjs",
     "test:e2e": "node e2e/run.mjs --workers=1",
     "test:e2e:install": "playwright install chromium",
-    "verify": "npm run typecheck && npm run test && python tools/validate_project.py && python tools/generate.py --check"
+    "code:index": "node tools/code-index.mjs",
+    "code:index:check": "node tools/code-index.mjs --check",
+    "verify:fast": "npm run typecheck && npm run lint && npm run code:index:check && npm run test:coverage",
+    "verify": "npm run verify:fast && npm run build:electron && npm run test:e2e"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@playwright/test": "^1.63.0",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/jest-dom": "^7.0.1",
@@ -24,13 +38,17 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
+    "@vitest/coverage-v8": "^5.0.5",
+    "electron": "^45.1.0",
+    "electron-builder": "^26.18.0",
+    "esbuild": "^0.28.2",
     "jsdom": "^30.1.2",
+    "oxlint": "^1.90.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.3",
     "vitest": "^5.0.1"
   },
   "dependencies": {
-    "@electric-sql/pglite": "^0.5.8",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   }

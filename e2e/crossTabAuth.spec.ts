@@ -1,39 +1,33 @@
 // E2E 测试：登录态跨 iframe 共享（REQ-005 Bug #3 验证）
-// 自包含模式：自带静态服务（8128）+ home 后端（8204），不依赖外部 dev 服务。
+// 自包含模式：静态服务 + home 后端（均系统分配端口），不依赖外部 dev 服务。
 // 走 harness（CDP 外部浏览器），避免 browser.close() 挂起问题。
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, expect, disconnectBrowser, collectErrors } from './harness.ts';
-import { startStatic, type StaticServer } from './servers.ts';
-import { createServer, registerAccount } from '../src/home/server.ts';
+import { startStatic, startHomeBackend, closeServer, type StaticServer } from './servers.ts';
+import { registerAccount } from '../src/home/server.ts';
 import { hashPassword } from '../src/auth/hash.ts';
-import type { Server } from 'node:http';
 
-const STATIC_PORT = 8128; // 避开 app 8123 / home 8124 / overview 8125 / dbg 8126
-const BACKEND_PORT = 8204; // 避开 app 8200 / home 8201 / overview 8202
-const APP = `http://localhost:${STATIC_PORT}/overview.html?backend=http://localhost:${BACKEND_PORT}`;
 const PWD = 'test_password';
 
-let staticSrv: StaticServer;
-let backend: Server;
+let staticSrv: StaticServer | undefined;
+let backend: Awaited<ReturnType<typeof startHomeBackend>> | undefined;
+let APP = '';
+let HOME_APP = '';
 
 test.beforeAll(async () => {
+  staticSrv = await startStatic(0, 'dist'); // 端口 0：不与桌面服务/其它 spec 争用
   const dataFile = join(tmpdir(), `e2e-xtab-${Date.now()}.json`);
   registerAccount('test_user', hashPassword(PWD), { enterprise_id: 'ent_x', team_id: 'team_x', perspective: 'team' });
-  backend = createServer({ port: BACKEND_PORT, dataFile });
-  await new Promise<void>((res) => backend.listen(BACKEND_PORT, () => res()));
-  staticSrv = await startStatic(STATIC_PORT, 'dist');
+  backend = await startHomeBackend({ dataFile, allowedOrigins: [`http://localhost:${staticSrv.port}`] });
+  APP = `http://localhost:${staticSrv.port}/overview.html?backend=http://localhost:${backend.port}`;
+  HOME_APP = `http://localhost:${staticSrv.port}/index.html?backend=http://localhost:${backend.port}`;
 });
 
 test.afterAll(async () => {
-  console.error('[xtab] afterAll: closing backend');
-  backend.closeAllConnections?.();
-  await new Promise<void>((res) => backend.close(() => res()));
-  console.error('[xtab] afterAll: backend closed, stopping static');
-  await staticSrv.stop();
-  console.error('[xtab] afterAll: static stopped, disconnecting browser');
+  await closeServer(backend?.server);
+  await staticSrv?.stop();
   await disconnectBrowser();
-  console.error('[xtab] afterAll: done');
 });
 
 test.describe('登录态跨 iframe 共享', () => {
@@ -80,7 +74,7 @@ test.describe('登录态跨 iframe 共享', () => {
 
   test('localStorage 中 session 存在', async ({ page }) => {
     const errors = collectErrors(page);
-    await page.goto(`http://localhost:${STATIC_PORT}/index.html?backend=http://localhost:${BACKEND_PORT}`);
+    await page.goto(HOME_APP);
 
     // 未登录时应无 session
     const beforeSession = await page.evaluate(() => localStorage.getItem('session:realpage'));

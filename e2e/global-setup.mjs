@@ -1,7 +1,7 @@
 // 启动一个 detached 的 Chromium（headless，开 CDP 端口），供 E2E 用 connectOverCDP 连接。
 // detached + unref：runner 不拥有该进程，因此 teardown 不会卡在 browser.close()。
 import http from 'node:http';
-import { spawn, execSync } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -37,19 +37,25 @@ function portOpen(port) {
   });
 }
 
-/** 找到监听指定端口的进程 pid（netstat -ano） */
+/** 找到监听指定端口的进程 pid（Windows: netstat；POSIX: lsof） */
 function pidListeningOn(port) {
   try {
-    const out = execSync('netstat -ano -p tcp', { encoding: 'utf8' });
-    for (const line of out.split('\n')) {
-      if (line.includes(`:${port} `) && line.includes('LISTENING')) {
-        const parts = line.trim().split(/\s+/);
-        const pid = Number(parts[parts.length - 1]);
-        if (Number.isInteger(pid) && pid > 0) return pid;
+    if (process.platform === 'win32') {
+      const out = execFileSync('netstat', ['-ano', '-p', 'tcp'], { encoding: 'utf8' });
+      for (const line of out.split('\n')) {
+        if (line.includes(`:${port} `) && line.includes('LISTENING')) {
+          const parts = line.trim().split(/\s+/);
+          const pid = Number(parts[parts.length - 1]);
+          if (Number.isInteger(pid) && pid > 0) return pid;
+        }
       }
+    } else {
+      const out = execFileSync('lsof', ['-ti', `tcp:${port}`, '-sTCP:LISTEN'], { encoding: 'utf8' });
+      const pid = Number(out.trim().split('\n')[0]);
+      if (Number.isInteger(pid) && pid > 0) return pid;
     }
   } catch {
-    // netstat 不可用时忽略
+    // 工具不可用/无监听时忽略
   }
   return null;
 }
@@ -76,7 +82,8 @@ export default async function globalSetup() {
     const stalePid = pidListeningOn(PORT);
     if (stalePid) {
       try {
-        execSync(`taskkill /PID ${stalePid} /T /F`, { stdio: 'ignore' });
+        if (process.platform === 'win32') execFileSync('taskkill', ['/PID', String(stalePid), '/T', '/F'], { stdio: 'ignore' });
+        else process.kill(stalePid, 'SIGKILL');
       } catch {
         // 已退出则忽略
       }
