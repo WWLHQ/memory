@@ -444,3 +444,14 @@ status: draft
 
 > 全量命令：`npm run verify` = `verify:fast`（`typecheck` → `lint` → `test:coverage`，121 文件 / 1320 例）→ `build:electron` → `test:e2e`（先 `vite build`，再 Playwright 21 个 spec / 94 例；静态服务与后端均用系统分配端口）。
 > 只跑快闸：`npm run verify:fast`（不含 E2E）。
+
+## 批次28（2026-10-31）
+
+| 条目 | 实现要点 | 测试 |
+|---|---|---|
+| 28-A 内核账本写锁与只读镜像 | `src/core/memagent/fileStorage.ts`：`<db>.lock` O_EXCL + pid 存活探测（陈旧锁自动回收）、`StorageLockedError`（E_STORAGE_LOCKED）、`readonly`/`reloadOnMtime` 选项、`readOnly/lockedBy` getter | `fileStorage.test.ts`「写锁与只读镜像」6 例（同进程第二实例降级只读/锁释放/陈旧锁回收/只读构造/镜像重载/无 reload 快照） |
+| 28-A 内核数据面 HTTP 端点 | `src/home/server.ts`：`POST /api/kernel/invoke`（会话门禁 + 六方法白名单 + appendAudit 形状校验 + `{ok,result|error}` 信封）、`GET /api/kernel/info`；`ServerOptions.kernelStorage/kernelInfo` 接线 | `server.test.ts`「批次28-A 内核数据面端点」4 例（501/401+400/审计校验/只读镜像） |
+| 28-A 浏览器三态账本 | `src/web/httpStorage.ts`（HttpStorageBackend：会话/可达性/401/501 四类 KernelUnavailableError + `fetchKernelInfo`）；`src/web/kernel.ts` 三态选择 + `rebuildKernelForDataPlane()` + `setKernelStorageForTests`；LoginModal/main.tsx 登录后重建 | `src/web/__tests__/httpStorage.test.ts`（9 例）；mock 会话页面测试注入内存账本（SecurityPage/LogsPage/AgentOnboardPage） |
+| 28-A dev 后端只读镜像 | `tools/dev-backend.mjs`：data-root.json 指针定位真实 `memories.db.json`，`FileStorage{readonly:true,reloadOnMtime:true}` 挂上 `/api/kernel/invoke`；绝不抢桌面端写锁 | verify:fast 覆盖（脚本不进 typecheck，人工启动验证） |
+| 28-B 动态配置面 + 宿主继承 | `src/agentOnboard/mcpClients.ts`：`dynamicConfigGlob`（WorkBuddy connectors，JSON 探测、绝不代写）+ `inheritsFrom`（deepseek harness ← qoder-cn，状态如实取宿主）；`src/electron/mcpClients.ts`：`resolveDynamicConfigPath`（单通配段、目录排序确定性）、扫描宿主继承状态推导、`wireMcpClient` 委托写入 | `agentOnboard/__tests__/mcpClients.test.ts`（配方常量/片段/探测更新）、`electron/__tests__/mcpClients.test.ts`「批次28-B 动态配置面与宿主继承」4 例 |
+| 28-C 遗留层自动清理 | `src/core/memagent/legacyLayers.ts`：`isMislabeledLayer`（标了 L2–L6 但无深层正文且非 llm/llm_partial）；`main.ts` bootstrap `autoDemoteLegacyLayers()`；`forgetting.ts` `buildSummary` 摘要行不再误标 L3；`coreMemoryOps.coreUpdateContent` 归一 stub 行 | `legacyLayers.test.ts`、`forgetting.test.ts`、`LegacyLedgerCard.test.tsx`、`coreMemoryOps.test.ts` |
