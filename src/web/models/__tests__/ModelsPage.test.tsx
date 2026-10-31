@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { ModelsPage } from '../ModelsPage.tsx';
 import { clearModelConfig, readModelConfig, writeModelConfig } from '../modelConfig.ts';
-import { getKernel, getKernelStorage, resetKernelForTests } from '../../kernel.ts';
+import { getKernelWithSeed, getKernelStorage, resetKernelForTests } from '../../kernel.ts';
 
 beforeEach(() => {
   clearModelConfig();
@@ -32,7 +32,7 @@ describe('ModelsPage（Phase C3 接真）', () => {
   });
 
   it('保存 model_config：真落盘 + 重嵌入已入库记忆 + 审计回显 model_config', async () => {
-    const before = await getKernel()._seedMemory({ content: '保存前写入的记忆 pre-save memory', category: 'fact', project_id: 'P1' });
+    const before = await getKernelWithSeed()._seedMemory({ content: '保存前写入的记忆 pre-save memory', category: 'fact', project_id: 'P1' });
     expect(before.embedding).toHaveLength(64);
 
     render(<ModelsPage />);

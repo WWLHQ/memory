@@ -60,7 +60,7 @@ npm run code:index:check        # 只检查索引是否过期（verify:fast 已�
 
 ## 4. 动作日志（排查第一入口）
 
-- **位置**：数据根下 `actions.log`（设置页「数据目录」卡片与 `dataRoot:get` 返回的 `actionsLogPath` 可查）。超过 5 MiB 轮转为 `actions.log.1 … .3`，最多保留 3 份历史。
+- **位置**：数据根下 `actions.log`（设置页「数据目录」卡片与 `dataRoot:get` 返回的 `actionsLogPath` 可查）。超过 5 MiB 轮转为 `actions.log.1` / `actions.log.2`（keep=3 → 当前文件 + 2 份历史，最旧的后移删除）。
 - **格式**（一行一个动作，可直接 grep）：
   `[2026-10-30T08:00:00.000Z] [info] [ipc:storage:putMemory] [req_ab12] {"mem_id":"m1","ms":3}`
 - **scope**：`app`（启动/退出）、`ui`（点击/提交/页面进入/脚本错误）、`host`（宿主桥调用）、`ipc`（主进程通道）、`home`（登录后端 HTTP 与账号事件）、`onboarding`（接入服务 HTTP）、`backup`、`dataRoot`、`kernel`、`mcp`、`webhook`。

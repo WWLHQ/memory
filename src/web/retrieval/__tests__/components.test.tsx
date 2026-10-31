@@ -8,7 +8,7 @@ import { ContextPanel } from '../ContextPanel.tsx';
 import { useRetrieval } from '../useRetrieval.ts';
 import { renderHook, act as actHook } from '@testing-library/react';
 import { SEED_HITS } from './fixtures.ts';
-import { getKernel, resetKernelForTests } from '../../kernel.ts';
+import { getKernelWithSeed, resetKernelForTests } from '../../kernel.ts';
 import type { ModeBannerData, BudgetData } from '../types.ts';
 
 const base: QueryBarValue = { query: '', scene: 'default', mode: null };
@@ -138,7 +138,7 @@ describe('useRetrieval (T6 状态机)', () => {
 
   it('IDLE→LOADING→RESULT；硬熔断→ERROR + 冷却 3s', async () => {
     // 真实内核账本预置一条命中记忆（recall 走内核，空库会如实返回 EMPTY）
-    await getKernel()._seedMemory({ content: '缓存 TTL 设为 300s（生产默认）', category: 'fact', project_id: 'P1' });
+    await getKernelWithSeed()._seedMemory({ content: '缓存 TTL 设为 300s（生产默认）', category: 'fact', project_id: 'P1' });
     const { result: r } = renderHook(() => useRetrieval());
     expect(r.current.phase).toBe('IDLE');
     actHook(() => r.current.search('缓存 TTL 是多少', 'default', null));

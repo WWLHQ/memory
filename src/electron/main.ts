@@ -48,6 +48,7 @@ import { readFile, appendFile, mkdir, writeFile, copyFile, readdir, unlink, stat
 import { join, extname, normalize, sep } from 'node:path';
 import { execSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { existsSync, readFileSync, writeFileSync, renameSync, copyFileSync, mkdirSync } from 'node:fs';
 import { dialog } from 'electron';
 
@@ -604,10 +605,16 @@ function registerDataRootIpc(): void {
 }
 
 // ── §6c MCP 客户端接入 IPC（批次15）────────────────────────────────────────
-// 状态扫描只读；含令牌片段与一键写配置会暴露/改写本机凭据 → 仅管理员。
+// 状态扫描需登录会话（批次27 P3-4）；含令牌片段与一键写配置会暴露/改写本机凭据 → 仅管理员。
 // 令牌只在返回值出现一次，日志只记客户端/路径/备份与结果，绝不记令牌。
 function registerMcpClientsIpc(token: string): void {
-  handleIpc(IPC.mcpClients, () => scanMcpClients({ currentToken: token }));
+  handleIpc(IPC.mcpClients, (_e, sessionId?: string) => {
+    // 成功回包形状是 { endpoint, clients, scannedAt }（非 IpcResult）——闸门失败必须抛错，
+    // 让渲染层走「扫描失败」路径，而不是被当成空 clients 静默显示「无客户端」。
+    const gate = requireSession(sessionId, IPC.mcpClients);
+    if (!gate.ok) throw new Error(gate.error);
+    return scanMcpClients({ currentToken: token });
+  });
   handleIpc(IPC.mcpClientSnippet, (_e, id: unknown, sessionId?: string) => {
     const gate = requireAdmin(sessionId, IPC.mcpClientSnippet);
     if (!gate.ok) return { ok: false, error: gate.error };
@@ -828,9 +835,13 @@ function registerL0Ipc(vault: L0Vault): void {
       return { ok: true, content: await vault.decrypt({ ...req, l0_session_id: id }) };
     } catch (e) { return l0Fail(e); }
   });
-  handleIpc(IPC.l0Seal, async (_e, plain: string) => {
-    // 写入加密只认主进程写密钥缓存（未解锁 → 抛 [E_L0_LOCKED]），不暴露任何密钥
-    return vault.seal(plain);
+  handleIpc(IPC.l0Seal, async (_e, plain: string, sessionId?: string) => {
+    const gate = requireSession(sessionId, IPC.l0Seal);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    try {
+      // 写入加密只认主进程写密钥缓存（未解锁 → [E_L0_LOCKED]），不暴露任何密钥
+      return { ok: true, sealed: await vault.seal(plain) };
+    } catch (e) { return l0Fail(e); }
   });
 }
 
@@ -971,8 +982,16 @@ function isTrustedUrl(raw: string): boolean {
     const u = new URL(raw);
     if (u.protocol === 'file:') {
       if (!trustedFileRoot) return false;
-      const filePath = normalize(decodeURIComponent(u.pathname)).toLowerCase();
-      return filePath.startsWith(normalize(trustedFileRoot).toLowerCase());
+      // 批次27 P3-6：Windows 下 file:///D:/... 的 u.pathname 是 /D:/...，旧实现直接 normalize
+      // 得到 \d:\...，永远匹配不上 d:\... 根目录——该分支在 Windows 上从未生效过。
+      // fileURLToPath 按平台正确转换；根目录拼 sep 保证目录边界（dist-evil 同样拒绝）。
+      let filePath: string;
+      try {
+        filePath = normalize(fileURLToPath(u)).toLowerCase();
+      } catch {
+        return false; // file: URL 无法转为本机路径（畸形）→ 不信任
+      }
+      return filePath.startsWith(normalize(trustedFileRoot + sep).toLowerCase());
     }
     if (u.protocol !== 'http:') return false;
     return trustedIpcOrigins.has(`${u.protocol}//${u.host}`);

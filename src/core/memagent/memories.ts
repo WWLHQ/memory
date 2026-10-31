@@ -388,7 +388,7 @@ export async function coreBrowse(
   if (!sessionId || !ctx.l0) {
     await storage.appendAudit({
       request_id, action: 'l0_auth_fail', ts: now, project_id: req.project_id, user_id: ctx.user_id,
-      detail: { reason: 'no_grant', form: ctx.form, l0_session_id: sessionId },
+      detail: { reason: 'no_grant', form: ctx.form },
     });
     return { rows: maskedRows(), l0_masked: true, audit: { request_id, action: 'l0_auth_fail' } };
   }
@@ -399,14 +399,14 @@ export async function coreBrowse(
   } catch (e) {
     await storage.appendAudit({
       request_id, action: 'l0_auth_fail', ts: now, project_id: req.project_id, user_id: ctx.user_id,
-      detail: { reason: 'expired', form: ctx.form, l0_session_id: sessionId },
+      detail: { reason: 'expired', form: ctx.form },
     });
     throw e;
   }
   if (info && info.scope_project_ids[0] !== '*' && !info.scope_project_ids.includes(req.project_id)) {
     await storage.appendAudit({
       request_id, action: 'l0_auth_fail', ts: now, project_id: req.project_id, user_id: info.user_id,
-      detail: { reason: 'no_grant', form: ctx.form, grant_id: info.grant_id, l0_session_id: sessionId },
+      detail: { reason: 'no_grant', form: ctx.form, grant_id: info.grant_id },
     });
     return { rows: maskedRows(), l0_masked: true, audit: { request_id, action: 'l0_auth_fail' } };
   }
@@ -425,7 +425,7 @@ export async function coreBrowse(
       request_id, action: 'l0_auth_fail', ts: now, project_id: req.project_id, user_id: info?.user_id ?? ctx.user_id,
       detail: {
         reason: code === 'E_L0_EXPIRED' ? 'expired' : 'decrypt_failed',
-        count: encrypted.length, form: ctx.form, grant_id: info?.grant_id, l0_session_id: sessionId,
+        count: encrypted.length, form: ctx.form, grant_id: info?.grant_id,
       },
     });
     throw e;
@@ -434,7 +434,7 @@ export async function coreBrowse(
   await storage.appendAudit({
     request_id, action: 'l0_view', ts: now, project_id: req.project_id, user_id: info?.user_id ?? ctx.user_id,
     detail: {
-      grant_id: info?.grant_id, l0_session_id: sessionId, project_id: req.project_id,
+      grant_id: info?.grant_id, project_id: req.project_id,
       mem_ids: encrypted.map((m) => m.mem_id), form: ctx.form,
     },
   });

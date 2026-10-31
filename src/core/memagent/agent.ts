@@ -12,7 +12,7 @@ import type {
   AuditRecord, BrowseResult, DiscoverReq, DiscoverResult, DiscoverSignal, FeedbackKind, FeedbackResult, Form, GcReq, GcReport,
   Hit, L0AccessRequest, L0AccessRequestResult, L0AdminPort, L0GrantReq, L0GrantResult, L0GrantView, L0HeartbeatResult,
   L0MigrationResult, L0RequestView, L0UnlockReq, L0UnlockResult, L0VaultStatus,
-  LogItem, LogPage, LogReq, MemAgent, MemAgentOptions, MemOp, MemOpPatch, MemOpResult, MemReq, Memory, Pref, RecallReq,
+  LogItem, LogPage, LogReq, MemAgent, MemAgentOptions, MemAgentSeedHooks, MemOp, MemOpPatch, MemOpResult, MemReq, Memory, Pref, RecallReq,
   RecallResult, SyncReq, SyncReport, WriteResult,
 } from './types.ts';
 
@@ -27,7 +27,7 @@ const SIGNAL_CAPABILITY: Record<DiscoverSignal, Form[]> = {
 /** 召回预算（2.4.1）：soft 1500 / warn 2000 / hard 3000 */
 const BUDGET = { soft: 1500, warn: 2000, hard: 3000 } as const;
 
-export function createMemAgent(opts: MemAgentOptions): MemAgent {
+export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHooks {
   const { form, account, llm, vector, storage } = opts;
   let usedToday = 0; // 反代理当日花费（19.8 cost_cap）
 
@@ -154,7 +154,7 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent {
     const budgetStatus = payload_tokens >= BUDGET.hard ? 'fused' : payload_tokens >= BUDGET.warn ? 'warn' : 'ok';
     const result: RecallResult = {
       hits, payload_tokens, pipeline_llm_tokens: 0,
-      budget: { soft: 1500, warn: 2000, hard: 3000, status: budgetStatus },
+      budget: { ...BUDGET, status: budgetStatus },
       evidence_thin,
       mode: mode ?? 'auto',
       request_id,

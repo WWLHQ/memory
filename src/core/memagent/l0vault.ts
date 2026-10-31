@@ -282,7 +282,7 @@ export class L0Vault implements L0AdminPort {
         changed = true;
       }
       await this.audit('l0_auth_expire', {
-        grant_id: s.grant_id, l0_session_id: s.l0_session_id, user_id: s.user_id, reason: 'idle_5min',
+        grant_id: s.grant_id, user_id: s.user_id, reason: 'idle_5min',
       }, { user_id: s.user_id });
     }
     if (changed) await this.save(k);
@@ -635,7 +635,7 @@ export class L0Vault implements L0AdminPort {
       }
     }
     await this.audit('l0_auth_expire', {
-      grant_id: s.grant_id, l0_session_id, user_id: s.user_id, reason: 'user_closed',
+      grant_id: s.grant_id, user_id: s.user_id, reason: 'user_closed',
     }, { user_id: s.user_id });
   }
 
@@ -693,7 +693,7 @@ export class L0Vault implements L0AdminPort {
     const actives = k.grants.filter((g) => g.status === 'active' || g.status === 'consumed');
     for (const s of victims) {
       await this.audit('l0_auth_expire', {
-        grant_id: s.grant_id, l0_session_id: s.l0_session_id, user_id: s.user_id, reason,
+        grant_id: s.grant_id, user_id: s.user_id, reason,
       }, { user_id: s.user_id });
     }
     if (actives.length > 0) {
@@ -702,7 +702,7 @@ export class L0Vault implements L0AdminPort {
         delete g.wrap;
         if (!victims.some((s) => s.grant_id === g.grant_id)) {
           await this.audit('l0_auth_expire', {
-            grant_id: g.grant_id, l0_session_id: '', user_id: g.grantee_user_id, reason,
+            grant_id: g.grant_id, user_id: g.grantee_user_id, reason,
           }, { user_id: g.grantee_user_id });
         }
       }

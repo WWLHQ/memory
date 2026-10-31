@@ -107,6 +107,10 @@ export async function demoteStubLayers(ctx: LegacyDemoteCtx): Promise<LegacyDemo
         version: m.version + 1,
         updated_at: now,
       };
+      // 批次27 P3-3：降级=本次重建了层级内容（只剩 L1）→ 按批次24-F 口径打生成时间戳。
+      // grafted_from（入边）/graft_to（出生记录）保留：是历史事实；子记忆的 graft_layer
+      // 悬空需跨记忆改写，实测无错误降级路径，不做超范围改写。
+      next.layers_generated_at = now;
       await storage.putMemory(next);
       report.demoted++;
       if (report.sample_ids.length < 20) report.sample_ids.push(m.mem_id);

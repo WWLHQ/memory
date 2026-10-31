@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { hostCall, hostCapability } from '../../desktop/hostBridge.ts';
 import { MCP_ENDPOINT, specOfMcpClient, type McpWireState } from '../../agentOnboard/mcpClients.ts';
 import type { BadgeClass } from '../../types/agentOnboard.ts';
-import { useSessionContext } from '../shared/session.ts';
+import { currentSessionId, useSessionContext } from '../shared/session.ts';
 
 interface ClientRow {
   id: string;
@@ -123,7 +123,7 @@ export function McpClientsPanel() {
   const refresh = useCallback((opts: { announce?: boolean } = {}) => {
     if (capability === 'none') return Promise.resolve();
     setScanning(true);
-    return hostCall<ScanReply>('mcp:clients')
+    return hostCall<ScanReply>('mcp:clients', [currentSessionId()])
       .then((r) => {
         setScan(r);
         setScanError('');

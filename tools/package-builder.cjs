@@ -68,8 +68,10 @@ function moveDir(from, to) {
 }
 
 /**
- * 批次19（用户要求）：打包前强制结束本仓库 release/ 下运行中的旧实例，
+ * 批次19（用户要求）：打包前结束本仓库 release/ 下运行中的旧实例，
  * 避免 release/installer 被占用而产出时间戳目录、导致旧程序残留。
+ * 批次27 P3-8 先礼后兵：先 CloseMainWindow()（等价点 ×，before-quit / 日志收尾能跑），
+ * 最多等 3 秒；仍未退出的幸存者才 Stop-Process -Force。
  * 只匹配 ExecutablePath 位于本仓库 release/ 内的进程，不影响系统安装版或其它应用；
  * 结束失败只告警，后续仍按“重命名失败则输出时间戳目录”的兜底继续打包。
  */
@@ -78,8 +80,14 @@ function killReleaseProcesses() {
   const prefix = releaseDir.replace(/'/g, "''");
   const script = [
     `$prefix = '${prefix}';`,
-    `$procs = Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) };`,
-    `if ($procs) { $procs | ForEach-Object { Write-Output ("[package] 强制结束旧实例 PID " + $_.ProcessId + " " + $_.ExecutablePath); Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } }`,
+    `$match = { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) };`,
+    `$procs = Get-CimInstance Win32_Process | Where-Object $match;`,
+    `if ($procs) {`,
+    `$procs | ForEach-Object { Write-Output ("[package] 请求旧实例退出 PID " + $_.ProcessId + " " + $_.ExecutablePath); $p = Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue; if ($p) { $null = $p.CloseMainWindow() } };`,
+    `$deadline = (Get-Date).AddSeconds(3);`,
+    `do { Start-Sleep -Milliseconds 200; $alive = Get-CimInstance Win32_Process | Where-Object $match } while ($alive -and (Get-Date) -lt $deadline);`,
+    `if ($alive) { $alive | ForEach-Object { Write-Output ("[package] 未响应，强制结束 PID " + $_.ProcessId + " " + $_.ExecutablePath); Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } }`,
+    `}`,
   ].join(' ');
   const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
     cwd: root,

@@ -4,7 +4,7 @@
 // 身份不再写死 demo 账号：优先取真实登录（Home 登录成功后 bindTenant 落盘）或主进程按会话下发
 // （批次26-B P1-3 syncTenantFromHost，桌面壳内每次页面加载覆盖本地值）；否则生成一次本地身份并持久化（仅本机生效）。
 import type {
-  Account, Form, L0AdminPort, L0Port, LlmProvider, MemAgent, VectorBackend,
+  Account, Form, L0AdminPort, L0Port, LlmProvider, MemAgent, MemAgentSeedHooks, VectorBackend,
 } from '../core/memagent/types.ts';
 import { createMemAgent } from '../core/memagent/agent.ts';
 import { InMemoryStorage } from '../core/memagent/storage.ts';
@@ -123,6 +123,11 @@ function hostL0Ports(): { l0?: L0Port; l0Admin?: L0AdminPort } {
   if (l0PortsOverride) return l0PortsOverride;
   if (!l0HostAvailable()) return {};
   return { l0: new HostL0Port(), l0Admin: new HostL0Admin() };
+}
+
+/** 测试辅助：灌种子记忆走这里（批次27 P3-1：_seedMemory 已移出公开 MemAgent 接口）；页面代码不得调用 */
+export function getKernelWithSeed(): MemAgent & MemAgentSeedHooks {
+  return getKernel() as MemAgent & MemAgentSeedHooks;
 }
 
 /** 全局唯一内核实例；首次调用时的 llm/vector 覆盖生效（模型页等需要自定义路由输入的场景） */

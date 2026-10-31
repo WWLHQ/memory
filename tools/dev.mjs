@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 const HOST = '127.0.0.1';
 const DEV_ORIGIN = `http://${HOST}:5180`;
 const HOME_PORT = 8201;
+const ONBOARD_PORT = 8200;
 // 8201 被占时的备用端口（与 home server 默认端口错开，仍在本机回环段）
 const FALLBACK_PORTS = [8211, 8212, 8213, 8214, 8215];
 const DEV_PAGE = '/overview.html';
@@ -56,15 +57,6 @@ function portFree(port) {
   });
 }
 
-async function waitBackendReady(port, timeoutMs = 6000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if ((await probeBackend(port)).devOriginAllowed) return true;
-    await new Promise((r) => setTimeout(r, 200));
-  }
-  return false;
-}
-
 function stopChildren() {
   for (const child of children) {
     if (child && child.exitCode === null && !child.killed) {
@@ -80,9 +72,10 @@ function shutdown(code) {
   process.exit(code);
 }
 
-/** 选一个能用的后端端口：8201 空闲就用它，否则顺延到备用端口；全被占返回 null */
-async function pickBackendPort() {
+/** 选一个能用的后端端口：候选按序试 portFree；exclude 掉已尝试过的（TOCTOU 竞速失败后顺延） */
+async function pickBackendPort(exclude = new Set()) {
   for (const port of [HOME_PORT, ...FALLBACK_PORTS]) {
+    if (exclude.has(port)) continue;
     if (await portFree(port)) return port;
   }
   return null;
@@ -92,13 +85,23 @@ async function startBackend(port) {
   log(`启动本机登录后端 ${base(port)}…`);
   backend = spawn(process.execPath, [backendScript], { stdio: 'inherit', env: { ...process.env, PORT: String(port) } });
   children.push(backend);
+  let exited = false;
   backend.on('exit', (code) => {
+    exited = true;
     backend = null;
     if (!shuttingDown) log(`登录后端已退出（code=${code ?? 0}）；Vite 继续运行，登录不可用。`);
   });
-  if (await waitBackendReady(port)) log(`登录后端就绪：${base(port)}（演示账号 user_001 / demo1234）`);
-  else log('登录后端 6 秒内未就绪；请查看上方错误输出。');
-  return backend !== null;
+  // 等就绪时一并盯进程退出：portFree 探测与真实 listen 之间有竞速窗口（P3-9），
+  // EADDRINUSE 会让 dev-backend 直接退出，不能干等 6 秒超时。
+  const deadline = Date.now() + 6000;
+  let ready = false;
+  while (Date.now() < deadline && !exited) {
+    if ((await probeBackend(port)).devOriginAllowed) { ready = true; break; }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  if (ready) log(`登录后端就绪：${base(port)}（演示账号 user_001 / demo1234）`);
+  else if (!exited) log('登录后端 6 秒内未就绪；请查看上方错误输出。');
+  return ready;
 }
 
 async function main() {
@@ -111,12 +114,21 @@ async function main() {
       log(`${HOME_PORT} 已有服务但不允许 ${DEV_ORIGIN} 来源（多半是安装版桌面端自带的登录后端）；`
         + '无需关闭桌面端，本次自动改用备用端口。');
     }
-    const picked = existing.reachable ? await pickBackendPort() : (await portFree(HOME_PORT) ? HOME_PORT : await pickBackendPort());
-    if (picked === null) {
-      log(`备用端口 ${FALLBACK_PORTS.join('/')} 也全部被占用，本次不起登录后端（浏览器登录不可用）。`);
-    } else {
-      backendPort = picked;
-      await startBackend(picked);
+    // P3-9：portFree 探测与真实 listen 之间有竞速窗口——后端因 EADDRINUSE 退出就
+    // 把该端口加入 exclude，顺延下一个候选重试，不再一次探测定生死。
+    const exclude = new Set();
+    for (;;) {
+      const picked = await pickBackendPort(exclude);
+      if (picked === null) {
+        log(`备用端口 ${FALLBACK_PORTS.join('/')} 也全部被占用，本次不起登录后端（浏览器登录不可用）。`);
+        break;
+      }
+      exclude.add(picked);
+      if (await startBackend(picked)) {
+        backendPort = picked;
+        break;
+      }
+      log(`端口 ${picked} 启动失败（可能被并发进程抢先占用），顺延下一个候选…`);
     }
   }
 
@@ -126,7 +138,14 @@ async function main() {
   const env = { ...process.env };
   const viaQuery = backendPort !== HOME_PORT;
   if (viaQuery) {
-    const url = `${DEV_PAGE}?backend=${base(backendPort)}&agentBackend=${base(8200)}`;
+    // P3-9：agentBackend 不再硬编码拼接——接入服务（8200）若被桌面端占用且不信任 dev 来源，
+    // 显式带上也是坏的；先探活，放行才带参，否则如实说明开发态接入页不可用。
+    const onboard = await probeBackend(ONBOARD_PORT);
+    let agentQ = '';
+    if (onboard.devOriginAllowed) agentQ = `&agentBackend=${base(ONBOARD_PORT)}`;
+    else if (onboard.reachable) log(`接入服务 ${base(ONBOARD_PORT)} 已有服务但不允许 ${DEV_ORIGIN} 来源：接入页在浏览器开发态不可用（桌面端内可用）。`);
+    else log(`接入服务 ${base(ONBOARD_PORT)} 未运行：接入页在浏览器开发态不可用（可单独起 onboard 服务）。`);
+    const url = `${DEV_PAGE}?backend=${base(backendPort)}${agentQ}`;
     env.DEV_NO_OPEN = '1';
     args.push('--open', url);
     log(`浏览器入口（登录后端在备用端口）：${DEV_ORIGIN}${url}`);

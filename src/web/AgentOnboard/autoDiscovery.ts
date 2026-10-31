@@ -12,6 +12,7 @@ import {
   MCP_CLIENT_SPECS, MCP_ENDPOINT, type McpClientSpec, type McpWireState,
 } from '../../agentOnboard/mcpClients.ts';
 import type { OnboardMcpSummary } from './onboardState.ts';
+import { currentSessionId } from '../shared/session.ts';
 
 export interface McpClientRow {
   id: string;
@@ -103,7 +104,7 @@ export async function scanLocalAgents(): Promise<LocalAgentScan> {
   const [hostR, installR, mcpR] = await Promise.allSettled([
     hostCall<HostScanResult>('hostScan:run'),
     hostCall<HostInstallScan>('hostAgentDetect:run'),
-    hostCall<{ endpoint?: string; clients?: McpClientRow[] }>('mcp:clients'),
+    hostCall<{ endpoint?: string; clients?: McpClientRow[] }>('mcp:clients', [currentSessionId()]),
   ]);
 
   const errors: string[] = [];

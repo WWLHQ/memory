@@ -4,6 +4,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "description": "多 Agent 记忆助手 - 多页面接入 + TS 内核 + Electron 端壳",
   "main": "dist-electron/main.cjs",
   "scripts": {

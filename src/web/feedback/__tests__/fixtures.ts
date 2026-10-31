@@ -1,6 +1,6 @@
 // 用户反馈页单测夹具（仅测试用；页面数据真相 = 内核审计账本）。
 import type { FeedbackRecord } from '../types.ts';
-import { getKernel } from '../../kernel.ts';
+import { getKernelWithSeed } from '../../kernel.ts';
 
 export const SEED_FEEDBACKS: FeedbackRecord[] = [
   { id: 'fb_001', memory_id: 'mem_001', action: 'confirm', rating: 5, comment: '准确', trust_delta: 0.1, created_at: '2026-10-09T08:00:00Z' },
@@ -12,7 +12,7 @@ export const SEED_FEEDBACKS: FeedbackRecord[] = [
 
 /** 用例夹具：反馈下拉候选 = 真实账本既有记忆 */
 export async function seedFeedbackMemories(): Promise<void> {
-  const ma = getKernel();
+  const ma = getKernelWithSeed();
   const rows: Array<[string, string]> = [
     ['mem_001', '项目技术栈约束：Node 20 + SQLite + React'],
     ['mem_012', '已归档旧结论：早期用 MySQL'],

@@ -673,10 +673,16 @@ export interface MemAgent {
   l0ChangeAdminPassword(oldPassword: string, newPassword: string): Promise<void>;
   /** 旧数据迁移（§4.4.6；桌面端迁移前自动备份） */
   l0Migrate(oldPassword?: string): Promise<L0MigrationResult>;
-  /** 测试辅助：灌入种子记忆（L0 仅在注入 L0Port 且显式 l0=true 时加密；绝不使用明文密码） */
-  _seedMemory(m: Partial<Memory> & Pick<Memory, 'content' | 'category' | 'project_id'> & { l0?: boolean }): Promise<Memory>;
   /** 单记忆操作（17.3/P4）：端壳状态变更统一走内核（G4 约束 + 钳制 + 版本 + 审计） */
   _memoryOp(mem_id: string, op: MemOp, patch?: MemOpPatch): Promise<MemOpResult>;
   /** 用户反馈（17.4）：confirm +0.1 / reject −0.05 / disputed 挂 9.7 裁决 */
   _feedback(mem_id: string, kind: FeedbackKind): Promise<FeedbackResult>;
+}
+
+/**
+ * 批次27 P3-1：种子记忆钩子——不属于公开 MemAgent 接口（绕过质量门与查重，仅限测试灌数）。
+ * 渲染层经 src/web/kernel.ts 拿到的是 MemAgent 类型，无法触达；测试直接用 createMemAgent 返回值。
+ */
+export interface MemAgentSeedHooks {
+  _seedMemory(m: Partial<Memory> & Pick<Memory, 'content' | 'category' | 'project_id'> & { l0?: boolean }): Promise<Memory>;
 }

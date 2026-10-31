@@ -144,6 +144,29 @@ describe('批次2：hostBridge 信任边界（来源 / channel / 回包 targetOr
     expect(post).toHaveBeenCalledTimes(2);
   });
 
+  test('批次27 P3-5：同 id 不同 args 不互相劫持（去重键含 method+args）', async () => {
+    const put = vi.fn(async (m: unknown) => ({ ok: true, echo: m }));
+    (window as unknown as { __ELECTRON__?: boolean }).__ELECTRON__ = true;
+    (window as unknown as { api: unknown }).api = { storage: { putMemory: put } };
+    const { handleBridgeMessage } = await import('../hostBridge.ts');
+    const replies: { id: string; ok: boolean; data?: unknown }[] = [];
+    const source = {
+      postMessage: (payload: unknown) => {
+        replies.push((payload as Record<string, { id: string; ok: boolean; data?: unknown }>)[RES]);
+      },
+    } as unknown as WindowProxy;
+    const origin = window.location.origin;
+
+    handleBridgeMessage(msg(origin, { [REQ]: { id: 'dup', method: 'storage:putMemory', args: ['first'] } }, source));
+    handleBridgeMessage(msg(origin, { [REQ]: { id: 'dup', method: 'storage:putMemory', args: ['second'] } }, source));
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(put).toHaveBeenCalledTimes(2);
+    const byId = replies.filter((r) => r.id === 'dup');
+    expect(byId).toHaveLength(2);
+    expect(byId.map((r) => r.data)).toEqual([{ ok: true, echo: 'first' }, { ok: true, echo: 'second' }]);
+  });
+
   test('iframe 请求父窗口时 targetOrigin 为当前来源（绝不为 *）', async () => {
     const post = vi.fn();
     const fakeParent = { postMessage: post, __ELECTRON__: true, api: {} } as unknown as Window;

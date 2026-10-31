@@ -49,9 +49,9 @@ const tenant = {
     ipcRenderer.invoke(IPC.tenantGet, sessionId) as Promise<{ ok: boolean; tenant?: { user_id: string; team_id: string; enterprise_id: string }; error?: string }>,
 };
 
-// MCP 客户端接入桥（批次15）：只读状态可匿名；含令牌片段/一键写入需管理员（主进程按 sessionId 校验）
+// MCP 客户端接入桥（批次15）：状态扫描需登录会话（批次27 P3-4）；含令牌片段/一键写入需管理员（主进程按 sessionId 校验）
 const mcpClients = {
-  list: () => ipcRenderer.invoke(IPC.mcpClients),
+  list: (sessionId?: string | null) => ipcRenderer.invoke(IPC.mcpClients, sessionId),
   snippet: (id: string, sessionId?: string | null) =>
     ipcRenderer.invoke(IPC.mcpClientSnippet, id, sessionId) as Promise<{ ok: boolean; snippet?: string; error?: string }>,
   wire: (id: string, sessionId?: string | null) =>
@@ -120,7 +120,8 @@ const l0 = {
   writeUnlock: (password: string, sessionId?: string | null) =>
     ipcRenderer.invoke(IPC.l0WriteUnlock, password, sessionId),
   writeLock: (sessionId?: string | null) => ipcRenderer.invoke(IPC.l0WriteLock, sessionId),
-  seal: (plain: string) => ipcRenderer.invoke(IPC.l0Seal, plain) as Promise<string>,
+  seal: (plain: string, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.l0Seal, plain, sessionId) as Promise<{ ok: boolean; sealed?: string; code?: string; error?: string }>,
   decrypt: (req: unknown, sessionId?: string | null) => ipcRenderer.invoke(IPC.l0Decrypt, req, sessionId),
   sessionInfo: (l0SessionId: string, sessionId?: string | null) =>
     ipcRenderer.invoke(IPC.l0SessionInfo, l0SessionId, sessionId),

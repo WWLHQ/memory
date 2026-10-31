@@ -136,17 +136,33 @@ const ALLOWED_METHODS = new Set<string>(Object.keys(CHANNEL_TO_NATIVE));
 /** 观测类通道：调用本身不写 host 日志，避免「看日志」把日志刷屏 */
 const QUIET_METHODS = new Set<HostMethod>(['log:write', 'log:tail']);
 
-/** 已执行请求的去重表（id → 结果 Promise），防止 iframe 重试触发重复副作用 */
+/** 已执行请求的去重表（key → 结果 Promise），防止 iframe 重试触发重复副作用 */
 const recentCalls = new Map<string, { at: number; result: Promise<unknown> }>();
+
+/**
+ * 批次27 P3-5：去重键 = id + method + args。只用 id 的话，iframe 里可预测/撞车的 id
+ * 会在 TTL 窗口内劫持（或被劫持）另一条不相干调用的缓存结果；同 id 重试仍是
+ * 同 method + 同 args，去重语义不变。
+ */
+function dedupeKey(id: string, method: HostMethod, args: unknown[]): string {
+  let argsKey: string;
+  try {
+    argsKey = JSON.stringify(args);
+  } catch {
+    argsKey = '<unserializable>';
+  }
+  return `${id}\u0000${method}\u0000${argsKey}`;
+}
 
 function executeOnce(id: string, method: HostMethod, args: unknown[]): Promise<unknown> {
   const now = Date.now();
   for (const [k, v] of recentCalls) if (now - v.at > DEDUPE_TTL_MS) recentCalls.delete(k);
-  const hit = recentCalls.get(id);
+  const key = dedupeKey(id, method, args);
+  const hit = recentCalls.get(key);
   if (hit) return hit.result;
   const result = Promise.resolve().then(() => callNative(method, args));
   result.catch(() => { /* 由请求方消费错误；这里只防止未处理拒绝 */ });
-  recentCalls.set(id, { at: now, result });
+  recentCalls.set(key, { at: now, result });
   return result;
 }
 

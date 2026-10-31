@@ -1,6 +1,6 @@
 // 生命周期页单测夹具（仅测试用；页面数据真相 = 内核账本）。
 import type { LifecycleRecord } from '../types.ts';
-import { getKernel } from '../../kernel.ts';
+import { getKernelWithSeed } from '../../kernel.ts';
 
 export const SEED_LIFECYCLE: LifecycleRecord[] = [
   {
@@ -43,7 +43,7 @@ export const SEED_LIFECYCLE: LifecycleRecord[] = [
 
 /** 用例夹具：把记录写成真实内核记忆（页面六态由 decay_class 推导回放） */
 export async function seedLifecycleLedger(list: LifecycleRecord[] = SEED_LIFECYCLE): Promise<void> {
-  const ma = getKernel();
+  const ma = getKernelWithSeed();
   for (const r of list) {
     await ma._seedMemory({
       mem_id: r.id,

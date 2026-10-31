@@ -169,7 +169,8 @@ export function tailActionLog(limit = 5): ActionLogTailResult {
   if (!s) return { ok: false, path: null, lines: [], error: '程序日志尚未初始化（数据根未就绪）' };
   const want = Number.isFinite(limit) ? Math.min(TAIL_MAX_LINES, Math.max(1, Math.floor(limit))) : 5;
   const files = [s.file];
-  for (let i = 1; i <= s.keep; i++) files.push(`${s.file}.${i}`);
+  // keep=3 时 rotate 只保留 .1/.2 两份历史（oldest = file.(keep-1)），所以探到 keep-1 为止
+  for (let i = 1; i <= s.keep - 1; i++) files.push(`${s.file}.${i}`);
 
   const out: string[] = [];
   for (const file of files) {

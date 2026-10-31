@@ -1,7 +1,7 @@
 // 日志页单测夹具（仅测试用；页面数据真相 = 内核审计账本）。
 import type { LogEntry } from '../types.ts';
 import type { AuditRecord } from '../../../core/memagent/types.ts';
-import { getKernel, getKernelStorage, setKernelL0ForTests } from '../../kernel.ts';
+import { getKernelStorage, getKernelWithSeed, setKernelL0ForTests } from '../../kernel.ts';
 import { createTestVault, TEST_ADMIN_ID, TEST_ADMIN_PW } from '../../../core/memagent/__tests__/l0Kit.ts';
 
 // 时间戳相对当前时间（避免硬编码日期随时间推移超出筛选时间窗）
@@ -45,7 +45,7 @@ export async function seedL0Memory(password = 'l0pass-1') {
   const { vault } = await createTestVault();
   await vault.changeAdminPassword(TEST_ADMIN_PW, password, TEST_ADMIN_ID);
   setKernelL0ForTests({ l0: vault, l0Admin: vault });
-  await getKernel()._seedMemory({
+  await getKernelWithSeed()._seedMemory({
     content: 'tcp://prod-db:5432/app',
     category: 'fact',
     project_id: 'P1',

@@ -81,7 +81,7 @@ describe('demoteStubLayers 正常路径', () => {
     expect(after?.sha256).toBe(sha256hex(L1_TEXT));
     expect(after?.version).toBe(2);
     expect(after?.updated_at).toBe(NOW);
-    expect(after?.layers_generated_at).toBeUndefined();  // 不伪造层级生成时间
+    expect(after?.layers_generated_at).toBe(NOW); // 批次27 P3-3：降级=重建层级内容，按批次24-F 口径打戳
   });
 
   it('执行留一条 security_change 审计（op=legacy_layer_demote），正文与口令不进账本', async () => {

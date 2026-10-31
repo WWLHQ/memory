@@ -46,7 +46,8 @@ export function l0HostAvailable(): boolean {
 export class HostL0Port implements L0Port {
   async seal(plain: string): Promise<string> {
     try {
-      return await hostCall<string>('l0:seal', [plain]);
+      const res = await hostCall<IpcResult<{ sealed: string }>>('l0:seal', [plain, currentSessionId()]);
+      return unwrap(res, 'E_L0_LOCKED').sealed;
     } catch (e) {
       throw asError(e, 'E_L0_LOCKED');
     }

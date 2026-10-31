@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { DEFAULT_USAGES } from '../catalog.ts';
 import { coreLoadSources, coreSaveConfig, coreSimulateAuto, coreVectorCount, coreVectorProbe } from '../coreModels.ts';
 import { clearModelConfig, hydrateUsages, readModelConfig, sanitizeUsages, writeModelConfig } from '../modelConfig.ts';
-import { getKernel, getKernelStorage, rebuildKernelFromModelConfig, resetKernelForTests } from '../../kernel.ts';
+import { getKernel, getKernelStorage, getKernelWithSeed, rebuildKernelFromModelConfig, resetKernelForTests } from '../../kernel.ts';
 import type { UsageConfig } from '../types.ts';
 
 beforeEach(() => {
@@ -40,12 +40,12 @@ describe('模型配置持久化（Phase C3）', () => {
   it('内核按已落盘维度构造：配置 768 维 → 新记忆 embedding = 768', async () => {
     writeModelConfig({ vectorKey: 'ds', dims: 768, updatedAt: Date.now() });
     resetKernelForTests(); // 清账本与内核单例，配置保留
-    const m = await getKernel()._seedMemory({ content: '维度接线验证 memory dim wiring', category: 'fact', project_id: 'P1' });
+    const m = await getKernelWithSeed()._seedMemory({ content: '维度接线验证 memory dim wiring', category: 'fact', project_id: 'P1' });
     expect(m.embedding).toHaveLength(768);
   });
 
   it('coreSaveConfig：落盘 + API Key 不落盘 + 已入库记忆按新维度重嵌入 + 内核重建', async () => {
-    const seeded = await getKernel()._seedMemory({ content: '配置前写入的记忆 pre-config memory', category: 'fact', project_id: 'P1' });
+    const seeded = await getKernelWithSeed()._seedMemory({ content: '配置前写入的记忆 pre-config memory', category: 'fact', project_id: 'P1' });
     expect(seeded.embedding).toHaveLength(64); // JS 起步默认维度
 
     const out = await coreSaveConfig('bge-m3', 'bge-m3（本地）', 1024, usagesWithKey('sk-should-not-persist'));
@@ -61,7 +61,7 @@ describe('模型配置持久化（Phase C3）', () => {
     expect(stored?.embedding).toHaveLength(1024);
 
     // 内核已重建：后续写入使用新维度，且与新查询同维可比（cosine > 0）
-    const after = await getKernel()._seedMemory({ content: '配置后写入的记忆 post-config memory', category: 'fact', project_id: 'P1' });
+    const after = await getKernelWithSeed()._seedMemory({ content: '配置后写入的记忆 post-config memory', category: 'fact', project_id: 'P1' });
     expect(after.embedding).toHaveLength(1024);
     const hits = await getKernel().recall({ query: 'post-config memory', project_id: 'P1' });
     expect(hits.hits.length).toBeGreaterThan(0);
@@ -73,11 +73,11 @@ describe('模型配置持久化（Phase C3）', () => {
   });
 
   it('rebuildKernelFromModelConfig：重建后 getKernel 使用新维度且不丢账本', async () => {
-    const before = await getKernel()._seedMemory({ content: '账本保留验证 ledger survives rebuild', category: 'fact', project_id: 'P1' });
+    const before = await getKernelWithSeed()._seedMemory({ content: '账本保留验证 ledger survives rebuild', category: 'fact', project_id: 'P1' });
     writeModelConfig({ vectorKey: 'st', dims: 384, updatedAt: Date.now() });
     rebuildKernelFromModelConfig();
     expect(await coreVectorCount()).toBe(1);
-    const next = await getKernel()._seedMemory({ content: '重建后写入 after rebuild', category: 'fact', project_id: 'P1' });
+    const next = await getKernelWithSeed()._seedMemory({ content: '重建后写入 after rebuild', category: 'fact', project_id: 'P1' });
     expect(next.embedding).toHaveLength(384);
     expect(await getKernelStorage().getMemory(before.mem_id)).not.toBeNull();
   });

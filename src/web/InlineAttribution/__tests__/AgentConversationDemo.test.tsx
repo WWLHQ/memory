@@ -6,7 +6,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { AgentConversationDemo } from '../AgentConversationDemo.tsx';
-import { getKernel, resetKernelForTests } from '../../kernel.ts';
+import { getKernelWithSeed, resetKernelForTests } from '../../kernel.ts';
 
 /** 写入接入页真实持久化状态（接入页一键接入后会写入该键） */
 function seedOnboard(agentNames: string[]) {
@@ -51,7 +51,7 @@ describe('AgentConversationDemo 宿主集成（接真口径·统一记忆库不�
 
   it('切换 agent：底层同一共享账本，召回池不随 agent 变化', async () => {
     seedOnboard(['deepseek harness', 'Claude Code']);
-    await getKernel()._seedMemory({
+    await getKernelWithSeed()._seedMemory({
       content: '项目技术栈约束：Node 20 + SQLite + React', category: 'fact', project_id: 'P1',
       created_by_agent: 'claude-code',
     });
@@ -67,7 +67,7 @@ describe('AgentConversationDemo 宿主集成（接真口径·统一记忆库不�
 
   it('off 级别：降级统计行出现（19.7 诚实约束）', async () => {
     seedOnboard(['deepseek harness']);
-    await getKernel()._seedMemory({ content: '部署约束：仅内网访问', category: 'preference', project_id: 'P1' });
+    await getKernelWithSeed()._seedMemory({ content: '部署约束：仅内网访问', category: 'preference', project_id: 'P1' });
     render(<AgentConversationDemo />);
     await waitFor(() => expect(screen.getByLabelText(/关闭 \(off\)/)).toBeInTheDocument());
     fireEvent.click(screen.getByLabelText(/关闭 \(off\)/));
