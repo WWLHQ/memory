@@ -174,7 +174,7 @@ status: draft
 | 调用方归因 | `RecallReq.client` + `agent.ts` 审计 `detail.client`；`mcpHttp.ts` 用 `initialize.clientInfo`（优先）/`User-Agent` 识别，`Mcp-Session-Id` 关联 | `mcpHttp.test.ts`（`Qoder/9.9.9`、`Cursor (UA)`） |
 | 客户端触发规则 | 根目录 `CLAUDE.md`（`@AGENTS.md` + 优先调用/回显）；`AGENTS.md §1.1/§9` 同步 | 人工（Claude Code 新会话） |
 
-> 诚实边界（批次15，28-D 更新）：自动写入只覆盖结构稳定的 JSON 客户端（含 Trae CN、WorkBuddy `~/.workbuddy/mcp.json`）与 Codex（TOML）；Zcode（应用内表单/JSON，无文件路径）与 deepseek harness（随宿主 Qoder 下发）给手工说明/宿主委托。状态扫描按文件内容判定，不保证客户端进程已重载配置（需重启客户端）。提示能否被普通成员复制（含令牌）由管理员门禁控制；令牌绝不进日志。
+> 诚实边界（批次15，28-D 更新）：自动写入只覆盖结构稳定的 JSON 客户端（含 Trae CN、WorkBuddy `~/.workbuddy/mcp.json`）与 Codex（TOML）；Zcode（应用内表单/JSON，无文件路径）与 deepseek harness（随宿主 Qoder 下发）给手工说明/宿主委托；28-E 起 Zcode「复制片段」输出与 WorkBuddy 同构的 mcpServers JSON（可直接粘贴）。状态扫描按文件内容判定，不保证客户端进程已重载配置（需重启客户端）。提示能否被普通成员复制（含令牌）由管理员门禁控制；令牌绝不进日志。
 
 ---
 
@@ -305,7 +305,7 @@ status: draft
 | 一键适配真正可用 | `McpClientsPanel.tsx`：按钮只在无管理员/扫描中/浏览器模式/无已安装客户端时禁用；`wireAll` 先顺序自动写入全部可写客户端，再为未接通的其余客户端调用 `mcp:clientSnippet` 生成片段；文案回显「自动 N + 片段 K」与逐项失败原因；`canWire` 排除 wired/conflict/invalid；行内按钮覆盖 TOML | `McpClientsPanel.test.tsx`（批量自动 3 + 片段 1 / 全部已接入仍可生成片段 / 成员禁用）、`autoDiscovery.test.ts`（TOML 自动写入、冲突拒绝、无路径转手工） |
 | 接通指引 | `McpClientsPanel.tsx` 的 `guideFor(row, endpoint)`：按状态给出具体菜单路径/配置文件、serverKey、端点、当前 URL 与修复步骤（冲突→改指端点或删条目→刷新→一键接入；无法解析→先修语法；手工→按 `connectHint` 添加 HTTP MCP）；行内 `data-testid="guide-<id>"` 展示 | `McpClientsPanel.test.tsx`（Codex 路径、Trae 菜单、Cursor 冲突、WorkBuddy 解析错误 + 刷新） |
 
-> 诚实边界（批次23）：`npm run dev` 只解决浏览器开发态登录；8201 被安装版桌面端占用且来源不允许 5180 时**批次24 起自动改用备用端口**（不再需要关闭桌面端）。效果证据四卡只统计真实召回审计与记忆主表，无样本「—」、无单价不估算。MCP 自动写入覆盖结构稳定的 JSON/TOML 客户端（28-D 起含 WorkBuddy `~/.workbuddy/mcp.json`）；Zcode（应用内部存储）与 deepseek harness（宿主下发）只给手工指引/宿主委托；冲突/无法解析/超 8 MiB 一律拒绝覆盖；令牌只在片段中一次性下发，绝不进日志/审计。
+> 诚实边界（批次23）：`npm run dev` 只解决浏览器开发态登录；8201 被安装版桌面端占用且来源不允许 5180 时**批次24 起自动改用备用端口**（不再需要关闭桌面端）。效果证据四卡只统计真实召回审计与记忆主表，无样本「—」、无单价不估算。MCP 自动写入覆盖结构稳定的 JSON/TOML 客户端（28-D 起含 WorkBuddy `~/.workbuddy/mcp.json`）；Zcode（应用内部存储）与 deepseek harness（宿主下发）只给手工指引/宿主委托（28-E 起 Zcode 片段为可粘贴 mcpServers JSON）；冲突/无法解析/超 8 MiB 一律拒绝覆盖；令牌只在片段中一次性下发，绝不进日志/审计。
 
 ---
 
@@ -454,4 +454,5 @@ status: draft
 | 28-A 浏览器三态账本 | `src/web/httpStorage.ts`（HttpStorageBackend：会话/可达性/401/501 四类 KernelUnavailableError + `fetchKernelInfo`）；`src/web/kernel.ts` 三态选择 + `rebuildKernelForDataPlane()` + `setKernelStorageForTests`；LoginModal/main.tsx 登录后重建 | `src/web/__tests__/httpStorage.test.ts`（9 例）；mock 会话页面测试注入内存账本（SecurityPage/LogsPage/AgentOnboardPage） |
 | 28-A dev 后端只读镜像 | `tools/dev-backend.mjs`：data-root.json 指针定位真实 `memories.db.json`，`FileStorage{readonly:true,reloadOnMtime:true}` 挂上 `/api/kernel/invoke`；绝不抢桌面端写锁 | verify:fast 覆盖（脚本不进 typecheck，人工启动验证） |
 | 28-B/28-D 宿主继承 + WorkBuddy 可写 | `src/agentOnboard/mcpClients.ts`：`inheritsFrom`（deepseek harness ← qoder-cn，状态如实取宿主）+ WorkBuddy `configPath '~/.workbuddy/mcp.json'`（28-D 实机确认，可备份+合并写入；28-B 的 `dynamicConfigGlob` 基础设施随实机结论移除）；`src/electron/mcpClients.ts`：扫描宿主继承状态推导、`wireMcpClient` 委托写入；Zcode 保持手工（应用内表单/JSON，无文件路径） | `agentOnboard/__tests__/mcpClients.test.ts`（配方常量/片段/探测更新）、`electron/__tests__/mcpClients.test.ts`「批次28-B/28-D 三客户端再审查」4 例 |
+| 28-E Zcode 片段升级 | `src/agentOnboard/mcpClients.ts`：Zcode `format` unknown→`json`（`renderMcpSnippet` 输出与 WorkBuddy 同构的 mcpServers JSON，可直接粘贴进其 JSON 标签页）；`configPath` 仍 null（扫描层无路径 manual）、`writable` 仍 false（不代写）——只升级片段不改自动写入边界；`McpClientsPanel.tsx` 安全说明同步 | `agentOnboard/__tests__/mcpClients.test.ts`（片段 JSON.parse+同构断言、探测 no_config 断言） |
 | 28-C 遗留层自动清理 | `src/core/memagent/legacyLayers.ts`：`isMislabeledLayer`（标了 L2–L6 但无深层正文且非 llm/llm_partial）；`main.ts` bootstrap `autoDemoteLegacyLayers()`；`forgetting.ts` `buildSummary` 摘要行不再误标 L3；`coreMemoryOps.coreUpdateContent` 归一 stub 行 | `legacyLayers.test.ts`、`forgetting.test.ts`、`LegacyLedgerCard.test.tsx`、`coreMemoryOps.test.ts` |

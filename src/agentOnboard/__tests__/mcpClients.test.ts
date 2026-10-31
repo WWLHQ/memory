@@ -71,17 +71,20 @@ describe('buildMcpEntry / renderMcpSnippet', () => {
     expect(text).toContain(`Authorization = "Bearer ${TOKEN}"`);
   });
 
-  test('手工客户端片段：端点 + 请求头 + 说明（批次28-B 起手工片段用 Zcode；WorkBuddy 已是 JSON 格式）', () => {
+  test('Zcode 片段升级为可粘贴 JSON（与 WorkBuddy 同构，批次28-E）；无文件面 → 仍不代写', () => {
     const zcode = specOfMcpClient('zcode');
     const text = renderMcpSnippet(zcode, EP, TOKEN);
-    expect(text).toContain(EP);
-    expect(text).toContain(`Authorization: Bearer ${TOKEN}`);
-    expect(text).toContain('客户端内一次配置');
-    // 批次28-B：WorkBuddy 升级为 JSON 格式（动态检出 connectors 下的 mcp.json）→ 片段为 mcpServers 结构
+    expect(() => JSON.parse(text) as unknown).not.toThrow();
+    const parsed = JSON.parse(text) as { mcpServers: Record<string, Record<string, unknown>> };
+    expect(parsed.mcpServers['MultiAgent Memory']).toEqual({
+      type: 'http', url: EP, headers: { Authorization: `Bearer ${TOKEN}` },
+    });
+    expect(zcode.writable).toBe(false);
+    expect(zcode.configPath).toBeNull();
+    // WorkBuddy / Trae 同为 mcpServers 结构
     const wbText = renderMcpSnippet(specOfMcpClient('workbuddy'), EP, TOKEN);
     expect(() => JSON.parse(wbText) as unknown).not.toThrow();
     expect(wbText).toContain(`Bearer ${TOKEN}`);
-    // Trae 已是 JSON：片段为 mcpServers 结构
     const traeText = renderMcpSnippet(trae, EP, TOKEN);
     expect(() => JSON.parse(traeText) as unknown).not.toThrow();
     expect(traeText).toContain(`Bearer ${TOKEN}`);
@@ -171,8 +174,11 @@ describe('probeClientConfig', () => {
     // WorkBuddy：configPath=null 但有动态配置面（JSON）→ 按格式探测，不再整体 manual
     expect(probeClientConfig(specOfMcpClient('workbuddy'), null, EP).state).toBe('no_config');
     expect(probeClientConfig(specOfMcpClient('workbuddy'), '{"any":true}', EP).state).toBe('missing_entry');
-    // 真无配置面的客户端（format unknown）仍 manual
-    expect(probeClientConfig(specOfMcpClient('zcode'), null, EP).state).toBe('manual');
+    // Zcode 批次28-E 升级 format json（片段与 WorkBuddy 同构）：按格式探测得 no_config；
+    // 「需手工」由 electron 扫描层因 configPath=null 判定（scanMcpClients 无路径一律 manual），探测层不再兜 manual
+    expect(probeClientConfig(specOfMcpClient('zcode'), null, EP).state).toBe('no_config');
+    expect(specOfMcpClient('zcode').configPath).toBeNull();
+    // deepseek-harness（format unknown）探测层仍 manual；实际状态由宿主继承逻辑覆盖
     expect(probeClientConfig(specOfMcpClient('deepseek-harness'), null, EP).state).toBe('manual');
   });
 });

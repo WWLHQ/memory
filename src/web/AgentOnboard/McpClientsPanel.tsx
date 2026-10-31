@@ -400,7 +400,7 @@ export function McpClientsPanel() {
           安全说明：片段中的 Authorization 令牌只在此处一次性展示，绝不写入日志/审计；一键写入支持结构稳定的
           JSON（Qoder CN / Claude Code / Cursor / Gemini / Qwen / Trae CN / WorkBuddy）与 TOML（Codex）客户端，
           写入前自动备份原文件，同名条目指向其它端点时拒绝覆盖。deepseek harness 随宿主 Qoder 下发（对宿主一键接入即自动接通）；
-          Zcode 的配置存应用内部存储（表单 / JSON 两种方式），会给出具体设置位置与字段，需在客户端内粘贴一次。
+          Zcode 的配置存应用内部存储（表单 / JSON 两种方式，无文件面不代写），「复制片段」输出的 mcpServers JSON 可整段粘贴进其 JSON 标签页，保存即接通。
           服务端召回审计会记录调用方（client），可在审计页按 Agent 核验是否真的调用了记忆库。
         </div>
       </div>

@@ -125,12 +125,14 @@ export const MCP_CLIENT_SPECS: McpClientSpec[] = [
   },
   {
     id: 'zcode', name: 'Zcode', badge: 'p3',
-    serverKey: 'MultiAgent Memory', format: 'unknown', entryStyle: 'type+url',
+    // format json：片段与 WorkBuddy 同构（mcpServers 可直接粘贴进 Zcode 的 JSON 标签页）；
+    // 无 configPath → 扫描仍 manual，writable false → 仍不代写，只是「复制片段」升级为可粘贴 JSON
+    serverKey: 'MultiAgent Memory', format: 'json', entryStyle: 'type+url',
     configPath: null, installMarkers: ['~/.zcode'],
     rulesHint: '工作区 AGENTS.md（若客户端支持）',
-    connectHint: 'Zcode → 设置 → MCP 服务器 → 添加/编辑，两种方式任选：① 表单——类型 HTTP、URL 填 http://127.0.0.1:8204/mcp、请求头 {"Authorization": "Bearer <mcp-token>"}；② JSON——直接粘贴 {"MultiAgent Memory": {"type": "http", "url": "http://127.0.0.1:8204/mcp", "headers": {"Authorization": "Bearer <mcp-token>"}}}（令牌见数据根 mcp-token.txt 或接入页「复制片段」），保存即接通',
+    connectHint: 'Zcode → 设置 → MCP 服务器 → 添加/编辑，两种方式任选：① JSON 标签页——把「复制片段」输出的 mcpServers JSON 整段粘贴，保存即接通；② 表单——类型 HTTP、URL 填 http://127.0.0.1:8204/mcp、请求头 {"Authorization": "Bearer <mcp-token>"}（令牌见数据根 mcp-token.txt 或接入页「复制片段」）',
     writable: false,
-    note: '2026-10-31 用户实测确认应用内「表单 / JSON」两种配置方式；配置存应用内部存储（IndexedDB），无稳定配置文件可合并 → 不代写，客户端内一次配置即接通',
+    note: '2026-10-31 用户实测确认应用内「表单 / JSON」两种配置方式；配置存应用内部存储（IndexedDB），无稳定配置文件可合并 → 不代写，「复制片段」为可直接粘贴的 JSON',
   },
   {
     id: 'deepseek-harness', name: 'deepseek harness', badge: 'p0',
