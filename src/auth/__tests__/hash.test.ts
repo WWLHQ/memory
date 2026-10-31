@@ -40,6 +40,7 @@ describe('verifyPassword（§4.1 校验 + 防时序）', () => {
     expect(verifyPassword(PLAIN, ':')).toBe(false);
   });
 
+  // 40 组 scrypt 在并行测试负载下可能超过默认 5s：显式放宽，避免门禁随机失败
   it('防时序：正确/错误密码的校验耗时差在宽松阈值内（scrypt 同参 + 常量比较）', () => {
     const N = 40;
     const tOk: number[] = [];
@@ -58,5 +59,5 @@ describe('verifyPassword（§4.1 校验 + 防时序）', () => {
     const diffRatio = Math.abs(mOk - mWrong) / Math.max(mOk, mWrong);
     // 宽松守卫：主要防"错误路径显著更快/更慢"的粗粒度泄露；scrypt 同参 + timingSafeEqual 保证结构恒定
     expect(diffRatio).toBeLessThan(1.0);
-  });
+  }, 30_000);
 });

@@ -7,9 +7,13 @@ import type { Form, Gain } from './agentOnboard.ts';
 /** 视角（§0.1 矩阵，按 3.2 过滤可见范围） */
 export type Perspective = 'personal' | 'team' | 'enterprise';
 
+/** 账号角色（批次7）：admin = 系统最高权限（可管理账号/团队/安全策略/数据位置）；member = 普通用户 */
+export type AccountRole = 'admin' | 'member';
+
 /**
  * 全局租户上下文（§0.1 / 18.2-A）。
  * 团队 team_id 由管理员在账号页（P12）分配，用户侧只读、不可自选——本类型只消费，不提供 setter。
+ * role 由登录后端下发（批次7）；缺省按 member 处理（兼容旧会话/测试夹具）。
  */
 export interface TenantContext {
   enterprise_id: string;
@@ -17,6 +21,12 @@ export interface TenantContext {
   user_id: string;
   perspective: Perspective;
   session_id: string;
+  role?: AccountRole;
+}
+
+/** 是否管理员上下文（唯一判定入口，避免 UI 各处重复比较字符串） */
+export function isAdminContext(ctx: Pick<TenantContext, 'role'> | null | undefined): boolean {
+  return ctx?.role === 'admin';
 }
 
 /** 同步角色（19.11：主源 / 镜像 / 离线） */
@@ -29,6 +39,8 @@ export interface SyncState {
   lastReconcileAt: number;
   /** 离线端待回传条数（pending_sync，19.11 §5）；offline 时 >0 */
   pendingSync: number;
+  /** 是否已接同步中枢（false = 本版本不提供云端同步，UI 不得显示「已同步」）；缺省按未实现处理 */
+  wired?: boolean;
 }
 
 /** 登录表单（§0.3：账号/密码/端形态；团队不出现在输入） */
@@ -38,12 +50,14 @@ export interface LoginForm {
   form: Form; // 自动识别，只读
 }
 
-/** 登录失败原因枚举（§0.3 / 4.2） */
-export type LoginFailReason = 'empty' | 'no_account' | 'wrong' | 'locked';
+/** 登录失败原因枚举（§0.3 / 4.2）；backend_unreachable = 登录后端进程不可达（如实失败，不本地放行）
+ *  origin_blocked = 后端在线但当前页面来源不在 CORS 白名单（批次22：与「未启动」区分，避免误导） */
+export type LoginFailReason = 'empty' | 'no_account' | 'wrong' | 'locked' | 'backend_unreachable' | 'origin_blocked';
 
-/** 登录审计事件（§4.3：登录必记审计 action=login · form:<端>；4.3.1 统一审计枚举 login/logout/login_fail/team_assign） */
+/** 登录审计事件（§4.3：登录必记审计 action=login · form:<端>；4.3.1 统一审计枚举 login/logout/login_fail/team_assign；
+ *  批次7 追加 admin_seed/password_change/role_change） */
 export interface LoginAudit {
-  action: 'login' | 'login_fail' | 'logout' | 'team_assign';
+  action: 'login' | 'login_fail' | 'logout' | 'team_assign' | 'admin_seed' | 'password_change' | 'role_change';
   form: Form;
   account: string;
   at: number;

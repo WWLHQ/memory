@@ -3,6 +3,7 @@
 // 真实后端接入时，把本类的卡片存储/审计替换为 API 调用即可，校验与状态机不变。
 
 import { AgentStatus, transition } from './stateMachine.ts';
+import { ulid } from '../core/memagent/ulid.ts';
 import { validateOnboard, type Violation } from './validators.ts';
 import type { AgentCard, AgentCardInput, Form, Priority } from '../types/agentOnboard.ts';
 
@@ -33,6 +34,48 @@ export interface TestResult {
 export interface RotateResult {
   ok: boolean;
   card?: AgentCard;
+  /** 一次性明文密钥：仅本次响应返回，服务端只保存 keyHash/keyTail */
+  key?: string;
+  reason?: string;
+}
+
+/** 单家 Agent 的真实探测结果（失败原因必填，供 UI 如实展示） */
+export interface ProbeResult {
+  ok: boolean;
+  /** 失败原因 / 通过证据（如「命中安装证据（cli）：…」） */
+  reason: string;
+  /** 可选溯源（真实安装路径 / 命令 / 卸载项） */
+  evidence?: string;
+}
+
+/**
+ * 真实拨测（批量签名：一次扫描回答多家，避免一键接入逐家重复扫描）。
+ * 缺省不注入 = 无法验证 → 测试一律不得报 CONNECTED（Phase C 验收）。
+ */
+export type AgentProbe = (agentNames: string[]) => Map<string, ProbeResult>;
+
+export interface OnboardServiceOptions {
+  /** 真实拨测（桌面壳注入本机安装痕迹探测；测试注入 fake） */
+  probe?: AgentProbe;
+  /** 密钥哈希（服务端注入 SHA-256；浏览器侧不注入 → 只存尾号，不存明文） */
+  keyHasher?: (key: string) => string;
+}
+
+/** 生成真实接入密钥（24 字节随机 → 48 hex，形如 mam_sk_<hex>）；界面恒脱敏，仅服务端持有明文 */
+function newApiKey(): string {
+  const bytes = new Uint8Array(24);
+  globalThis.crypto.getRandomValues(bytes);
+  return 'mam_sk_' + Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** 安全调用探测：探测抛错 → 视为未通过（不让异常伪装成连通） */
+function runProbe(probe: AgentProbe, names: string[]): Map<string, ProbeResult> {
+  try {
+    return probe(names);
+  } catch (e) {
+    const reason = `本机探测异常：${(e as Error)?.message ?? String(e)}`;
+    return new Map(names.map((n) => [n, { ok: false, reason }]));
+  }
 }
 export interface OneClickResult {
   ok: boolean;
@@ -51,7 +94,7 @@ export interface DiscoverInput {
 }
 
 function rid(): string {
-  return 'req_' + Math.random().toString(36).slice(2, 10);
+  return 'req_' + ulid();
 }
 
 /**
@@ -65,13 +108,19 @@ export class AgentOnboardService<B extends OnboardBackend | null = null> {
   backend: B;
   cards: Map<string, AgentCard>;
   audit: AuditEntry[] = [];
+  /** 真实拨测；缺省 → 无法验证连通（测试只降级不谎报） */
+  probe?: AgentProbe;
+  /** 密钥哈希；缺省不保存哈希（只保留尾号） */
+  keyHasher?: (key: string) => string;
 
   /** B=null 时同步，B=OnboardBackend 时异步 */
   private _wrap<R>(sync: () => R, asyncFn: () => Promise<R>): R | Promise<R> {
     return this.backend ? asyncFn() : sync();
   }
 
-  constructor(backend?: B) {
+  constructor(backend?: B, options: OnboardServiceOptions = {}) {
+    this.probe = options.probe;
+    this.keyHasher = options.keyHasher;
     this.backend = (backend ?? null) as B;
     if (this.backend) {
       this.cards = (this.backend as unknown as OnboardBackend).cards;
@@ -107,6 +156,10 @@ export class AgentOnboardService<B extends OnboardBackend | null = null> {
     const { ok, violations } = validateOnboard(card);
     if (!ok) return { ok: false, violations };
     card.status = AgentStatus.CONFIGURED;
+    // 密钥字段只由 rotateKey 维护；客户端不得注入哈希/尾号
+    card.apiKeyPlaintext = null;
+    delete card.keyHash;
+    delete card.keyTail;
     this.cards.set(input.agent_name, card);
     this._audit('configure', { agent: input.agent_name });
     return { ok: true, card };
@@ -125,15 +178,42 @@ export class AgentOnboardService<B extends OnboardBackend | null = null> {
     const requestId = rid();
     card.requestId = requestId;
     card.tested = true;
-    card.status = card.circuit === 'OPEN'
-      ? transition(card.status, 'CIRCUIT_OPEN')
-      : transition(card.status, 'TEST_PASS');
-    this._audit('test', { agent: agentName, requestId, status: card.status });
-    return { ok: true, card, requestId };
+
+    // 主通道熔断：直接降级（不再冒充测通）
+    if (card.circuit === 'OPEN') {
+      const reason = '主通道熔断 OPEN，已降级为仅补偿通道（circuit_open）';
+      card.status = transition(card.status, 'CIRCUIT_OPEN');
+      card.lastTest = { ok: false, reason, at: Date.now() };
+      this._audit('test', { agent: agentName, requestId, status: card.status, result: 'fail', reason: 'circuit_open' });
+      return { ok: false, card, requestId, reason };
+    }
+
+    // 未注入真实探测：无法验证 → 只降级，绝不谎报 CONNECTED
+    if (!this.probe) {
+      const reason = '未配置本机探测能力，无法验证连通（not_probed）';
+      card.status = transition(card.status, 'TEST_FAIL');
+      card.lastTest = { ok: false, reason, at: Date.now() };
+      this._audit('test', { agent: agentName, requestId, status: card.status, result: 'fail', reason: 'not_probed' });
+      return { ok: false, card, requestId, reason };
+    }
+
+    // 真实拨测：以本机安装/连接证据为唯一真相（记录真实探测耗时，供卡片「平均延时」）
+    const probeStarted = Date.now();
+    const probe = runProbe(this.probe, [agentName]).get(agentName)
+      ?? { ok: false, reason: `探测未返回「${agentName}」的结果` };
+    const durationMs = Date.now() - probeStarted;
+    card.status = transition(card.status, probe.ok ? 'TEST_PASS' : 'TEST_FAIL');
+    card.lastTest = { ok: probe.ok, reason: probe.reason, at: Date.now(), durationMs };
+    this._audit('test', {
+      agent: agentName, requestId, status: card.status,
+      result: probe.ok ? 'pass' : 'fail', reason: probe.reason, durationMs,
+    });
+    return { ok: probe.ok, card, requestId, reason: probe.reason };
   }
 
   /**
-   * 测试连通：必记 request_id（R7）；熔断 OPEN → DEGRADED，否则 TEST_PASS → CONNECTED。
+   * 测试连通：必记 request_id（R7）；熔断 OPEN → DEGRADED；
+   * 真实拨测失败 → TEST_FAIL → DEGRADED（已连通卡片同样回落，见状态机）。
    * 对应 AC-003.3 / AC-003.8。
    */
   testConnect(agentName: string): B extends null ? TestResult : Promise<TestResult> {
@@ -145,11 +225,19 @@ export class AgentOnboardService<B extends OnboardBackend | null = null> {
 
   private _rotateKey(agentName: string): RotateResult {
     const card = this.cards.get(agentName);
-    if (!card) return { ok: false };
-    card.keyRotatedAt = Date.now();
-    card.keyGraceUntil = Date.now() + 24 * 3600 * 1000; // 24h 宽限（§4/R6）
-    this._audit('rotate', { agent: agentName });
-    return { ok: true, card };
+    if (!card) return { ok: false, reason: 'no-card' };
+    const now = Date.now();
+    const key = newApiKey();
+    // 明文只在本次响应一次性返回；卡片只存哈希与尾 4 位（旧实现把明文随 JSON 落盘 + GET 泄露）
+    card.apiKeyPlaintext = null;
+    card.keyHash = this.keyHasher ? this.keyHasher(key) : undefined;
+    card.keyTail = key.slice(-4);
+    card.keyRotatedAt = now;
+    card.keyGraceUntil = now + 24 * 3600 * 1000; // 24h 宽限（§4/R6）
+    card.keyRevoked = false; // 轮换即恢复可用（旧 Key 宽限期内有效）
+    // 审计只记尾 4 位，绝不落明文
+    this._audit('rotate', { agent: agentName, keyTail: card.keyTail });
+    return { ok: true, card, key };
   }
 
   rotateKey(agentName: string): B extends null ? RotateResult : Promise<RotateResult> {
@@ -170,6 +258,7 @@ export class AgentOnboardService<B extends OnboardBackend | null = null> {
     const card = this.cards.get(agentName);
     if (!card) return { ok: false };
     card.apiKeyPlaintext = null;
+    card.keyHash = undefined; // 吊销后哈希不再可用
     card.keyRevoked = true; // R5/R6 立即失效
     this._audit('revoke', { agent: agentName });
     return { ok: true };
@@ -187,9 +276,16 @@ export class AgentOnboardService<B extends OnboardBackend | null = null> {
 
   private _oneClick(agents: DiscoverInput[], form: Form): OneClickResult {
     const result: AgentCard[] = [];
+    // 一次扫描回答多家（避免逐家重复跑本机探测）；失败/缺省一律不得 CONNECTED
+    const probeStarted = Date.now();
+    const probeResults = this.probe ? runProbe(this.probe, agents.map((a) => a.name)) : null;
+    // 批量探测耗时：作为本轮每条 auto_bind 的真实耗时样本（UI「平均延时」）
+    const probeMs = probeResults ? Date.now() - probeStarted : undefined;
     for (const a of agents) {
       // R8 默认只读召回；P2 写须确认（未确认则禁写）
       const p2 = a.priority === 'P2';
+      const probeResult: ProbeResult = probeResults?.get(a.name)
+        ?? { ok: false, reason: this.probe ? `探测未返回「${a.name}」的结果` : '未配置本机探测能力，无法验证连通（not_probed）' };
       const card: AgentCard = {
         agent_name: a.name,
         priority: a.priority,
@@ -203,8 +299,13 @@ export class AgentOnboardService<B extends OnboardBackend | null = null> {
         channels: { webhook: true, apiPull: true }, // R4 双通道至少一
         apiKeyPlaintext: null, // R5 脱敏
         circuit: 'CLOSED',
-        tested: true,
-        requestId: rid(),
+        tested: probeResult.ok,
+        requestId: probeResult.ok ? rid() : null,
+        // 把本轮真实拨测耗时随卡片下发：/agents 回填时即使审计读取失败，UI 仍有真实延时样本
+        lastTest: {
+          ok: probeResult.ok, reason: probeResult.reason, at: Date.now(),
+          ...(probeMs !== undefined ? { durationMs: probeMs } : {}),
+        },
         oneClick: {
           enabled: true,
           defaultReadOnly: true, // R8 默认只读召回
@@ -215,9 +316,14 @@ export class AgentOnboardService<B extends OnboardBackend | null = null> {
         discover: { enabled: true, crossMachine: false }, // R10 限本机
         form,
       };
-      card.status = transition(card.status, 'TEST_PASS'); // 测通 → CONNECTED
+      // 真实探测通过 → CONNECTED；失败/无探测 → DEGRADED（不谎报已连通）
+      card.status = transition(card.status, probeResult.ok ? 'TEST_PASS' : 'TEST_FAIL');
       this.cards.set(a.name, card);
-      this._audit('auto_bind', { agent: a.name, signal: a.signal, form, priority: a.priority });
+      this._audit('auto_bind', {
+        agent: a.name, signal: a.signal, form, priority: a.priority,
+        status: card.status, result: probeResult.ok ? 'pass' : 'fail', reason: probeResult.reason,
+        ...(probeMs !== undefined ? { durationMs: probeMs } : {}),
+      });
       result.push(card);
     }
     return { ok: true, cards: result };

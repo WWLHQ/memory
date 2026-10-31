@@ -14,6 +14,12 @@ test('CONFIGURED --TEST_FAIL--> DEGRADED', () => {
   assert.equal(transition(AgentStatus.CONFIGURED, 'TEST_FAIL'), AgentStatus.DEGRADED);
 });
 
+test('CONNECTED --TEST_FAIL--> DEGRADED（断开的 Agent 不得滞留已连通 · Phase C 验收）', () => {
+  assert.equal(transition(AgentStatus.CONNECTED, 'TEST_FAIL'), AgentStatus.DEGRADED);
+  // 复测通过可恢复
+  assert.equal(transition(AgentStatus.CONNECTED, 'TEST_PASS'), AgentStatus.CONNECTED);
+});
+
 test('CIRCUIT_OPEN 强制降级（从任意态）', () => {
   assert.equal(transition(AgentStatus.CONNECTED, 'CIRCUIT_OPEN'), AgentStatus.DEGRADED);
   assert.equal(transition(AgentStatus.ONBOARD, 'CIRCUIT_OPEN'), AgentStatus.DEGRADED);

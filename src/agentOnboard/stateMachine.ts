@@ -5,6 +5,7 @@
 //   ONBOARD(未配置) --CONFIGURE(填密钥+选通道)--> CONFIGURED(已配置)
 //   CONFIGURED --TEST_PASS(测试通过)--> CONNECTED(连通)
 //   CONFIGURED --TEST_FAIL(测试失败)--> DEGRADED(降级，仅补偿通道可用)
+//   CONNECTED --TEST_FAIL(真实拨测失败，如 Agent 已卸载/断开)--> DEGRADED（绝不滞留 CONNECTED）
 //   任意态 --CIRCUIT_OPEN(主通道熔断 OPEN)--> DEGRADED（R5/R6：自动降级不丢数据）
 //   DEGRADED --CIRCUIT_CLOSE(熔断恢复)--> CONNECTED
 
@@ -33,6 +34,14 @@ export const TRANSITIONS: TransitionTable = Object.freeze({
     TEST_PASS: 'CONNECTED',
     TEST_FAIL: 'DEGRADED', // 测试失败→降级（仅补偿通道）
     CIRCUIT_HALF_OPEN: 'DEGRADED',
+  },
+  CONNECTED: {
+    TEST_PASS: 'CONNECTED',
+    // 已连通卡片的真实拨测失败（Agent 断开/卸载）必须回落 DEGRADED，
+    // 否则卡片会滞留 CONNECTED 谎报连通（Phase C 验收）。
+    TEST_FAIL: 'DEGRADED',
+    CIRCUIT_HALF_OPEN: 'DEGRADED',
+    CONFIGURE: 'CONFIGURED',
   },
   DEGRADED: {
     CIRCUIT_CLOSE: 'CONNECTED', // 熔断恢复→连通

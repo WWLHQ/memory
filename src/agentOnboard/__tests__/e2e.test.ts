@@ -2,14 +2,36 @@
 // 说明：真正的浏览器点击级 E2E 需无头浏览器(Playwright)，需联网安装；此处以
 // "service + render 驱动 §8 场景" 在 Node 内验证业务正确性，等价于无 UI 的 E2E。
 import assert from 'node:assert/strict';
-import { AgentOnboardService } from '../service.ts';
+import { AgentOnboardService, type AgentProbe } from '../service.ts';
 import type { AgentCardInput, Priority } from '../../types/agentOnboard.ts';
 import { signalSourcesForForm } from '../formMatrix.ts';
 import { createServer } from '../server.ts';
 import { AgentOnboardClient } from '../client.ts';
+import type { TenantContext } from '../../types/home.ts';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+/** 测试注入真实探测（命中本机安装证据） */
+const probeOk: AgentProbe = (names) =>
+  new Map(names.map((n) => [n, { ok: true, reason: `命中「${n}」本机安装证据（测试注入）` }]));
+
+/** 批次26 P0-5：写端点会话真源（admin） */
+function adminSessions() {
+  const adminSid = 'sid-admin';
+  const sessions = new Map<string, TenantContext>([
+    [adminSid, { enterprise_id: 'e1', team_id: 't1', user_id: 'admin-1', perspective: 'team', session_id: adminSid, role: 'admin' }],
+  ]);
+  return {
+    adminSid,
+    getSession: (sid: string | undefined) => (sid ? sessions.get(sid) ?? null : null),
+    reader: () => adminSid,
+  };
+}
+
+function svcWithProbe() {
+  return new AgentOnboardService(null, { probe: probeOk });
+}
 
 function card(name: string, priority: Priority): AgentCardInput {
   return {
@@ -21,7 +43,7 @@ function card(name: string, priority: Priority): AgentCardInput {
 }
 
 test('§8 MVP 接入：deepseek(P0)+Claude(P1) 双通道 → 两卡片 CONNECTED + 优先级徽标', () => {
-  const svc = new AgentOnboardService();
+  const svc = svcWithProbe();
   svc.configure(card('deepseek harness', 'P0'));
   svc.configure(card('Claude Code', 'P1'));
   svc.testConnect('deepseek harness');
@@ -35,7 +57,7 @@ test('§8 MVP 接入：deepseek(P0)+Claude(P1) 双通道 → 两卡片 CONNECTED
 });
 
 test('§8 双通道兜底：主通道熔断 OPEN → DEGRADED 仅补偿', () => {
-  const svc = new AgentOnboardService();
+  const svc = svcWithProbe();
   svc.configure(card('deepseek harness', 'P0')); // 先正常配置
   svc.cards.get('deepseek harness')!.circuit = 'OPEN'; // 运行期熔断
   svc.testConnect('deepseek harness');
@@ -44,7 +66,7 @@ test('§8 双通道兜底：主通道熔断 OPEN → DEGRADED 仅补偿', () => 
 });
 
 test('§8 一键接入：3 个本机 Agent 自动出现卡片（P0/P1/P2），默认只读召回 + 双通道 + project 共享', () => {
-  const svc = new AgentOnboardService();
+  const svc = svcWithProbe();
   svc.oneClickOnboard(
     [
       { name: 'deepseek harness', priority: 'P0', signal: 'MCP注册表' },
@@ -103,9 +125,10 @@ test('T15 真实后端全链路 (HTTP)：configure→test→rotate→revoke→on
   const dir = mkdtempSync(join(tmpdir(), 'ab-e2e-'));
   const dataFile = join(dir, 'e2e.json');
 
-  const s1 = await createServer({ port: 0, dataFile });
+  const s = adminSessions();
+  const s1 = await createServer({ port: 0, dataFile, probe: probeOk, getSession: s.getSession });
   // 走 T14 注入点：service 包 client，等价于前端改调真实后端
-  const svc = new AgentOnboardService(new AgentOnboardClient(s1.url));
+  const svc = new AgentOnboardService(new AgentOnboardClient(s1.url, globalThis.fetch, s.reader));
 
   const cfg = await svc.configure(card('deepseek harness', 'P0'));
   assert.equal(cfg.ok, true);
@@ -138,8 +161,8 @@ test('T15 真实后端全链路 (HTTP)：configure→test→rotate→revoke→on
   await s1.stop();
 
   // 重启：JSON 持久化恢复卡片 + 审计
-  const s2 = await createServer({ port: 0, dataFile });
-  const svc2 = new AgentOnboardService(new AgentOnboardClient(s2.url));
+  const s2 = await createServer({ port: 0, dataFile, probe: probeOk, getSession: s.getSession });
+  const svc2 = new AgentOnboardService(new AgentOnboardClient(s2.url, globalThis.fetch, s.reader));
   const audit2 = await svc2.getAudit();
   assert.ok(audit2.length >= 6, '重启后审计仍在');
   // 深度卡片仍存在且吊销状态持久化

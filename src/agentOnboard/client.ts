@@ -11,12 +11,15 @@ export class AgentOnboardClient implements OnboardBackend {
   /** 本地镜像，随每次响应更新 */
   cards: Map<string, AgentCard>;
   private _fetch: typeof globalThis.fetch;
+  /** 会话提供者（批次26-A P0-5）：有登录会话时所有请求带 x-session-id（写端点服务端强制校验） */
+  private _getSession?: () => string | null | undefined;
 
-  constructor(baseUrl: string, fetchImpl: typeof globalThis.fetch = globalThis.fetch) {
+  constructor(baseUrl: string, fetchImpl: typeof globalThis.fetch = globalThis.fetch, getSession?: () => string | null | undefined) {
     this.baseUrl = String(baseUrl).replace(/\/+$/, '');
     // 必须绑定到 globalThis：浏览器 fetch 要求 this 为 Window，
     // 若以 this._fetch(...) 调用（this=本实例）会报 "Illegal invocation"。
     this._fetch = fetchImpl.bind(globalThis);
+    this._getSession = getSession;
     this.cards = new Map<string, AgentCard>();
   }
 
@@ -34,6 +37,7 @@ export class AgentOnboardClient implements OnboardBackend {
 
   async rotateKey(name: string): Promise<RotateResult> {
     const out = await this._post(`/agents/${enc(name)}/rotate-key`);
+    // out.key 是一次性明文；本地镜像只缓存脱敏卡片，绝不缓存明文
     if (out.ok && out.card) this.cards.set(name, out.card);
     return out;
   }
@@ -42,7 +46,7 @@ export class AgentOnboardClient implements OnboardBackend {
     const out = await this._post(`/agents/${enc(name)}/revoke-key`);
     if (out.ok) {
       const c = this.cards.get(name);
-      if (c) { c.apiKeyPlaintext = null; c.keyRevoked = true; }
+      if (c) { c.apiKeyPlaintext = null; c.keyHash = undefined; c.keyRevoked = true; }
     }
     return out;
   }
@@ -74,22 +78,29 @@ export class AgentOnboardClient implements OnboardBackend {
     return [...this.cards.values()];
   }
 
+  private _headers(): Record<string, string> {
+    const h: Record<string, string> = { 'Content-Type': 'application/json' };
+    const sid = this._getSession?.();
+    if (sid) h['x-session-id'] = sid;
+    return h;
+  }
+
   private async _post(path: string, body: unknown = {}): Promise<any> {
     const r = await this._fetch(this.baseUrl + path, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: this._headers(),
       body: JSON.stringify(body),
     });
     return r.json();
   }
 
   private async _del(path: string): Promise<any> {
-    const r = await this._fetch(this.baseUrl + path, { method: 'DELETE' });
+    const r = await this._fetch(this.baseUrl + path, { method: 'DELETE', headers: this._headers() });
     return r.json();
   }
 
   private async _get(path: string): Promise<any> {
-    const r = await this._fetch(this.baseUrl + path);
+    const r = await this._fetch(this.baseUrl + path, { headers: this._headers() });
     return r.json();
   }
 }

@@ -80,13 +80,19 @@ export interface AgentCard {
   accessMode?: string;
   mcpTools?: McpTools;
   channels?: Channels;
-  /** R5：明文密钥，界面恒脱敏不回显 */
+  /** R5：明文密钥字段仅允许为 null；轮换生成的明文只在当次响应顶层一次性返回，绝不入库/回显 */
   apiKeyPlaintext?: string | null;
+  /** 密钥 SHA-256（服务端保存，用于校验；界面与 GET /agents 不下发明文） */
+  keyHash?: string;
+  /** 密钥尾 4 位（审计与界面展示用） */
+  keyTail?: string;
   keyRotatedAt?: number;
   keyGraceUntil?: number;
   keyRevoked?: boolean;
   requestId?: string | null;
   tested?: boolean;
+  /** 最近一次真实拨测结果：失败原因如实落盘，UI 不得回退成「已连通」 */
+  lastTest?: { ok: boolean; reason: string; at: number; durationMs?: number };
   oneClick?: OneClickFlags;
   discover?: DiscoverFlags;
   form?: Form;
@@ -143,6 +149,20 @@ export interface UiKey {
 /** 原型 state：连通 / 降级（仅补偿）/ 未配置 */
 export type UiState = 'connected' | 'degraded' | 'onboard';
 
+/** 卡片真实统计（来自接入后端审计 GET /audit + 本地测速 RTT；无数据时字段缺省 → UI 显「—」） */
+export interface AgentRealStats {
+  /** 连通尝试累计次数（test + auto_bind） */
+  tests: number;
+  /** 通过（status=CONNECTED / result=pass）次数 */
+  passed: number;
+  lastTestAt?: number;
+  lastRotateAt?: number;
+  /** 最近一次连通尝试的真实耗时（ms） */
+  lastRtt?: number;
+  /** 历史连通尝试的平均真实耗时（ms；无样本 → 缺省） */
+  avgRtt?: number;
+}
+
 export interface UiAgentCard {
   name: string;
   badge: BadgeClass;
@@ -165,6 +185,16 @@ export interface UiAgentCard {
   state: UiState;
 }
 
+/** 本机已安装 Agent（主进程五路安装痕迹：CLI/安装目录 exe/开始菜单/配置/注册表卸载项） */
+export interface InstalledAgent {
+  agent: string;
+  via: 'cli' | 'app' | 'startmenu' | 'config' | 'uninstall';
+  source: string;
+  version?: string;
+  badge: BadgeClass;
+  label: string;
+}
+
 /** 一键接入发现结果（对齐原型 DISCOVERED） */
 export interface DiscoveredAgent {
   name: string;
@@ -173,6 +203,8 @@ export interface DiscoveredAgent {
   signal: string;
   bound: boolean;
   ok: boolean;
+  /** 数据来源：host=宿主真扫 / kernel=内核模拟降级 */
+  source?: 'host' | 'kernel';
 }
 
 /** 效果证据（对齐原型 GAINS） */

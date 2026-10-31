@@ -10,10 +10,15 @@ import { createServer as httpCreateServer, type IncomingMessage, type ServerResp
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { login, exportLockSnapshot, importLockSnapshot, registerAccount, resetAuthStore } from '../auth/loginService.ts';
+import {
+  login, hasAccount, exportLockSnapshot, importLockSnapshot, exportAccountSnapshot, importAccountSnapshot,
+  registerAccount, resetAuthStore, seedAdminAccount, listAccounts, changePassword, setAccountRole, assignAccountTeam,
+  readLockState, writeLockState, clearLockState, isDefaultAdminPasswordInUse,
+} from '../auth/loginService.ts';
 import { hashPassword } from '../auth/hash.ts';
+import { createOriginPolicy, rejectUntrustedOrigin, rejectUntrustedHost, applyCorsHeaders } from '../shared/localOrigin.ts';
 import type { Form } from '../types/agentOnboard.ts';
-import type { TenantContext, LoginAudit } from '../types/home.ts';
+import type { TenantContext, LoginAudit, AccountRole } from '../types/home.ts';
 
 /** 端壳 mirror 上抛条目（G6：全动作、成对/上下文放 payload） */
 export interface MirrorAuditEntry {
@@ -30,18 +35,62 @@ export interface ServerOptions {
   port?: number;
   /** 审计 JSON 持久化文件路径（.data/）；同目录写入 home-locks.json */
   dataFile: string;
+  /** 额外放行的浏览器来源（Electron 静态服务端口、E2E 静态服务端口） */
+  allowedOrigins?: string[];
+  /** 是否额外放行 Vite dev server 源（仅本地开发入口开启；生产默认 false） */
+  allowDevOrigins?: boolean;
+  /** 请求体上限（字节），缺省 1 MiB；超限返回 413 */
+  maxBodyBytes?: number;
+  /** 验证码有效期（毫秒），缺省 5 分钟 */
+  captchaTtlMs?: number;
+  /** 是否播种内置管理员（缺省 true；测试可关） */
+  seedAdmin?: boolean;
+  /** 内置管理员初始密码（缺省 Admin@123456，仅首次播种使用） */
+  adminPassword?: string;
+  /** 动作日志回调（批次7）：主进程写入 actions.log；缺省静默 */
+  onLog?: (scope: string, action: string, detail?: Record<string, unknown>) => void;
 }
+
+/** home server 句柄：在 Server 上附加会话查询（主进程做管理员 IPC 校验用） */
+export type HomeServer = Server & {
+  /** 按 session id 取登录上下文（过期/不存在返回 null） */
+  getSessionContext(sid: string | undefined): TenantContext | null;
+  /** L0 密码失败锁定（§4.4.8：home-locks.json 的 l0:<user_id> 项，与登录锁定同文件不同 key） */
+  getLockState(key: string): { failCount: number; lockedUntil?: number } | null;
+  setLockState(key: string, state: { failCount: number; lockedUntil?: number }): void;
+  clearLockState(key: string): void;
+};
 
 interface Session {
   context: TenantContext;
   form: Form;
+  /** 登录时间（会话 TTL 判定） */
+  at: number;
 }
 
-function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+/** 会话有效期（12 小时；过期后 /api/me 返回 401，前端重新登录） */
+const SESSION_TTL_MS = 12 * 3600 * 1000;
+const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
+
+class BodyTooLargeError extends Error {}
+
+function readJsonBody(req: IncomingMessage, maxBytes: number): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     let data = '';
-    req.on('data', (chunk) => (data += chunk));
+    let size = 0;
+    let tooLarge = false;
+    req.on('data', (chunk: Buffer | string) => {
+      if (tooLarge) return;
+      size += typeof chunk === 'string' ? Buffer.byteLength(chunk) : chunk.length;
+      if (size > maxBytes) {
+        tooLarge = true;
+        reject(new BodyTooLargeError('payload_too_large'));
+        return;
+      }
+      data += chunk;
+    });
     req.on('end', () => {
+      if (tooLarge) return;
       if (!data) return resolve({});
       try {
         resolve(JSON.parse(data) as Record<string, unknown>);
@@ -53,12 +102,16 @@ function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   });
 }
 
-export function createServer(opts: ServerOptions): Server {
+export function createServer(opts: ServerOptions): HomeServer {
   const auditFile = opts.dataFile;
   const lockFile = join(dirname(auditFile), 'home-locks.json');
+  const accountsFile = join(dirname(auditFile), 'home-accounts.json');
+  const maxBodyBytes = opts.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
+  const captchaTtlMs = opts.captchaTtlMs ?? 5 * 60 * 1000;
+  const log = opts.onLog ?? (() => {});
   mkdirSync(dirname(auditFile), { recursive: true });
 
-  // 启动时恢复审计 + 锁定表（确保重启后锁定表保留）
+  // 启动时恢复审计 + 锁定表 + 真实注册账号（确保重启后可登录）
   let audit: LoginAudit[] = [];
   try {
     audit = JSON.parse(readFileSync(auditFile, 'utf8')) as LoginAudit[];
@@ -69,6 +122,23 @@ export function createServer(opts: ServerOptions): Server {
     importLockSnapshot(JSON.parse(readFileSync(lockFile, 'utf8')) as Record<string, { failCount: number; lockedUntil?: number }>);
   } catch {
     /* 无锁定快照则跳过 */
+  }
+  try {
+    importAccountSnapshot(
+      JSON.parse(readFileSync(accountsFile, 'utf8')) as Parameters<typeof importAccountSnapshot>[0],
+    );
+  } catch {
+    /* 首次启动：无账号文件，等待真实注册 */
+  }
+
+  // 批次7：内置管理员。无 admin 则播种（默认密码仅首次使用，登录后可改）；旧快照缺角色则升级。
+  if (opts.seedAdmin !== false) {
+    const seeded = seedAdminAccount(opts.adminPassword);
+    if (seeded.created || seeded.upgraded) {
+      persistAccounts();
+      appendAudit({ action: 'admin_seed', form: 'desktop', account: seeded.account, at: Date.now() });
+      log('home', seeded.created ? 'admin_created' : 'admin_upgraded', { account: seeded.account });
+    }
   }
   // mirror 上抛账本持久化（REQ-006 端壳 G6）
   const mirrorFile = join(dirname(auditFile), 'home-mirror.json');
@@ -84,11 +154,31 @@ export function createServer(opts: ServerOptions): Server {
   // 验证码存储（简单实现，生产环境应存入 Redis/DB）
   const captchaStore = new Map<string, { code: string; expiresAt: number }>();
 
+  // ── 批次26-B P2-14/P2-17：内存滑动窗口限速 ─────────────────────────────────
+  // 锁定表落盘（home-locks.json）可被本机进程删除复位，这里的计数只在内存、删文件无效；
+  // 同时限制了 scrypt 校验与验证码生成的触发频率。进程重启即清零 —— 只作爆破减速，不是隔离边界。
+  const MAX_LOGIN_PER_MIN = 10;      // 每账号每分钟登录尝试（含失败；5 次错误即触发账号锁定，正常使用远达不到 10）
+  const MAX_REGISTER_PER_MIN = 10;   // 注册接口全局限速（本机单用户服务）
+  const MAX_CAPTCHA_PER_MIN = 30;    // 验证码签发全局限速
+  const MAX_CAPTCHA_ENTRIES = 256;   // 验证码存量上限（防无限增长；超出淘汰最早签发）
+  const rateWindows = new Map<string, number[]>();
+  function rateLimited(bucket: string, max: number, windowMs = 60_000): boolean {
+    const now = Date.now();
+    const arr = (rateWindows.get(bucket) ?? []).filter((t) => now - t < windowMs);
+    const limited = arr.length >= max;
+    if (!limited) arr.push(now);
+    rateWindows.set(bucket, arr);
+    return limited;
+  }
+
   function persistAudit(): void {
     writeFileSync(auditFile, JSON.stringify(audit, null, 2));
   }
   function persistLock(): void {
     writeFileSync(lockFile, JSON.stringify(exportLockSnapshot()));
+  }
+  function persistAccounts(): void {
+    writeFileSync(accountsFile, JSON.stringify(exportAccountSnapshot(), null, 2));
   }
   function appendAudit(a: LoginAudit): void {
     audit.push(a);
@@ -102,12 +192,76 @@ export function createServer(opts: ServerOptions): Server {
     res.end(JSON.stringify(body));
   }
   function sessionIdOf(req: IncomingMessage): string | undefined {
-    const h = req.headers['x-session-id'];
-    return Array.isArray(h) ? h[0] : h;
+    // 前端历史上用过 X-Auth-Session；两者都接受（x-session-id 优先）
+    const raw = req.headers['x-session-id'] ?? req.headers['x-auth-session'];
+    const h = Array.isArray(raw) ? raw[0] : raw;
+    const sid = typeof h === 'string' ? h.trim() : '';
+    return sid || undefined;
+  }
+  /** 取有效会话；过期即清理并返回 null */
+  function getSession(sid: string | undefined): Session | null {
+    if (!sid) return null;
+    const s = sessions.get(sid);
+    if (!s) return null;
+    if (Date.now() - s.at > SESSION_TTL_MS) {
+      sessions.delete(sid);
+      return null;
+    }
+    return s;
   }
 
+  /**
+   * 批次26-B P1-9：按用户吊销全部会话。
+   * 角色/团队/密码变更后旧会话立即失效 —— 会话里快照的 role/team 最长可活 12h，
+   * 撤权/改密必须同步清会话，否则旧权限窗口仍在。返回吊销数量（0 = 该用户本无会话）。
+   */
+  function revokeSessionsOfUser(userId: string): number {
+    let n = 0;
+    for (const [sid, s] of sessions) {
+      if (s.context.user_id === userId) {
+        sessions.delete(sid);
+        n += 1;
+      }
+    }
+    if (n > 0) log('home', 'sessions_revoked', { user: userId, count: n });
+    return n;
+  }
+
+  const originPolicy = createOriginPolicy(opts.allowedOrigins, { allowDev: opts.allowDevOrigins });
+
   const server = httpCreateServer((req, res) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    const startedAt = Date.now();
+    // 批次7：每个 HTTP 动作留痕（方法/路径/状态/耗时；绝不记录密码或请求体）
+    res.on('finish', () => {
+      log('home', 'http', {
+        method: req.method ?? '?',
+        path: (req.url ?? '/').split('?')[0],
+        status: res.statusCode,
+        ms: Date.now() - startedAt,
+      });
+    });
+    applyCorsHeaders(req, res, originPolicy);
+    // 浏览器跨源闸门：非白名单来源（含 Origin: null）一律 403，防任意网页驱动本机服务
+    if (rejectUntrustedOrigin(req, res, originPolicy)) {
+      // 批次22：记录被拒来源与方法/路径，便于排查「登录后端未启动」实为来源白名单拦截
+      log('home', 'origin_rejected', {
+        origin: req.headers.origin ?? 'null',
+        method: req.method ?? '?',
+        path: (req.url ?? '/').split('?')[0],
+      });
+      return;
+    }
+    // 批次26-B P2-16：Host 头绑定 —— Host 必须是本机回环地址 + 本服务实际端口（防 DNS rebinding）
+    const addr = server.address();
+    const hostPort = addr && typeof addr === 'object' ? addr.port : (opts.port ?? 0);
+    if (rejectUntrustedHost(req, res, [hostPort])) {
+      log('home', 'host_rejected', {
+        host: req.headers.host ?? 'none',
+        method: req.method ?? '?',
+        path: (req.url ?? '/').split('?')[0],
+      });
+      return;
+    }
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type,x-session-id,x-auth-session');
 
@@ -122,8 +276,20 @@ export function createServer(opts: ServerOptions): Server {
 
     Promise.resolve()
       .then(async () => {
+        // 批次22：健康探测（前端用 no-cors 探针区分「后端未启动」与「来源被拒」）
+        if (req.method === 'GET' && path === '/api/health') {
+          send(res, 200, { ok: true, service: 'home', ts: Date.now() });
+          return;
+        }
+
         if (req.method === 'POST' && path === '/api/register') {
-          const body = await readJsonBody(req);
+          // 批次26-B P2-17：注册全局限速（防本机脚本批量刷号；正常使用一次注册 2 个请求，远达不到 10/min）
+          if (rateLimited('register', MAX_REGISTER_PER_MIN)) {
+            log('home', 'register_rate_limited', {});
+            send(res, 429, { reason: 'rate_limited', message: '注册过于频繁，请稍后再试' });
+            return;
+          }
+          const body = await readJsonBody(req, maxBodyBytes);
           const account = typeof body.account === 'string' ? body.account : '';
           const password = typeof body.password === 'string' ? body.password : '';
           const confirmPassword = typeof body.confirmPassword === 'string' ? body.confirmPassword : '';
@@ -155,17 +321,20 @@ export function createServer(opts: ServerOptions): Server {
             return;
           }
 
-          // 验证码校验（简单实现：前端生成，后端验证）
+          // 验证码校验（一次性 + 过期即失效）
           const storedCaptcha = captchaStore.get(captchaId);
-          if (!storedCaptcha || storedCaptcha.code !== captchaCode) {
-            send(res, 400, { reason: 'invalid_captcha', message: '验证码错误' });
+          const expired = !storedCaptcha || storedCaptcha.expiresAt < Date.now();
+          if (expired || storedCaptcha.code !== captchaCode) {
+            if (storedCaptcha) captchaStore.delete(captchaId);
+            send(res, 400, { reason: 'invalid_captcha', message: '验证码错误或已过期' });
             return;
           }
           captchaStore.delete(captchaId); // 一次性使用
 
-          // 检查账号是否已存在
-          const checkResult = login({ account, password: 'dummy', form: 'desktop' });
-          if (checkResult.ok || checkResult.reason === 'wrong') {
+          // 只查账号是否存在，绝不用错误密码调用 login()：
+          // 旧实现会把已存在账号的 failCount 累加（5 次注册即可锁死账号），
+          // 且对锁定账号会落库覆盖 passwordHash（账号接管）。
+          if (hasAccount(account)) {
             send(res, 409, { reason: 'exists', message: '账号已存在' });
             return;
           }
@@ -173,50 +342,79 @@ export function createServer(opts: ServerOptions): Server {
           // 新用户注册
           const teamId = `personal-${account}`;
           registerAccount(account, hashPassword(password), { enterprise_id: 'local', team_id: teamId, perspective: 'personal' });
-          persistLock();
-          appendAudit({ action: 'login', form: 'desktop', account, at: Date.now() });
+          persistAccounts();
+          // 注册即分配个人团队 = team_assign；不得伪装成 login 审计（会污染登录统计）
+          appendAudit({ action: 'team_assign', form: 'desktop', account, at: Date.now() });
+          log('home', 'register', { account, team: teamId });
           send(res, 200, { ok: true, team_id: teamId, message: '注册成功' });
           return;
         }
 
         if (req.method === 'GET' && path === '/api/captcha') {
-          // 生成验证码
+          // 本地应用没有短信/邮件通道：验证码直出给本机用户（一次性消费，TTL 可配）
+          // 批次26-B P2-17：签发限速 + 存量上限（Map 不再无限增长）
+          if (rateLimited('captcha', MAX_CAPTCHA_PER_MIN)) {
+            log('home', 'captcha_rate_limited', {});
+            send(res, 429, { reason: 'rate_limited', message: '验证码请求过于频繁，请稍后再试' });
+            return;
+          }
+          const now = Date.now();
+          for (const [k, v] of captchaStore) if (v.expiresAt < now) captchaStore.delete(k);
+          while (captchaStore.size >= MAX_CAPTCHA_ENTRIES) {
+            const oldest = captchaStore.keys().next().value;
+            if (oldest === undefined) break;
+            captchaStore.delete(oldest);
+          }
           const id = randomUUID();
           const code = String(Math.floor(100000 + Math.random() * 900000));
-          captchaStore.set(id, { code, expiresAt: Date.now() + 5 * 60 * 1000 }); // 5分钟有效
-          send(res, 200, { id, code }); // 测试用返回 code，生产环境应只返回 id
+          captchaStore.set(id, { code, expiresAt: now + captchaTtlMs });
+          send(res, 200, { id, code });
           return;
         }
 
         if (req.method === 'POST' && path === '/api/login') {
-          const body = await readJsonBody(req);
+          const body = await readJsonBody(req, maxBodyBytes);
           const account = typeof body.account === 'string' ? body.account : '';
           const password = typeof body.password === 'string' ? body.password : '';
           const form = (typeof body.form === 'string' ? body.form : 'desktop') as Form;
+          // 批次26-B P2-14：内存滑动窗口限速 —— 锁定文件可被删除复位，这里删不掉；
+          // 同时约束了 scrypt 校验触发频率（P2-17）。失败尝试也计入。
+          if (rateLimited(`login:${account}`, MAX_LOGIN_PER_MIN)) {
+            log('home', 'login_rate_limited', { account });
+            send(res, 429, { reason: 'rate_limited' });
+            return;
+          }
           const result = login({ account, password, form });
           persistLock(); // 每次登录后落盘锁定态（★ 持久化要点）
 
           if (result.ok) {
             const sid = result.context.session_id;
-            sessions.set(sid, { context: result.context, form });
+            sessions.set(sid, { context: result.context, form, at: Date.now() });
             appendAudit(result.audit);
+            log('home', 'login_ok', { account, role: result.context.role ?? 'member', form });
+            // 批次26-B P2-14：内置管理员仍在用初始口令 → 每次登录告警（提示尽快在安全页修改；不记录口令）
+            if (result.context.role === 'admin' && isDefaultAdminPasswordInUse()) {
+              log('home', 'default_password_active', { account: result.context.user_id });
+            }
             send(res, 200, { context: result.context, sessionId: sid, audit: result.audit });
             return;
           }
           appendAudit(result.audit);
+          log('home', 'login_fail', { account, reason: result.reason, form });
           if (result.reason === 'locked') send(res, 423, { reason: 'locked', lockedUntil: result.lockedUntil });
-          else if (result.reason === 'no_account') send(res, 401, { reason: 'no_account' });
           else if (result.reason === 'empty') send(res, 400, { reason: 'empty' });
+          // 批次26-B P2-17 防用户名枚举：账号不存在与密码错误返回同一响应（真实原因只在服务端日志/审计）
           else send(res, 401, { reason: 'wrong' });
           return;
         }
 
         if (req.method === 'POST' && path === '/api/logout') {
           const sid = sessionIdOf(req);
-          if (sid && sessions.has(sid)) {
-            const s = sessions.get(sid)!;
+          const s = getSession(sid);
+          if (sid && s) {
             sessions.delete(sid);
             appendAudit({ action: 'logout', form: s.form, account: s.context.user_id, at: Date.now() });
+            log('home', 'logout', { account: s.context.user_id });
             send(res, 200, { ok: true });
           } else {
             send(res, 401, { ok: false, reason: 'no_session' });
@@ -225,18 +423,86 @@ export function createServer(opts: ServerOptions): Server {
         }
 
         if (req.method === 'GET' && path === '/api/me') {
-          const sid = sessionIdOf(req);
-          if (sid && sessions.has(sid)) {
-            send(res, 200, { context: sessions.get(sid)!.context });
+          const s = getSession(sessionIdOf(req));
+          if (s) {
+            send(res, 200, { context: s.context });
           } else {
             send(res, 401, { ok: false });
           }
           return;
         }
 
+        // ── 批次7：管理员账号管理（仅 admin 会话可调用）──────────────────────
+        if (req.method === 'GET' && path === '/api/accounts') {
+          const s = getSession(sessionIdOf(req));
+          if (!s) { send(res, 401, { ok: false, reason: 'no_session' }); return; }
+          if (s.context.role !== 'admin') {
+            log('home', 'accounts_forbidden', { account: s.context.user_id });
+            send(res, 403, { ok: false, reason: 'forbidden' });
+            return;
+          }
+          send(res, 200, { ok: true, items: listAccounts() });
+          return;
+        }
+
+        if (req.method === 'POST' && path === '/api/accounts/update') {
+          const s = getSession(sessionIdOf(req));
+          if (!s) { send(res, 401, { ok: false, reason: 'no_session' }); return; }
+          if (s.context.role !== 'admin') {
+            log('home', 'accounts_update_forbidden', { account: s.context.user_id });
+            send(res, 403, { ok: false, reason: 'forbidden' });
+            return;
+          }
+          const body = await readJsonBody(req, maxBodyBytes);
+          const target = typeof body.account === 'string' ? body.account.trim() : '';
+          if (!target || !hasAccount(target)) { send(res, 404, { ok: false, error: '账号不存在' }); return; }
+          let changed = false;
+          if (body.role === 'admin' || body.role === 'member') {
+            const r = setAccountRole(target, body.role as AccountRole);
+            if (!r.ok) { send(res, 400, { ok: false, error: r.error }); return; }
+            appendAudit({ action: 'role_change', form: 'desktop', account: target, at: Date.now() });
+            revokeSessionsOfUser(target); // P1-9：角色已变，目标账号全部旧会话立即失效
+            log('home', 'role_change', { by: s.context.user_id, account: target, role: body.role });
+            changed = true;
+          }
+          if (typeof body.team_id === 'string') {
+            const r = assignAccountTeam(target, body.team_id);
+            if (!r.ok) { send(res, 400, { ok: false, error: r.error }); return; }
+            appendAudit({ action: 'team_assign', form: 'desktop', account: target, at: Date.now() });
+            revokeSessionsOfUser(target); // P1-9：会话快照的 team_id 同样会过期，一并吊销
+            log('home', 'team_assign', { by: s.context.user_id, account: target, team: body.team_id });
+            changed = true;
+          }
+          if (!changed) { send(res, 400, { ok: false, error: '未提供 role/team_id' }); return; }
+          persistAccounts();
+          send(res, 200, { ok: true, items: listAccounts() });
+          return;
+        }
+
+        if (req.method === 'POST' && path === '/api/password') {
+          const s = getSession(sessionIdOf(req));
+          if (!s) { send(res, 401, { ok: false, reason: 'no_session' }); return; }
+          const body = await readJsonBody(req, maxBodyBytes);
+          const oldPassword = typeof body.oldPassword === 'string' ? body.oldPassword : '';
+          const newPassword = typeof body.newPassword === 'string' ? body.newPassword : '';
+          const r = changePassword(s.context.user_id, oldPassword, newPassword);
+          if (!r.ok) {
+            log('home', 'password_change_fail', { account: s.context.user_id, reason: r.reason });
+            const code = r.reason === 'no_account' ? 404 : r.reason === 'wrong' ? 401 : 400;
+            send(res, code, { ok: false, reason: r.reason });
+            return;
+          }
+          appendAudit({ action: 'password_change', form: 'desktop', account: s.context.user_id, at: Date.now() });
+          revokeSessionsOfUser(s.context.user_id); // P1-9：改密后该账号全部会话（含当前）失效，须重新登录
+          persistAccounts();
+          log('home', 'password_change', { account: s.context.user_id });
+          send(res, 200, { ok: true });
+          return;
+        }
+
         // REQ-006 端壳 mirror 上抛（G6 全动作审计持久账本）
         if (req.method === 'POST' && path === '/api/mirror/audit') {
-          const body = await readJsonBody(req);
+          const body = await readJsonBody(req, maxBodyBytes);
           const entry: MirrorAuditEntry = {
             seq: mirrorAudit.length + 1,
             source: typeof body.source === 'string' ? body.source : 'unknown',
@@ -262,10 +528,26 @@ export function createServer(opts: ServerOptions): Server {
 
         send(res, 404, { error: 'not found' });
       })
-      .catch(() => send(res, 500, { error: 'server error' }));
+      .catch((e) => {
+        if (res.headersSent) return;
+        if (e instanceof BodyTooLargeError) {
+          send(res, 413, { ok: false, error: 'payload_too_large' });
+          return;
+        }
+        if (e instanceof Error && e.message === 'invalid json') {
+          send(res, 400, { ok: false, error: 'invalid_json' });
+          return;
+        }
+        send(res, 500, { error: 'server error' });
+      });
   });
 
-  return server;
+  const homeServer = server as HomeServer;
+  homeServer.getSessionContext = (sid) => getSession(sid)?.context ?? null;
+  homeServer.getLockState = (key) => readLockState(key);
+  homeServer.setLockState = (key, state) => { writeLockState(key, state); persistLock(); };
+  homeServer.clearLockState = (key) => { clearLockState(key); persistLock(); };
+  return homeServer;
 }
 
 // 便于测试：暴露重置钩子（仅测试用，不影响服务端逻辑）

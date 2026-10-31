@@ -1,17 +1,38 @@
 // T14 验收：AgentOnboardClient 经 HTTP 调 T13 服务，全链路 + 审计持久化跨重启；非法配置返回 violations。
+// 批次26 P0-5：客户端在拿到会话 id 时自动带 x-session-id 头（写端点后端强制校验）。
 import assert from 'node:assert/strict';
 import { createServer } from '../server.ts';
 import { AgentOnboardClient } from '../client.ts';
+import type { AgentProbe } from '../service.ts';
+import type { TenantContext } from '../../types/home.ts';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+/** 测试注入真实探测（命中本机安装证据；server 默认探测会扫真机） */
+const probeOk: AgentProbe = (names) =>
+  new Map(names.map((n) => [n, { ok: true, reason: `命中「${n}」本机安装证据（测试注入）` }]));
+
+/** 批次26：会话真源（admin）+ 客户端会话读取器 */
+function adminSessions() {
+  const adminSid = 'sid-admin';
+  const sessions = new Map<string, TenantContext>([
+    [adminSid, { enterprise_id: 'e1', team_id: 't1', user_id: 'admin-1', perspective: 'team', session_id: adminSid, role: 'admin' }],
+  ]);
+  return {
+    adminSid,
+    getSession: (sid: string | undefined) => (sid ? sessions.get(sid) ?? null : null),
+    reader: () => adminSid,
+  };
+}
+
 test('HTTP 客户端全链路 + 审计持久化跨重启', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'ab-client-'));
   const dataFile = join(dir, 'a.json');
+  const s = adminSessions();
 
-  const s1 = await createServer({ port: 0, dataFile });
-  const client = new AgentOnboardClient(s1.url);
+  const s1 = await createServer({ port: 0, dataFile, probe: probeOk, getSession: s.getSession });
+  const client = new AgentOnboardClient(s1.url, globalThis.fetch, s.reader);
 
   const cfg = await client.configure({ agent_name: 'A', priority: 'P0', accessMode: 'MCP', circuit: 'CLOSED', channels: { webhook: true, apiPull: true } });
   assert.equal(cfg.ok, true);
@@ -44,8 +65,8 @@ test('HTTP 客户端全链路 + 审计持久化跨重启', async () => {
   await s1.stop();
 
   // 重启：JSON 持久化恢复卡片 + 审计
-  const s2 = await createServer({ port: 0, dataFile });
-  const client2 = new AgentOnboardClient(s2.url);
+  const s2 = await createServer({ port: 0, dataFile, probe: probeOk, getSession: s.getSession });
+  const client2 = new AgentOnboardClient(s2.url, globalThis.fetch, s.reader);
   const audit2 = await client2.getAudit();
   assert.ok(audit2.length >= 4, '重启后审计仍在');
   // 卡片持久化：重启后 A 仍存在且可再次测通（状态仍为 CONNECTED）
@@ -69,11 +90,24 @@ test('fetch 调用不丢 this 绑定（浏览器 fetch 需 this=Window，否则 
 test('非法配置经 HTTP 返回 violations（与内存实现一致）', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'ab-client2-'));
   const dataFile = join(dir, 'b.json');
-  const s = await createServer({ port: 0, dataFile });
-  const client = new AgentOnboardClient(s.url);
+  const s = adminSessions();
+  const srv = await createServer({ port: 0, dataFile, getSession: s.getSession });
+  const client = new AgentOnboardClient(srv.url, globalThis.fetch, s.reader);
 
   const bad = await client.configure({ agent_name: 'X', tenantManual: true, priority: 'P0', circuit: 'CLOSED' }); // 违反 R1
   assert.equal(bad.ok, false);
   assert.ok(Array.isArray(bad.violations) && bad.violations.length > 0);
-  await s.stop();
+  await srv.stop();
+});
+
+test('批次26 P0-5：无会话客户端写操作被拒（401 文案透传），读不受影响', async () => {
+  const s = adminSessions();
+  const srv = await createServer({ port: 0, dataFile: join(mkdtempSync(join(tmpdir(), 'ab-client3-')), 'c.json'), probe: probeOk, getSession: s.getSession });
+  const anon = new AgentOnboardClient(srv.url); // 不带会话读取器
+  const r = await anon.testConnect('A');
+  assert.equal(r.ok, false);
+  assert.match(JSON.stringify(r), /需要登录/);
+  const cards = await anon.getCards();
+  assert.deepEqual(cards, []);
+  await srv.stop();
 });
