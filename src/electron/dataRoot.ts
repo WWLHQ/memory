@@ -31,6 +31,8 @@ export const DATA_ROOT_MIGRATE_FILES = [
   'home-mirror.json',
   'agent-onboard.json',
   'l0-keyring.json',
+  'llm-config.json',
+  'llm-deepseek-key.txt',
 ] as const;
 
 /** 迁移数据子目录：备份历史 / 单条记忆导出 */

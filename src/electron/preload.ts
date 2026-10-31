@@ -135,6 +135,19 @@ const legacy = {
   demote: (sessionId?: string | null) => ipcRenderer.invoke(IPC.legacyDemote, sessionId),
 };
 
+// LLM 精炼网关桥（批次31）：读配置需登录会话；写配置/真拨测仅管理员；refine 是内核写路径的逐层代理。
+// deepseekKey 只在 setConfig 参数中出现一次，主进程写 0600 文件，任何返回值都不含密钥。
+const llm = {
+  config: (sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.llmConfigGet, sessionId) as Promise<{ ok: boolean; config?: unknown; deepseekKeySet?: boolean; usable?: boolean; error?: string }>,
+  setConfig: (patch: unknown, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.llmConfigSet, patch, sessionId) as Promise<{ ok: boolean; config?: unknown; deepseekKeySet?: boolean; usable?: boolean; error?: string }>,
+  test: (target: 'ollama' | 'deepseek', sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.llmTest, target, sessionId) as Promise<{ ok: boolean; model?: string; latencyMs?: number; error?: string }>,
+  refine: (payload: unknown, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.llmRefine, payload, sessionId) as Promise<{ ok: boolean; text?: string; tokens?: number; error?: string }>,
+};
+
 // 悬浮覆盖层桥：渲染层调 detectClaude() 拿 Claude 窗口位置，setPosition() 移动悬浮窗
 const floatAttribution = {
   detectClaude: () => ipcRenderer.invoke(IPC.floatDetectClaude),
@@ -146,4 +159,4 @@ const floatAttribution = {
 };
 
 contextBridge.exposeInMainWorld('__ELECTRON__', true);
-contextBridge.exposeInMainWorld('api', { storage, hostScan, hostAgentDetect, tenant, mcpClients, floatAttribution, collector, backup, dataRoot, log, l0, legacy });
+contextBridge.exposeInMainWorld('api', { storage, hostScan, hostAgentDetect, tenant, mcpClients, floatAttribution, collector, backup, dataRoot, log, l0, legacy, llm });

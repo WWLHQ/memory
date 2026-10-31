@@ -62,6 +62,11 @@ export const IPC = {
   legacyDemote: 'legacy:demote',
   /** 批次26-B P1-3：租户三元组由主进程按会话下发（渲染层不再自报 mam.tenant.v1） */
   tenantGet: 'tenant:get',
+  /** 批次31：LLM 精炼网关 —— 配置读/写（写需管理员）、连通真拨测（管理员）、逐层精炼代理（内核写路径经此走主进程 HTTP） */
+  llmConfigGet: 'llm:config',
+  llmConfigSet: 'llm:configSet',
+  llmTest: 'llm:test',
+  llmRefine: 'llm:refine',
 } as const;
 
 /** preload 实际暴露的全部 channel（自检基线） */
