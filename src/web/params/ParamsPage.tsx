@@ -10,6 +10,7 @@ import { newRequestId } from '../kernel.ts';
 import { NormalConfigCard } from './NormalConfigCard.tsx';
 import { KbPolicyTable } from './KbPolicyTable.tsx';
 import { KbManagementCard } from './KbManagementCard.tsx';
+import { LlmEngineCard } from './LlmEngineCard.tsx';
 import { DevPanel } from './DevPanel.tsx';
 import { useToast } from './useToast.tsx';
 import type { DevParams, KbPolicyRow, NormalConfig } from './types.ts';
@@ -82,6 +83,7 @@ export function ParamsPage({ load = coreLoadParams }: { load?: () => Promise<Par
         onChange={(next, label) => { setKbs(next); track(label); }}
       />
       <KbManagementCard />
+      <LlmEngineCard />
       <DevPanel
         dev={dev}
         onChange={(next, label) => { setDev(next); track(label); }}

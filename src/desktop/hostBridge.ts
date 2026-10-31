@@ -47,7 +47,8 @@ export type HostMethod =
   | 'l0:listRequests' | 'l0:listGrants' | 'l0:grant' | 'l0:deny' | 'l0:revoke'
   | 'l0:unlock' | 'l0:heartbeat' | 'l0:lock' | 'l0:writeUnlock' | 'l0:writeLock'
   | 'l0:seal' | 'l0:decrypt' | 'l0:sessionInfo' | 'l0:migrate'
-  | 'legacy:scan' | 'legacy:demote';
+  | 'legacy:scan' | 'legacy:demote'
+  | 'llm:config' | 'llm:configSet' | 'llm:test' | 'llm:refine';
 
 /** 扁平 channel → preload 暴露的嵌套对象方法（window.api[ns][fn]） */
 const CHANNEL_TO_NATIVE: Record<HostMethod, [string, string]> = {
@@ -99,6 +100,10 @@ const CHANNEL_TO_NATIVE: Record<HostMethod, [string, string]> = {
   'l0:migrate': ['l0', 'migrate'],
   'legacy:scan': ['legacy', 'scan'],
   'legacy:demote': ['legacy', 'demote'],
+  'llm:config': ['llm', 'config'],
+  'llm:configSet': ['llm', 'setConfig'],
+  'llm:test': ['llm', 'test'],
+  'llm:refine': ['llm', 'refine'],
 };
 
 /** 顶层窗口是否具备原生 preload 能力 */

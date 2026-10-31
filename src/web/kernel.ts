@@ -17,6 +17,7 @@ import { hostCall, hostCapability } from '../desktop/hostBridge.ts';
 import { currentSessionId } from './shared/session.ts';
 import { homeBaseUrl } from './backend.ts';
 import { HttpStorageBackend } from './httpStorage.ts';
+import { createHostLlm, refreshHostLlmSnapshotOnce } from './hostLlm.ts';
 
 const TENANT_KEY = 'mam.tenant.v1';
 
@@ -135,6 +136,8 @@ export function getKernelStorage(): StorageBackend {
 export function rebuildKernelForDataPlane(): void {
   storageSingleton = null;
   agentSingleton = null;
+  // 批次31：登录/重建后拉一次网关快照（异步到达；之前写入按 stub 口径只落 L1，诚实）
+  void refreshHostLlmSnapshotOnce();
 }
 
 let agentSingleton: MemAgent | null = null;
@@ -170,8 +173,8 @@ export function getKernel(overrides: KernelOverrides = {}): MemAgent {
     agentSingleton = createMemAgent({
       form: KERNEL_FORM,
       account: kernelAccount(),
-      // 显式 stub 装配点：未接入真实 LLM，写记忆只落 L1
-      llm: overrides.llm ?? new FakeLlmProvider(),
+      // LLM 装配点（批次31）：桌面壳内经 IPC 代理主进程网关（Ollama/DeepSeek）；浏览器或网关未配置 → stub 只落 L1
+      llm: overrides.llm ?? createHostLlm() ?? new FakeLlmProvider(),
       // 维度取自模型配置页落盘值（Phase C3）：保存的向量维度真实参与内核构造
       vector: overrides.vector ?? new JsVectorBackend(configuredVectorDim()),
       storage: getKernelStorage(),
@@ -186,8 +189,8 @@ export function createKernelOnSameStorage(overrides: KernelOverrides = {}): MemA
   return createMemAgent({
     form: KERNEL_FORM,
     account: kernelAccount(),
-    // 显式 stub 装配点（同上）
-    llm: overrides.llm ?? new FakeLlmProvider(),
+    // LLM 装配点（同上）
+    llm: overrides.llm ?? createHostLlm() ?? new FakeLlmProvider(),
     vector: overrides.vector ?? new JsVectorBackend(configuredVectorDim()),
     storage: getKernelStorage(),
     ...hostL0Ports(),
