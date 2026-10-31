@@ -34,7 +34,7 @@ export interface CoreWriteOutcome {
   request_id: string;
   /** 真实产出的精炼层（未接入 LLM 时仅 content_l1） */
   layers?: Record<string, string>;
-  refined_by?: 'stub' | 'llm';
+  refined_by?: 'stub' | 'llm' | 'llm_partial';
 }
 
 /** 提交写入：内核 write（逐层查重 new/grafted/duplicated/filtered）→ 页面回执语义映射 */

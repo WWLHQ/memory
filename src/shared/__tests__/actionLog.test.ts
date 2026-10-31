@@ -127,3 +127,56 @@ describe('createActionLogEntry / formatActionLine：统一行格式', () => {
     expect((entry.detail as Record<string, unknown>).password).toBe('***');
   });
 });
+
+describe('批次27 P2-10：值形态兜底脱敏（键名不敏感但值是密钥形态）', () => {
+  it('裸字符串里的 Bearer / JWT / 厂商密钥前缀被替换为 ***', () => {
+    expect(sanitizeActionDetail('Authorization was Bearer abc123def456ghi7')).toBe('Authorization was ***');
+    expect(sanitizeActionDetail('token=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJVadQssw5c'))
+      .toBe('token=***');
+    expect(sanitizeActionDetail('key sk-proj-AbCdEfGhIjKlMnOpQrSt')).toBe('key ***');
+    expect(sanitizeActionDetail('aws AKIAIOSFODNN7EXAMPLE creds')).toBe('aws *** creds');
+    expect(sanitizeActionDetail('slack xoxb-123456789012-abcdef')).toBe('slack ***');
+    expect(JSON.stringify(sanitizeActionDetail('Bearer abc123def456ghi7'))).not.toContain('abc123def456ghi7');
+  });
+
+  it('普通文本不被误伤（不做语义猜测）', () => {
+    expect(sanitizeActionDetail('skype meeting at 3pm')).toBe('skype meeting at 3pm');
+    expect(sanitizeActionDetail('version v1.2.3.4 released')).toBe('version v1.2.3.4 released');
+    expect(sanitizeActionDetail('用户 admin 登录成功')).toBe('用户 admin 登录成功');
+  });
+
+  it('数组元素与嵌套结构中的密钥形态值同样被遮蔽', () => {
+    const out = sanitizeActionDetail([
+      'Bearer abc123def456ghi7',
+      { note: 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJVadQssw5c' },
+    ]) as unknown[];
+    expect(out[0]).toBe('***');
+    expect((out[1] as { note: string }).note).toBe('***');
+  });
+
+  it('scope/action/request_id 注入归一化：换行/中括号/中文不再能伪造日志行', () => {
+    const entry = createActionLogEntry(
+      'ui\nevil] [error] [x:y',
+      'click] [error] fake',
+      null,
+      { requestId: 'req/../..abc$%123', now: 0 },
+    );
+    const line = formatActionLine(entry);
+    expect(line.includes('\n')).toBe(false);
+    // 整行仍恰好是 4 段 [..] + detail 的结构：除时间/级别外不再出现多余 [..] 段
+    expect(line.startsWith('[1970-01-01T00:00:00.000Z] [info] [')).toBe(true);
+    expect(entry.scope).toBe('ui_evil___error___x:y');
+    expect(entry.action).toBe('click___error__fake');
+    expect(entry.request_id).toBe('req______abc__123');
+  });
+
+  it('超长 scope/action/request_id 被截断（40/80/80）', () => {
+    const entry = createActionLogEntry('s'.repeat(60), 'a'.repeat(120), null, {
+      requestId: 'r'.repeat(100),
+      now: 0,
+    });
+    expect(entry.scope.length).toBe(40);
+    expect(entry.action.length).toBe(80);
+    expect(entry.request_id!.length).toBe(80);
+  });
+});

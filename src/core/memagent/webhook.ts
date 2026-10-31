@@ -40,7 +40,7 @@ export interface IngestResult {
   /** L2 摘要预览（仅真实 LLM 精炼时有值；未精炼为 undefined） */
   l2_preview?: string;
   /** 精炼来源：stub = 未接入 LLM（仅 L1） */
-  refined_by?: 'stub' | 'llm';
+  refined_by?: 'stub' | 'llm' | 'llm_partial';
   error?: string;
   ts: string;
 }
@@ -137,12 +137,14 @@ export function createWebhook(opts: WebhookOptions): WebhookServer {
       }
 
       if (!opts.refinePipeline) {
+        // 批次27 P2-3：未注入精炼管道 → 诚实拒绝（ok:false）。旧实现返回 ok:true/dedup:'new'
+        // 却什么都没写，还把 hash 记进幂等索引 → 同内容永久 duplicate。失败必须可重试。
         const r: IngestResult = {
-          ok: true, dedup: 'new', hash,
-          error: 'refinePipeline 未注入（降级）：L0 明文落库，未加密未精炼',
+          ok: false, dedup: 'error', hash,
+          error: 'refinePipeline 未注入：拒绝明文落库（未写入任何数据）；注入精炼管道后重试',
           ts,
         };
-        hashIndex.record(hash, r);
+        hashIndex.record(hash, r); // record 只进 recent，不写幂等索引 → 修正后可重试
         return r;
       }
 

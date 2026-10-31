@@ -79,7 +79,7 @@ export interface ReceiptOptions {
   memoryId?: string;
   /** 内核真实产出的层（未接入 LLM 时仅 content_l1） */
   layers?: Record<string, string>;
-  refinedBy?: 'stub' | 'llm';
+  refinedBy?: 'stub' | 'llm' | 'llm_partial';
 }
 
 const LAYER_FIELD: Record<LayerName, string> = {

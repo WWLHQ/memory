@@ -14,6 +14,7 @@ import { configuredVectorDim } from '../models/modelConfig.ts';
 import { hostCapability, hostCall } from '../../desktop/hostBridge.ts';
 import type { MemoryOp, MemoryRecord, OpResult } from './types.ts';
 import type { Layer, BrowseReq, BrowseResult } from '../../core/memagent/types.ts';
+import { DEFAULT_PROJECT_ID, listProjectIds } from '../shared/kernelProjects.ts';
 
 const DAY = 24 * 3600 * 1000;
 
@@ -227,23 +228,34 @@ export async function coreUpdateContent(memId: string, content: string): Promise
 
 /**
  * 查阅某一层全部内容（§4.1 / 19.11）：L0 必须带连续会话 l0_session_id，其他层直接可读。
- * L0 失败时返回 null（E_AUTH_L0），调用方负责 UI 反馈。
+ * 批次27 P2-7：项目从账本真实派生（list_projects 同口径），逐项目 browse 合并；空账本回落默认项目。
+ * 全部项目都失败时返回 null（如 L0 会话失效），调用方负责 UI 反馈。
  */
 export async function coreBrowse(
   layer: Layer,
   l0SessionId?: string,
 ): Promise<{ rows: { mem_id: string; content: string }[]; l0_masked: boolean } | null> {
   const ma = await getAgent();
-  const req: BrowseReq = {
-    layer,
-    project_id: 'P1',
-    l0_auth: layer === 'L0' && l0SessionId ? { l0_session_id: l0SessionId } : undefined,
-  };
-  try {
-    const res: BrowseResult = await ma.browse(req);
-    return { rows: res.rows, l0_masked: res.l0_masked };
-  } catch {
-    // E_AUTH_L0 或其他错误 → 返回 null 让调用方处理
-    return null;
+  const projects = await listProjectIds();
+  const targets = projects.length > 0 ? projects : [DEFAULT_PROJECT_ID];
+  const rows: { mem_id: string; content: string }[] = [];
+  let l0_masked = false;
+  let failed = 0;
+  for (const project_id of targets) {
+    const req: BrowseReq = {
+      layer,
+      project_id,
+      l0_auth: layer === 'L0' && l0SessionId ? { l0_session_id: l0SessionId } : undefined,
+    };
+    try {
+      const res: BrowseResult = await ma.browse(req);
+      rows.push(...res.rows);
+      l0_masked = l0_masked || res.l0_masked;
+    } catch {
+      // 单项目失败（如 L0 授权不覆盖该项目）只跳过该项目；全部失败才报给调用方
+      failed += 1;
+    }
   }
+  if (failed === targets.length) return null;
+  return { rows, l0_masked };
 }

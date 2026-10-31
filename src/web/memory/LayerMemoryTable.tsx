@@ -151,7 +151,8 @@ export function LayerMemoryTable({
                 {m.locked && <span title="已锁定">🔒</span>}
                 {m.archived && <span title="已归档">🗄️</span>}
                 {m.refined_by === 'stub' && <span className="lref" title="未接入 LLM，仅 L1 脱敏原文">未精炼</span>}
-                {!m.pinned && !m.locked && !m.archived && m.refined_by !== 'stub' && <span className="ldim">—</span>}
+                {m.refined_by === 'llm_partial' && <span className="lref" title="LLM 精炼中途失败：部分层级是真实 LLM 产物，其余缺失（批次27 P2-4 诚实标注）">部分精炼</span>}
+                {!m.pinned && !m.locked && !m.archived && m.refined_by !== 'stub' && m.refined_by !== 'llm_partial' && <span className="ldim">—</span>}
               </td>
               <td><span className={`ltemp ${temp}`}>{temp}</span></td>
               <td><span className="lstatus">{m.status}</span></td>

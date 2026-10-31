@@ -10,9 +10,10 @@ import { sha256hex } from './sync.ts';
 const DEEP_FIELDS = ['content_l2', 'content_l3', 'content_l4', 'content_l5', 'content_l6'] as const;
 const hasText = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0;
 
-/** 遗留脏行判定：带 L2–L6 内容，但不是真实 LLM 产出的（refined_by 缺失或为 stub） */
+/** 遗留脏行判定：带 L2–L6 内容，但不是真实 LLM 产出的（refined_by 缺失或为 stub；
+ *  批次27 P2-4：llm_partial 也是真实 LLM 产物（中途失败），不降级） */
 export function isStubDeepLayered(m: Memory): boolean {
-  if (m.refined_by === 'llm') return false;
+  if (m.refined_by === 'llm' || m.refined_by === 'llm_partial') return false;
   return DEEP_FIELDS.some((k) => hasText(m[k]));
 }
 

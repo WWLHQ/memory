@@ -236,7 +236,14 @@ export async function coreWrite(input: WriteInput, ctx: WriteCtx): Promise<Write
   const produced = LAYER_ORDER.filter((id) => generated[id] !== undefined);
   const deepest = produced[produced.length - 1] ?? 'L1';
   const mainContent = generated[deepest]!;
-  const refinedBy: 'stub' | 'llm' = produced.some((id) => id !== 'L1') ? 'llm' : 'stub';
+  // 批次27 P2-4：refined_by 诚实化。llm 仅在 L2–L6 全部产出（或提前嫁接收敛）时标记；
+  // LLM 中途失败/违规导致的残缺产物标记 llm_partial，不再冒充全量精炼。
+  const llmTouched = produced.some((id) => id !== 'L1');
+  const refinedBy: 'stub' | 'llm' | 'llm_partial' = !llmTouched
+    ? 'stub'
+    : !graft && produced.length < LAYER_ORDER.length
+      ? 'llm_partial'
+      : 'llm';
 
   const mem: Memory = {
     mem_id: `mem_${ulid()}`,
@@ -358,6 +365,8 @@ export async function coreBrowse(
   };
 
   if (!isL0) {
+    // 批次27 P2-2：表外 layer 不再静默过滤成「空结果 + 成功审计」，直接报错
+    if (!(req.layer in FIELD)) throw new Error(`E_BAD_LAYER: 非法 layer ${String(req.layer)}（允许 L0–L6）`);
     const rows = mems
       .filter((m) => {
         const v = m[FIELD[req.layer]] as string | undefined;

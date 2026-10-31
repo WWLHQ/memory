@@ -24,7 +24,7 @@ const REFINED = {
   content_l2: '[来源:Agent会话][类型:pitfall] 支付接口超时复盘：根因是连接池配置过小，调整后恢复；结论可供同项目复用。',
   content_l3: '成功点：定位连接池根因；失败点：上线前未压测；经验教训：容量类配置需在发布流程中验证。',
   content_l4: '模式归纳：容量类故障先核对连接池与超时配置。适用场景：支付链路压测与扩容评审。',
-  content_l5: '容量假设需随流量演进复核；边界：仅适用于同 project_id 的部署环境。',
+  content_l5: '容量假设需随流量演进复核；边界条件：仅适用于同 project_id 的部署环境。',
   content_l6: JSON.stringify({ keywords: ['连接池', '超时'], projections: [{ layer: 'L2', relevance: 0.9 }] }),
 };
 
@@ -51,6 +51,16 @@ describe('agent.write（批次3-B）', () => {
     const [a] = await storage.queryAudit({ action: 'llm_proxy' });
     expect(a.detail).toMatchObject({ model: 'free-refine', source: 'agent:free-refine' });
     expect(await storage.queryAudit({ action: 'llm_fallback' })).toHaveLength(0);
+  });
+
+  it('批次27 P2-4：LLM 产物残缺（仅部分层）→ llm_partial + llm_fallback（不冒充全量精炼）', async () => {
+    const { ma, storage } = makeAgent(provider({ refine: async () => ({ ...REFINED, content_l3: undefined, content_l4: undefined, content_l5: undefined, content_l6: undefined }) }));
+    const r = await ma.write({ content: CONTENT, category: 'pitfall', project_id: 'P1' });
+    expect(r.refined_by).toBe('llm_partial');
+    expect(r.layers?.content_l2).toBe(REFINED.content_l2);
+    expect(await storage.queryAudit({ action: 'llm_proxy' })).toHaveLength(0);
+    const [fb] = await storage.queryAudit({ action: 'llm_fallback' });
+    expect(fb.detail.code).toBe('E_LLM_FALLBACK');
   });
 
   it('选中模型但 Provider 无 refine → llm_fallback（E_LLM_FALLBACK），写入仍落 L1', async () => {

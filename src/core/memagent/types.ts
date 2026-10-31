@@ -156,7 +156,7 @@ export interface WriteResult {
   /** 实际生成的精炼层（§2.2）；未接入 LLM 时仅 content_l1 */
   layers?: Record<string, string>;
   /** 精炼来源（stub = 未接入 LLM，仅 L1） */
-  refined_by?: 'stub' | 'llm';
+  refined_by?: 'stub' | 'llm' | 'llm_partial';
   /** 各层规格自检违规项（§16.1；空数组 = 全部合规） */
   spec_violations?: string[];
   /** LLM 精炼调用失败原因（已回退到已生成层；未失败则缺省） */
@@ -469,7 +469,7 @@ export interface Memory {
   content_l5?: string;            // L5 洞察提炼（≤60 字：本质理解）
   content_l6?: string;            // L6 关键字投影（{"keywords":[...],"projections":[...]}）
   /** 精炼来源：stub = 未接入 LLM（只落 L1，L2–L6 不生成）；llm = 真实 LLM 产出 */
-  refined_by?: 'stub' | 'llm';
+  refined_by?: 'stub' | 'llm' | 'llm_partial';
   /**
    * 本组层内容（L1–L6）的生成时间（批次24 口径 2：一条记忆只记一个层级生成时间，不逐层记）。
    * 批次24 之前的历史行没有这个字段 → 页面显示「未记录」，绝不拿 created_at 冒充。

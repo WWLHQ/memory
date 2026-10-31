@@ -2,7 +2,7 @@
 // 表单(T3) + 查重卡(T4) + 写入回执（memory_id + L1–L6 折叠，L1 仅审计展开）+ toast + 后端 mirror。
 // T7 接真内核：提交走 memagent-core ma.write（查重 new/merged/duplicated 真实判定）。
 // ⚠ 禁止注入演示/种子数据：查重候选来自真实账本（空库即无候选）；写入只产生真实记忆。
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { WriteForm } from './WriteForm.tsx';
 import { DedupCard } from './DedupCard.tsx';
 import { useToast } from './useToast.tsx';
@@ -10,11 +10,12 @@ import { useWriteMirror } from './useWriteMirror.ts';
 import { composeReceipt, scoreDedup, validateDraft } from './logic.ts';
 import { coreWrite, coreListExisting } from './coreWrite.ts';
 import { KernelLoadError, kernelErrorText, useKernelLoad } from '../shared/kernelLoad.tsx';
+import { DEFAULT_PROJECT_ID, listProjectIds } from '../shared/kernelProjects.ts';
 import type { ExistingMemory, LayerName, MemoryDraft, WriteReceipt } from './types.ts';
 
 // 全局注入（演示值；真实环境由租户上下文注入，禁手填，R2）
-// project_id 与记忆管理页/内核账本统一为 'P1'（同一隔离项目，跨页数据一致）
-const INJECTED = { session_id: 's1', project_id: 'P1' };
+// 批次27 P2-7：项目 ID 从账本真实派生（listProjectIds）；账本为空时回落 DEFAULT_PROJECT_ID 占位
+const INJECTED = { session_id: 's1', project_id: DEFAULT_PROJECT_ID };
 
 export function WritePage({ load = coreListExisting }: { load?: () => Promise<ExistingMemory[]> } = {}) {
   const [draft, setDraft] = useState<MemoryDraft>({
@@ -29,6 +30,15 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
   const dedupLedger = useKernelLoad<ExistingMemory[]>('write-dedup', load);
   const { phase, data: existingData, error: dedupError, retry: retryDedup, replace } = dedupLedger;
   const existing = existingData ?? [];
+
+  // 批次27 P2-7：账本已有真实项目时，默认写入跟随账本（不再钉死占位项目）
+  useEffect(() => {
+    void listProjectIds().then((projects) => {
+      if (projects.length > 0) {
+        setDraft((d) => (projects.includes(d.project_id) ? d : { ...d, project_id: projects[0]! }));
+      }
+    });
+  }, [existingData]);
 
   // 词面预览随内容实时计算（纯函数，候选来自真实账本；对照层 L1 = 未接大模型时内核唯一查重层）
   const result = scoreDedup(draft.content, existing);

@@ -52,7 +52,7 @@ export interface MemoryRecord {
   /** 采集会话 ID（§5.4 幂等键的一部分） */
   session_id?: string;
   /** 精炼来源：stub = 未接入 LLM（仅 L1，列表标「未精炼」） */
-  refined_by?: 'stub' | 'llm';
+  refined_by?: 'stub' | 'llm' | 'llm_partial';
   /** 本组层内容（L1–L6）生成时间；undefined = 批次24 之前的历史行，未记录 */
   layers_generated_at?: string;
   /** 该记忆在内存身的层级（内核 layer 字段）。层级页据此判定可编辑层：

@@ -5,10 +5,12 @@
 // ⚠ 内核读不到（批次25 P0-7）→ 三态加载：显示原因 + 重试；某层 browse 失败也点名，绝不当成「该层为空」。
 import React, { useEffect, useState } from 'react';
 import { coreListMemories, coreBrowse, coreUpdateContent, openMemoryFile, storageLocation } from './coreMemoryOps.ts';
+import { DEDUP_THRESHOLDS } from '../../core/memagent/layerRules.ts';
 import type { MemoryRecord } from './types.ts';
 import { decayClass } from './logic.ts';
 import { useToast } from './useToast.tsx';
 import { KernelLoadError, kernelErrorText, useKernelLoad } from '../shared/kernelLoad.tsx';
+import { DEFAULT_PROJECT_ID, listProjectIds } from '../shared/kernelProjects.ts';
 import { useL0Session, formatRemaining } from '../shared/useL0Session.ts';
 import { useSessionContext } from '../shared/session.ts';
 import { fmtLayerGen } from '../shared/layerTime.ts';
@@ -19,12 +21,12 @@ import type { LayerFilterState } from './layerFilter.ts';
 
 export type LayerId = 'L6' | 'L5' | 'L4' | 'L3' | 'L2' | 'L1' | 'L0';
 const LAYERS: { id: LayerId; name: string; color: string; desc: string; thr: string }[] = [
-  { id: 'L6', name: '投影索引', color: '#22d3ee', thr: '0.90', desc: '关键字 ≤30 词 + relevance' },
-  { id: 'L5', name: '洞察提炼', color: '#f59e0b', thr: '0.90', desc: '本质洞察 ≤60 字' },
-  { id: 'L4', name: '模式归纳', color: '#c084fc', thr: '0.85', desc: '规律提炼 ≤120 字' },
-  { id: 'L3', name: '得失分析', color: '#3ecf8e', thr: '0.80', desc: '总结得失 ≤200 字' },
-  { id: 'L2', name: '会话摘要', color: '#4d9fff', thr: '0.75', desc: '情景摘要 ≤300 字' },
-  { id: 'L1', name: '清洗脱敏', color: '#e0884f', thr: '0.70', desc: '唯一可进 prompt 的原始形态' },
+  { id: 'L6', name: '投影索引', color: '#22d3ee', thr: DEDUP_THRESHOLDS.L6.toFixed(2), desc: '关键字 ≤30 词 + relevance' },
+  { id: 'L5', name: '洞察提炼', color: '#f59e0b', thr: DEDUP_THRESHOLDS.L5.toFixed(2), desc: '本质洞察 ≤60 字' },
+  { id: 'L4', name: '模式归纳', color: '#c084fc', thr: DEDUP_THRESHOLDS.L4.toFixed(2), desc: '规律提炼 ≤120 字' },
+  { id: 'L3', name: '得失分析', color: '#3ecf8e', thr: DEDUP_THRESHOLDS.L3.toFixed(2), desc: '总结得失 ≤200 字' },
+  { id: 'L2', name: '会话摘要', color: '#4d9fff', thr: DEDUP_THRESHOLDS.L2.toFixed(2), desc: '情景摘要 ≤300 字' },
+  { id: 'L1', name: '清洗脱敏', color: '#e0884f', thr: DEDUP_THRESHOLDS.L1.toFixed(2), desc: '唯一可进 prompt 的原始形态' },
   { id: 'L0', name: '原始对话', color: '#8e6bd8', thr: '—', desc: 'AES-256 加密，仅授权+密码' },
 ];
 
@@ -45,7 +47,13 @@ export function MemoryLayeredPage({ load = coreListMemories }: { load?: () => Pr
   const [l0Pwd, setL0Pwd] = useState('');
   const [l0GrantId, setL0GrantId] = useState('');
   const [l0Msg, setL0Msg] = useState<string>('状态：已锁定（L0 不参与检索，仅授权查阅）');
-  const [reqProjects, setReqProjects] = useState('P1');
+  // 批次27 P2-7：默认申请项目从账本真实派生；空账本回落默认占位项目
+  const [reqProjects, setReqProjects] = useState(DEFAULT_PROJECT_ID);
+  useEffect(() => {
+    void listProjectIds().then((ps) => {
+      if (ps.length > 0) setReqProjects(ps.join(', '));
+    });
+  }, []);
   const [reqReason, setReqReason] = useState('');
   const [reqMsg, setReqMsg] = useState<string | null>(null);
 

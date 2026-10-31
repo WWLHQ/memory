@@ -169,13 +169,17 @@ describe('Webhook ingest 主通道（§19.3）', () => {
     expect(webhook.lookupByHash('nonexistent-hash')).toBeUndefined();
   });
 
-  it('refinePipeline 未注入 → 降级（明文落库，诚实标注）', async () => {
+  it('批次27 P2-3：refinePipeline 未注入 → 诚实拒绝（不落库、不占幂等键，注入后可重试）', async () => {
     const storage = new InMemoryStorage();
     const webhook = createWebhook({ storage, hashIndex: new HashIndex() });
     const r = await webhook.ingest({ content: '降级测试', project_id: 'P1' });
-    expect(r.ok).toBe(true);
-    expect(r.dedup).toBe('new');
-    expect(r.error).toContain('降级');
+    expect(r.ok).toBe(false);
+    expect(r.dedup).toBe('error');
+    expect(r.error).toContain('未注入');
+    // 什么都没写
+    expect((await storage.listMemories({ project_id: 'P1' }))).toEqual([]);
+    // 不占幂等键：注入管道后同内容可重试成功
+    expect(webhook.lookupByHash(r.hash!)).toBeUndefined();
   });
 
   it('非法 category → error 且不占用幂等键（修正后可重试成功）', async () => {

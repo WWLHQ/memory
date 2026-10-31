@@ -42,6 +42,27 @@ const MAX_DEPTH = 4;
 /** 敏感字段名：命中即整体替换为 ***，绝不写值 */
 const SECRET_KEY = /pass(word)?|secret|token|authorization|api[-_]?key|credential|cookie|session[-_]?id/i;
 
+/** 值形态兜底（批次27 P2-10）：键名不脱敏但值本身是密钥形态时替换命中段。
+ *  只认高置信形态（JWT / Bearer / 常见厂商密钥前缀），不做语义猜测、不误伤普通文本。 */
+const SECRET_VALUE_PATTERNS: RegExp[] = [
+  /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi,
+  /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}/g,
+  /\b(sk|pk|rk)-[A-Za-z0-9_-]{16,}/gi,
+  /\bAKIA[0-9A-Z]{16}\b/g,
+  /\bxox[baprs]-[A-Za-z0-9-]{10,}/g,
+];
+
+function maskSecretValues(s: string): string {
+  let out = s;
+  for (const re of SECRET_VALUE_PATTERNS) out = out.replace(re, '***');
+  return out;
+}
+
+/** scope/action/request_id 只允许安全字符：行内以 [x] 与空格拼接，换行/中括号可伪造日志行（批次27 P2-10） */
+function safeLogToken(s: string, max: number, extra = ''): string {
+  return s.replace(new RegExp(`[^A-Za-z0-9_.:${extra}-]`, 'g'), '_').slice(0, max);
+}
+
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
@@ -49,7 +70,10 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 /** 递归脱敏 + 截断：深度/数组/字符串均有上限，循环引用安全 */
 export function sanitizeActionDetail(value: unknown, depth = 0, seen: WeakSet<object> = new WeakSet()): unknown {
   if (value === null || typeof value === 'number' || typeof value === 'boolean') return value;
-  if (typeof value === 'string') return value.length > MAX_STRING ? `${value.slice(0, MAX_STRING)}…` : value;
+  if (typeof value === 'string') {
+    const masked = maskSecretValues(value);
+    return masked.length > MAX_STRING ? `${masked.slice(0, MAX_STRING)}…` : masked;
+  }
   if (typeof value === 'bigint') return value.toString();
   if (typeof value === 'undefined') return undefined;
   if (typeof value === 'function' || typeof value === 'symbol') return `[${typeof value}]`;
@@ -89,10 +113,10 @@ export function createActionLogEntry(
   const entry: ActionLogEntry = {
     ts: new Date(opts.now ?? Date.now()).toISOString(),
     level: opts.level ?? 'info',
-    scope: String(scope || 'unknown'),
-    action: String(action || 'unknown'),
+    scope: safeLogToken(String(scope || 'unknown'), 40),
+    action: safeLogToken(String(action || 'unknown'), 80),
   };
-  if (opts.requestId) entry.request_id = opts.requestId;
+  if (opts.requestId) entry.request_id = opts.requestId.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 80);
   const clean = sanitizeActionDetail(detail);
   if (clean !== undefined) entry.detail = clean;
   return entry;

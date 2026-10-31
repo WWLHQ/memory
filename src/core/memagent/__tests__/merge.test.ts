@@ -205,7 +205,7 @@ describe('分支嫁接（§6.2）', () => {
       ctx({ llm, llmModel: 'real-model' }),
     );
     expect(r.dedup.action).toBe('new');
-    expect(r.refined_by).toBe('llm');
+    expect(r.refined_by).toBe('llm_partial'); // 批次27 P2-4：L4 违规停梯，L2/L3 合规但 L5/L6 缺失
     expect(r.spec_violations?.join()).toContain('L4');
     expect(llm.calls).toEqual(['L2', 'L3', 'L4']); // L5/L6 不再调用
     expect(r.layer_decisions?.at(-1)).toMatchObject({ layer: 'L4', action: 'invalid' });
@@ -227,7 +227,7 @@ describe('分支嫁接（§6.2）', () => {
       ctx({ llm, llmModel: 'real-model' }),
     );
     expect(r.refine_error).toContain('upstream 502');
-    expect(r.refined_by).toBe('llm'); // L2 已生成
+    expect(r.refined_by).toBe('llm_partial'); // 批次27 P2-4：仅 L2 已生成即异常中断
     const m = (await storage.getMemory(r.mem_id))!;
     expect(m.layer).toBe('L2');
     expect(m.content_l3).toBeUndefined();

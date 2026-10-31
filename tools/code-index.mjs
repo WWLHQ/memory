@@ -11,6 +11,7 @@
 // 只读源码，不修改任何业务文件；索引过期时重跑即可（无需手工维护）。
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -84,6 +85,8 @@ for (const abs of files) {
     summary: summaryOf(text),
     exports: exportsOf(text),
     lines: text.split('\n').length,
+    // 批次27 P2-18：内容指纹——符号名/行数不变的单行函数体改动也会让 --check 失败（强制重跑索引）
+    hash: createHash('sha256').update(text).digest('hex').slice(0, 12),
   });
 }
 
@@ -118,7 +121,9 @@ for (const [top, list] of groups) {
   lines.push('');
 }
 
-const md = lines.join('\n');
+const md = lines.join('\n')
+  + `\n## 指纹（P2-18）\n\n任一源码文件内容变化都会让 --check 失败（单行改动也不例外）。\n\n`
+  + entries.map((e) => `${e.file} ${e.hash}`).join('\n') + '\n';
 const out = join(ROOT, 'specs', 'code-index.generated.md');
 if (process.argv.includes('--write')) {
   await writeFile(out, md, 'utf8');

@@ -145,6 +145,39 @@ describe('L1 清洗脱敏（§2.1）', () => {
   it('批次10：占位符 [IP] / [证件号] 不计入有效长度', () => {
     expect(meaningfulLength('[IP][证件号]！！！')).toBe(0);
   });
+
+  // 批次27 P2-5：对抗样本固化——sanitizeL1 是逐行正则集合，不是语义识别。
+  // 以下形态部分可命中、部分明确不命中；这里如实记录边界，防止后续误以为「已全覆盖」。
+  describe('对抗样本（P2-5：正则脱敏的已知边界，非语义识别）', () => {
+    it('跨行拼接：键值在同一行内仍命中；值被换行截断后剩余片段不追脱', () => {
+      const out = sanitizeL1('api_key = abc123def\nsecond 456');
+      expect(out).toContain('[API_KEY]');
+      expect(out).not.toContain('abc123def');
+      // 换行后的「second 456」与上一行无键名关联，不做跨行语义关联
+      expect(out).toContain('second 456');
+    });
+
+    it('全角分隔符：全角冒号「：」命中；全角等号「＝」不在分隔符类 → 不命中（已知边界）', () => {
+      const outColon = sanitizeL1('password：AbcDef12345');
+      expect(outColon).toContain('[API_KEY]');
+      expect(outColon).not.toContain('AbcDef12345');
+      const outEq = sanitizeL1('password＝AbcDef12345');
+      expect(outEq).toContain('AbcDef12345');
+    });
+
+    it('裸 Base64（无键名/无认证头上下文）不命中——Base64 也用于正常技术内容，防止误伤', () => {
+      const out = sanitizeL1('payload YWRtaW46c2VjcmV0MTIz decode ok');
+      expect(out).toContain('YWRtaW46c2VjcmV0MTIz');
+    });
+
+    it('拆词（C o o k i e）不命中——逐词正则不做模糊匹配；正常拼写 Cookie: 仍命中', () => {
+      const split = sanitizeL1('C o o k i e : abcdefgh');
+      expect(split).toContain('abcdefgh');
+      const normal = sanitizeL1('Cookie: abcdefgh');
+      expect(normal).not.toContain('abcdefgh');
+      expect(normal).toContain('[API_KEY]');
+    });
+  });
 });
 
 describe('每层生成规格（§2.1 / §16.1）', () => {
@@ -363,7 +396,7 @@ describe('真实 LLM 精炼落地（refined_by 诚实化）', () => {
       content_l4: '太短', // 违反 L4 minChars / mustInclude
     }));
     const r = await coreWrite({ content: RAW, category: 'pitfall', project_id: 'P1' }, lctx(s, llm));
-    expect(r.refined_by).toBe('llm'); // L2/L3 仍合规
+    expect(r.refined_by).toBe('llm_partial'); // 批次27 P2-4：LLM 产出中断（L4 违规停梯），L2/L3 仍合规
     expect(r.spec_violations?.join()).toContain('L4');
     const m = (await s.listMemories({}))[0];
     expect(m.layer).toBe('L3');
@@ -470,5 +503,15 @@ describe('coreBrowse L0 授权解密（§4.1 / §4.4.3）', () => {
     for (const ln of ['L2', 'L3', 'L4', 'L5', 'L6'] as const) {
       expect(await get(ln)).toEqual([]);
     }
+  });
+
+  it('批次27 P2-2：非法 layer → E_BAD_LAYER，且不写 log_view 成功审计', async () => {
+    const s = new InMemoryStorage();
+    await coreWrite({ content: RAW, category: 'pitfall', project_id: 'P1' }, wctx(s));
+    await expect(coreBrowse({ layer: 'L9' as 'L1', project_id: 'P1' } as never, {
+      storage: s, request_id: 'req_bad_layer', now: 1,
+    })).rejects.toThrow('E_BAD_LAYER');
+    const views = await s.queryAudit({ action: 'log_view' });
+    expect(views).toEqual([]);
   });
 });

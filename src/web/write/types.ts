@@ -61,7 +61,7 @@ export interface WriteReceipt {
   /** 内核四态映射：create / graft（分支嫁接）/ merge / keep（duplicated）/ filtered（L0→L1 质量门拦截，未入库） */
   dedup_action: 'create' | 'graft' | 'merge' | 'overwrite' | 'keep' | 'filtered';
   /** 精炼来源：stub = 未接入 LLM（只落 L1） */
-  refined_by: 'stub' | 'llm';
+  refined_by: 'stub' | 'llm' | 'llm_partial';
 }
 
 export interface ValidationResult {

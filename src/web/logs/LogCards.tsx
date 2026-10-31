@@ -7,6 +7,7 @@ import { aggrErrors } from './logic.ts';
 import { coreAuditChain } from './coreLogs.ts';
 import { formatLogClock, formatLogDate } from '../Home/programLog.ts';
 import { formatRemaining } from '../shared/useL0Session.ts';
+import { DEFAULT_PROJECT_ID, listProjectIds } from '../shared/kernelProjects.ts';
 import { ColResizeHandle, useColWidths } from '../shared/useColWidths.tsx';
 import '../shared/tableResize.css';
 
@@ -207,7 +208,13 @@ export interface L0AuthCardProps {
 export function L0AuthCard(props: L0AuthCardProps) {
   const { role, unlocked, message, sample, remainingMs, lockedUntil, busy, grantId } = props;
   const [pwd, setPwd] = useState('');
-  const [projects, setProjects] = useState('P1');
+  // 批次27 P2-7：默认申请项目从账本真实派生；空账本回落默认占位项目
+  const [projects, setProjects] = useState(DEFAULT_PROJECT_ID);
+  useEffect(() => {
+    void listProjectIds().then((ps) => {
+      if (ps.length > 0) setProjects(ps.join(', '));
+    });
+  }, []);
   const [reason, setReason] = useState('');
   const roleText = role === 'admin' ? '管理员（管理密码直接查阅）'
     : role === 'member' ? '已授权账号（grant_id + 一次性密码）' : '未登录（登录后生效）';
