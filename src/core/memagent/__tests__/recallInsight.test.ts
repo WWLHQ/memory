@@ -6,6 +6,7 @@ import {
   formatCny, localDayStart, normalizeUnitPrice, rollupRecalls, selectRecallBackground,
 } from '../recallInsight.ts';
 import { createMemAgent } from '../agent.ts';
+import { clientSupportsHtmlDetails } from '../mcpRecall.ts';
 import { FakeLlmProvider } from '../llm.ts';
 import { InMemoryStorage } from '../storage.ts';
 import { JsVectorBackend } from '../vector.ts';
@@ -344,5 +345,46 @@ describe('buildRecallMarkdown（批次13）', () => {
     const r = recallResult();
     const md = buildRecallMarkdown(r, buildRecallHint(r, rollup, null), null);
     expect(md).toContain('今日含 1 次旧记录（无省量字段，金额按载荷下限计）');
+  });
+});
+
+describe('buildRecallMarkdown 纯 Markdown（批次29，DSH 实测只渲染 Markdown 不渲染 HTML）', () => {
+  const none = () => rollupRecalls([], Date.now());
+
+  it('htmlDetails:false → 零 HTML 标签/转义，外层加粗提示行 + 四小节加粗标题', () => {
+    const r = recallResult();
+    const hint = buildRecallHint(r, none(), null);
+    const md = buildRecallMarkdown(r, hint, null, { htmlDetails: false });
+    expect(md).not.toContain('<details>');
+    expect(md).not.toContain('<summary>');
+    expect(md).not.toContain('&lt;');
+    expect(md.startsWith(`**${hint.line}**`)).toBe(true);
+    expect(md).toContain('**📎 项目背景 2 条（2t）**');
+    expect(md).toContain('- [decision] 决策');
+    expect(md).toContain('**🧠 命中记忆 2 条（100t）**');
+    expect(md).toContain('- [L1/hot] ' + 'a'.repeat(100) + '（相关度 0.90）');
+    expect(md).toContain('**⚡ Token 用量（本次注入 102t）**');
+    expect(md).toContain('**💰 省钱与费用（本次省 9,898t）**');
+  });
+
+  it('内容含尖括号 → 纯版原样保留（不转义），HTML 版仍转义护结构', () => {
+    const r = recallResult({ hits: [hit('m9', '<script>alert("x")</script> & done')] });
+    const hint = buildRecallHint(r, none(), null);
+    const plain = buildRecallMarkdown(r, hint, null, { htmlDetails: false });
+    expect(plain).toContain('<script>alert("x")</script> & done');
+    const html = buildRecallMarkdown(r, hint, null);
+    expect(html).toContain('&lt;script&gt;alert("x")&lt;/script&gt; &amp; done');
+    expect(html.match(/<details>/g)).toHaveLength(5);
+  });
+});
+
+describe('clientSupportsHtmlDetails（批次29 白名单）', () => {
+  it('只放行实测渲染 HTML 折叠的 Qoder；未知/无标识一律纯 Markdown（fail-safe）', () => {
+    expect(clientSupportsHtmlDetails('Qoder/9.9.9')).toBe(true);
+    expect(clientSupportsHtmlDetails('qoder/1.0')).toBe(true);
+    expect(clientSupportsHtmlDetails('dsh-mcp-client/0.0.1')).toBe(false);
+    expect(clientSupportsHtmlDetails('zcode/0.16.9')).toBe(false);
+    expect(clientSupportsHtmlDetails('Cursor (UA)')).toBe(false);
+    expect(clientSupportsHtmlDetails(undefined)).toBe(false);
   });
 });

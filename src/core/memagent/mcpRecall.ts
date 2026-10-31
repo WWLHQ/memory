@@ -8,6 +8,17 @@ import {
   type RecallMoney, type RecallRollup,
 } from './recallInsight.ts';
 
+/**
+ * 客户端能否渲染 HTML <details>（批次29）：白名单只收**实测渲染过折叠块**的客户端（批次13 Qoder CN）。
+ * fail-safe：未知客户端（dsh-mcp-client / zcode / 无 clientInfo 的 TCP 等）一律纯 Markdown——
+ * DSH 实测只渲染 Markdown、HTML 标签原样露出（2026-10-31 截图证据）。
+ */
+export function clientSupportsHtmlDetails(client?: string): boolean {
+  if (!client) return false;
+  const name = client.split('/')[0].trim().toLowerCase();
+  return name === 'qoder';
+}
+
 /** 参数快照专用项目（pinned preference，非用户项目；不参与项目定位/列表） */
 const INTERNAL_PROJECT = 'P_SYSTEM';
 
@@ -130,6 +141,7 @@ export async function runRecallTool(
   // 累计口径必须包含本次召回：时钟取召回完成之后（召回审计的 ts 不晚于此刻）
   const { price, rollup } = await readPricingAndRollup(storage, now ?? Date.now());
   const hint = buildRecallHint(recall, rollup, price);
+  const htmlDetails = clientSupportsHtmlDetails(client);
   return {
     payload: {
       ...recall,
@@ -139,7 +151,7 @@ export async function runRecallTool(
         line: hint.line,
         money: hint.money,
         rollup: hint.rollup,
-        markdown: buildRecallMarkdown(recall, hint, price),
+        markdown: buildRecallMarkdown(recall, hint, price, { htmlDetails }),
       },
     },
     text: hint.line,

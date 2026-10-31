@@ -221,9 +221,9 @@ describe('MCP Server（§19.5）', () => {
     expect(result.savings.saved_tokens).toBeGreaterThanOrEqual(0);
     expect(result.display.money).toBeNull();
     expect(result.display.line).toContain('🧠 Memory');
-    // 批次13：TCP 与 HTTP 共用同一 payload → 折叠明细同样下发
-    expect(result.display.markdown).toContain('<details>');
-    expect(result.display.markdown).toContain('项目背景');
+    // 批次29：TCP 无 clientInfo → fail-safe 纯 Markdown，零 HTML 标签（数字与提示行同源）
+    expect(result.display.markdown).not.toContain('<details>');
+    expect(result.display.markdown).toContain('**📎 项目背景');
   });
 
   it('list_projects → 真实项目 P1', async () => {

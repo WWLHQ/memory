@@ -241,39 +241,52 @@ export function buildRecallHint(
   return { line, money, rollup };
 }
 
-/* ---------- 聊天窗口折叠明细（批次13）：四段可展开；不支持 HTML 的客户端回退单行 ---------- */
+/* ---------- 聊天窗口明细（批次13 HTML 折叠 / 批次29 纯 Markdown）：四段；不支持 HTML 的客户端用纯 Markdown ---------- */
 
 /** 折叠块文本安全化：记忆内容里的尖括号不得破坏 <details> 结构 */
 function mdInline(s: string, maxChars: number): string {
+  return plainClip(s, maxChars).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/** 纯 Markdown 版不转义 HTML（客户端如 DSH 只渲染 Markdown，转义串会原样露出 &lt;） */
+function plainClip(s: string, maxChars: number): string {
   const one = s.replace(/\s+/g, ' ').trim();
-  const clipped = one.length > maxChars ? `${one.slice(0, maxChars)}…` : one;
-  return clipped.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return one.length > maxChars ? `${one.slice(0, maxChars)}…` : one;
 }
 
 function mdSection(summary: string, body: string): string {
   return `<details>\n<summary>${summary}</summary>\n\n${body}\n</details>`;
 }
 
+export interface RecallMarkdownOpts {
+  /** true（默认）= 批次13 <details> 折叠版，仅实测支持 HTML 的客户端（Qoder）；false = 纯 Markdown 四小节（批次29，DSH 实测只渲染 Markdown） */
+  htmlDetails?: boolean;
+}
+
 /**
- * 组装聊天窗口折叠明细：外层 summary = 提示行，内层四段各自可折叠
- * （项目背景 / 命中记忆 / Token / 省钱与费用）。数字与 buildRecallHint 同源。
+ * 组装聊天窗口明细：外层 = 提示行，内层四段（项目背景 / 命中记忆 / Token / 省钱与费用）。
+ * htmlDetails=false 时同结构输出纯 Markdown（**加粗小节标题** + 列表，零 HTML 标签）。数字全部同源。
  */
 export function buildRecallMarkdown(
   result: RecallResult,
   hint: RecallHint,
   unitPriceCnyPerMTok: number | null,
+  opts: RecallMarkdownOpts = {},
 ): string {
+  const htmlDetails = opts.htmlDetails !== false;
+  const clip = htmlDetails ? mdInline : plainClip;
+  const section = (title: string, body: string) => (htmlDetails ? mdSection(title, body) : `**${title}**\n\n${body}`);
   const price = normalizeUnitPrice(unitPriceCnyPerMTok);
   const t = result.savings;
   const bg = result.background;
 
   const bgBody = bg.items.length > 0
-    ? bg.items.map((it) => `- [${it.category}] ${mdInline(it.content, 120)}`).join('\n')
+    ? bg.items.map((it) => `- [${it.category}] ${clip(it.content, 120)}`).join('\n')
     : '- 无（minimal 模式或账本暂无可用背景）';
 
   const hitBody = result.hits.length > 0
     ? result.hits
-      .map((h) => `- [${h.layer}/${h.decay_class}] ${mdInline(h.content, 120)}（相关度 ${h.score.toFixed(2)}）`)
+      .map((h) => `- [${h.layer}/${h.decay_class}] ${clip(h.content, 120)}（相关度 ${h.score.toFixed(2)}）`)
       .join('\n')
     : `- 未命中（扫描 ${fmtInt(result.scanned_memories)} 条，未注入命中内容）`;
 
@@ -302,11 +315,12 @@ export function buildRecallMarkdown(
   }
 
   const inner = [
-    mdSection(`📎 项目背景 ${bg.items.length} 条（${fmtInt(bg.tokens)}t）`, bgBody),
-    mdSection(`🧠 命中记忆 ${result.hits.length} 条（${fmtInt(t.payload_tokens)}t）`, hitBody),
-    mdSection(`⚡ Token 用量（本次注入 ${fmtInt(t.injected_tokens)}t）`, tokenBody),
-    mdSection(`💰 省钱与费用（本次省 ${fmtInt(t.saved_tokens)}t）`, saveLines.join('\n')),
+    section(`📎 项目背景 ${bg.items.length} 条（${fmtInt(bg.tokens)}t）`, bgBody),
+    section(`🧠 命中记忆 ${result.hits.length} 条（${fmtInt(t.payload_tokens)}t）`, hitBody),
+    section(`⚡ Token 用量（本次注入 ${fmtInt(t.injected_tokens)}t）`, tokenBody),
+    section(`💰 省钱与费用（本次省 ${fmtInt(t.saved_tokens)}t）`, saveLines.join('\n')),
   ].join('\n\n');
 
+  if (!htmlDetails) return `**${hint.line}**\n\n${inner}`;
   return `<details>\n<summary>${mdInline(hint.line, 500)}</summary>\n\n${inner}\n</details>`;
 }

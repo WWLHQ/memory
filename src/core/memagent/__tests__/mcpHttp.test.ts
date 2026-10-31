@@ -210,15 +210,16 @@ describe('MCP HTTP（批次2 信任边界）', () => {
     expect(body.result.content).toHaveLength(4); // 提示行 + 完整 JSON + 折叠明细 + 展示要求
     expect(body.result.content[0].text).toBe(body.result.structuredContent.display.line);
     expect(body.result.content[1].text).toContain('"saved_tokens"');
-    // 批次13：折叠明细与 display.markdown 同源，summary = 提示行，内含四段 <details>
+    // 批次29：无会话（非 Qoder）→ 纯 Markdown 四小节，零 HTML 标签（DSH 实测只渲染 Markdown）
     expect(body.result.content[2].text).toBe(body.result.structuredContent.display.markdown);
-    expect(body.result.content[2].text).toContain('<summary>');
-    expect(body.result.content[2].text).toContain('项目背景');
-    expect(body.result.content[2].text).toContain('命中记忆');
-    expect(body.result.content[2].text).toContain('Token 用量');
-    expect(body.result.content[2].text).toContain('省钱与费用');
+    expect(body.result.content[2].text).not.toContain('<details>');
+    expect(body.result.content[2].text).toContain('**📎 项目背景');
+    expect(body.result.content[2].text).toContain('**🧠 命中记忆');
+    expect(body.result.content[2].text).toContain('**⚡ Token 用量');
+    expect(body.result.content[2].text).toContain('**💰 省钱与费用');
     expect(body.result.content[3].text).toContain('display.markdown');
     expect(body.result.content[3].text).toContain('display.line');
+    expect(body.result.content[3].text).not.toContain('<details>');
   });
 
   it('配置单价后 recall → 金额可核算（¥/百万 token）', async () => {
@@ -302,6 +303,13 @@ describe('MCP HTTP（批次2 信任边界）', () => {
       { Authorization: `Bearer ${TOKEN}`, 'Mcp-Session-Id': sid! },
     );
     expect(recall.status).toBe(200);
+
+    const recallBody = (await recall.json()) as {
+      result: { structuredContent: { display: { markdown: string } }; content: Array<{ text: string }> };
+    };
+    // 批次29：Qoder 会话 → 仍发 <details> 折叠版（白名单内唯一实测客户端）
+    expect(recallBody.result.structuredContent.display.markdown).toContain('<details>');
+    expect(recallBody.result.content[3].text).toContain('<details> 四段');
 
     const bySession = (await storage.queryAudit({ action: 'recall' }))
       .filter((a) => (a.detail as { query?: string }).query === '批次15 归属测试-会话');

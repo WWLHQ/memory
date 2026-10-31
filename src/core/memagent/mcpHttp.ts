@@ -15,7 +15,7 @@ import { FakeLlmProvider } from './llm.ts';
 import { ulid } from './ulid.ts';
 import { assertMcpToken, tokenEquals, tokenFromHeaders, DEFAULT_MCP_ACCOUNT, projectInScope, type McpAccount } from './mcpAuth.ts';
 import { MCP_INSTRUCTIONS, MCP_TOOLS } from './mcpSchema.ts';
-import { runListProjectsTool, runRecallTool } from './mcpRecall.ts';
+import { clientSupportsHtmlDetails, runListProjectsTool, runRecallTool } from './mcpRecall.ts';
 import type { StorageBackend, Pref, L0Port } from './types.ts';
 import { CATEGORIES, isCategory } from './types.ts';
 
@@ -76,8 +76,14 @@ export interface McpHttpHandle {
 
 const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
 
-/** 结果末块：模型未必读 initialize.instructions，这里再要求一次展示方式（批次13：优先折叠块，纯文本客户端回退单行） */
-export const RECALL_ECHO_NOTE = '【展示要求】优先把上一条 display.markdown 整段（<details> 四段：项目背景/命中记忆/Token/省钱与费用，可逐段收起展开）原样输出到最终回答末尾；若客户端不渲染 HTML，则改为单独一行原样输出 display.line（以 🧠 Memory 开头的提示行）。两种方式都不得改写、省略或补全其中的 token 数与金额。';
+/** 结果末块：模型未必读 initialize.instructions，这里再要求一次展示方式。
+ *  批次29 起按客户端能力二选一：实测渲染 HTML 的客户端（Qoder）要 <details> 折叠版；
+ *  其余客户端（DSH 实测只渲染 Markdown、HTML 标签原样露出）要纯 Markdown 四小节版。 */
+export function recallEchoNote(htmlDetails: boolean): string {
+  return htmlDetails
+    ? '【展示要求】优先把上一条 display.markdown 整段（<details> 四段：项目背景/命中记忆/Token/省钱与费用，可逐段收起展开）原样输出到最终回答末尾；若客户端不渲染 HTML，则改为单独一行原样输出 display.line（以 🧠 Memory 开头的提示行）。两种方式都不得改写、省略或补全其中的 token 数与金额。'
+    : '【展示要求】把上一条 display.markdown 整段（纯 Markdown 四个小节：项目背景/命中记忆/Token/省钱与费用）原样输出到最终回答末尾；若客户端不渲染 Markdown，则改为单独一行原样输出 display.line（以 🧠 Memory 开头的提示行）。两种方式都不得改写、省略或补全其中的 token 数与金额，也不得给回答添加任何 HTML 标签。';
+}
 
 /** 启动标准 MCP streamable-http 服务器 */
 export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
@@ -198,7 +204,7 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
                 { type: 'text', text: out.text },
                 { type: 'text', text: JSON.stringify(out.result, null, 2) },
                 { type: 'text', text: markdown ?? out.text },
-                { type: 'text', text: RECALL_ECHO_NOTE },
+                { type: 'text', text: recallEchoNote(clientSupportsHtmlDetails(client)) },
               ]
             : [{ type: 'text', text: JSON.stringify(out.result, null, 2) }];
           return {
