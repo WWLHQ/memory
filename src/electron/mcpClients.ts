@@ -110,10 +110,49 @@ function extractStoredBearer(format: McpClientSpec['format'], text: string | nul
   return null;
 }
 
+/** 批次30：召回审计证据 —— configPath 为 null（配置存应用内部，如 Zcode）或文件扫不到的客户端，
+ *  只要有「以本客户端身份真实调用过 MCP」的审计行，即如实升级为已接入（能带着有效令牌成功召回 = 真接通）。 */
+export interface McpRecallEvidence {
+  ts: number;
+  /** recall 审计 detail.client（如 `zcode/0.16.9`、`dsh-mcp-client/0.0.1`）；非字符串忽略 */
+  client?: unknown;
+}
+
+/** 审计证据升级（纯函数，原地修改 clients）：只升级 manual / no_config / missing_entry /
+ *  missing_auth 四态；conflict / invalid 表示配置文件真实存在但内容有错——审计不能替代修复，保持原状。 */
+export function applyRecallEvidence(clients: McpClientStatus[], recalls: readonly McpRecallEvidence[]): void {
+  if (recalls.length === 0) return;
+  const counts = new Map<string, { n: number; last: number }>();
+  for (const r of recalls) {
+    const name = typeof r.client === 'string' ? r.client.split('/')[0].trim().toLowerCase() : '';
+    if (!name) continue;
+    const cur = counts.get(name) ?? { n: 0, last: 0 };
+    cur.n++;
+    cur.last = Math.max(cur.last, r.ts);
+    counts.set(name, cur);
+  }
+  for (const c of clients) {
+    if (c.state === 'wired' || c.state === 'conflict' || c.state === 'invalid') continue;
+    const spec = MCP_CLIENT_SPECS.find((s) => s.id === c.id);
+    if (!spec) continue;
+    const ids = [spec.id, ...(spec.auditClientIds ?? [])].map((s) => s.toLowerCase());
+    const ev = ids.map((id) => counts.get(id)).find((v) => v && v.n > 0);
+    if (!ev) continue;
+    const last = new Date(ev.last).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
+    c.state = 'wired';
+    c.hasAuth = true;
+    c.error = undefined;
+    c.note = `审计检测到真实调用 ${ev.n} 次（最近 ${last}，UTC+08:00）——配置存应用内部无法读取文件，以审计为准`;
+  }
+}
+
 /** 只读扫描：真实读取每个已知客户端的配置文件，按内容判定接入状态（不返回令牌）。
  *  传入 currentToken 时，「已接入」还要求配置里的令牌与当前 mcp-token.txt 一致——
  *  令牌轮换/数据根迁移后旧配置会静默 401，此处降级为 missing_auth 让一键适配可修复。 */
-export function scanMcpClients(options: { home?: string; appData?: string; endpoint?: string; currentToken?: string } = {}): McpClientsScan {
+export function scanMcpClients(options: {
+  home?: string; appData?: string; endpoint?: string; currentToken?: string;
+  recallEvidence?: readonly McpRecallEvidence[];
+} = {}): McpClientsScan {
   const home = options.home ?? homedir();
   const appData = options.appData ?? process.env.APPDATA ?? join(home, 'AppData', 'Roaming');
   const endpoint = options.endpoint ?? MCP_ENDPOINT;
@@ -165,6 +204,8 @@ export function scanMcpClients(options: { home?: string; appData?: string; endpo
       self.note = `宿主 ${host.name} 尚未接入本服务 —— 对宿主执行一键接入后，本客户端自动接通（无需单独配置）`;
     }
   }
+  // 批次30：召回审计证据升级 —— 文件扫不到但真实调用过的客户端（如 Zcode 配置存应用内部）如实显示已接入
+  applyRecallEvidence(clients, options.recallEvidence ?? []);
   return { endpoint, home, scannedAt: Date.now(), clients };
 }
 

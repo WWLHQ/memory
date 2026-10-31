@@ -25,7 +25,7 @@ import {
   type DataRootMigration, type DataRootSummary,
 } from './dataRoot.ts';
 import { detectLocalAgents, hostAgentConfig } from './agentDetect.ts';
-import { scanMcpClients, snippetForClient, wireMcpClient } from './mcpClients.ts';
+import { applyRecallEvidence, scanMcpClients, snippetForClient, wireMcpClient } from './mcpClients.ts';
 import { createServer as httpCreateServer } from 'node:http';
 import { runMcpServer } from '../core/memagent/mcp.ts';
 import { runMcpHttpServer } from '../core/memagent/mcpHttp.ts';
@@ -609,12 +609,20 @@ function registerDataRootIpc(): void {
 // 状态扫描需登录会话（批次27 P3-4）；含令牌片段与一键写配置会暴露/改写本机凭据 → 仅管理员。
 // 令牌只在返回值出现一次，日志只记客户端/路径/备份与结果，绝不记令牌。
 function registerMcpClientsIpc(token: string): void {
-  handleIpc(IPC.mcpClients, (_e, sessionId?: string) => {
+  handleIpc(IPC.mcpClients, async (_e, sessionId?: string) => {
     // 成功回包形状是 { endpoint, clients, scannedAt }（非 IpcResult）——闸门失败必须抛错，
     // 让渲染层走「扫描失败」路径，而不是被当成空 clients 静默显示「无客户端」。
     const gate = requireSession(sessionId, IPC.mcpClients);
     if (!gate.ok) throw new Error(gate.error);
-    return scanMcpClients({ currentToken: token });
+    // 批次30：召回审计作为接入证据（Zcode 等配置存应用内部的客户端文件扫不到，但真实调用可证明接通）；
+    // 审计读不到时退回纯文件扫描，不影响扫描本身。
+    let recallEvidence: Parameters<typeof applyRecallEvidence>[1] = [];
+    try {
+      recallEvidence = (await storage.queryAudit({ action: 'recall' })).map((a) => ({
+        ts: a.ts, client: (a.detail as { client?: unknown } | null)?.client,
+      }));
+    } catch { /* 证据不可用 → 纯文件口径 */ }
+    return scanMcpClients({ currentToken: token, recallEvidence });
   });
   handleIpc(IPC.mcpClientSnippet, (_e, id: unknown, sessionId?: string) => {
     const gate = requireAdmin(sessionId, IPC.mcpClientSnippet);

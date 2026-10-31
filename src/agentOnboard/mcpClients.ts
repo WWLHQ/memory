@@ -46,6 +46,9 @@ export interface McpClientSpec {
    *  （deepseek harness ← Qoder Desktop）。宿主已接入即本客户端已接入；
    *  一键接入委托给宿主配方真实写入。 */
   inheritsFrom?: McpClientId;
+  /** 批次30：审计证据匹配用的调用方名（recall 审计 detail.client 的首段）——
+   *  默认用 id 本身匹配；客户端自报名与 id 不同时在此显式列出。 */
+  auditClientIds?: string[];
   note?: string;
 }
 
@@ -141,6 +144,7 @@ export const MCP_CLIENT_SPECS: McpClientSpec[] = [
     rulesHint: '工作区 AGENTS.md',
     connectHint: 'deepseek harness 无独立 MCP 配置文件：随宿主（Qoder Desktop）的 mcpServers 下发，宿主接入即生效；宿主未接入时对本客户端点「一键接入」会自动写入宿主配置',
     inheritsFrom: 'qoder-cn',
+    auditClientIds: ['dsh-mcp-client'],
     writable: true,
     note: '批次28-B：宿主继承检测 + 一键接入委托宿主（qoder-cn）真实写入；本机 2026-10-31 实测 recall_memory 经宿主配置走通',
   },

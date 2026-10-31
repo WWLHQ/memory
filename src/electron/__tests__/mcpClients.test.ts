@@ -24,7 +24,7 @@ afterEach(() => {
   for (const d of temps.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
-function statusOf(home: string, id: string, opts: { currentToken?: string } = {}) {
+function statusOf(home: string, id: string, opts: { currentToken?: string; recallEvidence?: readonly { ts: number; client?: unknown }[] } = {}) {
   // appData 也指到临时目录：隔离本机真实的 %APPDATA%/Trae CN/User/mcp.json
   return scanMcpClients({ home, appData: home, ...opts }).clients.find((c) => c.id === id)!;
 }
@@ -388,5 +388,54 @@ describe('批次27 令牌过期检测（防假「已接入」）', () => {
       '',
     ].join('\n'));
     expect(statusOf(home, 'codex', { currentToken: TOKEN }).state).toBe('wired');
+  });
+});
+
+describe('applyRecallEvidence（批次30：审计证据升级）', () => {
+  test('configPath 为 null 的 Zcode：manual + 真实调用审计 → wired（以审计为准）', () => {
+    const home = tempHome();
+    mkdirSync(join(home, '.zcode'), { recursive: true });
+    const zc = statusOf(home, 'zcode', {
+      recallEvidence: [{ ts: Date.now(), client: 'zcode/0.16.9' }],
+    });
+    expect(zc.state).toBe('wired');
+    expect(zc.hasAuth).toBe(true);
+    expect(zc.note).toContain('审计检测到真实调用 1 次');
+    expect(zc.note).toContain('以审计为准');
+  });
+
+  test('调用方名不匹配（UA 兜底串 / 未知客户端）不升级', () => {
+    const home = tempHome();
+    const zc = statusOf(home, 'zcode', {
+      recallEvidence: [{ ts: Date.now(), client: 'Cursor (UA)' }, { ts: Date.now(), client: 'unknown-agent/1.0' }],
+    });
+    expect(zc.state).toBe('manual');
+  });
+
+  test('conflict / invalid：文件真实存在但有错 → 审计不替代修复，保持原状', () => {
+    const home = tempHome();
+    write(home, '.qoder-cn/settings.json', JSON.stringify({
+      mcpServers: { 'MultiAgent Memory': { type: 'http', url: 'http://127.0.0.1:9999/mcp' } },
+    }));
+    const q = statusOf(home, 'qoder-cn', {
+      recallEvidence: [{ ts: Date.now(), client: 'qoder/1.0' }],
+    });
+    expect(q.state).toBe('conflict');
+  });
+
+  test('deepseek harness：auditClientIds 命中 dsh-mcp-client → 即使宿主未接入也升级 wired', () => {
+    const home = tempHome();
+    mkdirSync(join(home, '.dsh'), { recursive: true });
+    const dsh = statusOf(home, 'deepseek-harness', {
+      recallEvidence: [{ ts: Date.now(), client: 'dsh-mcp-client/0.0.1' }],
+    });
+    expect(dsh.state).toBe('wired');
+    expect(dsh.note).toContain('审计检测到真实调用');
+  });
+
+  test('无证据 / 空数组：完全不影响原判定', () => {
+    const home = tempHome();
+    expect(statusOf(home, 'zcode').state).toBe('manual');
+    expect(statusOf(home, 'zcode', { recallEvidence: [] }).state).toBe('manual');
   });
 });
