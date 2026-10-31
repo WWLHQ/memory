@@ -56,3 +56,6 @@ e2e/.cde.json
 
 # 批次5：覆盖率产物
 /coverage
+
+# DSH 本地插件包（cordis.patch.yml 含 MCP Bearer 令牌，绝不入库）
+/dsh-bundles/
