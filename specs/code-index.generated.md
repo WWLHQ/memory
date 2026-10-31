@@ -3,7 +3,7 @@
 > 由 `npm run code:index` 生成，请勿手改；改代码后重跑即可。
 > 用法：先在本表定位文件与导出符号，再只读该文件的局部区间（省 token、少误改）。
 
-共 281 个源码文件。
+共 285 个源码文件。
 
 ## e2e
 
@@ -73,7 +73,7 @@
 
 | 文件 | 行数 | 摘要 | 导出 |
 |---|---|---|---|
-| [src/desktop/hostBridge.ts](src/desktop/hostBridge.ts) | 305 | 宿主桥（iframe 场景）：把 preload 能力透传给概览页 iframe 内的子页面。 | hostLog(fn), handleBridgeMessage(fn), isEmbedded(fn), installHostBridge(fn), hostCall(fn), hostCapability(fn), HostLogOptions(type), HostMethod(type) |
+| [src/desktop/hostBridge.ts](src/desktop/hostBridge.ts) | 310 | 宿主桥（iframe 场景）：把 preload 能力透传给概览页 iframe 内的子页面。 | hostLog(fn), handleBridgeMessage(fn), isEmbedded(fn), installHostBridge(fn), hostCall(fn), hostCapability(fn), HostLogOptions(type), HostMethod(type) |
 | [src/desktop/hostScan.ts](src/desktop/hostScan.ts) | 185 | 宿主真扫（discover 真实化）· 纯类型 + 纯匹配层（零 node 依赖，可安全打进浏览器包）。 | matchAgentsFromProcesses(fn), matchAgentsFromMcp(fn), matchAgentsFromConfigFiles(fn), mergeHostAgents(fn), AGENT_FINGERPRINTS(const), AgentFingerprint(type), HostAgentFound(type), HostScanResult(type), HostScanApi(type) |
 | [src/desktop/ipcStorage.ts](src/desktop/ipcStorage.ts) | 93 | 桌面端存储桥接（Electron 渲染进程侧）：把内核 StorageBackend 接口经 preload 暴露的 | IpcStorageBackend(class), StorageIpc(type) |
 
@@ -83,13 +83,14 @@
 |---|---|---|---|
 | [src/electron/actionLog.ts](src/electron/actionLog.ts) | 188 | 主进程动作日志（批次7）：把 shared/actionLog 的条目追加到 <数据根>/actions.log。 | initActionLog(fn), actionLogPath(fn), actionLog(fn), actionLogError(fn), tailActionLog(fn), resetActionLog(fn), ActionLogInitOptions(type) |
 | [src/electron/agentDetect.ts](src/electron/agentDetect.ts) | 322 | 本机 Agent 检测 · 后续扩展（2026-10-24）· 主进程 node 层（仅 Electron 使用） | detectLocalAgents(fn), detectCliAgents(fn), hostAgentConfig(fn), LocalAgentFound(type), AgentConfigSuggestion(type) |
-| [src/electron/dataRoot.ts](src/electron/dataRoot.ts) | 318 | 数据根目录（批次6）：记忆库、采集游标、日志、MCP 令牌、备份配置等全部持久数据 | defaultDataRoot(fn), dataRootPointerPath(fn), readDataRootPointer(fn), writeDataRootPointer(fn), clearDataRootMigrateFrom(fn), validateDataRootPath(fn), samePath(fn), ensureDirWritable(fn), hasAnyData(fn), summarizeDataDir(fn), detectDataRoots(fn), migrateDataRoot(fn), DATA_ROOT_DIR_NAME(const), DATA_ROOT_POINTER_NAME(const), DATA_ROOT_POINTER_VERSION(const), DATA_ROOT_MIGRATE_FILES(const), DATA_ROOT_MIGRATE_DIRS(const), DataRootPointer(type), DataRootSummary(type), DataRootMigration(type), DataRootPointerRead(type) |
+| [src/electron/dataRoot.ts](src/electron/dataRoot.ts) | 320 | 数据根目录（批次6）：记忆库、采集游标、日志、MCP 令牌、备份配置等全部持久数据 | defaultDataRoot(fn), dataRootPointerPath(fn), readDataRootPointer(fn), writeDataRootPointer(fn), clearDataRootMigrateFrom(fn), validateDataRootPath(fn), samePath(fn), ensureDirWritable(fn), hasAnyData(fn), summarizeDataDir(fn), detectDataRoots(fn), migrateDataRoot(fn), DATA_ROOT_DIR_NAME(const), DATA_ROOT_POINTER_NAME(const), DATA_ROOT_POINTER_VERSION(const), DATA_ROOT_MIGRATE_FILES(const), DATA_ROOT_MIGRATE_DIRS(const), DataRootPointer(type), DataRootSummary(type), DataRootMigration(type), DataRootPointerRead(type) |
 | [src/electron/hostScan.ts](src/electron/hostScan.ts) | 163 | 宿主真扫 · node IO 层（仅 Electron 主进程使用）： | parseTasklistCsv(fn), parseWmicJson(fn), listProcessNames(fn), detectMcpEntries(fn), detectConfigFiles(fn), scanHost(fn) |
-| [src/electron/ipcChannels.ts](src/electron/ipcChannels.ts) | 97 | preload 暴露的 IPC channel 清单（唯一真源）。 | missingChannels(fn), formatBootFailure(fn), handleBootFailure(fn), IPC(const), PRELOAD_CHANNELS(const), BootFailureDeps(type) |
+| [src/electron/ipcChannels.ts](src/electron/ipcChannels.ts) | 102 | preload 暴露的 IPC channel 清单（唯一真源）。 | missingChannels(fn), formatBootFailure(fn), handleBootFailure(fn), IPC(const), PRELOAD_CHANNELS(const), BootFailureDeps(type) |
 | [src/electron/l0KeyringStore.ts](src/electron/l0KeyringStore.ts) | 72 | L0 密钥环落盘适配（§4.4.8）：l0-keyring.json 原子写（temp → fsync → rename）， | writeFileAtomic(fn), createL0KeyringStore(fn), createHomeLockStore(fn), cleanupTempFiles(fn) |
-| [src/electron/main.ts](src/electron/main.ts) | 1923 | Electron 主进程入口： | — |
+| [src/electron/llmGateway.ts](src/electron/llmGateway.ts) | 266 | 批次31：LLM 精炼网关（主进程唯一真源）——「简单的用 Ollama，需要深入的用 DeepSeek」。 | defaultLlmConfig(fn), loadLlmConfig(fn), saveLlmConfig(fn), loadDeepseekKey(fn), saveDeepseekKey(fn), buildLayerPrompt(fn), testOllama(fn), testDeepseek(fn), loadLlmGateway(fn), deepseekKeyExists(fn), LLM_CONFIG_FILE(const), LLM_KEY_FILE(const), DEEPSEEK_BASE_URL(const), TieredLlmProvider(class), LlmEngineConfig(type), LlmGatewayConfig(type), EngineTestResult(type) |
+| [src/electron/main.ts](src/electron/main.ts) | 2020 | Electron 主进程入口： | — |
 | [src/electron/mcpClients.ts](src/electron/mcpClients.ts) | 289 | MCP 客户端配置读写 · node 层（批次15，仅 Electron 主进程使用）。 | expandHome(fn), applyRecallEvidence(fn), scanMcpClients(fn), snippetForClient(fn), wireMcpClient(fn), McpClientStatus(type), McpClientsScan(type), McpWireResult(type), McpRecallEvidence(type) |
-| [src/electron/preload.ts](src/electron/preload.ts) | 150 | Electron preload：contextIsolation 开启下，经 contextBridge 向渲染进程暴露存储桥接面与运行标识。 | — |
+| [src/electron/preload.ts](src/electron/preload.ts) | 163 | Electron preload：contextIsolation 开启下，经 contextBridge 向渲染进程暴露存储桥接面与运行标识。 | — |
 | [src/electron/webhookServer.ts](src/electron/webhookServer.ts) | 103 | Webhook HTTP 服务（批次26-A P0-4，从 main.ts 内联处理器抽出以便单测）： | createWebhookHttpServer(fn), WebhookServerOptions(type) |
 
 ## src/home
@@ -212,8 +213,9 @@
 | [src/web/growth/useGrowthMirror.ts](src/web/growth/useGrowthMirror.ts) | 11 | 自我净化与生长页后端镜像：growth_op 动作审计上抛（G6 fire-and-forget）。 | useGrowthMirror(fn) |
 | [src/web/growth/useGrowthReal.ts](src/web/growth/useGrowthReal.ts) | 182 | 自我净化与生长页（REQ-009 / P14）· 真实数据接真层 | samplesFromMemories(fn), metricsFromLedger(fn), dedupStatsFromLedger(fn), deltaSeriesFromLedger(fn), scheduleReal(fn), loadRealGrowthData(fn), GROWTH_REAL_DATA_SOURCE(const), RealGrowth(type), RealStorage(type) |
 | [src/web/growth/useToast.tsx](src/web/growth/useToast.tsx) | 13 | — | useToast(fn) |
+| [src/web/hostLlm.ts](src/web/hostLlm.ts) | 98 | 批次31：渲染层 LLM Provider —— 内核写路径的逐层精炼经 llm:refine IPC 代理主进程网关。 | hostLlmAvailable(fn), refreshHostLlmSnapshot(fn), refreshHostLlmSnapshotOnce(fn), applyHostLlmSnapshot(fn), createHostLlm(fn), LlmEngineSnapshot(type), LlmGatewaySnapshot(type) |
 | [src/web/httpStorage.ts](src/web/httpStorage.ts) | 102 | 批次28-A：浏览器内核数据面 —— StorageBackend 的 HTTP 透传实现。 | fetchKernelInfo(fn), KernelUnavailableError(class), HttpStorageBackend(class), HttpStorageOptions(type), KernelInfo(type) |
-| [src/web/kernel.ts](src/web/kernel.ts) | 219 | 统一内核接入口：全部页面共用同一份账本（唯一真相源）。 | getTenant(fn), bindTenant(fn), syncTenantFromHost(fn), kernelAccount(fn), setKernelStorageForTests(fn), getKernelStorage(fn), rebuildKernelForDataPlane(fn), setKernelL0ForTests(fn), getKernelWithSeed(fn), getKernel(fn), createKernelOnSameStorage(fn), rebuildKernelFromModelConfig(fn), resetKernelForTests(fn), newRequestId(fn), KERNEL_FORM(const), KernelTenant(type), KernelOverrides(type) |
+| [src/web/kernel.ts](src/web/kernel.ts) | 222 | 统一内核接入口：全部页面共用同一份账本（唯一真相源）。 | getTenant(fn), bindTenant(fn), syncTenantFromHost(fn), kernelAccount(fn), setKernelStorageForTests(fn), getKernelStorage(fn), rebuildKernelForDataPlane(fn), setKernelL0ForTests(fn), getKernelWithSeed(fn), getKernel(fn), createKernelOnSameStorage(fn), rebuildKernelFromModelConfig(fn), resetKernelForTests(fn), newRequestId(fn), KERNEL_FORM(const), KernelTenant(type), KernelOverrides(type) |
 | [src/web/lifecycle/LifecycleCard.tsx](src/web/lifecycle/LifecycleCard.tsx) | 51 | 生命周期页（REQ-006 / P4）状态查看器（T3） | LifecycleCard(fn) |
 | [src/web/lifecycle/LifecyclePage.tsx](src/web/lifecycle/LifecyclePage.tsx) | 293 | 生命周期页（REQ-006 / P4）· 完整编排（T5）· 真实数据接真版 | LifecyclePage(fn) |
 | [src/web/lifecycle/ParamPanel.tsx](src/web/lifecycle/ParamPanel.tsx) | 75 | 生命周期页（REQ-006 / P4）调参面板（T4） | ParamPanel(fn) |
@@ -282,10 +284,12 @@
 | [src/web/params/DevPanel.tsx](src/web/params/DevPanel.tsx) | 87 | P5-T3 开发者模式（折叠面板，暴露底层参数；2.4.3 / 2.4.1 / 15.3 / 9.10 / 15.1） | DevPanel(fn) |
 | [src/web/params/KbManagementCard.tsx](src/web/params/KbManagementCard.tsx) | 267 | 全局参数页（REQ-006 / P5）· 记忆库管理卡片 | KbManagementCard(fn) |
 | [src/web/params/KbPolicyTable.tsx](src/web/params/KbPolicyTable.tsx) | 61 | P5-T3 知识库策略表（17.6 六类，逐行可编辑，保存前校验数值区间） | KbPolicyTable(fn) |
+| [src/web/params/LlmEngineCard.tsx](src/web/params/LlmEngineCard.tsx) | 191 | 全局参数页 · LLM 精炼引擎卡片（批次31）：Ollama 管简单层（L2）、DeepSeek 管深层（L3–L6）， | LlmEngineCard(fn) |
 | [src/web/params/NormalConfigCard.tsx](src/web/params/NormalConfigCard.tsx) | 84 | P5-T3 普通配置卡（17.6 文案化，G7 不暴露参数名） | NormalConfigCard(fn) |
-| [src/web/params/ParamsPage.tsx](src/web/params/ParamsPage.tsx) | 106 | 全局参数页（REQ-006 / P5）T4 编排 | ParamsPage(fn) |
+| [src/web/params/ParamsPage.tsx](src/web/params/ParamsPage.tsx) | 108 | 全局参数页（REQ-006 / P5）T4 编排 | ParamsPage(fn) |
 | [src/web/params/coreParams.ts](src/web/params/coreParams.ts) | 65 | 全局参数页（REQ-006 / P5）接真内核：参数快照存内核 preference 记忆（params:v1: JSON， | coreLoadParams(fn), coreSaveParams(fn) |
 | [src/web/params/defaults.ts](src/web/params/defaults.ts) | 50 | 全局参数页默认值与展示标签（规格常量；用户保存后以内核 preference 快照为真相）。 | DEFAULT_CONFIG(const), SPEED_LABEL(const), RETENTION_LABEL(const), IMPORTANCE_LABEL(const), DEFAULT_KB_POLICIES(const), DEFAULT_DEV(const), LEVEL_MAPPING(const) |
+| [src/web/params/llmEngine.ts](src/web/params/llmEngine.ts) | 62 | 全局参数页 · LLM 精炼引擎桥（批次31）：渲染层经宿主桥走 llm:* IPC 调主进程网关。 | llmEngineAvailable(fn), llmGetConfig(fn), llmSaveConfig(fn), llmTestEngine(fn), LlmConfigView(type), LlmTestResult(type) |
 | [src/web/params/logic.ts](src/web/params/logic.ts) | 75 | 全局参数页（REQ-006 / P5）纯逻辑层 | speedToHalfLife(fn), retentionToArchive(fn), validateWeights(fn), payloadOrdered(fn), validateKbRow(fn), validateNM(fn), validateUnitPrice(fn), validateAll(fn), auditParams(fn) |
 | [src/web/params/paramsEntry.tsx](src/web/params/paramsEntry.tsx) | 10 | 全局参数页（REQ-006 / P5）入口 | — |
 | [src/web/params/types.ts](src/web/params/types.ts) | 41 | 全局参数页（REQ-006 / P5）数据模型 | NormalConfig(type), KbPolicyRow(type), DevParams(type), ForgetSpeed(type), Retention(type), ImportanceLevel(type) |
@@ -389,18 +393,19 @@ src/core/memagent/types.ts e46c7acf36d2
 src/core/memagent/ulid.ts 634c99f1962a
 src/core/memagent/vector.ts c51101cb38c0
 src/core/memagent/webhook.ts deae36bbc0ca
-src/desktop/hostBridge.ts 7d2d139733a1
+src/desktop/hostBridge.ts 6cc2bfb70551
 src/desktop/hostScan.ts 0559ae3ef556
 src/desktop/ipcStorage.ts f2b062a694a3
 src/electron/actionLog.ts 209f1eaec0b3
 src/electron/agentDetect.ts 3c31af9a1ae7
-src/electron/dataRoot.ts 03964b375042
+src/electron/dataRoot.ts 9b8a204dade0
 src/electron/hostScan.ts 694d58d7048c
-src/electron/ipcChannels.ts 4a2d2dc7703f
+src/electron/ipcChannels.ts cc81cd4a4110
 src/electron/l0KeyringStore.ts b900f5d523d5
-src/electron/main.ts 930109623ea7
+src/electron/llmGateway.ts 57ec35813a72
+src/electron/main.ts 28f070a6c0ac
 src/electron/mcpClients.ts 11a393a86b83
-src/electron/preload.ts 34714a36e3d0
+src/electron/preload.ts c8b4f28ae5f9
 src/electron/webhookServer.ts 62157c0b1e21
 src/home/dashboard.ts a23bc82dbf9d
 src/home/server.ts b1aa1b8777d6
@@ -498,8 +503,9 @@ src/web/growth/types.ts b0a835f61188
 src/web/growth/useGrowthMirror.ts f485e5b5dae2
 src/web/growth/useGrowthReal.ts a1834cc7986e
 src/web/growth/useToast.tsx 85cd09d2e1f5
+src/web/hostLlm.ts c08e976cbe9c
 src/web/httpStorage.ts 0a276a4ccb4a
-src/web/kernel.ts d2a9e4940452
+src/web/kernel.ts 7559bea8cbb1
 src/web/lifecycle/LifecycleCard.tsx c115dc841539
 src/web/lifecycle/LifecyclePage.tsx 311822ea441f
 src/web/lifecycle/ParamPanel.tsx 5858a0c4c600
@@ -568,10 +574,12 @@ src/web/overview/overviewEntry.tsx 5f4488678cc7
 src/web/params/DevPanel.tsx 4d2f45da1bcd
 src/web/params/KbManagementCard.tsx ae71b9713586
 src/web/params/KbPolicyTable.tsx b50f471cc589
+src/web/params/LlmEngineCard.tsx fc777812cd74
 src/web/params/NormalConfigCard.tsx f6da14e007e0
-src/web/params/ParamsPage.tsx 903098f3dcc7
+src/web/params/ParamsPage.tsx 52bb6ffb06d6
 src/web/params/coreParams.ts ddf4cbba772c
 src/web/params/defaults.ts aae990e826ed
+src/web/params/llmEngine.ts 5ea8f438bdbb
 src/web/params/logic.ts 72f8c9893dc5
 src/web/params/paramsEntry.tsx 47657233be13
 src/web/params/types.ts 58c344267f04
