@@ -23,24 +23,24 @@ describe('配方常量', () => {
     expect(MCP_CLIENT_SPECS.find((s) => s.id === 'codex')?.format).toBe('toml');
   });
 
-  test('批次27：JSON/TOML 已知结构客户端均可一键写入，托管/无配置客户端仍只给指引', () => {
-    for (const id of ['qoder-cn', 'claude-code', 'cursor', 'gemini-cli', 'qwen-code', 'codex', 'trae-cn']) {
+  test('批次27：JSON/TOML 已知结构客户端均可一键写入，仅 zcode 仍只给指引', () => {
+    for (const id of ['qoder-cn', 'claude-code', 'cursor', 'gemini-cli', 'qwen-code', 'codex', 'trae-cn', 'workbuddy']) {
       expect(specOfMcpClient(id).writable).toBe(true);
       expect(specOfMcpClient(id).connectHint.length).toBeGreaterThan(0);
     }
-    // 批次28-B：workbuddy（应用托管+跨设备同步，自动写入会被覆盖）与 zcode（实机无 MCP 配置面）仍只读；
-    // deepseek-harness 升级为「宿主继承可写」——一键接入委托宿主 qoder-cn 真实写入。
-    for (const id of ['workbuddy', 'zcode']) {
-      expect(specOfMcpClient(id).writable).toBe(false);
-      expect(specOfMcpClient(id).connectHint.length).toBeGreaterThan(0);
-    }
+    // 批次28-D：workbuddy 实机确认 ~/.workbuddy/mcp.json（应用内编辑器直显该路径）→ 升级可写；
+    // zcode 配置存应用内部存储（IndexedDB）无稳定文件可合并 → 只读 + 手工指引；
+    // deepseek-harness 宿主继承可写——一键接入委托宿主 qoder-cn 真实写入。
+    expect(specOfMcpClient('zcode').writable).toBe(false);
+    expect(specOfMcpClient('zcode').connectHint.length).toBeGreaterThan(0);
     const dsh = specOfMcpClient('deepseek-harness');
     expect(dsh.writable).toBe(true);
     expect(dsh.inheritsFrom).toBe('qoder-cn');
     expect(dsh.configPath).toBeNull();
     const wb = specOfMcpClient('workbuddy');
-    expect(wb.dynamicConfigGlob).toBe('~/.workbuddy/connectors/*/mcp.json');
+    expect(wb.configPath).toBe('~/.workbuddy/mcp.json');
     expect(wb.format).toBe('json');
+    expect(wb.entryStyle).toBe('type+url');
   });
 
   test('未知客户端 → 明确报错（不静默落到默认配方）', () => {
@@ -76,7 +76,7 @@ describe('buildMcpEntry / renderMcpSnippet', () => {
     const text = renderMcpSnippet(zcode, EP, TOKEN);
     expect(text).toContain(EP);
     expect(text).toContain(`Authorization: Bearer ${TOKEN}`);
-    expect(text).toContain('客户端内添加');
+    expect(text).toContain('客户端内一次配置');
     // 批次28-B：WorkBuddy 升级为 JSON 格式（动态检出 connectors 下的 mcp.json）→ 片段为 mcpServers 结构
     const wbText = renderMcpSnippet(specOfMcpClient('workbuddy'), EP, TOKEN);
     expect(() => JSON.parse(wbText) as unknown).not.toThrow();

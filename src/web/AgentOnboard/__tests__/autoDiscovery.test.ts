@@ -134,7 +134,7 @@ describe('autoWireMcpForAgents（连通后自动写 MCP）', () => {
     const wire = vi.fn(() => Promise.resolve({ ok: true, changed: true }));
     setApi({ mcpClients: { wire } });
     const s = await autoWireMcpForAgents(
-      ['Claude Code', 'Cursor', 'Codex', 'WorkBuddy'],
+      ['Claude Code', 'Cursor', 'Codex', 'Zcode'],
       {
         capability: 'native',
         endpoint: MCP_ENDPOINT,
@@ -152,10 +152,10 @@ describe('autoWireMcpForAgents（连通后自动写 MCP）', () => {
     expect(s.failed[0].reason).toContain('拒绝覆盖');
     expect(s.wired).toEqual(['Cursor', 'Codex']);
     expect(s.changed).toEqual(['Codex']);
-    expect(s.manual).toEqual(['WorkBuddy']); // 无稳定配置文件，只给人手指引
+    expect(s.manual).toEqual(['Zcode']); // 应用内部存储无稳定配置文件，只给人手指引
   });
 
-  it('未收录 MCP 配方的 Agent（如 WorkBuddy 之外的未知名）不计数，不伪造摘要', async () => {
+  it('未收录 MCP 配方的 Agent（如 Zcode 之外的未知名）不计数，不伪造摘要', async () => {
     const s = await autoWireMcpForAgents(['SomeUnknownAgent'], scan, { sid: 'sid', role: 'admin' });
     expect(s).toEqual({ endpoint: MCP_ENDPOINT, wired: [], changed: [], manual: [], failed: [] });
   });

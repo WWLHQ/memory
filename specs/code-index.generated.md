@@ -22,7 +22,7 @@
 |---|---|---|---|
 | [src/agentOnboard/client.ts](src/agentOnboard/client.ts) | 110 | Agent 接入 HTTP 客户端（REQ-003 接真实后端 · T14） | AgentOnboardClient(class) |
 | [src/agentOnboard/formMatrix.ts](src/agentOnboard/formMatrix.ts) | 35 | 按端置灰矩阵 (REQ-003 §9 / 19.10 / T10) | signalSourcesForForm(fn), isSourceGrayed(fn), SIGNAL_SOURCES(const), SignalSource(type) |
-| [src/agentOnboard/mcpClients.ts](src/agentOnboard/mcpClients.ts) | 394 | MCP 客户端接入配方（批次15）：单一真源。 | specOfMcpClient(fn), buildMcpEntry(fn), renderMcpSnippet(fn), probeJsonConfig(fn), probeTomlConfig(fn), probeClientConfig(fn), mergeMcpJsonConfig(fn), mergeMcpTomlConfig(fn), MCP_ENDPOINT(const), MCP_CLIENT_SPECS(const), McpClientSpec(type), McpConfigProbe(type), McpClientId(type), McpConfigFormat(type), McpEntryStyle(type), McpWireState(type) |
+| [src/agentOnboard/mcpClients.ts](src/agentOnboard/mcpClients.ts) | 391 | MCP 客户端接入配方（批次15）：单一真源。 | specOfMcpClient(fn), buildMcpEntry(fn), renderMcpSnippet(fn), probeJsonConfig(fn), probeTomlConfig(fn), probeClientConfig(fn), mergeMcpJsonConfig(fn), mergeMcpTomlConfig(fn), MCP_ENDPOINT(const), MCP_CLIENT_SPECS(const), McpClientSpec(type), McpConfigProbe(type), McpClientId(type), McpConfigFormat(type), McpEntryStyle(type), McpWireState(type) |
 | [src/agentOnboard/probe.ts](src/agentOnboard/probe.ts) | 38 | Agent 接入真实拨测（Phase C2）：以「本机安装痕迹」为唯一真相。 | createHostAgentProbe(fn), HostAgentProbeOptions(type) |
 | [src/agentOnboard/server.ts](src/agentOnboard/server.ts) | 288 | Agent 接入真实后端（REQ-003 接真实后端 · T13） | createServer(fn), RunningServer(type) |
 | [src/agentOnboard/service.ts](src/agentOnboard/service.ts) | 343 | Agent 接入服务层(REQ-003 T11 集成 / T12 E2E 链路) | AgentOnboardService(class), OnboardBackend(type), ConfigureResult(type), TestResult(type), RotateResult(type), ProbeResult(type), OnboardServiceOptions(type), OneClickResult(type), AuditEntry(type), DiscoverInput(type), AgentProbe(type) |
@@ -88,7 +88,7 @@
 | [src/electron/ipcChannels.ts](src/electron/ipcChannels.ts) | 97 | preload 暴露的 IPC channel 清单（唯一真源）。 | missingChannels(fn), formatBootFailure(fn), handleBootFailure(fn), IPC(const), PRELOAD_CHANNELS(const), BootFailureDeps(type) |
 | [src/electron/l0KeyringStore.ts](src/electron/l0KeyringStore.ts) | 72 | L0 密钥环落盘适配（§4.4.8）：l0-keyring.json 原子写（temp → fsync → rename）， | writeFileAtomic(fn), createL0KeyringStore(fn), createHomeLockStore(fn), cleanupTempFiles(fn) |
 | [src/electron/main.ts](src/electron/main.ts) | 1915 | Electron 主进程入口： | — |
-| [src/electron/mcpClients.ts](src/electron/mcpClients.ts) | 275 | MCP 客户端配置读写 · node 层（批次15，仅 Electron 主进程使用）。 | expandHome(fn), scanMcpClients(fn), snippetForClient(fn), wireMcpClient(fn), McpClientStatus(type), McpClientsScan(type), McpWireResult(type) |
+| [src/electron/mcpClients.ts](src/electron/mcpClients.ts) | 248 | MCP 客户端配置读写 · node 层（批次15，仅 Electron 主进程使用）。 | expandHome(fn), scanMcpClients(fn), snippetForClient(fn), wireMcpClient(fn), McpClientStatus(type), McpClientsScan(type), McpWireResult(type) |
 | [src/electron/preload.ts](src/electron/preload.ts) | 150 | Electron preload：contextIsolation 开启下，经 contextBridge 向渲染进程暴露存储桥接面与运行标识。 | — |
 | [src/electron/webhookServer.ts](src/electron/webhookServer.ts) | 103 | Webhook HTTP 服务（批次26-A P0-4，从 main.ts 内联处理器抽出以便单测）： | createWebhookHttpServer(fn), WebhookServerOptions(type) |
 
@@ -134,7 +134,7 @@
 | [src/web/AgentOnboard/Gains.tsx](src/web/AgentOnboard/Gains.tsx) | 25 | 效果证据 · 用户可感知的「省」与「快」（19.1 / 9.x / 2.4.x / 19.8 反代理） | Gains(fn) |
 | [src/web/AgentOnboard/IsolationConfig.tsx](src/web/AgentOnboard/IsolationConfig.tsx) | 34 | 隔离粒度配置行（规格 19.4 · R1 project_id 共享 / user_id 偏好跨项目） | IsolationConfig(fn) |
 | [src/web/AgentOnboard/KeyMgmt.tsx](src/web/AgentOnboard/KeyMgmt.tsx) | 21 | 密钥管理行（规格 T7 / §4 · R5 恒脱敏不回显 / R6 轮换宽限 24h / 超 90 天告警） | KeyMgmt(fn) |
-| [src/web/AgentOnboard/McpClientsPanel.tsx](src/web/AgentOnboard/McpClientsPanel.tsx) | 411 | MCP 客户端接入面板（批次15 建 / 批次21 交互收敛 / 批次23 一键适配全部 + 逐客户端接通指引）： | McpClientsPanel(fn) |
+| [src/web/AgentOnboard/McpClientsPanel.tsx](src/web/AgentOnboard/McpClientsPanel.tsx) | 412 | MCP 客户端接入面板（批次15 建 / 批次21 交互收敛 / 批次23 一键适配全部 + 逐客户端接通指引）： | McpClientsPanel(fn) |
 | [src/web/AgentOnboard/McpToolConfig.tsx](src/web/AgentOnboard/McpToolConfig.tsx) | 61 | MCP 工具配置行（规格 T5 / 19.5 · 须带 project_id） | toolRef(fn), McpToolConfig(fn) |
 | [src/web/AgentOnboard/OneClickOnboard.tsx](src/web/AgentOnboard/OneClickOnboard.tsx) | 248 | 一键接入本机 Agent（规格 T4 / AC-003.4 / 19.9 · 扫→分→绑→验 四段进度 + 自动绑定 + 可撤销） | OneClickOnboard(fn) |
 | [src/web/AgentOnboard/TestPanel.tsx](src/web/AgentOnboard/TestPanel.tsx) | 70 | 接入测试面板（规格 T8 / AC-003.8 · R7 必记 request_id · 注入预览） | TestPanel(fn), TestEvidence(type) |
@@ -353,7 +353,7 @@ e2e/run.mjs 3a472110f3e2
 e2e/servers.ts 1b241a102adf
 src/agentOnboard/client.ts 165163775053
 src/agentOnboard/formMatrix.ts e7dd02db5873
-src/agentOnboard/mcpClients.ts 6d766b20f339
+src/agentOnboard/mcpClients.ts 37170d869c1c
 src/agentOnboard/probe.ts b1d3392a8393
 src/agentOnboard/server.ts 8d5defd4c8c1
 src/agentOnboard/service.ts 298c23facc74
@@ -399,7 +399,7 @@ src/electron/hostScan.ts 694d58d7048c
 src/electron/ipcChannels.ts 4a2d2dc7703f
 src/electron/l0KeyringStore.ts b900f5d523d5
 src/electron/main.ts edf50b529086
-src/electron/mcpClients.ts a206ee16af2d
+src/electron/mcpClients.ts b4354a0164c4
 src/electron/preload.ts 34714a36e3d0
 src/electron/webhookServer.ts 62157c0b1e21
 src/home/dashboard.ts a23bc82dbf9d
@@ -420,7 +420,7 @@ src/web/AgentOnboard/FormBadge.tsx b2425eba179f
 src/web/AgentOnboard/Gains.tsx 5dd221d1770f
 src/web/AgentOnboard/IsolationConfig.tsx ae7060ad6cce
 src/web/AgentOnboard/KeyMgmt.tsx 1f40e96ae2f1
-src/web/AgentOnboard/McpClientsPanel.tsx cce4433f8436
+src/web/AgentOnboard/McpClientsPanel.tsx ce356bc8194d
 src/web/AgentOnboard/McpToolConfig.tsx 0450306a0a33
 src/web/AgentOnboard/OneClickOnboard.tsx 6d27b6fefff5
 src/web/AgentOnboard/TestPanel.tsx 616d8c8aaa4f

@@ -206,7 +206,6 @@ describe('wireMcpClient', () => {
 
   test('无稳定配置路径客户端 → 拒绝自动写入（诚实提示手工；deepseek-harness 宿主继承委托见 28-B 组）', () => {
     const home = tempHome();
-    expect(wireMcpClient('workbuddy', TOKEN, { home })).toMatchObject({ ok: false });
     expect(wireMcpClient('zcode', TOKEN, { home })).toMatchObject({ ok: false });
   });
 });
@@ -276,34 +275,46 @@ describe('批次27 Trae CN 真写', () => {
   });
 });
 
-// ── 批次28-B：三个「需手工」客户端的再审查 ——
-// ① WorkBuddy：应用托管（~/.workbuddy/connectors/<企业ID>/mcp.json 由客户端生成并跨设备同步），
-//    自动写入会被同步覆盖 → 只做自动检出（dynamicConfigGlob），绝不代写；
+// ── 批次28-B/28-D：三个客户端的再审查 ——
+// ① WorkBuddy：28-D 实机确认稳定配置 ~/.workbuddy/mcp.json（应用内编辑器直显该路径）→ 升级可写（备份+合并）；
 // ② deepseek harness：无独立配置面，MCP 随宿主 Qoder 下发 → inheritsFrom，一键接入委托宿主真实写入；
-// ③ Zcode：实机排查无任何 MCP 配置面 → 保持手工指引（诚实，不伪造）。
-describe('批次28-B 动态配置面与宿主继承', () => {
-  test('WorkBuddy：connectors 下有 mcp.json → 自动检出并按内容判定状态；无 → 如实「需手工」', () => {
+// ③ Zcode：配置存应用内部存储（表单/JSON 两种方式，无文件路径）→ 保持手工指引（诚实，不伪造）。
+describe('批次28-B/28-D 三客户端再审查', () => {
+  test('WorkBuddy：~/.workbuddy/mcp.json 按内容判定状态；一键写入备份+合并保留其它条目，复扫 wired', () => {
     const home = tempHome();
-    expect(statusOf(home, 'workbuddy').state).toBe('manual');
+    expect(statusOf(home, 'workbuddy').state).toBe('no_config');
 
-    write(home, '.workbuddy/connectors/acme-id/mcp.json', JSON.stringify({
-      mcpServers: { 'MultiAgent Memory': { type: 'http', url: MCP_ENDPOINT, headers: { Authorization: `Bearer ${TOKEN}` } } },
-    }));
-    const wb = statusOf(home, 'workbuddy', { currentToken: TOKEN });
-    expect(wb.state).toBe('wired');
-    expect(wb.installed).toBe(true);
-    expect(wb.displayPath).toBe('~/.workbuddy/connectors/*/mcp.json');
-    expect(wb.path).toContain(join('.workbuddy', 'connectors', 'acme-id', 'mcp.json'));
-    expect(wb.hasAuth).toBe(true);
+    const original = JSON.stringify({ mcpServers: { 'wb-other': { command: 'npx', args: ['-y', 'wb-mcp'] } } }, null, 2);
+    write(home, '.workbuddy/mcp.json', original);
+    expect(statusOf(home, 'workbuddy', { currentToken: TOKEN }).state).toBe('missing_entry');
+    expect(statusOf(home, 'workbuddy').path).toContain(join('.workbuddy', 'mcp.json'));
 
-    // 缺令牌 → missing_auth；一键写入仍拒绝（应用托管，代写会被同步覆盖）
-    write(home, '.workbuddy/connectors/acme-id/mcp.json', JSON.stringify({
-      mcpServers: { 'MultiAgent Memory': { type: 'http', url: MCP_ENDPOINT } },
-    }));
-    expect(statusOf(home, 'workbuddy', { currentToken: TOKEN }).state).toBe('missing_auth');
-    const r = wireMcpClient('workbuddy', TOKEN, { home, appData: home });
-    expect(r.ok).toBe(false);
-    expect(r.error).toContain('不支持自动写入');
+    const r = wireMcpClient('workbuddy', TOKEN, { home, now: Date.UTC(2026, 9, 31, 14, 0, 0) });
+    expect(r.ok).toBe(true);
+    expect(r.changed).toBe(true);
+    expect(r.backupPath).toBeTruthy();
+    expect(readFileSync(r.backupPath!, 'utf8')).toBe(original);
+    expect(JSON.stringify(r)).not.toContain(TOKEN);
+
+    const parsed = JSON.parse(readFileSync(join(home, '.workbuddy', 'mcp.json'), 'utf8')) as {
+      mcpServers: Record<string, { type?: string; url?: string; command?: string; headers?: Record<string, string> }>;
+    };
+    expect(parsed.mcpServers['wb-other'].command).toBe('npx'); // 其它条目原样保留
+    expect(parsed.mcpServers['MultiAgent Memory'].type).toBe('http');
+    expect(parsed.mcpServers['MultiAgent Memory'].url).toBe(MCP_ENDPOINT);
+    expect(parsed.mcpServers['MultiAgent Memory'].headers?.Authorization).toBe(`Bearer ${TOKEN}`);
+    expect(statusOf(home, 'workbuddy', { currentToken: TOKEN }).state).toBe('wired');
+
+    // 同名条目指向其它端点 → 拒绝覆盖
+    const conflict = wireMcpClient('workbuddy', TOKEN, {
+      home: (() => {
+        const h = tempHome();
+        write(h, '.workbuddy/mcp.json', JSON.stringify({ mcpServers: { 'MultiAgent Memory': { type: 'http', url: 'http://other/mcp' } } }));
+        return h;
+      })(),
+    });
+    expect(conflict.ok).toBe(false);
+    expect(conflict.error).toContain('拒绝覆盖');
   });
 
   test('deepseek harness：宿主 Qoder 已接入 → 如实 wired；宿主未接入 → 指引一键适配宿主', () => {
@@ -340,7 +351,7 @@ describe('批次28-B 动态配置面与宿主继承', () => {
     expect(statusOf(home, 'deepseek-harness', { currentToken: TOKEN }).state).toBe('wired');
   });
 
-  test('Zcode：无 MCP 配置面 → 保持手工（不伪造接入）', () => {
+  test('Zcode：应用内部存储（表单/JSON）无文件面 → 保持手工（不伪造接入）', () => {
     const home = tempHome();
     const z = statusOf(home, 'zcode');
     expect(z.writable).toBe(false);

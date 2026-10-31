@@ -42,9 +42,6 @@ export interface McpClientSpec {
   connectHint: string;
   /** 是否允许一键写入（已知结构；写前备份 + 原子替换） */
   writable: boolean;
-  /** 批次28-B：动态配置面（含一个 * 通配段，值如 ~/.workbuddy/connectors/<企业ID>/mcp.json）。
-   *  configPath 为 null 但客户端会自建配置时用：扫描展开首个命中文件并按 format 探测。 */
-  dynamicConfigGlob?: string;
   /** 批次28-B：宿主继承 —— 本客户端无独立 MCP 配置面，随宿主客户端的 mcpServers 下发
    *  （deepseek harness ← Qoder Desktop）。宿主已接入即本客户端已接入；
    *  一键接入委托给宿主配方真实写入。 */
@@ -119,21 +116,21 @@ export const MCP_CLIENT_SPECS: McpClientSpec[] = [
   {
     id: 'workbuddy', name: 'WorkBuddy', badge: 'p0',
     serverKey: 'MultiAgent Memory', format: 'json', entryStyle: 'type+url',
-    configPath: null, dynamicConfigGlob: '~/.workbuddy/connectors/*/mcp.json',
+    configPath: '~/.workbuddy/mcp.json',
     installMarkers: ['~/.workbuddy'],
     rulesHint: '工作区 AGENTS.md（若客户端支持）',
-    connectHint: 'WorkBuddy 的 MCP 连接器由应用托管并跨设备同步（~/.workbuddy/connectors/<企业ID>/mcp.json）：在 WorkBuddy → 连接器中心添加一次后，本面板自动检测为已接入；应用未创建该文件前无法安全代写（直接改会被同步覆盖）',
-    writable: false,
-    note: '批次28-B 起真实检测 connectors 目录（应用创建即自动识别已接入）；写入由应用托管，自动写入会被同步覆盖 → 客户端内添加一次即接通',
+    connectHint: 'WorkBuddy → 设置 → MCP 服务管理 → 添加/编辑（配置文件 ~/.workbuddy/mcp.json，应用内编辑器可直接改）；本面板「一键接入」可自动合并写入（写前备份，保留其它条目）',
+    writable: true,
+    note: '2026-10-31 用户实测确认稳定配置 ~/.workbuddy/mcp.json（mcpServers JSON，type+url+headers，应用内编辑器直显该路径）；本服务写前备份、幂等合并；若 WorkBuddy 云同步在其它设备覆盖改动，重新一键适配即可',
   },
   {
     id: 'zcode', name: 'Zcode', badge: 'p3',
     serverKey: 'MultiAgent Memory', format: 'unknown', entryStyle: 'type+url',
     configPath: null, installMarkers: ['~/.zcode'],
     rulesHint: '工作区 AGENTS.md（若客户端支持）',
-    connectHint: 'Zcode → 设置 → MCP → 添加服务器（端点与 Authorization 头可从「复制片段」获取）',
+    connectHint: 'Zcode → 设置 → MCP 服务器 → 添加/编辑，两种方式任选：① 表单——类型 HTTP、URL 填 http://127.0.0.1:8204/mcp、请求头 {"Authorization": "Bearer <mcp-token>"}；② JSON——直接粘贴 {"MultiAgent Memory": {"type": "http", "url": "http://127.0.0.1:8204/mcp", "headers": {"Authorization": "Bearer <mcp-token>"}}}（令牌见数据根 mcp-token.txt 或接入页「复制片段」），保存即接通',
     writable: false,
-    note: '2026-10-31 实机排查：其配置体系（v2 配置全树）无任何 MCP 段，自动写入无落点；客户端内添加一次即可',
+    note: '2026-10-31 用户实测确认应用内「表单 / JSON」两种配置方式；配置存应用内部存储（IndexedDB），无稳定配置文件可合并 → 不代写，客户端内一次配置即接通',
   },
   {
     id: 'deepseek-harness', name: 'deepseek harness', badge: 'p0',

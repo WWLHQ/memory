@@ -78,30 +78,6 @@ export function expandHome(
   return join(home, rel);
 }
 
-/** 批次28-B：解析动态配置面（glob 仅支持一个通配段，值如 ~/.workbuddy/connectors/<企业ID>/mcp.json）。
- *  按目录条目名排序取第一个命中文件（确定性）；目录不存在/无命中/多星号 → null（由调用方如实标注）。 */
-function resolveDynamicConfigPath(glob: string, home: string, appData: string): string | null {
-  const abs = expandHome(glob, home, appData);
-  const starIdx = abs.indexOf('*');
-  if (starIdx === -1) return existsSync(abs) ? abs : null;
-  if (abs.indexOf('*', starIdx + 1) !== -1) return null;
-  const head = abs.slice(0, starIdx);
-  // 通配段前的路径通常以分隔符结尾（如 ...connectors\*）：dirname 会多退一级，直接去掉尾分隔符即得扫描目录
-  const parent = /[\\/]$/.test(head) ? head.slice(0, -1) : dirname(head);
-  const tail = abs.slice(starIdx + 1);
-  let entries: string[];
-  try {
-    entries = readdirSync(parent).sort();
-  } catch {
-    return null;
-  }
-  for (const entry of entries) {
-    const p = join(parent, entry, tail);
-    if (existsSync(p)) return p;
-  }
-  return null;
-}
-
 function readConfig(path: string): { text: string | null; error?: string } {
   try {
     const text = readFileSync(path, 'utf8');
@@ -142,15 +118,12 @@ export function scanMcpClients(options: { home?: string; appData?: string; endpo
   const appData = options.appData ?? process.env.APPDATA ?? join(home, 'AppData', 'Roaming');
   const endpoint = options.endpoint ?? MCP_ENDPOINT;
   const clients: McpClientStatus[] = MCP_CLIENT_SPECS.map((spec) => {
-    // 批次28-B：动态配置面（configPath=null 但给了 dynamicConfigGlob）按真实命中的文件探测
-    const path = spec.configPath
-      ? expandHome(spec.configPath, home, appData)
-      : spec.dynamicConfigGlob ? resolveDynamicConfigPath(spec.dynamicConfigGlob, home, appData) : null;
+    const path = spec.configPath ? expandHome(spec.configPath, home, appData) : null;
     const installed = path !== null && existsSync(path)
       || spec.installMarkers.some((m) => existsSync(expandHome(m, home, appData)));
     const base = {
       id: spec.id, name: spec.name, badge: spec.badge, format: spec.format, writable: spec.writable,
-      displayPath: spec.configPath ?? spec.dynamicConfigGlob ?? null, path, installed, rulesHint: spec.rulesHint,
+      displayPath: spec.configPath ?? null, path, installed, rulesHint: spec.rulesHint,
       ...(spec.note ? { note: spec.note } : {}),
     };
     if (!path) return { ...base, state: 'manual' as const, hasAuth: false };
