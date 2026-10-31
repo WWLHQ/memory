@@ -34,6 +34,36 @@ python tools/validate_project.py
 
 ---
 
+## 运行应用与门禁（本项目实际命令）
+
+```bash
+npm install                 # 安装依赖（Node ≥22.13）
+npm run dev                 # 一键开发：自动拉起本机登录后端 + Vite 127.0.0.1:5180（浏览器登录开箱可用；演示账号 user_001 / demo1234）
+                            #   默认端口被安装版桌面端占用且不信任 5180 来源时，批次24 起自动换备用端口（8211→8215）另起受信服务，
+                            #   并直接以 ?backend= 打开页面，无需先关闭桌面端
+npm run dev:backend         # 仅本机登录/mirror 服务（默认 8201，可 PORT=8211 另起），供 npm run dev 复用或单独联调
+npm run package:win         # 便携目录 release/win-unpacked/
+npm run package             # NSIS 安装包 release/installer*/
+
+npm run verify:fast         # typecheck + lint + 索引新鲜度 + 覆盖率单测（117 文件 / 1248 用例）
+npm run verify              # verify:fast + Electron 构建 + Playwright E2E（21 spec）
+npm run lint                # oxlint 静态检查（correctness 规则，0 error 通过）
+npm run test:coverage       # vitest + v8 覆盖率（阈值门禁见 vite.config.ts）
+npm run code:index -- --write   # 刷新 specs/code-index.generated.md（导出符号索引，便于定位）
+```
+
+开发/维护前先读 [`AGENTS.md`](AGENTS.md)：目录地图、改哪里、动作日志格式与排查、权限模型、门禁与交付要求。
+
+## 管理员与诊断日志（批次7）
+
+- 内置管理员：`admin` / 初始密码 `Admin@123456`（首次启动自动播种；登录后在「账号与安全」页修改，已有管理员密码不会被覆盖）。
+- 仅管理员：更改/恢复数据根、备份配置与立即备份、密码策略、成员与密钥管理、账号角色与团队分配；普通成员访问其余页面，敏感入口显示「需管理员」。
+- 动作日志：数据根下 `actions.log`，一行一个动作，格式 `[ISO] [level] [scope:action] [requestId] {json}`，覆盖 UI 点击/提交/页面进入、宿主桥、IPC、HTTP、备份/数据根/内核动作；密码/令牌/密钥自动脱敏，5 MiB 轮转保留 3 份。其它日志：`main.log`、`float.log`、`home-audit.json`、`home-mirror.json`。
+
+手测流程见 [`specs/MANUAL-TEST.md`](specs/MANUAL-TEST.md)；各批次修复与验收结论见 `specs/MANUAL-TEST-FIX-BATCH-*.md`。
+
+---
+
 ## 已有项目怎么纳入
 
 老项目不想重写？看 [`meta/MIGRATION.md`](meta/MIGRATION.md)：先 `init_project.py` 种骨架（不动源码），再让 Agent **逆向**补全 `specs/`（把现有功能提炼成 REQ/AC/TC）+ `code-map.md`（文件→函数→测试），BUG 立即可定位；新改动走新流程，旧代码碰才改。
@@ -149,8 +179,9 @@ git add -A && git commit -m "REQ-003: ..."   # 每次改动提交
 
 门禁已可接入流水线，见 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)。每次 push / PR 自动跑：
 
-1. `python tools/validate_project.py` —— 完整性 / 正确性，红则阻断合入
-2. `python tools/generate.py --check` —— 校验 `build/` 与 `specs/` 同步
+1. Ubuntu `quality-gate` —— typecheck + oxlint + vitest + `validate_project.py` / `generate.py --check`
+2. Ubuntu `e2e` —— Playwright 21 个 spec
+3. Windows `windows-gate` —— `verify:fast`（类型 + lint + 单测 + 覆盖率阈值）
 
 若第 2 步失败，本地跑 `python tools/generate.py` 重新生成并提交 `build/` 即可。
 真实项目的测试命令（如 `npm test`，即各原子任务的验收命令）加进同一 workflow 即可。

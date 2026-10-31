@@ -20,6 +20,7 @@ status: imported
 | F 业务决策类 | 项目内业务决策记录的标识 | decision_id |
 | **G 端谱与同步类（19.10/19.11 新增）** | 多端接入、云同步、身份令牌等 | form、agent_ref、sync_token、conflict_id、dispute_flag |
 | **H 模型反代理与预算类（19.8/2.4 新增）** | LLM 路由来源、额度/单价、预算标识 | llm_proxy_source、model_ref、proxy_budget、proxy_price_cap、decay_class |
+| **I L0 授权与会话类（4.4 新增）** | L0 加密落盘后的授权、会话与写密钥标识 | grant_id、grantee_user_id、scope_project_ids、l0_session_id、l0_write_session_id、wrapped_dek |
 
 > **新增字段登记规则（本目录的持续约定）**：
 > 凡是后续对话或设计中新出现的**字段/ID**，必须按「**字段（英文名） + 中文说明**」格式补进 18.2 对应小类（不属于已有小类的，先归入 G/H 或新建小类），并在 18.5 登记表登记一行（新增时间、出处章节、小类、说明）。**不允许字段只散落在某章节而不进本目录。**
@@ -53,6 +54,9 @@ status: imported
 | old_id | 冲突处理中被覆盖的旧事实记忆 ID |
 | new_id | 冲突处理中新增或替代的新事实记忆 ID |
 | merged_id | 合并操作后生成的新合并记忆 ID |
+| graft_to | 分支嫁接：本次新记忆嫁接到的目标记忆 ID（命中层已有记忆），与 `graft_layer` 成对（6.2） |
+| graft_layer | 分支嫁接命中的层级（L1–L6），表示新记忆生成到该层即停止，不再生成更深层（6.2） |
+| grafted_from | 分支嫁接反向索引：目标记忆记录"有哪些新记忆嫁接到我"的记忆 ID 集合（6.2） |
 
 #### D. 上下文类（会话、项目）
 
@@ -108,6 +112,18 @@ status: imported
 | merged_from | 合并谱系：本条记忆"由谁合并而来"的来源（15.2） |
 | merged_into | 合并谱系：本条记忆"合并进了谁"的目标（15.2） |
 
+#### I. L0 授权与会话类（4.4 新增）
+
+| 字段名 | 中文说明 |
+|---|---|
+| grant_id | 一次性 L0 查阅授权的唯一标识；绑定指定账号、范围与有效期，过期/撤销/消费即作废（重新申请不得复用） |
+| grantee_user_id | 被授权的指定账号 user_id；只有该账号可用该授权密码解锁，换账号一律拒绝 |
+| scope_project_ids | 授权可查阅的项目范围（`["*"]` = 全部项目）；超出范围的项目 L0 仍遮罩 |
+| l0_session_id | 解锁后创建的 5min 连续查阅会话标识；只存主进程内存，不落盘、不进审计明文以外的位置；中断 ≥5min 失效 |
+| l0_write_session_id | 管理员 `l0_write_unlock` 创建的写密钥会话标识；**仅可写不可查阅**，锁屏/休眠/退出即清空 |
+| wrapped_dek | 用管理密码或指定授权密码（经 PBKDF2-SHA256 派生 KEK）包裹的 DEK；存于 `l0-keyring.json`，授权过期/撤销即删除，DEK 本体永不落盘 |
+| l0_auth | L0 解锁凭据的聚合字段：首次解锁为 `{grant_id, password}`（管理员可省略 grant_id 用管理密码），后续查阅用 `{l0_session_id}`；密码不落盘不落日志 |
+
 ### 18.3 按表或结构归集
 
 #### 18.3.1 enterprises / teams / users
@@ -139,6 +155,9 @@ status: imported
 - new_id：冲突覆盖中新增/替代的新记忆ID（C 类；与 old_id 成对记录）
 - resource_id：被操作资源ID（普通动作）；召回链路动作（rerank_on/cold_recall/recall_breach）可填 memory_id 或 request_id
 - request_id：召回请求ID（E 类；一次 recall 请求唯一，串起该请求的 rerank/cold/breach 多条审计行，见 4.3）
+- grant_id：L0 授权ID（I 类；`l0_auth_grant`/`l0_auth_deny`/`l0_auth_revoke`/`l0_auth_expire`/`l0_view`/`l0_auth_fail` 必带，适用时）
+- l0_session_id：L0 连续查阅会话ID（I 类；`l0_view`/`l0_auth_expire` 记录，便于回放一次会话的全部查阅）
+- graft_to：分支嫁接目标记忆ID（C 类；`graft` 审计必带，与 `graft_layer` 成对）
 - payload_tokens：本次召回返回的记忆 payload token 数（见 2.4.1 预算口径）
 - pipeline_llm_tokens：召回链路自身 LLM 消耗（重排/注意力过滤，单独计量）
 
@@ -173,6 +192,9 @@ status: imported
 4. 合并可回溯：memory_consolidated 必须同时记录 merged_id 与 source_ids，不允许合并后找不到来源。
 5. 冲突覆盖可回溯：old_id 与 new_id 必须成对记录在审计日志中，禁止只记录新事实而不记录被覆盖的旧事实。
 6. ID 命名统一：mid 仅为代码变量简称，正式落库字段一律使用 memory_id，不使用 mid 作为列名。
+7. L0 授权可追溯：每次 `l0_auth_request`/`l0_auth_grant`/`l0_auth_deny`/`l0_auth_revoke`/`l0_auth_expire`/`l0_view`/`l0_auth_fail` 必须记录 `grant_id`（适用时）、`user_id`、`form`、`request_id`；**绝不记录密码或 DEK**。
+8. 嫁接可回溯：分支嫁接必须同时记录 `graft_to` 与 `graft_layer`，目标记忆维护 `grafted_from`；禁止只写新记忆而不记录嫁接到谁（6.2）。
+9. L0 授权一次性：`grant_id` 不可复用；过期/撤销/会话 ≥5min 中断后必须重新申请，新的授权使用新的 `grant_id`；`l0_session_id` 仅主进程内存，进程重启即全部失效。
 
 ### 18.5 新增字段登记表（持续登记，格式：字段 + 中文说明）
 
@@ -202,4 +224,13 @@ status: imported
 | reinforce_count | 记忆被用户确认强化次数（与 access_count 分家） | 7.1 / 17.4 | H | 本次对话 |
 | merged_from | 合并谱系：由谁合并而来 | 15.2 | H | 本次对话 |
 | merged_into | 合并谱系：合并进了谁 | 15.2 | H | 本次对话 |
-| l0_auth | L0 原始加密对话查阅的授权凭据（管理员授权 + 密码，本次会话有效） | 4.3 / P15 | H | 本次对话 |
+| l0_auth | L0 解锁凭据聚合（grant_id+密码 或 l0_session_id；密码不落盘不落日志） | 4.4 / 4.3 | I | 2026-10-30 |
+| grant_id | 一次性 L0 查阅授权唯一标识（绑定指定账号/范围/有效期） | 4.4 | I | 2026-10-30 |
+| grantee_user_id | 被指定的授权账号，只有该账号可用授权密码解锁 | 4.4 | I | 2026-10-30 |
+| scope_project_ids | 授权可查阅的项目范围（`["*"]`=全部） | 4.4 | I | 2026-10-30 |
+| l0_session_id | 5min 连续查阅会话标识（仅主进程内存，中断即失效） | 4.4 | I | 2026-10-30 |
+| l0_write_session_id | 管理员写密钥会话标识（仅可写不可查阅，锁屏/退出清空） | 4.4.4 | I | 2026-10-30 |
+| wrapped_dek | 管理密码/授权密码包裹的 DEK（存 keyring，授权失效即删除；DEK 不落盘） | 4.4 | I | 2026-10-30 |
+| graft_to | 分支嫁接目标记忆 ID（与 graft_layer 成对） | 6.2 | C | 2026-10-30 |
+| graft_layer | 分支嫁接命中层级（L1–L6），命中即停止生成更深层 | 6.2 | C | 2026-10-30 |
+| grafted_from | 目标记忆记录的新嫁接来源记忆 ID 集合 | 6.2 | C | 2026-10-30 |

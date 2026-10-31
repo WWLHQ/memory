@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>记忆层级管理页 · 预览（L0–L6）</title>
+<style>
+:root{
+  --bg:#0f1419; --panel:#1a212b; --panel2:#202833; --line:#2b3441;
+  --txt:#e6edf3; --muted:#8b98a7; --dim:#5b6675; --accent:#4d9fff;
+  --ok:#3ecf8e; --warn:#ffd166; --err:#ff5c5c;
+  --l0:#8e6bd8; --l1:#e0884f; --l2:#4d9fff; --l3:#3ecf8e; --l4:#c084fc; --l5:#f59e0b; --l6:#22d3ee;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.55 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+.wrap{max-width:1200px;margin:0 auto;padding:18px}
+h1{font-size:18px;margin:0 0 2px}
+.badge{font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px;border:1px solid var(--line)}
+.badge.new{background:#1a3320;color:#7fe0a0}
+.badge.spec{background:#3a2f10;color:#ffd166}
+.sub{color:var(--muted);font-size:12px;margin-bottom:6px}
+.preview-note{background:#12324a;border:1px solid #2a4a66;color:#8cc7ff;font-size:12px;padding:8px 12px;border-radius:8px;margin:10px 0 14px}
+
+/* L0 解锁框：通过 padding 使其内容区与 .layer 卡片内部对齐，视觉宽度一致 */
+.l0bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 14px;margin-top:12px;width:100%}
+.l0bar label{font-size:12px;color:var(--muted)}
+.l0bar input{background:var(--panel2);border:1px solid var(--line);border-radius:7px;color:var(--txt);padding:6px 9px;font-size:12.5px;width:180px}
+.btn{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:6px 11px;cursor:pointer;font-size:11.5px}
+.btn.primary{background:var(--accent);color:#04121f;border-color:var(--accent);font-weight:600}
+.btn.danger{color:#ffb0b0;border-color:#6b2e2e}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+
+/* 布局：左侧层卡片堆叠 + L0 区域，右侧详情 */
+.cols{display:grid;grid-template-columns:1fr 360px;gap:14px}
+@media(max-width:900px){.cols{grid-template-columns:1fr}}
+.left-col{display:flex;flex-direction:column;gap:12px}
+.stack{display:flex;flex-direction:column;gap:12px}
+
+/* 层卡片 */
+.layer{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.layer-head{display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:default}
+.layer-head .dot{width:11px;height:11px;border-radius:50%;flex:none}
+.layer-head h2{font-size:14px;margin:0;font-weight:700}
+.layer-head .tag{font-size:11px;color:var(--muted)}
+.layer-head .count{margin-left:auto;font-size:11px;color:var(--muted)}
+.layer-head .thr{font-size:10px;color:var(--dim);font-family:monospace}
+.layer-body{border-top:1px solid var(--line)}
+.mem{display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid rgba(43,52,65,.5);cursor:pointer;font-size:12.5px}
+.mem:last-child{border-bottom:0}
+.mem:hover{background:var(--panel2)}
+.mem.sel{background:#14263a;outline:1px solid var(--accent);outline-offset:-1px}
+.mem .mid{font-family:monospace;color:var(--accent);font-size:11px;flex:none;width:96px;cursor:pointer}
+.mem .mc{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mem .mc .dim,.dim{color:var(--dim);font-style:italic}
+.mem .mask{font-family:monospace;color:var(--dim);font-size:11px}
+.temp{font-size:10px;padding:1px 7px;border-radius:6px;border:1px solid var(--line);flex:none}
+.temp.hot{background:#3a1616;color:#ffb0b0;border-color:#6b2e2e}
+.temp.warm{background:#3a2f10;color:#ffe6a8;border-color:#6b5a1e}
+.temp.cold{background:#13283a;color:#8cc7ff;border-color:#2a4a66}
+.icons{font-size:12px;flex:none;width:34px;text-align:center}
+.empty{padding:16px 14px;color:var(--dim);font-size:12px;text-align:center}
+
+/* 详情区 */
+.detail{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;height:fit-content}
+.detail h3{font-size:13px;margin:0 0 4px}
+.detail .kv{display:grid;grid-template-columns:110px 1fr;gap:6px 10px;font-size:12px;margin:10px 0}
+.detail .kv b{color:var(--muted);font-weight:600}
+.section-title{font-size:12px;color:var(--muted);font-weight:600;margin:12px 0 6px;text-transform:uppercase;letter-spacing:.4px}
+textarea{width:100%;background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:8px;font-size:12.5px;font-family:inherit;resize:vertical}
+.save-row{display:flex;gap:8px;align-items:center;margin-top:8px}
+.save-hint{font-size:11px;color:var(--dim);flex:1}
+.mask-banner{background:#2a1e3a;border:1px solid #4a3a66;color:#c9a8f0;border-radius:8px;padding:9px 12px;font-size:12px;margin:8px 0}
+.empty-detail{color:var(--dim);font-size:12.5px;padding:8px 0}
+.legend{font-size:11px;color:var(--dim);margin-top:10px;line-height:1.7}
+.legend b{color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>📚 记忆层级管理页 <span class="badge new">预览 · 新增</span> <span class="badge spec">规格 §2.1 / §8 / §19.11 / P15 §2.4</span></h1>
+  <div class="sub">管理 L0–L6 全部记忆 · 按精炼层分层显示 · 每条可打开阅读/编辑 · L0 需授权+密码</div>
+
+  <div class="preview-note">
+    📄 <b>预览说明</b>：本文件为版式/交互预览，数据为<b>示例占位</b>（仅演示分层与遮罩效果）。正式实现将接入真实账本（桌面 <code>memories.db.json</code> / 内核 StorageBackend），L0 解锁走内核 <code>browse(L0, l0_auth)</code> + <code>l0_view</code> 审计；每层内容来自补全后的 <code>content_l1..l6</code> 字段；详情页「存储位置」走 <code>storageLocation()</code> IPC 诚实标注真实路径。
+  </div>
+
+  <div class="cols">
+    <!-- 左列：层卡片堆叠 + L0 区域 -->
+    <div class="left-col">
+      <div class="stack" id="layerStack" data-testid="layer-stack"></div>
+      <!-- L0 授权框：始终可见，紧贴在 L1 卡片下方，宽度与层卡片一致 -->
+      <div class="l0bar" data-testid="l0-bar">
+        <span style="font-size:16px">🔐</span>
+        <label for="l0pwd">L0 原始层查阅授权（仅管理员 · 会话级）</label>
+        <input id="l0pwd" type="password" placeholder="输入 L0 密码" data-testid="l0-pwd" />
+        <button class="btn primary" id="l0-unlock" data-testid="l0-unlock">解锁 L0</button>
+        <button class="btn" id="l0-lock" data-testid="l0-lock" style="display:none">已解锁 · 重新锁定</button>
+        <!-- 管理员可设定自动上锁时长 -->
+        <label class="l0admin" for="l0timeout">自动上锁（分钟）</label>
+        <input id="l0timeout" type="number" min="1" max="120" value="5" style="width:60px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;color:var(--txt);padding:4px 6px;font-size:11.5px" data-testid="l0-timeout" title="管理员可设定 L0 无操作后自动上锁时长（默认 5 分钟）" />
+        <span id="l0-status" style="font-size:11px;color:var(--muted)">状态：已锁定</span>
+      </div>
+      <!-- L0 卡片容器：默认隐藏，解锁后渲染在授权框下方 -->
+      <div id="l0Stack" data-testid="l0-stack" style="display:none"></div>
+    </div>
+
+    <!-- 右：详情/编辑 -->
+    <div class="detail" id="detail" data-testid="detail">
+      <div class="empty-detail">← 点左侧任意层中的记忆条目，在此打开阅读与编辑该层内容。</div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <b>层语义（§2.1）</b>：L6 关键字投影（≤30 词 + relevance）· L5 洞察提炼（≤60 字）· L4 模式归纳（≤120 字）· L3 得失分析（≤200 字）· L2 会话摘要（≤300 字）· L1 清洗脱敏（唯一可进 prompt 的原始形态）· L0 原始对话（AES-256 加密，仅授权+密码）。<br>
+    <b>显示规则</b>：L6→L1 始终可见，自上而下最精炼→最深层；<b>L0 卡片默认不渲染，输入 L0 授权码解锁后出现在页面最底部</b>（会话级，每次 l0_view 写审计）。<br>
+    <b>编辑规则</b>：L1–L6 直接可读可改（改后写回真实账本 + <code>memory_op</code> 审计）；<b>locked 记忆</b>（🔒）内容只读，需先解锁；温度徽标随 freshness 推导（17.5）。
+  </div>
+</div>
+
+<script>
+// 示例占位数据（正式实现替换为真实账本读取）：每条记忆含 7 层内容
+// 层序自上而下 = L6（投影索引，最精炼）→ L0（原始加密，最深），与 §2.1 精炼方向一致
+const LAYERS = [
+  { id:'L6', name:'投影索引', color:'var(--l6)', thr:'0.90', desc:'关键字 ≤30 词 + relevance（召回主路）' },
+  { id:'L5', name:'洞察提炼', color:'var(--l5)', thr:'0.90', desc:'本质洞察 ≤60 字（顶层原则）' },
+  { id:'L4', name:'模式归纳', color:'var(--l4)', thr:'0.85', desc:'规律提炼 ≤120 字' },
+  { id:'L3', name:'得失分析', color:'var(--l3)', thr:'0.80', desc:'总结得失 ≤200 字' },
+  { id:'L2', name:'会话摘要', color:'var(--l2)', thr:'0.75', desc:'情景摘要 ≤300 字 + 元数据' },
+  { id:'L1', name:'清洗脱敏', color:'var(--l1)', thr:'0.70', desc:'姓名/电话/Key 脱敏，唯一可进 prompt 的原始形态' },
+  { id:'L0', name:'原始对话', color:'var(--l0)', thr:'—', desc:'AES-256-GCM 加密，仅授权+密码' },
+];
+
+// 示例记忆：L0-L5 有内容，L6 一条为空（演示空层诚实空态）
+const MEMS = [
+  { id:'mem_001', temp:'hot',  locked:false, pinned:true,
+    L0:'（原始对话）用户：为什么选 FastAPI 不选 Django？助手：性能优先…',
+    L1:'决策：后端选 FastAPI 而非 Django（性能优先，10.x 决策记录）',
+    L2:'本次选型复盘：性能压测 FastAPI QPS 3.2x 于 Django，连接池 200，P99 88ms。',
+    L3:'得失：✓ 性能达标 · ✗ 缺内置 admin，需自建管理端（成本 +2 周）',
+    L4:'规律：高并发 API 场景下 async 框架 + 手动连接池 优于 同步 ORM 全栈',
+    L5:'洞察：性能优先于开发效率时，选异步栈并预留 admin 成本',
+    L6:'fastapi, django, 性能, 选型, 异步, 连接池, qps, admin' },
+  { id:'mem_002', temp:'warm', locked:true, pinned:false,
+    L0:'（原始对话）排障：CORS 预检 403…',
+    L1:'踩坑：CORS 预检需把自定义请求头 X-Trace 加入后端白名单（脱敏：Key 不回显）',
+    L2:'排查 CORS 403：预检 OPTIONS 未放行自定义头，加入白名单后恢复。',
+    L3:'得失：✓ 定位快（30min）· ✗ 白名单散落两处配置，易漏',
+    L4:'模式：CORS/CSRF 白名单类问题，先核对 OPTIONS 预检 + 自定义头',
+    L5:'洞察：跨域白名单应集中一份配置，避免双处维护',
+    L6:'cors, 预检, options, 白名单, x-trace, 403' },
+  { id:'mem_003', temp:'cold', locked:false, pinned:false,
+    L0:'（原始对话）闲聊：今天天气…',
+    L1:'事实：团队偏好暗色主题 + 紧凑布局（个人偏好，跨项目共享开）',
+    L2:'用户偏好：暗色主题、紧凑间距、字体 13px，已应用于全局。',
+    L3:'得失：✓ 偏好一次收集 · ✗ 无团队级覆盖机制',
+    L4:'规律：偏好类记忆按 user_id 隔离，跨项目可共享开关',
+    L5:'洞察：个人偏好应可被团队规范覆盖（优先级：团队 > 个人）',
+    L6:'暗色, 紧凑, 偏好, 主题, 字体' },
+  { id:'mem_004', temp:'dormant', locked:false, pinned:false,
+    L0:'', // 空
+    L1:'（L1 缺省）', L2:'历史：旧版 vitest pool 双实例化导致测试不稳定，已迁移。',
+    L3:'已废弃：旧 pool 问题，被 mem_005 替代', L4:'', L5:'', L6:'' },
+];
+
+let l0Unlocked = false;
+let sel = { mem:'mem_001', layer:'L2' };
+let l0InactivityTimer = null;
+
+/** 读取管理员设定的自动上锁时长（分钟），localStorage 持久化，缺省 5 */
+function getL0TimeoutMinutes() {
+  const saved = localStorage.getItem('l0_auto_lock_minutes');
+  if (saved) return Math.max(1, Math.min(120, parseInt(saved, 10) || 5));
+  return 5;
+}
+// 初始化输入框值为当前配置
+document.getElementById('l0timeout').value = getL0TimeoutMinutes();
+
+/** 重置 L0 操作计时器：每次查看 L0 条目时重置，N 分钟后自动上锁（N 由管理员设定） */
+function resetL0Timer() {
+  if (l0InactivityTimer) clearInterval(l0InactivityTimer);
+  const minutes = getL0TimeoutMinutes();
+  l0InactivityTimer = setInterval(() => {
+    if (l0Unlocked) {
+      l0Unlocked = false;
+      document.getElementById('l0-unlock').style.display = '';
+      document.getElementById('l0-lock').style.display = 'none';
+      document.getElementById('l0-status').innerHTML = `状态：<b style="color:var(--warn)">已超时锁定（${minutes} 分钟无操作）· 需重新输入密码</b>`;
+      document.getElementById('l0pwd').value = '';
+      render();
+      alert(`L0 已因 ${minutes} 分钟无操作自动锁定，请重新输入密码解锁`);
+    }
+  }, minutes * 60 * 1000);
+}
+// 输入框值变化时实时更新配置并重启计时器
+document.getElementById('l0timeout').addEventListener('change', (e) => {
+  const val = Math.max(1, Math.min(120, parseInt(e.target.value, 10) || 5));
+  localStorage.setItem('l0_auto_lock_minutes', String(val));
+  if (l0Unlocked) resetL0Timer();
+});
+
+function maskContent(layer, mem) {
+  return mem[layer] || '';
+}
+
+/** 渲染一张层卡片到指定容器 */
+function layerCard(L) {
+  const card = document.createElement('div');
+  card.className = 'layer';
+  card.dataset.layer = L.id;
+  const isL0 = L.id === 'L0';
+  const visibleCount = MEMS.filter(m => m[L.id]).length;
+  card.innerHTML = `
+      <div class="layer-head">
+        <span class="dot" style="background:${L.color}"></span>
+        <h2 style="color:${L.color}">${L.id} · ${L.name}</h2>
+        <span class="tag">${L.desc}</span>
+        <span class="thr">阈值 ${L.thr}</span>
+        <span class="count">${visibleCount} / ${MEMS.length} 条</span>
+        ${isL0 ? `<button class="btn" style="margin-left:8px;font-size:11px" data-testid="l0-exit" title="退出 L0 并上锁">退出</button>` : ''}
+      </div>
+      <div class="layer-body">
+        ${MEMS.map(m => {
+          const txt = m[L.id] || '';
+          return `<div class="mem ${sel.mem===m.id && sel.layer===L.id ? 'sel':''}" data-mem="${m.id}" data-layer="${L.id}">
+            <span class="mid">${m.id}</span>
+            <span class="mc">${txt || '<span class="dim">该层暂无内容（可在此补齐）</span>'}</span>
+            ${m.locked ? `<span class="icons" title="已锁定">🔒</span>` : (m.pinned ? `<span class="icons" title="已置顶">📌</span>` : `<span class="icons"></span>`)}
+            <span class="temp ${m.temp}">${m.temp}</span>
+          </div>`;
+        }).join('')}
+      </div>`;
+  return card;
+}
+
+function render() {
+  const stack = document.getElementById('layerStack');
+  stack.innerHTML = '';
+  for (const L of LAYERS) {
+    if (L.id === 'L0') continue;
+    stack.appendChild(layerCard(L));
+  }
+
+  // L0 卡片：仅解锁后渲染并显示
+  const l0Stack = document.getElementById('l0Stack');
+  if (l0Unlocked) {
+    l0Stack.style.display = '';
+    l0Stack.innerHTML = '';
+    l0Stack.appendChild(layerCard(LAYERS.find(L => L.id === 'L0')));
+  } else {
+    l0Stack.style.display = 'none';
+    l0Stack.innerHTML = '';
+  }
+
+  // 绑定点击（两个容器都要绑）
+  document.querySelectorAll('.mem').forEach(el => {
+    el.addEventListener('click', () => {
+      sel = { mem: el.dataset.mem, layer: el.dataset.layer };
+      renderDetail();
+      // 查看 L0 条目时重置自动锁定计时器
+      if (el.dataset.layer === 'L0') resetL0Timer();
+      render(); // 高亮刷新
+    });
+  });
+  renderDetail();
+}
+
+function renderDetail() {
+  const box = document.getElementById('detail');
+  const m = MEMS.find(x => x.id === sel.mem);
+  if (!m) { box.innerHTML = `<div class="empty-detail">← 点左侧任意层中的记忆条目。</div>`; return; }
+  const L = LAYERS.find(x => x.id === sel.layer);
+  const isL0 = sel.layer === 'L0';
+  const raw = maskContent(sel.layer, m);
+  const locked = m.locked;
+  // L0 卡片只在解锁后渲染，所以能点到 L0 说明已解锁；只读仅由 locked 决定
+  const readOnly = locked;
+  let html = `
+    <h3>📖 ${L.id} · ${L.name} <span style="font-family:monospace;font-size:11px;color:var(--accent)">${m.id}</span></h3>
+    <div class="kv">
+      <b>温度 / 状态</b><span><span class="temp ${m.temp}">${m.temp}</span> · active</span>
+      <b>标记</b><span>${m.pinned && '📌置顶 '}${m.locked && '🔒锁定 '}${(!m.pinned && !m.locked) && '—'}</span>
+      <b>该层阈值</b><span style="font-family:monospace">${L.thr}</span>
+      <b>存储位置</b>
+      <span style="font-family:monospace;font-size:11px;color:var(--muted)" data-testid="store-location">
+        <!-- 预览：桌面场景示例路径；真实实现走 storageLocation() IPC -->
+        本机账本 · %APPDATA%\\multi-agent-memory\\memories.db.json
+      </span>
+    </div>`;
+
+  if (locked) {
+    html += `<div class="mask-banner" style="background:#2a2310;border-color:#6b5a1e;color:#ffe6a8">🔒 该记忆已锁定（G4）：内容只读，请先在记忆管理页「解锁」。</div>`;
+  }
+
+  html += `<div class="section-title">${readOnly ? '阅读（只读）' : '阅读 + 编辑'}</div>
+    <textarea id="ed" rows="6" ${readOnly ? 'disabled style="opacity:.6;cursor:not-allowed"' : ''} data-testid="edit">${raw || '（该层暂无内容）'}</textarea>
+    <div class="save-row">
+      <span class="save-hint">${isL0 ? 'L0 已解锁 · 改动写回账本 + l0_view 审计' : (readOnly ? '只读，不可编辑' : '保存将写回真实账本 + memory_op 审计')}</span>
+      <button class="btn" data-testid="open-memory-file" onclick="alert('预览：正式实现将打开记忆文件（导出 .json + OS 默认查看器）')">📂 打开记忆文件</button>
+      <button class="btn primary" ${readOnly ? 'disabled' : ''} data-testid="save" onclick="alert('预览：正式实现将写回账本（version+1 + 审计）')">保存修改</button>
+      <button class="btn" onclick="render()">关闭</button>
+    </div>`;
+  box.innerHTML = html;
+}
+
+// L0 解锁
+document.getElementById('l0-unlock').addEventListener('click', () => {
+  const pwd = document.getElementById('l0pwd').value;
+  if (pwd.length < 6) { alert('预览：L0 密码须 ≥6 位（正式实现：错 5 次锁 15min + l0_view 审计）'); return; }
+  l0Unlocked = true;
+  document.getElementById('l0-unlock').style.display = 'none';
+  document.getElementById('l0-lock').style.display = '';
+  document.getElementById('l0-status').innerHTML = '状态：<b style="color:var(--ok)">已解锁（会话级）</b> · 每次 L0 查阅记 l0_view 审计';
+  render();
+});
+document.getElementById('l0-lock').addEventListener('click', () => {
+  l0Unlocked = false;
+  document.getElementById('l0-lock').style.display = 'none';
+  document.getElementById('l0-unlock').style.display = '';
+  document.getElementById('l0-status').innerHTML = '状态：已锁定 <code>[L0 已加密 · 需授权]</code>';
+  document.getElementById('l0pwd').value = '';
+  render();
+});
+// 退出按钮（仅 L0 卡片显示）：点击后上锁并隐藏 L0 卡片
+document.addEventListener('click', (e) => {
+  if (e.target.dataset.testid === 'l0-exit') {
+    l0Unlocked = false;
+    document.getElementById('l0-lock').style.display = 'none';
+    document.getElementById('l0-unlock').style.display = '';
+    document.getElementById('l0-status').innerHTML = '状态：已锁定 <code>[L0 已加密 · 需授权]</code>';
+    document.getElementById('l0pwd').value = '';
+    render();
+  }
+});
+
+render();
+</script>
+</body>
+</html>

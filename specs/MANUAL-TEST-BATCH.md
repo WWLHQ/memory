@@ -242,11 +242,11 @@
 
 ## 反代理面板（112–117）
 
-112. **映射表**：4 行 = claude-code/claude-free（免费）· cursor-trial/glm-free（免费，余量 -30 红）· codex/gpt4o-mini（¥0.01）· x-agent/deepseek-v3（¥0.03，余量负红 + 行半透明）；每行有预算条（余量/预算 0.9×额度）
-113. **C7 auto 择优**：默认 auto 模式点「模拟一次代理调用」→ toast「auto 命中：claude-code/claude-free · 花费 ¥0.0000 —— 免费优先」；审计回显出现 `llm_proxy · llm_proxy_source=agent:claude-code · cost · mode=auto`；余量 780 → 779
+112. **映射表**：5 行 = claude-code/claude-free（免费，余量极大）· cursor-trial/glm-free（免费，余量极大）· codex/gpt4o-mini（¥0.01，余量极大）· x-agent/deepseek-v3（¥0.03，余量极大）· budget-exhausted/demo-exhausted（免费，余量 -30 红 + 行半透明）；每行有预算条（余量/预算 0.9×额度）
+113. **C7 auto 择优**：默认 auto 模式点「模拟一次代理调用」→ toast「auto 命中：claude-code/claude-free · 花费 ¥0.0000 —— 免费优先」；审计回显出现 `llm_proxy · llm_proxy_source=agent:claude-code · cost · mode=auto`；余量扣减 1（MAX_SAFE_INTEGER×0.9−120 → MAX_SAFE_INTEGER×0.9−121）
 114. **C8 超限剔除**：auto 下免费源耗尽场景（或手动只勾耗尽源）→ 回退本地，不选超限源
 115. **C9/R7 manual 拒付费**：切 manual，勾 x-agent（¥0.03 > cap 0.01）→ 模拟 → toast「R7 拒绝：勾选源 x-agent/deepseek-v3（¥0.03/千次 超 price_cap ¥0.01）」
-116. **C11 manual 不转其他**：manual 只勾 cursor-trial（余量已耗尽）→ 模拟 → toast「勾选源当日余量已耗尽 → 回退本地 fallback_local，不转未勾选源（C11）」；审计回显 `agent:local · mode=local`
+116. **C11 manual 不转其他**：manual 只勾 budget-exhausted（余量 -30 已耗尽）→ 模拟 → toast「勾选源当日余量已耗尽 → 回退本地 fallback_local，不转未勾选源（C11）」；审计回显 `agent:local · mode=local`
 117. **C13 price_cap=0**：price_cap 输 0 → 出现提示「C13：price_cap=0 —— 仅免费源可代理，付费源一律回退本地」
 
 ## 保存与审计（118–119）

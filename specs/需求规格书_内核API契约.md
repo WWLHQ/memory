@@ -47,6 +47,7 @@ const ma = createMemAgent({
 | 一键接入 | `ma.discover(DiscoverReq) → DiscoverResult` | 发现 + 打标 + 绑定 + 测通 | 19.9 |
 | 同步 | `ma.sync(SyncReq) → SyncReport` | 回传/拉取/裁决/对账 | 19.11 / 5.1 |
 | 查阅 | `ma.browse(BrowseReq) → BrowseResult` | L0–L6 某层内容（L0 需授权） | §4 |
+| **L0 授权** | `ma.l0RequestAccess` / `ma.l0GrantAccess` / `ma.l0Unlock` / `ma.l0Heartbeat` / `ma.l0Lock` | 申请/发放/解锁/连续会话心跳/结束 | §4.3 / 4.4 |
 | 日志 | `ma.logs(LogReq) → LogPage` | 运行日志 + 异常（分页/过滤） | §4 |
 | 撤销绑定 | `ma.unbind(agent) → void` | 撤销自动绑定（审计 unbound） | 19.9 |
 
@@ -80,8 +81,18 @@ interface MemReq {
   session_id?: string;
   source_agent?: string;          // 哪个 Agent 沉淀（19.x）
 }
-interface WriteResult { mem_id: string; dedup: { action:"new"|"merged"|"duplicated"; sim:number }; audit: AuditRef; }
+interface WriteResult {
+  mem_id: string;
+  dedup: {
+    action: "new"|"merged"|"duplicated"|"grafted"|"filtered"; // grafted=分支嫁接；filtered=质量门拦截
+    sim: number;
+    graft_to?: string;        // 分支嫁接：目标 memory_id
+    graft_layer?: "L1"|"L2"|"L3"|"L4"|"L5"|"L6"; // 命中层
+  };
+  audit: AuditRef;
+}
 ```
+> L0 加密由端壳注入的 `L0Vault` 完成；`MemReq` **不接受明文 L0 密码**。写密钥未解锁 → `E_L0_LOCKED`，不落明文、不降级。逐层生成/查重/嫁接规则见《需求规格书》§2.2/§6.1/§6.2。
 
 ## 3. 数据 schema（内核 ↔ 存储）
 
@@ -93,10 +104,13 @@ interface WriteResult { mem_id: string; dedup: { action:"new"|"merged"|"duplicat
 | `user_id` | string? | 仅个人偏好类（9.2） |
 | `enterprise_id`/`team_id` | string | 租户（18.2-A，全局注入禁手填） |
 | `category` | enum | 17.6 六类 |
-| `layer` | L0\|L1\|L2\|L3\|L4\|L5\|L6 | 精炼层（附录 A） |
-| `content_l0` | binary(加密) | **L0 原始加密对话，仅授权可查（§4）** |
-| `content_l1`…`content_l6` | text | 各层可读内容 |
-| `embedding` | vector | Rust/WASM 后端产出（§5） |
+| `layer` | L1\|L2\|L3\|L4\|L5\|L6 | **最高连续层**（不含 L0；缺层即止，不跳层） |
+| `content_l0_enc` | text(加密信封) | **L0 原始加密对话 v2 信封**（DEK + 随机 IV/tag），仅授权可查（§4.4） |
+| `content_l1`…`content_l6` | text | 各层可读内容；Lk 只存真实 LLM 产物 |
+| `embedding` | vector | **从 L1 生成**；Rust/WASM 后端产出（§5） |
+| `graft_to` | string? | 分支嫁接：目标 memory_id |
+| `graft_layer` | L1…L6? | 分支嫁接：命中层 |
+| `grafted_from` | string[]? | 目标记忆上记录的所有嫁接分支 memory_id |
 | `decay_class` | hot\|warm\|cold\|archived\|dormant | 17.7 分层 |
 | `pinned`/`locked` | bool | 17.5/17.8 置顶/豁免 |
 | `sim`/`conflict_id` | — | 查重/冲突（6.1/9.7） |
@@ -107,7 +121,7 @@ interface WriteResult { mem_id: string; dedup: { action:"new"|"merged"|"duplicat
 | 字段 | 说明 |
 |---|---|
 | `request_id` | 审计链主键 |
-| `action` | recall / write / gc / auto_bind / unbound / sync / llm_proxy / llm_fallback / log_view / **l0_view**（L0 查阅） |
+| `action` | recall / write / **graft** / gc / auto_bind / unbound / sync / llm_proxy / llm_fallback / log_view / **l0_view** / **l0_auth_request** / **l0_auth_grant** / **l0_auth_deny** / **l0_auth_revoke** / **l0_auth_expire** / **l0_auth_fail** |
 | `agent` / `form` | 哪个 Agent + 哪个端（19.10） |
 | `project_id`/`user_id` | 隔离锚 |
 | `ts` | 时间戳 |
@@ -117,15 +131,32 @@ interface WriteResult { mem_id: string; dedup: { action:"new"|"merged"|"duplicat
 
 ## 4. 查阅与日志 API
 
-### 4.1 全层查阅 `browse`（L0–L6 可查，L0 需授权）
+### 4.1 全层查阅 `browse`（L0–L6 可查，L0 需连续授权会话）
 ```ts
-interface BrowseReq { layer: "L0"|"L1"|…|"L6"; project_id: string; session_id?: string; l0_auth?: { password: string }; }
-interface BrowseResult { rows: Row[]; l0_masked: boolean; audit: AuditRef; }
+interface BrowseReq {
+  layer: "L0"|"L1"|"L2"|"L3"|"L4"|"L5"|"L6";
+  project_id: string;
+  session_id?: string;
+  l0_auth?: {
+    grant_id?: string;       // 管理员发放的 grant；管理员直接查阅可省略
+    password?: string;       // 首次解锁；不落盘、不回显、不进日志
+    l0_session_id?: string;  // 已解锁后的连续查阅会话（推荐，后续请求不再传密码）
+  };
+}
+interface BrowseResult {
+  rows: Row[];
+  l0_masked: boolean;
+  l0_session?: { l0_session_id: string; expires_at: number; idle_timeout_ms: number };
+  audit: AuditRef;
+}
 ```
 | 规则 | 说明 |
 |---|---|
-| L1–L6 直接可查 | 界面可浏览全部精炼层内容（17.x） |
-| **L0 需授权 + 密码** | 默认仅管理员；非管理员即使被授权，也须**输入密码**方可解开 L0 遮罩；每次 `l0_view` 写审计（4.3） |
+| L1–L6 直接可查 | 界面可浏览全部精炼层内容（17.x）；Lk 无真实产物 → 空态，不回落 L1 |
+| **L0 首次解锁** | 必须带 `grant_id` + `password`（非管理员）或管理员管理密码；指定账号必须与 grantee 一致；成功后返回 `l0_session` |
+| **L0 连续查阅** | 后续请求带 `l0_session_id`；每次 `browse` 刷新活动时间；5 分钟无活动 → 会话失效、grant 作废、删除 wrapped DEK；再次查阅须重新申请 |
+| **L0 审计** | 成功 → `l0_view`（form/request_id/user_id/grant_id/l0_session_id/project_id/mem_ids）；失败 → `l0_auth_fail`，不得写 `l0_view` |
+| **全有或全无** | 一次请求中任一命中记忆解密失败 → 整次 `E_AUTH_L0`，不返回部分明文 |
 | 未授权/密码错 | L0 列恒显示遮罩 `[L0 已加密 · 需授权]`，不泄露明文 |
 
 ### 4.2 日志 `logs`（日志记录页数据源）
@@ -136,6 +167,38 @@ interface LogItem { ts; level; form; action; agent?; request_id; message; ref_au
 ```
 - 日志页 = `logs` 的分页 + 过滤 UI（level/form/action/时间）；每条可跳审计（`ref_audit`）。
 - **异常**特指：熔断 OPEN、同步失败、反代理额度超限、L0 解密失败、向量后端报错——`level=error`，置顶。
+- **动作枚举**：`recall` / `write` / `graft` / `gc` / `auto_bind` / `unbound` / `sync*` / `llm_proxy` / `llm_fallback` / `log_view` / `l0_view` / `l0_auth_request` / `l0_auth_grant` / `l0_auth_deny` / `l0_auth_revoke` / `l0_auth_expire` / `l0_auth_fail` / `security_change`。
+
+### 4.3 L0 授权与会话 API（2026-10-30 拍板）
+
+```ts
+interface L0AccessRequest { project_ids: string[]; reason?: string; }
+interface L0AccessRequestResult { request_id: string; status: "pending"; }
+interface L0GrantReq { request_id?: string; grantee_user_id: string; scope_project_ids: string[]; password?: string; }
+interface L0Grant { grant_id: string; grantee_user_id: string; scope_project_ids: string[]; status: "active"|"expired"|"revoked"|"consumed"; created_at: number; last_view_at?: number; expires_at?: number; }
+interface L0UnlockReq { grant_id?: string; password: string; }   // 管理员直接查阅可省略 grant_id
+interface L0UnlockResult { l0_session_id: string; grant_id?: string; expires_at: number; idle_timeout_ms: number; }
+```
+
+| API | 角色 | 说明 | 审计 |
+|---|---|---|---|
+| `ma.l0RequestAccess(req)` | 已登录用户 | 申请指定 project 的 L0 查阅；返回 request_id | `l0_auth_request` |
+| `ma.l0ListRequests()` / `ma.l0ListGrants()` | 管理员 | 审批面板数据 | 只读 |
+| `ma.l0GrantAccess(req)` | 管理员 | 指定账号 + 一次性密码 + scope；用授权密码包裹 DEK | `l0_auth_grant` |
+| `ma.l0DenyRequest(request_id, reason)` | 管理员 | 拒绝申请 | `l0_auth_deny` |
+| `ma.l0RevokeGrant(grant_id, reason)` | 管理员 | 撤销未过期/活动授权 | `l0_auth_revoke` |
+| `ma.l0Unlock(req)` | grantee/管理员 | 校验账号+密码，解开 DEK，创建 5min 连续会话 | 首次 `browse` 记 `l0_view` |
+| `ma.l0Heartbeat(l0_session_id)` | grantee/管理员 | 刷新活动时间；不写 `l0_view` | 无（避免噪声） |
+| `ma.l0Lock(l0_session_id)` | grantee/管理员 | 主动结束查阅；作废 grant | `l0_auth_expire` |
+| `ma.l0UnlockWrite(password)` / `ma.l0LockWrite()` | 管理员 | 解锁/锁定后台写入 DEK 缓存 | `security_change` |
+| `ma.l0MigrateLegacy(old_password?)` | 管理员 | `content_orig` / v1 信封迁移到 v2 | `security_change` |
+
+**红线**：
+- 授权密码/DEK 不落盘、不进日志/审计/URL；`l0_session_id` 仅主进程内存。
+- **5 分钟无活动 → 会话失效、grant 作废、删除 wrapped DEK；再次查阅重新申请。**
+- 应用重启/锁屏/休眠 → 所有 `active` grants 作废；写密钥缓存清空。
+- 未解锁写密钥 → `E_L0_LOCKED`；不落明文、不降级。
+- `l0_view` 只在成功后记；失败写 `l0_auth_fail`。
 
 ## 5. 各端 Provider 注入（全端一致的路由 + 各端不同的实现）
 
@@ -178,7 +241,10 @@ interface VectorBackend {
 
 | 码 | 含义 | 端壳行为 |
 |---|---|---|
-| `E_AUTH_L0` | L0 未授权/密码错 | 保持遮罩，提示授权 |
+| `E_AUTH_L0` | L0 未授权/密码错/换账号/解密失败 | 保持遮罩，提示授权；写 `l0_auth_fail` |
+| `E_L0_LOCKED` | L0 写密钥未解锁（后台写入/采集） | 不落明文；提示管理员解锁；采集器不推进游标 |
+| `E_L0_NO_GRANT` | 非管理员未申请/未获授权 | 遮罩 + 引导“申请查阅” |
+| `E_L0_EXPIRED` | 授权/连续会话已过期（5min 无操作、重启、锁屏、被撤销） | 遮罩 + 提示“重新申请” |
 | `E_BUDGET_FUSE` | 召回预算硬熔断（3000t） | 降级 minimal/占位符 |
 | `E_LLM_FALLBACK` | 反代理超限，已回退本地 | 记 `llm_fallback`（4.3） |
 | `E_SYNC_CONFLICT` | 版本冲突待裁决 | 进 9.7 裁决队列（P8） |
@@ -197,8 +263,13 @@ const w = await ma.discover({ form:"web", signals:["mcp","hb"] });
 const c = await ma.discover({ form:"cli", signals:["mcp","proc"] });
 // 全端一致的召回
 const r = await ma.recall({ query:"为什么上次重构失败", project_id:"P1", scene:"critical" });
-// L0 授权查阅（管理员）
-const b = await ma.browse({ layer:"L0", project_id:"P1", l0_auth:{ password:"…" } });
+// L0 授权查阅：用户申请 → 管理员发放一次性密码 → 用户解锁 → 连续查阅 → 5min 无操作失效
+const req = await ma.l0RequestAccess({ project_ids:["P1"], reason:"核对 L1 摘要与原文" });
+const grant = await ma.l0GrantAccess({ request_id:req.request_id, grantee_user_id:"u_1", scope_project_ids:["P1"] }); // 管理员；密码由安全通道交付
+const s = await ma.l0Unlock({ grant_id:grant.grant_id, password:"…" });
+const b = await ma.browse({ layer:"L0", project_id:"P1", l0_auth:{ l0_session_id:s.l0_session_id } });
+await ma.l0Heartbeat(s.l0_session_id); // 页面可见+有焦点时每 60s
+// 5min 无活动 → 会话失效、grant 作废；再次查阅重新申请
 // 日志页
 const lg = await ma.logs({ level:"error", form:"web", since: now()-24*3600e3 });
 ```
@@ -210,6 +281,9 @@ const lg = await ma.logs({ level:"error", form:"web", since: now()-24*3600e3 });
 | 桌面→Web 同 recall | 两端口径一致（内核保证），仅 Provider/Storage 不同 |
 | 反代理全端 | 桌面/Web/CLI 同用途反代理，路由"先免费后低价+单价上限"一致（内核实现） |
 | 向量切 WASM | `JsVectorBackend` ↔ `RustWasmVectorBackend` 召回结果一致（接口同构） |
-| L0 查阅 | 未授权遮罩；授权+密码后解开，`l0_view` 写审计 |
+| L0 查阅（全流程） | 未授权 → `l0_auth_request` 申请 → 管理员指定账号 + 一次性授权密码（`l0_auth_grant`）→ 指定账号凭该密码 `l0Unlock` 成功 → 首次 `browse` 记 `l0_view`；未授权/错账号/错密码/过期一律遮罩 + `l0_auth_fail`，不得用 `l0_view` 冒充失败 |
+| L0 连续会话 | 会话内每 60s 心跳；中断 < 5min 可继续，≥ 5min 自动锁定、grant 作废并删除 wrapped DEK；再次查阅必须重新申请（`l0_auth_expire` → `l0_auth_request`） |
+| L0 后台写入 | 写密钥未解锁 → `E_L0_LOCKED`，不落明文、不降级、采集器游标不前进；管理员 `l0_write_unlock` 后仅可写不可查阅；锁屏/休眠/退出清空写密钥 |
+| 逐层查重与嫁接 | L1–L6 每层生成后立即按该层阈值查重；命中 → `dedup.action='grafted'` + `graft_to`/`graft_layer`，停止更深层；未命中 → 继续下一层；无真实 LLM → 只落 L1（`refined_by='stub'`） |
 | 日志页 | `logs` 按 level/form/时间过滤，异常置顶，每条可跳审计 |
 | 能力降级 | Web 端 `discover` 的 `proc` 信号自动剔除（E_FORM_DISABLED） |
