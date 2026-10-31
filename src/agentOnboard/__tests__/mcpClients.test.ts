@@ -28,10 +28,19 @@ describe('配方常量', () => {
       expect(specOfMcpClient(id).writable).toBe(true);
       expect(specOfMcpClient(id).connectHint.length).toBeGreaterThan(0);
     }
-    for (const id of ['workbuddy', 'zcode', 'deepseek-harness']) {
+    // 批次28-B：workbuddy（应用托管+跨设备同步，自动写入会被覆盖）与 zcode（实机无 MCP 配置面）仍只读；
+    // deepseek-harness 升级为「宿主继承可写」——一键接入委托宿主 qoder-cn 真实写入。
+    for (const id of ['workbuddy', 'zcode']) {
       expect(specOfMcpClient(id).writable).toBe(false);
       expect(specOfMcpClient(id).connectHint.length).toBeGreaterThan(0);
     }
+    const dsh = specOfMcpClient('deepseek-harness');
+    expect(dsh.writable).toBe(true);
+    expect(dsh.inheritsFrom).toBe('qoder-cn');
+    expect(dsh.configPath).toBeNull();
+    const wb = specOfMcpClient('workbuddy');
+    expect(wb.dynamicConfigGlob).toBe('~/.workbuddy/connectors/*/mcp.json');
+    expect(wb.format).toBe('json');
   });
 
   test('未知客户端 → 明确报错（不静默落到默认配方）', () => {
@@ -62,12 +71,16 @@ describe('buildMcpEntry / renderMcpSnippet', () => {
     expect(text).toContain(`Authorization = "Bearer ${TOKEN}"`);
   });
 
-  test('手工客户端片段：端点 + 请求头 + 说明（批次27 起 Trae 是 JSON 客户端，手工片段用 WorkBuddy）', () => {
-    const workbuddy = specOfMcpClient('workbuddy');
-    const text = renderMcpSnippet(workbuddy, EP, TOKEN);
+  test('手工客户端片段：端点 + 请求头 + 说明（批次28-B 起手工片段用 Zcode；WorkBuddy 已是 JSON 格式）', () => {
+    const zcode = specOfMcpClient('zcode');
+    const text = renderMcpSnippet(zcode, EP, TOKEN);
     expect(text).toContain(EP);
     expect(text).toContain(`Authorization: Bearer ${TOKEN}`);
-    expect(text).toContain('托管');
+    expect(text).toContain('客户端内添加');
+    // 批次28-B：WorkBuddy 升级为 JSON 格式（动态检出 connectors 下的 mcp.json）→ 片段为 mcpServers 结构
+    const wbText = renderMcpSnippet(specOfMcpClient('workbuddy'), EP, TOKEN);
+    expect(() => JSON.parse(wbText) as unknown).not.toThrow();
+    expect(wbText).toContain(`Bearer ${TOKEN}`);
     // Trae 已是 JSON：片段为 mcpServers 结构
     const traeText = renderMcpSnippet(trae, EP, TOKEN);
     expect(() => JSON.parse(traeText) as unknown).not.toThrow();
@@ -152,11 +165,15 @@ describe('probeTomlConfig', () => {
 });
 
 describe('probeClientConfig', () => {
-  test('批次27：Trae 走 JSON 探测；无配置路径/未知格式仍 manual（不猜内部格式）', () => {
+  test('批次27：Trae 走 JSON 探测；批次28-B 起动态配置面按格式探测、仅未知格式 manual', () => {
     expect(probeClientConfig(trae, null, EP).state).toBe('no_config');
     expect(probeClientConfig(trae, '{bad', EP).state).toBe('invalid');
-    expect(probeClientConfig(specOfMcpClient('workbuddy'), null, EP).state).toBe('manual');
-    expect(probeClientConfig(specOfMcpClient('workbuddy'), '{"any":true}', EP).state).toBe('manual');
+    // WorkBuddy：configPath=null 但有动态配置面（JSON）→ 按格式探测，不再整体 manual
+    expect(probeClientConfig(specOfMcpClient('workbuddy'), null, EP).state).toBe('no_config');
+    expect(probeClientConfig(specOfMcpClient('workbuddy'), '{"any":true}', EP).state).toBe('missing_entry');
+    // 真无配置面的客户端（format unknown）仍 manual
+    expect(probeClientConfig(specOfMcpClient('zcode'), null, EP).state).toBe('manual');
+    expect(probeClientConfig(specOfMcpClient('deepseek-harness'), null, EP).state).toBe('manual');
   });
 });
 

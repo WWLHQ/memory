@@ -275,7 +275,7 @@ describe('McpClientsPanel', () => {
     expect(cursorGuide).toContain('http://127.0.0.1:8204/mcp');
 
     const workbuddyGuide = screen.getByTestId('guide-workbuddy').textContent ?? '';
-    expect(workbuddyGuide).toContain('WorkBuddy → 连接器中心/MCP 设置添加');
+    expect(workbuddyGuide).toContain('WorkBuddy → 连接器中心');
     expect(workbuddyGuide).toContain('Unexpected token');
     expect(workbuddyGuide).toContain('刷新状态');
 

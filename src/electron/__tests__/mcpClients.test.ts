@@ -204,10 +204,10 @@ describe('wireMcpClient', () => {
     expect(readFileSync(path, 'utf8')).toBe(original);
   });
 
-  test('无稳定配置路径客户端 → 拒绝自动写入（诚实提示手工）', () => {
+  test('无稳定配置路径客户端 → 拒绝自动写入（诚实提示手工；deepseek-harness 宿主继承委托见 28-B 组）', () => {
     const home = tempHome();
     expect(wireMcpClient('workbuddy', TOKEN, { home })).toMatchObject({ ok: false });
-    expect(wireMcpClient('deepseek-harness', TOKEN, { home })).toMatchObject({ ok: false });
+    expect(wireMcpClient('zcode', TOKEN, { home })).toMatchObject({ ok: false });
   });
 });
 
@@ -273,6 +273,78 @@ describe('批次27 Trae CN 真写', () => {
     expect(r.ok).toBe(false);
     expect(r.error).toContain('拒绝覆盖');
     expect(readFileSync(path, 'utf8')).toBe(original);
+  });
+});
+
+// ── 批次28-B：三个「需手工」客户端的再审查 ——
+// ① WorkBuddy：应用托管（~/.workbuddy/connectors/<企业ID>/mcp.json 由客户端生成并跨设备同步），
+//    自动写入会被同步覆盖 → 只做自动检出（dynamicConfigGlob），绝不代写；
+// ② deepseek harness：无独立配置面，MCP 随宿主 Qoder 下发 → inheritsFrom，一键接入委托宿主真实写入；
+// ③ Zcode：实机排查无任何 MCP 配置面 → 保持手工指引（诚实，不伪造）。
+describe('批次28-B 动态配置面与宿主继承', () => {
+  test('WorkBuddy：connectors 下有 mcp.json → 自动检出并按内容判定状态；无 → 如实「需手工」', () => {
+    const home = tempHome();
+    expect(statusOf(home, 'workbuddy').state).toBe('manual');
+
+    write(home, '.workbuddy/connectors/acme-id/mcp.json', JSON.stringify({
+      mcpServers: { 'MultiAgent Memory': { type: 'http', url: MCP_ENDPOINT, headers: { Authorization: `Bearer ${TOKEN}` } } },
+    }));
+    const wb = statusOf(home, 'workbuddy', { currentToken: TOKEN });
+    expect(wb.state).toBe('wired');
+    expect(wb.installed).toBe(true);
+    expect(wb.displayPath).toBe('~/.workbuddy/connectors/*/mcp.json');
+    expect(wb.path).toContain(join('.workbuddy', 'connectors', 'acme-id', 'mcp.json'));
+    expect(wb.hasAuth).toBe(true);
+
+    // 缺令牌 → missing_auth；一键写入仍拒绝（应用托管，代写会被同步覆盖）
+    write(home, '.workbuddy/connectors/acme-id/mcp.json', JSON.stringify({
+      mcpServers: { 'MultiAgent Memory': { type: 'http', url: MCP_ENDPOINT } },
+    }));
+    expect(statusOf(home, 'workbuddy', { currentToken: TOKEN }).state).toBe('missing_auth');
+    const r = wireMcpClient('workbuddy', TOKEN, { home, appData: home });
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('不支持自动写入');
+  });
+
+  test('deepseek harness：宿主 Qoder 已接入 → 如实 wired；宿主未接入 → 指引一键适配宿主', () => {
+    const home = tempHome();
+    expect(statusOf(home, 'deepseek-harness').state).toBe('manual');
+    expect(statusOf(home, 'deepseek-harness').note).toContain('尚未接入');
+
+    write(home, '.qoder-cn/settings.json', JSON.stringify({
+      mcpServers: { 'MultiAgent Memory': { type: 'http', url: MCP_ENDPOINT, headers: { Authorization: `Bearer ${TOKEN}` } } },
+    }));
+    const dsh = statusOf(home, 'deepseek-harness', { currentToken: TOKEN });
+    expect(dsh.state).toBe('wired');
+    expect(dsh.hasAuth).toBe(true);
+    expect(dsh.note).toContain('Qoder');
+  });
+
+  test('deepseek harness 一键接入 = 委托宿主 qoder-cn 真实写入（备份 + 合并），复扫两者 wired', () => {
+    const home = tempHome();
+    write(home, '.qoder-cn/settings.json', JSON.stringify({ theme: 'dark', mcpServers: {} }));
+
+    const r = wireMcpClient('deepseek-harness', TOKEN, { home, appData: home, currentToken: TOKEN, now: Date.UTC(2026, 9, 31, 12, 0, 0) });
+    expect(r.ok).toBe(true);
+    expect(r.changed).toBe(true);
+    expect(r.backupPath).toBeTruthy();
+    expect(JSON.stringify(r)).not.toContain(TOKEN);
+
+    const parsed = JSON.parse(readFileSync(join(home, '.qoder-cn', 'settings.json'), 'utf8')) as {
+      theme?: string;
+      mcpServers: Record<string, { url?: string; headers?: Record<string, string> }>;
+    };
+    expect(parsed.theme).toBe('dark'); // 宿主其它配置原样保留
+    expect(parsed.mcpServers['MultiAgent Memory']?.url).toBe(MCP_ENDPOINT);
+    expect(statusOf(home, 'qoder-cn', { currentToken: TOKEN }).state).toBe('wired');
+    expect(statusOf(home, 'deepseek-harness', { currentToken: TOKEN }).state).toBe('wired');
+  });
+
+  test('Zcode：无 MCP 配置面 → 保持手工（不伪造接入）', () => {
+    const home = tempHome();
+    const z = statusOf(home, 'zcode');
+    expect(z.writable).toBe(false);
+    expect(z.state).toBe('manual');
   });
 });
 

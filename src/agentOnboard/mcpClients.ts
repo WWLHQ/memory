@@ -42,6 +42,13 @@ export interface McpClientSpec {
   connectHint: string;
   /** 是否允许一键写入（已知结构；写前备份 + 原子替换） */
   writable: boolean;
+  /** 批次28-B：动态配置面（含一个 * 通配段，值如 ~/.workbuddy/connectors/<企业ID>/mcp.json）。
+   *  configPath 为 null 但客户端会自建配置时用：扫描展开首个命中文件并按 format 探测。 */
+  dynamicConfigGlob?: string;
+  /** 批次28-B：宿主继承 —— 本客户端无独立 MCP 配置面，随宿主客户端的 mcpServers 下发
+   *  （deepseek harness ← Qoder Desktop）。宿主已接入即本客户端已接入；
+   *  一键接入委托给宿主配方真实写入。 */
+  inheritsFrom?: McpClientId;
   note?: string;
 }
 
@@ -111,30 +118,32 @@ export const MCP_CLIENT_SPECS: McpClientSpec[] = [
   },
   {
     id: 'workbuddy', name: 'WorkBuddy', badge: 'p0',
-    serverKey: 'MultiAgent Memory', format: 'unknown', entryStyle: 'type+url',
-    configPath: null, installMarkers: ['~/.workbuddy'],
+    serverKey: 'MultiAgent Memory', format: 'json', entryStyle: 'type+url',
+    configPath: null, dynamicConfigGlob: '~/.workbuddy/connectors/*/mcp.json',
+    installMarkers: ['~/.workbuddy'],
     rulesHint: '工作区 AGENTS.md（若客户端支持）',
-    connectHint: 'WorkBuddy → 连接器中心/MCP 设置添加（本地 ~/.workbuddy/connectors/<企业ID>/mcp.json 由应用托管并跨设备同步，直接改会被覆盖）',
+    connectHint: 'WorkBuddy 的 MCP 连接器由应用托管并跨设备同步（~/.workbuddy/connectors/<企业ID>/mcp.json）：在 WorkBuddy → 连接器中心添加一次后，本面板自动检测为已接入；应用未创建该文件前无法安全代写（直接改会被同步覆盖）',
     writable: false,
-    note: 'MCP 列表由应用托管（含加密凭据与边缘同步），自动写入会被同步覆盖 → 必须在客户端内添加',
+    note: '批次28-B 起真实检测 connectors 目录（应用创建即自动识别已接入）；写入由应用托管，自动写入会被同步覆盖 → 客户端内添加一次即接通',
   },
   {
     id: 'zcode', name: 'Zcode', badge: 'p3',
     serverKey: 'MultiAgent Memory', format: 'unknown', entryStyle: 'type+url',
     configPath: null, installMarkers: ['~/.zcode'],
     rulesHint: '工作区 AGENTS.md（若客户端支持）',
-    connectHint: 'Zcode → 设置 → MCP → 添加服务器（手工填写端点与请求头）',
+    connectHint: 'Zcode → 设置 → MCP → 添加服务器（端点与 Authorization 头可从「复制片段」获取）',
     writable: false,
-    note: '2026-10-31 实机排查未发现 MCP 配置文件（v2 配置无 mcp 段）：请在客户端设置中手工添加端点与 Authorization 头',
+    note: '2026-10-31 实机排查：其配置体系（v2 配置全树）无任何 MCP 段，自动写入无落点；客户端内添加一次即可',
   },
   {
     id: 'deepseek-harness', name: 'deepseek harness', badge: 'p0',
     serverKey: 'multiagent_memory', format: 'unknown', entryStyle: 'type+url',
     configPath: null, installMarkers: ['~/.dsh'],
     rulesHint: '工作区 AGENTS.md',
-    connectHint: 'deepseek harness（dsh 运行时）无独立 MCP 配置文件：随宿主（如 Qoder Desktop）的 mcpServers 生效，宿主接入即生效',
-    writable: false,
-    note: '2026-10-31 实机排查确认 dsh 走 cordis 配置体系（LLM 供应商），MCP 由宿主应用下发 → 宿主（qoder-cn 等）接入即覆盖',
+    connectHint: 'deepseek harness 无独立 MCP 配置文件：随宿主（Qoder Desktop）的 mcpServers 下发，宿主接入即生效；宿主未接入时对本客户端点「一键接入」会自动写入宿主配置',
+    inheritsFrom: 'qoder-cn',
+    writable: true,
+    note: '批次28-B：宿主继承检测 + 一键接入委托宿主（qoder-cn）真实写入；本机 2026-10-31 实测 recall_memory 经宿主配置走通',
   },
 ];
 
@@ -238,11 +247,11 @@ export function probeTomlConfig(text: string | null, spec: McpClientSpec, endpoi
   return { state: hasAuth ? 'wired' : 'missing_auth', foundUrl: url, hasAuth };
 }
 
-/** 按配置格式探测；manual = 该客户端没有可读配置路径 */
+/** 按配置格式探测；manual = 该客户端没有任何可读配置面（批次28-B：动态配置面 configPath=null 但有 glob，按格式正常探测） */
 export function probeClientConfig(
   spec: McpClientSpec, text: string | null, endpoint: string,
 ): McpConfigProbe {
-  if (!spec.configPath || spec.format === 'unknown') return { state: 'manual', hasAuth: false };
+  if (spec.format === 'unknown') return { state: 'manual', hasAuth: false };
   if (spec.format === 'toml') return probeTomlConfig(text, spec, endpoint);
   return probeJsonConfig(text, spec, endpoint);
 }

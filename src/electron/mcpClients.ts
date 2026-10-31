@@ -78,6 +78,30 @@ export function expandHome(
   return join(home, rel);
 }
 
+/** 批次28-B：解析动态配置面（glob 仅支持一个通配段，值如 ~/.workbuddy/connectors/<企业ID>/mcp.json）。
+ *  按目录条目名排序取第一个命中文件（确定性）；目录不存在/无命中/多星号 → null（由调用方如实标注）。 */
+function resolveDynamicConfigPath(glob: string, home: string, appData: string): string | null {
+  const abs = expandHome(glob, home, appData);
+  const starIdx = abs.indexOf('*');
+  if (starIdx === -1) return existsSync(abs) ? abs : null;
+  if (abs.indexOf('*', starIdx + 1) !== -1) return null;
+  const head = abs.slice(0, starIdx);
+  // 通配段前的路径通常以分隔符结尾（如 ...connectors\*）：dirname 会多退一级，直接去掉尾分隔符即得扫描目录
+  const parent = /[\\/]$/.test(head) ? head.slice(0, -1) : dirname(head);
+  const tail = abs.slice(starIdx + 1);
+  let entries: string[];
+  try {
+    entries = readdirSync(parent).sort();
+  } catch {
+    return null;
+  }
+  for (const entry of entries) {
+    const p = join(parent, entry, tail);
+    if (existsSync(p)) return p;
+  }
+  return null;
+}
+
 function readConfig(path: string): { text: string | null; error?: string } {
   try {
     const text = readFileSync(path, 'utf8');
@@ -118,12 +142,15 @@ export function scanMcpClients(options: { home?: string; appData?: string; endpo
   const appData = options.appData ?? process.env.APPDATA ?? join(home, 'AppData', 'Roaming');
   const endpoint = options.endpoint ?? MCP_ENDPOINT;
   const clients: McpClientStatus[] = MCP_CLIENT_SPECS.map((spec) => {
-    const path = spec.configPath ? expandHome(spec.configPath, home, appData) : null;
+    // 批次28-B：动态配置面（configPath=null 但给了 dynamicConfigGlob）按真实命中的文件探测
+    const path = spec.configPath
+      ? expandHome(spec.configPath, home, appData)
+      : spec.dynamicConfigGlob ? resolveDynamicConfigPath(spec.dynamicConfigGlob, home, appData) : null;
     const installed = path !== null && existsSync(path)
       || spec.installMarkers.some((m) => existsSync(expandHome(m, home, appData)));
     const base = {
       id: spec.id, name: spec.name, badge: spec.badge, format: spec.format, writable: spec.writable,
-      displayPath: spec.configPath, path, installed, rulesHint: spec.rulesHint,
+      displayPath: spec.configPath ?? spec.dynamicConfigGlob ?? null, path, installed, rulesHint: spec.rulesHint,
       ...(spec.note ? { note: spec.note } : {}),
     };
     if (!path) return { ...base, state: 'manual' as const, hasAuth: false };
@@ -148,6 +175,23 @@ export function scanMcpClients(options: { home?: string; appData?: string; endpo
       ...(probe.error ? { error: probe.error } : {}),
     };
   });
+  // 批次28-B：宿主继承 —— 无独立 MCP 配置面的客户端随宿主 mcpServers 下发（如 deepseek harness 随 Qoder），
+  // 接入状态如实取宿主扫描结果；宿主未接入时给出「一键适配宿主即自动接通」的指引，不伪造已接入。
+  const byId = new Map(clients.map((c) => [c.id, c]));
+  for (const spec of MCP_CLIENT_SPECS) {
+    if (!spec.inheritsFrom) continue;
+    const host = byId.get(spec.inheritsFrom);
+    const self = byId.get(spec.id);
+    if (!host || !self) continue;
+    if (host.state === 'wired') {
+      self.state = 'wired';
+      self.hasAuth = true;
+      self.error = undefined;
+      self.note = `MCP 由宿主 ${host.name} 下发（宿主已接入，配置 ${host.displayPath ?? '宿主配置'}）——宿主接通即生效`;
+    } else {
+      self.note = `宿主 ${host.name} 尚未接入本服务 —— 对宿主执行一键接入后，本客户端自动接通（无需单独配置）`;
+    }
+  }
   return { endpoint, home, scannedAt: Date.now(), clients };
 }
 
@@ -168,6 +212,11 @@ export function wireMcpClient(
   options: { home?: string; appData?: string; endpoint?: string; currentToken?: string; now?: number } = {},
 ): McpWireResult {
   const spec = specOfMcpClient(id);
+  // 批次28-B：宿主继承客户端（configPath=null + inheritsFrom）的一键接入 = 委托宿主真实写入，
+  // 宿主配置文件接通后本客户端随宿主下发自动生效 —— 不让用户手工配置。
+  if (!spec.configPath && spec.inheritsFrom) {
+    return wireMcpClient(spec.inheritsFrom, token, options);
+  }
   if (!spec.configPath || !spec.writable) {
     return { ok: false, error: '该客户端不支持自动写入（请复制配置片段后手工添加）' };
   }
