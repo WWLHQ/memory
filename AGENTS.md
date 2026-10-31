@@ -21,7 +21,7 @@ MultiAgent Memory：Electron 45 + React 19 + Vite 的本地优先「多 Agent �
 
 ### 1.1 Agent 先查记忆库（MCP）
 
-桌面端在 `127.0.0.1:8204/mcp` 暴露标准 MCP 服务 `multiagent_memory`（`recall_memory` / `write_memory` / `list_projects` / `get_user_preferences`）。**接入 Agent 回答本仓库实现、架构、历史决策、踩坑、偏好类问题前，优先调用 `recall_memory`（query = 用户问题关键词，project_id 可省略），并在回答末尾原样输出返回的 `display.markdown`**（🧠 Memory 提示行 + 四段可收起明细：项目背景 / 命中记忆 / Token / 省钱与费用）；客户端不渲染 HTML 时改为输出 `display.line` 单行。**回退规则**：本库未命中或工具不可用时，才回退读代码/工作区笔记/客户端自带 memory 文件——Qoder 等客户端的本地 memory 不是本记忆库，不能替代首选检索；形成新结论时用 `write_memory` 落库。
+桌面端在 `127.0.0.1:8204/mcp` 暴露标准 MCP 服务 `multiagent_memory`（`recall_memory` / `write_memory` / `list_projects` / `get_user_preferences`）。**接入 Agent 回答本仓库实现、架构、历史决策、踩坑、偏好类问题前，优先调用 `recall_memory`（query = 用户问题关键词，project_id 可省略），并在回答末尾原样输出返回的 `display.markdown`**（🧠 Memory 提示行 + 四段明细：项目背景 / 命中记忆 / Token / 省钱与费用）。**批次29 起服务端按调用方客户端自动适配格式**（实测支持 HTML 的客户端如 Qoder 得 `<details>` 折叠版；其余客户端得纯 Markdown 四小节，零 HTML 标签），原样输出即可，不要自行改写格式或添加 HTML 标签；客户端连 Markdown 都渲染不了时改为输出 `display.line` 单行。**回退规则**：本库未命中或工具不可用时，才回退读代码/工作区笔记/客户端自带 memory 文件——Qoder 等客户端的本地 memory 不是本记忆库，不能替代首选检索；形成新结论时用 `write_memory` 落库。
 
 - 桌面端未运行则 8204 不可达：如实说明，不编造记忆、不假装检索过。
 - Qoder 等客户端可能不注入 MCP `initialize.instructions`，本文件是其触发规则的兜底（新会话生效）；是否真的检索过，以数据根 `memories.db.json` 的 `recall` 审计为准（批次15 起审计 `detail.client` 记录调用方，如 `Qoder/9.9.9`）。
@@ -111,9 +111,10 @@ npm run code:index:check        # 只检查索引是否过期（verify:fast 已�
 - 浏览器纯前端模式（`npm run dev`）没有 Electron 主进程：日志仅控制台、L0 写密钥不可解锁（写入一律 `E_L0_LOCKED`）、宿主扫描不可用，页面如实提示。**批次23 起 `npm run dev` 自动拉起本机登录后端 8201**（`tools/dev.mjs`；8201 已有允许 5180 来源的后端时复用，否则另起 `dev-backend` 进程），浏览器登录开箱可用；若默认端口被不允许 5180 来源的安装版桌面端占用，**批次24 起自动改用备用端口（8211 起顺延）另起一份受信后端，并以 `?backend=` / `?agentBackend=` 直接打开页面**，不再要求先关桌面端（详见 §9 批次24）。即便如此仍不具备桌面宿主能力（MCP 客户端扫描、数据根 IPC 等不可用），需要时可单独 `npm run dev:backend`。
 - **L0 是密文落盘层**：不参与检索/查重；写入需管理员在安全页解锁写密钥（只加密，不能解密）；查阅需管理密码，或被授权账号凭 `grant_id + 一次性密码`，会话 5 分钟中断即锁定并作废授权（§4.4）。旧明文 `content_orig` 需管理员在安全页迁移（迁移前自动备份）。
 - 成员/API 密钥表暂无内核域模型：真实空表，不展示演示行。
-- **MCP 聊天窗口提示（批次11/12/13/14/15）**：
+- **MCP 聊天窗口提示（批次11/12/13/14/15，批次29 按客户端适配格式）**：
   - 提示由 `recall_memory` 返回；`initialize.instructions` 是建议性的（Qoder 实测未注入模型 → 工具未被调用、账本无召回审计），因此工具描述、HTTP 结果末块「展示要求」与 `AGENTS.md §1.1`/`CLAUDE.md` 重复约束「优先调用 + 回显提示」，仍不保证所有客户端照做。
   - 批次13/14 的回显物：`display.markdown`（外层 summary = 提示行，内层四段 `<details>` 可各自收起/展开，HTML 转义 + 120 字截断），不渲染 HTML 时回退 `display.line`。批次14 措辞改为「优先用本库、未命中/不可用再回退」。`token` 为字符启发式 `ceil(字符数/2)`；单价未设置时 `display.money=null`，绝不使用默认价格；旧召回审计无省量字段 → 只计调用次数并追加「旧记录」告警。
+  - **批次29 按客户端分发展示格式（实测 DSH 只渲染 Markdown，`<details>` 原样露出）**：`mcpRecall.clientSupportsHtmlDetails(client)` 白名单——仅实测支持 HTML 的客户端（当前 `qoder/*`）得到 `<details>` 折叠版；**其余一律纯 Markdown 四小节**（`**标题**` + 正文，零 HTML 标签、不做 HTML 转义以免 `&lt;` 原样露出）；无 clientInfo（TCP 8202、无会话 HTTP）恒为纯 Markdown fail-safe。`recallEchoNote(htmlDetails)` 与 `MCP_INSTRUCTIONS`/工具描述同步改为格式中立措辞（「服务端已按客户端适配格式，原样输出即可，不要自行添加 HTML 标签」）。`buildRecallMarkdown` 第 4 参 `{htmlDetails}`，两变体数字完全同源。
   - 批次15 推广边界：服务端提示对所有客户端一致；能否自动写入取决于客户端配置格式——Qoder CN / Claude Code / Cursor / WorkBuddy（`~/.workbuddy/mcp.json`，批次28-D）走 JSON（可备份后合并），Codex 是 TOML（可合并），**批次27 起 Trae CN 也确认稳定配置 `%APPDATA%/Trae CN/User/mcp.json`（JSON，可合并）**；Zcode 配置存应用内部存储（表单/JSON 两种方式，无文件路径）不代写，**批次28-E 起「复制片段」输出与 WorkBuddy 同构的 mcpServers JSON（可直接粘贴进其 JSON 标签页）**，deepseek harness 随宿主 Qoder 下发（对宿主一键接入即自动接通）。接入状态按真实文件内容判定，绝不伪造「已接入」；`~/.claude.json` 曾出现「条目存在但缺 Authorization → 401」，面板显示「缺令牌」并可一键补齐。令牌只在片段/写入时一次性传给受信渲染层，绝不进日志。
 - **L0→L1 质量门无旁路（批次10）**：手动编辑（`coreMemoryOps.coreUpdateContent`）与自动摘要（`forgetting.buildSummary`）都走同一 `checkL0ToL1Quality`。元对话（寒暄/身份询问/助手自述与能力清单）采用保守子句启发式：任一子句含数字、代码符号、文件扩展名或非停用英文技术词即整条放行；规则变更须同步 `qualityGate.test.ts` 正反例。
 - **登录即自动接入（批次16）**：登录成功后在后台执行三路真扫并写持久化状态（跨 iframe 共享），不再等用户切页；发现新 Agent 自动建卡并写后端 `auto_bind` 审计，连通（后端 CONNECTED 或宿主真扫命中）的可写 JSON 客户端由管理员会话自动写入 MCP（先备份；冲突/无法解析拒绝；TOML/未知格式只给手工说明）。任何一路扫描失败不影响其它路，失败原因原样展示；纯浏览器无宿主能力时**明确失败**并提示点「🔍 手动检测」，绝不用内核模拟冒充本机命中。卡片成功率/平均延时来自 `/audit`（含 `auto_bind` 的 `durationMs`），熔断来自 `/agents`，租户来自 `/api/me`，首次挂载即回填；旧审计无耗时样本时延时显「—」。

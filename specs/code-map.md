@@ -122,7 +122,7 @@ status: draft
 | 能力 | 代码落点 | 测试 |
 |---|---|---|
 | 工具描述强制触发 | `src/core/memagent/mcpSchema.ts`：「回答本项目相关问题前应先调用，不要只读代码或凭印象」+ 「调用后必须最后一行原样输出 display.line」 | `mcpHttp.test.ts`（tools/list 描述） |
-| 结果末块回显约束 | `src/core/memagent/mcpHttp.ts`：`RECALL_ECHO_NOTE` 作为 recall 结果第 3 个 content 块（提示行 + JSON + 展示要求） | `mcpHttp.test.ts`（content 长度 3、`最后一行`/`🧠 Memory` 断言） |
+| 结果末块回显约束 | `src/core/memagent/mcpHttp.ts`：`recallEchoNote(htmlDetails)` 作为 recall 结果第 4 个 content 块（批次29 起按客户端分 HTML 折叠 / 纯 Markdown 两种措辞） | `mcpHttp.test.ts`（content 长度 4、无会话不回显 `<details>` 断言） |
 | 指令去歧义 | `mcpSchema.ts`：`MCP_INSTRUCTIONS` 规则 5 改为「不要展示 MCP 认证令牌」，明确提示行中的 token 数字/金额**必须保留**（原「不要展示内部 token」与回显规则冲突） | 指令包含 `display.line` 断言 |
 | 客户端兜底触发 | `AGENTS.md §1.1`：接入 Agent 回答仓库问题前先调 `recall_memory`、最后一行回显；工具不可用如实说明；以 `recall` 审计核验是否真的检索 | 人工（Qoder 新会话） |
 
@@ -136,10 +136,10 @@ status: draft
 
 | 能力 | 代码落点 | 测试 |
 |---|---|---|
-| 四段折叠明细 | `src/core/memagent/recallInsight.ts` 的 `buildRecallMarkdown`：外层 `<details>`（summary = 提示行）+ 内层四段 `📎 项目背景 / 🧠 命中记忆 / ⚡ Token 用量 / 💰 省钱与费用`；内容 HTML 转义、空白折叠、单条 ≤120 字 | `recallInsight.test.ts`（5 对 `<details>`、转义、截断、空命中、金额/旧记录分支） |
-| 数据同源 | `mcpRecall.ts`：`display.markdown` 与 `display.line` 由同一次 recall + 同一份 `recall` 审计累计生成 | `mcpHttp.test.ts`（`content[2] === display.markdown`） |
-| 传输下发 | `mcpHttp.ts`：`tools/call` 内容块 = `[display.line, 完整 JSON, display.markdown, RECALL_ECHO_NOTE]`；TCP 8202 经 `display.markdown` 同步下发 | `mcpHttp.test.ts`（长度 4）、`mcp.test.ts` |
-| 回显策略 | `mcpSchema.ts`：`MCP_INSTRUCTIONS` 规则 2 与 `recall_memory` 描述改为「优先原样输出 display.markdown；不渲染 HTML 时回退 display.line」 | 指令含 `display.markdown`/`display.line` 断言 |
+| 四段折叠明细 | `src/core/memagent/recallInsight.ts` 的 `buildRecallMarkdown`：HTML 版外层 `<details>`（summary = 提示行）+ 内层四段；**批次29 纯 Markdown 版**（`htmlDetails:false`，`**小节标题**` + 正文，零 HTML 标签、不转义）给只渲染 Markdown 的客户端（如 DSH 实测） | `recallInsight.test.ts`（5 对 `<details>`、转义、纯 Markdown 无标签断言、转义差异对照） |
+| 数据同源 | `mcpRecall.ts`：`display.markdown` 与 `display.line` 由同一次 recall + 同一份 `recall` 审计累计生成；批次29 `clientSupportsHtmlDetails(client)` 白名单（仅 `qoder/*` → HTML 版，其余 fail-safe 纯 Markdown） | `mcpHttp.test.ts`（无会话纯 Markdown / Qoder 会话 `<details>`）、`recallInsight.test.ts`（白名单用例） |
+| 传输下发 | `mcpHttp.ts`：`tools/call` 内容块 = `[display.line, 完整 JSON, display.markdown, recallEchoNote(htmlDetails)]`；TCP 8202 无 clientInfo → 恒为纯 Markdown fail-safe | `mcpHttp.test.ts`（长度 4）、`mcp.test.ts` |
+| 回显策略 | `mcpSchema.ts`：`MCP_INSTRUCTIONS` 规则 2 与 `recall_memory` 描述改为格式中立——「服务端已按客户端适配格式（HTML 折叠或纯 Markdown），原样输出即可，不要自行添加 HTML 标签」 | 指令含 `display.markdown`/`display.line` 断言 |
 
 > 诚实边界（批次13）：折叠依赖客户端渲染 HTML `<details>`（Qoder 基于 VS Code，预期支持；未渲染时模型按指令回退单行）。明细里的记忆内容为截断摘要（≤120 字/条），完整内容仍以 `structuredContent.hits` 为准。
 
