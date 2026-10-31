@@ -83,7 +83,7 @@ status: active
 |---|---|---|
 | `npm run typecheck` | 渲染/内核（tsconfig）+ Electron（tsconfig.electron）双配置 `tsc --noEmit` | 0 错误 |
 | `npm run lint` | oxlint correctness 规则（含 react-hooks） | 0 error |
-| `npm test`（= `npx vitest run`） | 120 个测试文件 / 1315 条用例（批次27 P2-18 校正） | 全绿 |
+| `npm test`（= `npx vitest run`） | 121 个测试文件 / 1320 条用例（批次27 P3 收口实测） | 全绿 |
 | `npm run test:coverage` | vitest + v8 覆盖率（排除 Electron 主进程胶水与页面入口，由 E2E 覆盖） | 行 ≥74% / 语句 ≥71% / 函数 ≥67% / 分支 ≥61% |
 | `npm run test:e2e` | 先 `vite build`，再用 Playwright（`workers=1`，CDP 外部 Chromium）跑 21 个 spec | 全绿 |
 | `npm run verify:fast` | typecheck + lint + 覆盖率单测 | 全绿且达阈值 |

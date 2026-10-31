@@ -371,6 +371,34 @@ status: draft
 | P2-16 Host 头绑定 | `src/shared/localOrigin.ts` `rejectUntrustedHost` → home/onboard server 接线（403 `host_not_allowed` + `host_rejected` 日志） | `localOrigin.test.ts` + `server.test.ts`（恶意 Host 例） |
 | P2-17 验证码/注册 | `src/home/server.ts`：captcha 上限 256 + 30/min、注册 10/min 限速；登录 no_account 与 wrong 同响应（401） | `server.test.ts`（限速/防枚举例） |
 
+## 批次27：全量审计收口 P0-8/9 + 27-F + 27-G + P2/P3（2026-10-31）
+
+> 起因：`specs/AUDIT-FULL-REVIEW-2026-10-31.md` 剩余全部条目。诚实偏差与残留见 `AGENTS.md` §9 批次27 条目与 `specs/MANUAL-TEST-FIX-BATCH-27.md` §5。
+
+| 项 | 代码落点 | 测试 |
+|---|---|---|
+| 27-F MCP 一键适配接真 | `src/agentOnboard/mcpClients.ts`（Trae CN 配方 + `expandHome %APPDATA%/` + `currentToken` 过期降级）；`src/electron/mcpClients.ts` 真写 | `agentOnboard/mcpClients` 既有套件回归 |
+| 27-G 登录自动切受信后端 | `src/web/Home/useLoginMirror.ts`（sessionStorage `mam.backend.session.v1` + `discoverTrustedDevBackend` 8211–8215 + 自动重试）；`LoginModal.tsx` 文案 | `useLoginMirror.test.tsx` |
+| P2-1 查重阈值单一真源 | `src/core/memagent/layerRules.ts` 常量 → `src/web/write/spec.ts`、MemoryLayeredPage 导出引用 | 既有 layerRules/write 套件回归 |
+| P2-2 coreBrowse 层校验 | `src/core/memagent/memories.ts` 非法 layer → `E_BAD_LAYER`（不再记成功审计） | `memories.test.ts` |
+| P2-3 webhook 降级契约 | `src/core/memagent/webhook.ts` 未注入 pipeline 如实报错、不记幂等 hash | `webhook.test.ts` |
+| P2-4 refined_by 三态 | `src/core/memagent/memories.ts`（`llm`/`llm_partial`/`stub`） | `merge.test.ts`（2 例改期望） |
+| P2-5 脱敏对抗样本 | `layerRules.ts` 正则补 `sk-proj-` 形态；边界固化为测试 | `refine.test.ts` 对抗样本 describe（4 例） |
+| P2-7 项目 ID 真源 | `src/web/memory/coreMemoryOps.ts`、`WritePage.tsx`、`logs/LogCards.tsx` 项目来自真实清单 | 既有套件回归 |
+| P2-10 动作日志加固 | `src/shared/actionLog.ts`（值形态脱敏 + `safeLogToken` 归一 40/80/80） | `actionLog.test.ts` 值形态 describe（5 例） |
+| P2-18 索引指纹门禁 | `tools/code-index.mjs`（每文件 12 位 sha256 指纹入 markdown，`--check` 单行改动即失败） | 门禁本身（`verify:fast`） |
+| P3-1 种子钩子收口 | `src/core/memagent/types.ts` `MemAgentSeedHooks`；`src/web/kernel.ts` `getKernelWithSeed()` | 7 个测试文件换用（12 处） |
+| P3-2 审计零会话键 | `src/core/memagent/memories.ts`（5 处）、`l0vault.ts`（4 处）detail 移除 `l0_session_id` | 既有套件回归 |
+| P3-3 降级打生成时间 | `src/core/memagent/legacyLayers.ts` 降级时 `layers_generated_at=now`（grafted_from 保留，理由见代码注释） | `legacyLayers.test.ts:84` |
+| P3-4 IPC 会话闸门 | `src/electron/main.ts` `l0:seal`（IpcResult 化）/`mcp:clients`（闸门失败抛错）；`preload.ts`；`src/web/shared/l0Port.ts`；`autoDiscovery.ts`、`McpClientsPanel.tsx` 带会话 | 既有套件回归（E2E 覆盖登录路径） |
+| P3-5 宿主桥去重键 | `src/desktop/hostBridge.ts` `dedupeKey`（id+method+args） | `hostBridge.test.ts` +1 例 |
+| P3-6 Windows file: 信任 | `src/electron/main.ts` `isTrustedUrl` `fileURLToPath` + 目录边界 | 门禁回归（主进程无单测，E2E 覆盖） |
+| P3-7 日志轮转口径 | `src/electron/actionLog.ts` 尾读循环 `keep-1`；AGENTS §4 文案纠正 | 既有 actionLog 套件回归 |
+| P3-8 先礼后兵 | `tools/package-builder.cjs` `killReleaseProcesses`（CloseMainWindow 3s → Stop-Process -Force） | 实机打包验证（本报告 §4.8） |
+| P3-9 dev 端口健壮化 | `tools/dev.mjs`（TOCTOU 顺延重试 + `agentBackend` 探活后才拼参） | 实机 dev 验证 |
+| P3-10 engines | `package.json` `engines.node>=22` | npm 安装警告 |
+| P3-11 悬浮层冒烟 | `src/web/InlineAttribution/__tests__/floatEntry.test.tsx`（新，4 例） | vitest |
+
 
 ---
 
@@ -414,5 +442,5 @@ status: draft
 | T15 | 真实链路 E2E + 真浏览器点击级 | `e2e/app.spec.ts`（Playwright，指向 `dist/` 真实构建产物；批次26 起起真实 home 后端 + admin 登录） | `npm run test:e2e`（21 个 spec，`workers=1`） |
 | T16 | Webhook 入口 HTTP 服务 | `src/electron/webhookServer.ts` : `createWebhookHttpServer`（批次26 P0-4：全请求 mcp-token 鉴权、1 MiB body 上限、status/hash 只回 id+状态） | `src/electron/__tests__/webhookServer.test.ts` |
 
-> 全量命令：`npm run verify` = `verify:fast`（`typecheck` → `lint` → `test:coverage`，117 文件 / 1248 例）→ `build:electron` → `test:e2e`（先 `vite build`，再 Playwright 21 个 spec / 94 例；静态服务与后端均用系统分配端口）。
+> 全量命令：`npm run verify` = `verify:fast`（`typecheck` → `lint` → `test:coverage`，121 文件 / 1320 例）→ `build:electron` → `test:e2e`（先 `vite build`，再 Playwright 21 个 spec / 94 例；静态服务与后端均用系统分配端口）。
 > 只跑快闸：`npm run verify:fast`（不含 E2E）。
