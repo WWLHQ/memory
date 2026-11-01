@@ -28,6 +28,8 @@ export interface LlmTestResult {
   model?: string;
   latencyMs?: number;
   error?: string;
+  /** 主进程按落盘配置回的「该引擎是否已勾选启用」（批次34：拨测不要求启用，成功后要提示去勾选） */
+  enabled?: boolean;
 }
 
 export function llmEngineAvailable(): boolean {

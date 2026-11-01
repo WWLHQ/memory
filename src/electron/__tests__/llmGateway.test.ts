@@ -364,14 +364,32 @@ describe('testEngine / applyProbeResult', () => {
     expect(bad.error).not.toContain(KEY);
   });
 
-  test('未找到引擎 / 未启用 / 未填模型名 / 缺密钥 → 如实失败，不发请求', async () => {
+  test('未找到引擎 / 未填模型名 / 缺密钥 → 如实失败，不发请求', async () => {
     const c = cfg();
     expect((await testEngine(c, KEYS, 'nope')).error).toBe('未找到引擎 nope');
-    c.engines[0].enabled = false;
-    expect((await testEngine(c, KEYS, 'ollama')).error).toContain('未启用');
-    c.engines[0].enabled = true;
     c.engines[0].model = '';
     expect((await testEngine(c, KEYS, 'ollama')).error).toContain('未填写模型名');
+    expect((await testEngine(c, {}, 'kimi')).error).toContain('未配置 API Key');
+    expect(captures).toHaveLength(0);
+  });
+
+  // 批次34：用户「配了 Key 点测试连通却全显示连不通」——真因是旧实现在 enabled=false 时 9ms 内直接返回「未启用」，
+  // 一条 HTTP 都不发。拨测正是决定要不要启用的手段，因此不再要求先启用（启用仍只影响是否参与精炼排队）。
+  test('未勾选启用的引擎照样真拨测：拨测与启用解耦（批次34）', async () => {
+    const c = cfg();
+    c.engines[0].enabled = false; // ollama 未启用
+    const r = await testEngine(c, KEYS, 'ollama');
+    expect(r.ok).toBe(true);
+    expect(typeof r.latencyMs).toBe('number');
+    expect(captures.map((x) => x.engine)).toEqual(['ollama']); // 真实发出了请求
+  });
+
+  test('未启用 + 缺条件仍如实失败（解耦不等于放宽其它前提）', async () => {
+    const c = cfg();
+    c.engines[0].enabled = false;
+    c.engines[0].model = '';
+    expect((await testEngine(c, KEYS, 'ollama')).error).toContain('未填写模型名');
+    c.engines[2].enabled = false;
     expect((await testEngine(c, {}, 'kimi')).error).toContain('未配置 API Key');
     expect(captures).toHaveLength(0);
   });

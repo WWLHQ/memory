@@ -180,3 +180,45 @@ describe('LlmEngineCard 批次33-B（自定义厂商 + 读配置失败可见化�
     await waitFor(() => expect(patches).toContainEqual({ remove: 'kimi' }));
   });
 });
+
+// 批次34：用户「配了 Key 点测试连通全显示连不通」——旧实现要求先勾选启用，未启用时不发请求就返回失败。
+describe('LlmEngineCard 批次34（拨测与启用解耦）', () => {
+  test('未启用的引擎「测试连通」按钮仍可点；拨测不先保存草稿（没改动时）', async () => {
+    mockRole('admin');
+    const patches: unknown[] = [];
+    const tests: string[] = [];
+    setHost({
+      setConfig: async (patch) => { patches.push(patch); return { ...SNAPSHOT, ok: true }; },
+      test: async (id) => { tests.push(id); return { ok: true, latencyMs: 88, model: 'moonshot-v1-8k', enabled: false }; },
+    });
+    render(<LlmEngineCard />);
+    await waitFor(() => expect(screen.getByTestId('llm-engine-kimi')).toBeInTheDocument());
+    const btn = screen.getByTestId('llm-engine-kimi-test') as HTMLButtonElement;
+    expect(btn.disabled).toBe(false); // kimi 在快照里 enabled:false，仍允许拨测
+    await userEvent.click(btn);
+    await waitFor(() => expect(tests).toEqual(['kimi']));
+    expect(patches).toHaveLength(0); // 该行无编辑 → 不多写一次配置
+    expect(screen.getByText(/不要求先勾选「启用」/)).toBeInTheDocument();
+  });
+
+  test('拨测成功但该引擎尚未启用：显式提示「勾选启用后才参与精炼排队」', async () => {
+    mockRole('admin');
+    setHost({ test: async () => ({ ok: true, latencyMs: 88, model: 'moonshot-v1-8k', enabled: false }) });
+    render(<LlmEngineCard />);
+    await waitFor(() => expect(screen.getByTestId('llm-engine-kimi')).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId('llm-engine-kimi-test'));
+    await waitFor(() => expect(screen.getByTestId('llm-engine-kimi-test-result').textContent)
+      .toContain('尚未勾选「启用」'));
+    expect(screen.getByTestId('llm-engine-kimi-test-result').textContent).toContain('88ms');
+  });
+
+  test('已启用的引擎拨测成功：只报连通，不加多余提示', async () => {
+    mockRole('admin');
+    setHost({ test: async () => ({ ok: true, latencyMs: 512, model: 'qwen2.5:7b', enabled: true }) });
+    render(<LlmEngineCard />);
+    await waitFor(() => expect(screen.getByTestId('llm-engine-ollama')).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId('llm-engine-ollama-test'));
+    await waitFor(() => expect(screen.getByTestId('llm-engine-ollama-test-result').textContent).toContain('✅ 连通（512ms）'));
+    expect(screen.getByTestId('llm-engine-ollama-test-result').textContent).not.toContain('尚未勾选');
+  });
+});

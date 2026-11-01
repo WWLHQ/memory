@@ -345,9 +345,16 @@ export interface EngineTestResult {
   model?: string;
   latencyMs?: number;
   error?: string;
+  /** 该引擎当前是否勾选了「启用」——拨测成功但未启用时，渲染层要提示「勾选后才会参与精炼排队」（批次34） */
+  enabled?: boolean;
 }
 
-/** 真实拨测单个引擎（不落盘；调用方用 applyProbeResult 把延时写回配置） */
+/**
+ * 真实拨测单个引擎（不落盘；调用方用 applyProbeResult 把结果写回配置）。
+ * 批次34：**不再要求 enabled**——「测试连通」正是决定要不要启用它的手段，旧实现在未启用时 9ms 内直接返回
+ * 「X 未启用」、一条 HTTP 都不发，用户看到 ❌ 只能理解成「连不通」。启用与否只影响精炼排队（callOrder）。
+ * 仍然前提齐备才发请求：引擎存在、模型名非空、需要密钥的引擎必须已有密钥。
+ */
 export async function testEngine(
   cfg: LlmGatewayConfig,
   keys: Record<string, string>,
@@ -356,16 +363,15 @@ export async function testEngine(
 ): Promise<EngineTestResult> {
   const eng = cfg.engines.find((e) => e.id === id);
   if (!eng) return { ok: false, error: `未找到引擎 ${id}` };
-  if (!eng.enabled) return { ok: false, error: `${eng.name} 未启用` };
   if (!eng.model) return { ok: false, error: '未填写模型名' };
   const key = keys[id] ?? '';
-  if (eng.needsKey && !key) return { ok: false, model: eng.model, error: '未配置 API Key' };
+  if (eng.needsKey && !key) return { ok: false, model: eng.model, enabled: eng.enabled, error: '未配置 API Key' };
   const t0 = Date.now();
   try {
     await chat(eng, key, '只回复两个字符：OK', fetchImpl);
-    return { ok: true, model: eng.model, latencyMs: Date.now() - t0 };
+    return { ok: true, model: eng.model, latencyMs: Date.now() - t0, enabled: eng.enabled };
   } catch (e) {
-    return { ok: false, model: eng.model, latencyMs: Date.now() - t0, error: String((e as Error)?.message ?? e) };
+    return { ok: false, model: eng.model, latencyMs: Date.now() - t0, enabled: eng.enabled, error: String((e as Error)?.message ?? e) };
   }
 }
 

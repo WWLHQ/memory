@@ -149,7 +149,7 @@ const llm = {
   setConfig: (patch: unknown, sessionId?: string | null) =>
     ipcRenderer.invoke(IPC.llmConfigSet, patch, sessionId) as Promise<LlmViewResult>,
   test: (engineId: string, sessionId?: string | null) =>
-    ipcRenderer.invoke(IPC.llmTest, engineId, sessionId) as Promise<{ ok: boolean; model?: string; latencyMs?: number; error?: string }>,
+    ipcRenderer.invoke(IPC.llmTest, engineId, sessionId) as Promise<{ ok: boolean; model?: string; latencyMs?: number; error?: string; enabled?: boolean }>,
   refine: (payload: unknown, sessionId?: string | null) =>
     ipcRenderer.invoke(IPC.llmRefine, payload, sessionId) as Promise<{ ok: boolean; text?: string; tokens?: number; error?: string }>,
 };

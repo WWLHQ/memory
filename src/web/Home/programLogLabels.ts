@@ -34,6 +34,8 @@ const ACTION_LABEL: Record<string, string> = {
   'mcp:client-wire': '写入 MCP 客户端配置',
   'mcp:recall': 'MCP 召回记忆',
   'mcp:write': 'MCP 写入记忆',
+  'llm:config-saved': '保存 LLM 引擎配置',
+  'llm:test-engine': 'LLM 引擎连通拨测（真实 HTTP）',
   'kernel:l0:migrate-backup': 'L0 迁移前备份',
   'kernel:l0:migrate-backup-fail': 'L0 迁移备份失败',
   'kernel:legacy:demote-backup': '清理遗留账本前备份',

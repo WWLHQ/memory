@@ -679,12 +679,15 @@ function registerLlmIpc(): void {
     saveLlmConfig(USER_DATA, cfg);
     if (keyOp) saveLlmKey(USER_DATA, keyOp.id, keyOp.value); // 空值 = 清除；密钥本体不进日志
     llmGateway = loadLlmGateway(USER_DATA);
-    void mlog('llm:config-saved', {
+    const savedDetail = {
       by: gate.ctx.user_id,
       keyOp: keyOp ? { id: keyOp.id, cleared: !keyOp.value } : null,
       engines: cfg.engines.map((e) => ({ id: e.id, enabled: e.enabled, model: e.model })),
       usable: !!llmGateway,
-    });
+    };
+    void mlog('llm:config-saved', savedDetail);
+    // 批次34：同一条也落 actions.log —— AGENTS §4 写明排查第一入口是 actions.log，此前这两个 LLM 事件只进 main.log
+    actionLog('llm', 'config-saved', savedDetail);
     return { ok: true, ...llmGatewayView() };
   });
   handleIpc(IPC.llmTest, async (_e, target: unknown, sessionId?: string) => {
@@ -692,14 +695,17 @@ function registerLlmIpc(): void {
     if (!gate.ok) return { ok: false, error: gate.error };
     const id = typeof target === 'string' ? target : '';
     const r = await testEngine(loadLlmConfig(USER_DATA), loadLlmKeys(USER_DATA), id);
-    // 拨测延时写回配置 → 精炼按「最近实测最快」排队（失败不记延时，避免把坏引擎顶到前面）
+    // 拨测结果写回配置 → 精炼按「最近实测最快」排队（失败不记延时，避免把坏引擎顶到前面）
     saveLlmConfig(USER_DATA, applyProbeResult(loadLlmConfig(USER_DATA), id, r));
     llmGateway = loadLlmGateway(USER_DATA);
     // r.error 来自网关 safeErrorText（状态码 + 截断响应体，不含密钥）
-    void mlog('llm:test-engine', {
+    const probeDetail = {
       by: gate.ctx.user_id, engine: id || '(空)', ok: r.ok, model: r.model, latencyMs: r.latencyMs,
+      enabled: r.enabled, // 批次34：拨测不再要求启用，回显当时是否已勾选，便于区分「连通但未启用」
       ...(r.error ? { error: r.error } : {}),
-    });
+    };
+    void mlog('llm:test-engine', probeDetail);
+    actionLog('llm', 'test-engine', probeDetail);
     return { ...r };
   });
   handleIpc(IPC.llmRefine, async (_e, payload: unknown, sessionId?: string) => {

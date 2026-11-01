@@ -38,7 +38,7 @@ function EngineRow(props: {
   onClearKey: () => void;
   onTest: () => void;
   testing: boolean;
-  testResult: { ok: boolean; latencyMs?: number; error?: string } | null;
+  testResult: { ok: boolean; latencyMs?: number; error?: string; enabled?: boolean } | null;
   onRemove: () => void;
   isAdmin: boolean;
   busy: boolean;
@@ -78,7 +78,9 @@ function EngineRow(props: {
             {props.testResult && (
               <span className="dim" style={{ fontSize: 11 }} data-testid={`llm-engine-${engine.id}-test-result`}>
                 {props.testResult.ok
-                  ? `✅ 连通（${props.testResult.latencyMs ?? '?'}ms）`
+                  ? props.testResult.enabled === false
+                    ? `✅ 连通（${props.testResult.latencyMs ?? '?'}ms）—— 但尚未勾选「启用」，勾选后才会参与精炼排队`
+                    : `✅ 连通（${props.testResult.latencyMs ?? '?'}ms）`
                   : `❌ ${props.testResult.error ?? '失败'}`}
               </span>
             )}
@@ -127,7 +129,7 @@ export function LlmEngineCard() {
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState<Record<string, boolean>>({});
-  const [testResult, setTestResult] = useState<Record<string, { ok: boolean; latencyMs?: number; error?: string } | null>>({});
+  const [testResult, setTestResult] = useState<Record<string, { ok: boolean; latencyMs?: number; error?: string; enabled?: boolean } | null>>({});
   const [presetPick, setPresetPick] = useState('');
   const [custom, setCustom] = useState({ name: '', baseURL: '', model: '' });
 
@@ -217,7 +219,9 @@ export function LlmEngineCard() {
       <div className="note">
         写记忆时逐层生成 L2–L6，<b>不区分简单层/深入层由哪家做</b>：按各引擎<b>最近一次真实拨测延时</b>排队，
         最快的先用，调用失败自动回退下一个（未拨测的排在已拨测之后）。产物由内核按层规格硬校验，不合规如实判违规。
-        网关当前状态：{view.usable ? '已启用' : '未启用（写入只落 L1）'}；「测试连通」会先保存该引擎再真实拨测。
+        网关当前状态：{view.usable ? '已启用' : '未启用（写入只落 L1）'}。<b>「测试连通」不要求先勾选「启用」</b>
+        （批次34：拨测就是用来判断能不能连的，未启用的引擎照样真拨测）；它也会先把该行当前编辑保存下来再拨测。
+        <b>只有勾选「启用」并保存后</b>，该引擎才参与精炼排队——拨测成功但没勾选时，结果会写明「连通但未启用」。
       </div>
       {!isAdmin && (
         <div className="note" data-testid="llm-admin-required" style={{ color: 'var(--warn, #b8860b)' }}>
