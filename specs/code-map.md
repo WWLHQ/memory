@@ -137,8 +137,8 @@ status: draft
 | 能力 | 代码落点 | 测试 |
 |---|---|---|
 | 四段折叠明细 | `src/core/memagent/recallInsight.ts` 的 `buildRecallMarkdown`：HTML 版外层 `<details>`（summary = 提示行）+ 内层四段；**批次29 纯 Markdown 版**（`htmlDetails:false`，`**小节标题**` + 正文，零 HTML 标签、不转义）给只渲染 Markdown 的客户端（如 DSH 实测） | `recallInsight.test.ts`（5 对 `<details>`、转义、纯 Markdown 无标签断言、转义差异对照） |
-| 数据同源 | `mcpRecall.ts`：`display.markdown` 与 `display.line` 由同一次 recall + 同一份 `recall` 审计累计生成；批次29 `clientSupportsHtmlDetails(client)` 白名单（仅 `qoder/*` → HTML 版，其余 fail-safe 纯 Markdown） | `mcpHttp.test.ts`（无会话纯 Markdown / Qoder 会话 `<details>`）、`recallInsight.test.ts`（白名单用例） |
-| 传输下发 | `mcpHttp.ts`：`tools/call` 内容块 = `[display.line, 完整 JSON, display.markdown, recallEchoNote(htmlDetails)]`；TCP 8202 无 clientInfo → 恒为纯 Markdown fail-safe | `mcpHttp.test.ts`（长度 4）、`mcp.test.ts` |
+| 数据同源 | `mcpRecall.ts`：`display.markdown` 与 `display.line` 由同一次 recall + 同一份 `recall` 审计累计生成；批次29 `clientSupportsHtmlDetails(client)` 白名单（仅 `qoder/*` → HTML 版，其余 fail-safe 纯 Markdown）；**批次32 起非 HTML 客户端默认只给一行摘要**（见批次32 段） | `mcpHttp.test.ts`（无会话紧凑档 / Qoder 会话 `<details>`）、`recallInsight.test.ts`（白名单 + 档位矩阵用例） |
+| 传输下发 | `mcpHttp.ts`：`tools/call` 内容块 = `[display.line, 完整 JSON, display.markdown, recallEchoNote(mode)]`；批次32 起 `mode` 从**本次 payload 自己的 `display.mode`** 取（单一真源），TCP 8202 无 clientInfo → fail-safe 紧凑档 | `mcpHttp.test.ts`（长度 4、末块文案与档位一致）、`mcp.test.ts` |
 | 回显策略 | `mcpSchema.ts`：`MCP_INSTRUCTIONS` 规则 2 与 `recall_memory` 描述改为格式中立——「服务端已按客户端适配格式（HTML 折叠或纯 Markdown），原样输出即可，不要自行添加 HTML 标签」 | 指令含 `display.markdown`/`display.line` 断言 |
 
 > 诚实边界（批次13）：折叠依赖客户端渲染 HTML `<details>`（Qoder 基于 VS Code，预期支持；未渲染时模型按指令回退单行）。明细里的记忆内容为截断摘要（≤120 字/条），完整内容仍以 `structuredContent.hits` 为准。
@@ -174,7 +174,7 @@ status: draft
 | 调用方归因 | `RecallReq.client` + `agent.ts` 审计 `detail.client`；`mcpHttp.ts` 用 `initialize.clientInfo`（优先）/`User-Agent` 识别，`Mcp-Session-Id` 关联 | `mcpHttp.test.ts`（`Qoder/9.9.9`、`Cursor (UA)`） |
 | 客户端触发规则 | 根目录 `CLAUDE.md`（`@AGENTS.md` + 优先调用/回显）；`AGENTS.md §1.1/§9` 同步 | 人工（Claude Code 新会话） |
 | 审计证据升级（批次30） | `src/electron/mcpClients.ts` `applyRecallEvidence` + `scanMcpClients({recallEvidence})`：recall 审计 `detail.client` 按 `spec.id`/`auditClientIds` 匹配，manual/no_config/missing_entry/missing_auth → wired（note 注明「以审计为准」）；conflict/invalid 不升级；`main.ts §6c` 扫描时真查 `storage.queryAudit({action:'recall'})`（失败退回纯文件口径）；`McpClientSpec.auditClientIds`（deepseek-harness → `dsh-mcp-client`） | `src/electron/__tests__/mcpClients.test.ts`（批次30 五例：升级/不匹配不升级/conflict 保持/DSH 命中/空证据无影响） |
-| LLM 精炼网关（批次31） | `src/electron/llmGateway.ts`：`TieredLlmProvider`（L2→[ollama,deepseek] / L3–L6→[deepseek,ollama] 互备，无硬上限）、`buildLayerPrompt`（读 layerRules.ts LAYER_SPECS，L0 原文不上送）、`testOllama/testDeepseek` 真拨测、密钥文件 0600 + 错误 200 字截断；`main.ts §6d`（config 需会话 / configSet+test 需管理员 / refine 需会话+载荷校验）→ `preload.ts` `llm` 命名空间 → `hostBridge.ts` 四通道；`src/web/hostLlm.ts`（HostLlmProvider，`isStub` getter 由配置快照驱动，浏览器模式 null→FakeLlmProvider）；参数页 `LlmEngineCard.tsx` + `llmEngine.ts` | `src/electron/__tests__/llmGateway.test.ts`（14 例：分层路由/互备双向/密钥不泄露/config 钳制/提示词规格/拨测诚实失败）+ 实机 Ollama E2E（L2/L3 真生成 + DeepSeek 禁用时回退） |
+| LLM 精炼网关（批次31 建 → 批次32 多引擎，详见批次32 段） | `src/electron/llmGateway.ts`：批次31 建「主进程网关 + `llm:refine` 代理 + 层级提示词 + 密钥 0600」，批次32 把「双引擎分层互备」换成「N 引擎按最近拨测延时排队、逐个回退」 | `src/electron/__tests__/llmGateway.test.ts`（批次32 重写为 25 例）+ 实机 Ollama 验证（见批次32 手测报告） |
 
 > 诚实边界（批次15，28-D 更新）：自动写入只覆盖结构稳定的 JSON 客户端（含 Trae CN、WorkBuddy `~/.workbuddy/mcp.json`）与 Codex（TOML）；Zcode（应用内表单/JSON，无文件路径）与 deepseek harness（随宿主 Qoder 下发）给手工说明/宿主委托；28-E 起 Zcode「复制片段」输出与 WorkBuddy 同构的 mcpServers JSON（可直接粘贴）。状态扫描按文件内容判定，不保证客户端进程已重载配置（需重启客户端）。提示能否被普通成员复制（含令牌）由管理员门禁控制；令牌绝不进日志。
 
@@ -458,3 +458,26 @@ status: draft
 | 28-B/28-D 宿主继承 + WorkBuddy 可写 | `src/agentOnboard/mcpClients.ts`：`inheritsFrom`（deepseek harness ← qoder-cn，状态如实取宿主）+ WorkBuddy `configPath '~/.workbuddy/mcp.json'`（28-D 实机确认，可备份+合并写入；28-B 的 `dynamicConfigGlob` 基础设施随实机结论移除）；`src/electron/mcpClients.ts`：扫描宿主继承状态推导、`wireMcpClient` 委托写入；Zcode 保持手工（应用内表单/JSON，无文件路径） | `agentOnboard/__tests__/mcpClients.test.ts`（配方常量/片段/探测更新）、`electron/__tests__/mcpClients.test.ts`「批次28-B/28-D 三客户端再审查」4 例 |
 | 28-E Zcode 片段升级 | `src/agentOnboard/mcpClients.ts`：Zcode `format` unknown→`json`（`renderMcpSnippet` 输出与 WorkBuddy 同构的 mcpServers JSON，可直接粘贴进其 JSON 标签页）；`configPath` 仍 null（扫描层无路径 manual）、`writable` 仍 false（不代写）——只升级片段不改自动写入边界；`McpClientsPanel.tsx` 安全说明同步 | `agentOnboard/__tests__/mcpClients.test.ts`（片段 JSON.parse+同构断言、探测 no_config 断言） |
 | 28-C 遗留层自动清理 | `src/core/memagent/legacyLayers.ts`：`isMislabeledLayer`（标了 L2–L6 但无深层正文且非 llm/llm_partial）；`main.ts` bootstrap `autoDemoteLegacyLayers()`；`forgetting.ts` `buildSummary` 摘要行不再误标 L3；`coreMemoryOps.coreUpdateContent` 归一 stub 行 | `legacyLayers.test.ts`、`forgetting.test.ts`、`LegacyLedgerCard.test.tsx`、`coreMemoryOps.test.ts` |
+
+---
+
+## 批次32（2026-11-01）：LLM 多引擎 + 按延时路由 + DSH 明细默认收起
+
+> 起因：用户两条要求——①「LLM 精炼引擎增加第三方大模型，不区分简单和深入，哪个能用哪个快用哪个」；②「DSH 中记忆库信息要折叠起来，需要看的时候点击展开查看详细信息，不是直接展示详细，这样太占页面空间了」。
+> 拍板：接入 = 通用 OpenAI 兼容 + 预设快选；路由 = 按最近拨测延时自动排序；DSH 折叠 = 先实测渲染能力（批次29 已实测 DSH 只渲染 Markdown、`<details>` 原样露出，故走「默认一行摘要 + 按需再取明细」）。
+
+| 条目 | 实现要点 | 测试 |
+|---|---|---|
+| 32-A 多引擎配置 | `src/electron/llmGateway.ts`：`LlmEngineConfig` 增 `needsKey/lastLatencyMs/lastProbeAt/lastProbeOk`；`LLM_PRESETS` 预设快选（Ollama/DeepSeek/Kimi/智谱GLM/通义/OpenRouter）；`mergeLlmConfig`（补丁式：改引擎 / `add.preset` / `add` 自定义（id `custom_*`）/ `remove` / `key:{id,value}`）幂等 + 钳制（非布尔 enabled→false、缺或重复 id 丢弃、空列表回默认）；`chatEndpoint(base)`：`/v\d+` 结尾接 `/chat/completions`，否则接 `/v1/chat/completions` | `llmGateway.test.ts`（config 往返、钳制四条、`chatEndpoint` 单元 + 真实请求路径 `/api/paas/v4/chat/completions`、mergeLlmConfig 五类动作） |
+| 32-A 密钥面收口 | 同文件：`llm-keys.json`（0600，`{引擎id: 密钥}`）`loadLlmKeys/saveLlmKey/keyExists`，空值=清除；配置文件 `llm-config.json` **绝不含密钥**（`llmEngineViews` 只出 `keySet`）；legacy `llm-deepseek-key.txt` 仅作 `deepseek` 只读兜底（`llm-keys.json` 优先；清除不删用户遗留文件）；`isLocalBase()` 按 `new URL().hostname` 判回环 → 本机引擎 `needsKey=false` 且**永不带 Authorization**；`safeErrorText` 截 200 字，密钥绝不进 `refine_error` | 同上（「配置文件永不含密钥」断言、Authorization 只给 needsKey 引擎、legacy 兜底优先级、错误文案不含 KEY、`listModels` 本地/远端 tier 混合） |
+| 32-B 按延时路由 | 同文件：`LlmGatewayProvider.callOrder()` = 可运行引擎（`enabled && model && (!needsKey || 有密钥)`）按 `lastLatencyMs` 升序（未拨测 → `MAX_SAFE_INTEGER`，同值按列表顺序稳定并列），**逐个顺序回退，首个成功即用**；L2–L6 同一口径，**删除厂商↔层级绑定**；`applyProbeResult` 只在拨测成功时记延时（失败不顶队首）；都失败抛聚合错误（内核记 `refine_error`，该层留空） | 同上（延时排序、未拨测排后 + 并列顺序、三引擎顺序回退捕获 `['kimi','deepseek','ollama']`、聚合错误含各引擎原因且无密钥、可运行性三条跳过） |
+| 32-B 主进程/IPC | `src/electron/main.ts` §6d：`llm:configSet` 走 `mergeLlmConfig` + `saveLlmKey`；`llm:test` 真拨测后 `applyProbeResult` 写回配置（延时即下次排队依据）并重载网关；日志只记 id/模型/延时，不含密钥 | `verify:fast` + 实机拨测（见手测报告）；E2E 覆盖启动与配置通道 |
+| 32-B 渲染层 | `src/web/hostLlm.ts`：快照改 `{usable, engines: LlmEngineView[], presets}`，`isStub` 仍为 getter（保存即热生效）；导出 `isLocalBase` 供参数页标注本地/云端；`modelsFromSnapshot` 按回环给 `{free,0}`、远端 `{cheap,0.01}`（仅路由记账） | `hostLlm` 相关页面测试 + typecheck |
+| 32-B 引擎管理卡 | `src/web/params/LlmEngineCard.tsx`：预设快选 + 自定义 OpenAI 兼容引擎（名称/baseURL/模型/密钥）+ 逐引擎「测试连通」+ 排队顺序徽标 + 本地/云端标注；**拨测前先保存当前草稿**（主进程按落盘配置拨测），拨测后重拉快照刷新顺序 | typecheck/oxlint；E2E 启动冒烟；视觉需手动（jsdom 无布局） |
+| 32-C 明细默认收起 | `src/core/memagent/recallInsight.ts`：新增 `buildRecallCompactMarkdown(hint)`（一行加粗摘要 + 「再调一次并置 `detail=true`」指引，零 HTML）；`buildRecallMarkdown(...,{htmlDetails:false})` 保留作明细档 | `recallInsight.test.ts`（紧凑档无 `<details>`/无小节标题/含 `detail=true`；档位矩阵） |
+| 32-C 三档下发 | `src/core/memagent/mcpRecall.ts`：`RecallDisplayMode = 'html-details' | 'markdown-full' | 'markdown-compact'`，`recallDisplayMode(client, detail)`（HTML 白名单优先且忽略 detail；其余 detail→full、默认→compact）；`display.mode` 随结果下发；`detail` 非布尔 → `McpToolError(-32602)` | `mcp.test.ts`（TCP 默认紧凑 / `detail=true` 四小节 / `detail:'yes'` 报错）、`mcpHttp.test.ts`（无会话紧凑、detail=true 明细、Qoder 会话仍 `<details>`） |
+| 32-C 回显口径 | `src/core/memagent/mcpHttp.ts`：`recallEchoNote(mode)` 由**本次 payload 的 `display.mode`** 选文案（单一真源）；`src/core/memagent/mcpSchema.ts`：`recall_memory` 增 `detail` 参数与三档描述，`MCP_INSTRUCTIONS` 规则 2 改三档口径 | `mcpHttp.test.ts`（末块含「默认收起」/「detail=true 的明细返回」且与 content[2] 同档） |
+| 32-C 触发规则同步 | `AGENTS.md §1.1`、`CLAUDE.md`（Claude Code 落紧凑档） | 人工（新会话生效） |
+
+> 诚实边界（批次32）：① DSH 里「展开」是 Agent **再调一次 `recall_memory(detail=true)`**，不是可点击的 UI 控件——字面点击折叠只在 HTML 客户端（Qoder 系）成立；② 排队依据是**最近一次成功拨测**的延时，不是实时健康度：长期不点「测试连通」则按列表顺序，某引擎中途挂掉仍会先被尝试再回退（一次写入最多损耗一轮超时）；③ 远端第三方引擎需要用户自填 API Key 并自行确认其计费，`{cheap,0.01}` 只是 routeProxy 的记账元数据，**不代表厂商账单**；④ 自定义引擎按 OpenAI 兼容 `chat/completions` 调用，非该协议的端点（如纯 Anthropic 格式）不在支持范围。
+
