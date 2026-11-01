@@ -1,12 +1,15 @@
-// MCP 召回工具编排（批次11/13）：项目自动定位 / 列表 / 提示行与折叠明细组装。
+// MCP 召回工具编排（批次11/13/29/32）：项目自动定位 / 列表 / 提示行与明细组装 / 按客户端能力选档位。
 // 两条传输（HTTP 8204、TCP 8202）共用；所有数字来自 storage 真实账本与 recall 审计。
 import type { MemAgent, Memory, RecallMode, RecallResult, Scene, StorageBackend } from './types.ts';
 import { findParamsSnapshot } from './paramsSnapshot.ts';
 import { projectInScope } from './mcpAuth.ts';
 import {
-  buildRecallHint, buildRecallMarkdown, normalizeUnitPrice, rollupRecalls,
+  buildRecallCompactMarkdown, buildRecallHint, buildRecallMarkdown, normalizeUnitPrice, rollupRecalls,
   type RecallMoney, type RecallRollup,
 } from './recallInsight.ts';
+
+/** 批次32-C：聊天窗口明细档位（HTML 折叠 / 纯 Markdown 四小节 / 默认一行摘要 + 按需展开） */
+export type RecallDisplayMode = 'html-details' | 'markdown-full' | 'markdown-compact';
 
 /**
  * 客户端能否渲染 HTML <details>（批次29）：白名单只收**实测渲染过折叠块**的客户端（批次13 Qoder CN）。
@@ -90,6 +93,8 @@ export interface RecallToolPayload extends RecallResult {
     rollup: RecallRollup;
     /** 批次13：折叠明细（<details> 四段，summary = line）；客户端不渲染 HTML 时回退 line */
     markdown: string;
+    /** 批次32-C：本次 markdown 是哪一档（HTML 折叠 / 纯 Markdown 明细 / 一行摘要），UI 与测试据此核对口径 */
+    mode: RecallDisplayMode;
   };
 }
 
@@ -141,21 +146,39 @@ export async function runRecallTool(
   // 累计口径必须包含本次召回：时钟取召回完成之后（召回审计的 ts 不晚于此刻）
   const { price, rollup } = await readPricingAndRollup(storage, now ?? Date.now());
   const hint = buildRecallHint(recall, rollup, price);
-  const htmlDetails = clientSupportsHtmlDetails(client);
+  const mode = recallDisplayMode(client, detailRequested(args));
+  const markdown = mode === 'html-details'
+    ? buildRecallMarkdown(recall, hint, price, { htmlDetails: true })
+    : mode === 'markdown-full'
+      ? buildRecallMarkdown(recall, hint, price, { htmlDetails: false })
+      : buildRecallCompactMarkdown(hint);
   return {
     payload: {
       ...recall,
       project_id: project.project_id,
       resolved_from: project.resolved_from,
-      display: {
-        line: hint.line,
-        money: hint.money,
-        rollup: hint.rollup,
-        markdown: buildRecallMarkdown(recall, hint, price, { htmlDetails }),
-      },
+      display: { line: hint.line, money: hint.money, rollup: hint.rollup, markdown, mode },
     },
     text: hint.line,
   };
+}
+
+/** detail 参数只认布尔；其它类型如实报错（不静默当 false，避免用户点了展开却拿到摘要） */
+function detailRequested(args: Record<string, unknown>): boolean {
+  const v = args.detail;
+  if (v === undefined || v === null) return false;
+  if (typeof v !== 'boolean') throw new McpToolError('recall_memory.detail 必须是布尔值（true=要四段明细）');
+  return v;
+}
+
+/**
+ * 档位判定（批次32-C，用户拍板「DSH 里记忆库信息要折叠，点开才看明细」）：
+ * 实测能渲染 <details> 的客户端仍给 HTML 折叠版（点开即看，无需二次调用）；
+ * 其余客户端（DSH 只渲染 Markdown，没有可点击折叠控件）默认一行摘要，明细靠 detail=true 再取。
+ */
+export function recallDisplayMode(client: string | undefined, detail: boolean): RecallDisplayMode {
+  if (clientSupportsHtmlDetails(client)) return 'html-details';
+  return detail ? 'markdown-full' : 'markdown-compact';
 }
 
 /** 执行 list_projects：真实项目列表（空账本 → 空数组，不造数据）；scope 非空且不含 '*' 时按令牌作用域过滤 */

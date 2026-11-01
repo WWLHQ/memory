@@ -15,7 +15,7 @@ import { FakeLlmProvider } from './llm.ts';
 import { ulid } from './ulid.ts';
 import { assertMcpToken, tokenEquals, tokenFromHeaders, DEFAULT_MCP_ACCOUNT, projectInScope, type McpAccount } from './mcpAuth.ts';
 import { MCP_INSTRUCTIONS, MCP_TOOLS } from './mcpSchema.ts';
-import { clientSupportsHtmlDetails, runListProjectsTool, runRecallTool } from './mcpRecall.ts';
+import { runListProjectsTool, runRecallTool, type RecallDisplayMode } from './mcpRecall.ts';
 import type { StorageBackend, Pref, L0Port } from './types.ts';
 import { CATEGORIES, isCategory } from './types.ts';
 
@@ -77,12 +77,19 @@ export interface McpHttpHandle {
 const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
 
 /** 结果末块：模型未必读 initialize.instructions，这里再要求一次展示方式。
- *  批次29 起按客户端能力二选一：实测渲染 HTML 的客户端（Qoder）要 <details> 折叠版；
- *  其余客户端（DSH 实测只渲染 Markdown、HTML 标签原样露出）要纯 Markdown 四小节版。 */
-export function recallEchoNote(htmlDetails: boolean): string {
-  return htmlDetails
-    ? '【展示要求】优先把上一条 display.markdown 整段（<details> 四段：项目背景/命中记忆/Token/省钱与费用，可逐段收起展开）原样输出到最终回答末尾；若客户端不渲染 HTML，则改为单独一行原样输出 display.line（以 🧠 Memory 开头的提示行）。两种方式都不得改写、省略或补全其中的 token 数与金额。'
-    : '【展示要求】把上一条 display.markdown 整段（纯 Markdown 四个小节：项目背景/命中记忆/Token/省钱与费用）原样输出到最终回答末尾；若客户端不渲染 Markdown，则改为单独一行原样输出 display.line（以 🧠 Memory 开头的提示行）。两种方式都不得改写、省略或补全其中的 token 数与金额，也不得给回答添加任何 HTML 标签。';
+ *  文案按本次实际下发的档位（批次32-C），与 display.markdown 严格一致：
+ *  HTML 折叠版（实测渲染过 <details> 的 Qoder）/ 纯 Markdown 四小节（detail=true 主动要明细）/
+ *  一行摘要 + 展开指引（其余客户端默认档，DSH 实测只渲染 Markdown 且 HTML 标签原样露出）。 */
+export function recallEchoNote(mode: RecallDisplayMode): string {
+  const keep = '数字与金额不得改写、省略或补全。';
+  if (mode === 'html-details') {
+    return '【展示要求】优先把上一条 display.markdown 整段（<details> 四段：项目背景/命中记忆/Token/省钱与费用，可逐段收起展开）原样输出到最终回答末尾；若客户端不渲染 HTML，则改为单独一行原样输出 display.line（以 🧠 Memory 开头的提示行）。两种方式都不得改写、省略或补全其中的 token 数与金额。';
+  }
+  if (mode === 'markdown-full') {
+    return `【展示要求】本次是 detail=true 的明细返回：把上一条 display.markdown 整段（纯 Markdown 四个小节：项目背景/命中记忆/Token/省钱与费用）原样输出到最终回答末尾，不要给回答添加任何 HTML 标签。${keep}`;
+  }
+  return '【展示要求】本次按「默认收起」下发：把上一条 display.markdown 整段（一行 🧠 Memory 摘要 + 展开指引）原样输出到最终回答末尾，不要自行补写四段明细，也不要添加 HTML 标签。'
+    + `用户明确要看明细时，用同一个 query 再调用 recall_memory 并置 detail=true，然后原样输出那次返回的 display.markdown。${keep}`;
 }
 
 /** 启动标准 MCP streamable-http 服务器 */
@@ -199,12 +206,13 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
           // recall 首块 = 提示行（兼容纯文本客户端），随后完整 JSON、折叠明细（批次13）；同时给 structuredContent。
           // 批次12：模型常忽略 initialize.instructions → 结果末块再给一次展示方式硬约束（Qoder 实测必需）。
           const markdown = (out.result as { display?: { markdown?: string } }).display?.markdown;
+          const displayMode = ((out.result as { display?: { mode?: RecallDisplayMode } }).display?.mode) ?? 'markdown-compact';
           const content = out.text
             ? [
                 { type: 'text', text: out.text },
                 { type: 'text', text: JSON.stringify(out.result, null, 2) },
                 { type: 'text', text: markdown ?? out.text },
-                { type: 'text', text: recallEchoNote(clientSupportsHtmlDetails(client)) },
+                { type: 'text', text: recallEchoNote(displayMode) },
               ]
             : [{ type: 'text', text: JSON.stringify(out.result, null, 2) }];
           return {

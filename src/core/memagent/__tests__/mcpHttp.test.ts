@@ -196,7 +196,7 @@ describe('MCP HTTP（批次2 信任边界）', () => {
           hits: unknown[];
           background: unknown;
           savings: { saved_tokens: number; injected_tokens: number };
-          display: { line: string; markdown: string; money: unknown };
+          display: { line: string; markdown: string; money: unknown; mode: string };
         };
       };
     };
@@ -207,19 +207,36 @@ describe('MCP HTTP（批次2 信任边界）', () => {
     expect(body.result.structuredContent.display.money).toBeNull();
     expect(body.result.structuredContent.display.line).toContain('🧠 Memory');
     expect(body.result.structuredContent.display.line).toContain('未设置单价');
-    expect(body.result.content).toHaveLength(4); // 提示行 + 完整 JSON + 折叠明细 + 展示要求
+    expect(body.result.content).toHaveLength(4); // 提示行 + 完整 JSON + 明细 + 展示要求
     expect(body.result.content[0].text).toBe(body.result.structuredContent.display.line);
     expect(body.result.content[1].text).toContain('"saved_tokens"');
-    // 批次29：无会话（非 Qoder）→ 纯 Markdown 四小节，零 HTML 标签（DSH 实测只渲染 Markdown）
+    // 批次32-C：无会话（非 Qoder）→ 默认档「一行摘要 + 展开指引」，四段明细不再铺开占屏
+    expect(body.result.structuredContent.display.mode).toBe('markdown-compact');
     expect(body.result.content[2].text).toBe(body.result.structuredContent.display.markdown);
     expect(body.result.content[2].text).not.toContain('<details>');
-    expect(body.result.content[2].text).toContain('**📎 项目背景');
-    expect(body.result.content[2].text).toContain('**🧠 命中记忆');
-    expect(body.result.content[2].text).toContain('**⚡ Token 用量');
-    expect(body.result.content[2].text).toContain('**💰 省钱与费用');
+    expect(body.result.content[2].text).not.toContain('**📎 项目背景');
+    expect(body.result.content[2].text).toContain('detail=true');
+    expect(body.result.content[3].text).toContain('默认收起');
     expect(body.result.content[3].text).toContain('display.markdown');
-    expect(body.result.content[3].text).toContain('display.line');
     expect(body.result.content[3].text).not.toContain('<details>');
+  });
+
+  it('recall 置 detail=true → 纯 Markdown 四小节明细（零 HTML 标签，数字与摘要同源）', async () => {
+    const r = await call(
+      {
+        jsonrpc: '2.0', id: 922, method: 'tools/call',
+        params: { name: 'recall_memory', arguments: { query: 'MCP HTTP 写入测试', detail: true } },
+      },
+      { Authorization: `Bearer ${TOKEN}` },
+    );
+    const body = (await r.json()) as {
+      result: { structuredContent: { display: { mode: string; markdown: string; line: string } }; content: Array<{ text: string }> };
+    };
+    expect(body.result.structuredContent.display.mode).toBe('markdown-full');
+    expect(body.result.structuredContent.display.markdown).toContain('**📎 项目背景');
+    expect(body.result.structuredContent.display.markdown).toContain('**💰 省钱与费用');
+    expect(body.result.structuredContent.display.markdown).not.toContain('<details>');
+    expect(body.result.content[3].text).toContain('detail=true 的明细返回');
   });
 
   it('配置单价后 recall → 金额可核算（¥/百万 token）', async () => {
@@ -260,10 +277,17 @@ describe('MCP HTTP（批次2 信任边界）', () => {
     expect(body.result.structuredContent.display.line).toContain('¥');
     expect(body.result.structuredContent.display.line).toContain('今日');
     expect(body.result.structuredContent.display.line).toContain('全部');
-    // 批次13：折叠明细同步出现单价与今日/全部核算（与提示行同源）
-    expect(body.result.structuredContent.display.markdown).toContain('单价');
+    // 批次32-C：默认档只铺摘要行 → 金额核算（本次/今日/全部）仍在，明细里的「单价」需 detail=true
     expect(body.result.structuredContent.display.markdown).toContain('今日');
     expect(body.result.structuredContent.display.markdown).toContain('全部');
+    const full = await call(
+      { jsonrpc: '2.0', id: 931, method: 'tools/call', params: { name: 'recall_memory', arguments: { query: 'MCP HTTP 写入测试', detail: true } } },
+      { Authorization: `Bearer ${TOKEN}` },
+    );
+    const fullBody = (await full.json()) as { result: { structuredContent: { display: { markdown: string } } } };
+    expect(fullBody.result.structuredContent.display.markdown).toContain('单价：¥10/百万 token（用户在全局参数页设置，非厂商账单）');
+    expect(fullBody.result.structuredContent.display.markdown).toContain('今日');
+    expect(fullBody.result.structuredContent.display.markdown).toContain('全部');
   });
 
   it('多项目且未指定 project_id → isError 引导 list_projects（不猜项目）', async () => {

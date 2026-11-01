@@ -2,11 +2,11 @@
 import { describe, expect, it } from 'vitest';
 import type { AuditRecord, Hit, Memory, RecallResult } from '../types.ts';
 import {
-  BACKGROUND_MAX_ITEMS, BACKGROUND_MAX_TOKENS, buildRecallHint, buildRecallMarkdown, computeRecallSavings, corpusTokens,
-  formatCny, localDayStart, normalizeUnitPrice, rollupRecalls, selectRecallBackground,
+  BACKGROUND_MAX_ITEMS, BACKGROUND_MAX_TOKENS, buildRecallCompactMarkdown, buildRecallHint, buildRecallMarkdown,
+  computeRecallSavings, corpusTokens, formatCny, localDayStart, normalizeUnitPrice, rollupRecalls, selectRecallBackground,
 } from '../recallInsight.ts';
 import { createMemAgent } from '../agent.ts';
-import { clientSupportsHtmlDetails } from '../mcpRecall.ts';
+import { clientSupportsHtmlDetails, recallDisplayMode } from '../mcpRecall.ts';
 import { FakeLlmProvider } from '../llm.ts';
 import { InMemoryStorage } from '../storage.ts';
 import { JsVectorBackend } from '../vector.ts';
@@ -378,8 +378,33 @@ describe('buildRecallMarkdown 纯 Markdown（批次29，DSH 实测只渲染 Mark
   });
 });
 
-describe('clientSupportsHtmlDetails（批次29 白名单）', () => {
-  it('只放行实测渲染 HTML 折叠的 Qoder；未知/无标识一律纯 Markdown（fail-safe）', () => {
+// 批次32-C：DSH 里没有可点击折叠控件 → 不支持 HTML 的客户端默认只给一行摘要，明细靠 detail=true 再取
+describe('buildRecallCompactMarkdown + recallDisplayMode（批次32-C 默认收起）', () => {
+  const none = () => rollupRecalls([], Date.now());
+
+  it('紧凑版 = 加粗提示行 + 展开指引，零 HTML 标签、不铺四小节', () => {
+    const r = recallResult();
+    const hint = buildRecallHint(r, none(), null);
+    const md = buildRecallCompactMarkdown(hint);
+    expect(md.startsWith(`**${hint.line}**`)).toBe(true);
+    expect(md).toContain('detail=true');
+    expect(md).not.toContain('<details>');
+    expect(md).not.toContain('**📎 项目背景');
+    expect(md).not.toContain('- [decision] 决策');
+    // 摘要行里的数字仍在（用户仍能一眼看到命中/省量/金额）
+    expect(hint.line).toContain('🧠 Memory');
+  });
+
+  it('档位判定：HTML 客户端恒折叠版；其余默认紧凑、detail=true 才给四小节', () => {
+    expect(recallDisplayMode('Qoder/9.9.9', false)).toBe('html-details');
+    expect(recallDisplayMode('Qoder/9.9.9', true)).toBe('html-details'); // 已可点开，不必二次调用
+    expect(recallDisplayMode('dsh-mcp-client/0.0.1', false)).toBe('markdown-compact');
+    expect(recallDisplayMode('dsh-mcp-client/0.0.1', true)).toBe('markdown-full');
+    expect(recallDisplayMode(undefined, false)).toBe('markdown-compact'); // TCP/无 clientInfo 保守档
+  });
+});
+
+describe('clientSupportsHtmlDetails（批次29 白名单）', () => {  it('只放行实测渲染 HTML 折叠的 Qoder；未知/无标识一律纯 Markdown（fail-safe）', () => {
     expect(clientSupportsHtmlDetails('Qoder/9.9.9')).toBe(true);
     expect(clientSupportsHtmlDetails('qoder/1.0')).toBe(true);
     expect(clientSupportsHtmlDetails('dsh-mcp-client/0.0.1')).toBe(false);

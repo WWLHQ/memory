@@ -212,7 +212,7 @@ describe('MCP Server（§19.5）', () => {
       project_id: string; resolved_from: string; hits: unknown[];
       savings: { saved_tokens: number; injected_tokens: number };
       background: { items: unknown[] };
-      display: { line: string; markdown: string; money: unknown };
+      display: { line: string; markdown: string; money: unknown; mode: string };
     };
     expect(result.project_id).toBe('P1');
     expect(result.resolved_from).toBe('single_project');
@@ -221,9 +221,31 @@ describe('MCP Server（§19.5）', () => {
     expect(result.savings.saved_tokens).toBeGreaterThanOrEqual(0);
     expect(result.display.money).toBeNull();
     expect(result.display.line).toContain('🧠 Memory');
-    // 批次29：TCP 无 clientInfo → fail-safe 纯 Markdown，零 HTML 标签（数字与提示行同源）
+    // 批次32-C：TCP 无 clientInfo（非实测支持 HTML 的客户端）→ 默认紧凑档，明细不铺满聊天窗口
+    expect(result.display.mode).toBe('markdown-compact');
     expect(result.display.markdown).not.toContain('<details>');
+    expect(result.display.markdown).not.toContain('**📎 项目背景');
+    expect(result.display.markdown).toContain('detail=true');
+  });
+
+  it('recall detail=true → 纯 Markdown 四小节明细（数字与摘要行同源）', async () => {
+    const r = await rpcCall(PORT, {
+      jsonrpc: '2.0', id: 84, method: 'recall_memory', params: { query: 'MCP 写入测试', detail: true, token: TOKEN },
+    });
+    const result = r.result as { display: { mode: string; markdown: string; line: string } };
+    expect(result.display.mode).toBe('markdown-full');
     expect(result.display.markdown).toContain('**📎 项目背景');
+    expect(result.display.markdown).toContain('**🧠 命中记忆');
+    expect(result.display.markdown).toContain('**⚡ Token 用量');
+    expect(result.display.markdown).toContain('**💰 省钱与费用');
+    expect(result.display.markdown.startsWith(`**${result.display.line}**`)).toBe(true);
+  });
+
+  it('recall detail 传非布尔 → 明确报参数错误（不静默按摘要处理）', async () => {
+    const r = await rpcCall(PORT, {
+      jsonrpc: '2.0', id: 85, method: 'recall_memory', params: { query: 'MCP 写入测试', detail: 'yes', token: TOKEN },
+    });
+    expect(String(r.error?.message ?? '')).toContain('detail 必须是布尔值');
   });
 
   it('list_projects → 真实项目 P1', async () => {

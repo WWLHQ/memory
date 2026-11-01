@@ -324,3 +324,14 @@ export function buildRecallMarkdown(
   if (!htmlDetails) return `**${hint.line}**\n\n${inner}`;
   return `<details>\n<summary>${mdInline(hint.line, 500)}</summary>\n\n${inner}\n</details>`;
 }
+
+/**
+ * 批次32-C：不支持 HTML 折叠的客户端（DSH 实测只渲染 Markdown）默认只给**一行摘要 + 展开指引**。
+ * 为什么不再直接铺四小节：DSH 里没有可点击的折叠控件，四段明细每次全文占满聊天窗口（用户明确要求折叠）。
+ * 明细改由同一次工具调用的 detail=true 取得（数字与摘要行同源，只是少铺一遍）。
+ */
+export function buildRecallCompactMarkdown(hint: RecallHint): string {
+  return `**${hint.line}**\n\n`
+    + '📌 明细已收起（项目背景 / 命中记忆 / Token 用量 / 省钱与费用）。需要看时用同一个 query 再调用一次 recall_memory 并置 detail=true，'
+    + '然后把返回的 display.markdown 原样输出；不需要就保持本行，不要自行编造明细。';
+}
