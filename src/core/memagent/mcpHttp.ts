@@ -16,6 +16,9 @@ import { ulid } from './ulid.ts';
 import { assertMcpToken, tokenEquals, tokenFromHeaders, DEFAULT_MCP_ACCOUNT, projectInScope, type McpAccount } from './mcpAuth.ts';
 import { MCP_INSTRUCTIONS, MCP_TOOLS } from './mcpSchema.ts';
 import { runListProjectsTool, runRecallTool, type RecallDisplayMode } from './mcpRecall.ts';
+import { RecallDetailTickets } from './recallDetailTickets.ts';
+import { buildRecallDetailExpiredPage } from './recallInsight.ts';
+import { rejectUntrustedHost } from '../../shared/localOrigin.ts';
 import type { StorageBackend, Pref, L0Port } from './types.ts';
 import { CATEGORIES, isCategory } from './types.ts';
 
@@ -66,6 +69,11 @@ export interface McpHttpOptions {
   account?: McpAccount;
   /** 请求体上限（字节），缺省 1 MiB */
   maxBodyBytes?: number;
+  /**
+   * 批次33-C：明细页访问回调（供主进程落一条动作日志，只给命中/未命中，不含 id 与正文）。
+   * 缺省不记——内核/审计里没有明细正文，页面内容也绝不写进数据根。
+   */
+  onViewDetail?: (outcome: 'ok' | 'miss') => void;
 }
 
 export interface McpHttpHandle {
@@ -88,8 +96,12 @@ export function recallEchoNote(mode: RecallDisplayMode): string {
   if (mode === 'markdown-full') {
     return `【展示要求】本次是 detail=true 的明细返回：把上一条 display.markdown 整段（纯 Markdown 四个小节：项目背景/命中记忆/Token/省钱与费用）原样输出到最终回答末尾，不要给回答添加任何 HTML 标签。${keep}`;
   }
-  return '【展示要求】本次按「默认收起」下发：把上一条 display.markdown 整段（一行 🧠 Memory 摘要 + 展开指引）原样输出到最终回答末尾，不要自行补写四段明细，也不要添加 HTML 标签。'
-    + `用户明确要看明细时，用同一个 query 再调用 recall_memory 并置 detail=true，然后原样输出那次返回的 display.markdown。${keep}`;
+  return '【展示要求】本次按「默认收起 + 点击展开」下发：把上一条 display.markdown 整段原样输出到最终回答末尾'
+    + '（两行 🧠 Memory 摘要 + 一行「▶ 展开本次召回明细」的 Markdown 链接），链接的 URL 必须逐字保留——用户点它才在本机明细页里看四段明细。'
+    + '禁止自行补写命中条目、项目背景、Token 或费用明细，禁止把链接改写成纯文本/HTML 标签或自己编造 URL，也禁止替用户预先展开（不要因为觉得『这样更完整』而调用 detail=true）。'
+    + '只有用户在聊天里明确要看明细时，才用同一个 query 再调用 recall_memory 并置 detail=true，然后原样输出那次返回的 display.markdown。'
+    + '若客户端连 Markdown 链接都渲染不了（链接只是纯文本），照原样输出即可，不要改写摘要。'
+    + `数字与金额不得改写、省略或补全。`;
 }
 
 /** 启动标准 MCP streamable-http 服务器 */
@@ -112,6 +124,14 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
   const clientBySession = new Map<string, string>();
   /** UA → 最近一次 initialize 的调用方（部分客户端每次请求不带 Mcp-Session-Id） */
   const clientByUa = new Map<string, string>();
+  /**
+   * 批次33-C：默认收起档的一次性明细页票据（id → 已渲染 HTML）。
+   * 只在内存里，30 分钟过期、上限 200 条；不落数据根、不进审计，明细正文不外泄到 URL。
+   */
+  const detailTickets = new RecallDetailTickets<string>();
+  /** 实际监听端口（port:0 时由系统分配）——明细页基址与 Host 校验都以它为准 */
+  let servedPort = port;
+  const detailBase = () => `http://${host}:${servedPort}`;
   const remember = (map: Map<string, string>, key: string, value: string) => {
     map.delete(key);
     map.set(key, value);
@@ -125,7 +145,9 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
   async function callTool(name: string, args: Record<string, unknown>, client: string): Promise<{ result: unknown; text?: string }> {
     switch (name) {
       case 'recall_memory': {
-        const out = await runRecallTool(ma, storage, args, undefined, client, account.scope_project_ids);
+        const out = await runRecallTool(ma, storage, args, undefined, client, account.scope_project_ids, {
+          tickets: detailTickets, base: detailBase(),
+        });
         return { result: out.payload, text: out.text };
       }
       case 'list_projects':
@@ -249,6 +271,27 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
     }
     // 只处理 POST /mcp（精确路径，`/mcpanything` 不再命中）
     const path = (req.url ?? '/').split('?')[0];
+
+    // 批次33-C：GET /recall/<id> = 聊天里「▶ 展开本次召回明细」链接指向的一次性明细页。
+    // 为什么可以不带令牌：MCP 令牌是机器级凭据，绝不下进聊天窗口/URL；此处改由 22 字符随机 id + 30 分钟过期把守，
+    // 页面只回显这一次召回已经算好的数字（无新查询能力），并按 Host 绑定拒绝 DNS rebinding。
+    if (req.method === 'GET' && (path === '/recall' || path.startsWith('/recall/'))) {
+      if (rejectUntrustedHost(req, res, [servedPort])) return;
+      const id = path.slice('/recall/'.length);
+      const html = /^[A-Za-z0-9_-]{16,32}$/.test(id) ? detailTickets.take(id) : null;
+      res.writeHead(html ? 200 : 404, {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'X-Content-Type-Options': 'nosniff',
+        'Referrer-Policy': 'no-referrer',
+        'Content-Security-Policy':
+          "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src 'none'; connect-src 'none'; frame-ancestors 'none'; form-action 'none'",
+      });
+      res.end(html ?? buildRecallDetailExpiredPage());
+      if (opts.onViewDetail) opts.onViewDetail(html ? 'ok' : 'miss');
+      return;
+    }
+
     if (req.method !== 'POST' || path !== '/mcp') {
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'not found' }));
@@ -321,7 +364,9 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
   server.listen(port, host, () => {
     const addr = server.address();
     const actual = addr && typeof addr === 'object' ? addr.port : port;
-    console.log(`[mcp-http] 监听 http://${host}:${actual}/mcp（标准 MCP streamable-http，需 token）`);
+    servedPort = actual;
+    console.log(`[mcp-http] 监听 http://${host}:${actual}/mcp（标准 MCP streamable-http，需 token）`
+      + `；明细页 GET http://${host}:${actual}/recall/<一次性 id>（随机 id + 30 分钟过期，无需令牌）`);
     resolveReady(actual);
   });
   server.on('error', (err) => {

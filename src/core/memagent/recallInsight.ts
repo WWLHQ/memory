@@ -122,6 +122,12 @@ export interface RecallMoney {
 export interface RecallHint {
   /** 聊天窗口逐字回显的单行提示 */
   line: string;
+  /**
+   * 批次33-C：折叠档专用短摘要（最多两行 + 告警行，与 line 数字同源）。
+   * 为什么另起一行：line 把命中/背景/省量/本次/今日/全部串成一条长句，在不渲染 HTML 的客户端里
+   * 折成 4~5 行，用户要求「不点击只显示前 2 行」——明细挪到本机明细页后，聊天侧必须自带收口版本。
+   */
+  shortLine: string;
   /** 未配置单价 → null（提示行明示，不编造金额） */
   money: RecallMoney | null;
   rollup: RecallRollup;
@@ -206,8 +212,11 @@ export function buildRecallHint(
   const price = normalizeUnitPrice(unitPriceCnyPerMTok);
   let money: RecallMoney | null = null;
   let moneyPart: string;
+  /** 批次33-C 折叠档第二行：本次花费/省额 + 今日/全部次数（今日/全部的金额明细挪到本机明细页，仍同源） */
+  let moneyShort: string;
   if (price === null) {
     moneyPart = '💰 金额未开：未设置单价（全局参数页可设 ¥/百万 token）';
+    moneyShort = `💰 金额未开（参数页可设 ¥/百万 token） ｜ 今日 ${rollup.today_calls} 次 ｜ 全部 ${rollup.all_calls} 次`;
   } else {
     money = {
       unit_price_cny_per_mtok: price,
@@ -232,13 +241,20 @@ export function buildRecallHint(
     moneyPart = `💰 本次 ${formatCny(money.this_call.cost_cny)}（省 ${formatCny(money.this_call.saved_cny)}）`
       + ` ｜ 今日 ${rollup.today_calls} 次 ${formatCny(money.today.cost_cny)}（省 ${formatCny(money.today.saved_cny)}）`
       + ` ｜ 全部 ${rollup.all_calls} 次 ${formatCny(money.all.cost_cny)}（省 ${formatCny(money.all.saved_cny)}）`;
+    moneyShort = `💰 本次 ${formatCny(money.this_call.cost_cny)}（省 ${formatCny(money.this_call.saved_cny)}）`
+      + ` ｜ 今日 ${rollup.today_calls} 次 ｜ 全部 ${rollup.all_calls} 次`;
     if (rollup.today_legacy_calls > 0) {
       warnings.push(`⚠ 今日含 ${rollup.today_legacy_calls} 次旧记录（无省量字段，金额按载荷下限计）`);
     }
   }
 
   const line = [`🧠 Memory ｜ ${hitPart} ｜ ${bgPart} ｜ ${savePart} ｜ ${moneyPart}`, ...warnings].join(' ｜ ');
-  return { line, money, rollup };
+  const shortLine = [
+    `🧠 Memory ｜ ${hitPart} ｜ ${bgPart} ｜ ${savePart}`,
+    moneyShort,
+    ...warnings,
+  ].join('\n');
+  return { line, shortLine, money, rollup };
 }
 
 /* ---------- 聊天窗口明细（批次13 HTML 折叠 / 批次29 纯 Markdown）：四段；不支持 HTML 的客户端用纯 Markdown ---------- */
@@ -263,6 +279,67 @@ export interface RecallMarkdownOpts {
   htmlDetails?: boolean;
 }
 
+/** 四段明细的结构：标题 + 逐条正文（不含列表符号，由各自的渲染器补） */
+export interface RecallSection {
+  title: string;
+  lines: string[];
+}
+
+/**
+ * 四段明细的唯一数据口径（批次33 抽出，聊天 Markdown / 本机明细页共用）：
+ * 项目背景 / 命中记忆 / Token 用量 / 省钱与费用。clip 只管「截断 + 是否 HTML 转义」，数字完全同源。
+ */
+export function buildRecallSections(
+  result: RecallResult,
+  hint: RecallHint,
+  unitPriceCnyPerMTok: number | null,
+  clip: (s: string, maxChars: number) => string,
+  maxChars = 120,
+): RecallSection[] {
+  const t = result.savings;
+  const bg = result.background;
+  const r = hint.rollup;
+  const money = hint.money;
+  const price = normalizeUnitPrice(unitPriceCnyPerMTok);
+
+  const bgLines = bg.items.length > 0
+    ? bg.items.map((it) => `[${it.category}] ${clip(it.content, maxChars)}`)
+    : ['无（minimal 模式或账本暂无可用背景）'];
+
+  const hitLines = result.hits.length > 0
+    ? result.hits.map((h) => `[${h.layer}/${h.decay_class}] ${clip(h.content, maxChars)}（相关度 ${h.score.toFixed(2)}）`)
+    : [`未命中（扫描 ${fmtInt(result.scanned_memories)} 条，未注入命中内容）`];
+
+  const tokenLines = [
+    `本次注入：${fmtInt(t.injected_tokens)}t（命中 ${fmtInt(t.payload_tokens)}t + 背景 ${fmtInt(t.background_tokens)}t）`,
+    `全量基线：${fmtInt(t.corpus_tokens)}t（项目全部可读记忆）`,
+    `预算裁剪：${fmtInt(t.budget_trimmed_tokens)}t（${result.budget.status}；软 ${fmtInt(result.budget.soft)}t / 告警 ${fmtInt(result.budget.warn)}t / 硬 ${fmtInt(result.budget.hard)}t）`,
+    `扫描记忆：${fmtInt(result.scanned_memories)} 条`,
+  ];
+
+  const saveLines: string[] = [];
+  if (price === null || money === null) {
+    saveLines.push(`本次省：${fmtInt(t.saved_tokens)}t（金额未开：未设置单价，全局参数页可设 ¥/百万 token）`);
+    saveLines.push(`今日：${r.today_calls} 次，省 ${fmtInt(r.today_saved_tokens)}t`);
+    saveLines.push(`全部：${r.all_calls} 次，省 ${fmtInt(r.all_saved_tokens)}t`);
+  } else {
+    saveLines.push(`本次：花费 ${formatCny(money.this_call.cost_cny)}（省 ${formatCny(money.this_call.saved_cny)}；省 ${fmtInt(t.saved_tokens)}t）`);
+    saveLines.push(`今日：${r.today_calls} 次，花费 ${formatCny(money.today.cost_cny)}（省 ${formatCny(money.today.saved_cny)}）`);
+    saveLines.push(`全部：${r.all_calls} 次，花费 ${formatCny(money.all.cost_cny)}（省 ${formatCny(money.all.saved_cny)}）`);
+    saveLines.push(`单价：${formatCny(price)}/百万 token（用户在全局参数页设置，非厂商账单）`);
+  }
+  if (r.today_legacy_calls > 0) {
+    saveLines.push(`今日含 ${r.today_legacy_calls} 次旧记录（无省量字段，金额按载荷下限计）`);
+  }
+
+  return [
+    { title: `📎 项目背景 ${bg.items.length} 条（${fmtInt(bg.tokens)}t）`, lines: bgLines },
+    { title: `🧠 命中记忆 ${result.hits.length} 条（${fmtInt(t.payload_tokens)}t）`, lines: hitLines },
+    { title: `⚡ Token 用量（本次注入 ${fmtInt(t.injected_tokens)}t）`, lines: tokenLines },
+    { title: `💰 省钱与费用（本次省 ${fmtInt(t.saved_tokens)}t）`, lines: saveLines },
+  ];
+}
+
 /**
  * 组装聊天窗口明细：外层 = 提示行，内层四段（项目背景 / 命中记忆 / Token / 省钱与费用）。
  * htmlDetails=false 时同结构输出纯 Markdown（**加粗小节标题** + 列表，零 HTML 标签）。数字全部同源。
@@ -275,63 +352,144 @@ export function buildRecallMarkdown(
 ): string {
   const htmlDetails = opts.htmlDetails !== false;
   const clip = htmlDetails ? mdInline : plainClip;
-  const section = (title: string, body: string) => (htmlDetails ? mdSection(title, body) : `**${title}**\n\n${body}`);
-  const price = normalizeUnitPrice(unitPriceCnyPerMTok);
-  const t = result.savings;
-  const bg = result.background;
-
-  const bgBody = bg.items.length > 0
-    ? bg.items.map((it) => `- [${it.category}] ${clip(it.content, 120)}`).join('\n')
-    : '- 无（minimal 模式或账本暂无可用背景）';
-
-  const hitBody = result.hits.length > 0
-    ? result.hits
-      .map((h) => `- [${h.layer}/${h.decay_class}] ${clip(h.content, 120)}（相关度 ${h.score.toFixed(2)}）`)
-      .join('\n')
-    : `- 未命中（扫描 ${fmtInt(result.scanned_memories)} 条，未注入命中内容）`;
-
-  const tokenBody = [
-    `- 本次注入：${fmtInt(t.injected_tokens)}t（命中 ${fmtInt(t.payload_tokens)}t + 背景 ${fmtInt(t.background_tokens)}t）`,
-    `- 全量基线：${fmtInt(t.corpus_tokens)}t（项目全部可读记忆）`,
-    `- 预算裁剪：${fmtInt(t.budget_trimmed_tokens)}t（${result.budget.status}；软 ${fmtInt(result.budget.soft)}t / 告警 ${fmtInt(result.budget.warn)}t / 硬 ${fmtInt(result.budget.hard)}t）`,
-    `- 扫描记忆：${fmtInt(result.scanned_memories)} 条`,
-  ].join('\n');
-
-  const r = hint.rollup;
-  const money = hint.money;
-  const saveLines: string[] = [];
-  if (price === null || money === null) {
-    saveLines.push(`- 本次省：${fmtInt(t.saved_tokens)}t（金额未开：未设置单价，全局参数页可设 ¥/百万 token）`);
-    saveLines.push(`- 今日：${r.today_calls} 次，省 ${fmtInt(r.today_saved_tokens)}t`);
-    saveLines.push(`- 全部：${r.all_calls} 次，省 ${fmtInt(r.all_saved_tokens)}t`);
-  } else {
-    saveLines.push(`- 本次：花费 ${formatCny(money.this_call.cost_cny)}（省 ${formatCny(money.this_call.saved_cny)}；省 ${fmtInt(t.saved_tokens)}t）`);
-    saveLines.push(`- 今日：${r.today_calls} 次，花费 ${formatCny(money.today.cost_cny)}（省 ${formatCny(money.today.saved_cny)}）`);
-    saveLines.push(`- 全部：${r.all_calls} 次，花费 ${formatCny(money.all.cost_cny)}（省 ${formatCny(money.all.saved_cny)}）`);
-    saveLines.push(`- 单价：${formatCny(price)}/百万 token（用户在全局参数页设置，非厂商账单）`);
-  }
-  if (r.today_legacy_calls > 0) {
-    saveLines.push(`- 今日含 ${r.today_legacy_calls} 次旧记录（无省量字段，金额按载荷下限计）`);
-  }
-
-  const inner = [
-    section(`📎 项目背景 ${bg.items.length} 条（${fmtInt(bg.tokens)}t）`, bgBody),
-    section(`🧠 命中记忆 ${result.hits.length} 条（${fmtInt(t.payload_tokens)}t）`, hitBody),
-    section(`⚡ Token 用量（本次注入 ${fmtInt(t.injected_tokens)}t）`, tokenBody),
-    section(`💰 省钱与费用（本次省 ${fmtInt(t.saved_tokens)}t）`, saveLines.join('\n')),
-  ].join('\n\n');
+  const sections = buildRecallSections(result, hint, unitPriceCnyPerMTok, clip);
+  const inner = sections
+    .map((s) => {
+      const body = s.lines.map((l) => `- ${l}`).join('\n');
+      return htmlDetails ? mdSection(s.title, body) : `**${s.title}**\n\n${body}`;
+    })
+    .join('\n\n');
 
   if (!htmlDetails) return `**${hint.line}**\n\n${inner}`;
   return `<details>\n<summary>${mdInline(hint.line, 500)}</summary>\n\n${inner}\n</details>`;
 }
 
 /**
- * 批次32-C：不支持 HTML 折叠的客户端（DSH 实测只渲染 Markdown）默认只给**一行摘要 + 展开指引**。
- * 为什么不再直接铺四小节：DSH 里没有可点击的折叠控件，四段明细每次全文占满聊天窗口（用户明确要求折叠）。
- * 明细改由同一次工具调用的 detail=true 取得（数字与摘要行同源，只是少铺一遍）。
+ * 批次32-C / 33-C：不支持 HTML 折叠的客户端（DSH 实测只渲染 Markdown，`<details>` 原样露出）默认只给
+ * **两行短摘要 + 一个可点链接**，点开是本机明细页（真 `<details>` 折叠，数字同源）。
+ * 为什么不再直接铺四小节：DSH 聊天窗口没有可点击的折叠控件，四段全文每次铺满页面（用户明确要求收起）。
+ * detailUrl 缺失（TCP 8202 等无端口场景）时退回文字指引：明细用同 query + detail=true 再取。
  */
-export function buildRecallCompactMarkdown(hint: RecallHint): string {
-  return `**${hint.line}**\n\n`
+export function buildRecallCompactMarkdown(hint: RecallHint, detailUrl?: string): string {
+  const summary = `**${hint.shortLine}**`;
+  if (detailUrl) {
+    return `${summary}\n\n▶ [展开本次召回明细（项目背景 / 命中记忆 / Token / 费用）](${detailUrl})`;
+  }
+  return `${summary}\n\n`
     + '📌 明细已收起（项目背景 / 命中记忆 / Token 用量 / 省钱与费用）。需要看时用同一个 query 再调用一次 recall_memory 并置 detail=true，'
     + '然后把返回的 display.markdown 原样输出；不需要就保持本行，不要自行编造明细。';
+}
+
+/* ---------- 本机召回明细页（批次33-C）：聊天里点链接展开，页面自己支持真折叠 ---------- */
+
+export interface RecallDetailPageMeta {
+  project_id: string;
+  query: string;
+  /** 调用方标识（批次15），页面标注「本次由 X 触发」 */
+  client?: string;
+  issuedAt: number;
+  /** 票据过期时刻（由 RecallDetailTickets 决定，页面文案与真实过期一致） */
+  expiresAt: number;
+  /** 明细正文截断字数（页面明示，不假装全文） */
+  clipChars?: number;
+}
+
+/** 记忆内容进 HTML 前必须转义：正文里的尖括号不得破坏折叠结构 */
+export function htmlEscape(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function localTimeLabel(ms: number): string {
+  return `${new Date(ms).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}（UTC+08:00）`;
+}
+
+/**
+ * 渲染一次性本机明细页：摘要两行 + 四段 `<details>`（默认收起，点标题展开）+「全部展开/收起」。
+ * 纯字符串输出，不依赖模板引擎；所有动态内容走 htmlEscape；不含令牌、外部资源与远端脚本。
+ */
+export function buildRecallDetailPage(
+  result: RecallResult,
+  hint: RecallHint,
+  unitPriceCnyPerMTok: number | null,
+  meta: RecallDetailPageMeta,
+): string {
+  const clipChars = meta.clipChars ?? 400;
+  const sections = buildRecallSections(result, hint, unitPriceCnyPerMTok, (s, n) => htmlEscape(plainClip(s, n)), clipChars);
+  const detailBlocks = sections
+    .map((s) => `<details>\n<summary>${htmlEscape(s.title)}</summary>\n<ul>${s.lines.map((l) => `<li>${l}</li>`).join('')}</ul>\n</details>`)
+    .join('\n');
+  const summaryLines = hint.shortLine
+    .split('\n')
+    .map((l) => `<p class="sum">${htmlEscape(l)}</p>`)
+    .join('\n');
+  const ttlMin = Math.max(1, Math.round((meta.expiresAt - meta.issuedAt) / 60_000));
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>召回明细 ｜ MultiAgent Memory</title>
+<style>
+:root { color-scheme: light dark; --fg: #1f2328; --muted: #6a737d; --border: #e3e6ea; --bg: #fff; --card: #f7f8fa; }
+@media (prefers-color-scheme: dark) { :root { --fg: #e6e8eb; --muted: #9aa4ae; --border: #333a41; --bg: #16181c; --card: #1d2025; } }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 24px 16px 40px; background: var(--bg); color: var(--fg);
+  font: 14px/1.65 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; }
+main { max-width: 880px; margin: 0 auto; }
+h1 { font-size: 17px; margin: 0 0 10px; }
+.sum { margin: 2px 0; font-weight: 600; }
+.meta { color: var(--muted); font-size: 12px; margin: 8px 0 18px; }
+.ops { display: flex; gap: 8px; margin-bottom: 12px; }
+.ops button { font: inherit; font-size: 12px; padding: 4px 10px; border: 1px solid var(--border);
+  border-radius: 6px; background: var(--card); color: var(--fg); cursor: pointer; }
+details { border: 1px solid var(--border); border-radius: 8px; background: var(--card); margin: 0 0 10px; padding: 0 12px; }
+summary { cursor: pointer; font-weight: 600; padding: 10px 0; list-style: disclosure-closed; }
+details[open] summary { list-style: disclosure-open; border-bottom: 1px solid var(--border); }
+ul { margin: 8px 0 12px; padding-left: 20px; }
+li { margin: 3px 0; word-break: break-word; }
+footer { color: var(--muted); font-size: 12px; margin-top: 18px; border-top: 1px solid var(--border); padding-top: 12px; }
+code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+<h1>🧠 本次召回明细</h1>
+${summaryLines}
+<p class="meta">项目 <code>${htmlEscape(meta.project_id)}</code> ｜ 查询「${htmlEscape(plainClip(meta.query, 80))}」${meta.client ? ` ｜ 调用方 <code>${htmlEscape(meta.client)}</code>` : ''}
+<br>生成 ${localTimeLabel(meta.issuedAt)} ｜ 本链接 ${ttlMin} 分钟内有效（过期后请在聊天里让助手用 detail=true 再取一次）</p>
+<div class="ops">
+<button type="button" onclick="document.querySelectorAll('details').forEach(function(d){d.open=true})">全部展开</button>
+<button type="button" onclick="document.querySelectorAll('details').forEach(function(d){d.open=false})">全部收起</button>
+</div>
+${detailBlocks}
+<footer>
+本页与聊天里的摘要<b>数字同源</b>（同一次 recall 的真实账本计算，未重算、未估算）。
+命中与背景正文按 ${clipChars} 字截断，超出部分以「…」标示；金额按全局参数页单价换算，非厂商账单。
+链接由一次性随机 id 保护（30 分钟过期、不落盘），MCP 令牌不出现在 URL 与本页任何位置；服务只监听 127.0.0.1。
+</footer>
+</main>
+</body>
+</html>
+`;
+}
+
+/** 明细页失效（未知 id / 已过期 / id 格式非法）的诚实回执：不猜数据，给两条可执行的退路 */
+export function buildRecallDetailExpiredPage(): string {
+  return `<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer"><title>明细链接已失效</title>
+<style>body{font:15px/1.7 "Segoe UI","Microsoft YaHei",system-ui,sans-serif;margin:0;padding:40px 20px;color:#1f2328;background:#fff}
+main{max-width:720px;margin:0 auto}h1{font-size:18px}code{font-family:ui-monospace,Consolas,monospace;background:#f2f3f5;padding:1px 4px;border-radius:4px}
+</style></head><body><main>
+<h1>🧠 本次召回明细链接已失效</h1>
+<p>这个链接是一次性的，只在签发后 30 分钟内有效，且不落盘。有效期内没打开、或超过时间，明细就取不回来了。</p>
+<p>要看明细，任选一种：</p>
+<ul>
+<li>回到聊天窗口，让助手「用同一个问题再检索一次并展开明细」（即 <code>recall_memory</code> 置 <code>detail=true</code>），会重新得到一份纯 Markdown 四段明细；</li>
+<li>或在客户端里重新提问一次，摘要行里会带一条新的「▶ 展开本次召回明细」链接。</li>
+</ul>
+<p>本页面不含令牌，也不显示任何其它项目的记忆；链接本身由随机 id 把守。</p>
+</main></body></html>
+`;
 }

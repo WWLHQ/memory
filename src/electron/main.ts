@@ -1619,7 +1619,11 @@ async function bootstrap(): Promise<void> {
     .catch((e) => { void mlog('bootstrap:mcp-listen-error', String((e as Error)?.message ?? e)); });
 
   // 标准 MCP streamable-http（DSH dsh-mcp-client 走这条路连记忆库；POST /mcp → initialize/tools/list/tools/call）
-  const mcpHttp = runMcpHttpServer({ storage, port: MCP_HTTP_PORT, token: mcpToken, l0: l0Vault });
+  // 批次33-C：同一端口另开 GET /recall/<一次性 id> = 聊天里「展开明细」链接指向的本机明细页（真折叠），只记命中与否，不记 id 与正文。
+  const mcpHttp = runMcpHttpServer({
+    storage, port: MCP_HTTP_PORT, token: mcpToken, l0: l0Vault,
+    onViewDetail: (outcome) => { void mlog('mcp:recall_detail_view', { outcome }); },
+  });
   mcpHttp.ready
     .then((p) => { void mlog('bootstrap:mcp-http-listening', { port: p }); })
     .catch((e) => { void mlog('bootstrap:mcp-http-listen-error', String((e as Error)?.message ?? e)); });

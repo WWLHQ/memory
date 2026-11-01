@@ -2,8 +2,9 @@
 import { describe, expect, it } from 'vitest';
 import type { AuditRecord, Hit, Memory, RecallResult } from '../types.ts';
 import {
-  BACKGROUND_MAX_ITEMS, BACKGROUND_MAX_TOKENS, buildRecallCompactMarkdown, buildRecallHint, buildRecallMarkdown,
-  computeRecallSavings, corpusTokens, formatCny, localDayStart, normalizeUnitPrice, rollupRecalls, selectRecallBackground,
+  BACKGROUND_MAX_ITEMS, BACKGROUND_MAX_TOKENS, buildRecallCompactMarkdown, buildRecallDetailExpiredPage,
+  buildRecallDetailPage, buildRecallHint, buildRecallMarkdown, buildRecallSections, computeRecallSavings,
+  corpusTokens, formatCny, htmlEscape, localDayStart, normalizeUnitPrice, rollupRecalls, selectRecallBackground,
 } from '../recallInsight.ts';
 import { createMemAgent } from '../agent.ts';
 import { clientSupportsHtmlDetails, recallDisplayMode } from '../mcpRecall.ts';
@@ -378,21 +379,67 @@ describe('buildRecallMarkdown 纯 Markdown（批次29，DSH 实测只渲染 Mark
   });
 });
 
-// 批次32-C：DSH 里没有可点击折叠控件 → 不支持 HTML 的客户端默认只给一行摘要，明细靠 detail=true 再取
-describe('buildRecallCompactMarkdown + recallDisplayMode（批次32-C 默认收起）', () => {
+// 批次32-C：DSH 里没有可点击折叠控件 → 不支持 HTML 的客户端默认只给短摘要，明细靠 detail=true 再取
+// 批次33-C：摘要压到两行（shortLine）+ 可选「展开明细」链接指向本机明细页
+describe('buildRecallCompactMarkdown + recallDisplayMode（批次32-C/33-C 默认收起）', () => {
   const none = () => rollupRecalls([], Date.now());
 
-  it('紧凑版 = 加粗提示行 + 展开指引，零 HTML 标签、不铺四小节', () => {
+  it('短摘要两行：第一行命中/背景/省量，第二行金额与次数；不铺四小节', () => {
+    const r = recallResult();
+    const hint = buildRecallHint(r, none(), null);
+    const rows = hint.shortLine.split('\n');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toContain('🧠 Memory');
+    expect(rows[0]).toContain('命中 2 条（100t）');
+    expect(rows[0]).not.toContain('💰'); // 金额只在第二行，避免第一行过长换行
+    expect(rows[1]).toBe('💰 金额未开（参数页可设 ¥/百万 token） ｜ 今日 0 次 ｜ 全部 0 次');
+    // 完整提示行仍是单行（HTML 折叠档 / detail=true 档用）
+    expect(hint.line).not.toContain('\n');
+  });
+
+  it('设了单价 → 短摘要第二行给本次花费/省额与次数，今日·全部的金额明细挪到明细页', () => {
+    const now = Date.now();
+    const rollup = rollupRecalls(
+      [audit({ ts: now, detail: { saved_tokens: 4000, payload_tokens: 100, injected_tokens: 102 } })],
+      now,
+    );
+    const hint = buildRecallHint(recallResult(), rollup, 10);
+    const rows = hint.shortLine.split('\n');
+    expect(rows[1]).toBe('💰 本次 ¥0.00102（省 ¥0.099） ｜ 今日 1 次 ｜ 全部 1 次');
+    // 今日/全部的金额仍在完整提示行里（同源，只是折叠档不占聊天两行）
+    expect(hint.line).toContain(`今日 1 次 ${formatCny(rollup.today_injected_tokens * 10 / 1e6)}`);
+  });
+
+  it('无链接（TCP 等）→ 两行摘要 + detail=true 文字指引，零 HTML 标签、不铺四小节', () => {
     const r = recallResult();
     const hint = buildRecallHint(r, none(), null);
     const md = buildRecallCompactMarkdown(hint);
-    expect(md.startsWith(`**${hint.line}**`)).toBe(true);
+    expect(md.startsWith(`**${hint.shortLine}**`)).toBe(true);
     expect(md).toContain('detail=true');
     expect(md).not.toContain('<details>');
     expect(md).not.toContain('**📎 项目背景');
     expect(md).not.toContain('- [decision] 决策');
-    // 摘要行里的数字仍在（用户仍能一眼看到命中/省量/金额）
-    expect(hint.line).toContain('🧠 Memory');
+  });
+
+  it('有链接（批次33-C）→ 两行摘要 + 一行可点 Markdown 链接，不再要求二次调用', () => {
+    const r = recallResult();
+    const hint = buildRecallHint(r, none(), null);
+    const url = 'http://127.0.0.1:8204/recall/abcdefghij0123456789AB';
+    const md = buildRecallCompactMarkdown(hint, url);
+    expect(md.startsWith(`**${hint.shortLine}**`)).toBe(true);
+    expect(md).toContain(`▶ [展开本次召回明细（项目背景 / 命中记忆 / Token / 费用）](${url})`);
+    expect(md).not.toContain('detail=true'); // 默认档不再引导用户预先展开
+    expect(md).not.toContain('<details>');
+    expect(md).not.toContain('**📎 项目背景');
+    expect(md).not.toContain('- [decision] 决策');
+  });
+
+  it('旧记录告警进短摘要（不静默吞掉）', () => {
+    const now = Date.now();
+    const rollup = rollupRecalls([audit({ ts: now, detail: { payload_tokens: 50 } })], now);
+    const hint = buildRecallHint(recallResult(), rollup, 10);
+    expect(hint.shortLine.split('\n')).toHaveLength(3);
+    expect(hint.shortLine).toContain('⚠ 今日含 1 次旧记录');
   });
 
   it('档位判定：HTML 客户端恒折叠版；其余默认紧凑、detail=true 才给四小节', () => {
@@ -401,6 +448,89 @@ describe('buildRecallCompactMarkdown + recallDisplayMode（批次32-C 默认收�
     expect(recallDisplayMode('dsh-mcp-client/0.0.1', false)).toBe('markdown-compact');
     expect(recallDisplayMode('dsh-mcp-client/0.0.1', true)).toBe('markdown-full');
     expect(recallDisplayMode(undefined, false)).toBe('markdown-compact'); // TCP/无 clientInfo 保守档
+  });
+});
+
+// 批次33-C：聊天里点链接打开的本机明细页（真 <details> 折叠，数字与聊天摘要同源）
+describe('buildRecallDetailPage + buildRecallSections（批次33-C 本机明细页）', () => {
+  const none = () => rollupRecalls([], Date.now());
+  const issuedAt = Date.UTC(2026, 10, 1, 1, 33, 0); // 2026-11-01 09:33 UTC+08:00
+
+  const meta = (p: Partial<Parameters<typeof buildRecallDetailPage>[3]> = {}) => ({
+    project_id: 'P1',
+    query: '批次33 明细页测试',
+    client: 'dsh-mcp-client/0.0.1',
+    issuedAt,
+    expiresAt: issuedAt + 30 * 60 * 1000,
+    ...p,
+  });
+
+  it('四段 <details> 默认收起 + 全部展开/收起 + 一次性有效期文案', () => {
+    const r = recallResult();
+    const hint = buildRecallHint(r, none(), null);
+    const html = buildRecallDetailPage(r, hint, null, meta());
+    expect(html.startsWith('<!doctype html>')).toBe(true);
+    expect(html.match(/<details>/g)).toHaveLength(4);
+    expect(html.match(/<summary>/g)).toHaveLength(4);
+    expect(html).not.toContain('<details open'); // 默认收起：只有点击才展开
+    expect(html).toContain('全部展开');
+    expect(html).toContain('全部收起');
+    expect(html).toContain('list-style: disclosure-closed'); // 三角由浏览器原生 disclosure 标记呈现
+    expect(html).toContain('30 分钟内有效');
+    expect(html).toContain('09:33:00'); // 用户可读本地时刻（UTC+08:00），不露原始 UTC
+    expect(html).toContain('（UTC+08:00）');
+    expect(html).toContain('调用方 <code>dsh-mcp-client/0.0.1</code>');
+  });
+
+  it('摘要两行原样进页面（与聊天同一口径），未设单价如实标注', () => {
+    const r = recallResult();
+    const hint = buildRecallHint(r, none(), null);
+    const html = buildRecallDetailPage(r, hint, null, meta());
+    expect(html).toContain('<p class="sum">🧠 Memory ｜ 命中 2 条（100t） ｜ 📎 背景 2 条（2t） ｜ ⚡ 本次省 9,898t（全量约 10,000t）</p>');
+    expect(html).toContain('<p class="sum">💰 金额未开（参数页可设 ¥/百万 token） ｜ 今日 0 次 ｜ 全部 0 次</p>');
+    expect(html).toContain('金额未开：未设置单价');
+    expect(html).not.toContain('单价：¥');
+  });
+
+  it('命中正文按 clipChars 截断并 HTML 转义：记忆里的 <script> 破坏不了折叠结构', () => {
+    const r = recallResult({ hits: [hit('m9', `<script>alert("x")</script> ${'y'.repeat(500)}`)] });
+    const hint = buildRecallHint(r, none(), null);
+    const html = buildRecallDetailPage(r, hint, null, meta({ clipChars: 40 }));
+    expect(html).toContain('&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
+    expect(html).not.toContain('<script>alert');
+    expect(html).toContain('…（相关度 0.90）'); // 超长截断标示仍在
+    expect(html).toContain('按 40 字截断');
+  });
+
+  it('明细页正文 = buildRecallSections 同一口径（背景/命中/Token/费用四段，数字与聊天一致）', () => {
+    const r = recallResult();
+    const hint = buildRecallHint(r, none(), 10);
+    const sections = buildRecallSections(r, hint, 10, (s, n) => plainPass(s, n));
+    expect(sections.map((s) => s.title)).toEqual([
+      '📎 项目背景 2 条（2t）',
+      '🧠 命中记忆 2 条（100t）',
+      '⚡ Token 用量（本次注入 102t）',
+      '💰 省钱与费用（本次省 9,898t）',
+    ]);
+    expect(sections[1].lines[0]).toBe('[L1/hot] ' + 'a'.repeat(100) + '（相关度 0.90）');
+    expect(sections[3].lines.some((l) => l.startsWith('单价：¥10/百万 token'))).toBe(true); // formatCny 口径
+    const html = buildRecallDetailPage(r, hint, 10, meta());
+    for (const s of sections) expect(html).toContain(`<summary>${htmlEscape(s.title)}</summary>`);
+    expect(html).toContain('非厂商账单');
+  });
+
+  function plainPass(s: string, n: number): string {
+    const one = s.replace(/\s+/g, ' ').trim();
+    return one.length > n ? `${one.slice(0, n)}…` : one;
+  }
+
+  it('失效页诚实：给两条退路，不猜数据、不含其它项目记忆', () => {
+    const html = buildRecallDetailExpiredPage();
+    expect(html).toContain('本次召回明细链接已失效');
+    expect(html).toContain('detail=true');
+    expect(html).toContain('▶ 展开本次召回明细');
+    expect(html).toContain('本页面不含令牌');
+    expect(html.match(/<details>/g)).toBeNull();
   });
 });
 

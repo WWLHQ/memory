@@ -1,5 +1,7 @@
 // MCP streamable-http 契约测试（批次2 信任边界）：token 鉴权 / 拒绝浏览器 Origin / 体积上限 / 租户闭包
+// 批次33-C 追加：一次性召回明细页（GET /recall/<id>）的可点、失效与 Origin/Host 闸门。
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { request } from 'node:http';
 import { runMcpHttpServer, type McpHttpHandle } from '../mcpHttp.ts';
 import { InMemoryStorage } from '../storage.ts';
 import type { L0Vault } from '../l0vault.ts';
@@ -7,17 +9,36 @@ import { createTestVault } from './l0Kit.ts';
 
 const TOKEN = 'mcp-http-token-0123456789abcdef0123456789abcdef';
 
+/** 裸 HTTP GET：用于发出客户端 fetch 会规范化/丢弃的头（如伪造 Host，测 DNS rebinding 闸门） */
+function rawGetStatus(port: number, path: string, hostHeader: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const req = request(
+      { host: '127.0.0.1', port, path, method: 'GET', headers: { Host: hostHeader } },
+      (res) => {
+        res.resume();
+        res.on('end', () => resolve(res.statusCode ?? 0));
+      },
+    );
+    req.on('error', reject);
+    req.end();
+  });
+}
+
 describe('MCP HTTP（批次2 信任边界）', () => {
   let handle: McpHttpHandle;
   let url = '';
+  /** 批次33-C：明细页 GET 需要「127.0.0.1:实际端口」拼 URL 与 Host 头（port:0 时端口由系统分配） */
+  let port = 0;
+  let hostHeader = '';
   let vault: L0Vault;
   const storage = new InMemoryStorage();
 
   beforeAll(async () => {
     vault = (await createTestVault()).vault;
     handle = runMcpHttpServer({ port: 0, token: TOKEN, storage, maxBodyBytes: 512, l0: vault });
-    const port = await handle.ready;
-    url = `http://127.0.0.1:${port}/mcp`;
+    port = await handle.ready;
+    hostHeader = `127.0.0.1:${port}`;
+    url = `http://${hostHeader}/mcp`;
   });
 
   afterAll(() => {
@@ -196,7 +217,7 @@ describe('MCP HTTP（批次2 信任边界）', () => {
           hits: unknown[];
           background: unknown;
           savings: { saved_tokens: number; injected_tokens: number };
-          display: { line: string; markdown: string; money: unknown; mode: string };
+          display: { line: string; markdown: string; money: unknown; mode: string; detail_url: string | null };
         };
       };
     };
@@ -210,15 +231,70 @@ describe('MCP HTTP（批次2 信任边界）', () => {
     expect(body.result.content).toHaveLength(4); // 提示行 + 完整 JSON + 明细 + 展示要求
     expect(body.result.content[0].text).toBe(body.result.structuredContent.display.line);
     expect(body.result.content[1].text).toContain('"saved_tokens"');
-    // 批次32-C：无会话（非 Qoder）→ 默认档「一行摘要 + 展开指引」，四段明细不再铺开占屏
+    // 批次32-C/33-C：无会话（非 Qoder）→ 默认档「两行摘要 + 可点明细链接」，四段明细不在聊天里铺开
     expect(body.result.structuredContent.display.mode).toBe('markdown-compact');
     expect(body.result.content[2].text).toBe(body.result.structuredContent.display.markdown);
     expect(body.result.content[2].text).not.toContain('<details>');
     expect(body.result.content[2].text).not.toContain('**📎 项目背景');
-    expect(body.result.content[2].text).toContain('detail=true');
-    expect(body.result.content[3].text).toContain('默认收起');
-    expect(body.result.content[3].text).toContain('display.markdown');
+    expect(body.result.content[2].text).toContain('▶ [展开本次召回明细');
+    expect(body.result.content[2].text).toContain('/recall/');
+    expect(body.result.content[2].text).not.toContain('detail=true');
+    expect(body.result.structuredContent.display.detail_url).toContain('/recall/');
+    expect(body.result.content[3].text).toContain('默认收起 + 点击展开');
+    expect(body.result.content[3].text).toContain('URL 必须逐字保留');
+    expect(body.result.content[3].text).toContain('禁止自行补写');
     expect(body.result.content[3].text).not.toContain('<details>');
+  });
+
+  it('批次33-C：摘要里的明细链接可点 → GET /recall/<id> 返回真折叠页面（无需令牌）', async () => {
+    const r = await call(
+      { jsonrpc: '2.0', id: 94, method: 'tools/call', params: { name: 'recall_memory', arguments: { query: 'MCP HTTP 写入测试' } } },
+      { Authorization: `Bearer ${TOKEN}` },
+    );
+    const body = (await r.json()) as { result: { structuredContent: { display: { markdown: string } } } };
+    const m = body.result.structuredContent.display.markdown.match(/\/recall\/([A-Za-z0-9_-]{16,32})/);
+    expect(m, '摘要里应带一条一次性明细页链接').not.toBeNull();
+    const page = await fetch(`http://${hostHeader}${m![0]}`);
+    expect(page.status).toBe(200);
+    expect(page.headers.get('content-type')).toContain('text/html');
+    expect(page.headers.get('cache-control')).toBe('no-store');
+    expect(page.headers.get('content-security-policy')).toContain("default-src 'none'");
+    const html = await page.text();
+    // 页面 = 四段真折叠（客户端不渲染 HTML 也能点的那一份）
+    expect(html).toContain('📎 项目背景');
+    expect(html).toContain('🧠 命中记忆');
+    expect(html).toContain('⚡ Token 用量');
+    expect(html).toContain('💰 省钱与费用');
+    expect((html.match(/<details>/g) ?? []).length).toBe(4);
+    expect(html).toContain('30 分钟内有效');
+    // 令牌绝不出现在页面与 URL
+    expect(html).not.toContain(TOKEN);
+
+    // 同一个链接可重复打开（有效期内），但不是任意 id
+    const again = await fetch(`http://${hostHeader}${m![0]}`);
+    expect(again.status).toBe(200);
+    const ghost = await fetch(`http://${hostHeader}/recall/${'z'.repeat(22)}`);
+    expect(ghost.status).toBe(404);
+    const ghostHtml = await ghost.text();
+    expect(ghostHtml).toContain('链接已失效');
+    expect(ghostHtml).toContain('detail=true');
+  });
+
+  it('批次33-C：明细页仍受 Origin/Host 闸门约束（浏览器跨源与 DNS rebinding 一律拒绝）', async () => {
+    const r = await call(
+      { jsonrpc: '2.0', id: 95, method: 'tools/call', params: { name: 'recall_memory', arguments: { query: 'MCP HTTP 写入测试' } } },
+      { Authorization: `Bearer ${TOKEN}` },
+    );
+    const body = (await r.json()) as { result: { structuredContent: { display: { markdown: string } } } };
+    const path = body.result.structuredContent.display.markdown.match(/(\/recall\/[A-Za-z0-9_-]{16,32})/)?.[1] ?? '';
+    expect(path).not.toBe('');
+
+    const withOrigin = await fetch(`http://${hostHeader}${path}`, { headers: { Origin: 'http://evil.example' } });
+    expect(withOrigin.status).toBe(403);
+
+    // 伪造 Host（DNS rebinding 形态）：走裸 http 请求，确保 Host 头不被客户端改写
+    const code = await rawGetStatus(port, path, 'evil.example');
+    expect(code).toBe(403);
   });
 
   it('recall 置 detail=true → 纯 Markdown 四小节明细（零 HTML 标签，数字与摘要同源）', async () => {
