@@ -6,6 +6,7 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { AgentOnboardPage } from '../AgentOnboardPage.tsx';
+import { ONBOARD_AUTOSCAN_KEY } from '../autoOnboard.ts';
 import { ONBOARD_STATE_KEY, writeOnboardState } from '../onboardState.ts';
 import { bindTenant, resetKernelForTests, setKernelStorageForTests } from '../../kernel.ts';
 import { InMemoryStorage } from '../../../core/memagent/storage.ts';
@@ -93,6 +94,7 @@ beforeEach(() => {
   // 批次28-A：mock 会话会让账本走 HTTP 数据面，单测仍用内存账本
   setKernelStorageForTests(new InMemoryStorage());
   localStorage.clear();
+  sessionStorage.clear();
   bindTenant({ user_id: 'u_test', team_id: 'team_99', enterprise_id: 'ent_42' });
   setTestOverride(true);
 });
@@ -441,9 +443,10 @@ describe('AgentOnboardPage', () => {
     expect(document.querySelectorAll('#found > .found')).toHaveLength(1);
   });
 
-  it('页面启动补扫：近 60s 内已有成功结果 → 不重复扫描', async () => {
+  it('页面启动补扫：本次登录会话已扫过 → 切回接入页不重复扫描（批次33-A，按 sid 记账不再是 60s 窗口）', async () => {
     localStorage.setItem('session:realpage', 'sid_auto_skip');
-    seedOnboard(); // lastOnboardAt = now → 落在复用窗口内
+    seedOnboard(); // 已有「一键接入完成」持久化状态 → 挂载初始态直接回填卡片
+    sessionStorage.setItem(ONBOARD_AUTOSCAN_KEY, 'sid_auto_skip'); // 本次登录已扫过
     let meCalls = 0;
     mockAgentBackend((path) => {
       if (path === '/api/me') {
@@ -478,6 +481,42 @@ describe('AgentOnboardPage', () => {
     expect(hostScanCalls).toBe(0);
     expect(document.querySelector('#scanState')?.textContent).toContain('完成 · 发现并绑定 3 个');
     expect(screen.queryByTestId('onboard-failure')).toBeNull();
+  });
+
+  it('页面启动补扫：换了登录会话（sid 没扫过）→ 即使有历史接入状态仍补扫一轮', async () => {
+    localStorage.setItem('session:realpage', 'sid_auto_new');
+    seedOnboard();
+    sessionStorage.setItem(ONBOARD_AUTOSCAN_KEY, 'sid_other_login'); // 上一轮登录的标记，不算本次
+    mockAgentBackend((path) => {
+      if (path === '/api/me') {
+        return {
+          ok: true,
+          context: {
+            enterprise_id: 'ent_42', team_id: 'team_99', user_id: 'u_test',
+            perspective: 'team', session_id: 'sid_auto_new', role: 'admin',
+          },
+        };
+      }
+      if (path === '/discover') return { ok: true, cards: [] };
+      return { ok: true };
+    });
+    let hostScanCalls = 0;
+    (window as unknown as { __ELECTRON__: boolean }).__ELECTRON__ = true;
+    (window as unknown as { api: unknown }).api = {
+      hostScan: {
+        run: () => {
+          hostScanCalls += 1;
+          return Promise.resolve({ found: [], evidence: {}, platform: 'win32', ok: true, scannedAt: Date.now() });
+        },
+      },
+      hostAgentDetect: { run: () => Promise.resolve({ found: [], probes: {}, err: null }) },
+      mcpClients: { list: () => Promise.resolve({ endpoint: 'http://127.0.0.1:8204/mcp', clients: [] }) },
+    };
+
+    render(<AgentOnboardPage />);
+    await waitFor(() => expect(hostScanCalls).toBe(1), { timeout: 4000 });
+    // 起扫即记账：扫描进行中切页再挂载，也不会再起第二轮
+    expect(sessionStorage.getItem(ONBOARD_AUTOSCAN_KEY)).toBe('sid_auto_new');
   });
 
   it('页面启动补扫：无真实会话 → 登录门禁，不触发扫描', async () => {

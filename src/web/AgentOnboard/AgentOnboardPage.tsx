@@ -20,7 +20,7 @@ import { getOnboardInjectPreview } from './coreOnboard.ts';
 import { getKernelStorage } from '../kernel.ts';
 import { normalizeAgentKey, statsForAgent, useBackendMirror } from './useBackendMirror.ts';
 import {
-  ONBOARD_FAILURE_KEY, readOnboardFailure, resetAutoOnboardState, runAutoOnboard,
+  ONBOARD_FAILURE_KEY, hasAutoScannedSession, readOnboardFailure, resetAutoOnboardState, runAutoOnboard,
 } from './autoOnboard.ts';
 import { hostCapability } from '../../desktop/hostBridge.ts';
 import { useSessionContext } from '../shared/session.ts';
@@ -38,9 +38,6 @@ export function detectForm(): Form {
 }
 
 const RUNNING_STAGES = ['扫描注册信号中…', '自动打标 P0/P1/P2 中…', '按默认值绑定中…', '测通并写审计中…'];
-
-/** 启动补扫冷却窗口：近 60s 内已有成功结果/失败快照时直接复用，避免登录后 iframe 加载再扫一遍 */
-const AUTO_SCAN_REUSE_MS = 60_000;
 
 /** R2：记忆读写须带 project_id（关闭共享后请确认 project_id 仍可解析） */
 function checkR2(a: UiAgentCard): string | null {
@@ -392,15 +389,14 @@ export function AgentOnboardPage() {
   }, [running, session.role, session.sid, form, toast, applyStoredState, clearStageTimers]);
 
   // 批次18：应用重启恢复会话时没有登录事件 → 接入页挂载后补跑一轮三路真扫。
-  // 近 60s 内已有成功结果/失败快照则复用（登录后 iframe 加载不重复扫）；无会话交给登录门禁。
+  // 批次33-A：改按「本次登录会话是否已扫过」判定（用户反馈：首次登录扫一次即可，切页面不该再扫）。
+  // 已扫过就不起扫描：挂载初始态已从持久化快照回填卡片/发现行/接入状态，无需重复拉。
+  // 无会话交给登录门禁；「手动检测 / 重新接入」始终真扫，不受标记约束。
   useEffect(() => {
     if (autoScanRef.current) return;
     if (!session.sid || session.loading) return;
     autoScanRef.current = true;
-    const st = readOnboardState();
-    const failureSnap = readOnboardFailure();
-    const fresh = (at?: number) => typeof at === 'number' && Date.now() - at < AUTO_SCAN_REUSE_MS;
-    if (fresh(st?.lastOnboardAt) || fresh(failureSnap?.at)) return;
+    if (hasAutoScannedSession(session.sid)) return;
     runPipeline('auto');
   }, [session.sid, session.loading, runPipeline]);
 

@@ -68,6 +68,52 @@ export function clearOnboardFailure(): void {
   localStorage.removeItem(ONBOARD_FAILURE_KEY);
 }
 
+/**
+ * 批次33-A：本次登录会话是否已经自动扫过（值 = 已扫的 sessionId）。
+ * 为什么按会话而不是时间窗口：批次18 用「近 60s 内有结果就复用」，用户切走再切回接入页时
+ * 窗口早已过期 → 每次切页都重跑三路真扫（宿主扫描 + 后端拨测 + MCP 面板），既慢又刷屏（用户反馈第 1 条）。
+ * 标记放 sessionStorage：同一个应用窗口内切页面共享（不再重扫），关掉窗口/重启后自动清空
+ * （重启恢复会话仍补扫一轮，保留批次18 的语义）；换账号登录 sid 变了也照样扫。
+ * 「手动检测 / 撤销重接」不受该标记约束，永远真扫。
+ */
+export const ONBOARD_AUTOSCAN_KEY = 'agentOnboardAutoScanSid';
+
+/** 优先 sessionStorage（随窗口生命周期）；宿主环境没有时退回 localStorage（最多多扫一轮，不影响功能） */
+function autoScanStore(): Storage | null {
+  try {
+    if (typeof sessionStorage !== 'undefined') return sessionStorage;
+    if (typeof localStorage !== 'undefined') return localStorage;
+  } catch {
+    /* 隐私模式/禁用存储 → 由调用方按「未标记」处理 */
+  }
+  return null;
+}
+
+export function hasAutoScannedSession(sid: string): boolean {
+  try {
+    return autoScanStore()?.getItem(ONBOARD_AUTOSCAN_KEY) === sid;
+  } catch {
+    return false;
+  }
+}
+
+/** 起扫即标记（失败也标：本轮已如实给出的失败原因不该被切页反复重试；重扫请点「手动检测」） */
+export function markAutoScannedSession(sid: string): void {
+  try {
+    autoScanStore()?.setItem(ONBOARD_AUTOSCAN_KEY, sid);
+  } catch {
+    /* 写不进去 → 下一次挂载仍会补扫一轮 */
+  }
+}
+
+export function clearAutoScannedSession(): void {
+  try {
+    autoScanStore()?.removeItem(ONBOARD_AUTOSCAN_KEY);
+  } catch {
+    /* 无存储可清 */
+  }
+}
+
 export interface RunAutoOnboardOptions {
   /** 登录会话角色（写 MCP 配置需管理员；缺省按无权限处理） */
   role?: 'admin' | 'member' | null;
@@ -104,6 +150,9 @@ export function runAutoOnboard(opts: RunAutoOnboardOptions = {}): Promise<AutoOn
   if (inFlight) return inFlight;
   inFlight = (async () => {
     const started = Date.now();
+    // 批次33-A：登录/启动补扫按「一次登录一轮」记账（手动检测与撤销重接不受约束）。
+    // 先记再扫：扫描中途切页时，重新挂载的接入页看到标记就不再重复起一轮三路真扫。
+    if (opts.sid && (opts.trigger === 'login' || opts.trigger === 'auto')) markAutoScannedSession(opts.sid);
     const form = opts.form ?? 'desktop';
     const scan = await scanLocalAgents();
 
@@ -206,10 +255,11 @@ export function runAutoOnboardOnLogin(opts: RunAutoOnboardOptions = {}): Promise
   return runAutoOnboard({ ...opts, trigger: opts.trigger ?? 'login' });
 }
 
-/** 清除旧接入状态（登出/重接时调用） */
+/** 清除旧接入状态（登出/重接时调用）：批次33-A 一并清掉「本次登录已扫」标记，重接后允许再扫一轮 */
 export function resetAutoOnboardState(): void {
   clearOnboardFailure();
   clearOnboardState();
+  clearAutoScannedSession();
 }
 
 export type { OnboardMcpSummary };
