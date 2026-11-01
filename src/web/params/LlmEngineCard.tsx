@@ -2,7 +2,7 @@
 // 路由口径「哪个能用、哪个快用哪个」——按各引擎最近一次真实拨测延时排队，首个成功即用，失败回退下一个。
 // 配置落数据根 llm-config.json（不含密钥）；密钥统一落 llm-keys.json（0600），只写不读回（输入框留空 = 保持现有）。
 // 拨测走真实 HTTP，成功/失败与延时如实展示；未拨测的引擎排在已拨测之后（顺序徽标按同一口径算）。
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   llmEngineAvailable, llmGetConfig, llmSaveConfig, llmTestEngine, type LlmConfigPatch,
 } from './llmEngine.ts';
@@ -122,6 +122,7 @@ export function LlmEngineCard() {
   const { role, loading: sessionLoading } = useSessionContext();
   const isAdmin = role === 'admin';
   const [view, setView] = useState<LlmGatewaySnapshot | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, EngineRowDraft>>({});
   const [keys, setKeys] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -130,12 +131,17 @@ export function LlmEngineCard() {
   const [presetPick, setPresetPick] = useState('');
   const [custom, setCustom] = useState({ name: '', baseURL: '', model: '' });
 
+  /** 拉配置：成功即以服务端为准；失败如实记下原因（不再停在「加载中…」假装还有希望） */
+  const reload = useCallback(async () => {
+    const r = await llmGetConfig();
+    if (r.view) setView(r.view);
+    setLoadError(r.error);
+  }, []);
+
   useEffect(() => {
     if (!available) return;
-    let alive = true;
-    void llmGetConfig().then((v) => { if (alive) setView(v); });
-    return () => { alive = false; };
-  }, [available]);
+    void reload();
+  }, [available, reload]);
 
   /** 本地草稿与服务端视图同步（保存后以服务端为准，清掉该引擎草稿改动） */
   function draftOf(e: LlmEngineView): EngineRowDraft {
@@ -167,8 +173,7 @@ export function LlmEngineCard() {
     const r = await llmTestEngine(e.id);
     setTesting((s) => ({ ...s, [e.id]: false }));
     setTestResult((s) => ({ ...s, [e.id]: r }));
-    const v = await llmGetConfig(); // 主进程把延时写回了配置，重拉以更新顺序徽标
-    if (v) setView(v);
+    await reload(); // 主进程把延时写回了配置，重拉以更新顺序徽标
   }
 
   if (!available) {
@@ -187,7 +192,17 @@ export function LlmEngineCard() {
     return (
       <div className="card" data-testid="llm-engine-card">
         <b>🧠 LLM 精炼引擎</b>
-        <div className="note">加载 LLM 配置中…（需登录；未登录时网关配置不可读）</div>
+        <div className="note" data-testid="llm-load-failed">
+          {loadError
+            ? <>读不到引擎配置，因此下面没有引擎列表与添加入口。原因：{loadError}</>
+            : '加载 LLM 配置中…'}
+        </div>
+        <div className="row" style={{ gap: 8, marginTop: 8 }}>
+          <button type="button" className="btn" data-testid="llm-reload" onClick={() => void reload()}>重新加载</button>
+          <span className="dim" style={{ fontSize: 11 }}>
+            网关配置需登录会话读取、管理员保存；请先在首页用管理员账号登录后再回到本页。
+          </span>
+        </div>
       </div>
     );
   }
@@ -212,8 +227,47 @@ export function LlmEngineCard() {
       )}
 
       {view.engines.length === 0 && (
-        <div className="note" data-testid="llm-no-engine">还没有引擎，用下方预设快选添加，或自定义一家 OpenAI 兼容服务。</div>
+        <div className="note" data-testid="llm-no-engine">还没有引擎：用下方「➕ 添加其他厂商 API」填名称 + 服务地址 + 模型名，或从预设快选添加。</div>
       )}
+
+      <div
+        className="row"
+        data-testid="llm-add-section"
+        style={{
+          flexWrap: 'wrap', gap: 16, alignItems: 'flex-end', marginTop: 12,
+          border: '1px dashed var(--border, #e0e0e8)', borderRadius: 8, padding: '10px 12px',
+        }}
+      >
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 600 }}>➕ 添加其他厂商 API（任意 OpenAI 兼容服务）</div>
+          <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
+            <input data-testid="llm-add-custom-name" style={{ width: 130 }} placeholder="名称，如 内部网关" value={custom.name}
+              disabled={!isAdmin || busy} onChange={(e) => setCustom({ ...custom, name: e.target.value })} />
+            <input data-testid="llm-add-custom-baseurl" style={{ width: 260 }} placeholder="https://host 或 https://host/api/v1" value={custom.baseURL}
+              disabled={!isAdmin || busy} onChange={(e) => setCustom({ ...custom, baseURL: e.target.value })} />
+            <input data-testid="llm-add-custom-model" style={{ width: 150 }} placeholder="模型名（可留空后补）" value={custom.model}
+              disabled={!isAdmin || busy} onChange={(e) => setCustom({ ...custom, model: e.target.value })} />
+            <button type="button" className="btn primary" data-testid="llm-add-custom" disabled={!isAdmin || busy || !custom.name.trim() || !custom.baseURL.trim()}
+              onClick={() => { void apply({ add: { ...custom } }, '已添加自定义引擎，可点「测试连通」真实拨测。'); setCustom({ name: '', baseURL: '', model: '' }); }}>
+              ＋ 添加引擎
+            </button>
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 600 }}>或从预设快选</div>
+          <div className="row" style={{ gap: 6, marginTop: 4 }}>
+            <select data-testid="llm-add-preset" value={presetPick} disabled={!isAdmin || busy}
+              onChange={(e) => setPresetPick(e.target.value)}>
+              <option value="">选择厂商…</option>
+              {presets.filter((p) => !usedPresets.has(p.preset)).map((p) => (
+                <option key={p.preset} value={p.preset}>{p.name}</option>
+              ))}
+            </select>
+            <button type="button" className="btn" data-testid="llm-add-preset-btn" disabled={!isAdmin || busy || !presetPick}
+              onClick={() => { void apply({ add: { preset: presetPick } }, '已添加引擎。'); setPresetPick(''); }}>添加</button>
+          </div>
+        </div>
+      </div>
 
       {view.engines.map((e) => (
         <EngineRow
@@ -234,38 +288,6 @@ export function LlmEngineCard() {
           onRemove={() => void apply({ remove: e.id }, `已移除 ${e.name}。`)}
         />
       ))}
-
-      <div className="row" style={{ flexWrap: 'wrap', gap: 8, alignItems: 'center', marginTop: 14 }}>
-        <div>
-          <div style={{ fontSize: 11, color: 'var(--muted)' }}>从预设添加</div>
-          <div className="row" style={{ gap: 6 }}>
-            <select data-testid="llm-add-preset" value={presetPick} disabled={!isAdmin || busy}
-              onChange={(e) => setPresetPick(e.target.value)}>
-              <option value="">选择厂商…</option>
-              {presets.filter((p) => !usedPresets.has(p.preset)).map((p) => (
-                <option key={p.preset} value={p.preset}>{p.name}</option>
-              ))}
-            </select>
-            <button type="button" className="btn" data-testid="llm-add-preset-btn" disabled={!isAdmin || busy || !presetPick}
-              onClick={() => { void apply({ add: { preset: presetPick } }, '已添加引擎。'); setPresetPick(''); }}>添加</button>
-          </div>
-        </div>
-        <div>
-          <div style={{ fontSize: 11, color: 'var(--muted)' }}>自定义 OpenAI 兼容服务</div>
-          <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
-            <input data-testid="llm-add-custom-name" style={{ width: 130 }} placeholder="名称，如 内部网关" value={custom.name}
-              disabled={!isAdmin || busy} onChange={(e) => setCustom({ ...custom, name: e.target.value })} />
-            <input data-testid="llm-add-custom-baseurl" style={{ width: 260 }} placeholder="https://host 或 https://host/api/v1" value={custom.baseURL}
-              disabled={!isAdmin || busy} onChange={(e) => setCustom({ ...custom, baseURL: e.target.value })} />
-            <input data-testid="llm-add-custom-model" style={{ width: 150 }} placeholder="模型名（可留空后补）" value={custom.model}
-              disabled={!isAdmin || busy} onChange={(e) => setCustom({ ...custom, model: e.target.value })} />
-            <button type="button" className="btn" data-testid="llm-add-custom" disabled={!isAdmin || busy || !custom.name.trim() || !custom.baseURL.trim()}
-              onClick={() => { void apply({ add: { ...custom } }, '已添加自定义引擎。'); setCustom({ name: '', baseURL: '', model: '' }); }}>
-              ＋ 添加引擎
-            </button>
-          </div>
-        </div>
-      </div>
 
       <div className="row" style={{ marginTop: 12 }}>
         <button type="button" className="btn primary" data-testid="llm-save" disabled={busy || !isAdmin}

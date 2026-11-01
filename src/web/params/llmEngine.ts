@@ -41,11 +41,19 @@ function toView(r: LlmGatewaySnapshot & { ok: boolean }): LlmGatewaySnapshot | n
   return view;
 }
 
-export async function llmGetConfig(): Promise<LlmGatewaySnapshot | null> {
+/**
+ * 读取网关配置。批次33-B：失败原因如实返回（不再吞成 null）——
+ * 配置读不出来时页面必须说明「为什么没有引擎列表」（未登录 / 需管理员 / 宿主桥不可用），
+ * 而不是停在「加载中…」让用户以为没有自定义厂商入口。
+ */
+export async function llmGetConfig(): Promise<{ view: LlmGatewaySnapshot | null; error: string | null }> {
   try {
-    return toView(await hostCall<LlmGatewaySnapshot & { ok: boolean }>('llm:config', [getStoredSessionId()]));
-  } catch {
-    return null;
+    const view = toView(await hostCall<LlmGatewaySnapshot & { ok: boolean; error?: string }>('llm:config', [getStoredSessionId()]));
+    return view
+      ? { view, error: null }
+      : { view: null, error: '主进程未返回引擎列表（登录会话可能已失效，请重新登录后重试）' };
+  } catch (e) {
+    return { view: null, error: String((e as Error)?.message ?? e) };
   }
 }
 

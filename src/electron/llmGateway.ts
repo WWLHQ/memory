@@ -50,10 +50,17 @@ export interface LlmPreset {
 /** 预设快选：全部为 OpenAI 兼容 /chat/completions 端点（用户实测过的 DeepSeek/Ollama 保持不变） */
 export const LLM_PRESETS: readonly LlmPreset[] = [
   { preset: 'ollama', name: 'Ollama（本地）', baseURL: 'http://127.0.0.1:11434', model: '', needsKey: false },
+  { preset: 'vllm', name: 'vLLM（本地）', baseURL: 'http://127.0.0.1:8000/v1', model: '', needsKey: false },
+  { preset: 'lmstudio', name: 'LM Studio（本地）', baseURL: 'http://127.0.0.1:1234/v1', model: '', needsKey: false },
   { preset: 'deepseek', name: 'DeepSeek', baseURL: 'https://api.deepseek.com', model: 'deepseek-chat', needsKey: true },
   { preset: 'kimi', name: 'Kimi（月之暗面）', baseURL: 'https://api.moonshot.cn', model: 'moonshot-v1-8k', needsKey: true },
   { preset: 'zhipu', name: '智谱 GLM', baseURL: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-plus', needsKey: true },
   { preset: 'qwen', name: '通义千问（DashScope 兼容模式）', baseURL: 'https://dashscope.aliyuncs.com/compatible-mode', model: 'qwen-plus', needsKey: true },
+  { preset: 'siliconflow', name: '硅基流动 SiliconFlow', baseURL: 'https://api.siliconflow.cn/v1', model: 'deepseek-ai/DeepSeek-V3', needsKey: true },
+  { preset: 'minimax', name: 'MiniMax（abab）', baseURL: 'https://api.minimaxi.com/v1', model: 'MiniMax-Text-01', needsKey: true },
+  { preset: 'stepfun', name: '阶跃星辰 StepFun', baseURL: 'https://api.stepfun.com/v1', model: 'step-2-16k-exp', needsKey: true },
+  { preset: 'spark', name: '讯飞星火 Spark', baseURL: 'https://spark-api-open.xf-yun.com/v1', model: 'generalv3.5', needsKey: true },
+  { preset: 'groq', name: 'Groq', baseURL: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile', needsKey: true },
   { preset: 'openrouter', name: 'OpenRouter', baseURL: 'https://openrouter.ai/api/v1', model: '', needsKey: true },
 ];
 

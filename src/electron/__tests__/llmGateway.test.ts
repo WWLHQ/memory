@@ -400,7 +400,12 @@ describe('llmEngineViews', () => {
     const v = llmEngineViews(cfg(), KEYS);
     expect(v.usable).toBe(true);
     expect(v.engines.map((e) => [e.id, e.keySet])).toEqual([['ollama', false], ['deepseek', true], ['kimi', true]]);
-    expect(v.presets.map((p) => p.preset)).toEqual(['ollama', 'deepseek', 'kimi', 'zhipu', 'qwen', 'openrouter']);
+    // 批次33-B：预设快选扩充到 13 家（本机 3 + 云端 10），其余厂商走自定义 OpenAI 兼容地址
+    expect(v.presets.map((p) => p.preset)).toEqual([
+      'ollama', 'vllm', 'lmstudio', 'deepseek', 'kimi', 'zhipu', 'qwen',
+      'siliconflow', 'minimax', 'stepfun', 'spark', 'groq', 'openrouter',
+    ]);
+    expect(v.presets.filter((p) => !p.needsKey).map((p) => p.preset)).toEqual(['ollama', 'vllm', 'lmstudio']);
     expect(JSON.stringify(v)).not.toContain(KEY);
     expect(llmEngineViews(defaultLlmConfig(), {}).usable).toBe(false);
   });
