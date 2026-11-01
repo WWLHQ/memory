@@ -1,10 +1,10 @@
-// 批次31：LLM 精炼网关（主进程唯一真源）——「简单的用 Ollama，需要深入的用 DeepSeek」。
+// 批次32：LLM 精炼网关（主进程唯一真源）——通用 OpenAI 兼容**多引擎**，路由口径「哪个能用、哪个快用哪个」。
 // 为什么放主进程：内核在渲染层运行，直连外部 LLM 会撞 CORS 且 apiKey 必须进渲染层；
-// 网关收口在主进程后，密钥只存数据根 llm-deepseek-key.txt（0600，同 mcp-token.txt 先例），
+// 网关收口在主进程后，密钥只存数据根 llm-keys.json（0600，同 mcp-token.txt 先例），
 // 渲染层经 llm:refine IPC 代理逐层调用，浏览器模式无宿主能力 → 维持 stub（诚实不伪造）。
-// 分层路由（不加硬上限）：L2（会话摘要）优先 Ollama（免费本地）；L3–L6 优先 DeepSeek；
-// 任一引擎失败/未启用自动回退另一引擎；两层都不可用 → 抛错由内核记 refine_error 诚实回退 L1。
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+// 路由（批次32 改口径，取消 L2/L3–L6 分层绑定）：按各引擎**最近一次真实拨测延时**升序排队，
+// 未拨测的按列表顺序排后；逐个试，首个成功即用，失败回退下一个；全部不可用 → 抛错由内核记 refine_error 诚实回退。
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Category, LlmProvider, ModelInfo } from '../core/memagent/types.ts';
 import { layerSpecOf, type RefineLayer } from '../core/memagent/layerRules.ts';
@@ -12,40 +12,121 @@ import { layerSpecOf, type RefineLayer } from '../core/memagent/layerRules.ts';
 // ── 配置与密钥落盘（数据根，随迁移白名单走）────────────────────────────────────
 
 export const LLM_CONFIG_FILE = 'llm-config.json';
-/** DeepSeek API Key 单独落盘（绝不进 llm-config.json / 日志 / 审计 / 返回值） */
-export const LLM_KEY_FILE = 'llm-deepseek-key.txt';
+/** 各引擎 API Key 集中落盘（0600；绝不进 llm-config.json / 日志 / 审计 / IPC 返回值） */
+export const LLM_KEYS_FILE = 'llm-keys.json';
+/** 批次31 的旧密钥文件：仅在 llm-keys.json 缺 deepseek 条目时只读兜底（不自动改写用户文件） */
+export const LEGACY_DEEPSEEK_KEY_FILE = 'llm-deepseek-key.txt';
 const HTTP_TIMEOUT_MS = 60_000;
 
 export interface LlmEngineConfig {
+  /** 稳定标识（预设 id 或 custom_<ts>）；密钥表与拨测结果都按它关联 */
+  id: string;
+  name: string;
   enabled: boolean;
-  /** OpenAI 兼容 base（不含路径） */
+  /** OpenAI 兼容 base（不含 /chat/completions） */
   baseURL: string;
   model: string;
+  /** 是否需要 API Key（本地 Ollama = false） */
+  needsKey: boolean;
+  /** 最近一次真实拨测（「测试连通」）延时毫秒；null = 从未拨测 */
+  lastLatencyMs: number | null;
+  /** 拨测时刻（epoch 毫秒，UI 侧按 UTC+08:00 展示） */
+  lastProbeAt: number | null;
+  lastProbeOk: boolean | null;
 }
 
 export interface LlmGatewayConfig {
-  ollama: LlmEngineConfig;
-  deepseek: LlmEngineConfig;
+  engines: LlmEngineConfig[];
 }
 
-export const DEEPSEEK_BASE_URL = 'https://api.deepseek.com';
+export interface LlmPreset {
+  preset: string;
+  name: string;
+  baseURL: string;
+  model: string;
+  needsKey: boolean;
+}
 
-export function defaultLlmConfig(): LlmGatewayConfig {
+/** 预设快选：全部为 OpenAI 兼容 /chat/completions 端点（用户实测过的 DeepSeek/Ollama 保持不变） */
+export const LLM_PRESETS: readonly LlmPreset[] = [
+  { preset: 'ollama', name: 'Ollama（本地）', baseURL: 'http://127.0.0.1:11434', model: '', needsKey: false },
+  { preset: 'deepseek', name: 'DeepSeek', baseURL: 'https://api.deepseek.com', model: 'deepseek-chat', needsKey: true },
+  { preset: 'kimi', name: 'Kimi（月之暗面）', baseURL: 'https://api.moonshot.cn', model: 'moonshot-v1-8k', needsKey: true },
+  { preset: 'zhipu', name: '智谱 GLM', baseURL: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-plus', needsKey: true },
+  { preset: 'qwen', name: '通义千问（DashScope 兼容模式）', baseURL: 'https://dashscope.aliyuncs.com/compatible-mode', model: 'qwen-plus', needsKey: true },
+  { preset: 'openrouter', name: 'OpenRouter', baseURL: 'https://openrouter.ai/api/v1', model: '', needsKey: true },
+];
+
+function presetOf(id: string): LlmPreset | null {
+  return LLM_PRESETS.find((p) => p.preset === id) ?? null;
+}
+
+function engine(preset: LlmPreset, over: Partial<LlmEngineConfig> = {}): LlmEngineConfig {
   return {
-    ollama: { enabled: false, baseURL: 'http://127.0.0.1:11434', model: '' },
-    deepseek: { enabled: false, baseURL: DEEPSEEK_BASE_URL, model: 'deepseek-chat' },
+    id: preset.preset,
+    name: preset.name,
+    enabled: false,
+    baseURL: preset.baseURL,
+    model: preset.model,
+    needsKey: preset.needsKey,
+    lastLatencyMs: null,
+    lastProbeAt: null,
+    lastProbeOk: null,
+    ...over,
+  };
+}
+
+/** 默认配置 = 批次31 的两个槽位（Ollama + DeepSeek），均未启用；用户可自行增删引擎 */
+export function defaultLlmConfig(): LlmGatewayConfig {
+  return { engines: [engine(presetOf('ollama')!), engine(presetOf('deepseek')!)] };
+}
+
+const str = (v: unknown, d = ''): string => (typeof v === 'string' ? v.trim() : d);
+const numOrNull = (v: unknown): number | null =>
+  typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.round(v) : null;
+
+function clampEngine(raw: unknown, fallback: LlmEngineConfig): LlmEngineConfig {
+  const r = (raw ?? {}) as Partial<LlmEngineConfig>;
+  const base = str(r.baseURL) || fallback.baseURL;
+  // 命中预设的引擎以预设 needsKey 为准（防用户改坏标记把密钥发给本地端点）；自定义引擎按落盘值
+  const isPreset = !!presetOf(str(r.id) || fallback.id);
+  return {
+    id: str(r.id) || fallback.id,
+    name: str(r.name) || fallback.name,
+    enabled: r.enabled === true,
+    baseURL: base.replace(/\/+$/, ''),
+    model: str(r.model),
+    needsKey: isPreset ? fallback.needsKey : r.needsKey !== false,
+    lastLatencyMs: numOrNull(r.lastLatencyMs),
+    lastProbeAt: numOrNull(r.lastProbeAt),
+    lastProbeOk: typeof r.lastProbeOk === 'boolean' ? r.lastProbeOk : null,
   };
 }
 
 function clampConfig(raw: unknown): LlmGatewayConfig {
-  const def = defaultLlmConfig();
-  const r = (raw ?? {}) as Partial<LlmGatewayConfig>;
-  const eng = (e: Partial<LlmEngineConfig> | undefined, d: LlmEngineConfig): LlmEngineConfig => ({
-    enabled: e?.enabled === true,
-    baseURL: typeof e?.baseURL === 'string' && e.baseURL.trim() ? e.baseURL.trim().replace(/\/+$/, '') : d.baseURL,
-    model: typeof e?.model === 'string' ? e.model.trim() : d.model,
-  });
-  return { ollama: eng(r.ollama, def.ollama), deepseek: eng(r.deepseek, def.deepseek) };
+  const r = (raw ?? {}) as { engines?: unknown[] } & Partial<LlmGatewayConfig>;
+  // 批次31 旧形状 {ollama:{...},deepseek:{...}} → 引擎列表（用户已保存的配置不丢）
+  const legacy = raw as { ollama?: unknown; deepseek?: unknown } | null;
+  const list: unknown[] = Array.isArray(r.engines)
+    ? r.engines
+    : legacy && (legacy.ollama || legacy.deepseek)
+      ? [
+          { id: 'ollama', ...(typeof legacy.ollama === 'object' && legacy.ollama ? legacy.ollama : {}) },
+          { id: 'deepseek', ...(typeof legacy.deepseek === 'object' && legacy.deepseek ? legacy.deepseek : {}) },
+        ]
+      : [];
+  if (list.length === 0) return defaultLlmConfig();
+  const seen = new Set<string>();
+  const engines: LlmEngineConfig[] = [];
+  for (const item of list) {
+    const id = str((item as Partial<LlmEngineConfig>)?.id);
+    if (!id || seen.has(id)) continue; // id 缺失/重复 = 无法关联密钥与拨测结果，丢弃
+    seen.add(id);
+    const preset = presetOf(id);
+    const fallback = preset ? engine(preset) : { ...engine(presetOf('ollama')!), id, name: id, needsKey: true };
+    engines.push(clampEngine(item, fallback));
+  }
+  return engines.length ? { engines } : defaultLlmConfig();
 }
 
 export function loadLlmConfig(dir: string): LlmGatewayConfig {
@@ -61,18 +142,39 @@ export function saveLlmConfig(dir: string, cfg: LlmGatewayConfig): void {
   writeFileSync(join(dir, LLM_CONFIG_FILE), JSON.stringify(clampConfig(cfg), null, 2) + '\n', 'utf8');
 }
 
-export function loadDeepseekKey(dir: string): string {
+/** 密钥表：{引擎 id: key}；deepseek 缺条目时只读兜底批次31 旧文件 */
+export function loadLlmKeys(dir: string): Record<string, string> {
+  let map: Record<string, string> = {};
   try {
-    return readFileSync(join(dir, LLM_KEY_FILE), 'utf8').trim();
+    const raw = JSON.parse(readFileSync(join(dir, LLM_KEYS_FILE), 'utf8')) as Record<string, unknown>;
+    for (const [k, v] of Object.entries(raw ?? {})) if (typeof v === 'string' && v.trim()) map[k] = v.trim();
   } catch {
-    return '';
+    map = {};
   }
+  if (!map.deepseek) {
+    try {
+      const legacy = readFileSync(join(dir, LEGACY_DEEPSEEK_KEY_FILE), 'utf8').trim();
+      if (legacy) map.deepseek = legacy;
+    } catch {
+      /* 无旧文件：正常 */
+    }
+  }
+  return map;
 }
 
-/** 0600 落盘（mcp-token.txt 先例）；空串 = 清除密钥 */
-export function saveDeepseekKey(dir: string, key: string): void {
+/** 0600 落盘；空串 = 清除该引擎密钥 */
+export function saveLlmKey(dir: string, id: string, key: string): Record<string, string> {
+  const map = loadLlmKeys(dir);
+  const v = key.trim();
+  if (v) map[id] = v;
+  else delete map[id];
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, LLM_KEY_FILE), key.trim() + '\n', { encoding: 'utf8', mode: 0o600 });
+  writeFileSync(join(dir, LLM_KEYS_FILE), JSON.stringify(map, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
+  return map;
+}
+
+export function keyExists(dir: string, id: string): boolean {
+  return !!loadLlmKeys(dir)[id];
 }
 
 // ── 提示词（层规格单一真源 layerRules）────────────────────────────────────────
@@ -103,8 +205,10 @@ export function buildLayerPrompt(layer: RefineLayer, input: string, category: Ca
 
 type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 
-function endpoint(baseURL: string): string {
-  return `${baseURL.replace(/\/+$/, '')}/v1/chat/completions`;
+/** base 已带版本段（…/v1、…/api/paas/v4）→ 直接接 /chat/completions；否则补 /v1/chat/completions */
+export function chatEndpoint(baseURL: string): string {
+  const base = baseURL.replace(/\/+$/, '');
+  return /\/v\d+$/i.test(base) ? `${base}/chat/completions` : `${base}/v1/chat/completions`;
 }
 
 /** 错误消息清洗：绝不让响应体/头部里的密钥形态进入异常文本（异常会进审计 refine_error） */
@@ -114,100 +218,116 @@ function safeErrorText(engine: string, status: number, bodyText: string): string
 }
 
 async function chat(
-  name: 'ollama' | 'deepseek',
-  engine: LlmEngineConfig,
+  eng: LlmEngineConfig,
   apiKey: string,
   prompt: string,
   fetchImpl: FetchLike,
 ): Promise<string> {
-  if (!engine.model) throw new Error(`${name} 未配置模型名`);
+  if (!eng.model) throw new Error(`${eng.name} 未配置模型名`);
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (name === 'deepseek') headers.Authorization = `Bearer ${apiKey}`;
-  const res = await fetchImpl(endpoint(engine.baseURL), {
+  if (eng.needsKey) headers.Authorization = `Bearer ${apiKey}`; // 本地端点（needsKey=false）绝不带密钥
+  const res = await fetchImpl(chatEndpoint(eng.baseURL), {
     method: 'POST',
     headers,
     body: JSON.stringify({
-      model: engine.model,
+      model: eng.model,
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.2,
       max_tokens: 2048, // 上限给足余量；字数规格由内核 checkLayerSpec 硬校验，超限判违规
     }),
     signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
   });
-  if (!res.ok) throw new Error(safeErrorText(name, res.status, await res.text().catch(() => '')));
+  if (!res.ok) throw new Error(safeErrorText(eng.name, res.status, await res.text().catch(() => '')));
   const data = (await res.json()) as { choices?: { message?: { content?: unknown } }[] };
   const text = data.choices?.[0]?.message?.content;
-  if (typeof text !== 'string' || !text.trim()) throw new Error(`${name} 返回空内容`);
+  if (typeof text !== 'string' || !text.trim()) throw new Error(`${eng.name} 返回空内容`);
   return text.trim();
 }
 
-// ── 分层路由 Provider（注入内核的 LlmProvider 实现）───────────────────────────
+// ── 路由 Provider（注入内核的 LlmProvider 实现）───────────────────────────────
 
-/** 路由元数据（routeProxy 用）：Ollama=免费档优先选中；DeepSeek=低价档（≤ 内核 price_cap 0.01）。
- *  注意：price/quota 是内核 19.8 成本路由的记账元数据，不是 DeepSeek 真实账单。 */
-const OLLAMA_MODEL_INFO: Omit<ModelInfo, 'model'> = { tier: 'free', price: 0, quota: 100_000, used: 0 };
-const DEEPSEEK_MODEL_INFO: Omit<ModelInfo, 'model'> = { tier: 'cheap', price: 0.01, quota: 100_000, used: 0 };
+/** 本地回环端点记 free 档；其余记 cheap 档（≤ 内核 routeProxy 价帽 0.01）。
+ *  注意：price/quota 是内核 19.8 成本路由的记账元数据，不是厂商真实账单。 */
+const LOCAL_HOST = /^(localhost|127\.\d+\.\d+\.\d+|\[::1\]|::1)$/i;
 
-export class TieredLlmProvider implements LlmProvider {
+/** 只看主机名判定是否本机回环：本机引擎常带路径（…/v1、…/api/show），不能整串匹配 */
+function isLocalBase(baseURL: string): boolean {
+  try {
+    return LOCAL_HOST.test(new URL(baseURL).hostname);
+  } catch {
+    return false; // 解析不了的地址按远端对待：不擅自免密钥
+  }
+}
+
+function modelInfoOf(eng: LlmEngineConfig): Omit<ModelInfo, 'model'> {
+  return isLocalBase(eng.baseURL)
+    ? { tier: 'free', price: 0, quota: 100_000, used: 0 }
+    : { tier: 'cheap', price: 0.01, quota: 100_000, used: 0 };
+}
+
+/** 引擎是否具备被调用的最低条件：启用 + 有模型名 +（不需要密钥 或 已配密钥） */
+function runnable(eng: LlmEngineConfig, key: string): boolean {
+  return eng.enabled && !!eng.model && (!eng.needsKey || !!key);
+}
+
+export class LlmGatewayProvider implements LlmProvider {
   /** 非 stub：内核 makeLayerGenerator 据此放开 L2–L6 生成 */
   readonly isStub = false;
 
   constructor(
     private cfg: LlmGatewayConfig,
-    private deepseekKey: string,
+    private keys: Record<string, string> = {},
     private fetchImpl: FetchLike = fetch,
   ) {}
 
   usable(): boolean {
-    return (this.cfg.ollama.enabled && !!this.cfg.ollama.model) || (this.cfg.deepseek.enabled && !!this.cfg.deepseek.model && !!this.deepseekKey);
+    return this.cfg.engines.some((e) => runnable(e, this.keys[e.id] ?? ''));
   }
 
   listModels(): ModelInfo[] {
-    const out: ModelInfo[] = [];
-    if (this.cfg.ollama.enabled && this.cfg.ollama.model) out.push({ model: this.cfg.ollama.model, ...OLLAMA_MODEL_INFO });
-    if (this.cfg.deepseek.enabled && this.cfg.deepseek.model && this.deepseekKey) out.push({ model: this.cfg.deepseek.model, ...DEEPSEEK_MODEL_INFO });
-    return out;
+    return this.cfg.engines
+      .filter((e) => runnable(e, this.keys[e.id] ?? ''))
+      .map((e) => ({ model: e.model, ...modelInfoOf(e) }));
   }
 
-  /**
-   * 逐层精炼（§2.2）：L2 优先 Ollama（简单层），L3–L6 优先 DeepSeek（深层）；
-   * 首选引擎未启用或调用失败 → 回退另一引擎；两者都失败 → 抛错（内核记 refine_error 回退已生成层）。
-   */
-  async refineLayer(model: string, layer: RefineLayer, input: string, category: Category, ctx: { request_id: string; usage: string }): Promise<string> {
-    void model; // 路由按层内部决定；内核传入的 model 仅用于 routeProxy 记账
-    const prompt = buildLayerPrompt(layer, input, category);
-    const order: ('ollama' | 'deepseek')[] = layer === 'L2' ? ['ollama', 'deepseek'] : ['deepseek', 'ollama'];
+  /** 调用顺序 = 最近拨测延时升序（未拨测排后，保持列表顺序）；同一次调用内固定 */
+  private callOrder(): LlmEngineConfig[] {
+    const ready = this.cfg.engines.filter((e) => runnable(e, this.keys[e.id] ?? ''));
+    return ready
+      .map((e, i) => ({ e, i }))
+      .sort((a, b) => (a.e.lastLatencyMs ?? Number.MAX_SAFE_INTEGER) - (b.e.lastLatencyMs ?? Number.MAX_SAFE_INTEGER) || a.i - b.i)
+      .map(({ e }) => e);
+  }
+
+  private async race(prompt: string): Promise<{ text: string; engine: string }> {
+    const order = this.callOrder();
     const failures: string[] = [];
-    for (const name of order) {
-      const engine = this.cfg[name];
-      if (!engine.enabled) continue;
-      if (name === 'deepseek' && !this.deepseekKey) { failures.push('deepseek 未配置密钥'); continue; }
+    for (const eng of order) {
       try {
-        return await chat(name, engine, this.deepseekKey, prompt, this.fetchImpl);
+        return { text: await chat(eng, this.keys[eng.id] ?? '', prompt, this.fetchImpl), engine: eng.name };
       } catch (e) {
         failures.push(String((e as Error)?.message ?? e));
       }
     }
-    throw new Error(`LLM 精炼失败（${layer}，request_id=${ctx.request_id}）：${failures.join('；') || '无可用引擎（两引擎均未启用）'}`);
+    throw new Error(failures.join('；') || '无可用引擎（未启用 / 未填模型 / 未配密钥）');
   }
 
-  /** 通用调用（judge/rerank 等用途）：简单调用优先本地 Ollama，失败回退 DeepSeek */
+  /** 逐层精炼（§2.2）：不分层绑定厂商，按延时顺序逐个试；全失败 → 抛错（内核记 refine_error 回退已生成层） */
+  async refineLayer(model: string, layer: RefineLayer, input: string, category: Category, ctx: { request_id: string; usage: string }): Promise<string> {
+    void model; // 厂商由内部排队决定；内核传入的 model 仅用于 routeProxy 记账
+    const prompt = buildLayerPrompt(layer, input, category);
+    try {
+      return (await this.race(prompt)).text;
+    } catch (e) {
+      throw new Error(`LLM 精炼失败（${layer}，request_id=${ctx.request_id}）：${String((e as Error)?.message ?? e)}`);
+    }
+  }
+
+  /** 通用调用（judge/rerank 等用途）：同一套延时优先 + 逐个回退 */
   async call(model: string, prompt: string, _ctx: { request_id: string; usage: string }): Promise<{ text: string; tokens: number }> {
     void model;
-    const order: ('ollama' | 'deepseek')[] = ['ollama', 'deepseek'];
-    const failures: string[] = [];
-    for (const name of order) {
-      const engine = this.cfg[name];
-      if (!engine.enabled) continue;
-      if (name === 'deepseek' && !this.deepseekKey) { failures.push('deepseek 未配置密钥'); continue; }
-      try {
-        const text = await chat(name, engine, this.deepseekKey, prompt, this.fetchImpl);
-        return { text, tokens: Math.ceil(text.length / 2) };
-      } catch (e) {
-        failures.push(String((e as Error)?.message ?? e));
-      }
-    }
-    throw new Error(`LLM 调用失败：${failures.join('；') || '无可用引擎'}`);
+    const { text } = await this.race(prompt);
+    return { text, tokens: Math.ceil(text.length / 2) };
   }
 }
 
@@ -220,46 +340,119 @@ export interface EngineTestResult {
   error?: string;
 }
 
-export async function testOllama(cfg: LlmGatewayConfig, fetchImpl: FetchLike = fetch): Promise<EngineTestResult> {
-  const engine = cfg.ollama;
-  if (!engine.enabled) return { ok: false, error: 'Ollama 未启用' };
-  if (!engine.model) return { ok: false, error: '未填写模型名' };
+/** 真实拨测单个引擎（不落盘；调用方用 applyProbeResult 把延时写回配置） */
+export async function testEngine(
+  cfg: LlmGatewayConfig,
+  keys: Record<string, string>,
+  id: string,
+  fetchImpl: FetchLike = fetch,
+): Promise<EngineTestResult> {
+  const eng = cfg.engines.find((e) => e.id === id);
+  if (!eng) return { ok: false, error: `未找到引擎 ${id}` };
+  if (!eng.enabled) return { ok: false, error: `${eng.name} 未启用` };
+  if (!eng.model) return { ok: false, error: '未填写模型名' };
+  const key = keys[id] ?? '';
+  if (eng.needsKey && !key) return { ok: false, model: eng.model, error: '未配置 API Key' };
   const t0 = Date.now();
   try {
-    await chat('ollama', engine, '', '只回复两个字符：OK', fetchImpl);
-    return { ok: true, model: engine.model, latencyMs: Date.now() - t0, error: undefined };
+    await chat(eng, key, '只回复两个字符：OK', fetchImpl);
+    return { ok: true, model: eng.model, latencyMs: Date.now() - t0 };
   } catch (e) {
-    return { ok: false, model: engine.model, latencyMs: Date.now() - t0, error: String((e as Error)?.message ?? e) };
+    return { ok: false, model: eng.model, latencyMs: Date.now() - t0, error: String((e as Error)?.message ?? e) };
   }
 }
 
-export async function testDeepseek(cfg: LlmGatewayConfig, key: string, fetchImpl: FetchLike = fetch): Promise<EngineTestResult> {
-  const engine = cfg.deepseek;
-  if (!engine.enabled) return { ok: false, error: 'DeepSeek 未启用' };
-  if (!engine.model) return { ok: false, error: '未填写模型名' };
-  if (!key) return { ok: false, model: engine.model, error: '未配置 API Key' };
-  const t0 = Date.now();
-  try {
-    await chat('deepseek', engine, key, '只回复两个字符：OK', fetchImpl);
-    return { ok: true, model: engine.model, latencyMs: Date.now() - t0, error: undefined };
-  } catch (e) {
-    return { ok: false, model: engine.model, latencyMs: Date.now() - t0, error: String((e as Error)?.message ?? e) };
-  }
+/** 把拨测结果写回配置（成功/失败都记时刻与延时——失败延时有用于 UI 排障；只有成功参与排序） */
+export function applyProbeResult(cfg: LlmGatewayConfig, id: string, r: EngineTestResult): LlmGatewayConfig {
+  return {
+    engines: cfg.engines.map((e) =>
+      e.id === id
+        ? { ...e, lastProbeOk: r.ok, lastProbeAt: Date.now(), lastLatencyMs: r.ok ? (r.latencyMs ?? null) : null }
+        : e,
+    ),
+  };
 }
 
 /** 启动装配：读配置 + 密钥，可用则建网关；不可用返回 null（内核继续用 FakeLlmProvider 口径） */
-export function loadLlmGateway(dir: string): TieredLlmProvider | null {
-  const cfg = loadLlmConfig(dir);
-  const key = loadDeepseekKey(dir);
-  const p = new TieredLlmProvider(cfg, key);
+export function loadLlmGateway(dir: string): LlmGatewayProvider | null {
+  const p = new LlmGatewayProvider(loadLlmConfig(dir), loadLlmKeys(dir));
   return p.usable() ? p : null;
 }
 
-/** existsSync 仅用于 IPC 返回「密钥是否已设置」（绝不回显内容） */
-export function deepseekKeyExists(dir: string): boolean {
-  try {
-    return existsSync(join(dir, LLM_KEY_FILE)) && loadDeepseekKey(dir).length > 0;
-  } catch {
-    return false;
+// ── IPC 视图（新增/删除引擎、只回「密钥是否已设置」，绝不回显内容）──────────────
+
+export type LlmEngineView = LlmEngineConfig & { keySet: boolean };
+
+export interface LlmGatewayView {
+  usable: boolean;
+  engines: LlmEngineView[];
+  presets: LlmPreset[];
+}
+
+export function llmEngineViews(cfg: LlmGatewayConfig, keys: Record<string, string>): LlmGatewayView {
+  return {
+    usable: cfg.engines.some((e) => runnable(e, keys[e.id] ?? '')),
+    engines: cfg.engines.map((e) => ({ ...e, keySet: !!keys[e.id] })),
+    presets: [...LLM_PRESETS],
+  };
+}
+
+/** 渲染层可改的字段（其余由服务端维护：needsKey 来自预设、密钥单独落盘、拨测结果由 test 写入） */
+export interface LlmEnginePatch {
+  id: string;
+  name?: string;
+  enabled?: boolean;
+  baseURL?: string;
+  model?: string;
+}
+
+export interface LlmAddEngine {
+  preset?: string;
+  name?: string;
+  baseURL?: string;
+  model?: string;
+}
+
+export interface LlmConfigPatch {
+  engines?: LlmEnginePatch[];
+  add?: LlmAddEngine;
+  remove?: string;
+  /** 密钥写入/清除：{id, value}；value 省略或空串 = 清除 */
+  key?: { id: string; value?: string };
+}
+
+let customSeq = 0;
+
+/** 应用一次配置补丁（纯函数：返回新配置 + 可选的密钥动作，由调用方落盘） */
+export function mergeLlmConfig(cfg: LlmGatewayConfig, patch: LlmConfigPatch): { cfg: LlmGatewayConfig; keyOp?: { id: string; value: string } } {
+  let engines = cfg.engines.map((e) => ({ ...e }));
+  for (const p of patch.engines ?? []) {
+    const i = engines.findIndex((e) => e.id === p.id);
+    if (i < 0) continue;
+    const cur = engines[i];
+    engines[i] = clampEngine(
+      { ...cur, name: p.name ?? cur.name, enabled: p.enabled ?? cur.enabled, baseURL: p.baseURL ?? cur.baseURL, model: p.model ?? cur.model },
+      cur,
+    );
   }
+  if (patch.remove) engines = engines.filter((e) => e.id !== patch.remove);
+  const add = patch.add;
+  if (add) {
+    const preset = add.preset ? presetOf(add.preset) : null;
+    if (preset) {
+      if (!engines.some((e) => e.id === preset.preset)) engines.push(engine(preset));
+    } else if (str(add.name) && str(add.baseURL)) {
+      const id = `custom_${Date.now().toString(36)}${(customSeq++).toString(36)}`;
+      const name = str(add.name);
+      const baseURL = str(add.baseURL);
+      engines.push(
+        clampEngine(
+          { id, name, baseURL, model: add.model, needsKey: !isLocalBase(baseURL) },
+          { id, name, enabled: false, baseURL, model: str(add.model), needsKey: true, lastLatencyMs: null, lastProbeAt: null, lastProbeOk: null },
+        ),
+      );
+    }
+  }
+  const keyOp = patch.key ? { id: patch.key.id, value: patch.key.value ?? '' } : undefined;
+  return { cfg: clampConfig({ engines }), keyOp };
 }

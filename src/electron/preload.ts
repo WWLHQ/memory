@@ -135,15 +135,21 @@ const legacy = {
   demote: (sessionId?: string | null) => ipcRenderer.invoke(IPC.legacyDemote, sessionId),
 };
 
-// LLM 精炼网关桥（批次31）：读配置需登录会话；写配置/真拨测仅管理员；refine 是内核写路径的逐层代理。
-// deepseekKey 只在 setConfig 参数中出现一次，主进程写 0600 文件，任何返回值都不含密钥。
+// LLM 精炼网关桥（批次31 建，批次32 多引擎化）：读配置需登录会话；写配置/真拨测仅管理员；refine 是内核写路径的逐层代理。
+// 密钥只在 setConfig 的 patch.key 参数中出现一次，主进程写 0600 文件（llm-keys.json），任何返回值都不含密钥本体（只有 keySet）。
+type LlmViewResult = {
+  ok: boolean;
+  usable?: boolean;
+  engines?: unknown[];
+  presets?: unknown[];
+  error?: string;
+};
 const llm = {
-  config: (sessionId?: string | null) =>
-    ipcRenderer.invoke(IPC.llmConfigGet, sessionId) as Promise<{ ok: boolean; config?: unknown; deepseekKeySet?: boolean; usable?: boolean; error?: string }>,
+  config: (sessionId?: string | null) => ipcRenderer.invoke(IPC.llmConfigGet, sessionId) as Promise<LlmViewResult>,
   setConfig: (patch: unknown, sessionId?: string | null) =>
-    ipcRenderer.invoke(IPC.llmConfigSet, patch, sessionId) as Promise<{ ok: boolean; config?: unknown; deepseekKeySet?: boolean; usable?: boolean; error?: string }>,
-  test: (target: 'ollama' | 'deepseek', sessionId?: string | null) =>
-    ipcRenderer.invoke(IPC.llmTest, target, sessionId) as Promise<{ ok: boolean; model?: string; latencyMs?: number; error?: string }>,
+    ipcRenderer.invoke(IPC.llmConfigSet, patch, sessionId) as Promise<LlmViewResult>,
+  test: (engineId: string, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.llmTest, engineId, sessionId) as Promise<{ ok: boolean; model?: string; latencyMs?: number; error?: string }>,
   refine: (payload: unknown, sessionId?: string | null) =>
     ipcRenderer.invoke(IPC.llmRefine, payload, sessionId) as Promise<{ ok: boolean; text?: string; tokens?: number; error?: string }>,
 };

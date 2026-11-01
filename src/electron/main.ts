@@ -27,8 +27,8 @@ import {
 import { detectLocalAgents, hostAgentConfig } from './agentDetect.ts';
 import { applyRecallEvidence, scanMcpClients, snippetForClient, wireMcpClient } from './mcpClients.ts';
 import {
-  deepseekKeyExists, loadDeepseekKey, loadLlmConfig, loadLlmGateway, saveDeepseekKey, saveLlmConfig,
-  testDeepseek, testOllama, type LlmGatewayConfig, type TieredLlmProvider,
+  applyProbeResult, llmEngineViews, loadLlmConfig, loadLlmGateway, loadLlmKeys, mergeLlmConfig,
+  saveLlmConfig, saveLlmKey, testEngine, type LlmConfigPatch, type LlmGatewayProvider,
 } from './llmGateway.ts';
 import { createServer as httpCreateServer } from 'node:http';
 import { runMcpServer } from '../core/memagent/mcp.ts';
@@ -651,18 +651,19 @@ function registerMcpClientsIpc(token: string): void {
   });
 }
 
-// ── §6d LLM 精炼网关 IPC（批次31）──────────────────────────────────────────
+// ── §6d LLM 精炼网关 IPC（批次31 建，批次32 多引擎化）───────────────────────
 // 读配置需登录会话；写配置/真拨测仅管理员；逐层精炼代理需登录会话（内核写路径经此走主进程 HTTP）。
-// DeepSeek Key 只经参数写入 0600 文件，绝不回显、绝不进日志/审计；拨测错误文本已由网关清洗（不含密钥）。
+// 各引擎 API Key 只经参数写入 0600 文件（llm-keys.json），绝不回显、绝不进日志/审计；
+// 拨测/精炼错误文本已由网关 safeErrorText 清洗（状态码 + 截断响应体，不含密钥）。
 
-let llmGateway: TieredLlmProvider | null = null;
+let llmGateway: LlmGatewayProvider | null = null;
 
 const LLM_REFINE_LAYERS = ['L2', 'L3', 'L4', 'L5', 'L6'] as const;
 const LLM_REFINE_CATEGORIES = ['fact', 'decision', 'pitfall', 'insight', 'preference', 'context'] as const;
 
-function llmGatewayView(): { config: LlmGatewayConfig; deepseekKeySet: boolean; usable: boolean } {
-  const config = loadLlmConfig(USER_DATA);
-  return { config, deepseekKeySet: deepseekKeyExists(USER_DATA), usable: !!llmGateway };
+/** 网关视图：引擎列表（含 keySet，不含密钥本体）+ 预设 + 当前是否可用 */
+function llmGatewayView() {
+  return llmEngineViews(loadLlmConfig(USER_DATA), loadLlmKeys(USER_DATA));
 }
 
 function registerLlmIpc(): void {
@@ -671,26 +672,17 @@ function registerLlmIpc(): void {
     if (!gate.ok) throw new Error(gate.error);
     return { ok: true, ...llmGatewayView() };
   });
-  handleIpc(IPC.llmConfigSet, (_e, patch: { config?: Partial<LlmGatewayConfig>; deepseekKey?: string } | undefined, sessionId?: string) => {
+  handleIpc(IPC.llmConfigSet, (_e, patch: LlmConfigPatch | undefined, sessionId?: string) => {
     const gate = requireAdmin(sessionId, IPC.llmConfigSet);
     if (!gate.ok) return { ok: false, error: gate.error };
-    let keyUpdated = false;
-    if (patch && typeof patch.deepseekKey === 'string') {
-      saveDeepseekKey(USER_DATA, patch.deepseekKey);
-      keyUpdated = true;
-    }
-    const cur = loadLlmConfig(USER_DATA);
-    const p = patch?.config ?? {};
-    const cfg: LlmGatewayConfig = {
-      ollama: { ...cur.ollama, ...(typeof p.ollama === 'object' && p.ollama ? p.ollama : {}) },
-      deepseek: { ...cur.deepseek, ...(typeof p.deepseek === 'object' && p.deepseek ? p.deepseek : {}) },
-    };
+    const { cfg, keyOp } = mergeLlmConfig(loadLlmConfig(USER_DATA), patch ?? {});
     saveLlmConfig(USER_DATA, cfg);
+    if (keyOp) saveLlmKey(USER_DATA, keyOp.id, keyOp.value); // 空值 = 清除；密钥本体不进日志
     llmGateway = loadLlmGateway(USER_DATA);
     void mlog('llm:config-saved', {
-      by: gate.ctx.user_id, keyUpdated,
-      ollama: { enabled: cfg.ollama.enabled, model: cfg.ollama.model, baseURL: cfg.ollama.baseURL },
-      deepseek: { enabled: cfg.deepseek.enabled, model: cfg.deepseek.model },
+      by: gate.ctx.user_id,
+      keyOp: keyOp ? { id: keyOp.id, cleared: !keyOp.value } : null,
+      engines: cfg.engines.map((e) => ({ id: e.id, enabled: e.enabled, model: e.model })),
       usable: !!llmGateway,
     });
     return { ok: true, ...llmGatewayView() };
@@ -698,20 +690,22 @@ function registerLlmIpc(): void {
   handleIpc(IPC.llmTest, async (_e, target: unknown, sessionId?: string) => {
     const gate = requireAdmin(sessionId, IPC.llmTest);
     if (!gate.ok) return { ok: false, error: gate.error };
-    const cfg = loadLlmConfig(USER_DATA);
-    const r = target === 'deepseek'
-      ? await testDeepseek(cfg, loadDeepseekKey(USER_DATA))
-      : await testOllama(cfg);
+    const id = typeof target === 'string' ? target : '';
+    const r = await testEngine(loadLlmConfig(USER_DATA), loadLlmKeys(USER_DATA), id);
+    // 拨测延时写回配置 → 精炼按「最近实测最快」排队（失败不记延时，避免把坏引擎顶到前面）
+    saveLlmConfig(USER_DATA, applyProbeResult(loadLlmConfig(USER_DATA), id, r));
+    llmGateway = loadLlmGateway(USER_DATA);
     // r.error 来自网关 safeErrorText（状态码 + 截断响应体，不含密钥）
-    void mlog(`llm:test-${target === 'deepseek' ? 'deepseek' : 'ollama'}`, {
-      by: gate.ctx.user_id, ok: r.ok, model: r.model, latencyMs: r.latencyMs, ...(r.error ? { error: r.error } : {}),
+    void mlog('llm:test-engine', {
+      by: gate.ctx.user_id, engine: id || '(空)', ok: r.ok, model: r.model, latencyMs: r.latencyMs,
+      ...(r.error ? { error: r.error } : {}),
     });
     return { ...r };
   });
   handleIpc(IPC.llmRefine, async (_e, payload: unknown, sessionId?: string) => {
     const gate = requireSession(sessionId, IPC.llmRefine);
     if (!gate.ok) throw new Error(gate.error);
-    if (!llmGateway) throw new Error('LLM 网关未启用：请管理员在参数页配置并启用 Ollama / DeepSeek');
+    if (!llmGateway) throw new Error('LLM 网关未启用：请管理员在参数页配置并启用至少一个引擎（测试连通通过）');
     const p = (payload ?? {}) as {
       mode?: unknown; layer?: unknown; input?: unknown; category?: unknown; prompt?: unknown;
       request_id?: unknown; usage?: unknown;

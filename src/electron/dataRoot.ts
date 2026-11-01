@@ -32,6 +32,7 @@ export const DATA_ROOT_MIGRATE_FILES = [
   'agent-onboard.json',
   'l0-keyring.json',
   'llm-config.json',
+  'llm-keys.json',
   'llm-deepseek-key.txt',
 ] as const;
 
