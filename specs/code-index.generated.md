@@ -3,7 +3,7 @@
 > 由 `npm run code:index` 生成，请勿手改；改代码后重跑即可。
 > 用法：先在本表定位文件与导出符号，再只读该文件的局部区间（省 token、少误改）。
 
-共 285 个源码文件。
+共 286 个源码文件。
 
 ## e2e
 
@@ -52,14 +52,15 @@
 | [src/core/memagent/llm.ts](src/core/memagent/llm.ts) | 72 | LlmProvider（§5.1）+ 内核统一反代理路由（19.8：先免费 → 后低价 ≤ price_cap → cost_cap → 回退本地） | routeProxy(fn), FakeLlmProvider(class), ProxyPick(type) |
 | [src/core/memagent/mcp.ts](src/core/memagent/mcp.ts) | 299 | MCP Server（§19.5）：JSON-RPC 2.0 over TCP，暴露记忆工具，供 Agent 调用记忆助手。 | runMcpServer(fn), McpOptions(type), McpServerHandle(type) |
 | [src/core/memagent/mcpAuth.ts](src/core/memagent/mcpAuth.ts) | 56 | MCP 鉴权：MCP 端口只对持有本机令牌的 Agent 开放。 | projectInScope(fn), tokenEquals(fn), tokenFromHeaders(fn), assertMcpToken(fn), MCP_TOKEN_HEADER(const), DEFAULT_MCP_ACCOUNT(const), McpAccount(type) |
-| [src/core/memagent/mcpHttp.ts](src/core/memagent/mcpHttp.ts) | 333 | 标准 MCP（Model Context Protocol）streamable-http 服务器 | normalizeClientLabel(fn), clientFromInitialize(fn), clientFromUserAgent(fn), recallEchoNote(fn), runMcpHttpServer(fn), McpHttpOptions(type), McpHttpHandle(type) |
-| [src/core/memagent/mcpRecall.ts](src/core/memagent/mcpRecall.ts) | 193 | MCP 召回工具编排（批次11/13/29/32）：项目自动定位 / 列表 / 提示行与明细组装 / 按客户端能力选档位。 | clientSupportsHtmlDetails(fn), projectInfosFromMemories(fn), resolveProjectId(fn), runRecallTool(fn), recallDisplayMode(fn), runListProjectsTool(fn), McpToolError(class), ProjectInfo(type), ResolvedProject(type), RecallToolPayload(type), RecallToolOutput(type), RecallDisplayMode(type) |
-| [src/core/memagent/mcpSchema.ts](src/core/memagent/mcpSchema.ts) | 68 | MCP 工具清单与初始化指令（批次11/12/13）：HTTP(8204) 与 TCP(8202) 共用同一份 schema/instructions， | MCP_INSTRUCTIONS(const), MCP_TOOLS(const) |
+| [src/core/memagent/mcpHttp.ts](src/core/memagent/mcpHttp.ts) | 378 | 标准 MCP（Model Context Protocol）streamable-http 服务器 | normalizeClientLabel(fn), clientFromInitialize(fn), clientFromUserAgent(fn), recallEchoNote(fn), runMcpHttpServer(fn), McpHttpOptions(type), McpHttpHandle(type) |
+| [src/core/memagent/mcpRecall.ts](src/core/memagent/mcpRecall.ts) | 236 | MCP 召回工具编排（批次11/13/29/32/33）：项目自动定位 / 列表 / 提示行与明细组装 / 按客户端能力选档位。 | clientSupportsHtmlDetails(fn), projectInfosFromMemories(fn), resolveProjectId(fn), runRecallTool(fn), recallDisplayMode(fn), runListProjectsTool(fn), McpToolError(class), ProjectInfo(type), ResolvedProject(type), RecallToolPayload(type), RecallDetailTicketsPort(type), RecallToolDetailOpts(type), RecallToolOutput(type), RecallDisplayMode(type) |
+| [src/core/memagent/mcpSchema.ts](src/core/memagent/mcpSchema.ts) | 70 | MCP 工具清单与初始化指令（批次11/12/13）：HTTP(8204) 与 TCP(8202) 共用同一份 schema/instructions， | MCP_INSTRUCTIONS(const), MCP_TOOLS(const) |
 | [src/core/memagent/memories.ts](src/core/memagent/memories.ts) | 615 | 内核记忆业务（§3 schema + 行为红线）：write 逐层生成/查重/分支嫁接 / browse L0 授权 / gc 衰减 / memoryOp 17.3 操作 | coreWrite(fn), coreBrowse(fn), coreGc(fn), coreMemoryOp(fn), coreFeedback(fn), WriteInput(type), WriteCtx(type) |
 | [src/core/memagent/paramsSnapshot.ts](src/core/memagent/paramsSnapshot.ts) | 38 | 全局参数快照（params:v1: preference 记忆）的共享读取口。 | parseParamsSnapshot(fn), findParamsSnapshot(fn), autoOrganizeEnabled(fn), PARAMS_PREF_PREFIX(const), ParamsSnapshot(type) |
 | [src/core/memagent/pgSyncHub.ts](src/core/memagent/pgSyncHub.ts) | 250 | PgSyncHub（REQ-008 §2 服务端中枢 Postgres 落地）：与内存版 SyncHub 接口同构、语义一致。 | PgSyncHub(class) |
 | [src/core/memagent/qualityGate.ts](src/core/memagent/qualityGate.ts) | 328 | L0→L1 质量过滤器（§2.1 清洗红线）：拦截无用/低质信息，禁止其进入 L1 污染记忆库。 | checkL0ToL1Quality(fn), filteredAuditDetail(fn), QualityCheckResult(type) |
-| [src/core/memagent/recallInsight.ts](src/core/memagent/recallInsight.ts) | 338 | 召回洞察（批次11/13）：项目背景筛选 / 省量核算 / 聊天窗口提示行与累计金额的唯一纯函数真源。 | selectRecallBackground(fn), corpusTokens(fn), computeRecallSavings(fn), localDayStart(fn), rollupRecalls(fn), formatCny(fn), normalizeUnitPrice(fn), buildRecallHint(fn), buildRecallMarkdown(fn), buildRecallCompactMarkdown(fn), estTokens(const), BACKGROUND_MAX_ITEMS(const), BACKGROUND_ITEM_CHARS(const), BACKGROUND_MAX_TOKENS(const), RecallRollup(type), RecallMoneyBlock(type), RecallMoney(type), RecallHint(type), RecallMarkdownOpts(type) |
+| [src/core/memagent/recallDetailTickets.ts](src/core/memagent/recallDetailTickets.ts) | 65 | 批次33-C：召回明细页的一次性访问票据（id → 已渲染的明细 HTML）。 | RECALL_DETAIL_TTL_MS(const), RECALL_DETAIL_MAX_TICKETS(const), RecallDetailTickets(class), RecallDetailTicket(type) |
+| [src/core/memagent/recallInsight.ts](src/core/memagent/recallInsight.ts) | 496 | 召回洞察（批次11/13）：项目背景筛选 / 省量核算 / 聊天窗口提示行与累计金额的唯一纯函数真源。 | selectRecallBackground(fn), corpusTokens(fn), computeRecallSavings(fn), localDayStart(fn), rollupRecalls(fn), formatCny(fn), normalizeUnitPrice(fn), buildRecallHint(fn), buildRecallSections(fn), buildRecallMarkdown(fn), buildRecallCompactMarkdown(fn), htmlEscape(fn), buildRecallDetailPage(fn), buildRecallDetailExpiredPage(fn), estTokens(const), BACKGROUND_MAX_ITEMS(const), BACKGROUND_ITEM_CHARS(const), BACKGROUND_MAX_TOKENS(const), RecallRollup(type), RecallMoneyBlock(type), RecallMoney(type), RecallHint(type), RecallMarkdownOpts(type), RecallSection(type), RecallDetailPageMeta(type) |
 | [src/core/memagent/sessionCollector.ts](src/core/memagent/sessionCollector.ts) | 821 | 自有 Agent 会话自动采集器（§5.1 双链路补偿 · P0 自有形态，可调周期对账，预设 5min） | parseClaudeJsonl(fn), parseWorkbuddyMd(fn), parseDshProjcache(fn), scanSessionLogs(fn), createReconciler(fn), defaultAgentSources(fn), applyScanToStore(fn), ParsedMessage(type), SessionLogSource(type), FileCursor(type), CollectorCursor(type), CollectedItem(type), ScanResult(type), ScanOptions(type), ReconcileOptions(type), Reconciler(type), DefaultSourcesOpts(type), CollectorBridgeOpts(type), ApplyScanResult(type), LineParser(type), BlockParser(type) |
 | [src/core/memagent/sqliteStorage.ts](src/core/memagent/sqliteStorage.ts) | 131 | SqliteStorage（§5.3）：桌面/CLI 本地库 = P0 主源（需求规格书 §2 端壳注入、§5.3 存储端点表）。 | SqliteStorage(class) |
 | [src/core/memagent/storage.ts](src/core/memagent/storage.ts) | 91 | StorageBackend 接口实现（§5.3）：InMemoryStorage 用于测试/演示； | InMemoryStorage(class) |
@@ -87,8 +88,8 @@
 | [src/electron/hostScan.ts](src/electron/hostScan.ts) | 163 | 宿主真扫 · node IO 层（仅 Electron 主进程使用）： | parseTasklistCsv(fn), parseWmicJson(fn), listProcessNames(fn), detectMcpEntries(fn), detectConfigFiles(fn), scanHost(fn) |
 | [src/electron/ipcChannels.ts](src/electron/ipcChannels.ts) | 102 | preload 暴露的 IPC channel 清单（唯一真源）。 | missingChannels(fn), formatBootFailure(fn), handleBootFailure(fn), IPC(const), PRELOAD_CHANNELS(const), BootFailureDeps(type) |
 | [src/electron/l0KeyringStore.ts](src/electron/l0KeyringStore.ts) | 72 | L0 密钥环落盘适配（§4.4.8）：l0-keyring.json 原子写（temp → fsync → rename）， | writeFileAtomic(fn), createL0KeyringStore(fn), createHomeLockStore(fn), cleanupTempFiles(fn) |
-| [src/electron/llmGateway.ts](src/electron/llmGateway.ts) | 459 | 批次32：LLM 精炼网关（主进程唯一真源）——通用 OpenAI 兼容**多引擎**，路由口径「哪个能用、哪个快用哪个」。 | defaultLlmConfig(fn), loadLlmConfig(fn), saveLlmConfig(fn), loadLlmKeys(fn), saveLlmKey(fn), keyExists(fn), buildLayerPrompt(fn), chatEndpoint(fn), testEngine(fn), applyProbeResult(fn), loadLlmGateway(fn), llmEngineViews(fn), mergeLlmConfig(fn), LLM_CONFIG_FILE(const), LLM_KEYS_FILE(const), LEGACY_DEEPSEEK_KEY_FILE(const), LLM_PRESETS(const), LlmGatewayProvider(class), LlmEngineConfig(type), LlmGatewayConfig(type), LlmPreset(type), EngineTestResult(type), LlmGatewayView(type), LlmEnginePatch(type), LlmAddEngine(type), LlmConfigPatch(type), LlmEngineView(type) |
-| [src/electron/main.ts](src/electron/main.ts) | 2014 | Electron 主进程入口： | — |
+| [src/electron/llmGateway.ts](src/electron/llmGateway.ts) | 466 | 批次32：LLM 精炼网关（主进程唯一真源）——通用 OpenAI 兼容**多引擎**，路由口径「哪个能用、哪个快用哪个」。 | defaultLlmConfig(fn), loadLlmConfig(fn), saveLlmConfig(fn), loadLlmKeys(fn), saveLlmKey(fn), keyExists(fn), buildLayerPrompt(fn), chatEndpoint(fn), testEngine(fn), applyProbeResult(fn), loadLlmGateway(fn), llmEngineViews(fn), mergeLlmConfig(fn), LLM_CONFIG_FILE(const), LLM_KEYS_FILE(const), LEGACY_DEEPSEEK_KEY_FILE(const), LLM_PRESETS(const), LlmGatewayProvider(class), LlmEngineConfig(type), LlmGatewayConfig(type), LlmPreset(type), EngineTestResult(type), LlmGatewayView(type), LlmEnginePatch(type), LlmAddEngine(type), LlmConfigPatch(type), LlmEngineView(type) |
+| [src/electron/main.ts](src/electron/main.ts) | 2018 | Electron 主进程入口： | — |
 | [src/electron/mcpClients.ts](src/electron/mcpClients.ts) | 289 | MCP 客户端配置读写 · node 层（批次15，仅 Electron 主进程使用）。 | expandHome(fn), applyRecallEvidence(fn), scanMcpClients(fn), snippetForClient(fn), wireMcpClient(fn), McpClientStatus(type), McpClientsScan(type), McpWireResult(type), McpRecallEvidence(type) |
 | [src/electron/preload.ts](src/electron/preload.ts) | 169 | Electron preload：contextIsolation 开启下，经 contextBridge 向渲染进程暴露存储桥接面与运行标识。 | — |
 | [src/electron/webhookServer.ts](src/electron/webhookServer.ts) | 103 | Webhook HTTP 服务（批次26-A P0-4，从 main.ts 内联处理器抽出以便单测）： | createWebhookHttpServer(fn), WebhookServerOptions(type) |
@@ -129,7 +130,7 @@
 | 文件 | 行数 | 摘要 | 导出 |
 |---|---|---|---|
 | [src/web/AgentOnboard/AgentCard.tsx](src/web/AgentOnboard/AgentCard.tsx) | 162 | 单家宿主 Agent 接入卡片（规格 T3 / 19.2 · 19.3 · 5.2） | AgentCard(fn), AgentCardProps(type) |
-| [src/web/AgentOnboard/AgentOnboardPage.tsx](src/web/AgentOnboard/AgentOnboardPage.tsx) | 572 | Agent 接入配置页容器（REQ-003 接原型） | detectForm(fn), AgentOnboardPage(fn) |
+| [src/web/AgentOnboard/AgentOnboardPage.tsx](src/web/AgentOnboard/AgentOnboardPage.tsx) | 568 | Agent 接入配置页容器（REQ-003 接原型） | detectForm(fn), AgentOnboardPage(fn) |
 | [src/web/AgentOnboard/ChannelConfig.tsx](src/web/AgentOnboard/ChannelConfig.tsx) | 36 | 采集通道配置行（规格 T6 / 19.3 · R4 双通道至少开一 + SHA-256 幂等不可关） | ChannelConfig(fn) |
 | [src/web/AgentOnboard/FormBadge.tsx](src/web/AgentOnboard/FormBadge.tsx) | 46 | 按端置灰徽标（规格 T10 / AC-003.10 / 19.10） | FormBadge(fn), GRAYED_BY_FORM(const) |
 | [src/web/AgentOnboard/Gains.tsx](src/web/AgentOnboard/Gains.tsx) | 25 | 效果证据 · 用户可感知的「省」与「快」（19.1 / 9.x / 2.4.x / 19.8 反代理） | Gains(fn) |
@@ -141,7 +142,7 @@
 | [src/web/AgentOnboard/TestPanel.tsx](src/web/AgentOnboard/TestPanel.tsx) | 70 | 接入测试面板（规格 T8 / AC-003.8 · R7 必记 request_id · 注入预览） | TestPanel(fn), TestEvidence(type) |
 | [src/web/AgentOnboard/agentOnboardEntry.tsx](src/web/AgentOnboard/agentOnboardEntry.tsx) | 31 | REQ-003 接入页入口（原 index.html 默认页，因 REQ-005 首页路由决策迁至独立入口，保留 REQ-003 验证） | — |
 | [src/web/AgentOnboard/autoDiscovery.ts](src/web/AgentOnboard/autoDiscovery.ts) | 235 | 登录自动发现链路（批次16）：三路真实信号合并 + 对可写 JSON 客户端自动写入 MCP。 | scanLocalAgents(fn), mcpSpecForAgent(fn), autoWireMcpForAgents(fn), McpClientRow(type), HostInstallScan(type), LocalAgentScan(type) |
-| [src/web/AgentOnboard/autoOnboard.ts](src/web/AgentOnboard/autoOnboard.ts) | 216 | 登录/手动自动接入链路（批次16）： | readOnboardFailure(fn), clearOnboardFailure(fn), runAutoOnboard(fn), runAutoOnboardOnLogin(fn), resetAutoOnboardState(fn), ONBOARD_FAILURE_KEY(const), OnboardFailure(type), RunAutoOnboardOptions(type), AutoOnboardOutcome(type) |
+| [src/web/AgentOnboard/autoOnboard.ts](src/web/AgentOnboard/autoOnboard.ts) | 266 | 登录/手动自动接入链路（批次16）： | readOnboardFailure(fn), clearOnboardFailure(fn), hasAutoScannedSession(fn), markAutoScannedSession(fn), clearAutoScannedSession(fn), runAutoOnboard(fn), runAutoOnboardOnLogin(fn), resetAutoOnboardState(fn), ONBOARD_FAILURE_KEY(const), ONBOARD_AUTOSCAN_KEY(const), OnboardFailure(type), RunAutoOnboardOptions(type), AutoOnboardOutcome(type) |
 | [src/web/AgentOnboard/cards.ts](src/web/AgentOnboard/cards.ts) | 106 | 接入卡片构造与恢复：只由「真实接入过」的 agent 名单生成卡片，无任何演示卡片。 | specOf(fn), makeCard(fn), restoreCards(fn), restoreDiscovered(fn), AGENT_SPECS(const), AgentSpec(type) |
 | [src/web/AgentOnboard/coreOnboard.ts](src/web/AgentOnboard/coreOnboard.ts) | 192 | AgentOnboard 接入页接真内核：一键接入第 4 段「测通并写审计」走 ma.discover | coreDiscover(fn), coreHostDiscover(fn), computeOnboardGains(fn), getOnboardGains(fn), emptyOnboardGains(fn), getOnboardInjectPreview(fn), DiscoveredAgentUi(type) |
 | [src/web/AgentOnboard/onboardState.ts](src/web/AgentOnboard/onboardState.ts) | 73 | Agent 接入页「已接入」状态持久化（localStorage，跨 iframe 共享、切页/重载保持）。 | readOnboardState(fn), writeOnboardState(fn), clearOnboardState(fn), ONBOARD_STATE_KEY(const), OnboardMcpSummary(type), OnboardState(type) |
@@ -284,12 +285,12 @@
 | [src/web/params/DevPanel.tsx](src/web/params/DevPanel.tsx) | 87 | P5-T3 开发者模式（折叠面板，暴露底层参数；2.4.3 / 2.4.1 / 15.3 / 9.10 / 15.1） | DevPanel(fn) |
 | [src/web/params/KbManagementCard.tsx](src/web/params/KbManagementCard.tsx) | 267 | 全局参数页（REQ-006 / P5）· 记忆库管理卡片 | KbManagementCard(fn) |
 | [src/web/params/KbPolicyTable.tsx](src/web/params/KbPolicyTable.tsx) | 61 | P5-T3 知识库策略表（17.6 六类，逐行可编辑，保存前校验数值区间） | KbPolicyTable(fn) |
-| [src/web/params/LlmEngineCard.tsx](src/web/params/LlmEngineCard.tsx) | 286 | 全局参数页 · LLM 精炼引擎卡片（批次31 建 / 批次32 多引擎化）：任意多家 OpenAI 兼容引擎（预设快选或自定义）， | LlmEngineCard(fn) |
+| [src/web/params/LlmEngineCard.tsx](src/web/params/LlmEngineCard.tsx) | 308 | 全局参数页 · LLM 精炼引擎卡片（批次31 建 / 批次32 多引擎化）：任意多家 OpenAI 兼容引擎（预设快选或自定义）， | LlmEngineCard(fn) |
 | [src/web/params/NormalConfigCard.tsx](src/web/params/NormalConfigCard.tsx) | 84 | P5-T3 普通配置卡（17.6 文案化，G7 不暴露参数名） | NormalConfigCard(fn) |
 | [src/web/params/ParamsPage.tsx](src/web/params/ParamsPage.tsx) | 108 | 全局参数页（REQ-006 / P5）T4 编排 | ParamsPage(fn) |
 | [src/web/params/coreParams.ts](src/web/params/coreParams.ts) | 65 | 全局参数页（REQ-006 / P5）接真内核：参数快照存内核 preference 记忆（params:v1: JSON， | coreLoadParams(fn), coreSaveParams(fn) |
 | [src/web/params/defaults.ts](src/web/params/defaults.ts) | 50 | 全局参数页默认值与展示标签（规格常量；用户保存后以内核 preference 快照为真相）。 | DEFAULT_CONFIG(const), SPEED_LABEL(const), RETENTION_LABEL(const), IMPORTANCE_LABEL(const), DEFAULT_KB_POLICIES(const), DEFAULT_DEV(const), LEVEL_MAPPING(const) |
-| [src/web/params/llmEngine.ts](src/web/params/llmEngine.ts) | 73 | 全局参数页 · LLM 精炼引擎桥（批次31 建 / 批次32 多引擎化）：渲染层经宿主桥走 llm:* IPC 调主进程网关。 | llmEngineAvailable(fn), llmGetConfig(fn), llmSaveConfig(fn), llmTestEngine(fn), LlmEnginePatch(type), LlmConfigPatch(type), LlmTestResult(type) |
+| [src/web/params/llmEngine.ts](src/web/params/llmEngine.ts) | 81 | 全局参数页 · LLM 精炼引擎桥（批次31 建 / 批次32 多引擎化）：渲染层经宿主桥走 llm:* IPC 调主进程网关。 | llmEngineAvailable(fn), llmGetConfig(fn), llmSaveConfig(fn), llmTestEngine(fn), LlmEnginePatch(type), LlmConfigPatch(type), LlmTestResult(type) |
 | [src/web/params/logic.ts](src/web/params/logic.ts) | 75 | 全局参数页（REQ-006 / P5）纯逻辑层 | speedToHalfLife(fn), retentionToArchive(fn), validateWeights(fn), payloadOrdered(fn), validateKbRow(fn), validateNM(fn), validateUnitPrice(fn), validateAll(fn), auditParams(fn) |
 | [src/web/params/paramsEntry.tsx](src/web/params/paramsEntry.tsx) | 10 | 全局参数页（REQ-006 / P5）入口 | — |
 | [src/web/params/types.ts](src/web/params/types.ts) | 41 | 全局参数页（REQ-006 / P5）数据模型 | NormalConfig(type), KbPolicyRow(type), DevParams(type), ForgetSpeed(type), Retention(type), ImportanceLevel(type) |
@@ -377,14 +378,15 @@ src/core/memagent/legacyLayers.ts 8f912218cef5
 src/core/memagent/llm.ts b0d63a5e5bd4
 src/core/memagent/mcp.ts 63e4f1f9a102
 src/core/memagent/mcpAuth.ts 973d6419b4b8
-src/core/memagent/mcpHttp.ts b6e9bde173c5
-src/core/memagent/mcpRecall.ts 7f42f72d122c
-src/core/memagent/mcpSchema.ts 6590eae1fd81
+src/core/memagent/mcpHttp.ts a57d7e51e107
+src/core/memagent/mcpRecall.ts 1928b6326c85
+src/core/memagent/mcpSchema.ts 091f3f7b0b9a
 src/core/memagent/memories.ts 717f2fcb6c91
 src/core/memagent/paramsSnapshot.ts 0089f839839e
 src/core/memagent/pgSyncHub.ts dcf899e8acd4
 src/core/memagent/qualityGate.ts 973cc33b769b
-src/core/memagent/recallInsight.ts 56c34d765112
+src/core/memagent/recallDetailTickets.ts d7553f2a2f3a
+src/core/memagent/recallInsight.ts 3b3c36008b13
 src/core/memagent/sessionCollector.ts 83462ddfa60d
 src/core/memagent/sqliteStorage.ts 0c0c891d84cc
 src/core/memagent/storage.ts 88cdd05e7b35
@@ -402,8 +404,8 @@ src/electron/dataRoot.ts 979bb12a3daa
 src/electron/hostScan.ts 694d58d7048c
 src/electron/ipcChannels.ts cc81cd4a4110
 src/electron/l0KeyringStore.ts b900f5d523d5
-src/electron/llmGateway.ts ed721659b917
-src/electron/main.ts 56a8680951e4
+src/electron/llmGateway.ts a2676e6acae2
+src/electron/main.ts 8c36ae1a59f0
 src/electron/mcpClients.ts 11a393a86b83
 src/electron/preload.ts 99e1fdf5809f
 src/electron/webhookServer.ts 62157c0b1e21
@@ -419,7 +421,7 @@ src/types/agentOnboard.ts 488a56d3e926
 src/types/home.ts bedfcc8518ec
 src/types/inlineAttribution.ts f4e6759adb6d
 src/web/AgentOnboard/AgentCard.tsx 2f157b7bf6d9
-src/web/AgentOnboard/AgentOnboardPage.tsx 12ca5014f257
+src/web/AgentOnboard/AgentOnboardPage.tsx c1dd692e7748
 src/web/AgentOnboard/ChannelConfig.tsx b32e6a426470
 src/web/AgentOnboard/FormBadge.tsx b2425eba179f
 src/web/AgentOnboard/Gains.tsx 5dd221d1770f
@@ -431,7 +433,7 @@ src/web/AgentOnboard/OneClickOnboard.tsx 6d27b6fefff5
 src/web/AgentOnboard/TestPanel.tsx 616d8c8aaa4f
 src/web/AgentOnboard/agentOnboardEntry.tsx fb35983bae60
 src/web/AgentOnboard/autoDiscovery.ts c2fd3f26363d
-src/web/AgentOnboard/autoOnboard.ts ae8b38ca7c48
+src/web/AgentOnboard/autoOnboard.ts f04cb340aa41
 src/web/AgentOnboard/cards.ts 3dc5d5885b15
 src/web/AgentOnboard/coreOnboard.ts e107daf27b9a
 src/web/AgentOnboard/onboardState.ts 3b1368aac6d8
@@ -574,12 +576,12 @@ src/web/overview/overviewEntry.tsx 5f4488678cc7
 src/web/params/DevPanel.tsx 4d2f45da1bcd
 src/web/params/KbManagementCard.tsx ae71b9713586
 src/web/params/KbPolicyTable.tsx b50f471cc589
-src/web/params/LlmEngineCard.tsx 54f8719befee
+src/web/params/LlmEngineCard.tsx 3673b652083e
 src/web/params/NormalConfigCard.tsx f6da14e007e0
 src/web/params/ParamsPage.tsx 52bb6ffb06d6
 src/web/params/coreParams.ts ddf4cbba772c
 src/web/params/defaults.ts aae990e826ed
-src/web/params/llmEngine.ts 98f36ea30ab0
+src/web/params/llmEngine.ts 0c82d0802019
 src/web/params/logic.ts 72f8c9893dc5
 src/web/params/paramsEntry.tsx 47657233be13
 src/web/params/types.ts 58c344267f04

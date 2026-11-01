@@ -220,12 +220,12 @@ status: draft
 
 | 能力 | 代码落点 | 测试 |
 |---|---|---|
-| 接入页启动补扫 | `src/web/AgentOnboard/AgentOnboardPage.tsx`：挂载后若 `session.sid` 存在且 `session.loading=false`，且近 60s 内既无成功状态（`agentOnboardState.lastOnboardAt`）也无失败快照（`agentOnboardFailure.at`），自动执行 `runPipeline('auto')`；`useRef` 保证单次；`inFlight` 与登录触发互斥 | `src/web/AgentOnboard/__tests__/AgentOnboardPage.test.tsx`（补扫成功/60s 复用/无会话门禁） |
+| 接入页启动补扫 | `src/web/AgentOnboard/AgentOnboardPage.tsx`：挂载后若 `session.sid` 存在且 `session.loading=false`，且本次登录会话还没扫过，自动执行 `runPipeline('auto')`；`useRef` 保证单次；`inFlight` 与登录触发互斥。**批次33-A 去重口径**：`autoOnboard.ts` 的 `ONBOARD_AUTOSCAN_KEY='agentOnboardAutoScanSid'` + `hasAutoScannedSession/markAutoScannedSession/clearAutoScannedSession`（`sessionStorage`，无则退回 `localStorage`）；`runAutoOnboard` 对 `trigger=login/auto` **起扫即标记**（失败也标），`resetAutoOnboardState()` 三清；「手动检测 / 撤销重接」不受标记约束 | `AgentOnboardPage.test.tsx`（补扫成功 / 已扫过不重扫 / 换 sid 仍扫且起扫即记账 / 无会话门禁）+ `__tests__/autoScanSession.test.ts`（标记落 sessionStorage、按 sid 判定、清除、reset 三清） |
 | 触发来源 | `src/web/AgentOnboard/autoOnboard.ts`：`trigger` 增加 `'auto'`，审计 `onboarding:scan` 的 `trigger=auto` 区分登录/手动/重接 | 同页测试 + `autoOnboard` 单测 |
 | 只保留最新程序 | `tools/package-builder.cjs`：成功打包后除 `release/installer-*` 外，同时删除旧便携包 `release/win-unpacked` 与 `release/builder` 残留；删除失败只告警，不影响本次产物 | 人工（打包后 `release/` 只剩 `installer/`） |
 | 规格/协作文档 | `specs/需求规格书.md §19.14`、`§19.9`、`§19.13`；`AGENTS.md §9` | — |
 
-> 诚实边界（批次18）：补扫只在本机有真实会话时执行（`session:realpage`），无会话仍走登录门禁，绝不匿名扫描；近 60s 内已有结果直接复用，避免登录后 iframe 加载重复扫。纯浏览器/无宿主桥仍如实失败并提示「🔍 手动检测」。清理只发生在**打包成功后**，构建失败保留可回退产物；运行中的旧实例目录若被占用，删除失败只告警。
+> 诚实边界（批次18，批次33-A 更新）：补扫只在本机有真实会话时执行（`session:realpage`），无会话仍走登录门禁，绝不匿名扫描；「本次登录已扫」标记落在 sessionStorage，因此同一窗口切页不再重扫，**关掉窗口/重启后标记消失 → 恢复会话仍补扫一轮**；标记为「起扫即记」，本轮失败也只给一次原因，重扫请点「🔍 手动检测」。纯浏览器/无宿主桥仍如实失败并提示「🔍 手动检测」。清理只发生在**打包成功后**，构建失败保留可回退产物；运行中的旧实例目录若被占用，删除失败只告警。
 
 ---
 
@@ -480,4 +480,23 @@ status: draft
 | 32-C 触发规则同步 | `AGENTS.md §1.1`、`CLAUDE.md`（Claude Code 落紧凑档） | 人工（新会话生效） |
 
 > 诚实边界（批次32）：① DSH 里「展开」是 Agent **再调一次 `recall_memory(detail=true)`**，不是可点击的 UI 控件——字面点击折叠只在 HTML 客户端（Qoder 系）成立；② 排队依据是**最近一次成功拨测**的延时，不是实时健康度：长期不点「测试连通」则按列表顺序，某引擎中途挂掉仍会先被尝试再回退（一次写入最多损耗一轮超时）；③ 远端第三方引擎需要用户自填 API Key 并自行确认其计费，`{cheap,0.01}` 只是 routeProxy 的记账元数据，**不代表厂商账单**；④ 自定义引擎按 OpenAI 兼容 `chat/completions` 调用，非该协议的端点（如纯 Anthropic 格式）不在支持范围。
+
+---
+
+## 批次33（2026-11-01）：接入页一次登录一扫 + LLM 自定义厂商入口 + DSH 明细改道本机可点页
+
+> 起因（用户三条反馈）：①「agent 接入配置页首次登录扫一次即可，不需要每次切页面扫」；②「LLM 精炼引擎厂商要可自定义其他厂商」→ 澄清为「你只有预设厂商没有自定义厂商，我需要添加其他厂商 API」；③「dsh 还是没有改，禁止自动上细节，只有点击的时候才可显示细节，不点击只显示前 2 行」+「DSH 看能不能有其他方式实现」。
+> 拍板：①去重从 60s 窗口改按登录会话记账；②把「添加其他厂商」入口显性化并扩预设；③**DSH 气泡内联折叠实测做不到**（2026-11-01 复测 `<details>` 原样露出、连 `▶` 都没有）→ 改「聊天 2 行摘要 + 一条可点链接，点开是本机 8204 上的真折叠页」。
+
+| 条目 | 实现要点 | 测试 |
+|---|---|---|
+| 33-A 扫描按登录会话记账 | `src/web/AgentOnboard/autoOnboard.ts`：`ONBOARD_AUTOSCAN_KEY='agentOnboardAutoScanSid'` + `hasAutoScannedSession/markAutoScannedSession/clearAutoScannedSession`（`autoScanStore()` 优先 sessionStorage，无则退回 localStorage）；`runAutoOnboard` 对 `trigger=login/auto` 且有 `sid` 时**起扫即标记**（失败也标）；`resetAutoOnboardState()` 三清（状态/失败快照/标记）。`AgentOnboardPage.tsx` 挂载补扫改为 `if (hasAutoScannedSession(session.sid)) return;`，删除 `AUTO_SCAN_REUSE_MS=60_000` | `__tests__/autoScanSession.test.ts`（标记落 sessionStorage、按 sid 判定、清除、reset 三清）、`AgentOnboardPage.test.tsx`（已扫过 → 宿主扫描 0 次且回填完成态；换 sid → 扫 1 次且**起扫即记账**；无会话 → 门禁不扫） |
+| 33-B 预设扩到 13 家 | `src/electron/llmGateway.ts` `LLM_PRESETS`：本机 `ollama/vllm/lmstudio`（`needsKey=false`）+ 云端 `deepseek/kimi/zhipu/qwen/siliconflow/minimax/stepfun/spark/groq/openrouter`；`llmEngineViews` 原样下发给渲染层做快选下拉 | `llmGateway.test.ts`（13 个 id 顺序 + `needsKey=false` 恰为本机三家 + 序列化不含密钥） |
+| 33-B 自定义厂商入口 | `src/web/params/LlmEngineCard.tsx`：卡尾「添加其他厂商 API」区（`llm-add-section` / `llm-add-custom-*`），名称+baseURL 必填才可点，提交 `llmSaveConfig({add:{name,baseURL,model}})` → 主进程 `mergeLlmConfig` 生成 `custom_*` 引擎并回默认（enabled/model/baseURL），成功后清空输入并提示可点「测试连通」真拨测；纯浏览器/无宿主 IPC 时**不渲染添加入口**并如实说明；`llm-load-failed`（主进程未返回引擎列表）带「重新读取」 | `src/web/params/__tests__/LlmEngineCard.test.tsx`（9 例：浏览器诚实态 / `{ok:false}` 错误+重载 / 抛错后重拉 / add 载荷逐字断言 / 必填门 / 预设下拉 / 空列表指引 / member 只读禁用 / 排队徽标只给可调用引擎 / remove） |
+| 33-C 一次性明细票据 | **新文件** `src/core/memagent/recallDetailTickets.ts`：`RecallDetailTickets<T>`（`issue/take/size/clear`），id=`randomBytes(16).toString('base64url')`（22 字符，不可枚举），`RECALL_DETAIL_TTL_MS=30min`、`RECALL_DETAIL_MAX_TICKETS=200`；`evict()` 先清过期再按插入序淘汰最早；`take()` 不消费（TTL 内可重复打开），过期当场回收；**纯内存，明细正文不进数据根** | `__tests__/recallDetailTickets.test.ts`（id 形态/唯一性、TTL 边界含 `=TTL` 判过期、重复打开与 clear 不可恢复、上限淘汰、泛型 payload） |
+| 33-C 明细页渲染 | `src/core/memagent/recallInsight.ts`：`buildRecallSections(result, hint, price, clip, maxChars=120)` 成为四段**唯一生产者**（聊天 Markdown 与页面同源）；`buildRecallDetailPage(sections, meta)` → 真 `<details>`（`summary{list-style:disclosure-closed}` + `details[open]…disclosure-open` = 黑三角）+「全部展开/收起」+ 深浅色 `prefers-color-scheme`，正文按 `clipChars`（默认 400）截断并 `htmlEscape`，页脚写有效期/同源/金额非厂商账单/令牌不出现在 URL；`buildRecallDetailExpiredPage()` 给诚实 404；`buildRecallCompactMarkdown(hint, detailUrl?)` 有链接时输出 `▶ [展开本次召回明细（…）](url)` 且**不再**要求调 `detail=true`；摘要 `hint.shortLine` ≤2 行（今日/全部金额明细移到页面，`hint.line` 保留全量） | `recallInsight.test.ts`（shortLine 两行结构与 priced/未定价文案、`detail=true` 兜底档、带链接档、旧记录告警行、档位矩阵；明细页 4 段/无 `open`/展开按钮/`sum` 两行逐字/截断转义/sections 标题与金额口径/过期页） |
+| 33-C HTTP 路由 | `src/core/memagent/mcpHttp.ts`：8204 同一监听器新增 `GET /recall/<id>`（白名单正则 `/^[A-Za-z0-9_-]{16,32}$/`），仍过 `rejectUntrustedHost`；命中→`text/html` + `Cache-Control: no-store` + `X-Content-Type-Options: nosniff` + `Referrer-Policy: no-referrer` + CSP `default-src 'none'; style/script 'unsafe-inline'; img/frame-ancestors/form-action none`；未知/过期→404 失效页；`opts.onViewDetail('ok'|'miss')`。`mcpRecall.ts` 在 `markdown-compact` 档签票据并下发 `display.detail_url`（TCP 8202 无 base → `null`）；`main.ts` 把观测落 `mcp:recall_detail_view` 动作日志（只记 outcome） | `mcpHttp.test.ts`（摘要含 `/recall/` 链接 + `detail_url` 一致、真 GET → 200 与加固头、伪造 id → 404、带 `Origin` → 403、伪造 `Host` → 403、页面与摘要 `not.toContain(TOKEN)`） |
+| 33-C 口径同步 | `src/core/memagent/mcpSchema.ts`（三档指令 + `detail` 参数描述）、`mcpHttp.recallEchoNote('markdown-compact')`（「默认收起 + 点击展开 / URL 必须逐字保留 / 禁止自行补写 / 不要因为觉得更完整就调 detail=true」）、`AGENTS.md §1.1/§3/§9`、`CLAUDE.md` | 人工（新会话生效）+ `mcpHttp.test.ts` 末块文案断言 |
+
+> 诚实边界（批次33）：① 33-C 的「点击展开」发生在**系统浏览器/新窗口**，不是 DSH 气泡内联——内联黑三角在该客户端做不到；② 明细页只在内存票据里，**30 分钟后链接失效且不可恢复**，届时退回 `detail=true`；应用重启后旧链接必失效；③ TCP 8202 与无 base 地址场景 `detail_url=null`，仍是「摘要 + 再调一次工具」；④ 纯文本渲染客户端链接不可点但 URL 逐字可见可复制；⑤ 33-A 标记「起扫即记」，本轮失败后切页不再自动重试，需点「🔍 手动检测」；关掉窗口/重启后标记清空，恢复会话仍补扫一轮；⑥ 33-B 的新增引擎仅管理员（`llm:configSet` 主进程校验），添加后必须点「测试连通」才有延时参与排队；⑦ 明细页正文截断长度默认 400 字，长记忆看聊天 `detail=true` 档或原记忆条目。
 
