@@ -174,7 +174,7 @@ status: draft
 | 调用方归因 | `RecallReq.client` + `agent.ts` 审计 `detail.client`；`mcpHttp.ts` 用 `initialize.clientInfo`（优先）/`User-Agent` 识别，`Mcp-Session-Id` 关联 | `mcpHttp.test.ts`（`Qoder/9.9.9`、`Cursor (UA)`） |
 | 客户端触发规则 | 根目录 `CLAUDE.md`（`@AGENTS.md` + 优先调用/回显）；`AGENTS.md §1.1/§9` 同步 | 人工（Claude Code 新会话） |
 | 审计证据升级（批次30） | `src/electron/mcpClients.ts` `applyRecallEvidence` + `scanMcpClients({recallEvidence})`：recall 审计 `detail.client` 按 `spec.id`/`auditClientIds` 匹配，manual/no_config/missing_entry/missing_auth → wired（note 注明「以审计为准」）；conflict/invalid 不升级；`main.ts §6c` 扫描时真查 `storage.queryAudit({action:'recall'})`（失败退回纯文件口径）；`McpClientSpec.auditClientIds`（deepseek-harness → `dsh-mcp-client`） | `src/electron/__tests__/mcpClients.test.ts`（批次30 五例：升级/不匹配不升级/conflict 保持/DSH 命中/空证据无影响） |
-| LLM 精炼网关（批次31 建 → 批次32 多引擎，详见批次32 段） | `src/electron/llmGateway.ts`：批次31 建「主进程网关 + `llm:refine` 代理 + 层级提示词 + 密钥 0600」，批次32 把「双引擎分层互备」换成「N 引擎按最近拨测延时排队、逐个回退」 | `src/electron/__tests__/llmGateway.test.ts`（批次32 重写为 25 例）+ 实机 Ollama 验证（见批次32 手测报告） |
+| LLM 精炼网关（批次31 建 → 批次32 多引擎 → 批次34 拨测与启用解耦，详见对应批次段） | `src/electron/llmGateway.ts`：批次31 建「主进程网关 + `llm:refine` 代理 + 层级提示词 + 密钥 0600」，批次32 把「双引擎分层互备」换成「N 引擎按最近拨测延时排队、逐个回退」 | `src/electron/__tests__/llmGateway.test.ts`（批次32 重写为 25 例）+ 实机 Ollama 验证（见批次32 手测报告） |
 
 > 诚实边界（批次15，28-D 更新）：自动写入只覆盖结构稳定的 JSON 客户端（含 Trae CN、WorkBuddy `~/.workbuddy/mcp.json`）与 Codex（TOML）；Zcode（应用内表单/JSON，无文件路径）与 deepseek harness（随宿主 Qoder 下发）给手工说明/宿主委托；28-E 起 Zcode「复制片段」输出与 WorkBuddy 同构的 mcpServers JSON（可直接粘贴）。状态扫描按文件内容判定，不保证客户端进程已重载配置（需重启客户端）。提示能否被普通成员复制（含令牌）由管理员门禁控制；令牌绝不进日志。
 
@@ -499,4 +499,16 @@ status: draft
 | 33-C 口径同步 | `src/core/memagent/mcpSchema.ts`（三档指令 + `detail` 参数描述）、`mcpHttp.recallEchoNote('markdown-compact')`（「默认收起 + 点击展开 / URL 必须逐字保留 / 禁止自行补写 / 不要因为觉得更完整就调 detail=true」）、`AGENTS.md §1.1/§3/§9`、`CLAUDE.md` | 人工（新会话生效）+ `mcpHttp.test.ts` 末块文案断言 |
 
 > 诚实边界（批次33）：① 33-C 的「点击展开」发生在**系统浏览器/新窗口**，不是 DSH 气泡内联——内联黑三角在该客户端做不到；② 明细页只在内存票据里，**30 分钟后链接失效且不可恢复**，届时退回 `detail=true`；应用重启后旧链接必失效；③ TCP 8202 与无 base 地址场景 `detail_url=null`，仍是「摘要 + 再调一次工具」；④ 纯文本渲染客户端链接不可点但 URL 逐字可见可复制；⑤ 33-A 标记「起扫即记」，本轮失败后切页不再自动重试，需点「🔍 手动检测」；关掉窗口/重启后标记清空，恢复会话仍补扫一轮；⑥ 33-B 的新增引擎仅管理员（`llm:configSet` 主进程校验），添加后必须点「测试连通」才有延时参与排队；⑦ 明细页正文截断长度默认 400 字，长记忆看聊天 `detail=true` 档或原记忆条目。
+
+## 批次34（2026-11-01）：「测试连通」与「启用」解耦 + LLM 动作日志落对文件
+
+> 起因（用户反馈）：「LLM精炼引擎配置key后测试连通都连不通，本地OLLAMA也连不通」。真因不是网络：`llm-config.json` 四个引擎全部 `enabled:false`，而 `testEngine()` 第一条检查就返回「X 未启用」，**一条 HTTP 都不发**（动作日志 `[ipc:llm:test]` 只有 `ms:7~11`；`curl 127.0.0.1:11434/api/tags` 200 且列出 `qwen2.5:7b`）。
+
+| 条目 | 实现要点 | 测试 |
+|---|---|---|
+| 34-A 拨测不再要求启用 | `src/electron/llmGateway.ts` `testEngine`：删除 `if (!eng.enabled) return 'X 未启用'`；其余前提保持（未找到引擎 / 未填模型名 / `needsKey` 且无密钥 → 快速诚实失败、不发请求）；`EngineTestResult` 增 `enabled?: boolean` 回显。**精炼语义不变**：`callOrder()` 仍要求 `enabled`，不勾启用绝不参与 L2–L6 | `llmGateway.test.ts`（未启用照样真拨测：`ok=true` + 有延时 + mock 服务器确实收到该引擎请求 / 三条快速失败仍不发请求 / 其它前提不放宽） |
+| 34-B 结果与文案打通到参数页 | `src/electron/preload.ts`、`src/web/params/llmEngine.ts` 的 `LlmTestResult` 带上 `enabled`；`src/web/params/LlmEngineCard.tsx`：连通但未启用时结果写「✅ 连通（Nms）—— 但尚未勾选「启用」，勾选后才会参与精炼排队」，卡片说明改为「测试连通不要求先勾选启用」 | `LlmEngineCard.test.tsx`（未启用引擎的按钮仍可点且不误写草稿 / `enabled:false` 回显含「尚未勾选」/ `enabled:true` 不回显） |
+| 34-C LLM 事件落 `actions.log` | `src/electron/main.ts` §6d：`llm:configSet` 与 `llm:test` 由「只 `mlog()`（落 `main.log`）」改为 `mlog()` + `actionLog('llm', …)` 双写；`src/web/Home/programLogLabels.ts` 补 `llm:config-saved` / `llm:test-engine` 中文标签 | **无单测**（`main.ts` 的 IPC handler 不在 vitest 覆盖内，依赖真 Electron 宿主）；验证方式=装完后在参数页点保存/拨测，再 `rg "\[llm:test-engine\]" <数据根>/actions.log` 与日志记录页看中文行（见批次34 手测报告步骤） |
+
+> 诚实边界（批次34）：① 解耦只针对**拨测**，不改变精炼门槛——未勾选启用的引擎即使连通也不参与 L2–L6；② 拨测成功但没勾选启用时，排序徽标仍不出现（这是 `callOrder` 的既有口径，非缺陷）；③ 批次31/32/33 手测报告曾写「`actions.log` 有 `llm:config-saved` / `llm:test-engine`」，实测当时 0 命中（只落 `main.log`），已在各报告原位标注校正；④ 本机 `zhipu` 的 `baseURL` 被用户手工填成 `https://open.bigmodel.cn/api/v1`（正确预设值 `https://open.bigmodel.cn/api/paas/v4`），`deepseek`/`openrouter` 尚无密钥——这些是配置数据问题，代码不做语义猜测、不代改；⑤ 毫秒级返回的拨测结果等于「本地校验挡的、没发请求」，排障先看动作日志 `ms`。
 

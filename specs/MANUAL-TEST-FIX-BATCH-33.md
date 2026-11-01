@@ -86,7 +86,7 @@ status: done
    - 名称或 baseURL 留空 → 「添加」按钮禁用（不静默提交）。
 4. 新引擎行填 API Key → 点「测试连通」→ ✅ 显示真实延时 / ❌ 显示厂商返回原因（截断、**不含密钥**）。延时写入排队：下一个成功拨测的引擎若更快，徽标顺序会变。
 5. 门禁：普通成员进同页 → 添加区、保存、拨测、删除全部禁用并提示「需管理员」；未登录/浏览器 dev 模式 → 卡片诚实显示「不可用」，**不渲染添加输入框**。
-6. 日志与落盘：`actions.log` 有 `llm:config-saved` / `llm:test-engine`（只记 id/模型/延时）；数据根 `llm-config.json` 全文不含 `sk-` 等密钥串（`rg -c "sk-" <数据根>/llm-config.json` 应为空/0），密钥只在 `llm-keys.json`（0600）。
+6. 日志与落盘：`actions.log` 有 `llm:config-saved` / `llm:test-engine`（只记 id/模型/延时）；数据根 `llm-config.json` 全文不含 `sk-` 等密钥串（`rg -c "sk-" <数据根>/llm-config.json` 应为空/0），密钥只在 `llm-keys.json`（0600）。**（批次34 校正：本批次交付时这两个键只落 `main.log`，`actions.log` 实测 0 命中；批次34 起才双写。且本批次「测试连通」仍要求引擎先勾选启用，未启用时不发 HTTP 直接判失败——已在批次34 解耦。）**
 
 ### C. DSH：不点击只显示 2 行，点击展开真折叠明细（33-C）
 

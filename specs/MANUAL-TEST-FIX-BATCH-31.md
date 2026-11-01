@@ -55,7 +55,7 @@ status: done
 1. 安装新包并启动桌面端，管理员登录。
 2. 打开「全局参数」页 → 找到「🧠 LLM 精炼引擎」卡。
 3. 确保本机 Ollama 在跑（`http://127.0.0.1:11434`，先 `ollama pull qwen2.5:7b`）→ 勾选启用、模型名 `qwen2.5:7b` → 点「测试连通」→ 应显示 ✅ + 真实延时。
-4. 点「保存 LLM 配置」→ 写入成功提示（`llm:config-saved` 动作日志）。
+4. 点「保存 LLM 配置」→ 写入成功提示（`llm:config-saved` 动作日志）。**（批次34 校正：本批次该键只经 `mlog()` 落 `main.log`，`actions.log` 实测 0 命中；批次34 起才双写 `actionLog('llm', …)`。）**
 5. 到「写记忆」页写入一条测试记忆 → 应看到 L1 与 L2 逐层生成（L2 走 Ollama，约 20–40s）；层级列表/详情页可看到真实 L2 正文与 `layers_generated_at`（本组层生成时刻）。
 6. （可选）填入 DeepSeek API Key →「测试连通」✅ 后，新写入的 L3–L6 应由 DeepSeek 生成；关掉 DeepSeek 再写应自动回退 Ollama。
 7. 门禁回归：普通成员登录 → 该卡显示「需管理员」、控件禁用；未登录/浏览器 dev 模式 → 卡片诚实显示不可用，不冒充可配置。

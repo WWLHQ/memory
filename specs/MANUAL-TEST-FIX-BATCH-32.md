@@ -81,7 +81,7 @@ status: done
 7. 保存配置 →「写记忆」页写入一条测试记忆 → L2–L6 按延时顺序由引擎真实生成（层级列表可见正文与 `layers_generated_at`）。
 8. **回退验证**：把「上次最快」的那个云端引擎的 Key 删掉或让端点挂掉（不启服务），再写一条记忆 → 该次精炼先试它、失败后自动用次快引擎完成；若所有引擎都不可用，内核审计出现 `refine_error`（错误文案不含密钥），该层如实留空。
 9. 门禁回归：普通成员 → 该卡只读并提示「需管理员」；未登录/浏览器 dev 模式 → 诚实显示不可用（浏览器模式永远只落 L1）。
-10. 日志回查：`actions.log` 出现 `llm:config-saved`（含引擎 id/启用/模型，无密钥）与 `llm:test-engine`（含 `ok/model/latencyMs`）。
+10. 日志回查：`actions.log` 出现 `llm:config-saved`（含引擎 id/启用/模型，无密钥）与 `llm:test-engine`（含 `ok/model/latencyMs`）。**（批次34 校正：本条在批次32 交付时并不成立——当时这两个键只经 `mlog()` 落 `main.log`，`actions.log` 实测 0 命中；批次34 起 `main.ts` §6d 双写 `actionLog('llm', …)`，本条才真正可验证。另：批次32 的「测试连通」要求引擎先勾选启用，未勾选时 9ms 内返回「X 未启用」且从不发 HTTP，被用户读成「连不通」——批次34 已解耦，详见 `MANUAL-TEST-FIX-BATCH-34.md`。）**
 
 ### B. DSH 记忆明细默认收起
 
