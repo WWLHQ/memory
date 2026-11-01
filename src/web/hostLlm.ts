@@ -1,4 +1,4 @@
-// 批次31：渲染层 LLM Provider —— 内核写路径的逐层精炼经 llm:refine IPC 代理主进程网关。
+// 批次31 建 / 批次32 多引擎化：渲染层 LLM Provider —— 内核写路径的逐层精炼经 llm:refine IPC 代理主进程网关。
 // 为什么经 IPC：apiKey 只存主进程数据根（0600），渲染层绝不接触密钥；浏览器模式无宿主能力
 // → createHostLlm 返回 null，内核继续 FakeLlmProvider（只落 L1，诚实不伪造）。
 // isStub 是 getter：网关配置快照未就绪/不可用时按 stub 口径（只落 L1），可用即放开 L2–L6，
@@ -8,16 +8,32 @@ import type { RefineLayer } from '../core/memagent/layerRules.ts';
 import { hostCall, hostCapability } from '../desktop/hostBridge.ts';
 import { getStoredSessionId } from './Home/crossTabAuth.ts';
 
-export interface LlmEngineSnapshot {
+/** 引擎视图（与主进程 llmGateway.LlmEngineView 同形；keySet 只表「有没有」，绝不含密钥本体） */
+export interface LlmEngineView {
+  id: string;
+  name: string;
   enabled: boolean;
   baseURL: string;
   model: string;
+  needsKey: boolean;
+  keySet: boolean;
+  lastLatencyMs: number | null;
+  lastProbeAt: number | null;
+  lastProbeOk: boolean | null;
+}
+
+export interface LlmPresetView {
+  preset: string;
+  name: string;
+  baseURL: string;
+  model: string;
+  needsKey: boolean;
 }
 
 export interface LlmGatewaySnapshot {
   usable: boolean;
-  deepseekKeySet: boolean;
-  config: { ollama: LlmEngineSnapshot; deepseek: LlmEngineSnapshot };
+  engines: LlmEngineView[];
+  presets: LlmPresetView[];
 }
 
 let snapshot: LlmGatewaySnapshot | null = null;
@@ -34,9 +50,7 @@ export async function refreshHostLlmSnapshot(): Promise<void> {
   if (!hostLlmAvailable()) { snapshot = null; return; }
   try {
     const r = await hostCall<LlmGatewaySnapshot & { ok: boolean }>('llm:config', [getStoredSessionId()]);
-    snapshot = r.ok && r.config
-      ? { usable: !!r.usable, deepseekKeySet: !!r.deepseekKeySet, config: r.config }
-      : null;
+    snapshot = r.ok && Array.isArray(r.engines) ? { usable: !!r.usable, engines: r.engines, presets: r.presets ?? [] } : null;
   } catch {
     snapshot = null;
   }
@@ -54,14 +68,26 @@ export function applyHostLlmSnapshot(v: LlmGatewaySnapshot | null): void {
 }
 
 // routeProxy 记账元数据（与主进程 llmGateway 同口径；price/quota 是 19.8 成本路由的记账值，非真实账单）
-const OLLAMA_INFO = { tier: 'free', price: 0, quota: 100_000, used: 0 } as const;
-const DEEPSEEK_INFO = { tier: 'cheap', price: 0.01, quota: 100_000, used: 0 } as const;
+const LOCAL_HOST = /^(localhost|127\.\d+\.\d+\.\d+|\[::1\]|::1)$/i;
+
+/** 只看主机名：本机引擎常带路径（…/v1），与主进程 isLocalBase 同口径；参数页据此标注本地/云端 */
+export function isLocalBase(baseURL: string): boolean {
+  try {
+    return LOCAL_HOST.test(new URL(baseURL).hostname);
+  } catch {
+    return false;
+  }
+}
 
 function modelsFromSnapshot(s: LlmGatewaySnapshot): ModelInfo[] {
-  const out: ModelInfo[] = [];
-  if (s.config.ollama.enabled && s.config.ollama.model) out.push({ model: s.config.ollama.model, ...OLLAMA_INFO });
-  if (s.config.deepseek.enabled && s.config.deepseek.model && s.deepseekKeySet) out.push({ model: s.config.deepseek.model, ...DEEPSEEK_INFO });
-  return out;
+  return s.engines
+    .filter((e) => e.enabled && e.model && (!e.needsKey || e.keySet))
+    .map((e) => ({
+      model: e.model,
+      ...(isLocalBase(e.baseURL)
+        ? { tier: 'free' as const, price: 0, quota: 100_000, used: 0 }
+        : { tier: 'cheap' as const, price: 0.01, quota: 100_000, used: 0 }),
+    }));
 }
 
 /**

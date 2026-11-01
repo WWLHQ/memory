@@ -1,68 +1,119 @@
-// 全局参数页 · LLM 精炼引擎卡片（批次31）：Ollama 管简单层（L2）、DeepSeek 管深层（L3–L6），
-// 互为回退、不加硬上限。配置落数据根 llm-config.json（无密钥）；DeepSeek Key 单独 0600 文件，
-// 只写不读回（输入框留空 = 保持现有密钥）。拨测走真实 HTTP，成功/失败如实展示。
-import { useEffect, useState, type ReactNode } from 'react';
+// 全局参数页 · LLM 精炼引擎卡片（批次31 建 / 批次32 多引擎化）：任意多家 OpenAI 兼容引擎（预设快选或自定义），
+// 路由口径「哪个能用、哪个快用哪个」——按各引擎最近一次真实拨测延时排队，首个成功即用，失败回退下一个。
+// 配置落数据根 llm-config.json（不含密钥）；密钥统一落 llm-keys.json（0600），只写不读回（输入框留空 = 保持现有）。
+// 拨测走真实 HTTP，成功/失败与延时如实展示；未拨测的引擎排在已拨测之后（顺序徽标按同一口径算）。
+import { useEffect, useState } from 'react';
 import {
-  llmEngineAvailable, llmGetConfig, llmSaveConfig, llmTestEngine,
-  type LlmConfigView, type LlmTestResult,
+  llmEngineAvailable, llmGetConfig, llmSaveConfig, llmTestEngine, type LlmConfigPatch,
 } from './llmEngine.ts';
+import type { LlmEngineView, LlmGatewaySnapshot, LlmPresetView } from '../hostLlm.ts';
+import { isLocalBase } from '../hostLlm.ts';
 import { useSessionContext } from '../shared/session.ts';
 import { useToast } from './useToast.tsx';
 
+/** 与主进程 callOrder 同口径：可调用引擎按最近拨测延时升序（未拨测排后，保持列表顺序） */
+function callOrder(engines: LlmEngineView[]): LlmEngineView[] {
+  return engines
+    .filter((e) => e.enabled && e.model && (!e.needsKey || e.keySet))
+    .map((e, i) => ({ e, i }))
+    .sort((a, b) => (a.e.lastLatencyMs ?? Number.MAX_SAFE_INTEGER) - (b.e.lastLatencyMs ?? Number.MAX_SAFE_INTEGER) || a.i - b.i)
+    .map(({ e }) => e);
+}
+
+function probeText(e: LlmEngineView): string {
+  if (e.lastProbeAt === null) return '尚未拨测';
+  const at = new Date(e.lastProbeAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false });
+  if (e.lastProbeOk === true) return `上次拨测 ${at} ✅ ${e.lastLatencyMs ?? '?'}ms`;
+  return `上次拨测 ${at} ❌ 失败`;
+}
+
 function EngineRow(props: {
-  title: string;
-  note: string;
-  engine: { enabled: boolean; baseURL: string; model: string };
-  baseURLFixed?: boolean;
-  onEngine: (patch: Partial<{ enabled: boolean; baseURL: string; model: string }>) => void;
+  engine: LlmEngineView;
+  rank: number | null; // 调用顺序（1 起）；null = 当前条件不可调用
+  draft: { name: string; enabled: boolean; baseURL: string; model: string };
+  onDraft: (patch: Partial<EngineRowDraft>) => void;
+  keyDraft: string;
+  onKeyDraft: (v: string) => void;
+  onSaveKey: () => void;
+  onClearKey: () => void;
   onTest: () => void;
   testing: boolean;
-  testResult: LlmTestResult | null;
+  testResult: { ok: boolean; latencyMs?: number; error?: string } | null;
+  onRemove: () => void;
   isAdmin: boolean;
-  testId: string;
-  children?: ReactNode;
+  busy: boolean;
 }) {
-  const { engine, onEngine, isAdmin } = props;
+  const { engine, draft, onDraft, isAdmin } = props;
+  const local = isLocalBase(engine.baseURL);
   return (
-    <div style={{ marginTop: 12, borderTop: '1px solid var(--border, #e8e8ef)', paddingTop: 10 }} data-testid={props.testId}>
-      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-        <input type="checkbox" data-testid={`${props.testId}-enabled`} checked={engine.enabled} disabled={!isAdmin}
-          onChange={(e) => onEngine({ enabled: e.target.checked })} />
-        <b>{props.title}</b>
-      </label>
-      <div className="note">{props.note}</div>
+    <div style={{ marginTop: 12, borderTop: '1px solid var(--border, #e8e8ef)', paddingTop: 10 }} data-testid={`llm-engine-${engine.id}`}>
+      <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+          <input type="checkbox" data-testid={`llm-engine-${engine.id}-enabled`} checked={draft.enabled} disabled={!isAdmin}
+            onChange={(e) => onDraft({ enabled: e.target.checked })} />
+          <b>{draft.name || engine.name}</b>
+        </label>
+        {props.rank !== null && <span className="badge p2" data-testid={`llm-engine-${engine.id}-rank`}>调用顺序 {props.rank}</span>}
+        <span className="dim" style={{ fontSize: 11 }}>{local ? '本地端点 · 无需密钥' : '云端端点 · 需 API Key'}</span>
+        <span className="dim" style={{ fontSize: 11 }} data-testid={`llm-engine-${engine.id}-probe`}>{probeText(engine)}</span>
+        <button type="button" className="btn" data-testid={`llm-engine-${engine.id}-remove`} disabled={!isAdmin || props.busy}
+          title="从列表移除该引擎（不清除已保存的密钥文件）" onClick={props.onRemove}>移除</button>
+      </div>
       <div className="row" style={{ flexWrap: 'wrap', gap: 12, marginTop: 6 }}>
-        {!props.baseURLFixed && (
-          <div>
-            <div style={{ fontSize: 11, color: 'var(--muted)' }}>服务地址（OpenAI 兼容）</div>
-            <input data-testid={`${props.testId}-baseurl`} style={{ width: 240 }} value={engine.baseURL} disabled={!isAdmin}
-              onChange={(e) => onEngine({ baseURL: e.target.value })} />
-          </div>
-        )}
         <div>
-          <div style={{ fontSize: 11, color: 'var(--muted)' }}>模型名</div>
-          <input data-testid={`${props.testId}-model`} style={{ width: 180 }} value={engine.model} disabled={!isAdmin}
-            placeholder={props.testId === 'llm-ollama' ? '如 qwen2.5:7b' : 'deepseek-chat'}
-            onChange={(e) => onEngine({ model: e.target.value })} />
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>服务地址（OpenAI 兼容）</div>
+          <input data-testid={`llm-engine-${engine.id}-baseurl`} style={{ width: 260 }} value={draft.baseURL} disabled={!isAdmin}
+            onChange={(e) => onDraft({ baseURL: e.target.value })} />
         </div>
         <div>
-          <div style={{ fontSize: 11, color: 'var(--muted)' }}>连通拨测（真实 HTTP）</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>模型名</div>
+          <input data-testid={`llm-engine-${engine.id}-model`} style={{ width: 180 }} value={draft.model} disabled={!isAdmin}
+            placeholder="如 qwen2.5:7b / deepseek-chat" onChange={(e) => onDraft({ model: e.target.value })} />
+        </div>
+        <div>
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>连通拨测（真实 HTTP，延时参与排序）</div>
           <div className="row" style={{ gap: 6, alignItems: 'center' }}>
-            <button type="button" className="btn" data-testid={`${props.testId}-test`} disabled={!isAdmin || props.testing}
+            <button type="button" className="btn" data-testid={`llm-engine-${engine.id}-test`} disabled={!isAdmin || props.testing}
               onClick={props.onTest}>{props.testing ? '拨测中…' : '测试连通'}</button>
             {props.testResult && (
-              <span className="dim" style={{ fontSize: 11 }}>
+              <span className="dim" style={{ fontSize: 11 }} data-testid={`llm-engine-${engine.id}-test-result`}>
                 {props.testResult.ok
-                  ? `✅ 连通（${props.testResult.model ?? engine.model}，${props.testResult.latencyMs ?? '?'}ms）`
+                  ? `✅ 连通（${props.testResult.latencyMs ?? '?'}ms）`
                   : `❌ ${props.testResult.error ?? '失败'}`}
               </span>
             )}
           </div>
         </div>
       </div>
-      {props.children}
+      {engine.needsKey && (
+        <div style={{ marginTop: 8 }}>
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+            API Key（只写不读回；{engine.keySet ? '已设置' : '未设置'}；留空 = 保持现有密钥）
+          </div>
+          <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+            <input type="password" data-testid={`llm-engine-${engine.id}-key`} style={{ width: 320 }} value={props.keyDraft}
+              disabled={!isAdmin} placeholder={engine.keySet ? '••••••••（已保存）' : 'sk-…'}
+              onChange={(e) => props.onKeyDraft(e.target.value)} />
+            {props.keyDraft && (
+              <button type="button" className="btn" data-testid={`llm-engine-${engine.id}-key-save`} disabled={props.busy || !isAdmin}
+                onClick={props.onSaveKey}>保存密钥</button>
+            )}
+            {engine.keySet && (
+              <button type="button" className="btn" data-testid={`llm-engine-${engine.id}-key-clear`} disabled={props.busy || !isAdmin}
+                title="清除该引擎已保存的密钥" onClick={props.onClearKey}>清除</button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+interface EngineRowDraft {
+  name: string;
+  enabled: boolean;
+  baseURL: string;
+  model: string;
 }
 
 export function LlmEngineCard() {
@@ -70,11 +121,14 @@ export function LlmEngineCard() {
   const available = llmEngineAvailable();
   const { role, loading: sessionLoading } = useSessionContext();
   const isAdmin = role === 'admin';
-  const [view, setView] = useState<LlmConfigView | null>(null);
-  const [deepseekKey, setDeepseekKey] = useState('');
+  const [view, setView] = useState<LlmGatewaySnapshot | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, EngineRowDraft>>({});
+  const [keys, setKeys] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
-  const [testing, setTesting] = useState<{ ollama: boolean; deepseek: boolean }>({ ollama: false, deepseek: false });
-  const [testResult, setTestResult] = useState<{ ollama: LlmTestResult | null; deepseek: LlmTestResult | null }>({ ollama: null, deepseek: null });
+  const [testing, setTesting] = useState<Record<string, boolean>>({});
+  const [testResult, setTestResult] = useState<Record<string, { ok: boolean; latencyMs?: number; error?: string } | null>>({});
+  const [presetPick, setPresetPick] = useState('');
+  const [custom, setCustom] = useState({ name: '', baseURL: '', model: '' });
 
   useEffect(() => {
     if (!available) return;
@@ -82,6 +136,40 @@ export function LlmEngineCard() {
     void llmGetConfig().then((v) => { if (alive) setView(v); });
     return () => { alive = false; };
   }, [available]);
+
+  /** 本地草稿与服务端视图同步（保存后以服务端为准，清掉该引擎草稿改动） */
+  function draftOf(e: LlmEngineView): EngineRowDraft {
+    return drafts[e.id] ?? { name: e.name, enabled: e.enabled, baseURL: e.baseURL, model: e.model };
+  }
+
+  async function apply(patch: LlmConfigPatch, okMsg?: string) {
+    setBusy(true);
+    const r = await llmSaveConfig(patch);
+    setBusy(false);
+    if (!r.ok) { show(`保存失败：${r.error ?? '未知错误'}`); return false; }
+    if (r.view) setView(r.view);
+    // 本次补丁涉及的引擎已以服务端为准；其它引擎的在编草稿保留（不因一次保存被抹掉）
+    const touched = new Set<string>([
+      ...(patch.engines ?? []).map((e) => e.id),
+      ...(patch.remove ? [patch.remove] : []),
+    ]);
+    setDrafts((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => !touched.has(id))));
+    setKeys({});
+    show(okMsg ?? (r.view?.usable ? '已保存：写入记忆将逐层生成 L2–L6（按拨测延时排队调用）。' : '已保存（当前无可启用引擎，写入仍只落 L1）。'));
+    return true;
+  }
+
+  async function testEngine(e: LlmEngineView) {
+    setTesting((s) => ({ ...s, [e.id]: true }));
+    const d = draftOf(e);
+    // 拨测前先保存当前编辑（与批次31 口径一致）：主进程按落盘配置拨测，未保存的改动不生效
+    if (draftsDirty(d, e)) await apply({ engines: [{ id: e.id, ...d }] });
+    const r = await llmTestEngine(e.id);
+    setTesting((s) => ({ ...s, [e.id]: false }));
+    setTestResult((s) => ({ ...s, [e.id]: r }));
+    const v = await llmGetConfig(); // 主进程把延时写回了配置，重拉以更新顺序徽标
+    if (v) setView(v);
+  }
 
   if (!available) {
     return (
@@ -104,87 +192,94 @@ export function LlmEngineCard() {
     );
   }
 
-  async function save(patch: { config?: Partial<LlmConfigView['config']>; deepseekKey?: string }) {
-    setBusy(true);
-    const r = await llmSaveConfig(patch);
-    setBusy(false);
-    if (!r.ok || !r.view) { show(`保存失败：${r.error ?? '未知错误'}`); return; }
-    setView(r.view);
-    setDeepseekKey('');
-    show(r.view.usable ? 'LLM 配置已保存，写入记忆将逐层生成 L2–L6。' : 'LLM 配置已保存（当前无可启用引擎，写入仍只落 L1）。');
-  }
-
-  async function test(target: 'ollama' | 'deepseek') {
-    setTesting((s) => ({ ...s, [target]: true }));
-    const r = await llmTestEngine(target);
-    setTesting((s) => ({ ...s, [target]: false }));
-    setTestResult((s) => ({ ...s, [target]: r }));
-  }
-
-  const ollama = view.config.ollama;
-  const deepseek = view.config.deepseek;
+  const order = callOrder(view.engines);
+  const usedPresets = new Set(view.engines.map((e) => e.id));
+  const presets: LlmPresetView[] = view.presets ?? [];
 
   return (
     <div className="card" data-testid="llm-engine-card">
       <b>🧠 LLM 精炼引擎</b>
       <div className="note">
-        写记忆时逐层生成 L2–L6：简单的层（L2 会话摘要）优先本地 Ollama，需要深入的层（L3–L6）优先 DeepSeek；
-        任一引擎失败自动回退另一引擎。产物由内核按层规格硬校验，不合规如实判违规。
-        网关当前状态：{view.usable ? '已启用' : '未启用（写入只落 L1）'}；「测试连通」会先保存再真实拨测。
+        写记忆时逐层生成 L2–L6，<b>不区分简单层/深入层由哪家做</b>：按各引擎<b>最近一次真实拨测延时</b>排队，
+        最快的先用，调用失败自动回退下一个（未拨测的排在已拨测之后）。产物由内核按层规格硬校验，不合规如实判违规。
+        网关当前状态：{view.usable ? '已启用' : '未启用（写入只落 L1）'}；「测试连通」会先保存该引擎再真实拨测。
       </div>
       {!isAdmin && (
         <div className="note" data-testid="llm-admin-required" style={{ color: 'var(--warn, #b8860b)' }}>
-          🔒 需管理员：修改配置与连通拨测仅管理员可操作
+          🔒 需管理员：增删引擎、改配置与连通拨测仅管理员可操作
           {sessionLoading ? '（正在确认登录身份…）' : role === 'member' ? '（当前账号为普通成员）' : '（当前未登录）'}。
         </div>
       )}
 
-      <EngineRow
-        title="Ollama（本地免费 · 简单层优先）"
-        note={`服务地址 ${ollama.baseURL || 'http://127.0.0.1:11434'}（OpenAI 兼容 /v1/chat/completions）`}
-        engine={ollama} isAdmin={isAdmin} testId="llm-ollama"
-        testing={testing.ollama} testResult={testResult.ollama}
-        onEngine={(patch) => setView({ ...view, config: { ...view.config, ollama: { ...ollama, ...patch } } })}
-        onTest={() => void save({ config: { ollama } }).then(() => void test('ollama'))}
-      />
+      {view.engines.length === 0 && (
+        <div className="note" data-testid="llm-no-engine">还没有引擎，用下方预设快选添加，或自定义一家 OpenAI 兼容服务。</div>
+      )}
 
-      <EngineRow
-        title="DeepSeek（云端深入层优先）"
-        note={`服务地址 ${deepseek.baseURL}（固定官方端点）`}
-        engine={deepseek} isAdmin={isAdmin} testId="llm-deepseek" baseURLFixed
-        testing={testing.deepseek} testResult={testResult.deepseek}
-        onEngine={(patch) => setView({ ...view, config: { ...view.config, deepseek: { ...deepseek, ...patch } } })}
-        onTest={() => void save({ config: { deepseek } }).then(() => void test('deepseek'))}
-      >
-        <div style={{ marginTop: 8 }}>
-          <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-            API Key（只写不读回；{view.deepseekKeySet ? '已设置' : '未设置'}；留空 = 保持现有密钥）
-          </div>
-          <div className="row" style={{ gap: 6, alignItems: 'center' }}>
-            <input type="password" data-testid="llm-deepseek-key" style={{ width: 320 }} value={deepseekKey}
-              disabled={!isAdmin} placeholder={view.deepseekKeySet ? '••••••••（已保存）' : 'sk-…'}
-              onChange={(e) => setDeepseekKey(e.target.value)} />
-            {deepseekKey && (
-              <button type="button" className="btn" data-testid="llm-deepseek-key-save" disabled={busy || !isAdmin}
-                onClick={() => void save({ deepseekKey })}>保存密钥</button>
-            )}
-            {view.deepseekKeySet && (
-              <button type="button" className="btn" data-testid="llm-deepseek-key-clear" disabled={busy || !isAdmin}
-                title="清除已保存的密钥" onClick={() => void save({ deepseekKey: '' })}>清除</button>
-            )}
+      {view.engines.map((e) => (
+        <EngineRow
+          key={e.id}
+          engine={e}
+          draft={draftOf(e)}
+          rank={(() => { const i = order.findIndex((o) => o.id === e.id); return i < 0 ? null : i + 1; })()}
+          isAdmin={isAdmin}
+          busy={busy}
+          keyDraft={keys[e.id] ?? ''}
+          onKeyDraft={(v) => setKeys((s) => ({ ...s, [e.id]: v }))}
+          onSaveKey={() => void apply({ key: { id: e.id, value: keys[e.id] ?? '' } }, `${e.name} 密钥已保存。`)}
+          onClearKey={() => void apply({ key: { id: e.id, value: '' } }, `${e.name} 密钥已清除。`)}
+          onDraft={(patch) => setDrafts((prev) => ({ ...prev, [e.id]: { ...draftOf(e), ...patch } }))}
+          onTest={() => void testEngine(e)}
+          testing={!!testing[e.id]}
+          testResult={testResult[e.id] ?? null}
+          onRemove={() => void apply({ remove: e.id }, `已移除 ${e.name}。`)}
+        />
+      ))}
+
+      <div className="row" style={{ flexWrap: 'wrap', gap: 8, alignItems: 'center', marginTop: 14 }}>
+        <div>
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>从预设添加</div>
+          <div className="row" style={{ gap: 6 }}>
+            <select data-testid="llm-add-preset" value={presetPick} disabled={!isAdmin || busy}
+              onChange={(e) => setPresetPick(e.target.value)}>
+              <option value="">选择厂商…</option>
+              {presets.filter((p) => !usedPresets.has(p.preset)).map((p) => (
+                <option key={p.preset} value={p.preset}>{p.name}</option>
+              ))}
+            </select>
+            <button type="button" className="btn" data-testid="llm-add-preset-btn" disabled={!isAdmin || busy || !presetPick}
+              onClick={() => { void apply({ add: { preset: presetPick } }, '已添加引擎。'); setPresetPick(''); }}>添加</button>
           </div>
         </div>
-      </EngineRow>
+        <div>
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>自定义 OpenAI 兼容服务</div>
+          <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+            <input data-testid="llm-add-custom-name" style={{ width: 130 }} placeholder="名称，如 内部网关" value={custom.name}
+              disabled={!isAdmin || busy} onChange={(e) => setCustom({ ...custom, name: e.target.value })} />
+            <input data-testid="llm-add-custom-baseurl" style={{ width: 260 }} placeholder="https://host 或 https://host/api/v1" value={custom.baseURL}
+              disabled={!isAdmin || busy} onChange={(e) => setCustom({ ...custom, baseURL: e.target.value })} />
+            <input data-testid="llm-add-custom-model" style={{ width: 150 }} placeholder="模型名（可留空后补）" value={custom.model}
+              disabled={!isAdmin || busy} onChange={(e) => setCustom({ ...custom, model: e.target.value })} />
+            <button type="button" className="btn" data-testid="llm-add-custom" disabled={!isAdmin || busy || !custom.name.trim() || !custom.baseURL.trim()}
+              onClick={() => { void apply({ add: { ...custom } }, '已添加自定义引擎。'); setCustom({ name: '', baseURL: '', model: '' }); }}>
+              ＋ 添加引擎
+            </button>
+          </div>
+        </div>
+      </div>
 
       <div className="row" style={{ marginTop: 12 }}>
         <button type="button" className="btn primary" data-testid="llm-save" disabled={busy || !isAdmin}
-          onClick={() => void save({ config: { ollama, deepseek } })}>
+          onClick={() => void apply({ engines: view.engines.map((e) => ({ id: e.id, ...draftOf(e) })) })}>
           {busy ? '保存中…' : '保存 LLM 配置'}
         </button>
         <span className="dim" style={{ fontSize: 11 }}>
-          配置存 <code>llm-config.json</code>（不含密钥）；DeepSeek Key 存 <code>llm-deepseek-key.txt</code>（0600，仅主进程可读）。
+          配置存 <code>llm-config.json</code>（不含密钥）；各引擎 Key 统一存 <code>llm-keys.json</code>（0600，仅主进程可读）。
         </span>
       </div>
     </div>
   );
+}
+
+function draftsDirty(d: EngineRowDraft, e: LlmEngineView): boolean {
+  return d.name !== e.name || d.enabled !== e.enabled || d.baseURL.trim() !== e.baseURL.trim() || d.model.trim() !== e.model.trim();
 }
