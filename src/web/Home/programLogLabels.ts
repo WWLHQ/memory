@@ -15,6 +15,8 @@ const ACTION_LABEL: Record<string, string> = {
   'app:bootstrap': '应用启动',
   // 批次41-E：主窗口创建失败（此前只进 main.log、静默 return；现报错并退出）
   'app:bootstrap:window-failed': '主窗口创建失败，应用已报错并退出',
+  // 批次41-U：MCP 机器令牌「就绪」此前只在 main.log，日志页查不到；补双写（值只有文件路径，无令牌明文）
+  'app:bootstrap:mcp-token-ready': 'MCP 机器令牌已就绪（客户端接入前需配置该令牌）',
   'ui:click': '点击控件',
   'ui:submit': '提交表单',
   'ui:change': '修改输入',
@@ -52,6 +54,9 @@ const ACTION_LABEL: Record<string, string> = {
   'kernel:refine:queue-reconciled': '删除的行里，同步摘掉了补炼队列的幽灵条目',
   'kernel:refine:queue-reconcile-error': '摘除补炼队列幽灵条目失败',
   'kernel:refine:queue-remove-error': '单条删除后摘补炼队列条目失败',
+  // 批次41-U：遗忘周期跑完/报错此前只在 main.log，日志页查不到；补双写（值只有计数与原因码，无正文）
+  'kernel:forgetting:cycle:done': '遗忘周期跑完一轮（层迁移/冷压缩/合并摘要）',
+  'kernel:forgetting:cycle:error': '遗忘周期本轮报错',
   'kernel:l0:migrate-backup': 'L0 迁移前备份',
   'kernel:l0:migrate-backup-fail': 'L0 迁移备份失败',
   'kernel:legacy:demote-backup': '清理遗留账本前备份',
@@ -207,6 +212,8 @@ const NOTE_KEYS = [
   // 批次41-T：存量字段回填——补了几行指纹/向量、进了多少索引、几行填不了（值只有计数与路径，无正文）
   'total', 'fillable_rows', 'sha256_filled', 'embedding_filled', 'indexed',
   'protected_rows', 'unfillable_sha256', 'unfillable_embedding', 'failed',
+  // 批次41-U：遗忘周期跑完一轮的计数（全是数字，无记忆正文）——「迁了几层、合了几条摘要」要一眼看见
+  'freshness_updated', 'summaries_created', 'summaries_filtered', 'merged_originals', 'compressed', 'migrated',
 ];
 
 /** k 为空串表示「这个字段的值本身就是一句话」（error/reason/message/text），不再挂前缀 */

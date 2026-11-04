@@ -2531,6 +2531,9 @@ async function bootstrap(): Promise<void> {
   const mcpToken = loadOrCreateMcpToken();
   const mcpTokenFile = join(USER_DATA, 'mcp-token.txt');
   void mlog('bootstrap:mcp-token-ready', { file: mcpTokenFile });
+  // 批次41-U：「令牌就绪」此前只在 main.log，日志页（读 actions.log）查不到；补双写。
+  // 值只有文件路径，与 mlog 同一份载荷——令牌明文绝不进任何日志。
+  actionLog('app', 'bootstrap:mcp-token-ready', { file: mcpTokenFile });
   // 客户端接入面板（批次15）：令牌就绪后才能生成片段/一键写入
   registerMcpClientsIpc(mcpToken);
   // LLM 精炼网关（批次31）：配置/密钥就绪后内核写路径才能产出 L2–L6；未配置时保持 stub 口径
@@ -3021,11 +3024,15 @@ async function bootstrap(): Promise<void> {
       try {
         const report = await runForgettingCycle(storage, now, { enabled, weeklyCompress, vector: collectorVector });
         void mlog('forgetting:cycle:done', { why, enabled, weeklyCompress, ...report });
+        // 批次41-U：双写进 actions.log（与批次34/41-R 同口径）——值只有计数与原因码，正文一个字不落
+        actionLog('kernel', 'forgetting:cycle:done', { why, enabled, weeklyCompress, ...report });
       } finally {
         storage.commitBatch();
       }
     } catch (e) {
-      void mlog('forgetting:cycle:error', { why, error: String((e as Error)?.message ?? e) });
+      const err = String((e as Error)?.message ?? e);
+      void mlog('forgetting:cycle:error', { why, error: err });
+      actionLog('kernel', 'forgetting:cycle:error', { why, error: err }, { level: 'error' });
     }
   };
   if (process.env.MAM_FORGETTING_DISABLED === '1') {

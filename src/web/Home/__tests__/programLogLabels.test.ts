@@ -22,6 +22,10 @@ describe('actionTitle', () => {
     expect(actionTitle('kernel', 'audit:log-migrate-skipped')).toContain('本次没搬历史审计');
     // 批次41-R：明细页查看事件双写进 actions.log 后，人话视图必须认得这个键
     expect(actionTitle('mcp', 'recall_detail_view')).toContain('召回明细页');
+    // 批次41-U：遗忘周期与 MCP 令牌就绪双写进 actions.log 后，人话视图必须认得这些键
+    expect(actionTitle('kernel', 'forgetting:cycle:done')).toContain('遗忘周期');
+    expect(actionTitle('kernel', 'forgetting:cycle:error')).toContain('遗忘周期');
+    expect(actionTitle('app', 'bootstrap:mcp-token-ready')).toContain('MCP 机器令牌');
   });
 
   it('IPC 通道命中：作用域中文 + 通道说明', () => {
@@ -70,6 +74,15 @@ describe('detailNote', () => {
   it('批次41-R：明细页查看事件只带 outcome（一次性 id 与正文都不在值里）', () => {
     expect(detailNote('{"outcome":"ok","id":"dmZ8gmrCURLtNquDq5WqFg","html":"<details>正文</details>"}'))
       .toBe('outcome=ok');
+  });
+
+  it('批次41-U：遗忘周期跑完的计数进人话摘要，且不带任何记忆正文', () => {
+    const note = detailNote('{"why":"interval","enabled":true,"weeklyCompress":true,'
+      + '"freshness_updated":1532,"migrated":40,"summaries_created":3,"summaries_filtered":0,'
+      + '"merged_originals":12,"compressed":7,"request_id":"req_x"}');
+    expect(note).toContain('freshness_updated=1532');
+    expect(note).toContain('summaries_created=3');
+    expect(note).toContain('migrated=40');
   });
 
   it('批次41-A：审计账本的计数与位置进人话摘要，且不带任何审计正文', () => {
