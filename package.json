@@ -27,6 +27,7 @@
     "test:e2e:install": "playwright install chromium",
     "code:index": "node tools/code-index.mjs",
     "code:index:check": "node tools/code-index.mjs --check",
+    "rejudge": "node tools/rejudge-dry.mjs",
     "verify:fast": "npm run typecheck && npm run lint && npm run code:index:check && npm run test:coverage",
     "verify": "npm run verify:fast && npm run build:electron && npm run test:e2e"
   },

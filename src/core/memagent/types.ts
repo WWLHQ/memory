@@ -1,5 +1,7 @@
 // memagent-core 契约类型（REQ-007 §1/§2/§3/§5/§6 直译，19.10/19.11）
 // 内核 = 唯一事实源；端壳只调用不实现业务（19.11 红线①）。
+import type { L0BlobStore } from './l0Store.ts';
+import type { LayerViolationCode } from './layerRules.ts';
 
 /** 端形态（19.10 端谱） */
 export type Form = 'desktop' | 'web' | 'mobile' | 'mac' | 'linux' | 'cli';
@@ -46,6 +48,7 @@ export type ErrorCode =
   | 'E_L0_LOCKED'      // L0 写密钥未解锁（§4.4.4）
   | 'E_L0_NO_GRANT'    // 非管理员未申请/未获授权（§4.4）
   | 'E_L0_EXPIRED'     // 授权/连续会话已过期（5min 无操作、重启、锁屏、撤销）
+  | 'E_L0_MISSING_BLOB'// 批次37：行说有自己的 L0（has_l0），L0 原数据库里却取不到信封（断链，绝不当空正文）
   | 'E_CRYPTO'         // L0 加解密失败（环境缺 WebCrypto / 密文非法）
   | 'E_BUDGET_FUSE'    // 召回预算硬熔断（3000t）
   | 'E_LLM_FALLBACK'   // 反代理超限，已回退本地
@@ -171,6 +174,8 @@ export interface LayerDecision {
   layer: Exclude<Layer, 'L0'>;
   action: 'generated' | 'duplicate' | 'invalid' | 'skipped' | 'stopped';
   by: 'local' | 'llm' | 'none';
+  /** 批次40-C：判废时的稳定原因码（中文 reason 可改，码不换） */
+  code?: LayerViolationCode;
   score?: number;
   threshold?: number;
   candidates?: number;
@@ -455,6 +460,11 @@ export interface Memory {
   category: Category;
   layer: Exclude<Layer, 'L0'>;    // 主内容所在精炼层（L0 为原始加密对话）
   content_l0_enc?: string;        // L0 原始加密对话（v2 信封 JSON，仅授权连续会话可解）
+  /**
+   * 批次37：本条的 L0 密文已搬进**独立的 L0 原数据库文件**（memories.l0.json），
+   * 记忆库这一侧只留这个标记。为 true 时 `content_l0_enc` 必然为空——查阅/重建要经 L0BlobStore 取信封。
+   */
+  has_l0?: boolean;
   /** 旧 v1 信封无法迁移（缺旧密码）→ 保留并显式告警，不静默伪造成功 */
   l0_migration_pending?: boolean;
   content: string;                // 该层可读内容
@@ -475,6 +485,12 @@ export interface Memory {
    * 批次24 之前的历史行没有这个字段 → 页面显示「未记录」，绝不拿 created_at 冒充。
    */
   layers_generated_at?: number;
+  /**
+   * 通过 L0→L1 质量门时的规则版本（批次36-A，`QUALITY_GATE_VERSION`）。
+   * 历史行缺失 → 按 v1（批次35 以前的口径），绝不猜它是最新版；
+   * 「存量重判」（rejudge）据此回答「这行是被哪一版规则放进来的」。
+   */
+  quality_gate_v?: number;
   embedding?: number[];
   decay_class: DecayClass;
   pinned: boolean;
@@ -642,6 +658,11 @@ export interface MemAgentOptions {
   l0?: L0Port;
   /** L0 授权管理端（桌面端由主进程 L0Vault 实现） */
   l0Admin?: L0AdminPort;
+  /**
+   * 批次37：L0 原数据库（独立文件）。缺省 = L0 密文仍留在记忆库行上（旧口径）。
+   * 传入时 FileStorage 会把写入行的信封搬进此库、行只留 `has_l0`，browse 也从这里回读信封。
+   */
+  l0Blobs?: L0BlobStore;
 }
 
 /** createMemAgent 返回的核心 API 面（§2） */

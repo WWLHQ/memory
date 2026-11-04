@@ -7,7 +7,7 @@ import type { Memory, MemOp as CoreOp, StorageBackend } from '../../core/memagen
 import type { MemAgent } from '../../core/memagent/types.ts';
 import { getKernel, getKernelStorage, newRequestId } from '../kernel.ts';
 import { policyFor } from '../../core/memagent/forgetting.ts';
-import { checkL0ToL1Quality, filteredAuditDetail } from '../../core/memagent/qualityGate.ts';
+import { checkL0ToL1Quality, filteredAuditDetail, QUALITY_GATE_VERSION } from '../../core/memagent/qualityGate.ts';
 import { layerSpecOf } from '../../core/memagent/layerRules.ts';
 import { embedSync } from '../../core/memagent/vector.ts';
 import { sha256hex } from '../../core/memagent/sync.ts';
@@ -189,7 +189,7 @@ export async function coreUpdateContent(memId: string, content: string): Promise
       user_id: m.user_id,
       detail: {
         op: 'edit_content', mem_id: memId, source: 'manual_edit',
-        ...filteredAuditDetail(trimmed, gate.reason ?? '未通过质量门'),
+        ...filteredAuditDetail(trimmed, gate),
       },
     });
     return { ok: false, error: `内容未通过 L0→L1 质量门：${gate.reason}` };
@@ -206,6 +206,8 @@ export async function coreUpdateContent(memId: string, content: string): Promise
     version: m.version + 1,
     updated_at: now,
     layers_generated_at: now,   // 手动改写即重炼：层级生成时间跟着刷新（批次24 口径2）
+    // 批次36-A：本次改写是按当前版规则过的门 → 重盖质量门版本戳
+    quality_gate_v: QUALITY_GATE_VERSION,
     sha256: sha256hex(nextText),
     ...(effectiveLayer === 'L1'
       ? {
