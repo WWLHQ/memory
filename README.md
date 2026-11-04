@@ -45,8 +45,8 @@ npm run dev:backend         # 仅本机登录/mirror 服务（默认 8201，可 
 npm run package:win         # 便携目录 release/win-unpacked/
 npm run package             # NSIS 安装包 release/installer*/
 
-npm run verify:fast         # typecheck + lint + 索引新鲜度 + 覆盖率单测（117 文件 / 1248 用例）
-npm run verify              # verify:fast + Electron 构建 + Playwright E2E（21 spec）
+npm run verify:fast         # typecheck + lint + 索引新鲜度 + 覆盖率单测（2026-11-04 实测 149 文件 / 1754 例；每批都变，以本命令输出为准）
+npm run verify              # verify:fast + Electron 构建 + Playwright E2E（22 个 spec / 106 例，`ls e2e/*.spec.ts` 现查）
 npm run lint                # oxlint 静态检查（correctness 规则，0 error 通过）
 npm run test:coverage       # vitest + v8 覆盖率（阈值门禁见 vite.config.ts）
 npm run code:index -- --write   # 刷新 specs/code-index.generated.md（导出符号索引，便于定位）
@@ -180,7 +180,7 @@ git add -A && git commit -m "REQ-003: ..."   # 每次改动提交
 门禁已可接入流水线，见 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)。每次 push / PR 自动跑：
 
 1. Ubuntu `quality-gate` —— typecheck + oxlint + vitest + `validate_project.py` / `generate.py --check`
-2. Ubuntu `e2e` —— Playwright 21 个 spec
+2. Ubuntu `e2e` —— Playwright（spec 数 = `ls e2e/*.spec.ts | wc -l`，2026-11-04 为 22 个）
 3. Windows `windows-gate` —— `verify:fast`（类型 + lint + 单测 + 覆盖率阈值）
 
 若第 2 步失败，本地跑 `python tools/generate.py` 重新生成并提交 `build/` 即可。

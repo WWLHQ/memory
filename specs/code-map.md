@@ -18,7 +18,7 @@ status: draft
 - UI 组件 `src/web/AgentOnboard/*.tsx`（AgentCard/OneClickOnboard/McpToolConfig/ChannelConfig/KeyMgmt/TestPanel/FormBadge/Gains）+ `theme.css`（逐条抄自原型）
 - 服务层 `src/agentOnboard/service.ts`(`AgentOnboardService`：configure/testConnect/rotateKey/revokeKey/oneClickOnboard/revokeBind + 审计)
 - 页面装配 `src/web/AgentOnboard/AgentOnboardPage.tsx` + `src/web/main.tsx` + `index.html`（Vite 构建，`npm run dev/build`）
-- 测试 `src/**/__tests__/*.test.ts(x)`；命令 `npm run typecheck`（tsc strict）+ `npm run lint`（oxlint）+ `npm test`（vitest 144 文件 / 1633 例，2026-11-02 实测）+ `npm run test:e2e`（Playwright 22 个 spec / 106 例） |
+- 测试 `src/**/__tests__/*.test.ts(x)`；命令 `npm run typecheck`（tsc strict）+ `npm run lint`（oxlint）+ `npm test`（vitest **149 文件 / 1754 例**，2026-11-04 41-T 轮实测；每批都变，以 `npm run verify:fast` 输出为准）+ `npm run test:e2e`（Playwright **22 个 spec / 106 例**，`ls e2e/*.spec.ts` 现查） |
 | REQ-004 | [需求规格书_Agent界面内联记忆标识.md](需求规格书_Agent界面内联记忆标识.md) | [Agent界面内联标识_原型.html](design/ui/Agent界面内联标识_原型.html) | - |
 | REQ-005 | [需求规格书_UI页面设计.md](需求规格书_UI页面设计.md) | [登录与首页_原型.html](design/ui/登录与首页_原型.html) / [index.html](design/ui/index.html) | 已落地（T1–T12）：`src/auth/hash.ts`（scrypt+防时序）/ `src/auth/login.ts`（锁定）/ `src/home/server.ts`（登录/注册/captcha/镜像审计）/ `src/home/dashboard.ts`（聚合）/ `src/web/Home/*`（TenantProvider/TopBar/Dashboard/LoginModal/HomePage）/ `src/web/Home/coreHome.ts`（内核账本实时四卡、真实同步态）/ `src/web/Home/useLoginMirror.ts`（后端镜像） |
 | REQ-006 | [需求规格书_其余页面字段级交互规格.md](需求规格书_其余页面字段级交互规格.md) | [冲突裁决页_原型.html](design/ui/冲突裁决页_原型.html) | - |
@@ -441,10 +441,10 @@ status: draft
 | T12 | 端到端验收（含按端置灰/同步） | `src/agentOnboard/__tests__/e2e.test.ts`；页面装配 `src/web/AgentOnboard/AgentOnboardPage.tsx` | `npm test`（117 文件 / 1248 例全绿，2026-10-31） |
 | T13 | 真实后端 HTTP 服务 | `src/agentOnboard/server.ts` : `createServer`（node:http + JSON 持久化 + CORS + 批次26 写端点会话闸门：x-session-id 经 getSession 校验，密钥轮换/撤销/删除需 admin；GET /audit 出站脱敏本机路径） | `server.test.ts` / `client.test.ts` |
 | T14 | HTTP 客户端 | `src/agentOnboard/client.ts` : `AgentOnboardClient`（批次26：有会话时自动带 `x-session-id` 头）；`src/web/AgentOnboard/useBackendMirror.ts`、`autoOnboard.ts` | `client.test.ts` |
-| T15 | 真实链路 E2E + 真浏览器点击级 | `e2e/app.spec.ts`（Playwright，指向 `dist/` 真实构建产物；批次26 起起真实 home 后端 + admin 登录） | `npm run test:e2e`（21 个 spec，`workers=1`） |
+| T15 | 真实链路 E2E + 真浏览器点击级 | `e2e/app.spec.ts`（Playwright，指向 `dist/` 真实构建产物；批次26 起起真实 home 后端 + admin 登录） | `npm run test:e2e`（**22** 个 spec，`workers=1`） |
 | T16 | Webhook 入口 HTTP 服务 | `src/electron/webhookServer.ts` : `createWebhookHttpServer`（批次26 P0-4：全请求 mcp-token 鉴权、1 MiB body 上限、status/hash 只回 id+状态） | `src/electron/__tests__/webhookServer.test.ts` |
 
-> 全量命令：`npm run verify` = `verify:fast`（`typecheck` → `lint` → `test:coverage`，144 文件 / 1633 例）→ `build:electron` → `test:e2e`（先 `vite build`，再 Playwright 22 个 spec / 106 例；静态服务与后端均用系统分配端口）。
+> 全量命令：`npm run verify` = `verify:fast`（`typecheck` → `lint` → `test:coverage`，**149 文件 / 1754 例**，2026-11-04 41-T 轮实测）→ `build:electron` → `test:e2e`（先 `vite build`，再 Playwright 22 个 spec / 106 例；静态服务与后端均用系统分配端口）。
 > 只跑快闸：`npm run verify:fast`（不含 E2E）。
 
 ## 批次28（2026-10-31）
