@@ -18,7 +18,7 @@ status: draft
 - UI 组件 `src/web/AgentOnboard/*.tsx`（AgentCard/OneClickOnboard/McpToolConfig/ChannelConfig/KeyMgmt/TestPanel/FormBadge/Gains）+ `theme.css`（逐条抄自原型）
 - 服务层 `src/agentOnboard/service.ts`(`AgentOnboardService`：configure/testConnect/rotateKey/revokeKey/oneClickOnboard/revokeBind + 审计)
 - 页面装配 `src/web/AgentOnboard/AgentOnboardPage.tsx` + `src/web/main.tsx` + `index.html`（Vite 构建，`npm run dev/build`）
-- 测试 `src/**/__tests__/*.test.ts(x)`；命令 `npm run typecheck`（tsc strict）+ `npm run lint`（oxlint）+ `npm test`（vitest 117 文件 / 1248 例）+ `npm run test:e2e`（Playwright 21 个 spec / 94 例） |
+- 测试 `src/**/__tests__/*.test.ts(x)`；命令 `npm run typecheck`（tsc strict）+ `npm run lint`（oxlint）+ `npm test`（vitest 144 文件 / 1633 例，2026-11-02 实测）+ `npm run test:e2e`（Playwright 22 个 spec / 106 例） |
 | REQ-004 | [需求规格书_Agent界面内联记忆标识.md](需求规格书_Agent界面内联记忆标识.md) | [Agent界面内联标识_原型.html](design/ui/Agent界面内联标识_原型.html) | - |
 | REQ-005 | [需求规格书_UI页面设计.md](需求规格书_UI页面设计.md) | [登录与首页_原型.html](design/ui/登录与首页_原型.html) / [index.html](design/ui/index.html) | 已落地（T1–T12）：`src/auth/hash.ts`（scrypt+防时序）/ `src/auth/login.ts`（锁定）/ `src/home/server.ts`（登录/注册/captcha/镜像审计）/ `src/home/dashboard.ts`（聚合）/ `src/web/Home/*`（TenantProvider/TopBar/Dashboard/LoginModal/HomePage）/ `src/web/Home/coreHome.ts`（内核账本实时四卡、真实同步态）/ `src/web/Home/useLoginMirror.ts`（后端镜像） |
 | REQ-006 | [需求规格书_其余页面字段级交互规格.md](需求规格书_其余页面字段级交互规格.md) | [冲突裁决页_原型.html](design/ui/冲突裁决页_原型.html) | - |
@@ -43,7 +43,7 @@ status: draft
 | 渲染层会话与 UI 门禁 | `src/web/shared/session.ts`（`useSessionContext`）、`src/web/security/AccountAdminCard.tsx`、`src/web/security/accountsClient.ts`、`src/web/params/KbManagementCard.tsx`、`src/web/security/PwdPolicyCard.tsx`（`readOnly`） | `src/web/security/__tests__/SecurityPage.test.tsx` + `e2e/security.spec.ts` |
 | 动作日志（格式/脱敏） | `src/shared/actionLog.ts`（`sanitizeActionDetail` / `createActionLogEntry` / `formatActionLine`） | `src/shared/__tests__/actionLog.test.ts` |
 | 动作日志（主进程落盘/轮转） | `src/electron/actionLog.ts`（`initActionLog` / `actionLog` / `actionLogError` / `actionLogPath`）；`main.ts` §8 `registerLogIpc` | `src/electron/__tests__/actionLog.test.ts` |
-| 动作日志（渲染层/宿主桥） | `src/web/shared/actionLog.ts`（`uiLog` + 自动捕获 click/submit/change/error/page_view；由 19 个页面入口 `import '../shared/actionLog.ts'` 安装）、`src/desktop/hostBridge.ts`（`hostLog` / `log:write`）、`src/electron/preload.ts` | `src/desktop/__tests__/hostBridge.test.ts` + E2E |
+| 动作日志（渲染层/宿主桥） | `src/web/shared/actionLog.ts`（`uiLog` + 自动捕获 click/submit/change/error/page_view；由 20 个页面入口 `import '../shared/actionLog.ts'` 安装）、`src/desktop/hostBridge.ts`（`hostLog` / `log:write`）、`src/electron/preload.ts` | `src/desktop/__tests__/hostBridge.test.ts` + E2E |
 | 服务端动作日志 | `src/agentOnboard/server.ts`、`src/home/server.ts` 的 `onLog`（HTTP method/path/status/ms + 账号事件） | `src/home/__tests__/admin.test.ts`（home:http 断言） |
 | 维护索引 | 根 `AGENTS.md`；`tools/code-index.mjs`（`npm run code:index -- --write`）→ `specs/code-index.generated.md`；`src/electron/main.ts` 顶部「文件地图」 | `npm run lint`（脚本本身）+ 人工核对 |
 
@@ -69,15 +69,15 @@ status: draft
 
 | 能力 | 代码落点 | 测试 |
 |---|---|---|
-| 规则单一真源 | `src/core/memagent/layerRules.ts`：`LAYER_ORDER`、`LAYER_SPECS`、`DEDUP_THRESHOLDS`、`DEDUP_WEIGHTS[_NO_LLM]`、`L0_POLICY`、`MIN_MEANINGFUL_CHARS`、`sanitizeL1`、`meaningfulLength`、`checkLayerSpec` | `src/core/memagent/__tests__/qualityGate.test.ts`（脱敏/门禁/规格） |
-| L0→L1 质量门 | `src/core/memagent/qualityGate.ts`（`checkL0ToL1Quality`：空/占位/无信息量/过短拦截，规则引用 layerRules） | 同上 |
+| 规则单一真源 | `src/core/memagent/layerRules.ts`：`LAYER_ORDER`、`LAYER_SPECS`、`DEDUP_THRESHOLDS`、`DEDUP_WEIGHTS[_NO_LLM]`、`L0_POLICY`、`MIN_MEANINGFUL_CHARS`、`sanitizeL1`、`meaningfulLength`、`checkLayerSpec`（**批次40 起另加 `DEPTH_CAP_BANDS`/`depthCapFor`/`targetLayers`/`layerBand`/`checkLayerSpecDetailed`/`headlineLayer`/`MIN_MEANINGFUL_WITHOUT_FACTS`，见批次40 小节**） | `src/core/memagent/__tests__/qualityGate.test.ts`（脱敏/门禁/规格）、`refine.test.ts`「每层生成规格」describe |
+| L0→L1 质量门 | `src/core/memagent/qualityGate.ts`（`checkL0ToL1Quality`：空/占位/无信息量/过短拦截，规则引用 layerRules；**批次40-B 起 `QUALITY_GATE_VERSION=3` + 码 `short_low_signal`：有效字 <30 且无硬事实且无技术证据 → 入库即拒**） | 同上 |
 | 逐层生成 → 校验 → 查重 → 嫁接停止 | `src/core/memagent/memories.ts`（`coreWrite`：L0 seal 前置、L1 本地脱敏、`makeLayerGenerator` 逐层、命中即 `graft_to/graft_layer` 并停止；目标只刷新 `grafted_from/confidence/version`） | `src/core/memagent/__tests__/refine.test.ts`、`contract.test.ts` |
 | 五维查重与逐层阈值 | `src/core/memagent/dedup.ts`（`findDuplicate`、权重归一化、`DEDUP_THRESHOLDS`） | `refine.test.ts` |
 | L0 密钥环与连续会话 | `src/core/memagent/l0vault.ts`（`L0Vault`：v2 信封、`admin_wrap`、一次性 grant、5min 空闲 + 60s 心跳、5 次错误 15min 锁、启动/锁屏/休眠/退出清理、全有或全无解密、幂等迁移 `sweep/onAppRestart/onSecurityLock/onExit`） | `src/core/memagent/__tests__/l0vault.test.ts` + `l0Kit.ts` |
 | 加解密与包裹 | `src/core/memagent/crypto.ts`（`encryptL0WithKey/decryptL0WithKey`、`wrapSecret/unwrapSecret`、`deriveKek`、`generateDek`、`MASK`）；`types.ts`（L0 端壳端口/审计类型、graft 字段） | `l0vault.test.ts` + `qualityGate.test.ts` |
 | 端壳 IPC（18 通道） | `src/electron/ipcChannels.ts`（`IPC.l0*`）→ `preload.ts`（`window.api.l0`）→ `src/desktop/hostBridge.ts`（`HostMethod`/`CHANNEL_TO_NATIVE`）→ `src/web/shared/l0Port.ts`（`HostL0Port/HostL0Admin`）→ `src/web/kernel.ts`（注入 MemAgent `l0*`） | `src/electron/__tests__/ipcChannels.test.ts`、`src/desktop/__tests__/hostBridge.test.ts` |
 | 主进程编排 | `src/electron/main.ts`：`registerL0Ipc`（管理操作 `requireAdmin` + 会话归属校验）、`l0-keyring.json` 原子写、`onAppRestart`、30s `sweep`、`powerMonitor` 锁屏/休眠、退出清理、迁移前备份 `backups/l0-migrate-<ts>/` | 手测 + `npm run typecheck` |
-| 管理 UI | `src/web/security/L0AdminCard.tsx`（状态/设置/轮换/写密钥/申请审批/发放/撤销/迁移）、`SecurityPage.tsx`、`coreSecurity.ts` | `src/web/security/__tests__/SecurityPage.test.tsx` |
+| 管理 UI | `src/web/security/L0AdminCard.tsx`（状态/设置/轮换/写密钥/申请审批/发放/撤销）、`src/web/security/L0MigrateCard.tsx`（批次38：§4.4.6 旧数据迁移从管理卡拆出单独成卡）、`SecurityPage.tsx`、`coreSecurity.ts` | `src/web/security/__tests__/SecurityPage.test.tsx`、`__tests__/L0MigrateCard.test.tsx` 8 例 |
 | 查阅 UI（连续会话） | `src/web/shared/useL0Session.ts`（解锁/1s 倒计时/60s 心跳仅可见+聚焦/到期自锁/`formatRemaining`）、`src/web/logs/LogCards.tsx`（`L0AuthCard`）、`src/web/memory/MemoryLayeredPage.tsx`（`l0-bar`） | `src/web/logs/__tests__/LogsPage.test.tsx`、`logic.test.ts` |
 | 嫁接可视化 | `src/web/Home/layerGraph.ts`（`GraphEdgeKind='graft'`、`stats.grafts`）、`LayerGraphPanel.tsx`（橙色点线边/图例/抽屉/底部统计）、`layerGraph.css` | `src/web/Home/__tests__/layerGraph.test.ts` |
 | 审计动作登记 | `src/web/audit/types.ts`、`logic.ts`（`ACTION_LABEL`）、`FilterBar.tsx`：`graft`、`memory_op`、`l0_view`、`l0_auth_*`、`security_change` | `src/web/audit/__tests__/*` |
@@ -444,7 +444,7 @@ status: draft
 | T15 | 真实链路 E2E + 真浏览器点击级 | `e2e/app.spec.ts`（Playwright，指向 `dist/` 真实构建产物；批次26 起起真实 home 后端 + admin 登录） | `npm run test:e2e`（21 个 spec，`workers=1`） |
 | T16 | Webhook 入口 HTTP 服务 | `src/electron/webhookServer.ts` : `createWebhookHttpServer`（批次26 P0-4：全请求 mcp-token 鉴权、1 MiB body 上限、status/hash 只回 id+状态） | `src/electron/__tests__/webhookServer.test.ts` |
 
-> 全量命令：`npm run verify` = `verify:fast`（`typecheck` → `lint` → `test:coverage`，121 文件 / 1320 例）→ `build:electron` → `test:e2e`（先 `vite build`，再 Playwright 21 个 spec / 94 例；静态服务与后端均用系统分配端口）。
+> 全量命令：`npm run verify` = `verify:fast`（`typecheck` → `lint` → `test:coverage`，144 文件 / 1633 例）→ `build:electron` → `test:e2e`（先 `vite build`，再 Playwright 22 个 spec / 106 例；静态服务与后端均用系统分配端口）。
 > 只跑快闸：`npm run verify:fast`（不含 E2E）。
 
 ## 批次28（2026-10-31）
@@ -511,4 +511,310 @@ status: draft
 | 34-C LLM 事件落 `actions.log` | `src/electron/main.ts` §6d：`llm:configSet` 与 `llm:test` 由「只 `mlog()`（落 `main.log`）」改为 `mlog()` + `actionLog('llm', …)` 双写；`src/web/Home/programLogLabels.ts` 补 `llm:config-saved` / `llm:test-engine` 中文标签 | **无单测**（`main.ts` 的 IPC handler 不在 vitest 覆盖内，依赖真 Electron 宿主）；验证方式=装完后在参数页点保存/拨测，再 `rg "\[llm:test-engine\]" <数据根>/actions.log` 与日志记录页看中文行（见批次34 手测报告步骤） |
 
 > 诚实边界（批次34）：① 解耦只针对**拨测**，不改变精炼门槛——未勾选启用的引擎即使连通也不参与 L2–L6；② 拨测成功但没勾选启用时，排序徽标仍不出现（这是 `callOrder` 的既有口径，非缺陷）；③ 批次31/32/33 手测报告曾写「`actions.log` 有 `llm:config-saved` / `llm:test-engine`」，实测当时 0 命中（只落 `main.log`），已在各报告原位标注校正；④ 本机 `zhipu` 的 `baseURL` 被用户手工填成 `https://open.bigmodel.cn/api/v1`（正确预设值 `https://open.bigmodel.cn/api/paas/v4`），`deepseek`/`openrouter` 尚无密钥——这些是配置数据问题，代码不做语义猜测、不代改；⑤ 毫秒级返回的拨测结果等于「本地校验挡的、没发请求」，排障先看动作日志 `ms`。
+
+## 批次35（2026-11-01）：无意义会话禁止入库（质量门收紧 + 采集器只采用户 + 整库清空重采）
+
+> 起因（用户反馈 + 10 张截图）：「这些没有意义的会话记录怎么都放行入库了」。本机账本 1642 行逐条回放实测：
+> **助手自述/能力清单/过程旁白**共 22 条以「带产品名/版本号就算有技术证据」的旧口径漏网，另有裸 IPv4、单个 emoji 等 13 条形态问题。
+> 结论分三层：判定层（质量门规则本身有漏网口径）、结构层（采集器把助手消息一起入库）、历史层（已落库的行收不回来）——本批次三层各收一次。
+
+| 条目 | 实现要点 | 测试 |
+|---|---|---|
+| 35-A 判定前先剥 Markdown 装饰 | `src/core/memagent/qualityGate.ts`：新增 `DECOR_RE`/`stripDecoration(text)`（`**`/`__`/`~~`/行内反引号/`#` 标题/`>` 引用/表格竖线/`—–` 破折号 → 空格；`[文案](链接)` → 文案；只压水平空白，保留换行给清单判定）。旧漏网头号原因：`**需求分析**` 里的 `*` 自己充当了「代码符号证据」 | `qualityGate.test.ts`（批次35 describe：`**Claude Code** + Haiku 4.5 + 模型 ID` 三行整段拦 / 能力清单原样拦） |
+| 35-B 证据判定去停用词后再看符号 | `TECH_STOP` 扩厂商与通用 IT 词（`anthropic/openai/haiku/…/code/cli/api/sdk/ide/ui/app/web/tool/official/version/flash/pro/max/mini`）；`hasTechEvidence` 先把停用词从文本里摘掉，再用 `LOOSE_SYM_RE`（**只匹配两侧空白的排版符号**，贴着字的 `E_AUTH`、`D:\tmp` 仍算证据）；扩展名表补 `kts/html?/css/scss/svg`。「网站 / 桌面应用」的斜杠不再是证据 | `qualityGate.test.ts`（能力清单段 / 身份自述段 / 11 条硬事实正例必须放行） |
+| 35-C 硬事实豁免（段级） | 新增 `HARD_FACT_RES`+`hasHardFacts`：错误码 `E_AUTH`、`key=0.767` 实测数值、带单位数值/端口/条数、函数调用 `apiData()`、命令行、带扩展名的文件名/路径、状态码；**刻意不含裸版本号与裸产品名**（「我是 Claude Haiku 4.5」里的 `4.5` 是自述不是事实）。身份段/清单段/旁白段只有在**全段无硬事实**时才整段拦 | `qualityGate.test.ts`（`T15 PASS … a=0.767 b=0` / `L6 14/14 … EXIT=0` / `build.bat 的 for 循环 %%i` / `SolidWorks 版本是 2020 SP5（内部版本 28.5.0）` 全部放行） |
+| 35-D 过程旁白按整句判 | `NARRATION_RE`（我先看/接下来检查/现在写/我换用 X 工具/让我先…）+ `NARRATION_STATE_RE`（能用了/跑通了/已就绪/报错是噪音）+ `NARRATION_DONE_RE`（X 完成）+ `NARRATION_SELFOP_RE`（更新记忆/HANDOVER/跑 selftest/标记待办）+ `NARRATION_REMARK_RE`（≤24 字的「输出捕获有点问题」）；口径 = **同一行每个句子都是元信息**才拦（`sentences.every(isMetaSentence)`），`NARRATION_GUARD_RE` 认出「请/务必/不要/必须/确保/尽量…」是**要求**而非旁白，直接放行 | `qualityGate.test.ts`（16 条旁白必须拦 + 「Token 硬上限…一定要保证效果」「测试已补喵~」等指令句必须放行） |
+| 35-E 采集器只采用户消息 | `src/core/memagent/sessionCollector.ts`：`SessionLogSource.roles?` + `DEFAULT_COLLECT_ROLES=['user']`（缺省白名单，源不声明就只采 user）；`ScanResult.roleSkipped` 可观测计数；jsonl/zstd 循环在算哈希前跳过非白名单角色；分块解析源先 `parse` 再按角色过滤（**游标 `msgIndex` 索引的是过滤后数组**）；`parseClaudeJsonl` 对 `isMeta:true` 直接返回 null；`defaultAgentSources` 里 **WorkBuddy 显式 `roles:['assistant']`**（其日志整篇是 `##` 任务分块，按用户口径保留） | `sessionCollector.test.ts`（30 例：首次全量只采 user + `roleSkipped=1` / `isMeta` 跳过 / 预设源缺省 undefined 且实测只采 user / workbuddy 声明与反证「不给 roles 则 collected=0」）、`dshZstdCollector.test.ts`（端到端 `collected=1 roleSkipped=1`，显式放开 roles 才两条都采） |
+| 35-F 拦下有计数不静默 | `ApplyScanResult` 增 `filtered`（`dedup.action==='filtered'` 单列）；`main.ts` 采集回执 `console.log`/`collectorStatus` 带 `filtered`，`lastApply` 经 IPC 暴露 | `sessionCollector.test.ts`（new/duplicate/filtered 三态计数 + 三类都写审计） |
+| 35-G 整库清空重采 | **新文件** `src/core/memagent/ledgerReset.ts`：`scanLedgerForReset`（只读：条数/层级/来源/L0 密文数/真实 LLM 产物数/墓碑数/样本 id）+ `purgeLedger`（逐行 `deleteMemory` + 向量 `remove`，一批一次落盘，单行失败不中断并计数，写 `security_change/op='ledger_purge'`；**强制 `backup_confirmed:true` 且要求 `admin_user_id`，缺任一抛错且不动数据**）→ `ipcChannels.ts` `ledgerResetPreview/ledgerResetRecollect` → `main.ts` §采集区（顺序=**备份 → 清空 → 游标归零 → 后台追采**；`backupBeforeKernelChange('ledger-reset')` 另拷 `collector-cursor.json`；确认口令必须逐字 `RESET`；`runRecollectCatchUp` 最多 80 轮、单轮仍钳 50 条、轮间让出 300ms）→ `preload.ts` `ledgerReset.{preview,run}`（`collector.status` 返回值补 `last/apply/recollecting`）→ `desktop/hostBridge.ts` 两条通道 → 新卡片 `src/web/security/LedgerResetCard.tsx`（预览/口令门禁/回执/游标写失败警告/追采进度轮询）挂在 `SecurityPage.tsx` | `ledgerReset.test.ts`（6 例：预览不改数据不写审计、删光含墓碑+向量摘除+审计成对、无管理员/无备份拒绝且不删一行、单行失败回显 `failed_ids`、空库幂等）、`LedgerResetCard.test.tsx`（9 例：浏览器诚实不可用/非管理员不预览/口令禁用/逐字断言 `('RESET','s_test')`/回执含备份路径与 `security_change`/游标失败警告/拒绝无成功回执/空库无按钮/IPC 抛错不装干净） |
+| 35-H 日志标签 | `src/web/Home/programLogLabels.ts`：`kernel:ledger:reset-backup`/`-backup-fail`/`-rejected`/`-recollect` 四条中文标题 + `ledger:resetPreview`/`ledger:resetRecollect` 通道说明 | `programLogLabels.test.ts`（既有 10 例仍绿；新标签为纯映射，人工按手测报告在日志页核对） |
+
+> 诚实边界（批次35）：① **质量门无法凭措辞区分用户与助手**——「让我先看一下配置」既可能是助手旁白也可能是用户的要求，所以结构性修复是采集器角色白名单，旁白规则主要保护 MCP `write_memory` 与手动改写这两条没有角色信息的入口；② 判定仍是启发式，接受少量漏网（实测「collect 幂等通过…」「A5 全绿。标记任务完成。」因带硬事实/指令语气仍会入库），取向是**宁可放过不可错杀**，不做语义猜测；③ WorkBuddy 例外是显式声明的（`roles:['assistant']`），若不接受该源噪声，最小裁剪=删掉这三行声明，其 323 条日志即整体不再入库；④ 整库清空**不可逆**，唯一退路是执行前自动备份目录（回执原样给出路径），真实 LLM 精炼产物删了不会自动重生成，预览会点名条数；⑤ 追采单轮 50 条、最多 80 轮（≈4000 条），历史会话超出部分由 5 分钟周期继续补齐，不是丢数据；⑥ 游标文件写失败时内存游标已归零、本次重采照常，但**应用重启后会退回旧游标**，卡片会显式警告；⑦ 清空只动 `memories.db.json` 的记忆行与进程内向量索引，不动 L0 密钥环、审计历史与账号数据。
+
+## 批次36（2026-11-01）：入库规则更新后的存量处置（规则版本戳 + 只读回放 + 存量重判）
+
+> 起因（用户追问）：「以后入库规则有更新后应该怎么处理？」以及「我说的删除库只是删除 L1–L6 的库，不用重新读，直接从 L0 重新生成」。
+> 回放本机账本得到的硬事实决定了技术路线：**1642 行里带 `content_orig` 的有 1641 行，而且是明文原文（5.78 MB / 全库 21.15 MB，其中 684 行与脱敏后的 L1 不同）；`content_l0_enc`（v2 信封）0 行、真实 LLM 精炼产物 0 行、缺 L1 0 行**，
+> ~~数据根没有 `l0-keyring.json`（L0 从未初始化）~~ → **（2026-11-02 再校正）**本机实测：`l0-keyring.json` **存在**（2026-11-01 17:06 UTC+08:00 由批次37 之前的 `l0:setup` 建好，`v:2`、`admin_wrap` 有、`grants`/`requests` 各 0、**`recovery_wrap` 没有**），但 `memories.l0.json` **不存在**、全库 v2 信封 **0 行** → L0 键环立着了、可它保护的密文一份都还没有。结论不变：**重新入库要先解锁 L0 写密钥（§4.4.4）**，存量搬家要先封存。
+> **（2026-11-02 校正）**本段原写「`content_orig` 0 行」是错的，实测 1641 行；所以「从 L0 重新生成」**原料是在的**（明文原文），当时选「按当前规则重判」是因为它**不需要 L0 密钥、不需要 LLM、不动游标**，不是因为没料。
+> 「按 L0 重建 L1–L6」随批次37（拆库 + L0 密钥初始化）一并落地。
+> 用户当时拍板：写入**保持现状**（不解锁就拒写），存量走「不需要解锁、不需要 LLM」的**按当前规则重判**，并把它做成常态能力。
+
+| 条目 | 实现要点 | 测试 |
+|---|---|---|
+| 36-A 规则版本戳 + 稳定拦截码 | `src/core/memagent/qualityGate.ts`：`QUALITY_GATE_VERSION = 2`（**改判定口径必须 +1**）+ `QualityBlockCode`（`empty/thin/greeting/separator/empty_heading/decoration/bare_link/bare_json/bare_number/comment_only/import_only/require_only/meta_question/identity/capability_list/disclaimer/narration`，中文 `reason` 可随版本改写、码不动）；`QualityCheckResult.code`、`NOISE_PATTERNS` 每条带码、`metaReplyReason` 返回 `{code,reason}`、`filteredAuditDetail(raw, result)` 输出 `filter_code` + `gate_version`。`types.ts` 新增 `Memory.quality_gate_v?: number`，由 `memories.ts`（写入）、`coreMemoryOps.coreUpdateContent`（手动改写）、`forgetting.buildSummary`（摘要行）三处盖章；**历史行无字段一律按 v1** | `qualityGate.test.ts` 34 → 37 例（码稳定性表 `empty/bare_number/bare_link/comment_only/import_only/bare_json/meta_question/narration/identity`、`unspecified` 兜底、放行不发码；并固化「短寒暄先撞上 `thin`，不是 `greeting`」的真实顺序） |
+| 36-B 只读回放器 | **新文件** `tools/rejudge-dry.mjs`（`package.json` 的 `npm run rejudge`）：全程 `readFileSync`、零写操作，末尾原样声明「本次只读，未写任何文件」；数据根解析 `--file > --root > data-root.json 指针 > 默认根`；**直接 `import()` 生产 `qualityGate.ts`**（Node ≥ 24 原生跑 `.ts`），回放与入库同一份规则；只喂 `content_l1`（缺失才退 `content`），不解密 L0；输出总数/墓碑/缺 L1/按行版本戳/放行/拦下/受保护/可删/码分布/层级分布/样本，`--code` `--limit` `--json` 可控 | 本机实测（2026-11-01 17:40 UTC+08:00）：`1642 / 墓碑 0 / 缺 L1 0 / v1:1642 → 放行 1585、拦下 57`，码分布 `narration 36 · thin 17 · identity 3 · capability_list 1`（全部原 L1），受保护 0，**可删 57** |
+| 36-C 存量重判（内核 + IPC + UI） | **新文件** `src/core/memagent/rejudge.ts`：`scanRowsForRejudge`（只读预览：应删/受保护/需重盖戳/码分布/行戳分布/样本）与 `rejudgeRows`（应删行 `deleteMemory` + 向量 `remove` + **每行** `memory_op/op='rejudge_purge'`；放行行只重盖 `quality_gate_v`，正文/层级/`version`/向量不动；`pinned`/`locked` 命中也不删只计数；缺 L1 不判定不删；单行失败不中断并回显 `failed_ids`；整轮 `security_change/op='rules_rejudge'`；**强制 `backup_confirmed` + `admin_user_id`**）。预览与执行共用同一 `decide()`，回执数字与预览必然一致 → `ipcChannels.ts` `rules:rejudgePreview`（需会话）/ `rules:rejudgeRun`（需管理员 + 逐字 `REJUDGE`）→ `main.ts` §采集区（`backupBeforeKernelChange('rules-rejudge')`，备份失败直接拒绝；`actionLog('kernel','rules:rejudge-run',…)`）→ `preload.ts` `rulesRejudge.{preview,run}` → `desktop/hostBridge.ts` 两条通道 → 新卡片 `src/web/security/RulesRejudgeCard.tsx` 挂 `SecurityPage.tsx` | `rejudge.test.ts`（11 例：预览不改数据不写审计 / v1 归因 / 缺 `content_l1` 退回正文 / 删行+摘向量+双份审计 / 放行只盖戳且 `version` 不变 / pinned+locked 保留 / 缺管理员拒绝 / 缺备份拒绝且零审计 / 单行失败回显 `failed_ids` / 幂等且预览数字与回执一致 / `filter` 只作用指定项目）、`RulesRejudgeCard.test.tsx`（9 例：浏览器诚实不可用并指路 `npm run rejudge` / 非管理员不预览 / 真值回显含码分布与「受保护」 / `REJUDGE` 口令门禁 / 回执含备份路径与两类审计 / 备份失败原样显示无成功回执 / 干净态无按钮 / 只剩盖戳仍可执行 / IPC 抛错不装干净） |
+| 36-D 日志标签 | `src/web/Home/programLogLabels.ts`：`kernel:rules:rejudge-backup`/`-backup-fail`/`-rejected`/`-run` 四条中文标题 + `rules:rejudgePreview`/`rules:rejudgeRun` 通道说明 | 纯映射；手测报告要求在日志页按中文标题核对 |
+
+> 诚实边界（批次36）：① **口径分工要记牢**——判定规则变→重判（本节，不需 L0 写密钥、不调 LLM、不动采集游标）；采集规则变（角色白名单那类）→清空重采（批次35）；两者都变→先重判再补采；② 重判**不产生新 L0、不改 L1–L6 正文**，所以它不会把「助手侧结论」补回来，删除不可逆，唯一退路是回执里的备份目录；③ 预览与执行之间若有新写入仍会有差，卡片每次执行前重拉预览；④ `pinned`/`locked` 与缺 L1 行一律保留（后者是批次24/28-C 遗留账本清理的职责，本模块不猜）；⑤ 回放器依赖 Node ≥ 24 直接跑 `.ts`，纯浏览器模式无主进程 IPC，卡片如实不可用；⑥ 用户提的「L0 与 L1–L6 拆两个文件存储」是独立改造，**本批次未做**，已立项为批次37（拆库 + 首启强制选两个库位置 + L0 管理密码 + 双库备份 + 按 L0 重建 L1–L6）——**批次37 已于 2026-11-02 落地，见下一节**。
+
+---
+
+## 批次37（2026-11-02）：L0 与 L1–L6 拆成两个库文件 + 首启强制选位置 + 双库备份 + 恢复码找回 + 按 L0 重建
+
+> 起因（用户原话）：「执行36-D「L0 与 L1–L6 拆两个库文件」，软件首次启动需强制用户指定L0库和L1-L6库位置，并且L0库和L1-L6库要增加备份功能」；追问「原数据库最好搞成密码忘记可找回的渠道，数据是宝贵的万一忘记密码数据就废了损失比较大」；加上批次36 就挂在那儿的口径「我说的删除库只是删除 L1–L6 的库，不用重新读，直接从 L0 重新生成」。
+> 五项拍板（AskUserQuestion）：① 升级上来的老指针**也走强制向导**；② 粒度=**原数据库与记忆库各自选目录，可同目录也可分开**；③ 首启**强制先设 L0 管理密码**；④ 按 L0 重建的入口**一起做**；⑤ 找回机制=**恢复码 + 恢复卡**，码**一次性**（用过即当场换新码、新卡必须重新导出），且**必须先导出一张卡才算走完向导**。
+> 拆库前本机账本的硬事实（决定了技术路线，2026-11-02 实测）：`memories.db.json` 1642 行里 **1641 行带明文 `content_orig`（≈5.78 MB）**、`content_l0_enc`（v2 信封）**0 行**、`has_l0` **0 行**、**没有 `memories.l0.json`**；`l0-keyring.json` **已存在**（2026-11-01 17:06 UTC+08:00 由批次37 之前的 `l0:setup` 建好：`v:2`、`admin_wrap` 有、`grants`/`requests` 各 0、**`recovery_wrap` 没有**）→ 键环立着了、它保护的密文一份都还没有，所以**存量搬家必须先解锁 L0 写密钥**，而本机向导的「设 L0 管理密码」这一步会按真值回显成「已设过」，只剩「重新发码 + 导出这张卡」。
+
+| 条目 | 实现要点 | 测试 |
+|---|---|---|
+| 37-A L0 独立库文件（真正的「拆库」） | **新文件** `src/core/memagent/l0Store.ts`：`L0BlobStore` 接口 + `FileL0BlobStore`（文件格式 `{version,items:{[mem_id]:{envelope,sealed_at}}}`、0600、`isSealedL0` **只放行 v2/v1 信封，明文写入直接抛 `L0NotSealedError`**；文件读不动抛 `L0StoreCorruptError`（原件改名隔离 + 落 `kernel:l0:store-corrupt`，绝不静默当空库）；被别的进程持有抛 `L0StoreLockedError`）+ `InMemoryL0BlobStore`（单测/纯浏览器）。`fileStorage.ts` 新增 `l0?: L0BlobStore` 选项与 `l0Store` getter：写入时把行上的 `content_l0_enc` 搬进 L0 库、行上只留 `has_l0: true`；删行/清 L0 时同步删密文不留孤儿；**行说有自己的 L0 而库里没有 → 显式断链错误，绝不当空正文返回**。IPC `l0:blobs`（需会话）批量回读密文，解密仍只走 `l0:unlock` + `l0:decrypt`（浏览/检索路径永远拿不到明文）；渲染层只读门面 **新** `src/web/shared/l0BlobStore.ts`（`getAll` 一次取完整库、不解密不缓存正文，写/删/枚举一律显式 `E_NOT_IMPLEMENTED`——渲染层永远不是 L0 库的写者），由 `src/web/kernel.ts` 注入内核 browse | `l0Store.test.ts` 27 例（三条红线逐一钉死：只收密文 / 两库都不静默空库 / 断链显式报错，另含 browse 双源信封）、`l0BlobStore.test.ts` 6 例（渲染层只读、写删显式拒绝） |
+| 37-B 首启强制向导（第 20 个入口） | 新入口 `setup.html` + `src/web/setup/SetupPage.tsx`/`setupEntry.tsx`。**门禁判据在主进程，页面只是载体**：`main.ts:276` `isWizardIncomplete()` = `!isSetupComplete(pointer)`（指针里的 `ledgerDir` + `l0Dir` + `setupDone`），`main.ts:281` `mainWindowUrl(staticPort, wizardFirst)` 向导没走完直接进 `setup.html`；`chooseLibraryDir(s)` 用原生对话框分别选两个库的目录（**取消 = 诚实退出，不塞默认值、不带半配置继续启动**）。`registerSetupIpc`（`main.ts:1967`）六条通道 `setup:state / reselectDirs / setL0Password / regenCode / exportCard / finish`：不设会话，换成更硬的本机判据——设密码只在**密钥环尚无 `admin_wrap`** 时允许、`finish` 只在**本次真导出过一张恢复卡**才落 `setupDone`、卡面走主进程原生「另存为」（不落数据根）。改选目录后由 `adoptLibraryFilesIntoPlace` 把库文件核对/补送到新目录（不删源），**路径在 `app ready` 前解析，改完要重启才生效**。preload `setup.*`（`preload.ts:171-176`）→ `hostBridge.ts` 六条通道 | `SetupPage.test.tsx` 14 例（进度一律按 `setup:state` 真值回显；恢复码明文只在发码那一次显示，主进程说不回显时页面绝不编一个；三步没走完「完成设置」不可点；主进程拒绝就原样显示原因、绝不跳主界面）、`setupEntry.test.tsx` 2 例、`dataRoot.test.ts` 20 例（`resolveLibraryPaths` / `isSetupComplete` / 老指针兼容读取）、**`e2e/setup.spec.ts` 12 例（批次37-H 补记：跑真 dist 产物——不打桩验诚实降级，打桩 `window.api.setup.*` 验三步闸门/发码只显一次/导出/finish 真导航，桩逐条镜像 `main.ts` §6e 的返回与拒绝文案；已用变异验证过它不是永远绿）** |
+| 37-C 存量搬家（明文 `content_orig` → L0 库） | **新文件** `src/core/memagent/l0Split.ts`：`scanLedgerForSplit`（只读预览）/ `splitLedger`（执行）——**明文必须先经 L0 写密钥封存成 v2 信封才许搬**，没解锁就整轮拒绝；行上已有的 v1/v2 信封原样搬家（**不重封**，重封要旧密码，那是 `l0:migrate` 的活）；解析不出的既不搬也不删；完整性核对（孤儿/断链）如实点名，单行失败不中断整轮，再跑一遍幂等零写盘，审计成对且不含正文。IPC `l0:splitPreview`（需会话）/ `l0:splitRun`（需管理员 + 逐字 `SPLIT` + `backupBeforeKernelChange('l0-split')`）→ 卡片 `src/web/security/L0SplitCard.tsx` | `l0Split.test.ts` 9 例、`l0SplitFile.test.ts` 4 例（跑在**真实两个文件**上：拆完的记忆库文件里搜不到一个字节原文 / 行只留 `has_l0` 可检索正文不动 / v1 信封原样搬家 / 重开两文件后查阅能取回原文）、`L0SplitCard.test.tsx` 11 例 |
+| 37-D 双库备份 | **新文件** `src/electron/backupFiles.ts`（纯函数配方，主进程与单测同一真源）：三前缀 `memories-`（记忆库）/ `meml0-`（L0 原库）/ `l0key-`（密钥环）+ 同一时间戳；`planBackupFiles` 只收真实存在的源、缺哪个就在回执里明说缺哪个；`selectBackupsToDelete` **每个前缀各留 keep 份**（互不挤占）；`tsOfBackupName` / `sortBackupsNewestFirst` 按时间戳段排序（三类前缀长度不同，整串排会让一个库独占榜单）。接线：`main.ts:624` `backupPaths()`、`:640` `runBackupOnce`、`:982` `backupBeforeKernelChange(dirPrefix)`（重判 / 清空重采 / 存量拆分 / 按 L0 重建 / L0 迁移全部先备份，**备份失败直接拒绝**）；参数页 `KbManagementCard.tsx` 显示两个库的真实路径与三类备份历史 | `backupFiles.test.ts` 10 例（只备记忆库 = 不完整备份 / 份数按库分算 / 历史按时间戳段排） |
+| 37-E 按 L0 重建 L1–L6（「删的只是 L1–L6 那份库」） | **新文件** `src/core/memagent/rebuild.ts`：`makeL0Reader`（原文**只有两条来源**——行上历史明文，或经**管理员的 L0 查阅会话**解密；四类取不到原因码 `no_source / broken_link / view_locked / bad_envelope`）、`scanRowsForRebuild`（预览）、`rebuildLayersFromL0`（执行：原文 → `checkL0ToL1Quality` → 新 L1 →（可选）逐层 L2–L6 过 `checkLayerSpec` → 重算 `sha256` / `embedSync(L1)` 向量 / `layer_specs` / `layers_generated_at` / `quality_gate_v`）。管道函数 `makeLayerGenerator` / `buildL6Input` / `layerSpecsFrom` 由 `memories.ts` 导出复用，**与正常写入同一条管道，不复制实现**。IPC `l0:rebuildPreview`（需会话）/ `l0:rebuildRun`（需管理员 + 逐字 `REBUILD` + `view_locked > 0` 时在**备份之前**整轮拒绝 + 双库备份）→ 卡片 `src/web/security/RebuildFromL0Card.tsx`（卡内解锁/锁上查阅会话走 `l0:unlock`/`l0:lock`，解锁后带 `l0_session_id` 重拉预览） | `rebuild.test.ts` 12 例（预览只读但真读原文 / 执行覆盖正文并重算指纹·向量·戳 / 按当前质量门删应删行 / pinned+locked 与取不到原文的行一律不碰 / 缺管理员·缺备份拒绝 / LLM 可用才炼深层、残缺如实 `llm_partial` / 四类原因码各一条 / L0 原文绝不进审计）、`RebuildFromL0Card.test.tsx` 12 例（回执 `not.toContain` 任何原文） |
+> **适用边界（批次41-O 补）**：37-E「按 L0 重建」救的是**整份 L1–L6 库丢了 / 要整库重造**（原文还留在 L0 库里或行上）；它**救不回逐行删除**——`ledgerReset`（清空重采）/ `rejudge`（规则重判）/ 手动删某行时，其 L0 密文被**同步销毁**，重建对那行只能按「取不到原文」跳过。逐行删除的唯一退路是执行前落的那份备份目录，故批次41-O 在 `RulesRejudgeCard`/`LedgerResetCard` 的预览/回执里都明写「连带销毁 N 条 L0 原文」（`with_l0_cipher`，见批次41-O 节）。
+| 37-G L0 忘记管理密码找回（恢复码 + 恢复卡） | **新文件** `src/core/memagent/l0Recovery.ts`：`generateRecoveryCode`（32 字节 = 256bit 随机数，**不是密码的衍生物**）、`normalizeRecoveryCode`（只归一空白，不给别的宽容）、`wrapDekWithRecovery` / `unwrapDekWithRecovery`、`createKeyringSecrets`（**同一个 DEK 包两份**：`admin_wrap` 用管理密码派生 KEK、`recovery_wrap` 用恢复码派生 KEK）、`keyringFingerprint`、`buildRecoveryCard`（纯文本卡：码 + 库指纹 + 对应文件路径 + 红线，**绝不含管理密码**）、`RECOVERY_BAD_CODE`。`l0vault.ts` 新增 `initL0WithRecovery` / `rotateRecoveryCode` / `recoverWithCode` / `recoveryStatus`（恢复成功当场作废旧码换新码；**码错算进同一套 5 次锁定链路**；DEK 不变 → 恢复前封的信封用新密码照样解得开；状态接口只回「有没有 / 指纹 / 时间」）。IPC `l0:recoveryStatus / recoveryInit / recoveryIssue / recover / recoveryExport` + `l0:changePassword`（**全部仅管理员**），卡面导出走主进程原生「另存为」 | `l0Recovery.test.ts` 8 例、`l0VaultRecovery.test.ts` 13 例、`L0RecoveryCard.test.tsx` 13 例 |
+| 37-日志标签 | `src/web/Home/programLogLabels.ts`：`dataRoot:setup:*` 八条（两库目录已指定 / 未选即退出 / 库文件已核对补送 / 首启已设 L0 密码 / 设密码被拒 / 进入首启向导 / 已完成跳过 / 向导完成含恢复卡已导出）、`kernel:l0:split-*` 四条、`kernel:l0:rebuild-*` 四条、`kernel:l0:recovery-*` 四条、`kernel:l0:store-corrupt`，加 `setup:*` 与新增 `l0:*` 通道的中文说明 | 纯映射；手测报告要求在日志页按中文标题逐条核对 |
+
+> 诚实边界（批次37）：① **「拆库」不等于「换个地方躺明文」**——`isSealedL0` 只放行 v2/v1 信封，明文进不了 L0 库，所以 1641 行存量必须先解锁 L0 写密钥才能搬（`l0:splitRun` 没解锁就整轮拒绝，不解锁就保持现状不写）；② 向导的门禁是主进程的 `isSetupComplete` + 各条 IPC 自己的本机判据，**绕过页面也进不了数据面**；向导内改选两库位置**要重启才生效**；升级上来的老指针没有 `setupDone`，**照样进向导**；③ 恢复码**一次性**：用过即作废并当场换新码，**新卡必须重新导出**；码明文只在发码那一次的返回值里出现一次，绝不进日志与审计。**红线（卡面、恢复卡正文、AGENTS §9 三处都写了）：管理密码与恢复码同时丢失 = L0 原数据库不可恢复**，解密能力没有任何服务端兜底；④ 重建**不开新的解密口子**：`view_locked` 行在备份之前整轮拒绝，取不到原文与 `pinned`/`locked` 一行不碰（重建不是顺手清理，没有证据就删等于凭空丢数据），不勾「同时用 LLM 重炼」就把 L2–L6 清空并记 `refined_by=stub`（预览用 `rebuild_deep_cleared` 提前告知会清多少行）；⑤ 纯浏览器（`npm run dev`）无主进程 → 向导与五张 L0 卡（管理 / 拆分 / 旧数据迁移 / 恢复 / 重建）如实显示不可用，绝不用页面内存对象冒充真文件；`setup.html` **已有点击级 E2E**（`e2e/setup.spec.ts` 12 例，见批次37 报告 §8），但 E2E 栈里同样没有主进程 → **`setupDone` 落盘、主窗口真被拦在向导、原生选目录/另存为、真密钥环与 DEK 封装、SPLIT/REBUILD 路径仍不在 E2E 覆盖内**（由 `dataRoot.test.ts` + `SetupPage.test.tsx` + 各卡单测覆盖），首次真机走查见 `specs/MANUAL-TEST-FIX-BATCH-37.md` §4.1；⑥ 拆完库后 `memories.l0.json` 是**唯一的原件副本**，双库备份只保证「这台机器上三个文件都有退路」，**不能替代离线副本**——请与密钥环、恢复卡分开存放。
+
+---
+
+## 批次38（2026-11-02）：§4.4.6 旧数据迁移拆成独立卡片 + 实机执行台账校正
+
+> 起因（用户原话）：「**旧数据迁移请单独拆出一个卡片**，点击迁移旧数据后显示：扫描 1642 · 明文迁移 0 · v1 迁移 0 · 待处理 0 · 跳过 1642 · 备份 …`backups/l0-migrate-2026-11-02T13-03-23-744Z`」。
+> 顺带一条实机事实校正：批次37 交付时文档写着「真实账本 1641 行明文存量**一行未搬**」，用户截图 + 本机内核审计证明**已经搬完**（见下表「实机台账」）。文档失真就改文档，不留给用户猜（AGENTS §8）。
+
+| 条目 | 实现要点 | 测试 |
+|---|---|---|
+| 38-A 旧数据迁移独立卡 | **新文件** `src/web/security/L0MigrateCard.tsx`：把 §4.4.6 那段从 `L0AdminCard.tsx` 整块拆出（管理卡删掉 `l0-migrate-form` / `l0-mig-report` 与 `doMigrate`、`migOldPw/migReport/migBackup` 三个 state 与 `coreL0Migrate`/`L0MigrationReport` 两个 import，只留密钥环本体），挂在 `SecurityPage.tsx` 的 `L0SplitCard` 之后。通道不变（`coreL0Migrate` → `l0:migrate`，仅管理员 + 迁移前 `backupBeforeKernelChange('l0-migrate')`）。三条口径：① **写密钥未解锁不给点**，且 `l0:status` 读不到时按「未确认」处理（同样禁用并明说「本机读不到密钥环状态」）——**绝不凭空重加密**；② 新增独立的「刷新写密钥状态」按钮：解锁动作发生在上方管理卡，本卡原来只在挂载时拉一次状态，导致「解完回来按钮还是灰的」，现在点一下即重判、不必刷新整页；③ 回执只报计数与备份目录，`pending > 0` 写明**这些行一行没动**（迁移不是顺手清理），全零时如实说「本轮无事可做：行上已没有明文，也没有遗留 v1 信封」。卡尾固定说明**先换封法（本卡）、后换地方（37-C 拆分卡）**的分工，避免用户在拆完库后再点 SPLIT 却看到「本轮搬入 0」以为没生效 | `L0MigrateCard.test.tsx` 8 例（非管理员不给入口且不拉状态 / 未解锁禁用且点了不发 / 状态读不到仍禁用 / 逐字回显实机那条 no-op 回执与备份目录 / 旧密码原样下传并当场清空输入框且不出现在回执 / `pending>0` 警告含「一行没动」 / 内核抛错只显示原因不显示成功回执 / 点刷新后放行）+ `SecurityPage.test.tsx` 10 例（含新加的「迁移表单不在 `l0-admin-card` 里」的归属断言）。**已做变异验证**：把禁用条件改成只剩 `busy` → 3 例失败，确认这三条门禁不是空断言 |
+| 38-B 实机台账（本机数据根实测，UTC+08:00） | 内核 `security_change` / `memory_op` + `actions.log`：20:36:48 `l0_recovery_rotated`（指纹 `4f433527`，`user=setup:first-run`）→ 20:38:52 `l0:recovery-exported` `L0恢复卡-4f433527.txt`（1179 字节）→ 指针 `setupDone:true`；20:57:52 `l0_migrate` `scanned 1642 · migrated_orig 1641`（明文全封 v2，经 37-A「写入即搬」进 L0 库，行上只留 `has_l0`）→ 21:03:23 第二次 `migrated_orig 0 · 跳过 1642`（用户截图那条）；21:25:19 `rules_rejudge` `total 1642 · purge 57 · restamped 1585 · by_code {narration 36, thin 17, identity 3, capability_list 1}`，**与批次36 只读回放预测逐字一致**；`l0_split` 审计 **0 条** = `l0:splitRun`（逐字 `SPLIT`）从未真机执行，因为已无事可做。当前库面：记忆库 1585 行 / `has_l0` 1584 / 明文 0 / 行上信封 0 / `quality_gate_v` 全 2；`memories.l0.json` 1584 条 · 9.52 MB；密钥环顶层键是 `recovery`（不是 `recovery_wrap`）。**仍未真机执行**：`REBUILD`（按 L0 重建）、`RESET`（清空重采） | 台账来自命令行实测，非推断；手测报告 `specs/MANUAL-TEST-FIX-BATCH-38.md` §3 |
+
+> 诚实边界（批次38）：① 本批**只动渲染层卡片编排**，`l0:migrate` 的内核实现、备份前置与审计字段一个都没改，所以旧数据迁移的行为与批次37 完全一致（回执数字对得上实机）；② 独立卡挂在 `L0SplitCard` 之后是**顺序即分工**的表达（先重封、再搬家），不是新的执行依赖——两卡各自独立可用；③ 38-B 的台账说明批次37 文档里的「一行未搬」已失真，该句已在 `specs/需求规格书.md` §19.22（批次37 小节）诚实边界③⑦ 就地校正，`specs/MANUAL-TEST-FIX-BATCH-37.md` 的历史快照表述（§2「拆库前本机账本的硬事实」）保留不改，因为那写的是**动手之前**的状态；④ 纯浏览器（`npm run dev`）下本卡与其余 L0 卡一样没有主进程数据面：`l0:status` 读不到就按未解锁处理、按钮禁用，绝不假装迁移成功。
+
+## 批次39（2026-11-02）：重新设计精炼器 —— 写入只落 L0+L1，L2–L6 交给后台补炼队列
+
+> 起因（用户原话）：「**重新设计精炼器生成L2-L6**」，前一条是「L2-L6是怎么生成的？怎么没有数据？」。
+> 实测的账本硬事实（2026-11-02，本机数据根）：`memories.db.json` **1585 行全部** `layer=L1` / `refined_by=stub`，带任一 L2–L6 正文的行 **0**；而 LLM 网关是健康的——`llm-config.json` 6 个引擎里 **5 个已启用且拨测成功**（ollama 352ms / custom agnes 475ms / custom agnes 1608ms / openrouter 2058ms / zhipu 2497ms；deepseek 未启用）。
+> **真因不是模型、不是密钥、不是网络**：`main.ts` 采集器构造 `WriteCtx` 时**不传 `llm`/`llmModel`**（同一文件里批次37-E 的 rebuild 通道是传 `llmGateway` 的），`mcp.ts` / `mcpHttp.ts` 又硬编码 `new FakeLlmProvider()` → `makeLayerGenerator` 的 `canLlm` 为假，阶梯第一步就停在 L1。**MCP 那两个桩是用户明确要求保留的设计（「MCP HTTP 写入只落 L0，脱敏后才能产出L1」），不是待修的 bug。**
+
+| 条目 | 实现要点 | 测试 |
+|---|---|---|
+| 39-A 队列纯函数与落盘 | **新文件** `src/core/memagent/refineQueue.ts`：`refine-queue.json`（0600，`{version,enabled,day,dayRows,items:{[mem_id]:{state,reason?,layers?,refined_by?,llm_calls?,at}}}`，**只有 mem_id 与状态，正文/密文一个字不落**）、`clampRefineQueue`（坏文件按空队列起，不炸启动）、`enqueueRows` 幂等入队（`added/already_queued/settled/protected_skipped/not_eligible` 五计数）、`nextPending` 内含**未启用 + 当日额度**两道闸门、`markRefined`/`markRefineFailed` 计当日额度、`markRefineSkipped` **不计**（没有真实产出就不烧额度）、`settleRowOutcome` 把单行结果映射成 done/skipped/failed、`retryFailed` 手动放回失败行、`summarizeRefineQueue` 出 UI 进度。三条拍板常量：`REFINE_MAX_ENGINES_PER_CALL=3`、`REFINE_MAX_ROWS_PER_DAY=500`、`dayKey` 按 **UTC+08:00** 记自然日 | `refineQueue.test.ts` 19 例：跨日计数（**这一例抓出真 bug**：跨日后新日第一行的额度被算成 0，日额度形同虚设）、额度只由 done/failed 消耗、skipped 不消耗、`enabled=false` 直接不出队、落盘重载续炼、文件不含正文、受保护/不合格行不入队、`settleRowOutcome` 四种映射、`retryFailed` 计数 |
+| 39-B 单条引擎预算 ≤3 | `LlmGatewayProvider` 第 4 个构造参 `maxEnginesPerCall`（缺省取核心的 `REFINE_MAX_ENGINES_PER_CALL`）：`race()` 只取 `callOrder()` 前 N 台，全失败时错误里写明「本条引擎预算 N 个已用完，还有 K 个未试」。**方向是 electron→core**（主进程 import 核心常量，不复制数字） | `llmGateway.test.ts` 新增一例：预算 2 时第 3 台引擎**绝不发起请求**（捕获调用序列恰好 `['deepseek','kimi']`），缺省预算 3 则三台全试 |
+| 39-C 后台 worker + 两处入队 | `main.ts` **§6f**（注意与批次37-B 首启向导的 §6e 是两个区块）：`REFINE_TICK_MS=15_000` 定时 `runRefineTick` + `refineInFlight` 防重入；**`llmGateway.usable()` 为假时直接 return——不起活、不把行判死、不消耗额度**（没有真实调用就没有失败）；启动 `startRefineQueue` 扫全量存量入队并落 `refine:backfill-scan`；采集器每写完一批把新 `mem_id` 入队（`refine:enqueue-collected`）。`refineRowLayers` **只有产出至少一层才改行**：改行时重算 `sha256`/`layer_specs`/`layers_generated_at`、`version+1`、向量按新 `layer` 重 upsert 而 `content_l1` 与 embedding 不动；每行审计 `memory_op/op='layer_refine'` + `actor='refine_queue'`，**只有层名与计数** | 单行精炼 7 例并入 `refineQueue.test.ts`：五层全产出且审计不含正文、中途违规→`llm_partial`、L2 就违规→**整行一字不改**、无 LLM/`deleted`/缺 L1/`pinned`/`locked`/幽灵 id 全部拒动、LLM 抛错只记 `refine_error`、向量 layer 元数据前进且与 L1 余弦≈1 |
+| 39-D IPC + 参数页卡 | `ipcChannels.ts` 四条：`refine:state`（需会话）/ `refine:setEnabled` / `refine:backfill` / `refine:retryFailed`（三条均**仅管理员**）→ `preload.ts` `refineQueue` 命名空间 → `desktop/hostBridge.ts`；渲染层桥 `src/web/params/refineQueue.ts`（把主进程回执收成 `RefineResult{ok,view,error,report?,retried?}`，浏览器模式如实「不是桌面宿主环境」）+ 卡片 `RefineQueueCard.tsx`（挂在 `ParamsPage.tsx` 紧跟 LLM 引擎卡；20s 轮询；进度 / `今日 X/500 还剩 Y` / 队列文件路径 / 三条口径写在卡面 / 引擎不可用时「只排不炼」告警 / 失败行为 0 时禁用重试） | `RefineQueueCard.test.tsx` 8 例（浏览器降级 / 管理员按主进程数字原样显示含 UTC+08:00 时刻 / 成员三控件禁用但刷新可用 / 入队四计数回执 / 开关把布尔值真传主进程 / `failed=0` 禁用重试、有失败才回显行数 / 引擎不可用文案 / 主进程拒绝只显示原因不假装 0 待炼） |
+
+> 诚实边界（批次39）：① **补炼会真调引擎、真花钱**——今日拨测延时序下，单条 3 台预算恰好是 ollama + 两个 agnes 云端引擎，openrouter/zhipu 排第 4/5 因而在补炼里不会被调用；不想花云端钱就停用引擎或关掉「开启后台补炼」，`price:0.01` 价档仍是 §19.8 的记账口径、**不是厂商账单**；② 本机 7B 单次精炼实测 ~28s → 一行五层约两分钟，**500 行/日是上限不是目标**，实际吞吐由模型速度决定；③ 层级规格违规判废 → 该层留空、整行按已产出层收尾标 `llm_partial`，本机小模型概率不低，这是如实记账不是失败；④ `main.ts` §6f 的定时与入队接线**没有自动化测试**（纯函数 19 + 卡片 8 + 网关预算 1），需按手测报告在实机核对 `refine-queue.json` 与 `actions.log`；⑤ 队列文件不在数据根迁移白名单——丢了等价于重新扫存量入队，不丢数据；⑥ **与批次37-E 的分工**：补炼只**加**深层、不动 L1；REBUILD 是整行重造（新 L1 + 深层）且需要 L0 查阅会话解密原文。删库要恢复→REBUILD，想让存量长出 L2–L6→本队列；⑦ 纯浏览器模式没有主进程 → 卡片如实显示不可用，绝不用页面内存对象冒充队列。
+
+---
+
+## 批次40（2026-11-03）：短料在入库那一步就拦掉 + L2–L6 规格重新梳理（绝对字数 → 按源文相对）
+
+> 起因（用户原话）：「**在L0清洗脱敏生成L1的时候就要把字数少的过滤掉，不是等到精炼才过滤**」+「**L2-L6精炼逻辑重新在梳理下**」。
+> 批次39 队列真跑之后的实测（本机数据根，2026-11-03）：`refine-queue.json` 入队 **1584 行 = done 262 · failed 238 · pending 1084**，当日 **500 行额度用满**；238 条失败的原因**全是同一句**「首层（L2）就没有产出：模型答复不合规格或为空」。
+> 追下去不是模型的锅，是**规格结构性不可能**：批次39 的层级规格是绝对字数下限（L2 ≥50 字），而真实账本的 L1 就是短——1585 行（缺 L1 **0** 行）按有效字分布 **<30 字 422（26.6%）· 30–59 字 493（31.1%）· 60–119 字 459（29.0%）· 120–239 字 150（9.5%）· ≥240 字 61（3.8%）**。对着 18 字的源要求写 50 字摘要，唯一「达标」办法就是编料——那正是批次24 整批清掉的 stub 幻觉产物的来源。
+> 用户拍板（AskUserQuestion）：入库门槛用**双条件**（短 **且** 无事实才拦，不做纯字数一刀）；改动范围**五条一起改**。
+
+| 条目 | 实现要点 | 测试 |
+|---|---|---|
+| 40-A 规格相对化 + 格式契约 | `src/core/memagent/layerRules.ts`：`LayerSpec` 新增 `minRatio`（L2 0.4 / L3 0.35 / L4 0.3 / L5 0.25）与 `mustStartWith`，`minChars` **语义降为「没有源文时的兜底地板」**。新函数 `layerBand(spec, source?)` 三条夹逼：① 下限 = 源文字数 × `minRatio` 且不低于地板；② 相对下限**最多吃掉本层上限的 80%**（`Math.floor(maxChars*0.8)`，否则 5000 字长源把下限顶穿上限，变成写不进去的死规格）；③ **上限同时受源文约束** `min(maxChars, 源文长度)`——摘要是压缩不是扩写，产物比源长直接判废。`mustInclude` 全文 `text.includes(k)` 扫描 → `mustStartWith` 查开头（L4「适用场景」/ L5「边界条件」），旧口径实测把 L4 全灭（库面 L3 116 行 vs L4 1 行，模型换个说法就判废）；标准没放宽，只是**变成可达成**，因为契约同时被写进了提示词的输出格式。`checkLayerSpecDetailed(spec, text, source)` 返回 `LayerViolation[]`（`{layer, code, reason}`），`LayerViolationCode` = `empty / too_short / too_long / missing_keyword / bad_prefix / bad_json`；`checkLayerSpec` 保留为「只要中文清单」的薄封装 | `refine.test.ts`「每层生成规格（§2.1 / §16.1）」describe：`layerBand(l2)` 无源=`{12,300}`、18 字源=`{12,18}`、200 字源=`{80,200}`、5000 字源=`{240,300}`（上限夹住）、4 字源的 L5=`{10,10}` 不死规格；`depthCapFor` 逐档边界 29/30/59/60/119/120/240 |
+| 40-B 短料在入库那步就拦 | `src/core/memagent/qualityGate.ts`：`QUALITY_GATE_VERSION` **2→3** + `QualityBlockCode` 新码 `short_low_signal` + `layerRules.ts` 新常量 `MIN_MEANINGFUL_WITHOUT_FACTS = 30`。判定放在**所有具体噪声码之后**（保证旁白/身份仍记它们自己的码）：`meaningful < 30 && !hasHardFacts && !hasTechEvidence` 才拒。**三道豁免而不是两道**——`hasTechEvidence` 沿用批次35 已拍板口径，否则「请帮我做一个SolidWorks插件,要求:批量转换文件格式」「优化 PostgreSQL 索引」这类批次35 明确放行过的短料会被重新杀掉（口径冲突优先于字数门槛）。分工：`MIN_MEANINGFUL_CHARS=10` 管空串/纯符号兜底，`30` 管「没有信号就不配占记忆位」。写页 / MCP / 采集器 / 补炼队列四处同一份 `checkL0ToL1Quality`，不再有「入库放行、精炼才发现」 | `qualityGate.test.ts` 34→**42** 例，新增 describe「批次40 短且无信号门」：拦「开始实施。先创建解决方案和项目文件。」这类纯短句；带硬事实（错误码 / `40001` / `pool_size=5`）或带具体技术名词的短句必须放行；`code` 逐条断言且**不与 `thin`/`narration`/`identity` 串码** |
+| 40-C 深度按料给 + L6 独立通道 + 停在哪儿记哪儿 | `layerRules.ts`：`DEPTH_CAP_BANDS`（≥240→L5 / ≥120→L4 / ≥60→L3 / ≥30→L2 / `<30`→**null，不炼深层停在 L1**）+ `depthCapFor` + `targetLayers(meaningful)`（叙事层按档位给，**L6 恒追加**——它是检索索引 `keywords/projections`，不是压缩摘要，任何深度都能单独产出）+ `isFullyRefined(produced, targets)`（`llm_partial` 的唯一依据，不再拿 `LAYER_ORDER.length` 硬比）+ **`headlineLayer(produced, targets)`**：只有叙事层（本行该炼的 L2–L5）一层不缺时 L6 才算最深层，否则回落到最后一个连续层——**绝不用索引冒充深度**。`refined_by` 语义随之变更：**炼满本行该炼的层 = `llm`**，缺层才是 `llm_partial`。阶梯（`memories.ts` 写入 / `refineQueue.ts` 补炼 / `rebuild.ts` 重建**三条管道同源**）：中间层判废时**跳过 L6 再试它一次**，代价是深度不能再由「有没有 L6」倒推 → 由 `headlineLayer` 补齐。队列侧：`RefineRowResult.to_layer`、每行 `stop_layer`/`stop_code`、`settle()` 在 done 时**清掉上一轮的旧码**（旧结论不能留着冒充本次）、`retryFailed` 清码、`summarizeRefineQueue` 汇总 `stop_codes` | `refineQueue.test.ts` 19→**25** 例，新增 describe「批次40-C：深度按料给 + L6 独立通道 + 停在哪儿记哪儿」：短料行 `targets=['L1']` 且整行拒炼（`code='thin'`）、L4 判废但 L2/L3/L6 到手 → `layer='L3'` + `content_l6` 照常落 + `refined_by='llm_partial'` + `stop_layer='L3'`/`stop_code='empty'`、done 后旧 `stop_code` 被清、`retryFailed` 清码、`summarizeRefineQueue.stop_codes` 聚合。`refine.test.ts` 50 例含「RAW 脱敏后有效字 50 → `depthCapFor=L2`，料不够就不硬凑深层」「带硬事实过了质量门但有效字 24 → 不炼深层」；`rebuild.test.ts` 同源断言 |
+| 40-D 提示词把相对区间与契约说清楚 | `src/electron/llmGateway.ts` `buildLayerPrompt(layer, input, category)`：`layerBand(spec, input)` 现算现写——`长度：X–Y 字（由上游 N 字按本层压缩比算出；写不够就是没内容，写超了就是没压缩，都算废）`；`格式契约：第一个词必须是「适用场景」…不许换成别的说法`（`mustStartWith` 落到 prompt，判定才查得下去）；`保留：源文中出现的关键词不得丢弃（也不得凭空补造）`；L6 仍单独给 JSON 输出格式。上游内容用 `"""` 包裹原样下传，**L0 原文从不上送** | `llmGateway.test.ts` 30 例（含 prompt 含「由上游 … 字按本层压缩比算出」与 `mustStartWith` 契约、区间随源文长度变化） |
+| 40-E 队列卡与日志页显示「阶梯停在哪」 | `src/web/params/refineQueue.ts`：`REFINE_STOP_LABELS`（`LayerViolationCode` + 队列自有码 → 中文，**码→中文的唯一映射处**，未知码原样显示不吞）+ `refineStopLabel` + `refineStopRows`（按行数降序，UI 顺序稳定）；`RefineQueueCard.tsx` 进度区新增 `data-testid="refine-stop-codes"` 一行「阶梯停在哪：压得太狠（低于本层下限）（`too_short`）1 行 …」+ 尾部口径说明「『已炼成』不等于『炼到 L6』」，无码时不占位；`src/web/Home/programLogLabels.ts` 的 `NOTE_KEYS` 补 `to_layer/stop_layer/stop_code/refined_by`（`kernel:refine:row` 那三个字段在人话视图也看得见，值只有层名与英文码，无正文） | `RefineQueueCard.test.tsx` 8→**10** 例（按码显示行数 / 未知码原样透出 / 无 `stop_codes` 不渲染该行）、`programLogLabels.test.ts` 新增一例（`detailNote` 必须带出 `to_layer/stop_layer/stop_code/refined_by`） |
+| 40-F 存量口径实测（只读） | `npm run rejudge`（2026-11-03 14:10 UTC+08:00，全程不写盘）回放真实 `memories.db.json`：1585 行 → **放行 1461 / 拦下 124**，124 条**全是 `short_low_signal`**、全是 L1、受保护 0；样本形如「开始实施。先创建解决方案和项目文件。」「接下来我们需要怎么做」 | 回放器本身即 `tools/rejudge-dry.mjs`（批次36-B），依赖 Node ≥ 24 直跑 `.ts`；`rejudge.test.ts` 11 例断言预览与实际回执必然一致 |
+| 40-G 旧 fixture 与既有断言校正（**改这三处必同步**） | 新相对规格 + v3 门槛打破了 16 例旧回归：`refine.test.ts` / `refineQueue.test.ts` / `merge.test.ts` / `llmHonesty.test.ts` 的样本全部换成**实测过的压缩链**（L1 320 字 → L2 171 → L3 115 → L4 62（`适用场景：`开头）→ L5 52（`边界条件：`开头）→ L6 JSON）——旧的「短源 + 长摘要」fixture **真的该判废**，不是测试写错；`webhook.test.ts` 4 例、`MemoryPage.test.tsx`/`MemoryLayeredPage.test.tsx` 3 例、`e2e/write.spec.ts` 1 例的 fixture 正文本来就会被 v3 拦下 → 给句子加硬事实（`回滚耗时 120 秒` / `网关 504 状态码` / `pool_size=5`），让断言继续打在各用例本来的目标（E2E 那条仍然断言 `E_L0_LOCKED`）。`rejudge.test.ts` 的行戳断言改为 `QUALITY_GATE_VERSION - 1` 参数化，不再硬编码 `v2` | 全绿：单测 **146 文件 / 1681 例**（覆盖率 Statements 81.46% / Branches 73.81% / Lines 84.52%）、`npm run build:electron` + **E2E 106 例** |
+
+> 诚实边界（批次40）：① **只改规则与记账字段，没动数据**——那 238 条 `failed` 是批次39 绝对规格下记的账，本批次**没有回滚队列、没有重炼存量**；要重炼就点参数页「重试失败行」（放回 pending，按新相对规格重跑，**会再次真实调用引擎并消耗当日额度**）。② 124 行 `short_low_signal` 存量仍在库里——安全页「规则重判存量」按钮（逐字 `REJUDGE` + 强制备份）**我没替用户点过**。③ 深度档位是**拍出来的工程常量**（每深一层源料大致翻倍），不是语义理解；`<30 字` 的豁免判据仍是正则与词表，豁免的是**字数**这一维，不是「有没有信息量」。④ `headlineLayer` 只保证「行上报的深度不撒谎」，不证明产物质量——L2 合规但内容编造仍会落库（启发式既有取舍：宁可放过不可错杀）。⑤ `minRatio` 的 0.4/0.35/0.3/0.25 来自「按真实账本长度分布回放，短源链不再整批判废」的实测标定，不是理论值；换模型或换采集口径需要重新标定。⑥ 只排不炼、≤3 引擎、≤500 行/日、正文零落盘这四条批次39 闸门**一条没放松**；本批改的是「炼几层、每层写多少字、为什么停」，不是「花多少钱」。⑦ **红线复述**：L0 管理密码与恢复码同时丢失 = L0 原数据库不可恢复，本批次与找回通道无关。
+
+## 批次41-A（2026-11-03）：内核审计搬出记忆库 —— 追加式 `audit.jsonl` + 归档轮转 + 四源备份（评审 P1-5）
+
+> 起因：评审 P1-5「内核审计只增不减，且非批量模式下每条审计 = 整库 stringify+fsync+rename」。当时报告写「本机库已 25 MB 级」，本次实测校正为 **13.01 MiB**（`memories.db.json` 13,635,138 B，2026-11-03 16:20 UTC+08:00 只读实测；库最后写入 16:00:27）。
+> 实测代价（**临时目录复刻，不碰数据根**）：真实库内容 1,475 行记忆 + 11,666 行审计（审计序列化 2,983,840 B = 库的 **21.9%**）；旧路径（整库 stringify → 写 tmp → fsync → rename）中位 **108.44 ms/条**，新路径（单行 append + fsync）中位 **3.78 ms/条** → **约 28.7 倍**；单独 `JSON.stringify(doc)` 中位 31.8 ms。
+> 任务附注：「这条不做，P2-9「sync 接线会放大摘要行无向量 + 审计增长」永远不能做」——本批次解除审计这一半，另一半（摘要行向量）= 批次41-B。
+
+| 条目 | 实现要点 | 测试 |
+|---|---|---|
+| 41-A1 追加式审计账本 | **新文件** `src/core/memagent/auditLog.ts`：`FileAuditLog`（`AUDIT_FILE_NAME='audit.jsonl'`、`AUDIT_ACTIVE_MAX_BYTES=16MiB`）。写=`openSync(path,'a')+writeSync+fsyncSync`（O(记录大小)，不再整库序列化）；`append/appendMany/beginBatch/commitBatch/close`（**落盘成功才进内存视图**，失败原样上抛且批次保留，绝不「标已提交、实际没落盘」）；轮转 `rotateIfNeeded` 只在超闸门时把**整档** `renameSync` 进 `audit-archive/audit-<UTC>-<三位补零序号>.jsonl`（**只换文件、一条不删**；序号恒定存在，否则同毫秒两次轮转的纯字典序会排反）；归档挪不动（占用/权限）就继续在在档上追加，**轮转失败绝不丢审计**。读：`query/list/count/stats`；逐行解析，坏行只计 `skipped_lines`（掉电尾行属正常残留），**整档一行都认不出**才判结构损坏 → `backupCorrupt` 改名隔离 + `AuditLogCorruptError`(`E_AUDIT_LOG_CORRUPT`)。只读镜像（`readonly`）绝不写盘/轮转/改名别人的文件，按**字节增量**跟随写方追加（变短=轮转 → 整体重载）；`readFrom` 用 `Buffer.alloc`（**不用 `allocUnsafe`**：短读时未初始化堆内存可能混进结果，即评审 P2-11 同类坑） | `__tests__/auditLog.test.ts` **11** 例（新）：空账本不抛不预建 / 落盘与新实例顺序读回 / `query` 三种过滤 / 尾行截断容错且 `skipped_lines=1` / 整档不可认→抛码 + `.corrupt` 保内容 + 二次启动空账本 / 批量未提交不落盘·commit 一次落盘·`close` 兜底 / `appendMany` 一次补齐 / **轮转不删数据**（`archive_files=1·rows=3·archived_rows=3·bytes=0`，再追加后归档仍 3 行、`query({request_id:'req_old'})` 仍命中）/ 只读增量可见 + 写方轮转后重载 / 只读绝不写盘改名 / `detail` 结构保真 |
+| 41-A2 FileStorage 接上与存量迁移 | `src/core/memagent/fileStorage.ts`：`FileDoc.audit` 降级为**历史字段**；新选项 `auditPath`（缺省 = 记忆库同目录 `join(dir, AUDIT_FILE_NAME)`）与 `auditMaxBytes`（单测闸门）；`appendAudit` → `auditLog.append`；`queryAudit` = **归档 + 在档 + 库里未迁完的 `doc.audit`** 合并（全量真数据口径不变）；**`migrateLegacyAudit()` 是公开的、构造时不调用**——搬之前必须有一次备份（项目不变量），所以由端壳在备份成功后调它，返回本次搬走的行数、库里已空即幂等返回 0、只读实例返回 0；中断风险按**「宁重复不缺失」**处理并写一条 `security_change/op=audit_log_migrate` 可见审计；审计账本读不认时**不掀掉整个存储**（记忆库还读得动），记 `auditCorruption` 后按空账本继续；`commitBatch` 顺序 **L0 库 → 记忆库 → 审计**（绝不先写一条数据没落盘的审计）；`auditStats` getter 出 `rows`（含 legacy）/`migrated_rows`/`legacy_rows_in_ledger`/`corruption` | `fileStorage.test.ts` **37** 例，新增 describe「FileStorage · 审计独立账本（批次41-A）」9 例：缺省 `auditPath` 派生 / 库里 `audit: []` 而 `audit.jsonl` 有 2 行 / **构造不搬（断言库文件字节一字未动 + 历史照旧查得到）→ 显式调 `migrateLegacyAudit()` 才搬 2 行、再调返回 0、二次启动不重复** / **迁移中断 → 重复 2 条 + `audit_log_migrate` 审计** / 只读不迁（显式调用也返回 0）但查得到 legacy 且文件字节不变（写抛 `/只读模式/`）/ 只读镜像跟随写方追加 / `audit.jsonl` 整档不可认 → `corruption` 可见 + `.corrupt` 存在 + **记忆照常读写** / 批量模式攒批与 `close()` 兜底 / `auditMaxBytes:1` 轮转后 `queryAudit` 仍全量。另：P0-6 写盘失败族的 `appendAudit` 用例改打审计文件本身（`mkdirSync` 占位 + 先改名腾位），旧 `${db}.tmp` 障碍对追加式文件无效 |
+| 41-A3 主进程接线、迁移闸门与观测 | `src/electron/main.ts`：§1 `AUDIT_PATH`（= `LIB_PATHS.audit`，兜底 `join(USER_DATA, AUDIT_FILE_NAME)`）→ §2 `FileStorage(DB_PATH, {l0, auditPath})` → §10 bootstrap **存量迁移闸门**：`auditStats.legacy_rows_in_ledger > 0` 且本进程可写 → `backupBeforeKernelChange('audit-log-split', 'audit:log-backup')` 成功后才 `storage.migrateLegacyAudit()`；备份/迁移抛错 → `kernel:audit:log-migrate-skipped`（warn，含 `legacy_rows` 与 error）且**本次不搬**（历史审计原样留库里，应用照常启动，绝不无备份改写用户账本）；只读实例只落 `bootstrap:audit-migrate-deferred` 主日志。打开后落 `kernel:audit:log-open`（path/rows/bytes/archive/坏行/legacy/readonly），并按需追加 `audit:log-migrated`（迁移过多少行）、`audit:log-bad-lines`（warn）、`audit:log-corrupt`（error，含隔离原件路径）；§6 `dataRoot:get` 回显 `activeAuditPath` + `audit: storage.auditStats`；§2 `adoptLibraryFilesIntoPlace` 新增第 4 件「审计账本」补送与 `adoptLibraryDirIntoPlace(USER_DATA, ledgerDir, 'audit-archive')` 整批补送（汇总 `审计归档（N 个文件）`）；§5 `backupPaths()` 出四源 | 备份闸门与四条日志键在 `main.ts` §10（接线级，无自动化测试，需在实机日志页按中文标题核对：手测报告 §5）；纯函数与存储层由 `dataRoot.test.ts`/`backupFiles.test.ts`/`fileStorage.test.ts` 覆盖 |
+| 41-A4 数据根与两库位置 | `src/electron/dataRoot.ts`：`LibraryPaths` 新增 `audit`（**跟 `ledgerDir`**，缺字段回落 root = 与记忆库同位置；不跟 L0 库走）、`DATA_ROOT_MIGRATE_FILES` += `AUDIT_FILE_NAME`、`DATA_ROOT_MIGRATE_DIRS` += `'audit-archive'`、新导出 `adoptLibraryDirIntoPlace(fromDir,toDir,dirName)`（复用 `copyDirMissing`：目标同名不动、源不删、同目录跳过） | `dataRoot.test.ts` 20→**27** 例：`audit` 随 `ledgerDir`/旧指针回落 root、两个白名单必须含新条目（**改了必须同步 AGENTS §6**）、`migrateDataRoot` 真带走 `audit.jsonl`（目标已有则 `skipped` 不覆盖）与 `audit-archive/` 逐文件、`.lock` 不迁、源保留、只有审计/只有非空归档目录都算「这里有数据」且进 `summarizeDataDir`、`adoptLibraryDirIntoPlace` 三种结果 |
+| 41-A5 四源备份配方 | `src/electron/backupFiles.ts`：`BackupKind` += `'audit'`，新 `BACKUP_EXT`（audit=`.jsonl`，其余 `.json`），前缀 `memaudit-`；`planBackupFiles`/`selectBackupsToDelete`/`sortBackupsNewestFirst`/`kindOfBackupName` 全部按第四类扩到同源口径（**份数按库分算，绝不跨库凑数**）。追加式文件被复制时可能截到半行：**读侧按行容错，不为此加锁**（备份不该阻塞写入） | `backupFiles.test.ts` 9→**13** 例（四前缀一次全备 / 各 missing 组合如实标缺哪个 / 四前缀滚动互不挤占 / `.jsonl` 与 `.json` 不误删 `.tmp`/`.lock` / `kindOfBackupName('memaudit-…')==='audit` / `BACKUP_EXT` 断言） |
+| 41-A6 设置页与备份标签 | `src/web/memory/dataRoot.ts`：`AuditLogInfo`（path/archive_dir/rows/bytes/archive_files/archive_bytes/archived_rows/skipped_lines/readonly/migrated_rows/legacy_rows_in_ledger/corruption）+ `DataRootInfo.activeAuditPath?/audit?`；`src/web/memory/backup.ts` `BackupKind` += `'audit'`、`BACKUP_KIND_LABEL.audit='审计账本'`（**「备了记忆库」不再等于「备了审计」**）；`src/web/params/KbManagementCard.tsx` 新增 `data-testid="kb-audit-path"` 行（在档行数 / 归档文件数与行数 / 坏行 / 上次隔离原件路径），迁移说明点名「L0 库、密钥环与审计账本」 | 渲染层字段来自 `dataRoot:get` 真值，无桩数据；卡面数字需实机核对（手测报告 §5） |
+
+| 41-A7 日志页人话标签 | `src/web/Home/programLogLabels.ts`：`kernel:audit:log-open/log-migrated/log-bad-lines/log-corrupt/log-backup/log-migrate-skipped` 六条中文标题（审计账本在哪、迁了多少、坏了几行、原件隔离到哪、搬之前备了什么、为什么这次没搬）+ `NOTE_KEYS` 补 `rows/bytes/migrated_rows/legacy_rows/legacy_rows_in_ledger/archived_rows/archive_files/skipped_lines`（值全是计数与路径，**审计正文与 `detail` 里的内容不被抬进摘要**） | `programLogLabels.test.ts` 10→**12** 例（六条 `actionTitle` 命中 + `detailNote` 带出计数且断言正文不出现） |
+
+> 诚实边界（批次41-A）：① **`audit-archive/` 不进滚动备份**——`backups/` 只有在档 `audit.jsonl` 的快照；轮转从不删数据、全量历史仍常驻数据目录，但**要异地留存请整体备份数据目录**，别假设备份覆盖了全量历史。② 归档与在档**一次装进内存**（`loadAll`），审计行数继续涨时这是内存占用的上限来源，本批次没做「按需查档」。③ 存量迁移的中断窗口只可能产生**重复行**，不产生缺失；库里那格清空后 `persist` 失败 = 历史仍留在库里，下次启动再迁一次（不静默截断）。④ **另一份同接口实现 `sqliteStorage.ts`（node:sqlite，当前未注入生产）没动**，本次只收口主进程实际注入的 `FileStorage`。⑤ 16 MiB 闸门与「归档不删」是工程取舍，**没有 TTL、没有自动清理**，不是保留期合规策略。⑥ 上面那组 ms 数字来自**临时目录复刻**（读真实库、写临时目录），不是数据根实测。**2026-11-04 10:08:50（UTC+08:00）闸门已在用户机真跑过**（见「批次41-Z」节）：体积差这条**已字面成立**（`doc.audit` 归零、库 14,283,011 → 11,215,610 B），但**时延收益本机仍无足量样本**（迁移后 `ipc:storage:putMemory` 命中 n=0，迁移前 n=3、中位 165 ms）——不要把复刻的 28.7 倍当成本机实测值写进任何回执。
+
+## 批次41-B（2026-11-03）：遗忘摘要行补齐 `sha256` + 语义向量 —— 摘要行与写入路径同字段口径（评审 P1-4 未修的另一半）
+
+> 评审原话拆两半：P1-4「摘要行无向量」+ P1-5「审计增长」。P1-5 = 批次41-A（上一条），P1-4 = 本条。任务口径（用户拍板）：**「摘要行与正常写入路径同源 —— `content_l1` → `embedSync` 落向量 → `sha256`，向量 upsert 进同一个 vector backend；补 `forgetting.test.ts` 正例（断言摘要行能被语义召回命中）」**；范围外：**不改摘要合成分组口径与质量门**。
+> 为什么这不只是「多存两个字段」：语义召回的打分对象就是行上的 `m.embedding`（`agent.ts` 读行向量，`VectorBackend` 只是那份可丢弃的索引）→ 缺向量的摘要行**恒 0 分**，遗忘引擎产出的摘要永远召不回来；缺 `sha256` 的行在 sync 的每日全量对账里被 `!m.sha256` 判成「缺失」（`sync.ts:226`），且违反需求规格书 §2.2 不变量 7「向量源自 L1」。
+
+| 步骤 | 改了什么 | 怎么验 |
+|---|---|---|
+| 41-B1 摘要行字段同源 | `src/core/memagent/forgetting.ts` 的 `buildSummary`：新增 `const contentL1 = gate.content!`（= 过完 L0→L1 质量门的正文，行上 `content` 与 `content_l1` 同值）→ `sha256: sha256hex(contentL1)` + `embedding: embedSync(contentL1, DEFAULT_VECTOR_DIM)`；导入 `DEFAULT_VECTOR_DIM/embedSync`（`vector.ts`）、`sha256hex`（`sync.ts`）。**纯函数、无 I/O**，与 `memories.ts:290/292`、`rebuild.ts:369-372`、`refineQueue.ts:415-418` 同一组合（sha 取行上报正文、向量取 L1） | `forgetting.test.ts` AC-09 用例新增两条断言：`summary.sha256 === sha256hex(summary.content)`、`summary.embedding` 逐元素等于 `embedSync(content_l1, DEFAULT_VECTOR_DIM)` |
+| 41-B2 索引 upsert 与「不给就不假装」 | `ForgettingOptions.vector?: VectorBackend`；`runForgettingCycle` 合并段在 `putMemory(summary)` 之后 `await opts.vector.upsert(summary.mem_id, summary.content_l1!, { project_id, layer: 'L1' })`（layer 用 `'L1'`：摘要行上报的就是 L1，与 `memories.ts` 写入按 deepest 层建索引同源同值）。**`vector` 缺省时只写行上向量**，不调任何索引、不声称建过索引 | 新用例「批次41-B：摘要行进向量索引」：第一段给真 `JsVectorBackend` → 跑完整周期 → `vector.search(embedSync(summary.content_l1, vector.dim), 5, {})` 命中 `summary.mem_id`、行上向量与查询向量余弦 = 1；第二段不给 vector → 行上 `embedding` 仍真算、新建的索引里**没有**该 id |
+| 41-B3 端壳注入同一个 backend | `src/electron/main.ts` 遗忘周期调度（§5.1 采集器区块内的 `runForgettingScheduled`）：`runForgettingCycle(storage, now, { enabled, weeklyCompress, vector: collectorVector })` —— `collectorVector`（`main.ts:2412`）与采集器写入、补炼队列 `startRefineQueue`、L0 查阅/重建用的是**同一个** `JsVectorBackend` 实例，摘要行不再游离于该实例之外 | 接线级（6h 周期 + 10min 首跑，无自动化测试）；实机按手测报告核对 `gc` 审计的 `summaries_created` 与记忆库 `sum_` 行的 `sha256`/`embedding` |
+
+> 实测（2026-11-03 17:50 UTC+08:00，只读真实账本；桌面端持写锁正在写，读的是当时快照）：1,532 行记忆中 **`sum_` 前缀行 = 0、带 `merged_from` 的行 = 0** → 遗忘引擎在用户机上从未真产出过摘要行，**本批次没有历史摘要行需要回填**，新口径从下一次周期产出起生效。顺带量到两处**不属本批次**的存量缺口：① **533 行缺 `sha256`**（全部 `layer=L1`、`quality_gate_v=3`、`refined_by=stub`、`has_l0=true`；创建时刻集中在 2026-10-30 10:02–16:27 UTC+08:00，全部无 `layers_generated_at`）——`coreWrite` 的 `sha256` 由提交 `843282c`（2026-10-31 17:55）引入，故这批是**该提交之前的历史行**，不是现役通道在漏；后果限定在「sync 对账会把它们列进 missing」，而 sync 未接线 → 记为**批次41-J 的前置事实**。② **1 行缺 `embedding`** → 语义召回恒 0 分，同属存量清理类，未动。两者都不在本批次顺手改：批量重算 533 行的指纹属于**改写账本**，要走备份闸门与卡片口径（`rejudge`/`legacy` 那一类），不是补字段这一步的 scope。
+> 门禁（批次41-B 收口）：`npm run typecheck` 干净；oxlint **0 warnings / 0 errors**；全量 `vitest run` **147 文件 / 1714 例**全绿（覆盖率 Statements 81.63% / Branches 73.78% / Lines 84.73%）；`npm run code:index -- --write` 306 文件且 `:check` 最新。
+> 诚实边界（批次41-B）：① `refined_by` 仍是 `stub`（本地合成不是 LLM 产物，批次28-C 口径不变）；② 只补**新产出**的字段，已有 `sum_` 行（本机 0 行）不回填；③ 向量索引是内存件，重启后由 `collectorVector` 重新建，**行上 `embedding` 才是召回依据**——所以本批次的必要项是 `embedding`，`upsert` 是让索引与表保持一致；④ 分组口径（`enterprise/team/project/category` + `content.slice(0,8)`、`≥3` 触发、`auto_merge` 白名单）与 `checkL0ToL1Quality` 质量门**一字未动**。
+
+## 批次41-C（2026-11-03）：删除行的通道同步摘除补炼队列条目 —— `refine-queue.json` 里的幽灵条目
+
+> 补炼队列 `refine-queue.json` 是「待炼行」的索引（`mem_id → 状态`，正文一个字不落）。删除通道对账本做的是**硬删**（`FileStorage.deleteMemory` 的 `delete this.doc.memories[id]` + 同步删 L0 密文），但此前**没碰队列**，被删的 id 一直留在文件里：`summarizeRefineQueue` 把死行算进 pending/failed、`nextPending` 反复取到 `no_source`。
+> 实测（2026-11-03 19:35 UTC+08:00 只读真实 `refine-queue.json` + 账本）：1,621 条队列项（1,359 pending / 262 done），其中 **124 条 `mem_id` 在账本里已不存在（`not-in-ledger`），全部 `pending`、attempts 1–2** = 删掉的行遗留的幽灵条目。
+
+| 步骤 | 改了什么 | 怎么验 |
+|---|---|---|
+| 41-C1 两个纯函数（单一真源） | `src/core/memagent/refineQueue.ts`：`removeRefineRows(state, ids, now)` 按 id 摘除（**任意状态都摘**——行没了它的 pending/done/failed/skipped 全成幽灵；只删不新增、id 不在即幂等返回 `removed=0`）；`reconcileRefineQueue(state, liveIds, now)` 按「当前未删行」集合一次摘掉所有已消失 id（`liveIds` 是 `Iterable<string>`，活集合为空则全摘） | `refineQueue.test.ts` 新增「批次41-C」describe 4 例：`removeRefineRows` 幂等 / `reconcileRefineQueue` 活行保留·死行剔除且活行状态原样（done 的 live_1 保持 done）/ 全活时 `pruned=0` 且**原 state 原样返回**（不复制）/ `summarizeRefineQueue` 在摘除后把死行从 pending·failed 计数回落（pending=1、failed=0） |
+| 41-C2 端壳接线（三处） | `src/electron/main.ts` §6f：新 helper `reconcileRefineQueueDir(why)`（`refineQueueDir` 未就绪直接返回；`listMemories({})` 取活行 → `reconcileRefineQueue`，只在 `pruned>0` 落盘 + 记 `kernel:refine:queue-reconciled`）与 `removeRefineQueueRow(id)`（单条摘除，热路径不做全量）；① `startRefineQueue` 启动时对账一次并写进 `refine:backfill-scan` 的 `pruned_ghosts`（**存量 124 条在下次启动自净**）；② `storage:deleteMemory` IPC 成功后 `removeRefineQueueRow(id)`（改 async）；③ `purgeLedger`（`'ledger-reset'`）与 `rejudgeRows`（`'rules-rejudge'`）执行完各 `void reconcileRefineQueueDir(…)` | 纯函数 4 例覆盖逻辑；handler 三处是**接线级**（各一行），需手测报告实机核对 `refine:queue-reconciled` / `refine:backfill-scan` 动作日志（人话标签见 41-C3） |
+| 41-C3 日志页人话标签 | `src/web/Home/programLogLabels.ts`：新增 `kernel:refine:queue-reconciled / queue-reconcile-error / queue-remove-error` 三条中文标题；`NOTE_KEYS` 补 `pruned / pruned_ghosts / why`（值只有计数与触发原因，无正文） | `programLogLabels.test.ts`（沿用既有 `actionTitle` 命中断言，无新增计数断言） |
+
+> 门禁（批次41-C 收口）：`npm run typecheck` 干净；oxlint **0 warnings / 0 errors**；全量 `vitest run` **147 文件 / 1718 例**全绿；`npm run code:index -- --write` 306 文件且 `:check` 最新。
+> 诚实边界（批次41-C）：① 41-C 只收口 `refine-queue.json` 这份**索引文件**，删除通道「**连带销毁 N 条 L0 原文**」是另一件事（`deleteMemory` 本就同步删 L0 密文，属存储语义，本批次不动、也不假装告知）——见 **41-O**；② 对账是「当前未删行」口径，`done` 行若仍在库中保留（「已炼到 L3」结论仍有意义），只有行没了才摘；③ 三个 handler 的接线没有自动化测试直接覆盖（与 41-A 的备份闸门同口径的接线级缺口，归 41-H 补齐）。
+
+## 批次41-P（2026-11-04）：第四条硬删通道接上队列对账 —— 复查 41-C「幽灵收干净了吗」时量出来的缺口
+
+> 41-C 按「三个删除通道」接线，但账本里的**硬删**有四条：`rebuildLayersFromL0`（安全页「按 L0 重建 L1–L6」）的 purge 分支同样逐行 `storage.deleteMemory`（`src/core/memagent/rebuild.ts:299`），41-C 漏接。后果不是数据错，而是**索引脏到下次重启为止**：点过 REBUILD 且 `purged>0` 的那批 id 会留在 `refine-queue.json` 里，直到 `startRefineQueue` 的全量对账自净。
+> 复查实测（2026-11-04 10:29–10:31 UTC+08:00，真实数据根**只读**，应用正在补炼中，数字为快照）：队列 **1531** 项 vs 活行 **1532**，**幽灵 0**（41-C 摘除 124 条后的幂等状态此刻仍成立）；`pending 1150 · done 314 · skipped 65（全 thin）· failed 2（全 bad_json）`，`dayRows=54/500`；唯一「有 L1、无深层、却不在队列」的活行是 `params_01M6AGZS9K4CTQM23HV64MYF1E`（`pinned=true`）——**保护行不入队是批次39/40 既定口径，不是漏**。
+
+| 步骤 | 改了什么 | 怎么验 |
+|---|---|---|
+| 41-P1 端壳接线（一行） | `src/electron/main.ts` 的 `IPC.l0RebuildRun`：`l0:rebuild-run` 动作日志之后补 `if (report.purged > 0) void reconcileRefineQueueDir('l0-rebuild')`（**purged=0 是常态，不为此白扫整本账本**），并把 `reconcileRefineQueueDir` 的头注释改为「覆盖四条硬删通道」 | 与另三条通道同为**接线级**：判定本体 `reconcileAndPersistRefineQueue` 已由批次41-H 覆盖（注入 load/save + 落盘计数）；`why=l0-rebuild` 的 `kernel:refine:queue-reconciled` 需真点 REBUILD 才出，属口令闸门，本批**未点** |
+| 41-P2 不改的部分 | `rebuild.ts` 本体不动（核心模块不持有队列目录，`refineQueueDir` 归端壳）；落盘与日志闸门不动（仍只在真摘到才写盘）；批次28-A 的浏览器 HTTP 数据面 `deleteMemory`（`src/home/server.ts:87`）不接对账——那是第二个进程，桌面端在跑时它是只读镜像（删会被拒），它单独持锁写入时留下的幽灵由下次启动全量对账自净 | `npm run verify:fast` 全绿：**147 文件 / 1733 例**，typecheck 干净、oxlint **0/0**、索引已刷新（306 文件）、覆盖率 Statements 81.76% / Branches 73.98% / Lines 84.83% |
+
+> 诚实边界（批次41-P）：① 本条只把 REBUILD 从「靠重启自净」变成「当场自净」，**没有新增删除语义**；② 复查数字是**运行中快照**（应用正在补炼，`pending`/`dayRows` 每分钟都在变），不可当静态基线引用；③ 该接线**不在用户机运行的产物里**（安装包建于 10:17:07，本条改于其后），要生效需重新打包。
+
+## 批次41-L（2026-11-04）：MCP 机器令牌全量轮换 —— **零代码改动的运维**，但先量出「只换一家」不成立
+
+> 起因：DSH 的 MCP Bearer 自 2026-10-31 泄露一直没换（41-L 立项时挂在手测报告 §6）。用户指令「轮换 DSH MCP Bearer 令牌」，先量架构：`loadOrCreateMcpToken()`（`src/electron/main.ts:507-519`）只在 bootstrap 跑一次，**同一个值**喂 MCP TCP 8202、HTTP 8204、webhook 8203 与 `registerMcpClientsIpc(mcpToken)`；`assertMcpToken()` 只回一个字符串。而 `deepseek-harness` 配方 = `configPath:null` + `inheritsFrom:'qoder-cn'` + `writable:true`（批次28-B）——DSH **没有自己的配置面**。→ 结论：不存在「只换 DSH」这条路径，把这条摆出来后用户改口径为「全量换 + 全量重写」。真正的按客户端/成员隔离令牌属批次41-K/45-B 方案（未实现）。
+
+| 步骤 | 做了什么 | 怎么验 |
+|---|---|---|
+| 41-L1 退出与换值 | 向持写锁主进程发 `CloseMainWindow()` → 走 `before-quit`（落盘 + 清内存 L0 密钥）→ `memories.db.json.lock` 自行释放；`mcp-token.txt` 由 `randomBytes(32).hex` 新值 tmp+rename 原子替换 | **旧值全程零落盘**（草稿脚本原本要把旧令牌另存一份给下一步用 = 白轮换，跑之前删掉了该逻辑）。新指纹 `6fef9c55022c`、退役值 `005925732bce`（sha256 前 12 位，**都不是令牌本身**） |
+| 41-L2 用生产函数重写客户端 | `wireMcpClient(id, token, { currentToken })`（`src/electron/mcpClients.ts`，纯 Node，`node --experimental-strip-types` 直接 import）逐家跑 `qoder-cn`/`claude-code`/`codex`/`trae-cn`/`workbuddy` + `deepseek-harness`（委托宿主真写）——每份先 `.bak-<ISO>` 再合并，冲突/坏文件按批次23 口径拒绝 | 5 份备份：`settings.json.bak-2026-11-04T02-50-59-433Z` / `.claude.json.bak-…-435Z` / `config.toml.bak-…-438Z` / `Trae CN/User/mcp.json.bak-…-443Z` / `.workbuddy/mcp.json.bak-…-445Z`；**现役 5 份配置里退役值命中 0/5** |
+| 41-L3 DSH 私有配置 | `dsh-bundles/dsh-memagent-mcp/cordis.patch.yml`（被 `.gitignore` 的 `/dsh-bundles/` 覆盖，**绝不提交**）按「恰好一个 64 位 hex」守卫替换 | mtime 10:51:17，文件内唯一 hex64 指纹 = 新值 |
+| 41-L4 重启与探针 | 安装包产物 10:51:48（UTC+08:00）起来，写锁 `{"pid":38552}` | `[bootstrap:mcp-token-ready]`（只带 `file`，无值）、`kernel:audit:log-open rows=11958`、`refine:backfill-scan pruned_ghosts:0`；探针：**新令牌 Bearer 200（响应体不含令牌明文）· 错令牌 401 `-32001` · 无凭据 401 · 新令牌走 `x-mcp-token` 200 · webhook 8203 无令牌 401** |
+
+> 诚实边界（批次41-L）：① **退役值仍在上面 5 份 `.bak-*` 里**（备份原文件是 `wireMcpClient` 既定行为，批次26-B P2-15 只保留最新 3 份）——它已不能访问任何东西，但要连备份一起清干净得手工删，本批没替用户删；② `mode:0o600` 在 Windows 上 `fs.statSync().mode` 报 **666**（应用首次写入也是这个值，真实权限看 NTFS ACL），属既有表现；③ `bootstrap:mcp-token-ready` **只进 `main.log`、不进 `actions.log`**（同 41-B 的 `forgetting:cycle` 一类观测缺口，本批未顺手改）；④ **本会话 Qoder 侧连接器无实测证据**（该工具在本次会话不可用），「重载 Qoder 后自动用上新令牌」是推断；⑤ 单令牌仍是机器级凭据（拿到即全库 + §1.1 召回），41-K/45-B 才是根治；⑥ 换令牌**必然**让所有旧配置立刻 401，所以「全量重写」不是可选项——只换不重写等于把所有 Agent 断在外面。
+
+## 批次41-D（2026-11-03）：采集器失败指数退避 + 上限（P1-12）
+
+> 实测（grep `backoff` 于 `main.ts` 0 命中）：采集 reconciler 每 5min 跑一轮，单轮 `catch` 只 `mlog('collector:…:error')` 后原样等下一次定时。L0 写密钥锁定（或任何持续故障）时**同样的失败每 5min 重演一次**，日志与错误长期空转、无退避、无上限。
+> 目标：失败按指数退避（5min→10→20→40，钳到上限 2h）；连续失败 N 轮（缺省 6）后**停自动重试**，UI 只留「上次失败原因 + 手动重跑」；成功即退避归零。退避状态机收进纯函数，主进程只接线；`collector:backoff` 动作日志只带原因码。
+
+| 步骤 | 改了什么 | 怎么验 |
+|---|---|---|
+| 41-D1 退避状态机（纯函数单一真源） | `src/core/memagent/sessionCollector.ts` 的 `createReconciler`：`onScan` 抛错=本轮没推进 → `consecutiveFails++`、`nextEligibleAt = now + min(backoffCapMs, intervalMs·backoffFactor^fails)`；心跳 tick 用 `now() < nextEligibleAt` 门控（固定 base tick，跨窗才起跑）；`consecutiveFails ≥ maxConsecutiveFails` → 清心跳停自动重试；成功即归零 + 若曾停则重启心跳。新增选项 `backoffFactor`（缺省 2）/`backoffCapMs`（缺省 2h）/`maxConsecutiveFails`（缺省 6）/`now`（注入时钟，测试用）+ 回调 `onRoundFail`/`onAutoRetryStopped`/`onRecover`（只带原因码/轮数/间隔，绝不带正文）+ `Reconciler` 增读 `consecutiveFails`/`autoRetryStopped` | `sessionCollector.test.ts` 新增「批次41-D」describe 5 例：失败→指数退避且下一次心跳在窗口内被门控、跨窗才再跑 / 退避间隔封顶到 `backoffCapMs` / 连续失败达 `maxConsecutiveFails` 停自动重试且清心跳（tick 不再跑） / 失败后成功恢复退避归零并重启心跳（新增一份 timer） / 成功轮直接归零 |
+| 41-D2 端壳接线 | `src/electron/main.ts` §5.1：`COLLECTOR_BACKOFF_CAP_MS=2h`/`COLLECTOR_MAX_CONSECUTIVE_FAILS=6`；`onScan` 末尾 `!canAdvance`（L0 锁定致 apply 失败 / commit 失败 / 有写失败）时**抛错**（原因码 `apply_failed`/`commit_failed`/`write_failed`）让 reconciler 计为失败并退避；三个退避回调各落 `collector:backoff`/`backoff-auto-stopped`/`backoff-recovered`（`mlog` + `actionLog('collector',…)` 双写，值只有 `fails`/`delayMs`/`reason`）；`collector:status` 回显 `consecutiveFails`/`autoRetryStopped`/`last`（上次失败原因）；`collector:trigger-now` 手动重跑走同一退避记账、回显 `advanced`、成功后自恢复心跳 | handler 是**接线级**（`onScan` 补抛 + 三回调 + 状态回显），纯函数退避状态机由 41-D1 的 5 例覆盖，接线需手测报告实机核对 `collector:backoff` 动作日志 |
+| 41-D3 日志页人话标签 | `src/web/Home/programLogLabels.ts`：新增 `collector:backoff / backoff-auto-stopped / backoff-recovered` 三条中文标题；`NOTE_KEYS` 补 `fails / delayMs / prevFails / capMs`（值只有数字与原因码，无正文） | `programLogLabels.test.ts`（`actionTitle` 命中断言，无新增计数断言） |
+
+> 门禁（批次41-D 收口）：`npm run typecheck` 干净；oxlint **0 warnings / 0 errors**；全量 `vitest run` **147 文件 / 1723 例**全绿；`npm run code:index -- --write` 306 文件且 `:check` 最新。
+> 诚实边界（批次41-D）：① 退避只在「**onScan 真的抛错**」时触发——41-D 前主进程 `onScan` 从不抛错（`canAdvance` 只影响游标推进），退避是靠本批次在 `onScan` 末尾对 `!canAdvance` **补抛错**才真正接上的，没这条补抛 reconciler 永远看到「成功」；② 门控粒度是**心跳节拍**（固定 5min tick）而非精确到退避值——退避窗口内的 tick 直接跳过，实际起跑取「≥ nextEligibleAt 的下一个 5min 心跳」，非精确到毫秒（为保持注入定时器接口不变）；③ 手动 `trigger-now` 与清空重采的追采循环也走同一 `noteRound` 记账，会累加/清零退避计数（「真失败就该退避」的诚实口径）；④ 主进程退避接线是**接线级**，纯函数退避状态机由 5 例覆盖，接线需手测实机核对 `collector:backoff` 动作日志。
+
+## 批次41-E（2026-11-03）：主窗口创建失败必须报错并退出（P1-6）
+
+> 实测 `main.ts` 的 `new BrowserWindow` catch 分支：`mlog('bootstrap:window-failed')` 后 `return`——不走 `handleBootFailure`、不退出。用户表现「双击没反应」，进程存活并持单实例锁，只能杀进程恢复。
+
+| 步骤 | 改了什么 | 怎么验 |
+|---|---|---|
+| 41-E1 catch 分支报错并退出 | `src/electron/main.ts` §11 `bootstrap()`：catch 里 ① `mlog` 保留；② 补 `actionLog('app','bootstrap:window-failed',{ error, logPath: MAIN_LOG }, { level:'error' })`（此前只进 `main.log`，`actions.log` 查不到）；③ `dialog.showErrorBox('主窗口创建失败', 原因 + MAIN_LOG 路径)`；④ `app.quit()` 真退出（`return` 兜住后续 `win.webContents` 不空跑） | **主进程接线级**（`BrowserWindow`/`dialog`/`app` 无法在 vitest 真起窗口），无单测；实机核对：模拟窗口创建失败 → 弹错框 + `actions.log` 有 `app:bootstrap:window-failed` + 进程退出释放单实例锁 |
+| 41-E2 日志页人话标签 | `src/web/Home/programLogLabels.ts`：新增 `app:bootstrap:window-failed` 中文标题；`NOTE_KEYS` 补 `logPath`（值只有路径，无正文） | `programLogLabels.test.ts`（`actionTitle` 命中断言，无新增计数断言） |
+
+> 门禁（批次41-E 收口）：`npm run typecheck` 干净；oxlint **0 warnings / 0 errors**；`programLogLabels.test.ts` 12 例全绿。
+> 诚实边界（批次41-E）：① 靠 `app.quit()` 退出（而非 `process.exit`）——保留 `before-quit` 钩子（清内存 L0 密钥），失败启动时 L0 本未解锁，走标准退出路径即可；② 本改动的价值在「**可见 + 可诊断 + 可退出**」，没有自动化测试，实机验证归手测报告。
+
+## 批次41-F（2026-11-03）：备份目录校验 + 删除只认本配方产出的文件（P1-8）
+
+> 实测 `main.ts`：`backupChooseDir` 拿到原生目录选择结果后只 `normalize()` 就直接落 `backup-config.json`，**没有与数据根同规格的绝对路径/UNC/相对路径/可写性校验**；`rotateBackups` 在该目录内按前缀 `selectBackupsToDelete` 匹配删除——`selectBackupsToDelete` 此前只认「前缀 + 扩展名」，管理员把目录配错（指到 `memories-export/` 或某个装着别人 `memories-*.json` 的共享目录）就会把**非本配方产出的同名文件**也删掉。
+
+| 步骤 | 改了什么 | 怎么验 |
+|---|---|---|
+| 41-F1 删除只认「本配方产出的确切文件名」 | `src/electron/backupFiles.ts`：新增纯函数 `isRecipeBackupName(name)`（`<前缀><合法UTC时间戳段><扩展名>` 三者齐全才算本配方产出，时间戳段用 `planBackupFiles` 同一形态 `YYYY-MM-DDTHH-MM-SS-mmmZ`）；`selectBackupsToDelete` 在「前缀 + 扩展名」基础上**追加 `isRecipeBackupName` 门**——前缀匹配不再单独作为删除依据，共享目录里外来的、恰好同前缀但中间非时间戳的文件（如 `memories-notes.json`）不碰 | `backupFiles.test.ts` 批次41-F 两例：`isRecipeBackupName` 认形状（非时间戳/缺完整段→假）；`selectBackupsToDelete` 混入 `memories-notes.json` 时只删本配方最旧一份、外来文件保留；全外来→一个不删。改后旧例 `memories-a.json/b.json` 不再当备份滚（本批次已按时间戳形状改名） |
+| 41-F2 落 `cfg.dir` 前做与数据根同一套校验 | `src/electron/main.ts` §6：`backupSaveConfig`（手动改 dir）与 `backupChooseDir`（原生选择）保存前都走 `validateDataRootPath`（绝对/拒 UNC·相对）+ `ensureDirWritable`（可写探针，复用 `dataRoot.ts` 的真源），拒绝时**如实报错、不落配置**，并落 `backup:dir-invalid` / `backup:dir-unwritable`（mlog，含配置者与原因，无正文） | **主进程接线级**：校验真源在 `dataRoot.ts`（已有单测），备份两条 handler 是各几行接线；实机核对——配 UNC/相对/不可写目录 → IPC 返回 `ok:false` + 明确原因、`backup-config.json` 未变；配正常目录 → `backup:config-saved` 带 `dir` |
+
+> 门禁（批次41-F 收口）：`npm run typecheck` 干净；`backupFiles.test.ts` **15 例全绿**（新增 41-F 两例 + 修正 1 例）；`npm run code:index -- --write` 306 文件且 `:check` 最新。
+> 诚实边界（批次41-F）：① `isRecipeBackupName` 只能挡住「**形状不像本配方**」的外来文件（中间非时间戳段）；若共享目录里是**另一个实例产出的合法时间戳形状**备份，按名字仍无法区分归属——这属于「不该把多实例指向同一备份目录」的使用口径，本批次不为此引入实例指纹（会破坏既有备份文件的兼容性）；② 41-F 的删除收口落在纯函数 `selectBackupsToDelete`，`rotateBackups`（main.ts）直接调用它，无额外删除路径；③ 两条校验 handler 的接线无自动化测试直接覆盖（校验真源有单测），实机核对归手测报告。
+
+## 批次41-G（2026-11-03）：审计遗留三条小修 —— 全量评审 `AUDIT-FULL-REVIEW-2026-10-31` 里 #7/#11/#12 三条
+
+> 收口 2026-10-31 全量评审里三条未修的遗留小项，均为**局部卫生**，不动行为口径：#7（e2e 强杀 CDP 端口进程树可能误杀用户自己的 Chrome）、#11（动作日志尾读用 `Buffer.allocUnsafe` 且忽略 `readSync` 实读长度）、#12（静态服务 `decodeURIComponent` 未捕获畸形 `%` 序列的 `URIError`）。
+
+| 步骤 | 改了什么 | 怎么验 |
+|---|---|---|
+| 41-G1 e2e 强杀前先验归属（评审 #7） | `e2e/global-setup.mjs`：新增 `exePathOfPid(pid)`（Windows 走 PowerShell 查 `Win32_Process.ExecutablePath`、Linux 读 `/proc/<pid>/exe`、取不到返回 `null`）+ `isPlaywrightExe(path)`（与 `chromium.executablePath()` 相等、或路径含 `ms-playwright`/`.local-browsers` 缓存特征才认「本仓库」）；旧实例占用 CDP 端口时**先确认可执行路径属于本仓库 Playwright 浏览器才 `taskkill /T`**，否则**不启动并抛出明确指引**（释放端口或设 `E2E_CDP_PORT`），绝不连用户 Chrome 标签页一起杀 | 无单测（e2e 引导脚本）；`node --check` 语法过；实机核对——占 9222 的是系统 Chrome 时 E2E 报「非本仓库进程占用，请释放/换端口」而非杀掉；占的是上轮残留 Chromium 时正常清掉续跑 |
+| 41-G2 尾读不用 `allocUnsafe` 且尊重实读长度（评审 #11） | `src/electron/actionLog.ts` `readTailLines`：`Buffer.allocUnsafe(readBytes)` → `Buffer.alloc(readBytes)`，并把 `readSync` 返回值接住、只取 `buf.subarray(0, read)` 再转字符串——短读（文件在读前缩小等）不再把未初始化堆内存/池化旧数据混进日志窗口（与 `auditLog.readFrom` 同一口径） | `actionLog` 尾读既有单测仍绿（1725 例全过）；行为对正常文件不变（`read == readBytes` 时子串=整段） |
+| 41-G3 静态服务 `decodeURIComponent` 捕获 `URIError`（评审 #12） | `src/electron/main.ts` §7 `startStaticServer`：请求行 `decodeURIComponent` 包 `try/catch`，畸形 `%` 序列（`URIError`）→ 回 `400 bad request`，不再让未捕获异常打断整个请求回调 | 正常请求路径不变；`curl 'http://127.0.0.1:<port>/%zz'` 得 400 而非服务端崩溃 |
+
+> 门禁（批次41-G 收口）：`npm run typecheck` 干净；oxlint **0 warnings / 0 errors**；全量 `vitest run` **147 文件 / 1725 例**全绿（Statements 81.73% / Branches 73.89% / Lines 84.81%）；`node --check e2e/global-setup.mjs` 过；`npm run code:index -- --write` 306 文件且 `:check` 最新。
+> 诚实边界（批次41-G）：① 41-G1 的判定是「**能确认是本仓库才杀，确认不了就不杀**」——`exePathOfPid` 取不到路径（如 PowerShell 不可用、macOS 无 `/proc`）时按「非本仓库」处理，宁可让本次 E2E 失败并给指引，也不误杀；这是**保守默认**，代价是「确实是我们残留但路径查不到」时会拦一次（此时设 `E2E_CDP_PORT` 换端口即可绕过）；② 41-G2 只改读取缓冲与实读长度，**不改尾读窗口口径**（仍 128KB / 50 行、跨轮转回退）；③ 41-G3 只收口**主进程静态服务**这一处评审点名的 `decodeURIComponent`，e2e 测试脚手架（`dev-server.ts`/`servers.ts`）与 `agentOnboard/server.ts` 里的同类调用**不在本条评审范围内、未动**（测试脚手架是随机端口一次性、agentOnboard 侧由外层 try/catch 兜底）。
+
+## 批次41-H（2026-11-03）：补齐两处「接线级」自动化测试 —— 把主进程里「只在真改到才落盘」与「向导强制与否」的判定收成可测纯函数
+
+> 41-C / 41-A 收口时留了两处**接线级缺口**（主进程 handler 的接线没有自动化测试直接覆盖，归 41-H）：① §6f 补炼接线——删除/清空重采/规则重判后「摘除补炼队列幽灵条目，**且只在真摘到才落盘 + 记日志**」；② 向导主进程判定——指针缺失/损坏/老指针没 `setupDone` 时**必须**进向导。此前这两处判定都写死在 `main.ts`（无法在 vitest 里 import Electron），逻辑靠实机走查。41-H 把**判定本体**提成纯函数、`main.ts` 退成薄接线，判定就有自动化覆盖。
+
+| 步骤 | 改了什么 | 怎么验 |
+|---|---|---|
+| 41-H1 补炼「对账/单删 + 是否落盘」判定提成纯函数 | `src/core/memagent/refineQueue.ts`：新增 `reconcileAndPersistRefineQueue({queueDir,liveIds,now,load,save})` 与 `removeRefineQueueRowAndPersist({queueDir,id,now,load,save})`——`load`/`save` 由调用方注入（本模块不碰文件系统），返回 `{pruned/removed, persisted, state}`，把「`queueDir` 未就绪不碰盘 / 无幽灵不落盘（幂等）/ 真摘到才 `save` 一次」这三条分支收成**一个可测口径**；`main.ts` §6f 的 `reconcileRefineQueueDir`（reset/rejudge 后全量对账）与 `removeRefineQueueRow`（`storage:deleteMemory` 成功后的单删热路径）改成直接调它，行为不变（同落盘闸门、同 `refine:queue-reconciled` 日志键） | `refineQueue.test.ts` 新增「批次41-H」describe 2 例：`reconcileAndPersistRefineQueue` 有幽灵→落盘 1 次且清掉 ghost、无幽灵→不落盘、`queueDir:null`→连 load 都不碰；`removeRefineQueueRowAndPersist` 真摘到→落盘 1 次、再摘幂等不落盘、`queueDir:null`/`id:''` 一律不碰（注入式 load/save + 落盘计数器断言） |
+| 41-H2 向导主进程判定提成纯函数 | `src/electron/dataRoot.ts`：新增 `wizardRequired(read: DataRootPointerRead): boolean` = `!isSetupComplete(read.status==='ok' ? read.pointer : null)`——把「`readSetupPointer`（读指针）→ 判缺失/损坏 → `isSetupComplete`」三步收成**单一判定**（missing/corrupt 当 `null` → 一律进向导）；`main.ts` 的 `isWizardIncomplete` 改成读指针后直接调 `wizardRequired`（读指针这步仍留在端壳，因为 `DATA_ROOT_POINTER` 是主进程常量） | `dataRoot.test.ts` 新增「批次41-H」describe 4 例：指针缺失/损坏→`true`；老指针没 `setupDone`（只两库目录）→`true`；`setupDone` 但缺库目录→`true`；**唯一放行**（两库目录 + `setupDone` 齐全）→`false` |
+
+> 门禁（批次41-H 收口）：`npm run typecheck` 干净；oxlint **0 warnings / 0 errors**；全量 `vitest run` **147 文件 / 1731 例**全绿（Statements 81.75% / Branches 73.91% / Lines 84.82%）；`npm run code:index -- --write` 306 文件且 `:check` 最新。
+> 诚实边界（批次41-H）：① 41-H 补的是**判定本体的接线级覆盖**——把「是否落盘」「是否进向导」这两条主进程分支提成纯函数后就有单测；但 **`main.ts` 里 IPC 通道本身怎么把 `storage:deleteMemory` 成功回调接到 `removeRefineQueueRow`、reset/rejudge 执行完接到 `reconcileRefineQueueDir` 这层「调用顺序」仍无自动化测试**（需要真起 IPC + 会话 + 内核，属 E2E/实机口径，未在本批次伪造）；② 纯函数提取**不改变既有行为**（落盘闸门、日志键、`refine:queue-reconciled` 口径全部照旧），只是把原本内联在 `main.ts` 的三行判定挪进 `refineQueue.ts`/`dataRoot.ts` 的单一真源；③ `wizardRequired` 仍不含 L0 密钥环/写密钥的状态——向导门禁口径是「指针三件事」，与 `isWizardIncomplete` 旧口径一致，未借本批次扩张判据。
+
+## 批次41-O（2026-11-03）：删除通道如实告知「连带销毁 N 条 L0 原文」（用户口径 B：只告知、不改「删除即销毁 L0」的存储语义）
+
+> 41-C 收口时留了一笔账：三个删除通道（`ledgerReset` 清空重采 / `rejudge` 规则重判 / 手动删行）对账本是**硬删**，而 `FileStorage.deleteMemory` 本就**同步删 L0 密文**（批次36/37 设计）。用户口径 B 明确**不反转**存储语义（删除即销毁 L0，不保留），所以问题不是「该不该销毁」，而是「**销毁多少原文，用户事前不知道**」——`RejudgePreview` 此前没上报待删行里带 L0 原文的条数，卡片也没提示「这些原文删了就回不来」。41-O 只补**告知**这一层：把「连带销毁 N 条 L0 原文」在两张卡的预览 / 确认 / 回执三处明写，并把数字带进审计与动作日志；删除/销毁逻辑一字不动。
+
+| 步骤 | 改了什么 | 怎么验 |
+|---|---|---|
+| 41-O1 重判预览/回执上报带 L0 原文的待删行数 | `src/core/memagent/rejudge.ts`：`RejudgePreview` 新增 `with_l0_cipher: number`——**只计「将删且非受保护且带 L0」的行**（`purge && !protected && hasL0Source`；受保护行执行会跳过、其 L0 存活不计，放行/缺 L1 行不删不计）；判据 `hasL0Source`（行上明文 `content_orig` / 已拆 `content_l0_enc` / `has_l0` 标记）与 `ledgerReset.ts` 的 `hasText` 判据同源；`summarize()` 只在「purge 且非受保护」分支累加；整轮 `security_change/op=rules_rejudge` 审计 detail + `main.ts` 的 `rules:rejudge-run` 动作日志都带上 `with_l0_cipher` | `rejudge.test.ts` 新增批次41-O 1 例（受保护 purge / 放行 / 缺 L1 一律不计，只 1 条「将删且带 L0」计 1）；`RulesRejudgeCard.test.tsx` 补 `with_l0_cipher` 断言 + 「警告出现 / 为 0 时不出现」正反例 |
+| 41-O2 两张安全页卡三处明写 | `src/web/security/RulesRejudgeCard.tsx`：预览区 `with_l0_cipher>0` 出红字 `rules-rejudge-l0-warn`（「N 条待删行带 L0 原文：删除同步销毁其 L0 密文，且不能按 L0 重建找回，唯一退路是备份目录」）+ 确认区补一句 + 回执区 `rules-rejudge-l0-receipt`（「连带销毁 N 条 L0 原文」）；`src/web/security/LedgerResetCard.tsx` 同口径出 `ledger-reset-l0-warn` / 确认区 / `ledger-reset-l0-receipt`（其预览内联计数原就有，本次补警告块与回执块） | `LedgerResetCard.test.tsx` 预览用例补 `ledger-reset-l0-warn` 断言（含「5」「L0」「备份目录」）；两卡 testid 与文案由单测锁定 |
+| 41-O3 文档校正「按 L0 重建」适用范围 | AGENTS §9 批次37-E 边界补 ⑤、批次39 分工补 41-O 边界；本文件 37-E 行补「适用边界」引注；`specs/需求规格书.md` 同步——统一写明：**重建救整份 L1–L6 库丢失/要重造，救不回逐行删除**（逐行删除的 L0 原文已同步销毁，重建只能按「取不到原文」跳过，退路只有执行前备份） | 三处文档与卡片口径一致，无「删一行还能靠重建找回」的误导表述 |
+
+> 门禁（批次41-O 收口）：`npm run typecheck` 干净；oxlint **0 warnings / 0 errors**；全量 `vitest run` **147 文件 / 1733 例**全绿（Statements 81.76% / Branches 73.98% / Lines 84.83%）；`npm run code:index -- --write` 306 文件且 `:check` 最新。
+> 诚实边界（批次41-O）：① **不改存储语义**——删行同步销毁 L0 密文仍是既定行为（口径 B），本批次只把它从「静默」变「事前明写」；② `with_l0_cipher` 在 `rejudge` 里只数**会删的那部分**，而 `ledgerReset` 是整库清空、其 `scanLedgerForReset` 早已报全库带 L0 行数——两者口径不同（选择性删 vs 全删）但都诚实，未强行拉齐；③ 受保护行（pinned/locked）执行时跳过、其 L0 存活，故**不计**进 `with_l0_cipher`，避免「会销毁」被高估；④ 「备份目录是唯一退路」在卡面与文档都点明，本批次不提供新的找回通道。
+
+## 批次41-J（2026-11-03）：未接线三件套立项方案（**只出方案、不实现**）
+
+> 完整方案在 `specs/ROADMAP-批次42-未接线三件套-方案.md`（本行只留指针与实测结论，不复述全文）。三件「未接线大项」= 云端同步 / 每日全量补齐 / 独立采集守护进程；**均为增量能力，不做不影响现有数据正确性**。
+>
+> **实测结论（2026-11-03 只读，非推测）**：① 云端同步**核心已写好且已测**（`sync.ts` 的 `SyncHub`+三端引擎+§9.7 裁决、`pgSyncHub.ts` 基于 `@electric-sql/pglite` 进程内 Postgres、可传 `dataDir` 落盘），但 `src/electron/` **0 处**引用、内核入口 `agent.ts` 的 `sync()` 仍 `E_NOT_IMPLEMENTED`（`agent.ts:253-264`）；② §3.4 `reconcile()` 引擎存在但**无调度**（`FORGETTING_INTERVAL_MS` 是 6h 遗忘周期，不是每日对账）；③ 采集/遗忘/补炼全在**主进程内** `main.ts` 的 `setInterval`，**桌面端没开就没在采**。
+>
+> **拆分建议（供后续排期，不代表已排期/已实现）**：42-A 内核 `sync()` 接真 → 42-B 端壳 `PgSyncHub` 持久化 + `sync:*` IPC → 42-C 三端引擎 + §9.7 裁决 UI → 42-D 备份/迁移收口；43-A 每日全量 `reconcile`（依赖 42）；44-A 采集抽无头守护 → 44-B 双写者锁协同。**前置**：多端 `team_id` 隔离依赖 **41-K 的账本租户归一**，建议 41-K 先于 42。
+> 诚实边界（批次41-J）：本批次**只写方案**，未改任何 `src/` 代码、未触发实质 `verify` 逻辑变化；方案里的「每日 / 每 6h / 15s」等数字取自当前 `main.ts` 实测，非目标值；中枢落地形态（单机 pglite 文件 vs 远端 PG）是 42 的第一道拍板口，方案未替用户定。
+
+## 批次41-K（2026-11-03）：令牌与租户欠账立项方案（**只出方案、不实现**）
+
+> 完整方案在 `specs/ROADMAP-批次45-租户归一与成员密钥域模型-方案.md`（本行只留指针与实测结论）。两条欠账 = **账本租户归一（MCP 作用域收紧的前置）** + **成员/API 密钥内核域模型**；**不处理不影响单机数据正确性**（MCP 现在是「单令牌 + `['*']` 全放行」的已知接受取舍），但做多租户硬隔离前必须先做 45-A。
+>
+> **实测结论（2026-11-03 只读，非推测）**：① 渲染层 `getTenant()` 首次**现造** `u_<ulid>/team_local/ent_local`（桌面壳内被 `syncTenantFromHost` 会话真值覆盖，纯浏览器仍现造）；② 采集器/MCP 写账本用**写死** `u1/t1/e1`——**同一份 `memories.db.json` 混住多租户身份**；③ `McpAccount.scope_project_ids` 默认 `['*']`（`mcpAuth.ts` 冻结，机器级单令牌），`projectInScope` 已写好且 `mcpScope.test.ts` 8 例覆盖，**差的是账本租户一致才敢收紧**；④ 内核**无**「成员/API 密钥」域模型（只有 `Account` 写三元组 + L0 授权的 `grantee_user_id`/`scope_project_ids`），home 侧 `admin/member` 角色与内核**未绑定**。
+>
+> **拆分建议（供后续排期，不代表已排期/已实现）**：45-A 账本租户归一（单一租户真源 + 数据根规范三元组 + 存量归一迁移走备份闸门）→ 45-A3 才收紧 `McpAccount.scope_project_ids`；45-B 成员/API 密钥域模型（`Member`/`ApiKey` 真实空表，`ApiKey.secret` 只存哈希、绑定 member，复用 45-A 归一租户，把单一机器级令牌升级为「member 的 API key」）。**依赖**：45-B 依赖 45-A；45-A3 依赖 41-J/42 是否做多机（单机可先只做 45-A1/A2）。
+> 诚实边界（批次41-K）：本批次**只写方案**，未改任何 `src/` 代码；`u1/t1/e1` 与「现造 `u_<ulid>`」为当前实测口径，一旦 45-A 落地这些写源都要改，本行数字仅作现状记录。
+
+## 批次41-Z（2026-11-04）：批次41 收口 —— 全量门禁、打包，以及**第一次让批次41 的代码在用户机上跑起来**
+
+> 这一节不是「又改了什么代码」，而是**把 41-A…41-O 从「仓库里有」变成「用户机上正在执行」**。收口前的实测事实：数据根写锁里 pid=19008 的可执行路径是 `release/installer/win-unpacked/`，即批次40-E 于 2026-11-03 14:32 产出的那份包，其 `app.asar` 里 `grep audit.jsonl` **0 命中** → 41-A 的 `FileAuditLog` 根本不在运行的二进制里。所以 41-A 的存量迁移、41-C 的启动对账、41-D/E/F/O 全部**只存在于源码，从未执行过**。
+>
+> **两步落地**：① `npm run build && npm run build:electron && node tools/package-win.cjs` 出便携产物 `release/win-unpacked/`（该目录不碰正在运行的 `release/installer/`，也不产出安装包），`CloseMainWindow` 优雅退出 pid 19008 后启动 → 10:08:50（UTC+08:00）闸门自跑；② `npm run verify` 全链绿后 `npm run package` 出 NSIS 包，`release/installer` 换成含批次41 的产物，10:18:33 第二次启动做幂等复验。
+>
+> **真机证据（全部来自数据根，只读核对）**：
+>
+> | 项 | 实测值 |
+> |---|---|
+> | 41-A 备份闸门 | `kernel:audit:log-backup` → `backups/audit-log-split-2026-11-04T02-08-50-029Z`，**3 源**（迁移前的 `memories.db.json` 14,283,011 B 快照、`memories.l0.json`、`l0-keyring.json`）；当时 `audit.jsonl` 尚不存在，故**没有第 4 源**（配方按「缺哪个源就明写缺哪个」执行，不是漏备） |
+> | 41-A 迁移 | `kernel:audit:log-migrated` `migrated_rows=11847`；`audit.jsonl` 3,067,402 B、**11,847 行逐行 `JSON.parse` 通过、0 坏行**；`doc.audit` 长度 **0**；库文件 14,283,011 → 11,215,610 B（**−3.07 MB**）；记忆行数 1532 未变 → **审计条数迁移前后相等，`queryAudit` 全量口径没丢行** |
+> | 41-A 幂等 | 第二次启动 `kernel:audit:log-open` rows=11855、`legacy_rows_in_ledger` 已空 → **不再出现 `log-migrated`**（与 `fileStorage.test.ts` 那条「二次启动不重复」用例同口径，真机成立） |
+> | 41-A 追加中 | 迁移后 `audit.jsonl` 11,847 → 11,856 行持续增长（`memory_op` 新行），写锁由新产物持有 → 追加式账本不是「搬完就静止」 |
+> | 41-C 对账 | 首次启动 `kernel:refine:backfill-scan` `pruned_ghosts:**124**`（队列 1655 → 1531 条，幽灵现量 0）；第二次启动 `pruned_ghosts:0` = **幂等** |
+> | 时延收益 | **本机无足量样本**：迁移后 `ipc:storage:putMemory` n=0、迁移前 n=3（中位 165 ms）。复刻实验的 28.7 倍**不得**当本机实测值引用 |
+> | 41-D 退避 | 今日 `collector:backoff*` **0 命中**（采集器一直成功推进）→ 只有单测 5 例，**未被真机实证** |
+> | 41-B 摘要行 | `main.log` 里 `forgetting:cycle` 共 **33 条**，最近一条 09:55:31（UTC+08:00）`summaries_created:0`（`freshness_updated:1532 migrated:16`）→ 合并组未触发（需同键 ≥3 行），**新字段仍无真机产物**；顺带确认该周期**只 `mlog` 到 `main.log`、不写 `actions.log`**（`main.ts:2972`），属既有观测缺口、不属本批次，未顺手改 |
+>
+> **门禁（实测）**：`npm run verify` **退出码 0** —— typecheck 干净、oxlint **0 warnings / 0 errors**、`code:index:check` 已是最新（**306 个文件**）、vitest **147 文件 / 1733 例**全绿（Statements 81.76% / Branches 73.98% / Lines 84.83%）、`build:electron` + Playwright **106 例通过（37.3s）**。安装包 `release/installer/MultiAgent Memory-0.1.0-setup.exe` **122,048,550 B = 116.39 MB**，SHA256 `E5160D30647EFC5E511D366A6BAEA2260E682869E5247691AB1DD26845A30634`，2026-11-04 10:17:07 落盘。
+>
+> **两条踩坑记录（下次别再误判）**：① 打包日志显示 `release/installer` 被外部进程占用（EPERM）→ 按批次21 既定路径先输出到 `release\installer-20261104-021635`、构建成功后删旧目录并**收口回 `release/installer`**，同时删掉了便携产物 `release\win-unpacked`（所以便携那份不能当长期入口，收口必须落在安装包）。② **用 `grep app.asar` 判「产物里有没有某段代码」在本项目不成立**——electron-builder 把 `dist-electron` 放进了 `app.asar.unpacked/`，asar 本体里 `grep audit.jsonl` 恒为 0（假阴性）。正确判据：`app.asar.unpacked/dist-electron/main.cjs` 的 md5 与刚构建的 `dist-electron/main.cjs` 逐字节相同（本次 `5c251652…`，`audit.jsonl` 命中 3 次），或直接看真机启动的动作日志。
+>
+> 诚实边界（批次41-Z）：本节的「真机已验证」只覆盖 41-A 与 41-C 两条；41-D（需一次真失败）、41-E（需模拟窗口创建失败）、41-F（需把备份目录配到非法路径）、41-O（需管理员点重判/清空预览）与 41-B（需一个真摘要行）**仍待实机走查**，步骤写在 `specs/MANUAL-TEST-FIX-BATCH-41.md` §3，没有把它们写成已验证。
+
+
+
+
+
+
 
