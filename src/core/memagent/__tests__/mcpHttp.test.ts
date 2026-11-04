@@ -441,3 +441,45 @@ describe('MCP HTTP（批次2 信任边界）', () => {
     expect(body.result.content[0].text).toContain('category');
   });
 });
+
+// 批次41-R：明细页「有没有被点开」此前只写 main.log，日志页（读 actions.log）看不到。
+// 这里锁住回调本体：主进程接的是 mlog + actionLog 双写（接线级），判据与值形态由本用例钉住。
+describe('批次41-R：明细页查看回调 onViewDetail 只回 outcome', () => {
+  let handle: McpHttpHandle;
+  let hostHeader = '';
+  const seen: Array<'ok' | 'miss'> = [];
+
+  beforeAll(async () => {
+    const vault = (await createTestVault()).vault;
+    handle = runMcpHttpServer({
+      port: 0, token: TOKEN, storage: new InMemoryStorage(), l0: vault,
+      onViewDetail: (outcome) => { seen.push(outcome); },
+    });
+    hostHeader = `127.0.0.1:${await handle.ready}`;
+  });
+
+  afterAll(() => { handle?.stop(); });
+
+  it('点开有效链接 = ok，点开不存在/已失效的 id = miss（回调里没有 id、没有正文）', async () => {
+    const r = await fetch(`http://${hostHeader}/mcp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` },
+      body: JSON.stringify({
+        jsonrpc: '2.0', id: 1, method: 'tools/call',
+        params: { name: 'recall_memory', arguments: { query: '批次41-R 观测缺口', project_id: 'P1' } },
+      }),
+    });
+    const body = (await r.json()) as { result: { structuredContent: { display: { detail_url: string | null } } } };
+    const link = body.result.structuredContent.display.detail_url;
+    expect(link, '摘要档应带一条一次性明细链接').toMatch(/^http:\/\/127\.0\.0\.1:\d+\/recall\/[A-Za-z0-9_-]{16,32}$/);
+
+    const opened = await fetch(link!);
+    expect(opened.status).toBe(200);
+    const ghost = await fetch(`http://${hostHeader}/recall/${'q'.repeat(22)}`);
+    expect(ghost.status).toBe(404);
+
+    expect(seen).toEqual(['ok', 'miss']);
+    // 回调值域只有这两个字面量——一次性 id 与页面正文都不出这道口
+    expect(seen.every((s) => s === 'ok' || s === 'miss')).toBe(true);
+  });
+});

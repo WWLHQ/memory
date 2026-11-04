@@ -818,3 +818,16 @@ status: draft
 
 
 
+### 批次41-R：明细页查看事件双写进 `actions.log`（观测入口错位，不是功能缺陷）
+
+> 发现方式不是读代码，是**闭合 41-L 时真点了一次明细页**（2026-11-04 11:51）：`main.log` 里 `mcp:recall_detail_view` 3 条、`actions.log` **0 条**。AGENTS §4 写明「排查第一入口 = `actions.log`」，日志记录页读的也是它（`tailActionLog`）——所以「明细页到底被点开过没有」这件事对用户不可见。同型缺口此前修过两次：批次34 的 `llm:config-saved`/`llm:test-engine`、批次41-B 声明的 `forgetting:cycle`。
+
+| 项 | 落点 | 测试 |
+|---|---|---|
+| 41-R1 双写接线 | `src/electron/main.ts` §11 里 `runMcpHttpServer({…, onViewDetail })`：`mlog('mcp:recall_detail_view',{outcome})` **加** `actionLog('mcp','recall_detail_view',{outcome})`（批次34 同口径）。回调签名 `'ok'\|'miss'` 由 `src/core/memagent/mcpHttp.ts:76` 定死，**一次性 id、页面正文、令牌都出不了这道口** | 接线两行本身属端壳级；判据与值形态由下一条在核心层钉住 |
+| 41-R2 人话视图 | `src/web/Home/programLogLabels.ts`：动作字典新增 `mcp:recall_detail_view` = 「打开召回明细页（一次性链接）」；`NOTE_KEYS` 补 `outcome` | `programLogLabels.test.ts` 2 例：`actionTitle('mcp','recall_detail_view')` 认得新键；`detailNote({outcome,id,html})` 只输出 `outcome=ok`（id/正文不进摘要） |
+| 41-R3 回调本体 | `mcpHttp.ts` 的 `GET /recall/<id>` 路由（`take()` 命中给 200 + `ok`，未命中/过期给 404 + `miss`；**不消费票据**，TTL 内可重复打开） | `mcpHttp.test.ts` 新增「批次41-R」describe 1 例：真起服务器 → `recall_memory(project_id:P1)` 取 `display.detail_url` → 打开 200、打开 `'q'.repeat(22)` 得 404，断言回调序列 `['ok','miss']` 且值域只有这两个字面量 |
+
+> 门禁（批次41-R 收口）：`npm run verify` 退出码 **0**（typecheck 干净 → oxlint 0/0 → 索引 306 文件最新 → vitest **147 文件 / 1735 例**（本批 +2，Statements 81.76%）→ Electron 构建 → E2E **106 passed**）；`npm run package` 重新出包（122,048,686 B / SHA256 `d0f31b70a702236cfb16cc10f9ccf7a050270e23f075c50ce85ff309a4c5cadf`，12:11:56），产物 `app.asar.unpacked/dist-electron/main.cjs` 里双写两行都在、`l0-rebuild` 命中 2 次（= 41-P 同批出厂；10:17 那版包里没有 41-P）。
+> **真机已验（2026-11-04 12:14，本批新产物，写锁 `{"pid":3880}`）**：真发一次 `recall_memory`（客户端自报 `verify-41r`）→ `mode=markdown-compact` + `detail_url` → 打开 **200 / 5,548 B**（页面里检索当前令牌命中 0）→ 假 id **404** → `actions.log` 该键由 **0 条 → 2 条**（`{"outcome":"ok"}` / `{"outcome":"miss"}`），`main.log` 由 3 条 → 5 条（双写、非搬移）。核对步骤与期望行见 `specs/MANUAL-TEST-FIX-BATCH-41.md` §3。
+> 诚实边界（批次41-R）：① 只修观测，票据口径（30 分钟、纯内存、不消费）与闸门（Host 绑定 + 免令牌）一字未动；② 同批量到的 **41-Q 没在本批修**——`clientSupportsHtmlDetails` 判据是 `client.split('/')[0]` **精确等于 `qoder`**，本机 Qoder Desktop 自报 `qoder-desktop-mcp-host/1.0.0`，recall 审计 **0 命中**（11:51 实测 100 条、12:15 复测 102 条，含本会话为验证而发的 2 条）→ `html-details` 档从未生效；把它加进白名单的前提是「Qoder 气泡真渲染 `<details>`」，这条**尚无证据**（DSH 侧 2026-10-31/11-01 两次实测是原样吐纯文本），盲改会把失效 HTML 铺回聊天窗口，所以留待用户拍板；③ 上面那条真机验证**自己也进了账**——那次 `verify-41r` 召回在 `audit.jsonl` 里留下一条真实 recall 行（观测修复的验证必然污染被观测的计数，所以上面的数字都带时刻）。

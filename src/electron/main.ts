@@ -2549,7 +2549,12 @@ async function bootstrap(): Promise<void> {
   // 批次33-C：同一端口另开 GET /recall/<一次性 id> = 聊天里「展开明细」链接指向的本机明细页（真折叠），只记命中与否，不记 id 与正文。
   const mcpHttp = runMcpHttpServer({
     storage, port: MCP_HTTP_PORT, token: mcpToken, l0: l0Vault,
-    onViewDetail: (outcome) => { void mlog('mcp:recall_detail_view', { outcome }); },
+    // 批次41-R：同一条也落 actions.log（批次34 对 llm:* 的同一口径）——日志页读的是 actions.log，
+    // 只写 main.log 等于「明细页有没有被点开过」对用户不可见。值只有 ok/miss，无 id、无正文。
+    onViewDetail: (outcome) => {
+      void mlog('mcp:recall_detail_view', { outcome });
+      actionLog('mcp', 'recall_detail_view', { outcome });
+    },
   });
   mcpHttp.ready
     .then((p) => { void mlog('bootstrap:mcp-http-listening', { port: p }); })

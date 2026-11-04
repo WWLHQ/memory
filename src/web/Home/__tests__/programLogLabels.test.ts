@@ -20,6 +20,8 @@ describe('actionTitle', () => {
     expect(actionTitle('kernel', 'audit:log-corrupt')).toContain('整档读不认');
     expect(actionTitle('kernel', 'audit:log-backup')).toContain('搬移历史审计前的备份');
     expect(actionTitle('kernel', 'audit:log-migrate-skipped')).toContain('本次没搬历史审计');
+    // 批次41-R：明细页查看事件双写进 actions.log 后，人话视图必须认得这个键
+    expect(actionTitle('mcp', 'recall_detail_view')).toContain('召回明细页');
   });
 
   it('IPC 通道命中：作用域中文 + 通道说明', () => {
@@ -63,6 +65,11 @@ describe('detailNote', () => {
     expect(note).toContain('stop_layer=L3');
     expect(note).toContain('stop_code=too_short');
     expect(note).toContain('refined_by=llm_partial');
+  });
+
+  it('批次41-R：明细页查看事件只带 outcome（一次性 id 与正文都不在值里）', () => {
+    expect(detailNote('{"outcome":"ok","id":"dmZ8gmrCURLtNquDq5WqFg","html":"<details>正文</details>"}'))
+      .toBe('outcome=ok');
   });
 
   it('批次41-A：审计账本的计数与位置进人话摘要，且不带任何审计正文', () => {

@@ -35,6 +35,8 @@ const ACTION_LABEL: Record<string, string> = {
   'onboarding:scan': '本机 Agent 扫描',
   'mcp:client-wire': '写入 MCP 客户端配置',
   'mcp:recall': 'MCP 召回记忆',
+  // 批次41-R：明细页被点开过没有——此前只进 main.log，日志页（读 actions.log）看不到
+  'mcp:recall_detail_view': '打开召回明细页（一次性链接）',
   'mcp:write': 'MCP 写入记忆',
   'llm:config-saved': '保存 LLM 引擎配置',
   'llm:test-engine': 'LLM 引擎连通拨测（真实 HTTP）',
@@ -194,6 +196,8 @@ const NOTE_KEYS = [
   'pruned', 'pruned_ghosts', 'why',
   // 批次41-D：采集器失败退避——退避到第几轮、等多久、恢复前累计几轮（值只有数字与原因码，无正文）
   'fails', 'delayMs', 'prevFails', 'capMs',
+  // 批次41-R：明细页查看事件（值只有 ok/miss，一次性 id 与正文都不落）
+  'outcome',
 ];
 
 /** k 为空串表示「这个字段的值本身就是一句话」（error/reason/message/text），不再挂前缀 */

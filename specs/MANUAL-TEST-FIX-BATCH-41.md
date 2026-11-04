@@ -1,7 +1,7 @@
 # 批次41 手动测试报告 · 审计搬出记忆库 + 队列卫生 + 退避/退出/备份校验 + 删除如实告知（收口与首次真机执行）
 
 日期（UTC+08:00）：2026-11-04
-分支：`main`，HEAD 仍是 `3a4080a`（**批次35、36、37、38、39、40、41 的改动全部未提交**；`git commit`/`git push` 需用户明确授权，本批未提交）
+分支：`main`，HEAD = `3c23bfe`（批次 35–41 已按问题点分 6 笔提交并推送 `origin/main`；**本报告的 41-R 一条尚未提交**，`git push` 需用户另行授权）
 上一批次：批次40（`specs/MANUAL-TEST-FIX-BATCH-40.md`）
 起因（用户原话）：「审计搬出记忆库」→「跑」（授权走完 41-Z：`verify` → `package` → 本报告）→ 追加「队列幽灵对账」（复查 41-C，产出 **41-P**）→ 追加「轮换 DSH MCP Bearer 令牌」（**41-L 已真机执行**，用户口径「全量换 + 全量重写」）
 
@@ -12,18 +12,20 @@
 | 项 | 值 |
 |---|---|
 | 安装包 | `release/installer/MultiAgent Memory-0.1.0-setup.exe` |
-| 大小 | 122,048,550 字节 = **116.39 MB** |
-| SHA256 | `E5160D30647EFC5E511D366A6BAEA2260E682869E5247691AB1DD26845A30634` |
-| 落盘完成（UTC+08:00） | 2026-11-04 10:17:07 |
+| 大小 | 122,048,686 字节 = **116.39 MB** |
+| SHA256 | `d0f31b70a702236cfb16cc10f9ccf7a050270e23f075c50ce85ff309a4c5cadf` |
+| 落盘完成（UTC+08:00） | 2026-11-04 **12:11:56**（本批 41-R 收口重打包；此表原写的是 10:17:07 那一版 `E5160D30…45A30634` / 122,048,550 B，**已被取代**——那一版里没有 41-P 的 `l0-rebuild` 对账，也没有 41-R 的双写） |
+| 出厂核对（不是「源码写了」，是「包里有没有」） | 只读比对 `app.asar.unpacked/dist-electron/main.cjs`（581,094 B）：`void mlog("mcp:recall_detail_view", { outcome });` 与 `actionLog("mcp", "recall_detail_view", { outcome });` **两行都在**、`reconcileRefineQueueDir("l0-rebuild")` **命中**、渲染层 `app.asar` 内 `召回明细页` **命中** |
+| 在跑的产物 | 12:14 用 `release/installer/win-unpacked/MultiAgent Memory.exe` 起回，写锁 `{"pid":3880,…}`；8204 可用（真发一次召回得 200） |
 | `npm run verify` | **退出码 0**（typecheck → oxlint → 索引新鲜度 → 覆盖率 → `build:electron` → E2E 一条链跑完，未分段） |
 | `npm run typecheck` | 干净（`tsc --noEmit` + `tsc --noEmit -p tsconfig.electron.json`） |
 | `npm run lint` | oxlint **0 warnings / 0 errors** |
 | `npm run code:index:check` | 代码索引已是最新（**306 个文件**；`npm run package` 的 `prepackage` 又自动刷新一次） |
-| 单测 | vitest **147 文件 / 1733 例全过** |
+| 单测 | vitest **147 文件 / 1735 例全过**（41-R 本批 +2：`mcpHttp.test.ts` 1 例 + `programLogLabels.test.ts` 断言） |
 | `npm run test:coverage` | Statements 81.76% / Branches 73.98% / Lines 84.83% |
-| `npm run test:e2e` | Playwright **106 passed（37.3s）** |
-| 打包过程 | 一次 EPERM 回退按批次21 既定路径走完：`release/installer` 被外部进程占用 → 本次先输出到 `release\installer-20261104-021635` → 构建成功后删旧目录并**收口回 `release/installer`**（日志 `[package] 已删除旧 release/installer，并把本次产物收口到固定目录` / `[package] 产物：release\installer；旧安装包目录清理 1 个`）。同时按流程删除便携产物 `release\win-unpacked` → **`release/` 下现在只有 `installer` 一个目录**。 |
-| 未做 | 没有执行 `npm run rejudge` 之外的账本批量改写；**没有点过**安全页任何需口令按钮（`SPLIT` / `RESET` / `REJUDGE` / `REBUILD`）；未提交、未推送。**41-L 已做**（令牌轮换见 §2 末尾，属运维动作、零代码改动、没碰账本） |
+| `npm run test:e2e` | Playwright **106 passed（45.9s）** |
+| 打包过程 | **共两次**。第一次（10:17，41-Z 收口）：一次 EPERM 回退按批次21 既定路径走完——`release/installer` 被外部进程占用 → 先输出到 `release\installer-20261104-021635` → 构建成功后删旧目录并**收口回 `release/installer`**（`旧安装包目录清理 1 个`）。同时按流程删除便携产物 `release\win-unpacked` → `release/` 下只有 `installer` 一个目录。**第二次（12:11，41-R 收口）**：同一回退再次触发（`[package] release/installer 被外部进程占用（EPERM），本次输出改到 release\installer-20261104-041129`），构建成功后照样收口回 `release/installer`（`旧安装包目录清理 0 个`）。**旧实例退出的证据不在打包日志里**：`killReleaseProcesses()`（批次27 的「先礼后兵」：`CloseMainWindow()` → 3 秒 → `Stop-Process -Force`）的 `Write-Output` 落在 PowerShell stdout，而 `package-builder.cjs` 只用它判断要不要多睡 800ms、**不转发成 `[package]` 行**，所以日志里一条关闭记录都没有——只能从别处证：`actions.log` 的 `[app:bootstrap:start]` 在 `02:51:48`（10:51，41-L 重启）与 `04:14:14`（12:14，本批新产物）之间**没有任何一次新启动**，且 12:14 新进程能拿到写锁（`{"pid":3880}`）、当前 `tasklist` 只有这一套 4 个进程 = 旧实例确实已退。**这条观测缺口本批没修**（属打包脚本自身的人话输出，与 41-R 同类但不在本批范围）。这一版产物才同时含 41-P 与 41-R。 |
+| 未做 | **41-R 没做任何账本改写**（只加一条观测的双写），也**没有点过**安全页任何需口令按钮（`SPLIT` / `RESET` / `REJUDGE` / `REBUILD`）——用户机上那两轮 `REJUDGE` 是用户自己点的（124 行已于 2026-11-03 14:43 清除，见 §6 与批次36/40 报告的校正）。提交状态：批次 35–41 已在 `3c23bfe` 及其前 5 笔进入 `origin/main`；**41-R 这笔待提交，推送需用户另行授权**。**41-L 已做**（令牌轮换见 §2 末尾，属运维动作、零代码改动、没碰账本） |
 
 > **判据校正（写给下一位维护者）**：用 `grep <符号> app.asar` 判断「产物里有没有某段代码」在本项目**不成立**。electron-builder 把 `dist-electron` 放进了 `app.asar.unpacked/`，asar 本体里 `grep audit.jsonl` 恒为 **0（假阴性）**。正确做法：比对 `app.asar.unpacked/dist-electron/main.cjs` 与刚构建的 `dist-electron/main.cjs` 的 md5（本次同为 `5c251652c6c712c2cf7f514fc96cce38`，`audit.jsonl` 命中 3 次），或直接看真机启动的动作日志。本报告初稿差点把「41-A 没进包」写成结论，就是这个假阴性造成的，已用真机启动证伪。
 
@@ -119,6 +121,15 @@
 - 对照旧行为（本批修复前）：同一操作只落 `l0:rebuild-run`，队列里留 N 条幽灵，直到下次启动 `[kernel:refine:backfill-scan] {"pruned_ghosts":N}` 才自净。
 - 闸门提醒：这一步要真删数据，**必须**你自己点，我不会替你输口令；执行前那份 `backups/l0-rebuild-…` 目录是唯一退路。
 
+**41-R 明细页查看事件双写进 `actions.log`（新增；回调本体有单测，`main.ts` 那两行是接线级 → 已真机执行）**
+- 现状实测（发现方式）：2026-11-04 11:51 真点了一次明细页 → `main.log` 有 `mcp:recall_detail_view` **3 条**、`actions.log` **0 条**，所以日志记录页（读 `actions.log`）看不到「明细页被点开过」这件事。
+- **真机已验证（2026-11-04 12:14，本批新产物 `release/installer/win-unpacked`，写锁 `{"pid":3880}`）**：向 8204 发一次真 `recall_memory`（客户端自报 `verify-41r`）→ `display.mode = markdown-compact` 且带 `detail_url` → 点开该链接得 **200 / 5,548 B**（页面全文里检索当前令牌命中 **0**，`leakToken=false`）→ 再把 URL 里 22 位 id 换成同长度的假 id 访问 → **404**。随后核对落盘：
+  - `actions.log` **2 条**：`[…T04:14:49.580Z] [info] [mcp:recall_detail_view] {"outcome":"ok"}` 与 `…581Z] … {"outcome":"miss"}`（= 北京时间 12:14:49，此前该键在 `actions.log` 里是 **0 条**）。
+  - `main.log` 同键 **5 条**（旧 3 条 + 本次 2 条）= 双写两条路径都在写，不是搬走。
+  - 没验的只剩**渲染层观感**：日志记录页人话视图里「打开召回明细页（一次性链接） · outcome=ok」这一行的实际显示（`programLogLabels.test.ts` 断言了键与人话标题、`{outcome,id,html}` 只输出 `outcome=ok`，但页面截图需要你目视确认）。
+- 断言的边界：值**只有** `ok`/`miss` 两个字面量——一次性 id、页面正文、令牌都不经回调出口（`mcpHttp.test.ts` 批次41-R 例锁的就是这个序列）；本条只修观测，票据 30 分钟 TTL / 纯内存 / 不消费的口径没动。
+- 同批量到的 **41-Q 本批未修**：`clientSupportsHtmlDetails` 白名单判据是首段**精确等于 `qoder`**，本机 Qoder Desktop 自报 `qoder-desktop-mcp-host/1.0.0` → recall 审计 **0 命中**（11:51 实测 100 条、12:15 复测 102 条，其中 2 条是本会话为验证 41-L/41-R 自己发的），`html-details` 档从未生效。要不要把该机自报名加进白名单，取决于「Qoder 聊天气泡是否真渲染 `<details>`」——这条**还没有证据**，盲改会把失效 HTML 铺回气泡，所以留给你拍板（见 §6 第 2 条）。
+
 ---
 
 ## 4. 批次41 逐条做了什么（细节见 `AGENTS.md` §3/§9 与 `specs/code-map.md` 批次41 各节）
@@ -139,6 +150,7 @@
 | 41-O | 三个删除通道事前明写「连带销毁 N 条 L0 原文」（口径 B：**只告知，不改「删除即销毁 L0」的存储语义**） | `rejudge.ts` 的 `RejudgePreview.with_l0_cipher` + 两张卡 | `rejudge.test.ts` **12** · `RulesRejudgeCard.test.tsx` **10** · `LedgerResetCard.test.tsx` **9** · `programLogLabels.test.ts` **12** |
 | **41-L** | 轮换泄露自 2026-10-31 的 MCP 机器令牌，并用生产函数把 5 家有配置面的客户端 + DSH（随宿主）全部重写 | `src/electron/main.ts` 的 `loadOrCreateMcpToken` + `src/electron/mcpClients.ts` 的 `wireMcpClient`（**零代码改动**，纯运维） | 无新增用例（走的是批次22/23/26-B 已有代码路径）；验证靠 200/401 探针 + 逐文件指纹复核，见 §2 末尾 |
 | **41-P** | 复查 41-C 时量出「硬删其实有四条通道」：按 L0 重建的 purge 分支也逐行 `deleteMemory`（`rebuild.ts:299`）却没接对账 → 现在 `l0:rebuildRun` 在 `report.purged > 0` 时补 `reconcileRefineQueueDir('l0-rebuild')` | `src/electron/main.ts` 的 `IPC.l0RebuildRun`（接线级，判定本体仍是 `refineQueue.ts`） | 无新增（本体由 41-H 的 `reconcileAndPersistRefineQueue` 覆盖）；实机核对 `why=l0-rebuild` 需真点 `REBUILD`，本批**未点** |
+| **41-R** | 闭合 41-L 时真点了一次明细页，量出 `mcp:recall_detail_view` 只在 `main.log`（3 条）、`actions.log` **0 条** → 日志页看不见。现改 `mlog` + `actionLog` 双写（批次34 对 `llm:*` 的同款口径），值只有 `ok`/`miss` | `src/electron/main.ts` 的 `runMcpHttpServer({onViewDetail})` + `src/web/Home/programLogLabels.ts` | `mcpHttp.test.ts`（批次41-R describe 1 例：`['ok','miss']` 序列 + 值域只有这两个字面量）· `programLogLabels.test.ts` +2 断言（新键有人话、`{outcome,id,html}` 只输出 `outcome=ok`）；`main.ts` 那两行属接线级、**已真机验掉**（12:14 真点：`actions.log` 该键 0 条 → 2 条，`ok` + `miss`）；只剩日志记录页**人话视图那一行的实际渲染**待用户目视，核对过程见 §3 |
 
 **41-I 今日首份真机数据（额度重置后，2026-11-04）**：队列 1531 条 = pending **1179** · done **298** · skipped **52** · failed **2**；`day=2026-11-04 dayRows=38/500`。今日 `ok=false` 的原因码分布：**`thin` 33 · `no_source` 12 · `spec_violation` 1**。对照批次39 的「failed 238 全是同一句 L2 没产出」——**批次40 的「料不够就 `skipped/thin`、不判死」在真机成立**（238 条 failed 已归零，短料现在停在 L1 并写明原因）。但样本仍小（今日约 50 行），不足以下「定档」结论。
 
@@ -171,7 +183,7 @@
    - **结论：41-M 只欠你一句授权，代码与仓库都没有阻塞。** 红线照旧：`dsh-bundles/`（内含 DSH 私有配置的 MCP Bearer 令牌）必须保持 gitignore，绝不进提交。
 2. **41-L 已做，且已于 2026-11-04 11:50 真机闭合**（轮换本身 10:47–10:56，用户口径「全量换 + 全量重写」）：证据、五份备份文件名与探针结果见 **§2 末尾**，逐条边界（`.bak-*` 里仍留着已失效的旧值、Windows 上报 666、动作日志无令牌就绪键、按客户端隔离仍属 41-K/45-B）也写在那里。
    - **闭合证据（2026-11-04 11:50:18–11:51:17，UTC+08:00）**：本会话经 Qoder 连接器真调了一次 `recall_memory`，内核审计新增 `action=recall`，`detail.client = qoder-desktop-mcp-host/1.0.0`、`request_id = req_01M6JAVN7E0H2B443GXJZAMQ59`、命中 5 条、`scanned_memories=1531`；返回值里 `rollup.today_calls=1` 与「审计里轮换（10:56）之后 recall 行数 = 1」两条独立口径一致——**新令牌在真客户端上端到端可用**，此前 §6.2 的「本会话 Qoder 连接器未实测」作废。顺带把一次性明细页也验了：`GET /recall/<id>` 返回 **200 / 4,928 B / 4 个 `<details>`**，`Cache-Control: no-store`、`X-Content-Type-Options: nosniff`、CSP `default-src 'none'`，页面正文**不含当前令牌**（按值比对，非按形状）。
-   - **本次闭合顺剂量出两个新缺陷（都未修，已立案）**：① **三档分发的第一档在该用户机上从未生效**——`clientSupportsHtmlDetails` 的判据是 `client.split('/')[0]` **精确等于 `qoder`**（`src/core/memagent/mcpRecall.ts:22-26`），而现役 `audit.jsonl` 的 **100 条 recall 行里命中白名单 0 条**，Qoder Desktop 实际自报 `qoder-desktop-mcp-host/1.0.0` → 得到的是 `display.mode = markdown-compact`。所以 AGENTS §1.1 与 §9 批次29 写的「当前 `qoder/*` 得 `<details>` 折叠版」**两头都不成立**（既不是前缀匹配，也没有一个 Qoder 命中）。② **`mcp:recall_detail_view` 只进 `main.log`，不进 `actions.log`**（`main.ts:2552` 用的是 `mlog`，不是 `actionLog`）——`main.log` 实测 3 条命中（最近 `2026-11-04 11:51:17`），而 `actions.log` 全量 **0 条**，所以 AGENTS §3/§9 批次33-C 的「落 `mcp:recall_detail_view` 动作日志」不准，日志页看不到明细页是否被点开过。这与 §2 末尾「动作日志无令牌就绪键」、批次41-B 的 `forgetting:cycle` 是同一类观测缺口。
+   - **本次闭合顺剂量出两个新缺陷（① 已立案为 41-Q 未修；② 已随 41-R 修掉）**：① **三档分发的第一档在该用户机上从未生效**——`clientSupportsHtmlDetails` 的判据是 `client.split('/')[0]` **精确等于 `qoder`**（`src/core/memagent/mcpRecall.ts:22-26`），而现役 `audit.jsonl` 的 **100 条 recall 行里命中白名单 0 条**，Qoder Desktop 实际自报 `qoder-desktop-mcp-host/1.0.0` → 得到的是 `display.mode = markdown-compact`。所以 AGENTS §1.1 与 §9 批次29 写的「当前 `qoder/*` 得 `<details>` 折叠版」**两头都不成立**（既不是前缀匹配，也没有一个 Qoder 命中）。② **`mcp:recall_detail_view` 只进 `main.log`，不进 `actions.log`**（`main.ts:2552` 用的是 `mlog`，不是 `actionLog`）——`main.log` 实测 3 条命中（最近 `2026-11-04 11:51:17`），而 `actions.log` 全量 **0 条**，所以 AGENTS §3/§9 批次33-C 的「落 `mcp:recall_detail_view` 动作日志」不准，日志页看不到明细页是否被点开过。这与 §2 末尾「动作日志无令牌就绪键」、批次41-B 的 `forgetting:cycle` 是同一类观测缺口。**② 已随本批 41-R 修掉并于 12:14 真机验证**（`mlog` + `actionLog('mcp','recall_detail_view',{outcome})` 双写；`actions.log` 该键由 0 条 → 2 条 `ok`/`miss`，见 §3 与 §4 表末行）；① 仍是待你拍板的 **41-Q**，本批没动白名单判据。
 3. **41-I 观测数据已足量，待用户定档**（2026-11-04 11:43 实测，判据用生产函数 `depthCapFor` + `meaningfulLength`，不是重算）：全库 1532 活行按深度上限分布 `cap L1 298 · L2 493 · L3 461 · L4 154 · L5 126`；**11-04（批次40-C 规则下）done 220 行 = 高于 cap 0 行（闸门确实守住了）· 恰好=cap 139 · 低于 cap 81 行（37%）**，81 行**全部**是 `refined_by=llm_partial` 且**都带 `stop_code`**（`too_short 68 · bad_json 9 · too_long 4`，没有一行是「停下来说不清为什么」）；对照 11-03（批次39 绝对规格）done 262 行 = 高于新 cap 70 行、0 行走 L6 通道 → 40-C 的行为改动是真发生了。**但 L4/L5 实际产出近乎为零**：全库带 L4 正文 1 行、带 L5 正文 0 行，而 cap 够 L4/L5 的 280 行里已 done 的 93 行全停在 L3 以下。旧文本「今日样本约 50 行 / `thin` 占比 33/46 ≈ 72%」是批次40 当天的快照，已被本条取代。**定档三个选项（调档位 / 深层只排云端引擎 / 接受 L3 封顶 + L6 索引）仍属用户拍板**，我没有替用户改任何档位常量。
 4. **41-N 未回收**：批次35–40 的手测验收反馈（尤其批次40 §4 A–E）用户尚未给。
 5. **数据层账目（2026-11-04 11:42 复核，其中一条是本报告的错）**：批次35「清空重采」（`RESET`）**从没点过**（`audit.jsonl` 里 0 条 `op=ledger_purge`），SPLIT / REBUILD 同样从未执行（无对应 `op`）。~~批次40 判出的 124 行 `short_low_signal` 存量仍在库里~~ **此句先前是错的，现已按证据改正**：审计 `2026-11-03 14:43:03` 有 `security_change / op=rules_rejudge`，`gate_version=3 · total=1585 · purge=124 · purged=124 · restamped=1461 · by_code={short_low_signal:124} · by_layer={L1:124}`，且执行前落了备份目录 `backups/rules-rejudge-2026-11-03T06-43-03-474Z`；`2026-11-04 11:42` 的 `npm run rejudge --json` 只读回放 1532 行得 **would_block 0 / deletable 0 / passed 1532**（两轮重判合计 `rejudge_purge` 审计 181 条 = 11-02 的 57 + 11-03 的 124，逐条对得上）。533 行缺 `sha256`、1 行缺 `embedding` 仍未回填（属批次41-J/42 云端同步的前置事实，不在本批顺手改）。
