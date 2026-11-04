@@ -39,8 +39,8 @@ export interface ActionLogTailResult {
 const MAX_STRING = 500;
 const MAX_ARRAY = 20;
 const MAX_DEPTH = 4;
-/** 敏感字段名：命中即整体替换为 ***，绝不写值 */
-const SECRET_KEY = /pass(word)?|secret|token|authorization|api[-_]?key|credential|cookie|session[-_]?id/i;
+/** 敏感字段名：命中即整体替换为 ***，绝不写值（批次37-G：恢复码 recovery_code 与密码同级） */
+const SECRET_KEY = /pass(word)?|secret|token|authorization|api[-_]?key|credential|cookie|session[-_]?id|recovery/i;
 
 /** 值形态兜底（批次27 P2-10）：键名不脱敏但值本身是密钥形态时替换命中段。
  *  只认高置信形态（JWT / Bearer / 常见厂商密钥前缀），不做语义猜测、不误伤普通文本。 */

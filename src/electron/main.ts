@@ -13,17 +13,24 @@ process.on('unhandledRejection', (reason) => {
 import { createServer, type HomeServer } from '../home/server.ts';
 import { createServer as createAgentOnboardServer } from '../agentOnboard/server.ts';
 import { FileStorage } from '../core/memagent/fileStorage.ts';
+import { FileL0BlobStore } from '../core/memagent/l0Store.ts';
+import {
+  BACKUP_PREFIX, kindOfBackupName, planBackupFiles, selectBackupsToDelete, sortBackupsNewestFirst,
+  type BackupKind,
+} from './backupFiles.ts';
 import { validateAuditRecord as sharedValidateAuditRecord } from '../shared/auditShape.ts';
 import { scanHost } from './hostScan.ts';
 import { IPC, missingChannels, handleBootFailure } from './ipcChannels.ts';
 import { initActionLog, actionLog, actionLogError, tailActionLog } from './actionLog.ts';
 import type { TenantContext } from '../types/home.ts';
 import {
-  DATA_ROOT_POINTER_VERSION, clearDataRootMigrateFrom, dataRootPointerPath, defaultDataRoot,
-  detectDataRoots, ensureDirWritable, hasAnyData, migrateDataRoot, readDataRootPointer,
-  samePath, summarizeDataDir, validateDataRootPath, writeDataRootPointer,
-  type DataRootMigration, type DataRootSummary,
+  DATA_ROOT_POINTER_VERSION, LEDGER_FILE_NAME, L0_FILE_NAME, L0_KEYRING_FILE_NAME,
+  adoptLibraryDirIntoPlace, clearDataRootMigrateFrom, dataRootPointerPath, defaultDataRoot, detectDataRoots, ensureDirWritable,
+  hasAnyData, hasLibraryDirs, isSetupComplete, libraryFileState, migrateDataRoot, readDataRootPointer, resolveLibraryPaths,
+  samePath, summarizeDataDir, validateDataRootPath, wizardRequired, writeDataRootPointer,
+  type DataRootMigration, type DataRootPointer, type DataRootSummary, type LibraryPaths,
 } from './dataRoot.ts';
+import { AUDIT_FILE_NAME } from '../core/memagent/auditLog.ts';
 import { detectLocalAgents, hostAgentConfig } from './agentDetect.ts';
 import { applyRecallEvidence, scanMcpClients, snippetForClient, wireMcpClient } from './mcpClients.ts';
 import {
@@ -35,7 +42,7 @@ import { runMcpServer } from '../core/memagent/mcp.ts';
 import { runMcpHttpServer } from '../core/memagent/mcpHttp.ts';
 import { createWebhook } from '../core/memagent/webhook.ts';
 import { createWebhookHttpServer } from './webhookServer.ts';
-import type { AuditAction, Category } from '../core/memagent/types.ts';
+import type { AuditAction, Category, Memory } from '../core/memagent/types.ts';
 import {
   createReconciler, applyScanToStore, defaultAgentSources,
   type CollectorCursor, type ScanResult,
@@ -43,6 +50,16 @@ import {
 import { coreWrite } from '../core/memagent/memories.ts';
 import { L0Vault } from '../core/memagent/l0vault.ts';
 import { demoteStubLayers, scanStubLayers } from '../core/memagent/legacyLayers.ts';
+import { purgeLedger, scanLedgerForReset } from '../core/memagent/ledgerReset.ts';
+import { rejudgeRows, scanRowsForRejudge } from '../core/memagent/rejudge.ts';
+import { scanLedgerForSplit, splitLedger } from '../core/memagent/l0Split.ts';
+import { makeL0Reader, rebuildLayersFromL0, scanRowsForRebuild } from '../core/memagent/rebuild.ts';
+import { buildRecoveryCard, formatRecoveryCode } from '../core/memagent/l0Recovery.ts';
+import {
+  REFINE_MAX_ROWS_PER_DAY, REFINE_QUEUE_FILE, enqueueRows, loadRefineQueue, nextPending,
+  reconcileAndPersistRefineQueue, reconcileRefineQueue, removeRefineQueueRowAndPersist,
+  refineRowLayers, retryFailed, saveRefineQueue, settleRowOutcome, summarizeRefineQueue,
+} from '../core/memagent/refineQueue.ts';
 import { MemAgentError } from '../core/memagent/errors.ts';
 import { cleanupTempFiles, createHomeLockStore, createL0KeyringStore } from './l0KeyringStore.ts';
 import type { L0GrantReq, L0UnlockReq } from '../core/memagent/types.ts';
@@ -50,7 +67,7 @@ import { runForgettingCycle } from '../core/memagent/forgetting.ts';
 import { autoOrganizeEnabled } from '../core/memagent/paramsSnapshot.ts';
 import { JsVectorBackend } from '../core/memagent/vector.ts';
 import { readFile, appendFile, mkdir, writeFile, copyFile, readdir, unlink, stat } from 'node:fs/promises';
-import { join, extname, normalize, sep } from 'node:path';
+import { join, extname, normalize, sep, basename, dirname } from 'node:path';
 import { execSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -94,6 +111,23 @@ const DIST = resolveDistDir();
 // flog/mlog 等顶层函数闭包依赖这些变量，必须在顶层声明而非 const 初始化）
 let USER_DATA: string;
 let DB_PATH: string;
+/** 批次37-A：L0 原数据库文件（密文独立成库，不再和 L1–L6 混在 memories.db.json 里） */
+let L0_DB_PATH: string;
+/**
+ * 批次41-A：内核审计账本文件（追加式 JSONL，跟记忆库同目录）。
+ * 审计从 `memories.db.json` 里搬出去的理由只有一个：以前每追加一条审计 = 整库 stringify + fsync + rename。
+ */
+let AUDIT_PATH: string;
+/** 批次37-A：L0 原数据库实例（主进程独占写；页面只能经 l0:blobs 按会话批量回读密文） */
+let l0Store: FileL0BlobStore;
+/**
+ * 批次37-B：两个库 + 密钥环的真实路径（按指针 ledgerDir/l0Dir 解析）。
+ * 未走过首启向导的老指针两个字段都没有 → 都跟随数据根，行为与拆库前一致；
+ * 但 `isSetupComplete()` 仍为 false，窗口照样进向导（兼容读取 ≠ 免向导）。
+ */
+let LIB_PATHS: LibraryPaths;
+/** 密钥环与 L0 原数据库同目录：恢复 L0 需要的两件东西必须放在一起备份/搬走 */
+let L0_KEYRING_PATH: string;
 let FLOAT_LOG: string;
 let MAIN_LOG: string;
 let BACKUP_CFG_PATH: string;
@@ -103,11 +137,23 @@ let storage: FileStorage;
 let homeServerRef: HomeServer | null = null;
 /** L0 密钥环（§4.4）：DEK 只在主进程内存；退出时清空写密钥缓存 */
 let l0VaultRef: L0Vault | null = null;
+/**
+ * 批次37-G：本次运行内**待导出**的 L0 恢复卡（正文含恢复码，只在内存，绝不落数据根/日志）。
+ * 换发新卡即覆盖；导出成功不改写（用户可能第一次选了别处想再存一份）。
+ */
+let pendingRecoveryCard: { fingerprint: string; text: string } | null = null;
+/**
+ * 批次37-B：本次运行是否真导出过一张恢复卡。
+ * 只在内存里记账（换发新卡即清零），所以「没导出过就重启」不会留下一个可以糊弄过去的持久标记。
+ */
+let recoveryCardExported = false;
 const MIRROR_PORT = 8201;
 const AGENT_ONBOARD_PORT = 8200;
 const MCP_PORT = 8202;
 const MCP_HTTP_PORT = 8204;
 const WEBHOOK_PORT = 8203;
+/** 批次37-A：l0:blobs 单次回读上限（渲染层按 200 一批，留出余量；超限如实拒绝而不是静默截断） */
+const L0_BLOBS_MAX_IDS = 500;
 
 // ── §2 数据根目录（批次6）───────────────────────────────────────────────────
 // 引导指针固定放在 %APPDATA%\MultiAgent Memory\data-root.json（不随 userData 漂移）；
@@ -225,11 +271,166 @@ async function chooseMigrationSource(chosenRoot: string): Promise<string | undef
 }
 
 /**
+ * 读指针（批次37-B 向导与 `dataRoot:get` 共用）。没有指针文件 / 损坏 → null，
+ * 由调用方按「没配好」处理：向导会重新问，绝不静默当成已配置。
+ */
+function readSetupPointer(): DataRootPointer | null {
+  const r = DATA_ROOT_POINTER ? readDataRootPointer(DATA_ROOT_POINTER) : ({ status: 'missing' } as const);
+  return r.status === 'ok' ? r.pointer : null;
+}
+
+/**
+ * 首启向导是否还开着（批次37-B 的唯一门禁口径）：
+ * `setupDone` 只有在「两库位置已定 + L0 管理密码已设 + 恢复卡已导出」三件事都做完后才置真，
+ * 所以这里只看指针字段就够了——升级上来的老指针没有 setupDone，照样进向导（用户拍板：升级也走强制向导）。
+ */
+function isWizardIncomplete(): boolean {
+  // 批次41-H：主进程判定收成纯函数 wizardRequired（缺失/损坏/老指针没 setupDone 一律进向导），端壳只做读指针
+  const read = DATA_ROOT_POINTER ? readDataRootPointer(DATA_ROOT_POINTER) : ({ status: 'missing' } as const);
+  return wizardRequired(read);
+}
+
+/** 主窗口地址：向导没走完先进 setup.html，走完进 overview.html（带上两个后端端口） */
+function mainWindowUrl(staticPort: number, wizardFirst: boolean): string {
+  const origin = `http://127.0.0.1:${staticPort}`;
+  if (wizardFirst) return `${origin}/setup.html`;
+  return `${origin}/overview.html?backend=${origin}:${MIRROR_PORT}&agentBackend=${origin}:${AGENT_ONBOARD_PORT}`;
+}
+
+/**
+ * 库位置选择（批次37-B 第一段向导）。
+ * 取消 = 返回 null，由调用方诚实退出；绝不带着半配好的指针继续启动，也不替用户塞默认值。
+ */
+async function chooseLibraryDir(step: string, what: string, defaultDir: string): Promise<string | null> {
+  for (;;) {
+    const res = await dialog.showMessageBox({
+      type: 'question',
+      title: `首启设置 ${step}`,
+      message: `${what}放在哪里？`,
+      detail: [
+        `默认位置：${defaultDir}`,
+        '两个库可以在同一目录，也可以分开（比如把原数据库单独放加密盘）。',
+        '文件名固定、不可改：记忆库 memories.db.json / 原数据库 memories.l0.json，密钥环 l0-keyring.json 与原数据库同目录。',
+        '所选目录必须可写；选已有库文件的目录=直接用那份，向导不会覆盖它。',
+      ].join('\n'),
+      buttons: ['使用默认位置', '选择文件夹…', '退出'],
+      defaultId: 0,
+      cancelId: 2,
+      noLink: true,
+    });
+    if (res.response === 2) return null;
+    if (res.response === 0) return defaultDir;
+    const pick = await dialog.showOpenDialog({ title: `${step} 选择文件夹`, properties: ['openDirectory', 'createDirectory'] });
+    if (pick.canceled || !pick.filePaths[0]) continue;
+    const v = validateDataRootPath(pick.filePaths[0]);
+    if (!v.ok) { dialog.showErrorBox('目录不可用', v.error); continue; }
+    const w = ensureDirWritable(v.root);
+    if (!w.ok) { dialog.showErrorBox('目录不可写', `${v.root}\n${w.error}`); continue; }
+    return v.root;
+  }
+}
+
+/**
+ * 换目录时把数据根里的同名库**复制**过去（不删源、目标已存在则不动）。
+ * 记忆库 / 原数据库 / 密钥环 / 审计账本四件都走这里——少搬一件就等于把恢复与追责的拼图拆散了。
+ */
+function adoptLibraryFile(fromDir: string, toDir: string, fileName: string): { copied: boolean; kept_target: boolean; error?: string } {
+  if (samePath(fromDir, toDir)) return { copied: false, kept_target: false };
+  const dst = join(toDir, fileName);
+  const src = join(fromDir, fileName);
+  if (existsSync(dst)) return { copied: false, kept_target: true };
+  if (!existsSync(src)) return { copied: false, kept_target: false };
+  try {
+    mkdirSync(toDir, { recursive: true });
+    copyFileSync(src, dst);
+    return { copied: true, kept_target: false };
+  } catch (e) {
+    return { copied: false, kept_target: false, error: String((e as Error)?.message ?? e) };
+  }
+}
+
+/** 两库位置依次问完（原数据库默认跟记忆库同目录）；任一步取消 → null */
+async function chooseLibraryDirs(root: string): Promise<{ ledgerDir: string; l0Dir: string } | null> {
+  const ledgerDir = await chooseLibraryDir('1/2', 'L1–L6 记忆库（可检索正文 + 层级 + 审计）', root);
+  if (!ledgerDir) return null;
+  const l0Dir = await chooseLibraryDir('2/2', 'L0 原数据库（每条记忆的加密原文，唯一的原件副本）', ledgerDir);
+  if (!l0Dir) return null;
+  return { ledgerDir, l0Dir };
+}
+
+/** 把两库位置写进指针（保留 root / migrateFrom 等既有字段）；失败弹错误框并返回 false */
+function persistPointer(pointer: DataRootPointer): boolean {
+  if (!DATA_ROOT_POINTER) return false;
+  try {
+    writeDataRootPointer(DATA_ROOT_POINTER, { ...pointer, updatedAt: new Date().toISOString() });
+    return true;
+  } catch (e) {
+    dialog.showErrorBox('无法保存库位置设置', `本次仍使用所选位置，但下次启动会重新询问。\n${String((e as Error)?.message ?? e)}`);
+    return false;
+  }
+}
+
+/**
+ * 批次37-B 第一段：把两个库的位置定下来并落指针，然后重启（路径在 ready 前解析，重启才生效）。
+ * 已指定过（指针两个字段都在）直接放行。返回 false = 已安排退出，调用方不再继续 bootstrap。
+ */
+async function ensureLibraryDirs(pointer: DataRootPointer): Promise<boolean> {
+  if (hasLibraryDirs(pointer)) return true;
+  const dirs = await chooseLibraryDirs(pointer.root);
+  if (!dirs) {
+    actionLog('dataRoot', 'setup:dirs-canceled', { root: pointer.root });
+    app.exit(0);
+    return false;
+  }
+  const next: DataRootPointer = { ...pointer, ledgerDir: dirs.ledgerDir, l0Dir: dirs.l0Dir };
+  actionLog('dataRoot', 'setup:dirs-set', { ledgerDir: dirs.ledgerDir, l0Dir: dirs.l0Dir });
+  if (!persistPointer(next)) { app.exit(0); return false; }
+  try {
+    app.relaunch();
+  } catch (e) {
+    console.error('[setup] relaunch failed', e);
+  }
+  app.exit(0);
+  return false;
+}
+
+/**
+ * 批次37-B：把数据根里已有的库文件补送到各自目录（复制，不删源，目标已存在一律不动）。
+ * 放在 bootstrap 里而不是向导里，是因为 migrateFrom（旧数据迁移）也在这一步才落进数据根——
+ * 向导执行时那两个文件可能还没搬来。缺这一句的后果是「换了目录 → 账本凭空变空」，所以每启动都核对一次。
+ */
+function adoptLibraryFilesIntoPlace(): void {
+  const moves = [
+    ['记忆库', adoptLibraryFile(USER_DATA, LIB_PATHS.ledgerDir, LEDGER_FILE_NAME)],
+    ['原数据库', adoptLibraryFile(USER_DATA, LIB_PATHS.l0Dir, L0_FILE_NAME)],
+    ['L0 密钥环', adoptLibraryFile(USER_DATA, LIB_PATHS.l0Dir, L0_KEYRING_FILE_NAME)],
+    ['审计账本', adoptLibraryFile(USER_DATA, LIB_PATHS.ledgerDir, AUDIT_FILE_NAME)],
+  ] as const;
+  const copied: string[] = moves.filter(([, r]) => r.copied).map(([n]) => n);
+  const errors = moves.filter(([, r]) => r.error).map(([n, r]) => `${n}: ${r.error}`);
+  // 批次41-A：归档目录整批补送（逐文件，目标同名不动）——漏了它 = 换了目录后历史审计查不到
+  const archive = adoptLibraryDirIntoPlace(USER_DATA, LIB_PATHS.ledgerDir, 'audit-archive');
+  if (archive.copied > 0) copied.push(`审计归档（${archive.copied} 个文件）`);
+  for (const err of archive.errors) errors.push(`审计归档: ${err}`);
+  if (copied.length > 0 || errors.length > 0) {
+    actionLog('dataRoot', 'setup:library-adopted', { copied, errors, ledgerDir: LIB_PATHS.ledgerDir, l0Dir: LIB_PATHS.l0Dir });
+  }
+  if (errors.length > 0) {
+    dialog.showErrorBox('库文件没能送到指定目录', `${errors.join('\n')}\n\n向导不会删原文件；本次按指定目录启动，若那里没有库就是空账本——请手动复制或重新选择目录。`);
+  }
+}
+
+/**
  * ready 后、bootstrap 前：首次启动/指针损坏/原目录不可用时完成选择，写指针并重启。
  * 重启后指针在 ready 前生效，Chromium 缓存与全部应用数据才真正落到新根目录。
  */
 async function prepareDataRoot(): Promise<boolean> {
-  if (!dataRootStartup.setup) return true;
+  if (!dataRootStartup.setup) {
+    // 数据根可用，但两库位置从未指定（升级上来的老指针）→ 照样强制走一次向导
+    const read = DATA_ROOT_POINTER ? readDataRootPointer(DATA_ROOT_POINTER) : { status: 'missing' as const };
+    if (read.status !== 'ok') return true;
+    return ensureLibraryDirs(read.pointer);
+  }
   if (!APP_DATA_DIR || !DEFAULT_DATA_ROOT || !DATA_ROOT_POINTER) {
     throw new Error('无法确定应用数据目录（appData），请检查系统环境后重试');
   }
@@ -237,26 +438,22 @@ async function prepareDataRoot(): Promise<boolean> {
   if (!root) { app.exit(0); return false; }
   const migrateFrom = await chooseMigrationSource(root);
   dataRootStartup.setup = undefined;
+  const base: DataRootPointer = {
+    version: DATA_ROOT_POINTER_VERSION,
+    root,
+    ...(migrateFrom ? { migrateFrom } : {}),
+    updatedAt: new Date().toISOString(),
+  };
   try {
-    writeDataRootPointer(DATA_ROOT_POINTER, {
-      version: DATA_ROOT_POINTER_VERSION,
-      root,
-      ...(migrateFrom ? { migrateFrom } : {}),
-      updatedAt: new Date().toISOString(),
-    });
+    writeDataRootPointer(DATA_ROOT_POINTER, base);
   } catch (e) {
     dataRootPointerWriteError = String((e as Error)?.message ?? e);
     dialog.showErrorBox('无法保存数据位置', `本次仍使用所选位置，但下次启动会重新询问。\n${dataRootPointerWriteError}`);
     try { app.setPath('userData', root); } catch { /* ignore */ }
     return true;
   }
-  try {
-    app.relaunch();
-  } catch (e) {
-    console.error('[data-root] relaunch failed', e);
-  }
-  app.exit(0);
-  return false;
+  // 首启在同一次向导里接着问两个库的位置（ensureLibraryDirs 自己负责重启与退出）
+  return ensureLibraryDirs(base);
 }
 
 // IPC 信任面：只接受精确的页面来源（静态服务端口在 bootstrap 拿到后填充）+ dist 下的 file: 页面。
@@ -272,6 +469,12 @@ const registeredIpcChannels = new Set<string>();
 const COLLECTOR_INTERVAL_MS = 300_000;
 const COLLECTOR_MAX_PER_ROUND = 50;
 const COLLECTOR_FIRST_SCAN_DELAY_MS = 10_000;
+// 批次41-D（P1-12）：失败指数退避 5→10→20→40→80→120(cap) 封顶 2h；连续失败 6 轮后停自动重试（保留手动重跑）
+const COLLECTOR_BACKOFF_CAP_MS = 2 * 60 * 60_000;
+const COLLECTOR_MAX_CONSECUTIVE_FAILS = 6;
+/** 批次35：清空重采后的连续补采——单轮仍钳 50 条，最多 80 轮（≈4000 条），轮间让出 300ms */
+const RECOLLECT_MAX_ROUNDS = 80;
+const RECOLLECT_ROUND_GAP_MS = 300;
 
 // storage / FLOAT_LOG / MAIN_LOG 改为 bootstrap 内赋值（DB_PATH/USER_DATA 在 app ready 后才可用）
 // ── §4 诊断日志（旧版 flog/mlog；批次7 起新代码一律用 actionLog）─────────────
@@ -317,7 +520,8 @@ function loadOrCreateMcpToken(): string {
 
 // ── §5 备份（记忆库管理页 P8 扩展）──────────────────────────────────────────
 // 备份配置持久化于 userData/backup-config.json；
-// 调度器每分钟 tick 一次，到用户设定时刻自动把 memories.db.json 复制到备份目录（带时间戳，保留最近 N 份）。
+// 调度器每分钟 tick 一次，到用户设定时刻自动把 memories.db.json / memories.l0.json / l0-keyring.json
+// 各复制一份到备份目录（前缀 memories- / meml0- / l0key- + 时间戳，各自保留最近 N 份）。批次37-D。
 // 日志：backup:start / backup:auto-done / backup-auto-error → mlog（main.log）
 interface BackupConfig {
   enabled: boolean;
@@ -331,6 +535,12 @@ interface BackupConfig {
 
 // BACKUP_CFG_PATH 改为 bootstrap 内赋值
 
+/** 批次37-D：一次备份里每个落盘文件的回执（哪个库、叫什么、多大）——回执逐文件如实列出，缺哪个也说明缺哪个 */
+interface BackupFileReceipt {
+  kind: BackupKind;
+  name: string;
+  size: number;
+}
 function defaultBackupConfig(): BackupConfig {
   return { enabled: false, dir: '', hour: 3, minute: 0, keepCount: 7 };
 }
@@ -431,24 +641,47 @@ function saveBackupConfig(cfg: BackupConfig): void {
   void mlog('backup:config-saved', { enabled: cfg.enabled, dir: cfg.dir || '(default)', time: `${String(cfg.hour).padStart(2, '0')}:${String(cfg.minute).padStart(2, '0')}`, keep: cfg.keepCount });
 }
 
-/** 执行一次备份：复制 DB → 备份目录（时间戳文件名）+ 清理超出保留份数的旧备份 + 写审计 */
-async function runBackupOnce(trigger: 'manual' | 'auto'): Promise<{ ok: boolean; file?: string; error?: string }> {
+/**
+ * 批次37-D：双库备份的文件配方在 backupFiles.ts（纯函数 + 单测同一真源），这里只做落盘。
+ * 批次41-A 起含审计账本：**只备记忆库不再等于备了审计**——审计搬出主库后是唯一一件「搬走了就不在老地方」的数据。
+ * 归档目录 `audit-archive/` 不在这份配方里（轮转出的旧行仍在数据目录，从不删除），
+ * 需要异地留存时请把数据目录整体纳入备份——这条边界写进 AGENTS §9 与手测报告，不假装备份覆盖了全量历史。
+ */
+function backupPaths(): Record<BackupKind, string> {
+  return { ledger: DB_PATH, l0: L0_DB_PATH, keyring: L0_KEYRING_PATH, audit: AUDIT_PATH };
+}
+
+/** 按前缀滚动删除超出保留份数的旧备份（删除失败只忽略，不影响本次备份结果） */
+async function rotateBackups(backupDir: string, prefix: string, keepCount: number): Promise<void> {
+  const names = await readdir(backupDir);
+  for (const n of selectBackupsToDelete(names, prefix, keepCount)) {
+    await unlink(join(backupDir, n)).catch(() => { /* ignore */ });
+  }
+}
+
+/**
+ * 执行一次备份（批次37-D 起双库 + 密钥环；批次41-A 起再加审计账本）：各自复制一份、
+ * 各自按 keepCount 滚动，回执逐文件记录。缺哪个就如实说缺哪个——绝不只备记忆库就宣称"已备份"。
+ * 审计是追加式文件，复制瞬间可能截到半行；读侧按行容错，不影响其余行（不为此加锁，备份不该阻塞写入）。
+ */
+async function runBackupOnce(
+  trigger: 'manual' | 'auto',
+): Promise<{ ok: boolean; file?: string; files?: BackupFileReceipt[]; missing?: BackupKind[]; error?: string }> {
   const cfg = loadBackupConfig();
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
   const backupDir = cfg.dir || join(USER_DATA, 'backups');
-  const dbPath = DB_PATH;
+  const files: BackupFileReceipt[] = [];
   try {
-    await mkdir(backupDir, { recursive: true });
-    if (!existsSync(dbPath)) {
-      return { ok: false, error: '记忆库文件不存在（尚未产生记忆）' };
+    const plan = planBackupFiles(ts, backupPaths(), (p) => existsSync(p));
+    if (plan.files.length === 0) {
+      return { ok: false, error: '记忆库、原数据库与审计账本都还不存在（尚未产生记忆）' };
     }
-    const target = join(backupDir, `memories-${ts}.json`);
-    await copyFile(dbPath, target);
-    // 保留最近 keepCount 份（按文件名时间戳排序）
-    const all = (await readdir(backupDir)).filter((n) => n.startsWith('memories-') && n.endsWith('.json')).sort();
-    const removeCount = all.length - cfg.keepCount;
-    for (let i = 0; i < removeCount; i++) {
-      await unlink(join(backupDir, all[i])).catch(() => { /* ignore */ });
+    await mkdir(backupDir, { recursive: true });
+    for (const f of plan.files) {
+      const target = join(backupDir, f.name);
+      await copyFile(f.src, target);
+      files.push({ kind: f.kind, name: f.name, size: (await stat(target)).size });
+      await rotateBackups(backupDir, BACKUP_PREFIX[f.kind], cfg.keepCount);
     }
     cfg.lastRun = new Date().toISOString();
     cfg.lastOk = true;
@@ -458,10 +691,14 @@ async function runBackupOnce(trigger: 'manual' | 'auto'): Promise<{ ok: boolean;
       action: 'memory_op',
       ts: Date.now(),
       project_id: 'P1',
-      detail: { op: 'auto_backup', trigger, file: target, keep: cfg.keepCount, memories: Object.keys(storageSize()).length },
+      detail: {
+        op: 'auto_backup', trigger, dir: backupDir,
+        files: files.map((f) => `${f.kind}:${f.name}`), missing: plan.missing, keep: cfg.keepCount,
+        memories: Object.keys(storageSize()).length,
+      },
     } as never);
-    void mlog(`backup:${trigger}-done`, { file: target });
-    return { ok: true, file: target };
+    void mlog(`backup:${trigger}-done`, { files, missing: plan.missing });
+    return { ok: true, file: files[0] ? join(backupDir, files[0].name) : undefined, files, missing: plan.missing };
   } catch (e) {
     cfg.lastOk = false;
     void mlog(`backup:${trigger}-error`, String((e as Error)?.message ?? e));
@@ -480,16 +717,19 @@ function storageSize(): Record<string, unknown> {
   }
 }
 
-/** 备份历史（最近 20 份，倒序） */
-async function listBackups(): Promise<{ dir: string; items: { name: string; time: string; size: number }[] }> {
+/** 备份历史（批次37-D：三类文件合并列表，最近 20 份倒序；kind 说明这份是哪个库） */
+async function listBackups(): Promise<{
+  dir: string;
+  items: { name: string; time: string; size: number; kind: BackupKind }[];
+}> {
   const cfg = loadBackupConfig();
   const backupDir = cfg.dir || join(USER_DATA, 'backups');
   try {
     if (!existsSync(backupDir)) return { dir: backupDir, items: [] };
-    const names = (await readdir(backupDir)).filter((n) => n.startsWith('memories-') && n.endsWith('.json')).sort();
-    const items = await Promise.all(names.slice(-20).reverse().map(async (n) => {
+    const names = sortBackupsNewestFirst(await readdir(backupDir)).slice(0, 20);
+    const items = await Promise.all(names.map(async (n) => {
       const s = await stat(join(backupDir, n));
-      return { name: n, time: s.mtime.toISOString(), size: s.size };
+      return { name: n, time: s.mtime.toISOString(), size: s.size, kind: kindOfBackupName(n) ?? 'ledger' as const };
     }));
     return { dir: backupDir, items };
   } catch {
@@ -553,9 +793,24 @@ async function registerBackupIpc(): Promise<void> {
     cfg.minute = Math.min(59, Math.max(0, Math.round(cfg.minute ?? 0)));
     cfg.keepCount = Math.min(50, Math.max(1, Math.round(cfg.keepCount ?? 7)));
     cfg.enabled = !!cfg.enabled;
-    cfg.dir = typeof cfg.dir === 'string' ? cfg.dir : '';
+    cfg.dir = typeof cfg.dir === 'string' ? cfg.dir.trim() : '';
+    // 批次41-F：手动改 dir 也走与数据根同一套校验（绝对路径 / 拒 UNC·相对 / 可写），
+    // 拒绝时如实报错不落配置——配错目录会让滚动删除在共享目录里误删别人的同名文件。
+    if (cfg.dir) {
+      const dv = validateDataRootPath(cfg.dir);
+      if (!dv.ok) {
+        void mlog('backup:dir-invalid', { by: gate.ctx.user_id, dir: cfg.dir, error: dv.error });
+        return { ok: false, error: `备份目录非法：${dv.error}` };
+      }
+      const dw = ensureDirWritable(dv.root);
+      if (!dw.ok) {
+        void mlog('backup:dir-unwritable', { by: gate.ctx.user_id, dir: dv.root, error: dw.error });
+        return { ok: false, error: `备份目录不可写：${dw.error}` };
+      }
+      cfg.dir = dv.root;
+    }
     saveBackupConfig(cfg);
-    void mlog('backup:config-saved', { by: gate.ctx.user_id, enabled: cfg.enabled, hour: cfg.hour, minute: cfg.minute, keepCount: cfg.keepCount });
+    void mlog('backup:config-saved', { by: gate.ctx.user_id, enabled: cfg.enabled, hour: cfg.hour, minute: cfg.minute, keepCount: cfg.keepCount, dir: cfg.dir || '(default)' });
     return { ok: true, cfg };
   });
   handleIpc(IPC.backupChooseDir, async (_e, sessionId?: string) => {
@@ -564,12 +819,23 @@ async function registerBackupIpc(): Promise<void> {
     const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
     const res = await dialog.showOpenDialog(win, { title: '选择备份目录', properties: ['openDirectory', 'createDirectory'] });
     if (res.canceled || res.filePaths.length === 0) return { ok: false, dir: '' };
-    const dir = normalize(res.filePaths[0]);
+    const raw = res.filePaths[0];
+    // 批次41-F：原生目录选择结果也必须校验后落配置，与数据根同规格
+    const dv = validateDataRootPath(raw);
+    if (!dv.ok) {
+      void mlog('backup:dir-invalid', { by: gate.ctx.user_id, dir: raw, error: dv.error });
+      return { ok: false, dir: '', error: `备份目录非法：${dv.error}` };
+    }
+    const dw = ensureDirWritable(dv.root);
+    if (!dw.ok) {
+      void mlog('backup:dir-unwritable', { by: gate.ctx.user_id, dir: dv.root, error: dw.error });
+      return { ok: false, dir: '', error: `备份目录不可写：${dw.error}` };
+    }
     const cfg = loadBackupConfig();
-    cfg.dir = dir;
+    cfg.dir = dv.root;
     saveBackupConfig(cfg);
-    void mlog('backup:dir-changed', { by: gate.ctx.user_id, dir });
-    return { ok: true, dir };
+    void mlog('backup:dir-changed', { by: gate.ctx.user_id, dir: dv.root });
+    return { ok: true, dir: dv.root };
   });
   handleIpc(IPC.backupRunNow, (_e, sessionId?: string) => {
     const gate = requireAdmin(sessionId, IPC.backupRunNow);
@@ -591,6 +857,12 @@ function registerDataRootIpc(): void {
     isDefault: !!DEFAULT_DATA_ROOT && samePath(USER_DATA, DEFAULT_DATA_ROOT),
     pointer: DATA_ROOT_POINTER,
     activeDbPath: DB_PATH,
+    // 批次37-A：L0 原数据库独立位置（页面「记忆存储在哪」卡片据此显示两个库）
+    activeL0Path: L0_DB_PATH,
+    l0ReadOnly: l0Store.readOnly,
+    // 批次41-A：审计账本独立成追加文件，位置与体量如实回显（页面据此说明「审计不再混在主库里」）
+    activeAuditPath: AUDIT_PATH,
+    audit: storage.auditStats,
     actionsLogPath: join(USER_DATA, 'actions.log'),
   }));
   handleIpc(IPC.dataRootOpen, async () => {
@@ -768,15 +1040,84 @@ async function backupBeforeKernelChange(dirPrefix: string, logAction: string): P
   const base = loadBackupConfig().dir || join(USER_DATA, 'backups');
   const dir = join(base, `${dirPrefix}-${ts}`);
   await mkdir(dir, { recursive: true });
-  for (const f of ['memories.db.json', 'l0-keyring.json']) {
-    const src = join(USER_DATA, f);
-    if (existsSync(src)) await copyFile(src, join(dir, f));
+  // 批次37-D：批量改写账本前把三类落盘源一起备份 —— 只备记忆库会让 L0 原数据库成为唯一没有退路的那一份。
+  const copied: string[] = [];
+  for (const src of Object.values(backupPaths())) {
+    if (!existsSync(src)) continue;
+    await copyFile(src, join(dir, basename(src)));
+    copied.push(basename(src));
   }
-  actionLog('kernel', logAction, { dir });
+  actionLog('kernel', logAction, { dir, copied });
   return dir;
 }
 
-function registerL0Ipc(vault: L0Vault): void {
+/**
+ * 把内存里那张待导出的恢复卡写盘（批次37-G 换发后 / 批次37-B 向导强制导出共用同一段真实现）。
+ * 原生「另存为」，默认落系统下载目录并逐字提示别和数据根放一起。
+ * 卡面含恢复码：日志只记文件名/字节数/指纹，绝不记正文；选在数据根内也允许（不替用户保管决定），
+ * 但回执如实标注 inside_data_root 供页面警告。
+ */
+async function exportPendingRecoveryCard(user: string): Promise<
+  { ok: true; file_name: string; inside_data_root: boolean; fingerprint: string }
+  | { ok: false; canceled?: true; error: string }
+> {
+  const card = pendingRecoveryCard;
+  if (!card) {
+    return { ok: false, error: '本次没有待导出的恢复卡：恢复码只在生成那一次可见，请重新换发一张' };
+  }
+  const res = await dialog.showSaveDialog({
+    title: '导出 L0 恢复卡',
+    defaultPath: join(app.getPath('downloads'), `L0恢复卡-${card.fingerprint}.txt`),
+    filters: [{ name: '文本', extensions: ['txt'] }],
+    message: '请存到与这台电脑分开的地方（U 盘/打印/密码管理器）——和数据根放在一起的备份，会在同一次事故里一起没了',
+  });
+  if (res.canceled || !res.filePath) {
+    actionLog('kernel', 'l0:recovery-export-canceled', { user });
+    return { ok: false, canceled: true, error: '未导出恢复卡：恢复码仍在内存里，可再次点击导出' };
+  }
+  try {
+    await writeFile(res.filePath, card.text, { encoding: 'utf8', mode: 0o600 });
+    const inside = samePath(dirname(res.filePath), USER_DATA)
+      || normalize(res.filePath).startsWith(normalize(USER_DATA) + sep);
+    recoveryCardExported = true;
+    actionLog('kernel', 'l0:recovery-exported', {
+      file: basename(res.filePath), bytes: Buffer.byteLength(card.text), fingerprint: card.fingerprint,
+      inside_data_root: inside, user,
+    });
+    return { ok: true, file_name: basename(res.filePath), inside_data_root: inside, fingerprint: card.fingerprint };
+  } catch (e) {
+    const err = String((e as Error)?.message ?? e);
+    actionLog('kernel', 'l0:recovery-export-fail', { error: err }, { level: 'error' });
+    return { ok: false, error: `恢复卡写入失败：${err}` };
+  }
+}
+
+/**
+ * 发一张恢复卡：主进程拼卡面正文（l0Recovery.ts 引了 node:crypto，渲染层打包不了），
+ * 并把码明文**只**放进本次返回值——之后任何接口都只回状态，绝不回显。
+ * 批次37-B 首启向导与批次37-G 安全页发码共用：新码覆盖旧码，上一次导出随之作废。
+ */
+function issueRecoveryCard(i: { recovery_code: string; fingerprint: string; created_at: number }): {
+  recovery_code: string; recovery_code_grouped: string; fingerprint: string; created_at: number;
+} {
+  pendingRecoveryCard = {
+    fingerprint: i.fingerprint,
+    text: buildRecoveryCard({
+      code: i.recovery_code, fingerprint: i.fingerprint, l0_path: L0_DB_PATH,
+      created_at: i.created_at, has_admin_password: true,
+    }),
+  };
+  // 新码 = 新卡：上一次导出作废，向导/卡面都要求重新导一次（旧码已经进不了这个进程了）
+  recoveryCardExported = false;
+  return {
+    recovery_code: i.recovery_code,
+    recovery_code_grouped: formatRecoveryCode(i.recovery_code),
+    fingerprint: i.fingerprint,
+    created_at: i.created_at,
+  };
+}
+
+function registerL0Ipc(vault: L0Vault, collectorVector: JsVectorBackend): void {
   /** 查阅会话必须属于当前登录账号（管理员也不能借用他人会话；直接查阅请用管理密码） */
   const assertOwner = async (l0SessionId: unknown, ctx: TenantContext, channel: string): Promise<string> => {
     const id = typeof l0SessionId === 'string' ? l0SessionId.trim() : '';
@@ -945,6 +1286,221 @@ function registerL0Ipc(vault: L0Vault): void {
       return { ok: true, sealed: await vault.seal(plain) };
     } catch (e) { return l0Fail(e); }
   });
+  /**
+   * 批次37-A：拆库后按 mem_id 批量回读 L0 信封（密文）。
+   * 记忆库行上只剩 has_l0，正文原文在这独立文件里；渲染层持有的是账本镜像，取不到它，
+   * 所以开这条只读通道。出主进程前只过登录会话校验（密文仍需授权会话才能解密），
+   * 日志只记条数，绝不记信封值。缺的 id 如实不返回 —— 由内核判成断链错误。
+   */
+  handleIpc(IPC.l0Blobs, async (_e, memIds: unknown, sessionId?: string) => {
+    const gate = requireSession(sessionId, IPC.l0Blobs);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    if (!Array.isArray(memIds)) return { ok: false, error: 'l0:blobs 需要 mem_id 数组' };
+    const ids = [...new Set(memIds.filter((x): x is string => typeof x === 'string' && x.trim() !== '').map((x) => x.trim()))];
+    if (ids.length === 0) return { ok: true, envelopes: {} };
+    if (ids.length > L0_BLOBS_MAX_IDS) {
+      return { ok: false, error: `一次最多回读 ${L0_BLOBS_MAX_IDS} 条（本次 ${ids.length} 条，请分批）` };
+    }
+    const found = await l0Store.getAll(ids);
+    actionLog('ipc', 'l0:blobs', { asked: ids.length, found: found.size });
+    return { ok: true, envelopes: Object.fromEntries(found) };
+  });
+
+  /**
+   * 批次37-C：存量拆分迁移 —— 把历史行上还躺着的 L0 原文搬进独立的 L0 原数据库。
+   * 本机实测（2026-11-02）1642 行里 1641 行带着**明文** `content_orig`（约 5.5 MB）：拆库之前
+   * 这批原文一直在记忆库文件里裸奔，拆库之后若不搬家就永远留在错误的位置。
+   * 与 `l0:migrate` 的分工：那边把明文/v1 **再加密**在行上；这边把（加密后的）信封**换地方存**，
+   * 行上只留 `has_l0`。明文必须经写密钥封存才允许进 L0 库——没解锁就整轮拒绝，绝不搬明文。
+   */
+  handleIpc(IPC.l0SplitPreview, async (_e, sessionId?: string) => {
+    const gate = requireSession(sessionId, IPC.l0SplitPreview);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    try {
+      return { ok: true, preview: await scanLedgerForSplit(storage, l0Store) };
+    } catch (e) { return l0Fail(e); }
+  });
+
+  handleIpc(IPC.l0SplitRun, async (_e, confirmText?: string, sessionId?: string) => {
+    const gate = requireAdmin(sessionId, IPC.l0SplitRun);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    // 二次确认口令：搬完行上就再也没有原件，唯一退路是执行前的双库备份 → 逐字 SPLIT
+    if ((confirmText ?? '').trim().toUpperCase() !== 'SPLIT') {
+      actionLog('kernel', 'l0:split-rejected', { reason: 'confirm_text', user: gate.ctx.user_id });
+      return { ok: false, error: '未输入确认口令 SPLIT，已取消（拆分后原文不再留在记忆库，不可逆）' };
+    }
+    let preview: Awaited<ReturnType<typeof scanLedgerForSplit>>;
+    try {
+      preview = await scanLedgerForSplit(storage, l0Store);
+    } catch (e) { return l0Fail(e); }
+    // 有明文却没解锁写密钥 → 在备份之前如实拒绝：本轮一行都搬不了，没必要先动盘
+    if (preview.plaintext_orig > 0 && !(await vault.status()).write_unlocked) {
+      actionLog('kernel', 'l0:split-rejected', { reason: 'write_key_locked', plaintext: preview.plaintext_orig, user: gate.ctx.user_id });
+      return { ok: false, error: `${preview.plaintext_orig} 行带着明文原文：请先解锁 L0 写密钥再执行（§4.4.4，绝不把明文当 L0 存）` };
+    }
+    let backupDir: string;
+    try {
+      backupDir = await backupBeforeKernelChange('l0-split', 'l0:split-backup');
+    } catch (e) {
+      const err = String((e as Error)?.message ?? e);
+      actionLog('kernel', 'l0:split-backup-fail', { error: err }, { level: 'error' });
+      return { ok: false, error: `拆分前备份失败：${err}` };
+    }
+    try {
+      const now = Date.now();
+      const report = await splitLedger({
+        storage, l0Blobs: l0Store, seal: (p) => vault.seal(p),
+        admin_user_id: gate.ctx.user_id, request_id: `req_l0_split_${now}`, now, backup_confirmed: true,
+      });
+      // 只记条数与字节：原文、信封、口令一律不落日志
+      actionLog('kernel', 'l0:split-run', {
+        scanned: report.total, moved: report.moved, sealed: report.sealed_from_plaintext,
+        cipher_moved: report.cipher_moved, failed: report.failed,
+        l0_count: report.l0_count, l0_bytes: report.l0_bytes,
+        orphan_blobs: report.orphan_blobs, broken_links: report.broken_links,
+        dir: backupDir,
+      });
+      return { ok: true, report, backup_dir: backupDir };
+    } catch (e) { return l0Fail(e); }
+  });
+
+  /**
+   * 批次37-E：按 L0 原文重建 L1–L6（用户口径「删的只是 L1–L6 那份库，不用重新采集，直接从 L0 重新生成」）。
+   * 原文怎么来只有两条路：行上的历史明文，或经**管理员的 L0 查阅会话**解密——本通道不开新的解密口子：
+   * 传了 l0_session_id 就照 §4.4.2 校验归属并按会话 scope 解密；没传则密文一律判 `view_locked`、如实计数。
+   * 预览也是读操作、但会真读原文（不改任何数据），所以同样要过会话校验。
+   */
+  const makeRebuildReader = async (l0SessionId: unknown, ctx: TenantContext, channel: string) => {
+    const sid = (typeof l0SessionId === 'string' ? l0SessionId.trim() : '');
+    if (!sid) return makeL0Reader({ l0Blobs: l0Store });
+    const id = await assertOwner(sid, ctx, channel);
+    return makeL0Reader({
+      l0Blobs: l0Store,
+      decrypt: (m, envelope) => vault.decrypt({ l0_session_id: id, project_id: m.project_id, mem_id: m.mem_id, envelope }),
+    });
+  };
+
+  handleIpc(IPC.l0RebuildPreview, async (_e, req: { l0_session_id?: string; use_llm?: boolean } | undefined, sessionId?: string) => {
+    const gate = requireSession(sessionId, IPC.l0RebuildPreview);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    try {
+      const readL0 = await makeRebuildReader(req?.l0_session_id, gate.ctx, IPC.l0RebuildPreview);
+      const llmReady = Boolean(llmGateway && llmGateway.usable());
+      const preview = await scanRowsForRebuild({ storage, readL0, llmAvailable: req?.use_llm === true && llmReady });
+      return { ok: true, llm_ready: llmReady, preview };
+    } catch (e) { return l0Fail(e); }
+  });
+
+  handleIpc(IPC.l0RebuildRun, async (_e, req: { confirm_text?: string; l0_session_id?: string; use_llm?: boolean } | undefined, sessionId?: string) => {
+    const gate = requireAdmin(sessionId, IPC.l0RebuildRun);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    // 二次确认口令：旧 L1–L6 正文会被覆盖，唯一退路是执行前的双库备份 → 逐字 REBUILD
+    if ((req?.confirm_text ?? '').trim().toUpperCase() !== 'REBUILD') {
+      actionLog('kernel', 'l0:rebuild-rejected', { reason: 'confirm_text', user: gate.ctx.user_id });
+      return { ok: false, error: '未输入确认口令 REBUILD，已取消（重建会覆盖现有 L1–L6 正文，不可逆）' };
+    }
+    let readL0: Awaited<ReturnType<typeof makeRebuildReader>>;
+    let preview: Awaited<ReturnType<typeof scanRowsForRebuild>>;
+    try {
+      readL0 = await makeRebuildReader(req?.l0_session_id, gate.ctx, IPC.l0RebuildRun);
+      const useLlm = req?.use_llm === true && Boolean(llmGateway && llmGateway.usable());
+      preview = await scanRowsForRebuild({ storage, readL0, llmAvailable: useLlm });
+    } catch (e) { return l0Fail(e); }
+    // 密文没解锁就拒绝：别把盘动一遍才告诉用户读不到原文
+    const locked = preview.by_unavailable.view_locked ?? 0;
+    if (locked > 0) {
+      actionLog('kernel', 'l0:rebuild-rejected', { reason: 'view_locked', rows: locked, user: gate.ctx.user_id });
+      return { ok: false, error: `${locked} 行的原文是 L0 密文：请先在安全页解锁 L0 查阅会话再重建（§4.4.3，绝不猜正文）` };
+    }
+    let backupDir: string;
+    try {
+      backupDir = await backupBeforeKernelChange('l0-rebuild', 'l0:rebuild-backup');
+    } catch (e) {
+      const err = String((e as Error)?.message ?? e);
+      actionLog('kernel', 'l0:rebuild-backup-fail', { error: err }, { level: 'error' });
+      return { ok: false, error: `重建前备份失败：${err}` };
+    }
+    try {
+      const now = Date.now();
+      const useLlm = req?.use_llm === true && Boolean(llmGateway && llmGateway.usable());
+      const report = await rebuildLayersFromL0({
+        storage, vector: collectorVector, readL0,
+        llm: useLlm ? llmGateway ?? undefined : undefined,
+        llmModel: useLlm ? 'llm-gateway' : undefined,
+        useLlm,
+        admin_user_id: gate.ctx.user_id, request_id: `req_l0_rebuild_${now}`, now, backup_confirmed: true,
+      });
+      // 只记计数与层级名：L0 原文、新旧正文一律不落日志
+      actionLog('kernel', 'l0:rebuild-run', {
+        scanned: report.total, rebuilt: report.rebuilt, l1_changed: report.rebuilt_l1_changed,
+        purged: report.purged, deep_generated: report.deep_generated, deep_cleared: report.deep_cleared,
+        llm: useLlm, llm_calls: report.llm_calls, refine_failed: report.refine_failed,
+        protected_skipped: report.skipped_protected, unavailable_skipped: report.skipped_unavailable,
+        failed: report.failed, dir: backupDir,
+      });
+      // 批次41-P：重建的 purge 分支同样是硬删行（rebuild.ts 的 deleteMemory），队列里即成幽灵。
+      // 只在真删了行时才做一次全量对账——purged=0 是常态，不该为此白扫整本账本。
+      if (report.purged > 0) void reconcileRefineQueueDir('l0-rebuild');
+      return { ok: true, report, backup_dir: backupDir };
+    } catch (e) { return l0Fail(e); }
+  });
+
+  // ── 批次37-G：L0 恢复码（忘记管理密码的唯一找回通道，一次性） ──────────────────
+  // 卡面正文只能在主进程拼：l0Recovery.ts 引了 node:crypto，渲染层打包不了。
+  // 码明文只在「发码那一次」的返回值里出现一次，之后任何接口都只回状态，绝不回显。
+  handleIpc(IPC.l0RecoveryStatus, async (_e, sessionId?: string) => {
+    const gate = requireAdmin(sessionId, IPC.l0RecoveryStatus);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    try {
+      return { ok: true, ...(await vault.recoveryStatus()), has_pending_card: Boolean(pendingRecoveryCard) };
+    } catch (e) { return l0Fail(e); }
+  });
+
+  /** 首启向导：一次建好 DEK + 管理密码包 + 恢复码包（已设过密码的库走「换发恢复码」） */
+  handleIpc(IPC.l0RecoveryInit, async (_e, password?: string, sessionId?: string) => {
+    const gate = requireAdmin(sessionId, IPC.l0RecoveryInit);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    try {
+      const issued = await vault.initL0WithRecovery({ password: password ?? '', admin_user_id: gate.ctx.user_id });
+      actionLog('kernel', 'l0:recovery-issued', { op: 'init', fingerprint: issued.fingerprint, user: gate.ctx.user_id });
+      return { ok: true, ...issueRecoveryCard(issued) };
+    } catch (e) { return l0Fail(e); }
+  });
+
+  /** 换发一张新卡（卡被人看过 / 旧库首次发码）：需已解锁 L0 写密钥，否则等于给拿到文件的人免密发码 */
+  handleIpc(IPC.l0RecoveryIssue, async (_e, sessionId?: string) => {
+    const gate = requireAdmin(sessionId, IPC.l0RecoveryIssue);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    try {
+      const issued = await vault.rotateRecoveryCode({ admin_user_id: gate.ctx.user_id });
+      actionLog('kernel', 'l0:recovery-issued', { op: 'rotate', fingerprint: issued.fingerprint, user: gate.ctx.user_id });
+      return { ok: true, ...issueRecoveryCard(issued) };
+    } catch (e) { return l0Fail(e); }
+  });
+
+  /** 忘记管理密码 → 恢复码找回并当场设新密码；旧码当场作废，返回的是**新**码，必须重新导出卡 */
+  handleIpc(IPC.l0Recover, async (_e, req?: { code?: string; newPassword?: string }, sessionId?: string) => {
+    const gate = requireAdmin(sessionId, IPC.l0Recover);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    try {
+      const issued = await vault.recoverWithCode({
+        code: typeof req?.code === 'string' ? req.code : '',
+        newPassword: typeof req?.newPassword === 'string' ? req.newPassword : '',
+        admin_user_id: gate.ctx.user_id,
+      });
+      actionLog('kernel', 'l0:recovery-issued', { op: 'recover', fingerprint: issued.fingerprint, user: gate.ctx.user_id });
+      return { ok: true, ...issueRecoveryCard(issued) };
+    } catch (e) { return l0Fail(e); }
+  });
+
+  /**
+   * 导出恢复卡：实现抽到 `exportPendingRecoveryCard`（首启向导的强制导出走的是同一段真实现）。
+   */
+  handleIpc(IPC.l0RecoveryExport, async (_e, sessionId?: string) => {
+    const gate = requireAdmin(sessionId, IPC.l0RecoveryExport);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    return exportPendingRecoveryCard(gate.ctx.user_id);
+  });
 }
 
 /**
@@ -1004,6 +1560,156 @@ function registerLegacyIpc(): void {
         missing_l1: report.missing_l1, dir: backupDir,
       });
       return { ok: true, report, backup_dir: backupDir };
+    } catch (e) { return l0Fail(e); }
+  });
+}
+
+// ── §6f L2–L6 后台补炼队列（批次39）──────────────────────────────────────────
+// 用户拍板（2026-11-02）：写入只落 L0（密文）+ 脱敏 L1，L2–L6 交给后台异步队列补炼；
+// 存量 1585 行全量补炼；单条最多试 3 个引擎；每日最多 500 行；llm_partial 不自动重试（要点「重试失败行」才回队）。
+// 队列状态落 ledger 目录 refine-queue.json（0600，只有 mem_id + 状态 + 原因码，正文一个字不落）。
+// 关键取舍：引擎没就绪时**不起活也不把行判死**——没有真实调用就没有失败，也不消耗当日额度。
+
+/** 每 15 秒最多补炼一行：本机 7B 模型单次约 28s，靠 refineInFlight 防重入，不靠间隔排队 */
+const REFINE_TICK_MS = 15_000;
+let refineQueueDir = '';
+let refineInFlight = false;
+let refineTimer: ReturnType<typeof setInterval> | null = null;
+
+const refineQueuePath = (): string => join(refineQueueDir, REFINE_QUEUE_FILE);
+
+async function runRefineTick(vector: JsVectorBackend): Promise<void> {
+  if (refineInFlight || !refineQueueDir) return;
+  refineInFlight = true;
+  try {
+    const state = loadRefineQueue(refineQueueDir);
+    const id = nextPending(state); // 已含「未启用 / 当日额度用尽」两道闸门
+    if (!id) return;
+    if (!llmGateway || !llmGateway.usable()) return;
+    const now = Date.now();
+    const r = await refineRowLayers(id, {
+      storage, vector, llm: llmGateway, llmModel: 'llm-gateway',
+      request_id: `req_refine_${now}`, now, actor: 'refine_queue',
+    });
+    const settled = settleRowOutcome(state, id, r, now);
+    saveRefineQueue(refineQueueDir, settled);
+    // 只记计数与层名：新正文、L1、原文一律不进动作日志
+    actionLog('kernel', 'refine:row', {
+      mem_id: id, ok: r.ok, refined_by: r.refined_by, to_layer: r.to_layer,
+      layers: r.layers.length, targets: r.targets?.length ?? null, llm_calls: r.llm_calls,
+      code: r.code ?? null, stop_layer: r.stop_layer ?? null, stop_code: r.stop_code ?? null,
+      ms: Date.now() - now,
+      day_rows: settled.dayRows, day_limit: REFINE_MAX_ROWS_PER_DAY,
+    });
+  } catch (e) {
+    actionLog('kernel', 'refine:tick-error', { error: String((e as Error)?.message ?? e) }, { level: 'error' });
+  } finally {
+    refineInFlight = false;
+  }
+}
+
+/** 启动：把「有 L1 但没有任一深层」的存量行全部入队（幂等，已在队列里的不重复计），然后起定时器 */
+async function startRefineQueue(vector: JsVectorBackend): Promise<void> {
+  try {
+    refineQueueDir = LIB_PATHS?.ledgerDir ?? USER_DATA;
+    await mkdir(refineQueueDir, { recursive: true });
+    const state = loadRefineQueue(refineQueueDir);
+    const live = await storage.listMemories({});
+    const { state: enq, report } = enqueueRows(state, live);
+    // 批次41-C：启动即对账——把账本里已不存在的行（硬删/清空/重判遗留的幽灵）从队列摘掉，
+    // 任何删除通道没同步摘除都能在这里自净一遍（覆盖本机已攒下的存量幽灵）。
+    const { state: next, pruned } = reconcileRefineQueue(enq, live.map((m) => m.mem_id));
+    saveRefineQueue(refineQueueDir, next);
+    actionLog('kernel', 'refine:backfill-scan', {
+      ...report, pending: Object.values(next.items).filter((i) => i.state === 'pending').length,
+      pruned_ghosts: pruned, enabled: next.enabled, file: refineQueuePath(),
+    });
+    if (!refineTimer) {
+      refineTimer = setInterval(() => { void runRefineTick(vector); }, REFINE_TICK_MS);
+      refineTimer.unref?.();
+    }
+  } catch (e) {
+    actionLog('kernel', 'refine:start-error', { error: String((e as Error)?.message ?? e) }, { level: 'error' });
+  }
+}
+
+/**
+ * 批次41-C：按「当前未删行」对账并摘掉补炼队列里的幽灵条目（覆盖所有硬删通道：
+ * 清空重采 / 规则重判 / 手动删除 / 按 L0 重建的 purge，批次41-P 补最后一条）。
+ * 只在全量摘除发生时落盘 + 记一条动作日志（pruned>0）。
+ * 删行的通道执行完调用一次即可，队列文件在写锁进程内维护。
+ */
+async function reconcileRefineQueueDir(why: string): Promise<void> {
+  if (!refineQueueDir) return;
+  try {
+    const live = new Set((await storage.listMemories({})).map((m) => m.mem_id));
+    const r = reconcileAndPersistRefineQueue({
+      queueDir: refineQueueDir, liveIds: live,
+      load: () => loadRefineQueue(refineQueueDir),
+      save: (s) => saveRefineQueue(refineQueueDir, s),
+    });
+    if (r.persisted) actionLog('kernel', 'refine:queue-reconciled', { pruned: r.pruned, why });
+  } catch (e) {
+    actionLog('kernel', 'refine:queue-reconcile-error', { error: String((e as Error)?.message ?? e), why }, { level: 'warn' });
+  }
+}
+
+/** 批次41-C：单条硬删后只摘这一个 id（热路径，不做全量对账；id 不在队列则幂等不动）。 */
+function removeRefineQueueRow(id: string): void {
+  if (!refineQueueDir || !id) return;
+  try {
+    void removeRefineQueueRowAndPersist({
+      queueDir: refineQueueDir, id,
+      load: () => loadRefineQueue(refineQueueDir),
+      save: (s) => saveRefineQueue(refineQueueDir, s),
+    });
+  } catch (e) {
+    actionLog('kernel', 'refine:queue-remove-error', { error: String((e as Error)?.message ?? e) }, { level: 'warn' });
+  }
+}
+
+function registerRefineIpc(): void {
+  const view = () => ({
+    summary: summarizeRefineQueue(loadRefineQueue(refineQueueDir), refineQueuePath()),
+    engine: { loaded: Boolean(llmGateway), usable: Boolean(llmGateway?.usable()) },
+  });
+  handleIpc(IPC.refineState, async (_e, sessionId?: string) => {
+    const gate = requireSession(sessionId, IPC.refineState);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    if (!refineQueueDir) return { ok: false, error: '补炼队列还没就绪（主进程启动中或数据根不可写）' };
+    try {
+      return { ok: true, ...view() };
+    } catch (e) { return l0Fail(e); }
+  });
+  handleIpc(IPC.refineSetEnabled, async (_e, enabled: unknown, sessionId?: string) => {
+    const gate = requireAdmin(sessionId, IPC.refineSetEnabled);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    if (typeof enabled !== 'boolean') return { ok: false, error: '需要一个布尔值（开 / 关）' };
+    try {
+      const state = loadRefineQueue(refineQueueDir);
+      saveRefineQueue(refineQueueDir, { ...state, enabled, updated_at: Date.now() });
+      actionLog('kernel', 'refine:set-enabled', { enabled, user: gate.ctx.user_id });
+      return { ok: true, ...view() };
+    } catch (e) { return l0Fail(e); }
+  });
+  handleIpc(IPC.refineBackfill, async (_e, sessionId?: string) => {
+    const gate = requireAdmin(sessionId, IPC.refineBackfill);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    try {
+      const { state, report } = enqueueRows(loadRefineQueue(refineQueueDir), await storage.listMemories({}));
+      saveRefineQueue(refineQueueDir, state);
+      actionLog('kernel', 'refine:backfill-run', { ...report, user: gate.ctx.user_id });
+      return { ok: true, report, ...view() };
+    } catch (e) { return l0Fail(e); }
+  });
+  handleIpc(IPC.refineRetryFailed, async (_e, sessionId?: string) => {
+    const gate = requireAdmin(sessionId, IPC.refineRetryFailed);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    try {
+      const { state, retried } = retryFailed(loadRefineQueue(refineQueueDir));
+      saveRefineQueue(refineQueueDir, state);
+      actionLog('kernel', 'refine:retry-failed', { retried, user: gate.ctx.user_id });
+      return { ok: true, retried, ...view() };
     } catch (e) { return l0Fail(e); }
   });
 }
@@ -1076,7 +1782,15 @@ const MIME: Record<string, string> = {
 function startStaticServer(): Promise<number> {
   return new Promise((resolve) => {
     const srv = httpCreateServer((req, res) => {
-      let urlPath = decodeURIComponent((req.url ?? '/').split('?')[0]);
+      // 批次41-G：畸形 % 序列会让 decodeURIComponent 抛 URIError，未捕获会打断整个请求回调
+      let urlPath: string;
+      try {
+        urlPath = decodeURIComponent((req.url ?? '/').split('?')[0]);
+      } catch {
+        res.writeHead(400);
+        res.end('bad request');
+        return;
+      }
       if (urlPath === '/') urlPath = '/overview.html';
       const filePath = normalize(join(DIST, urlPath));
       // 前缀边界必须是「目录分隔符」而非字符串前缀：否则 dist-evil/ 也能通过 startsWith(DIST)
@@ -1217,9 +1931,12 @@ async function registerStorageIpc(): Promise<void> {
   handleIpc(IPC.storagePutMemory, (_e, m) => storage.putMemory(m as Parameters<typeof storage.putMemory>[0]));
   handleIpc(IPC.storageGetMemory, (_e, id) => storage.getMemory(id as string));
   handleIpc(IPC.storageListMemories, (_e, f) => storage.listMemories(f as Parameters<typeof storage.listMemories>[0]));
-  handleIpc(IPC.storageDeleteMemory, (_e, id, sessionId?: unknown) => {
+  handleIpc(IPC.storageDeleteMemory, async (_e, id, sessionId?: unknown) => {
     requireDataPlaneSession(sessionId, IPC.storageDeleteMemory);
-    return storage.deleteMemory(id as string);
+    const r = await storage.deleteMemory(id as string);
+    // 批次41-C：硬删后同 id 的补炼队列条目即成幽灵，摘掉（热路径只删这一个，不触发全量对账）
+    removeRefineQueueRow(id as string);
+    return r;
   });
   handleIpc(IPC.storageAppendAudit, (_e, a, sessionId?: unknown) => {
     requireDataPlaneSession(sessionId, IPC.storageAppendAudit);
@@ -1462,6 +2179,125 @@ function registerFloatIpc(staticPort: number): void {
   });
 }
 
+// ── §6e 首启向导 IPC（批次37-B）────────────────────────────────────────────
+// 向导跑在登录之前，所以这几条通道**不带会话**：门禁换成「本机此刻还没有需要保护的东西」——
+// 设 L0 管理密码只在密钥环尚无 admin_wrap 时放行（那时 L0 库里没有任何密文，设密码不是越权）；
+// 一旦 admin_wrap 存在，改密码/换发码一律回到 l0:recovery* 的管理员口径，向导只剩「导出这一张卡」。
+// 恢复码只在发那一次返回；日志只记指纹（8 位散列）与目录，绝不记密码、绝不记码。
+function registerSetupIpc(vault: L0Vault, staticPort: number): void {
+  handleIpc(IPC.setupState, async () => {
+    const pointer = readSetupPointer();
+    const paths = pointer ? resolveLibraryPaths(pointer) : LIB_PATHS;
+    // 密钥环读不动（损坏）时按「没设过密码」如实回显，让向导给出真实下一步，而不是把用户卡死
+    const vaultStatus = await vault.status().catch(() => null);
+    const recovery = await vault.recoveryStatus().catch(() => null);
+    return {
+      ok: true,
+      setup_done: isSetupComplete(pointer),
+      dirs_set: hasLibraryDirs(pointer),
+      ledger_dir: paths.ledgerDir,
+      l0_dir: paths.l0Dir,
+      same_dir: samePath(paths.ledgerDir, paths.l0Dir),
+      ledger_file: libraryFileState(paths.ledgerDir, LEDGER_FILE_NAME),
+      l0_file: libraryFileState(paths.l0Dir, L0_FILE_NAME),
+      has_admin_password: Boolean(vaultStatus?.has_admin_wrap),
+      write_unlocked: Boolean(vaultStatus?.write_unlocked),
+      has_recovery: Boolean(recovery?.has_recovery),
+      card_pending: Boolean(pendingRecoveryCard),
+      card_exported: recoveryCardExported,
+      fingerprint: pendingRecoveryCard?.fingerprint ?? recovery?.fingerprint ?? '',
+    };
+  });
+
+  /**
+   * 改选两库位置（向导里唯一的「选错了想重来」出口）：重跑第一段对话框 → 写指针 → 重启。
+   * 只改位置，不动文件（下一轮启动的 `adoptLibraryFilesIntoPlace` 负责把库补送到新目录，不删源）。
+   */
+  handleIpc(IPC.setupReselectDirs, async () => {
+    const pointer = readSetupPointer();
+    const dirs = await chooseLibraryDirs(pointer?.root ?? USER_DATA);
+    if (!dirs) return { ok: false, canceled: true, error: '未选择目录：保持原位置不变' };
+    const next: DataRootPointer = {
+      ...(pointer ?? { version: DATA_ROOT_POINTER_VERSION, root: USER_DATA, updatedAt: '' }),
+      ledgerDir: dirs.ledgerDir, l0Dir: dirs.l0Dir,
+    };
+    if (!persistPointer(next)) return { ok: false, error: '无法写入数据位置指针：请检查该目录是否可写' };
+    actionLog('dataRoot', 'setup:dirs-set', { ledgerDir: dirs.ledgerDir, l0Dir: dirs.l0Dir, reselect: true });
+    try {
+      app.relaunch();
+    } catch (e) {
+      console.error('[setup] relaunch failed', e);
+    }
+    app.exit(0);
+    return { ok: true, relaunch: true };
+  });
+
+  /** 首启设 L0 管理密码：一次建好 DEK + 密码包 + 恢复码包，码只在这里出现一次 */
+  handleIpc(IPC.setupSetL0Password, async (_e, password?: string) => {
+    if (password !== undefined && typeof password !== 'string') {
+      return { ok: false, error: '管理密码必须是字符串' };
+    }
+    if ((await vault.status().catch(() => null))?.has_admin_wrap) {
+      actionLog('dataRoot', 'setup:set-password-denied', { reason: 'already_set' }, { level: 'warn' });
+      return { ok: false, error: '本机已设过 L0 管理密码：请在「安全」页用恢复码找回，向导不再改密码' };
+    }
+    try {
+      const issued = await vault.initL0WithRecovery({ password: password ?? '', admin_user_id: 'setup:first-run' });
+      actionLog('kernel', 'l0:recovery-issued', { op: 'init', fingerprint: issued.fingerprint, user: 'setup:first-run' });
+      actionLog('dataRoot', 'setup:l0-password-set', { fingerprint: issued.fingerprint });
+      return { ok: true, ...issueRecoveryCard(issued) };
+    } catch (e) { return l0Fail(e); }
+  });
+
+  /**
+   * 密码已设但恢复卡没导出就重启（码明文只给过一次，本进程已经没有了）：
+   * 用管理密码当场解锁 → 换发一张**新**码 → 立刻锁回去。旧码随之作废，不留下「旧卡还能用」的窗口。
+   */
+  handleIpc(IPC.setupRegenCode, async (_e, password?: string) => {
+    if ((await vault.status().catch(() => null))?.has_admin_wrap !== true) {
+      return { ok: false, error: '尚未设置 L0 管理密码：请先完成上一步' };
+    }
+    try {
+      await vault.unlockWrite({ password: password ?? '', admin_user_id: 'setup:first-run' });
+      const issued = await vault.rotateRecoveryCode({ admin_user_id: 'setup:first-run' });
+      await vault.lockWrite({ admin_user_id: 'setup:first-run' });
+      actionLog('kernel', 'l0:recovery-issued', { op: 'rotate', fingerprint: issued.fingerprint, user: 'setup:first-run' });
+      return { ok: true, ...issueRecoveryCard(issued) };
+    } catch (e) {
+      void vault.lockWrite({ admin_user_id: 'setup:first-run' }).catch(() => undefined);
+      return l0Fail(e);
+    }
+  });
+
+  /** 导出恢复卡：与批次37-G 同一段实现（原生另存为，日志只有文件名/字节/指纹） */
+  handleIpc(IPC.setupExportCard, async () => exportPendingRecoveryCard('setup:first-run'));
+
+  /**
+   * 走完向导：只有「密码已设 + 本次真导出过一张卡」才落 setupDone。
+   * 落不了指针就如实报错——下次启动照样被向导拦住，绝不假装配置成功。
+   */
+  handleIpc(IPC.setupFinish, async () => {
+    const pointer = readSetupPointer();
+    const status = await vault.status().catch(() => null);
+    if (!status?.has_admin_wrap) return { ok: false, error: '还没设置 L0 管理密码：这一步不能跳' };
+    if (!recoveryCardExported || !pendingRecoveryCard) {
+      return { ok: false, error: '恢复卡还没导出：没有这张卡，忘记管理密码时 L0 原文就找不回来' };
+    }
+    const next: DataRootPointer = {
+      ...(pointer ?? { version: DATA_ROOT_POINTER_VERSION, root: USER_DATA, updatedAt: '' }),
+      ledgerDir: LIB_PATHS.ledgerDir,
+      l0Dir: LIB_PATHS.l0Dir,
+      setupDone: true,
+    };
+    if (!persistPointer(next)) return { ok: false, error: '无法写入数据位置指针（首启设置没保存）：请检查该目录是否可写后重试' };
+    actionLog('dataRoot', 'setup:done', {
+      ledgerDir: LIB_PATHS.ledgerDir, l0Dir: LIB_PATHS.l0Dir, fingerprint: pendingRecoveryCard.fingerprint,
+    });
+    // 由主进程给下一步地址：端口参数只有它知道，页面自己拼会漏掉 backend/agentBackend
+    return { ok: true, next_url: mainWindowUrl(staticPort, false) };
+  });
+}
+
 // ── §10 bootstrap ───────────────────────────────────────────────────────────
 let bootStarted = false;
 
@@ -1472,7 +2308,22 @@ async function bootstrap(): Promise<void> {
   // 延迟初始化 USER_DATA / DB_PATH（在 Electron 主进程上下文中，require('electron') 才返回真实 API）
   // 赋值给顶层 let，供 flog/mlog 等顶层函数闭包使用（避免模块加载期 ReferenceError）
   USER_DATA = app.getPath('userData');
-  DB_PATH = join(USER_DATA, 'memories.db.json');
+  // 批次37-B：两个库各有自己的目录（首启向导写进指针）；没走过向导的老指针 = 都跟随数据根，
+  // 这是「兼容读取」而不是「绕过向导」——向导门禁见 prepareDataRoot / setup:state
+  {
+    const p = DATA_ROOT_POINTER ? readDataRootPointer(DATA_ROOT_POINTER) : { status: 'missing' as const };
+    LIB_PATHS = p.status === 'ok'
+      ? resolveLibraryPaths(p.pointer)
+      : {
+        root: USER_DATA, ledgerDir: USER_DATA, l0Dir: USER_DATA,
+        ledger: join(USER_DATA, LEDGER_FILE_NAME), l0: join(USER_DATA, L0_FILE_NAME),
+        keyring: join(USER_DATA, L0_KEYRING_FILE_NAME), audit: join(USER_DATA, AUDIT_FILE_NAME),
+      };
+  }
+  DB_PATH = LIB_PATHS.ledger;
+  L0_DB_PATH = LIB_PATHS.l0;
+  AUDIT_PATH = LIB_PATHS.audit;
+  L0_KEYRING_PATH = join(LIB_PATHS.l0Dir, L0_KEYRING_FILE_NAME);
   COLLECTOR_CURSOR_FILE = join(USER_DATA, 'collector-cursor.json');
   FLOAT_LOG = join(USER_DATA, 'float.log');
   MAIN_LOG = join(USER_DATA, 'main.log');
@@ -1483,16 +2334,78 @@ async function bootstrap(): Promise<void> {
   // 数据根迁移必须在 FileStorage/服务启动前完成（无在途写）：只复制白名单、不覆盖、不删源
   const dataRootMigration = applyDataRootMigration();
   const legacyDbImported = importLegacyDbDir();
-  storage = new FileStorage(DB_PATH);
+  // 批次37-B：库文件必须落在指针指定的目录（migrateFrom 的数据是上一步才进数据根的，所以核对只能放这里）
+  adoptLibraryFilesIntoPlace();
+  // 批次37-A：L0 原数据库必须在 FileStorage 之前就绪 —— 写记忆时信封要能立刻搬家。
+  // 读不动（结构损坏）时：原件已由 l0Store 改名 *.corrupt 保留，本次按空库继续，但必须把
+  // 「原件在哪 / 哪些行会断链」写进主日志与动作日志，绝不静默开空库（与记忆库 D3 同口径）。
+  try {
+    l0Store = new FileL0BlobStore(L0_DB_PATH);
+  } catch (e) {
+    const msg = String((e as Error)?.message ?? e);
+    void mlog('storage:l0-corrupt-notice', { path: L0_DB_PATH, error: msg });
+    actionLog('kernel', 'l0:store-corrupt', { path: L0_DB_PATH, error: msg }, { level: 'error' });
+    l0Store = new FileL0BlobStore(L0_DB_PATH); // 原件已改名隔离，重试即得到空库（不再抛）
+  }
+  if (l0Store.readOnly) {
+    void mlog('storage:l0-readonly', { path: L0_DB_PATH, lockedBy: l0Store.lockedBy ?? null });
+  }
+  storage = new FileStorage(DB_PATH, { l0: l0Store, auditPath: AUDIT_PATH });
   // 上次损坏已隔离 → 本次是空库：必须让用户知道原件位置，不能静默开空库
   const corruptNotice = storage.takeCorruptionNotice();
   if (corruptNotice) void mlog('storage:corrupt-notice', corruptNotice);
+  // 批次41-A 存量迁移闸门：库里还压着历史审计时（本机实测 11,666 行 / 2.9 MiB），先按项目不变量
+  // 「批量改写账本前先备份」做一次备份，备成了才把它们搬进 audit.jsonl 并清空库里那格。
+  // 备份没做成 → 本次不搬，历史审计原样留在库里（读与查照旧），绝不无备份动用户的账本；
+  // 只读镜像（写锁被别的进程持有）同样不搬 —— 那是写方的账本，等持有写锁的进程自己搬。
+  {
+    const pending = storage.auditStats.legacy_rows_in_ledger;
+    if (pending > 0 && storage.auditStats.readonly) {
+      void mlog('bootstrap:audit-migrate-deferred', { legacy_rows: pending, reason: 'readonly' });
+    } else if (pending > 0) {
+      try {
+        const dir = await backupBeforeKernelChange('audit-log-split', 'audit:log-backup');
+        const moved = storage.migrateLegacyAudit();
+        void mlog('bootstrap:audit-migrated', { rows: moved, to: AUDIT_PATH, backup_dir: dir });
+      } catch (e) {
+        const msg = String((e as Error)?.message ?? e);
+        void mlog('bootstrap:audit-migrate-skipped', { legacy_rows: pending, error: msg });
+        actionLog('kernel', 'audit:log-migrate-skipped', { legacy_rows: pending, error: msg }, { level: 'warn' });
+      }
+    }
+  }
+  // 批次41-A：审计搬出主库后，「账本在哪 / 多少行 / 有没有读不动的行」必须每次启动都留痕——
+  // 审计是追责用的，一个静默空账本比一个报错的账本危险得多。
+  {
+    const a = storage.auditStats;
+    void mlog('bootstrap:audit-log', {
+      path: a.path, rows: a.rows, bytes: a.bytes, archive_files: a.archive_files,
+      archived_rows: a.archived_rows, skipped_lines: a.skipped_lines,
+      legacy_rows_in_ledger: a.legacy_rows_in_ledger, readonly: a.readonly,
+    });
+    actionLog('kernel', 'audit:log-open', {
+      path: a.path, rows: a.rows, bytes: a.bytes, archive_files: a.archive_files,
+      archived_rows: a.archived_rows, skipped_lines: a.skipped_lines, readonly: a.readonly,
+    });
+    if (a.migrated_rows > 0) {
+      actionLog('kernel', 'audit:log-migrated', { migrated_rows: a.migrated_rows, to: a.path });
+    }
+    if (a.skipped_lines > 0) {
+      actionLog('kernel', 'audit:log-bad-lines', { path: a.path, skipped_lines: a.skipped_lines }, { level: 'warn' });
+    }
+    if (a.corruption) {
+      actionLog('kernel', 'audit:log-corrupt', a.corruption, { level: 'error' });
+    }
+  }
   void mlog('bootstrap:data-root', {
     root: USER_DATA,
     defaultRoot: DEFAULT_DATA_ROOT,
     isDefault: !!DEFAULT_DATA_ROOT && samePath(USER_DATA, DEFAULT_DATA_ROOT),
     pointer: DATA_ROOT_POINTER,
     pointerWriteError: dataRootPointerWriteError,
+    l0Path: L0_DB_PATH,
+    l0ReadOnly: l0Store.readOnly,
+    l0Count: await l0Store.count(),
     migration: dataRootMigration
       ? { from: dataRootMigration.from, copied: dataRootMigration.copied, skipped: dataRootMigration.skipped, errors: dataRootMigration.errors, dbSource: dataRootMigration.dbSource }
       : null,
@@ -1569,7 +2482,7 @@ async function bootstrap(): Promise<void> {
 
   // L0 密钥环（§4.4）：DEK 只在主进程内存；管理/授权密码只以 PBKDF2 包裹 DEK 落盘。
   // 启动即作废上次未消费的授权（连续性已断）并清空内存密钥，写密钥需管理员重新解锁。
-  const l0KeyringFile = join(USER_DATA, 'l0-keyring.json');
+  const l0KeyringFile = L0_KEYRING_PATH;
   await cleanupTempFiles(l0KeyringFile);
   const l0Vault = new L0Vault({
     keyring: createL0KeyringStore(l0KeyringFile),
@@ -1579,7 +2492,12 @@ async function bootstrap(): Promise<void> {
     form: 'desktop',
   });
   await l0Vault.onAppRestart();
-  registerL0Ipc(l0Vault);
+  // 进程内向量索引提前建：清库/重判/按 L0 重建三条改写路径都要同步摘除或刷新向量，
+  // 而它们注册在下面的 IPC 段里（采集器共用这一个索引，声明原先在采集区，随批次37-E 上移）。
+  const collectorVector = new JsVectorBackend();
+  registerL0Ipc(l0Vault, collectorVector);
+  // 批次37-B：首启向导通道（登录之前用，不带会话）
+  registerSetupIpc(l0Vault, staticPort);
   registerLegacyIpc();
   // 批次28-C：遗留账本自动清理 —— 批次24 的清理卡要管理员手动点，实际一直没执行；
   // 现在启动即扫描（stub 深层行 + 误标层行），命中就先备份再自动降级回 L1，审计可回查。
@@ -1618,6 +2536,9 @@ async function bootstrap(): Promise<void> {
   llmGateway = loadLlmGateway(USER_DATA);
   void mlog('bootstrap:llm-gateway', { usable: !!llmGateway });
   registerLlmIpc();
+  // 批次39：写入只落 L0+L1，深层由这条后台队列补炼（存量启动即入队，幂等；引擎没就绪就先排着不判死）
+  registerRefineIpc();
+  void startRefineQueue(collectorVector);
 
   const mcp = runMcpServer({ storage, port: MCP_PORT, token: mcpToken, l0: l0Vault });
   mcp.ready
@@ -1691,8 +2612,6 @@ async function bootstrap(): Promise<void> {
     // 首次启动 / 文件损坏 → 从空游标开始（不阻塞启动）
   }
 
-  const collectorVector = new JsVectorBackend();
-
   // 首扫：等窗口 ready-to-show 后延迟触发一次（避免启动即抢 IO 卡住首屏）；
   // 之后由 reconciler 每 5min 自动对账，单轮最多 COLLECTOR_MAX_PER_ROUND 条。
   const startFirstScan = () => {
@@ -1700,7 +2619,7 @@ async function bootstrap(): Promise<void> {
     setTimeout(() => {
       void mlog('collector:first-scan:start');
       reconciler.runOnce()
-        .then((s) => void mlog('collector:first-scan:done', { collected: s.collected, deduped: s.deduped, skipped: s.skipped.length }))
+        .then((s) => void mlog('collector:first-scan:done', { collected: s.collected, deduped: s.deduped, roleSkipped: s.roleSkipped, skipped: s.skipped.length }))
         .catch((e) => void mlog('collector:first-scan:error', String((e as Error)?.message ?? e)));
     }, COLLECTOR_FIRST_SCAN_DELAY_MS);
   };
@@ -1710,6 +2629,7 @@ async function bootstrap(): Promise<void> {
   let detectedAgentNames: string[] = [];
   const buildSources = () => defaultAgentSources({ agents: detectedAgentNames.length > 0 ? detectedAgentNames : undefined });
   // source 用函数形式：每轮现取游标与 agent 白名单，保证增量续采与动态扩展都生效
+  let lastApply: { written: number; filtered: number; failed: number; ts: number } | null = null;
   const reconciler = createReconciler({
     intervalMs: COLLECTOR_INTERVAL_MS, // §5.1 预设 5min
     source: () => ({
@@ -1719,12 +2639,30 @@ async function bootstrap(): Promise<void> {
       maxItemsPerRun: COLLECTOR_MAX_PER_ROUND, // 单轮上限 50 条，防大批量灌入卡死事件循环
     }),
     runOnStart: false,
+    // 批次41-D（P1-12）：失败退避参数 + 记账回调（只落原因码，绝不落正文）
+    backoffCapMs: COLLECTOR_BACKOFF_CAP_MS,
+    maxConsecutiveFails: COLLECTOR_MAX_CONSECUTIVE_FAILS,
+    onRoundFail: (info) => {
+      // L0 写密钥锁定等长障时不再每 5min 空转刷屏：退避间隔递增、封顶 2h
+      void mlog('collector:backoff', { fails: info.fails, delayMs: info.delayMs, reason: info.reason, capMs: COLLECTOR_BACKOFF_CAP_MS });
+      actionLog('collector', 'backoff', { fails: info.fails, delayMs: info.delayMs, reason: info.reason }, { level: 'warn' });
+    },
+    onAutoRetryStopped: (info) => {
+      void mlog('collector:backoff-auto-stopped', { fails: info.fails, reason: info.reason, manualOnly: true });
+      actionLog('collector', 'backoff-auto-stopped', { fails: info.fails, reason: info.reason }, { level: 'error' });
+    },
+    onRecover: (info) => {
+      void mlog('collector:backoff-recovered', { prevFails: info.prevFails });
+      actionLog('collector', 'backoff-recovered', { prevFails: info.prevFails });
+    },
     onScan: async (scan: ScanResult) => {
       // 扫描阶段会把新指纹写进 seenHashes；失败时整体回滚，避免残留“已见”导致下轮跳过
       const seenBefore = new Set(collectorSeen);
       // 一批写入只落盘一次（L0→L6 逐条 coreWrite 期间不逐次同步写盘），finally 统一 commit
       storage.beginBatch?.();
-      let applied: { written: number; failed: number } | null = null;
+      // 批次39：本批真正落库的 mem_id —— 提交成功后进后台补炼队列（采集器仍然不炼深层，写入保持只落 L0+L1）
+      const writtenIds: string[] = [];
+      let applied: { written: number; filtered: number; failed: number } | null = null;
       let committed = false;
       try {
         applied = await applyScanToStore(scan, {
@@ -1739,9 +2677,9 @@ async function bootstrap(): Promise<void> {
               },
               { storage, vector: collectorVector, account: { user_id: 'u1', team_id: 't1', enterprise_id: 'e1' }, request_id: `req_col_${Date.now()}`, now: Date.now(), l0: l0Vault },
             );
+            if (r.mem_id) writtenIds.push(r.mem_id);
             return { mem_id: r.mem_id, dedup: r.dedup };
-          },
-          audit: async (rec) => {
+          },          audit: async (rec) => {
             await storage.appendAudit({
               request_id: rec.request_id,
               action: rec.action as AuditAction,
@@ -1769,6 +2707,7 @@ async function bootstrap(): Promise<void> {
       // 游标只在「本批提交成功 + 无失败写入」后推进；否则保留旧游标 + 回滚 seen，下轮重采（coreWrite 去重兜底）。
       // 旧实现先写游标后 commit：崩溃窗口或单条写失败会永久跳过这些消息。
       const canAdvance = committed && applied !== null && applied.failed === 0;
+      lastApply = applied ? { ...applied, ts: Date.now() } : null;
       if (canAdvance) {
         collectorCursor = scan.cursors;
         try {
@@ -1785,6 +2724,21 @@ async function bootstrap(): Promise<void> {
         } catch (e) {
           console.error('[collector] cursor persist failed', e);
         }
+        // 批次39：本批新行入后台补炼队列（只在整批提交成功后入队，失败的批不入队——否则会把没落库的 id 排进去）
+        if (writtenIds.length > 0 && refineQueueDir) {
+          try {
+            const rows: Memory[] = [];
+            for (const id of writtenIds) {
+              const m = await storage.getMemory(id);
+              if (m) rows.push(m);
+            }
+            const { state: next, report } = enqueueRows(loadRefineQueue(refineQueueDir), rows);
+            saveRefineQueue(refineQueueDir, next);
+            if (report.added > 0) actionLog('kernel', 'refine:enqueue-collected', { written: writtenIds.length, ...report });
+          } catch (e) {
+            actionLog('kernel', 'refine:enqueue-collected-fail', { error: String((e as Error)?.message ?? e) }, { level: 'error' });
+          }
+        }
       } else {
         collectorSeen = seenBefore;
         if (applied !== null && applied.failed > 0) {
@@ -1793,10 +2747,20 @@ async function bootstrap(): Promise<void> {
       }
 
       if (scan.collected > 0 || (applied?.written ?? 0) > 0) {
-        console.log(`[collector] period done: collected=${scan.collected} written=${applied?.written ?? 0}${applied && applied.failed > 0 ? ` failed=${applied.failed}` : ''} ${scan.deduped ? `deduped=${scan.deduped}` : ''}`);
+        console.log(`[collector] period done: collected=${scan.collected} written=${applied?.written ?? 0}${applied && applied.filtered > 0 ? ` filtered=${applied.filtered}` : ''}${applied && applied.failed > 0 ? ` failed=${applied.failed}` : ''} ${scan.deduped ? `deduped=${scan.deduped}` : ''}${scan.roleSkipped ? ` roleSkipped=${scan.roleSkipped}` : ''}`);
+      }
+      if (scan.roleSkipped > 0) {
+        // 批次35 采集口角色白名单（缺省只采 user）挡下的条数——被拦的不是丢失，是口径
+        void mlog('collector:role-gate', { roleSkipped: scan.roleSkipped, collected: scan.collected, deduped: scan.deduped });
       }
       if (scan.skipped.length > 0) {
         for (const s of scan.skipped) console.log(`[collector] ${s}`);
+      }
+      // 批次41-D（P1-12）：本轮没推进（L0 写密钥锁定 / apply 或 commit 失败 / 有写失败）→ 抛出让 reconciler 计为失败并退避。
+      // 正常推进（canAdvance）则不抛，reconciler 侧退避归零。原因只带码不带正文。
+      if (!canAdvance) {
+        const reason = applied === null ? 'apply_failed' : !committed ? 'commit_failed' : applied.failed > 0 ? 'write_failed' : 'not_advanced';
+        throw new Error(`collector:round-not-advanced(${reason})`);
       }
     },
   });
@@ -1807,7 +2771,13 @@ async function bootstrap(): Promise<void> {
       ok: true,
       running: !reconciler.stopped,
       intervalMs: reconciler.intervalMs,
-      last: last ? { collected: last.collected, deduped: last.deduped, skipped: last.skipped, ts: last.ts } : null,
+      last: last ? { collected: last.collected, deduped: last.deduped, roleSkipped: last.roleSkipped, skipped: last.skipped, ts: last.ts } : null,
+      // 批次41-D：失败退避状态（连续失败轮数 + 是否已因达上限停自动重试；UI 显示「上次失败原因 + 手动重跑」）
+      consecutiveFails: reconciler.consecutiveFails,
+      autoRetryStopped: reconciler.autoRetryStopped,
+      // 批次35：清空重采进度（本轮入库/质量门拦下）+ 追采是否在跑
+      apply: lastApply,
+      recollecting: recollectInFlight,
     };
   });
   // 19.9 接入成功立即对账：不等 5min 周期，接入后马上读新 agent 的会话日志
@@ -1817,7 +2787,167 @@ async function bootstrap(): Promise<void> {
       detectedAgentNames = [...new Set([...detectedAgentNames, ...agentNames])];
     }
     const r = await reconciler.runOnce();
-    return { ok: true, collected: r.collected, deduped: r.deduped, skipped: r.skipped, ts: r.ts };
+    // 批次41-D：手动重跑也按成败口径回显——reconciler 失败时给合成占位 skipped[0]='采集异常: …'，据此区分「跑成功」与「没推进」
+    const advanced = !(r.skipped[0] ?? '').startsWith('采集异常');
+    return {
+      ok: true,
+      advanced,
+      consecutiveFails: reconciler.consecutiveFails,
+      autoRetryStopped: reconciler.autoRetryStopped,
+      collected: r.collected,
+      deduped: r.deduped,
+      roleSkipped: r.roleSkipped,
+      skipped: r.skipped,
+      ts: r.ts,
+    };
+  });
+
+  // ── 批次35：记忆库清空重采（用户拍板「库内内容全部删除，按新入库规则重新拉取」）──────
+  // 收紧质量门只能挡住**以后**的写入，救不回已经落库的助手自述/过程旁白——那批噪声是旧采集口径
+  // （助手消息照采）灌进来的，唯一诚实的做法是整库清空 + 采集游标归零 + 立即按新规则追采。
+  // 顺序固定：备份 → 清空 → 清游标 → 追采。备份失败一律拒绝清空（不可逆操作不留裸奔窗口）。
+  let recollectInFlight = false;
+
+  const resetCollectorCursors = async (): Promise<{ ok: boolean; error?: string }> => {
+    collectorCursor = {};
+    collectorSeen = new Set<string>();
+    try {
+      await mkdir(USER_DATA, { recursive: true });
+      await writeFile(
+        collectorCursorFile,
+        JSON.stringify({ cursor: {}, seen: [], updatedAt: new Date().toISOString() }),
+        'utf8',
+      );
+      return { ok: true };
+    } catch (e) {
+      // 内存游标已归零、文件没写进去：如实回显，重启后会退回旧游标（可能漏采），不假装成功
+      return { ok: false, error: String((e as Error)?.message ?? e) };
+    }
+  };
+
+  /** 清空后连续补采到「本轮采不到新消息」或轮次上限；单轮上限仍是 COLLECTOR_MAX_PER_ROUND。 */
+  const runRecollectCatchUp = async (): Promise<void> => {
+    recollectInFlight = true;
+    let rounds = 0;
+    let items = 0;
+    try {
+      while (rounds < RECOLLECT_MAX_ROUNDS) {
+        const s = await reconciler.runOnce();
+        rounds++;
+        items += s.collected;
+        if (s.collected === 0) break;
+        await new Promise((resolve) => setTimeout(resolve, RECOLLECT_ROUND_GAP_MS));
+      }
+      void mlog('collector:recollect-done', {
+        rounds, items, exhausted: rounds >= RECOLLECT_MAX_ROUNDS,
+        written: lastApply?.written ?? 0, filtered: lastApply?.filtered ?? 0,
+      });
+    } catch (e) {
+      void mlog('collector:recollect-error', { rounds, error: String((e as Error)?.message ?? e) });
+    } finally {
+      recollectInFlight = false;
+    }
+  };
+
+  handleIpc(IPC.ledgerResetPreview, async (_e, sessionId?: string) => {
+    const gate = requireSession(sessionId, IPC.ledgerResetPreview);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    try {
+      return {
+        ok: true,
+        preview: await scanLedgerForReset(storage),
+        collector: { sourceCount: buildSources().length, recollecting: recollectInFlight, maxPerRound: COLLECTOR_MAX_PER_ROUND },
+      };
+    } catch (e) { return l0Fail(e); }
+  });
+
+  handleIpc(IPC.ledgerResetRecollect, async (_e, confirmText?: string, sessionId?: string) => {
+    const gate = requireAdmin(sessionId, IPC.ledgerResetRecollect);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    // 二次确认口令：清空不可逆，必须逐字输入 RESET（UI 也要求手输，不接受默认值）
+    if ((confirmText ?? '').trim().toUpperCase() !== 'RESET') {
+      actionLog('kernel', 'ledger:reset-rejected', { reason: 'confirm_text', user: gate.ctx.user_id });
+      return { ok: false, error: '未输入确认口令 RESET，已取消（清空不可逆）' };
+    }
+    let backupDir: string;
+    try {
+      backupDir = await backupBeforeKernelChange('ledger-reset', 'ledger:reset-backup');
+      if (existsSync(collectorCursorFile)) {
+        await copyFile(collectorCursorFile, join(backupDir, 'collector-cursor.json'));
+      }
+    } catch (e) {
+      const err = String((e as Error)?.message ?? e);
+      actionLog('kernel', 'ledger:reset-backup-fail', { error: err }, { level: 'error' });
+      return { ok: false, error: `清空前备份失败：${err}` };
+    }
+    try {
+      const now = Date.now();
+      const report = await purgeLedger({
+        storage, vector: collectorVector, admin_user_id: gate.ctx.user_id,
+        request_id: `req_ledger_reset_${now}`, now, backup_confirmed: true,
+      });
+      const cursorReset = await resetCollectorCursors();
+      actionLog('kernel', 'ledger:reset-recollect', {
+        total: report.total, purged: report.purged, failed: report.failed,
+        with_l0_cipher: report.with_l0_cipher, llm_refined: report.llm_refined,
+        cursor_reset: cursorReset.ok, ...(cursorReset.ok ? {} : { cursor_error: cursorReset.error }),
+        dir: backupDir,
+      });
+      // 批次41-C：清空后队列里全是幽灵（行都删了），对账摘除；随后追采会重新入队活行
+      void reconcileRefineQueueDir('ledger-reset');
+      // 追采放后台：IPC 立即返回回执，页面靠 collector:status 观察进度，不等几分钟
+      void runRecollectCatchUp();
+      return {
+        ok: true, report, backup_dir: backupDir,
+        cursor_reset: cursorReset.ok, cursor_error: cursorReset.error,
+        recollecting: true,
+      };
+    } catch (e) { return l0Fail(e); }
+  });
+
+  // 批次36-C：存量按当前质量门重判。与「清空重采」的区别——只删按新口径本不该入库的行，
+  // 保留行的正文/向量/采集游标都不动，判定只喂 content_l1，因此不需要 L0 写密钥、不调 LLM。
+  handleIpc(IPC.rulesRejudgePreview, async (_e, sessionId?: string) => {
+    const gate = requireSession(sessionId, IPC.rulesRejudgePreview);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    try {
+      return { ok: true, preview: await scanRowsForRejudge(storage) };
+    } catch (e) { return l0Fail(e); }
+  });
+
+  handleIpc(IPC.rulesRejudgeRun, async (_e, confirmText?: string, sessionId?: string) => {
+    const gate = requireAdmin(sessionId, IPC.rulesRejudgeRun);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    // 二次确认口令：删除不可逆，必须逐字输入 REJUDGE（与整库清空的 RESET 区分开）
+    if ((confirmText ?? '').trim().toUpperCase() !== 'REJUDGE') {
+      actionLog('kernel', 'rules:rejudge-rejected', { reason: 'confirm_text', user: gate.ctx.user_id });
+      return { ok: false, error: '未输入确认口令 REJUDGE，已取消（重判会删行，不可逆）' };
+    }
+    let backupDir: string;
+    try {
+      backupDir = await backupBeforeKernelChange('rules-rejudge', 'rules:rejudge-backup');
+    } catch (e) {
+      const err = String((e as Error)?.message ?? e);
+      actionLog('kernel', 'rules:rejudge-backup-fail', { error: err }, { level: 'error' });
+      return { ok: false, error: `重判前备份失败：${err}` };
+    }
+    try {
+      const now = Date.now();
+      const report = await rejudgeRows({
+        storage, vector: collectorVector, admin_user_id: gate.ctx.user_id,
+        request_id: `req_rejudge_${now}`, now, backup_confirmed: true,
+      });
+      actionLog('kernel', 'rules:rejudge-run', {
+        gate_version: report.gate_version, total: report.total, purge: report.purge,
+        purged: report.purged, restamped: report.restamped,
+        skipped_protected: report.skipped_protected, skipped_no_l1: report.skipped_no_l1,
+        with_l0_cipher: report.with_l0_cipher,
+        failed: report.failed, dir: backupDir,
+      });
+      // 批次41-C：重判删掉的行在队列里即成幽灵，按「当前未删行」对账摘除（放行行不动）
+      void reconcileRefineQueueDir('rules-rejudge');
+      return { ok: true, report, backup_dir: backupDir };
+    } catch (e) { return l0Fail(e); }
   });
 
   console.log(`[collector] 会话采集器已创建（§5.1 周期 ${COLLECTOR_INTERVAL_MS / 1000}s，预设 5min）`);
@@ -1842,7 +2972,7 @@ async function bootstrap(): Promise<void> {
       // 一轮写盘一次（层迁移/合并可能涉及上千条），避免逐条全量 persist 卡住主进程
       storage.beginBatch?.();
       try {
-        const report = await runForgettingCycle(storage, now, { enabled, weeklyCompress });
+        const report = await runForgettingCycle(storage, now, { enabled, weeklyCompress, vector: collectorVector });
         void mlog('forgetting:cycle:done', { why, enabled, weeklyCompress, ...report });
       } finally {
         storage.commitBatch();
@@ -1881,7 +3011,17 @@ async function bootstrap(): Promise<void> {
       },
     });
   } catch (e) {
-    void mlog('bootstrap:window-failed', String((e as Error)?.message ?? e));
+    // 批次41-E（P1-6）：主窗口创建失败不能再静默 return——否则进程存活并持有单实例锁，
+    // 用户表现为「双击没反应」，只能杀进程恢复。这里显式报错并退出。
+    const winFailMsg = String((e as Error)?.message ?? e);
+    void mlog('bootstrap:window-failed', winFailMsg);
+    // 补一条动作日志（此前只进 main.log，动作日志查不到）——只带原因与日志路径，不带窗口内容
+    actionLog('app', 'bootstrap:window-failed', { error: winFailMsg, logPath: MAIN_LOG }, { level: 'error' });
+    dialog.showErrorBox(
+      '主窗口创建失败',
+      `应用启动失败，无法创建主窗口，正在退出。\n原因：${winFailMsg}\n日志：${MAIN_LOG}`,
+    );
+    app.quit();
     return;
   }
 
@@ -1907,7 +3047,13 @@ async function bootstrap(): Promise<void> {
   });
 
   // 显式传端口：?backend= 供 mirrorClient 走 home server，?agentBackend= 供 useBackendMirror 走 agentOnboard server
-  win.loadURL(`http://127.0.0.1:${staticPort}/overview.html?backend=http://127.0.0.1:${MIRROR_PORT}&agentBackend=http://127.0.0.1:${AGENT_ONBOARD_PORT}`);
+  // 批次37-B：首启向导没走完（两库位置 / L0 管理密码 / 恢复卡导出）就先进 setup.html。
+  // 门禁判据在主进程（指针里的 setupDone），页面只是载体——绕过页面也进不了数据面，各条 IPC 各有闸门。
+  const wizardFirst = isWizardIncomplete();
+  actionLog('dataRoot', wizardFirst ? 'setup:wizard-open' : 'setup:wizard-skipped', {
+    ledgerDir: LIB_PATHS.ledgerDir, l0Dir: LIB_PATHS.l0Dir,
+  });
+  void win.loadURL(mainWindowUrl(staticPort, wizardFirst));
 
   if (corruptNotice) {
     const detail = [

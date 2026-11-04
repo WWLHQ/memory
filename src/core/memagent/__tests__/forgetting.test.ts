@@ -5,6 +5,8 @@ import {
   reinforceOne, restoreOne, runForgettingCycle, scoreMemory,
 } from '../forgetting.ts';
 import { InMemoryStorage } from '../storage.ts';
+import { DEFAULT_VECTOR_DIM, JsVectorBackend, cosine, embedSync } from '../vector.ts';
+import { sha256hex } from '../sync.ts';
 import type { Memory } from '../types.ts';
 
 const DAY = 24 * 3600 * 1000;
@@ -122,6 +124,10 @@ describe('17.9 合并与摘要', () => {
     expect(built.summary.layer).toBe('L1');
     expect(built.summary.content_l1).toBe(built.summary.content);
     expect(built.summary.refined_by).toBe('stub');
+    // 批次41-B（评审 P1-4 另一半）：摘要行与写入路径同字段口径 —— sha256 + 源自 L1 的语义向量
+    // （§2.2 不变量 7）。缺任一项，摘要行在语义召回里恒 0 分、按 sha256 查重永远匹配不到。
+    expect(built.summary.sha256).toBe(sha256hex(built.summary.content!));
+    expect(built.summary.embedding).toEqual(embedSync(built.summary.content_l1!, DEFAULT_VECTOR_DIM));
     expect(built.originals.every((o) => o.decay_class === 'cold' && o.merged_into === built.summary.mem_id)).toBe(true);
   });
 
@@ -217,6 +223,36 @@ describe('17.10 后台周期任务', () => {
     expect(storage.size).toBe(4); // 3 原文 + 1 摘要（不删除）
     const d0 = await storage.getMemory('d0');
     expect(d0?.decay_class).toBe('cold');
+  });
+
+  it('批次41-B：摘要行进向量索引（给了 vector 就同步 upsert；不给也只有行上向量，不假装建过索引）', async () => {
+    const storage = new InMemoryStorage();
+    for (let i = 0; i < 3; i++) {
+      await storage.putMemory(mem({ mem_id: `v${i}`, content: `deploy docker guide part ${i}`, category: 'decision' }));
+    }
+    const vector = new JsVectorBackend();
+    const r = await runForgettingCycle(storage, NOW, { vector });
+    expect(r.summaries_created).toBe(1);
+    const summary = (await storage.listMemories({})).find((m) => m.mem_id.startsWith('sum_'))!;
+    expect(summary).toBeDefined();
+
+    // 索引里查得到这条摘要（按它自己的正文嵌入去查 → 命中自己）
+    const hits = await vector.search(embedSync(summary.content_l1!, vector.dim), 5, {});
+    expect(hits.map((h) => h.mem_id)).toContain(summary.mem_id);
+    // 语义召回读的是行上的 embedding（agent.ts:81），这里必须非 0 分
+    expect(cosine(embedSync(summary.content_l1!, DEFAULT_VECTOR_DIM), summary.embedding!)).toBeCloseTo(1, 6);
+
+    // 不传 vector：行上向量照旧真算，但索引不被写入（无后端时不假装建过索引）
+    const storage2 = new InMemoryStorage();
+    for (let i = 0; i < 3; i++) {
+      await storage2.putMemory(mem({ mem_id: `w${i}`, content: `deploy docker guide part ${i}`, category: 'decision' }));
+    }
+    const r2 = await runForgettingCycle(storage2, NOW);
+    expect(r2.summaries_created).toBe(1);
+    const summary2 = (await storage2.listMemories({})).find((m) => m.mem_id.startsWith('sum_'))!;
+    expect(summary2.embedding).toEqual(embedSync(summary2.content_l1!, DEFAULT_VECTOR_DIM));
+    expect((await vector.search(embedSync(summary2.content_l1!, vector.dim), 5, {}))
+      .map((h) => h.mem_id)).not.toContain(summary2.mem_id);
   });
 
   it('批次10：噪声成员组 → 合并被质量门拦下，原文不动（审计记 summaries_filtered）', async () => {

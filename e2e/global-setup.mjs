@@ -2,7 +2,7 @@
 // detached + unref：runner 不拥有该进程，因此 teardown 不会卡在 browser.close()。
 import http from 'node:http';
 import { spawn, execFileSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, readlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
@@ -73,14 +73,60 @@ function waitPortClosed(port, timeoutMs = 8000) {
   });
 }
 
+/**
+ * 批次41-G：解析某 pid 的可执行文件路径；无法确定时返回 null（宁可判「非本仓库」也不误杀）。
+ * Windows 走 PowerShell 查 Win32_Process.ExecutablePath；POSIX 在 Linux 读 /proc/<pid>/exe，
+ * 其它平台（macOS 无 /proc）返回 null。
+ */
+function exePathOfPid(pid) {
+  try {
+    if (process.platform === 'win32') {
+      const out = execFileSync('powershell', [
+        '-NoProfile', '-Command',
+        `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}" | Select-Object -ExpandProperty ExecutablePath)`,
+      ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+      const line = out.trim().split('\n')[0].trim();
+      return line || null;
+    }
+    return readlinkSync(`/proc/${pid}/exe`);
+  } catch {
+    return null;
+  }
+}
+
+/** 判定某可执行路径是否属于本仓库 Playwright 的浏览器（而非用户系统里的 Chrome/Edge） */
+function isPlaywrightExe(path) {
+  if (!path) return false;
+  try {
+    const ours = chromium.executablePath();
+    if (ours && path === ours) return true;
+    // Playwright 缓存目录的两个常见形态：默认 ms-playwright、或 node_modules 内 .local-browsers
+    return /ms-playwright|\.local-browsers/i.test(path);
+  } catch {
+    return false;
+  }
+}
+
+
 export default async function globalSetup() {
   // 防端口劫持：上一轮 detached Chromium 会跨运行存活；若旧实例仍占着 CDP 端口，
   // 新 spawn 会因端口冲突静默失败，而 waitForCDP 探测到的却是旧实例
   // （旧实例可能被外部环境注入扩展 service worker，导致 connectOverCDP 崩溃）。
-  // 故先按 netstat 找到占用 pid，taskkill 整棵进程树后再启动新实例。
+  // 故先按 netstat 找到占用 pid，确认是本仓库的 Playwright 浏览器后再 taskkill 整棵进程树。
   if (await portOpen(PORT)) {
     const stalePid = pidListeningOn(PORT);
     if (stalePid) {
+      // 批次41-G：绝不「裸杀」——先确认可执行路径属于本仓库 Playwright 浏览器。
+      // 若用户自己的 Chrome 恰好也开着 9222（或其它默认端口），这里判为「非本仓库」，
+      // 宁可让本次 E2E 失败并给出释放/换端口的指引，也不连其标签页一起杀掉。
+      const staleExe = exePathOfPid(stalePid);
+      if (!isPlaywrightExe(staleExe)) {
+        throw new Error(
+          `CDP 端口 ${PORT} 被非本仓库的进程占用（pid=${stalePid}${staleExe ? '，' + staleExe : ''}）。` +
+          `为避免误杀（例如你自己的 Chrome 恰好开了 ${PORT}），本次 E2E 不启动。` +
+          `请释放该端口，或设 E2E_CDP_PORT 为空闲端口后重跑。`,
+        );
+      }
       try {
         if (process.platform === 'win32') execFileSync('taskkill', ['/PID', String(stalePid), '/T', '/F'], { stdio: 'ignore' });
         else process.kill(stalePid, 'SIGKILL');

@@ -86,15 +86,21 @@ describe('scanSessionLogs dsh-projcache 端到端', () => {
       filePattern: /^session-.*\.json$/, category: 'context',
     };
     const r1 = await scanSessionLogs({ sources: [src], seenHashes: new Set() });
-    expect(r1.collected).toBe(2);
+    // 批次35：采集口缺省只采 user → 同 turn 的 response（助手正文）不进库
+    expect(r1.collected).toBe(1);
+    expect(r1.roleSkipped).toBe(1);
     expect(r1.items[0].role).toBe('user');
     expect(r1.items[0].content).toBe('问题一');
-    expect(r1.items[1].role).toBe('assistant');
-    expect(r1.items[1].content).toBe('回答一');
-    // 第二轮：无内容变化 + seenHashes 命中 → 0 新采（幂等）
+    // 第二轮：无内容变化 + seenHashes 命中 → 0 新采（幂等，按过滤后的消息数统计）
     const seen = new Set(r1.items.map((i) => i.hash));
     const r2 = await scanSessionLogs({ sources: [src], cursor: r1.cursors, seenHashes: seen });
     expect(r2.collected).toBe(0);
-    expect(r2.deduped).toBe(2);
+    expect(r2.deduped).toBe(1);
+    // 放开白名单 → user + assistant 全文都采（历史口径可复现）
+    const r3 = await scanSessionLogs({
+      sources: [{ ...src, roles: ['user', 'assistant'] }], seenHashes: new Set(),
+    });
+    expect(r3.collected).toBe(2);
+    expect(r3.items.map((i) => `${i.role}:${i.content}`)).toEqual(['user:问题一', 'assistant:回答一']);
   });
 });

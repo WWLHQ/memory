@@ -1,10 +1,12 @@
 // REQ-010 遗忘机制后台任务（17.4–17.11）：新鲜度/打分/层迁移/合并摘要/周期任务
 // 约束：不物理删除（AC-01）、locked 豁免（AC-04）、失败不伤原文（AC-10）、可审计可关闭（AC-14）
 import { ulid } from './ulid.ts';
-import { checkL0ToL1Quality } from './qualityGate.ts';
+import { checkL0ToL1Quality, QUALITY_GATE_VERSION } from './qualityGate.ts';
 import { layerSpecOf } from './layerRules.ts';
+import { DEFAULT_VECTOR_DIM, embedSync } from './vector.ts';
+import { sha256hex } from './sync.ts';
 import type {
-  AuditAction, AuditRecord, Category, DecayClass, Memory, StorageBackend,
+  AuditAction, AuditRecord, Category, DecayClass, Memory, StorageBackend, VectorBackend,
 } from './types.ts';
 
 const DAY = 24 * 3600 * 1000;
@@ -139,6 +141,7 @@ export type SummaryBuildResult =
  * 17.9 合并组 → 摘要记忆（importance 取最高、merged_from 记来源、原文降 Cold 保留；失败不影响原文）
  * 批次10：自动摘要与手动写入共用 L0→L1 质量门——成员内容与聚合产物都必须过门，
  * 否则跳过合并（原文不降级、不删除），由周期审计记录拦截原因。
+ * 批次41-B：摘要行与写入路径同字段口径（`sha256` + `embedding` 都在这里算出来，纯函数、无 I/O）。
  */
 export function buildSummary(group: Memory[], now: number): SummaryBuildResult {
   if (group.length < 3) return null; // 17.9 触发条件：≥3 条相似
@@ -164,9 +167,14 @@ export function buildSummary(group: Memory[], now: number): SummaryBuildResult {
   if (!gate.ok) return { ok: false, reason: `摘要聚合内容未通过质量门：${gate.reason}` };
 
   const maxImp = Math.max(...keepLocked.map((m) => m.importance ?? 0.5));
+  const contentL1 = gate.content!;
   // 批次28-C：摘要行曾打 layer:'L3' 且不带 content_l1/refined_by —— 未接 LLM 的本地摘要
   // 却以深层身份出现，正是「没有 LLM 却有 L2-L6」的直接来源之一。本地合成属 L1 产物：
   // layer=L1、正文落 content_l1、refined_by=stub，与写入路径同一口径。
+  // 批次41-B（评审 P1-4 的另一半）：同一口径还包括**sha256 与语义向量**——摘要行此前既不落
+  // sha256 也不带 embedding，于是语义召回对它恒 0 分、按 sha256 查重永远匹配不到它、
+  // reconcile 把它判成「缺失」（违反需求规格书 §2.2 不变量 7「向量源自 L1」）。
+  // 与 memories.ts 写入路径同源：sha256 取行上报正文（这里 = L1），向量取 content_l1。
   const summary: Memory = {
     mem_id: `sum_${ulid(now)}`,
     project_id: keepLocked[0].project_id,
@@ -174,8 +182,8 @@ export function buildSummary(group: Memory[], now: number): SummaryBuildResult {
     team_id: keepLocked[0].team_id,
     category: keepLocked[0].category,
     layer: 'L1',
-    content: gate.content!,
-    content_l1: gate.content!,
+    content: contentL1,
+    content_l1: contentL1,
     layer_specs: { L1: `v1:${layerSpecOf('L1').name}` },
     refined_by: 'stub',
     decay_class: 'warm',
@@ -185,6 +193,9 @@ export function buildSummary(group: Memory[], now: number): SummaryBuildResult {
     confidence: 0.6,
     merged_from: keepLocked.map((m) => m.mem_id),
     layers_generated_at: now,
+    quality_gate_v: QUALITY_GATE_VERSION,
+    sha256: sha256hex(contentL1),
+    embedding: embedSync(contentL1, DEFAULT_VECTOR_DIM),
     version: 1,
     created_at: now,
   };
@@ -211,6 +222,12 @@ export interface ForgettingOptions {
   enabled?: boolean;
   /** 是否执行冷压缩（17.10 每周） */
   weeklyCompress?: boolean;
+  /**
+   * 批次41-B：向量索引。给了它，摘要行落库后同步行 upsert（与写入/补炼/重建路径一致）；
+   * 不给则只写行上的 `embedding`（纯函数测试、无向量后端的调用方）——行上是真向量，
+   * 语义召回（读 `m.embedding`）照常命中，缺的只是那份可丢弃的索引。
+   */
+  vector?: VectorBackend;
 }
 
 /**
@@ -265,6 +282,12 @@ export async function runForgettingCycle(
       continue;
     }
     await storage.putMemory(built.summary);
+    // 批次41-B：摘要行也要进向量索引（与 memories.ts 写入路径同口径：按 content_l1 建索引）
+    if (opts.vector) {
+      await opts.vector.upsert(built.summary.mem_id, built.summary.content_l1!, {
+        project_id: built.summary.project_id, layer: 'L1',
+      });
+    }
     for (const o of built.originals) await storage.putMemory(o);
     report.summaries_created++;
     report.merged_originals += built.originals.length;

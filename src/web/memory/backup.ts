@@ -13,10 +13,31 @@ export interface BackupConfigView {
   lastOk?: boolean;
 }
 
+/**
+ * 批次37-D：一次备份覆盖的落盘源。L0=原数据库（密文），keyring=L0 密钥环（wrapped DEK）——没有它们，记忆库备份无法还原原文。
+ * 批次41-A：audit=内核审计账本（追加式 JSONL）。审计搬出记忆库之后，「备了记忆库」不再等于「备了审计」。
+ */
+export type BackupKind = 'ledger' | 'l0' | 'keyring' | 'audit';
+
+export const BACKUP_KIND_LABEL: Record<BackupKind, string> = {
+  ledger: '记忆库（L1–L6）',
+  l0: 'L0 原数据库（密文）',
+  keyring: 'L0 密钥环',
+  audit: '审计账本',
+};
+
 export interface BackupItem {
   name: string;
   time: string;
   size: number;
+  /** 批次37-D：这份备份属于哪个库（旧列表项无此字段时按记忆库理解） */
+  kind?: BackupKind;
+}
+
+/** 立即备份的回执：逐文件说明备了什么、哪些源当前不存在 */
+export interface BackupRunReceipt {
+  files: { kind: BackupKind; name: string; size: number }[];
+  missing: BackupKind[];
 }
 
 export type BackupOpResult<T = unknown> =
@@ -63,13 +84,16 @@ export async function backupChooseDir(): Promise<BackupOpResult<{ dir?: string }
   }
 }
 
-/** 立即备份（敏感操作）：主进程按 sessionId 校验管理员 */
-export async function backupRunNow(): Promise<BackupOpResult<{ file?: string }>> {
+/** 立即备份（敏感操作）：主进程按 sessionId 校验管理员；批次37-D 起一次备齐记忆库 + L0 原数据库 + 密钥环 */
+export async function backupRunNow(): Promise<BackupOpResult<{ file?: string; receipt?: BackupRunReceipt }>> {
   try {
-    const res = await hostCall<{ ok: boolean; file?: string; error?: string }>(
-      'backup:runNow', [getStoredSessionId()],
-    );
-    if (res.ok) return { ok: true, file: res.file };
+    const res = await hostCall<{
+      ok: boolean; file?: string; error?: string;
+      files?: { kind: BackupKind; name: string; size: number }[]; missing?: BackupKind[];
+    }>('backup:runNow', [getStoredSessionId()]);
+    if (res.ok) {
+      return { ok: true, file: res.file, receipt: { files: res.files ?? [], missing: res.missing ?? [] } };
+    }
     return { ok: false, error: res.error ?? '备份失败' };
   } catch (e) {
     return { ok: false, error: String((e as Error)?.message ?? e) };

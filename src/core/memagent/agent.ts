@@ -7,6 +7,7 @@ import {
   BACKGROUND_MAX_TOKENS, computeRecallSavings, estTokens, selectRecallBackground,
 } from './recallInsight.ts';
 import { cosine, embedSync, DEFAULT_VECTOR_DIM } from './vector.ts';
+import type { L0BlobStore } from './l0Store.ts';
 import { ulid } from './ulid.ts';
 import type {
   AuditRecord, BrowseResult, DiscoverReq, DiscoverResult, DiscoverSignal, FeedbackKind, FeedbackResult, Form, GcReq, GcReport,
@@ -267,6 +268,8 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
     // L0 只认连续会话（coreBrowse 内校验 + 审计），DEK 由端壳主进程持有
     return coreBrowse(req, {
       storage, request_id, now: Date.now(), l0: opts.l0, user_id: account.user_id, form,
+      // 批次37：拆库后行上只有 has_l0，信封在 L0 原数据库；存储后端自带优先，其次显式注入
+      l0Blobs: opts.l0Blobs ?? (storage as { l0Store?: L0BlobStore }).l0Store,
     });
   }
 

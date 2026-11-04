@@ -61,8 +61,13 @@ const mcpClients = {
 // 会话采集器桥（19.9 接入成功立即读各 agent 会话/记忆）：宿主真扫命中后立刻触发一次对账
 // triggerNow(agentNames?)：传入已检测到的已安装 agent 名 → 扩展采集源白名单，立即读 L0
 const collector = {
-  triggerNow: (agentNames?: string[]) => ipcRenderer.invoke(IPC.collectorTriggerNow, agentNames) as Promise<{ ok: boolean; collected: number; deduped: number; skipped: string[]; ts: number }>,
-  status: () => ipcRenderer.invoke(IPC.collectorStatus) as Promise<{ ok: boolean; running: boolean; intervalMs: number }>,
+  triggerNow: (agentNames?: string[]) => ipcRenderer.invoke(IPC.collectorTriggerNow, agentNames) as Promise<{ ok: boolean; collected: number; deduped: number; roleSkipped: number; skipped: string[]; ts: number }>,
+  status: () => ipcRenderer.invoke(IPC.collectorStatus) as Promise<{
+    ok: boolean; running: boolean; intervalMs: number;
+    last?: { collected: number; deduped: number; roleSkipped: number; skipped: string[]; ts: number } | null;
+    apply?: { written: number; filtered: number; failed: number; ts: number } | null;
+    recollecting?: boolean;
+  }>,
 };
 
 // 记忆库自动备份桥（记忆库管理页 P8 扩展）：备份位置/时间用户可设置，主进程调度器到点自动备份
@@ -72,14 +77,20 @@ const backup = {
   saveConfig: (patch: { enabled?: boolean; dir?: string; hour?: number; minute?: number; keepCount?: number }, sessionId?: string | null) =>
     ipcRenderer.invoke(IPC.backupSaveConfig, patch, sessionId) as Promise<{ ok: true; cfg?: unknown } | { ok: false; error: string }>,
   chooseDir: (sessionId?: string | null) => ipcRenderer.invoke(IPC.backupChooseDir, sessionId) as Promise<{ ok: boolean; dir: string; error?: string }>,
-  runNow: (sessionId?: string | null) => ipcRenderer.invoke(IPC.backupRunNow, sessionId) as Promise<{ ok: boolean; file?: string; error?: string }>,
-  list: () => ipcRenderer.invoke(IPC.backupList) as Promise<{ dir: string; items: { name: string; time: string; size: number }[] }>,
+  runNow: (sessionId?: string | null) => ipcRenderer.invoke(IPC.backupRunNow, sessionId) as Promise<{
+    ok: boolean; file?: string; error?: string;
+    files?: { kind: 'ledger' | 'l0' | 'keyring'; name: string; size: number }[];
+    missing?: ('ledger' | 'l0' | 'keyring')[];
+  }>,
+  list: () => ipcRenderer.invoke(IPC.backupList) as Promise<{
+    dir: string; items: { name: string; time: string; size: number; kind: 'ledger' | 'l0' | 'keyring' }[];
+  }>,
 };
 
 // 数据存放位置（批次6）：记忆库/游标/日志/MCP 令牌/备份配置等全部数据挂在用户选定目录
 // 批次7：更改/恢复默认属敏感操作 → 主进程按 sessionId 校验管理员；查询/打开目录保持可用。
 const dataRoot = {
-  get: () => ipcRenderer.invoke(IPC.dataRootGet) as Promise<{ root: string; defaultRoot: string; isDefault: boolean; pointer: string; activeDbPath: string }>,
+  get: () => ipcRenderer.invoke(IPC.dataRootGet) as Promise<{ root: string; defaultRoot: string; isDefault: boolean; pointer: string; activeDbPath: string; activeL0Path?: string; l0ReadOnly?: boolean }>,
   open: () => ipcRenderer.invoke(IPC.dataRootOpen) as Promise<{ ok: boolean; path?: string; error?: string }>,
   change: (sessionId?: string | null) => ipcRenderer.invoke(IPC.dataRootChange, sessionId) as Promise<{ ok: boolean; root?: string; restartRequired?: boolean; canceled?: boolean; error?: string }>,
   restoreDefault: (sessionId?: string | null) => ipcRenderer.invoke(IPC.dataRootRestoreDefault, sessionId) as Promise<{ ok: boolean; root?: string; restartRequired?: boolean; canceled?: boolean; error?: string }>,
@@ -127,12 +138,74 @@ const l0 = {
     ipcRenderer.invoke(IPC.l0SessionInfo, l0SessionId, sessionId),
   migrate: (opts: { oldPassword?: string } | undefined, sessionId?: string | null) =>
     ipcRenderer.invoke(IPC.l0Migrate, opts, sessionId),
+  /** 批次37-A：拆库后批量回读 L0 信封（只回密文；需登录会话，主进程校验） */
+  blobs: (memIds: string[], sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.l0Blobs, memIds, sessionId) as Promise<
+      { ok: true; envelopes: Record<string, string> } | { ok: false; error: string }
+    >,
+  /** 批次37-C：存量拆分迁移（历史行的明文/遗留信封搬进 L0 原数据库）——预览只读、执行需管理员 + 逐字口令 */
+  splitPreview: (sessionId?: string | null) => ipcRenderer.invoke(IPC.l0SplitPreview, sessionId),
+  splitRun: (confirmText?: string, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.l0SplitRun, confirmText, sessionId),
+  /** 批次37-E：按 L0 原文重建 L1–L6（预览需会话；执行需管理员 + 逐字 REBUILD + 强制双库备份） */
+  rebuildPreview: (req?: { l0_session_id?: string; use_llm?: boolean }, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.l0RebuildPreview, req ?? {}, sessionId),
+  rebuildRun: (req?: { confirm_text?: string; l0_session_id?: string; use_llm?: boolean }, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.l0RebuildRun, req ?? {}, sessionId),
+  /**
+   * 批次37-G：L0 恢复码（忘记管理密码的唯一找回通道，一次性）。
+   * recovery_code 只在 issue/recover/init 那一次的返回值里出现；状态接口永不回显。
+   */
+  recoveryStatus: (sessionId?: string | null) => ipcRenderer.invoke(IPC.l0RecoveryStatus, sessionId),
+  recoveryInit: (password: string, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.l0RecoveryInit, password, sessionId),
+  recoveryIssue: (sessionId?: string | null) => ipcRenderer.invoke(IPC.l0RecoveryIssue, sessionId),
+  recover: (req: { code: string; newPassword: string }, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.l0Recover, req, sessionId),
+  recoveryExport: (sessionId?: string | null) => ipcRenderer.invoke(IPC.l0RecoveryExport, sessionId),
+};
+
+// 首启向导桥（批次37-B）：登录之前用，所以这些方法不带会话参数。
+// 恢复码只在发那一次的返回值里出现，向导不缓存、不回显。
+const setup = {
+  state: () => ipcRenderer.invoke(IPC.setupState),
+  reselectDirs: () => ipcRenderer.invoke(IPC.setupReselectDirs),
+  setL0Password: (password: string) => ipcRenderer.invoke(IPC.setupSetL0Password, password),
+  regenCode: (password: string) => ipcRenderer.invoke(IPC.setupRegenCode, password),
+  exportCard: () => ipcRenderer.invoke(IPC.setupExportCard),
+  finish: () => ipcRenderer.invoke(IPC.setupFinish),
 };
 
 // 遗留账本清理桥（批次24）：预览只读、执行需管理员；主进程执行前自动备份数据根。
 const legacy = {
   scan: (sessionId?: string | null) => ipcRenderer.invoke(IPC.legacyScan, sessionId),
   demote: (sessionId?: string | null) => ipcRenderer.invoke(IPC.legacyDemote, sessionId),
+};
+
+// 记忆库清空重采桥（批次35）：预览需会话、执行仅管理员，且必须逐字带确认口令。
+// 主进程按「备份 → 清空 → 清游标 → 后台追采」顺序做，回执里的 backup_dir 是唯一退路。
+const ledgerReset = {
+  preview: (sessionId?: string | null) => ipcRenderer.invoke(IPC.ledgerResetPreview, sessionId),
+  run: (confirmText: string, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.ledgerResetRecollect, confirmText, sessionId),
+};
+
+// 存量规则重判桥（批次36-C）：预览需会话、执行仅管理员 + 逐字口令 REJUDGE。
+// 与 ledgerReset 的分工：本桥只删「按当前质量门本不该入库」的行，保留行不清空、游标不动、无需 L0 写密钥。
+const rulesRejudge = {
+  preview: (sessionId?: string | null) => ipcRenderer.invoke(IPC.rulesRejudgePreview, sessionId),
+  run: (confirmText: string, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.rulesRejudgeRun, confirmText, sessionId),
+};
+
+// 批次39：L2–L6 后台补炼队列桥。状态只读需会话；开关/补炼存量/重试失败行仅管理员。
+// 队列里的正文一律不出主进程：状态视图只有 mem_id 计数、额度与原因码。
+const refineQueue = {
+  state: (sessionId?: string | null) => ipcRenderer.invoke(IPC.refineState, sessionId),
+  setEnabled: (enabled: boolean, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.refineSetEnabled, enabled, sessionId),
+  backfill: (sessionId?: string | null) => ipcRenderer.invoke(IPC.refineBackfill, sessionId),
+  retryFailed: (sessionId?: string | null) => ipcRenderer.invoke(IPC.refineRetryFailed, sessionId),
 };
 
 // LLM 精炼网关桥（批次31 建，批次32 多引擎化）：读配置需登录会话；写配置/真拨测仅管理员；refine 是内核写路径的逐层代理。
@@ -165,4 +238,4 @@ const floatAttribution = {
 };
 
 contextBridge.exposeInMainWorld('__ELECTRON__', true);
-contextBridge.exposeInMainWorld('api', { storage, hostScan, hostAgentDetect, tenant, mcpClients, floatAttribution, collector, backup, dataRoot, log, l0, legacy, llm });
+contextBridge.exposeInMainWorld('api', { storage, hostScan, hostAgentDetect, tenant, mcpClients, floatAttribution, collector, backup, dataRoot, log, l0, setup, legacy, ledgerReset, rulesRejudge, refineQueue, llm });

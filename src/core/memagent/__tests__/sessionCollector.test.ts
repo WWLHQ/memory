@@ -10,8 +10,10 @@ import {
   scanSessionLogs,
   createReconciler,
   applyScanToStore,
+  defaultAgentSources,
   type CollectorCursor,
   type SessionLogSource,
+  type ReconcileOptions,
 } from '../sessionCollector.ts';
 
 function tmpDir(prefix: string): string {
@@ -58,6 +60,15 @@ describe('parseClaudeJsonl', () => {
     expect(parseClaudeJsonl('')).toBeNull();
   });
 
+  it('isMeta:true（斜杠命令回显/系统注入提醒）→ null（批次35：那不是用户说的话）', () => {
+    const line = JSON.stringify({
+      type: 'user', isMeta: true,
+      message: { role: 'user', content: '<local-command-stdout>Done</local-command-stdout>' },
+      sessionId: 's9',
+    });
+    expect(parseClaudeJsonl(line)).toBeNull();
+  });
+
   it('assistant 无 text 块（纯 thinking）→ null（不采空）', () => {
     const line = JSON.stringify({
       type: 'assistant',
@@ -101,7 +112,7 @@ describe('parseWorkbuddyMd', () => {
 // ── 增量扫描 + 幂等 ──────────────────────────────────────────────────────────
 
 describe('scanSessionLogs（增量 + 幂等）', () => {
-  it('首次全量采 Claude jsonl 新消息', async () => {
+  it('首次全量采 Claude jsonl：批次35 起只采用户消息，助手消息在采集口挡下', async () => {
     const dir = tmpDir('col-claude-');
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
@@ -114,8 +125,16 @@ describe('scanSessionLogs（增量 + 幂等）', () => {
     const src: SessionLogSource = { name: 'claude-code', parser: 'claude-jsonl', dir, recursive: true };
     const seen = new Set<string>();
     const scan1 = await scanSessionLogs({ sources: [src], cursor: {}, seenHashes: seen });
-    expect(scan1.collected).toBe(2);
-    expect(scan1.items.map((i) => i.content)).toEqual(['msg-1', 'msg-2']);
+    expect(scan1.collected).toBe(1);
+    expect(scan1.items.map((i) => i.content)).toEqual(['msg-1']);
+    expect(scan1.items[0].role).toBe('user');
+    expect(scan1.roleSkipped).toBe(1); // 助手正文没进库，是被采集口径挡掉的（不是丢失）
+
+    // 显式放开角色白名单 → 两条都采（口径可回退，不是硬编码丢弃）
+    const both = await scanSessionLogs({
+      sources: [{ ...src, roles: ['user', 'assistant'] }], cursor: {}, seenHashes: new Set(),
+    });
+    expect(both.collected).toBe(2);
 
     // 第二次（无新内容 + seenHashes 兜底）→ 0 条
     const scan2 = await scanSessionLogs({ sources: [src], cursor: scan1.cursors, seenHashes: seen });
@@ -166,7 +185,7 @@ describe('scanSessionLogs（增量 + 幂等）', () => {
     fs.mkdirSync(path.join(dir, 'proj', '.workbuddy', 'memory'), { recursive: true });
     const mf = path.join(dir, 'proj', '.workbuddy', 'memory', '2026-10-23.md');
     fs.writeFileSync(mf, '## 任务A\n- 内容甲\n');
-    const src: SessionLogSource = { name: 'workbuddy', parser: 'workbuddy-md', dir, recursive: true, filePattern: /\.md$/ };
+    const src: SessionLogSource = { name: 'workbuddy', parser: 'workbuddy-md', dir, recursive: true, filePattern: /\.md$/, roles: ['assistant'] };
     const seen = new Set<string>();
     const s1 = await scanSessionLogs({ sources: [src], cursor: {}, seenHashes: seen });
     expect(s1.collected).toBe(1);
@@ -190,7 +209,7 @@ describe('scanSessionLogs（增量 + 幂等）', () => {
     fs.writeFileSync(path.join(dir, 'many.md'), md);
     const src: SessionLogSource = {
       name: 'workbuddy', parser: 'workbuddy-md', dir, recursive: true,
-      filePattern: /\.md$/, maxMessagesPerFile: 5,
+      filePattern: /\.md$/, maxMessagesPerFile: 5, roles: ['assistant'],
     };
     const seen = new Set<string>();
     const scan = await scanSessionLogs({ sources: [src], cursor: {}, seenHashes: seen });
@@ -225,6 +244,46 @@ describe('scanSessionLogs（增量 + 幂等）', () => {
     const s2 = await scanSessionLogs({ sources: [src], cursor: s1.cursors, seenHashes: seen, maxItemsPerRun: 5 });
     expect(s2.items.map((i) => i.content)).toEqual(['msg-5', 'msg-6', 'msg-7', 'msg-8', 'msg-9']);
     expect(s2.deduped).toBe(0);
+  });
+});
+
+// ── 批次35：内置源的角色口径（缺省只采用户消息；workbuddy 是唯一显式例外） ──────
+
+describe('defaultAgentSources 角色白名单（批次35）', () => {
+  it('claude-code / deepseek-harness 不写 roles → 走缺省「只采 user」', async () => {
+    const home = tmpDir('col-roles-');
+    const srcs = defaultAgentSources({ home });
+    expect(srcs.find((s) => s.name === 'claude-code')?.roles).toBeUndefined();
+    expect(srcs.find((s) => s.name === 'deepseek-harness')?.roles).toBeUndefined();
+    // 扩展 agent（Qoder CN / Cursor 等）同样是 claude-jsonl 形态 → 不声明 roles
+    for (const s of srcs.filter((x) => x.parser === 'claude-jsonl')) {
+      expect(s.roles, s.name).toBeUndefined();
+    }
+    // 缺省口径落到采集口：同一份日志只采到 user 行
+    const dir = tmpDir('col-roles-scan-');
+    fs.writeFileSync(path.join(dir, 'x.jsonl'), [
+      JSON.stringify({ type: 'user', message: { role: 'user', content: '用户提问' }, sessionId: 's' }),
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '我先看一下目录' }] }, sessionId: 's' }),
+    ].join('\n') + '\n');
+    const scan = await scanSessionLogs({
+      sources: [{ name: 'claude-code', parser: 'claude-jsonl', dir, recursive: true }], cursor: {}, seenHashes: new Set(),
+    });
+    expect(scan.items.map((i) => i.content)).toEqual(['用户提问']);
+    expect(scan.roleSkipped).toBe(1);
+  });
+
+  it('workbuddy 显式 roles:[assistant]（源里没有用户消息，按缺省口径会整体清零）', async () => {
+    const home = tmpDir('col-roles-wb-');
+    const wb = defaultAgentSources({ home }).find((s) => s.name === 'workbuddy');
+    expect(wb?.roles).toEqual(['assistant']);
+    // 反证：同一条源若不声明 roles，工作日志块一条也采不到
+    const dir = tmpDir('col-roles-wb2-');
+    fs.writeFileSync(path.join(dir, '2026-10-23.md'), '## 任务A\n- 内容甲\n');
+    const base: SessionLogSource = { name: 'workbuddy', parser: 'workbuddy-md', dir, recursive: true, filePattern: /\.md$/ };
+    expect((await scanSessionLogs({ sources: [base], cursor: {}, seenHashes: new Set() })).collected).toBe(0);
+    expect((await scanSessionLogs({
+      sources: [{ ...base, roles: ['assistant'] }], cursor: {}, seenHashes: new Set(),
+    })).collected).toBe(1);
   });
 });
 
@@ -424,6 +483,148 @@ describe('createReconciler（周期对账，预设 5min）', () => {
   });
 });
 
+// ── createReconciler 失败退避（批次41-D / P1-12）：指数退避 + 封顶 + 连续失败停自动重试 ──
+describe('createReconciler 失败退避（批次41-D）', () => {
+  /** 可控时钟 + 假定时器 + 可切换 onScan 成败 + 记录退避回调 */
+  function harness(opts: Pick<ReconcileOptions, 'backoffCapMs' | 'maxConsecutiveFails'> = {}) {
+    let t = 0;
+    let attempts = 0;
+    let shouldFail = false;
+    let handleSeq = 0;
+    const timers: { fn: () => void; ms: number; handle: number; cleared: boolean }[] = [];
+    const fakeTimer = {
+      setInterval: (fn: () => void, ms: number) => {
+        const handle = handleSeq++;
+        timers.push({ fn, ms, handle, cleared: false });
+        return handle;
+      },
+      clearInterval: (h: unknown) => {
+        const item = timers.find((x) => x.handle === h);
+        if (item) item.cleared = true;
+      },
+    };
+    const fails: Array<{ fails: number; delayMs: number; reason: string }> = [];
+    const stops: Array<{ fails: number; reason: string }> = [];
+    const recovers: Array<{ prevFails: number }> = [];
+    const r = createReconciler({
+      source: { sources: [] },
+      onScan: () => {
+        attempts++;
+        if (shouldFail) throw new Error('L0 write key locked');
+      },
+      runOnStart: false,
+      intervalMs: 300_000,
+      timer: fakeTimer,
+      now: () => t,
+      onRoundFail: (i) => fails.push(i),
+      onAutoRetryStopped: (i) => stops.push(i),
+      onRecover: (i) => recovers.push(i),
+      ...opts,
+    });
+    return {
+      r,
+      timers,
+      fails,
+      stops,
+      recovers,
+      getAttempts: () => attempts,
+      fail: () => { shouldFail = true; },
+      ok: () => { shouldFail = false; },
+      advance: (ms: number) => { t += ms; },
+      // tick 触发一次心跳（退避窗口内会跳过）；flush 让 fire-and-forget 的 runOnce 跑完
+      tick: () => { timers[0].fn(); },
+      flush: () => new Promise<void>((res) => setTimeout(res, 0)),
+    };
+  }
+
+  it('失败→指数退避；下一次心跳在窗口内被门控，跨窗后才再跑', async () => {
+    const h = harness();
+    h.fail();
+    await h.r.runOnce(); // 手动首跑失败
+    expect(h.fails).toHaveLength(1);
+    expect(h.fails[0].delayMs).toBe(600_000); // 300000·2^1
+    expect(h.r.consecutiveFails).toBe(1);
+
+    h.tick();
+    await h.flush();
+    expect(h.getAttempts()).toBe(1); // 窗口内没再跑
+
+    h.advance(600_000 - 1);
+    h.tick();
+    await h.flush();
+    expect(h.getAttempts()).toBe(1); // 还差 1ms 没跨窗口
+
+    h.advance(2);
+    h.tick();
+    await h.flush();
+    expect(h.getAttempts()).toBe(2);
+    expect(h.r.consecutiveFails).toBe(2);
+    expect(h.fails[1].delayMs).toBe(1_200_000); // 300000·2^2
+    h.r.stop();
+  });
+
+  it('退避间隔封顶到 backoffCapMs（不上无限涨）', async () => {
+    const h = harness({ backoffCapMs: 1_200_000 });
+    h.fail();
+    for (let i = 0; i < 5; i++) {
+      await h.r.runOnce();
+      h.advance(h.fails[i].delayMs + 1);
+    }
+    // 第 1/2/3/4 次依次 600k/1.2M/2.4M→1.2M/4.8M→1.2M，第 5 次也 1.2M（封顶）
+    expect(h.fails.map((f) => f.delayMs)).toEqual([600_000, 1_200_000, 1_200_000, 1_200_000, 1_200_000]);
+    expect(h.r.consecutiveFails).toBe(5);
+    h.r.stop();
+  });
+
+  it('连续失败达 maxConsecutiveFails → 停自动重试（清心跳），UI 只留手动重跑', async () => {
+    const h = harness({ maxConsecutiveFails: 3 });
+    h.fail();
+    for (let i = 0; i < 3; i++) {
+      await h.r.runOnce();
+      h.advance(2_000_000_000); // 直接跨过任何窗口
+    }
+    expect(h.stops).toHaveLength(1);
+    expect(h.stops[0].fails).toBe(3);
+    expect(h.r.autoRetryStopped).toBe(true);
+    expect(h.timers[0].cleared).toBe(true); // 心跳被清
+
+    // 停后即使时钟跨过、心跳 tick 也不再跑（且心跳已清）
+    h.tick();
+    await h.flush();
+    expect(h.getAttempts()).toBe(3);
+    h.r.stop();
+  });
+
+  it('失败后成功恢复 → 退避归零 + 重启心跳', async () => {
+    const h = harness({ maxConsecutiveFails: 2 });
+    h.fail();
+    await h.r.runOnce();
+    await h.r.runOnce(); // 第 2 次失败 → 停自动重试
+    expect(h.r.autoRetryStopped).toBe(true);
+    expect(h.getAttempts()).toBe(2);
+
+    h.ok();
+    await h.r.runOnce(); // 手动重跑成功
+    expect(h.r.consecutiveFails).toBe(0);
+    expect(h.r.autoRetryStopped).toBe(false);
+    expect(h.recovers).toEqual([{ prevFails: 2 }]);
+    expect(h.timers).toHaveLength(2); // 成功后重启了一份新心跳
+    h.r.stop();
+  });
+
+  it('成功轮直接归零退避（不累计失败）', async () => {
+    const h = harness();
+    h.fail();
+    await h.r.runOnce();
+    expect(h.r.consecutiveFails).toBe(1);
+    h.ok();
+    await h.r.runOnce(); // 成功
+    expect(h.r.consecutiveFails).toBe(0);
+    expect(h.recovers).toEqual([{ prevFails: 1 }]);
+    h.r.stop();
+  });
+});
+
 // ── applyScanToStore（入库桥接 + 审计） ──────────────────────────────────────
 
 describe('applyScanToStore', () => {
@@ -435,33 +636,44 @@ describe('applyScanToStore', () => {
     const writes: string[] = [];
     const audits: string[] = [];
     const r = await applyScanToStore(
-      { collected: 2, deduped: 0, skipped: [], items, cursors: {}, ts: 0 },
+      { collected: 2, deduped: 0, roleSkipped: 0, skipped: [], items, cursors: {}, ts: 0 },
       {
         write: async (input) => { writes.push(input.content); return { mem_id: `m${writes.length}`, dedup: { action: 'new' } }; },
         audit: async (rec) => { audits.push(rec.detail?.source as string); },
       },
     );
-    expect(r).toEqual({ written: 2, failed: 0 });
+    expect(r).toEqual({ written: 2, filtered: 0, failed: 0 });
     expect(writes).toEqual(['c1', 'c2']);
     expect(audits.filter((a) => a === 'collector')).toHaveLength(2);
   });
 
-  it('dedup=duplicate 不计入 written', async () => {
+  it('dedup=duplicate 不计入 written；dedup=filtered 单独计数（批次35 质量门拦下 ≠ 丢失）', async () => {
+    const audits: Array<Record<string, unknown> | undefined> = [];
     const r = await applyScanToStore(
-      { collected: 1, deduped: 0, skipped: [], items: [{ key: 'k', agent: 'a', role: 'user', content: 'x', hash: 'h', seq: 0 }], cursors: {}, ts: 0 },
+      { collected: 3, deduped: 0, roleSkipped: 0, skipped: [], items: [
+        { key: 'k', agent: 'a', role: 'user', content: 'x', hash: 'h1', seq: 0 },
+        { key: 'k', agent: 'a', role: 'user', content: 'y', hash: 'h2', seq: 1 },
+        { key: 'k', agent: 'a', role: 'user', content: '我先看一下', hash: 'h3', seq: 2 },
+      ], cursors: {}, ts: 0 },
       {
-        write: async () => ({ mem_id: 'm1', dedup: { action: 'duplicate' } }),
-        audit: async () => {},
+        write: async (input) => ({
+          mem_id: 'm1',
+          dedup: input.content === 'x' ? { action: 'duplicate' }
+            : input.content === 'y' ? { action: 'new' }
+              : { action: 'filtered' as const, sim: -1 },
+        }),
+        audit: async (rec) => { audits.push(rec.detail); },
       },
     );
-    expect(r).toEqual({ written: 0, failed: 0 });
+    expect(r).toEqual({ written: 1, filtered: 1, failed: 0 });
+    expect(audits).toHaveLength(3); // 三类都留审计，绝不静默吞掉
   });
 
   it('单条 write 失败不阻塞整批 + error 审计', async () => {
     const audits: string[] = [];
     const r = await applyScanToStore(
       {
-        collected: 2, deduped: 0, skipped: [],
+        collected: 2, deduped: 0, roleSkipped: 0, skipped: [],
         items: [
           { key: 'k1', agent: 'a', role: 'user', content: 'ok', hash: 'h1', seq: 0 },
           { key: 'k2', agent: 'a', role: 'user', content: 'bad', hash: 'h2', seq: 1 },
@@ -476,7 +688,7 @@ describe('applyScanToStore', () => {
         audit: async (rec) => { audits.push(rec.detail?.source === 'collector' ? `ok:${rec.request_id}` : 'err'); },
       },
     );
-    expect(r).toEqual({ written: 1, failed: 1 }); // 只有 ok 入库；failed 供调用方保留旧游标
+    expect(r).toEqual({ written: 1, filtered: 0, failed: 1 }); // 只有 ok 入库；failed 供调用方保留旧游标
   });
 });
 

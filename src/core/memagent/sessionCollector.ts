@@ -2,6 +2,9 @@
 //
 // 设计原则（诚实、不造假）：
 //   · 只读"确实存在"的会话日志（目录/文件缺失 → 诚实 skip + 原因，绝不造假数据）
+//   · 角色白名单（批次35）：源缺省**只采 user**——助手消息是「我先看一下…/让我检查…」这类过程旁白
+//     的主体（本机账本 1642 行实测：入库噪声全部来自助手消息）。只有 Agent 工作日志的源
+//     （workbuddy `##` 分块）显式写 roles:['assistant'] 保留采集，旁白交给 L0→L1 质量门拦。
 //   · 增量：per-file 游标 {offset, contentSha}，只读 offset 之后的新内容；文件被截断/重写 → 重置全量
 //   · 幂等：每条消息 SHA-256(content + source + seq) 去重（§5.4），跨周期不重复入库
 //   · 入库：新消息 → 调用方注入的 write（coreWrite，L0 AES-256-GCM → L1–L6 阶梯）
@@ -44,7 +47,9 @@ export type BlockParser = (text: string, sourceName: string) => ParsedMessage[];
  *   · type:"user" 且 message.content 为字符串 → 用户输入
  *   · type:"assistant" 且 message.content 含 {type:"text"} 块 → 助手正文
  *   · tool_result / thinking / queue-operation / attachment → 不采（非对话正文）
+ *   · isMeta:true（斜杠命令回显、系统注入的提醒）→ 不采（批次35：那不是用户说的话）
  * 容错：坏行/半行跳过；content 数组里只取 text 块并拼接。
+ * 注：本解析器两种角色都解析出来，角色白名单在 scanSessionLogs 按 source.roles 过滤（采集口收口）。
  */
 export function parseClaudeJsonl(line: string): ParsedMessage[] | null {
   const t = line.trim();
@@ -52,6 +57,7 @@ export function parseClaudeJsonl(line: string): ParsedMessage[] | null {
   let o: Record<string, unknown>;
   try { o = JSON.parse(t); } catch { return null; }
   if (o.type !== 'user' && o.type !== 'assistant') return null;
+  if (o.isMeta === true) return null;
   const msg = o.message as { role?: string; content?: unknown } | undefined;
   if (!msg) return null;
   const sid = typeof o.sessionId === 'string' ? o.sessionId : undefined;
@@ -175,7 +181,17 @@ export interface SessionLogSource {
   maxMessagesPerFile?: number;
   /** 记忆类别缺省（assistant 日志 → 多为 fact/pitfall） */
   category?: string;
+  /**
+   * 采集角色白名单（批次35）。**缺省只采 `user`**——助手侧消息是过程旁白/进度自述的主体
+   * （本机账本 1642 行实测：噪声全部来自助手消息），质量门拦不住的那部分应该根本不进采集口。
+   * 例外：只存在 Agent 自己工作日志的源（workbuddy `##` 分块记忆）， parser 没有角色可分，
+   * 显式写 `roles: ['assistant']` 保留采集，旁白交给 L0→L1 质量门拦。
+   */
+  roles?: Array<ParsedMessage['role']>;
 }
+
+/** 批次35 缺省采集角色：只采用户消息 */
+const DEFAULT_COLLECT_ROLES: Array<ParsedMessage['role']> = ['user'];
 
 // ─── zstd 增量解压（DSH session.v4.jsonl.zstd 专用） ─────────────────────────
 
@@ -306,6 +322,8 @@ async function listFiles(dir: string, pattern: RegExp, recursive: boolean, maxDe
 export interface ScanResult {
   collected: number;
   deduped: number;
+  /** 批次35：被角色白名单（缺省只采 user）挡下的消息数——不是幂等命中，是采集口径 */
+  roleSkipped: number;
   skipped: string[];
   items: CollectedItem[];
   cursors: CollectorCursor;
@@ -342,6 +360,8 @@ export async function scanSessionLogs(opts: ScanOptions): Promise<ScanResult> {
   const skipped: string[] = [];
   let collected = 0;
   let deduped = 0;
+  /** 批次35：因角色不在源白名单（缺省只采 user）而被采集口挡下的消息数 */
+  let roleSkipped = 0;
   /** 本轮已新采消息数（去重命中不占限流名额），限流以此为准 */
   let processedThisRun = 0;
   /** 限流：本轮新采消息达到上限后停止继续采（游标保留，下周期接着采） */
@@ -349,6 +369,7 @@ export async function scanSessionLogs(opts: ScanOptions): Promise<ScanResult> {
   const markProcessed = (): void => { processedThisRun++; };
 
   for (const src of sources) {
+    const roles = src.roles ?? DEFAULT_COLLECT_ROLES; // 批次35：缺省只采用户消息
     if (!existsSync(src.dir)) {
       skipped.push(`${src.name}: 目录不存在（${src.dir}）`);
       continue;
@@ -426,6 +447,7 @@ export async function scanSessionLogs(opts: ScanOptions): Promise<ScanResult> {
           const msgs = parse(line);
           const list = Array.isArray(msgs) ? msgs : msgs ? [msgs] : [];
           for (const m of list) {
+            if (!roles.includes(m.role)) { roleSkipped++; continue; } // 角色不在源白名单 → 采集口挡下
             const hash = sha256(`${m.content}|${m.session_id ?? ''}|${key}`);
             if (seenHashes.has(hash)) {
               deduped++; // 幂等命中不占限流/单文件名额
@@ -489,6 +511,7 @@ export async function scanSessionLogs(opts: ScanOptions): Promise<ScanResult> {
             const msgs = parse(line);
             const list = Array.isArray(msgs) ? msgs : msgs ? [msgs] : [];
             for (const m of list) {
+              if (!roles.includes(m.role)) { roleSkipped++; continue; } // 角色不在源白名单 → 采集口挡下
               const hash = sha256(`${m.content}|${m.session_id ?? ''}|${key}`);
               if (seenHashes.has(hash)) {
                 deduped++;
@@ -518,7 +541,10 @@ export async function scanSessionLogs(opts: ScanOptions): Promise<ScanResult> {
         const rawText = buf.toString('utf8');
         const wholeSha = sha256Buf(buf);
         const parse = src.parser === 'dsh-projcache' ? (src.parseBlock ?? parseDshProjcache) : (src.parseBlock ?? parseWorkbuddyMd);
-        const msgs = parse(rawText, src.name);
+        // 批次35：整块解析先过角色白名单再算下标——游标 msgIndex 记的是「过滤后」的位置，续采口径才稳定
+        const allMsgs = parse(rawText, src.name);
+        const msgs = allMsgs.filter((m) => roles.includes(m.role));
+        roleSkipped += allMsgs.length - msgs.length;
         const unchanged = prev?.v === CURSOR_V && prev.contentSha === wholeSha;
         // 无续采位 = 上次已整文件采完（msgIndex 缺省视为文件尾）
         const startIdx = unchanged ? (prev?.msgIndex ?? msgs.length) : 0;
@@ -573,7 +599,7 @@ export async function scanSessionLogs(opts: ScanOptions): Promise<ScanResult> {
     }
   }
 
-  return { collected, deduped, skipped, items, cursors, ts: Date.now() };
+  return { collected, deduped, roleSkipped, skipped, items, cursors, ts: Date.now() };
 }
 
 // ─── 周期对账器（§5.1 双链路补偿，可配周期，预设 5min） ───────────────────────
@@ -583,7 +609,7 @@ export interface ReconcileOptions {
   intervalMs?: number;
   /** 每次周期调用的采集源（对象或函数：函数在每次对账前求值，支持动态扩展 agent 白名单） */
   source: ScanOptions | (() => ScanOptions);
-  /** 采集完成回调（落库 + 更新游标） */
+  /** 采集完成回调（落库 + 更新游标）。抛错 = 本轮没推进，触发退避（批次41-D）。 */
   onScan: (scan: ScanResult) => Promise<void> | void;
   /** 启动即跑一次（缺省 true，首扫全量） */
   runOnStart?: boolean;
@@ -591,6 +617,26 @@ export interface ReconcileOptions {
   timer?: { setInterval: (fn: () => void, ms: number) => unknown; clearInterval: (h: unknown) => void };
   /** 采集器来源标记（写审计 source） */
   sourceLabel?: string;
+  /**
+   * 批次41-D（P1-12）：连续失败后的指数退避倍率（`intervalMs·factor^fails`）。缺省 2。
+   * 只在「本轮没推进」（onScan 抛错）时抬下次间隔，成功即回落到 `intervalMs`。
+   */
+  backoffFactor?: number;
+  /** 批次41-D：退避间隔的上限 ms（指数增长封顶，避免无限拉长）。缺省 2h。 */
+  backoffCapMs?: number;
+  /**
+   * 批次41-D：连续失败达到该轮数后**停自动重试**（保留手动重跑，成功即重启）。缺省 6。
+   * 语义：5→10→20→40→80→120(cap) 六次递增后不再空转，避免 L0 写密钥锁定等长障时日志/错误长期刷屏。
+   */
+  maxConsecutiveFails?: number;
+  /** 批次41-D：注入时钟（测试用 fake clock；缺省 Date.now） */
+  now?: () => number;
+  /** 批次41-D：本轮判为失败（onScan 抛错）后的回调（带轮数/退避间隔/原因码，绝不带正文；供主进程落 collector:backoff 动作日志） */
+  onRoundFail?: (info: { fails: number; delayMs: number; reason: string }) => void;
+  /** 批次41-D：连续失败达上限、停自动重试时的回调（同样只带原因码） */
+  onAutoRetryStopped?: (info: { fails: number; reason: string }) => void;
+  /** 批次41-D：失败后成功恢复（退避归零）时的回调 */
+  onRecover?: (info: { prevFails: number }) => void;
 }
 
 export interface Reconciler {
@@ -602,6 +648,10 @@ export interface Reconciler {
   readonly stopped: boolean;
   /** 最近一次扫描结果（供 UI 展示对账状态） */
   last?: ScanResult;
+  /** 批次41-D：当前连续失败轮数（成功即清零） */
+  readonly consecutiveFails: number;
+  /** 批次41-D：是否已因连续失败达上限而停自动重试（手动重跑成功后自动重启） */
+  readonly autoRetryStopped: boolean;
 }
 
 export function createReconciler(opts: ReconcileOptions): Reconciler {
@@ -612,41 +662,93 @@ export function createReconciler(opts: ReconcileOptions): Reconciler {
   };
   // source 支持动态：每次对账前求值（函数形式），让 detector 更新白名单后周期采集自动扩展
   const resolveSource = (): ScanOptions => (typeof opts.source === 'function' ? opts.source() : opts.source);
+  // 批次41-D（P1-12）：失败退避常量。指数 `intervalMs·factor^fails`，封顶 capMs；连续失败达上限即停自动重试。
+  const backoffFactor = opts.backoffFactor ?? 2;
+  const backoffCapMs = opts.backoffCapMs ?? 7_200_000; // 缺省 2h（任务口径「钳到上限如 2h」）
+  const maxConsecutiveFails = opts.maxConsecutiveFails ?? 6;
+  const now = opts.now ?? Date.now;
   let stopped = false;
   let last: ScanResult | undefined;
   let inflight: Promise<ScanResult> | null = null;
+  // 批次41-D：退避状态。consecutiveFails 成功即清零；nextEligibleAt 门控心跳 tick；autoStopped 达上限停心跳
+  let consecutiveFails = 0;
+  let nextEligibleAt = 0;
+  let autoStopped = false;
+  let handle: unknown;
+
+  /** 本轮失败原因码（绝不带正文）：取 last 里的合成占位首句，没有就 unknown */
+  const roundFailReason = (): string => last?.skipped?.[0] ?? 'unknown';
 
   function doRunOnce(): Promise<ScanResult> {
     const p = (async () => {
+      let failed = false;
       try {
         const scan = await scanSessionLogs(resolveSource());
         last = scan;
         await opts.onScan(scan);
         return scan;
       } catch (e) {
-        // 单轮失败不杀定时器（诚实：记录后下轮继续）
-        last = { collected: 0, deduped: 0, skipped: [`采集异常: ${String((e as Error)?.message ?? e)}`], items: [], cursors: {}, ts: Date.now() };
+        // 本轮没推进（扫描抛错或 onScan 抛错，如 L0 写密钥锁定导致 apply 失败）
+        failed = true;
+        last = { collected: 0, deduped: 0, roleSkipped: 0, skipped: [`采集异常: ${String((e as Error)?.message ?? e)}`], items: [], cursors: {}, ts: now() };
         return last;
       } finally {
         inflight = null;
+        noteRound(failed); // 批次41-D：无论成功失败都记账退避（手动与周期同口径）
       }
     })();
     inflight = p;
     return p;
   }
 
+  /** 批次41-D：一轮跑完后的退避记账。失败→抬下次间隔+必要时停自动重试；成功→归零+重启心跳 */
+  function noteRound(failed: boolean): void {
+    if (failed) {
+      consecutiveFails++;
+      // 指数退避，封顶 capMs：第 N 次失败后等 min(cap, intervalMs·factor^N)
+      const delayMs = Math.min(backoffCapMs, intervalMs * Math.pow(backoffFactor, consecutiveFails));
+      nextEligibleAt = now() + delayMs;
+      opts.onRoundFail?.({ fails: consecutiveFails, delayMs, reason: roundFailReason() });
+      if (!stopped && consecutiveFails >= maxConsecutiveFails && !autoStopped) {
+        // 连续失败达上限：停自动重试（清心跳），只保留手动重跑入口；成功即重启
+        autoStopped = true;
+        timer.clearInterval(handle);
+        opts.onAutoRetryStopped?.({ fails: consecutiveFails, reason: roundFailReason() });
+      }
+    } else {
+      if (consecutiveFails > 0) opts.onRecover?.({ prevFails: consecutiveFails });
+      consecutiveFails = 0;
+      nextEligibleAt = 0;
+      // 之前因连续失败停过、现在成功了 → 重新拉起心跳
+      if (autoStopped && !stopped) {
+        autoStopped = false;
+        arm();
+      }
+    }
+  }
+
   async function runOnce(): Promise<ScanResult> {
     if (stopped) {
-      return last ?? { collected: 0, deduped: 0, skipped: [], items: [], cursors: {}, ts: Date.now() };
+      return last ?? { collected: 0, deduped: 0, roleSkipped: 0, skipped: [], items: [], cursors: {}, ts: now() };
     }
     // 已有在途对账 → 等它完成返回同一结果（不并发重入；定时器 tick 与手动 runOnce 互斥）
     if (inflight) return inflight;
     return doRunOnce();
   }
 
-  const handle = timer.setInterval(() => {
+  /** 批次41-D：心跳 tick——退避窗口内直接跳过；达上限停自动重试后也跳过（只有手动重跑能再拉起来） */
+  function tick(): void {
+    if (stopped || autoStopped) return;
+    if (now() < nextEligibleAt) return; // 处于退避窗口 → 本轮不跑
     void runOnce();
-  }, intervalMs);
+  }
+
+  function arm(): void {
+    // 心跳固定在 base intervalMs 上 tick，实际是否起跑由退避门控决定（避免改动注入定时器接口）
+    handle = timer.setInterval(tick, intervalMs);
+  }
+
+  arm();
 
   if (opts.runOnStart !== false) {
     void runOnce(); // 启动即对账（首扫全量）
@@ -664,6 +766,12 @@ export function createReconciler(opts: ReconcileOptions): Reconciler {
     },
     get last() {
       return last;
+    },
+    get consecutiveFails() {
+      return consecutiveFails;
+    },
+    get autoRetryStopped() {
+      return autoStopped;
     },
   };
 }
@@ -701,6 +809,8 @@ export function defaultAgentSources(o: DefaultSourcesOpts = {}): SessionLogSourc
     category: 'context',
   });
   // workbuddy（自有 P0）
+  // 批次35 角色例外：它是 Agent 自己写的工作日志（`##` 分块），源里根本没有用户消息流——
+  // 按缺省口径（只采 user）会把这个源整体清零。保留采集，旁白交给 L0→L1 质量门拦。
   const wbRoot = o.workbuddyRoot ?? join(home, 'workbuddy');
   out.push({
     name: 'workbuddy',
@@ -710,6 +820,7 @@ export function defaultAgentSources(o: DefaultSourcesOpts = {}): SessionLogSourc
     maxDepth: 4,
     category: 'fact',
     filePattern: /\.md$/,
+    roles: ['assistant'],
   });
   // DSH（自有 P0，DeepSeek Harness）：完整会话正文落盘在 session_projcache（turnOutline 逐 turn 的 prompt/response 全文）
   // 注：~/.dsh/sessions/**/session.v4.jsonl.zstd 只有 1 行会话壳元数据（无对话正文），不作为采集源
@@ -770,6 +881,8 @@ export interface CollectorBridgeOpts {
 export interface ApplyScanResult {
   /** 真正 new 的条数（dedup 后） */
   written: number;
+  /** 批次35：被 L0→L1 质量门拦下的条数（有 filtered 审计留痕，不是丢失） */
+  filtered: number;
   /** 写入失败条数：调用方必须据此保留旧游标，下一轮重采（去重兜底） */
   failed: number;
 }
@@ -780,6 +893,7 @@ export interface ApplyScanResult {
  */
 export async function applyScanToStore(scan: ScanResult, opts: CollectorBridgeOpts): Promise<ApplyScanResult> {
   let written = 0;
+  let filtered = 0;
   let failed = 0;
   const now = Date.now();
   for (let i = 0; i < scan.items.length; i++) {
@@ -794,6 +908,7 @@ export async function applyScanToStore(scan: ScanResult, opts: CollectorBridgeOp
         session_id: item.key,
       });
       if (r.dedup.action === 'new') written++;
+      else if (r.dedup.action === 'filtered') filtered++; // 质量门拦下：已有 filtered 审计，不是丢失
       await opts.audit?.({
         request_id: `req_col_${now}_${item.seq}`,
         action: 'write',
@@ -816,5 +931,5 @@ export async function applyScanToStore(scan: ScanResult, opts: CollectorBridgeOp
       if ((i + 1) % 5 === 0) await yieldToEventLoop();
     }
   }
-  return { written, failed };
+  return { written, filtered, failed };
 }

@@ -1,6 +1,6 @@
 // FileStorage 验收（§5.3）：零依赖纯文件实现，与 SqliteStorage 同接口 + 同契约。
 // 覆盖 6 方法 + 原子写 + 损坏降级 + close 幂等 + size + 写盘失败不静默丢批（批次25 P0-6）。
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
@@ -164,6 +164,7 @@ describe('FileStorage（桌面 P0 主源 · 零依赖纯文件）', () => {
 // 批次25 P0-6：写盘失败必须显式可见，且不能静默丢批 / 留半态。
 // 障碍注入不用 mock：原子写的临时文件是 `${db}.tmp`，把它预先占为目录
 // → writeFileSync 稳定抛 EISDIR（真实磁盘错误同路径），删掉即恢复正常。
+// 批次41-A 之后审计走独立追加文件，它的障碍同样用目录占位（见 auditFile）。
 describe('FileStorage · 写盘失败不静默丢批（批次25 P0-6）', () => {
   let dir: string;
   let db: string;
@@ -175,6 +176,19 @@ describe('FileStorage · 写盘失败不静默丢批（批次25 P0-6）', () => 
 
   const block = () => mkdirSync(`${db}.tmp`);
   const unblock = () => rmSync(`${db}.tmp`, { recursive: true, force: true });
+  // 批次41-A：审计不再走「整库原子写」，所以它的写障碍必须打在审计文件本身：
+  // 先把已写的账本临时挪开、原路径占成目录 → openSync(path,'a') 稳定抛 EISDIR；
+  // 解除障碍时把账本原样放回（append-only —— 连测试都不许悄悄丢行）。
+  const auditFile = () => join(dir, 'audit.jsonl');
+  const auditHeld = () => join(dir, 'audit.jsonl.held');
+  const blockAudit = (): void => {
+    if (existsSync(auditFile())) renameSync(auditFile(), auditHeld());
+    mkdirSync(auditFile());
+  };
+  const unblockAudit = (): void => {
+    rmSync(auditFile(), { recursive: true, force: true });
+    if (existsSync(auditHeld())) renameSync(auditHeld(), auditFile());
+  };
 
   it('putMemory 写盘失败 → 抛出原始错误 + 内存回滚（磁盘/内存不分叉）', async () => {
     const s = new FileStorage(db);
@@ -201,15 +215,16 @@ describe('FileStorage · 写盘失败不静默丢批（批次25 P0-6）', () => 
     expect((await new FileStorage(db).getMemory('m1'))?.content).toBe('v1');
   });
 
-  it('appendAudit 写盘失败 → 回滚（不留半态账本行）', async () => {
-    const s = new FileStorage(db);
+  it('appendAudit 写盘失败 → 抛原始错误 + 内存视图不留未落盘的账本行（批次41-A：审计落独立追加文件）', async () => {
+    const s = new FileStorage(db, { auditPath: auditFile() });
     await s.appendAudit(audit('write', { request_id: 'r1' }));
-    block();
+    blockAudit();
     await expect(s.appendAudit(audit('recall', { request_id: 'r2' }))).rejects.toThrow(/EISDIR/);
     expect((await s.queryAudit({})).map((a) => a.request_id)).toEqual(['r1']);
-    unblock();
+    unblockAudit();
     await s.appendAudit(audit('recall', { request_id: 'r3' }));
-    expect((await new FileStorage(db).queryAudit({})).map((a) => a.request_id)).toEqual(['r1', 'r3']);
+    expect((await new FileStorage(db, { auditPath: auditFile() }).queryAudit({}))
+      .map((a) => a.request_id)).toEqual(['r1', 'r3']);
   });
 
   it('deleteMemory 写盘失败 → 撤销删除（不静默丢记忆）', async () => {
@@ -358,5 +373,147 @@ describe('FileStorage · 写锁与只读镜像（批次28-A）', () => {
     expect(await mirror.getMemory('m2')).toBeNull();
     writer.close();
     mirror.close();
+  });
+});
+
+// 批次41-A：审计从记忆库文件搬进追加式 JSONL（audit.jsonl）。
+// 这里验的是「搬家之后语义不变」：页面查到的还是全量真数据；以及新出现的三件事——
+// 库里不再写审计、存量一次性迁走且幂等、只读镜像不改别人账本但仍读得到历史。
+describe('FileStorage · 审计独立账本（批次41-A）', () => {
+  let dir: string;
+  let db: string;
+  let auditFile: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'filestorage-audit-'));
+    db = join(dir, 'memories.db.json');
+    auditFile = join(dir, 'audit.jsonl');
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('缺省 auditPath 跟着记忆库所在目录（两库分目录时审计跟可检索层走）', () => {
+    const s = new FileStorage(db);
+    expect(s.auditStats.path).toBe(join(dir, 'audit.jsonl'));
+    s.close();
+  });
+
+  it('审计只落 audit.jsonl，记忆库文件里不再堆审计数组（写放大的根）', async () => {
+    const s = new FileStorage(db);
+    await s.putMemory(mem('m1'));
+    await s.appendAudit(audit('write', { request_id: 'r1' }));
+    await s.appendAudit(audit('recall', { request_id: 'r2' }));
+    const docOnDisk = JSON.parse(readFileSync(db, 'utf8')) as { audit: unknown[] };
+    expect(docOnDisk.audit).toEqual([]);
+    expect(readFileSync(auditFile, 'utf8').trim().split('\n').length).toBe(2);
+    expect((await s.queryAudit({})).length).toBe(2);
+    expect(s.auditStats.bytes).toBe(readFileSync(auditFile, 'utf8').length);
+    s.close();
+  });
+
+  it('存量迁移：老库里的历史审计整批搬进 audit.jsonl，库里那格清空且再启动不重复', async () => {
+    const legacy = [audit('write', { request_id: 'old1', ts: 10 }), audit('recall', { request_id: 'old2', ts: 20 })];
+    writeFileSync(db, JSON.stringify({ memories: {}, audit: legacy }), 'utf8');
+
+    const s = new FileStorage(db);
+    // 构造不搬（端壳必须先备份，备份是端壳的活）：搬之前历史审计照旧查得到、文件一个字节没动
+    expect(s.auditStats.migrated_rows).toBe(0);
+    expect(s.auditStats.legacy_rows_in_ledger).toBe(2);
+    expect((await s.queryAudit({})).map((a) => a.request_id)).toEqual(['old1', 'old2']);
+    expect(readFileSync(db, 'utf8')).toBe(JSON.stringify({ memories: {}, audit: legacy }));
+
+    expect(s.migrateLegacyAudit()).toBe(2);
+    expect(s.auditStats.migrated_rows).toBe(2);
+    expect(s.auditStats.legacy_rows_in_ledger).toBe(0);
+    expect((await s.queryAudit({})).map((a) => a.request_id)).toEqual(['old1', 'old2']);
+    expect((JSON.parse(readFileSync(db, 'utf8')) as { audit: unknown[] }).audit).toEqual([]);
+    expect(readFileSync(auditFile, 'utf8').trim().split('\n').length).toBe(2);
+    expect(s.migrateLegacyAudit()).toBe(0);   // 幂等：库里已空，再调不会重复搬
+    s.close();
+
+    // 第二次启动：库里已空 → 不再迁移，也不产生重复行
+    const s2 = new FileStorage(db);
+    expect(s2.auditStats.migrated_rows).toBe(0);
+    expect(s2.auditStats.legacy_rows_in_ledger).toBe(0);
+    expect((await s2.queryAudit({})).map((a) => a.request_id)).toEqual(['old1', 'old2']);
+    s2.close();
+  });
+
+  it('迁移中断（账本已有内容 + 库里仍有历史）→ 宁重复不缺失，并记一条可见审计', async () => {
+    const legacy = [audit('write', { request_id: 'old1' }), audit('recall', { request_id: 'old2' })];
+    writeFileSync(db, JSON.stringify({ memories: {}, audit: legacy }), 'utf8');
+    writeFileSync(auditFile, `${JSON.stringify(audit('write', { request_id: 'old1' }))}\n`, 'utf8');
+
+    const s = new FileStorage(db);
+    s.migrateLegacyAudit();
+    const ids = (await s.queryAudit({ request_id: 'old1' })).length;
+    expect(ids).toBe(2);                       // 重复行原样留着，不猜哪条是真
+    expect(s.auditStats.migrated_rows).toBe(2);
+    expect((await s.queryAudit({ action: 'security_change' }))
+      .map((a) => a.detail.op)).toContain('audit_log_migrate');
+    s.close();
+  });
+
+  it('只读实例绝不迁移：库里历史审计照样查得到（等持锁的写方搬）', async () => {
+    const legacy = [audit('write', { request_id: 'old1' })];
+    writeFileSync(db, JSON.stringify({ memories: {}, audit: legacy }), 'utf8');
+    const before = readFileSync(db, 'utf8');
+
+    const ro = new FileStorage(db, { readonly: true });
+    expect(ro.auditStats.migrated_rows).toBe(0);
+    expect(ro.auditStats.legacy_rows_in_ledger).toBe(1);
+    expect((await ro.queryAudit({})).map((a) => a.request_id)).toEqual(['old1']);
+    expect(ro.migrateLegacyAudit()).toBe(0);        // 只读镜像被显式调用也不搬：那是写方的账本
+    expect(readFileSync(db, 'utf8')).toBe(before);   // 一个字节都没动
+    await expect(ro.appendAudit(audit('write'))).rejects.toThrow(/只读模式/);
+    ro.close();
+  });
+
+  it('只读镜像的审计跟随写方追加（审计是账本，不该停在快照上）', async () => {
+    const writer = new FileStorage(db);
+    await writer.appendAudit(audit('write', { request_id: 'w1' }));
+    const mirror = new FileStorage(db, { readonly: true });
+    expect((await mirror.queryAudit({})).map((a) => a.request_id)).toEqual(['w1']);
+    await writer.appendAudit(audit('recall', { request_id: 'w2' }));
+    expect((await mirror.queryAudit({ request_id: 'w2' })).length).toBe(1);
+    writer.close();
+    mirror.close();
+  });
+
+  it('审计账本整档读不认 → 不掀掉记忆库：隔离原件、corruption 可见、记忆照常读写', async () => {
+    writeFileSync(auditFile, '这不是审计\n还不是审计\n', 'utf8');
+    const s = new FileStorage(db);
+    expect(s.auditStats.corruption).not.toBeNull();
+    expect(s.auditStats.corruption?.db_path).toBe(auditFile);
+    expect(s.auditStats.corruption?.backup_path).toContain('.corrupt');
+    expect(existsSync(`${auditFile}.corrupt`)).toBe(true);
+    await s.putMemory(mem('m1'));
+    expect((await s.getMemory('m1'))?.content).toBe('content-m1');
+    expect((await s.queryAudit({})).length).toBe(0); // 原件已改名保留，本次按空账本继续（不假装历史还在）
+    s.close();
+  });
+
+  it('批量模式：审计攒批与记忆同批提交，close 兜底不丢（顺序：L0→记忆库→审计）', async () => {
+    const s = new FileStorage(db);
+    s.beginBatch();
+    await s.putMemory(mem('m1'));
+    await s.appendAudit(audit('write', { request_id: 'b1' }));
+    await s.appendAudit(audit('recall', { request_id: 'b2' }));
+    expect(existsSync(auditFile)).toBe(false);       // 批量期间不逐条落盘
+    s.commitBatch();
+    expect(readFileSync(auditFile, 'utf8').trim().split('\n').length).toBe(2);
+    expect((await s.queryAudit({})).map((a) => a.request_id)).toEqual(['b1', 'b2']);
+    s.close();
+  });
+
+  it('轮转后 queryAudit 仍是全量真数据（归档行照样按 request_id 查到）', async () => {
+    const s = new FileStorage(db, { auditMaxBytes: 1 });
+    await s.appendAudit(audit('write', { request_id: 'arc1' }));
+    await s.appendAudit(audit('recall', { request_id: 'arc2' }));
+    const stats = s.auditStats;
+    expect(stats.archive_files).toBe(2);
+    expect(stats.rows).toBe(2);
+    expect(stats.archived_rows).toBe(2);
+    expect((await s.queryAudit({ request_id: 'arc1' })).length).toBe(1);
+    s.close();
+    expect(existsSync(join(dir, 'audit-archive'))).toBe(true);
   });
 });

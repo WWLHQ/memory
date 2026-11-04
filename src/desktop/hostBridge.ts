@@ -46,8 +46,15 @@ export type HostMethod =
   | 'l0:status' | 'l0:setup' | 'l0:changePassword' | 'l0:requestAccess'
   | 'l0:listRequests' | 'l0:listGrants' | 'l0:grant' | 'l0:deny' | 'l0:revoke'
   | 'l0:unlock' | 'l0:heartbeat' | 'l0:lock' | 'l0:writeUnlock' | 'l0:writeLock'
-  | 'l0:seal' | 'l0:decrypt' | 'l0:sessionInfo' | 'l0:migrate'
+  | 'l0:seal' | 'l0:decrypt' | 'l0:sessionInfo' | 'l0:migrate' | 'l0:blobs'
+  | 'l0:splitPreview' | 'l0:splitRun'
+  | 'l0:rebuildPreview' | 'l0:rebuildRun'
+  | 'l0:recoveryStatus' | 'l0:recoveryInit' | 'l0:recoveryIssue' | 'l0:recover' | 'l0:recoveryExport'
+  | 'setup:state' | 'setup:reselectDirs' | 'setup:setL0Password' | 'setup:regenCode' | 'setup:exportCard' | 'setup:finish'
   | 'legacy:scan' | 'legacy:demote'
+  | 'ledger:resetPreview' | 'ledger:resetRecollect'
+  | 'rules:rejudgePreview' | 'rules:rejudgeRun'
+  | 'refine:state' | 'refine:setEnabled' | 'refine:backfill' | 'refine:retryFailed'
   | 'llm:config' | 'llm:configSet' | 'llm:test' | 'llm:refine';
 
 /** 扁平 channel → preload 暴露的嵌套对象方法（window.api[ns][fn]） */
@@ -98,8 +105,32 @@ const CHANNEL_TO_NATIVE: Record<HostMethod, [string, string]> = {
   'l0:decrypt': ['l0', 'decrypt'],
   'l0:sessionInfo': ['l0', 'sessionInfo'],
   'l0:migrate': ['l0', 'migrate'],
+  'l0:blobs': ['l0', 'blobs'],
+  'l0:splitPreview': ['l0', 'splitPreview'],
+  'l0:splitRun': ['l0', 'splitRun'],
+  'l0:rebuildPreview': ['l0', 'rebuildPreview'],
+  'l0:rebuildRun': ['l0', 'rebuildRun'],
+  'l0:recoveryStatus': ['l0', 'recoveryStatus'],
+  'l0:recoveryInit': ['l0', 'recoveryInit'],
+  'l0:recoveryIssue': ['l0', 'recoveryIssue'],
+  'l0:recover': ['l0', 'recover'],
+  'l0:recoveryExport': ['l0', 'recoveryExport'],
+  'setup:state': ['setup', 'state'],
+  'setup:reselectDirs': ['setup', 'reselectDirs'],
+  'setup:setL0Password': ['setup', 'setL0Password'],
+  'setup:regenCode': ['setup', 'regenCode'],
+  'setup:exportCard': ['setup', 'exportCard'],
+  'setup:finish': ['setup', 'finish'],
   'legacy:scan': ['legacy', 'scan'],
   'legacy:demote': ['legacy', 'demote'],
+  'ledger:resetPreview': ['ledgerReset', 'preview'],
+  'ledger:resetRecollect': ['ledgerReset', 'run'],
+  'rules:rejudgePreview': ['rulesRejudge', 'preview'],
+  'rules:rejudgeRun': ['rulesRejudge', 'run'],
+  'refine:state': ['refineQueue', 'state'],
+  'refine:setEnabled': ['refineQueue', 'setEnabled'],
+  'refine:backfill': ['refineQueue', 'backfill'],
+  'refine:retryFailed': ['refineQueue', 'retryFailed'],
   'llm:config': ['llm', 'config'],
   'llm:configSet': ['llm', 'setConfig'],
   'llm:test': ['llm', 'test'],

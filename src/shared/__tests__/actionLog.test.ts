@@ -19,6 +19,7 @@ describe('sanitizeActionDetail：脱敏', () => {
       credential: 'cred',
       cookie: 'sid=1',
       session_id: 'sess-1',
+      recovery_code: 'recovery-code-plain',
       user: 'alice',
     }) as Record<string, unknown>;
 
@@ -31,9 +32,12 @@ describe('sanitizeActionDetail：脱敏', () => {
     expect(out.credential).toBe('***');
     expect(out.cookie).toBe('***');
     expect(out.session_id).toBe('***');
+    // 批次37-G：L0 恢复码与密码同级，绝不进日志
+    expect(out.recovery_code).toBe('***');
     expect(out.user).toBe('alice');
     expect(JSON.stringify(out)).not.toContain('plain-secret');
     expect(JSON.stringify(out)).not.toContain('sk-live');
+    expect(JSON.stringify(out)).not.toContain('recovery-code-plain');
   });
 
   it('嵌套对象的敏感字段同样脱敏', () => {

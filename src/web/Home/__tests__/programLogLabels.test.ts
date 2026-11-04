@@ -13,6 +13,13 @@ describe('actionTitle', () => {
   it('精确字典命中：直接用中文动作说明', () => {
     expect(actionTitle('home', 'login_fail')).toBe('登录失败');
     expect(actionTitle('kernel', 'legacy:demote')).toBe('遗留账本清理完成');
+    // 批次41-A：审计账本六个键都必须有中文标题（日志页人话视图不能只露 kernel:audit:*）
+    expect(actionTitle('kernel', 'audit:log-open')).toContain('内核审计账本已打开');
+    expect(actionTitle('kernel', 'audit:log-migrated')).toContain('搬进审计账本');
+    expect(actionTitle('kernel', 'audit:log-bad-lines')).toContain('解析不出来的行');
+    expect(actionTitle('kernel', 'audit:log-corrupt')).toContain('整档读不认');
+    expect(actionTitle('kernel', 'audit:log-backup')).toContain('搬移历史审计前的备份');
+    expect(actionTitle('kernel', 'audit:log-migrate-skipped')).toContain('本次没搬历史审计');
   });
 
   it('IPC 通道命中：作用域中文 + 通道说明', () => {
@@ -46,6 +53,27 @@ describe('detailNote', () => {
 
   it('只按优先级挑字段：未列入 NOTE_KEYS 的键不抢占摘要', () => {
     expect(detailNote('{"client":"Qoder/9.9.9","token":"***"}')).toBe('client=Qoder/9.9.9');
+  });
+
+  it('批次40-C：补炼一行的「停在哪、为什么停」要进人话摘要（值只有层名与英文码，无正文）', () => {
+    const note = detailNote('{"mem_id":"mem_x","ok":true,"refined_by":"llm_partial","to_layer":"L3",'
+      + '"layers":3,"targets":4,"llm_calls":2,"code":null,"stop_layer":"L3","stop_code":"too_short","ms":28123}');
+    expect(note).toContain('mem_id=mem_x');
+    expect(note).toContain('to_layer=L3');
+    expect(note).toContain('stop_layer=L3');
+    expect(note).toContain('stop_code=too_short');
+    expect(note).toContain('refined_by=llm_partial');
+  });
+
+  it('批次41-A：审计账本的计数与位置进人话摘要，且不带任何审计正文', () => {
+    const note = detailNote('{"path":"D:/data/audit.jsonl","rows":11666,"bytes":0,'
+      + '"migrated_rows":11666,"legacy_rows_in_ledger":0,"archive_files":1,"archived_rows":900,'
+      + '"skipped_lines":2,"readonly":false,"detail":{"content":"这段不该出现在摘要里"}}', 400);
+    expect(note).toContain('path=D:/data/audit.jsonl');
+    expect(note).toContain('rows=11666');
+    expect(note).toContain('migrated_rows=11666');
+    expect(note).toContain('skipped_lines=2');
+    expect(note).not.toContain('这段不该出现在摘要里');   // detail 里的正文不被抬进摘要
   });
 });
 

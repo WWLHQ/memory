@@ -57,9 +57,51 @@ export const IPC = {
   l0Decrypt: 'l0:decrypt',
   l0SessionInfo: 'l0:sessionInfo',
   l0Migrate: 'l0:migrate',
+  /** 批次37-A：L0 原数据库批量回读（拆库后行上只有 has_l0，查阅要在主进程取密文）——需登录会话 */
+  l0Blobs: 'l0:blobs',
+  /** 批次37-C：存量拆分迁移（历史行的明文 content_orig / 遗留信封搬进 L0 原数据库）——只读预览 / 管理员执行（强制先双库备份 + 逐字口令 + 需 L0 写密钥） */
+  l0SplitPreview: 'l0:splitPreview',
+  l0SplitRun: 'l0:splitRun',
+  /**
+   * 批次37-E：按 L0 原文重建 L1–L6（不重新采集，用库里已有的 L0 重炼可检索层）。
+   * 预览需登录会话（会真读原文，但不写盘）；执行需管理员 + 逐字口令 REBUILD + 强制先双库备份。
+   * 原文是密文时必须带管理员的 l0_session_id（§4.4.2 归属校验），否则那些行判 view_locked、如实不碰。
+   */
+  l0RebuildPreview: 'l0:rebuildPreview',
+  l0RebuildRun: 'l0:rebuildRun',
+  /**
+   * 批次37-G：L0 恢复码（忘记管理密码时唯一的找回通道，一次性）。
+   * 状态只回「有没有/指纹/时间」；发码/找回/换发都只在返回值里出现码明文一次；
+   * 导出走主进程原生「另存为」，卡面不落数据根。全部仅管理员。
+   */
+  l0RecoveryStatus: 'l0:recoveryStatus',
+  l0RecoveryInit: 'l0:recoveryInit',
+  l0RecoveryIssue: 'l0:recoveryIssue',
+  l0Recover: 'l0:recover',
+  l0RecoveryExport: 'l0:recoveryExport',
+  /**
+   * 批次37-B：首启强制向导（setup.html，登录之前）。
+   * 不要求会话，但门禁换成「本机此刻还没有需要保护的东西」：
+   * 设 L0 管理密码只在密钥环尚无 admin_wrap 时放行（那时库里没有任何密文，设密码不构成越权）；
+   * 一旦 admin_wrap 存在，改密码/发码一律回到 l0:recovery* 的管理员口径。
+   */
+  setupState: 'setup:state',
+  /** 向导内改选两库位置（重选后要重启才生效：路径在 app ready 前解析） */
+  setupReselectDirs: 'setup:reselectDirs',
+  setupSetL0Password: 'setup:setL0Password',
+  /** 密码已设但恢复卡没导出就重启了：用管理密码当场解锁换发一张新码（向导内的唯一出路） */
+  setupRegenCode: 'setup:regenCode',
+  setupExportCard: 'setup:exportCard',
+  setupFinish: 'setup:finish',
   /** 批次24：遗留账本清理（未接 LLM 却带 L2–L6 的历史行降级回 L1）——只读预览 / 管理员执行 */
   legacyScan: 'legacy:scan',
   legacyDemote: 'legacy:demote',
+  /** 批次35：记忆库清空重采（无意义噪声已入库的行只能整库重来）——只读预览 / 管理员执行（强制先备份 + 清游标 + 追采） */
+  ledgerResetPreview: 'ledger:resetPreview',
+  ledgerResetRecollect: 'ledger:resetRecollect',
+  /** 批次36-C：存量按当前质量门重判（规则收紧后已落库的噪声行不会自己变干净）——只读预览 / 管理员执行（强制先备份 + 逐字口令） */
+  rulesRejudgePreview: 'rules:rejudgePreview',
+  rulesRejudgeRun: 'rules:rejudgeRun',
   /** 批次26-B P1-3：租户三元组由主进程按会话下发（渲染层不再自报 mam.tenant.v1） */
   tenantGet: 'tenant:get',
   /** 批次31：LLM 精炼网关 —— 配置读/写（写需管理员）、连通真拨测（管理员）、逐层精炼代理（内核写路径经此走主进程 HTTP） */
@@ -67,6 +109,11 @@ export const IPC = {
   llmConfigSet: 'llm:configSet',
   llmTest: 'llm:test',
   llmRefine: 'llm:refine',
+  /** 批次39：L2–L6 后台补炼队列 —— 状态（需会话）/ 开关与补炼与重试失败行（仅管理员） */
+  refineState: 'refine:state',
+  refineSetEnabled: 'refine:setEnabled',
+  refineBackfill: 'refine:backfill',
+  refineRetryFailed: 'refine:retryFailed',
 } as const;
 
 /** preload 实际暴露的全部 channel（自检基线） */

@@ -1,16 +1,23 @@
 // FileStorage（§5.3）：桌面/CLI 本地库 = P0 主源（零依赖，纯文件系统，无 node:sqlite）。
-// 与 SqliteStorage 接口同构：memories/audit 两集合，完整对象以 JSON 落盘（原子写，单文件单进程安全）。
+// 与 SqliteStorage 接口同构：完整记忆对象以 JSON 落盘（原子写，单文件单进程安全）。
 // 设计取舍：
 //   · 不引入 node:sqlite（Electron 34 打包后运行时缺该内置模块，双击即崩）→ 纯 fs 实现，安装包零外部依赖。
 //   · 单文件 <userData>/memories.db.json + 同步原子写（写 tmp → rename）保证崩溃一致性；
 //     桌面壳为单进程主源，无并发写竞争，故不需 WAL/锁。
 //   · 与 SqliteStorage 相同的方法签名 + 测试辅助（size/close），可被同一套测试消费（见 __tests__）。
+//   · 批次41-A：审计不再落在这个文件里，改由 auditLog.ts 的追加式 JSONL 承载——
+//     每追加一条审计不再等于「整库 stringify + fsync + rename」（评审 P1-5 的写放大）。
 import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync, openSync, fsyncSync, closeSync, unlinkSync, statSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
+import type { L0BlobStore } from './l0Store.ts';
+import { isSealedL0 } from './l0Store.ts';
+import type { AuditLogStats } from './auditLog.ts';
+import { AUDIT_FILE_NAME, AuditLogCorruptError, FileAuditLog } from './auditLog.ts';
 import type { AuditAction, AuditRecord, Filter, Memory, StorageBackend } from './types.ts';
 
 interface FileDoc {
   memories: Record<string, Memory>;
+  /** 历史字段（批次41-A 之前审计写在这里）：读到非空即一次性迁进 audit.jsonl，迁移后恒为空数组 */
   audit: AuditRecord[];
 }
 
@@ -49,13 +56,27 @@ export interface FileStorageOptions {
   readonly?: boolean;
   /** 只读模式下每次读前检查账本文件 mtime，变了就重载（镜像持有写锁的进程，近实时） */
   reloadOnMtime?: boolean;
+  /**
+   * 批次37：L0 原数据库。给了它，本文件就**只存 L1–L6**（审计自批次41-A 起在 audit.jsonl）——
+   * putMemory 时把行上的 `content_l0_enc` 搬进 L0 库、行上改记 `has_l0`，
+   * deleteMemory / 清掉 L0 的改写会同步把密文从 L0 库删掉。
+   * 不给（测试、旧数据未拆库）则完全保持批次36 及以前的行为：信封照旧写在行上。
+   */
+  l0?: L0BlobStore;
+  /**
+   * 批次41-A：审计账本文件路径。缺省 = 与记忆库同目录的 `audit.jsonl`
+   * （跟着记忆库所在目录走：审计是这本账本的账，不该分开放）。
+   */
+  auditPath?: string;
+  /** 批次41-A：在档文件大小闸门（单测用它触发轮转；生产用默认值） */
+  auditMaxBytes?: number;
 }
 
 export class FileStorage implements StorageBackend {
   private doc: FileDoc;
   private open = true;
-  /** 批量模式：true 时 putMemory/appendAudit 只改内存、不逐次同步写盘；
-   *  由 commitBatch() 一次性 persist（把 N 次全量同步写盘降为 1 次，避免卡死事件循环）。 */
+  /** 批量模式：true 时 putMemory 只改内存、不逐次同步写盘，审计攒进审计账本缓冲；
+   *  由 commitBatch() 一次性落盘（把 N 次全量同步写盘降为 1 次，避免卡死事件循环）。 */
   private batching = false;
   private dirty = false;
   /** 批次28-A：生效的只读态（构造传入，或写锁被其它活进程持有时自动降级） */
@@ -66,15 +87,99 @@ export class FileStorage implements StorageBackend {
   private ownsLock = false;
   /** 写锁被其它活进程持有 → 自动降级只读；只读构造不取锁恒为 null */
   private lockHolder: { pid: number; at: number } | null = null;
+  /** 批次37：L0 原数据库（未配置 = L0 仍写在行上，保持旧行为） */
+  private readonly l0?: L0BlobStore;
+  /** 批次41-A：追加式审计账本（audit.jsonl）——审计不再进记忆库文件 */
+  private readonly auditLog: FileAuditLog;
+  /** 批次41-A：审计账本本次启动被隔离过（原件已改名 *.corrupt）：回显用，绝不静默开空账本 */
+  private auditCorruption: CorruptionNotice | null = null;
+  /** 批次41-A：存量迁移是否发生过（回显给设置页/日志，迁移只在可写进程做一次） */
+  private auditMigratedRows = 0;
 
   constructor(private readonly dbPath: string, opts: FileStorageOptions = {}) {
     const dir = dirname(dbPath);
     mkdirSync(dir, { recursive: true });
     this.lockPath = `${dbPath}.lock`;
     this.reloadOnMtime = opts.reloadOnMtime === true;
+    this.l0 = opts.l0;
     this.mode = opts.readonly === true || !this.acquireLock();
     this.doc = this.load();
     this.lastMtimeMs = this.statMtime();
+    const auditPath = opts.auditPath ?? join(dir, AUDIT_FILE_NAME);
+    try {
+      this.auditLog = new FileAuditLog(auditPath, {
+        readonly: this.mode,
+        maxBytes: opts.auditMaxBytes,
+      });
+    } catch (e) {
+      // 审计账本读不认：原件已改名隔离，本次按空账本继续，但必须留下可消费的通知（与库损坏同口径）。
+      // 不让它掀掉整个存储——记忆库还读得动，用户不该因为审计文件坏了打不开应用。
+      const err = e as AuditLogCorruptError;
+      this.auditCorruption = {
+        db_path: auditPath,
+        backup_path: err?.backupPath ?? null,
+        error: String(err?.message ?? e),
+        ts: new Date().toISOString(),
+      };
+      this.auditLog = new FileAuditLog(auditPath, { readonly: this.mode, maxBytes: opts.auditMaxBytes });
+    }
+  }
+
+  /**
+   * 批次41-A 一次性存量迁移：老库里 `doc.audit` 的数组整批搬进 audit.jsonl，然后把库里那格清空并落盘。
+   * **构造时不自动搬**：搬之前必须有备份（项目不变量「批量改写账本前先备份，备份失败就拒绝改写」），
+   * 而备份是端壳的活（`main.ts` 启动时先 `backupBeforeKernelChange` 再调本方法）。
+   * 没调本方法不影响任何读与查：历史审计照旧合进 `queryAudit` 的全量视图。
+   * 只在可写进程生效（只读镜像不改别人的账本）；重复调用幂等（库里已空即直接返回 0）。
+   * 迁移中断留下的重复风险按「宁重复不缺失」处理：审计是账本，多一行远比少一行好，
+   * 且发生过一次就写进 stats 里可见，不假装两边一致。返回本次搬走的行数。
+   */
+  migrateLegacyAudit(): number {
+    const legacy = this.doc.audit;
+    if (!Array.isArray(legacy) || legacy.length === 0) return 0;
+    if (this.mode) return 0; // 只读：历史审计留在库里照旧可查，等持有写锁的进程搬
+    const overlap = this.auditLog.count() > 0; // 账本已有内容 + 库里也有历史 = 上次迁移没走完
+    this.auditLog.appendMany(legacy);
+    this.doc.audit = [];
+    this.auditMigratedRows = legacy.length;
+    this.persist();
+    if (overlap) {
+      // 明确记一条审计：不改动任何数据，只把「可能有重复行」这件事写进账本本身
+      this.auditLog.append({
+        request_id: `req_audit_migrate_${Date.now().toString(36)}`,
+        action: 'security_change',
+        ts: Date.now(),
+        detail: {
+          op: 'audit_log_migrate',
+          moved: legacy.length,
+          overlap_possible: true,
+          note: '检测到上一次审计迁移中断的痕迹：历史审计已补齐，可能与已落盘部分重复（宁重复不缺失）',
+        },
+      });
+    }
+    return legacy.length;
+  }
+
+  /** 批次37：配了就只存 L1–L6，L0 密文在另一个文件里 */
+  get l0Store(): L0BlobStore | null {
+    return this.l0 ?? null;
+  }
+
+  /** 批次41-A：审计账本真实状态（路径/条数/字节/归档/坏行数），设置页与诊断用 */
+  get auditStats(): AuditLogStats & {
+    migrated_rows: number;
+    /** 库里仍未搬走的历史审计行数（只读镜像上属正常状态；端壳备份完成后调 migrateLegacyAudit 才搬） */
+    legacy_rows_in_ledger: number;
+    corruption: CorruptionNotice | null;
+  } {
+    const s = this.auditLog.stats();
+    return {
+      ...s,
+      rows: s.rows + this.doc.audit.length, // 只读镜像上库里还没迁走的历史审计同样算进可查总数
+      migrated_rows: this.auditMigratedRows,
+      legacy_rows_in_ledger: this.doc.audit.length,
+      corruption: this.auditCorruption,
+    };
   }
 
   /** 独占写锁：<db>.lock（O_EXCL 原子创建，内容含 pid）。锁被活进程持有 → 自动只读；
@@ -153,19 +258,24 @@ export class FileStorage implements StorageBackend {
   beginBatch(): void {
     this.assertWritable();
     this.batching = true;
+    this.l0?.beginBatch(); // 批次37：两个库一起进批量，避免 N 次全量写盘
+    this.auditLog.beginBatch(); // 批次41-A：审计同样攒批，commit 时一次追加
   }
 
   /** 提交批量：一次性同步写盘。写盘失败则原样上抛并保留批次（batching/dirty 不动），
-   *  由调用方重试或 close() 兜底——绝不「标已提交、实际没落盘」。无脏则直接结束批量。 */
+   *  由调用方重试或 close() 兜底——绝不「标已提交、实际没落盘」。
+   *  落盘顺序固定三段：
+   *  ① L0 库先落、记忆库后落——反过来会留下「行说有自己的 L0、L0 库里没有」的断链；
+   *  ② 审计最后落——审计是「发生了什么」的账，绝不能先写下一条数据没落盘的审计（批次41-A）。 */
   commitBatch(): void {
     if (!this.batching) return;
-    if (!this.dirty) {
-      this.batching = false;
-      return;
+    this.l0?.commitBatch();
+    if (this.dirty) {
+      this.persist();
+      this.dirty = false;
     }
-    this.persist();
+    this.auditLog.commitBatch();
     this.batching = false;
-    this.dirty = false;
   }
 
   /** 读盘 → 结构：仅"文件不存在"视为空库；损坏/非法结构 → 备份 .corrupt + 显式抛错（D3） */
@@ -294,13 +404,47 @@ export class FileStorage implements StorageBackend {
     }
   }
 
+  /**
+   * 批次37：把行上的 L0 密文搬进 L0 原数据库，返回「该写进记忆库的行」+ 失败时的尽力回滚。
+   * 规则（只动 L0，不碰 L1–L6 正文）：
+   *  · 行带合法信封 → 先写 L0 库，再把行改成 `content_l0_enc: undefined` + `has_l0: true`；
+   *  · 行带 `has_l0` 而无信封 → 原样（密文已在 L0 库）；
+   *  · 行既无信封也无 `has_l0`，但 L0 库里有本条（删除/清 L0 的改写）→ 同步删掉密文，不留孤儿。
+   *  · 信封形状不合法（明文混进来）→ **不搬、不删、不静默**，原样留在行上由上层报错。
+   * 顺序保证：L0 库写失败时**根本不碰记忆库**（不会出现「行上说有 L0、库里没有」）。
+   * 反向（L0 已写、记忆库写失败）只会留下「库里有密文、行上没有」的孤儿——读不到、不可检索，
+   * 由 `scanLedgerForSplit`/完整性核对点名，绝不假装两边一致。
+   */
+  private async splitL0FromRow(m: Memory): Promise<Memory> {
+    const l0 = this.l0;
+    if (!l0) return m;
+    const envelope = m.content_l0_enc;
+    if (envelope) {
+      if (!isSealedL0(envelope)) return m; // 不合法信封：不搬不删，留给上层显式处理
+      await l0.put(m.mem_id, { envelope, sealed_at: m.updated_at ?? m.created_at });
+      return { ...m, content_l0_enc: undefined, has_l0: true };
+    }
+    if (m.has_l0) return m;
+    const stale = await l0.get(m.mem_id);
+    if (stale) {
+      try {
+        await l0.delete(m.mem_id);
+      } catch (e) {
+        // 记忆库里这条已经没有 L0 了，密文却删不掉：如实上抛，不留下「以为清了」的假状态
+        throw new Error(`L0 原数据库清理失败（${m.mem_id}）：${String((e as Error)?.message ?? e)}`);
+      }
+    }
+    return m;
+  }
+
   async putMemory(m: Memory): Promise<void> {
     this.assertWritable();
-    const prev = this.doc.memories[m.mem_id];
-    this.doc.memories[m.mem_id] = m;
+    const row = this.l0 ? await this.splitL0FromRow(m) : m;
+    const prev = this.doc.memories[row.mem_id];
+    this.doc.memories[row.mem_id] = row;
     this.touchOrRollback(() => {
-      if (prev === undefined) delete this.doc.memories[m.mem_id];
-      else this.doc.memories[m.mem_id] = prev;
+      if (prev === undefined) delete this.doc.memories[row.mem_id];
+      else this.doc.memories[row.mem_id] = prev;
     });
   }
 
@@ -327,18 +471,20 @@ export class FileStorage implements StorageBackend {
     this.assertWritable();
     const prev = this.doc.memories[mem_id];
     if (prev === undefined) return; // 幂等：删不存在不抛
+    // 批次37：这条记忆物理消失 → L0 原数据库里的密文也必须同步消失（不留可解的孤儿）
+    const blob = this.l0 ? await this.l0.get(mem_id) : null;
+    if (this.l0 && blob) await this.l0.delete(mem_id);
     delete this.doc.memories[mem_id];
     this.touchOrRollback(() => {
       this.doc.memories[mem_id] = prev; // 写盘失败 → 撤销删除，不静默丢记忆
+      if (this.l0 && blob) void this.l0.put(mem_id, blob).catch(() => { /* 回滚失败：由完整性核对点名孤儿行 */ });
     });
   }
 
+  /** 批次41-A：审计落追加式 JSONL（一条 = 一次 append+fsync），不再进记忆库文件；失败不留内存半态 */
   async appendAudit(a: AuditRecord): Promise<void> {
     this.assertWritable();
-    this.doc.audit.push(a); // append-only（4.3）
-    this.touchOrRollback(() => {
-      if (this.doc.audit[this.doc.audit.length - 1] === a) this.doc.audit.pop();
-    });
+    this.auditLog.append(a); // append-only（4.3）：只追加，本方法从不删任何已有行
   }
 
   async queryAudit(filter: {
@@ -347,12 +493,15 @@ export class FileStorage implements StorageBackend {
     since?: number;
   }): Promise<AuditRecord[]> {
     this.maybeReload();
-    return this.doc.audit.filter((a) => {
+    const inLog = this.auditLog.query(filter);
+    // 迁移前（或只读镜像尚未被写方迁移）：库里那格历史审计照样查得到，绝不出现「拆了文件就查不到」
+    const legacy = this.doc.audit.filter((a) => {
       if (filter.request_id && a.request_id !== filter.request_id) return false;
       if (filter.action && filter.action !== a.action) return false;
       if (filter.since !== undefined && a.ts < filter.since) return false;
       return true;
     });
+    return legacy.length === 0 ? inLog : [...legacy, ...inLog];
   }
 
   /** 优雅关闭（测试/进程退出前调用）；幂等，重复调用无害。
@@ -360,9 +509,17 @@ export class FileStorage implements StorageBackend {
    *  落盘失败时原样上抛且**不置为已关闭**：调用方可见、记录日志，障碍解除后可再次 close 重试。 */
   close(): void {
     if (!this.open) return;
-    if (this.mode) { this.open = false; return; } // 只读实例无待落盘批次，直接关闭
+    if (this.mode) {
+      this.open = false;
+      this.l0?.close();
+      this.auditLog.close();
+      return; // 只读实例无待落盘批次，直接关闭
+    }
     this.commitBatch();
     this.open = false;
+    // 批次37：L0 库与记忆库各自持锁，关闭时一并落盘并释放，否则残留 <l0>.lock 会让下个实例误判只读
+    this.l0?.close();
+    this.auditLog.close(); // 批次41-A：审计缓冲同样在退出前落盘
     if (this.ownsLock) {
       try { unlinkSync(this.lockPath); } catch { /* 锁文件删不掉：陈旧锁由下个实例按死 pid 判定 */ }
       this.ownsLock = false;

@@ -138,10 +138,12 @@ function readTailLines(file: string, limit: number): string[] {
     const st = statSync(file);
     if (!st.isFile() || st.size <= 0) return [];
     const readBytes = Math.min(st.size, TAIL_CHUNK_BYTES);
-    const buf = Buffer.allocUnsafe(readBytes);
+    // 批次41-G：Buffer.alloc（非 allocUnsafe）+ 只按 readSync 实读长度取子串——短读（文件在读前缩小等）
+    // 不会把未初始化堆内存 / 池化旧数据混进 UI 日志（与 auditLog.readFrom 同一口径）
+    const buf = Buffer.alloc(readBytes);
     fd = openSync(file, 'r');
-    readSync(fd, buf, 0, readBytes, st.size - readBytes);
-    const lines = buf.toString('utf8').split(/\r?\n/).filter((l) => l.length > 0);
+    const read = readSync(fd, buf, 0, readBytes, st.size - readBytes);
+    const lines = buf.subarray(0, read).toString('utf8').split(/\r?\n/).filter((l) => l.length > 0);
     // 只读了文件尾部：首行可能被截断，丢弃它避免展示半行
     if (readBytes < st.size) lines.shift();
     return lines.slice(-limit);

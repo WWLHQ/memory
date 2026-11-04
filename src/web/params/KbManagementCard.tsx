@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import {
   backupAvailable, backupGetConfig, backupSaveConfig, backupChooseDir,
   backupRunNow, backupList,
+  BACKUP_KIND_LABEL,
   type BackupConfigView, type BackupItem,
 } from '../memory/backup.ts';
 import {
@@ -67,7 +68,13 @@ export function KbManagementCard() {
     const r = await backupRunNow();
     setBusy(false);
     if (!r.ok) { show(`备份失败：${r.error}`); return; }
-    show(`已备份：${r.file ?? ''}`);
+    // 批次37-D：回执逐库说明——只说"已备份"会掩盖"其实只备了记忆库"
+    const got = (r.receipt?.files ?? []).map((f) => BACKUP_KIND_LABEL[f.kind]);
+    const lost = (r.receipt?.missing ?? []).map((k) => BACKUP_KIND_LABEL[k]);
+    show([
+      `已备份 ${got.length} 个文件：${got.join('、') || '（无）'}`,
+      lost.length ? `本次未备（文件不存在）：${lost.join('、')}` : '',
+    ].filter(Boolean).join(' · '));
     void backupList().then((res) => { if (res.ok) { setItems(res.items ?? []); setListDir(res.dir ?? ''); } });
   }
 
@@ -130,7 +137,7 @@ export function KbManagementCard() {
   return (
     <div className="card" data-testid="kb-mgmt-card">
       <b>🗄️ 记忆库管理</b>
-      <div className="note">数据存放位置 + 自动备份 · 桌面壳真实落盘（记忆库/游标/日志/MCP 令牌/备份配置全部在数据目录下）</div>
+      <div className="note">数据存放位置 + 自动备份 · 桌面壳真实落盘（记忆库与 L0 原数据库、游标、日志、MCP 令牌、备份配置全部在数据目录下）</div>
       {!isAdmin && (
         <div className="note" data-testid="kb-admin-required" style={{ color: 'var(--warn, #b8860b)' }}>
           🔒 需管理员：更改数据位置与备份设置仅管理员可操作
@@ -164,11 +171,31 @@ export function KbManagementCard() {
         <div className="note">
           当前生效记忆库：<code style={{ fontSize: 11 }}>{rootInfo.activeDbPath}</code>
         </div>
+        {rootInfo.activeL0Path && (
+          <div className="note" data-testid="kb-l0-path">
+            L0 原数据库（密文独立存放）：<code style={{ fontSize: 11 }}>{rootInfo.activeL0Path}</code>
+            {rootInfo.l0ReadOnly ? ' · 只读（被其它进程持有写锁，写入会被拒绝）' : ''}
+          </div>
+        )}
+        {rootInfo.activeAuditPath && (
+          <div className="note" data-testid="kb-audit-path">
+            审计账本（追加式，自批次41 起不再混在记忆库文件里）：<code style={{ fontSize: 11 }}>{rootInfo.activeAuditPath}</code>
+            {rootInfo.audit
+              ? ` · 在档 ${rootInfo.audit.rows} 行 · 归档 ${rootInfo.audit.archive_files} 个文件 ${rootInfo.audit.archived_rows} 行`
+              : ''}
+            {rootInfo.audit && rootInfo.audit.skipped_lines > 0
+              ? ` · 读不动的坏行 ${rootInfo.audit.skipped_lines}（只跳过、不删原件）`
+              : ''}
+            {rootInfo.audit?.corruption
+              ? ` · 上次启动整档解析失败，原件已改名保留：${rootInfo.audit.corruption.backup_path ?? '（未能保留原件）'}`
+              : ''}
+          </div>
+        )}
         <div className="note">
           动作日志（排查用）：<code style={{ fontSize: 11 }} data-testid="kb-actions-log">{rootInfo.actionsLogPath ?? `${rootInfo.root}/actions.log`}</code>
         </div>
         <div className="note">
-          更改位置会复制现有数据到新目录（不覆盖、不删除原目录）并自动重启；记忆库、采集游标、main.log、MCP 令牌、备份配置等全部数据都随之前往。
+          更改位置会复制现有数据到新目录（不覆盖、不删除原目录）并自动重启；记忆库、L0 原数据库与密钥环、审计账本、采集游标、main.log、MCP 令牌、备份配置等全部数据都随之前往。
         </div>
       </div>
 
@@ -246,6 +273,7 @@ export function KbManagementCard() {
                   {items.map((it) => (
                     <tr key={it.name} style={{ borderBottom: '1px solid var(--border, #eee)' }}>
                       <td style={{ padding: '3px 6px', fontFamily: 'monospace' }}>{it.name}</td>
+                      <td style={{ padding: '3px 6px', color: 'var(--muted)' }} data-testid="backup-item-kind">{BACKUP_KIND_LABEL[it.kind ?? 'ledger']}</td>
                       <td style={{ padding: '3px 6px', color: 'var(--muted)' }}>{new Date(it.time).toLocaleString()}</td>
                       <td style={{ padding: '3px 6px', textAlign: 'right', color: 'var(--muted)' }}>{(it.size / 1024).toFixed(1)} KB</td>
                     </tr>
@@ -257,8 +285,10 @@ export function KbManagementCard() {
         )}
 
         <div className="note" style={{ fontSize: 11, marginTop: 8 }}>
-          自动备份 = 主进程调度器每分钟检查，到设定时刻把记忆库复制到备份目录（带时间戳文件名，自动清理超出保留份数的旧备份）。
+          自动备份 = 主进程调度器每分钟检查，到设定时刻把<strong>记忆库（L1–L6）、L0 原数据库、L0 密钥环</strong>各复制一份到备份目录
+          （带时间戳文件名，各自按保留份数清理；缺哪个源会在回执里点名）。
           备份配置存于 <code>backup-config.json</code>；操作全部写审计 + <code>main.log</code>。
+          <strong> 注意</strong>：L0 备份里是密文，只有配合密钥环与 L0 密码（或恢复码）才能还原原文——三者请分开存放。
         </div>
       </div>
     </div>

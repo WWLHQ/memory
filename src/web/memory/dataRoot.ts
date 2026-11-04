@@ -3,12 +3,38 @@
 import { hostCapability, hostCall } from '../../desktop/hostBridge.ts';
 import { getStoredSessionId } from '../Home/crossTabAuth.ts';
 
+export interface AuditLogInfo {
+  path: string;
+  /** 轮转出的旧审计行所在目录（与审计账本同目录下的 audit-archive/） */
+  archive_dir: string;
+  rows: number;
+  bytes: number;
+  archive_files: number;
+  archive_bytes: number;
+  archived_rows: number;
+  /** 读不动的坏行数（只计数、绝不静默丢弃） */
+  skipped_lines: number;
+  readonly: boolean;
+  /** 本次启动从主库文件里搬进独立账本的历史审计行数（0 = 早已搬完或本来就没有） */
+  migrated_rows: number;
+  /** 主库文件里仍留着的旧审计行数（只读镜像会有值：不迁移，查询时合并） */
+  legacy_rows_in_ledger: number;
+  corruption: { db_path: string; backup_path: string | null; error: string; ts: string } | null;
+}
+
 export interface DataRootInfo {
   root: string;
   defaultRoot: string;
   isDefault: boolean;
   pointer: string;
   activeDbPath: string;
+  /** 批次37-A：L0 原数据库文件（密文独立成库；旧数据根尚无此文件时主进程返回其目标路径） */
+  activeL0Path?: string;
+  /** 批次37-A：L0 库被其它进程持有写锁 → 只读（写入会被拒） */
+  l0ReadOnly?: boolean;
+  /** 批次41-A：内核审计账本（追加式 JSONL，跟记忆库同目录）位置与体量 */
+  activeAuditPath?: string;
+  audit?: AuditLogInfo;
   /** 动作日志文件（批次7）：<数据根>/actions.log */
   actionsLogPath?: string;
 }
