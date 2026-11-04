@@ -1,7 +1,7 @@
 # 批次41 手动测试报告 · 审计搬出记忆库 + 队列卫生 + 退避/退出/备份校验 + 删除如实告知（收口与首次真机执行）
 
 日期（UTC+08:00）：2026-11-04
-分支：`main`，HEAD = `5845937`（批次 35–41 已按问题点分 6 笔提交并推送 `origin/main` 至 `3c23bfe`；**41-R 已提交为 `1652bd8`、41-S 立案文档已提交为 `5845937`，这两笔连同本次文档收口尚未推送**，`git push` 需用户另行授权）
+分支：`main`，HEAD = `948bcf5`（批次 35–41 已按问题点分 6 笔提交并推送 `origin/main` 至 `3c23bfe`；**41-R `1652bd8`、41-S 立案文档 `5845937`、需求规格书 §19.25 `bb63b5a`、41-T 存量字段回填通道 `948bcf5` 这 4 笔尚未推送**，`git status -sb` 实测 `main...origin/main [ahead 4]`，`git push` 需用户另行授权）
 上一批次：批次40（`specs/MANUAL-TEST-FIX-BATCH-40.md`）
 起因（用户原话）：「审计搬出记忆库」→「跑」（授权走完 41-Z：`verify` → `package` → 本报告）→ 追加「队列幽灵对账」（复查 41-C，产出 **41-P**）→ 追加「轮换 DSH MCP Bearer 令牌」（**41-L 已真机执行**，用户口径「全量换 + 全量重写」）
 
@@ -17,15 +17,16 @@
 | 落盘完成（UTC+08:00） | 2026-11-04 **12:11:56**（本批 41-R 收口重打包；此表原写的是 10:17:07 那一版 `E5160D30…45A30634` / 122,048,550 B，**已被取代**——那一版里没有 41-P 的 `l0-rebuild` 对账，也没有 41-R 的双写） |
 | 出厂核对（不是「源码写了」，是「包里有没有」） | 只读比对 `app.asar.unpacked/dist-electron/main.cjs`（581,094 B）：`void mlog("mcp:recall_detail_view", { outcome });` 与 `actionLog("mcp", "recall_detail_view", { outcome });` **两行都在**、`reconcileRefineQueueDir("l0-rebuild")` **命中**、渲染层 `app.asar` 内 `召回明细页` **命中** |
 | 在跑的产物 | 12:14 用 `release/installer/win-unpacked/MultiAgent Memory.exe` 起回，写锁 `{"pid":3880,…}`；8204 可用（真发一次召回得 200） |
-| `npm run verify` | **退出码 0**（typecheck → oxlint → 索引新鲜度 → 覆盖率 → `build:electron` → E2E 一条链跑完，未分段） |
+| `npm run verify` | **退出码 0**。最近一次是 **41-T 收口轮（2026-11-04 12:52–12:55 UTC+08:00）**，一整条链跑完未分段（typecheck → oxlint → 索引新鲜度 → 覆盖率 → `build:electron` → E2E）；上一轮为 41-R 收口（12:0x） |
 | `npm run typecheck` | 干净（`tsc --noEmit` + `tsc --noEmit -p tsconfig.electron.json`） |
 | `npm run lint` | oxlint **0 warnings / 0 errors** |
-| `npm run code:index:check` | 代码索引已是最新（**306 个文件**；`npm run package` 的 `prepackage` 又自动刷新一次） |
-| 单测 | vitest **147 文件 / 1735 例全过**（41-R 本批 +2：`mcpHttp.test.ts` 1 例 + `programLogLabels.test.ts` 断言） |
-| `npm run test:coverage` | Statements 81.76% / Branches 73.98% / Lines 84.83% |
-| `npm run test:e2e` | Playwright **106 passed（45.9s）** |
+| `npm run code:index:check` | 代码索引已是最新（**308 个文件**；41-T 新增 `fieldBackfill.ts` + `FieldBackfillCard.tsx` 两个文件，从 306 涨上来） |
+| 单测 | vitest **149 文件 / 1754 例全过**（41-T 本批 **+2 文件 / +19 例**：`fieldBackfill.test.ts` 11 例 + `FieldBackfillCard.test.tsx` 8 例；此前 41-R +2 例） |
+| `npm run test:coverage` | Statements **81.89%**（11338/13844）/ Branches **74.18%**（8200/11054）/ Functions 77.98% / Lines **84.93%**（9841/11587）——41-T 轮 |
+| `npm run test:e2e` | Playwright **106 passed**（41-T 轮 48.7s） |
+| **41-T 没有重新打包** | 安装包仍是 **12:11:56 那一版**（`d0f31b70…4c5cadf`），**里面没有 41-T**：`FieldBackfillCard` 与 `ledger:fields*` 两条 IPC 只存在于源码与 `dist/`（`npm run verify` 的 `build:electron` 产物），现役 `app.asar.unpacked/dist-electron/main.cjs` 里 `grep ledger:fieldsBackfill` **命中 0**。原因不是忘了，是打包按批次19 流程会先结束正在补炼的实例（当前写锁 `{"pid":3880}`），**要不要现在重启由用户决定**（与 §6 第 12 条同一件事的另一面：41-P/41-R 已在包里，41-T 不在） |
 | 打包过程 | **共两次**。第一次（10:17，41-Z 收口）：一次 EPERM 回退按批次21 既定路径走完——`release/installer` 被外部进程占用 → 先输出到 `release\installer-20261104-021635` → 构建成功后删旧目录并**收口回 `release/installer`**（`旧安装包目录清理 1 个`）。同时按流程删除便携产物 `release\win-unpacked` → `release/` 下只有 `installer` 一个目录。**第二次（12:11，41-R 收口）**：同一回退再次触发（`[package] release/installer 被外部进程占用（EPERM），本次输出改到 release\installer-20261104-041129`），构建成功后照样收口回 `release/installer`（`旧安装包目录清理 0 个`）。**旧实例退出的证据不在打包日志里**：`killReleaseProcesses()`（批次27 的「先礼后兵」：`CloseMainWindow()` → 3 秒 → `Stop-Process -Force`）的 `Write-Output` 落在 PowerShell stdout，而 `package-builder.cjs` 只用它判断要不要多睡 800ms、**不转发成 `[package]` 行**，所以日志里一条关闭记录都没有——只能从别处证：`actions.log` 的 `[app:bootstrap:start]` 在 `02:51:48`（10:51，41-L 重启）与 `04:14:14`（12:14，本批新产物）之间**没有任何一次新启动**，且 12:14 新进程能拿到写锁（`{"pid":3880}`）、当前 `tasklist` 只有这一套 4 个进程 = 旧实例确实已退。**这条观测缺口本批没修**（属打包脚本自身的人话输出，与 41-R 同类但不在本批范围）。这一版产物才同时含 41-P 与 41-R。 |
-| 未做 | **41-R 没做任何账本改写**（只加一条观测的双写）；**41-T 建的是通道，没有替用户点执行**——那 **533 行缺 `sha256` + 1 行缺 `embedding` 此刻仍是空的**，卡片就位 ≠ 存量已回填；也**没有点过**安全页任何需口令按钮（`SPLIT` / `RESET` / `REJUDGE` / `REBUILD`）——用户机上那两轮 `REJUDGE` 是用户自己点的（124 行已于 2026-11-03 14:43 清除，见 §6 与批次36/40 报告的校正）。提交状态：批次 35–41 已在 `3c23bfe` 及其前 5 笔进入 `origin/main`；**41-R 已提交（`1652bd8`）、41-S 立案文档已提交（`5845937`）、需求规格书 §19.25 已提交（`bb63b5a`），41-T（代码 + 卡 + 文档）为下一笔待提交——推送均需用户另行授权**。**41-L 已做**（令牌轮换见 §2 末尾，属运维动作、零代码改动、没碰账本） |
+| 未做 | **41-R 没做任何账本改写**（只加一条观测的双写）；**41-T 建的是通道，没有替用户点执行**——那 **533 行缺 `sha256` + 1 行缺 `embedding` 此刻仍是空的**，卡片就位 ≠ 存量已回填；也**没有点过**安全页任何需口令按钮（`SPLIT` / `RESET` / `REJUDGE` / `REBUILD`）——用户机上那两轮 `REJUDGE` 是用户自己点的（124 行已于 2026-11-03 14:43 清除，见 §6 与批次36/40 报告的校正）。提交状态：批次 35–41 已在 `3c23bfe` 及其前 5 笔进入 `origin/main`；**41-R `1652bd8`、41-S 立案文档 `5845937`、需求规格书 §19.25 `bb63b5a`、41-T 存量字段回填通道 `948bcf5` 四笔均已提交，`main...origin/main [ahead 4]` = 全部尚未推送（推送需用户另行授权）**。**41-T 未进安装包**（见上一行），所以用户机上现在还**点不到**那张卡。**41-L 已做**（令牌轮换见 §2 末尾，属运维动作、零代码改动、没碰账本） |
 
 > **判据校正（写给下一位维护者）**：用 `grep <符号> app.asar` 判断「产物里有没有某段代码」在本项目**不成立**。electron-builder 把 `dist-electron` 放进了 `app.asar.unpacked/`，asar 本体里 `grep audit.jsonl` 恒为 **0（假阴性）**。正确做法：比对 `app.asar.unpacked/dist-electron/main.cjs` 与刚构建的 `dist-electron/main.cjs` 的 md5（本次同为 `5c251652c6c712c2cf7f514fc96cce38`，`audit.jsonl` 命中 3 次），或直接看真机启动的动作日志。本报告初稿差点把「41-A 没进包」写成结论，就是这个假阴性造成的，已用真机启动证伪。
 
@@ -131,7 +132,7 @@
   - 召回真的回来了：那 1 行缺向量的行，执行前用它的 L1 原文做语义检索召不回（恒 0 分），执行后应能命中。
 - 步骤④（幂等）：再点一次「重新预览」→「本轮会写盘」**必须为 0**、执行按钮消失（`fields-backfill-clean` 出现）；`actions.log` 里 `memory_op/op=field_backfill` 的行数不再增长。
 - 步骤⑤（备份闸门）：把备份目录配成不可写路径后再点执行 → 应**如实报错且一行不写**，并出现 `[kernel:ledger:fields-backup-fail]`（error 级）。
-- 边界（照旧声明）：① **本批我没有点执行**，那 533+1 行此刻仍是空的——卡片就位 ≠ 存量已回填；② 缺 `content` 或缺 `content_l1` 的行**不猜**，只计进 `unfillable_*` 并原样留着（两个字段都缺且都算不出的行在两项里各计一次，所以相加是「项」不是「行」）；③ `indexed` 只统计「本行**新**建了向量且注入了索引」的行，`main.ts` 注入的是 `collectorVector`（与采集器/补炼/重建同一实例），没注入时恒 0，不假装建过索引；④ 审计只记字段名与长度，**正文与算出的指纹都不落账本**。
+- 边界（照旧声明）：① **本批我没有点执行**，那 533+1 行此刻仍是空的——卡片就位 ≠ 存量已回填；而且**这张卡目前在用户机上也还点不到**：41-T 没有重新打包（§0 倒数第二行 + §6 第 12 条），现役安装包 `main.cjs` 里 `ledger:fieldsBackfill` 命中 0，要打这一步得先结束正在补炼的 pid 3880；② 缺 `content` 或缺 `content_l1` 的行**不猜**，只计进 `unfillable_*` 并原样留着（两个字段都缺且都算不出的行在两项里各计一次，所以相加是「项」不是「行」）；③ `indexed` 只统计「本行**新**建了向量且注入了索引」的行，`main.ts` 注入的是 `collectorVector`（与采集器/补炼/重建同一实例），没注入时恒 0，不假装建过索引；④ 审计只记字段名与长度，**正文与算出的指纹都不落账本**。
 
 **41-R 明细页查看事件双写进 `actions.log`（新增；回调本体有单测，`main.ts` 那两行是接线级 → 已真机执行）**
 - 现状实测（发现方式）：2026-11-04 11:51 真点了一次明细页 → `main.log` 有 `mcp:recall_detail_view` **3 条**、`actions.log` **0 条**，所以日志记录页（读 `actions.log`）看不到「明细页被点开过」这件事。
