@@ -1,7 +1,7 @@
 # 批次41 手动测试报告 · 审计搬出记忆库 + 队列卫生 + 退避/退出/备份校验 + 删除如实告知（收口与首次真机执行）
 
 日期（UTC+08:00）：2026-11-04
-分支：`main`，HEAD = `3c23bfe`（批次 35–41 已按问题点分 6 笔提交并推送 `origin/main`；**本报告的 41-R 一条尚未提交**，`git push` 需用户另行授权）
+分支：`main`，HEAD = `5845937`（批次 35–41 已按问题点分 6 笔提交并推送 `origin/main` 至 `3c23bfe`；**41-R 已提交为 `1652bd8`、41-S 立案文档已提交为 `5845937`，这两笔连同本次文档收口尚未推送**，`git push` 需用户另行授权）
 上一批次：批次40（`specs/MANUAL-TEST-FIX-BATCH-40.md`）
 起因（用户原话）：「审计搬出记忆库」→「跑」（授权走完 41-Z：`verify` → `package` → 本报告）→ 追加「队列幽灵对账」（复查 41-C，产出 **41-P**）→ 追加「轮换 DSH MCP Bearer 令牌」（**41-L 已真机执行**，用户口径「全量换 + 全量重写」）
 
@@ -25,7 +25,7 @@
 | `npm run test:coverage` | Statements 81.76% / Branches 73.98% / Lines 84.83% |
 | `npm run test:e2e` | Playwright **106 passed（45.9s）** |
 | 打包过程 | **共两次**。第一次（10:17，41-Z 收口）：一次 EPERM 回退按批次21 既定路径走完——`release/installer` 被外部进程占用 → 先输出到 `release\installer-20261104-021635` → 构建成功后删旧目录并**收口回 `release/installer`**（`旧安装包目录清理 1 个`）。同时按流程删除便携产物 `release\win-unpacked` → `release/` 下只有 `installer` 一个目录。**第二次（12:11，41-R 收口）**：同一回退再次触发（`[package] release/installer 被外部进程占用（EPERM），本次输出改到 release\installer-20261104-041129`），构建成功后照样收口回 `release/installer`（`旧安装包目录清理 0 个`）。**旧实例退出的证据不在打包日志里**：`killReleaseProcesses()`（批次27 的「先礼后兵」：`CloseMainWindow()` → 3 秒 → `Stop-Process -Force`）的 `Write-Output` 落在 PowerShell stdout，而 `package-builder.cjs` 只用它判断要不要多睡 800ms、**不转发成 `[package]` 行**，所以日志里一条关闭记录都没有——只能从别处证：`actions.log` 的 `[app:bootstrap:start]` 在 `02:51:48`（10:51，41-L 重启）与 `04:14:14`（12:14，本批新产物）之间**没有任何一次新启动**，且 12:14 新进程能拿到写锁（`{"pid":3880}`）、当前 `tasklist` 只有这一套 4 个进程 = 旧实例确实已退。**这条观测缺口本批没修**（属打包脚本自身的人话输出，与 41-R 同类但不在本批范围）。这一版产物才同时含 41-P 与 41-R。 |
-| 未做 | **41-R 没做任何账本改写**（只加一条观测的双写），也**没有点过**安全页任何需口令按钮（`SPLIT` / `RESET` / `REJUDGE` / `REBUILD`）——用户机上那两轮 `REJUDGE` 是用户自己点的（124 行已于 2026-11-03 14:43 清除，见 §6 与批次36/40 报告的校正）。提交状态：批次 35–41 已在 `3c23bfe` 及其前 5 笔进入 `origin/main`；**41-R 这笔待提交，推送需用户另行授权**。**41-L 已做**（令牌轮换见 §2 末尾，属运维动作、零代码改动、没碰账本） |
+| 未做 | **41-R 没做任何账本改写**（只加一条观测的双写），也**没有点过**安全页任何需口令按钮（`SPLIT` / `RESET` / `REJUDGE` / `REBUILD`）——用户机上那两轮 `REJUDGE` 是用户自己点的（124 行已于 2026-11-03 14:43 清除，见 §6 与批次36/40 报告的校正）。提交状态：批次 35–41 已在 `3c23bfe` 及其前 5 笔进入 `origin/main`；**41-R 已提交（`1652bd8`）、41-S 立案文档已提交（`5845937`），本报告的文档收口（含需求规格书 §19.25）为第三笔待提交——推送均需用户另行授权**。**41-L 已做**（令牌轮换见 §2 末尾，属运维动作、零代码改动、没碰账本） |
 
 > **判据校正（写给下一位维护者）**：用 `grep <符号> app.asar` 判断「产物里有没有某段代码」在本项目**不成立**。electron-builder 把 `dist-electron` 放进了 `app.asar.unpacked/`，asar 本体里 `grep audit.jsonl` 恒为 **0（假阴性）**。正确做法：比对 `app.asar.unpacked/dist-electron/main.cjs` 与刚构建的 `dist-electron/main.cjs` 的 md5（本次同为 `5c251652c6c712c2cf7f514fc96cce38`，`audit.jsonl` 命中 3 次），或直接看真机启动的动作日志。本报告初稿差点把「41-A 没进包」写成结论，就是这个假阴性造成的，已用真机启动证伪。
 
