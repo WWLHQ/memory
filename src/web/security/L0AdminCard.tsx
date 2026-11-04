@@ -1,11 +1,12 @@
 // 账号与安全页 · L0 密钥环管理卡（§4.4）
-// 管理密码设置/轮换 · 写密钥解锁/锁定 · 查阅申请审批 · 一次性授权发放/撤销 · 旧数据迁移。
+// 管理密码设置/轮换 · 写密钥解锁/锁定 · 查阅申请审批 · 一次性授权发放/撤销。
 // 页面只做展示与交互编排：口令校验/包裹/会话/审计全部在内核 L0Vault；一次性密码绝不落盘不进日志。
+// 「旧数据迁移（§4.4.6）」已拆成独立卡片 L0MigrateCard.tsx——它和 L0 拆分/重建卡是同一类批量动作，摆在一起才看得懂分工。
 import { useCallback, useEffect, useState } from 'react';
-import type { L0GrantView, L0MigrationReport, L0RequestView, L0VaultStatus } from '../../core/memagent/types.ts';
+import type { L0GrantView, L0RequestView, L0VaultStatus } from '../../core/memagent/types.ts';
 import {
   coreL0ChangeAdminPassword, coreL0Deny, coreL0Grant, coreL0ListGrants, coreL0ListRequests,
-  coreL0LockWrite, coreL0Migrate, coreL0Revoke, coreL0SetupAdminPassword, coreL0Status, coreL0UnlockWrite,
+  coreL0LockWrite, coreL0Revoke, coreL0SetupAdminPassword, coreL0Status, coreL0UnlockWrite,
 } from './coreSecurity.ts';
 
 const MIN_LEN = 8;
@@ -39,9 +40,6 @@ export function L0AdminCard({ enabled }: { enabled: boolean }) {
   const [scope, setScope] = useState('');
   const [grantPw, setGrantPw] = useState('');
   const [issued, setIssued] = useState<IssuedGrant | null>(null);
-  const [migOldPw, setMigOldPw] = useState('');
-  const [migReport, setMigReport] = useState<L0MigrationReport | null>(null);
-  const [migBackup, setMigBackup] = useState<string | undefined>(undefined);
 
   const refresh = useCallback(async () => {
     try {
@@ -80,7 +78,7 @@ export function L0AdminCard({ enabled }: { enabled: boolean }) {
       <div className="card" data-testid="l0-admin-card">
         <b>🔐 L0 密钥环（§4.4）</b>
         <div className="note" data-testid="l0-admin-required">
-          需管理员权限：管理密码、写密钥、查阅授权与旧数据迁移仅管理员可操作。
+          需管理员权限：管理密码、写密钥与查阅授权仅管理员可操作（旧数据迁移见下方独立卡）。
         </div>
       </div>
     );
@@ -165,16 +163,6 @@ export function L0AdminCard({ enabled }: { enabled: boolean }) {
     void run('锁定写密钥', async () => {
       await coreL0LockWrite();
       setMsg('写密钥已锁定：新的 L0 写入将返回 E_L0_LOCKED');
-    });
-  };
-
-  const doMigrate = () => {
-    void run('迁移旧数据', async () => {
-      const r = await coreL0Migrate(migOldPw || undefined);
-      setMigReport(r.report);
-      setMigBackup(r.backup_dir);
-      setMigOldPw('');
-      setMsg('迁移完成：报告如下（迁移前已自动备份数据根）');
     });
   };
 
@@ -317,25 +305,6 @@ export function L0AdminCard({ enabled }: { enabled: boolean }) {
       </table>
       {grants.length === 0 && <div className="note" data-testid="l0-grant-empty">暂无授权记录</div>}
 
-      <div className="section-title">旧数据迁移（§4.4.6：content_orig 明文 / v1 信封 → v2）</div>
-      <div className="row" data-testid="l0-migrate-form">
-        <input type="password" data-testid="l0-mig-old-pw" value={migOldPw} placeholder="旧 v1 密码（无旧数据可留空）"
-          style={{ ...inputStyle, width: 220 }} onChange={(e) => setMigOldPw(e.target.value)} />
-        <button type="button" className="btn" data-testid="l0-migrate" disabled={busy || !status?.write_unlocked}
-          title={status?.write_unlocked ? '迁移前自动备份数据根' : '请先解锁写密钥'}
-          onClick={doMigrate}>
-          迁移旧数据
-        </button>
-        {!status?.write_unlocked && <span className="dim">需先解锁写密钥（迁移要重新加密）</span>}
-      </div>
-      {migReport && (
-        <div className="note" data-testid="l0-mig-report">
-          扫描 {migReport.scanned} · 明文迁移 {migReport.migrated_orig} · v1 迁移 {migReport.migrated_v1} ·
-          待处理 <b>{migReport.pending}</b> · 跳过 {migReport.skipped}
-          {migBackup && <> · 备份 <code>{migBackup}</code></>}
-          {migReport.pending > 0 && <div style={{ color: 'var(--warn)' }}>仍有 {migReport.pending} 条待迁移：请提供正确的旧密码后重试。</div>}
-        </div>
-      )}
       <div className="note">
         红线：管理密码/授权密码/DEK 不进日志、审计与 URL；审计只记 grant_id · 账号 · 动作 · 结果（§4.4.7）。
       </div>

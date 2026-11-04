@@ -10,6 +10,12 @@ import { KeyTable, MemberTable, RoleMatrixCard } from './SecurityCards.tsx';
 import { AdminAccountCard } from './AccountAdminCard.tsx';
 import { L0AdminCard } from './L0AdminCard.tsx';
 import { LegacyLedgerCard } from './LegacyLedgerCard.tsx';
+import { LedgerResetCard } from './LedgerResetCard.tsx';
+import { RulesRejudgeCard } from './RulesRejudgeCard.tsx';
+import { L0SplitCard } from './L0SplitCard.tsx';
+import { L0MigrateCard } from './L0MigrateCard.tsx';
+import { RebuildFromL0Card } from './RebuildFromL0Card.tsx';
+import { L0RecoveryCard } from './L0RecoveryCard.tsx';
 import { useSessionContext } from '../shared/session.ts';
 import { useToast } from './useToast.tsx';
 import type { ApiKey, PwdPolicy, TeamMember } from './types.ts';
@@ -63,7 +69,17 @@ export function SecurityPage() {
 
       <L0AdminCard enabled={role === 'admin'} />
 
+      <L0SplitCard enabled={role === 'admin'} />
+      <L0MigrateCard enabled={role === 'admin'} />
+      <L0RecoveryCard enabled={role === 'admin'} />
+
       <LegacyLedgerCard enabled={role === 'admin'} />
+
+      <LedgerResetCard enabled={role === 'admin'} />
+
+      <RulesRejudgeCard enabled={role === 'admin'} />
+
+      <RebuildFromL0Card enabled={role === 'admin'} />
 
       <RoleMatrixCard />
       <MemberTable

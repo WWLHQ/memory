@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { SecurityPage } from '../SecurityPage.tsx';
 import { coreLoadSecurityAudit } from '../coreSecurity.ts';
 import { resetKernelForTests, setKernelL0ForTests, setKernelStorageForTests } from '../../kernel.ts';
@@ -112,5 +112,21 @@ describe('SecurityPage (P12-T4 编排)', () => {
     expect(screen.getByTestId('l0-admin-required')).toBeInTheDocument();
     expect(screen.queryByTestId('l0-setup')).toBeNull();
     expect(screen.queryByTestId('l0-write')).toBeNull();
+  });
+
+  it('批次37-E：按 L0 重建卡挂在安全页，浏览器环境如实不可用（数据面在主进程）', () => {
+    render(<SecurityPage />);
+    expect(screen.getByTestId('l0-rebuild-card')).toBeInTheDocument();
+    expect(screen.getByTestId('l0-rebuild-unavailable')).toBeInTheDocument();
+    expect(screen.queryByTestId('l0-rebuild-run')).toBeNull();
+  });
+
+  it('批次38：旧数据迁移从 L0 管理卡拆出为独立卡片（管理卡里不再内嵌）', () => {
+    render(<SecurityPage />);
+    const migrate = screen.getByTestId('l0-migrate-card');
+    expect(migrate.classList.contains('card')).toBe(true);
+    expect(within(migrate).getByTestId('l0-migrate-form')).toBeInTheDocument();
+    const admin = screen.getByTestId('l0-admin-card');
+    expect(within(admin).queryByTestId('l0-migrate-form')).toBeNull();
   });
 });

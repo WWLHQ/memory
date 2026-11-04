@@ -14,6 +14,10 @@ import {
   parseL0Envelope, parseL0EnvelopeV2, randomBytes, unwrapSecret, wrapSecret,
 } from './crypto.ts';
 import { MemAgentError } from './errors.ts';
+import {
+  createKeyringSecrets, generateRecoveryCode, keyringFingerprint, RECOVERY_BAD_CODE, unwrapDekWithRecovery,
+  wrapDekWithRecovery,
+} from './l0Recovery.ts';
 import { ulid } from './ulid.ts';
 import type {
   AuditRecord, Form, L0AccessRequest, L0AccessRequestResult, L0AdminPort, L0GrantReq, L0GrantResult,
@@ -31,6 +35,14 @@ export const L0_LOCK_MS = 15 * 60 * 1000;
 /** 管理密码/授权密码最短长度（§4.4.1） */
 export const L0_MIN_SECRET_LEN = 8;
 
+/** 恢复码签发结果：码明文只在这一刻存在，调用方渲染成恢复卡后就不再有任何接口能取回它 */
+export interface L0RecoveryIssue {
+  recovery_code: string;
+  /** 卡与库的对应指纹（公开材料派生，仅用于让用户分清几张卡各开哪个库） */
+  fingerprint: string;
+  created_at: number;
+}
+
 /** ---------- 落盘结构（l0-keyring.json，§4.4.8） ---------- */
 
 export interface L0GrantRecord {
@@ -44,6 +56,18 @@ export interface L0GrantRecord {
   last_view_at?: number;
   expires_at?: number;
   request_id?: string;
+}
+
+/**
+ * 批次37-G：L0 恢复码记录（同一个 DEK 的第二份包裹）。
+ * 一次性口径：`revoked_at` 一旦置真，这条恢复码就永久失效（用过即作废），换新码会新增一条覆盖。
+ * 这里只存**包裹结果**（salt/iv/tag/ct），恢复码明文从不落盘——丢了就只能重新生成。
+ */
+export interface L0RecoveryRecord {
+  wrap: L0Wrap;
+  created_at: number;
+  /** 用过后作废的时刻；未置真表示当前这张卡仍有效 */
+  revoked_at?: number;
 }
 
 export interface L0RequestRecord {
@@ -61,6 +85,8 @@ export interface L0RequestRecord {
 export interface L0Keyring {
   v: 2;
   admin_wrap?: L0Wrap;
+  /** 批次37-G：忘记管理密码时唯一的找回通道（一次性恢复码） */
+  recovery?: L0RecoveryRecord;
   grants: L0GrantRecord[];
   requests: L0RequestRecord[];
   updated_at: number;
@@ -168,6 +194,8 @@ export class L0Vault implements L0AdminPort {
     return {
       v: 2,
       admin_wrap: k.admin_wrap,
+      // 批次37-G：白名单式读取必须带上 recovery，否则每次 load 都把恢复码静默丢掉 → 用户以为设过却找不回
+      recovery: k.recovery?.wrap?.salt && k.recovery?.wrap?.ct ? { ...k.recovery } : undefined,
       grants: Array.isArray(k.grants) ? k.grants : [],
       requests: Array.isArray(k.requests) ? k.requests : [],
       updated_at: k.updated_at ?? 0,
@@ -331,6 +359,121 @@ export class L0Vault implements L0AdminPort {
     await this.save(k);
     this.writeDek = dek;
     await this.audit('security_change', { admin_user_id, op: 'l0_admin_rotate' });
+  }
+
+  // ─── 批次37-G：L0 恢复码（忘记管理密码的唯一找回通道，一次性） ───────────────
+
+  /**
+   * 首启/初始化：一次建好 DEK + 管理密码包 + 恢复码包。
+   * 恢复码由本模块生成（256bit 随机），**只在这次**返回明文；调用方必须把它渲染成恢复卡并
+   * 让用户导出到数据根之外，否则向导不放行（用户拍板：强制先导出才能继续）。
+   * 已设过管理密码时拒绝——轮换走 changeAdminPassword，重建走不了（DEK 不可换，换了旧密文全废）。
+   */
+  async initL0WithRecovery(req: { password: string; admin_user_id: string }): Promise<L0RecoveryIssue> {
+    if (typeof req.password !== 'string' || req.password.length < L0_MIN_SECRET_LEN) {
+      throw new MemAgentError('E_AUTH_L0', `管理密码须 ≥${L0_MIN_SECRET_LEN} 位（§4.4.1）`);
+    }
+    const k = await this.load();
+    if (k.admin_wrap) {
+      throw new MemAgentError('E_AUTH_L0', '管理密码已设置：如需换恢复码请用「重新生成恢复码」（§4.4.1）');
+    }
+    const created = await createKeyringSecrets(req.password, generateRecoveryCode());
+    k.admin_wrap = created.admin_wrap;
+    k.recovery = { wrap: created.recovery_wrap, created_at: this.clock() };
+    await this.save(k);
+    this.writeDek = created.dek;
+    await this.audit('security_change', {
+      admin_user_id: req.admin_user_id, op: 'l0_recovery_created',
+      fingerprint: keyringFingerprint(k.admin_wrap, k.recovery.wrap),
+    });
+    return {
+      recovery_code: created.recovery_code,
+      fingerprint: keyringFingerprint(k.admin_wrap, k.recovery.wrap),
+      created_at: k.recovery.created_at,
+    };
+  }
+
+  /** 恢复码现状：只回「有没有、什么时候建的、是否已作废」，绝不回显码本身 */
+  async recoveryStatus(): Promise<{
+    has_recovery: boolean; created_at: number; revoked_at: number; fingerprint: string;
+  }> {
+    const k = await this.load();
+    const r = k.recovery;
+    return {
+      has_recovery: Boolean(r && !r.revoked_at),
+      created_at: r?.created_at ?? 0,
+      revoked_at: r?.revoked_at ?? 0,
+      fingerprint: keyringFingerprint(k.admin_wrap ?? null, r?.wrap ?? null),
+    };
+  }
+
+  /**
+   * 忘记管理密码 → 用恢复码找回并当场设新密码。
+   * 「验证」是唯一目的：真的拿码去解 recovery_wrap，解不开就按口令错误处理（同一套 5 次锁定），
+   * 绝不做「先收下再说」。成功后旧码立即作废 + 换新码，返回的**新码**必须重新导出恢复卡。
+   */
+  async recoverWithCode(req: { code: string; newPassword: string; admin_user_id: string }): Promise<L0RecoveryIssue> {
+    if (typeof req.newPassword !== 'string' || req.newPassword.length < L0_MIN_SECRET_LEN) {
+      throw new MemAgentError('E_AUTH_L0', `新管理密码须 ≥${L0_MIN_SECRET_LEN} 位（§4.4.1）`);
+    }
+    const k = await this.load();
+    const r = k.recovery;
+    if (!r) {
+      throw new MemAgentError('E_L0_NO_GRANT', '本机从未生成过 L0 恢复码：无法用恢复码找回（§4.4.1）');
+    }
+    if (r.revoked_at) {
+      throw new MemAgentError('E_AUTH_L0', '这张恢复卡已作废（一次性）：请使用最新一次导出的那张（§4.4.1）');
+    }
+    await this.assertNotLocked(req.admin_user_id);
+    let dek: Uint8Array;
+    try {
+      dek = await unwrapDekWithRecovery(r.wrap, req.code);
+    } catch {
+      // 与密码错误同一条锁定链路：恢复码也是凭据，可以被暴力试探，一样 5 次锁 15 分钟
+      await this.recordBadPassword(req.admin_user_id);
+      throw new MemAgentError('E_AUTH_L0', RECOVERY_BAD_CODE);
+    }
+    await this.clearFailures(req.admin_user_id);
+    const oldFingerprint = keyringFingerprint(k.admin_wrap ?? null, r.wrap);
+    // 旧码当场被新码覆盖（一条记录只存当前有效的那张卡）——不留「旧码还能用」的窗口
+    const newCode = generateRecoveryCode();
+    const salt = newWrapSalt();
+    k.admin_wrap = { salt, ...(await wrapSecret(dek, await deriveKek(req.newPassword, salt))) };
+    const next: L0RecoveryRecord = { wrap: await wrapDekWithRecovery(dek, newCode), created_at: this.clock() };
+    k.recovery = next;
+    await this.save(k);
+    this.writeDek = dek;
+    await this.audit('security_change', {
+      admin_user_id: req.admin_user_id, op: 'l0_recovered',
+      old_fingerprint: oldFingerprint,
+      fingerprint: keyringFingerprint(k.admin_wrap, next.wrap),
+    });
+    return { recovery_code: newCode, fingerprint: keyringFingerprint(k.admin_wrap, next.wrap), created_at: next.created_at };
+  }
+
+  /**
+   * 主动换一张恢复卡（比如卡被人看过、或者只是想要新的）。
+   * 需要当前写密钥在内存（= 已解锁），否则等于给拿着文件的人免密发码——一律拒绝。
+   */
+  async rotateRecoveryCode(req: { admin_user_id: string }): Promise<L0RecoveryIssue> {
+    if (!this.writeDek) {
+      throw new MemAgentError('E_L0_LOCKED', '换发恢复码需先解锁 L0 写密钥（§4.4.4）');
+    }
+    const k = await this.load();
+    if (!k.admin_wrap) {
+      throw new MemAgentError('E_L0_NO_GRANT', '管理密码尚未设置：请先完成 L0 初始化（§4.4.1）');
+    }
+    const oldFingerprint = keyringFingerprint(k.admin_wrap, k.recovery?.wrap ?? null);
+    const newCode = generateRecoveryCode();
+    const next: L0RecoveryRecord = { wrap: await wrapDekWithRecovery(this.writeDek, newCode), created_at: this.clock() };
+    k.recovery = next;
+    await this.save(k);
+    await this.audit('security_change', {
+      admin_user_id: req.admin_user_id, op: 'l0_recovery_rotated',
+      old_fingerprint: oldFingerprint,
+      fingerprint: keyringFingerprint(k.admin_wrap, next.wrap),
+    });
+    return { recovery_code: newCode, fingerprint: keyringFingerprint(k.admin_wrap, next.wrap), created_at: next.created_at };
   }
 
   /** 后台写入解锁：只缓存写密钥，不能用于查阅明文（§4.4.4） */
