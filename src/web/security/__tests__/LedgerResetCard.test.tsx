@@ -31,6 +31,7 @@ function mockHost(opts: {
   preview?: unknown;
   run?: unknown;
   status?: unknown;
+  trigger?: unknown;
 } = {}) {
   w.__ELECTRON__ = true;
   const previewFn = vi.fn(() => Promise.resolve(opts.preview ?? {
@@ -40,8 +41,12 @@ function mockHost(opts: {
     ok: true, report: REPORT, backup_dir: 'D:\\backups\\ledger-reset-x', cursor_reset: true, recollecting: true,
   }));
   const statusFn = vi.fn(() => Promise.resolve(opts.status ?? STATUS));
-  w.api = { ledgerReset: { preview: previewFn, run: runFn }, collector: { status: statusFn } };
-  return { previewFn, runFn, statusFn };
+  const triggerFn = vi.fn(() => Promise.resolve(opts.trigger ?? {
+    ok: true, advanced: true, collected: 50, deduped: 12, roleSkipped: 380,
+    consecutiveFails: 0, autoRetryStopped: false, skipped: [], ts: 1_800_000_000_000,
+  }));
+  w.api = { ledgerReset: { preview: previewFn, run: runFn }, collector: { status: statusFn, triggerNow: triggerFn } };
+  return { previewFn, runFn, statusFn, triggerFn };
 }
 
 beforeEach(() => {
@@ -156,6 +161,50 @@ describe('LedgerResetCard（批次35 清空重采）', () => {
     render(<LedgerResetCard enabled />);
     await waitFor(() => expect(screen.getByTestId('ledger-reset-empty')).toBeInTheDocument());
     expect(screen.queryByTestId('ledger-reset-run')).toBeNull();
+    // 批次41-V：旧文案让用户去点一个界面上根本不存在的「采集状态」入口，这条钉住它不复发
+    expect(screen.queryByText(/「采集状态」/)).toBeNull();
+  });
+
+  it('批次41-V：空态里的「立即采集一轮」真走 collector:triggerNow，推进了就读回计数', async () => {
+    const { triggerFn } = mockHost({
+      preview: { ok: true, preview: { ...PREVIEW, total: 0, by_layer: {}, by_source: {}, sample_ids: [] } },
+      trigger: { ok: true, advanced: true, collected: 50, deduped: 12, roleSkipped: 380, consecutiveFails: 0, autoRetryStopped: false, skipped: [] },
+    });
+    render(<LedgerResetCard enabled />);
+    await waitFor(() => expect(screen.getByTestId('ledger-reset-trigger')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('ledger-reset-trigger'));
+    await waitFor(() => expect(triggerFn).toHaveBeenCalled());
+    expect(await screen.findByTestId('ledger-reset-trigger-outcome')).toHaveTextContent('本轮采到 50 条');
+    expect(screen.queryByTestId('ledger-reset-trigger-error')).toBeNull();
+  });
+
+  it('批次41-V：本轮没推进（写失败）→ 明写原因码并指路 L0 解锁，不报成功', async () => {
+    mockHost({
+      preview: { ok: true, preview: { ...PREVIEW, total: 0, by_layer: {}, by_source: {}, sample_ids: [] } },
+      trigger: {
+        ok: true, advanced: false, collected: 50, deduped: 0, roleSkipped: 0,
+        consecutiveFails: 2, autoRetryStopped: false,
+        skipped: ['采集异常: collector:round-not-advanced(write_failed)'],
+      },
+    });
+    render(<LedgerResetCard enabled />);
+    fireEvent.click(await screen.findByTestId('ledger-reset-trigger'));
+    const outcome = await screen.findByTestId('ledger-reset-trigger-outcome');
+    expect(outcome).toHaveTextContent('本轮没推进');
+    expect(outcome).toHaveTextContent('write_failed');
+    expect(outcome).toHaveTextContent('连续失败 2 轮');
+    expect(outcome).toHaveTextContent('E_L0_LOCKED');
+    expect(outcome).toHaveTextContent('L0 管理');
+  });
+
+  it('批次41-V：采集状态说「自动重试已停」就显出来（拉一次 collector:status，不编造）', async () => {
+    const { statusFn } = mockHost({
+      preview: { ok: true, preview: { ...PREVIEW, total: 0, by_layer: {}, by_source: {}, sample_ids: [] } },
+      status: { ...STATUS, consecutiveFails: 6, autoRetryStopped: true },
+    });
+    render(<LedgerResetCard enabled />);
+    await waitFor(() => expect(screen.getByTestId('ledger-reset-blocked')).toHaveTextContent('连续失败 6 轮'));
+    expect(statusFn).toHaveBeenCalled();
   });
 
   it('IPC 抛错：显示抛错原因，不假装库为空', async () => {

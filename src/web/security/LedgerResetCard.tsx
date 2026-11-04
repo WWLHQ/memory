@@ -20,10 +20,24 @@ function kv(by: Record<string, number>): string {
 interface CollectorStatus {
   ok: boolean;
   running?: boolean;
-  last?: { collected: number; deduped: number; roleSkipped: number; ts: number } | null;
+  last?: { collected: number; deduped: number; roleSkipped: number; ts: number; skipped?: string[] } | null;
   apply?: { written: number; filtered: number; failed: number; ts: number } | null;
   recollecting?: boolean;
+  /** 批次41-D：连续失败轮数与「达上限已停自动重试」 */
+  consecutiveFails?: number;
+  autoRetryStopped?: boolean;
   error?: string;
+}
+
+/** 批次41-V：collector:triggerNow 的回执（只带计数与原因码，不带任何正文） */
+interface TriggerOutcome {
+  advanced: boolean;
+  collected: number;
+  deduped: number;
+  roleSkipped: number;
+  fails: number;
+  stopped: boolean;
+  reason?: string;
 }
 
 export function LedgerResetCard({ enabled }: { enabled: boolean }) {
@@ -36,6 +50,10 @@ export function LedgerResetCard({ enabled }: { enabled: boolean }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [status, setStatus] = useState<CollectorStatus | null>(null);
+  // 批次41-V：空库时给一条真能点的「立即采集」——collector:triggerNow 一直有 IPC，此前没有任何页面渲染它
+  const [trigger, setTrigger] = useState<TriggerOutcome | null>(null);
+  const [triggering, setTriggering] = useState(false);
+  const [triggerErr, setTriggerErr] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const hostReady = hostCapability() !== 'none';
 
@@ -83,6 +101,23 @@ export function LedgerResetCard({ enabled }: { enabled: boolean }) {
     };
   }, [hostReady, report, watching]);
 
+  // 空库时拉一次采集状态：「为什么没长回来」（连续失败 / 已停自动重试）要能在卡面上看到，拉不到就不显
+  useEffect(() => {
+    if (!hostReady || !enabled || status || (preview?.total ?? -1) !== 0) return;
+    let alive = true;
+    void (async () => {
+      try {
+        const res = await hostCall<CollectorStatus>('collector:status', []);
+        if (alive && res?.ok) setStatus(res);
+      } catch {
+        // 状态拉不到就只留按钮，不编造退避事实
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [hostReady, enabled, preview, status]);
+
   const doReset = async () => {
     setBusy(true);
     setErr(null);
@@ -105,6 +140,37 @@ export function LedgerResetCard({ enabled }: { enabled: boolean }) {
       setErr(`清空失败：${errText(e)}`);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const doTrigger = async () => {
+    setTriggering(true);
+    setTriggerErr(null);
+    try {
+      const res = await hostCall<{
+        ok: boolean; advanced?: boolean; collected?: number; deduped?: number; roleSkipped?: number;
+        consecutiveFails?: number; autoRetryStopped?: boolean; skipped?: string[]; error?: string;
+      }>('collector:triggerNow', []);
+      if (res?.ok) {
+        setTrigger({
+          advanced: !!res.advanced,
+          collected: res.collected ?? 0,
+          deduped: res.deduped ?? 0,
+          roleSkipped: res.roleSkipped ?? 0,
+          fails: res.consecutiveFails ?? 0,
+          stopped: !!res.autoRetryStopped,
+          reason: (res.skipped ?? []).find((s) => s.startsWith('采集异常')),
+        });
+        // 重跑会改退避计数与追采状态，顺手拉一次，卡面不留旧数
+        const st = await hostCall<CollectorStatus>('collector:status', []);
+        if (st?.ok) setStatus(st);
+      } else {
+        setTriggerErr(res?.error ?? '采集失败（主进程未返回结果）');
+      }
+    } catch (e) {
+      setTriggerErr(`采集失败：${errText(e)}`);
+    } finally {
+      setTriggering(false);
     }
   };
 
@@ -148,7 +214,35 @@ export function LedgerResetCard({ enabled }: { enabled: boolean }) {
             </div>
           )}
           {preview && total === 0 && (
-            <div className="note" data-testid="ledger-reset-empty">库内已无记忆行；如需重采，点下方「采集状态」里的立即采集即可。</div>
+            <div className="note" data-testid="ledger-reset-empty">
+              库内已无记忆行。采集器每 5 分钟自动跑一轮；不想等就点下面这个按钮立即跑一轮。
+              <div className="row">
+                <button type="button" className="btn" data-testid="ledger-reset-trigger" disabled={triggering} onClick={() => void doTrigger()}>
+                  {triggering ? '采集进行中…' : '立即采集一轮'}
+                </button>
+                {status?.autoRetryStopped && (
+                  <span style={{ color: 'var(--warn)' }} data-testid="ledger-reset-blocked">
+                    自动重试已停（连续失败 {status.consecutiveFails ?? 0} 轮）——修好堵点再手动点。
+                  </span>
+                )}
+              </div>
+              {trigger && trigger.advanced && (
+                <div data-testid="ledger-reset-trigger-outcome">
+                  本轮采到 <b>{trigger.collected}</b> 条 · 去重 {trigger.deduped} · 非用户消息跳过 {trigger.roleSkipped}
+                  （入库与拦下数看上方追采计数）
+                </div>
+              )}
+              {trigger && !trigger.advanced && (
+                <div style={{ color: 'var(--err)' }} data-testid="ledger-reset-trigger-outcome">
+                  本轮没推进：{trigger.reason ?? '主进程未给出原因'}（连续失败 {trigger.fails} 轮）。
+                  写失败最常见的原因是 <b>L0 写密钥未解锁</b>（<code>E_L0_LOCKED</code>）——在「L0 管理」卡解锁后再点一次，
+                  成功后退避自动归零。
+                </div>
+              )}
+              {triggerErr && (
+                <div style={{ color: 'var(--err)' }} data-testid="ledger-reset-trigger-error">{triggerErr}</div>
+              )}
+            </div>
           )}
           {total > 0 && (
             <div className="row" data-testid="ledger-reset-confirm">

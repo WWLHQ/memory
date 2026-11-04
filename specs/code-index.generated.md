@@ -327,7 +327,7 @@
 | [src/web/security/L0MigrateCard.tsx](src/web/security/L0MigrateCard.tsx) | 127 | 安全页 · L0 旧数据迁移卡（§4.4.6；从 L0AdminCard 里拆出来单独成卡） | L0MigrateCard(fn) |
 | [src/web/security/L0RecoveryCard.tsx](src/web/security/L0RecoveryCard.tsx) | 222 | 安全页 · L0 恢复卡（批次37-G） | L0RecoveryCard(fn) |
 | [src/web/security/L0SplitCard.tsx](src/web/security/L0SplitCard.tsx) | 186 | 安全页 · L0 存量拆分迁移卡（批次37-C） | L0SplitCard(fn) |
-| [src/web/security/LedgerResetCard.tsx](src/web/security/LedgerResetCard.tsx) | 217 | 安全页 · 记忆库清空重采卡（批次35） | LedgerResetCard(fn) |
+| [src/web/security/LedgerResetCard.tsx](src/web/security/LedgerResetCard.tsx) | 311 | 安全页 · 记忆库清空重采卡（批次35） | LedgerResetCard(fn) |
 | [src/web/security/LegacyLedgerCard.tsx](src/web/security/LegacyLedgerCard.tsx) | 138 | 安全页 · 遗留账本清理卡（批次24） | LegacyLedgerCard(fn) |
 | [src/web/security/PwdPolicyCard.tsx](src/web/security/PwdPolicyCard.tsx) | 62 | P12-T3 密码策略 + 实时校验（4.2） | PwdPolicyCard(fn) |
 | [src/web/security/RebuildFromL0Card.tsx](src/web/security/RebuildFromL0Card.tsx) | 271 | 安全页 · 按 L0 原文重建 L1–L6 卡（批次37-E） | RebuildFromL0Card(fn) |
@@ -437,7 +437,7 @@ src/electron/hostScan.ts 694d58d7048c
 src/electron/ipcChannels.ts 70065989e859
 src/electron/l0KeyringStore.ts b900f5d523d5
 src/electron/llmGateway.ts 6de278fcf527
-src/electron/main.ts c17561de546c
+src/electron/main.ts 091737752faf
 src/electron/mcpClients.ts 11a393a86b83
 src/electron/preload.ts 0391fc475f92
 src/electron/webhookServer.ts 62157c0b1e21
@@ -482,7 +482,7 @@ src/web/Home/crossTabAuth.ts d85780df575e
 src/web/Home/layerGraph.ts 9a728a7ec61e
 src/web/Home/layerGraphLayout.ts 8215d57492af
 src/web/Home/programLog.ts 4dd7748fe50e
-src/web/Home/programLogLabels.ts 376dcc9018fe
+src/web/Home/programLogLabels.ts 076c15f3e0b3
 src/web/Home/tenantContext.tsx f9769d7590c9
 src/web/Home/useLoginMirror.ts 853b3dc8f825
 src/web/InlineAttribution/AgentConversationDemo.tsx bfc1ae30298f
@@ -640,7 +640,7 @@ src/web/security/L0AdminCard.tsx 37f2eabb3d64
 src/web/security/L0MigrateCard.tsx 5697922c5b40
 src/web/security/L0RecoveryCard.tsx 2e07e8479713
 src/web/security/L0SplitCard.tsx f563aab06852
-src/web/security/LedgerResetCard.tsx 9392677ec4a8
+src/web/security/LedgerResetCard.tsx c7f6df571b88
 src/web/security/LegacyLedgerCard.tsx 728888b09019
 src/web/security/PwdPolicyCard.tsx ad12fb5ffafb
 src/web/security/RebuildFromL0Card.tsx c29229b4b2ac
