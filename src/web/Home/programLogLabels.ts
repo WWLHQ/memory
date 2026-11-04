@@ -65,6 +65,10 @@ const ACTION_LABEL: Record<string, string> = {
   'kernel:rules:rejudge-backup-fail': '存量重判备份失败',
   'kernel:rules:rejudge-rejected': '存量重判被拒（确认口令不符）',
   'kernel:rules:rejudge-run': '存量按当前质量门重判完成',
+  // 批次41-T：存量补齐 sha256 / 向量（只填两个空字段，不删行、不改正文）
+  'kernel:ledger:fields-backup': '存量字段回填前备份',
+  'kernel:ledger:fields-backup-fail': '存量字段回填备份失败',
+  'kernel:ledger:fields-backfill': '存量补齐缺失的指纹与向量完成',
   'kernel:l0:store-corrupt': 'L0 原数据库读不动（原件已改名隔离，本次按空库启动）',
   // 批次41-A：审计搬出记忆库后，这四个键是「审计账本在哪、有没有迁过、有没有坏行」的唯一人话入口
   'kernel:audit:log-open': '内核审计账本已打开（独立追加文件，不再随记忆库整档读写）',
@@ -177,6 +181,8 @@ const CHANNEL_LABEL: Record<string, string> = {
   'ledger:resetRecollect': '清空记忆库并按新规则重采',
   'rules:rejudgePreview': '预览存量重判范围',
   'rules:rejudgeRun': '按当前规则重判存量（删噪声行）',
+  'ledger:fieldsPreview': '预览存量缺指纹/缺向量的行',
+  'ledger:fieldsBackfill': '补齐存量缺失的指纹与向量',
   'refine:state': '读取 L2–L6 补炼队列状态',
   'refine:setEnabled': '开关 L2–L6 后台补炼',
   'refine:backfill': '把存量行入队补炼',
@@ -198,6 +204,9 @@ const NOTE_KEYS = [
   'fails', 'delayMs', 'prevFails', 'capMs',
   // 批次41-R：明细页查看事件（值只有 ok/miss，一次性 id 与正文都不落）
   'outcome',
+  // 批次41-T：存量字段回填——补了几行指纹/向量、进了多少索引、几行填不了（值只有计数与路径，无正文）
+  'total', 'fillable_rows', 'sha256_filled', 'embedding_filled', 'indexed',
+  'protected_rows', 'unfillable_sha256', 'unfillable_embedding', 'failed',
 ];
 
 /** k 为空串表示「这个字段的值本身就是一句话」（error/reason/message/text），不再挂前缀 */

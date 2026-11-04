@@ -102,6 +102,9 @@ export const IPC = {
   /** 批次36-C：存量按当前质量门重判（规则收紧后已落库的噪声行不会自己变干净）——只读预览 / 管理员执行（强制先备份 + 逐字口令） */
   rulesRejudgePreview: 'rules:rejudgePreview',
   rulesRejudgeRun: 'rules:rejudgeRun',
+  /** 批次41-T：存量补齐缺失的 sha256 / 向量（`sha256` 随提交 `843282c` 才引入，之前的历史行行上是空的）——只读预览 / 管理员执行（强制先备份）。**无逐字口令**：不删行、不改正文、不动层级与 version，与 REJUDGE/RESET/REBUILD 不同类。 */
+  ledgerFieldsPreview: 'ledger:fieldsPreview',
+  ledgerFieldsBackfill: 'ledger:fieldsBackfill',
   /** 批次26-B P1-3：租户三元组由主进程按会话下发（渲染层不再自报 mam.tenant.v1） */
   tenantGet: 'tenant:get',
   /** 批次31：LLM 精炼网关 —— 配置读/写（写需管理员）、连通真拨测（管理员）、逐层精炼代理（内核写路径经此走主进程 HTTP） */

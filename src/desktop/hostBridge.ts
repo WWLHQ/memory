@@ -54,6 +54,8 @@ export type HostMethod =
   | 'legacy:scan' | 'legacy:demote'
   | 'ledger:resetPreview' | 'ledger:resetRecollect'
   | 'rules:rejudgePreview' | 'rules:rejudgeRun'
+  /** 批次41-T：存量补齐缺失的 sha256 / 向量（只补元数据，不删行、不改正文） */
+  | 'ledger:fieldsPreview' | 'ledger:fieldsBackfill'
   | 'refine:state' | 'refine:setEnabled' | 'refine:backfill' | 'refine:retryFailed'
   | 'llm:config' | 'llm:configSet' | 'llm:test' | 'llm:refine';
 
@@ -127,6 +129,8 @@ const CHANNEL_TO_NATIVE: Record<HostMethod, [string, string]> = {
   'ledger:resetRecollect': ['ledgerReset', 'run'],
   'rules:rejudgePreview': ['rulesRejudge', 'preview'],
   'rules:rejudgeRun': ['rulesRejudge', 'run'],
+  'ledger:fieldsPreview': ['ledgerFields', 'preview'],
+  'ledger:fieldsBackfill': ['ledgerFields', 'run'],
   'refine:state': ['refineQueue', 'state'],
   'refine:setEnabled': ['refineQueue', 'setEnabled'],
   'refine:backfill': ['refineQueue', 'backfill'],

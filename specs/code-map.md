@@ -843,3 +843,20 @@ status: draft
 | 后果面 ②（接入证据，最重） | `applyRecallEvidence`（`src/electron/mcpClients.ts`，批次30）按 `client.split('/')[0]` 匹配 `MCP_CLIENT_SPECS[].id`/`auditClientIds`，把 `no_config/missing_entry/missing_auth` 升成「审计检测到真实调用 N 次 = 已接入」。串号等于**把 A 的调用算成 B 的接入证据**，与 AGENTS §7.4「绝不伪造已接入」直接冲突。（既有那道「UA 兜底串 `Cursor (UA)` 不匹配任何 id」的防线挡不住这一类——串的是**自报名**，不是 UA 识别名。） |
 | 测试现状 | `mcpHttp.test.ts` **没有**任何「同 UA 两个客户端」的串号用例；`批次41-R` describe 只锁 `onViewDetail` 的值域。 |
 | 待定口径（要用户拍板，本批一条没动） | **A** 通用 UA（`node`/`curl/*`/`Python-urllib/*`…）一律判 `unknown`，fail-safe 走纯 Markdown 档且不作接入证据；**B** 取消 `clientByUa`，只认客户端回传的 `Mcp-Session-Id`（最干净，但今天靠 UA 兜底才认得出的客户端会一起降级，批次30 的 Zcode/DSH 类升级失效）；**C** 判据不动，改为在文档与面板明写「`detail.client` 只作观测、不作接入证据」。**选 A 或 B 都要补串号用例；选 C 要改 §9 批次30 的口径。** |
+
+### 批次41-T：存量补齐缺失的 `sha256` 与 `embedding`（批次41-B 声明的「533 行缺指纹 + 1 行缺向量」存量，本批给出通道）
+
+> 这两个字段随提交 `843282c`（2026-10-31）才进写入路径，之前的历史行行上就是空的。代价有边界且可查：缺 `embedding` 的行在语义召回里恒 0 分（`agent.ts` 按行上 `m.embedding` 打分），缺 `sha256` 的行在云端同步的每日全量对账里会被 `sync.ts` 列进 `missing` —— 所以这 533 行同时是**批次42（sync 接线）的前置事实**。
+> 本机实测（2026-11-04 12:40 UTC+08:00，只读真实账本）：1532 活行里 **533 行缺 sha256、1 行缺 embedding**；缺向量的那行是 pinned 的 `params_01M6AGZS9K4CTQM23HV64MYF1E`。
+
+| 环节 | 真源 |
+|---|---|
+| 判定与改写（纯函数） | `src/core/memagent/fieldBackfill.ts`：`decide()` 一处判定预览与执行共用；公式与三条既有管道**同源**——`sha256 = sha256hex(content)`（`memories.ts:290`、`rebuild.ts:369`）、`embedding = embedSync(content_l1, dim)`（§2.2 不变量 7：**向量只源自 L1，不从别的层凑**）。`scanRowsForBackfill` 只读预览；`backfillMissingFields` 强制 `admin_user_id` + `backup_confirmed:true`，缺任一即抛错拒绝。**只填两个空字段**：正文 / `layer` / `version` / `updated_at` / 质量门戳 / L0 一律不动 → 第二次跑必然 `fillable_rows=0`（幂等）。 |
+| 端壳接线 | `src/electron/ipcChannels.ts` 的 `ledger:fieldsPreview`（需会话）/ `ledger:fieldsBackfill`（需管理员）→ `main.ts` §采集区（`backupBeforeKernelChange('field-backfill','ledger:fields-backup')` → `backfillMissingFields({storage, vector: collectorVector, …})` → `actionLog('kernel','ledger:fields-backfill',{…})`；备份失败落 `ledger:fields-backup-fail`（error）并**拒绝改写**）→ `preload.ts` `ledgerFields` → `src/desktop/hostBridge.ts`（`HostMethod` + `CHANNEL_TO_NATIVE`）。注入 `collectorVector` 与采集器/补炼/重建同一个索引实例。 |
+| UI | `src/web/security/FieldBackfillCard.tsx`（挂在 `SecurityPage.tsx`，紧跟「规则重判存量」卡）：缺口按**字段**分列（缺多少 / 其中多少算不出），受保护行单列，回执报「补了几行指纹、几行向量、进了多少索引、备份在哪」。testid：`fields-backfill-preview` / `-preview-report` / `-sample` / `-run` / `-report` / `-clean` / `-error` / `-unavailable` / `-need-admin`。 |
+| 日志人话 | `src/web/Home/programLogLabels.ts`：`kernel:ledger:fields-backup` / `-backup-fail` / `ledger:fields-backfill` 三条中文标题 + `ledger:fieldsPreview` / `ledger:fieldsBackfill` 两条通道说明；`NOTE_KEYS` 补 `total`/`fillable_rows`/`sha256_filled`/`embedding_filled`/`indexed`/`protected_rows`/`unfillable_sha256`/`unfillable_embedding`/`failed`（值只有计数与路径，无正文）。 |
+| **与其他删除/重造通道的分工** | `REJUDGE`（删行）/ `RESET`（整库清空重采）/ `REBUILD`（整行重造）**都会删或改正文**，所以各有逐字口令；本通道**不删不改正文，只填空字段**，属另一类 → 不设口令，但仍守「批量改写账本前先备份」这条不变量（项目从批次24 起如此）。 |
+| 测试 | `fieldBackfill.test.ts` **11 例**（预览计数含「缺但补不了」/ 同源相等 / 只动元数据不动 `version`·`updated_at`·`layer` / 向量注入 vs `indexed:0` / pinned·locked / 填不出原样留着 / 无管理员与无备份都拒绝 / 幂等二次跑 `fillable_rows=0` 且只多一条汇总审计 / 正文与算出的指纹都不落审计）+ `FieldBackfillCard.test.tsx` **8 例**（浏览器不可用 / 非管理员不起预览 / 预览真值 / 样本不上正文 / 执行回执 / 无可补行不给点 / 主进程拒绝原样显示 / IPC 抛错）。 |
+
+> 诚实边界（批次41-T）：① **本批没有替用户点执行**——通道、卡片、门禁都齐了，那 533 行在用户点之前仍是空的；② `indexed` 只统计「本行**新**建了向量且注入了索引」的行，往已存在向量的行上不会重复 upsert，`vector` 未注入时恒 0（与批次41-B 同口径：行上向量是真写、索引是可丢弃的进程内实例，不假装建过）；③ 缺 `content` 或缺 `content_l1` 的行**不猜**——算不出就原样留着并在预览里明列条数，宁可这行继续召不回，也不给它一个来路不明的向量；④ 卡片与审计都只报字段名、层名与长度，**正文与算出的指纹都不落账本**（有测试断言）；⑤ `unfillable_*` 是「字段缺口」口径下的子集，两个字段都缺且都算不出的行会在两边各计一次，所以 `unfillable_sha256 + unfillable_embedding` 不等于「行数」——卡面上写的是「项」不是「行」。
+

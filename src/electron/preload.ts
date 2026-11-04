@@ -198,6 +198,13 @@ const rulesRejudge = {
     ipcRenderer.invoke(IPC.rulesRejudgeRun, confirmText, sessionId),
 };
 
+// 存量字段回填桥（批次41-T）：预览需会话、执行仅管理员，**没有逐字口令**——
+// 本桥不删行、不改正文、不动层级/version，只把历史行缺失的 sha256 / 向量补上（执行前仍强制备份）。
+const ledgerFields = {
+  preview: (sessionId?: string | null) => ipcRenderer.invoke(IPC.ledgerFieldsPreview, sessionId),
+  run: (sessionId?: string | null) => ipcRenderer.invoke(IPC.ledgerFieldsBackfill, sessionId),
+};
+
 // 批次39：L2–L6 后台补炼队列桥。状态只读需会话；开关/补炼存量/重试失败行仅管理员。
 // 队列里的正文一律不出主进程：状态视图只有 mem_id 计数、额度与原因码。
 const refineQueue = {
@@ -238,4 +245,4 @@ const floatAttribution = {
 };
 
 contextBridge.exposeInMainWorld('__ELECTRON__', true);
-contextBridge.exposeInMainWorld('api', { storage, hostScan, hostAgentDetect, tenant, mcpClients, floatAttribution, collector, backup, dataRoot, log, l0, setup, legacy, ledgerReset, rulesRejudge, refineQueue, llm });
+contextBridge.exposeInMainWorld('api', { storage, hostScan, hostAgentDetect, tenant, mcpClients, floatAttribution, collector, backup, dataRoot, log, l0, setup, legacy, ledgerReset, rulesRejudge, ledgerFields, refineQueue, llm });

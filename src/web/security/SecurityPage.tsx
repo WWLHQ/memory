@@ -12,6 +12,7 @@ import { L0AdminCard } from './L0AdminCard.tsx';
 import { LegacyLedgerCard } from './LegacyLedgerCard.tsx';
 import { LedgerResetCard } from './LedgerResetCard.tsx';
 import { RulesRejudgeCard } from './RulesRejudgeCard.tsx';
+import { FieldBackfillCard } from './FieldBackfillCard.tsx';
 import { L0SplitCard } from './L0SplitCard.tsx';
 import { L0MigrateCard } from './L0MigrateCard.tsx';
 import { RebuildFromL0Card } from './RebuildFromL0Card.tsx';
@@ -78,6 +79,8 @@ export function SecurityPage() {
       <LedgerResetCard enabled={role === 'admin'} />
 
       <RulesRejudgeCard enabled={role === 'admin'} />
+
+      <FieldBackfillCard enabled={role === 'admin'} />
 
       <RebuildFromL0Card enabled={role === 'admin'} />
 
