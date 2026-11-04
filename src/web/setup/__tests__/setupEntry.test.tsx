@@ -31,8 +31,11 @@ describe('setupEntry 首启向导入口（批次37-B 冒烟）', () => {
     w.__ELECTRON__ = true;
     w.api = { setup: { state } };
     await import('../setupEntry.tsx');
-    await waitFor(() => expect(screen.getByTestId('setup-step-dirs')).toBeInTheDocument());
-    expect(state).toHaveBeenCalled();
+    // setup-step-dirs 不等 state 就渲染；等 mock 回的真数据落到卡面（dirs_set=true → ① 已完成），
+    // 否则并行负载下 effect 还没发起 IPC 就断言，这条会假红；也让下面的 disabled 不是空状态下的假通过
+    await waitFor(() => expect(state).toHaveBeenCalled());
+    expect(await screen.findByText('① 已完成')).toBeInTheDocument();
+    expect(screen.getByTestId('setup-step-dirs')).toBeInTheDocument();
     expect(screen.getByTestId('setup-finish')).toBeDisabled();
   });
 });
