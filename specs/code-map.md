@@ -831,3 +831,15 @@ status: draft
 > 门禁（批次41-R 收口）：`npm run verify` 退出码 **0**（typecheck 干净 → oxlint 0/0 → 索引 306 文件最新 → vitest **147 文件 / 1735 例**（本批 +2，Statements 81.76%）→ Electron 构建 → E2E **106 passed**）；`npm run package` 重新出包（122,048,686 B / SHA256 `d0f31b70a702236cfb16cc10f9ccf7a050270e23f075c50ce85ff309a4c5cadf`，12:11:56），产物 `app.asar.unpacked/dist-electron/main.cjs` 里双写两行都在、`l0-rebuild` 命中 2 次（= 41-P 同批出厂；10:17 那版包里没有 41-P）。
 > **真机已验（2026-11-04 12:14，本批新产物，写锁 `{"pid":3880}`）**：真发一次 `recall_memory`（客户端自报 `verify-41r`）→ `mode=markdown-compact` + `detail_url` → 打开 **200 / 5,548 B**（页面里检索当前令牌命中 0）→ 假 id **404** → `actions.log` 该键由 **0 条 → 2 条**（`{"outcome":"ok"}` / `{"outcome":"miss"}`），`main.log` 由 3 条 → 5 条（双写、非搬移）。核对步骤与期望行见 `specs/MANUAL-TEST-FIX-BATCH-41.md` §3。
 > 诚实边界（批次41-R）：① 只修观测，票据口径（30 分钟、纯内存、不消费）与闸门（Host 绑定 + 免令牌）一字未动；② 同批量到的 **41-Q 没在本批修**——`clientSupportsHtmlDetails` 判据是 `client.split('/')[0]` **精确等于 `qoder`**，本机 Qoder Desktop 自报 `qoder-desktop-mcp-host/1.0.0`，recall 审计 **0 命中**（11:51 实测 100 条、12:15 复测 102 条，含本会话为验证而发的 2 条）→ `html-details` 档从未生效；把它加进白名单的前提是「Qoder 气泡真渲染 `<details>`」，这条**尚无证据**（DSH 侧 2026-10-31/11-01 两次实测是原样吐纯文本），盲改会把失效 HTML 铺回聊天窗口，所以留待用户拍板；③ 上面那条真机验证**自己也进了账**——那次 `verify-41r` 召回在 `audit.jsonl` 里留下一条真实 recall 行（观测修复的验证必然污染被观测的计数，所以上面的数字都带时刻）。
+
+### 批次41-S：MCP 调用方身份可跨客户端串号（立案，**本批未修**；由 41-R 的真机验证顺带量出）
+
+> 这条不是读代码读出来的怀疑，是**两次真调用打在同一台机器上撞出来的**：12:14:49 我的 Node 探测脚本 `initialize(clientInfo.name=verify-41r)`，12:21:21 Qoder Desktop 连接器真调一次召回，`audit.jsonl` 里**两行的 `detail.client` 都是 `verify-41r/0.0.1`**。
+
+| 环节 | 真源与后果 |
+|---|---|
+| 判据（为什么能串） | `src/core/memagent/mcpHttp.ts:124-126` 两张表：`clientBySession`（`initialize` 生成的 sid → 自报名）、`clientByUa`（**UA → 最近一次 `initialize` 的自报名**）；`mcpHttp.ts:343-345` 的取值顺序 = `Mcp-Session-Id` 命中 → **同 UA 最近一次 initialize** → `clientFromUserAgent(ua)`。凡是「做过 initialize、后续请求不回传会话头」的客户端都落在同一条 UA 记录上，而 `remember()`（`:135-142`）是 delete+set → **最后一次 initialize 赢**。本机实测 **Node 的 `fetch` 默认发字面量 `User-Agent: node`**（一次性回显服务返回 `{"ua":"node","session":null}`），Electron 主进程本身就是 Node → 同机多客户端必然共键。**边界**：这段里能确证的观测只有「我的探测脚本没写会话头」和「Node `fetch` 默认 UA 是 `node`」两条；Qoder 连接器到底带不带 `Mcp-Session-Id` 服务端不落原始请求头、无法证明，所以「UA 撞车」是按取值顺序**推**出的最解释得通的一条，不是看到的（观测到的确定事实只有「两次调用的 `detail.client` 字面相同」）。 |
+| 后果面 ①（展示档位） | `clientSupportsHtmlDetails(client)`（`mcpRecall.ts:22-26`）按这个自报名选三档之一 → 甲客户端可能吃到乙客户端的档位。本机这次两侧首段都不是 `qoder`，所以结果没变，但**41-Q 的「0 命中」计数里部分行的真实调用方不可证**。 |
+| 后果面 ②（接入证据，最重） | `applyRecallEvidence`（`src/electron/mcpClients.ts`，批次30）按 `client.split('/')[0]` 匹配 `MCP_CLIENT_SPECS[].id`/`auditClientIds`，把 `no_config/missing_entry/missing_auth` 升成「审计检测到真实调用 N 次 = 已接入」。串号等于**把 A 的调用算成 B 的接入证据**，与 AGENTS §7.4「绝不伪造已接入」直接冲突。（既有那道「UA 兜底串 `Cursor (UA)` 不匹配任何 id」的防线挡不住这一类——串的是**自报名**，不是 UA 识别名。） |
+| 测试现状 | `mcpHttp.test.ts` **没有**任何「同 UA 两个客户端」的串号用例；`批次41-R` describe 只锁 `onViewDetail` 的值域。 |
+| 待定口径（要用户拍板，本批一条没动） | **A** 通用 UA（`node`/`curl/*`/`Python-urllib/*`…）一律判 `unknown`，fail-safe 走纯 Markdown 档且不作接入证据；**B** 取消 `clientByUa`，只认客户端回传的 `Mcp-Session-Id`（最干净，但今天靠 UA 兜底才认得出的客户端会一起降级，批次30 的 Zcode/DSH 类升级失效）；**C** 判据不动，改为在文档与面板明写「`detail.client` 只作观测、不作接入证据」。**选 A 或 B 都要补串号用例；选 C 要改 §9 批次30 的口径。** |
