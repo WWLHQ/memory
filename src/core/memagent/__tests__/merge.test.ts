@@ -10,16 +10,28 @@ import { createTestVault, TEST_ADMIN_PW } from './l0Kit.ts';
 
 const ACCOUNT = { user_id: 'u1', team_id: 't1', enterprise_id: 'e1' };
 const NOW = 1_000_000;
-const BASE = 'deploy docker compose v2 staging cluster alpha';
+// 批次40：深度上限按 L1 有效字数给（≥240 才允许炼到 L5），且逐层产物必须**一层比一层短**
+// （压缩不是扩写），所以下面这条原文与五层样本是实测过的链：L1 320 字 → L2 171 → L3 115 → L4 62 → L5 52。
+const BASE = 'staging 集群部署复盘：docker compose v2 在 alpha 与 beta 两套环境的编排文件一致，升级后 beta 环境缺少健康检查配置项 healthcheck.interval=30s，' +
+  '滚动发布时流量打到未就绪容器，网关 502 状态码激增，错误码 SQLSTATE 08001 同步上升。补齐 healthcheck 并把 deploy.replicas 从 2 调到 4 之后恢复，回滚演练通过。' +
+  '联系人：张三，电话 13800138000。复盘结论：多环境发布必须先在 beta 环境校验编排配置项再推进 alpha。' +
+  '同类隐患在订单查询链路也出现过一次，当时同样靠扩副本恢复，没有留下压测记录，这次一并补齐到发布手册里。';
+/** 只够炼到 L2 的中等原文（批次40 深度闸门：有效字 59 → cap L2） */
+const MID = 'docker compose v2 在 beta 环境的部署校验与回滚演练记录：健康检查配置项补齐后 502 状态码归零，副本从 2 扩到 4。';
+/** MID 的合规 L2（源文 72 字 → 允许 29–72 字，且必须保留源文里的「配置项 / 状态码」） */
+const L2_MID = 'compose v2 升级后 beta 环境补齐健康检查配置项，502 状态码归零，副本扩到 4。';
 
-/** 各层合规产物（供逐层假 Provider 使用） */
+/** 各层合规产物（供逐层假 Provider 使用；L4/L5 按格式契约开头） */
 const LAYERS: Record<string, string> = {
-  L2: '[来源:Agent会话][类型:fact] staging cluster 使用 docker compose v2 部署 alpha 与 beta 两套环境，部署流程一致，beta 环境需额外校验配置后再放量，结论可供同项目复用。',
-  L3: '成功点：alpha/beta 两套环境部署流程一致；失败点：beta 环境配置需额外校验；经验教训：先小流量验证再全量发布。',
-  L4: '模式归纳：多环境部署改动先在 beta 环境验证再推进 alpha。适用场景：多环境发布与回滚演练。',
-  L5: '部署一致性与回滚速度决定发布风险；边界条件：仅适用于同 project_id 的部署环境。',
+  L2: 'staging 集群部署复盘：docker compose v2 升级后 beta 环境缺少健康检查配置项，滚动发布把流量打到未就绪容器，' +
+    '网关 502 状态码与错误码 SQLSTATE 08001 一起上升；补齐 healthcheck、副本 2→4 后恢复，回滚演练通过。' +
+    '结论：多环境发布要先在 beta 校验编排配置项再推进 alpha。',
+  L3: '成功点：值班补齐 healthcheck 并扩副本，服务很快恢复；失败点：升级 compose 时只按 alpha 校验配置项，beta 漏检导致 502；' +
+    '经验教训：多环境发布前必须在 beta 复现一遍编排校验，并留下压测记录。',
+  L4: '适用场景：多环境滚动发布与回滚演练。编排配置项要在每套环境各自校验，不能只按首套环境通过就推进，副本数需与健康检查一起复核。',
+  L5: '边界条件：仅适用于同一 project_id 下的 compose 多环境部署，单环境发布仍需另做演练。',
   L6: JSON.stringify({
-    keywords: ['docker', 'compose', 'staging'],
+    keywords: ['compose', 'healthcheck', '502', 'SQLSTATE 08001', '多环境'],
     projections: [{ layer: 'L2', relevance: 0.9 }, { layer: 'L4', relevance: 0.8 }],
   }),
 };
@@ -95,7 +107,8 @@ describe('分支嫁接（§6.2）', () => {
     await vector.upsert('m1', seed().content_l1!, { project_id: 'P1', layer: 'L2' });
 
     const r = await coreWrite(
-      { content: '报表导出与权限审计：每季度复核，审计留痕归档，复核结果归档', category: 'fact', project_id: 'P1' },
+      // 批次40-B 门槛：短（有效字 <30）但带硬事实（每季度复核 3 次）→ 放行；纯短无事实才拦
+      { content: '报表导出与权限审计：每季度复核 3 次，审计留痕归档，复核结果归档', category: 'fact', project_id: 'P1' },
       ctx(),
     );
     expect(r.dedup.action).toBe('grafted');
@@ -135,24 +148,24 @@ describe('分支嫁接（§6.2）', () => {
 
   it('深层命中：L1 不重复、L2 重复 → graft@L2，停止生成 L3–L6', async () => {
     const { storage, ctx } = setup();
-    await storage.putMemory(seed({ content_l2: LAYERS.L2 }));
-    const llm = layerLlm();
+    await storage.putMemory(seed({ content_l2: L2_MID }));
+    const llm = layerLlm({ L2: L2_MID });
 
     const r = await coreWrite(
-      { content: 'docker compose v2 在 beta 环境的部署校验与回滚演练记录', category: 'fact', project_id: 'P1' },
+      { content: MID, category: 'fact', project_id: 'P1' },
       ctx({ llm, llmModel: 'real-model' }),
     );
     expect(r.dedup.action).toBe('grafted');
     expect(r.dedup.graft_layer).toBe('L2');
     expect(r.dedup.graft_to).toBe('m1');
-    expect(llm.calls).toEqual(['L2']); // 命中即停，不生成 L3–L6
+    expect(llm.calls).toEqual(['L2']); // 命中即停，不再生成 L6 索引
     expect(r.layer_decisions?.map((d) => d.layer)).toEqual(['L1', 'L2']);
     expect(r.layer_decisions?.[1]).toMatchObject({ layer: 'L2', action: 'duplicate', threshold: 0.75 });
 
     const created = (await storage.getMemory(r.mem_id))!;
     expect(created.layer).toBe('L2');
     expect(created.refined_by).toBe('llm');
-    expect(created.content_l2).toBe(LAYERS.L2);
+    expect(created.content_l2).toBe(L2_MID);
     expect(created.content_l3).toBeUndefined();
     expect(Object.keys(created.layer_specs ?? {})).toEqual(['L1', 'L2']);
   });
@@ -197,7 +210,7 @@ describe('分支嫁接（§6.2）', () => {
     expect(m.content_l2).toBe(LAYERS.L2);
   });
 
-  it('某层违规 → 该层不落 + 停止更深层；layer=最高连续层', async () => {
+  it('某层违规 → 该层不落 + 停止更深层；layer=最高连续层（L6 独立通道照常产出）', async () => {
     const { storage, ctx } = setup();
     const llm = layerLlm({ L4: '太短' });
     const r = await coreWrite(
@@ -205,18 +218,19 @@ describe('分支嫁接（§6.2）', () => {
       ctx({ llm, llmModel: 'real-model' }),
     );
     expect(r.dedup.action).toBe('new');
-    expect(r.refined_by).toBe('llm_partial'); // 批次27 P2-4：L4 违规停梯，L2/L3 合规但 L5/L6 缺失
+    expect(r.refined_by).toBe('llm_partial'); // 批次27 P2-4：L4 违规停梯，L5 缺失
     expect(r.spec_violations?.join()).toContain('L4');
-    expect(llm.calls).toEqual(['L2', 'L3', 'L4']); // L5/L6 不再调用
-    expect(r.layer_decisions?.at(-1)).toMatchObject({ layer: 'L4', action: 'invalid' });
+    expect(llm.calls).toEqual(['L2', 'L3', 'L4', 'L6']); // L5 不再调用；L6 是索引，照炼
+    expect(r.layer_decisions?.find((d) => d.layer === 'L4')).toMatchObject({ layer: 'L4', action: 'invalid' });
 
     const m = (await storage.getMemory(r.mem_id))!;
+    // 批次40-C：绝不能因为「L6 也产出了」就把这行标成 L6——层深只数连续的叙事层
     expect(m.layer).toBe('L3');
     expect(m.content).toBe(LAYERS.L3);
     expect(m.content_l4).toBeUndefined();
     expect(m.content_l5).toBeUndefined();
-    expect(m.content_l6).toBeUndefined();
-    expect(Object.keys(m.layer_specs ?? {})).toEqual(['L1', 'L2', 'L3']);
+    expect(m.content_l6).toBe(LAYERS.L6);
+    expect(Object.keys(m.layer_specs ?? {})).toEqual(['L1', 'L2', 'L3', 'L6']);
   });
 
   it('LLM 调用异常 → 保留已生成层，refine_error 如实返回', async () => {

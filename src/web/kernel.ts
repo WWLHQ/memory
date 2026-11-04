@@ -6,6 +6,7 @@
 import type {
   Account, Form, L0AdminPort, L0Port, LlmProvider, MemAgent, MemAgentSeedHooks, StorageBackend, VectorBackend,
 } from '../core/memagent/types.ts';
+import type { L0BlobStore } from '../core/memagent/l0Store.ts';
 import { createMemAgent } from '../core/memagent/agent.ts';
 import { InMemoryStorage } from '../core/memagent/storage.ts';
 import { FakeLlmProvider } from '../core/memagent/llm.ts';
@@ -13,6 +14,7 @@ import { JsVectorBackend } from '../core/memagent/vector.ts';
 import { ulid } from '../core/memagent/ulid.ts';
 import { configuredVectorDim } from './models/modelConfig.ts';
 import { HostL0Admin, HostL0Port, l0HostAvailable } from './shared/l0Port.ts';
+import { HostL0BlobStore } from './shared/l0BlobStore.ts';
 import { hostCall, hostCapability } from '../desktop/hostBridge.ts';
 import { currentSessionId } from './shared/session.ts';
 import { homeBaseUrl } from './backend.ts';
@@ -147,19 +149,28 @@ export interface KernelOverrides {
   vector?: VectorBackend;
 }
 
-let l0PortsOverride: { l0?: L0Port; l0Admin?: L0AdminPort } | null = null;
+let l0PortsOverride: { l0?: L0Port; l0Admin?: L0AdminPort; l0Blobs?: L0BlobStore } | null = null;
 
 /** 测试辅助：注入 L0 端口（页面测试用真 L0Vault）；生产代码不得调用 */
-export function setKernelL0ForTests(ports: { l0?: L0Port; l0Admin?: L0AdminPort } | null): void {
+export function setKernelL0ForTests(ports: { l0?: L0Port; l0Admin?: L0AdminPort; l0Blobs?: L0BlobStore } | null): void {
   l0PortsOverride = ports;
   agentSingleton = null;
 }
 
 /** L0 端口（§4.4）：桌面壳注入主进程 L0Vault 代理；纯浏览器不注入（写/查如实报错） */
-function hostL0Ports(): { l0?: L0Port; l0Admin?: L0AdminPort } {
-  if (l0PortsOverride) return l0PortsOverride;
+function hostL0Ports(): { l0?: L0Port; l0Admin?: L0AdminPort; l0Blobs?: L0BlobStore } {
+  if (l0PortsOverride) return { ...l0PortsOverride, ...kernelL0Blobs() };
   if (!l0HostAvailable()) return {};
-  return { l0: new HostL0Port(), l0Admin: new HostL0Admin() };
+  return { l0: new HostL0Port(), l0Admin: new HostL0Admin(), l0Blobs: new HostL0BlobStore() };
+}
+
+/**
+ * 批次37-A：L0 原数据库读口。测试注入的端口若自带读口则尊重它，
+ * 否则桌面壳内补一个走 IPC 的只读门面（纯浏览器没有 L0 库，保持 undefined → browse 走遮罩口径）。
+ */
+function kernelL0Blobs(): { l0Blobs?: L0BlobStore } {
+  if (l0PortsOverride?.l0Blobs) return { l0Blobs: l0PortsOverride.l0Blobs };
+  return l0HostAvailable() ? { l0Blobs: new HostL0BlobStore() } : {};
 }
 
 /** 测试辅助：灌种子记忆走这里（批次27 P3-1：_seedMemory 已移出公开 MemAgent 接口）；页面代码不得调用 */

@@ -7,7 +7,9 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Category, LlmProvider, ModelInfo } from '../core/memagent/types.ts';
-import { layerSpecOf, type RefineLayer } from '../core/memagent/layerRules.ts';
+import { layerBand, layerSpecOf, type RefineLayer } from '../core/memagent/layerRules.ts';
+// 单条引擎预算的单一真源在批次39 的队列模块（core → electron 依赖方向不变），避免两处各写一个 3
+import { REFINE_MAX_ENGINES_PER_CALL } from '../core/memagent/refineQueue.ts';
 
 // ── 配置与密钥落盘（数据根，随迁移白名单走）────────────────────────────────────
 
@@ -186,20 +188,29 @@ export function keyExists(dir: string, id: string): boolean {
 
 // ── 提示词（层规格单一真源 layerRules）────────────────────────────────────────
 
-/** 逐层提示词：输入只能是上一层产物（§2.2 不变量 1 由调用方保证）；规格直接取 LAYER_SPECS */
+/**
+ * 逐层提示词：输入只能是上一层产物（§2.2 不变量 1 由调用方保证）。
+ * 批次40-D：长度要求与 `checkLayerSpecDetailed` **同源**（都走 `layerBand`），
+ * 不再给模型一个它达不到的绝对字数（批次39 实测 4/4 失败样例全是「18 字源 → 要求 ≥50 字」）；
+ * 格式契约（开头词）也在这里明说，判废才说得通。
+ */
 export function buildLayerPrompt(layer: RefineLayer, input: string, category: Category): string {
   const s = layerSpecOf(layer);
-  const len = s.maxChars !== null || s.minChars !== null
-    ? `长度：${s.minChars ?? 0}–${s.maxChars ?? '不限'} 字。`
-    : '';
+  const band = layerBand(s, input);
+  const srcLen = input.trim().length;
+  const len = band.min === null && band.max === null
+    ? ''
+    : `长度：${band.min ?? 0}–${band.max ?? '不限'} 字（由上游 ${srcLen} 字按本层压缩比算出；写不够就是没内容，写超了就是没压缩，都算废）。`;
   const preserve = s.preserve?.length ? `保留：源文中出现的这些关键词不得丢弃（也不得凭空补造）——${s.preserve.join('、')}。` : '';
-  const must = s.mustInclude?.length ? `必含要素：${s.mustInclude.join('、')}。` : '';
+  const contract = s.mustStartWith
+    ? `格式契约：第一个词必须是「${s.mustStartWith}」，紧跟内容，不许换成别的说法。`
+    : '';
   const l6 = layer === 'L6'
     ? '输出格式：仅一个 JSON 对象 {"keywords":["…"],"projections":["…"]}，keywords 为检索关键词数组（≤30 个），projections 为适用投影场景数组。'
-    : '只输出该层内容本身，不要任何解释、前缀或标题。';
+    : `只输出该层内容本身${s.mustStartWith ? '（开头的必需词除外）' : ''}，不要解释、不要标题、不要在结尾补说明。`;
   return [
     `你是多 Agent 记忆系统的层级精炼引擎。基于记忆分类「${category}」，把上游内容提炼为 ${s.id}（${s.name}）。`,
-    len, preserve, must, l6,
+    len, preserve, contract, l6,
     '',
     '上游内容：',
     '"""',
@@ -281,11 +292,21 @@ export class LlmGatewayProvider implements LlmProvider {
   /** 非 stub：内核 makeLayerGenerator 据此放开 L2–L6 生成 */
   readonly isStub = false;
 
+  /**
+   * 一次调用最多试几个引擎（批次39 用户拍板 D：单条 ≤3）。
+   * 成本闸门的意义：排在后面的引擎再慢再贵，也不该被一条记忆无限追问下去；
+   * 试满即抛错，由调用方（写入 / 补炼队列）如实记 refine_error，绝不降级成 stub 产物。
+   */
+  private readonly maxEnginesPerCall: number;
+
   constructor(
     private cfg: LlmGatewayConfig,
     private keys: Record<string, string> = {},
     private fetchImpl: FetchLike = fetch,
-  ) {}
+    maxEnginesPerCall = REFINE_MAX_ENGINES_PER_CALL,
+  ) {
+    this.maxEnginesPerCall = maxEnginesPerCall > 0 ? Math.floor(maxEnginesPerCall) : Number.POSITIVE_INFINITY;
+  }
 
   usable(): boolean {
     return this.cfg.engines.some((e) => runnable(e, this.keys[e.id] ?? ''));
@@ -307,7 +328,8 @@ export class LlmGatewayProvider implements LlmProvider {
   }
 
   private async race(prompt: string): Promise<{ text: string; engine: string }> {
-    const order = this.callOrder();
+    const all = this.callOrder();
+    const order = all.slice(0, this.maxEnginesPerCall);
     const failures: string[] = [];
     for (const eng of order) {
       try {
@@ -316,7 +338,10 @@ export class LlmGatewayProvider implements LlmProvider {
         failures.push(String((e as Error)?.message ?? e));
       }
     }
-    throw new Error(failures.join('；') || '无可用引擎（未启用 / 未填模型 / 未配密钥）');
+    // 被预算挡在门外的引擎要说清楚：用户看到「试了 3 个」不会误以为全机只有 3 个可用
+    const capped = all.length - order.length;
+    const tail = capped > 0 ? `（本条引擎预算 ${order.length} 个已用完，还有 ${capped} 个未试）` : '';
+    throw new Error(`${failures.join('；') || '无可用引擎（未启用 / 未填模型 / 未配密钥）'}${tail}`);
   }
 
   /** 逐层精炼（§2.2）：不分层绑定厂商，按延时顺序逐个试；全失败 → 抛错（内核记 refine_error 回退已生成层） */

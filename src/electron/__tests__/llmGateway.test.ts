@@ -140,6 +140,22 @@ describe('LlmGatewayProvider 延时排序路由（批次32：取消 L2/深层的
     expect(captures.map((x) => x.engine)).toEqual(['kimi', 'deepseek', 'ollama']);
   });
 
+  test('单条引擎预算（批次39 D 拍板）：试满即失败，排在预算后的引擎一次都不碰', async () => {
+    const c = cfg();
+    c.engines[1].lastLatencyMs = 100; // deepseek 最快
+    c.engines[2].lastLatencyMs = 200; // kimi 次之
+    c.engines[0].lastLatencyMs = 900; // ollama 排最后，且它是唯一不会挂的
+    failing.add('deepseek');
+    failing.add('kimi');
+    const p = new LlmGatewayProvider(c, KEYS, undefined, 2);
+    await expect(p.refineLayer('', 'L2', '文本', 'fact', CTX)).rejects.toThrow(/引擎预算 2 个已用完，还有 1 个未试/);
+    expect(captures.map((x) => x.engine)).toEqual(['deepseek', 'kimi']);
+    // 默认预算 = 3（REFINE_MAX_ENGINES_PER_CALL）：同样的三引擎全部会被试到
+    captures.length = 0;
+    await new LlmGatewayProvider(c, KEYS).refineLayer('', 'L2', '文本', 'fact', CTX).catch(() => undefined);
+    expect(captures.map((x) => x.engine)).toEqual(['deepseek', 'kimi', 'ollama']);
+  });
+
   test('全部引擎失败 → 抛聚合错误（每档原因都在）且错误文本绝不含密钥', async () => {
     for (const name of ['ollama', 'deepseek', 'kimi']) failing.add(name);
     const p = new LlmGatewayProvider(cfg(), KEYS);
@@ -432,9 +448,25 @@ describe('llmEngineViews', () => {
 // ── 提示词（层规格单一真源，批次31 口径不变）──────────────────────────────────
 
 describe('buildLayerPrompt', () => {
-  test('按 LAYER_SPECS 生成约束：L4 必含「适用场景」、L5 必含「边界条件」、L6 要求 JSON', () => {
-    expect(buildLayerPrompt('L4', '上游', 'fact')).toContain('适用场景');
-    expect(buildLayerPrompt('L5', '上游', 'fact')).toContain('边界条件');
+  const SRC = '上'.repeat(100);
+
+  test('批次40：长度约束按**源文实时算**，不再写死绝对区间', () => {
+    // L2 minRatio 0.4 → 100 字源文要求 40–100 字（上限同时被「产物不得长于源」夹住）
+    const l2 = buildLayerPrompt('L2', SRC, 'pitfall');
+    expect(l2).toContain('长度：40–100 字');
+    expect(l2).toContain('由上游 100 字按本层压缩比算出');
+    expect(l2).not.toContain('长度：12–300 字'); // 旧的绝对区间文案已废除
+    // L6 是索引不是摘要：没有字数区间可写
+    expect(buildLayerPrompt('L6', SRC, 'fact')).not.toContain('长度：');
+  });
+
+  test('批次40：格式契约写成「第一个词必须是」，L4/L5 各有自己的开头', () => {
+    expect(buildLayerPrompt('L4', SRC, 'fact')).toContain('第一个词必须是「适用场景」');
+    expect(buildLayerPrompt('L5', SRC, 'fact')).toContain('第一个词必须是「边界条件」');
+    expect(buildLayerPrompt('L2', SRC, 'fact')).not.toContain('第一个词必须是');
+  });
+
+  test('保留关键词、L6 JSON 与上游原文都照旧进提示词', () => {
     const l6 = buildLayerPrompt('L6', '上游', 'fact');
     expect(l6).toContain('keywords');
     expect(l6).toContain('projections');

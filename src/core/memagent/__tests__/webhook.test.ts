@@ -117,7 +117,7 @@ describe('Webhook ingest 主通道（§19.3）', () => {
   it('重复 ingest（同 content + session_id）→ duplicate，不重复入库', async () => {
     const { storage, webhook } = makeWebhook();
     const event: IngestEvent = {
-      content: '去重测试：连接池耗尽导致请求超时失败',
+      content: '去重测试：连接池 pool_size=5 耗尽导致请求超时，网关返回 504 状态码',
       project_id: 'P1',
       session_id: 'sess-dup-001',
       source_agent: 'mcp',
@@ -136,7 +136,7 @@ describe('Webhook ingest 主通道（§19.3）', () => {
 
   it('不同 session_id 同 content → 两次独立写入，第二次分支嫁接到第一次（§6.2）', async () => {
     const { storage, webhook } = makeWebhook();
-    const base = { content: '同内容不同会话：数据库迁移脚本失败回滚记录', project_id: 'P1' };
+    const base = { content: '同内容不同会话：数据库迁移脚本 migrate_v2 执行失败，回滚耗时 120 秒', project_id: 'P1' };
     const r1 = await webhook.ingest({ ...base, session_id: 's1' });
     const r2 = await webhook.ingest({ ...base, session_id: 's2' });
     // SHA-256 幂等层不短路（不同 session_id → 不同 hash）→ 走内核逐层查重
@@ -184,7 +184,7 @@ describe('Webhook ingest 主通道（§19.3）', () => {
 
   it('非法 category → error 且不占用幂等键（修正后可重试成功）', async () => {
     const { webhook } = makeWebhook();
-    const base = { content: '类别校验测试：缓存击穿复盘', project_id: 'P1', session_id: 's-cat' };
+    const base = { content: '类别校验测试：缓存击穿后回源请求量 3 倍于平时', project_id: 'P1', session_id: 's-cat' };
     const bad = await webhook.ingest({ ...base, category: 'bug' as never });
     expect(bad.ok).toBe(false);
     expect(bad.dedup).toBe('error');
@@ -222,8 +222,8 @@ describe('Webhook ingest 主通道（§19.3）', () => {
     const { webhook } = makeWebhook();
     // project_id 缺失：refinePipeline 仍被调用，coreWrite 会处理
     // 这里测幂等性：两次同事件只入库一次
-    const r1 = await webhook.ingest({ content: '无项目测试：部署流水线构建失败排查记录', project_id: 'P1' });
-    const r2 = await webhook.ingest({ content: '无项目测试：部署流水线构建失败排查记录', project_id: 'P1' });
+    const r1 = await webhook.ingest({ content: '无项目测试：部署流水线构建失败，重试 3 轮后通过', project_id: 'P1' });
+    const r2 = await webhook.ingest({ content: '无项目测试：部署流水线构建失败，重试 3 轮后通过', project_id: 'P1' });
     expect(r1.dedup).toBe('new');
     expect(r2.dedup).toBe('duplicate');
   });

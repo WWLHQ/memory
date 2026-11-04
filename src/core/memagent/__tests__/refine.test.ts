@@ -4,6 +4,7 @@ import { encryptL0, decryptL0, parseL0Envelope, parseL0EnvelopeV2 } from '../cry
 import { LAYER_SPECS, checkLayerSpec, sanitizeL1, meaningfulLength } from '../layerRules.ts';
 import {
   DEDUP_THRESHOLDS, DEDUP_WEIGHTS, DEDUP_WEIGHTS_NO_LLM, L0_POLICY,
+  depthCapFor, layerBand,
 } from '../layerRules.ts';
 import { coreWrite, coreBrowse } from '../memories.ts';
 import { InMemoryStorage } from '../storage.ts';
@@ -187,18 +188,43 @@ describe('每层生成规格（§2.1 / §16.1）', () => {
     expect(LAYER_SPECS[3].from).toContain('L3');
   });
 
-  it('L2 上限 300 / 下限 50；L3 200/30；L4 120/20；L5 60/10', () => {
+  it('批次40：绝对下限改为「相对下限的地板」——maxChars 不变，minChars 只做兜底', () => {
     const by = (id: string) => LAYER_SPECS.find((s) => s.id === id)!;
-    expect([by('L2').maxChars, by('L2').minChars]).toEqual([300, 50]);
-    expect([by('L3').maxChars, by('L3').minChars]).toEqual([200, 30]);
-    expect([by('L4').maxChars, by('L4').minChars]).toEqual([120, 20]);
-    expect([by('L5').maxChars, by('L5').minChars]).toEqual([60, 10]);
+    expect([by('L2').maxChars, by('L2').minChars, by('L2').minRatio]).toEqual([300, 12, 0.4]);
+    expect([by('L3').maxChars, by('L3').minChars, by('L3').minRatio]).toEqual([200, 12, 0.35]);
+    expect([by('L4').maxChars, by('L4').minChars, by('L4').minRatio]).toEqual([120, 12, 0.3]);
+    expect([by('L5').maxChars, by('L5').minChars, by('L5').minRatio]).toEqual([60, 10, 0.25]);
     expect(by('L1').maxChars).toBeNull();  // L1 不限长度
   });
 
-  it('L4 必含"适用场景"，L5 必含"边界条件"；L6 keywords ≤30（§16.1 rule）', () => {
-    expect(LAYER_SPECS.find((s) => s.id === 'L4')!.mustInclude).toContain('适用场景');
-    expect(LAYER_SPECS.find((s) => s.id === 'L5')!.mustInclude).toContain('边界条件');
+  it('批次40：产物长度区间随源文算——短源不再被要求扩写，产物不得长于源', () => {
+    const l2 = LAYER_SPECS.find((s) => s.id === 'L2')!;
+    // 无源文 → 退回地板
+    expect(layerBand(l2)).toEqual({ min: 12, max: 300 });
+    expect(layerBand(l2, '')).toEqual({ min: 12, max: 300 });
+    // 批次39 实测的结构性不可能样例：18 字源要求 ≥50 字摘要
+    expect(layerBand(l2, 'x'.repeat(18))).toEqual({ min: 12, max: 18 });
+    // 200 字源 → 下限按 40% 算，上限不许超过源文（压缩不是扩写）
+    expect(layerBand(l2, 'x'.repeat(200))).toEqual({ min: 80, max: 200 });
+    // 超长源 → 相对下限被本层上限的 80% 钳住，避免 min > max
+    expect(layerBand(l2, 'x'.repeat(5000))).toEqual({ min: 240, max: 300 });
+  });
+
+  it('批次40：深度上限按 L1 有效字数分档（料不够就不硬凑深层）', () => {
+    expect(depthCapFor(meaningfulLength('x'.repeat(30)))).toBe('L2');
+    expect(depthCapFor(meaningfulLength('x'.repeat(59)))).toBe('L2');
+    expect(depthCapFor(meaningfulLength('x'.repeat(60)))).toBe('L3');
+    expect(depthCapFor(meaningfulLength('x'.repeat(119)))).toBe('L3');
+    expect(depthCapFor(meaningfulLength('x'.repeat(120)))).toBe('L4');
+    expect(depthCapFor(meaningfulLength('x'.repeat(240)))).toBe('L5');
+    // 连入库门槛（30）都不够 → 这行就停在 L1
+    expect(depthCapFor(29)).toBeNull();
+    expect(depthCapFor(0)).toBeNull();
+  });
+
+  it('L4 必须以「适用场景」开头，L5 必须以「边界条件」开头；L6 keywords ≤30（§16.1 rule）', () => {
+    expect(LAYER_SPECS.find((s) => s.id === 'L4')!.mustStartWith).toBe('适用场景');
+    expect(LAYER_SPECS.find((s) => s.id === 'L5')!.mustStartWith).toBe('边界条件');
     expect(LAYER_SPECS.find((s) => s.id === 'L6')!.maxKeywords).toBe(30);
     const l5 = LAYER_SPECS.find((s) => s.id === 'L5')!;
     expect(checkLayerSpec(l5, '只写了边界但没有写全，长度足够的一段洞察内容').join()).toContain('边界条件');
@@ -207,13 +233,19 @@ describe('每层生成规格（§2.1 / §16.1）', () => {
     expect(checkLayerSpec(l6, tooMany).join()).toContain('L6 keywords 超限：31 > 30');
   });
 
-  it('checkLayerSpec 能抓出超长/过短/缺关键词/缺要素', () => {
+  it('checkLayerSpec 能抓出超长/过短/缺关键词/未按格式契约开头', () => {
     const l4 = LAYER_SPECS.find((s) => s.id === 'L4')!;
-    expect(checkLayerSpec(l4, '太短')).toContain('L4 过短：2 < 20 字（过度压缩，§16.1）');
+    expect(checkLayerSpec(l4, '太短')).toContain('L4 过短：2 < 12 字（过度压缩，§16.1）');
     expect(checkLayerSpec(l4, 'x'.repeat(121)).join()).toContain('L4 超长');
     expect(checkLayerSpec(l4, '没有场景说明的一段足够长度的模式归纳文字描述').join()).toContain('适用场景');
     expect(checkLayerSpec(LAYER_SPECS[5], '不是JSON').join()).toContain('合法 JSON');
-    expect(checkLayerSpec(l4, '这是一个足够长度且包含适用场景描述的合规模式归纳内容')).toEqual([]);
+    expect(checkLayerSpec(l4, '适用场景：支付链路压测与扩容评审时核对连接池配置')).toEqual([]);
+  });
+
+  it('批次40：超短源文不会被判成「min > max」的死区间（地板不得盖过上限）', () => {
+    const l5 = LAYER_SPECS.find((s) => s.id === 'L5')!;
+    const band = layerBand(l5, 'x'.repeat(4));
+    expect(band.min).toBeLessThanOrEqual(band.max!);
   });
 });
 
@@ -340,13 +372,22 @@ describe('无真实 LLM 的精炼诚实性（Phase C 验收）', () => {
 });
 
 describe('真实 LLM 精炼落地（refined_by 诚实化）', () => {
+  // 批次40：深度上限按 L1 有效字数给（≥240 才允许炼到 L5），所以全链用例用长原文；
+  // 逐层产物必须**一层比一层短**（压缩不是扩写），下列样本已按 layerBand 实测区间校验。
+  const RAW_LONG = '线上事故复盘（2026-10-12 支付链路）：支付接口大面积超时，值班排查后确认根因是连接池配置项 pool_size=5 过小，' +
+    '高峰期活跃连接被打满后请求排队，网关侧 504 状态码激增。临时把 pool_size 调到 50 并同步调大 connect_timeout=800ms 后恢复，' +
+    '错误码 SQLSTATE 40001 也随之消失。联系人：张三，电话 13800138000，数据库地址 tcp://prod-db:5432/app，api_key: sk-abcdef1234567890abcdef。' +
+    '复盘结论：容量类参数必须压测验证后再上线，压测环境要复现生产并发量，不能只按单机配置推算；' +
+    '同类隐患在订单查询链路也出现过一次，当时的处置同样是先扩连接池再查慢查询，没有留下压测记录，这次要补齐。';
+
   const LAYERS = {
     content_l1: '（Provider 的 L1 不落库，内核以 sanitizeL1 为准）',
-    content_l2: '[来源:Agent会话][类型:pitfall] 支付接口超时复盘：根因是连接池配置过小，调整后恢复，关键约束与配置项已保留，供同类问题召回复用。',
-    content_l3: '成功点：定位到连接池配置根因；失败点：未提前做压测；经验教训：上线前验证连接池容量。',
-    content_l4: '模式归纳：容量类故障优先核对连接池与超时配置。适用场景：支付链路压测与扩容评审。',
-    content_l5: '容量假设需随流量演进复核；边界条件：仅适用于同 project_id 的部署环境。',
-    content_l6: JSON.stringify({ keywords: ['连接池', '超时', '复盘'], projections: [{ layer: 'L2', relevance: 0.9 }] }),
+    content_l2: '支付链路超时复盘：根因是连接池配置项过小（pool_size=5），高峰连接打满后请求排队，网关 504 状态码激增；' +
+      '调到 pool_size=50、connect_timeout=800ms 后恢复，错误码随之下清。结论是容量类参数须压测验证后再上线。',
+    content_l3: '成功点：值班快速定位到连接池配置项根因并恢复；失败点：上线前没做并发压测，容量参数只按单机推算；经验教训：容量类参数必须压测验证。',
+    content_l4: '适用场景：支付链路与网关容量评审。连接池、超时这类配置项要与生产并发量一起核对，不能只按单机默认值上线。',
+    content_l5: '边界条件：仅适用于同 project_id 且网关前置的部署环境，非支付链路仍需另做压测。',
+    content_l6: JSON.stringify({ keywords: ['连接池', '超时', '504', 'SQLSTATE 40001', '压测'], projections: [{ layer: 'L2', relevance: 0.9 }] }),
   };
 
   function fakeRefine(refineImpl: NonNullable<LlmProvider['refine']>): LlmProvider {
@@ -367,7 +408,7 @@ describe('真实 LLM 精炼落地（refined_by 诚实化）', () => {
       calledWith = { model, category, request_id: ctx.request_id };
       return LAYERS;
     });
-    const r = await coreWrite({ content: RAW, category: 'pitfall', project_id: 'P1' }, lctx(s, llm));
+    const r = await coreWrite({ content: RAW_LONG, category: 'pitfall', project_id: 'P1' }, lctx(s, llm));
     expect(calledWith).toEqual({ model: 'real-model', category: 'pitfall', request_id: 'req_llm' });
     expect(r.refined_by).toBe('llm');
     expect(r.spec_violations).toEqual([]);
@@ -393,9 +434,9 @@ describe('真实 LLM 精炼落地（refined_by 诚实化）', () => {
     const s = new InMemoryStorage();
     const llm = fakeRefine(async () => ({
       ...LAYERS,
-      content_l4: '太短', // 违反 L4 minChars / mustInclude
+      content_l4: '太短', // 违反 L4 相对下限 + 格式契约前缀（批次40）
     }));
-    const r = await coreWrite({ content: RAW, category: 'pitfall', project_id: 'P1' }, lctx(s, llm));
+    const r = await coreWrite({ content: RAW_LONG, category: 'pitfall', project_id: 'P1' }, lctx(s, llm));
     expect(r.refined_by).toBe('llm_partial'); // 批次27 P2-4：LLM 产出中断（L4 违规停梯），L2/L3 仍合规
     expect(r.spec_violations?.join()).toContain('L4');
     const m = (await s.listMemories({}))[0];
@@ -403,8 +444,47 @@ describe('真实 LLM 精炼落地（refined_by 诚实化）', () => {
     expect(m.content).toBe(LAYERS.content_l3);
     expect(m.content_l4).toBeUndefined();
     expect(m.content_l5).toBeUndefined();
-    expect(m.content_l6).toBeUndefined();
-    expect(Object.keys(m.layer_specs ?? {})).toEqual(['L1', 'L2', 'L3']);
+    // 批次40-C：L6 是独立通道——L4 判废不影响索引照产出，但行上 layer 仍按连续叙事层记，绝不用 L6 冒充深度
+    expect(m.content_l6).toBe(LAYERS.content_l6);
+    expect(Object.keys(m.layer_specs ?? {})).toEqual(['L1', 'L2', 'L3', 'L6']);
+  });
+
+  it('批次40 深度上限：短 L1 只炼到 L2+L6，L3–L5 一次都不调', async () => {
+    const s = new InMemoryStorage();
+    const asked: string[] = [];
+    // 压缩率按源文给：RAW 脱敏后 90 字 → L2 允许 36–90 字（LAYERS.content_l2 是给长原文的，这里换短的）
+    const L2_SHORT = '支付接口超时复盘：根因是连接池 pool_size=5 过小，调到 50 后恢复；容量类参数上线前必须压测。';
+    const llm = fakeRefine(async (_m, _raw, _c, ctx) => {
+      asked.push(ctx.request_id);
+      return { ...LAYERS, content_l2: L2_SHORT };
+    });
+    // RAW 脱敏后有效字 50 → depthCapFor=L2：料不够就不硬凑深层（硬凑只能编造）
+    const r = await coreWrite({ content: RAW, category: 'pitfall', project_id: 'P1' }, lctx(s, llm));
+    expect(r.refined_by).toBe('llm');
+    expect(r.spec_violations).toEqual([]);
+    const m = (await s.listMemories({}))[0];
+    expect(m.content_l2).toBe(L2_SHORT);
+    expect(m.content_l3).toBeUndefined();
+    expect(m.content_l4).toBeUndefined();
+    expect(m.content_l5).toBeUndefined();
+    expect(m.content_l6).toBe(LAYERS.content_l6);
+    expect(Object.keys(m.layer_specs ?? {})).toEqual(['L1', 'L2', 'L6']);
+    expect(asked).toHaveLength(1); // 旧 Provider 一次返回多层：本行只该被调用一次
+  });
+
+  it('批次40 深度上限：有料但太短（有效字 <30）→ 整行停在 L1，一次引擎都不调', async () => {
+    const s = new InMemoryStorage();
+    let called = 0;
+    const llm = fakeRefine(async () => { called++; return LAYERS; });
+    // 带硬事实所以过了质量门（错误码 + 40001），但有效字只有 24 → depthCapFor = null
+    const r = await coreWrite({ content: '错误码 SQLSTATE 40001 在压测环境复现了。', category: 'pitfall', project_id: 'P1' }, lctx(s, llm));
+    expect(called).toBe(0);
+    expect(r.dedup.action).not.toBe('filtered');
+    expect(r.refined_by).toBe('stub');
+    const m = (await s.listMemories({}))[0];
+    expect(m.layer).toBe('L1');
+    expect(m.content_l2).toBeUndefined();
+    expect(m.refined_by).toBe('stub');
   });
 
   it('refine 抛异常 → 只落 L1、标 stub 并如实返回 refine_error', async () => {

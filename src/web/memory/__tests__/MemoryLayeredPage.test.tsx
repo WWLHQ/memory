@@ -63,13 +63,13 @@ describe('MemoryLayeredPage 保存写回（批次25 P0-1）', () => {
     const edit = await openRow('L1', 'mem_w1');
     await waitFor(() => expect(edit).toHaveValue('原始层级内容等待改写'));
 
-    fireEvent.change(edit, { target: { value: '改写后的层级内容已生效' } });
+    fireEvent.change(edit, { target: { value: '改写后的层级内容已生效，超时阈值 300ms' } });
     fireEvent.click(screen.getByTestId('save'));
 
     await waitFor(() => expect(screen.getByTestId('save')).toHaveTextContent('保存修改'));
     const m = await getStorage().getMemory('mem_w1');
-    expect(m?.content).toBe('改写后的层级内容已生效');
-    expect(m?.content_l1).toBe('改写后的层级内容已生效');
+    expect(m?.content).toBe('改写后的层级内容已生效，超时阈值 300ms');
+    expect(m?.content_l1).toBe('改写后的层级内容已生效，超时阈值 300ms');
     expect(m?.version).toBe(2);
     expect(await editContentRows()).toBe(auditBefore + 1);
   });
@@ -109,12 +109,12 @@ describe('MemoryLayeredPage 保存写回（批次25 P0-1）', () => {
     await getStorage().putMemory(mem({ mem_id: 'mem_w4', content: '内容四号原始文本', content_l1: '内容四号原始文本' }));
     const edit = await openRow('L1', 'mem_w4');
     await waitFor(() => expect(edit).toHaveValue('内容四号原始文本'));
-    fireEvent.change(edit, { target: { value: '改写后的内容四号文本' } });
+    fireEvent.change(edit, { target: { value: '改写后的内容四号文本，回滚耗时 120 秒' } });
     fireEvent.click(screen.getByTestId('save'));
     await waitFor(() => expect(screen.getByTestId('save')).toHaveTextContent('保存修改'));
-    expect((await getStorage().getMemory('mem_w4'))?.content).toBe('改写后的内容四号文本');
-    await waitFor(() => expect(edit).toHaveValue('改写后的内容四号文本'));
-    expect(within(screen.getByTestId('L1-table')).getByTestId('lrow-mem_w4')).toHaveTextContent('改写后的内容四号文本');
+    expect((await getStorage().getMemory('mem_w4'))?.content).toBe('改写后的内容四号文本，回滚耗时 120 秒');
+    await waitFor(() => expect(edit).toHaveValue('改写后的内容四号文本，回滚耗时 120 秒'));
+    expect(within(screen.getByTestId('L1-table')).getByTestId('lrow-mem_w4')).toHaveTextContent('改写后的内容四号文本，回滚耗时 120 秒');
   });
 });
 

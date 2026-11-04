@@ -9,7 +9,14 @@ import { createTestVault } from './l0Kit.ts';
 import type { LlmProvider, ModelInfo } from '../types.ts';
 
 const ACCOUNT = { user_id: 'u1', team_id: 't1', enterprise_id: 'e1' };
-const CONTENT = '支付接口超时复盘：连接池配置过小，调整为 50 后恢复；需在上线前压测连接池容量。';
+
+// 批次40：产物必须逐层比上游短（压缩不是扩写），所以原文取长、五层取压缩链——
+// 与 refine.test.ts 同一组实测过的样本（L1 320 字 → 允许炼到 L5）。
+const CONTENT = '线上事故复盘（2026-10-12 支付链路）：支付接口大面积超时，值班排查后确认根因是连接池配置项 pool_size=5 过小，' +
+  '高峰期活跃连接被打满后请求排队，网关侧 504 状态码激增。临时把 pool_size 调到 50 并同步调大 connect_timeout=800ms 后恢复，' +
+  '错误码 SQLSTATE 40001 也随之消失。联系人：张三，电话 13800138000，数据库地址 tcp://prod-db:5432/app，api_key: sk-abcdef1234567890abcdef。' +
+  '复盘结论：容量类参数必须压测验证后再上线，压测环境要复现生产并发量，不能只按单机配置推算；' +
+  '同类隐患在订单查询链路也出现过一次，当时的处置同样是先扩连接池再查慢查询，没有留下压测记录，这次要补齐。';
 
 const FREE_MODEL: ModelInfo = { model: 'free-refine', tier: 'free', price: 0, quota: 1000, used: 0 };
 
@@ -21,11 +28,12 @@ beforeAll(async () => {
 
 const REFINED = {
   content_l1: '',
-  content_l2: '[来源:Agent会话][类型:pitfall] 支付接口超时复盘：根因是连接池配置过小，调整后恢复；结论可供同项目复用。',
-  content_l3: '成功点：定位连接池根因；失败点：上线前未压测；经验教训：容量类配置需在发布流程中验证。',
-  content_l4: '模式归纳：容量类故障先核对连接池与超时配置。适用场景：支付链路压测与扩容评审。',
-  content_l5: '容量假设需随流量演进复核；边界条件：仅适用于同 project_id 的部署环境。',
-  content_l6: JSON.stringify({ keywords: ['连接池', '超时'], projections: [{ layer: 'L2', relevance: 0.9 }] }),
+  content_l2: '支付链路超时复盘：根因是连接池配置项过小（pool_size=5），高峰连接打满后请求排队，网关 504 状态码激增；' +
+    '调到 pool_size=50、connect_timeout=800ms 后恢复，错误码随之下清。结论是容量类参数须压测验证后再上线。',
+  content_l3: '成功点：值班快速定位到连接池配置项根因并恢复；失败点：上线前没做并发压测，容量参数只按单机推算；经验教训：容量类参数必须压测验证。',
+  content_l4: '适用场景：支付链路与网关容量评审。连接池、超时这类配置项要与生产并发量一起核对，不能只按单机默认值上线。',
+  content_l5: '边界条件：仅适用于同 project_id 且网关前置的部署环境，非支付链路仍需另做压测。',
+  content_l6: JSON.stringify({ keywords: ['连接池', '超时', '504', 'SQLSTATE 40001', '压测'], projections: [{ layer: 'L2', relevance: 0.9 }] }),
 };
 
 function makeAgent(llm: LlmProvider, storage = new InMemoryStorage()) {

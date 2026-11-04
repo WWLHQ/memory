@@ -7,10 +7,12 @@ import type {
   StorageBackend, VectorBackend, WriteResult,
 } from './types.ts';
 import { MemAgentError } from './errors.ts';
+import type { L0BlobStore } from './l0Store.ts';
 import { embedSync, DEFAULT_VECTOR_DIM } from './vector.ts';
-import { checkL0ToL1Quality, filteredAuditDetail } from './qualityGate.ts';
+import { checkL0ToL1Quality, filteredAuditDetail, QUALITY_GATE_VERSION } from './qualityGate.ts';
 import {
-  LAYER_ORDER, checkLayerSpec, layerSpecOf,
+  LAYER_ORDER, checkLayerSpecDetailed, headlineLayer, layerSpecOf,
+  isFullyRefined, meaningfulLength, targetLayers,
   type RefineLayer,
 } from './layerRules.ts';
 import { findDuplicate } from './dedup.ts';
@@ -18,8 +20,11 @@ import { ulid } from './ulid.ts';
 import { sha256hex } from './sync.ts';
 import { classifyLayer } from './forgetting.ts';
 
-export { LAYER_SPECS, checkLayerSpec, sanitizeL1, layerSpecOf, meaningfulLength } from './layerRules.ts';
-export type { LayerSpec, RefineLayer } from './layerRules.ts';
+export {
+  LAYER_SPECS, checkLayerSpec, checkLayerSpecDetailed, sanitizeL1, layerSpecOf, meaningfulLength,
+  depthCapFor, headlineLayer, layerBand, targetLayers,
+} from './layerRules.ts';
+export type { LayerSpec, LayerViolation, LayerViolationCode, RefineLayer } from './layerRules.ts';
 
 /** 17.4 钳制：importance 下限 0.1 / confidence 下限 0.05（2.4.2 规则4） */
 const CLAMP = { importance: [0.1, 1] as const, confidence: [0.05, 1] as const };
@@ -35,7 +40,7 @@ const round3 = (v: number) => Math.round(v * 1000) / 1000;
 // ─── §2.2 逐层管道：L0 加密 → L1 脱敏 → L2…L6 逐层生成/校验/查重 ────────────────
 
 /** 已生成层 → layer_specs 版本记录（只记录真实产出的层） */
-function layerSpecsFrom(generated: Partial<Record<RefineLayer, string>>): Record<string, string> {
+export function layerSpecsFrom(generated: Partial<Record<RefineLayer, string>>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const id of LAYER_ORDER) {
     if (generated[id] !== undefined) out[id] = `v1:${layerSpecOf(id).name}`;
@@ -44,7 +49,7 @@ function layerSpecsFrom(generated: Partial<Record<RefineLayer, string>>): Record
 }
 
 /** L6 输入：L1–L5 全部已生成层（阶梯收敛，不把 L0 送进 LLM） */
-function buildL6Input(generated: Partial<Record<RefineLayer, string>>): string {
+export function buildL6Input(generated: Partial<Record<RefineLayer, string>>): string {
   return LAYER_ORDER
     .filter((id) => id !== 'L6' && generated[id] !== undefined)
     .map((id) => `[${id}] ${generated[id]}`)
@@ -63,7 +68,7 @@ interface LayerGenerator {
  * 旧 Provider 只实现 refine（一次返回多层）时，仅以 L1 调用一次并按层取用，
  * 保证 L0 原文永不送 LLM；新 Provider 应实现 refineLayer。
  */
-function makeLayerGenerator(
+export function makeLayerGenerator(
   llm: LlmProvider | undefined,
   model: string | undefined,
   category: Category,
@@ -146,7 +151,7 @@ export async function coreWrite(input: WriteInput, ctx: WriteCtx): Promise<Write
   if (!quality.ok) {
     await storage.appendAudit({
       ...auditRef, project_id: input.project_id, user_id: input.user_id, ts: now,
-      detail: { ...filteredAuditDetail(input.content, quality.reason!), source_agent: input.source_agent, session_id: input.session_id },
+      detail: { ...filteredAuditDetail(input.content, quality), source_agent: input.source_agent, session_id: input.session_id },
     });
     return {
       mem_id: '',
@@ -174,14 +179,16 @@ export async function coreWrite(input: WriteInput, ctx: WriteCtx): Promise<Write
 
   // 3) 逐层生成 → 校验 → 查重；命中即嫁接停止（不再生成下一层）
   const generator = makeLayerGenerator(ctx.llm, ctx.llmModel, input.category, request_id);
+  // 批次40-C：这一行该炼到哪几层由 L1 的有效字数决定（料不够不硬凑深层，见 targetLayers）
+  const targets = targetLayers(meaningfulLength(contentL1));
   const generated: Partial<Record<RefineLayer, string>> = {};
   const decisions: LayerDecision[] = [];
   const violations: string[] = [];
   let refineError: string | undefined;
   let graft: { target: Memory; layer: RefineLayer; score: number; threshold: number } | null = null;
 
-  for (let i = 0; i < LAYER_ORDER.length; i++) {
-    const layer = LAYER_ORDER[i];
+  for (let i = 0; i < targets.length; i++) {
+    const layer = targets[i];
     let text: string;
     let by: 'local' | 'llm';
 
@@ -193,9 +200,9 @@ export async function coreWrite(input: WriteInput, ctx: WriteCtx): Promise<Write
         decisions.push({ layer, action: 'skipped', by: 'none', reason: '未接入真实 LLM：只落 L1（refined_by=stub）' });
         break;
       }
-      const upstream = layer === 'L6' ? buildL6Input(generated) : generated[LAYER_ORDER[i - 1]];
+      const upstream = layer === 'L6' ? buildL6Input(generated) : generated[targets[i - 1]];
       if (!upstream) {
-        decisions.push({ layer, action: 'stopped', by: 'none', reason: `缺少上游 ${LAYER_ORDER[i - 1]}，阶梯中断` });
+        decisions.push({ layer, action: 'stopped', by: 'none', reason: `缺少上游 ${targets[i - 1]}，阶梯中断` });
         break;
       }
       try {
@@ -203,12 +210,15 @@ export async function coreWrite(input: WriteInput, ctx: WriteCtx): Promise<Write
       } catch (e) {
         refineError = String((e as Error)?.message ?? e);
         decisions.push({ layer, action: 'invalid', by: 'llm', reason: `LLM 调用失败：${refineError}` });
-        break;
+        break;  // 传输失败 = 该行的引擎预算已用完，不再往下烧
       }
-      const bad = text ? checkLayerSpec(layerSpecOf(layer), text, upstream) : [`${layer} 产物为空`];
+      const bad = checkLayerSpecDetailed(layerSpecOf(layer), text, upstream);
       if (bad.length > 0) {
-        violations.push(...bad);
-        decisions.push({ layer, action: 'invalid', by: 'llm', reason: bad.join('；') });
+        violations.push(...bad.map((v) => v.reason));
+        decisions.push({ layer, action: 'invalid', by: 'llm', code: bad[0].code, reason: bad.map((v) => v.reason).join('；') });
+        // L6 是独立通道（检索索引，不吃上游连续性）：中间层判废也要跳过去再试它一次
+        const l6 = targets.indexOf('L6');
+        if (layer !== 'L6' && l6 > i) { i = l6 - 1; continue; }
         break;
       }
       by = 'llm';
@@ -234,14 +244,14 @@ export async function coreWrite(input: WriteInput, ctx: WriteCtx): Promise<Write
   }
 
   const produced = LAYER_ORDER.filter((id) => generated[id] !== undefined);
-  const deepest = produced[produced.length - 1] ?? 'L1';
+  const deepest = headlineLayer(produced, targets);
   const mainContent = generated[deepest]!;
-  // 批次27 P2-4：refined_by 诚实化。llm 仅在 L2–L6 全部产出（或提前嫁接收敛）时标记；
-  // LLM 中途失败/违规导致的残缺产物标记 llm_partial，不再冒充全量精炼。
+  // 批次27 P2-4 + 批次40-C：refined_by 诚实化。llm = 本行该炼的层全炼到了（深度按料给，
+  // 不再要求每条都到 L6）；中途失败/违规的残缺产物标 llm_partial，不冒充全量精炼。
   const llmTouched = produced.some((id) => id !== 'L1');
   const refinedBy: 'stub' | 'llm' | 'llm_partial' = !llmTouched
     ? 'stub'
-    : !graft && produced.length < LAYER_ORDER.length
+    : !graft && !isFullyRefined(produced, targets)
       ? 'llm_partial'
       : 'llm';
 
@@ -265,6 +275,8 @@ export async function coreWrite(input: WriteInput, ctx: WriteCtx): Promise<Write
     refined_by: refinedBy,
     layer_specs: layerSpecsFrom(generated),
     layers_generated_at: now,
+    // 批次36-A：这一行是按哪一版质量门放进来的（历史行无字段 → 回放/重判按 v1 处理）
+    quality_gate_v: QUALITY_GATE_VERSION,
     graft_to: graft?.target.mem_id,
     graft_layer: graft?.layer,
     decay_class: 'hot',
@@ -352,7 +364,11 @@ export async function coreWrite(input: WriteInput, ctx: WriteCtx): Promise<Write
  */
 export async function coreBrowse(
   req: BrowseReq,
-  ctx: { storage: StorageBackend; request_id: string; now: number; l0?: L0Port; user_id?: string; form?: Form },
+  ctx: {
+    storage: StorageBackend; request_id: string; now: number; l0?: L0Port; user_id?: string; form?: Form;
+    /** 批次37：L0 密文已拆到独立原数据库时，行只带 has_l0，信封从这里取 */
+    l0Blobs?: L0BlobStore;
+  },
 ): Promise<BrowseResult> {
   const { storage, request_id, now } = ctx;
   const mems = await storage.listMemories({ project_id: req.project_id });
@@ -380,9 +396,14 @@ export async function coreBrowse(
     return { rows, l0_masked: false, audit: { request_id, action: 'log_view' } };
   }
 
+  // 批次37：L0 密文可以在行上（未拆库/旧数据），也可以在**独立的 L0 原数据库**里（行只带 has_l0）。
+  // 未授权时不取信封（省掉整库的 L0 库读取），只按「这条声明有自己的 L0」遮罩。
+  const claims = mems.filter((m) => Boolean(m.content_l0_enc) || Boolean(m.has_l0)).map((m) => m.mem_id);
+  const claimSet = new Set(claims);
+
   const maskedRows = (): BrowseRow[] => mems.map((m) => ({
     mem_id: m.mem_id,
-    content: m.content_l0_enc ? '[L0 已加密 · 需授权]' : '',
+    content: claimSet.has(m.mem_id) ? '[L0 已加密 · 需授权]' : '',
   }));
 
   if (!sessionId || !ctx.l0) {
@@ -411,12 +432,40 @@ export async function coreBrowse(
     return { rows: maskedRows(), l0_masked: true, audit: { request_id, action: 'l0_auth_fail' } };
   }
 
-  const encrypted = mems.filter((m) => Boolean(m.content_l0_enc));
+  // 已授权才取信封：行上的旧数据直接用，拆库后的行从 L0 原数据库取（有批量口就一次取完）
+  const envelope = new Map<string, string>();
+  for (const m of mems) if (m.content_l0_enc) envelope.set(m.mem_id, m.content_l0_enc);
+  const need = claims.filter((id) => !envelope.has(id));
+  if (need.length && ctx.l0Blobs) {
+    if (ctx.l0Blobs.getAll) {
+      for (const [id, env] of await ctx.l0Blobs.getAll(need)) envelope.set(id, env);
+    } else {
+      for (const id of need) {
+        const blob = await ctx.l0Blobs.get(id);
+        if (blob) envelope.set(id, blob.envelope);
+      }
+    }
+  }
+  // 断链（行说有 L0、库里取不到）绝不静默当空正文：记审计 + 显式报错（批次37）
+  const missing = claims.filter((id) => !envelope.has(id));
+  if (missing.length) {
+    await storage.appendAudit({
+      request_id, action: 'l0_auth_fail', ts: now, project_id: req.project_id, user_id: info?.user_id ?? ctx.user_id,
+      detail: { reason: 'missing_blob', count: missing.length, mem_ids: missing.slice(0, 5), form: ctx.form },
+    });
+    throw new MemAgentError(
+      'E_L0_MISSING_BLOB',
+      `L0 原数据库取不到 ${missing.length} 条信封（记忆库行上带 has_l0）：绝不当作空正文返回`,
+      { request_id, count: missing.length, mem_ids: missing.slice(0, 5) },
+    );
+  }
+
+  const ids = [...envelope.keys()];
   const plain = new Map<string, string>();
   try {
-    for (const m of encrypted) {
-      plain.set(m.mem_id, await ctx.l0.decrypt({
-        l0_session_id: sessionId, project_id: req.project_id, mem_id: m.mem_id, envelope: m.content_l0_enc!,
+    for (const mem_id of ids) {
+      plain.set(mem_id, await ctx.l0.decrypt({
+        l0_session_id: sessionId, project_id: req.project_id, mem_id, envelope: envelope.get(mem_id)!,
       }));
     }
   } catch (e) {
@@ -425,7 +474,7 @@ export async function coreBrowse(
       request_id, action: 'l0_auth_fail', ts: now, project_id: req.project_id, user_id: info?.user_id ?? ctx.user_id,
       detail: {
         reason: code === 'E_L0_EXPIRED' ? 'expired' : 'decrypt_failed',
-        count: encrypted.length, form: ctx.form, grant_id: info?.grant_id,
+        count: ids.length, form: ctx.form, grant_id: info?.grant_id,
       },
     });
     throw e;
@@ -435,12 +484,12 @@ export async function coreBrowse(
     request_id, action: 'l0_view', ts: now, project_id: req.project_id, user_id: info?.user_id ?? ctx.user_id,
     detail: {
       grant_id: info?.grant_id, project_id: req.project_id,
-      mem_ids: encrypted.map((m) => m.mem_id), form: ctx.form,
+      mem_ids: ids, form: ctx.form,
     },
   });
   const rows: BrowseRow[] = mems.map((m) => ({
     mem_id: m.mem_id,
-    content: m.content_l0_enc ? (plain.get(m.mem_id) ?? '') : '',
+    content: envelope.has(m.mem_id) ? (plain.get(m.mem_id) ?? '') : '',
   }));
   return { rows, l0_masked: false, audit: { request_id, action: 'l0_view' } };
 }
@@ -537,6 +586,9 @@ export async function coreMemoryOp(
         content: '',
         content_orig: undefined,
         content_l0_enc: undefined,
+        // 批次37：墓碑同样清掉 L0——标了 has_l0 会让 FileStorage 把密文留在 L0 库里，
+        // 与批次36「删除即销毁 L0 正文」的语义不一致（删掉的原始对话不该还能解出来）。
+        has_l0: undefined,
         content_l1: undefined,
         content_l2: undefined,
         content_l3: undefined,

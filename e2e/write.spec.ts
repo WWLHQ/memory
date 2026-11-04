@@ -35,7 +35,9 @@ test.describe('写入页', () => {
 
   test('纯浏览器无主进程密钥环 → 写入如实报 E_L0_LOCKED，不产生回执/明文落库', async ({ page }) => {
     await page.goto(APP);
-    await page.locator('[data-testid="f-content"]').fill('部署前必须检查数据库迁移脚本');
+    // 批次40-B 起入库门槛会先拦「短且无硬事实」，这句话带 120 秒/504 状态码这类硬事实，
+    // 因此能过质量门、把断言打在真正要观测的 E_L0_LOCKED 上。
+    await page.locator('[data-testid="f-content"]').fill('部署前必须检查数据库迁移脚本，上次回滚耗时 120 秒，网关报 504 状态码');
     await expect(page.locator('[data-testid="submit"]')).toBeEnabled();
     await page.locator('[data-testid="submit"]').click();
     await expect(page.locator('[data-testid="toast"]')).toContainText('E_L0_LOCKED');

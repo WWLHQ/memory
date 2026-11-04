@@ -11,6 +11,7 @@ import { NormalConfigCard } from './NormalConfigCard.tsx';
 import { KbPolicyTable } from './KbPolicyTable.tsx';
 import { KbManagementCard } from './KbManagementCard.tsx';
 import { LlmEngineCard } from './LlmEngineCard.tsx';
+import { RefineQueueCard } from './RefineQueueCard.tsx';
 import { DevPanel } from './DevPanel.tsx';
 import { useToast } from './useToast.tsx';
 import type { DevParams, KbPolicyRow, NormalConfig } from './types.ts';
@@ -84,6 +85,7 @@ export function ParamsPage({ load = coreLoadParams }: { load?: () => Promise<Par
       />
       <KbManagementCard />
       <LlmEngineCard />
+      <RefineQueueCard />
       <DevPanel
         dev={dev}
         onChange={(next, label) => { setDev(next); track(label); }}

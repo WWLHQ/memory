@@ -11,25 +11,40 @@ export interface LayerSpec {
   name: string;
   /** 字数上限（按字符计；null = 不限） */
   maxChars: number | null;
-  /** 字数下限（按字符计；null = 不限） */
+  /**
+   * 绝对字数下限（批次40 起语义变更）：它**不是**「产物至少要写这么多字」，
+   * 而是**相对下限的兜底地板**——源文很短、或调用方没传源文时用它。
+   * 有源文时真正的下限由 `minRatio` 算出（见 `layerBand`）。
+   */
   minChars: number | null;
+  /**
+   * 相对下限系数（批次40）：产物下限 = 源文字数 × 本系数。
+   * 摘要是**压缩**不是扩写——绝对字数下限对短源等于要求模型编料（批次39 实测 4/4 失败样例
+   * 全是「18 字源 → 要求 ≥50 字摘要」这类结构性不可能）。
+   */
+  minRatio?: number;
   /** 源文出现则本层不得丢弃的关键词（不得凭空补造） */
   preserve?: string[];
-  /** 本层必含要素 */
-  mustInclude?: string[];
+  /**
+   * 格式契约前缀（批次40，替代原 `mustInclude` 全文扫描）：产物必须以该串开头。
+   * 原 `mustInclude` 用 `text.includes(k)` 判，模型写了同义表述就整层判废——
+   * 实测 L4 三次全死在缺「适用场景」四字（库面 L3 116 行 vs L4 1 行）。
+   * 现在把字面要求**写进提示词的输出格式**，判定查开头：标准没放宽，只是变成可达成。
+   */
+  mustStartWith?: string;
   /** 该层输入来源（阶梯依赖） */
   from: string;
   /** L6 专用：keywords 上限 */
   maxKeywords?: number;
 }
 
-/** 每层生成规格（§16.1）。L5 必含「边界条件」（不是只查“边界”二字）；L6 keywords ≤30。 */
+/** 每层生成规格（§16.1，批次40 重新梳理）。 */
 export const LAYER_SPECS: readonly LayerSpec[] = [
   { id: 'L1', name: '清洗脱敏', maxChars: null, minChars: null, from: 'L0 原始对话（仅本次写入，不落 LLM）' },
-  { id: 'L2', name: '会话摘要', maxChars: 300, minChars: 50, preserve: ['错误码', '状态码', '配置项'], from: 'L1 脱敏原文' },
-  { id: 'L3', name: '得失分析', maxChars: 200, minChars: 30, preserve: ['成功', '失败', '教训'], from: 'L2 会话摘要' },
-  { id: 'L4', name: '模式归纳', maxChars: 120, minChars: 20, mustInclude: ['适用场景'], from: 'L3 得失分析' },
-  { id: 'L5', name: '洞察提炼', maxChars: 60, minChars: 10, mustInclude: ['边界条件'], from: 'L4 模式归纳' },
+  { id: 'L2', name: '会话摘要', maxChars: 300, minChars: 12, minRatio: 0.4, preserve: ['错误码', '状态码', '配置项'], from: 'L1 脱敏原文' },
+  { id: 'L3', name: '得失分析', maxChars: 200, minChars: 12, minRatio: 0.35, preserve: ['成功', '失败', '教训'], from: 'L2 会话摘要' },
+  { id: 'L4', name: '模式归纳', maxChars: 120, minChars: 12, minRatio: 0.3, mustStartWith: '适用场景', from: 'L3 得失分析' },
+  { id: 'L5', name: '洞察提炼', maxChars: 60, minChars: 10, minRatio: 0.25, mustStartWith: '边界条件', from: 'L4 模式归纳' },
   { id: 'L6', name: '投影索引', maxChars: null, minChars: null, from: 'L1–L5 相关内容 + relevance', maxKeywords: 30 },
 ];
 
@@ -78,6 +93,34 @@ export const L0_POLICY = {
 
 /** 最低有效字符数（去空白/标点/占位符后；§2.1 质量门） */
 export const MIN_MEANINGFUL_CHARS = 10;
+
+/**
+ * 「短且无硬事实」入库门槛（批次40-B，§2.1）。
+ * 双条件而不是纯字数一刀：本机真实账本 1585 行实测「有效字 <50」占 **51.8%**，
+ * 且该区间里混着「C# 7.3 不支持 dynamic」这类最该留的短记忆（30–49 字带 36% 含硬事实），
+ * 纯字数会把它们一起删掉。所以「短」只在**同时没有硬事实**时才构成拦下的理由。
+ * 与 `MIN_MEANINGFUL_CHARS` 的分工：10 = 空串/纯符号兜底；30 = 没有事实就太短、不值得占用记忆位。
+ */
+export const MIN_MEANINGFUL_WITHOUT_FACTS = 30;
+
+/**
+ * 深度上限档位（批次40）：按 L1 有效字数决定这一行**最深可以炼到哪一层**。
+ * 依据：L2→L5 是逐级压缩，每深一层可用的料更少；源文不够长还硬往下炼，唯一「达标」的办法就是编造
+ *   （批次24 整批清掉的 stub 幻觉产物就是这么来的）。故要求每深一层源料大致翻倍。
+ * **L6 不在此表内**：它是检索索引（keywords/projections）不是压缩摘要，任何深度都能单独生成。
+ */
+export const DEPTH_CAP_BANDS: readonly { minMeaningful: number; cap: RefineLayer }[] = [
+  { minMeaningful: 240, cap: 'L5' },
+  { minMeaningful: 120, cap: 'L4' },
+  { minMeaningful: 60, cap: 'L3' },
+  { minMeaningful: MIN_MEANINGFUL_WITHOUT_FACTS, cap: 'L2' },
+];
+
+/** 这行的 L1 有料炼到第几层；null = 连 L2 的料都不够（就停在 L1，仍可正常检索） */
+export function depthCapFor(meaningful: number): RefineLayer | null {
+  for (const b of DEPTH_CAP_BANDS) if (meaningful >= b.minMeaningful) return b.cap;
+  return null;
+}
 
 const MASK_TOKENS = Object.values(MASK);
 const MASK_RE = new RegExp(MASK_TOKENS.map((m) => m.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g');
@@ -156,40 +199,124 @@ export function sanitizeL1(raw: string): string {
   return out;
 }
 
+/** 单层产物字数区间（批次40：有源文按相对系数算，无源文退回绝对地板） */
+export interface LayerBand {
+  min: number | null;
+  max: number | null;
+}
+
 /**
- * 校验单层产物是否满足规格（空数组 = 合规）。
- * `source` 为上游文本：preserve 关键词只在源文确实出现时才要求保留。
+ * 算出这一层允许的字数区间。三条夹逼规则：
+ * 1. 相对下限 = 源文字数 × `minRatio`，不低于绝对地板 `minChars`；
+ * 2. 相对下限最多吃掉本层上限的 80%（否则长源会把下限顶到超过上限，变成写不进去的死规格）；
+ * 3. **上限同时受源文长度约束**——产物不得长于源（摘要是压缩不是扩写）。
  */
-export function checkLayerSpec(spec: LayerSpec, text: string, source?: string): string[] {
-  const bad: string[] = [];
-  const t = (text ?? '').trim();
-  if (!t) { bad.push(`${spec.id} 产物为空`); return bad; }
-  if (spec.maxChars !== null && t.length > spec.maxChars) {
-    bad.push(`${spec.id} 超长：${t.length} > ${spec.maxChars} 字（${spec.name}）`);
+export function layerBand(spec: LayerSpec, source?: string): LayerBand {
+  const floor = spec.minChars ?? 0;
+  const src = source?.trim().length ?? 0;
+  if (spec.minRatio === undefined || !source || src === 0) {
+    return { min: spec.minChars === null ? null : floor, max: spec.maxChars };
   }
-  if (spec.minChars !== null && t.length < spec.minChars) {
-    bad.push(`${spec.id} 过短：${t.length} < ${spec.minChars} 字（过度压缩，§16.1）`);
+  let min = Math.round(src * spec.minRatio);
+  if (spec.maxChars !== null) min = Math.min(min, Math.floor(spec.maxChars * 0.8));
+  min = Math.max(min, floor);
+  const max = spec.maxChars === null ? null : Math.max(min, Math.min(spec.maxChars, Math.max(src, min)));
+  return { min, max };
+}
+
+/**
+ * 单层产物的违规码（批次40-C，稳定英文码；中文 reason 可改，码不能随便换）。
+ * 补炼队列与审计按码统计「这行卡在哪一步」，不再只有一句含混的「不合规格」。
+ */
+export type LayerViolationCode =
+  | 'empty'
+  | 'too_short'
+  | 'too_long'
+  | 'missing_keyword'
+  | 'bad_prefix'
+  | 'bad_json';
+
+export interface LayerViolation {
+  layer: RefineLayer;
+  code: LayerViolationCode;
+  reason: string;
+}
+
+/**
+ * 校验单层产物并给出**分层原因码**（空数组 = 合规）。
+ * `source` 为上游文本：① preserve 关键词只在源文确实出现时才要求保留；
+ * ② 批次40 起字数区间由源文算出（见 `layerBand`），源文缺失时按绝对地板判。
+ */
+export function checkLayerSpecDetailed(spec: LayerSpec, text: string, source?: string): LayerViolation[] {
+  const bad: LayerViolation[] = [];
+  const push = (code: LayerViolationCode, reason: string): void => { bad.push({ layer: spec.id, code, reason }); };
+  const t = (text ?? '').trim();
+  if (!t) { push('empty', `${spec.id} 产物为空`); return bad; }
+  const band = layerBand(spec, source);
+  if (band.max !== null && t.length > band.max) {
+    push('too_long', `${spec.id} 超长：${t.length} > ${band.max} 字（${spec.name}；源文 ${source?.trim().length ?? 0} 字，产物不得长于源）`);
+  }
+  if (band.min !== null && t.length < band.min) {
+    push('too_short', `${spec.id} 过短：${t.length} < ${band.min} 字（过度压缩，§16.1）`);
   }
   for (const k of spec.preserve ?? []) {
     if (source && source.includes(k) && !t.includes(k)) {
-      bad.push(`${spec.id} 丢失源文关键词「${k}」（§16.1 preserve_keywords）`);
+      push('missing_keyword', `${spec.id} 丢失源文关键词「${k}」（§16.1 preserve_keywords）`);
     }
   }
-  for (const k of spec.mustInclude ?? []) {
-    if (!t.includes(k)) bad.push(`${spec.id} 缺必含要素「${k}」`);
+  if (spec.mustStartWith && !t.startsWith(spec.mustStartWith)) {
+    push('bad_prefix', `${spec.id} 未按格式契约以「${spec.mustStartWith}」开头`);
   }
   if (spec.id === 'L6') {
     try {
       const o = JSON.parse(t) as { keywords?: unknown; projections?: unknown };
       if (!Array.isArray(o.keywords) || o.keywords.length === 0) {
-        bad.push('L6 keywords 须为非空数组');
+        push('bad_json', 'L6 keywords 须为非空数组');
       } else if (spec.maxKeywords !== undefined && o.keywords.length > spec.maxKeywords) {
-        bad.push(`L6 keywords 超限：${o.keywords.length} > ${spec.maxKeywords}`);
+        push('bad_json', `L6 keywords 超限：${o.keywords.length} > ${spec.maxKeywords}`);
       }
-      if (!Array.isArray(o.projections)) bad.push('L6 projections 须为数组');
+      if (!Array.isArray(o.projections)) push('bad_json', 'L6 projections 须为数组');
     } catch {
-      bad.push('L6 须为合法 JSON（{"keywords":[…],"projections":[…]}）');
+      push('bad_json', 'L6 须为合法 JSON（{"keywords":[…],"projections":[…]}）');
     }
   }
   return bad;
+}
+
+/** 人类可读的违规清单（§16.1）；需要原因码时用 `checkLayerSpecDetailed` */
+export function checkLayerSpec(spec: LayerSpec, text: string, source?: string): string[] {
+  return checkLayerSpecDetailed(spec, text, source).map((v) => v.reason);
+}
+
+/**
+ * 这一行**应当**炼到哪几层（批次40-C，写入 / 补炼 / 重建三条管道共用同一口径）。
+ * 深度由 L1 的有效字数决定（`depthCapFor`），L6 永远在列——它是检索索引不是压缩摘要，
+ * 任何深度都能单独生成，也不该因为 L4 判废而丢掉已经到手的 L2/L3。
+ * `['L1']` = 连 L2 的料都不够，这行就停在 L1（仍可正常检索）。
+ */
+export function targetLayers(meaningful: number): RefineLayer[] {
+  const cap = depthCapFor(meaningful);
+  if (!cap) return ['L1'];
+  return [...LAYER_ORDER.slice(0, LAYER_ORDER.indexOf(cap) + 1), 'L6'];
+}
+
+/** 产出层是否已「炼满本行该炼的层」——残缺判 `llm_partial` 的唯一依据，不再拿 LAYER_ORDER 长度硬比 */
+export function isFullyRefined(produced: RefineLayer[], targets: RefineLayer[]): boolean {
+  return targets.every((t) => produced.includes(t));
+}
+
+/**
+ * 行上的 `layer` / `content` 取哪一层（批次40-C）。
+ * L6 是检索索引，中间层判废时也会独立产出，所以**不能**再用「产出了 L6」倒推这行炼到了多深：
+ * 只有叙事层（L2–L5 里本行该炼的那些）一层不缺时，L6 才算这行的最深层；
+ * 否则回落到产出链上最后一个连续层。索引本身照常落 `content_l6`，不因这个判定而丢弃。
+ */
+export function headlineLayer(produced: RefineLayer[], targets: RefineLayer[]): RefineLayer {
+  const narrative = targets.filter((t) => t !== 'L6');
+  let depth: RefineLayer = 'L1';
+  for (const t of narrative) {
+    if (!produced.includes(t)) return depth;
+    depth = t;
+  }
+  return produced.includes('L6') ? 'L6' : depth;
 }

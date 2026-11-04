@@ -73,7 +73,7 @@ describe('MemoryPage 集成（T5）', () => {
 
   it('抽屉编辑保存 → 写回真实账本（version+1 + 审计）', async () => {
     const storage = getStorage();
-    const edited = '修改后的内容：上线前必须校验数据库迁移脚本';
+    const edited = '修改后的内容：上线前必须校验数据库迁移脚本，回滚耗时 120 秒';
     await storage.putMemory(mem({ mem_id: 'mem_t1', content: '原始内容' }));
     await renderLoaded();
     fireEvent.click(within(screen.getByTestId('row-mem_t1')).getByTestId('op-open'));
