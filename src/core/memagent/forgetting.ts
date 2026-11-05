@@ -6,7 +6,7 @@ import { layerSpecOf } from './layerRules.ts';
 import { DEFAULT_VECTOR_DIM, cosine, embedSync } from './vector.ts';
 import { sha256hex } from './sync.ts';
 import type {
-  AuditAction, AuditRecord, Category, DecayClass, Memory, StorageBackend, VectorBackend,
+  AuditAction, AuditRecord, Category, DecayClass, Filter, Memory, StorageBackend, VectorBackend,
 } from './types.ts';
 
 const DAY = 24 * 3600 * 1000;
@@ -229,6 +229,18 @@ export interface ForgettingOptions {
    * 语义召回（读 `m.embedding`）照常命中，缺的只是那份可丢弃的索引。
    */
   vector?: VectorBackend;
+  /**
+   * 批次46-2：项目隔离。传入非空项目 ID 时，本轮三处 listMemories 都只扫该项目；
+   * **缺省 = 全库**，main.ts 每 6h 的生产调度行为一字不变。
+   */
+  projectId?: string;
+  /**
+   * 批次46-2：true = 只演算，不 putMemory / appendAudit / vector.upsert|remove。
+   * 计数照常演算（诚实反映「若真实执行会发生什么」），缺省 = 原有真实落库行为。
+   * 演算按**当前账本快照**进行，本轮内尚未落库的降档结果不计入压缩演算；
+   * 真实执行以落库后状态为准，二者可能不同，`coreGcFull` 的 note 如实说明。
+   */
+  dryRun?: boolean;
 }
 
 /**
@@ -282,23 +294,27 @@ export async function runForgettingCycle(
   opts: ForgettingOptions = {},
 ): Promise<ForgettingCycleReport> {
   const request_id = `req_${ulid(now)}`;
+  const dryRun = opts.dryRun === true;
+  // 批次46-2：项目隔离。缺省为空对象 → 与原先 listMemories({}) 完全等价（main.ts 调度行为不变）。
+  const listFilter: Filter = opts.projectId ? { project_id: opts.projectId } : {};
   const report: ForgettingCycleReport = {
     freshness_updated: 0, migrated: 0, summaries_created: 0, summaries_filtered: 0,
     merged_originals: 0, compressed: 0, request_id,
   };
   if (opts.enabled === false) {
-    await auditWrite(storage, request_id, 'gc', { skipped: true, reason: 'auto_policy_disabled' }, now);
+    if (!dryRun) await auditWrite(storage, request_id, 'gc', { skipped: true, reason: 'auto_policy_disabled' }, now);
     return report; // AC-14：可关闭
   }
 
-  const mems = await storage.listMemories({});
+  const mems = await storage.listMemories(listFilter);
   report.freshness_updated = mems.length;
 
   // 1) 层迁移（locked/pinned 豁免在 classifyLayer 内）
   for (const m of mems) {
     const next = classifyLayer(m, now);
     if (next && next !== m.decay_class) {
-      await storage.putMemory({ ...m, decay_class: next, version: m.version + 1 });
+      // 批次46-2：dryRun 只演算计数，不落库（计数仍诚实反映「会迁移几条」）
+      if (!dryRun) await storage.putMemory({ ...m, decay_class: next, version: m.version + 1 });
       report.migrated++;
     }
   }
@@ -309,7 +325,7 @@ export async function runForgettingCycle(
   // 分桶键必须含租户/团队/项目/类别：跨归属绝不合并（摘要继承首条归属，混组会串档），
   // buildSummary 内还有一道同归属二次校验。auto_merge=false 的类别不自动合并
   //（17.6；'cautious' 暂按不自动合并处理，需人工确认）。
-  const live = (await storage.listMemories({})).filter((m) => !m.merged_into && !m.locked);
+  const live = (await storage.listMemories(listFilter)).filter((m) => !m.merged_into && !m.locked);
   const buckets = new Map<string, Memory[]>();
   for (const m of live) {
     if (policyFor(m.category).auto_merge !== true) continue;
@@ -327,14 +343,17 @@ export async function runForgettingCycle(
         filterReasons.push(built.reason);
         continue;
       }
-      await storage.putMemory(built.summary);
-      // 批次41-B：摘要行也要进向量索引（与 memories.ts 写入路径同口径：按 content_l1 建索引）
-      if (opts.vector) {
-        await opts.vector.upsert(built.summary.mem_id, built.summary.content_l1!, {
-          project_id: built.summary.project_id, layer: 'L1',
-        });
+      // 批次46-2：dryRun 全程零写入（摘要行 / 向量索引 / 原文都不落盘），计数照常演算
+      if (!dryRun) {
+        await storage.putMemory(built.summary);
+        // 批次41-B：摘要行也要进向量索引（与 memories.ts 写入路径同口径：按 content_l1 建索引）
+        if (opts.vector) {
+          await opts.vector.upsert(built.summary.mem_id, built.summary.content_l1!, {
+            project_id: built.summary.project_id, layer: 'L1',
+          });
+        }
+        for (const o of built.originals) await storage.putMemory(o);
       }
-      for (const o of built.originals) await storage.putMemory(o);
       report.summaries_created++;
       report.merged_originals += built.originals.length;
     }
@@ -346,18 +365,22 @@ export async function runForgettingCycle(
   // 磁盘正文压缩（L0 分库 / 冷表折叠）尚未落地，此处不假装做了：见 specs/demo-data-baseline.md。
   // 只有给了 vector 后端才有可压缩对象；没后端时 compressed 诚实为 0，不拿冷层行数冒充成绩。
   if (opts.weeklyCompress && opts.vector) {
-    const colds = (await storage.listMemories({})).filter(
+    const colds = (await storage.listMemories(listFilter)).filter(
       (m) => m.decay_class === 'cold' || m.decay_class === 'archived' || m.decay_class === 'dormant',
     );
     for (const m of colds) {
       // 幂等：7 天内已压过的行不重复 remove / 不重复计数 / 不重复写回（与每周调度同频）
       if (m.compressed_at !== undefined && now - m.compressed_at < 7 * DAY) continue;
-      await opts.vector.remove(m.mem_id);
-      await storage.putMemory({ ...m, compressed_at: now, version: m.version + 1 });
+      // 批次46-2：dryRun 不清索引、不写回；无 vector 后端时整个分支不进入，compressed 诚实为 0
+      if (!dryRun) {
+        await opts.vector.remove(m.mem_id);
+        await storage.putMemory({ ...m, compressed_at: now, version: m.version + 1 });
+      }
       report.compressed++;
     }
   }
 
+  if (dryRun) return report; // 零审计：演算未落审计，不伪造回执（沿用 D5-3 口径）
   await auditWrite(storage, request_id, 'gc', {
     ...report, task: 'forgetting_cycle', weeklyCompress: opts.weeklyCompress === true,
     ...(filterReasons.length > 0 ? { summary_filter_reasons: filterReasons.slice(0, 10) } : {}),

@@ -3,7 +3,8 @@ import { isCategory } from './types.ts';
 import type {
   AuditRef, BrowseReq, BrowseResult, BrowseRow, Category, Form,
   FeedbackKind, FeedbackResult,
-  GcReq, GcReport, L0Port, LayerDecision, LlmProvider, MemOp, MemOpPatch, MemOpResult, Memory,
+  GcFullReport, GcFullReq, GcReq, GcReport, L0Port, LayerDecision, LlmProvider,
+  MemOp, MemOpPatch, MemOpResult, Memory,
   StorageBackend, VectorBackend, WriteResult,
 } from './types.ts';
 import { MemAgentError } from './errors.ts';
@@ -18,7 +19,7 @@ import {
 import { findDuplicate } from './dedup.ts';
 import { ulid } from './ulid.ts';
 import { sha256hex } from './sync.ts';
-import { classifyLayer } from './forgetting.ts';
+import { classifyLayer, runForgettingCycle } from './forgetting.ts';
 
 export {
   LAYER_SPECS, checkLayerSpec, checkLayerSpecDetailed, sanitizeL1, layerSpecOf, meaningfulLength,
@@ -587,6 +588,69 @@ export async function coreGc(
     detail: { decayed, conflicts_resolved: 0 },
   });
   return { decayed, merged: 0, conflicts_resolved: 0, request_id, audit: auditRef };
+}
+
+// ─── coreGcFull（批次46-2，方案 C 薄编排） ──────────────────────────────────────
+
+/**
+ * 完整遗忘周期编排：一次 `runForgettingCycle` 同时产出「衰减段 + 摘要合并段 + 压缩段」，
+ * 报告保留 `GcReport` 既有三项以兼容已接入 Agent，并新增契约 §7 六字段真值。
+ *
+ * 红线：
+ * - `coreGc` / `ma.gc()` **一行未改**；`runForgettingCycle` 只加可选 `projectId`/`dryRun`；
+ *   `main.ts` 每 6h 的生产调度不动。本函数是与 `ma.gc()` 并列的另一条入口，
+ *   **勿在同一次执行里同时调用**（两者都会做层迁移，会双计）。
+ * - D5：`decayed` 只是 `migrated` 的兼容别名，同一事件只出一个数。
+ * - 46-2 **未接冲突裁决**（属 46-3）：`conflicts_resolved` 诚实为 0，不拿别的数字顶替。
+ * - `dry_run=true` 全程零写入，`audit` 以真实账本判定而非按入参猜。
+ */
+export const GC_FULL_NOTE =
+  '衰减段：decayed 是 migrated 的兼容别名（同一事件只出一个数，未双计），merged 为历史占位恒 0、由 summaries_created 取代；'
+  + '摘要段：freshness_updated 实为「本轮扫描条数」而非新鲜度更新条数，scanned 为同值如实命名，'
+  + 'summaries_created/summaries_filtered/merged_originals/compressed 均来自 runForgettingCycle 真实事件，'
+  + 'compressed 只清向量索引副本、不动磁盘正文；'
+  + '裁决段：conflicts_resolved 在 46-2 恒 0（冲突裁决属 46-3，未落定不伪造）；'
+  + 'dry_run=true 按当前账本快照演算、全程零写入（不落记忆/审计/索引）且 audit=null；'
+  + '本入口与 ma.gc() 是两条独立路径，勿同时执行以免双计。';
+
+export async function coreGcFull(
+  req: GcFullReq,
+  ctx: { storage: StorageBackend; now: number },
+): Promise<GcFullReport> {
+  const projectId = (req.project_id ?? '').trim();
+  // 内核层防御性校验：不猜项目、不越界演算。MCP 层已有 McpToolError 前置校验，
+  // 这里不新增 ErrorCode 以免扩大 types.ts 错误码枚举的影响面。
+  if (!projectId) throw new Error('coreGcFull.project_id 必填且须为非空字符串');
+  const dryRun = req.dry_run === true;
+  const cycle = await runForgettingCycle(ctx.storage, ctx.now, {
+    projectId,
+    dryRun,
+    ...(req.enabled !== undefined ? { enabled: req.enabled } : {}),
+    ...(req.weeklyCompress !== undefined ? { weeklyCompress: req.weeklyCompress } : {}),
+    ...(req.vector ? { vector: req.vector } : {}),
+  });
+  // 以真实账本判定审计是否落盘，不按入参猜（沿用 D5-3「以内核真实回执判断」口径）
+  const audits = await ctx.storage.queryAudit({ request_id: cycle.request_id });
+  const audit: AuditRef | null = audits.length > 0
+    ? { request_id: cycle.request_id, action: 'gc' }
+    : null;
+  return {
+    project_id: projectId,
+    dry_run: dryRun,
+    request_id: cycle.request_id,
+    decayed: cycle.migrated,           // D5：兼容别名，不双计
+    merged: 0,                         // 历史占位，由 summaries_created 取代
+    conflicts_resolved: 0,             // 46-2 未接裁决，未落定诚实为 0
+    freshness_updated: cycle.freshness_updated,
+    scanned: cycle.freshness_updated,  // D4：如实命名
+    migrated: cycle.migrated,
+    summaries_created: cycle.summaries_created,
+    summaries_filtered: cycle.summaries_filtered,
+    merged_originals: cycle.merged_originals,
+    compressed: cycle.compressed,
+    audit,
+    note: GC_FULL_NOTE,
+  };
 }
 
 // ─── coreMemoryOp ──────────────────────────────────────────────────────────────

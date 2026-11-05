@@ -1,7 +1,7 @@
 // createMemAgent（§1 入口）：内核装配 + 9 核心API + 全动作审计（§3.2）
 import { MemAgentError } from './errors.ts';
 import { routeProxy } from './llm.ts';
-import { coreBrowse, coreFeedback, coreGc, coreMemoryOp, coreWrite } from './memories.ts';
+import { coreBrowse, coreFeedback, coreGc, coreGcFull, coreMemoryOp, coreWrite } from './memories.ts';
 import { MemoryPendingStore, PendingWrites, type WriteKnobs } from './pendingWrites.ts';
 import { hardFilter, scoreMemory } from './forgetting.ts';
 import {
@@ -11,7 +11,8 @@ import { cosine, embedSync, DEFAULT_VECTOR_DIM } from './vector.ts';
 import type { L0BlobStore } from './l0Store.ts';
 import { ulid } from './ulid.ts';
 import type {
-  AuditRecord, BrowseResult, DiscoverReq, DiscoverResult, DiscoverSignal, FeedbackKind, FeedbackResult, Form, GcReq, GcReport,
+  AuditRecord, BrowseResult, DiscoverReq, DiscoverResult, DiscoverSignal, FeedbackKind, FeedbackResult, Form,
+  GcFullReport, GcFullReq, GcReq, GcReport,
   Hit, L0AccessRequest, L0AccessRequestResult, L0AdminPort, L0GrantReq, L0GrantResult, L0GrantView, L0HeartbeatResult,
   L0MigrationResult, L0RequestView, L0UnlockReq, L0UnlockResult, L0VaultStatus,
   LogItem, LogPage, LogReq, MemAgent, MemAgentOptions, MemAgentSeedHooks, MemOp, MemOpPatch, MemOpResult, MemReq, Memory, Pref, RecallReq,
@@ -336,6 +337,14 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
     return coreGc(req, { storage, request_id, now: Date.now() });
   }
 
+  /**
+   * 批次46-2：完整遗忘周期（项目隔离 / dry_run / 六字段真值）。
+   * 与 gc() 并列、不共用同一轮执行；request_id 由 runForgettingCycle 自己生成并写进 gc 审计。
+   */
+  async function gcFull(req: GcFullReq): Promise<GcFullReport> {
+    return coreGcFull(req, { storage, now: Date.now() });
+  }
+
   async function getPrefs(user_id: string): Promise<Pref[]> {
     // 19.4：user_id 级跨 Agent 偏好（contract 级从存储读 preference 类）
     const mems = await storage.listMemories({});
@@ -516,7 +525,7 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
   }
 
   return {
-    recall, write, gc, getPrefs, discover, sync, browse, logs, unbind,
+    recall, write, gc, gcFull, getPrefs, discover, sync, browse, logs, unbind,
     l0RequestAccess, l0ListRequests, l0ListGrants, l0GrantAccess, l0DenyRequest, l0RevokeGrant,
     l0Unlock, l0Heartbeat, l0Lock, l0UnlockWrite, l0LockWrite, l0Status,
     l0SetupAdminPassword, l0ChangeAdminPassword, l0Migrate,

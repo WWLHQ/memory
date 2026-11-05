@@ -40,14 +40,14 @@
 
 | 文件 | 行数 | 摘要 | 导出 |
 |---|---|---|---|
-| [src/core/memagent/agent.ts](src/core/memagent/agent.ts) | 531 | createMemAgent（§1 入口）：内核装配 + 9 核心API + 全动作审计（§3.2） | createMemAgent(fn) |
+| [src/core/memagent/agent.ts](src/core/memagent/agent.ts) | 540 | createMemAgent（§1 入口）：内核装配 + 9 核心API + 全动作审计（§3.2） | createMemAgent(fn) |
 | [src/core/memagent/auditLog.ts](src/core/memagent/auditLog.ts) | 392 | 内核审计账本（批次41-A）：从 memories.db.json 里搬出来，独立成追加式 JSONL。 | AUDIT_FILE_NAME(const), AUDIT_ACTIVE_MAX_BYTES(const), AuditLogCorruptError(class), AuditLogLockedError(class), FileAuditLog(class), AuditFilter(type), AuditLogStats(type), FileAuditLogOptions(type) |
 | [src/core/memagent/crypto.ts](src/core/memagent/crypto.ts) | 330 | L0 加密层（§4.1）：AES-256-GCM + PBKDF2 派生密钥。 | encryptL0(fn), parseL0Envelope(fn), decryptL0(fn), randomBytes(fn), generateDek(fn), newWrapSalt(fn), deriveKek(fn), wrapSecret(fn), unwrapSecret(fn), encryptL0WithKey(fn), parseL0EnvelopeV2(fn), decryptL0WithKey(fn), L0_KEK_ITER(const), L0_DEK_BYTES(const), MASK(const), L0_KEY_BYTES(const), L0Envelope(type), L0EnvelopeV2(type), L0Wrap(type) |
 | [src/core/memagent/dedup.ts](src/core/memagent/dedup.ts) | 192 | 五维查重（§6.1）：语义 35% / 关键词 20% / 实体 15% / 结构 10% / LLM 仲裁 20%。 | layerText(fn), keywordSet(fn), entitySet(fn), structuralSimilarity(fn), baseDimensionScores(fn), fourDimScore(fn), fiveDimScore(fn), findDuplicate(fn), JUDGE_TOP_N(const), DimensionScores(type), DedupEvaluation(type), DedupOutcome(type), DedupOptions(type) |
 | [src/core/memagent/errors.ts](src/core/memagent/errors.ts) | 32 | memagent-core 错误码（§6，各端统一处理） | isL0LockedError(fn), isL0LockedText(fn), MemAgentError(class) |
 | [src/core/memagent/fieldBackfill.ts](src/core/memagent/fieldBackfill.ts) | 242 | 存量「补齐缺失的 sha256 与向量」（批次41-T）：批次41-B 之后新写的每一行都带这两个字段， | scanRowsForBackfill(fn), backfillMissingFields(fn), BackfillDecision(type), BackfillPreview(type), BackfillReport(type), BackfillCtx(type), BackfillSkipCode(type) |
 | [src/core/memagent/fileStorage.ts](src/core/memagent/fileStorage.ts) | 536 | FileStorage（§5.3）：桌面/CLI 本地库 = P0 主源（零依赖，纯文件系统，无 node:sqlite）。 | StorageCorruptError(class), StorageLockedError(class), FileStorage(class), CorruptionNotice(type), FileStorageOptions(type) |
-| [src/core/memagent/forgetting.ts](src/core/memagent/forgetting.ts) | 377 | REQ-010 遗忘机制后台任务（17.4–17.11）：新鲜度/打分/层迁移/合并摘要/周期任务 | policyFor(fn), freshnessOf(fn), scoreMemory(fn), hardFilter(fn), classifyLayer(fn), forgetOne(fn), restoreOne(fn), reinforceOne(fn), buildSummary(fn), clusterSimilar(fn), runForgettingCycle(fn), SCORE_WEIGHTS(const), MERGE_SIM_THRESHOLD(const), ForgettingPolicy(type), ForgettingCycleReport(type), ForgettingOptions(type), SummaryBuildResult(type) |
+| [src/core/memagent/forgetting.ts](src/core/memagent/forgetting.ts) | 400 | REQ-010 遗忘机制后台任务（17.4–17.11）：新鲜度/打分/层迁移/合并摘要/周期任务 | policyFor(fn), freshnessOf(fn), scoreMemory(fn), hardFilter(fn), classifyLayer(fn), forgetOne(fn), restoreOne(fn), reinforceOne(fn), buildSummary(fn), clusterSimilar(fn), runForgettingCycle(fn), SCORE_WEIGHTS(const), MERGE_SIM_THRESHOLD(const), ForgettingPolicy(type), ForgettingCycleReport(type), ForgettingOptions(type), SummaryBuildResult(type) |
 | [src/core/memagent/l0Recovery.ts](src/core/memagent/l0Recovery.ts) | 123 | L0 恢复码（批次37-G）：管理密码忘了还能把 L0 原数据库捞回来的唯一通道。 | generateRecoveryCode(fn), formatRecoveryCode(fn), normalizeRecoveryCode(fn), wrapDekWithRecovery(fn), unwrapDekWithRecovery(fn), createKeyringSecrets(fn), keyringFingerprint(fn), buildRecoveryCard(fn), RECOVERY_CODE_BYTES(const), RECOVERY_BAD_CODE(const), RecoveryCardInput(type) |
 | [src/core/memagent/l0Split.ts](src/core/memagent/l0Split.ts) | 259 | 存量拆分迁移（批次37-C）：把「还躺在记忆库行上」的 L0 原文搬进独立的 L0 原数据库。 | scanLedgerForSplit(fn), splitLedger(fn), SplitDecision(type), SplitPreview(type), SplitReport(type), SplitCtx(type) |
 | [src/core/memagent/l0Store.ts](src/core/memagent/l0Store.ts) | 375 | L0 原数据库（批次37）：把每条记忆的 L0 密文从「记忆库」里搬出来，单独落一个文件。 | isSealedL0(fn), L0NotSealedError(class), L0StoreLockedError(class), L0StoreCorruptError(class), FileL0BlobStore(class), InMemoryL0BlobStore(class), L0Blob(type), L0BlobStore(type), FileL0BlobStoreOptions(type) |
@@ -64,7 +64,7 @@
 | [src/core/memagent/mcpReadTools.ts](src/core/memagent/mcpReadTools.ts) | 160 | MCP 读工具编排（批次44-D5-1）：list_memories / get_memory。 | toMemoryView(fn), runListMemoriesTool(fn), runGetMemoryTool(fn), MemoryView(type), ListMemoriesResult(type), GetMemoryResult(type) |
 | [src/core/memagent/mcpRecall.ts](src/core/memagent/mcpRecall.ts) | 269 | MCP 召回工具编排（批次11/13/29/32/33）：项目自动定位 / 列表 / 提示行与明细组装 / 按客户端能力选档位。 | clientSupportsHtmlDetails(fn), projectInfosFromMemories(fn), resolveProjectId(fn), runRecallTool(fn), recallDisplayMode(fn), runListProjectsTool(fn), McpToolError(class), ProjectInfo(type), ResolvedProject(type), RecallToolPayload(type), RecallDetailTicketsPort(type), RecallToolDetailOpts(type), RecallToolOutput(type), RecallDisplayMode(type) |
 | [src/core/memagent/mcpSchema.ts](src/core/memagent/mcpSchema.ts) | 165 | MCP 工具清单与初始化指令（批次11/12/13）：HTTP(8204) 与 TCP(8202) 共用同一份 schema/instructions， | MCP_INSTRUCTIONS(const), MCP_TOOLS(const) |
-| [src/core/memagent/memories.ts](src/core/memagent/memories.ts) | 732 | 内核记忆业务（§3 schema + 行为红线）：write 逐层生成/查重/分支嫁接 / browse L0 授权 / gc 衰减 / memoryOp 17.3 操作 | layerSpecsFrom(fn), buildL6Input(fn), makeLayerGenerator(fn), parseWriteKnobs(fn), coreWrite(fn), coreBrowse(fn), coreGc(fn), coreMemoryOp(fn), coreFeedback(fn), WriteInput(type), WriteCtx(type) |
+| [src/core/memagent/memories.ts](src/core/memagent/memories.ts) | 796 | 内核记忆业务（§3 schema + 行为红线）：write 逐层生成/查重/分支嫁接 / browse L0 授权 / gc 衰减 / memoryOp 17.3 操作 | layerSpecsFrom(fn), buildL6Input(fn), makeLayerGenerator(fn), parseWriteKnobs(fn), coreWrite(fn), coreBrowse(fn), coreGc(fn), coreGcFull(fn), coreMemoryOp(fn), coreFeedback(fn), GC_FULL_NOTE(const), WriteInput(type), WriteCtx(type) |
 | [src/core/memagent/paramsSnapshot.ts](src/core/memagent/paramsSnapshot.ts) | 38 | 全局参数快照（params:v1: preference 记忆）的共享读取口。 | parseParamsSnapshot(fn), findParamsSnapshot(fn), autoOrganizeEnabled(fn), PARAMS_PREF_PREFIX(const), ParamsSnapshot(type) |
 | [src/core/memagent/pendingStoreFile.ts](src/core/memagent/pendingStoreFile.ts) | 57 | 文件落盘实现（node-only）：pending 队列持久化到 <dir>/pending-<id>.json。 | FilePendingStore(class) |
 | [src/core/memagent/pendingWrites.ts](src/core/memagent/pendingWrites.ts) | 96 | 落盘兜底队列（A3 §4.4.4 / 批次44-D4） | MemoryPendingStore(class), PendingWrites(class), PendingWrite(type), PendingStore(type), WriteKnobs(type) |
@@ -80,7 +80,7 @@
 | [src/core/memagent/sqliteStorage.ts](src/core/memagent/sqliteStorage.ts) | 131 | SqliteStorage（§5.3）：桌面/CLI 本地库 = P0 主源（需求规格书 §2 端壳注入、§5.3 存储端点表）。 | SqliteStorage(class) |
 | [src/core/memagent/storage.ts](src/core/memagent/storage.ts) | 91 | StorageBackend 接口实现（§5.3）：InMemoryStorage 用于测试/演示； | InMemoryStorage(class) |
 | [src/core/memagent/sync.ts](src/core/memagent/sync.ts) | 371 | REQ-008 云同步（同步机制详细设计 §1–§8）：sha256 幂等 + 向量时钟 LWW + SyncHub 中枢 + 三端引擎 | sha256hex(fn), vcCompare(fn), vcTick(fn), stampForSync(fn), syncUp(fn), syncDown(fn), reconcile(fn), filterSyncAudits(fn), SyncHub(class), SyncConflict(type), SyncAudit(type), SyncUpReport(type), VClock(type), PushOutcome(type), AnySyncHub(type) |
-| [src/core/memagent/types.ts](src/core/memagent/types.ts) | 763 | memagent-core 契约类型（REQ-007 §1/§2/§3/§5/§6 直译，19.10/19.11） | isCategory(fn), CATEGORIES(const), Account(type), RefinedLayers(type), RecallReq(type), Hit(type), Budget(type), RecallBackgroundItem(type), RecallBackground(type), RecallSavings(type), RecallResult(type), MemReq(type), WriteResult(type), LayerDecision(type), GcReq(type), GcReport(type), Pref(type), DiscoverReq(type), DiscoveredAgent(type), DiscoverResult(type), SyncReq(type), SyncReport(type), BrowseReq(type), BrowseRow(type), BrowseResult(type), L0Port(type), L0AccessRequest(type), L0AccessRequestResult(type), L0GrantReq(type), L0GrantView(type), L0GrantResult(type), L0RequestView(type), L0UnlockReq(type), L0UnlockResult(type), L0HeartbeatResult(type), L0VaultStatus(type), L0MigrationReport(type), L0MigrationResult(type), L0AdminPort(type), LogReq(type), LogItem(type), LogPage(type), AuditRef(type), AuditRecord(type), Memory(type), MemOpPatch(type), MemOpResult(type), FeedbackResult(type), ModelInfo(type), LlmCallCtx(type), LlmResp(type), LlmProvider(type), Filter(type), Scored(type), VectorBackend(type), StorageBackend(type), MemAgentOptions(type), MemAgent(type), MemAgentSeedHooks(type), Form(type), Layer(type), DecayClass(type), Category(type), RecallMode(type), Scene(type), ErrorCode(type), DiscoverSignal(type), L0GrantStatus(type), AuditAction(type), MemOp(type), FeedbackKind(type) |
+| [src/core/memagent/types.ts](src/core/memagent/types.ts) | 813 | memagent-core 契约类型（REQ-007 §1/§2/§3/§5/§6 直译，19.10/19.11） | isCategory(fn), CATEGORIES(const), Account(type), RefinedLayers(type), RecallReq(type), Hit(type), Budget(type), RecallBackgroundItem(type), RecallBackground(type), RecallSavings(type), RecallResult(type), MemReq(type), WriteResult(type), LayerDecision(type), GcReq(type), GcReport(type), GcFullReq(type), GcFullReport(type), Pref(type), DiscoverReq(type), DiscoveredAgent(type), DiscoverResult(type), SyncReq(type), SyncReport(type), BrowseReq(type), BrowseRow(type), BrowseResult(type), L0Port(type), L0AccessRequest(type), L0AccessRequestResult(type), L0GrantReq(type), L0GrantView(type), L0GrantResult(type), L0RequestView(type), L0UnlockReq(type), L0UnlockResult(type), L0HeartbeatResult(type), L0VaultStatus(type), L0MigrationReport(type), L0MigrationResult(type), L0AdminPort(type), LogReq(type), LogItem(type), LogPage(type), AuditRef(type), AuditRecord(type), Memory(type), MemOpPatch(type), MemOpResult(type), FeedbackResult(type), ModelInfo(type), LlmCallCtx(type), LlmResp(type), LlmProvider(type), Filter(type), Scored(type), VectorBackend(type), StorageBackend(type), MemAgentOptions(type), MemAgent(type), MemAgentSeedHooks(type), Form(type), Layer(type), DecayClass(type), Category(type), RecallMode(type), Scene(type), ErrorCode(type), DiscoverSignal(type), L0GrantStatus(type), AuditAction(type), MemOp(type), FeedbackKind(type) |
 | [src/core/memagent/ulid.ts](src/core/memagent/ulid.ts) | 47 | 简易 ULID：48bit 时间戳 + 80bit 随机（crypto 级），同毫秒内单调递增（契约 §3.1） | ulid(fn) |
 | [src/core/memagent/vector.ts](src/core/memagent/vector.ts) | 92 | VectorBackend（§5.2）当前唯一生产实现：JsVectorBackend（hash bag-of-words + cosine）。 | tokenize(fn), embedSync(fn), cosine(fn), DEFAULT_VECTOR_DIM(const), JsVectorBackend(class) |
 | [src/core/memagent/webhook.ts](src/core/memagent/webhook.ts) | 202 | Webhook 接收端（§19.3 主通道 / §5.4 SHA-256 幂等保真） | createWebhook(fn), HashIndex(class), IngestEvent(type), IngestResult(type), WebhookOptions(type), WebhookServer(type) |
@@ -399,14 +399,14 @@ src/agentOnboard/stateMachine.ts 8959634e14b2
 src/agentOnboard/validators.ts a7372fc705a7
 src/auth/hash.ts 3919b27befef
 src/auth/loginService.ts a0cc1ede21f9
-src/core/memagent/agent.ts 24dd84b7e586
+src/core/memagent/agent.ts 40b5a2de1e90
 src/core/memagent/auditLog.ts 307fbb57f262
 src/core/memagent/crypto.ts 6e5f2f4845bb
 src/core/memagent/dedup.ts 7035020d489f
 src/core/memagent/errors.ts 4f68fde40b23
 src/core/memagent/fieldBackfill.ts 23a377e0c190
 src/core/memagent/fileStorage.ts 35c4b0f65a0d
-src/core/memagent/forgetting.ts aa19f18ac07b
+src/core/memagent/forgetting.ts 33e9fd9fb8c0
 src/core/memagent/l0Recovery.ts c76af3edf9b2
 src/core/memagent/l0Split.ts 741edeb20acf
 src/core/memagent/l0Store.ts 34cc6bd091a6
@@ -423,7 +423,7 @@ src/core/memagent/mcpManageTools.ts ae7e7d2e884a
 src/core/memagent/mcpReadTools.ts 6ba2d8e228b7
 src/core/memagent/mcpRecall.ts 673a07c9b432
 src/core/memagent/mcpSchema.ts dbbf302231a2
-src/core/memagent/memories.ts c2f2b5a7a933
+src/core/memagent/memories.ts 7e2d8ad53f64
 src/core/memagent/paramsSnapshot.ts f819e011fbd7
 src/core/memagent/pendingStoreFile.ts 67a02b1b7648
 src/core/memagent/pendingWrites.ts c961e240a28b
@@ -439,7 +439,7 @@ src/core/memagent/sessionCollector.ts 54d49e1d4722
 src/core/memagent/sqliteStorage.ts 0c0c891d84cc
 src/core/memagent/storage.ts 88cdd05e7b35
 src/core/memagent/sync.ts ffdeb7ae3aea
-src/core/memagent/types.ts 35672e3c1ffc
+src/core/memagent/types.ts 86e53856fc4a
 src/core/memagent/ulid.ts 634c99f1962a
 src/core/memagent/vector.ts 80221de2d059
 src/core/memagent/webhook.ts deae36bbc0ca

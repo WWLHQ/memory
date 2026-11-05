@@ -217,6 +217,51 @@ export interface GcReport {
   audit: AuditRef | null;
 }
 
+/**
+ * 批次46-2（方案 C 薄编排）：完整遗忘周期编排 `coreGcFull()` 的输入。
+ * `coreGc` / `ma.gc()` 一行未改；这是与它们并列的另一条入口，勿在同一次执行里同时调用。
+ */
+export interface GcFullReq extends GcReq {
+  /** 是否执行冷压缩（17.10 每周）；缺省 false = 不动向量索引 */
+  weeklyCompress?: boolean;
+  /** 向量后端：给了才有可压缩对象 / 摘要索引；缺省 = 诚实不压缩 */
+  vector?: VectorBackend;
+  /** 自动策略开关（AC-14），透传 runForgettingCycle；缺省 = 启用 */
+  enabled?: boolean;
+}
+
+/**
+ * 批次46-2：分层报告。三段数字来自同一次 runForgettingCycle 调用，禁止双计。
+ * D6：保留 GcReport 既有三项 + 新增六项真实字段，不删字段、不重命名既有字段。
+ */
+export interface GcFullReport {
+  project_id: string;
+  dry_run: boolean;
+  request_id: string;
+  // ── 衰减段（兼容 GcReport 既有三项，不删、不改名）──
+  /** = migrated 的兼容别名（D5：同一事件只出一个数，严禁双计） */
+  decayed: number;
+  /** 历史占位恒 0；由 summaries_created 取代，deprecated，不冒充统计 */
+  merged: number;
+  /** 46-2 仍恒 0：冲突裁决属 46-3，未落定不伪造计数 */
+  conflicts_resolved: number;
+  // ── 摘要合并段（契约 §7 六字段，均有真实事件源）──
+  /** 诚实语义 = 本轮扫描条数，**不是**「新鲜度更新条数」（D4）；另见 scanned */
+  freshness_updated: number;
+  /** 如实命名，恒等于 freshness_updated（D4） */
+  scanned: number;
+  migrated: number;
+  summaries_created: number;
+  summaries_filtered: number;
+  merged_originals: number;
+  /** 真清掉向量索引副本并写回的冷层行数（无 vector 后端诚实 0） */
+  compressed: number;
+  /** dry_run=true 恒 null：演算未落审计，不伪造回执（沿用 D5-3 口径） */
+  audit: AuditRef | null;
+  /** 分层口径说明（D6），不是统计量 */
+  note: string;
+}
+
 /** ---------- 偏好（19.4） ---------- */
 export interface Pref {
   user_id: string;
@@ -707,6 +752,11 @@ export interface MemAgent {
   recall(req: RecallReq): Promise<RecallResult>;
   write(req: MemReq): Promise<WriteResult>;
   gc(req: GcReq): Promise<GcReport>;
+  /**
+   * 批次46-2：完整遗忘周期（项目隔离 / dry_run / 六字段真值）。
+   * 与 gc() 是两条独立入口，**勿在同一次执行里同时调用**（两者都会做层迁移，会双计）。
+   */
+  gcFull(req: GcFullReq): Promise<GcFullReport>;
   getPrefs(user_id: string): Promise<Pref[]>;
   discover(req: DiscoverReq): Promise<DiscoverResult>;
   sync(req: SyncReq): Promise<SyncReport>;
