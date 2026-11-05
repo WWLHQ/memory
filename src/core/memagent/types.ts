@@ -773,12 +773,47 @@ export interface VectorBackend {
   remove(mem_id: string): Promise<void>;
 }
 
+// ── 批次46-D6：项目注册表（多用户三池 / create_project 基础）──
+/** 项目池类型：shared=全员可见 / user=每用户私有（owner_user_id 必填）/ archive=归档隐藏池 / general=普通受管项目 */
+export type ProjectKind = 'shared' | 'user' | 'archive' | 'general';
+
+export interface ProjectRecord {
+  project_id: string;
+  kind: ProjectKind;
+  /** kind='user' 时必有：该池归属的用户 ID；shared/archive 可为空 */
+  owner_user_id?: string;
+  display_name?: string;
+  created_at: number;
+  /** 创建者标识（admin 令牌 label / user_id / 'system'） */
+  created_by: string;
+}
+
+export interface CreateProjectInput {
+  project_id: string;
+  kind?: ProjectKind;
+  owner_user_id?: string;
+  display_name?: string;
+  created_by: string;
+}
+
+export interface ListProjectsFilter {
+  kind?: ProjectKind;
+  owner_user_id?: string;
+}
+
 export interface StorageBackend {
   /** 记忆主表 */
   putMemory(m: Memory): Promise<void>;
   getMemory(mem_id: string): Promise<Memory | null>;
   listMemories(filter: Filter): Promise<Memory[]>;
   deleteMemory(mem_id: string): Promise<void>;
+  // ── 批次46-D6：项目注册表（多用户三池基础）──
+  /** 创建/登记一个受管项目（幂等：已存在同名 project_id 显式拒绝）；命名规则由上层（create_project 工具）约束，本层只做存在性校验 */
+  createProject(input: CreateProjectInput): Promise<ProjectRecord>;
+  /** 取单个项目注册记录；未登记返回 null（隐式项目由上层按需兜底） */
+  getProject(project_id: string): Promise<ProjectRecord | null>;
+  /** 列出受管项目（可按 kind / owner_user_id 过滤）；不含隐式项目（由上层 list_projects 工具合并） */
+  listProjects(filter?: ListProjectsFilter): Promise<ProjectRecord[]>;
   /** 审计（append-only） */
   appendAudit(a: AuditRecord): Promise<void>;
   queryAudit(filter: { request_id?: string; action?: AuditAction; since?: number }): Promise<AuditRecord[]>;

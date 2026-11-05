@@ -21,6 +21,7 @@ const DEDUPE_TTL_MS = 10_000;
 export type HostMethod =
   | 'storage:putMemory' | 'storage:getMemory' | 'storage:listMemories'
   | 'storage:deleteMemory' | 'storage:appendAudit' | 'storage:queryAudit'
+  | 'storage:createProject' | 'storage:getProject' | 'storage:listProjects'
   | 'storage:location'
   | 'storage:openMemoryFile'
   | 'hostScan:run'
@@ -67,6 +68,9 @@ const CHANNEL_TO_NATIVE: Record<HostMethod, [string, string]> = {
   'storage:deleteMemory': ['storage', 'deleteMemory'],
   'storage:appendAudit': ['storage', 'appendAudit'],
   'storage:queryAudit': ['storage', 'queryAudit'],
+  'storage:createProject': ['storage', 'createProject'],
+  'storage:getProject': ['storage', 'getProject'],
+  'storage:listProjects': ['storage', 'listProjects'],
   'storage:location': ['storage', 'location'],
   'storage:openMemoryFile': ['storage', 'openMemoryFile'],
   'hostScan:run': ['hostScan', 'run'],

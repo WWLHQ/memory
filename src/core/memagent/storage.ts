@@ -1,6 +1,6 @@
 // StorageBackend 接口实现（§5.3）：InMemoryStorage 用于测试/演示；
 // FileStorage（fileStorage.ts，桌面/CLI 本地库 = P0 主源）/ ServerStorage / SystemStorage 为各端实现（接口同构）。
-import type { AuditAction, AuditRecord, Filter, Memory, StorageBackend } from './types.ts';
+import type { AuditAction, AuditRecord, CreateProjectInput, Filter, ListProjectsFilter, Memory, ProjectRecord, StorageBackend } from './types.ts';
 import { IpcStorageBackend } from '../../desktop/ipcStorage.ts';
 import { hostCall, hostCapability } from '../../desktop/hostBridge.ts';
 
@@ -14,11 +14,16 @@ class HostBridgeStorage implements StorageBackend {
   queryAudit(filter: { request_id?: string; action?: AuditAction; since?: number }): Promise<AuditRecord[]> {
     return hostCall<AuditRecord[]>('storage:queryAudit', [filter]);
   }
+  // ── 批次46-D6：项目注册表（渲染→主进程转发）──
+  createProject(input: CreateProjectInput): Promise<ProjectRecord> { return hostCall<ProjectRecord>('storage:createProject', [input]); }
+  getProject(project_id: string): Promise<ProjectRecord | null> { return hostCall<ProjectRecord | null>('storage:getProject', [project_id]); }
+  listProjects(filter?: ListProjectsFilter): Promise<ProjectRecord[]> { return hostCall<ProjectRecord[]>('storage:listProjects', [filter]); }
 }
 
 export class InMemoryStorage implements StorageBackend {
   private mems = new Map<string, Memory>();
   private audits: AuditRecord[] = [];
+  private projects = new Map<string, ProjectRecord>();
 
   /** 批量写入模式：内存后端本就零 IO，no-op（接口对齐，FileStorage 才真正延迟写盘）。 */
   beginBatch(): void { /* no-op */ }
@@ -62,6 +67,34 @@ export class InMemoryStorage implements StorageBackend {
 
   async deleteMemory(mem_id: string): Promise<void> {
     this.mems.delete(mem_id);
+  }
+
+  // ── 批次46-D6：项目注册表（内存实现）──
+  async createProject(input: CreateProjectInput): Promise<ProjectRecord> {
+    const project_id = input.project_id.trim();
+    if (!project_id) throw new Error('createProject.project_id 不能为空');
+    if (this.projects.has(project_id)) throw new Error(`项目已存在：${project_id}`);
+    const rec: ProjectRecord = {
+      project_id,
+      kind: input.kind ?? 'general',
+      owner_user_id: input.owner_user_id,
+      display_name: input.display_name,
+      created_at: Date.now(),
+      created_by: input.created_by,
+    };
+    this.projects.set(project_id, rec);
+    return rec;
+  }
+
+  async getProject(project_id: string): Promise<ProjectRecord | null> {
+    return this.projects.get(project_id) ?? null;
+  }
+
+  async listProjects(filter?: ListProjectsFilter): Promise<ProjectRecord[]> {
+    let recs = [...this.projects.values()];
+    if (filter?.kind) recs = recs.filter((p) => p.kind === filter.kind);
+    if (filter?.owner_user_id) recs = recs.filter((p) => p.owner_user_id === filter.owner_user_id);
+    return recs;
   }
 
   async appendAudit(a: AuditRecord): Promise<void> {

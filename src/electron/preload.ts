@@ -26,6 +26,10 @@ const storage = {
   deleteMemory: (id: string) => ipcRenderer.invoke(IPC.storageDeleteMemory, id, sidArg()),
   appendAudit: (a: unknown) => ipcRenderer.invoke(IPC.storageAppendAudit, a, sidArg()),
   queryAudit: (f: unknown) => ipcRenderer.invoke(IPC.storageQueryAudit, f),
+  // ── 批次46-D6：项目注册表（多用户三池基础）──
+  createProject: (input: unknown) => ipcRenderer.invoke(IPC.storageCreateProject, input),
+  getProject: (id: string) => ipcRenderer.invoke(IPC.storageGetProject, id),
+  listProjects: (f: unknown) => ipcRenderer.invoke(IPC.storageListProjects, f),
   /** 账本位置：渲染层展示「记忆存储在哪」（真实路径） */
   location: () => ipcRenderer.invoke(IPC.storageLocation) as Promise<{ path: string; source: string }>,
   /** 打开单条记忆文件：导出为 .json 并在默认查看器中打开（真实落盘 userData/memories-export/） */

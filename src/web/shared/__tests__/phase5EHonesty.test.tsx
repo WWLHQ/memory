@@ -40,6 +40,10 @@ function fakeStorage(audits: AuditRecord[]): StorageBackend {
     deleteMemory: async () => {},
     appendAudit: async () => {},
     queryAudit: async () => audits,
+    // ── 批次46-D6：项目注册表（本测试不覆盖，给占位实现以满足 StorageBackend 契约）──
+    createProject: async () => ({ project_id: 'x', kind: 'general', created_at: 0, created_by: 'u' }),
+    getProject: async () => null,
+    listProjects: async () => [],
   };
 }
 

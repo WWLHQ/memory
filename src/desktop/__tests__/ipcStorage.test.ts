@@ -1,11 +1,12 @@
 // IpcStorageBackend 验收：6 方法纯转发到注入的 StorageIpc，参数/返回值透传无误（§5.3 桌面桥接）。
 import { describe, it, expect, vi } from 'vitest';
 import { IpcStorageBackend, type StorageIpc } from '../ipcStorage.ts';
-import type { AuditRecord, Memory } from '../../core/memagent/types.ts';
+import type { AuditRecord, Memory, ProjectRecord } from '../../core/memagent/types.ts';
 
 function fakeIpc(): StorageIpc {
   const mem: Memory = { mem_id: 'm1', project_id: 'P1' } as Memory;
   const audit: AuditRecord = { request_id: 'r1', action: 'write', ts: 1, detail: {} } as AuditRecord;
+  const project: ProjectRecord = { project_id: 'P1', kind: 'general', created_at: 1, created_by: 'u' };
   return {
     putMemory: vi.fn(async () => {}),
     getMemory: vi.fn(async () => mem),
@@ -13,6 +14,10 @@ function fakeIpc(): StorageIpc {
     deleteMemory: vi.fn(async () => {}),
     appendAudit: vi.fn(async () => {}),
     queryAudit: vi.fn(async () => [audit]),
+    // ── 批次46-D6：项目注册表转发 ──
+    createProject: vi.fn(async () => project),
+    getProject: vi.fn(async () => null),
+    listProjects: vi.fn(async () => [project]),
   };
 }
 
@@ -47,5 +52,19 @@ describe('IpcStorageBackend 转发', () => {
     const q = { action: 'write' as const };
     await b.queryAudit(q);
     expect(ipc.queryAudit).toHaveBeenCalledWith(q);
+  });
+
+  it('批次46-D6：createProject / getProject / listProjects 均透传', async () => {
+    const ipc = fakeIpc();
+    const b = new IpcStorageBackend(ipc);
+    const input = { project_id: 'P-new', created_by: 'u-admin' } as const;
+    const created = await b.createProject(input);
+    expect(ipc.createProject).toHaveBeenCalledWith(input);
+    expect(created.project_id).toBe('P-new');
+    await b.getProject('P-x');
+    expect(ipc.getProject).toHaveBeenCalledWith('P-x');
+    const filter = { kind: 'shared' as const };
+    await b.listProjects(filter);
+    expect(ipc.listProjects).toHaveBeenCalledWith(filter);
   });
 });

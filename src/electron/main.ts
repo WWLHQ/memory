@@ -1971,6 +1971,10 @@ async function registerStorageIpc(): Promise<void> {
     return storage.appendAudit(a as Parameters<typeof storage.appendAudit>[0]);
   });
   handleIpc(IPC.storageQueryAudit, (_e, f) => storage.queryAudit(f as Parameters<typeof storage.queryAudit>[0]));
+  // ── 批次46-D6：项目注册表（多用户三池基础）──
+  handleIpc(IPC.storageCreateProject, (_e, input) => storage.createProject(input as Parameters<typeof storage.createProject>[0]));
+  handleIpc(IPC.storageGetProject, (_e, id) => storage.getProject(id as string));
+  handleIpc(IPC.storageListProjects, (_e, f) => storage.listProjects(f as Parameters<typeof storage.listProjects>[0]));
   handleIpc(IPC.storageOpenMemoryFile, async (_e, memId: string) => {
     try {
       // 记忆 ID 仅允许安全字符（防路径穿越：memId 直接进导出文件名）

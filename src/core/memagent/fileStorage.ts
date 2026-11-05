@@ -13,12 +13,14 @@ import type { L0BlobStore } from './l0Store.ts';
 import { isSealedL0 } from './l0Store.ts';
 import type { AuditLogStats } from './auditLog.ts';
 import { AUDIT_FILE_NAME, AuditLogCorruptError, FileAuditLog } from './auditLog.ts';
-import type { AuditAction, AuditRecord, Filter, Memory, StorageBackend } from './types.ts';
+import type { AuditAction, AuditRecord, CreateProjectInput, Filter, ListProjectsFilter, Memory, ProjectRecord, StorageBackend } from './types.ts';
 
 interface FileDoc {
   memories: Record<string, Memory>;
   /** 历史字段（批次41-A 之前审计写在这里）：读到非空即一次性迁进 audit.jsonl，迁移后恒为空数组 */
   audit: AuditRecord[];
+  /** 批次46-D6：项目注册表（多用户三池基础）；缺省 {} 向后兼容旧库 */
+  projects: Record<string, ProjectRecord>;
 }
 
 /** 损坏隔离通知（D3）：首次损坏时落 sidecar，端壳下次启动消费并提示，避免"静默空库" */
@@ -284,7 +286,7 @@ export class FileStorage implements StorageBackend {
     try {
       raw = readFileSync(this.dbPath, 'utf8');
     } catch (e) {
-      if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { memories: {}, audit: [] };
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { memories: {}, audit: [], projects: {} };
       this.writeCorruptionNotice(null, e);
       throw new StorageCorruptError(this.dbPath, null, e);
     }
@@ -296,7 +298,10 @@ export class FileStorage implements StorageBackend {
         throw new Error('shape: memories 非对象');
       }
       if (doc.audit !== undefined && !Array.isArray(doc.audit)) throw new Error('shape: audit 非数组');
-      return { memories: doc.memories ?? {}, audit: doc.audit ?? [] };
+      if (doc.projects !== undefined && (typeof doc.projects !== 'object' || doc.projects === null || Array.isArray(doc.projects))) {
+        throw new Error('shape: projects 非对象');
+      }
+      return { memories: doc.memories ?? {}, audit: doc.audit ?? [], projects: doc.projects ?? {} };
     } catch (e) {
       const backup = this.backupCorrupt();
       this.writeCorruptionNotice(backup, e);
@@ -479,6 +484,39 @@ export class FileStorage implements StorageBackend {
       this.doc.memories[mem_id] = prev; // 写盘失败 → 撤销删除，不静默丢记忆
       if (this.l0 && blob) void this.l0.put(mem_id, blob).catch(() => { /* 回滚失败：由完整性核对点名孤儿行 */ });
     });
+  }
+
+  // ── 批次46-D6：项目注册表（多用户三池基础）──
+  // 库内持久化于 FileDoc.projects（缺省 {} 向后兼容旧库）；写盘失败按 touchOrRollback 撤销内存改动。
+  async createProject(input: CreateProjectInput): Promise<ProjectRecord> {
+    this.assertWritable();
+    const project_id = input.project_id.trim();
+    if (!project_id) throw new Error('createProject.project_id 不能为空');
+    if (project_id in this.doc.projects) throw new Error(`项目已存在：${project_id}`);
+    const rec: ProjectRecord = {
+      project_id,
+      kind: input.kind ?? 'general',
+      owner_user_id: input.owner_user_id,
+      display_name: input.display_name,
+      created_at: Date.now(),
+      created_by: input.created_by,
+    };
+    this.doc.projects[project_id] = rec;
+    this.touchOrRollback(() => { delete this.doc.projects[project_id]; });
+    return rec;
+  }
+
+  async getProject(project_id: string): Promise<ProjectRecord | null> {
+    this.maybeReload(); // 只读镜像跟随写方新增/删除的项目注册项
+    return this.doc.projects[project_id] ?? null;
+  }
+
+  async listProjects(filter?: ListProjectsFilter): Promise<ProjectRecord[]> {
+    this.maybeReload();
+    let recs = Object.values(this.doc.projects);
+    if (filter?.kind) recs = recs.filter((p) => p.kind === filter.kind);
+    if (filter?.owner_user_id) recs = recs.filter((p) => p.owner_user_id === filter.owner_user_id);
+    return recs;
   }
 
   /** 批次41-A：审计落追加式 JSONL（一条 = 一次 append+fsync），不再进记忆库文件；失败不留内存半态 */

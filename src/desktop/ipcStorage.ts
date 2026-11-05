@@ -4,8 +4,11 @@
 import type {
   AuditAction,
   AuditRecord,
+  CreateProjectInput,
   Filter,
+  ListProjectsFilter,
   Memory,
+  ProjectRecord,
   StorageBackend,
 } from '../core/memagent/types.ts';
 import type { HostScanResult } from './hostScan.ts';
@@ -18,6 +21,10 @@ export interface StorageIpc {
   deleteMemory(mem_id: string): Promise<void>;
   appendAudit(a: AuditRecord): Promise<void>;
   queryAudit(filter: { request_id?: string; action?: AuditAction; since?: number }): Promise<AuditRecord[]>;
+  /** 批次46-D6：项目注册表（多用户三池基础） */
+  createProject(input: CreateProjectInput): Promise<ProjectRecord>;
+  getProject(project_id: string): Promise<ProjectRecord | null>;
+  listProjects(filter?: ListProjectsFilter): Promise<ProjectRecord[]>;
   /** 账本位置（真实路径），供渲染层展示「记忆存储在哪」；桌面专属，浏览器无此能力 */
   location?: () => Promise<{ path: string; source: string }>;
   /** 打开单条记忆文件：导出为 .json 并在默认查看器中打开；桌面专属 */
@@ -50,6 +57,19 @@ export class IpcStorageBackend implements StorageBackend {
 
   queryAudit(filter: { request_id?: string; action?: AuditAction; since?: number }): Promise<AuditRecord[]> {
     return this.ipc.queryAudit(filter);
+  }
+
+  // ── 批次46-D6：项目注册表（渲染→主进程转发）──
+  createProject(input: CreateProjectInput): Promise<ProjectRecord> {
+    return this.ipc.createProject(input);
+  }
+
+  getProject(project_id: string): Promise<ProjectRecord | null> {
+    return this.ipc.getProject(project_id);
+  }
+
+  listProjects(filter?: ListProjectsFilter): Promise<ProjectRecord[]> {
+    return this.ipc.listProjects(filter);
   }
 
   /** 批量写入模式：渲染侧转发（主进程 FileStorage 才真正延迟写盘；渲染无本地状态，no-op 兜底）。 */

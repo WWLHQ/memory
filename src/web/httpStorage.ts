@@ -1,12 +1,13 @@
 // 批次28-A：浏览器内核数据面 —— StorageBackend 的 HTTP 透传实现。
 // 纯浏览器模式（npm run dev，无 Electron 主进程）下，内核存储不再用进程内空账本，
 // 而是凭登录会话（x-session-id）经本机登录后端的 /api/kernel/invoke 直读真实账本。
-// 服务端只放行六条存储方法且会话鉴权；写入被只读镜像拒绝时原样抛 E_STORAGE_LOCKED 文案。
-import type { AuditAction, AuditRecord, Filter, Memory, StorageBackend } from '../core/memagent/types.ts';
+// 服务端只放行存储方法且会话鉴权；写入被只读镜像拒绝时原样抛 E_STORAGE_LOCKED 文案（批次46-D6 增补项目注册表三方法）。
+import type { AuditAction, AuditRecord, CreateProjectInput, Filter, ListProjectsFilter, Memory, ProjectRecord, StorageBackend } from '../core/memagent/types.ts';
 import { currentSessionId } from './shared/session.ts';
 
 const KERNEL_METHODS = [
   'putMemory', 'getMemory', 'listMemories', 'deleteMemory', 'appendAudit', 'queryAudit',
+  'createProject', 'getProject', 'listProjects',
 ] as const;
 type KernelMethod = (typeof KERNEL_METHODS)[number];
 
@@ -78,6 +79,19 @@ export class HttpStorageBackend implements StorageBackend {
 
   queryAudit(filter: { request_id?: string; action?: AuditAction; since?: number }): Promise<AuditRecord[]> {
     return this.invoke<AuditRecord[]>('queryAudit', filter);
+  }
+
+  // ── 批次46-D6：项目注册表（经登录后端内核数据面转发）──
+  createProject(input: CreateProjectInput): Promise<ProjectRecord> {
+    return this.invoke<ProjectRecord>('createProject', input);
+  }
+
+  getProject(project_id: string): Promise<ProjectRecord | null> {
+    return this.invoke<ProjectRecord | null>('getProject', project_id);
+  }
+
+  listProjects(filter?: ListProjectsFilter): Promise<ProjectRecord[]> {
+    return this.invoke<ProjectRecord[]>('listProjects', filter);
   }
 }
 

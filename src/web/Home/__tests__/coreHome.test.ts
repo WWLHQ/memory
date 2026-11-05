@@ -51,6 +51,10 @@ function fakeStorage(opts: {
     deleteMemory: async () => {},
     appendAudit: async () => {},
     queryAudit: async () => opts.audits ?? [],
+    // ── 批次46-D6：项目注册表（本测试不覆盖，给占位实现以满足 StorageBackend 契约）──
+    createProject: async () => ({ project_id: 'x', kind: 'general', created_at: 0, created_by: 'u' }),
+    getProject: async () => null,
+    listProjects: async () => [],
   };
 }
 
@@ -150,6 +154,10 @@ describe('getHomeFeed（首页真实可算，内核账本聚合）', () => {
     const broken: StorageBackend = {
       putMemory: async () => {}, getMemory: async () => null, listMemories: async () => { throw new Error('x'); },
       deleteMemory: async () => {}, appendAudit: async () => {}, queryAudit: async () => { throw new Error('x'); },
+      // ── 批次46-D6：项目注册表（占位，getHomeFeed 不调用）──
+      createProject: async () => ({ project_id: 'x', kind: 'general', created_at: 0, created_by: 'u' }),
+      getProject: async () => null,
+      listProjects: async () => [],
     };
     const feed = await getHomeFeed(broken);
     expect(feed.sync.role).toBe('offline');
@@ -166,6 +174,10 @@ describe('getHomeFeed（首页真实可算，内核账本聚合）', () => {
       listMemories: async () => { throw new Error('E_IPC_TIMEOUT 宿主桥 3s 未回话'); },
       deleteMemory: async () => {}, appendAudit: async () => {},
       queryAudit: async () => { throw new Error('E_IPC_TIMEOUT 宿主桥 3s 未回话'); },
+      // ── 批次46-D6：项目注册表（占位，getHomeFeed 不调用）──
+      createProject: async () => ({ project_id: 'x', kind: 'general', created_at: 0, created_by: 'u' }),
+      getProject: async () => null,
+      listProjects: async () => [],
     };
     const feed = await getHomeFeed(broken);
     expect(feed.storageError).toContain('E_IPC_TIMEOUT');
@@ -181,6 +193,10 @@ describe('getHomeFeed（首页真实可算，内核账本聚合）', () => {
       putMemory: async () => {}, getMemory: async () => { throw new Error('x'); },
       listMemories: async () => { throw new Error('x'); }, deleteMemory: async () => {},
       appendAudit: async () => {}, queryAudit: async () => { throw new Error('x'); },
+      // ── 批次46-D6：项目注册表（占位，getHomeFeed 不调用）──
+      createProject: async () => ({ project_id: 'x', kind: 'general', created_at: 0, created_by: 'u' }),
+      getProject: async () => null,
+      listProjects: async () => [],
     };
     const mirror: MirrorItem[] = [{ request_id: 'm1', action: 'recall', payload: { query: 'q', evidence_thin: true } }];
     const feed = await getHomeFeed(broken, { mirrorItems: mirror });
@@ -211,6 +227,10 @@ describe('getHomeFeed（首页真实可算，内核账本聚合）', () => {
     const broken: StorageBackend = {
       putMemory: async () => {}, getMemory: async () => null, listMemories: async () => { throw new Error('x'); },
       deleteMemory: async () => {}, appendAudit: async () => {}, queryAudit: async () => { throw new Error('x'); },
+      // ── 批次46-D6：项目注册表（占位，getHomeFeed 不调用）──
+      createProject: async () => ({ project_id: 'x', kind: 'general', created_at: 0, created_by: 'u' }),
+      getProject: async () => null,
+      listProjects: async () => [],
     };
     const feed = await getHomeFeed(broken);
     expect(feed.effectGains).toHaveLength(4);

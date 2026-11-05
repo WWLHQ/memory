@@ -82,9 +82,10 @@ interface Session {
 const SESSION_TTL_MS = 12 * 3600 * 1000;
 const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
 
-/** 批次28-A：内核数据面白名单（只放六条存储方法；与 preload 数据面同一套边界） */
+/** 批次28-A：内核数据面白名单（只放存储方法；与 preload 数据面同一套边界；批次46-D6 增补项目注册表三方法） */
 const KERNEL_METHODS = [
   'putMemory', 'getMemory', 'listMemories', 'deleteMemory', 'appendAudit', 'queryAudit',
+  'createProject', 'getProject', 'listProjects',
 ] as const;
 
 class BodyTooLargeError extends Error {}

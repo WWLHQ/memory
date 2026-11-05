@@ -2,7 +2,7 @@
 // 基于 node:sqlite（Node ≥22.13 内置，零依赖），与 InMemoryStorage 接口同构：
 // memories/audit 两表，领域列冗余建索引供 Filter 下推，完整对象以 JSON doc 保真存取。
 import { DatabaseSync } from 'node:sqlite';
-import type { AuditAction, AuditRecord, Filter, Memory, StorageBackend } from './types.ts';
+import type { AuditAction, AuditRecord, CreateProjectInput, Filter, ListProjectsFilter, Memory, ProjectRecord, StorageBackend } from './types.ts';
 
 export class SqliteStorage implements StorageBackend {
   private db: DatabaseSync;
@@ -30,6 +30,15 @@ export class SqliteStorage implements StorageBackend {
       );
       CREATE INDEX IF NOT EXISTS idx_audit_query
         ON audit (request_id, action, ts);
+      CREATE TABLE IF NOT EXISTS projects (
+        project_id   TEXT PRIMARY KEY,
+        kind         TEXT NOT NULL,
+        owner_user_id TEXT,
+        display_name TEXT,
+        created_at   INTEGER NOT NULL,
+        created_by   TEXT NOT NULL,
+        doc          TEXT NOT NULL
+      );
     `);
   }
 
@@ -81,6 +90,51 @@ export class SqliteStorage implements StorageBackend {
 
   async deleteMemory(mem_id: string): Promise<void> {
     this.db.prepare('DELETE FROM memories WHERE mem_id = ?').run(mem_id);
+  }
+
+  // ── 批次46-D6：项目注册表（多用户三池基础）──
+  async createProject(input: CreateProjectInput): Promise<ProjectRecord> {
+    const project_id = input.project_id.trim();
+    if (!project_id) throw new Error('createProject.project_id 不能为空');
+    const existing = this.db.prepare('SELECT 1 FROM projects WHERE project_id = ?').get(project_id);
+    if (existing) throw new Error(`项目已存在：${project_id}`);
+    const rec: ProjectRecord = {
+      project_id,
+      kind: input.kind ?? 'general',
+      owner_user_id: input.owner_user_id,
+      display_name: input.display_name,
+      created_at: Date.now(),
+      created_by: input.created_by,
+    };
+    this.db
+      .prepare('INSERT INTO projects (project_id, kind, owner_user_id, display_name, created_at, created_by, doc) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(rec.project_id, rec.kind, rec.owner_user_id ?? null, rec.display_name ?? null, rec.created_at, rec.created_by, JSON.stringify(rec));
+    return rec;
+  }
+
+  async getProject(project_id: string): Promise<ProjectRecord | null> {
+    const row = this.db.prepare('SELECT doc FROM projects WHERE project_id = ?').get(project_id) as { doc: string } | undefined;
+    if (!row) return null;
+    const rec = JSON.parse(row.doc) as ProjectRecord;
+    // 落库时 undefined 以 null 存储，回读归一化为 undefined（与接口类型 ProjectRecord 一致）
+    if (rec.owner_user_id === null) delete (rec as Partial<ProjectRecord>).owner_user_id;
+    if (rec.display_name === null) delete (rec as Partial<ProjectRecord>).display_name;
+    return rec;
+  }
+
+  async listProjects(filter?: ListProjectsFilter): Promise<ProjectRecord[]> {
+    const conds: string[] = [];
+    const params: (string | null)[] = [];
+    if (filter?.kind) { conds.push('kind = ?'); params.push(filter.kind); }
+    if (filter?.owner_user_id) { conds.push('owner_user_id = ?'); params.push(filter.owner_user_id); }
+    const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+    const rows = this.db.prepare(`SELECT doc FROM projects ${where} ORDER BY project_id`).all(...params) as { doc: string }[];
+    return rows.map((r) => {
+      const rec = JSON.parse(r.doc) as ProjectRecord;
+      if (rec.owner_user_id === null) delete (rec as Partial<ProjectRecord>).owner_user_id;
+      if (rec.display_name === null) delete (rec as Partial<ProjectRecord>).display_name;
+      return rec;
+    });
   }
 
   async appendAudit(a: AuditRecord): Promise<void> {
