@@ -5,6 +5,7 @@
 //  设计不变量：首页任何数字都来自真实账本或可明确溯源；无示例/写死假文案（取代原 SEED 硬编码）。
 import { mirrorFetch } from '../mirrorClient.ts';
 import { kernelErrorText } from '../shared/kernelLoad.tsx';
+import { isL0LockedText } from '../../core/memagent/errors.ts';
 import type { StorageBackend, AuditRecord, Memory } from '../../core/memagent/types.ts';
 import type { RawHomeFeed } from '../../home/dashboard.ts';
 import type { AnomalyItem, ActiveMemory, TodoItem, SyncState } from '../../types/home.ts';
@@ -78,9 +79,24 @@ function asRecord(detail: unknown): Record<string, unknown> {
   return (detail && typeof detail === 'object' ? detail : {}) as Record<string, unknown>;
 }
 
-/** 异常速览（真实）：从内核审计派生——反代理降级 / 召回证据稀薄 / 召回零命中 */
-function deriveKernelAnomalies(audits: AuditRecord[]): AnomalyItem[] {
+/**
+ * 批次41-W：这条锁定异常只看**最近这一段时间**（默认 30 分钟）。
+ * 采集器每 5min 一轮（失败按 41-D 退避），解锁写密钥后下一轮就没有新失败行了——
+ * 按全量历史计数会让这条 error 在用户机上永远挂着，那就是假警报。
+ */
+export const L0_LOCK_ANOMALY_WINDOW_MS = 30 * 60_000;
+
+/** 异常速览（真实）：从内核审计派生——反代理降级 / 召回证据稀薄 / 召回零命中 / L0 写密钥锁定 */
+function deriveKernelAnomalies(
+  audits: AuditRecord[],
+  now = Date.now(),
+  windowMs = L0_LOCK_ANOMALY_WINDOW_MS,
+): AnomalyItem[] {
   const out: AnomalyItem[] = [];
+  // 批次41-W：写密钥锁定会让**每一条**入库失败（§4.4.4 不落明文），一轮采集几十条同类错误。
+  // 逐条推等于把真信号埋进刷屏里，所以聚合成一条 error（只报计数与最近一次可溯源 id，正文不进首页）。
+  let l0LockedCount = 0;
+  let l0LockedLastId = '';
   for (const a of audits) {
     const d = asRecord(a.detail);
     if (a.action === 'llm_fallback') {
@@ -96,7 +112,18 @@ function deriveKernelAnomalies(audits: AuditRecord[]): AnomalyItem[] {
       } else if (Number(d.hits ?? -1) === 0) {
         out.push({ level: 'warn', title: '召回零命中', detail: `query=${String(d.query ?? '?')}`, request_id: a.request_id });
       }
+    } else if (a.action === 'write' && a.ts >= now - windowMs && isL0LockedText(String(d.error ?? ''))) {
+      l0LockedCount++;
+      l0LockedLastId = a.request_id;
     }
+  }
+  if (l0LockedCount > 0) {
+    out.push({
+      level: 'error',
+      title: 'L0 写密钥未解锁：写入被挡',
+      detail: `近 ${Math.round(windowMs / 60_000)} 分钟 ${l0LockedCount} 条没入库（不是内容问题）· 输入管理密码解锁写密钥后会自动重采`,
+      request_id: l0LockedLastId,
+    });
   }
   return out;
 }
@@ -200,7 +227,7 @@ export async function getHomeFeed(storage: StorageBackend, opts: GetHomeFeedOpts
   try {
     [audits, memories] = await Promise.all([storage.queryAudit({}), storage.listMemories({})]);
     storageOk = true;
-    anomalies = anomalies.concat(deriveKernelAnomalies(audits));
+    anomalies = anomalies.concat(deriveKernelAnomalies(audits, now));
     activeMemories = await deriveRecallTop3(audits, storage, 3);
     todos = deriveTodos(memories);
   } catch (e) {

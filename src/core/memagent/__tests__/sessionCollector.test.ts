@@ -15,6 +15,7 @@ import {
   type SessionLogSource,
   type ReconcileOptions,
 } from '../sessionCollector.ts';
+import { MemAgentError } from '../errors.ts';
 
 function tmpDir(prefix: string): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -642,7 +643,7 @@ describe('applyScanToStore', () => {
         audit: async (rec) => { audits.push(rec.detail?.source as string); },
       },
     );
-    expect(r).toEqual({ written: 2, filtered: 0, failed: 0 });
+    expect(r).toEqual({ written: 2, filtered: 0, failed: 0, failed_l0_locked: 0 });
     expect(writes).toEqual(['c1', 'c2']);
     expect(audits.filter((a) => a === 'collector')).toHaveLength(2);
   });
@@ -665,7 +666,7 @@ describe('applyScanToStore', () => {
         audit: async (rec) => { audits.push(rec.detail); },
       },
     );
-    expect(r).toEqual({ written: 1, filtered: 1, failed: 0 });
+    expect(r).toEqual({ written: 1, filtered: 1, failed: 0, failed_l0_locked: 0 });
     expect(audits).toHaveLength(3); // 三类都留审计，绝不静默吞掉
   });
 
@@ -688,7 +689,47 @@ describe('applyScanToStore', () => {
         audit: async (rec) => { audits.push(rec.detail?.source === 'collector' ? `ok:${rec.request_id}` : 'err'); },
       },
     );
-    expect(r).toEqual({ written: 1, filtered: 0, failed: 1 }); // 只有 ok 入库；failed 供调用方保留旧游标
+    expect(r).toEqual({ written: 1, filtered: 0, failed: 1, failed_l0_locked: 0 }); // 只有 ok 入库；failed 供调用方保留旧游标
+  });
+});
+
+// ── 批次41-W：L0 写密钥锁定单独计数 ──────────────────────────────────────────
+
+describe('applyScanToStore · 批次41-W L0 写密钥锁定', () => {
+  const items = [
+    { key: 'k1', agent: 'a', role: 'user', content: 'locked', hash: 'h1', seq: 0 },
+    { key: 'k2', agent: 'a', role: 'user', content: 'other', hash: 'h2', seq: 1 },
+  ];
+  const base = { collected: 2, deduped: 0, roleSkipped: 0, skipped: [], items, cursors: {}, ts: 0 };
+
+  it('E_L0_LOCKED 计入 failed_l0_locked 且在审计里打标；普通失败只计 failed', async () => {
+    const audits: Array<Record<string, unknown> | undefined> = [];
+    const r = await applyScanToStore(base, {
+      write: async (input) => {
+        if (input.content === 'locked') throw new MemAgentError('E_L0_LOCKED', 'L0 写密钥未解锁');
+        throw new Error('boom');
+      },
+      audit: async (rec) => { audits.push(rec.detail); },
+    });
+    expect(r).toEqual({ written: 0, filtered: 0, failed: 2, failed_l0_locked: 1 });
+    const errAudits = audits.filter((d) => d?.source === 'collector' && d?.error !== undefined);
+    expect(errAudits).toHaveLength(2);
+    expect(errAudits.find((d) => String(d?.error ?? '').includes('E_L0_LOCKED'))?.l0_locked).toBe(true);
+    expect(errAudits.find((d) => String(d?.error ?? '') === 'boom')?.l0_locked).toBeUndefined();
+  });
+
+  it('只剩字符串的错误（跨 IPC 后没有 code）仍判成锁定——与首页异常派生同一判据', async () => {
+    const r = await applyScanToStore(base, {
+      write: async () => { throw new Error('[E_L0_LOCKED] L0 写密钥未解锁：请输入管理密码'); },
+    });
+    expect(r.failed_l0_locked).toBe(2);
+  });
+
+  it('没有锁定失败时 failed_l0_locked 恒为 0（不误报）', async () => {
+    const r = await applyScanToStore(base, {
+      write: async () => ({ mem_id: 'm1', dedup: { action: 'new' as const } }),
+    });
+    expect(r.failed_l0_locked).toBe(0);
   });
 });
 

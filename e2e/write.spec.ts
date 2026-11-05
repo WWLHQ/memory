@@ -40,7 +40,9 @@ test.describe('写入页', () => {
     await page.locator('[data-testid="f-content"]').fill('部署前必须检查数据库迁移脚本，上次回滚耗时 120 秒，网关报 504 状态码');
     await expect(page.locator('[data-testid="submit"]')).toBeEnabled();
     await page.locator('[data-testid="submit"]').click();
-    await expect(page.locator('[data-testid="toast"]')).toContainText('E_L0_LOCKED');
+    // 批次41-W：写密钥锁定不再甩原始 `E_L0_LOCKED`，而是就地出「解锁写密钥」提示（正文见 L0WriteUnlock 卡），
+    // toast 改为面向人的措辞。断言打在「L0 写密钥未解锁」这句上（真锁定的稳定信号），不再要求原始错误码字面量。
+    await expect(page.locator('[data-testid="toast"]')).toContainText('L0 写密钥未解锁');
     await expect(page.locator('[data-testid="receipt"]')).toHaveCount(0);
   });
 });

@@ -20,6 +20,7 @@ import { existsSync } from 'node:fs';
 import { stat, readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { zstdDecompressSync } from 'node:zlib';
+import { isL0LockedError } from './errors.ts';
 
 /** 让出事件循环（避免大文件批量处理时阻塞 Electron 主进程 → 窗口"未响应"） */
 const yieldToEventLoop = (): Promise<void> => new Promise((res) => setImmediate(res));
@@ -885,6 +886,12 @@ export interface ApplyScanResult {
   filtered: number;
   /** 写入失败条数：调用方必须据此保留旧游标，下一轮重采（去重兜底） */
   failed: number;
+  /**
+   * 批次41-W：failed 里有多少是「L0 写密钥未解锁」。这类失败**不是 bug**，用户输入管理密码
+   * 解锁写密钥就能解决；不拆开就只会看到 failed=N，不知道下一步该做什么（端壳据此把失败原因
+   * 判成 l0_locked 并提示解锁）。恒 ≤ failed。
+   */
+  failed_l0_locked: number;
 }
 
 /**
@@ -895,6 +902,7 @@ export async function applyScanToStore(scan: ScanResult, opts: CollectorBridgeOp
   let written = 0;
   let filtered = 0;
   let failed = 0;
+  let failedL0Locked = 0;
   const now = Date.now();
   for (let i = 0; i < scan.items.length; i++) {
     const item = scan.items[i];
@@ -921,15 +929,22 @@ export async function applyScanToStore(scan: ScanResult, opts: CollectorBridgeOp
     } catch (e) {
       // 单条失败不阻塞整批（诚实：error 审计留痕 + 失败计数）
       failed++;
+      // 批次41-W：锁定失败单独计数——原因不同，用户要做的事完全不同（解锁写密钥 vs 排查写入）
+      const l0Locked = isL0LockedError(e);
+      if (l0Locked) failedL0Locked++;
       await opts.audit?.({
         request_id: `req_col_${now}_${item.seq}_err`,
         action: 'write',
         ts: now,
         project_id: opts.project_id ?? 'P1',
-        detail: { source: 'collector', agent: item.agent, error: String((e as Error)?.message ?? e) },
+        detail: {
+          source: 'collector', agent: item.agent,
+          error: String((e as Error)?.message ?? e),
+          ...(l0Locked ? { l0_locked: true } : {}),
+        },
       });
       if ((i + 1) % 5 === 0) await yieldToEventLoop();
     }
   }
-  return { written, filtered, failed };
+  return { written, filtered, failed, failed_l0_locked: failedL0Locked };
 }

@@ -366,5 +366,55 @@
 - **② DSH 那一家无法单独证身份**：`deepseek-harness` 随宿主下发、自己没有配置面（批次28-B），它的调用只会带宿主的 `qoder-cn` → **服务端分不开「宿主」与「随宿主下发的 DSH」**，`hasClientId` 也只能如实取宿主值。
 - **③ 头值是自声明不是认证**：想按客户端发独立密钥仍属批次41-K/45-B（账本租户归一 + 成员/API 密钥域模型），本批没做。
 - **④ 登录自动接入故意不动**：`autoDiscovery.autoWireMcpForAgents` 对 `state==='wired'` 仍跳过——**不为补头每次登录重写配置**（那会让 `.bak-` 无限滚动）。补头只走面板显式按钮。
-- **⑤ 用户第 1 条（写密钥失败提示，41-W）本批未动**，仍是设计稿：`applyScanToStore` 现在只把 `E_L0_LOCKED` 计入 `failed++`，没有原因码、没有界面提示。见任务 #64。
+- **⑤ 用户第 1 条（写密钥失败提示，41-W）已随 §9 落地**：`applyScanToStore` 现把 `E_L0_LOCKED` 单独计 `failed_l0_locked`、端壳出 `l0_locked_writes` / 退避原因码 `l0_locked`，写入页与首页就地解锁入口见 §9（任务 #64 收口）。
 - **⑥ 同一工作树里有批次42 的在建改动**（`recallModes.ts`、`types.ts`/`mcpSchema.ts` 的枚举扩充、两份未跟踪 `specs/召回模式*.md`）**不属于 41-X，本笔提交没带它们**；因此上面「1986 例 / 313 文件」是**全工作树**的数字，不是 41-X 单独的增量。刷新后的 `specs/code-index.generated.md` 同理——它按磁盘现状生成，无法只索引本批文件。
+
+## 9. 〔2026-11-05〕41-W：L0 写密钥未解锁的失败提示 + 就地解锁入口
+
+**回答的是用户第 1 条**（原话）：「写密钥能否增加一个有失败提示功能，提示用户输入密码打开」。
+**闭合的痛点**：L0 写密钥锁定期间（重启后未解锁 / 会话超时 / 显式锁定），**每一笔** L0 写入都抛 `E_L0_LOCKED`（明文绝不落盘，§4.4.4）——但用户看不出「为什么没写进去」，只能去安全页盲解锁。41-W 把这条失败做成**可见 + 就地可解**，且**不新增任何带权限的读路径**：提示由「一次真实写入失败」驱动，不主动轮 `l0:status`（它仍 requireAdmin），密码走既有 `l0:writeUnlock` 管理员闸门，**落不进日志**。
+
+### 9.1 改了什么（逐文件给理由，未动的写在 9.4）
+
+| 文件 | 改动 | 为什么 |
+|---|---|---|
+| `src/core/memagent/errors.ts` | 新增单一判据 `isL0LockedError(e)`（`MemAgentError` 认 `code==='E_L0_LOCKED'`；非 `MemAgentError` 走文本判据）+ 纯函数 `isL0LockedText(text)` | 采集器 / 端壳 / 首页三处**共用一个判据**，不许各处写正则（批次41-W 口径） |
+| `src/core/memagent/sessionCollector.ts` | `ApplyScanResult` 增 `failed_l0_locked`；`applyScanToStore` 的 catch 用判据把锁定的写失败单独计数，锁定行进审计 `detail.l0_locked:true`（普通失败不带） | 让用户/日志分得清「写密钥锁定（输密码即解）」与「写入 bug（要修）」 |
+| `src/electron/main.ts` §5.1 | 游标未推进的 mlog `reason` 改按 `failed_l0_locked>0 ? 'l0_locked' : 'write_failed'`；41-D 退避的抛错链把 `l0_locked` 排在 `write_failed` 前；`collector:status` 回显 `l0_locked_writes` | 写密钥锁定是「输密码就能解的长障」，混成一个码会把提示入口藏起来；喂给 41-D 退避 |
+| `src/electron/preload.ts` | `collector.status` 的 `apply` 类型加 `failed_l0_locked`、顶层加 `l0_locked_writes?: boolean` | 渲染层能读到「有没有锁定导致的写失败」 |
+| `src/web/shared/L0WriteUnlock.tsx`（新） | 就地解锁卡：管理员出密码框 + 「解锁写密钥」（`getKernel().l0UnlockWrite`），成功/失败都清空输入；成员/未登录出「需管理员」文案、不起按钮 | 把「输密码打开」做成一个可复用控件（写入页 + 采集器场景共用） |
+| `src/web/write/WritePage.tsx` | `doWrite()` 捕获 `E_L0_LOCKED` → 出解锁卡 + toast，**解锁成功后自动重放这条写入** | 手动写入被挡时当场可解，不必切到安全页 |
+| `src/web/Home/coreHome.ts` | 导出 `L0_LOCK_ANOMALY_WINDOW_MS`（30 分钟）+ `deriveKernelAnomalies` 聚合成**一条** error 异常「L0 写密钥未解锁：写入被挡」（`request_id` 用最近一次命中，真实可追溯） | 首页一眼看见「近 30 分钟因写密钥没解锁漏了几条」，窗口闸门避免常驻误报 |
+| `src/web/Home/programLogLabels.ts` | `NOTE_KEYS` 补 `failed_l0_locked` | 采集器失败摘要里能看出「几条是写密钥锁定」 |
+| `src/core/memagent/memories.ts:167` | `E_L0_LOCKED` 提示措辞对齐（只改文案，不动码） | 文案统一，不动行为 |
+| `e2e/write.spec.ts` | 「纯浏览器写入如实报 E_L0_LOCKED」一例的断言从 `toast 含字面量 E_L0_LOCKED` 改为含「L0 写密钥未解锁」（41-W 的面向人措辞） | 旧断言绑死原始错误码字面量，41-W 把 toast 换成可就地解锁的人话后必挂；断言改打在稳定信号「L0 写密钥未解锁」上 |
+
+### 9.2 门禁（本轮真跑，非估算）
+
+- **快门禁（`npm run verify:fast`，已跑）**：typecheck 0 error、oxlint 0 warning、索引已刷新（**316 个文件**，`npm run code:index -- --write`）、`test:coverage` 全绿——**171 文件 / 2031 例**，覆盖率 Statements 82.86% / Branches 75.25% / Lines 85.92%。
+- **41-W 新增/更新用例**：`l0LockedError.test.ts` **6**（认 code / 认 message / `MemAgentError` 以 code 为准不误判 / 普通写失败不冒充 / null·undefined·裸对象 / 纯文本判据）· `sessionCollector.test.ts` 批次41-W **3**（`E_L0_LOCKED` 计 `failed_l0_locked` + 审计打标 / 只有 message 的字符串也判锁 / 无锁定 `failed_l0_locked=0`）· `coreHome.test.ts` 批次41-W **3**（窗口内聚合成一条 + 计数 + 最近 `request_id` / 超窗即消失 / 非 L0 写失败不产生）· `L0WriteUnlock.test.tsx` **6**（管理员成功→调用 + 回调 + 密码不在 DOM / 失败→就地报错 + 清密码 + 不回调 / 空密码不调 / 成员→需管理员无按钮 / 未登录→未认证文案 / `scene` 名渲染）· `WritePage.l0locked.test.tsx` **3**（锁定写入→出卡 + 无成功回执 + toast / 解锁成功→自动重放→回执 / 解锁失败→就地报错 + 清密码 + 无回执，用真 `createTestVault` + `vault.lockWrite` 造真锁）。
+- **`verify:fast` 曾先报「代码索引已过期」**（新增 5 个测试/组件文件 + `programLogLabels` 改动），跑 `npm run code:index -- --write` 后复绿，属预期流程。
+
+### 9.3 出厂产物（实测）
+
+- 安装包：`release/installer/MultiAgent Memory-0.1.0-setup.exe`，**122,061,324 B / SHA256 `e510e907b3aac2d0b3d304af3fa65531074a54f7dc54081792727b6944cce3f0`**（落盘 2026-11-05 19:14 UTC+08:00，取代 §8 的 41-X 一版）。
+- 产物核对按 `release/installer/win-unpacked/resources/app.asar.unpacked/dist-electron/main.cjs`（`app.asar` 会被 asarUnpack，直接 grep asar 是假阴性）：`l0_locked_writes` 命中 1、`E_L0_LOCKED` 命中 14、`collector:cursor-hold` 命中 1 —— 端壳侧 41-W 接线已进包；渲染层的新 toast 文案「L0 写密钥未解锁」与解锁卡由 `dist/write.html`（E2E 已断言）覆盖。⚠️ **包里有 ≠ 已生效**：用户机要看到解锁卡需重装此包并重启（写密钥随重启锁定，正好是复现场景）。
+- **打包口径说明**：本次 `npm run package` 因 `release/installer` 被外部进程占用（EPERM，与批次19/21 记录的宿主/索引器持句柄同源）走了「先输出到 `installer-20261105-111343`、再复制收口回 `release/installer`」的回退路径；3 个旧时间戳目录（`-052604`/`-082233`/`-111343`）因 EPERM 未删干净，属既有清理口径（不影响本次产物）。
+- **门禁**：本批 `npm run verify` 全绿（typecheck 0 error → oxlint 0 warning → 索引 316 文件已是最新 → vitest **171 文件 / 2031 例** 全过（Statements 82.87% / Branches ~75% / Lines ~85.9%）→ Electron 构建 → E2E **106 例**全过）。E2E 的 `write.spec.ts` 一处断言随 41-W 的新措辞同步更新（见 §9.1 末行说明 + `e2e/write.spec.ts:43`）。
+
+> **全量测试的偶发 flaky 说明（诚实记一笔，不藏）**：本机在**并行满负载**下跑全量 vitest 时，个别 React/状态类用例（如 `RefineQueueCard` 的「改额度数字」在极少数一轮里出现过 `rows:500800`、`home/server.test.ts` 批次28-A 端点例）会**随机**报 1 例失败、换个文件下次又不报；**单独跑该文件、或整轮重跑时都是绿的（2031/2031）**。这是 jsdom 跨用例状态/时序污染的老毛病，**不是 41-W 引入的**（41-W 的 5 个新/改用例在各轮里都稳定通过）。最终以「重跑到绿」的 `npm run verify` 结果为准。
+
+### 9.4 不做什么 / 边界（诚实声明，不留给用户猜）
+
+- **① 不新增带权限的读路径**：提示由真实写入失败驱动，`l0:status`/`l0:writeUnlock` 仍走既有 requireAdmin 闸门，本批没放宽任何鉴权。
+- **② 密码零落盘**：`L0WriteUnlock` 成功/失败都清空输入，`onUnlocked` 只传动作不传密码；动作日志与审计只记「解锁成功/失败」，不记密码值（有测试断言 DOM 无密码）。
+- **③ 首页异常走近 30 分钟窗口**（`L0_LOCK_ANOMALY_WINDOW_MS`）：解锁后不再刷新窗口内命中 → 异常自动消失，不是常驻误报；超窗那几条即使没解锁也不再上首页（它们仍在审计里可查）。
+- **④ 端壳接线级行为需实机核对**：`collector:status` 的 `l0_locked_writes`、退避原因码 `l0_locked`（`collector:backoff` 动作日志）没有单测直接覆盖 handler，纯函数判据与三处 UI 由 9.2 的用例覆盖，接线按 §9.4 步骤走查。
+- **⑤ 未动的文件**：`l0vault.ts`（`unlockWrite`/`lockWrite`/`isWriteUnlocked` 既有语义）、`l0:status` 的 requireAdmin 闸门、采集器退避常量（41-D）——41-W 只在失败分类与 UI 提示层动手，内核写路径与门禁一字未改。
+
+### 9.5 待实机走查（这些只有单测，本批没有真机样本）
+
+1. 重启应用（写密钥随重启锁定）→ 写入页写一条记忆 → 应看到就地解锁卡 + toast，**不写进库**；管理员输入正确 L0 管理密码 → 解锁成功 → **自动重放这条写入**，出现成功回执；密码输错 → 卡内就地报错、输入框清空、仍无回执。
+2. 首页「异常」区：写密钥锁定时若有近 30 分钟内的失败写入，应聚合出**一条**「L0 写密钥未解锁：写入被挡」（计数 + 一句修复指引 + 可点 `request_id` 回查）；解锁并重写、或等超 30 分钟窗口后，该条消失。
+3. 日志记录页：采集器因写密钥锁定未推进时，人话视图与 `actions.log` 应能看到 `collector:backoff`（原因码 `l0_locked`）与 `collector:status` 的 `l0_locked_writes`（`main.log` 里 `collector:cursor-hold` 的 `reason=l0_locked`）；对照解锁后采集器恢复推进、退避归零。
+

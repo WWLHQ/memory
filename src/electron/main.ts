@@ -2664,7 +2664,7 @@ async function bootstrap(): Promise<void> {
   let detectedAgentNames: string[] = [];
   const buildSources = () => defaultAgentSources({ agents: detectedAgentNames.length > 0 ? detectedAgentNames : undefined });
   // source 用函数形式：每轮现取游标与 agent 白名单，保证增量续采与动态扩展都生效
-  let lastApply: { written: number; filtered: number; failed: number; ts: number } | null = null;
+  let lastApply: { written: number; filtered: number; failed: number; failed_l0_locked: number; ts: number } | null = null;
   const reconciler = createReconciler({
     intervalMs: COLLECTOR_INTERVAL_MS, // §5.1 预设 5min
     source: () => ({
@@ -2697,7 +2697,7 @@ async function bootstrap(): Promise<void> {
       storage.beginBatch?.();
       // 批次39：本批真正落库的 mem_id —— 提交成功后进后台补炼队列（采集器仍然不炼深层，写入保持只落 L0+L1）
       const writtenIds: string[] = [];
-      let applied: { written: number; filtered: number; failed: number } | null = null;
+      let applied: { written: number; filtered: number; failed: number; failed_l0_locked: number } | null = null;
       let committed = false;
       try {
         applied = await applyScanToStore(scan, {
@@ -2777,7 +2777,11 @@ async function bootstrap(): Promise<void> {
       } else {
         collectorSeen = seenBefore;
         if (applied !== null && applied.failed > 0) {
-          void mlog('collector:cursor-hold', { failed: applied.failed, collected: scan.collected, reason: 'write_failed' });
+          // 批次41-W：单独报「其中多少是写密钥锁定」——这条决定了下一步是输密码还是查写入 bug
+          void mlog('collector:cursor-hold', {
+            failed: applied.failed, failed_l0_locked: applied.failed_l0_locked,
+            collected: scan.collected, reason: applied.failed_l0_locked > 0 ? 'l0_locked' : 'write_failed',
+          });
         }
       }
 
@@ -2793,8 +2797,14 @@ async function bootstrap(): Promise<void> {
       }
       // 批次41-D（P1-12）：本轮没推进（L0 写密钥锁定 / apply 或 commit 失败 / 有写失败）→ 抛出让 reconciler 计为失败并退避。
       // 正常推进（canAdvance）则不抛，reconciler 侧退避归零。原因只带码不带正文。
+      // 批次41-W：l0_locked 优先于 write_failed——同为「有写失败」，但前者是用户输密码就能解的长障，
+      // 混成一个码就等于把提示入口藏起来了（退避日志与 collector:status 都按这个原因码走）。
       if (!canAdvance) {
-        const reason = applied === null ? 'apply_failed' : !committed ? 'commit_failed' : applied.failed > 0 ? 'write_failed' : 'not_advanced';
+        const reason = applied === null ? 'apply_failed'
+          : !committed ? 'commit_failed'
+            : applied.failed_l0_locked > 0 ? 'l0_locked'
+              : applied.failed > 0 ? 'write_failed'
+                : 'not_advanced';
         throw new Error(`collector:round-not-advanced(${reason})`);
       }
     },
@@ -2812,6 +2822,9 @@ async function bootstrap(): Promise<void> {
       autoRetryStopped: reconciler.autoRetryStopped,
       // 批次35：清空重采进度（本轮入库/质量门拦下）+ 追采是否在跑
       apply: lastApply,
+      // 批次41-W：最近一轮是不是「L0 写密钥没解锁」——这是用户输管理密码就能解的障，
+      // 页面据此直接给解锁入口，而不是只报 failed=N 让用户猜。只有布尔与计数，无正文。
+      l0_locked_writes: lastApply !== null && lastApply.failed_l0_locked > 0,
       recollecting: recollectInFlight,
     };
   });

@@ -35,7 +35,7 @@ describe('coreTraceLookup（首页 .rid 溯源真查 home 账本）', () => {
 
 // ---------- getHomeFeed（真实可算：内核账本聚合） ----------
 import type { StorageBackend, AuditRecord, Memory } from '../../../core/memagent/types.ts';
-import { getHomeFeed, type MirrorItem } from '../coreHome.ts';
+import { getHomeFeed, L0_LOCK_ANOMALY_WINDOW_MS, type MirrorItem } from '../coreHome.ts';
 
 function fakeStorage(opts: {
   audits?: AuditRecord[];
@@ -215,5 +215,40 @@ describe('getHomeFeed（首页真实可算，内核账本聚合）', () => {
     const feed = await getHomeFeed(broken);
     expect(feed.effectGains).toHaveLength(4);
     expect(feed.effectGains.every((g) => g.big === '—')).toBe(true);
+  });
+});
+
+// ---------- 批次41-W：L0 写密钥锁定聚合成一条异常 ----------
+
+describe('getHomeFeed · 批次41-W L0 写密钥未解锁异常', () => {
+  const lock = (request_id: string, ts: number): AuditRecord => ({
+    request_id, action: 'write', ts,
+    detail: { source: 'collector', error: '[E_L0_LOCKED] L0 写密钥未解锁：请输入 L0 管理密码解锁写密钥后再写入' },
+  });
+
+  it('窗口内多条锁定失败 → 聚合成一条 error（计数 + 最近一次可溯源 request_id，正文不上首页）', async () => {
+    const now = Date.now();
+    const audits: AuditRecord[] = [lock('req_l1', now - 60_000), lock('req_l2', now - 30_000), lock('req_l3', now - 10_000)];
+    const feed = await getHomeFeed(fakeStorage({ audits }));
+    expect(feed.raw.anomalies!).toHaveLength(1);
+    const a = feed.raw.anomalies![0];
+    expect(a.level).toBe('error');
+    expect(a.title).toContain('L0 写密钥未解锁');
+    expect(a.detail).toContain('3 条没入库');
+    expect(a.request_id).toBe('req_l3');
+    expect(a.detail).not.toContain('请输入'); // 只报计数，审计里的错误原文不铺到首页
+  });
+
+  it('超出窗口的历史锁定失败不再挂 error（解锁后自动消失，不是假警报）', async () => {
+    const now = Date.now();
+    const audits: AuditRecord[] = [lock('req_old', now - L0_LOCK_ANOMALY_WINDOW_MS - 60_000)];
+    const feed = await getHomeFeed(fakeStorage({ audits }));
+    expect(feed.raw.anomalies ?? []).toHaveLength(0);
+  });
+
+  it('普通写失败（非 E_L0_LOCKED）不冒充这条异常', async () => {
+    const audits: AuditRecord[] = [{ request_id: 'req_x', action: 'write', ts: Date.now(), detail: { source: 'collector', error: 'boom' } }];
+    const feed = await getHomeFeed(fakeStorage({ audits }));
+    expect(feed.raw.anomalies ?? []).toHaveLength(0);
   });
 });

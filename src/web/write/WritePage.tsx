@@ -10,6 +10,8 @@ import { useWriteMirror } from './useWriteMirror.ts';
 import { composeReceipt, scoreDedup, validateDraft } from './logic.ts';
 import { coreWrite, coreListExisting } from './coreWrite.ts';
 import { KernelLoadError, kernelErrorText, useKernelLoad } from '../shared/kernelLoad.tsx';
+import { L0WriteUnlock } from '../shared/L0WriteUnlock.tsx';
+import { isL0LockedError } from '../../core/memagent/errors.ts';
 import { DEFAULT_PROJECT_ID, listProjectIds } from '../shared/kernelProjects.ts';
 import { newRequestId } from '../kernel.ts';
 import type { ExistingMemory, LayerName, MemoryDraft, WriteReceipt } from './types.ts';
@@ -24,6 +26,8 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
     session_id: sessionId, project_id: DEFAULT_PROJECT_ID,
   });
   const [receipt, setReceipt] = useState<WriteReceipt | null>(null);
+  // 批次41-W：本次提交是不是「L0 写密钥锁着」挡下的——是就在原地给解锁入口，不要把用户赶去别的页面
+  const [l0Locked, setL0Locked] = useState(false);
   const toast = useToast();
   const mirror = useWriteMirror();
 
@@ -50,13 +54,18 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
       toast.show(v.errors.join('；'));
       return;
     }
-    // 是否重复由内核判（new/grafted/duplicated/filtered），页面预览不参与决策
-    void (async () => {
+    void doWrite();
+  }
+
+  /** 真正提交一条写入；解锁成功后可以直接重放（批次41-W），不必让用户再点一次「写入」 */
+  function doWrite() {
+    return (async () => {
       try {
         const cw = await coreWrite({
           content: draft.content, category: draft.category,
           project_id: draft.project_id, session_id: draft.session_id, source: draft.source,
         });
+        setL0Locked(false);
         if (cw.dedup_action === 'filtered') {
           setReceipt(null);
         } else {
@@ -81,6 +90,12 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
                 : '内容被 L0→L1 质量门拦截（无信息量/过短/无用内容），未写入记忆库。',
         );
       } catch (e) {
+        if (isL0LockedError(e)) {
+          // 批次41-W：这类失败不是内容问题，是写密钥锁着——给就地解锁入口，而不是只甩一句错误码
+          setL0Locked(true);
+          toast.show('未写入：L0 写密钥未解锁（原文没法封成密文）。解锁写密钥后会自动重放这条写入。');
+          return;
+        }
         toast.show(`写入失败：${kernelErrorText(e)}`);
       }
     })();
@@ -97,6 +112,8 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
         <KernelLoadError what="读取查重候选（真实账本）" error={dedupError} onRetry={retryDedup} />
       )}
       {draft.content.trim().length > 0 && phase !== 'error' && <DedupCard result={result} />}
+
+      {l0Locked && <L0WriteUnlock scene="这条手动写入" onUnlocked={doWrite} />}
 
       {receipt && (
         <div className="card receipt" data-testid="receipt">

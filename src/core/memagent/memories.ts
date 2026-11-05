@@ -211,7 +211,7 @@ export async function coreWrite(input: WriteInput, ctx: WriteCtx): Promise<Write
 
   // 1.5) L0 加密必须在任何 LLM 调用前确认（§4.4.4）：无写密钥 → E_L0_LOCKED，不落明文
   if (!ctx.l0) {
-    throw new MemAgentError('E_L0_LOCKED', 'L0 写密钥未解锁：请管理员在安全页解锁后再写入（§4.4.4）');
+    throw new MemAgentError('E_L0_LOCKED', 'L0 写密钥未解锁：请输入 L0 管理密码解锁写密钥后再写入（桌面端安全页「L0 管理」，或写入被挡处的解锁框；§4.4.4）');
   }
   let content_l0_enc: string;
   try {

@@ -65,7 +65,9 @@ const collector = {
   status: () => ipcRenderer.invoke(IPC.collectorStatus) as Promise<{
     ok: boolean; running: boolean; intervalMs: number;
     last?: { collected: number; deduped: number; roleSkipped: number; skipped: string[]; ts: number } | null;
-    apply?: { written: number; filtered: number; failed: number; ts: number } | null;
+    apply?: { written: number; filtered: number; failed: number; failed_l0_locked: number; ts: number } | null;
+    /** 批次41-W：最近一轮有写入失败是「L0 写密钥未解锁」（页面据此给解锁入口，不再只报 failed=N） */
+    l0_locked_writes?: boolean;
     recollecting?: boolean;
   }>,
 };

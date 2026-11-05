@@ -862,6 +862,23 @@ status: draft
 
 > 诚实边界（批次41-X）：① **没有替用户点「补身份头」，也没重启客户端**——用户机现役 5 份配置仍是批次41-L 那一版（有令牌、无该头），升级需出厂后在接入页点一次「⚡ 一键适配全部」或逐行「补身份头」；② 头值是**自声明不是认证**，本批消除的是「跨客户端串号」，任何进程都能自称任意 id；③ DSH 随宿主下发，其调用只会带宿主的 `qoder-cn`，**服务端无法区分宿主与随宿主下发的 DSH**；④ 不带该头的调用与批次41-S 行为完全一致（向后兼容，无回归）。
 
+### 批次41-W：L0 写密钥未解锁的失败提示 + 就地解锁入口（回答「写密钥能否增加一个有失败提示功能，提示用户输入密码打开」）
+
+> 动因（用户口径）：L0 写密钥锁定期间（重启后未解锁 / 会话超时 / 显式锁定），**每一笔** L0 写入都抛 `E_L0_LOCKED`（明文绝不落盘，§4.4.4）——但原先用户看不出「为什么没写进去」，只能去安全页盲解锁。41-W 把这条失败**做成可见 + 就地可解**，且**不新增任何带权限的读路径**：提示由「一次真实写入失败」驱动，不是主动轮 `l0:status`（它仍是 requireAdmin），密码经 `l0:writeUnlock` 走既有管理员闸门，落不进日志。
+
+| 环节 | 真源 | 测试 |
+|---|---|---|
+| 判据（单一真源，不许各处写正则） | `src/core/memagent/errors.ts`：`isL0LockedError(e)`（`MemAgentError` 认 `code==='E_L0_LOCKED'`；非 `MemAgentError` 走 `isL0LockedText` 文本判据）+ 导出纯函数 `isL0LockedText(text)`（`includes('E_L0_LOCKED')`）。采集器 / 端壳 / 首页异常派生**共用这一个判据**，不再各写一遍。 | `__tests__/l0LockedError.test.ts` **6 例**（认 code / 认 message / `MemAgentError` 以 code 为准不误判 / 普通写失败不冒充 / null·undefined·裸对象 / 纯文本判据） |
+| 采集器（区分「写密钥锁定」与「普通写失败」） | `src/core/memagent/sessionCollector.ts`：`ApplyScanResult` 新增 `failed_l0_locked: number`；`applyScanToStore` 的 catch 用 `isL0LockedError` 分类，锁定行单独计数并进审计 `detail`（`l0_locked: true`，普通失败不带） | `__tests__/sessionCollector.test.ts`「批次41-W」describe **3 例**（`E_L0_LOCKED` 计 `failed_l0_locked` + 审计打标 / 只有 message 的字符串错误也判锁 / 无锁定时 `failed_l0_locked=0`） |
+| 端壳接线 | `src/electron/main.ts` §5.1：`lastApply`/`applied` 带 `failed_l0_locked`；游标未推进的 mlog `reason: applied.failed_l0_locked>0 ? 'l0_locked' : 'write_failed'`；41-D 退避的抛错链把 `l0_locked` 排在 `write_failed` 之前（同为「有写失败」，但前者输密码即解、后者是写入 bug，混成一个码会把提示入口藏起来）；`collector:status` 新增 `l0_locked_writes` 回显 | 接线级（真起内核/会话），`sessionCollector` 纯函数 3 例已覆盖判据 |
+| 就地解锁卡（写入页 + 采集器场景复用） | `src/web/shared/L0WriteUnlock.tsx`（新）：props `{ scene, onUnlocked? }`；用 `useSessionContext()`——**管理员**出密码框 + 「解锁写密钥」按钮（`getKernel().l0UnlockWrite(password)`），成功/失败都 `setPassword('')`（密码不留 DOM）；**成员 / 未登录**出「需管理员」文案、不起按钮。testid：`l0-write-unlock`/`l0-unlock-password`/`l0-unlock-submit`/`l0-unlock-need-admin`/`l0-unlock-error`/`l0-unlock-done` | `shared/__tests__/L0WriteUnlock.test.tsx` **6 例**（管理员成功→调用 + `onUnlocked` + 密码不在 DOM / 失败→就地报错 + 清密码 + 不回调 / 空密码不调 / 成员→需管理员无按钮 / 未登录→未认证文案 / `scene` 名渲染） |
+| 写入页（失败即提示 + 解锁后自动重放） | `src/web/Write/WritePage.tsx`：`doWrite()` 里 `isL0LockedError(e)` → `setL0Locked(true)` + toast「未写入：L0 写密钥未解锁…解锁后会自动重放这条写入」；`l0Locked` 时渲染 `<L0WriteUnlock scene="这条手动写入" onUnlocked={doWrite} />`（解锁成功自动重放这条写入） | `write/__tests__/WritePage.l0locked.test.tsx` **3 例**（锁定写入→出卡 + 无成功回执 + toast / 解锁成功→自动重放→回执 / 解锁失败（错密码）→就地报错 + 清密码 + 无回执；用真 `createTestVault` + `vault.lockWrite` 造真锁） |
+| 首页异常（近 30 分钟窗口闸门，避免常驻误报） | `src/web/Home/coreHome.ts`：导出 `L0_LOCK_ANOMALY_WINDOW_MS = 30*60_000` + `deriveKernelAnomalies(audits, now, windowMs)`；聚合分支 `action==='write' && a.ts >= now-windowMs && isL0LockedText(String(d.error??''))` 计 `l0LockedCount`、追 `l0LockedLastId`，出**一条** error 异常「L0 写密钥未解锁：写入被挡」，`request_id` 用最近一次命中的（真实可追溯，不落正文） | `Home/__tests__/coreHome.test.ts`「批次41-W」describe **3 例**（窗口内聚合成一条 + 计数 + 最近 request_id / 超窗即消失 / 非 L0 写失败不产生这条） |
+| 日志人话 | `src/web/Home/programLogLabels.ts`：`NOTE_KEYS` 补 `failed_l0_locked`（批次41-W 注释块），采集器失败摘要里能一眼看出「几条是写密钥锁定」 | 断言在既有 `programLogLabels.test.ts` 口径内 |
+| 文案 | `src/core/memagent/memories.ts:167` 的 `E_L0_LOCKED` 提示语对齐（只改措辞，不动码） | — |
+
+> 诚实边界（批次41-W）：① **不新增带权限的读路径**——提示由真实写入失败驱动，`l0:status`/`l0:writeUnlock` 仍走既有 requireAdmin 闸门，本批没放宽；② **密码零落盘**：`L0WriteUnlock` 成功/失败都清空输入，`onUnlocked` 回调只传动作不传密码，动作日志与审计只记「解锁成功/失败」不记密码值（有测试断言 DOM 无密码）；③ 首页异常走**近 30 分钟窗口**（`L0_LOCK_ANOMALY_WINDOW_MS`），解锁后不再刷新该窗口内的命中 → 异常自动消失，不是常驻误报；④ 采集器侧 `l0_locked_writes`/`l0_locked` 原因码喂给 41-D 退避——写密钥锁定是「用户输密码就能解的长障」，与「写入 bug」分列；⑤ 接线级行为（端壳 `main.ts` §5.1 的 `l0:status` 回显与退避原因码）需按手测报告实机核对 `collector:backoff` / `collector:status` 动作日志，纯函数判据与三处 UI 由上面的用例覆盖。
+
 ### 批次41-T：存量补齐缺失的 `sha256` 与 `embedding`（批次41-B 声明的「533 行缺指纹 + 1 行缺向量」存量，本批给出通道）
 
 > 这两个字段随提交 `843282c`（2026-10-31）才进写入路径，之前的历史行行上就是空的。代价有边界且可查：缺 `embedding` 的行在语义召回里恒 0 分（`agent.ts` 按行上 `m.embedding` 打分），缺 `sha256` 的行在云端同步的每日全量对账里会被 `sync.ts` 列进 `missing` —— 所以这 533 行同时是**批次42（sync 接线）的前置事实**。
