@@ -42,6 +42,7 @@ import { runMcpServer } from '../core/memagent/mcp.ts';
 import { runMcpHttpServer } from '../core/memagent/mcpHttp.ts';
 import { ensureSharedProject } from '../core/memagent/mcpRecall.ts';
 import { FileTokenStore } from '../core/memagent/tokenStore.ts';
+import { loadOrCreateTenant } from './tenantSource.ts';
 import { createWebhook } from '../core/memagent/webhook.ts';
 import { createWebhookHttpServer } from './webhookServer.ts';
 import type { AuditAction, Category, Memory } from '../core/memagent/types.ts';
@@ -2558,6 +2559,12 @@ async function bootstrap(): Promise<void> {
     throw e;
   });
 
+  // 批次45-A1 单一租户真源：数据根级 tenant.json（0600）。采集器 / webhook / MCP 引导账户统一读它，
+  // 不再各自写死三元组（首建 = 规范缺省 u1/t1/e1，与存量账本一致）；损坏 fail-fast 阻断启动。
+  const tenantTriple = loadOrCreateTenant(USER_DATA);
+  void mlog('bootstrap:tenant-source', { file: join(USER_DATA, 'tenant.json'), ...tenantTriple });
+  actionLog('app', 'bootstrap:tenant-source', { user_id: tenantTriple.user_id, team_id: tenantTriple.team_id, enterprise_id: tenantTriple.enterprise_id });
+
   // MCP 两端口都要求令牌：HTTP 走 Authorization/x-mcp-token，TCP 走 initialize params.token。
   // 令牌只落 userData/mcp-token.txt（0600），用户把它配置给 Agent；日志只记路径，绝不记明文。
   const mcpToken = loadOrCreateMcpToken();
@@ -2583,7 +2590,12 @@ async function bootstrap(): Promise<void> {
   // 库损坏 fail-fast（抛错阻断启动，绝不静默清空既有授权）；TCP 与 HTTP 共用同一实例。
   const tokenStore = new FileTokenStore(join(USER_DATA, 'mcp-tokens.json'));
 
-  const mcp = runMcpServer({ storage, port: MCP_PORT, token: mcpToken, l0: l0Vault, tokenStore });
+  // 45-A1：引导账户三元组来自租户真源（缺省 u1/t1/e1，行为等价；is_admin=true = 本机属主，D6-3 口径不变）
+  const mcpBootstrapAccount = {
+    ...tenantTriple, is_admin: true as const, scope_project_ids: ['*'],
+  };
+
+  const mcp = runMcpServer({ storage, port: MCP_PORT, token: mcpToken, l0: l0Vault, tokenStore, account: mcpBootstrapAccount });
   mcp.ready
     .then((p) => { void mlog('bootstrap:mcp-listening', { port: p }); })
     .catch((e) => { void mlog('bootstrap:mcp-listen-error', String((e as Error)?.message ?? e)); });
@@ -2591,7 +2603,7 @@ async function bootstrap(): Promise<void> {
   // 标准 MCP streamable-http（DSH dsh-mcp-client 走这条路连记忆库；POST /mcp → initialize/tools/list/tools/call）
   // 批次33-C：同一端口另开 GET /recall/<一次性 id> = 聊天里「展开明细」链接指向的本机明细页（真折叠），只记命中与否，不记 id 与正文。
   const mcpHttp = runMcpHttpServer({
-    storage, port: MCP_HTTP_PORT, token: mcpToken, l0: l0Vault, tokenStore,
+    storage, port: MCP_HTTP_PORT, token: mcpToken, l0: l0Vault, tokenStore, account: mcpBootstrapAccount,
     // 批次41-R：同一条也落 actions.log（批次34 对 llm:* 的同一口径）——日志页读的是 actions.log，
     // 只写 main.log 等于「明细页有没有被点开过」对用户不可见。值只有 ok/miss，无 id、无正文。
     onViewDetail: (outcome) => {
@@ -2616,7 +2628,7 @@ async function bootstrap(): Promise<void> {
           project_id: input.project_id,
           source_agent: input.source_agent,
         },
-        { storage, vector: webhookVector, account: { user_id: 'u1', team_id: 't1', enterprise_id: 'e1' }, request_id: `req_wh_${Date.now()}`, now: Date.now(), l0: l0Vault },
+        { storage, vector: webhookVector, account: tenantTriple, request_id: `req_wh_${Date.now()}`, now: Date.now(), l0: l0Vault },
       );
       const filtered = r.dedup.action === 'filtered';
       return {
@@ -2723,7 +2735,7 @@ async function bootstrap(): Promise<void> {
                 source_agent: input.source_agent,
                 session_id: input.session_id,
               },
-              { storage, vector: collectorVector, account: { user_id: 'u1', team_id: 't1', enterprise_id: 'e1' }, request_id: `req_col_${Date.now()}`, now: Date.now(), l0: l0Vault },
+              { storage, vector: collectorVector, account: tenantTriple, request_id: `req_col_${Date.now()}`, now: Date.now(), l0: l0Vault },
             );
             if (r.mem_id) writtenIds.push(r.mem_id);
             return { mem_id: r.mem_id, dedup: r.dedup };

@@ -2,7 +2,8 @@
 // - Electron（顶层窗口 / 概览页 iframe）：InMemoryStorage 构造即绑定主进程 SqliteStorage，本模块只做单例收敛；
 // - 纯浏览器：本模块持有进程内唯一 InMemoryStorage，页面间不再各持一份空账本。
 // 身份不再写死 demo 账号：优先取真实登录（Home 登录成功后 bindTenant 落盘）或主进程按会话下发
-// （批次26-B P1-3 syncTenantFromHost，桌面壳内每次页面加载覆盖本地值）；否则生成一次本地身份并持久化（仅本机生效）。
+// （批次26-B P1-3 syncTenantFromHost，桌面壳内每次页面加载覆盖本地值）；否则用本机规范缺省三元组
+// （批次45-A1：与主进程 tenant.json / 采集器·webhook 同源，不再现造 u_<ulid> 本机身份）。
 import type {
   Account, Form, L0AdminPort, L0Port, LlmProvider, MemAgent, MemAgentSeedHooks, StorageBackend, VectorBackend,
 } from '../core/memagent/types.ts';
@@ -12,6 +13,7 @@ import { InMemoryStorage } from '../core/memagent/storage.ts';
 import { FakeLlmProvider } from '../core/memagent/llm.ts';
 import { JsVectorBackend } from '../core/memagent/vector.ts';
 import { ulid } from '../core/memagent/ulid.ts';
+import { DEFAULT_TENANT } from '../shared/tenantDefaults.ts';
 import { configuredVectorDim } from './models/modelConfig.ts';
 import { HostL0Admin, HostL0Port, l0HostAvailable } from './shared/l0Port.ts';
 import { HostL0BlobStore } from './shared/l0BlobStore.ts';
@@ -49,13 +51,15 @@ function persistTenant(t: KernelTenant): void {
   try { localStorage.setItem(TENANT_KEY, JSON.stringify(t)); } catch { /* 隐私模式/配额满：仅内存生效 */ }
 }
 
-/** 当前租户身份（首次调用生成并持久化，跨页面/跨重启稳定） */
+/** 当前租户身份（首次调用持久化，跨页面/跨重启稳定） */
 export function getTenant(): KernelTenant {
   if (tenantCache) return tenantCache;
   const persisted = readPersistedTenant();
   if (persisted) { tenantCache = persisted; return tenantCache; }
-  const suffix = ulid().slice(-10).toLowerCase();
-  tenantCache = { user_id: `u_${suffix}`, team_id: `team_local`, enterprise_id: `ent_local` };
+  // 批次45-A1 浏览器降级：不再现造 u_<ulid> 本机身份（每台浏览器各造一个 user_id 是账本租户混住的根源），
+  // 改用本机规范缺省三元组（与主进程 tenant.json / 采集器·webhook 同源）。
+  // 登录 bindTenant / 桌面壳 syncTenantFromHost 仍会用真实身份覆盖——降级值只保证「同一台账本同一套身份」。
+  tenantCache = { ...DEFAULT_TENANT };
   persistTenant(tenantCache);
   return tenantCache;
 }
@@ -221,6 +225,7 @@ export function resetKernelForTests(): void {
   agentSingleton = null;
   l0PortsOverride = null;
   storageOverride = null;
+  tenantCache = null; // 45-A1：租户单例一并重置（否则跨用例泄漏，降级持久化断言会拿到被 clear 过的 localStorage）
 }
 
 /** 统一 request_id 生成（内核同一 ULID 口径；禁止页面自增计数器冒充） */

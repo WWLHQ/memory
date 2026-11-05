@@ -3,6 +3,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { hostCall, hostCapability } from '../../desktop/hostBridge.ts';
 import { getTenant, syncTenantFromHost, resetKernelForTests } from '../kernel.ts';
+import { DEFAULT_TENANT } from '../../shared/tenantDefaults.ts';
 
 vi.mock('../../desktop/hostBridge.ts', () => ({
   hostCapability: vi.fn(() => 'none' as const),
@@ -30,6 +31,15 @@ describe('批次26-B P1-3 租户主进程下发（kernel.syncTenantFromHost）',
     expect(ok).toBe(false);
     expect(getTenant()).toEqual(before);
     expect(hostCall).not.toHaveBeenCalled();
+  });
+
+  it('批次45-A1 浏览器降级：首次 getTenant 用规范缺省三元组（u1/t1/e1），不再现造 u_<ulid> 本机身份', () => {
+    const t = getTenant();
+    expect(t).toEqual({ user_id: 'u1', team_id: 't1', enterprise_id: 'e1' });
+    // 与采集器/webhook/MCP 同源：直接断言与共享常量相等，防止三写者漂移
+    expect(t).toEqual(DEFAULT_TENANT);
+    // 降级值也持久化（跨页面/跨重启稳定）
+    expect(JSON.parse(localStorage.getItem('mam.tenant.v1') ?? '{}')).toEqual(DEFAULT_TENANT);
   });
 
   it('桌面壳 + 有效会话：服务端真值覆盖本地身份并持久化', async () => {
