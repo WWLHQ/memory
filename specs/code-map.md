@@ -981,7 +981,7 @@ status: draft
 
 | 任务 | commit | 内容 | 三道闸门 |
 |---|---|---|---|
-| **46-1 需求/方案定稿（#17）** | 本次提交（下一子任务同步时补短哈希） | 新建 `specs/批次46-真正冲突裁决与摘要合并统计_落地方案.md`（12 项代码实测、§7 六字段逐项映射与取舍、§9.7 三模式 + hold 四值语义、3 个落地方案与 9 个决策点、46-1～46-5 任务拆分、A/B/C 验收点、C1 六个候选变异点）；纠错 4 份活文档的「本系统无对应统计量」旧措辞；`需求规格书_内核API契约.md` §2.4 补「两条 GC 路径不可混用」；本表补 D5-4 短哈希 `8e556ee`。**零代码改动** | 见下方三栏 |
+| **46-1 需求/方案定稿（#17）** | `48694c4` | 新建 `specs/批次46-真正冲突裁决与摘要合并统计_落地方案.md`（12 项代码实测、§7 六字段逐项映射与取舍、§9.7 三模式 + hold 四值语义、3 个落地方案与 9 个决策点、46-1～46-5 任务拆分、A/B/C 验收点、C1 六个候选变异点）；纠错 4 份活文档的「本系统无对应统计量」旧措辞；`需求规格书_内核API契约.md` §2.4 补「两条 GC 路径不可混用」；本表补 D5-4 短哈希 `8e556ee`。**零代码改动** | 见下方三栏 |
 
 > **关键实测结论（推翻 D5-3 一处记录）**：契约 §7 六字段在 `forgetting.ts::ForgettingCycleReport` + `runForgettingCycle()` 里**早已完整实现**且有真实事件源，由 `main.ts:3064` 每 6h 调度、写 `action='gc'` 带 `task='forgetting_cycle'` 审计，`forgetting.test.ts` 覆盖；缺的是**接线与隔离**（扫全库无 `project_id` 过滤、无 `dry_run`、未接 MCP）。冲突裁决：`GcReq.resolve_conflicts?`（`types.ts:199`）已声明但 `coreGc` 未读，三模式在端壳 `web/dispute/coreDispute.ts`（含硬编码 `project_id:'P1'`、`conflict_score:0.8`）。故本专项 = 接线 + 隔离 + 裁决下沉 + 文档纠错，**不是从零造统计**；D5-3 运行期决策（只回三项 / 不补 0 / 不改名冒充）保持正确不变。
 
@@ -989,3 +989,13 @@ status: draft
 > **A·影响面回归**：影响面 = 新增方案文档 + 5 份活文档措辞/交叉引用；**零源码、零类型、零 schema、零测试改动**，`code:index:check` 319 文件仍最新（生成器排除 `specs/` 与测试文件）；既有行为不变 = `ma.gc()` 三态表、`runForgettingCycle()` 签名、`main.ts` 6h 调度、`tools/list` 10 工具、D5-3 十例与 D5-4 115 例均未触碰；提交卫生 = 精确 `git add`，外部生成未跟踪 spec 排除。
 > **B·效果验证**：脚本逐条核对 §1 的 14 项 file:line 声明（`memories.ts:566` `coreGc`、`types.ts:199` `resolve_conflicts?`、`forgetting.ts:209/279/295/338/357`、`main.ts:3064`、`coreDispute.ts:48/122`、`web/dispute/types.ts:12`、`types.ts:457`、`memories.ts:722`）→ **14/14 命中、失配 0**；交叉引用核对 4 份活文档各含 1 处指向新方案；首次核对抓到 `types.ts:198` 是注释行（声明在 199），方案已把区间细化为「196-206（在 199）」。
 > **C·变异验证**：C3 声明变异 —— 临时把 §2 的 `report.freshness_updated = mems.length` 改成 `= 0` → 与 `forgetting.ts:295` 源码对照返回「一致: false → 失配被发现」→ 原样还原 → 复核「一致: true、变异残留 0 处」。未做代码级变异（本提交无代码）。
+
+| **46-1 后续收口：D1–D9 拍板 + 外部 spec 纳入** | 本次提交（下一子任务同步时补短哈希） | 用户 2026-11-05 回复「按推荐执行，外部生成的文件纳入提交」。`批次46-…_落地方案.md` 状态改为「已拍板 / 进入实施」、§5 标题改写、新增 §5.1 拍板结果表（D1 编号 46 / D2 方案 C / D3 显式 verdict / D4 如实标注 / D5 禁止双计 / D6 保留三项+新增真实字段 / D7 不改调度 / D8 保留原名+verdict 枚举 / D9 重排任务）；把长期未跟踪的 `specs/MCP运维与多Agent写入规范.md` **纳入版本管理**（批次43 R3 反向补回的来源文档），纳入时按「活文档要实」就地校正 4 处过时/错误现状声明（§0.1 校正说明：`source_agent` 默认值已去除、Token Broker/mint 内核零命中属 D6、`manage_memory delete` 名称与开关口径）；本表补 46-1 短哈希 `48694c4`。零代码改动 | 见下方三栏 |
+
+> **收口说明**：上一行 46-1 的 A 栏「外部生成未跟踪 spec 排除」是**该提交当时的真实状态**，保留原貌以便追溯；本次按用户明确指令改为纳入，二者不矛盾。
+> **外部文档校正的 4 处**：① §4.1「MCP 默认 `'mcp'`」→ 批次44-D1 已去除默认值、必填且拒绝字面 `mcp`；② §4.3「默认身份禁用」缺口 → 标注已闭合（同 D1）；③ §3.2/§3.3「Token Broker 已能 mint 三池令牌」→ 实测全仓 `src/` 对 `TokenBroker`/`mint` 零命中，属 D6 未落地；④ §4.2「`memory_op` delete」→ 对齐为 `manage_memory(action=delete)` + `MCP_ALLOW_DELETE=1` / `allowDelete:true`（D5-2）。未校正项复核仍成立：MCP 无 `GET /health`、`sync` 未接线（`E_NOT_IMPLEMENTED`）、`GET /recall/<id>` 明细页只听回环。
+
+> **46-1 收口三道闸门证据（纯文档按 C3）**：
+> **A·影响面回归**：影响面 = 方案文档状态/拍板表 + 新纳入 spec + 本表；零源码/类型/schema/测试改动；`code:index:check` 319 文件仍最新（生成器排除 `specs/`）；全量 `vitest run --maxWorkers=1` 175 文件 / 2112 项全绿、`npm run typecheck` 两工程 0 错；既有行为不变 = `ma.gc()` 三态表、`runForgettingCycle()` 签名、`main.ts` 调度、`tools/list` 10 工具、D5-3/D5-4 用例均未触碰；任务重排按 D9 执行（#19→46-2、#18→46-3、#20→46-4、新增 46-5），**46-2 代码实现属下一原子任务，本轮不擅自连跑**。
+> **B·效果验证**：反向核对拍板表 9 条与方案 §4/§5 原推荐逐条一致；核对外部文档 4 处校正与源码证据（`mcp.ts:201-205` / `mcpHttp.ts:246-250` / `mcpSchema.ts:53` 的 `source_agent` 必填、`src/` 对 `TokenBroker|mint` 零命中、`mcpHttp.ts` 对 `health` 零命中、`agent.ts` 的 `E_NOT_IMPLEMENTED`）；`git check-ignore` 确认该文件未被忽略、`git add` 后状态由 `??` 变 `A`。
+> **C·变异验证**：C3 声明变异 —— 临时把校正说明里的一条结论改成反向（把「Token Broker 未落地」写回「已能 mint」）→ 与 `src/` 检索结果对照返回失配被检出 → 原样还原 → 复核残留 0 处；再做交叉引用核对（方案 §5.1 ↔ 外部文档 §0.1 ↔ 本表 ↔ 任务清单）。未做代码级变异（本提交无代码）。
