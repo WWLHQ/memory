@@ -21,6 +21,7 @@ import { buildRecallDetailExpiredPage } from './recallInsight.ts';
 import { rejectUntrustedHost } from '../../shared/localOrigin.ts';
 import type { StorageBackend, Pref, L0Port } from './types.ts';
 import { CATEGORIES, isCategory } from './types.ts';
+import { parseWriteKnobs } from './memories.ts';
 
 const PROTOCOL_VERSION = '2025-06-18';
 
@@ -234,6 +235,9 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
         if (!sa || sa === 'mcp') {
           throw new Error('write_memory.source_agent 必填且须显式标识来源 agent（禁止依赖默认 mcp，命名见 §7.1）');
         }
+        // A4（§2.3）：扩展打分旋钮（可选；未传 → 记录不带该字段，scoreMemory 走默认 0.5）
+        const { knobs, error: knobError } = parseWriteKnobs(p);
+        if (knobError) throw new Error(knobError);
         return {
           result: await ma.write({
             content: p.content,
@@ -242,6 +246,7 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
             user_id: account.user_id,
             session_id: p.session_id ? String(p.session_id) : undefined,
             source_agent: sa,
+            ...knobs,
           }),
         };
       }

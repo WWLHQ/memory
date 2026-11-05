@@ -15,6 +15,7 @@ import { MCP_INSTRUCTIONS, MCP_TOOLS } from './mcpSchema.ts';
 import { McpToolError, runListProjectsTool, runRecallTool } from './mcpRecall.ts';
 import type { StorageBackend, Pref, L0Port } from './types.ts';
 import { CATEGORIES, isCategory } from './types.ts';
+import { parseWriteKnobs } from './memories.ts';
 
 const VERSION = '2.0';
 
@@ -188,6 +189,12 @@ export function runMcpServer(opts: McpOptions): McpServerHandle {
             send(socket, jsonError(req.id, -32602, 'write_memory.source_agent 必填且须显式标识来源 agent（禁止依赖默认 mcp，命名见 §7.1）'));
             return;
           }
+          // A4（§2.3）：扩展打分旋钮（可选；未传 → 记录不带该字段，scoreMemory 走默认 0.5）
+          const { knobs, error: knobError } = parseWriteKnobs(p);
+          if (knobError) {
+            send(socket, jsonError(req.id, -32602, knobError));
+            return;
+          }
           const result = await s.write({
             content: p.content,
             category,
@@ -195,6 +202,7 @@ export function runMcpServer(opts: McpOptions): McpServerHandle {
             user_id: sessionUser,
             session_id: p.session_id ? String(p.session_id) : undefined,
             source_agent: sa,
+            ...knobs,
           });
           send(socket, ok(req.id, result));
           return;

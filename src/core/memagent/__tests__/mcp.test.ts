@@ -3,6 +3,7 @@ import { describe, expect, it, beforeAll, afterAll } from 'vitest';
 import { createConnection } from 'node:net';
 import { runMcpServer, type McpServerHandle } from '../mcp.ts';
 import { InMemoryStorage } from '../storage.ts';
+import { scoreMemory } from '../forgetting.ts';
 import type { L0Vault } from '../l0vault.ts';
 import { createTestVault } from './l0Kit.ts';
 
@@ -175,6 +176,71 @@ describe('MCP Server（§19.5）', () => {
 
     // 验证 source_agent 已记录
     expect(mcpMem.created_by_agent).toBe('mcp-test');
+    // A4：未传打分旋钮 → 记录不带该字段（scoreMemory 兼容默认 0.5）
+    expect(mcpMem.importance).toBeUndefined();
+    expect(mcpMem.confidence).toBeUndefined();
+    expect(mcpMem.half_life_days).toBeUndefined();
+    expect(mcpMem.tags).toBeUndefined();
+  });
+
+  it('write_memory：扩展打分旋钮落库并生效于 scoreMemory（A4）', async () => {
+    const r = await rpcCall(PORT, {
+      jsonrpc: '2.0', id: 35,
+      method: 'write_memory',
+      params: {
+        content: 'A4 旋钮测试：连接池上限 20，超出直接拒绝',
+        project_id: 'P1',
+        category: 'decision',
+        source_agent: 'mcp-test',
+        importance: 0.9,
+        confidence: 0.8,
+        half_life_days: 60,
+        tags: ['支付', ' 回归 '],
+        token: TOKEN,
+      },
+    });
+    expect(r.error).toBeUndefined();
+    const result = r.result as { mem_id: string };
+    const mems = await storage.listMemories({});
+    const m = mems.find((x) => x.mem_id === result.mem_id)!;
+    expect(m.importance).toBe(0.9);
+    expect(m.confidence).toBe(0.8);
+    expect(m.half_life_days).toBe(60);
+    expect(m.tags).toEqual(['支付', '回归']); // tags 去首尾空白
+    // 旋钮生效：同 relevance/时刻下，带 0.9/0.8 的打分 > 抹掉旋钮后的默认 0.5 打分
+    const now = m.created_at;
+    const { importance: _i, confidence: _c, ...rest } = m;
+    expect(scoreMemory(m, 1, now)).toBeGreaterThan(scoreMemory(rest, 1, now));
+  });
+
+  it('write_memory：importance 越界（1.5）→ -32602', async () => {
+    const r = await rpcCall(PORT, {
+      jsonrpc: '2.0', id: 36,
+      method: 'write_memory',
+      params: { content: '越界', project_id: 'P1', category: 'fact', source_agent: 'mcp-test', importance: 1.5, token: TOKEN },
+    });
+    expect(r.error?.code).toBe(-32602);
+    expect(r.error?.message).toContain('importance');
+  });
+
+  it('write_memory：half_life_days=0 → -32602', async () => {
+    const r = await rpcCall(PORT, {
+      jsonrpc: '2.0', id: 37,
+      method: 'write_memory',
+      params: { content: '半衰期非法', project_id: 'P1', category: 'fact', source_agent: 'mcp-test', half_life_days: 0, token: TOKEN },
+    });
+    expect(r.error?.code).toBe(-32602);
+    expect(r.error?.message).toContain('half_life_days');
+  });
+
+  it('write_memory：tags 非字符串数组 → -32602', async () => {
+    const r = await rpcCall(PORT, {
+      jsonrpc: '2.0', id: 38,
+      method: 'write_memory',
+      params: { content: 'tags 非法', project_id: 'P1', category: 'fact', source_agent: 'mcp-test', tags: '支付', token: TOKEN },
+    });
+    expect(r.error?.code).toBe(-32602);
+    expect(r.error?.message).toContain('tags');
   });
 
   it('get_preferences：缺 user_id → -32602', async () => {

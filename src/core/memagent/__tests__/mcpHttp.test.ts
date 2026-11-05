@@ -203,6 +203,38 @@ describe('MCP HTTP（批次2 信任边界）', () => {
     expect(body.result.content[0].text).toContain('source_agent');
   });
 
+  it('tools/call 扩展打分旋钮 → 落库（A4）', async () => {
+    const r = await call(
+      {
+        jsonrpc: '2.0', id: 921, method: 'tools/call',
+        params: { name: 'write_memory', arguments: { content: 'HTTP A4 旋钮测试：PGlite 17 单库上限 4GB', project_id: 'P1', category: 'decision', source_agent: 'workbuddy', importance: 0.9, confidence: 0.7, half_life_days: 30, tags: ['存储'] } },
+      },
+      { Authorization: `Bearer ${TOKEN}` },
+    );
+    const body = (await r.json()) as { result: { isError: boolean; content: Array<{ text: string }> } };
+    expect(body.result.isError).toBe(false);
+    const mems = await storage.listMemories({});
+    const m = mems.find((x) => x.content_l1?.includes('PGlite 17 单库上限'))!;
+    expect(m).toBeDefined();
+    expect(m.importance).toBe(0.9);
+    expect(m.confidence).toBe(0.7);
+    expect(m.half_life_days).toBe(30);
+    expect(m.tags).toEqual(['存储']);
+  });
+
+  it('tools/call importance 越界 → isError=true（A4）', async () => {
+    const r = await call(
+      {
+        jsonrpc: '2.0', id: 922, method: 'tools/call',
+        params: { name: 'write_memory', arguments: { content: '越界', project_id: 'P1', category: 'fact', source_agent: 'workbuddy', importance: 2 } },
+      },
+      { Authorization: `Bearer ${TOKEN}` },
+    );
+    const body = (await r.json()) as { result: { isError: boolean; content: Array<{ text: string }> } };
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0].text).toContain('importance');
+  });
+
   it('list_projects 返回真实项目（P1 + 条数）', async () => {
     const r = await call(
       { jsonrpc: '2.0', id: 91, method: 'tools/call', params: { name: 'list_projects', arguments: {} } },

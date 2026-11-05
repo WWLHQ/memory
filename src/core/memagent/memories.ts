@@ -116,6 +116,11 @@ export interface WriteInput {
   user_id?: string;
   session_id?: string;
   source_agent?: string;
+  /** A4（§2.3）扩展打分旋钮：显式传入才落库；未传 → scoreMemory 走默认 0.5（兼容存量） */
+  importance?: number;
+  confidence?: number;
+  half_life_days?: number;
+  tags?: string[];
 }
 
 export interface WriteCtx {
@@ -130,6 +135,48 @@ export interface WriteCtx {
   llmModel?: string;
   /** L0 写密钥端口（§4.4.4）：缺省/未解锁 → E_L0_LOCKED，绝不落明文 */
   l0?: L0Port;
+}
+
+/**
+ * A4（§2.3）：MCP `write_memory` 扩展打分旋钮的统一入参校验（TCP mcp.ts / HTTP mcpHttp.ts 共用）。
+ * 全部可选；非法即返回带字段名的 error 文案（调用方回 -32602 / isError），合法则产出钳制前的原始值
+ * （coreWrite 落库时再做 CLAMP 钳制）。未传入的字段不出现在 knobs 里 → 记录不带该字段，
+ * scoreMemory 走默认 0.5（兼容存量，不引发分数漂移）。
+ */
+export function parseWriteKnobs(p: Record<string, unknown>): {
+  knobs: Pick<WriteInput, 'importance' | 'confidence' | 'half_life_days' | 'tags'>;
+  error?: string;
+} {
+  const knobs: Pick<WriteInput, 'importance' | 'confidence' | 'half_life_days' | 'tags'> = {};
+  if (p.importance !== undefined) {
+    const v = p.importance;
+    if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > 1) {
+      return { knobs, error: 'write_memory.importance 须为 0–1 的数字' };
+    }
+    knobs.importance = v;
+  }
+  if (p.confidence !== undefined) {
+    const v = p.confidence;
+    if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > 1) {
+      return { knobs, error: 'write_memory.confidence 须为 0–1 的数字' };
+    }
+    knobs.confidence = v;
+  }
+  if (p.half_life_days !== undefined) {
+    const v = p.half_life_days;
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 1) {
+      return { knobs, error: 'write_memory.half_life_days 须为 ≥1 的整数（天）' };
+    }
+    knobs.half_life_days = v;
+  }
+  if (p.tags !== undefined) {
+    if (!Array.isArray(p.tags) || p.tags.some((t) => typeof t !== 'string')) {
+      return { knobs, error: 'write_memory.tags 须为字符串数组' };
+    }
+    const cleaned = (p.tags as string[]).map((t) => t.trim()).filter((t) => t.length > 0);
+    if (cleaned.length > 0) knobs.tags = cleaned;
+  }
+  return { knobs };
 }
 
 /**
@@ -290,6 +337,13 @@ export async function coreWrite(input: WriteInput, ctx: WriteCtx): Promise<Write
     sha256: sha256hex(mainContent),
   };
   mem.embedding = embedSync(contentL1, dim); // 语义向量从 L1 生成（§2.2 不变量 7）
+  // A4（§2.3）：显式传入的打分旋钮才落库；未传 → 不带该字段，scoreMemory 走默认 0.5（兼容存量）
+  if (input.importance !== undefined) mem.importance = clamp(input.importance, CLAMP.importance);
+  if (input.confidence !== undefined) mem.confidence = clamp(input.confidence, CLAMP.confidence);
+  if (input.half_life_days !== undefined) mem.half_life_days = Math.max(1, input.half_life_days);
+  if (input.tags !== undefined && input.tags.length > 0) {
+    mem.tags = input.tags.map((t) => String(t).trim()).filter((t) => t.length > 0);
+  }
   await storage.putMemory(mem);
   await vector.upsert(mem.mem_id, contentL1, { project_id: input.project_id, layer: deepest });
 
