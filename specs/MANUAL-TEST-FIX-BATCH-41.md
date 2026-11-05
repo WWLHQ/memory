@@ -32,6 +32,8 @@
 
 > **〔2026-11-05 13:26 追加〕最新出厂产物是 41-I 临时放开额度版**（上面 §0 表里的 12:07 B 包是 41-S 收口版，仍对应 41-Q/41-S 的交付，但**已不是最新安装包**）。41-I 临时把 `REFINE_MAX_ROWS_PER_DAY` 500→100_000 让用户重启后排空 1233 条 `pending`、取全量 `stop_code×state` 分布定深度档位——**这是临时值，排空+定档后必须回落 500 再打一次包**。安装包/大小/SHA256/产物核对/EPERM 残留与「待用户重启」详见 **§7**；定档结论尚未产生，**41-I 未收口**。
 
+> **〔2026-11-05 更晚追加，取代上一条的「临时值」口径〕41-I 已正规化为运行时「限额 / 不限额」开关**（用户拍板「将 41-I 的也做成同样的按钮和功能，主动权交给用户」）。`REFINE_MAX_ROWS_PER_DAY` **回落为 500**，但它不再是硬闸门——每日额度改由 `RefineQueueState.cap_enabled`/`cap_rows` 运行时驱动，参数页卡片出「限额/不限额」开关 + 数字框（仅管理员，走新 IPC `refine:setCap`）：限额 → 按 `cap_rows` 截断、数字框可改；不限额 → `effectiveCap()=Infinity`、数字框灰不可改。**用户不再需要为「跑全量」重打包**——切到不限额即可排空 `pending`。上一条 13:26 那个 100_000 出厂包**已被本批产物取代**（详见 §7 改写）。**最新出厂产物（实测）**：`release/installer/MultiAgent Memory-0.1.0-setup.exe`，落盘 **2026-11-05 14:15:04（UTC+08:00）**、**122,056,492 B / SHA256 `ec6381b23f4f3c4d4d4e18fd3e0361cafa56aa8dde8128ea7c74d456af7d357a`**，且**用户机已于 14:15:47 运行在这新包上**（写锁 pid 44008、队列文件已被新代码写入 `cap_enabled/cap_rows`）——**不用再重启即可在参数页使用限额开关**。副作用如实声明：新包常量回落 500，而今日 `dayRows` 已在旧包 `1e5` 下跑到 **593** → `500 − 593 ≤ 0`，**今天这台机器不再出补炼活**，要接着排 `pending`（现 1190 条）请在参数页取消勾选「限额」。**定档（41-I #37）本身仍未收口**——限额开关是「怎么给额度」，`minRatio`/`DEPTH_CAP_BANDS`「该炼多深」是另一件事，仍待全量分布交用户拍板。
+
 ---
 
 ## 1. 本批最重要的一条：批次41 的代码此前从未在用户机上运行过
@@ -252,13 +254,38 @@
 
 ---
 
-## 7. 〔2026-11-05〕41-I 临时放开每日补炼额度，跑全量 pending 取定档分布
+## 7. 〔2026-11-05〕41-I：每日补炼额度从编译常量正规化为运行时「限额 / 不限额」开关
 
-用户口径（AskUserQuestion 拍板）：「**本次将 500 额度限制放开，全部处理完再定 41-I**」——即先把 `REFINE_MAX_ROWS_PER_DAY` 这道成本闸门抬到近无限，让 `pending` 全排空，拿到**全量** `stop_code × state` 分布，再据此定深度档位（`DEPTH_CAP_BANDS` / `minRatio`）。
+**结论先行**：41-I 最初用「把 `REFINE_MAX_ROWS_PER_DAY` 抬到 100_000 的编译常量」临时放开额度（提交 `4f96eaa`，13:26 出厂包，见本节末「前置」）。用户随后拍板「**将 41-I 的也做成同样的按钮和功能，主动权交给用户**」——于是本批把它正规化成**运行时可调**的限额开关，常量回落 500 只剩「默认值 + 坏值回落」两个用途。下面先讲本批（正规化）改了什么，再附前置 `4f96eaa` 的历史与定档基线表。
 
-- **改了什么（提交 `4f96eaa`，4 文件）**：① `src/core/memagent/refineQueue.ts` 的 `REFINE_MAX_ROWS_PER_DAY` **500 → 100_000**（保持**有限值**，不能用 `Infinity`——`JSON.stringify(Infinity)=null` 会让参数页卡片 `day_limit ?? 500` 谎报 500）；② `refineQueue.test.ts` 的「额度用尽」用例原来 `for (i<REFINE_MAX_ROWS_PER_DAY) markRefined(...)` 逐行 burn（不可变拷贝 O(n²)），改成直接 `s = { ...s, dayRows: REFINE_MAX_ROWS_PER_DAY }` 验闸门算术——否则 100_000 档会真把测试跑挂；其余引用该常量的断言用符号自动跟随，没动；③ `main.ts` §6f 头注释加「临时放开、定档后须回落 500」；④ 刷新代码索引。
-- **这是临时值，不是新口径**：批次39 用户拍板 D 的正常口径仍是 **≤500/日**（补炼真调引擎花钱）。**pending 排空、41-I 定档完成后必须回落为 500**（见本条末尾「排空后」）。
-- **为什么必须重打包**：这道闸门是**编译常量**，没有运行时 IPC setter——只有重新出包 + 用户重启到新产物，那 1233 条 `pending` 才会在新额度下继续排。放开额度**只是不再按日截断**，吞吐仍受模型速度限制（`REFINE_TICK_MS=15s` × 单行多层真调，本机 7B 单次约 28s）。
+### 7.1 本批：限额 / 不限额运行时控制（取代 4f96eaa 的编译常量放开）
+
+- **改了什么（10 文件，代码链）**：
+  1. `src/core/memagent/refineQueue.ts`——`RefineQueueState` 新增 `cap_enabled:boolean` + `cap_rows:number`；`emptyRefineQueue` 缺省 `cap_enabled=true / cap_rows=REFINE_MAX_ROWS_PER_DAY`；`clampRefineQueue` 归一（`cap_enabled!==false` 缺省按限额、`cap_rows` 非有限整数≥1 一律回落 500，坏值绝不冒充「不限额」）；新纯函数 `effectiveCap()`（限额→`cap_rows`，不限额→`Infinity`）取代常量做闸门、`dailyBudgetLeft` 走它；新纯函数 `setRefineCap(state,{enabled,rows?})`（不限额忽略 `rows` 但保留旧 `cap_rows` 供切回复用；限额时 `rows` 非有限整数≥1 则沿用旧值，否则 `Math.floor`）；`nextPending` **不改**（`Infinity` 天然过 `<=0` 判据）；`RefineQueueSummary` 新增 `cap_enabled/cap_rows`，`day_limit`/`day_left` 类型改 `number|null`——不限额时 `null`（**绝不把 `Infinity` 上线：`JSON.stringify(Infinity)=null`**，UI 据 `cap_enabled` 显示「不限额」而非谎报大数）。
+  2. `src/electron/ipcChannels.ts`——新增 `refineSetCap: 'refine:setCap'`（`PRELOAD_CHANNELS` 自动含它，`ipcChannels.test.ts` parity 用例自动跟随）。
+  3. `src/electron/main.ts`——§6f import 加 `setRefineCap`、**去掉** `REFINE_MAX_ROWS_PER_DAY`；头注释从「临时放开须回落」改为「已正规化，常量只剩默认+回落」；tick 观测日志 `day_limit: cap_enabled ? cap_rows : null` + `cap_enabled`；新 `handleIpc(IPC.refineSetCap, ...)`：`requireAdmin` → 校验 payload（`enabled` 必须布尔；限额时 `rows` 必须有限整数≥1，否则如实拒绝）→ `loadRefineQueue`→`setRefineCap`→`saveRefineQueue` → `actionLog('kernel','refine:set-cap',{cap_enabled, cap_rows: cap_enabled?cap_rows:null, user})`（**只有开关与计数，无正文**）→ 回 `view()`。
+  4. `src/electron/preload.ts` + `src/desktop/hostBridge.ts`——`refineQueue.setCap` 桥接（`HostMethod` 加 `'refine:setCap'`，`CHANNEL_TO_NATIVE` 加 `'refine:setCap': ['refineQueue','setCap']`——联合类型加了成员就必须补映射，否则 typecheck 直接失败）。
+  5. `src/web/params/refineQueue.ts`——`RefineQueueSummary` 镜像加 `cap_enabled/cap_rows`、`day_limit/day_left:number|null`；`RefineMethod` 加 `'refine:setCap'`；新 `refineQueueSetCap(enabled, rows?)`（限额传 `{enabled:true,rows}`，不限额传 `{enabled:false}`）。
+  6. `src/web/params/RefineQueueCard.tsx`——卡面「默认最多补炼 N 行（可在下面「限额/不限额」里改，仅管理员）」；进度行「已用 day_rows 行」+（限额：`/ 限额 day_limit 行，还剩 day_left 行`；不限额：`（不限额：今日不按行数截断）`）；新控件行 `refine-cap-row`：`refine-cap-toggle`（勾选=限额）+ `refine-cap-rows`（数字框，**仅 cap_enabled 时可编辑，不限额时灰/disabled**）+ `refine-cap-save`（保存；值未变/非管理员/busy 时禁用）。`applyCap` 回执「已设为限额：每自然日最多补炼 X 行」/「已设为不限额…」。
+  7. `src/web/Home/programLogLabels.ts`——`kernel:refine:set-cap` 中文标题 + `NOTE_KEYS` 补 `cap_enabled`/`cap_rows`。
+  8. 测试：`refineQueue.test.ts` +6 例（默认 500 / 坏 cap 归一化 / 不限额=`Infinity` 且 `nextPending` 不挡 / `setRefineCap` 校验 / summary `null` vs 数字）；`RefineQueueCard.test.tsx` 改「5/500」断言为「限额 500」+ cap-toggle/rows 三态，新增不限额切换、保存限额、普通成员禁用三条。
+- **与「开启后台补炼」开关的分工**：`refine:setEnabled`（暂停/启用整条队列）不变；本批的 `refine:setCap` 只管**每日跑多少行**，两者正交——暂停是「不起活但仍入队」，不限额是「起活且今日不截断」。
+- **诚实边界**：① 不限额 = 今日不按行数截断，但**真调引擎、真花钱**，卡面与回执都明写；② `effectiveCap` 的 `Infinity` 只在进程内做闸门算术，**跨 IPC 一律转 `null`**，渲染层拿不到 `Infinity`；③ 这是运行时开关，**用户切换后无需重打包/重启**——旧「为跑全量而重打包」的口径作废。
+- **卡片缺陷（全量跑门禁时才暴露的真 bug，已修）**：`RefineQueueCard` 的额度草稿原先由「后台 20s 轮询回来的 `cap_rows`」驱动回写，于是**用户正在手打数字时，一次轮询同步会把草稿覆盖掉**——`RefineQueueCard.test.tsx` 实测打出 `rows: 500800`（预期 `800`，即 `500` 被塞进用户刚打的 `800` 前面）。这不是测试脆皮，是真实交互缺陷。修法：`capDirty = useRef(false)` 闸门——`onChange` 置真、同步 effect 只在 `!capDirty.current` 时才跟随 `cap_rows`、保存成功后清零。修后单文件 12 例、全量 166 文件 / 1954 例全绿。
+- **门禁（本批提交前真跑，逐段单独执行 — 一次 `&&` 全链被并发资源争用打断，故分段核退出码，实测值非估算）**：`npm run typecheck` 干净 → `oxlint` **0 warnings / 0 errors** → `code:index:check` 索引最新（`npm run code:index -- --write` 刷新后 **312 个文件**）→ `vitest` 覆盖跑 **COV_EXIT=0**，**166 文件 / 1954 例全过** → `build:electron` **BLD_EXIT=0**（`main.cjs built OK`、`preload.cjs built OK`）→ `test:e2e` **E2E_EXIT=0**，**107 passed（46.7s）**。
+  - **两笔提交前各跑一轮 `npm run verify:fast`（退出码直接取，不用管道）**：代码笔 **VERIFY_FAST_EXIT=0**（166 文件 / 1954 例、Statements 82.61% / Branches 74.93% / Lines 85.67%）；文档笔**第一次跑到一半被掐（`npm run verify:fast` 退出码 127，输出停在 `LifecyclePage.test.tsx` —— 是进程被并发争用中止，不是断言失败）**，原样重跑 **VERIFY2_EXIT=0**（oxlint 0/0、索引最新 312 文件、166 文件全过）。
+  - **一处与本片无关的既有抖动（如实声明）**：全量并发跑时 `src/home/__tests__/server.test.ts:568`（批次28-A 只读镜像用例）撞过 5000ms 超时；**单独跑该文件 30/30 全绿**。它是 CPU 争用下的既有时序抖动，不是本批引入的回归，本批没有顺手改它（超出外科手术范围）。
+- **出厂（本轮重打包，实测值非估算）**：`npm run package` 退出码 **0**，落盘 **2026-11-05 14:15:04（UTC+08:00）** → `release/installer/MultiAgent Memory-0.1.0-setup.exe`，**122,056,492 B / SHA256 `ec6381b23f4f3c4d4d4e18fd3e0361cafa56aa8dde8128ea7c74d456af7d357a`**。
+  - **产物核对（按打包产物验证口径：`app.asar.unpacked/dist-electron/main.cjs`，不 grep `app.asar` 本体）**：该文件 **595,301 B**（14:14:46 生成）里 `REFINE_MAX_ROWS_PER_DAY = 500` 命中 **1**（常量已回落，只剩默认值 + 坏值回落）、`refine:setCap` **2**、`cap_enabled` **16**、`cap_rows` **16**、`set-cap`（动作日志键）**1**；`1e5` 仍有 5 处但**都与补炼额度无关**（`Math.floor(1e5 + …)` 的 id 生成 + 两处 `quota: 1e5` 记账字段）→ 本批代码确实在出厂产物里。
+  - **渲染层同样在产物里**（在 `resources/app.asar` 内，asar 是纯字节容器，`grep -a` 可直接命中）：`refine-cap-toggle` **2**、`refine-cap-rows` **1**、`refine-cap-save` **1**、`不限额` **6**。
+  - **打包过程（EPERM 回退，如实记）**：`release/installer` 被运行中的旧实例占用（EPERM）→ 本次先输出到 `release\installer-20261105-061442` → 构建成功后按批次21 流程（rename 仍 EPERM 时）**复制+删除**收口回 `release/installer`（`已删除旧 release/installer，并把本次产物收口到固定目录`）；本轮**新临时目录已删净**，但**上一轮 13:26 那次的残留 `release/installer-20261105-052604` 仍删不掉**（`旧安装包目录清理 0 个，1 个被占用未删`）——不影响 `release/installer` 产物本身，待旧句柄释放后可手工删。
+- **重启实况（本条与上一轮不同，如实记）**：打包按批次19 流程结束旧实例；**14:15:47（UTC+08:00）`release\installer\win-unpacked\MultiAgent Memory.exe` 四个进程全部是新起的一批**（写锁 `{"pid":44008,"at":1793859347916}` = 同一时刻 14:15:47），14:15:48 新实例就跑完了 `startRefineQueue` 并**用本批新代码重写了 `refine-queue.json`**——所以**不需要用户再手动重启**，限额开关此刻已在用户机上可用。**「谁把它拉起来的」我没有证据**（打包脚本只负责结束旧实例、不启动新实例），只记录观测到的进程创建时刻与写锁 pid，不编造原因。
+- **开关可用性实测（只读，2026-11-05 14:16 UTC+08:00）**：`refine-queue.json` 顶层已出现 `cap_enabled: true`、`cap_rows: 500`（旧包从不写这两个键 → 这是「新代码在跑」的产物级证据）；`day=2026-11-05`、`dayRows=593`。
+  - **由此得到的一个真实后果（写给用户，也写给下一位维护者）**：今日 593 行是**在旧包的 `1e5` 闸门下**跑出来的，新包回落 500 后 `dailyBudgetLeft = 500 − 593 ≤ 0` → **今天这台机器不会再出补炼活**。要接着排 `pending`，用户直接在参数页**取消勾选「限额」= 不限额**（或把限额改成大于 593 的值），保存即生效，**不必再改常量、不必再打包**——这正是本批要解决的。
+  - `actions.log` 里 `refine:set-cap` 命中 **0**：截至本次测量，**还没有人真点过这个开关**（开关在产物里、可用，但「点了之后确实拦住/放开」属用户实机动作，本批不替用户点，也不假装点过）。
+- **顺带量到的最新分布（只读，非本批目标，给 41-I 定档#37 添数据）**：14:16 `stop_code × state` = `pending 1190` · `failed:bad_json 219` · `done:too_short 153` · `done:bad_json 128` · `skipped:thin 72` · `done:无码 52` · `done:too_long 41`（合计 1855 条）。对比 §7.2 基线：`done:too_short` 109→153、`done:too_long` 38→41、`done:bad_json` 115→128、`failed:bad_json` 211→219 → **定档信号（落在 done 行上的 too_short/too_long）仍在增长，`pending` 还剩 1190 条没进样本**，#37 的「全量分布」仍未达成。
+
+### 7.2 前置：`4f96eaa` 临时放开（已被 7.1 取代，保留作定档背景）
 
 **放开前的基线（2026-11-05 只读实测 `refine-queue.json`，非估算）**：
 
@@ -277,9 +304,9 @@
 
 - **重启动作与影响（如实）**：打包按批次19 流程结束旧实例。**当前旧实例没有 in-flight 精炼会丢**——`dayRows` 早已 500/500 顶满，`nextPending` 在旧包下返回 null（额度闸门挡着），即空闲；补炼状态全在 `refine-queue.json`（0600，重启续炼），停一下不丢已 done/skipped/failed 的账。**待用户重启到新产物**，那 1233 `pending` 才按 15s tick 开始排空。
 
-- **排空后（本条的收口条件，尚未达成）**：① 重新只读量**全量** `stop_code × state`（尤其 `too_short`/`too_long` 在 done 行上的占比、以及 pending 里新暴露的形态）→ 交用户拍 `minRatio` / `DEPTH_CAP_BANDS`；② **把 `REFINE_MAX_ROWS_PER_DAY` 回落为 500** 并再跑一轮门禁 + 打包（临时值绝不留在出厂产物里）；③ 定档结论写进本报告与 `AGENTS.md` §9 / `layerRules.ts` 注释。**在①②完成前，41-I 仍是「数据采集中」，不是「已定档」。**
+- **排空后（收口条件）**：① 重新只读量**全量** `stop_code × state`（尤其 `too_short`/`too_long` 在 done 行上的占比、以及 pending 里新暴露的形态）→ 交用户拍 `minRatio` / `DEPTH_CAP_BANDS`；② ~~把 `REFINE_MAX_ROWS_PER_DAY` 回落为 500 并再打包~~ **已由 §7.1 正规化取代**：常量已回落 500（只剩默认+回落），且额度改为运行时「限额/不限额」开关——**用户想排空 `pending` 现在直接在参数页切「不限额」，不必再为跑全量重打包**；③ 定档结论（#37）写进本报告与 `AGENTS.md` §9 / `layerRules.ts` 注释。**①③（定档）仍未达成——限额开关解决「怎么给额度」，`minRatio`/`DEPTH_CAP_BANDS`「该炼多深」是另一件事，仍待全量分布交用户拍板。**
 
 - **门禁（临时放开这轮，提交前真跑）**：`npm run verify:fast` 退出码 0（typecheck 干净 → oxlint 0/0 → 索引最新 → vitest 全过）；`build:electron` 退出码 0；`test:e2e` 通过。提交 `4f96eaa` 分问题点单独一笔（**不**动批次42 WIP 的四份未跟踪 `specs/*.md`），**未 push**（push 需用户单独授权）。
 - **出厂（本轮重打包，实测值非估算）**：`npm run package` 落盘 **2026-11-05 13:26（UTC+08:00）** → `release/installer/MultiAgent Memory-0.1.0-setup.exe`，**122,055,615 B / SHA256 `994028c0331962d70a5583af99e8dc2d330216e04c2172986b61ae2981b29dd0`**。产物核对按打包产物验证口径（`app.asar.unpacked/dist-electron/main.cjs`，**不是** grep `app.asar`）：那份 `main.cjs`（**592,961 B**）里 `REFINE_MAX_ROWS_PER_DAY = 1e5`（esbuild 把 `100_000` 压成 `1e5`）、`= 500` 命中 **0** → 放开后的额度确实在出厂产物里，用户重启即生效。
 - **打包过程（EPERM 回退，如实记）**：`release/installer` 被旧实例占用（EPERM）→ 本次先输出到 `release\installer-20261105-052604` → 构建成功后按批次21 流程**复制+删除**收口回 `release/installer`（`产物：release\installer`）；但临时源目录 `installer-20261105-052604` 收尾删除仍被占用未成功（`旧安装包目录清理 0 个，1 个被占用未删`）——**该残留临时目录仍在 `release/` 下**，属打包脚本清理失败告警、不影响 `release/installer` 产物本身；旧实例（pid 32840）与新产物争用句柄导致，**待用户重启到新包、旧实例退出后可手工删掉那个 `installer-20261105-052604` 目录**。
-- **待用户执行的一步**：**重启到 13:26 新包**（`release/installer/win-unpacked/MultiAgent Memory.exe`）——重启后 `refine:state` 的 `day_limit` 应回显 **100000**、`day_left` 约 99500，那 1233 条 `pending` 才会按 15s tick 开始排空（吞吐受模型速度限制）。**排空前 41-I 仍是「数据采集中」，不是「已定档」。**
+- **待用户执行的一步**：~~**重启到 13:26 新包**（`release/installer/win-unpacked/MultiAgent Memory.exe`）——重启后 `refine:state` 的 `day_limit` 应回显 **100000**、`day_left` 约 99500，那 1233 条 `pending` 才会按 15s tick 开始排空（吞吐受模型速度限制）。~~ **〔2026-11-05 14:15 已被 §7.1 作废〕**本节「前置」的 13:26 包（`1e5` 常量）用户机确实跑过一阵（`dayRows` 涨到 593），但那条「靠重启换常量来排空 pending」的路线已随 41-I 正规化取消——现在**参数页切「不限额」就能排空，不需要打包也不需要重启**；旧包里那个 `1e5` 常量在新包（14:15，`ec6381b2…`）里已回落 500。**排空前 41-I 仍是「数据采集中」，不是「已定档」（#37 待用户拍 `minRatio`/`DEPTH_CAP_BANDS`）。**
