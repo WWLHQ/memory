@@ -30,6 +30,8 @@
 
 > **判据校正（写给下一位维护者）**：用 `grep <符号> app.asar` 判断「产物里有没有某段代码」在本项目**不成立**。electron-builder 把 `dist-electron` 放进了 `app.asar.unpacked/`，asar 本体里 `grep audit.jsonl` 恒为 **0（假阴性）**。正确做法：比对 `app.asar.unpacked/dist-electron/main.cjs` 与刚构建的 `dist-electron/main.cjs` 的 md5（本次同为 `5c251652c6c712c2cf7f514fc96cce38`，`audit.jsonl` 命中 3 次），或直接看真机启动的动作日志。本报告初稿差点把「41-A 没进包」写成结论，就是这个假阴性造成的，已用真机启动证伪。
 
+> **〔2026-11-05 13:26 追加〕最新出厂产物是 41-I 临时放开额度版**（上面 §0 表里的 12:07 B 包是 41-S 收口版，仍对应 41-Q/41-S 的交付，但**已不是最新安装包**）。41-I 临时把 `REFINE_MAX_ROWS_PER_DAY` 500→100_000 让用户重启后排空 1233 条 `pending`、取全量 `stop_code×state` 分布定深度档位——**这是临时值，排空+定档后必须回落 500 再打一次包**。安装包/大小/SHA256/产物核对/EPERM 残留与「待用户重启」详见 **§7**；定档结论尚未产生，**41-I 未收口**。
+
 ---
 
 ## 1. 本批最重要的一条：批次41 的代码此前从未在用户机上运行过
@@ -247,3 +249,37 @@
     - **提交口径（诚实记一笔偏差 + B 是新的未提交内容）**：41-Q/41-S **方案 A** 本应按「分问题点提交」各自独立提交，但**是用户把 41-Q/41-S（A）折进了既有的批次41 内核提交 `7d910ed`**，不是我的独立提交。**方案 B 是本轮新改动**（`mcpHttp.ts` 加 `isTrustedClientSelfName` + 两处接线、`mcpHttp.test.ts` 加 4 例、AGENTS.md/code-map/本报告/记忆同步）——**尚未提交，也尚未 push**（push 需用户单独授权）。工作树状态现查 `git status -sb` 与 `git log --oneline -1`，不硬编码。
 
     - **实机核对（2026-11-05 已由用户目视确认）**：方案 B 在真服务器 + 真气泡上都验到了。① 用户机在跑的就是 B 包（写锁 pid 32840，exe=`release/installer/win-unpacked/MultiAgent Memory.exe`，那份 `main.cjs` 里 `isTrustedClientSelfName` 命中 3）；② 以可信自报名 `qoder-desktop-mcp-host/1.0.0` + 通用 UA + 不带会话头发召回 → 服务端返回 `mode=html-details`、审计记 `qoder-desktop-mcp-host/1.0.0`，**用户在 Qoder 气泡里肉眼确认默认收起成一行带 `▶`、点开是四段可各自再收起的折叠卡 = 折叠档回归**；③ 任意/探测名（`recall-probe`/`sop-lookup`/历史 `verify-*`）在 B 下仍落 `unknown` → `markdown-compact`，本会话实测与审计计数一致。仍未单独目视的只剩 41-R 那条「日志页人话视图」一行（与本档无关，见上）。
+
+---
+
+## 7. 〔2026-11-05〕41-I 临时放开每日补炼额度，跑全量 pending 取定档分布
+
+用户口径（AskUserQuestion 拍板）：「**本次将 500 额度限制放开，全部处理完再定 41-I**」——即先把 `REFINE_MAX_ROWS_PER_DAY` 这道成本闸门抬到近无限，让 `pending` 全排空，拿到**全量** `stop_code × state` 分布，再据此定深度档位（`DEPTH_CAP_BANDS` / `minRatio`）。
+
+- **改了什么（提交 `4f96eaa`，4 文件）**：① `src/core/memagent/refineQueue.ts` 的 `REFINE_MAX_ROWS_PER_DAY` **500 → 100_000**（保持**有限值**，不能用 `Infinity`——`JSON.stringify(Infinity)=null` 会让参数页卡片 `day_limit ?? 500` 谎报 500）；② `refineQueue.test.ts` 的「额度用尽」用例原来 `for (i<REFINE_MAX_ROWS_PER_DAY) markRefined(...)` 逐行 burn（不可变拷贝 O(n²)），改成直接 `s = { ...s, dayRows: REFINE_MAX_ROWS_PER_DAY }` 验闸门算术——否则 100_000 档会真把测试跑挂；其余引用该常量的断言用符号自动跟随，没动；③ `main.ts` §6f 头注释加「临时放开、定档后须回落 500」；④ 刷新代码索引。
+- **这是临时值，不是新口径**：批次39 用户拍板 D 的正常口径仍是 **≤500/日**（补炼真调引擎花钱）。**pending 排空、41-I 定档完成后必须回落为 500**（见本条末尾「排空后」）。
+- **为什么必须重打包**：这道闸门是**编译常量**，没有运行时 IPC setter——只有重新出包 + 用户重启到新产物，那 1233 条 `pending` 才会在新额度下继续排。放开额度**只是不再按日截断**，吞吐仍受模型速度限制（`REFINE_TICK_MS=15s` × 单行多层真调，本机 7B 单次约 28s）。
+
+**放开前的基线（2026-11-05 只读实测 `refine-queue.json`，非估算）**：
+
+| 口径 | 值 |
+|---|---|
+| 队列总条 | **1805** |
+| 按状态 | `done 289 · failed 211 · skipped 72 · pending 1233` |
+| 当日额度 | `day=2026-11-05`、`dayRows=500/500`（旧闸门已顶满，`enabled=true`） |
+| **`stop_code × state` 交叉表** | `skipped:thin 72` · `done:too_short 109` · `done:too_long 38` · `done:bad_json 115` · `failed:bad_json 211` |
+
+- **这张表怎么读（写给定档决策，也写给下一位维护者）**：
+  1. **`bad_json` 合计 326（done 115 + failed 211）= 最大失败源，但它不是深度档位的杠杆**。`checkLayerSpecDetailed` 里 `bad_json` 只挂在 **L6**（keywords 须非空数组 / ≤`maxKeywords` / `projections` 须数组 / 合法 JSON），L2–L5 不会出这个码。所以「跑全量」的主要价值**不是**用 `bad_json` 调 `minRatio`/`DEPTH_CAP_BANDS`——那是**提示词/L6 JSON 契约**那条线，得单独治；
+  2. **真正给深度档位定档的是 `done:too_short 109` + `done:too_long 38`**：它们落在**已 done** 的行上，说明相对区间（下限=源文×`minRatio`、上限=`min(maxChars, 源文)`）对某些源长仍偏紧/偏松，阶梯被提前截断（行按已产出的较浅层收尾成 done）——这才是 `minRatio` 该不该动的证据；
+  3. `skipped:thin 72` = 批次40「<30 有效字不炼深层、停 L1」的正常归类，不是失败；
+  4. 现在只跑到 **572 行有结论（done 289 + failed 211）+ 72 skipped**，**1233 pending 还没进样本**——这正是「放开额度跑全量」要补的那一段。
+
+- **重启动作与影响（如实）**：打包按批次19 流程结束旧实例。**当前旧实例没有 in-flight 精炼会丢**——`dayRows` 早已 500/500 顶满，`nextPending` 在旧包下返回 null（额度闸门挡着），即空闲；补炼状态全在 `refine-queue.json`（0600，重启续炼），停一下不丢已 done/skipped/failed 的账。**待用户重启到新产物**，那 1233 `pending` 才按 15s tick 开始排空。
+
+- **排空后（本条的收口条件，尚未达成）**：① 重新只读量**全量** `stop_code × state`（尤其 `too_short`/`too_long` 在 done 行上的占比、以及 pending 里新暴露的形态）→ 交用户拍 `minRatio` / `DEPTH_CAP_BANDS`；② **把 `REFINE_MAX_ROWS_PER_DAY` 回落为 500** 并再跑一轮门禁 + 打包（临时值绝不留在出厂产物里）；③ 定档结论写进本报告与 `AGENTS.md` §9 / `layerRules.ts` 注释。**在①②完成前，41-I 仍是「数据采集中」，不是「已定档」。**
+
+- **门禁（临时放开这轮，提交前真跑）**：`npm run verify:fast` 退出码 0（typecheck 干净 → oxlint 0/0 → 索引最新 → vitest 全过）；`build:electron` 退出码 0；`test:e2e` 通过。提交 `4f96eaa` 分问题点单独一笔（**不**动批次42 WIP 的四份未跟踪 `specs/*.md`），**未 push**（push 需用户单独授权）。
+- **出厂（本轮重打包，实测值非估算）**：`npm run package` 落盘 **2026-11-05 13:26（UTC+08:00）** → `release/installer/MultiAgent Memory-0.1.0-setup.exe`，**122,055,615 B / SHA256 `994028c0331962d70a5583af99e8dc2d330216e04c2172986b61ae2981b29dd0`**。产物核对按打包产物验证口径（`app.asar.unpacked/dist-electron/main.cjs`，**不是** grep `app.asar`）：那份 `main.cjs`（**592,961 B**）里 `REFINE_MAX_ROWS_PER_DAY = 1e5`（esbuild 把 `100_000` 压成 `1e5`）、`= 500` 命中 **0** → 放开后的额度确实在出厂产物里，用户重启即生效。
+- **打包过程（EPERM 回退，如实记）**：`release/installer` 被旧实例占用（EPERM）→ 本次先输出到 `release\installer-20261105-052604` → 构建成功后按批次21 流程**复制+删除**收口回 `release/installer`（`产物：release\installer`）；但临时源目录 `installer-20261105-052604` 收尾删除仍被占用未成功（`旧安装包目录清理 0 个，1 个被占用未删`）——**该残留临时目录仍在 `release/` 下**，属打包脚本清理失败告警、不影响 `release/installer` 产物本身；旧实例（pid 32840）与新产物争用句柄导致，**待用户重启到新包、旧实例退出后可手工删掉那个 `installer-20261105-052604` 目录**。
+- **待用户执行的一步**：**重启到 13:26 新包**（`release/installer/win-unpacked/MultiAgent Memory.exe`）——重启后 `refine:state` 的 `day_limit` 应回显 **100000**、`day_left` 约 99500，那 1233 条 `pending` 才会按 15s tick 开始排空（吞吐受模型速度限制）。**排空前 41-I 仍是「数据采集中」，不是「已定档」。**
