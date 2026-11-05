@@ -182,7 +182,9 @@ Agent 标准写入动作改为四步，粒度是「一条记忆」：
 > 为什么逐条落盘：锁屏/休眠会在任意时刻清掉写密钥，批量写到一半被锁屏打断会丢失后半。逐条落盘最多丢当前这一条，且能精确重放。覆盖 `E_L0_LOCKED` / 锁屏 / 休眠 / 应用重启 / 进程崩溃 / 会话中断 / 网络中断 七种失败，且**不依赖任何内核改动**。
 
 ### 11.4 写前探锁（预防）
-`GET /health` 类探针与只读工具 **`get_write_status`**（草案，内核零改动，复用 `L0Vault.status()`）可在写前读一次锁状态，`write_unlocked=false` 就**不发起写入**、直接提示解锁。与 §11.3 兜底**两者都要**：探锁是「少撞锁」，pending 是「撞了也不丢」。
+`GET /health` 类探针与只读工具 **`get_write_status`**（批次44-D4 已落地：`L0Port.isWriteUnlocked()` + 内核 pending 队列）可在写前读一次锁状态，返回 `{l0_unlocked, writeDek_present, pending_count}`，不返回任何密钥材料；`l0_unlocked=false` 就**不发起写入**、直接提示解锁。与 §11.3 兜底**两者都要**：探锁是「少撞锁」，pending 是「撞了也不丢」。
+
+> **内核侧兜底（批次44-D4 补强）**：即使 Agent 未探锁直接写入，MCP 的 `write_memory` 在 `E_L0_LOCKED` 时会**逐条暂存**到 pending 队列并回执 `status=pending`（明确未落库、绝不伪造 `mem_id`）；解锁后由 `get_write_status` 或下一次成功写入**自动重放**落库，无需人工重打。桌面可注入 `FilePendingStore` 把队列持久化到 `pending/` JSON，进程重启也不丢。§11.3 的 Agent 侧「先落盘」仍建议保留，两层互补、互不替代。
 
 ### 11.5 Agent 侧铁律
 1. 写入前**先落盘**，永远不要「直接写、失败了再说」；

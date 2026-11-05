@@ -5,7 +5,8 @@ import { runMcpServer, type McpServerHandle } from '../mcp.ts';
 import { InMemoryStorage } from '../storage.ts';
 import { scoreMemory } from '../forgetting.ts';
 import type { L0Vault } from '../l0vault.ts';
-import { createTestVault } from './l0Kit.ts';
+import { createTestVault, TEST_ADMIN_PW, TEST_ADMIN_ID } from './l0Kit.ts';
+import { MemoryPendingStore } from '../pendingWrites.ts';
 
 const TOKEN = 'mcp-test-token-0123456789abcdef0123456789abcdef';
 
@@ -60,11 +61,11 @@ describe('MCP Server（§19.5）', () => {
     expect(r.result).toBeUndefined();
   });
 
-  it('tools/list 返回四个工具且 schema 正确', async () => {
+  it('tools/list 返回五个工具且 schema 正确', async () => {
     const r = await rpcCall(PORT, { jsonrpc: '2.0', id: 1, method: 'tools/list', params: { token: TOKEN } });
     const tools = (r.result as { tools: Array<{ name: string; inputSchema?: { required?: string[] } }> }).tools;
     expect(tools.map((t) => t.name)).toEqual([
-      'recall_memory', 'write_memory', 'list_projects', 'get_preferences',
+      'recall_memory', 'write_memory', 'list_projects', 'get_preferences', 'get_write_status',
     ]);
     const recallTool = tools.find((t) => t.name === 'recall_memory')!;
     expect(recallTool.inputSchema!.required).toEqual(['query']); // project_id 可省略（批次11）
@@ -361,5 +362,91 @@ describe('MCP Server（§19.5）', () => {
     });
     expect(out).toContain('-32600');
     tiny.stop();
+  });
+});
+
+// 批次44-D4：L0 写密钥锁定期间 write_memory 落盘兜底（pending/flush）端到端验证。
+// 用真实 L0Vault 的 lockWrite/unlockWrite 制造锁态；pending 队列显式共享（跨 socket 也一致）。
+describe('批次44-D4：L0 锁定写入落盘兜底（pending/flush）', () => {
+  let handle: McpServerHandle;
+  let port = 0;
+  let vault: L0Vault;
+  const storage = new InMemoryStorage();
+
+  beforeAll(async () => {
+    vault = (await createTestVault()).vault;
+    handle = runMcpServer({
+      port: 0, storage, token: TOKEN, l0: vault, pending: new MemoryPendingStore(),
+    });
+    port = await handle.ready;
+  });
+
+  afterAll(() => { handle?.stop(); });
+
+  const status = async (id: number) => rpcCall(port, {
+    jsonrpc: '2.0', id, method: 'get_write_status', params: { token: TOKEN },
+  });
+
+  it('get_write_status：解锁态 → l0_unlocked=true / pending_count=0', async () => {
+    const r = await status(900);
+    expect(r.error).toBeUndefined();
+    expect(r.result).toEqual({ l0_unlocked: true, writeDek_present: true, pending_count: 0 });
+  });
+
+  it('锁定后 write_memory → status=pending（不丢、不伪造 mem_id、不落库）', async () => {
+    await vault.lockWrite({ admin_user_id: TEST_ADMIN_ID });
+    const r = await rpcCall(port, {
+      jsonrpc: '2.0', id: 901, method: 'write_memory',
+      params: {
+        token: TOKEN, content: '项目 P1 决策：本地持久化 pending 队列按 created_at 升序逐条重放，锁定态不落明文', project_id: 'P1',
+        category: 'fact', source_agent: 'mcp-test',
+      },
+    });
+    expect(r.error).toBeUndefined();
+    const out = r.result as { status: string; pending_id: string; reason: string; mem_id?: string };
+    expect(out.status).toBe('pending');
+    expect(out.reason).toBe('E_L0_LOCKED');
+    expect(out.pending_id).toMatch(/^pend_/);
+    expect(out.mem_id).toBeUndefined(); // 诚实降级：绝不伪造写入回执
+
+    const st = await status(902);
+    expect(st.result).toEqual({ l0_unlocked: false, writeDek_present: false, pending_count: 1 });
+    expect((await storage.listMemories({})).length).toBe(0); // 锁定态不落明文
+  });
+
+  it('锁定态再写一条 → 逐条累积（不覆盖、不丢）', async () => {
+    const r = await rpcCall(port, {
+      jsonrpc: '2.0', id: 903, method: 'write_memory',
+      params: {
+        token: TOKEN, content: '运维手册补充：PostgreSQL 17 的 WAL 归档窗口设为 15 分钟，超过即清理旧日志', project_id: 'P1',
+        category: 'decision', source_agent: 'mcp-test',
+      },
+    });
+    expect((r.result as { status: string }).status).toBe('pending');
+    const st = await status(904);
+    expect((st.result as { pending_count: number }).pending_count).toBe(2);
+  });
+
+  it('解锁后 write_memory → 自动重放全部 pending，两条历史 + 本次都落库', async () => {
+    await vault.unlockWrite({ password: TEST_ADMIN_PW, admin_user_id: TEST_ADMIN_ID });
+    const r = await rpcCall(port, {
+      jsonrpc: '2.0', id: 905, method: 'write_memory',
+      params: {
+        token: TOKEN, content: '前端约定：所有入口 HTML 文件名一律小写，避免 Linux CI 上大小写错位导致 404', project_id: 'P1',
+        category: 'insight', source_agent: 'mcp-test',
+      },
+    });
+    expect(r.error).toBeUndefined();
+    const out = r.result as { mem_id: string; replayed_pending?: number; status?: string };
+    expect(out.status).toBeUndefined();
+    expect(out.mem_id).toMatch(/^mem_/);
+    expect(out.replayed_pending).toBe(2);
+
+    const mems = await storage.listMemories({});
+    const contents = mems.map((m) => m.content);
+    expect(contents).toContain('项目 P1 决策：本地持久化 pending 队列按 created_at 升序逐条重放，锁定态不落明文');
+    expect(contents).toContain('运维手册补充：PostgreSQL 17 的 WAL 归档窗口设为 15 分钟，超过即清理旧日志');
+    expect(contents).toContain('前端约定：所有入口 HTML 文件名一律小写，避免 Linux CI 上大小写错位导致 404');
+    expect((await status(906)).result).toEqual({ l0_unlocked: true, writeDek_present: true, pending_count: 0 });
   });
 });

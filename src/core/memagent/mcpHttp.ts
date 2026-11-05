@@ -19,9 +19,11 @@ import { runListProjectsTool, runRecallTool, type RecallDisplayMode } from './mc
 import { RecallDetailTickets } from './recallDetailTickets.ts';
 import { buildRecallDetailExpiredPage } from './recallInsight.ts';
 import { rejectUntrustedHost } from '../../shared/localOrigin.ts';
-import type { StorageBackend, Pref, L0Port } from './types.ts';
+import type { StorageBackend, Pref, L0Port, MemReq, WriteResult } from './types.ts';
 import { CATEGORIES, isCategory } from './types.ts';
 import { parseWriteKnobs } from './memories.ts';
+import { isL0LockedError } from './errors.ts';
+import { MemoryPendingStore, type PendingStore, type WriteKnobs } from './pendingWrites.ts';
 
 const PROTOCOL_VERSION = '2025-06-18';
 
@@ -136,6 +138,8 @@ export interface McpHttpOptions {
    * 缺省不记——内核/审计里没有明细正文，页面内容也绝不写进数据根。
    */
   onViewDetail?: (outcome: 'ok' | 'miss') => void;
+  /** 批次44-D4：pending 队列存储端口；缺省内存实现，桌面建议注入 FilePendingStore */
+  pending?: PendingStore;
 }
 
 export interface McpHttpHandle {
@@ -180,6 +184,8 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
     vector: new JsVectorBackend(),
     storage,
     l0: opts.l0,
+    // 批次44-D4：写入落盘兜底队列（缺省内存；桌面可注入文件实现持久化）
+    pending: opts.pending ?? new MemoryPendingStore(),
   });
 
   /** 会话 → 调用方（批次15：initialize.clientInfo 自报）；客户端不维护会话时用 UA 兜底 */
@@ -238,17 +244,39 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
         // A4（§2.3）：扩展打分旋钮（可选；未传 → 记录不带该字段，scoreMemory 走默认 0.5）
         const { knobs, error: knobError } = parseWriteKnobs(p);
         if (knobError) throw new Error(knobError);
-        return {
-          result: await ma.write({
-            content: p.content,
-            category,
-            project_id: p.project_id,
-            user_id: account.user_id,
-            session_id: p.session_id ? String(p.session_id) : undefined,
-            source_agent: sa,
-            ...knobs,
-          }),
+        const writeReq: MemReq & WriteKnobs = {
+          content: p.content,
+          category,
+          project_id: p.project_id,
+          user_id: account.user_id,
+          session_id: p.session_id ? String(p.session_id) : undefined,
+          source_agent: sa,
+          ...knobs,
         };
+        // A3 / 批次44-D4：L0 锁定时不丢——暂存 pending 队列，解锁后自动重放落库。
+        // 诚实降级：绝不伪造 mem_id，status=pending 明确表示「未落库」。
+        let result: WriteResult;
+        try {
+          result = await ma.write(writeReq);
+        } catch (e) {
+          if (!isL0LockedError(e)) throw e;
+          const pending_id = await ma.enqueuePending(writeReq);
+          return {
+            result: {
+              status: 'pending',
+              pending_id,
+              reason: 'E_L0_LOCKED',
+              message: 'L0 写密钥未解锁：本次写入已暂存 pending 队列，解锁后自动重放落库。这不是写入成功，请勿据此认为已落库。',
+            },
+          };
+        }
+        // 解锁后自动重放：本次写入成功（必然已解锁），顺带清空历史 pending 条目
+        const replay = await ma.flushPending();
+        return { result: replay.flushed > 0 ? { ...result, replayed_pending: replay.flushed } : result };
+      }
+      case 'get_write_status': {
+        // 批次44-D4：写前探锁 + 解锁态顺带重放历史 pending
+        return { result: await ma.getWriteStatus() };
       }
       case 'get_preferences': {
         const p = args;

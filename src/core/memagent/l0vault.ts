@@ -504,6 +504,11 @@ export class L0Vault implements L0AdminPort {
 
   // ─── L0Port：写入与查阅 ─────────────────────────────────────────────────────
 
+  /** 批次44-D4：写密钥当前是否在内存（供 get_write_status 探锁；L0Port.isWriteUnlocked） */
+  isWriteUnlocked(): boolean {
+    return this.writeDek !== null;
+  }
+
   /** 写入加密：只认写密钥缓存；未解锁 → E_L0_LOCKED（绝不落明文/伪造密文） */
   async seal(plain: string): Promise<string> {
     if (!this.writeDek) {

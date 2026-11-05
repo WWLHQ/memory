@@ -1,6 +1,7 @@
 // memagent-core 契约类型（REQ-007 §1/§2/§3/§5/§6 直译，19.10/19.11）
 // 内核 = 唯一事实源；端壳只调用不实现业务（19.11 红线①）。
 import type { L0BlobStore } from './l0Store.ts';
+import type { PendingStore, WriteKnobs } from './pendingWrites.ts';
 import type { LayerViolationCode } from './layerRules.ts';
 
 /** 端形态（19.10 端谱） */
@@ -282,6 +283,11 @@ export interface L0Port {
     scope_project_ids: string[];
     expires_at: number;
   }>;
+  /**
+   * 批次44-D4：写密钥当前是否在内存（用于 get_write_status 探锁）。
+   * 可选——未实现的桥接端（如 HostL0Port）缺省按 false 处理（best-effort，不影响 pending 重放逻辑）。
+   */
+  isWriteUnlocked?(): boolean;
 }
 
 export interface L0AccessRequest {
@@ -670,6 +676,11 @@ export interface MemAgentOptions {
    * 传入时 FileStorage 会把写入行的信封搬进此库、行只留 `has_l0`，browse 也从这里回读信封。
    */
   l0Blobs?: L0BlobStore;
+  /**
+   * 批次44-D4：写入落盘兜底队列存储端口。L0 锁定时 write_memory 暂存于此，解锁后重放。
+   * 缺省 = 内存实现（进程内不丢，重启清空）；桌面应传入 FilePendingStore 以持久化。
+   */
+  pending?: PendingStore;
 }
 
 /** createMemAgent 返回的核心 API 面（§2） */
@@ -701,6 +712,18 @@ export interface MemAgent {
   l0ChangeAdminPassword(oldPassword: string, newPassword: string): Promise<void>;
   /** 旧数据迁移（§4.4.6；桌面端迁移前自动备份） */
   l0Migrate(oldPassword?: string): Promise<L0MigrationResult>;
+  // ---- 批次44-D4：写入落盘兜底（L0 锁定期间不丢，解锁后自动重放） ----
+  /** 锁定时暂存一条写入，返回 pending_id */
+  enqueuePending(req: MemReq & WriteKnobs): Promise<string>;
+  /** 解锁后重放所有 pending（writeFn = 内核 write）；返回已重放 / 失败条数 */
+  flushPending(): Promise<{ flushed: number; failed: number }>;
+  /** 当前 pending 条数 */
+  countPending(): Promise<number>;
+  /**
+   * 探锁 + 队列状态（批次44-D4 三字段口径）：
+   * l0_unlocked / writeDek_present（写密钥是否在内存，同一判据双命名）/ pending_count（解锁时顺带重放）
+   */
+  getWriteStatus(): Promise<{ l0_unlocked: boolean; writeDek_present: boolean; pending_count: number }>;
   /** 单记忆操作（17.3/P4）：端壳状态变更统一走内核（G4 约束 + 钳制 + 版本 + 审计） */
   _memoryOp(mem_id: string, op: MemOp, patch?: MemOpPatch): Promise<MemOpResult>;
   /** 用户反馈（17.4）：confirm +0.1 / reject −0.05 / disputed 挂 9.7 裁决 */

@@ -7,7 +7,8 @@ import {
 } from '../mcpHttp.ts';
 import { InMemoryStorage } from '../storage.ts';
 import type { L0Vault } from '../l0vault.ts';
-import { createTestVault } from './l0Kit.ts';
+import { createTestVault, TEST_ADMIN_PW, TEST_ADMIN_ID } from './l0Kit.ts';
+import { MemoryPendingStore } from '../pendingWrites.ts';
 
 const TOKEN = 'mcp-http-token-0123456789abcdef0123456789abcdef';
 
@@ -74,7 +75,7 @@ describe('MCP HTTP（批次2 信任边界）', () => {
     expect(header.status).toBe(200);
     const body = (await header.json()) as { result: { tools: Array<{ name: string; description?: string }> } };
     expect(body.result.tools.map((t) => t.name)).toEqual([
-      'recall_memory', 'write_memory', 'list_projects', 'get_preferences',
+      'recall_memory', 'write_memory', 'list_projects', 'get_preferences', 'get_write_status',
     ]);
     // 批次14：措辞为「优先使用本工具 + 未命中/不可用再回退」，不是硬禁用
     const recallDesc = body.result.tools.find((t) => t.name === 'recall_memory')?.description ?? '';
@@ -738,5 +739,75 @@ describe('isTrustedClientSelfName（批次41-S 方案 B 已知产品闸门）', 
     expect(isTrustedClientSelfName('unknown')).toBe(false);
     expect(isTrustedClientSelfName('')).toBe(false);
     expect(isTrustedClientSelfName(undefined)).toBe(false);
+  });
+});
+
+// 批次44-D4：HTTP 端 L0 锁定写入落盘兜底（pending/flush 与 TCP 同口径）
+describe('批次44-D4：HTTP L0 锁定写入落盘兜底', () => {
+  let handle: McpHttpHandle;
+  let url = '';
+  let vault: L0Vault;
+  const storage = new InMemoryStorage();
+
+  beforeAll(async () => {
+    vault = (await createTestVault()).vault;
+    handle = runMcpHttpServer({
+      port: 0, token: TOKEN, storage, l0: vault, pending: new MemoryPendingStore(),
+    });
+    url = `http://127.0.0.1:${await handle.ready}/mcp`;
+  });
+
+  afterAll(() => { handle?.stop(); });
+
+  type ToolBody = {
+    result: { isError: boolean; structuredContent?: Record<string, unknown>; content: Array<{ text: string }> };
+  };
+  async function tool(id: number, name: string, args: Record<string, unknown> = {}): Promise<ToolBody> {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` },
+      body: JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } }),
+    });
+    return (await res.json()) as ToolBody;
+  }
+
+  it('get_write_status：解锁态 → l0_unlocked=true / pending_count=0', async () => {
+    const b = await tool(950, 'get_write_status');
+    expect(b.result.isError).toBe(false);
+    expect(b.result.structuredContent).toEqual({ l0_unlocked: true, writeDek_present: true, pending_count: 0 });
+  });
+
+  it('锁定后 write_memory → status=pending（isError=false 但明确未落库，不伪造 mem_id）', async () => {
+    await vault.lockWrite({ admin_user_id: TEST_ADMIN_ID });
+    const b = await tool(951, 'write_memory', {
+      content: 'D4 HTTP 锁定写入不丢', project_id: 'P1', category: 'fact', source_agent: 'mcp-test',
+    });
+    expect(b.result.isError).toBe(false);
+    const out = b.result.structuredContent!;
+    expect(out.status).toBe('pending');
+    expect(out.reason).toBe('E_L0_LOCKED');
+    expect(String(out.pending_id)).toMatch(/^pend_/);
+    expect(out.mem_id).toBeUndefined();
+
+    const st = await tool(952, 'get_write_status');
+    expect(st.result.structuredContent).toEqual({ l0_unlocked: false, writeDek_present: false, pending_count: 1 });
+    expect((await storage.listMemories({})).length).toBe(0);
+  });
+
+  it('解锁后 write_memory → 自动重放 pending（replayed_pending=1）', async () => {
+    await vault.unlockWrite({ password: TEST_ADMIN_PW, admin_user_id: TEST_ADMIN_ID });
+    const b = await tool(953, 'write_memory', {
+      content: 'D4 HTTP 解锁后新写入', project_id: 'P1', category: 'decision', source_agent: 'mcp-test',
+    });
+    expect(b.result.isError).toBe(false);
+    const out = b.result.structuredContent!;
+    expect(String(out.mem_id)).toMatch(/^mem_/);
+    expect(out.replayed_pending).toBe(1);
+    expect(out.status).toBeUndefined();
+
+    const contents = (await storage.listMemories({})).map((m) => m.content);
+    expect(contents).toContain('D4 HTTP 锁定写入不丢');
+    expect(contents).toContain('D4 HTTP 解锁后新写入');
+    expect((await tool(954, 'get_write_status')).result.structuredContent).toEqual({ l0_unlocked: true, writeDek_present: true, pending_count: 0 });
   });
 });

@@ -13,7 +13,7 @@ export const MCP_INSTRUCTIONS = `你是接入了 MultiAgent Memory 的 Agent。�
 1. 触发（默认优先）：用户消息只要涉及本仓库/本项目的实现、架构、历史决策、踩坑、偏好、事实，或出现「记得 / 上次 / 之前 / 老规矩 / 继续上次」，就优先调用 recall_memory 再回答；本库未命中或工具不可用时，才回退到读代码、工作区笔记或客户端自带 memory 文件。客户端自带的 memory/笔记不是本记忆库，不能替代首选检索。project_id 可省略：账本只有一个项目时自动定位；有多个项目时先调用 list_projects 并向用户确认。
 2. 回显（强制）：每次 recall_memory 成功返回后，把该次返回的 display.markdown 整段原样输出到最终回答末尾。服务端按你的客户端能力选档位：支持 HTML 折叠的客户端收到 <details> 四段（项目背景/命中记忆/Token/省钱与费用，可点开收起）；其余客户端默认收到「两行 🧠 Memory 摘要 + 展开入口」——HTTP 传输给一条指向本机一次性明细页的 Markdown 链接（用户点链接才看四段，URL 必须逐字保留、不得改写不得丢），TCP 等无链接场景给一行文字指引。任何档位都禁止自行补写或预先展开明细（明细只能来自本次或下一次工具返回），不得添加 HTML 标签；token 数字与金额必须原样保留。需要明细时，用同一个 query 再调用 recall_memory 并置 detail=true，然后原样输出那次返回的 display.markdown。若客户端连 Markdown 都渲染不了，改为单独一行原样输出 display.line。
 3. 金额：display.money 为 null 表示用户尚未设置单价（全局参数页），不得猜测或补全金额。
-4. 沉淀：会话中形成新的决策、踩坑、事实、偏好或洞察时，调用 write_memory 落库（category 选最贴近的一类）；写入前如不确定项目，先 list_projects。
+4. 沉淀：会话中形成新的决策、踩坑、事实、偏好或洞察时，调用 write_memory 落库（category 选最贴近的一类）；写入前如不确定项目，先 list_projects；不确定 L0 写密钥是否解锁时先调用 get_write_status 探锁。若 write_memory 返回 status=pending，表示本次内容已暂存、解锁后会自动重放落库——这不是写入成功，必须如实告知用户，不得伪造 mem_id 或声称已落库。
 5. 边界：不要向用户展示 MCP 认证令牌（Authorization 头 / mcp-token.txt 内容）；不要伪造记忆内容、省量或审计回执。工具不可用时（未启动/未授权/连接失败）如实说明并继续回答，不得假装检索过记忆。`;
 
 /** 标准 MCP 工具定义（tools/list 返回；顺序即客户端展示顺序） */
@@ -69,5 +69,10 @@ export const MCP_TOOLS = [
       },
       required: ['user_id'],
     },
+  },
+  {
+    name: 'get_write_status',
+    description: '写前探锁（批次44-D4）：返回 l0_unlocked（写入是否解锁）、writeDek_present（写密钥是否在内存）与 pending_count（待重放的暂存写入条数）；不返回任何密钥材料。已解锁时调用会顺带自动重放历史 pending 条目。write_memory 返回 status=pending 说明写密钥锁定、内容已暂存而非落库，解锁后可再用本工具确认重放结果。',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
 ] as const;

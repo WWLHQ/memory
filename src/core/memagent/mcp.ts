@@ -13,9 +13,11 @@ import { FakeLlmProvider } from './llm.ts';
 import { assertMcpToken, tokenEquals, DEFAULT_MCP_ACCOUNT, projectInScope, type McpAccount } from './mcpAuth.ts';
 import { MCP_INSTRUCTIONS, MCP_TOOLS } from './mcpSchema.ts';
 import { McpToolError, runListProjectsTool, runRecallTool } from './mcpRecall.ts';
-import type { StorageBackend, Pref, L0Port } from './types.ts';
+import type { StorageBackend, Pref, L0Port, MemReq, WriteResult } from './types.ts';
 import { CATEGORIES, isCategory } from './types.ts';
 import { parseWriteKnobs } from './memories.ts';
+import { isL0LockedError } from './errors.ts';
+import { MemoryPendingStore, type PendingStore, type WriteKnobs } from './pendingWrites.ts';
 
 const VERSION = '2.0';
 
@@ -59,7 +61,7 @@ class Session {
   ma: ReturnType<typeof createMemAgent>;
   readonly account: McpAccount;
   readonly storage: StorageBackend;
-  constructor(account: McpAccount, storage?: StorageBackend, l0?: L0Port) {
+  constructor(account: McpAccount, storage?: StorageBackend, l0?: L0Port, pending?: PendingStore) {
     this.account = account;
     this.storage = storage ?? new InMemoryStorage();
     this.ma = createMemAgent({
@@ -70,6 +72,8 @@ class Session {
       vector: new JsVectorBackend(),
       storage: this.storage,
       l0,
+      // 批次44-D4：跨 socket 共享同一 pending 队列，避免多连接各自暂存互不重放
+      pending,
     });
   }
 }
@@ -87,6 +91,8 @@ export interface McpOptions {
   account?: McpAccount;
   /** 单行 JSON 上限（字节），缺省 1 MiB */
   maxLineBytes?: number;
+  /** 批次44-D4：共享 pending 队列存储端口；缺省内存实现，桌面建议注入 FilePendingStore */
+  pending?: PendingStore;
 }
 
 export interface McpServerHandle {
@@ -107,6 +113,8 @@ export function runMcpServer(opts: McpOptions): McpServerHandle {
   const token = assertMcpToken(opts.token);
   const { port = 8202, maxLineBytes = DEFAULT_MAX_LINE_BYTES, account = DEFAULT_MCP_ACCOUNT } = opts;
   const sockets = new WeakMap<Socket, SocketState>();
+  // 批次44-D4：所有 socket 共享一个 pending 队列（缺省内存；桌面可注入文件实现持久化）
+  const sharedPending: PendingStore = opts.pending ?? new MemoryPendingStore();
 
   function stateOf(socket: Socket): SocketState {
     let st = sockets.get(socket);
@@ -119,7 +127,7 @@ export function runMcpServer(opts: McpOptions): McpServerHandle {
 
   function sessionOf(socket: Socket): Session {
     const st = stateOf(socket);
-    if (!st.session) st.session = new Session(account, opts.storage, opts.l0);
+    if (!st.session) st.session = new Session(account, opts.storage, opts.l0, sharedPending);
     return st.session;
   }
 
@@ -195,7 +203,7 @@ export function runMcpServer(opts: McpOptions): McpServerHandle {
             send(socket, jsonError(req.id, -32602, knobError));
             return;
           }
-          const result = await s.write({
+          const writeReq: MemReq & WriteKnobs = {
             content: p.content,
             category,
             project_id: p.project_id,
@@ -203,8 +211,26 @@ export function runMcpServer(opts: McpOptions): McpServerHandle {
             session_id: p.session_id ? String(p.session_id) : undefined,
             source_agent: sa,
             ...knobs,
-          });
-          send(socket, ok(req.id, result));
+          };
+          // A3 / 批次44-D4：L0 锁定时不丢——暂存 pending 队列，解锁后自动重放落库。
+          // 诚实降级：绝不伪造 mem_id，也不把「未解锁」伪装成写入成功。
+          let result: WriteResult;
+          try {
+            result = await s.write(writeReq);
+          } catch (e) {
+            if (!isL0LockedError(e)) throw e;
+            const pending_id = await s.enqueuePending(writeReq);
+            send(socket, ok(req.id, {
+              status: 'pending',
+              pending_id,
+              reason: 'E_L0_LOCKED',
+              message: 'L0 写密钥未解锁：本次写入已暂存 pending 队列，解锁后自动重放落库。这不是写入成功，请勿据此认为已落库。',
+            }));
+            return;
+          }
+          // 解锁后自动重放：本次写入成功（必然已解锁），顺带清空历史 pending 条目
+          const replay = await s.flushPending();
+          send(socket, ok(req.id, replay.flushed > 0 ? { ...result, replayed_pending: replay.flushed } : result));
           return;
         }
 
@@ -221,6 +247,12 @@ export function runMcpServer(opts: McpOptions): McpServerHandle {
           }
           const result: Pref[] = await s.getPrefs(sessionUser);
           send(socket, ok(req.id, result));
+          return;
+        }
+
+        // ── get_write_status（批次44-D4：写前探锁 + 解锁态顺带重放） ──────
+        case 'get_write_status': {
+          send(socket, ok(req.id, await s.getWriteStatus()));
           return;
         }
 

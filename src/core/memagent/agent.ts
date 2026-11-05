@@ -2,6 +2,7 @@
 import { MemAgentError } from './errors.ts';
 import { routeProxy } from './llm.ts';
 import { coreBrowse, coreFeedback, coreGc, coreMemoryOp, coreWrite } from './memories.ts';
+import { MemoryPendingStore, PendingWrites, type WriteKnobs } from './pendingWrites.ts';
 import { hardFilter, scoreMemory } from './forgetting.ts';
 import {
   BACKGROUND_MAX_TOKENS, computeRecallSavings, estTokens, selectRecallBackground,
@@ -31,6 +32,8 @@ const BUDGET = { soft: 1500, warn: 2000, hard: 3000 } as const;
 export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHooks {
   const { form, account, llm, vector, storage } = opts;
   let usedToday = 0; // 反代理当日花费（19.8 cost_cap）
+  // 批次44-D4：写入落盘兜底队列。缺省内存实现（进程内不丢），桌面可注入 FilePendingStore 持久化。
+  const pending = new PendingWrites(opts.pending ?? new MemoryPendingStore());
 
   function newRequestId(): string {
     return `req_${ulid()}`;
@@ -228,6 +231,43 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
     };
   }
 
+  // ─── 批次44-D4：写入落盘兜底（L0 锁定不丢 / 解锁自动重放） ──────────────────
+
+  /** 写密钥是否已解锁：桌面 L0Vault 实现 isWriteUnlocked；无端口时 best-effort false（不据此阻断写入） */
+  async function writeUnlocked(): Promise<boolean> {
+    if (typeof opts.l0?.isWriteUnlocked === 'function') return opts.l0.isWriteUnlocked();
+    if (opts.l0Admin) {
+      try { return (await opts.l0Admin.status()).write_unlocked; } catch { return false; }
+    }
+    return false;
+  }
+
+  /** L0 锁定时暂存一条写入（不伪造 mem_id、不落明文），返回 pending_id */
+  async function enqueuePending(req: MemReq & WriteKnobs): Promise<string> {
+    return pending.enqueue(req);
+  }
+
+  /** 解锁后重放全部 pending：队列空 → 零开销短路；仍锁定/出错 → 保留待下次，绝不丢 */
+  async function flushPending(): Promise<{ flushed: number; failed: number }> {
+    return pending.flush(write);
+  }
+
+  async function countPending(): Promise<number> {
+    return pending.count();
+  }
+
+  /** 写前探锁：已解锁则顺带重放历史 pending，回报重放后的剩余条数（批次44-D4 三字段口径） */
+  async function getWriteStatus(): Promise<{ l0_unlocked: boolean; writeDek_present: boolean; pending_count: number }> {
+    const l0_unlocked = await writeUnlocked();
+    if (l0_unlocked) await pending.flush(write);
+    return {
+      l0_unlocked,
+      // 写密钥（DEK）在内存 ⇔ 写入解锁：同一判据双命名，便于 Agent 与运维脚本对齐
+      writeDek_present: l0_unlocked,
+      pending_count: await pending.count(),
+    };
+  }
+
   async function gc(req: GcReq): Promise<GcReport> {
     const request_id = newRequestId();
     return coreGc(req, { storage, request_id, now: Date.now() });
@@ -417,6 +457,8 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
     l0RequestAccess, l0ListRequests, l0ListGrants, l0GrantAccess, l0DenyRequest, l0RevokeGrant,
     l0Unlock, l0Heartbeat, l0Lock, l0UnlockWrite, l0LockWrite, l0Status,
     l0SetupAdminPassword, l0ChangeAdminPassword, l0Migrate,
+    // 批次44-D4：写入落盘兜底（L0 锁定不丢 / 解锁自动重放）
+    enqueuePending, flushPending, countPending, getWriteStatus,
     // 测试专用钩子（批次27 P3-1：已移出公开 MemAgent 接口）—— 仅测试灌数，页面代码不得调用
     _seedMemory: seedMemory, _memoryOp: memoryOp, _feedback: feedback,
   };
