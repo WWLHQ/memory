@@ -86,7 +86,7 @@ export function isIdentifiableUserAgent(ua: string | undefined): boolean {
  * 会被归并成那个产品（本机主要就是 Qoder 宿主一家用 `node`，风险有限；彻底消除需客户端回传会话头，属方案 C）。
  */
 const TRUSTED_CLIENT_SELF_IDS = new Set([
-  'qoder', 'qoder-desktop-mcp-host', 'claude', 'claude-code', 'codex', 'cursor',
+  'qoder', 'qoder-cn', 'qoder-desktop-mcp-host', 'claude', 'claude-code', 'codex', 'cursor',
   'gemini', 'gemini-cli', 'qwen', 'qwen-code', 'trae', 'trae-cn', 'workbuddy',
   'zcode', 'deepseek', 'deepseek-harness', 'dsh-mcp-client',
 ]);
@@ -94,6 +94,27 @@ export function isTrustedClientSelfName(client: string | undefined): boolean {
   if (!client) return false;
   const seg = client.split('/')[0].trim().toLowerCase();
   return TRUSTED_CLIENT_SELF_IDS.has(seg);
+}
+
+/** 批次41-X：显式身份请求头名。一键接入会把本客户端的规范 id 写进这个头，
+ *  于是每次调用都自带身份，不再依赖「同 UA 最近一次 initialize 的自报名」归并（41-S 方案 B 的残留串号）。 */
+export const MCP_CLIENT_HEADER = 'x-memagent-client';
+
+/** 允许进字符集之外的头值一律不采信（防把控制字符/超长串写进审计）。 */
+const CLIENT_HEADER_VALUE_RE = /^[A-Za-z0-9 ._:/@+-]{1,64}$/;
+
+/**
+ * 批次41-X（方案 C）：从显式身份头取调用方身份。
+ * 与 UA 归并的区别：这是**每次请求自己声明**的，不共用任何键，因此不存在「甲的调用记成乙」。
+ * 仍是自报（不是鉴权，鉴权归令牌）：它只影响「这次调用记在谁名下 + 给哪一档展示格式」，
+ * 冒充它拿不到额外数据。取不到/非法值 → undefined，交回原有 会话头 → UA → UA 识别 链，绝不因此拒服务。
+ */
+export function clientFromExplicitHeader(raw: string | string[] | undefined): string | undefined {
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof value !== 'string') return undefined;
+  const label = normalizeClientLabel(value);
+  if (!label || !CLIENT_HEADER_VALUE_RE.test(label)) return undefined;
+  return label;
 }
 
 
@@ -369,26 +390,35 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
           const ua = typeof uaHeader === 'string' ? uaHeader : undefined;
           const sidHeader = req.headers['mcp-session-id'];
           const incomingSid = typeof sidHeader === 'string' ? sidHeader : '';
+          // 批次41-X（方案 C）：显式身份头优先——一键接入写进配置的 X-Memagent-Client 每次请求都带，
+          // 不共用 UA/会话这类「别人也会命中」的键，从根上消除 41-S 的跨客户端串号。
+          const declaredClient = clientFromExplicitHeader(req.headers[MCP_CLIENT_HEADER]);
           // 批次15：initialize 时登记调用方并以 Mcp-Session-Id 关联后续 tools/call；
           // 客户端不带会话头时退化为「同 UA 最近一次 initialize」，再退化到 UA 识别。
           if (method === 'initialize') {
             const sid = ulid();
-            const selfId = clientFromInitialize(params);
+            const selfId = declaredClient ?? clientFromInitialize(params);
             if (selfId) {
               remember(clientBySession, sid, selfId);
               // 批次41-S（方案 B）：有辨识度 UA 才登记；或自报名本身是**已知客户端产品**也登记——
               // 让 Qoder 宿主这类「UA=`node`、不带会话头、但自报 qoder-desktop-mcp-host」的合法客户端
               // 保住气泡折叠档。任意/探测名（不在已知表里）仍不登记，从源头堵住被它抢注。
-              if (ua && (isIdentifiableUserAgent(ua) || isTrustedClientSelfName(selfId))) remember(clientByUa, ua, selfId);
+              // 批次41-X：显式带了身份头的客户端每次请求都自带身份，这条归并路径对它已无意义，
+              // 所以不再按它的值去占通用 UA 那条键（那是 41-S 残留串号的来源）。
+              const byUa = !declaredClient && ua
+                && (isIdentifiableUserAgent(ua) || isTrustedClientSelfName(selfId));
+              if (byUa) remember(clientByUa, ua, selfId);
             }
             res.setHeader('Mcp-Session-Id', sid);
           }
-          // 批次41-S（方案 B）：取值顺序 会话头 → （有辨识度 UA，或该 UA 上登记的自报名是已知产品）
+          // 取值顺序（批次41-X 起）：显式身份头 → 会话头 → （有辨识度 UA，或该 UA 上登记的自报名是已知产品）
           // 同 UA 最近一次 initialize → UA 识别。通用 UA 上若没登记过已知产品，仍落到 unknown。
           const uaCached = ua ? clientByUa.get(ua) : undefined;
-          const client = clientBySession.get(incomingSid)
+          const client = declaredClient
+            ?? clientBySession.get(incomingSid)
             ?? (ua && (isIdentifiableUserAgent(ua) || isTrustedClientSelfName(uaCached)) ? uaCached : undefined)
             ?? clientFromUserAgent(ua);
+
           const rpcResp = await handleRpc(payload, client);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(rpcResp));

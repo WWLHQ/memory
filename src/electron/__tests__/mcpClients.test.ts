@@ -439,3 +439,81 @@ describe('applyRecallEvidence（批次30：审计证据升级）', () => {
     expect(statusOf(home, 'zcode', { recallEvidence: [] }).state).toBe('manual');
   });
 });
+
+// 批次41-X：显式身份头 X-Memagent-Client —— 一键接入写入、扫描如实报告、缺头可补写。
+// 这一条消除的是 41-S 方案 B 的残留：通用 UA（Node/Electron 都发 `node`）上「最后一次 initialize 赢」
+// 会把甲客户端的调用记到乙名下（连带把乙升级成「已接入」以及发错展示档位）。
+describe('批次41-X 显式身份头（写入 + 检出 + 补写）', () => {
+  const HEADER = 'X-Memagent-Client';
+
+  function jsonEntry(withHeader: boolean, token = TOKEN): Record<string, unknown> {
+    const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+    if (withHeader) headers[HEADER] = 'qoder-cn';
+    return { type: 'http', url: MCP_ENDPOINT, headers };
+  }
+
+  test('老配置（有令牌、无身份头）→ 仍 wired，但 hasClientId=false 且给出「补身份头」说明', () => {
+    const home = tempHome();
+    write(home, '.qoder-cn/settings.json', JSON.stringify({ mcpServers: { 'MultiAgent Memory': jsonEntry(false) } }));
+    const q = statusOf(home, 'qoder-cn', { currentToken: TOKEN });
+    expect(q.state).toBe('wired');
+    expect(q.hasClientId).toBe(false);
+    expect(q.note).toContain(HEADER);
+    expect(q.note).toContain('补身份头');
+  });
+
+  test('41-X 之后写入的配置 → hasClientId=true，不再提示补写', () => {
+    const home = tempHome();
+    write(home, '.qoder-cn/settings.json', JSON.stringify({ mcpServers: { 'MultiAgent Memory': jsonEntry(true) } }));
+    const q = statusOf(home, 'qoder-cn', { currentToken: TOKEN });
+    expect(q.state).toBe('wired');
+    expect(q.hasClientId).toBe(true);
+    expect(q.note ?? '').not.toContain('补身份头');
+  });
+
+  test('对「已接入但缺身份头」执行一键接入 → 备份后补写该头，复扫 hasClientId=true 且令牌不动', () => {
+    const home = tempHome();
+    const path = write(home, '.qoder-cn/settings.json', JSON.stringify({ mcpServers: { 'MultiAgent Memory': jsonEntry(false) } }, null, 2));
+    const r = wireMcpClient('qoder-cn', TOKEN, { home, appData: home, currentToken: TOKEN });
+    expect(r.ok).toBe(true);
+    expect(r.changed).toBe(true);
+    expect(r.backupPath && existsSync(r.backupPath)).toBe(true);
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as { mcpServers: Record<string, { headers: Record<string, string> }> };
+    const headers = parsed.mcpServers['MultiAgent Memory'].headers;
+    expect(headers[HEADER]).toBe('qoder-cn');
+    expect(headers.Authorization).toBe(`Bearer ${TOKEN}`);
+    expect(statusOf(home, 'qoder-cn', { currentToken: TOKEN }).hasClientId).toBe(true);
+    // 幂等：再点一次不重复写盘
+    const again = wireMcpClient('qoder-cn', TOKEN, { home, appData: home, currentToken: TOKEN });
+    expect(again.changed).toBe(false);
+  });
+
+  test('TOML（Codex）：已有 Authorization 缺身份头 → 补写该头且保留原有头，复扫 hasClientId=true', () => {
+    const home = tempHome();
+    const path = write(home, '.codex/config.toml', [
+      'model = "gpt-5"',
+      '',
+      '[mcp_servers.multiagent_memory]',
+      `url = "${MCP_ENDPOINT}"`,
+      'http_headers = { "X-Custom" = "1", Authorization = "Bearer old" }',
+      '',
+    ].join('\n'));
+    const before = statusOf(home, 'codex');
+    expect(before.state).toBe('wired');
+    expect(before.hasClientId).toBe(false);
+    const r = wireMcpClient('codex', TOKEN, { home, appData: home, currentToken: TOKEN });
+    expect(r.ok).toBe(true);
+    const text = readFileSync(path, 'utf8');
+    expect(text).toContain(`${HEADER} = "codex"`);
+    expect(text).toContain('"X-Custom" = "1"');
+    expect(text.match(new RegExp(TOKEN, 'g'))).toHaveLength(1);
+    expect(statusOf(home, 'codex').hasClientId).toBe(true);
+  });
+
+  test('审计证据升级来的 wired（Zcode 无文件面）→ 身份头无从判定，留 undefined（不谎报缺/有）', () => {
+    const home = tempHome();
+    const zc = statusOf(home, 'zcode', { recallEvidence: [{ ts: Date.now(), client: 'zcode/0.16.9' }] });
+    expect(zc.state).toBe('wired');
+    expect(zc.hasClientId).toBeUndefined();
+  });
+});

@@ -6,7 +6,7 @@
 // 浏览器模式（无宿主桥）如实降级：只说明无法扫描，绝不伪造「已接入」或客户端列表。
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { hostCall, hostCapability } from '../../desktop/hostBridge.ts';
-import { MCP_ENDPOINT, specOfMcpClient, type McpWireState } from '../../agentOnboard/mcpClients.ts';
+import { MCP_CLIENT_HEADER_NAME, MCP_ENDPOINT, specOfMcpClient, type McpWireState } from '../../agentOnboard/mcpClients.ts';
 import type { BadgeClass } from '../../types/agentOnboard.ts';
 import { currentSessionId, useSessionContext } from '../shared/session.ts';
 
@@ -20,6 +20,8 @@ interface ClientRow {
   installed: boolean;
   state: McpWireState;
   hasAuth: boolean;
+  /** 批次41-X：配置里是否带显式身份头；false = 已接入但缺身份头（可点「补身份头」） */
+  hasClientId?: boolean;
   foundUrl?: string;
   rulesHint: string;
   note?: string;
@@ -62,6 +64,12 @@ const STATE_HINT: Record<McpWireState, string> = {
   manual: '无稳定配置路径：复制片段后按下方指引在客户端设置中粘贴',
 };
 
+/** 批次41-X：「已接入但缺显式身份头」——状态仍是 wired（调用能通），只是服务端认不出这是哪一家。
+ *  这类行需要允许重新写入（补头），所以不能因 state==='wired' 就锁死按钮。 */
+function needsClientId(row: ClientRow): boolean {
+  return row.state === 'wired' && row.hasClientId === false;
+}
+
 function specOf(id: string) {
   try {
     return specOfMcpClient(id);
@@ -81,16 +89,24 @@ function guideFor(row: ClientRow, endpoint: string): string {
   const key = spec?.serverKey ?? 'MultiAgent Memory';
   switch (row.state) {
     case 'wired':
-      return STATE_HINT.wired;
+      if (!needsClientId(row)) {
+        // 只在配置文件真读到该头时才声称「已写入」；无文件面的客户端（如审计证据升级来的 wired）无从判定，不谎报
+        return row.hasClientId === true
+          ? `${STATE_HINT.wired}（身份头 ${MCP_CLIENT_HEADER_NAME} 已在配置中确认）`
+          : STATE_HINT.wired;
+      }
+      return row.writable
+        ? `点本行「补身份头」：自动备份后给 ${where} 的 ${key} 条目补请求头 ${MCP_CLIENT_HEADER_NAME}: ${row.id}（写前备份，令牌与身份头都不落日志）`
+        : `打开 ${where}，在 ${key} 条目补请求头 ${MCP_CLIENT_HEADER_NAME}: ${row.id}（点「复制片段」获取，保存后点「刷新状态」）`;
     case 'missing_auth':
       return row.writable
-        ? `点本行「补齐令牌」：自动备份后写入 ${where} 的 Authorization（令牌一次性下传，不落日志）`
-        : `打开 ${where}，在 ${key} 条目补请求头 Authorization: Bearer <令牌>（点「复制片段」获取）`;
+        ? `点本行「补齐令牌」：自动备份后写入 ${where} 的 Authorization 与身份头 ${MCP_CLIENT_HEADER_NAME}: ${row.id}（令牌一次性下传，不落日志）`
+        : `打开 ${where}，在 ${key} 条目补请求头 Authorization: Bearer <令牌> 与 ${MCP_CLIENT_HEADER_NAME}: ${row.id}（点「复制片段」获取）`;
     case 'missing_entry':
     case 'no_config':
       return row.writable
-        ? `点本行「一键接入」或顶部「⚡ 一键适配全部」：自动备份后写入 ${where}（条目 ${key}，端点 ${endpoint}）`
-        : `打开 ${where}，新增 HTTP MCP 服务器：名称 ${key}，URL ${endpoint}，请求头 Authorization: Bearer <令牌>（点「复制片段」或「一键适配全部」生成）`;
+        ? `点本行「一键接入」或顶部「⚡ 一键适配全部」：自动备份后写入 ${where}（条目 ${key}，端点 ${endpoint}，请求头含身份头 ${MCP_CLIENT_HEADER_NAME}: ${row.id}）`
+        : `打开 ${where}，新增 HTTP MCP 服务器：名称 ${key}，URL ${endpoint}，请求头 Authorization: Bearer <令牌> 与 ${MCP_CLIENT_HEADER_NAME}: ${row.id}（点「复制片段」或「一键适配全部」生成）`;
     case 'conflict':
       return `打开 ${path}，把 ${key} 条的 URL 从 ${row.foundUrl ?? '其它端点'} 改成 ${endpoint}（或删除该条目），保存后点「刷新状态」，再点「一键接入」`;
     case 'invalid': {
@@ -99,7 +115,7 @@ function guideFor(row: ClientRow, endpoint: string): string {
     }
     case 'manual':
     default:
-      return `打开 ${where}，新增 HTTP MCP 服务器：名称 ${key}，URL ${endpoint}，请求头 Authorization: Bearer <令牌>（点「复制片段」或「一键适配全部」生成片段）`;
+      return `打开 ${where}，新增 HTTP MCP 服务器：名称 ${key}，URL ${endpoint}，请求头 Authorization: Bearer <令牌> 与 ${MCP_CLIENT_HEADER_NAME}: ${row.id}（点「复制片段」或「一键适配全部」生成片段）`;
   }
 }
 
@@ -174,8 +190,9 @@ export function McpClientsPanel() {
     hostCall<WireReply>('mcp:clientWire', [row.id, session.sid])
       .then((r) => {
         if (!r.ok) { setMessage(`写入失败：${r.error ?? '未知原因'}`); return; }
+        const headerOnly = row.state === 'wired';
         setMessage(r.changed
-          ? `已写入 ${row.name}${r.backupPath ? `（原文件已备份：${r.backupPath}）` : ''}；请重启该客户端后验证提示行`
+          ? `${headerOnly ? `已为 ${row.name} 补写身份头 ${MCP_CLIENT_HEADER_NAME}` : `已写入 ${row.name}`}${r.backupPath ? `（原文件已备份：${r.backupPath}）` : ''}；请重启该客户端后验证提示行`
           : `${row.name} 已是最新，未改动`);
         return refresh();
       })
@@ -184,7 +201,10 @@ export function McpClientsPanel() {
   };
 
   const canWire = (row: ClientRow) =>
-    row.writable && row.state !== 'wired' && row.state !== 'conflict' && row.state !== 'invalid';
+    row.writable
+    && row.state !== 'conflict'
+    && row.state !== 'invalid'
+    && (row.state !== 'wired' || needsClientId(row));
 
   /**
    * 批次23：一键适配全部 —— 所有已安装客户端一次处理：
@@ -196,7 +216,7 @@ export function McpClientsPanel() {
     if (!session.sid) { setMessage('请先登录后再写入配置'); return; }
     if (rows.length === 0) { setMessage('未检测到已安装的 MCP 客户端，无需适配'); return; }
     const targets = rows.filter(canWire);
-    const pending = rows.filter((r) => r.state !== 'wired' && !canWire(r));
+    const pending = rows.filter((r) => !canWire(r) && (r.state !== 'wired' || needsClientId(r)));
     setBusy('wire-all');
     const failed: string[] = [];
     let written = 0;
@@ -253,7 +273,7 @@ export function McpClientsPanel() {
   const scannedAt = scan && typeof scan.scannedAt === 'number' ? formatClock(scan.scannedAt) : '';
   const endpoint = scan?.endpoint ?? MCP_ENDPOINT;
   const wireTargets = rows.filter(canWire);
-  const snippetTargets = rows.filter((r) => r.state !== 'wired' && !canWire(r));
+  const snippetTargets = rows.filter((r) => !canWire(r) && (r.state !== 'wired' || needsClientId(r)));
   const batchLabel = wireTargets.length > 0
     ? `⚡ 一键适配全部（自动 ${wireTargets.length}${snippetTargets.length > 0 ? ` + 片段 ${snippetTargets.length}` : ''}）`
     : snippetTargets.length > 0
@@ -309,6 +329,8 @@ export function McpClientsPanel() {
           <b>一键接入</b>：管理员专用，先备份再合并写入，支持 JSON（Qoder / Claude Code / Cursor / Gemini / Qwen）与 TOML（Codex）；
           <b>⚡ 一键适配全部</b>：一次处理所有已安装客户端——可写的自动备份写入，无法自动写入的自动生成片段并给出具体接通位置与步骤；
           配置冲突/无法解析时拒绝覆盖。
+          <b>补身份头</b>（批次41-X）：条目已接入但缺 <code>{MCP_CLIENT_HEADER_NAME}</code> 时出现——服务端据此认出「这次调用来自哪一家」，
+          缺了就只能按 User-Agent 归并，多台客户端共用通用 UA（如 Node 的 <code>node</code>）时会把 A 的调用记成 B。
         </div>
         {capability === 'none' && (
           <div className="warn show" data-testid="mcp-browser-note">
@@ -366,13 +388,18 @@ export function McpClientsPanel() {
                       className="btn primary" type="button" data-act="mcp-wire"
                       disabled={!admin || busy !== '' || !canWire(row)}
                       title={disabledReason
-                        || (row.state === 'wired' ? '已接入，无需重复写入'
+                        || (row.state === 'wired'
+                          ? needsClientId(row)
+                            ? `已接入但缺显式身份头 ${MCP_CLIENT_HEADER_NAME}：备份原文件后补写该头（服务端据此识别调用方，避免多客户端串号）`
+                            : '已接入，无需重复写入'
                           : row.state === 'conflict' || row.state === 'invalid'
                             ? '配置冲突/无法解析：请先手工修正，系统不覆盖'
-                            : '备份原文件后合并写入本服务条目')}
+                            : '备份原文件后合并写入本服务条目（含身份头）')}
                       onClick={() => wire(row)}
                     >
-                      {row.state === 'wired' ? '已接入' : row.state === 'missing_auth' ? '补齐令牌' : '一键接入'}
+                      {row.state === 'wired'
+                        ? needsClientId(row) ? '补身份头' : '已接入'
+                        : row.state === 'missing_auth' ? '补齐令牌' : '一键接入'}
                     </button>
                   )}
                 </div>

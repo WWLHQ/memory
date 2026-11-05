@@ -2,7 +2,9 @@
 // 批次33-C 追加：一次性召回明细页（GET /recall/<id>）的可点、失效与 Origin/Host 闸门。
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { request } from 'node:http';
-import { runMcpHttpServer, isIdentifiableUserAgent, isTrustedClientSelfName, type McpHttpHandle } from '../mcpHttp.ts';
+import {
+  clientFromExplicitHeader, runMcpHttpServer, isIdentifiableUserAgent, isTrustedClientSelfName, type McpHttpHandle,
+} from '../mcpHttp.ts';
 import { InMemoryStorage } from '../storage.ts';
 import type { L0Vault } from '../l0vault.ts';
 import { createTestVault } from './l0Kit.ts';
@@ -518,8 +520,87 @@ describe('MCP HTTP（批次2 信任边界）', () => {
     expect((byProbe[0].detail as { client?: string }).client).toBe('unknown');
   });
 
-  it('tools/call 非法 category → isError（不静默落 pitfall）', async () => {
-    const r = await call(
+  // ── 批次41-X（方案 C）：显式身份头 X-Memagent-Client ─────────────────────────
+  it('批次41-X：显式身份头优先于 UA 归并——同一条通用 UA 上两家各记各的，不再串号', async () => {
+    const GENERIC_UA = 'node';
+    // 甲：带身份头 initialize（一键接入写入的配置就是这种：UA 是运行时串，身份在头里）
+    const initA = await call(
+      { jsonrpc: '2.0', id: 150, method: 'initialize', params: { clientInfo: { name: 'claude-code', version: '1.2.3' } } },
+      { Authorization: `Bearer ${TOKEN}`, 'User-Agent': GENERIC_UA, 'X-Memagent-Client': 'claude-code' },
+    );
+    expect(initA.status).toBe(200);
+    // 乙：同 UA、同一服务端进程，带**自己的**身份头直接调 recall（不做 initialize、不带会话头）
+    const rB = await call(
+      { jsonrpc: '2.0', id: 151, method: 'tools/call', params: { name: 'recall_memory', arguments: { project_id: 'P1', query: '批次41-X 乙客户端' } } },
+      { Authorization: `Bearer ${TOKEN}`, 'User-Agent': GENERIC_UA, 'X-Memagent-Client': 'qoder-cn' },
+    );
+    const bodyB = (await rB.json()) as { result: { structuredContent: { display: { mode: string } } } };
+    // 配方 id `qoder-cn` 命中白名单 → 气泡内联折叠档（41-X 不能把已实机证实的折叠档打回去）
+    expect(bodyB.result.structuredContent.display.mode).toBe('html-details');
+    const auditB = (await storage.queryAudit({ action: 'recall' }))
+      .filter((a) => (a.detail as { query?: string }).query === '批次41-X 乙客户端');
+    expect(auditB).toHaveLength(1);
+    // 关键：记的是乙自己声明的身份，而不是「同 UA 最近一次 initialize 的甲」
+    expect((auditB[0].detail as { client?: string }).client).toBe('qoder-cn');
+
+    // 甲随后不带会话头再调一次：仍按自己的头记账
+    await call(
+      { jsonrpc: '2.0', id: 152, method: 'tools/call', params: { name: 'recall_memory', arguments: { project_id: 'P1', query: '批次41-X 甲客户端' } } },
+      { Authorization: `Bearer ${TOKEN}`, 'User-Agent': GENERIC_UA, 'X-Memagent-Client': 'claude-code' },
+    );
+    const auditA = (await storage.queryAudit({ action: 'recall' }))
+      .filter((a) => (a.detail as { query?: string }).query === '批次41-X 甲客户端');
+    expect((auditA[0].detail as { client?: string }).client).toBe('claude-code');
+  });
+
+  it('批次41-X：带身份头的客户端不占用通用 UA 那条键——随后无头同 UA 的调用不会被算成它', async () => {
+    const GENERIC_UA = 'okhttp/4.10.0';
+    // 带显式头做 initialize → 服务端不需要再用 UA 归并，故不写 clientByUa
+    await call(
+      { jsonrpc: '2.0', id: 160, method: 'initialize', params: { clientInfo: { name: 'qoder-desktop-mcp-host', version: '1.0.0' } } },
+      { Authorization: `Bearer ${TOKEN}`, 'User-Agent': GENERIC_UA, 'X-Memagent-Client': 'qoder-cn' },
+    );
+    // 随后一个「同 UA、不带身份头、不带会话头」的调用（脚本/未知客户端）
+    await call(
+      { jsonrpc: '2.0', id: 161, method: 'tools/call', params: { name: 'recall_memory', arguments: { project_id: 'P1', query: '批次41-X 无头同UA' } } },
+      { Authorization: `Bearer ${TOKEN}`, 'User-Agent': GENERIC_UA },
+    );
+    const rows = (await storage.queryAudit({ action: 'recall' }))
+      .filter((a) => (a.detail as { query?: string }).query === '批次41-X 无头同UA');
+    // 41-S 方案 B 的残留（被归并成 qoder-desktop-mcp-host）在 41-X 下不再发生：该 UA 键是空的
+    expect((rows[0].detail as { client?: string }).client).toBe('unknown');
+  });
+
+  it('批次41-X：非法身份头值（超长/空白/charset 外）一律不采信，回退原有 会话头 → UA → UA 识别 链', async () => {
+    const GENERIC_UA = 'python-urllib/3.11';
+    const bad = `x${'y'.repeat(80)}`;
+    for (const value of [bad, '   ']) {
+      const r = await call(
+        { jsonrpc: '2.0', id: 170, method: 'tools/call', params: { name: 'recall_memory', arguments: { project_id: 'P1', query: '批次41-X 非法头' } } },
+        { Authorization: `Bearer ${TOKEN}`, 'User-Agent': GENERIC_UA, 'X-Memagent-Client': value },
+      );
+      expect(r.status).toBe(200);
+    }
+    const rows = (await storage.queryAudit({ action: 'recall' }))
+      .filter((a) => (a.detail as { query?: string }).query === '批次41-X 非法头');
+    expect(rows).toHaveLength(2);
+    // 每一次都落到链尾的 unknown（通用 UA、无会话、无合法声明），绝不被当成某个已知客户端
+    for (const a of rows) expect((a.detail as { client?: string }).client).toBe('unknown');
+  });
+
+  it('批次41-X：纯函数 clientFromExplicitHeader 只认规范值，其余给 undefined', () => {
+    expect(clientFromExplicitHeader('qoder-cn')).toBe('qoder-cn');
+    expect(clientFromExplicitHeader(['codex', 'other'])).toBe('codex');
+    expect(clientFromExplicitHeader('Trae CN')).toBe('Trae CN');
+    expect(clientFromExplicitHeader(undefined)).toBeUndefined();
+    expect(clientFromExplicitHeader('   ')).toBeUndefined();
+    // 控制字符在 normalizeClientLabel 里塌成空格（绝不原样进审计），仍算合法声明
+    expect(clientFromExplicitHeader('a\r\nb')).toBe('a b');
+    expect(clientFromExplicitHeader('x'.repeat(81))).toBeUndefined();
+    expect(clientFromExplicitHeader('emoji😀')).toBeUndefined();
+  });
+
+  it('tools/call 非法 category → isError（不静默落 pitfall）', async () => {    const r = await call(
       {
         jsonrpc: '2.0', id: 10, method: 'tools/call',
         params: { name: 'write_memory', arguments: { content: '非法类别', project_id: 'P1', category: 'bug' } },

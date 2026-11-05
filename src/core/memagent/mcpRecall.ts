@@ -20,8 +20,12 @@ export type RecallDisplayMode = 'html-details' | 'markdown-full' | 'markdown-com
  *  见 AGENTS §1.1 / §9 批次29 校正）。
  *  fail-safe：其余客户端一律不走 HTML 档——DSH 两次实测都不渲染 `<details>`（批次29 2026-10-31 截图
  *  + 批次33 2026-11-01 09:33 实机复读，标签原样露成文本，其「点开才看明细」改用本机明细页链接 33-C）；
- *  dsh-mcp-client / zcode / 无 clientInfo 的 TCP / `unknown` 同理。 */
-const HTML_DETAILS_CLIENT_IDS = new Set(['qoder', 'qoder-desktop-mcp-host']);
+ *  dsh-mcp-client / zcode / 无 clientInfo 的 TCP / `unknown` 同理。
+ *  批次41-X 补 `qoder-cn`：显式身份头 `X-Memagent-Client` 的值取**配方 id**（Qoder 即 `qoder-cn`），
+ *  与原先的自报名 `qoder-desktop-mcp-host` 是两个口径。不加进来就等于重演批次41-S 方案 A——
+ *  为消除串号把 Qoder 宿主自己打回 `markdown-compact`，丢掉已实机证实的气泡折叠档
+ *  （用户口径「能内联就内联，做不到才用 HTML 页兜底」）。 */
+const HTML_DETAILS_CLIENT_IDS = new Set(['qoder', 'qoder-cn', 'qoder-desktop-mcp-host']);
 
 export function clientSupportsHtmlDetails(client?: string): boolean {
   if (!client) return false;

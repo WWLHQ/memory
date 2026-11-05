@@ -49,11 +49,17 @@ describe('配方常量', () => {
 });
 
 describe('buildMcpEntry / renderMcpSnippet', () => {
-  test('三种条目风格字段正确', () => {
-    expect(buildMcpEntry(qoder, EP, TOKEN)).toEqual({ type: 'http', url: EP, headers: { Authorization: `Bearer ${TOKEN}` } });
-    expect(buildMcpEntry(cursor, EP, TOKEN)).toEqual({ url: EP, headers: { Authorization: `Bearer ${TOKEN}` } });
+  test('三种条目风格字段正确（批次41-X：请求头带令牌 + 显式身份头，值为本配方 id）', () => {
+    expect(buildMcpEntry(qoder, EP, TOKEN)).toEqual({
+      type: 'http', url: EP, headers: { Authorization: `Bearer ${TOKEN}`, 'X-Memagent-Client': 'qoder-cn' },
+    });
+    expect(buildMcpEntry(cursor, EP, TOKEN)).toEqual({
+      url: EP, headers: { Authorization: `Bearer ${TOKEN}`, 'X-Memagent-Client': 'cursor' },
+    });
     const gemini = specOfMcpClient('gemini-cli');
-    expect(buildMcpEntry(gemini, EP, TOKEN)).toEqual({ httpUrl: EP, headers: { Authorization: `Bearer ${TOKEN}` } });
+    expect(buildMcpEntry(gemini, EP, TOKEN)).toEqual({
+      httpUrl: EP, headers: { Authorization: `Bearer ${TOKEN}`, 'X-Memagent-Client': 'gemini-cli' },
+    });
   });
 
   test('JSON 片段可解析且含唯一令牌、serverKey 正确', () => {
@@ -77,7 +83,7 @@ describe('buildMcpEntry / renderMcpSnippet', () => {
     expect(() => JSON.parse(text) as unknown).not.toThrow();
     const parsed = JSON.parse(text) as { mcpServers: Record<string, Record<string, unknown>> };
     expect(parsed.mcpServers['MultiAgent Memory']).toEqual({
-      type: 'http', url: EP, headers: { Authorization: `Bearer ${TOKEN}` },
+      type: 'http', url: EP, headers: { Authorization: `Bearer ${TOKEN}`, 'X-Memagent-Client': 'zcode' },
     });
     expect(zcode.writable).toBe(false);
     expect(zcode.configPath).toBeNull();
@@ -116,7 +122,7 @@ describe('probeJsonConfig', () => {
   test('端点正确但缺/空 Authorization → missing_auth（会 401）', () => {
     const noAuth = { type: 'http', url: EP };
     expect(probeJsonConfig(JSON.stringify({ mcpServers: { 'MultiAgent Memory': noAuth } }), qoder, EP)).toEqual({
-      state: 'missing_auth', hasAuth: false, foundUrl: EP,
+      state: 'missing_auth', hasAuth: false, hasClientId: false, foundUrl: EP,
     });
     const empty = { url: EP, headers: { Authorization: '   ' } };
     expect(probeJsonConfig(JSON.stringify({ mcpServers: { 'MultiAgent Memory': empty } }), qoder, EP).state).toBe('missing_auth');

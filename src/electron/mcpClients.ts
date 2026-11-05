@@ -5,8 +5,8 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameS
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import {
-  MCP_CLIENT_SPECS, MCP_ENDPOINT, mergeMcpJsonConfig, mergeMcpTomlConfig, probeClientConfig,
-  renderMcpSnippet, specOfMcpClient, type McpClientSpec, type McpWireState,
+  MCP_CLIENT_HEADER_NAME, MCP_CLIENT_SPECS, MCP_ENDPOINT, mergeMcpJsonConfig, mergeMcpTomlConfig,
+  probeClientConfig, renderMcpSnippet, specOfMcpClient, type McpClientSpec, type McpWireState,
 } from '../agentOnboard/mcpClients.ts';
 import type { BadgeClass } from '../types/agentOnboard.ts';
 
@@ -44,6 +44,10 @@ export interface McpClientStatus {
   installed: boolean;
   state: McpWireState;
   hasAuth: boolean;
+  /** 批次41-X：配置里是否带显式身份头 `X-Memagent-Client`。
+   *  `false` = 条目已接入但缺身份头（41-X 之前写入的老配置）→ 可点「补身份头」重新写入；
+   *  `undefined` = 无从判定（无稳定配置文件、审计升级来的）。 */
+  hasClientId?: boolean;
   foundUrl?: string;
   rulesHint: string;
   note?: string;
@@ -178,10 +182,17 @@ export function scanMcpClients(options: {
         note = `${spec.note ? `${spec.note}；` : ''}配置中的令牌与当前 mcp-token.txt 不一致（可能已轮换），一键适配可自动补齐`;
       }
     }
+    // 批次41-X：已接入但缺显式身份头 —— 调用能通，但服务端只能按「UA → 同 UA 最近一次
+    // initialize 自报名」归并识别调用方，通用 UA（Node/Electron 都是 `node`）下会跨客户端串号。
+    // 状态仍是 wired（不骗「未接入」），只补一条可修复的说明。
+    if (state === 'wired' && probe.hasClientId === false) {
+      note = `${spec.note ? `${spec.note}；` : ''}缺显式身份头 ${MCP_CLIENT_HEADER_NAME}：能调用但身份按 UA 归并（多客户端共用通用 UA 时会串号）——点「补身份头」写入`;
+    }
     return {
       ...base,
       state,
       hasAuth: probe.hasAuth,
+      ...(probe.hasClientId !== undefined ? { hasClientId: probe.hasClientId } : {}),
       ...(note !== undefined ? { note } : {}),
       ...(probe.foundUrl ? { foundUrl: probe.foundUrl } : {}),
       ...(probe.error ? { error: probe.error } : {}),
@@ -199,7 +210,9 @@ export function scanMcpClients(options: {
       self.state = 'wired';
       self.hasAuth = true;
       self.error = undefined;
-      self.note = `MCP 由宿主 ${host.name} 下发（宿主已接入，配置 ${host.displayPath ?? '宿主配置'}）——宿主接通即生效`;
+      self.hasClientId = host.hasClientId;
+      self.note = `MCP 由宿主 ${host.name} 下发（宿主已接入，配置 ${host.displayPath ?? '宿主配置'}）——宿主接通即生效`
+        + (host.hasClientId === false ? `；宿主配置缺显式身份头 ${MCP_CLIENT_HEADER_NAME}，对本客户端点「补身份头」即写宿主配置` : '');
     } else {
       self.note = `宿主 ${host.name} 尚未接入本服务 —— 对宿主执行一键接入后，本客户端自动接通（无需单独配置）`;
     }
@@ -218,7 +231,8 @@ export function snippetForClient(id: string, token: string, endpoint = MCP_ENDPO
 /**
  * 一键接入/修复：支持已知结构的 JSON 与 TOML 客户端（批次23 起含 Codex / Gemini / Qwen）。
  *  · 先按真实内容判定；conflict/invalid 一律拒绝（不覆盖别人的条目、不改坏文件）
- *  · 已接入 → changed=false（不重写）；传 currentToken 时令牌过期也视为待修复（降级重写补齐）
+ *  · 已接入且已带显式身份头 → changed=false（不重写）；传 currentToken 时令牌过期也视为待修复（降级重写补齐）
+ *  · 批次41-X：已接入但缺 X-Memagent-Client 也走合并补写该头（「补身份头」按钮的真身）
  *  · 需要写入 → 备份原文件（.bak-<ISO>）+ 临时文件 + rename 原子替换
  */
 export function wireMcpClient(
@@ -247,7 +261,7 @@ export function wireMcpClient(
   if (probe.state === 'invalid') {
     return { ok: false, state: probe.state, error: `配置文件无法解析：${probe.error ?? '格式错误'}` };
   }
-  if (probe.state === 'wired') {
+  if (probe.state === 'wired' && probe.hasClientId !== false) {
     // 批次27：传了 currentToken 且配置内的令牌已过期 → 不短路，继续走合并把令牌补成当前值
     const stale = options.currentToken !== undefined
       && extractStoredBearer(spec.format, read.text, spec.serverKey) !== options.currentToken.trim();

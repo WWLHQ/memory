@@ -165,6 +165,8 @@ export interface McpConfigProbe {
   /** 命中的端点（不含令牌；用于解释 conflict） */
   foundUrl?: string;
   hasAuth: boolean;
+  /** 批次41-X：条目里是否已带显式身份头 `X-Memagent-Client`（缺≠坏，老配置照常工作，只是身份仍靠归并） */
+  hasClientId?: boolean;
   error?: string;
 }
 
@@ -174,9 +176,23 @@ export function specOfMcpClient(id: string): McpClientSpec {
   return spec;
 }
 
+/** 批次41-X：显式身份请求头。值固定为本配方的规范 id（`spec.id`），由服务端 8204 逐次读取，
+ *  用来替代「同 UA 最近一次 initialize 的自报名」那条会跨客户端串号的归并（AGENTS §9 批次41-S 残留）。
+ *  注意：这是**身份**不是**凭据**——令牌仍是唯一鉴权，缺这个头的老配置照常工作（落到原有归并链）。 */
+export const MCP_CLIENT_HEADER_NAME = 'X-Memagent-Client';
+
+/** 本服务需要的请求头（批次41-X：令牌 + 显式身份头），JSON/TOML 两条写入路径共用同一真源 */
+export function mcpHeaderPairs(spec: McpClientSpec, token: string): Array<{ key: string; value: string }> {
+  return [
+    { key: 'Authorization', value: `Bearer ${token}` },
+    { key: MCP_CLIENT_HEADER_NAME, value: spec.id },
+  ];
+}
+
 /** 生成单个客户端条目（含真实令牌；仅用于「复制配置」/一键写入，绝不写日志） */
 export function buildMcpEntry(spec: McpClientSpec, endpoint: string, token: string): Record<string, unknown> {
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers: Record<string, string> = {};
+  for (const pair of mcpHeaderPairs(spec, token)) headers[pair.key] = pair.value;
   if (spec.entryStyle === 'httpUrl') return { httpUrl: endpoint, headers };
   if (spec.entryStyle === 'url') return { url: endpoint, headers };
   return { type: 'http', url: endpoint, headers };
@@ -184,13 +200,16 @@ export function buildMcpEntry(spec: McpClientSpec, endpoint: string, token: stri
 
 /** 可复制的配置片段（JSON / TOML / 手工说明） */
 export function renderMcpSnippet(spec: McpClientSpec, endpoint: string, token: string): string {
+  const pairs = mcpHeaderPairs(spec, token);
   if (spec.format === 'json') {
     return `${JSON.stringify({ mcpServers: { [spec.serverKey]: buildMcpEntry(spec, endpoint, token) } }, null, 2)}\n`;
   }
   if (spec.format === 'toml') {
-    return `[mcp_servers.${spec.serverKey}]\nurl = "${endpoint}"\nhttp_headers = { Authorization = "Bearer ${token}" }\n`;
+    const table = pairs.map((p) => `${tomlKey(p.key)} = "${tomlQuote(p.value)}"`).join(', ');
+    return `[mcp_servers.${spec.serverKey}]\nurl = "${endpoint}"\nhttp_headers = { ${table} }\n`;
   }
-  return `端点：${endpoint}\n请求头：Authorization: Bearer ${token}\n（${spec.note ?? '请在客户端设置中手工添加'}）\n`;
+  const headerLines = pairs.map((p) => `请求头：${p.key}: ${p.value}`).join('\n');
+  return `端点：${endpoint}\n${headerLines}\n（${spec.note ?? '请在客户端设置中手工添加'}）\n`;
 }
 
 /** 判断 JSON 配置里本服务的接入状态（不返回令牌） */
@@ -216,11 +235,15 @@ export function probeJsonConfig(text: string | null, spec: McpClientSpec, endpoi
   const url = typeof e.url === 'string' ? e.url : typeof e.httpUrl === 'string' ? e.httpUrl : undefined;
   if (url !== endpoint) return { state: 'conflict', foundUrl: url, hasAuth: false };
   const headers = e.headers;
-  const auth = headers && typeof headers === 'object'
-    ? ((headers as Record<string, unknown>).Authorization ?? (headers as Record<string, unknown>).authorization)
-    : undefined;
+  const headerBag = headers && typeof headers === 'object' && !Array.isArray(headers)
+    ? (headers as Record<string, unknown>)
+    : {};
+  const readHeader = (key: string): unknown => headerBag[key] ?? headerBag[key.toLowerCase()];
+  const auth = readHeader('Authorization');
   const hasAuth = typeof auth === 'string' && /^Bearer\s+\S+/i.test(auth.trim());
-  return { state: hasAuth ? 'wired' : 'missing_auth', foundUrl: url, hasAuth };
+  const clientId = readHeader(MCP_CLIENT_HEADER_NAME);
+  const hasClientId = typeof clientId === 'string' && clientId.trim().length > 0;
+  return { state: hasAuth ? 'wired' : 'missing_auth', foundUrl: url, hasAuth, hasClientId };
 }
 
 /** 转义正则元字符（TOML 段名可能含点/短横线） */
@@ -247,7 +270,18 @@ export function probeTomlConfig(text: string | null, spec: McpClientSpec, endpoi
   if (url !== endpoint) return { state: 'conflict', foundUrl: url, hasAuth: false };
   const auth = /\bAuthorization\s*=\s*"([^"]*)"/i.exec(section)?.[1];
   const hasAuth = typeof auth === 'string' && /^Bearer\s+\S+/i.test(auth.trim());
-  return { state: hasAuth ? 'wired' : 'missing_auth', foundUrl: url, hasAuth };
+  const hasClientId = tomlHeaderRe(MCP_CLIENT_HEADER_NAME).test(section);
+  return { state: hasAuth ? 'wired' : 'missing_auth', foundUrl: url, hasAuth, hasClientId };
+}
+
+/** TOML 里某个请求头是否已写（裸键与带引号键两种写法都认） */
+function tomlHeaderRe(key: string): RegExp {
+  return new RegExp(`(^|[,{\\s"])${escapeRe(key)}"?(?=\\s*=\\s*")`, 'i');
+}
+
+/** TOML 键：只有非 `[A-Za-z0-9_-]` 才加引号（`X-Memagent-Client` 的短横线本身是合法裸键字符） */
+function tomlKey(key: string): string {
+  return /^[-A-Za-z0-9_]+$/.test(key) ? key : `"${tomlQuote(key)}"`;
 }
 
 /** 按配置格式探测；manual = 该客户端没有任何可读配置面（批次28-B：动态配置面 configPath=null 但有 glob，按格式正常探测） */
@@ -322,14 +356,14 @@ export function mergeMcpTomlConfig(
   const headerRe = new RegExp(`^\\s*\\[mcp_servers\\.${escapeRe(spec.serverKey)}\\]\\s*$`);
   const ownRe = new RegExp(`^\\s*\\[mcp_servers\\.${escapeRe(spec.serverKey)}(?:\\.|\\])`);
   const headerIdx = lines.findIndex((l) => headerRe.test(l));
-  const authValue = `Bearer ${token}`;
-  const authAssignment = `Authorization = "${tomlQuote(authValue)}"`;
+  const pairs = mcpHeaderPairs(spec, token);
+  const assignments = pairs.map((p) => `${tomlKey(p.key)} = "${tomlQuote(p.value)}"`);
 
   if (headerIdx === -1) {
     const block = [
       `[mcp_servers.${spec.serverKey}]`,
       `url = "${tomlQuote(endpoint)}"`,
-      `http_headers = { ${authAssignment} }`,
+      `http_headers = { ${assignments.join(', ')} }`,
     ].join(eol);
     const base = source.trimEnd();
     return { text: `${base.length > 0 ? `${base}${eol}${eol}` : ''}${block}${eol}`, changed: true };
@@ -344,7 +378,7 @@ export function mergeMcpTomlConfig(
   const url = /\b(?:url|http_url)\s*=\s*"([^"]*)"/.exec(bodyText)?.[1];
   if (url !== endpoint) throw new Error('E_CONFIG_CONFLICT: 同名条目指向其它端点');
 
-  // 形式一：子表 [mcp_servers.<key>.http_headers]
+  // 形式一：子表 [mcp_servers.<key>.http_headers]——逐个头补齐/修正，缺的追加在子表末尾
   const childRe = new RegExp(`^\\s*\\[mcp_servers\\.${escapeRe(spec.serverKey)}\\.http_headers\\]\\s*$`);
   const childIdx = lines.findIndex((l, i) => i > headerIdx && i < sectionEnd && childRe.test(l));
   if (childIdx !== -1) {
@@ -352,19 +386,28 @@ export function mergeMcpTomlConfig(
     for (let i = childIdx + 1; i < sectionEnd; i += 1) {
       if (/^\s*\[/.test(lines[i])) { childEnd = i; break; }
     }
-    for (let i = childIdx + 1; i < childEnd; i += 1) {
-      const m = /^(\s*)(Authorization|authorization)\s*=\s*"([^"]*)"\s*$/.exec(lines[i]);
-      if (m) {
-        if (m[3] === authValue) return { text: source, changed: false };
-        lines[i] = `${m[1]}Authorization = "${tomlQuote(authValue)}"`;
-        return { text: lines.join(eol), changed: true };
+    const childBody = lines.slice(childIdx + 1, childEnd);
+    let changed = false;
+    for (const pair of pairs) {
+      const want = tomlQuote(pair.value);
+      const lineRe = new RegExp(`^(\\s*)"?${escapeRe(pair.key)}"?\\s*=\\s*"((?:[^"\\\\]|\\\\.)*)"\\s*$`, 'i');
+      const at = childBody.findIndex((l) => lineRe.test(l));
+      if (at === -1) {
+        childBody.push(`${tomlKey(pair.key)} = "${want}"`);
+        changed = true;
+        continue;
       }
+      const m = lineRe.exec(childBody[at])!;
+      if (m[2] === want) continue;
+      childBody[at] = `${m[1]}${tomlKey(pair.key)} = "${want}"`;
+      changed = true;
     }
-    lines.splice(childEnd, 0, authAssignment);
+    if (!changed) return { text: source, changed: false };
+    lines.splice(childIdx + 1, childEnd - childIdx - 1, ...childBody);
     return { text: lines.join(eol), changed: true };
   }
 
-  // 形式二：段内内联表 http_headers = { ... }
+  // 形式二：段内内联表 http_headers = { ... }——只动本服务需要的头，其它键原样保留
   const inlineIdx = lines.findIndex(
     (l, i) => i > headerIdx && i < sectionEnd && /\bhttp_headers\s*=\s*\{/.test(l),
   );
@@ -373,17 +416,25 @@ export function mergeMcpTomlConfig(
     const open = line.indexOf('{');
     const close = line.lastIndexOf('}');
     if (open !== -1 && close > open) {
-      const inner = line.slice(open + 1, close);
-      const authRe = /(Authorization|authorization)\s*=\s*"([^"]*)"/;
-      const m = authRe.exec(inner);
-      if (m) {
-        if (m[2] === authValue) return { text: source, changed: false };
-        lines[inlineIdx] = `${line.slice(0, open + 1)}${inner.replace(authRe, () => authAssignment)}${line.slice(close)}`;
-        return { text: lines.join(eol), changed: true };
+      let inner = line.slice(open + 1, close);
+      let changed = false;
+      for (const pair of pairs) {
+        const want = tomlQuote(pair.value);
+        const pairRe = new RegExp(`(^|[{,\\s"])${escapeRe(pair.key)}"?\\s*=\\s*"((?:[^"\\\\]|\\\\.)*)"`);
+        const m = pairRe.exec(inner);
+        if (m) {
+          if (m[2] === want) continue;
+          inner = `${inner.slice(0, m.index)}${m[1]}${tomlKey(pair.key)} = "${want}"${inner.slice(m.index + m[0].length)}`;
+          changed = true;
+          continue;
+        }
+        const trimmed = inner.trimEnd();
+        const sep = trimmed.trim().length === 0 ? ' ' : trimmed.endsWith(',') ? ' ' : ', ';
+        inner = `${trimmed}${sep}${tomlKey(pair.key)} = "${want}"`;
+        changed = true;
       }
-      const trimmed = inner.trimEnd();
-      const sep = trimmed.trim().length === 0 ? ' ' : trimmed.endsWith(',') ? ' ' : ', ';
-      lines[inlineIdx] = `${line.slice(0, open + 1)}${trimmed}${sep}${authAssignment}${line.slice(close)}`;
+      if (!changed) return { text: source, changed: false };
+      lines[inlineIdx] = `${line.slice(0, open + 1)}${inner}${line.slice(close)}`;
       return { text: lines.join(eol), changed: true };
     }
   }
@@ -391,6 +442,6 @@ export function mergeMcpTomlConfig(
   // 形式三：段内没有 http_headers → 紧跟 url 行补一行
   const urlIdx = lines.findIndex((l, i) => i > headerIdx && i < sectionEnd && /\b(?:url|http_url)\s*=/.test(l));
   const insertAt = urlIdx === -1 ? headerIdx + 1 : urlIdx + 1;
-  lines.splice(insertAt, 0, `http_headers = { ${authAssignment} }`);
+  lines.splice(insertAt, 0, `http_headers = { ${assignments.join(', ')} }`);
   return { text: lines.join(eol), changed: true };
 }

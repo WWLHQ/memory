@@ -317,3 +317,93 @@ describe('McpClientsPanel', () => {
     expect(screen.getByTestId('mcp-message').textContent).toContain('已复制');
   });
 });
+
+describe('批次41-X 显式身份头（面板补写口径）', () => {
+  test('已接入但缺身份头 → 按钮变「补身份头」且可点，指引写明头名与配方 id', async () => {
+    mockRole('admin');
+    const scan = {
+      ...SCAN,
+      clients: SCAN.clients.map((c) => ((c as unknown as { id?: string }).id === 'qoder-cn'
+        ? { ...c, state: 'wired', hasAuth: true, hasClientId: false }
+        : c)),
+    };
+    const wire = vi.fn(() => Promise.resolve({ ok: true, changed: true, backupPath: 'C:/x/.qoder-cn.bak' }));
+    setHost({ list: () => Promise.resolve(scan), wire });
+    render(<McpClientsPanel />);
+    await waitFor(() => expect(screen.getByTestId('state-qoder-cn').textContent).toBe('已接入'));
+
+    const row = document.querySelector('[data-client="qoder-cn"]') as HTMLElement;
+    const btn = row.querySelector('[data-act="mcp-wire"]') as HTMLButtonElement;
+    expect(btn.disabled).toBe(false);
+    expect(btn.textContent).toBe('补身份头');
+    expect(screen.getByTestId('guide-qoder-cn').textContent).toContain('X-Memagent-Client');
+    expect(screen.getByTestId('guide-qoder-cn').textContent).toContain('qoder-cn');
+
+    await userEvent.click(btn);
+    await waitFor(() => expect(wire).toHaveBeenCalledWith('qoder-cn', 'sid_test'));
+  });
+
+  test('已接入且身份头齐全 → 仍是禁用的「已接入」，不重复写盘', async () => {
+    mockRole('admin');
+    const scan = {
+      ...SCAN,
+      clients: SCAN.clients.map((c) => ((c as unknown as { id?: string }).id === 'qoder-cn'
+        ? { ...c, state: 'wired', hasAuth: true, hasClientId: true }
+        : c)),
+    };
+    const wire = vi.fn(() => Promise.resolve({ ok: true, changed: false }));
+    setHost({ list: () => Promise.resolve(scan), wire });
+    render(<McpClientsPanel />);
+    await waitFor(() => expect(screen.getByTestId('state-qoder-cn').textContent).toBe('已接入'));
+
+    const row = document.querySelector('[data-client="qoder-cn"]') as HTMLElement;
+    const btn = row.querySelector('[data-act="mcp-wire"]') as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(btn.textContent).toBe('已接入');
+    expect(screen.getByTestId('guide-qoder-cn').textContent).not.toContain('补身份头');
+    expect(screen.getByTestId('guide-qoder-cn').textContent).toContain('已在配置中确认');
+  });
+
+  test('一键适配全部把「已接入但缺身份头」计入自动写入目标', async () => {
+    mockRole('admin');
+    const scan = {
+      ...SCAN,
+      clients: SCAN.clients.map((c) => {
+        const id = (c as unknown as { id?: string }).id;
+        if (id === 'qoder-cn') return { ...c, state: 'wired', hasAuth: true, hasClientId: false };
+        if (id === 'claude-code') return { ...c, state: 'wired', hasAuth: true, hasClientId: true };
+        if (id === 'codex') return { ...c, state: 'wired', hasAuth: true, hasClientId: true };
+        return c;
+      }),
+    };
+    const wire = vi.fn(() => Promise.resolve({ ok: true, changed: true }));
+    const snippet = vi.fn(() => Promise.resolve({ ok: true, snippet: '["trae 手工片段"]' }));
+    setHost({ list: () => Promise.resolve(scan), wire, snippet });
+    render(<McpClientsPanel />);
+    await waitFor(() => expect(screen.getByTestId('state-qoder-cn').textContent).toBe('已接入'));
+
+    const all = screen.getByTestId('mcp-wire-all') as HTMLButtonElement;
+    expect(all.disabled).toBe(false);
+    expect(all.textContent).toContain('一键适配全部（自动 1 + 片段 1）');
+    await userEvent.click(all);
+    await waitFor(() => expect(wire).toHaveBeenCalledTimes(1));
+    expect(wire).toHaveBeenCalledWith('qoder-cn', 'sid_test');
+    expect(snippet).toHaveBeenCalledWith('trae-cn', 'sid_test');
+  });
+
+  test('身份头无从判定（无文件面的审计证据升级）→ 不出现「补身份头」，也不谎报缺头', async () => {
+    mockRole('admin');
+    const scan = {
+      ...SCAN,
+      clients: SCAN.clients.map((c) => ((c as unknown as { id?: string }).id === 'qoder-cn'
+        ? { ...c, state: 'wired', hasAuth: true, hasClientId: undefined }
+        : c)),
+    };
+    setHost({ list: () => Promise.resolve(scan) });
+    render(<McpClientsPanel />);
+    await waitFor(() => expect(screen.getByTestId('state-qoder-cn').textContent).toBe('已接入'));
+    expect(screen.getByTestId('guide-qoder-cn').textContent).not.toContain('X-Memagent-Client');
+    const row = document.querySelector('[data-client="qoder-cn"]') as HTMLElement;
+    expect((row.querySelector('[data-act="mcp-wire"]') as HTMLButtonElement).textContent).toBe('已接入');
+  });
+});

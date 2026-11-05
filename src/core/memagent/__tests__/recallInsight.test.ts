@@ -537,13 +537,20 @@ describe('buildRecallDetailPage + buildRecallSections（批次33-C 本机明细�
   });
 });
 
-describe('clientSupportsHtmlDetails（批次29 白名单 + 批次41-Q 扩 Qoder Desktop）', () => {  it('放行实测渲染 HTML 折叠的 Qoder CN 与 Qoder Desktop 宿主；未知/无标识一律纯 Markdown（fail-safe）', () => {
+describe('clientSupportsHtmlDetails（批次29 白名单 + 批次41-Q 扩 Qoder Desktop + 批次41-X 扩配方 id）', () => {
+  it('放行实测渲染 HTML 折叠的 Qoder CN 与 Qoder Desktop 宿主；未知/无标识一律纯 Markdown（fail-safe）', () => {
     expect(clientSupportsHtmlDetails('Qoder/9.9.9')).toBe(true);
     expect(clientSupportsHtmlDetails('qoder/1.0')).toBe(true);
     // 批次41-Q：Qoder Desktop 的 MCP 宿主自报名首段是 qoder-desktop-mcp-host，原先精确等于 qoder 挡在门外
     expect(clientSupportsHtmlDetails('qoder-desktop-mcp-host/1.0.0')).toBe(true);
     expect(clientSupportsHtmlDetails('Qoder-Desktop-MCP-Host/1.0.0')).toBe(true);
+    // 批次41-X：显式身份头的值是**配方 id**（Qoder 那一家即 `qoder-cn`），不加进白名单就等于重演
+    // 41-S 方案 A——为堵串号把已实机证实的气泡折叠档打回 markdown-compact
+    expect(clientSupportsHtmlDetails('qoder-cn')).toBe(true);
+    expect(clientSupportsHtmlDetails('qoder-cn/1.0')).toBe(true);
     expect(clientSupportsHtmlDetails('dsh-mcp-client/0.0.1')).toBe(false);
+    // 其余配方 id（claude-code/codex/…）未实测渲染 HTML，保持纯 Markdown fail-safe
+    expect(clientSupportsHtmlDetails('claude-code')).toBe(false);
     expect(clientSupportsHtmlDetails('zcode/0.16.9')).toBe(false);
     expect(clientSupportsHtmlDetails('Cursor (UA)')).toBe(false);
     // 批次41-S 产出的 unknown 不得吃到 HTML 档

@@ -5,6 +5,8 @@
 上一批次：批次40（`specs/MANUAL-TEST-FIX-BATCH-40.md`）
 起因（用户原话）：「审计搬出记忆库」→「跑」（授权走完 41-Z：`verify` → `package` → 本报告）→ 追加「队列幽灵对账」（复查 41-C，产出 **41-P**）→ 追加「轮换 DSH MCP Bearer 令牌」（**41-L 已真机执行**，用户口径「全量换 + 全量重写」）
 
+
+> **〔2026-11-05 16:22 追加，本批最新出厂产物〕41-X 显式身份头**（回答用户「显式身份头，要考虑其他 agent 怎么一键接入」，闭合批次41-S 方案 B 的残留串号）。最新安装包 = `release/installer/MultiAgent Memory-0.1.0-setup.exe`，**122,057,789 B / SHA256 `a34a1b7df8df42cd10f810c627e83254f8026f88b04e6ca48cf5386e105c41cb`**（落盘 16:22:57，取代 14:15 的 `ec6381b2…`）。产物核对按 `app.asar.unpacked/dist-electron/main.cjs`（md5 与构建产物一致）：`x-memagent-client` / `X-Memagent-Client` 各命中 1。⚠️ **包里有 ≠ 已生效**：用户机现役 5 份客户端配置里 `X-Memagent-Client` 实测命中 **0/5**，需重启到新包并在接入页点一次「⚡ 一键适配全部」（或逐行「补身份头」）+ 重启各客户端才算升级完成；核对步骤与限制见 **§8**。
 ---
 
 ## 0. 交付物（实测值，非估算）
@@ -310,3 +312,59 @@
 - **出厂（本轮重打包，实测值非估算）**：`npm run package` 落盘 **2026-11-05 13:26（UTC+08:00）** → `release/installer/MultiAgent Memory-0.1.0-setup.exe`，**122,055,615 B / SHA256 `994028c0331962d70a5583af99e8dc2d330216e04c2172986b61ae2981b29dd0`**。产物核对按打包产物验证口径（`app.asar.unpacked/dist-electron/main.cjs`，**不是** grep `app.asar`）：那份 `main.cjs`（**592,961 B**）里 `REFINE_MAX_ROWS_PER_DAY = 1e5`（esbuild 把 `100_000` 压成 `1e5`）、`= 500` 命中 **0** → 放开后的额度确实在出厂产物里，用户重启即生效。
 - **打包过程（EPERM 回退，如实记）**：`release/installer` 被旧实例占用（EPERM）→ 本次先输出到 `release\installer-20261105-052604` → 构建成功后按批次21 流程**复制+删除**收口回 `release/installer`（`产物：release\installer`）；但临时源目录 `installer-20261105-052604` 收尾删除仍被占用未成功（`旧安装包目录清理 0 个，1 个被占用未删`）——**该残留临时目录仍在 `release/` 下**，属打包脚本清理失败告警、不影响 `release/installer` 产物本身；旧实例（pid 32840）与新产物争用句柄导致，**待用户重启到新包、旧实例退出后可手工删掉那个 `installer-20261105-052604` 目录**。
 - **待用户执行的一步**：~~**重启到 13:26 新包**（`release/installer/win-unpacked/MultiAgent Memory.exe`）——重启后 `refine:state` 的 `day_limit` 应回显 **100000**、`day_left` 约 99500，那 1233 条 `pending` 才会按 15s tick 开始排空（吞吐受模型速度限制）。~~ **〔2026-11-05 14:15 已被 §7.1 作废〕**本节「前置」的 13:26 包（`1e5` 常量）用户机确实跑过一阵（`dayRows` 涨到 593），但那条「靠重启换常量来排空 pending」的路线已随 41-I 正规化取消——现在**参数页切「不限额」就能排空，不需要打包也不需要重启**；旧包里那个 `1e5` 常量在新包（14:15，`ec6381b2…`）里已回落 500。**排空前 41-I 仍是「数据采集中」，不是「已定档」（#37 待用户拍 `minRatio`/`DEPTH_CAP_BANDS`）。**
+
+---
+
+## 8. 〔2026-11-05 16:23〕41-X：显式身份头 `X-Memagent-Client` + 一键接入把它写进每份配置
+
+**起因（用户原话，第 2 条）**：「显式身份头，要考虑其他 agent 怎么一键接入」。
+**闭合的是**：批次41-S 方案 B 留下的那条残留——不带 `Mcp-Session-Id` 的请求按「UA → 最近一次 initialize 的自报名」归并，而 Node/Electron 客户端的默认 UA 都是字面量 `node`，同机多客户端共用同一条键。方案 C 原设想「要求客户端回传会话头」，那要客户端改造，做不到；等效做法是**每请求自带一个身份头**，而且写入通道本来就存在（一键接入已经在写 `Authorization`）。
+**口径先钉住**：这个头**只是身份，不是凭据**——鉴权仍是批次41-L 那个机器级令牌，任何进程也都能自称任意 id，本批消除的是「跨客户端串号」，不构成认证。
+
+### 8.1 改了什么（逐文件给理由，未动的写在 8.4）
+
+| 文件 | 为什么动它 |
+|---|---|
+| `src/core/memagent/mcpHttp.ts` | 服务端认调用方的唯一入口。新增 `MCP_CLIENT_HEADER` 与纯函数 `clientFromExplicitHeader`（值先折叠空白截 80，再要求匹配 `^[A-Za-z0-9 ._:/@+-]{1,64}$`——**非法/超限不采信、退回 41-S 归并链，而不是拒绝服务**，脏值不进审计）；取值顺序改为 `显式身份头 → 会话头 → UA 归并 → UA 识别`；`initialize` 里**带了显式头的客户端不再去占通用 UA 那条键**（这正是串号的来源）。顺带把 `qoder-cn` 加进 `TRUSTED_CLIENT_SELF_IDS`（与配方 id 对齐） |
+| `src/agentOnboard/mcpClients.ts` | 客户端配方与合并逻辑的**单一真源**，「其他 agent 怎么拿到」的答案就在这里。新增 `MCP_CLIENT_HEADER_NAME` + `mcpHeaderPairs(spec, token)` → **头值就是配方 id**（`qoder-cn`/`claude-code`/`codex`/`cursor`/`gemini-cli`/`qwen-code`/`trae-cn`/`workbuddy`/`zcode`/`deepseek-harness`）。三条下发路径同源：`buildMcpEntry`（真写入的条目）、`renderMcpSnippet`（**「复制片段」——不能自动写入的 Zcode 这类同样拿得到**）、`mergeMcpJsonConfig` / `mergeMcpTomlConfig`（JSON 合并 + TOML 子表/内联表两种写法）。探测新增 `hasClientId` |
+| `src/electron/mcpClients.ts` | 真扫 + 真写。`wired` 但 `hasClientId === false` → note 明写「能调用但身份按 UA 归并（多客户端共用通用 UA 时会串号）——点『补身份头』写入」；宿主继承（deepseek harness）如实取宿主的 `hasClientId`。**本批测出来的真缺陷**：`wireMcpClient` 原先 `if (state === 'wired')` 直接 `changed:false` 短路——**「补身份头」按钮点了是个空响应**；闸门改为 `wired && hasClientId !== false`，缺头时才继续走「备份 `.bak-<ISO>` → 合并 → tmp+rename」 |
+| `src/core/memagent/mcpRecall.ts` | 展示档位白名单补 `qoder-cn`。头值既然是配方 id，白名单不认 `qoder-cn` 就等于把已接入的 Qoder CN 打回摘要档——**重演 41-S 方案 A 那次误伤**（那次用户刚在真机上目视确认过折叠气泡） |
+| `src/web/AgentOnboard/McpClientsPanel.tsx` | 「补身份头」按钮（行内三态文案：一键接入 / 补齐令牌 / 补身份头）、计入顶部「⚡ 一键适配全部」、接通指引写明头名与 id。**「已写入」只在配置文件真读到该头时才说**，无文件面的 wired（审计证据升级来的）留 `undefined` → 不谎报有/缺 |
+
+### 8.2 门禁（本轮真跑，非估算）
+
+- `npm run verify` 退出码 **0**：typecheck 干净 → oxlint **0 warnings / 0 errors**（527 文件）→ 代码索引已是最新（**313 个文件**）→ vitest **167 文件 / 1986 例**全过（Statements **82.73%**，11770/14227）→ `build:electron` → **E2E 107 passed（54.9s）**。
+- 41-X 新增/更新的用例：`mcpHttp.test.ts` 批次41-X **4 例**（端到端带头/不带头、`display.mode=html-details`、通用 UA 无登记落 `unknown`、`clientFromExplicitHeader` 正反例含 `'a\r\nb'→'a b'`、81 字符与 emoji 判否）+ `electron/mcpClients.test.ts` 批次41-X **5 例**（老配置 `hasClientId:false`+note、新配置 `true`、**真写补头含备份 + 二次幂等 `changed:false`**、Codex TOML 补头保留原有自定义头且令牌只出现一次、无文件面留 `undefined`）+ `McpClientsPanel.test.tsx` 批次41-X **4 例** + `agentOnboard/mcpClients.test.ts` 三条口径断言更新 + `recallInsight.test.ts` 白名单补 `qoder-cn`。
+- 测试先失败后修对的两处，都记在 `specs/code-map.md` 批次41-X 那节的「本批测出来的真缺陷」行：`wireMcpClient` 的 wired 短路（按钮空响应）、`mergeMcpTomlConfig` 内联表那条 `pairRe` 前缀类不匹配「空格开头的裸键」→ 会重复追加 `Authorization` 写出坏 TOML。
+
+### 8.3 出厂产物（实测）
+
+| 项 | 值 |
+|---|---|
+| 安装包 | `release/installer/MultiAgent Memory-0.1.0-setup.exe` |
+| 大小 | **122,057,789 字节 = 116.40 MB** |
+| SHA256 | **`a34a1b7df8df42cd10f810c627e83254f8026f88b04e6ca48cf5386e105c41cb`** |
+| 落盘（UTC+08:00） | **2026-11-05 16:22:57**（取代 14:15 的 `ec6381b2…` 版） |
+| 出厂核对（按打包产物验证口径：**比 `app.asar.unpacked/dist-electron/main.cjs`，不是 grep `app.asar`**） | 产物内 `main.cjs` **598,743 B**，与刚构建的 `dist-electron/main.cjs` **md5 相同**（`e678c8bcce10d460d442733d88b035b7`）；串里 `x-memagent-client` 命中 **1**（服务端读头，小写规范形）、`X-Memagent-Client` 命中 **1**（配方常量）、`qoder-cn` 命中 9。渲染层 `dist/assets/agentonboard-*.js` 里 `X-Memagent-Client` 与「补身份头」各命中 1。 |
+| 打包过程（EPERM，如实记） | 又一次 EPERM 回退：先输出到 `release\installer-20261105-082233` → 构建成功后按批次21 流程复制+删除**收口回 `release/installer`**（`产物：release\installer`）。**`release/` 下残留两个删不掉的临时目录**（本次 `installer-20261105-082233` + 上一轮 13:26 的 `installer-20261105-052604`），清理各报 EPERM——不影响 `release/installer` 产物本身，**待旧实例退出后可手工删除**。 |
+| 代价（照批次19 流程，明说） | 打包强制结束了当时正在运行的实例（补炼随之暂停，队列状态都在 `refine-queue.json` 里，重启续炼、不丢账）。**本批没有替用户重启到新包**。 |
+
+### 8.4 待实机走查（这些只有单测，本批没有真机样本）
+
+**升级前的真实基线（2026-11-05 16:20 只读实测，非估算）**：5 份现役客户端配置 `~/.qoder-cn/settings.json`、`~/.claude.json`、`~/.codex/config.toml`、`%APPDATA%/Trae CN/User/mcp.json`、`~/.workbuddy/mcp.json` 里 **`X-Memagent-Client` 命中均为 0**——它们仍是批次41-L 那一版（有令牌、无身份头）。所以下面这几步是**用户机上现在还没发生的事**：
+
+1. 重启到本包 → Agent 接入页「MCP 客户端接入状态」→ **已接入的行应出现「补身份头」按钮**（不再是灰的「已接入」），行内说明写着「能调用但身份按 UA 归并……点『补身份头』写入」；顶部「⚡ 一键适配全部」的自动写入计数应包含这些行。
+2. 点一次「⚡ 一键适配全部」（或逐行「补身份头」，仅管理员）→ 回执应报「已为 X 补写身份头 `X-Memagent-Client`（原文件已备份：…）」。核对 5 份配置各多出一个 `.bak-<ISO>`（P2-15 只留最新 3 份，属既定行为）；**再点一次应回「已是最新，未改动」**（幂等）。
+3. 重复点上一步的判据用指纹，不用看内容：`grep -c "X-Memagent-Client" <配置>` 由 **0 → 1**；令牌值**不需要也不应该**被比对出来（比对令牌一律用 sha256 前缀，见 §2 与记忆口径）。
+4. **重启各客户端**（配置头只在客户端重建连接时才生效）→ 在 Qoder 里触发一次 `recall_memory` → 期望：气泡仍是折叠档（41-S 方案 B 的效果不回归），且数据根 `audit.jsonl` 那条 recall 的 `detail.client` **等于配方 id**（如 `qoder-cn`），不再是 `verify-41r` 那类别人的自报名。这一步才是「串号被消除」的正面证据。
+5. 反向核对（不该发生的）：`actions.log` 与 `audit.jsonl` 里**不得出现令牌明文**，明细页 URL 里也不得出现；`grep` 用指纹不要用值。
+6. 纯浏览器（`npm run dev`）无宿主能力 → 面板不列客户端、不显示「已接入」，与批次15 口径一致。
+
+### 8.5 未完成与已知限制（不留给用户猜）
+
+- **① 本批没替用户点「补身份头」，也没重启**：代码进了包，配置还是老配置，**升级动作在用户手上**。在那之前所有客户端继续走 41-S 归并链（向后兼容，无回归）。
+- **② DSH 那一家无法单独证身份**：`deepseek-harness` 随宿主下发、自己没有配置面（批次28-B），它的调用只会带宿主的 `qoder-cn` → **服务端分不开「宿主」与「随宿主下发的 DSH」**，`hasClientId` 也只能如实取宿主值。
+- **③ 头值是自声明不是认证**：想按客户端发独立密钥仍属批次41-K/45-B（账本租户归一 + 成员/API 密钥域模型），本批没做。
+- **④ 登录自动接入故意不动**：`autoDiscovery.autoWireMcpForAgents` 对 `state==='wired'` 仍跳过——**不为补头每次登录重写配置**（那会让 `.bak-` 无限滚动）。补头只走面板显式按钮。
+- **⑤ 用户第 1 条（写密钥失败提示，41-W）本批未动**，仍是设计稿：`applyScanToStore` 现在只把 `E_L0_LOCKED` 计入 `failed++`，没有原因码、没有界面提示。见任务 #64。
+- **⑥ 同一工作树里有批次42 的在建改动**（`recallModes.ts`、`types.ts`/`mcpSchema.ts` 的枚举扩充、两份未跟踪 `specs/召回模式*.md`）**不属于 41-X，本笔提交没带它们**；因此上面「1986 例 / 313 文件」是**全工作树**的数字，不是 41-X 单独的增量。刷新后的 `specs/code-index.generated.md` 同理——它按磁盘现状生成，无法只索引本批文件。

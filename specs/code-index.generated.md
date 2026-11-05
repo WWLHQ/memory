@@ -147,7 +147,7 @@
 | [src/web/AgentOnboard/Gains.tsx](src/web/AgentOnboard/Gains.tsx) | 25 | 效果证据 · 用户可感知的「省」与「快」（19.1 / 9.x / 2.4.x / 19.8 反代理） | Gains(fn) |
 | [src/web/AgentOnboard/IsolationConfig.tsx](src/web/AgentOnboard/IsolationConfig.tsx) | 34 | 隔离粒度配置行（规格 19.4 · R1 project_id 共享 / user_id 偏好跨项目） | IsolationConfig(fn) |
 | [src/web/AgentOnboard/KeyMgmt.tsx](src/web/AgentOnboard/KeyMgmt.tsx) | 21 | 密钥管理行（规格 T7 / §4 · R5 恒脱敏不回显 / R6 轮换宽限 24h / 超 90 天告警） | KeyMgmt(fn) |
-| [src/web/AgentOnboard/McpClientsPanel.tsx](src/web/AgentOnboard/McpClientsPanel.tsx) | 434 | MCP 客户端接入面板（批次15 建 / 批次21 交互收敛 / 批次23 一键适配全部 + 逐客户端接通指引）： | McpClientsPanel(fn) |
+| [src/web/AgentOnboard/McpClientsPanel.tsx](src/web/AgentOnboard/McpClientsPanel.tsx) | 439 | MCP 客户端接入面板（批次15 建 / 批次21 交互收敛 / 批次23 一键适配全部 + 逐客户端接通指引）： | McpClientsPanel(fn) |
 | [src/web/AgentOnboard/McpToolConfig.tsx](src/web/AgentOnboard/McpToolConfig.tsx) | 61 | MCP 工具配置行（规格 T5 / 19.5 · 须带 project_id） | toolRef(fn), McpToolConfig(fn) |
 | [src/web/AgentOnboard/OneClickOnboard.tsx](src/web/AgentOnboard/OneClickOnboard.tsx) | 248 | 一键接入本机 Agent（规格 T4 / AC-003.4 / 19.9 · 扫→分→绑→验 四段进度 + 自动绑定 + 可撤销） | OneClickOnboard(fn) |
 | [src/web/AgentOnboard/TestPanel.tsx](src/web/AgentOnboard/TestPanel.tsx) | 70 | 接入测试面板（规格 T8 / AC-003.8 · R7 必记 request_id · 注入预览） | TestPanel(fn), TestEvidence(type) |
@@ -411,7 +411,7 @@ src/core/memagent/legacyLayers.ts 8f912218cef5
 src/core/memagent/llm.ts 651a60641c34
 src/core/memagent/mcp.ts 63e4f1f9a102
 src/core/memagent/mcpAuth.ts 973d6419b4b8
-src/core/memagent/mcpHttp.ts b1aadd8407f1
+src/core/memagent/mcpHttp.ts 48bfb3b1fbf6
 src/core/memagent/mcpRecall.ts 8562d926152a
 src/core/memagent/mcpSchema.ts de0fd1787fce
 src/core/memagent/memories.ts 734f01c76644
@@ -465,7 +465,7 @@ src/web/AgentOnboard/FormBadge.tsx b2425eba179f
 src/web/AgentOnboard/Gains.tsx 5dd221d1770f
 src/web/AgentOnboard/IsolationConfig.tsx ae7060ad6cce
 src/web/AgentOnboard/KeyMgmt.tsx 1f40e96ae2f1
-src/web/AgentOnboard/McpClientsPanel.tsx 23838a41aa86
+src/web/AgentOnboard/McpClientsPanel.tsx b6493df2ca1d
 src/web/AgentOnboard/McpToolConfig.tsx 0450306a0a33
 src/web/AgentOnboard/OneClickOnboard.tsx 6d27b6fefff5
 src/web/AgentOnboard/TestPanel.tsx 616d8c8aaa4f
