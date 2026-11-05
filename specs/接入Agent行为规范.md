@@ -34,20 +34,23 @@
 
 ## 3. 回显规范（强制）
 
-每次 `recall_memory` 成功返回后，**必须把该次返回的 `display.markdown` 整段原样输出到最终回答末尾**。服务端按客户端能力选档：
+每次 `recall_memory` 成功返回后，**必须把该次返回的 `display.markdown` 整段原样输出到最终回答末尾**。服务端按客户端能力选档。
 
+> **互通约束**：全档位参数（档位名 / 触发阈值 / 客户端能力判定键 / 四段明细字段 / `detail_url` 形态 / 折叠展开文案）必须与 APP 桌面端 `src/core/memagent/mcpRecall.ts`（`recallDisplayMode` / `clientSupportsHtmlDetails`）及 `recallInsight.ts`（`buildRecallCompactMarkdown` / `buildRecallDetailPage`）对齐，取自同一真源，避免「Agent 回显与 APP 渲染口径分裂」。
+
+### 3.1 两档（取消 markdown-full / 单行 兜底）
 | 档位 | 判据 | 客户端收到内容 |
 |---|---|---|
-| `html-details` | `client.split('/')[0]` 命中白名单 `{qoder, qoder-desktop-mcp-host}` | `<details>` 四段（项目背景 / 命中记忆 / Token / 省钱与费用，可点开收起）|
-| `markdown-compact` | 其余客户端默认档 | 两行 🧠 Memory 摘要 + 一条指向本机一次性明细页的 Markdown 链接（HTTP 档）|
-| `markdown-full` | 明细链接已过期（30min）或客户端连链接都渲染不了 | 用同一 `query` 再调一次并置 `detail=true`，得纯 Markdown 四小节 |
-| 单行兜底 | 客户端连 Markdown 都渲染不了 | 单独一行原样输出 `display.line` |
+| **折叠气泡（首选 compact 档）** | 客户端支持气泡折叠（或服务端判定可折叠） | 两行 🧠 Memory 摘要 + **可展开折叠气泡**——气泡内联展开显示四段明细（项目背景 / 命中记忆 / Token 用量 / 省钱与费用），点击收起 |
+| **HTML `<details>`（兜底 fallback）** | 客户端不支持气泡折叠（如 `client.split('/')[0]` 命中白名单 `{qoder, qoder-desktop-mcp-host}` 或 fail-safe） | `<details>` 四段（summary = 🧠 Memory 提示行，内层四段：项目背景 / 命中记忆 / Token / 省钱与费用，可点开收起）|
 
+> 不再保留 markdown-full / 单行兜底。无法渲染气泡与 HTML 的极端客户端，由 APP 侧 fail-safe 处理（占位/提示，不编造明细），其形态由 APP 内参数定义。
 > **〔批次41-Q 校正〕** 白名单含 `qoder-desktop-mcp-host` 是因 Qoder Desktop 自报 UA 为 `qoder-desktop-mcp-host/1.0.0`（首段非 `qoder`）。但「Qoder 聊天气泡是否真渲染 `<details>`」**尚无实测证据**——若实机像 DSH 那样把标签原样吐成文本，按 fail-safe 把该项撤下（改回只留 `qoder`），并在手测报告记录。
+> **互通**：折叠气泡与 HTML `<details>` 的四段明细内容、字段、文案、`detail_url` 形态必须同源；新增/修改任一档位参数须同步 `mcpRecall.ts`/`recallInsight.ts` 与服务端下发逻辑。
 
 **回显硬约束（任何档位）**：
 - 禁止自行补写或预先展开明细（明细只能来自本次或下一次工具返回）；
-- 禁止添加 HTML 标签；
+- 禁止自行构造折叠结构（气泡 / `<details>` 由服务端返回，Agent 不自行拼装 HTML）；
 - token 数字与金额必须原样保留，不得改写；
 - 需要明细时，用**同一个 query** 再调用一次并置 `detail=true`，然后原样输出那次返回的 `display.markdown`；**不要因为「这样更完整」就自动调 `detail=true`**（那等于把明细铺回聊天窗口，违背本档目的）；
 - 明细页 URL（HTTP 档）**必须逐字保留**，不得截断或改写。
