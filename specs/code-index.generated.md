@@ -165,7 +165,7 @@
 | [src/web/Home/LoginModal.tsx](src/web/Home/LoginModal.tsx) | 412 | REQ-005 T8：登录卡片组件（§0.3 弹出子视图） | LoginModal(fn), LoginModalProps(type) |
 | [src/web/Home/ProgramLogPanel.tsx](src/web/Home/ProgramLogPanel.tsx) | 240 | 程序运行日志窗口（批次17 建，批次19 从首页迁至日志记录页）：真实尾读 <数据根>/actions.log。 | ProgramLogPanel(fn), ProgramLogPanelProps(type) |
 | [src/web/Home/TopBar.tsx](src/web/Home/TopBar.tsx) | 88 | REQ-005 T6：首页顶栏组件（登录态自适应，§0.2 顶栏） | TopBar(fn), TopBarProps(type) |
-| [src/web/Home/coreHome.ts](src/web/Home/coreHome.ts) | 273 | REQ-005 首页（真实可算）： | coreTraceLookup(fn), emptyGains(fn), getHomeFeed(fn), emptySync(fn), fetchMirrorItems(fn), TraceHit(type), MirrorItem(type), GetHomeFeedOpts(type), HomeFeedResult(type) |
+| [src/web/Home/coreHome.ts](src/web/Home/coreHome.ts) | 300 | REQ-005 首页（真实可算）： | coreTraceLookup(fn), emptyGains(fn), getHomeFeed(fn), emptySync(fn), fetchMirrorItems(fn), L0_LOCK_ANOMALY_WINDOW_MS(const), TraceHit(type), MirrorItem(type), GetHomeFeedOpts(type), HomeFeedResult(type) |
 | [src/web/Home/crossTabAuth.ts](src/web/Home/crossTabAuth.ts) | 49 | 跨 iframe 登录态共享（localStorage）—— REQ-005 T11 补充 | getStoredSessionId(fn), storeSessionId(fn), clearStoredSessionId(fn), setTestOverride(fn), hasActiveSession(fn), useCrossTabAuth(fn) |
 | [src/web/Home/layerGraph.ts](src/web/Home/layerGraph.ts) | 328 | 首页 L1–L6 关系图谱数据推导（批次8-A，纯函数）： | categoryMeta(fn), memoryLayerText(fn), deriveLayerGraph(fn), emptyLayerGraph(fn), GRAPH_LAYERS(const), GRAPH_CATEGORIES(const), LayerMeta(type), CategoryMeta(type), LayerHubNode(type), MemoryGraphNode(type), LayerGraphEdge(type), LayerGraphStats(type), LayerGraph(type), LayerGraphOptions(type), GraphLayerId(type), GraphCategoryId(type), GraphEdgeKind(type) |
 | [src/web/Home/layerGraphLayout.ts](src/web/Home/layerGraphLayout.ts) | 190 | 首页 L1–L6 关系图谱布局（批次8-A，纯函数）： | layoutLayerGraph(fn), LayoutPoint(type), PositionedHub(type), PositionedNode(type), PositionedEdge(type), LayoutSpoke(type), LayerGraphLayout(type), LayerGraphLayoutOptions(type) |
@@ -364,7 +364,7 @@
 | [src/web/vite-env.d.ts](src/web/vite-env.d.ts) | 2 | Vite 侧效应导入（CSS）的类型声明 | — |
 | [src/web/write/DedupCard.tsx](src/web/write/DedupCard.tsx) | 40 | 写入页（REQ-006 / P2）查重预览卡（T4） | DedupCard(fn) |
 | [src/web/write/WriteForm.tsx](src/web/write/WriteForm.tsx) | 124 | 写入页（REQ-006 / P2）表单（T3） | WriteForm(fn) |
-| [src/web/write/WritePage.tsx](src/web/write/WritePage.tsx) | 132 | 写入页（REQ-006 / P2）· 完整编排（T5） | WritePage(fn) |
+| [src/web/write/WritePage.tsx](src/web/write/WritePage.tsx) | 149 | 写入页（REQ-006 / P2）· 完整编排（T5） | WritePage(fn) |
 | [src/web/write/coreWrite.ts](src/web/write/coreWrite.ts) | 78 | 写入页（REQ-006 / P2）接真内核：ma.write（六类 + 查重短路嫁接 + 审计） | coreWrite(fn), coreListExisting(fn), CoreWriteOutcome(type) |
 | [src/web/write/logic.ts](src/web/write/logic.ts) | 139 | 写入页（REQ-006 / P2）纯逻辑层 | estimateTokens(fn), needsRefine(fn), validateDraft(fn), jaccard(fn), scoreDedup(fn), thresholdForLayer(fn), composeReceipt(fn), ReceiptOptions(type) |
 | [src/web/write/spec.ts](src/web/write/spec.ts) | 25 | 写入页（REQ-006 / P2）规格常量（非演示数据） | TAG_SUGGESTIONS(const), CATEGORY_PREVIEW(const), LAYER_THRESHOLDS(const) |
@@ -397,7 +397,7 @@ src/core/memagent/agent.ts c0d51c7071fc
 src/core/memagent/auditLog.ts 307fbb57f262
 src/core/memagent/crypto.ts 6e5f2f4845bb
 src/core/memagent/dedup.ts 7035020d489f
-src/core/memagent/errors.ts 2d1d3445d74b
+src/core/memagent/errors.ts 34c2c944a594
 src/core/memagent/fieldBackfill.ts 23a377e0c190
 src/core/memagent/fileStorage.ts 35c4b0f65a0d
 src/core/memagent/forgetting.ts aa19f18ac07b
@@ -414,7 +414,7 @@ src/core/memagent/mcpAuth.ts 973d6419b4b8
 src/core/memagent/mcpHttp.ts 48bfb3b1fbf6
 src/core/memagent/mcpRecall.ts 8562d926152a
 src/core/memagent/mcpSchema.ts de0fd1787fce
-src/core/memagent/memories.ts 734f01c76644
+src/core/memagent/memories.ts 3702449e72c9
 src/core/memagent/paramsSnapshot.ts f819e011fbd7
 src/core/memagent/pgSyncHub.ts dcf899e8acd4
 src/core/memagent/qualityGate.ts eb7a0001260d
@@ -424,7 +424,7 @@ src/core/memagent/recallInsight.ts 95b6693dc6de
 src/core/memagent/recallModes.ts a99b0df92758
 src/core/memagent/refineQueue.ts 8a4b9204d51d
 src/core/memagent/rejudge.ts fbbb37ee97b1
-src/core/memagent/sessionCollector.ts e59384cb15a5
+src/core/memagent/sessionCollector.ts 0824c6d7a60f
 src/core/memagent/sqliteStorage.ts 0c0c891d84cc
 src/core/memagent/storage.ts 88cdd05e7b35
 src/core/memagent/sync.ts ffdeb7ae3aea
@@ -443,9 +443,9 @@ src/electron/hostScan.ts 694d58d7048c
 src/electron/ipcChannels.ts 398d8ec21f32
 src/electron/l0KeyringStore.ts b900f5d523d5
 src/electron/llmGateway.ts 6de278fcf527
-src/electron/main.ts e29c03ae51fa
+src/electron/main.ts 92ae55b9fd6d
 src/electron/mcpClients.ts df9527333225
-src/electron/preload.ts 3cdf1a9066a6
+src/electron/preload.ts f2d65834ba4c
 src/electron/webhookServer.ts 62157c0b1e21
 src/home/dashboard.ts a23bc82dbf9d
 src/home/server.ts 42d06f5c8160
@@ -483,7 +483,7 @@ src/web/Home/LayerGraphPanel.tsx 7c94457e288e
 src/web/Home/LoginModal.tsx c9224c5e3622
 src/web/Home/ProgramLogPanel.tsx 7951f28c2a5d
 src/web/Home/TopBar.tsx 5a0e8315bc3a
-src/web/Home/coreHome.ts 18fcff36b25e
+src/web/Home/coreHome.ts 379a4e7917e6
 src/web/Home/crossTabAuth.ts d85780df575e
 src/web/Home/layerGraph.ts 9a728a7ec61e
 src/web/Home/layerGraphLayout.ts 8215d57492af
@@ -682,7 +682,7 @@ src/web/test-setup.ts 3a2ad06d2218
 src/web/vite-env.d.ts 191b7a12f3de
 src/web/write/DedupCard.tsx f1a434a39892
 src/web/write/WriteForm.tsx ae3bb29058ff
-src/web/write/WritePage.tsx a8b60d28ee53
+src/web/write/WritePage.tsx 869c8f162885
 src/web/write/coreWrite.ts cd1d5bf295a1
 src/web/write/logic.ts ecb4e9d45e79
 src/web/write/spec.ts 27df79f585c2

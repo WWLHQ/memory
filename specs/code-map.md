@@ -894,3 +894,26 @@ status: draft
 
 > 本批发现的规格书缺陷（已锁定，待修订）：① §2.4.3 `pattern_reasoning` 权重 `(0.15,0.25,0.10,0.40)` 求和 **0.90 ≠ 声明「权重和=1.0」**，`recallModes.ts` 保留字面值未擅自归一化，测试显式锁定；② 用户粘贴文档的「层级单条 Token 上限 400/200/100/50、total 800」在规格书与代码（`layerRules.ts` 字符上限 300/200/120/60）均不存在，模板文档已按规格书权重框架修正。
 > 索引：`npm run code:index -- --write` 已更新 `specs/code-index.generated.md`（313 文件）。
+
+### 批次43：文档对齐（双向吸收 + 反向补回，2026-11-05）
+
+> 动因：用户要求把目标工作集 `specs/working-set/`（原 WorkBuddy 工作集 `multiagent-memory-ops\`）的 4 份文档，与本项目 `specs/` 对齐——**双向吸收 + 反向补回**。〔批次43 二次〕所有资料已导入本项目 `specs/working-set/` 统一管理，后续对齐基于本地副本。需求定稿见 `specs/文档对齐确认需求稿.md`（含选 B：保留已提交 `recallModes.test.ts`）。
+> 源头：目标侧 `agent-memory-sop.md`(v1.8)、`mcp-extension-contract.md`(v1.1)、`multiuser-design-status.md`、`archive/draft-tool-inventory.md`；本侧 `接入Agent行为规范.md`、`记忆库工具能力清单.md`、`需求规格书_内核API契约.md`、`MCP运维与多Agent写入规范.md`。
+
+| 吸收进本项目（A1–A5 + M1） | 落点 | 来源 |
+|---|---|---|
+| A1 多用户三池 D1–D25（三池/令牌代理/mint/user_id 读取不隔离/L0 归档/L1 分流/脱敏闸门 B+ 两者并用 规则同步+模型异步） | `specs/多用户三池隔离设计_D1-D25.md`（新建，多用户隔离单一真源） | 目标 multiuser-design-status.md + SOP §15 + 契约 §13 |
+| A2 12 工具 Agent 面口径（读7/写2/管3=12，运维/管理端能力单列不计入；命名对齐 recall_memory/manage_memory） | `specs/记忆库工具能力清单.md`（重构） | 目标 draft-tool-inventory.md + 契约 §14 |
+| A3 L0 写密钥门禁与落盘兜底（E_L0_LOCKED、writeDek 清空路径、逐条 pending/flush、get_write_status、两种拒绝判别） | `specs/接入Agent行为规范.md` §11 | 目标 SOP §10.2 |
+| A4 记忆打分与衰减公式（score 权重 + importance/confidence 恒0.5 两把锁死旋钮 + 整改方向；区分 recallModes 模式权重） | `specs/需求规格书_内核API契约.md` §2.3 | 目标 SOP §13.2 / 契约 §0 |
+| A5 source_agent 命名表（workbuddy/claude-desktop/cursor/gemini-cli/codex，禁依赖默认 mcp） | `specs/接入Agent行为规范.md` §7.1 | 目标 SOP §5–§6 |
+| M1 回显两档（折叠气泡首选 / HTML `<details>` 兜底，取消 markdown-full/单行）+ 互通约束（参数对齐 APP mcpRecall.ts/recallInsight.ts） | `specs/接入Agent行为规范.md` §3.1 | 本项目回显设计 + 用户二次校正 |
+
+| 反向补回目标 SOP（R1–R3，升 v1.9） | 落点 | 来源 |
+|---|---|---|
+| R1 回显两档 + 互通 | 目标 `agent-memory-sop.md` §9.4 | 本项目 接入Agent行为规范.md §3 |
+| R2 5 召回模式（auto + 5 具体模式 + 权重 + critical 禁 minimal + 中英混排不触发极简） | 目标 `agent-memory-sop.md` §9.3 | 本项目 recallModes.ts / 需求规格书 §2.1 |
+| R3 运维架构四方向（守护/健康/跨机/多Agent写入） | 目标 `agent-memory-sop.md` §16 | 本项目 MCP运维与多Agent写入规范.md |
+
+> 提交粒度：每个原子任务一提交（T1–T7），仅提交本次相关 specs 文件，不碰早期遗留脏文件（errors.ts/sessionCollector.ts）与早期未提交 specs。目标 SOP 所在文件夹非 git 仓库，其改动仅落磁盘、不在本仓库提交。
+> 索引：`npm run code:index -- --write` 见下方说明（本批纯文档改动，源码符号未变）。
