@@ -74,7 +74,7 @@ describe('MCP HTTP（批次2 信任边界）', () => {
     expect(header.status).toBe(200);
     const body = (await header.json()) as { result: { tools: Array<{ name: string; description?: string }> } };
     expect(body.result.tools.map((t) => t.name)).toEqual([
-      'recall_memory', 'write_memory', 'list_projects', 'get_user_preferences',
+      'recall_memory', 'write_memory', 'list_projects', 'get_preferences',
     ]);
     // 批次14：措辞为「优先使用本工具 + 未命中/不可用再回退」，不是硬禁用
     const recallDesc = body.result.tools.find((t) => t.name === 'recall_memory')?.description ?? '';
@@ -167,7 +167,7 @@ describe('MCP HTTP（批次2 信任边界）', () => {
     const r = await call(
       {
         jsonrpc: '2.0', id: 8, method: 'tools/call',
-        params: { name: 'get_user_preferences', arguments: { user_id: 'u2' } },
+        params: { name: 'get_preferences', arguments: { user_id: 'u2' } },
       },
       { Authorization: `Bearer ${TOKEN}` },
     );

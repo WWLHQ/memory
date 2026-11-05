@@ -2,7 +2,7 @@
 // DSH 的 dsh-mcp-client 用标准 MCP 协议（initialize / tools/list / tools/call）连接，
 // 而不是我们私有 TCP JSON-RPC。本端点暴露标准 MCP HTTP（POST /mcp，JSON 响应）。
 // 复用 MemAgent 内核（storage 共享主进程 FileStorage），四个工具：
-//   recall_memory / write_memory / list_projects / get_user_preferences
+//   recall_memory / write_memory / list_projects / get_preferences
 // 批次11/12/13：initialize 下发 MCP_INSTRUCTIONS（关键词触发召回 + 回显提示）；recall 结果末块加回显约束；
 //         结果块顺序 = [display.line, 完整 JSON, display.markdown（四段折叠）, 展示要求]；
 //         另附 structuredContent（含背景/省量/金额/折叠明细）。
@@ -245,12 +245,12 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
           }),
         };
       }
-      case 'get_user_preferences': {
+      case 'get_preferences': {
         const p = args;
-        if (!p.user_id || typeof p.user_id !== 'string') throw new Error('get_user_preferences.user_id 必填');
+        if (!p.user_id || typeof p.user_id !== 'string') throw new Error('get_preferences.user_id 必填');
         // 租户闭包：只能读会话身份自己的偏好
         if (String(p.user_id) !== account.user_id) {
-          throw new Error('get_user_preferences.user_id 与会话租户不一致（禁止跨租户读取）');
+          throw new Error('get_preferences.user_id 与会话租户不一致（禁止跨租户读取）');
         }
         const out: Pref[] = await ma.getPrefs(account.user_id);
         // structuredContent 必须是 JSON 对象（MCP 规范），数组统一包一层 items

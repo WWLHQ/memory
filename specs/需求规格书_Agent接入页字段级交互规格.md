@@ -78,7 +78,7 @@ ONBOARD（未配置） ──填密钥+选通道──> CONFIGURED（已配置�
 |---|---|---|---|---|---|
 | `recall_memory` | `query`,`top_k`,`project_id`,`user_id`,`scene`,`mode?` | `top_k=5`、`scene=default` | 启用开关、`top_k`(1–10)、默认 `scene`、默认 `mode`(null=自动) | `top_k` 越界钳制；`scene=critical` 时 `mode` 不得为 `minimal`（16.5，同检索页 R5） | 「critical 禁极简，已回落 null」 |
 | `write_memory` | `content`,`category`,`project_id`,`user_id`,`session_id` | 默认 `category=work` | 启用开关、默认 `category` | `category` 枚举（17.6 六类）；`project_id` 必填（19.4） | 缺 project_id 不可保存 |
-| `get_user_preferences` | `user_id` | — | 启用开关 | `user_id` 必填 | — |
+| `get_preferences` | `user_id` | — | 启用开关 | `user_id` 必填 | — |
 
 - **隔离粒度开关（19.4）**：
   | 开关 | 默认 | 联动 | 文案 |

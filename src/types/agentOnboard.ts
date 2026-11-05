@@ -49,7 +49,7 @@ export interface UserPreferencesTool {
 export interface McpTools {
   recall_memory?: RecallMemoryTool;
   write_memory?: WriteMemoryTool;
-  get_user_preferences?: UserPreferencesTool;
+  get_preferences?: UserPreferencesTool;
 }
 export interface Channels {
   webhook: boolean;
@@ -229,10 +229,10 @@ export const AgentCardShape = Object.freeze({
 });
 
 export const McpToolConfigShape = Object.freeze({
-  tools: ['recall_memory', 'write_memory', 'get_user_preferences'] as const,
+  tools: ['recall_memory', 'write_memory', 'get_preferences'] as const,
   recall_memory: { required: ['project_id'], optional: ['scene', 'mode', 'top_k'] },
   write_memory: { required: ['project_id'], optional: ['category'] },
-  get_user_preferences: { required: ['user_id'] },
+  get_preferences: { required: ['user_id'] },
 });
 
 export const ChannelConfigShape = Object.freeze({

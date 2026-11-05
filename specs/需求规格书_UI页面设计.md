@@ -520,7 +520,7 @@ status: imported
 |---|---|---|
 | `recall_memory(query, top_k, project_id, user_id, scene, mode?)` | `query`、`top_k`、`project_id`、`user_id` | 启用开关 + `top_k` 默认值 + 默认 `scene` |
 | `write_memory(content, category, project_id, user_id, session_id)` | `content`、`category`、`project_id` | 启用开关 + 默认 `category` |
-| `get_user_preferences(user_id)` | `user_id` | 启用开关（个人偏好，跨 Agent/项目共享，19.4） |
+| `get_preferences(user_id)` | `user_id` | 启用开关（个人偏好，跨 Agent/项目共享，19.4） |
 
 **记忆空间隔离配置（19.4）**：项目层按 `project_id` 共享（跨 Agent 可见）；个人偏好按 `user_id` 隔离（仅个人偏好类，微信式 9.2）。可配"个人偏好跨项目共享"开关（默认开）。
 
@@ -542,7 +542,7 @@ status: imported
 ├────────────────────────────────────────────────────────────┤
 │ MCP 工具: recall_memory[✓] top_k=5 scene=task_start        │
 │            write_memory[✓] category=work  隔离: project_id+user_id │
-│            get_user_preferences[✓] (个人偏好跨项目共享[开])  │
+│            get_preferences[✓] (个人偏好跨项目共享[开])  │
 ├────────────────────────────────────────────────────────────┤
 │ 采集: 主 Webhook[✓]  补偿 API 拉取[✓]  对账 5min/每日       │
 │ 密钥: [API_KEY:harness]  [API_KEY:claude]  [API_KEY:codex] │

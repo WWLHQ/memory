@@ -54,7 +54,7 @@ export function McpToolConfig({ tools, onChange }: Props) {
           checked={pref.on}
           onChange={(e) => onChange('pref', e.target.checked)}
         />
-        get_user_preferences
+        get_preferences
       </label>
     </div>
   );

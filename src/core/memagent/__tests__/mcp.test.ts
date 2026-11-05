@@ -63,7 +63,7 @@ describe('MCP Server（§19.5）', () => {
     const r = await rpcCall(PORT, { jsonrpc: '2.0', id: 1, method: 'tools/list', params: { token: TOKEN } });
     const tools = (r.result as { tools: Array<{ name: string; inputSchema?: { required?: string[] } }> }).tools;
     expect(tools.map((t) => t.name)).toEqual([
-      'recall_memory', 'write_memory', 'list_projects', 'get_user_preferences',
+      'recall_memory', 'write_memory', 'list_projects', 'get_preferences',
     ]);
     const recallTool = tools.find((t) => t.name === 'recall_memory')!;
     expect(recallTool.inputSchema!.required).toEqual(['query']); // project_id 可省略（批次11）
@@ -177,15 +177,20 @@ describe('MCP Server（§19.5）', () => {
     expect(mcpMem.created_by_agent).toBe('mcp-test');
   });
 
-  it('get_user_preferences：缺 user_id → -32602', async () => {
-    const r = await rpcCall(PORT, { jsonrpc: '2.0', id: 5, method: 'get_user_preferences', params: { token: TOKEN } });
+  it('get_preferences：缺 user_id → -32602', async () => {
+    const r = await rpcCall(PORT, { jsonrpc: '2.0', id: 5, method: 'get_preferences', params: { token: TOKEN } });
     expect(r.error?.code).toBe(-32602);
   });
 
-  it('get_user_preferences：读取其它租户 → -32602（租户闭包）', async () => {
-    const r = await rpcCall(PORT, { jsonrpc: '2.0', id: 51, method: 'get_user_preferences', params: { user_id: 'u2', token: TOKEN } });
+  it('get_preferences：读取其它租户 → -32602（租户闭包）', async () => {
+    const r = await rpcCall(PORT, { jsonrpc: '2.0', id: 51, method: 'get_preferences', params: { user_id: 'u2', token: TOKEN } });
     expect(r.error?.code).toBe(-32602);
     expect(r.error?.message).toContain('租户');
+  });
+
+  it('旧名 get_user_preferences → -32601（重命名后无别名）', async () => {
+    const r = await rpcCall(PORT, { jsonrpc: '2.0', id: 52, method: 'get_user_preferences', params: { user_id: 'u1', token: TOKEN } });
+    expect(r.error?.code).toBe(-32601);
   });
 
   it('tools/call 代理：经 tools/call 调 write_memory 同样成功', async () => {

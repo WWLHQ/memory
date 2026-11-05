@@ -56,7 +56,7 @@ export const MCP_TOOLS = [
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
   {
-    name: 'get_user_preferences',
+    name: 'get_preferences',
     description: '读取用户偏好配置（跨 Agent 共享）。',
     inputSchema: {
       type: 'object',

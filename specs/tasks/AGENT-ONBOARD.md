@@ -14,7 +14,7 @@
   - `AgentStatus = 'ONBOARD'|'CONFIGURED'|'CONNECTED'|'DEGRADED'`
   - `PriorityBadge = 'P0'|'P1'|'P2'|'P3'`（MVP·P0 / MVP·P1 / 兜底·P2 / 扩展·P3）
   - `AgentCard`（agent_name 枚举、接入方式、连通成功率、熔断状态、平均延迟、enterprise_id/team_id 只读、优先级）
-  - `McpToolConfig`（`recall_memory`/`write_memory`/`get_user_preferences` + project_id/user_id 必填标记）
+  - `McpToolConfig`（`recall_memory`/`write_memory`/`get_preferences` + project_id/user_id 必填标记）
   - `ChannelConfig`（主 Webhook + 补偿 API 拉取、对账周期、SHA-256 幂等开关）
   - `KeyMgmt`（脱敏占位、轮换宽限期、最后轮换时间）
 - 验收：`npm run typecheck`（tsc --noEmit，规格原定的编译期门禁）+ `npm test`（`src/types/__tests__/types.test.ts`）

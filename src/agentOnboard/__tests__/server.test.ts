@@ -19,7 +19,7 @@ const VALID = {
   mcpTools: {
     recall_memory: { project_id: 'p1' },
     write_memory: { project_id: 'p1' },
-    get_user_preferences: { user_id: 'u1' },
+    get_preferences: { user_id: 'u1' },
   },
   channels: { webhook: true, apiPull: true },
   apiKeyPlaintext: null,

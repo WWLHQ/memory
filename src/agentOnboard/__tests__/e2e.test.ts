@@ -37,7 +37,7 @@ function card(name: string, priority: Priority): AgentCardInput {
   return {
     agent_name: name, priority, accessMode: 'MCP+Webhook',
     enterprise_id: 'e1', team_id: 't1', tenantManual: false,
-    mcpTools: { recall_memory: { project_id: 'p1' }, write_memory: { project_id: 'p1' }, get_user_preferences: { user_id: 'u1' } },
+    mcpTools: { recall_memory: { project_id: 'p1' }, write_memory: { project_id: 'p1' }, get_preferences: { user_id: 'u1' } },
     channels: { webhook: true, apiPull: true }, apiKeyPlaintext: null, circuit: 'CLOSED',
   };
 }

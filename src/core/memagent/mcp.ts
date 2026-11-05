@@ -1,7 +1,7 @@
 // MCP Server（§19.5）：JSON-RPC 2.0 over TCP，暴露记忆工具，供 Agent 调用记忆助手。
 // 运行在主进程内，复用现有 storage/agent/vector 实例，零额外依赖。
 //
-// 工具：recall_memory / write_memory / list_projects / get_user_preferences
+// 工具：recall_memory / write_memory / list_projects / get_preferences
 // 批次11：initialize 下发 MCP_INSTRUCTIONS；recall 返回项目背景/省量/金额提示（与 HTTP 8204 共用 mcpSchema/mcpRecall）。
 // 错误：JSON-RPC error 对象；不抛未捕获异常（stderr 作为兜底）。
 import { createServer as createNetServer } from 'node:net';
@@ -200,15 +200,15 @@ export function runMcpServer(opts: McpOptions): McpServerHandle {
           return;
         }
 
-        // ── get_user_preferences ───────────────────────────────────────
-        case 'get_user_preferences': {
+        // ── get_preferences ───────────────────────────────────────
+        case 'get_preferences': {
           if (!p.user_id || typeof p.user_id !== 'string') {
-            send(socket, jsonError(req.id, -32602, 'get_user_preferences.user_id 必填'));
+            send(socket, jsonError(req.id, -32602, 'get_preferences.user_id 必填'));
             return;
           }
           // 租户闭包：只能读会话身份自己的偏好
           if (String(p.user_id) !== sessionUser) {
-            send(socket, jsonError(req.id, -32602, 'get_user_preferences.user_id 与会话租户不一致（禁止跨租户读取）'));
+            send(socket, jsonError(req.id, -32602, 'get_preferences.user_id 与会话租户不一致（禁止跨租户读取）'));
             return;
           }
           const result: Pref[] = await s.getPrefs(sessionUser);

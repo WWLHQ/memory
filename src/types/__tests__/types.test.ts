@@ -17,7 +17,7 @@ test('CircuitState 含 OPEN（熔断联动 R5/R6）', () => {
 
 test('契约常量齐全（MCP/通道/密钥形状）', () => {
   assert.deepEqual(AgentCardShape.required, ['agent_name', 'priority', 'status', 'circuit']);
-  assert.deepEqual(McpToolConfigShape.tools, ['recall_memory', 'write_memory', 'get_user_preferences']);
+  assert.deepEqual(McpToolConfigShape.tools, ['recall_memory', 'write_memory', 'get_preferences']);
   assert.deepEqual(ChannelConfigShape.required, ['webhook', 'apiPull']);
   assert.equal(KeyMgmtShape.desensitize, true);
   assert.equal(KeyMgmtShape.rotateGraceHours, 24);

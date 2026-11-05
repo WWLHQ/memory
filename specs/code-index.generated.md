@@ -56,9 +56,9 @@
 | [src/core/memagent/ledgerReset.ts](src/core/memagent/ledgerReset.ts) | 125 | 记忆库清空重采（批次35）：按新入库口径「彻底重来」的纯函数层。 | scanLedgerForReset(fn), purgeLedger(fn), LedgerResetPreview(type), LedgerPurgeReport(type), LedgerPurgeCtx(type) |
 | [src/core/memagent/legacyLayers.ts](src/core/memagent/legacyLayers.ts) | 164 | 遗留账本清理（批次24）：把「未接真实 LLM 却带 L2–L6」的历史行诚实降级回 L1。 | isStubDeepLayered(fn), isMislabeledLayer(fn), scanStubLayers(fn), demoteStubLayers(fn), LegacyScan(type), LegacyDemoteReport(type), LegacyDemoteCtx(type) |
 | [src/core/memagent/llm.ts](src/core/memagent/llm.ts) | 71 | LlmProvider（§5.1）+ 内核统一反代理路由（19.8：先免费 → 后低价 ≤ price_cap → cost_cap → 回退本地） | routeProxy(fn), FakeLlmProvider(class), ProxyPick(type) |
-| [src/core/memagent/mcp.ts](src/core/memagent/mcp.ts) | 299 | MCP Server（§19.5）：JSON-RPC 2.0 over TCP，暴露记忆工具，供 Agent 调用记忆助手。 | runMcpServer(fn), McpOptions(type), McpServerHandle(type) |
+| [src/core/memagent/mcp.ts](src/core/memagent/mcp.ts) | 305 | MCP Server（§19.5）：JSON-RPC 2.0 over TCP，暴露记忆工具，供 Agent 调用记忆助手。 | runMcpServer(fn), McpOptions(type), McpServerHandle(type) |
 | [src/core/memagent/mcpAuth.ts](src/core/memagent/mcpAuth.ts) | 56 | MCP 鉴权：MCP 端口只对持有本机令牌的 Agent 开放。 | projectInScope(fn), tokenEquals(fn), tokenFromHeaders(fn), assertMcpToken(fn), MCP_TOKEN_HEADER(const), DEFAULT_MCP_ACCOUNT(const), McpAccount(type) |
-| [src/core/memagent/mcpHttp.ts](src/core/memagent/mcpHttp.ts) | 454 | 标准 MCP（Model Context Protocol）streamable-http 服务器 | normalizeClientLabel(fn), clientFromInitialize(fn), clientFromUserAgent(fn), isIdentifiableUserAgent(fn), isTrustedClientSelfName(fn), clientFromExplicitHeader(fn), recallEchoNote(fn), runMcpHttpServer(fn), MCP_CLIENT_HEADER(const), McpHttpOptions(type), McpHttpHandle(type) |
+| [src/core/memagent/mcpHttp.ts](src/core/memagent/mcpHttp.ts) | 459 | 标准 MCP（Model Context Protocol）streamable-http 服务器 | normalizeClientLabel(fn), clientFromInitialize(fn), clientFromUserAgent(fn), isIdentifiableUserAgent(fn), isTrustedClientSelfName(fn), clientFromExplicitHeader(fn), recallEchoNote(fn), runMcpHttpServer(fn), MCP_CLIENT_HEADER(const), McpHttpOptions(type), McpHttpHandle(type) |
 | [src/core/memagent/mcpRecall.ts](src/core/memagent/mcpRecall.ts) | 244 | MCP 召回工具编排（批次11/13/29/32/33）：项目自动定位 / 列表 / 提示行与明细组装 / 按客户端能力选档位。 | clientSupportsHtmlDetails(fn), projectInfosFromMemories(fn), resolveProjectId(fn), runRecallTool(fn), recallDisplayMode(fn), runListProjectsTool(fn), McpToolError(class), ProjectInfo(type), ResolvedProject(type), RecallToolPayload(type), RecallDetailTicketsPort(type), RecallToolDetailOpts(type), RecallToolOutput(type), RecallDisplayMode(type) |
 | [src/core/memagent/mcpSchema.ts](src/core/memagent/mcpSchema.ts) | 70 | MCP 工具清单与初始化指令（批次11/12/13）：HTTP(8204) 与 TCP(8202) 共用同一份 schema/instructions， | MCP_INSTRUCTIONS(const), MCP_TOOLS(const) |
 | [src/core/memagent/memories.ts](src/core/memagent/memories.ts) | 667 | 内核记忆业务（§3 schema + 行为红线）：write 逐层生成/查重/分支嫁接 / browse L0 授权 / gc 衰减 / memoryOp 17.3 操作 | layerSpecsFrom(fn), buildL6Input(fn), makeLayerGenerator(fn), coreWrite(fn), coreBrowse(fn), coreGc(fn), coreMemoryOp(fn), coreFeedback(fn), WriteInput(type), WriteCtx(type) |
@@ -165,7 +165,7 @@
 | [src/web/Home/LoginModal.tsx](src/web/Home/LoginModal.tsx) | 412 | REQ-005 T8：登录卡片组件（§0.3 弹出子视图） | LoginModal(fn), LoginModalProps(type) |
 | [src/web/Home/ProgramLogPanel.tsx](src/web/Home/ProgramLogPanel.tsx) | 240 | 程序运行日志窗口（批次17 建，批次19 从首页迁至日志记录页）：真实尾读 <数据根>/actions.log。 | ProgramLogPanel(fn), ProgramLogPanelProps(type) |
 | [src/web/Home/TopBar.tsx](src/web/Home/TopBar.tsx) | 88 | REQ-005 T6：首页顶栏组件（登录态自适应，§0.2 顶栏） | TopBar(fn), TopBarProps(type) |
-| [src/web/Home/coreHome.ts](src/web/Home/coreHome.ts) | 300 | REQ-005 首页（真实可算）： | coreTraceLookup(fn), emptyGains(fn), getHomeFeed(fn), emptySync(fn), fetchMirrorItems(fn), L0_LOCK_ANOMALY_WINDOW_MS(const), TraceHit(type), MirrorItem(type), GetHomeFeedOpts(type), HomeFeedResult(type) |
+| [src/web/Home/coreHome.ts](src/web/Home/coreHome.ts) | 273 | REQ-005 首页（真实可算）： | coreTraceLookup(fn), emptyGains(fn), getHomeFeed(fn), emptySync(fn), fetchMirrorItems(fn), TraceHit(type), MirrorItem(type), GetHomeFeedOpts(type), HomeFeedResult(type) |
 | [src/web/Home/crossTabAuth.ts](src/web/Home/crossTabAuth.ts) | 49 | 跨 iframe 登录态共享（localStorage）—— REQ-005 T11 补充 | getStoredSessionId(fn), storeSessionId(fn), clearStoredSessionId(fn), setTestOverride(fn), hasActiveSession(fn), useCrossTabAuth(fn) |
 | [src/web/Home/layerGraph.ts](src/web/Home/layerGraph.ts) | 328 | 首页 L1–L6 关系图谱数据推导（批次8-A，纯函数）： | categoryMeta(fn), memoryLayerText(fn), deriveLayerGraph(fn), emptyLayerGraph(fn), GRAPH_LAYERS(const), GRAPH_CATEGORIES(const), LayerMeta(type), CategoryMeta(type), LayerHubNode(type), MemoryGraphNode(type), LayerGraphEdge(type), LayerGraphStats(type), LayerGraph(type), LayerGraphOptions(type), GraphLayerId(type), GraphCategoryId(type), GraphEdgeKind(type) |
 | [src/web/Home/layerGraphLayout.ts](src/web/Home/layerGraphLayout.ts) | 190 | 首页 L1–L6 关系图谱布局（批次8-A，纯函数）： | layoutLayerGraph(fn), LayoutPoint(type), PositionedHub(type), PositionedNode(type), PositionedEdge(type), LayoutSpoke(type), LayerGraphLayout(type), LayerGraphLayoutOptions(type) |
@@ -364,7 +364,7 @@
 | [src/web/vite-env.d.ts](src/web/vite-env.d.ts) | 2 | Vite 侧效应导入（CSS）的类型声明 | — |
 | [src/web/write/DedupCard.tsx](src/web/write/DedupCard.tsx) | 40 | 写入页（REQ-006 / P2）查重预览卡（T4） | DedupCard(fn) |
 | [src/web/write/WriteForm.tsx](src/web/write/WriteForm.tsx) | 124 | 写入页（REQ-006 / P2）表单（T3） | WriteForm(fn) |
-| [src/web/write/WritePage.tsx](src/web/write/WritePage.tsx) | 149 | 写入页（REQ-006 / P2）· 完整编排（T5） | WritePage(fn) |
+| [src/web/write/WritePage.tsx](src/web/write/WritePage.tsx) | 132 | 写入页（REQ-006 / P2）· 完整编排（T5） | WritePage(fn) |
 | [src/web/write/coreWrite.ts](src/web/write/coreWrite.ts) | 78 | 写入页（REQ-006 / P2）接真内核：ma.write（六类 + 查重短路嫁接 + 审计） | coreWrite(fn), coreListExisting(fn), CoreWriteOutcome(type) |
 | [src/web/write/logic.ts](src/web/write/logic.ts) | 139 | 写入页（REQ-006 / P2）纯逻辑层 | estimateTokens(fn), needsRefine(fn), validateDraft(fn), jaccard(fn), scoreDedup(fn), thresholdForLayer(fn), composeReceipt(fn), ReceiptOptions(type) |
 | [src/web/write/spec.ts](src/web/write/spec.ts) | 25 | 写入页（REQ-006 / P2）规格常量（非演示数据） | TAG_SUGGESTIONS(const), CATEGORY_PREVIEW(const), LAYER_THRESHOLDS(const) |
@@ -388,7 +388,7 @@ src/agentOnboard/formMatrix.ts e7dd02db5873
 src/agentOnboard/mcpClients.ts 602143f6236b
 src/agentOnboard/probe.ts b1d3392a8393
 src/agentOnboard/server.ts 8d5defd4c8c1
-src/agentOnboard/service.ts 298c23facc74
+src/agentOnboard/service.ts bcd12fb1e53b
 src/agentOnboard/stateMachine.ts 8959634e14b2
 src/agentOnboard/validators.ts a7372fc705a7
 src/auth/hash.ts 3919b27befef
@@ -409,12 +409,12 @@ src/core/memagent/layerRules.ts ee112fe9be26
 src/core/memagent/ledgerReset.ts 02fddcaebf0b
 src/core/memagent/legacyLayers.ts 8f912218cef5
 src/core/memagent/llm.ts 651a60641c34
-src/core/memagent/mcp.ts 63e4f1f9a102
+src/core/memagent/mcp.ts 65589e578ac7
 src/core/memagent/mcpAuth.ts 973d6419b4b8
-src/core/memagent/mcpHttp.ts 48bfb3b1fbf6
+src/core/memagent/mcpHttp.ts 7bad5b395e87
 src/core/memagent/mcpRecall.ts 8562d926152a
-src/core/memagent/mcpSchema.ts de0fd1787fce
-src/core/memagent/memories.ts 3702449e72c9
+src/core/memagent/mcpSchema.ts a27397a72b9e
+src/core/memagent/memories.ts cf453ff60ea1
 src/core/memagent/paramsSnapshot.ts f819e011fbd7
 src/core/memagent/pgSyncHub.ts dcf899e8acd4
 src/core/memagent/qualityGate.ts eb7a0001260d
@@ -455,7 +455,7 @@ src/shared/actionLog.ts 4183f74a0f21
 src/shared/auditShape.ts 5d37cae8c5f0
 src/shared/localOrigin.ts 26f99e4f1928
 src/shared/sessionKey.ts ab2fa7617802
-src/types/agentOnboard.ts 488a56d3e926
+src/types/agentOnboard.ts 08d46c4de7c0
 src/types/home.ts cedc7119117d
 src/types/inlineAttribution.ts f4e6759adb6d
 src/web/AgentOnboard/AgentCard.tsx 2f157b7bf6d9
@@ -466,7 +466,7 @@ src/web/AgentOnboard/Gains.tsx 5dd221d1770f
 src/web/AgentOnboard/IsolationConfig.tsx ae7060ad6cce
 src/web/AgentOnboard/KeyMgmt.tsx 1f40e96ae2f1
 src/web/AgentOnboard/McpClientsPanel.tsx b6493df2ca1d
-src/web/AgentOnboard/McpToolConfig.tsx 0450306a0a33
+src/web/AgentOnboard/McpToolConfig.tsx 5bb834b70576
 src/web/AgentOnboard/OneClickOnboard.tsx 6d27b6fefff5
 src/web/AgentOnboard/TestPanel.tsx 616d8c8aaa4f
 src/web/AgentOnboard/agentOnboardEntry.tsx fb35983bae60
@@ -476,14 +476,14 @@ src/web/AgentOnboard/cards.ts 3dc5d5885b15
 src/web/AgentOnboard/coreOnboard.ts e107daf27b9a
 src/web/AgentOnboard/onboardState.ts 3b1368aac6d8
 src/web/AgentOnboard/store.ts 0e28d5609de5
-src/web/AgentOnboard/useBackendMirror.ts 0cbebeea7d03
+src/web/AgentOnboard/useBackendMirror.ts 34d3128af111
 src/web/Home/Dashboard.tsx d0a5545068e5
 src/web/Home/HomePage.tsx f9a5af50ef63
 src/web/Home/LayerGraphPanel.tsx 7c94457e288e
 src/web/Home/LoginModal.tsx c9224c5e3622
 src/web/Home/ProgramLogPanel.tsx 7951f28c2a5d
 src/web/Home/TopBar.tsx 5a0e8315bc3a
-src/web/Home/coreHome.ts 379a4e7917e6
+src/web/Home/coreHome.ts 650c6ce5d635
 src/web/Home/crossTabAuth.ts d85780df575e
 src/web/Home/layerGraph.ts 9a728a7ec61e
 src/web/Home/layerGraphLayout.ts 8215d57492af
@@ -682,7 +682,7 @@ src/web/test-setup.ts 3a2ad06d2218
 src/web/vite-env.d.ts 191b7a12f3de
 src/web/write/DedupCard.tsx f1a434a39892
 src/web/write/WriteForm.tsx ae3bb29058ff
-src/web/write/WritePage.tsx 869c8f162885
+src/web/write/WritePage.tsx 4431cd14aaf1
 src/web/write/coreWrite.ts cd1d5bf295a1
 src/web/write/logic.ts ecb4e9d45e79
 src/web/write/spec.ts 27df79f585c2

@@ -294,7 +294,7 @@ export class AgentOnboardService<B extends OnboardBackend | null = null> {
         mcpTools: {
           recall_memory: { project_id: 'p1', scene: 'default', mode: null }, // R2 带 project_id
           write_memory: { project_id: 'p1' },
-          get_user_preferences: { user_id: 'u1' },
+          get_preferences: { user_id: 'u1' },
         },
         channels: { webhook: true, apiPull: true }, // R4 双通道至少一
         apiKeyPlaintext: null, // R5 脱敏

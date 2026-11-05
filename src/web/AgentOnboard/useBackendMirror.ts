@@ -30,7 +30,7 @@ export function toServiceInput(a: UiAgentCard): AgentCardInput {
     mcpTools: {
       recall_memory: { project_id: 'p1', scene: a.tools.recall.scene, mode: a.tools.recall.mode || null, top_k: a.tools.recall.topk },
       write_memory: { project_id: 'p1' },
-      get_user_preferences: { user_id: 'u1' },
+      get_preferences: { user_id: 'u1' },
     },
     channels: { webhook: a.chan.webhook, apiPull: a.chan.api },
   };

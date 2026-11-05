@@ -176,7 +176,7 @@ test('McpToolConfig：三个工具 + 原型文案', async () => {
   render(<McpToolConfig tools={SEED_AGENTS[0].tools} onChange={(t) => got.push(t)} />);
   expect(screen.getByText(/recall_memory top_k=5 scene=task_start/)).toBeInTheDocument();
   expect(screen.getByText('write_memory')).toBeInTheDocument();
-  expect(screen.getByText('get_user_preferences')).toBeInTheDocument();
+  expect(screen.getByText('get_preferences')).toBeInTheDocument();
   await userEvent.click(document.querySelector('input[data-tool="write"]') as HTMLInputElement);
   expect(got).toEqual(['write']);
 });

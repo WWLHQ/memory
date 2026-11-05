@@ -91,7 +91,7 @@
 ## 7. 租户与作用域纪律
 
 - **令牌作用域**：`write_memory` / `recall_memory` / `manage_memory` 统一 `projectInScope`；`'*'` 全放行，否则只能操作显式列出的项目；越界即返回 `-32602`。
-- **租户闭包**：`write_memory.user_id`、`get_user_preferences.user_id` 必须与会话身份一致，禁止跨租户读写。
+- **租户闭包**：`write_memory.user_id`、`get_preferences.user_id` 必须与会话身份一致，禁止跨租户读写。
 - **多租户池**：私人池 `P-<user>` 与共享池 `P-shared` 隔离；Agent 只能见令牌授权范围内的池。
 
 ### 7.1 身份契约与 `source_agent` 命名表
