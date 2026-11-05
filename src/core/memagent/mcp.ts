@@ -10,7 +10,8 @@ import { createMemAgent } from './agent.ts';
 import { InMemoryStorage } from './storage.ts';
 import { JsVectorBackend } from './vector.ts';
 import { FakeLlmProvider } from './llm.ts';
-import { assertMcpToken, tokenEquals, DEFAULT_MCP_ACCOUNT, projectInScope, type McpAccount } from './mcpAuth.ts';
+import { assertMcpToken, DEFAULT_MCP_ACCOUNT, projectInScope, type McpAccount } from './mcpAuth.ts';
+import { resolveAccountFor, type TokenStorePort } from './tokenStore.ts';
 import { MCP_INSTRUCTIONS, MCP_TOOLS } from './mcpSchema.ts';
 import { McpToolError, runListProjectsTool, runRecallTool } from './mcpRecall.ts';
 import type { StorageBackend, Pref, L0Port, MemReq, WriteResult } from './types.ts';
@@ -80,7 +81,6 @@ class Session {
     });
   }
 }
-
 export interface McpOptions {
   /** 注入已有 StorageBackend（如主进程共享的 FileStorage）；缺省用 InMemoryStorage */
   storage?: StorageBackend;
@@ -90,8 +90,11 @@ export interface McpOptions {
   port?: number;
   /** 必填：访问令牌（initialize / 任意请求的 params.token） */
   token: string;
-  /** 会话租户（客户端不得越过该 user_id）；缺省本机单用户 */
+  /** 会话租户（客户端不得越过该 user_id）；缺省本机单用户。D6-4 起为**引导令牌**的账户；
+   *  库令牌（tokenStore 签发）按各自记录解析账户。 */
   account?: McpAccount;
+  /** D6-4 令牌代理：受限令牌库（缺省无库 = 仅引导令牌可用，现状行为不变） */
+  tokenStore?: TokenStorePort;
   /** 单行 JSON 上限（字节），缺省 1 MiB */
   maxLineBytes?: number;
   /** 批次44-D4：共享 pending 队列存储端口；缺省内存实现，桌面建议注入 FilePendingStore */
@@ -110,6 +113,8 @@ const DEFAULT_MAX_LINE_BYTES = 1024 * 1024;
 
 interface SocketState {
   authed: boolean;
+  /** D6-4：鉴权成功后按令牌解析出的会话账户（引导令牌 → 引导账户；库令牌 → 库账户） */
+  account: McpAccount | null;
   session: Session | null;
   buffer: string;
 }
@@ -126,7 +131,7 @@ export function runMcpServer(opts: McpOptions): McpServerHandle {
   function stateOf(socket: Socket): SocketState {
     let st = sockets.get(socket);
     if (!st) {
-      st = { authed: false, session: null, buffer: '' };
+      st = { authed: false, account: null, session: null, buffer: '' };
       sockets.set(socket, st);
     }
     return st;
@@ -134,7 +139,10 @@ export function runMcpServer(opts: McpOptions): McpServerHandle {
 
   function sessionOf(socket: Socket): Session {
     const st = stateOf(socket);
-    if (!st.session) st.session = new Session(account, opts.storage, opts.l0, sharedPending);
+    if (!st.session) {
+      // D6-4：会话账户 = 鉴权时解析出的账户（st.account 已在鉴权点赋值，兜底引导账户防御）
+      st.session = new Session(st.account ?? account, opts.storage, opts.l0, sharedPending);
+    }
     return st.session;
   }
 
@@ -143,33 +151,40 @@ export function runMcpServer(opts: McpOptions): McpServerHandle {
       const { method, params } = req;
       const p = (params && typeof params === 'object' ? params : {}) as Record<string, unknown>;
 
-      // 鉴权：首个请求必须带 token（initialize/任意方法均可），之后该 socket 保持授权
+      // 鉴权：首个请求必须带 token（initialize/任意方法均可），之后该 socket 保持授权。
+      // D6-4：令牌 → 账户按库解析（引导令牌 → 引导账户；库令牌 → 各自 scope/is_admin/user_id；
+      // 未配置库时仅引导令牌可用 = 现状行为不变）。
       const st = stateOf(socket);
       if (!st.authed) {
-        if (!tokenEquals(typeof p.token === 'string' ? p.token : undefined, token)) {
+        const resolved = resolveAccountFor(typeof p.token === 'string' ? p.token : undefined, {
+          serverToken: token, store: opts.tokenStore, bootstrap: account,
+        });
+        if (!resolved) {
           send(socket, jsonError(req.id, -32001, 'unauthorized: 缺少或无效的 MCP token'));
           return;
         }
+        st.account = resolved;
         st.authed = true;
       }
 
       const sess = sessionOf(socket);
       const s = sess.ma;
       const sessionStorage = sess.storage;
-      const sessionUser = account.user_id;
+      const acct = sess.account; // D6-4：会话账户（每 socket 各自，不再全局共享）
+      const sessionUser = acct.user_id;
 
       switch (method) {
         // ── recall_memory ──────────────────────────────────────────────
         case 'recall_memory': {
           // 批次11：project_id 可省略（唯一项目自动定位）；返回背景/省量/金额提示
-          const out = await runRecallTool(s, sessionStorage, p, undefined, undefined, account);
+          const out = await runRecallTool(s, sessionStorage, p, undefined, undefined, acct);
           send(socket, ok(req.id, out.payload));
           return;
         }
 
         // ── list_projects ──────────────────────────────────────────────
         case 'list_projects': {
-          send(socket, ok(req.id, await runListProjectsTool(sessionStorage, account)));
+          send(socket, ok(req.id, await runListProjectsTool(sessionStorage, acct)));
           return;
         }
 
@@ -180,7 +195,7 @@ export function runMcpServer(opts: McpOptions): McpServerHandle {
             return;
           }
           // 三池可见性门禁（D6-2）：shared 恒可见 / user 仅 owner 或 admin / archive 仅 admin / general 按令牌 scope 列表
-          if (!projectInScope(account, p.project_id)) {
+          if (!projectInScope(acct, p.project_id)) {
             send(socket, jsonError(req.id, -32602, `当前 MCP 令牌作用域不含项目 ${p.project_id}（三池可见性校验，D6-2）`));
             return;
           }
@@ -265,26 +280,26 @@ export function runMcpServer(opts: McpOptions): McpServerHandle {
 
         // ── list_memories / get_memory（批次44-D5-1：治理盘点 + 精确读） ──
         case 'list_memories': {
-          send(socket, ok(req.id, await runListMemoriesTool(sessionStorage, p, account)));
+          send(socket, ok(req.id, await runListMemoriesTool(sessionStorage, p, acct)));
           return;
         }
         case 'get_memory': {
-          send(socket, ok(req.id, await runGetMemoryTool(sessionStorage, p, account)));
+          send(socket, ok(req.id, await runGetMemoryTool(sessionStorage, p, acct)));
           return;
         }
 
         // ── feedback / manage_memory（批次44-D5-2：反馈与生命周期治理） ──
         case 'feedback': {
-          send(socket, ok(req.id, await runFeedbackTool(s, sessionStorage, p, account)));
+          send(socket, ok(req.id, await runFeedbackTool(s, sessionStorage, p, acct)));
           return;
         }
         case 'manage_memory': {
-          send(socket, ok(req.id, await runManageMemoryTool(s, sessionStorage, p, account, { allowDelete })));
+          send(socket, ok(req.id, await runManageMemoryTool(s, sessionStorage, p, acct, { allowDelete })));
           return;
         }
         // ── gc_report（批次44-D5-3：遗忘周期报告，默认只演算） ──
         case 'gc_report': {
-          send(socket, ok(req.id, await runGcReportTool(s, p, account)));
+          send(socket, ok(req.id, await runGcReportTool(s, p, acct)));
           return;
         }
 

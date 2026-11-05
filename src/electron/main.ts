@@ -41,6 +41,7 @@ import { createServer as httpCreateServer } from 'node:http';
 import { runMcpServer } from '../core/memagent/mcp.ts';
 import { runMcpHttpServer } from '../core/memagent/mcpHttp.ts';
 import { ensureSharedProject } from '../core/memagent/mcpRecall.ts';
+import { FileTokenStore } from '../core/memagent/tokenStore.ts';
 import { createWebhook } from '../core/memagent/webhook.ts';
 import { createWebhookHttpServer } from './webhookServer.ts';
 import type { AuditAction, Category, Memory } from '../core/memagent/types.ts';
@@ -2578,7 +2579,11 @@ async function bootstrap(): Promise<void> {
   // D6-2：启动自动建共享项目 P-shared（若注册表无则建；只读镜像/无写权限时静默跳过，绝不阻碍启动）
   await ensureSharedProject(storage);
 
-  const mcp = runMcpServer({ storage, port: MCP_PORT, token: mcpToken, l0: l0Vault });
+  // D6-4 令牌代理：文件化受限令牌库 userData/mcp-tokens.json（0600；缺库 = 空库，引导令牌兜底 admin）。
+  // 库损坏 fail-fast（抛错阻断启动，绝不静默清空既有授权）；TCP 与 HTTP 共用同一实例。
+  const tokenStore = new FileTokenStore(join(USER_DATA, 'mcp-tokens.json'));
+
+  const mcp = runMcpServer({ storage, port: MCP_PORT, token: mcpToken, l0: l0Vault, tokenStore });
   mcp.ready
     .then((p) => { void mlog('bootstrap:mcp-listening', { port: p }); })
     .catch((e) => { void mlog('bootstrap:mcp-listen-error', String((e as Error)?.message ?? e)); });
@@ -2586,7 +2591,7 @@ async function bootstrap(): Promise<void> {
   // 标准 MCP streamable-http（DSH dsh-mcp-client 走这条路连记忆库；POST /mcp → initialize/tools/list/tools/call）
   // 批次33-C：同一端口另开 GET /recall/<一次性 id> = 聊天里「展开明细」链接指向的本机明细页（真折叠），只记命中与否，不记 id 与正文。
   const mcpHttp = runMcpHttpServer({
-    storage, port: MCP_HTTP_PORT, token: mcpToken, l0: l0Vault,
+    storage, port: MCP_HTTP_PORT, token: mcpToken, l0: l0Vault, tokenStore,
     // 批次41-R：同一条也落 actions.log（批次34 对 llm:* 的同一口径）——日志页读的是 actions.log，
     // 只写 main.log 等于「明细页有没有被点开过」对用户不可见。值只有 ok/miss，无 id、无正文。
     onViewDetail: (outcome) => {

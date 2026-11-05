@@ -13,7 +13,8 @@ import { InMemoryStorage } from './storage.ts';
 import { JsVectorBackend } from './vector.ts';
 import { FakeLlmProvider } from './llm.ts';
 import { ulid } from './ulid.ts';
-import { assertMcpToken, tokenEquals, tokenFromHeaders, DEFAULT_MCP_ACCOUNT, projectInScope, type McpAccount } from './mcpAuth.ts';
+import { assertMcpToken, tokenFromHeaders, DEFAULT_MCP_ACCOUNT, projectInScope, type McpAccount } from './mcpAuth.ts';
+import { resolveAccountFor, type TokenStorePort } from './tokenStore.ts';
 import { MCP_INSTRUCTIONS, MCP_TOOLS } from './mcpSchema.ts';
 import { runListProjectsTool, runRecallTool, type RecallDisplayMode } from './mcpRecall.ts';
 import { RecallDetailTickets } from './recallDetailTickets.ts';
@@ -132,8 +133,11 @@ export interface McpHttpOptions {
   host?: string;
   /** 必填：访问令牌（Authorization: Bearer / x-mcp-token） */
   token: string;
-  /** 会话租户（客户端不得越过该 user_id）；缺省本机单用户 */
+  /** 会话租户（客户端不得越过该 user_id）；缺省本机单用户。D6-4 起为**引导令牌**的账户；
+   *  库令牌（tokenStore 签发）按各自记录解析账户。 */
   account?: McpAccount;
+  /** D6-4 令牌代理：受限令牌库（缺省无库 = 仅引导令牌可用，现状行为不变） */
+  tokenStore?: TokenStorePort;
   /** 请求体上限（字节），缺省 1 MiB */
   maxBodyBytes?: number;
   /**
@@ -216,27 +220,28 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
     }
   };
 
-  /** 执行单个 MCP 工具调用（tools/call 的参数 name + arguments）；text = 供聊天窗口回显的提示行 */
-  async function callTool(name: string, args: Record<string, unknown>, client: string): Promise<{ result: unknown; text?: string }> {
+  /** 执行单个 MCP 工具调用（tools/call 的参数 name + arguments）；text = 供聊天窗口回显的提示行。
+   *  D6-4：acct = 本请求令牌解析出的会话账户（引导令牌 → 引导账户；库令牌 → 各自账户）。 */
+  async function callTool(name: string, args: Record<string, unknown>, client: string, acct: McpAccount): Promise<{ result: unknown; text?: string }> {
     switch (name) {
       case 'recall_memory': {
-        const out = await runRecallTool(ma, storage, args, undefined, client, account, {
+        const out = await runRecallTool(ma, storage, args, undefined, client, acct, {
           tickets: detailTickets, base: detailBase(),
         });
         return { result: out.payload, text: out.text };
       }
       case 'list_projects':
-        return { result: await runListProjectsTool(storage, account) };
+        return { result: await runListProjectsTool(storage, acct) };
       case 'write_memory': {
         const p = args;
         if (!p.content || typeof p.content !== 'string') throw new Error('write_memory.content 必填');
         if (!p.project_id || typeof p.project_id !== 'string') throw new Error('write_memory.project_id 必填');
         // 三池可见性门禁（D6-2）：shared 恒可见 / user 仅 owner 或 admin / archive 仅 admin / general 按令牌 scope 列表
-        if (!projectInScope(account, p.project_id)) {
+        if (!projectInScope(acct, p.project_id)) {
           throw new Error(`当前 MCP 令牌作用域不含项目 ${p.project_id}（三池可见性校验，D6-2）`);
         }
         // 租户闭包：客户端只能以会话身份写入，禁止冒用其它 user_id
-        if (p.user_id !== undefined && String(p.user_id) !== account.user_id) {
+        if (p.user_id !== undefined && String(p.user_id) !== acct.user_id) {
           throw new Error('write_memory.user_id 与会话租户不一致（禁止跨租户写入）');
         }
         const category = p.category ?? 'pitfall';
@@ -255,7 +260,7 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
           content: p.content,
           category,
           project_id: p.project_id,
-          user_id: account.user_id,
+          user_id: acct.user_id,
           session_id: p.session_id ? String(p.session_id) : undefined,
           source_agent: sa,
           ...knobs,
@@ -287,32 +292,32 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
       }
       case 'list_memories': {
         // 批次44-D5-1：治理盘点（与 TCP 共用 runListMemoriesTool）
-        return { result: await runListMemoriesTool(storage, args, account) };
+        return { result: await runListMemoriesTool(storage, args, acct) };
       }
       case 'get_memory': {
         // 批次44-D5-1：按 mem_id 精确读（与 TCP 共用 runGetMemoryTool）
-        return { result: await runGetMemoryTool(storage, args, account) };
+        return { result: await runGetMemoryTool(storage, args, acct) };
       }
       case 'feedback': {
         // 批次44-D5-2：用户反馈（与 TCP 共用 runFeedbackTool）
-        return { result: await runFeedbackTool(ma, storage, args, account) };
+        return { result: await runFeedbackTool(ma, storage, args, acct) };
       }
       case 'manage_memory': {
         // 批次44-D5-2：单条生命周期治理（与 TCP 共用 runManageMemoryTool，delete 受同一门禁）
-        return { result: await runManageMemoryTool(ma, storage, args, account, { allowDelete }) };
+        return { result: await runManageMemoryTool(ma, storage, args, acct, { allowDelete }) };
       }
       case 'gc_report': {
         // 批次44-D5-3：遗忘周期报告（与 TCP 共用 runGcReportTool，默认 dry_run=true）
-        return { result: await runGcReportTool(ma, args, account) };
+        return { result: await runGcReportTool(ma, args, acct) };
       }
       case 'get_preferences': {
         const p = args;
         if (!p.user_id || typeof p.user_id !== 'string') throw new Error('get_preferences.user_id 必填');
         // 租户闭包：只能读会话身份自己的偏好
-        if (String(p.user_id) !== account.user_id) {
+        if (String(p.user_id) !== acct.user_id) {
           throw new Error('get_preferences.user_id 与会话租户不一致（禁止跨租户读取）');
         }
-        const out: Pref[] = await ma.getPrefs(account.user_id);
+        const out: Pref[] = await ma.getPrefs(acct.user_id);
         // structuredContent 必须是 JSON 对象（MCP 规范），数组统一包一层 items
         return { result: { items: out } };
       }
@@ -322,7 +327,7 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
   }
 
   /** 处理一个 JSON-RPC 请求对象（MCP 单请求/单响应；不支持批量） */
-  async function handleRpc(req: Record<string, unknown>, client: string): Promise<Record<string, unknown>> {
+  async function handleRpc(req: Record<string, unknown>, client: string, acct: McpAccount): Promise<Record<string, unknown>> {
     const method = String(req.method ?? '');
     const id = ('id' in req ? (req.id as number | string | null | undefined) : null) ?? null;
     const params = (req.params && typeof req.params === 'object' ? req.params : {}) as Record<string, unknown>;
@@ -350,7 +355,7 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
         const name = String(params.name ?? '');
         const args = (params.arguments && typeof params.arguments === 'object' ? params.arguments : {}) as Record<string, unknown>;
         try {
-          const out = await callTool(name, args, client);
+          const out = await callTool(name, args, client, acct);
           // recall 首块 = 提示行（兼容纯文本客户端），随后完整 JSON、折叠明细（批次13）；同时给 structuredContent。
           // 批次12：模型常忽略 initialize.instructions → 结果末块再给一次展示方式硬约束（Qoder 实测必需）。
           const markdown = (out.result as { display?: { markdown?: string } }).display?.markdown;
@@ -423,7 +428,12 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
       res.end(JSON.stringify({ error: 'not found' }));
       return;
     }
-    if (!tokenEquals(tokenFromHeaders(req.headers), token)) {
+    // D6-4：令牌 → 账户按库解析（引导令牌 → 引导账户；库令牌 → 各自 scope/is_admin/user_id；
+    // 未配置库时仅引导令牌可用 = 现状行为不变）。解析失败一律 401。
+    const reqAccount = resolveAccountFor(tokenFromHeaders(req.headers), {
+      serverToken: token, store: opts.tokenStore, bootstrap: account,
+    });
+    if (!reqAccount) {
       res.writeHead(401, { 'Content-Type': 'application/json', 'WWW-Authenticate': 'Bearer' });
       res.end(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32001, message: 'unauthorized: 缺少或无效的 MCP token' } }));
       return;
@@ -484,7 +494,7 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
             ?? (ua && (isIdentifiableUserAgent(ua) || isTrustedClientSelfName(uaCached)) ? uaCached : undefined)
             ?? clientFromUserAgent(ua);
 
-          const rpcResp = await handleRpc(payload, client);
+          const rpcResp = await handleRpc(payload, client, reqAccount);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(rpcResp));
         } catch (e) {
