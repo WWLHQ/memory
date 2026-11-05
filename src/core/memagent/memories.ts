@@ -344,6 +344,10 @@ export async function coreWrite(input: WriteInput, ctx: WriteCtx): Promise<Write
   if (input.tags !== undefined && input.tags.length > 0) {
     mem.tags = input.tags.map((t) => String(t).trim()).filter((t) => t.length > 0);
   }
+  // 批次44-D5-4：显式传入才落库（历史行不带该字段 → 不进 session 视图，绝不拿 created_at 冒充）
+  if (input.session_id !== undefined && input.session_id.trim()) {
+    mem.session_id = input.session_id.trim();
+  }
   await storage.putMemory(mem);
   await vector.upsert(mem.mem_id, contentL1, { project_id: input.project_id, layer: deepest });
 

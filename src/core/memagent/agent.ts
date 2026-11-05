@@ -59,9 +59,72 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
     });
   }
 
+  /**
+   * 批次44-D5-4：会话工作记忆视图（scope='session'）。
+   * 不走向量：按 session_id 精确过滤 → created_at 倒序 → 最近 top_k 条 → 3000t 硬熔断。
+   * 不注入项目背景（避免别会话内容借道回灌）；历史行无 session_id 一律不进视图。
+   * 审计 / 省量 / 命中计数沿用与项目召回同一口径，便于回显与监控不出现两套数字。
+   */
+  async function sessionRecall(req: RecallReq, request_id: string, now: number): Promise<RecallResult> {
+    const sid = req.session_id?.trim();
+    if (!sid) throw new MemAgentError('E_VECTOR', 'scope=session 必须提供非空 session_id');
+    const topK = req.top_k ?? 5;
+    if (!Number.isInteger(topK) || topK < 1 || topK > 10) {
+      throw new MemAgentError('E_VECTOR', 'top_k 须在 1–10');
+    }
+    const all = await storage.listMemories({ project_id: req.project_id });
+    const candidates = all
+      .filter((m) => m.session_id === sid && !m.deleted && !m.merged_into)
+      .sort((a, b) => (b.created_at - a.created_at) || b.mem_id.localeCompare(a.mem_id));
+    const limited = candidates.slice(0, topK);
+    const preCapTokens = limited.reduce((n, m) => n + estTokens(m.content), 0);
+    // 硬熔断：会话视图没有语义分数，按「最近优先」从尾部丢弃（确定性，不按 score 排序）
+    const kept = [...limited];
+    let payload_tokens = preCapTokens;
+    while (payload_tokens > BUDGET.hard && kept.length > 0) {
+      const dropped = kept.pop()!;
+      payload_tokens -= estTokens(dropped.content);
+    }
+    const hits: Hit[] = kept.map((m) => ({
+      mem_id: m.mem_id, content: m.content, layer: m.layer, decay_class: m.decay_class,
+      pinned: m.pinned, locked: m.locked,
+      score: 0, // 未做语义相关度计算，0 是诚实值，不冒充相关度
+      evidence_ref: `l0:${m.mem_id}`,
+    }));
+    const background = { items: [], tokens: 0, candidates: 0 };
+    const savings = computeRecallSavings({ memories: all, hits, background, preCapTokens });
+    const budgetStatus = payload_tokens >= BUDGET.hard ? 'fused' : payload_tokens >= BUDGET.warn ? 'warn' : 'ok';
+    const result: RecallResult = {
+      hits, payload_tokens, pipeline_llm_tokens: 0,
+      budget: { ...BUDGET, status: budgetStatus },
+      mode: 'auto',
+      request_id,
+      scanned_memories: candidates.length,
+      background,
+      savings,
+    };
+    for (const h of hits) {
+      const m = await storage.getMemory(h.mem_id);
+      if (m) await storage.putMemory({ ...m, access_count: (m.access_count ?? 0) + 1, last_access_time: now });
+    }
+    await audit(request_id, 'recall', {
+      query: req.query, hits: hits.length, payload_tokens, scene: req.scene ?? 'default', mode: 'auto',
+      scope: 'session', session_id: sid,
+      evidence_thin: false, latency_ms: Date.now() - now, pipeline_llm_tokens: 0,
+      ...(req.client ? { client: req.client } : {}),
+      mems: hits.map((h) => h.mem_id), scanned_memories: candidates.length,
+      background_tokens: 0, bg_mems: [], corpus_tokens: savings.corpus_tokens,
+      injected_tokens: savings.injected_tokens, saved_tokens: savings.saved_tokens,
+      budget_trimmed_tokens: savings.budget_trimmed_tokens,
+    }, { project_id: req.project_id, user_id: req.user_id });
+    return result;
+  }
+
   async function recall(req: RecallReq): Promise<RecallResult> {
     const request_id = newRequestId();
     const now = Date.now();
+    // 批次44-D5-4：会话视图走独立非向量分支，项目召回路径一行不改
+    if (req.scope === 'session') return sessionRecall(req, request_id, now);
     const topK = req.top_k ?? 5;
     if (topK < 1 || topK > 10) throw new MemAgentError('E_VECTOR', 'top_k 须在 1–10');
     // 16.5：critical 禁 minimal（模式分流红线）

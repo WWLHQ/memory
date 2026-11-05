@@ -67,13 +67,17 @@ export type ErrorCode =
 /** ---------- 召回（§2.1 / 2.4） ---------- */
 export interface RecallReq {
   query: string;
-  top_k?: number;                 // 1–10，默认 5
+  top_k?: number;                 // 1–10，默认 5；scope='session' 时即「最近 N 条」上限
   project_id: string;             // 必填（19.4 跨 Agent 共享锚）
   user_id?: string;               // 个人偏好才用（19.4 / 9.2）
   scene?: Scene;
   mode?: RecallMode;
   /** 调用方标识（批次15）：MCP initialize.clientInfo 或 User-Agent 识别，落 recall 审计用于按 Agent 核验 */
   client?: string;
+  /** 批次44-D5-4：'project'（缺省）= 项目内语义检索；'session' = 本会话工作记忆，不走向量 */
+  scope?: 'project' | 'session';
+  /** scope='session' 时必填：写入时用的同一个 session_id；历史行无该字段不进会话视图 */
+  session_id?: string;
 }
 
 export interface Hit {
@@ -520,6 +524,11 @@ export interface Memory {
   conflict_id?: string;           // 冲突（9.7）
   version: number;                // 同步用（REQ-008）
   created_by_agent?: string;
+  /**
+   * 批次44-D5-4：写入时的会话归属（scope='session' 工作记忆视图用）。
+   * 可选向后兼容：历史行无该字段 = 不进任何会话视图，绝不拿 created_at / project_id 冒充。
+   */
+  session_id?: string;
   created_at: number;
   // ---- REQ-010 遗忘机制扩展（17.4，全部可选向后兼容） ----
   importance?: number;            // 知识重要程度 0–1

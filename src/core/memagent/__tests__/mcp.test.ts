@@ -7,6 +7,7 @@ import { scoreMemory } from '../forgetting.ts';
 import type { L0Vault } from '../l0vault.ts';
 import { createTestVault, TEST_ADMIN_PW, TEST_ADMIN_ID } from './l0Kit.ts';
 import { MemoryPendingStore } from '../pendingWrites.ts';
+import type { Memory } from '../types.ts';
 
 const TOKEN = 'mcp-test-token-0123456789abcdef0123456789abcdef';
 
@@ -776,6 +777,135 @@ describe('批次44-D5-3：gc_report（TCP）', () => {
       const r = await rpcCall(p, {
         jsonrpc: '2.0', id: 1006, method: 'gc_report',
         params: { token: TOKEN, project_id: 'P2' },
+      });
+      expect(r.error?.code).toBe(-32602);
+      expect(r.error?.message).toContain('作用域');
+    } finally {
+      scoped.stop();
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe('批次44-D5-4：recall_memory(scope=session)（TCP 8202 端到端）', () => {
+  let handle: McpServerHandle;
+  let port = 0;
+  let vault: L0Vault;
+  const storage = new InMemoryStorage();
+
+  function seedMem(over: Partial<Memory> & Pick<Memory, 'mem_id' | 'content'>): Memory {
+    return {
+      project_id: 'P1', enterprise_id: 'e1', team_id: 't1',
+      category: 'fact', layer: 'L1', decay_class: 'hot',
+      pinned: false, locked: false, version: 1, created_at: 0,
+      ...over,
+    };
+  }
+
+  beforeAll(async () => {
+    vault = (await createTestVault()).vault;
+    // 显式 created_at → 倒序结果确定；两条本会话、一条别会话、一条无 session_id 历史行、一条冷背景
+    await storage.putMemory(seedMem({ mem_id: 's_old', session_id: 'S-E2E', created_at: 100, content: '会话决策一：把会话工作记忆按会话标识精确过滤' }));
+    await storage.putMemory(seedMem({ mem_id: 's_new', session_id: 'S-E2E', created_at: 300, content: '会话决策二：倒序取最近若干条，不做语义相关度计算' }));
+    await storage.putMemory(seedMem({ mem_id: 's_mid', session_id: 'S-E2E', created_at: 200, content: '会话决策三：仍受项目作用域与预算硬熔断约束' }));
+    await storage.putMemory(seedMem({ mem_id: 's_other', session_id: 'S-OTHER', created_at: 400, content: '别的会话：不应出现在本次会话工作记忆视图里' }));
+    await storage.putMemory(seedMem({ mem_id: 's_legacy', created_at: 500, content: '历史行没有会话标识：不进任何会话视图，也不能拿时间冒充' }));
+    await storage.putMemory(seedMem({ mem_id: 's_bg', decay_class: 'cold', created_at: 600, content: '冷背景候选：项目召回仍走背景通道，会话视图不注入' }));
+    handle = runMcpServer({ port: 0, storage, token: TOKEN, l0: vault });
+    port = await handle.ready;
+  });
+  afterAll(() => { handle?.stop(); });
+
+  const call = (id: number, method: string, params: Record<string, unknown> = {}) =>
+    rpcCall(port, { jsonrpc: '2.0', id, method, params: { token: TOKEN, ...params } });
+
+  it('tools/list：recall_memory 增 scope/session_id；initialize 指令点名会话视图', async () => {
+    const list = await call(1100, 'tools/list');
+    const tools = (list.result as { tools: Array<{ name: string; inputSchema: { properties: Record<string, unknown> } }> }).tools;
+    expect(tools.map((t) => t.name)).toHaveLength(10); // 参数变体，不新增 tools/list 条目
+    const props = tools.find((t) => t.name === 'recall_memory')!.inputSchema.properties;
+    expect(props).toHaveProperty('scope');
+    expect(props).toHaveProperty('session_id');
+    expect(tools.find((t) => t.name === 'write_memory')!.inputSchema.properties).toHaveProperty('session_id');
+    const init = await call(1101, 'initialize');
+    expect((init.result as { instructions: string }).instructions).toContain("scope='session'");
+  });
+
+  it('B 效果验证：write_memory 带 session_id → 真落库，且随即能被会话视图召回', async () => {
+    const w = await call(1102, 'write_memory', {
+      project_id: 'P1', category: 'decision', source_agent: 'workbuddy', session_id: 'S-WRITE',
+      content: '端到端写入验证：会话工作记忆由 write_memory 的会话标识落库，随后 recall_memory 用同一标识取回，这条内容足够长以通过质量门',
+    });
+    expect(w.error).toBeUndefined();
+    const memId = (w.result as { mem_id: string }).mem_id;
+    expect(memId).toBeTruthy();
+    expect((await storage.getMemory(memId))?.session_id).toBe('S-WRITE');
+
+    const r = await call(1103, 'recall_memory', {
+      project_id: 'P1', query: '完全无关的检索词', scope: 'session', session_id: 'S-WRITE', top_k: 5,
+    });
+    expect(r.error).toBeUndefined();
+    const out = r.result as { hits: Array<{ mem_id: string; score: number }>; background: { items: unknown[] } };
+    expect(out.hits.map((h) => h.mem_id)).toEqual([memId]); // 查询词无关也照回：真不走向量
+    expect(out.hits[0].score).toBe(0); // 未计算相关度，0 是诚实值
+    expect(out.background.items).toHaveLength(0);
+  });
+
+  it('B 效果验证：会话视图按 created_at 倒序 + top_k 截断，别会话/历史行一律不混入', async () => {
+    const r = await call(1104, 'recall_memory', {
+      project_id: 'P1', query: '任意', scope: 'session', session_id: 'S-E2E', top_k: 2,
+    });
+    expect(r.error).toBeUndefined();
+    const out = r.result as {
+      hits: Array<{ mem_id: string }>; scanned_memories: number;
+      background: { items: unknown[]; candidates: number }; display: { line: string; markdown: string };
+    };
+    expect(out.hits.map((h) => h.mem_id)).toEqual(['s_new', 's_mid']);
+    expect(out.scanned_memories).toBe(3);
+    expect(out.background.candidates).toBe(0); // 会话视图不注入项目背景
+    expect(out.display.line).toContain('🧠 Memory'); // 回显档位仍按既有逻辑组装
+    expect(out.display.markdown).toBeTruthy();
+  });
+
+  it('A 回归：不带 scope 仍走项目语义召回，背景通道与历史行可见性不变', async () => {
+    // top_k=10 让全部 hot 候选都进命中（默认 5 时，write_memory 那条带 embedding 会按分数挤掉一条 0 分种子行，
+    // 那是既有打分行为，不是会话分支造成的）；冷候选仍留在背景池，可验证背景通道未被改掉。
+    const r = await call(1105, 'recall_memory', { project_id: 'P1', query: '会话决策', top_k: 10 });
+    expect(r.error).toBeUndefined();
+    const out = r.result as {
+      hits: Array<{ mem_id: string }>; background: { candidates: number }; mode: string;
+    };
+    expect(out.hits.length).toBeGreaterThan(0);
+    expect(out.hits.some((h) => h.mem_id === 's_legacy')).toBe(true);  // 项目视图可见无 session_id 的历史行
+    expect(out.hits.some((h) => h.mem_id === 's_other')).toBe(true);   // 也可见别会话行
+    expect(out.background.candidates).toBeGreaterThan(0);
+    expect(out.mode).toBe('auto');
+  });
+
+  it('C2 输入变异：缺 session_id / 空串 / 非法 scope / top_k 越界 → -32602', async () => {
+    const cases: Array<Record<string, unknown>> = [
+      { project_id: 'P1', query: 'q', scope: 'session' },
+      { project_id: 'P1', query: 'q', scope: 'session', session_id: '' },
+      { project_id: 'P1', query: 'q', scope: 'bogus', session_id: 'S-E2E' },
+      { project_id: 'P1', query: 'q', scope: 'session', session_id: 'S-E2E', top_k: 0 },
+      { project_id: 'P1', query: 'q', scope: 'session', session_id: 'S-E2E', top_k: 11 },
+    ];
+    for (const params of cases) {
+      const r = await call(1106, 'recall_memory', params);
+      expect(r.error?.code).toBe(-32602);
+    }
+  });
+
+  it('受限令牌：会话视图不绕过项目作用域 → -32602', async () => {
+    const scoped = runMcpServer({
+      port: 0, storage, token: TOKEN, l0: vault,
+      account: { user_id: 'u1', team_id: 't1', enterprise_id: 'e1', scope_project_ids: ['P1'] },
+    });
+    const p = await scoped.ready;
+    try {
+      const r = await rpcCall(p, {
+        jsonrpc: '2.0', id: 1107, method: 'recall_memory',
+        params: { token: TOKEN, project_id: 'P2', query: 'q', scope: 'session', session_id: 'S-E2E' },
       });
       expect(r.error?.code).toBe(-32602);
       expect(r.error?.message).toContain('作用域');

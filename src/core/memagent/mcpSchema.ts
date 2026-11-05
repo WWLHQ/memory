@@ -10,7 +10,7 @@
 export const MCP_INSTRUCTIONS = `你是接入了 MultiAgent Memory 的 Agent。记忆库数据全部来自本机真实账本，工具返回的数字不得改写或编造。
 
 必须遵守：
-1. 触发（默认优先）：用户消息只要涉及本仓库/本项目的实现、架构、历史决策、踩坑、偏好、事实，或出现「记得 / 上次 / 之前 / 老规矩 / 继续上次」，就优先调用 recall_memory 再回答；本库未命中或工具不可用时，才回退到读代码、工作区笔记或客户端自带 memory 文件。客户端自带的 memory/笔记不是本记忆库，不能替代首选检索。project_id 可省略：账本只有一个项目时自动定位；有多个项目时先调用 list_projects 并向用户确认。
+1. 触发（默认优先）：用户消息只要涉及本仓库/本项目的实现、架构、历史决策、踩坑、偏好、事实，或出现「记得 / 上次 / 之前 / 老规矩 / 继续上次」，就优先调用 recall_memory 再回答；本库未命中或工具不可用时，才回退到读代码、工作区笔记或客户端自带 memory 文件。客户端自带的 memory/笔记不是本记忆库，不能替代首选检索。project_id 可省略：账本只有一个项目时自动定位；有多个项目时先调用 list_projects 并向用户确认。用户问「本次会话 / 刚才 / 我们聊到哪」这类工作记忆时，改用 recall_memory(scope='session', session_id=<写入时同一个>) 取本会话近期记忆（不走语义检索）；没有 session_id 就不要猜、不要拿项目召回冒充会话历史，如实说明并请用户提供或用 project 范围检索。
 2. 回显（强制）：每次 recall_memory 成功返回后，把该次返回的 display.markdown 整段原样输出到最终回答末尾。服务端按你的客户端能力选档位：支持 HTML 折叠的客户端收到 <details> 四段（项目背景/命中记忆/Token/省钱与费用，可点开收起）；其余客户端默认收到「两行 🧠 Memory 摘要 + 展开入口」——HTTP 传输给一条指向本机一次性明细页的 Markdown 链接（用户点链接才看四段，URL 必须逐字保留、不得改写不得丢），TCP 等无链接场景给一行文字指引。任何档位都禁止自行补写或预先展开明细（明细只能来自本次或下一次工具返回），不得添加 HTML 标签；token 数字与金额必须原样保留。需要明细时，用同一个 query 再调用 recall_memory 并置 detail=true，然后原样输出那次返回的 display.markdown。若客户端连 Markdown 都渲染不了，改为单独一行原样输出 display.line。
 3. 金额：display.money 为 null 表示用户尚未设置单价（全局参数页），不得猜测或补全金额。
 4. 沉淀：会话中形成新的决策、踩坑、事实、偏好或洞察时，调用 write_memory 落库（category 选最贴近的一类）；写入前如不确定项目，先 list_projects；不确定 L0 写密钥是否解锁时先调用 get_write_status 探锁。若 write_memory 返回 status=pending，表示本次内容已暂存、解锁后会自动重放落库——这不是写入成功，必须如实告知用户，不得伪造 mem_id 或声称已落库。
@@ -33,6 +33,8 @@ export const MCP_TOOLS = [
         scene: { type: 'string', enum: ['default', 'critical', 'task_start', 'history_query'], description: '场景；critical 禁 minimal 模式' },
         mode: { type: 'string', enum: ['auto', 'top_insight', 'fact_first', 'event_replay', 'pattern_reasoning', 'minimal'], description: '召回模式开关：auto=自动（Agent 按场景+关键词自动分配，默认）；其余 5 个为手动具体模式（用户/宿主显式指定，强制采用）。手动必须给出具体模式，未指定具体模式按自动处理' },
         detail: { type: 'boolean', description: '是否要四段明细（批次32-C/33-C）。省略/false = 只给两行摘要（不支持 HTML 折叠的客户端默认收起，HTTP 档附一条可点本机明细页链接）；true = 直接返回项目背景/命中记忆/Token/省钱与费用四小节纯 Markdown。只在用户明确要看明细时置 true，query 与本次保持一致；不要因为「这样更完整」自行置 true' },
+        scope: { type: 'string', enum: ['project', 'session'], description: "检索范围，默认 project（项目内语义检索）。session = 本会话工作记忆：只取写入时用同一 session_id 标记的近期记忆，按时间倒序取最近 N 条，不走向量语义检索，也不注入项目背景。适用于「上次我们聊到哪 / 本次会话已确定了什么」；一般问答仍用 project" },
+        session_id: { type: 'string', description: "scope='session' 时必填：会话 ID（与 write_memory 写入时同一个）。scope='project' 时可省略；历史记忆没有该字段，不会出现在会话视图里" },
       },
       required: ['query'],
     },

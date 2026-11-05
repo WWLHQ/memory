@@ -162,6 +162,28 @@ export async function runRecallTool(
   const query = typeof args.query === 'string' ? args.query.trim() : '';
   if (!query) throw new McpToolError('recall_memory.query 必填且不能为空（传入用户问题/关键词）');
 
+  // 批次44-D5-4：scope/session_id 参数校验（MCP 层给 -32602，内核再兜一层）
+  const viewScope = args.scope === undefined ? 'project' : args.scope;
+  if (viewScope !== 'project' && viewScope !== 'session') {
+    throw new McpToolError(`recall_memory.scope 非法：${String(viewScope)}（允许：project/session）`);
+  }
+  let sessionId: string | undefined;
+  if (args.session_id !== undefined) {
+    if (typeof args.session_id !== 'string' || !args.session_id.trim()) {
+      throw new McpToolError('recall_memory.session_id 须为非空字符串');
+    }
+    sessionId = args.session_id.trim();
+  }
+  if (viewScope === 'session' && !sessionId) {
+    throw new McpToolError('recall_memory.scope=session 时 session_id 必填且须为非空字符串');
+  }
+  if (viewScope === 'session' && args.top_k !== undefined) {
+    const n = Number(args.top_k);
+    if (!Number.isInteger(n) || n < 1 || n > 10) {
+      throw new McpToolError('recall_memory.top_k 须为 1–10 的整数（scope=session 时为最近 N 条上限）');
+    }
+  }
+
   const infos = projectInfosFromMemories(await storage.listMemories({}));
   const project = resolveProjectId(infos, args.project_id);
   // 令牌项目作用域（批次26-B P1-10）：'*' 全放行；否则只能命中显式列出的项目
@@ -175,6 +197,9 @@ export async function runRecallTool(
     scene: (args.scene as Scene) ?? 'default',
     mode: (args.mode as RecallMode) ?? null,
     client,
+    // 批次44-D5-4：scope=project 时两个字段均为 undefined/缺省，项目召回路径行为完全不变
+    scope: viewScope,
+    session_id: sessionId,
   });
   // 累计口径必须包含本次召回：时钟取召回完成之后（召回审计的 ts 不晚于此刻）
   const stamp = now ?? Date.now();

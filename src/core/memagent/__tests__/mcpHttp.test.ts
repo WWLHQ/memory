@@ -9,6 +9,7 @@ import { InMemoryStorage } from '../storage.ts';
 import type { L0Vault } from '../l0vault.ts';
 import { createTestVault, TEST_ADMIN_PW, TEST_ADMIN_ID } from './l0Kit.ts';
 import { MemoryPendingStore } from '../pendingWrites.ts';
+import type { Memory } from '../types.ts';
 
 const TOKEN = 'mcp-http-token-0123456789abcdef0123456789abcdef';
 
@@ -1055,5 +1056,167 @@ describe('批次44-D5-3：gc_report（HTTP）', () => {
     }
     expect((await storage.getMemory('mem_gc_http'))?.decay_class).toBe('warm');
     expect(await storage.queryAudit({})).toHaveLength(1); // 失败请求未写审计
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+describe('批次44-D5-4：recall_memory(scope=session)（HTTP 8204 端到端）', () => {
+  let handle: McpHttpHandle;
+  let url = '';
+  let vault: L0Vault;
+  const storage = new InMemoryStorage();
+
+  function seedMem(over: Partial<Memory> & Pick<Memory, 'mem_id' | 'content'>): Memory {
+    return {
+      project_id: 'P1', enterprise_id: 'e1', team_id: 't1',
+      category: 'fact', layer: 'L1', decay_class: 'hot',
+      pinned: false, locked: false, version: 1, created_at: 0,
+      ...over,
+    };
+  }
+
+  beforeAll(async () => {
+    vault = (await createTestVault()).vault;
+    await storage.putMemory(seedMem({ mem_id: 'h_old', session_id: 'S-HTTP', created_at: 100, content: '会话纪要一：确认会话视图按会话标识精确过滤' }));
+    await storage.putMemory(seedMem({ mem_id: 'h_new', session_id: 'S-HTTP', created_at: 300, content: '会话纪要二：按时间倒序取最近若干条' }));
+    await storage.putMemory(seedMem({ mem_id: 'h_mid', session_id: 'S-HTTP', created_at: 200, content: '会话纪要三：不注入项目背景，避免别会话借道回灌' }));
+    await storage.putMemory(seedMem({ mem_id: 'h_other', session_id: 'S-ELSE', created_at: 400, content: '别的会话：不可出现在本次会话工作记忆视图' }));
+    await storage.putMemory(seedMem({ mem_id: 'h_legacy', created_at: 500, content: '历史行无会话标识：不进会话视图，也不拿创建时间冒充' }));
+    await storage.putMemory(seedMem({ mem_id: 'h_bg', decay_class: 'cold', created_at: 600, content: '冷背景候选：项目召回背景通道仍然生效' }));
+    handle = runMcpHttpServer({ port: 0, token: TOKEN, storage, l0: vault });
+    url = `http://127.0.0.1:${await handle.ready}/mcp`;
+  });
+  afterAll(() => { handle?.stop(); });
+
+  type ToolBody = {
+    result: {
+      isError: boolean;
+      structuredContent?: Record<string, unknown>;
+      content?: Array<{ text: string }>;
+    };
+  };
+  async function tool(id: number, name: string, args: Record<string, unknown> = {}): Promise<ToolBody> {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` },
+      body: JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } }),
+    });
+    return (await res.json()) as ToolBody;
+  }
+  async function rpc(method: 'tools/list' | 'initialize'): Promise<Record<string, unknown>> {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1200, method }),
+    });
+    return ((await res.json()) as { result: Record<string, unknown> }).result;
+  }
+
+  it('tools/list 仍是 10 个工具；recall/write schema 含 session_id；instructions 点名会话视图', async () => {
+    const list = await rpc('tools/list');
+    const tools = list.tools as Array<{ name: string; inputSchema: { properties: Record<string, unknown> } }>;
+    expect(tools.map((t) => t.name)).toHaveLength(10); // 参数变体，不新增条目
+    const props = tools.find((t) => t.name === 'recall_memory')!.inputSchema.properties;
+    expect(props).toHaveProperty('scope');
+    expect(props).toHaveProperty('session_id');
+    expect(tools.find((t) => t.name === 'write_memory')!.inputSchema.properties).toHaveProperty('session_id');
+    expect(String((await rpc('initialize')).instructions)).toContain("scope='session'");
+  });
+
+  it('B 效果验证：tools/call write_memory 带 session_id → 落库 → 会话视图取回（查询词无关也照回）', async () => {
+    const w = await tool(1201, 'write_memory', {
+      project_id: 'P1', category: 'decision', source_agent: 'workbuddy', session_id: 'S-WRITE-HTTP',
+      content: 'HTTP 端到端写入验证：会话工作记忆由写入接口的会话标识落库，随后用同一个标识从会话视图取回，这条内容足够长以通过质量门',
+    });
+    expect(w.result.isError).toBe(false);
+    const memId = (w.result.structuredContent as { mem_id: string }).mem_id;
+    expect(memId).toBeTruthy();
+    expect((await storage.getMemory(memId))?.session_id).toBe('S-WRITE-HTTP');
+
+    const out = await tool(1202, 'recall_memory', {
+      project_id: 'P1', query: 'zzzz 完全无关', scope: 'session', session_id: 'S-WRITE-HTTP', top_k: 5,
+    });
+    expect(out.result.isError).toBe(false);
+    const sc = out.result.structuredContent as {
+      hits: Array<{ mem_id: string; score: number }>; background: { items: unknown[] };
+      display: { line: string; markdown: string };
+    };
+    expect(sc.hits.map((h) => h.mem_id)).toEqual([memId]);
+    expect(sc.hits[0].score).toBe(0);
+    expect(sc.background.items).toHaveLength(0);
+    expect(out.result.content![0].text).toBe(sc.display.line); // 回显档位仍按既有口径组装
+    expect(sc.display.markdown).toBeTruthy();
+  });
+
+  it('B 效果验证：倒序 + top_k 截断；别会话 / 历史行不混入；写入 recall 审计', async () => {
+    const before = (await storage.queryAudit({ action: 'recall' })).length;
+    const out = await tool(1203, 'recall_memory', {
+      project_id: 'P1', query: '刚才', scope: 'session', session_id: 'S-HTTP', top_k: 2,
+    });
+    expect(out.result.isError).toBe(false);
+    const sc = out.result.structuredContent as {
+      hits: Array<{ mem_id: string }>; scanned_memories: number; background: { candidates: number };
+    };
+    expect(sc.hits.map((h) => h.mem_id)).toEqual(['h_new', 'h_mid']);
+    expect(sc.scanned_memories).toBe(3);
+    expect(sc.background.candidates).toBe(0);
+    const audits = await storage.queryAudit({ request_id: (out.result.structuredContent as { request_id: string }).request_id });
+    expect(audits).toHaveLength(1);
+    expect(audits[0].detail).toMatchObject({ scope: 'session', session_id: 'S-HTTP', hits: 2 });
+    expect((await storage.queryAudit({ action: 'recall' })).length).toBe(before + 1);
+  });
+
+  it('A 回归：scope=project 与不带 scope 命中一致（项目语义路径一行未改）', async () => {
+    const plain = await tool(1204, 'recall_memory', { project_id: 'P1', query: '会话纪要', top_k: 10 });
+    const explicit = await tool(1205, 'recall_memory', {
+      project_id: 'P1', query: '会话纪要', top_k: 10, scope: 'project', session_id: 'S-HTTP',
+    });
+    expect(plain.result.isError).toBe(false);
+    expect(explicit.result.isError).toBe(false);
+    const ids = (b: ToolBody) =>
+      ((b.result.structuredContent as { hits: Array<{ mem_id: string }> }).hits).map((h) => h.mem_id);
+    expect(ids(explicit)).toEqual(ids(plain));
+    expect(ids(plain)).toContain('h_legacy'); // 项目视图仍可见无 session_id 的历史行
+    const bg = (plain.result.structuredContent as { background: { candidates: number } }).background;
+    expect(bg.candidates).toBeGreaterThan(0);
+  });
+
+  it('C2 输入变异：非法参数 → isError:true，且不写 recall 审计', async () => {
+    const before = (await storage.queryAudit({ action: 'recall' })).length;
+    for (const args of [
+      { project_id: 'P1', query: 'q', scope: 'session' },
+      { project_id: 'P1', query: 'q', scope: 'session', session_id: '' },
+      { project_id: 'P1', query: 'q', scope: 'bogus', session_id: 'S-HTTP' },
+      { project_id: 'P1', query: 'q', scope: 'session', session_id: 'S-HTTP', top_k: 11 },
+    ]) {
+      const out = await tool(1206, 'recall_memory', args);
+      expect(out.result.isError).toBe(true);
+    }
+    expect((await storage.queryAudit({ action: 'recall' })).length).toBe(before);
+  });
+
+  it('受限令牌：会话视图不绕过项目作用域 → isError:true', async () => {
+    const scoped = runMcpHttpServer({
+      port: 0, token: TOKEN, storage, l0: vault,
+      account: { user_id: 'u1', team_id: 't1', enterprise_id: 'e1', scope_project_ids: ['P1'] },
+    });
+    const scopedUrl = `http://127.0.0.1:${await scoped.ready}/mcp`;
+    try {
+      const res = await fetch(scopedUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` },
+        body: JSON.stringify({
+          jsonrpc: '2.0', id: 1207, method: 'tools/call',
+          params: {
+            name: 'recall_memory',
+            arguments: { project_id: 'P2', query: 'q', scope: 'session', session_id: 'S-HTTP' },
+          },
+        }),
+      });
+      const body = (await res.json()) as ToolBody;
+      expect(body.result.isError).toBe(true);
+    } finally {
+      scoped.stop();
+    }
   });
 });

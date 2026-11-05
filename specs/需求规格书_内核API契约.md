@@ -40,7 +40,7 @@ const ma = createMemAgent({
 
 | API | 签名 | 返回 | 出处 |
 |---|---|---|---|
-| 召回 | `ma.recall(RecallReq) → RecallResult` | 命中记忆 + 证据 + 预算 + request_id | 2.4 |
+| 召回 | `ma.recall(RecallReq) → RecallResult` | 命中记忆 + 证据 + 预算 + request_id；`scope='session'` 走非向量会话视图（§2.1.1） | 2.4 / 批次44-D5-4 |
 | 写入 | `ma.write(MemReq) → WriteResult` | 新 mem_id + 查重结果 + 审计 | 2.2 / 6.1 |
 | 生命周期 | `ma.gc(GcReq) → GcReport` | 衰减/裁决/嫁接报告；`dry_run=true` 只演算不落库（§2.4） | 9.7 / 6.2 / 批次44-D5-3 |
 | 偏好 | `ma.getPrefs(user_id) → Pref[]` | 个人偏好（user_id 级跨 Agent） | 19.4 |
@@ -60,6 +60,9 @@ interface RecallReq {
   user_id?: string;               // 个人偏好才用（19.4 / 9.2）
   scene?: "task_start"|"critical"|"default";
   mode?: "top_insight"|"fact_first"|"event_replay"|"pattern_reasoning"|"minimal"|null; // null=自动（16.5 critical 禁 minimal）
+  client?: string;                // 调用方标识（批次15），落 recall 审计
+  scope?: "project"|"session";    // 批次44-D5-4：缺省/'project' = 原语义召回；'session' = 非向量会话视图
+  session_id?: string;            // scope='session' 时必填；与 write 落库的 session_id 同一个
 }
 interface RecallResult {
   hits: Hit[];                    // 含 decay_class/pinned/locked/score/证据链接
@@ -70,6 +73,23 @@ interface RecallResult {
   request_id: string;             // 审计链路（18.2-E）
 }
 ```
+
+#### 2.1.1 `scope='session'` 会话工作记忆视图（批次44-D5-4）
+
+`ma.recall()` 在 `req.scope === 'session'` 时**早返回**到 `sessionRecall()`，原项目召回路径（`vector.embed` → `hardFilter` → `scoreMemory` → 背景/省量）一行未改；TCP(8202) 与 HTTP(8204) 都经 `runRecallTool()` 复用同一参数校验与回显组装，不新增 `tools/list` 条目。
+
+| 维度 | 口径 |
+|---|---|
+| 过滤 | `storage.listMemories({ project_id })` 后按 `m.session_id === session_id` **精确过滤**，并排除 `deleted` / `merged_into`；历史行无 `session_id` 一律不进视图，**绝不拿 `created_at` / `project_id` 冒充** |
+| 排序 / 截断 | `created_at` 倒序（同时间戳用 `mem_id` 降序兜底保证确定性）→ 取最近 `top_k` 条（1–10，缺省 5）|
+| 相关度 | 不做语义检索，故 `hit.score = 0` 是「未计算」的诚实值；`pipeline_llm_tokens = 0`、`mode = 'auto'`、`evidence_thin` 不下发 |
+| 背景 | `background = { items: [], tokens: 0, candidates: 0 }`，不注入项目背景（避免别会话内容借道回灌）；`savings` 仍由 `computeRecallSavings()` 按同一口径实算 |
+| 预算 | 仍守 `BUDGET.hard = 3000`；超限按「最近优先」从**尾部**丢弃（不看 score，确定性），`payload_tokens` 按最终 hits 重算 |
+| 作用域 | MCP 层 `projectInScope` 校验在前；内核 `listMemories({ project_id })` 再做项目隔离，受限令牌无法借会话视图越界 |
+| 审计 | 写 `action='recall'`，detail 含 `scope:'session'` / `session_id` / `hits` / `scanned_memories` / `background_tokens:0` / 省量字段；命中同样 `access_count+1` 并更新 `last_access_time` |
+| 写入侧 | `write_memory.session_id` 已存在于 `MemReq` / `WriteInput`；本次让 `coreWrite` 在**显式传入且非空**时才落 `Memory.session_id`（可选字段，历史行兼容）；sqlite/file 存储整行 JSON 序列化，无需改表 |
+
+参数非法（缺 `session_id`、空串、非字符串、`scope` 非法、`top_k` 非 1–10 整数）在 MCP 层回 `-32602`，内核 `sessionRecall()` 再兜一层 `E_VECTOR`；不带 `scope` 或 `scope='project'` 时 `session_id` 不参与过滤，既有召回行为完全不变。
 
 ### 2.2 写入 `write`
 ```ts
