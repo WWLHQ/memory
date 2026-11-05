@@ -36,11 +36,16 @@ export interface RefinedLayers {
   content_l6?: string;
 }
 
-/** 召回模式（16.5；null = 自动） */
-export type RecallMode = 'top_insight' | 'fact_first' | 'event_replay' | 'pattern_reasoning' | 'minimal' | null;
+/**
+ * 召回模式（16.5）。
+ *   - null / 'auto' = 自动（Agent 按 scene×关键词 自动分配具体模式，见 recallModes.ts §2.4.4）；
+ *   - 其余 5 个为「手动」具体模式（用户/宿主显式指定，强制采用）。
+ * 顶层开关即「自动 / 手动」：手动必须给出下面 5 个之一，否则边界校验报错。
+ */
+export type RecallMode = 'top_insight' | 'fact_first' | 'event_replay' | 'pattern_reasoning' | 'minimal' | 'auto' | null;
 
-/** 召回场景 */
-export type Scene = 'task_start' | 'critical' | 'default';
+/** 召回场景（19.4 / 2.4.4） */
+export type Scene = 'task_start' | 'critical' | 'default' | 'history_query';
 
 /** 错误码（§6，各端统一处理） */
 export type ErrorCode =
