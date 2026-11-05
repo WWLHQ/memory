@@ -114,15 +114,23 @@ describe('批次44-D5-3：runGcReportTool（MCP 层默认只演算 + 诚实统�
     expect(await storage.queryAudit({ request_id: r.request_id })).toHaveLength(1);
   });
 
-  it('只回内核真实三项，不伪造摘要类统计；note 说明差异', async () => {
+  it('46-4 报告字段对齐：保留三项 + 六项真实字段 + scanned；note 分层说明', async () => {
     const r = await runGcReportTool(ma, { project_id: 'P1' }, ['*']);
-    expect(r.report).toEqual({ decayed: 1, merged: 0, conflicts_resolved: 0 });
-    expect(Object.keys(r.report)).toEqual(['decayed', 'merged', 'conflicts_resolved']);
-    expect(r.report).not.toHaveProperty('freshness_updated');
-    expect(r.report).not.toHaveProperty('summaries_created');
-    expect(r.report).not.toHaveProperty('compressed');
+    expect(Object.keys(r.report)).toEqual([
+      'decayed', 'merged', 'conflicts_resolved',
+      'freshness_updated', 'scanned', 'migrated',
+      'summaries_created', 'summaries_filtered', 'merged_originals', 'compressed',
+    ]);
+    expect(r.report.decayed).toBe(1);
+    expect(r.report.scanned).toBe(r.report.freshness_updated); // D4 如实命名
+    expect(r.report.decayed).toBe(r.report.migrated);          // D5 别名不双计
+    expect(r.report.merged).toBe(0);
+    expect(r.report.conflicts_resolved).toBe(0);               // 未触发裁决，诚实 0
+    expect(r.report.compressed).toBe(0);                       // MCP 未注入 vector，诚实 0
+    expect(r.conflict_resolution).toEqual({ requested: false, verdict: null, resolved: 0 });
     expect(r.note).toBe(GC_REPORT_NOTE);
-    expect(r.note).toContain('没有对应统计量');
+    expect(r.note).toContain('真实字段');
+    expect(r.note).not.toContain('没有对应统计量');
   });
 
   it('project_id 缺失/空串/越界 → -32602，且不改库、不写审计', async () => {
@@ -134,7 +142,7 @@ describe('批次44-D5-3：runGcReportTool（MCP 层默认只演算 + 诚实统�
     expect(await storage.queryAudit({})).toHaveLength(0);
   });
 
-  it('dry_run 非布尔、resolve_conflicts 传入、缺 project_id 的错误码均为 -32602', async () => {
+  it('dry_run 非布尔、裁决参数不完整、缺 project_id 的错误码均为 -32602', async () => {
     const cases: Array<Record<string, unknown>> = [
       { project_id: 'P1', dry_run: 'true' },
       { project_id: 'P1', dry_run: 1 },
@@ -152,14 +160,117 @@ describe('批次44-D5-3：runGcReportTool（MCP 层默认只演算 + 诚实统�
     }
   });
 
-  it('resolve_conflicts 明确拒绝（内核未实现冲突裁决），不静默忽略', async () => {
+  it('resolve_conflicts=true 不给 verdict → 明确拒绝（禁止自动 auto_override）', async () => {
     await expect(runGcReportTool(ma, { project_id: 'P1', resolve_conflicts: true }, ['*']))
-      .rejects.toThrow(/未实现冲突裁决|不静默忽略/);
+      .rejects.toThrow(/verdict|禁止自动/);
   });
 
   it('空项目也如实回零报告（不伪造统计量、不补造记录）', async () => {
     const r = await runGcReportTool(ma, { project_id: 'P_EMPTY' }, ['*']);
-    expect(r.report).toEqual({ decayed: 0, merged: 0, conflicts_resolved: 0 });
+    expect(r.report.decayed).toBe(0);
+    expect(r.report.freshness_updated).toBe(0);
+    expect(r.report.scanned).toBe(0);
+    expect(r.report.conflicts_resolved).toBe(0);
     expect(r.audit_written).toBe(false);
+  });
+});
+
+describe('批次46-4：MCP 裁决参数（D3/D8 二者都给才落定）', () => {
+  let storage: InMemoryStorage;
+  let ma: MemAgent;
+
+  beforeEach(async () => {
+    ({ storage, ma } = fixture());
+    // 一对真实 pending 冲突（共享 conflict_id，均非 archived/dormant/deleted）
+    await storage.putMemory(mem({
+      mem_id: 'cf_old', conflict_id: 'cf_mcp', created_at: Date.now() - 2 * DAY, confidence: 0.5,
+    }));
+    await storage.putMemory(mem({
+      mem_id: 'cf_new', conflict_id: 'cf_mcp', created_at: Date.now() - DAY, confidence: 0.6,
+    }));
+  });
+
+  it('resolve_conflicts=true + verdict=auto_override + dry_run=false → 真实落定、成对审计', async () => {
+    const r = await runGcReportTool(ma, {
+      project_id: 'P1', dry_run: false, resolve_conflicts: true, verdict: 'auto_override',
+    }, ['*']);
+    expect(r.report.conflicts_resolved).toBe(1);
+    expect(r.conflict_resolution).toEqual({ requested: true, verdict: 'auto_override', resolved: 1 });
+    expect(r.audit_written).toBe(true);
+    expect((await storage.getMemory('cf_old'))?.decay_class).toBe('archived');
+    expect((await storage.getMemory('cf_old'))?.conflict_id).toBeUndefined();
+    expect((await storage.getMemory('cf_new'))?.confidence).toBeCloseTo(0.7, 5);
+    const audits = await storage.queryAudit({ action: 'conflict_resolve' });
+    expect(audits).toHaveLength(1);
+    expect(audits[0].detail).toMatchObject({
+      old_id: 'cf_old', new_id: 'cf_new', verdict: 'auto_override', pending: false,
+    });
+  });
+
+  it('user_confirm / hold → 不落定、库状态不变、保持 pending', async () => {
+    for (const v of ['user_confirm', 'hold'] as const) {
+      const s = new InMemoryStorage();
+      const agent: MemAgent = createMemAgent({
+        form: 'desktop', account: ACCOUNT,
+        llm: new FakeLlmProvider(), vector: new JsVectorBackend(), storage: s,
+      });
+      await s.putMemory(mem({ mem_id: 'cf_old', conflict_id: 'cf_mcp', created_at: Date.now() - 2 * DAY }));
+      await s.putMemory(mem({ mem_id: 'cf_new', conflict_id: 'cf_mcp', created_at: Date.now() - DAY }));
+      const before = (await s.listMemories({})).map((m) => ({ ...m }));
+      const r = await runGcReportTool(agent, {
+        project_id: 'P1', dry_run: false, resolve_conflicts: true, verdict: v,
+      }, ['*']);
+      expect(r.report.conflicts_resolved).toBe(0);
+      expect(r.conflict_resolution).toEqual({ requested: true, verdict: v, resolved: 0 });
+      expect((await s.listMemories({})).map((m) => ({ ...m }))).toEqual(before);
+      const audits = await s.queryAudit({ action: 'conflict_resolve' });
+      expect(audits[0].detail).toMatchObject({ pending: true, verdict: v });
+    }
+  });
+
+  it('dry_run=true 且带裁决 → 全程零写入、audit_written=false、resolved=0', async () => {
+    const before = (await storage.listMemories({})).map((m) => ({ ...m }));
+    const r = await runGcReportTool(ma, {
+      project_id: 'P1', resolve_conflicts: true, verdict: 'auto_override',
+    }, ['*']);
+    expect(r.dry_run).toBe(true);
+    expect(r.report.conflicts_resolved).toBe(0);
+    expect(r.audit_written).toBe(false);
+    expect((await storage.listMemories({})).map((m) => ({ ...m }))).toEqual(before);
+    expect(await storage.queryAudit({})).toHaveLength(0);
+  });
+
+  it('只给 verdict 不给 resolve_conflicts → 明确拒绝，不静默忽略高风险参数', async () => {
+    await expect(runGcReportTool(ma, { project_id: 'P1', verdict: 'auto_override' }, ['*']))
+      .rejects.toThrow(/resolve_conflicts/);
+  });
+
+  it('非法 verdict / 非布尔 resolve_conflicts → -32602 且不改库', async () => {
+    const cases: Array<Record<string, unknown>> = [
+      { project_id: 'P1', resolve_conflicts: true, verdict: 'bogus' },
+      { project_id: 'P1', resolve_conflicts: 'true', verdict: 'auto_override' },
+      { project_id: 'P1', resolve_conflicts: true, verdict: 1 },
+    ];
+    for (const args of cases) {
+      try {
+        await runGcReportTool(ma, args, ['*']);
+        throw new Error('expected McpToolError');
+      } catch (e) {
+        expect(e).toBeInstanceOf(McpToolError);
+        expect((e as McpToolError).code).toBe(-32602);
+      }
+    }
+    expect((await storage.getMemory('cf_old'))?.decay_class).toBe('hot');
+    expect(await storage.queryAudit({})).toHaveLength(0);
+  });
+
+  it('四 verdict 均能通过校验且回执如实标注（dry_run 不落定）', async () => {
+    for (const v of ['auto_override', 'user_confirm', 'merge', 'hold'] as const) {
+      const r = await runGcReportTool(ma, {
+        project_id: 'P1', dry_run: true, resolve_conflicts: true, verdict: v,
+      }, ['*']);
+      expect(r.ok).toBe(true);
+      expect(r.conflict_resolution).toEqual({ requested: true, verdict: v, resolved: 0 });
+    }
   });
 });

@@ -1037,16 +1037,22 @@ describe('批次44-D5-3：gc_report（HTTP）', () => {
     expect(await storage.queryAudit({})).toHaveLength(1);
   });
 
-  it('报告只含内核真实三项，note 说明差异，不伪造摘要类统计', async () => {
+  it('46-4 报告字段对齐 + note 分层说明，不伪造摘要类统计', async () => {
     const out = await tool(1012, 'gc_report', { project_id: 'P1' });
     const body = out.result.structuredContent as { report: Record<string, unknown>; note: string };
-    expect(Object.keys(body.report)).toEqual(['decayed', 'merged', 'conflicts_resolved']);
-    expect(body.report).not.toHaveProperty('summaries_created');
-    expect(body.report).not.toHaveProperty('migrated');
-    expect(body.note).toContain('没有对应统计量');
+    expect(Object.keys(body.report)).toEqual([
+      'decayed', 'merged', 'conflicts_resolved',
+      'freshness_updated', 'scanned', 'migrated',
+      'summaries_created', 'summaries_filtered', 'merged_originals', 'compressed',
+    ]);
+    expect(body.report.scanned).toBe(body.report.freshness_updated);
+    expect(body.report.decayed).toBe(body.report.migrated);
+    expect(body.report.conflicts_resolved).toBe(0);
+    expect(body.note).toContain('真实字段');
+    expect(body.note).not.toContain('没有对应统计量');
   });
 
-  it('缺 project_id / dry_run 非布尔 / 未实现的 resolve_conflicts → isError:true', async () => {
+  it('缺 project_id / dry_run 非布尔 / 裁决参数不完整 → isError:true', async () => {
     for (const args of [
       {}, { project_id: '' }, { project_id: 'P1', dry_run: 'true' },
       { project_id: 'P1', resolve_conflicts: true },
@@ -1056,6 +1062,74 @@ describe('批次44-D5-3：gc_report（HTTP）', () => {
     }
     expect((await storage.getMemory('mem_gc_http'))?.decay_class).toBe('warm');
     expect(await storage.queryAudit({})).toHaveLength(1); // 失败请求未写审计
+  });
+
+  // 批次46-4：HTTP 端到端完整链路（tools/call gc_report → 内核裁决 → 存储/审计）
+  it('46-4 端到端：resolve_conflicts+verdict 真实落定，旧行归档 + 成对审计', async () => {
+    const now = Date.now();
+    const base = {
+      project_id: 'P1', enterprise_id: 'e1', team_id: 't1',
+      category: 'context', layer: 'L1', decay_class: 'hot',
+      pinned: false, locked: false, version: 1, conflict_id: 'cf_http',
+    } as const;
+    await storage.putMemory({
+      ...base, mem_id: 'cf_http_old', content: '灰度发布必须先看 QPS',
+      confidence: 0.5, created_at: now - 2 * DAY,
+    });
+    await storage.putMemory({
+      ...base, mem_id: 'cf_http_new', content: '灰度发布必须先看错误率',
+      confidence: 0.6, created_at: now - DAY,
+    });
+    const beforeAudits = (await storage.queryAudit({})).length;
+
+    const out = await tool(1014, 'gc_report', {
+      project_id: 'P1', dry_run: false, resolve_conflicts: true, verdict: 'auto_override',
+    });
+    expect(out.result.isError).toBe(false);
+    const body = out.result.structuredContent as {
+      report: { conflicts_resolved: number };
+      conflict_resolution: { requested: boolean; verdict: string; resolved: number };
+      audit_written: boolean;
+    };
+    expect(body.report.conflicts_resolved).toBe(1);
+    expect(body.conflict_resolution).toEqual({ requested: true, verdict: 'auto_override', resolved: 1 });
+    expect(body.audit_written).toBe(true);
+    expect((await storage.getMemory('cf_http_old'))?.decay_class).toBe('archived');
+    expect((await storage.getMemory('cf_http_new'))?.confidence).toBeCloseTo(0.7, 5);
+    const audits = await storage.queryAudit({ action: 'conflict_resolve' });
+    expect(audits).toHaveLength(1);
+    expect(audits[0].detail).toMatchObject({
+      old_id: 'cf_http_old', new_id: 'cf_http_new', verdict: 'auto_override', pending: false,
+    });
+    expect((await storage.queryAudit({})).length).toBeGreaterThan(beforeAudits);
+  });
+
+  it('46-4 端到端：dry_run=true 带裁决 → 零写入、零审计、resolved=0', async () => {
+    const now = Date.now();
+    const base = {
+      project_id: 'P1', enterprise_id: 'e1', team_id: 't1',
+      category: 'context', layer: 'L1', decay_class: 'hot',
+      pinned: false, locked: false, version: 1, conflict_id: 'cf_http_dry',
+    } as const;
+    await storage.putMemory({ ...base, mem_id: 'cf_http_dry_old', content: '另一条冲突旧文', created_at: now - 2 * DAY });
+    await storage.putMemory({ ...base, mem_id: 'cf_http_dry_new', content: '另一条冲突新文', created_at: now - DAY });
+    const before = (await storage.listMemories({})).map((m) => ({ ...m }));
+    const beforeAudits = (await storage.queryAudit({})).length;
+
+    const out = await tool(1015, 'gc_report', {
+      project_id: 'P1', resolve_conflicts: true, verdict: 'auto_override',
+    });
+    expect(out.result.isError).toBe(false);
+    const body = out.result.structuredContent as {
+      dry_run: boolean; audit_written: boolean; report: { conflicts_resolved: number };
+      conflict_resolution: { requested: boolean; verdict: string; resolved: number };
+    };
+    expect(body.dry_run).toBe(true);
+    expect(body.report.conflicts_resolved).toBe(0);
+    expect(body.conflict_resolution).toEqual({ requested: true, verdict: 'auto_override', resolved: 0 });
+    expect(body.audit_written).toBe(false);
+    expect((await storage.listMemories({})).map((m) => ({ ...m }))).toEqual(before);
+    expect(await storage.queryAudit({})).toHaveLength(beforeAudits);
   });
 });
 

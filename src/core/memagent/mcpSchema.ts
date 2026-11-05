@@ -17,7 +17,7 @@ export const MCP_INSTRUCTIONS = `你是接入了 MultiAgent Memory 的 Agent。�
 5. 边界：不要向用户展示 MCP 认证令牌（Authorization 头 / mcp-token.txt 内容）；不要伪造记忆内容、省量或审计回执。工具不可用时（未启动/未授权/连接失败）如实说明并继续回答，不得假装检索过记忆。
 6. 盘点：需要治理记忆（找过时/重复/低价值条目）时用 list_memories 按条件列清单；已知 mem_id 时用 get_memory 精确读单条。两者只返回可读摘要与状态字段，不含 L0 密文；project_id 超出令牌作用域会被拒绝。list_memories 是清单盘点，找答案仍应首选 recall_memory。
 7. 反馈与治理：只有用户明确认可或否定某条召回记忆时，才用 feedback 提交 verdict（confirm/reject/disputed），由内核计算可信度变化，不要凭自己的判断代用户表态。需要置顶/取消置顶、锁定/解锁、归档/恢复、降权/强化、调参或迁移时用 manage_memory；locked 的记忆只有 unlock 能操作。delete 不可逆且默认不开放（需服务端开关），除非用户明确要求删除，一律优先 forget（降权不删）或 archive（归档可恢复）。两工具只回可读摘要，不含 L0 密文；ok:false 或 blocked_locked:true 时必须如实告知，不得声称操作已生效。
-8. 遗忘可观测性：用户觉得「记忆变少了 / 状态变了」时用 gc_report 查本次遗忘周期会降档多少条。dry_run 缺省 true，只演算不改库不写审计；只有用户明确要求执行遗忘周期时才显式传 dry_run=false。报告只有内核真实统计 decayed/merged/conflicts_resolved，note 会说明与目标契约摘要类统计字段的差异，不得据此推断或编造 summaries_created 等数字。`;
+8. 遗忘可观测性：用户觉得「记忆变少了 / 状态变了」时用 gc_report 查本次遗忘周期会降档多少条。dry_run 缺省 true，只演算不改库不写审计；只有用户明确要求执行遗忘周期时才显式传 dry_run=false。报告是分层真实统计：衰减段保留 decayed/merged/conflicts_resolved，摘要合并段给出 freshness_updated/scanned/migrated/summaries_created/summaries_filtered/merged_originals/compressed，全部来自真实事件、note 说明各段口径；不得据此推断或编造任何数字，本入口未注入向量后端故 compressed 恒为 0。若用户明确要求处理已排队冲突，必须同时给 resolve_conflicts=true 与合法 verdict（auto_override/user_confirm/merge/hold）才落定；只给其中一个会被明确拒绝，绝不自动覆盖旧记忆；conflicts_resolved 只数真实落定，dry_run 或 user_confirm/hold 时为 0。`;
 
 /** 标准 MCP 工具定义（tools/list 返回；顺序即客户端展示顺序） */
 export const MCP_TOOLS = [
@@ -151,12 +151,14 @@ export const MCP_TOOLS = [
   },
   {
     name: 'gc_report',
-    description: '触发/查询一次记忆遗忘周期的结果（衰减降档统计）。dry_run 缺省 true：只演算，不改记忆、不写审计；显式 false 才真实执行衰减并落审计。project_id 必填且须在令牌作用域内。报告只含内核真实字段 decayed/merged/conflicts_resolved，note 说明与目标契约摘要类统计字段的差异——本系统没有 summaries_created/migrated 等统计量，不会补 0 伪装。内核未实现冲突裁决，故不提供 resolve_conflicts。',
+    description: '触发/查询一次完整遗忘周期的分层真实统计（衰减 + 摘要合并 + 冲突裁决）。dry_run 缺省 true：只演算，不改记忆、不写审计；显式 false 才真实执行并落审计。project_id 必填且须在令牌作用域内。报告保留 decayed/merged/conflicts_resolved 三项，并给出 freshness_updated/scanned/migrated/summaries_created/summaries_filtered/merged_originals/compressed 真实字段（全部来自 runForgettingCycle 真实事件，note 说明口径，不补 0 伪装）；本 MCP 入口未注入向量后端，compressed 诚实恒为 0。resolve_conflicts 不是自动覆盖开关：必须与 verdict（auto_override/user_confirm/merge/hold）同时给才处理已排队裁决，只给其一会被明确拒绝、绝不默认 auto_override；conflicts_resolved 只计真实落定，dry_run 或 user_confirm/hold 时为 0。',
     inputSchema: {
       type: 'object',
       properties: {
         project_id: { type: 'string', description: '项目 ID（必填，不猜项目；须落在令牌作用域内）' },
-        dry_run: { type: 'boolean', description: 'true = 只演算不落库（缺省 true）；false = 真实执行衰减并落审计' },
+        dry_run: { type: 'boolean', description: 'true = 只演算不落库（缺省 true）；false = 真实执行遗忘周期并落审计' },
+        resolve_conflicts: { type: 'boolean', description: '是否同时处理本周期已排队的显式冲突裁决（缺省 false）。不是自动覆盖开关：置 true 必须同时给合法 verdict；只给 verdict 或只给本参数都会被明确拒绝' },
+        verdict: { type: 'string', enum: ['auto_override', 'user_confirm', 'merge', 'hold'], description: '用户显式选定的裁决方式：auto_override 归档旧记忆并强化新记忆；user_confirm/hold 保持 pending 不落定；merge 聚合内容（须过质量门）。必须与 resolve_conflicts=true 同时给，禁止默认 auto_override' },
       },
       required: ['project_id'],
     },

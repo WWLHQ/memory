@@ -703,10 +703,14 @@ describe('批次44-D5-3：gc_report（TCP）', () => {
 
   it('tools/list 暴露 10 个工具，gc_report schema 要求 project_id', async () => {
     const r = await call(1000, 'tools/list');
-    const tools = (r.result as { tools: Array<{ name: string; inputSchema?: { required?: string[] } }> }).tools;
-    expect(tools.map((t) => t.name)).toHaveLength(10);
+    const tools = (r.result as {
+      tools: Array<{ name: string; inputSchema?: { required?: string[]; properties?: Record<string, unknown> } }>;
+    }).tools;
+    expect(tools.map((t) => t.name)).toHaveLength(10); // 46-4 仍是 10 个工具，只改 schema
     const gc = tools.find((t) => t.name === 'gc_report')!;
     expect(gc.inputSchema!.required).toEqual(['project_id']);
+    expect(gc.inputSchema!.properties).toHaveProperty('resolve_conflicts');
+    expect(gc.inputSchema!.properties).toHaveProperty('verdict');
   });
 
   it('缺省 dry_run=true → 只演算：报 decayed=1，但记忆未降档、未写审计', async () => {
@@ -739,16 +743,22 @@ describe('批次44-D5-3：gc_report（TCP）', () => {
     expect(await storage.queryAudit({})).toHaveLength(1); // 演算未再写审计
   });
 
-  it('报告只含内核真实三项，note 说明差异，不伪造摘要类统计', async () => {
+  it('46-4 报告字段对齐 + note 分层说明，不伪造摘要类统计', async () => {
     const r = await call(1004, 'gc_report', { project_id: 'P1' });
     const out = r.result as { report: Record<string, unknown>; note: string };
-    expect(Object.keys(out.report)).toEqual(['decayed', 'merged', 'conflicts_resolved']);
-    expect(out.report).not.toHaveProperty('summaries_created');
-    expect(out.report).not.toHaveProperty('freshness_updated');
-    expect(out.note).toContain('没有对应统计量');
+    expect(Object.keys(out.report)).toEqual([
+      'decayed', 'merged', 'conflicts_resolved',
+      'freshness_updated', 'scanned', 'migrated',
+      'summaries_created', 'summaries_filtered', 'merged_originals', 'compressed',
+    ]);
+    expect(out.report.scanned).toBe(out.report.freshness_updated);
+    expect(out.report.decayed).toBe(out.report.migrated);
+    expect(out.report.conflicts_resolved).toBe(0);
+    expect(out.note).toContain('真实字段');
+    expect(out.note).not.toContain('没有对应统计量');
   });
 
-  it('非法参数 / 越界 / 未实现的 resolve_conflicts → -32602，且不改库', async () => {
+  it('非法参数 / 越界 / 裁决参数不完整 → -32602，且不改库', async () => {
     const cases: Array<Record<string, unknown>> = [
       {}, { project_id: '' }, { project_id: 'P1', dry_run: 'true' },
       { project_id: 'P1', dry_run: 1 }, { project_id: 'P1', resolve_conflicts: true },
@@ -783,6 +793,68 @@ describe('批次44-D5-3：gc_report（TCP）', () => {
     } finally {
       scoped.stop();
     }
+  });
+
+  // 批次46-4：TCP 端到端完整链路（tools/call gc_report → 内核裁决 → 存储/审计）
+  it('46-4 端到端：resolve_conflicts+verdict 真实落定，旧行归档 + 成对审计', async () => {
+    const now = Date.now();
+    const base = {
+      project_id: 'P1', enterprise_id: 'e1', team_id: 't1',
+      category: 'context', layer: 'L1', decay_class: 'hot',
+      pinned: false, locked: false, version: 1, conflict_id: 'cf_tcp',
+    } as const;
+    await storage.putMemory({
+      ...base, mem_id: 'cf_tcp_old', content: '部署脚本必须校验 Redis 连接',
+      confidence: 0.5, created_at: now - 2 * DAY,
+    });
+    await storage.putMemory({
+      ...base, mem_id: 'cf_tcp_new', content: '部署脚本必须校验 TLS 证书',
+      confidence: 0.6, created_at: now - DAY,
+    });
+    const beforeAudits = (await storage.queryAudit({})).length;
+
+    const r = await call(1007, 'gc_report', {
+      project_id: 'P1', dry_run: false, resolve_conflicts: true, verdict: 'auto_override',
+    });
+    const out = r.result as {
+      report: { conflicts_resolved: number };
+      conflict_resolution: { requested: boolean; verdict: string; resolved: number };
+    };
+    expect(out.report.conflicts_resolved).toBe(1);
+    expect(out.conflict_resolution).toEqual({ requested: true, verdict: 'auto_override', resolved: 1 });
+    expect((await storage.getMemory('cf_tcp_old'))?.decay_class).toBe('archived');
+    expect((await storage.getMemory('cf_tcp_new'))?.confidence).toBeCloseTo(0.7, 5);
+    const audits = await storage.queryAudit({ action: 'conflict_resolve' });
+    expect(audits).toHaveLength(1);
+    expect(audits[0].detail).toMatchObject({
+      old_id: 'cf_tcp_old', new_id: 'cf_tcp_new', verdict: 'auto_override', pending: false,
+    });
+    expect((await storage.queryAudit({})).length).toBeGreaterThan(beforeAudits);
+  });
+
+  it('46-4 端到端：dry_run=true 带裁决 → 零写入、零审计、resolved=0', async () => {
+    const now = Date.now();
+    const base = {
+      project_id: 'P1', enterprise_id: 'e1', team_id: 't1',
+      category: 'context', layer: 'L1', decay_class: 'hot',
+      pinned: false, locked: false, version: 1, conflict_id: 'cf_tcp_dry',
+    } as const;
+    await storage.putMemory({ ...base, mem_id: 'cf_tcp_dry_old', content: '另一条冲突旧文', created_at: now - 2 * DAY });
+    await storage.putMemory({ ...base, mem_id: 'cf_tcp_dry_new', content: '另一条冲突新文', created_at: now - DAY });
+    const before = (await storage.listMemories({})).map((m) => ({ ...m }));
+    const beforeAudits = (await storage.queryAudit({})).length;
+
+    const r = await call(1008, 'gc_report', {
+      project_id: 'P1', resolve_conflicts: true, verdict: 'auto_override',
+    });
+    const out = r.result as {
+      dry_run: boolean; audit_written: boolean; report: { conflicts_resolved: number };
+    };
+    expect(out.dry_run).toBe(true);
+    expect(out.report.conflicts_resolved).toBe(0);
+    expect(out.audit_written).toBe(false);
+    expect((await storage.listMemories({})).map((m) => ({ ...m }))).toEqual(before);
+    expect((await storage.queryAudit({})).length).toBe(beforeAudits);
   });
 });
 
