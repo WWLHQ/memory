@@ -934,3 +934,20 @@ status: draft
 
 > 提交粒度：每个原子任务一提交（T1–T7），仅提交本次相关 specs 文件，不碰早期遗留脏文件（errors.ts/sessionCollector.ts）与早期未提交 specs。目标 SOP 所在文件夹非 git 仓库，其改动仅落磁盘、不在本仓库提交。
 > 索引：`npm run code:index -- --write` 见下方说明（本批纯文档改动，源码符号未变）。
+
+### 批次44：吸收项落地 D1–D5（2026-11-05）
+
+> 需求/设计真源：`specs/批次44-吸收项落地设计.md`（A1–A5/M1 代码缺口核对）+ `specs/批次44-D5工具面落地子方案.md`（D5 立项细化）。
+> 纪律：每原子任务一提交；完成即展示「测试/门禁输出 + 改动清单」并等人工确认再推进下一步。
+
+| 任务 | commit | 代码落点 | 测试 / 门禁 |
+|---|---|---|---|
+| D1 `source_agent` 去默认 `'mcp'` | `14af325` | `mcp.ts` / `mcpHttp.ts` / `mcpSchema.ts`：必填且拒绝字面 `mcp` | TCP/HTTP 缺参拒绝用例 |
+| D2 工具命名对齐 `get_preferences` | `01d17b6` | MCP 内核 + AgentOnboard 子系统 + 8 份活文档；旧名无别名 | 旧名 → -32601 |
+| D3 `write_memory` 扩展打分旋钮 | `a620999` | `memories.ts` 的 `parseWriteKnobs()` + `coreWrite` 落库钳制；schema→MCP→打分 | 旋钮落库 / 越界 / tags 类型用例 |
+| D4 `get_write_status` + pending/flush | `051436e` | 新增 `pendingWrites.ts`（`PendingWrites`/`MemoryPendingStore`）、`pendingStoreFile.ts`（`FilePendingStore`）；`agent.ts` 装配 `writeUnlocked`/`enqueuePending`/`flushPending`/`getWriteStatus`；`l0vault.ts` 的 `isWriteUnlocked()`；两端 case | `pendingWrites.test.ts` 7 例 + TCP 4 例 + HTTP 3 例 |
+| D5-0 工具面子方案 | `834b069` | `specs/批次44-D5工具面落地子方案.md`（范围重算 = 6 工具 + 1 变体；决策 ① 推荐 `create_project` 并入 D6） | 人工评审；用户回复「并入 D6」 |
+| **D5-1 `list_memories` + `get_memory`** | 本次提交 | 新增 `src/core/memagent/mcpReadTools.ts`（TCP/HTTP 共用编排：`toMemoryView()` 白名单裁剪、`runListMemoriesTool()`、`runGetMemoryTool()`）；`mcpSchema.ts` 工具数 5→7 + 指令第 6 条「盘点」；`mcp.ts` / `mcpHttp.ts` 各增两个 case | 新增 `__tests__/mcpReadTools.test.ts` **11 例**；`mcp.test.ts` +4 例、`mcpHttp.test.ts` +3 例、`tools/list` 断言 5→7；全量 `vitest run --maxWorkers=1` 172 文件 / 2049 项、`tsc --noEmit`、oxlint 受影响 7 文件 0/0 |
+
+> D5-1 红线：对外只回白名单摘要（`mem_id`/`project_id`/`category`/`layer`/`decay_class`/`pinned`/`locked`/时间戳/打分字段/`tags`/`snippet`）；`snippet` 取 `content_l1 ?? content` 前 200 字，绝不返回 `content_l0_enc`/`content_orig`/`has_l0`/`content`/`embedding`。项目定位复用 `mcpRecall.ts` 的 `projectInfosFromMemories`/`resolveProjectId`，所有项目与单条读取均经 `projectInScope` 校验。
+> 活文档同步：`记忆库工具能力清单.md`（2 行状态 + 现状 7 条目 + 口径说明）、`需求规格书.md` §19.5 工具表 +2 行、`批次44-D5工具面落地子方案.md`（决策 ① 已拍板 / D5-1 ✅ / D5-5 取消并入 D6）、`code-index.generated.md` 重生成。

@@ -18,6 +18,7 @@ import { CATEGORIES, isCategory } from './types.ts';
 import { parseWriteKnobs } from './memories.ts';
 import { isL0LockedError } from './errors.ts';
 import { MemoryPendingStore, type PendingStore, type WriteKnobs } from './pendingWrites.ts';
+import { runGetMemoryTool, runListMemoriesTool } from './mcpReadTools.ts';
 
 const VERSION = '2.0';
 
@@ -253,6 +254,16 @@ export function runMcpServer(opts: McpOptions): McpServerHandle {
         // ── get_write_status（批次44-D4：写前探锁 + 解锁态顺带重放） ──────
         case 'get_write_status': {
           send(socket, ok(req.id, await s.getWriteStatus()));
+          return;
+        }
+
+        // ── list_memories / get_memory（批次44-D5-1：治理盘点 + 精确读） ──
+        case 'list_memories': {
+          send(socket, ok(req.id, await runListMemoriesTool(sessionStorage, p, account.scope_project_ids)));
+          return;
+        }
+        case 'get_memory': {
+          send(socket, ok(req.id, await runGetMemoryTool(sessionStorage, p, account.scope_project_ids)));
           return;
         }
 

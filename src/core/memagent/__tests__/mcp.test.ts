@@ -61,11 +61,12 @@ describe('MCP Server（§19.5）', () => {
     expect(r.result).toBeUndefined();
   });
 
-  it('tools/list 返回五个工具且 schema 正确', async () => {
+  it('tools/list 返回七个工具且 schema 正确', async () => {
     const r = await rpcCall(PORT, { jsonrpc: '2.0', id: 1, method: 'tools/list', params: { token: TOKEN } });
     const tools = (r.result as { tools: Array<{ name: string; inputSchema?: { required?: string[] } }> }).tools;
     expect(tools.map((t) => t.name)).toEqual([
       'recall_memory', 'write_memory', 'list_projects', 'get_preferences', 'get_write_status',
+      'list_memories', 'get_memory',
     ]);
     const recallTool = tools.find((t) => t.name === 'recall_memory')!;
     expect(recallTool.inputSchema!.required).toEqual(['query']); // project_id 可省略（批次11）
@@ -448,5 +449,89 @@ describe('批次44-D4：L0 锁定写入落盘兜底（pending/flush）', () => {
     expect(contents).toContain('运维手册补充：PostgreSQL 17 的 WAL 归档窗口设为 15 分钟，超过即清理旧日志');
     expect(contents).toContain('前端约定：所有入口 HTML 文件名一律小写，避免 Linux CI 上大小写错位导致 404');
     expect((await status(906)).result).toEqual({ l0_unlocked: true, writeDek_present: true, pending_count: 0 });
+  });
+});
+
+// 批次44-D5-1：list_memories / get_memory（TCP 端到端，与 HTTP 共用 mcpReadTools）
+describe('批次44-D5-1：list_memories / get_memory（TCP）', () => {
+  let handle: McpServerHandle;
+  let port = 0;
+  let vault: L0Vault;
+  const storage = new InMemoryStorage();
+  const LONG_A = '项目 P1 决策：本地持久化 pending 队列按 created_at 升序逐条重放，锁定态不落明文';
+  const LONG_B = '运维手册补充：PostgreSQL 17 的 WAL 归档窗口设为 15 分钟，超过即清理旧日志';
+
+  beforeAll(async () => {
+    vault = (await createTestVault()).vault;
+    handle = runMcpServer({ port: 0, storage, token: TOKEN, l0: vault });
+    port = await handle.ready;
+  });
+  afterAll(() => { handle?.stop(); });
+
+  const call = (id: number, method: string, params: Record<string, unknown> = {}) =>
+    rpcCall(port, { jsonrpc: '2.0', id, method, params: { token: TOKEN, ...params } });
+
+  it('tools/list 暴露 7 个工具（含新增两个）', async () => {
+    const r = await call(950, 'tools/list');
+    const names = (r.result as { tools: Array<{ name: string }> }).tools.map((t) => t.name);
+    expect(names).toHaveLength(7);
+    expect(names).toContain('list_memories');
+    expect(names).toContain('get_memory');
+  });
+
+  it('写入两条 → list_memories 盘点不泄 L0，get_memory 精确读', async () => {
+    const w1 = await call(951, 'write_memory', {
+      content: LONG_A, project_id: 'P1', category: 'fact', source_agent: 'mcp-test', tags: ['d5'],
+    });
+    const w2 = await call(952, 'write_memory', {
+      content: LONG_B, project_id: 'P1', category: 'decision', source_agent: 'mcp-test',
+    });
+    const id1 = (w1.result as { mem_id: string }).mem_id;
+    const id2 = (w2.result as { mem_id: string }).mem_id;
+    expect(id1).toMatch(/^mem_/);
+    expect(id2).toMatch(/^mem_/);
+
+    const list = await call(953, 'list_memories', { project_id: 'P1' });
+    const out = list.result as { ok: boolean; total: number; items: Array<Record<string, unknown>> };
+    expect(out.ok).toBe(true);
+    expect(out.total).toBe(2);
+    expect(out.items.map((i) => i.mem_id)).toEqual(expect.arrayContaining([id1, id2]));
+    for (const item of out.items) {
+      expect(item).not.toHaveProperty('content_l0_enc');
+      expect(item).not.toHaveProperty('content_orig');
+    }
+
+    const one = await call(954, 'get_memory', { mem_id: id1 });
+    const got = one.result as { ok: boolean; item: Record<string, unknown> };
+    expect(got.ok).toBe(true);
+    expect(got.item.mem_id).toBe(id1);
+    expect(got.item).not.toHaveProperty('content_l0_enc');
+  });
+
+  it('category 过滤 / 不存在回执 / 非法参数', async () => {
+    const byCat = await call(955, 'list_memories', { project_id: 'P1', category: 'decision' });
+    expect((byCat.result as { total: number }).total).toBe(1);
+    const missing = await call(956, 'get_memory', { mem_id: 'mem_not_exist' });
+    expect(missing.result).toEqual({ ok: false, item: null, reason: '记忆不存在' });
+    const bad = await call(957, 'list_memories', { project_id: 'P1', limit: 0 });
+    expect(bad.error?.code).toBe(-32602);
+  });
+
+  it('受限令牌：显式越界项目 → -32602（不回显不可见项目）', async () => {
+    const scoped = runMcpServer({
+      port: 0, storage, token: TOKEN, l0: vault,
+      account: { user_id: 'u1', team_id: 't1', enterprise_id: 'e1', scope_project_ids: ['P1'] },
+    });
+    const p = await scoped.ready;
+    try {
+      const r = await rpcCall(p, {
+        jsonrpc: '2.0', id: 958, method: 'list_memories',
+        params: { token: TOKEN, project_id: 'P2' },
+      });
+      expect(r.error?.code).toBe(-32602);
+      expect(r.error?.message).toContain('作用域');
+    } finally {
+      scoped.stop();
+    }
   });
 });

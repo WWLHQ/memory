@@ -14,7 +14,8 @@ export const MCP_INSTRUCTIONS = `你是接入了 MultiAgent Memory 的 Agent。�
 2. 回显（强制）：每次 recall_memory 成功返回后，把该次返回的 display.markdown 整段原样输出到最终回答末尾。服务端按你的客户端能力选档位：支持 HTML 折叠的客户端收到 <details> 四段（项目背景/命中记忆/Token/省钱与费用，可点开收起）；其余客户端默认收到「两行 🧠 Memory 摘要 + 展开入口」——HTTP 传输给一条指向本机一次性明细页的 Markdown 链接（用户点链接才看四段，URL 必须逐字保留、不得改写不得丢），TCP 等无链接场景给一行文字指引。任何档位都禁止自行补写或预先展开明细（明细只能来自本次或下一次工具返回），不得添加 HTML 标签；token 数字与金额必须原样保留。需要明细时，用同一个 query 再调用 recall_memory 并置 detail=true，然后原样输出那次返回的 display.markdown。若客户端连 Markdown 都渲染不了，改为单独一行原样输出 display.line。
 3. 金额：display.money 为 null 表示用户尚未设置单价（全局参数页），不得猜测或补全金额。
 4. 沉淀：会话中形成新的决策、踩坑、事实、偏好或洞察时，调用 write_memory 落库（category 选最贴近的一类）；写入前如不确定项目，先 list_projects；不确定 L0 写密钥是否解锁时先调用 get_write_status 探锁。若 write_memory 返回 status=pending，表示本次内容已暂存、解锁后会自动重放落库——这不是写入成功，必须如实告知用户，不得伪造 mem_id 或声称已落库。
-5. 边界：不要向用户展示 MCP 认证令牌（Authorization 头 / mcp-token.txt 内容）；不要伪造记忆内容、省量或审计回执。工具不可用时（未启动/未授权/连接失败）如实说明并继续回答，不得假装检索过记忆。`;
+5. 边界：不要向用户展示 MCP 认证令牌（Authorization 头 / mcp-token.txt 内容）；不要伪造记忆内容、省量或审计回执。工具不可用时（未启动/未授权/连接失败）如实说明并继续回答，不得假装检索过记忆。
+6. 盘点：需要治理记忆（找过时/重复/低价值条目）时用 list_memories 按条件列清单；已知 mem_id 时用 get_memory 精确读单条。两者只返回可读摘要与状态字段，不含 L0 密文；project_id 超出令牌作用域会被拒绝。list_memories 是清单盘点，找答案仍应首选 recall_memory。`;
 
 /** 标准 MCP 工具定义（tools/list 返回；顺序即客户端展示顺序） */
 export const MCP_TOOLS = [
@@ -74,5 +75,33 @@ export const MCP_TOOLS = [
     name: 'get_write_status',
     description: '写前探锁（批次44-D4）：返回 l0_unlocked（写入是否解锁）、writeDek_present（写密钥是否在内存）与 pending_count（待重放的暂存写入条数）；不返回任何密钥材料。已解锁时调用会顺带自动重放历史 pending 条目。write_memory 返回 status=pending 说明写密钥锁定、内容已暂存而非落库，解锁后可再用本工具确认重放结果。',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'list_memories',
+    description: '按条件盘点项目内的记忆（治理用，非语义检索）：不带 query，按最近活动倒序返回清单，用于发现过时、重复、低价值条目。支持 category / decay_class / source_agent / tag / updated_since 过滤与 offset+limit 分页；project_id 可省略（令牌可见范围内唯一项目自动定位）。只返回可读摘要与状态字段，绝不返回 L0 密文。找答案请首选 recall_memory。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'string', description: '项目 ID（可省略：令牌可见范围内唯一项目自动定位）' },
+        category: { type: 'string', enum: ['fact', 'decision', 'pitfall', 'insight', 'preference', 'context'], description: '按类别过滤' },
+        decay_class: { type: 'string', enum: ['hot', 'warm', 'cold', 'archived', 'dormant'], description: '按衰减档位过滤' },
+        source_agent: { type: 'string', description: '按写入来源过滤（对应 created_by_agent，如 workbuddy）' },
+        tag: { type: 'string', description: '按单个标签过滤（需 write_memory 写入时带 tags）' },
+        updated_since: { type: 'integer', description: '仅返回 updated_at/created_at ≥ 该毫秒时间戳的条目' },
+        limit: { type: 'integer', minimum: 1, maximum: 100, description: '返回条数，默认 20' },
+        offset: { type: 'integer', minimum: 0, description: '偏移，默认 0' },
+      },
+    },
+  },
+  {
+    name: 'get_memory',
+    description: '按 mem_id 精确读一条记忆（补语义召回盲区）。mem_id 来自 recall_memory 的 hits[].mem_id 或 list_memories 的 items[].mem_id。只返回可读摘要与状态字段，绝不返回 L0 密文；不存在如实回 ok:false，项目超出令牌作用域会被拒绝。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        mem_id: { type: 'string', description: '记忆 ID（必填）' },
+      },
+      required: ['mem_id'],
+    },
   },
 ] as const;

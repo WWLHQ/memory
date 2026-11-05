@@ -24,6 +24,7 @@ import { CATEGORIES, isCategory } from './types.ts';
 import { parseWriteKnobs } from './memories.ts';
 import { isL0LockedError } from './errors.ts';
 import { MemoryPendingStore, type PendingStore, type WriteKnobs } from './pendingWrites.ts';
+import { runGetMemoryTool, runListMemoriesTool } from './mcpReadTools.ts';
 
 const PROTOCOL_VERSION = '2025-06-18';
 
@@ -277,6 +278,14 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
       case 'get_write_status': {
         // 批次44-D4：写前探锁 + 解锁态顺带重放历史 pending
         return { result: await ma.getWriteStatus() };
+      }
+      case 'list_memories': {
+        // 批次44-D5-1：治理盘点（与 TCP 共用 runListMemoriesTool）
+        return { result: await runListMemoriesTool(storage, args, account.scope_project_ids) };
+      }
+      case 'get_memory': {
+        // 批次44-D5-1：按 mem_id 精确读（与 TCP 共用 runGetMemoryTool）
+        return { result: await runGetMemoryTool(storage, args, account.scope_project_ids) };
       }
       case 'get_preferences': {
         const p = args;

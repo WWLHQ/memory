@@ -76,6 +76,7 @@ describe('MCP HTTP（批次2 信任边界）', () => {
     const body = (await header.json()) as { result: { tools: Array<{ name: string; description?: string }> } };
     expect(body.result.tools.map((t) => t.name)).toEqual([
       'recall_memory', 'write_memory', 'list_projects', 'get_preferences', 'get_write_status',
+      'list_memories', 'get_memory',
     ]);
     // 批次14：措辞为「优先使用本工具 + 未命中/不可用再回退」，不是硬禁用
     const recallDesc = body.result.tools.find((t) => t.name === 'recall_memory')?.description ?? '';
@@ -809,5 +810,75 @@ describe('批次44-D4：HTTP L0 锁定写入落盘兜底', () => {
     expect(contents).toContain('D4 HTTP 锁定写入不丢');
     expect(contents).toContain('D4 HTTP 解锁后新写入');
     expect((await tool(954, 'get_write_status')).result.structuredContent).toEqual({ l0_unlocked: true, writeDek_present: true, pending_count: 0 });
+  });
+});
+
+// 批次44-D5-1：list_memories / get_memory（HTTP 端到端，与 TCP 共用 mcpReadTools）
+describe('批次44-D5-1：list_memories / get_memory（HTTP）', () => {
+  let handle: McpHttpHandle;
+  let url = '';
+  let vault: L0Vault;
+  const storage = new InMemoryStorage();
+  const LONG_A = '项目 P1 决策：本地持久化 pending 队列按 created_at 升序逐条重放，锁定态不落明文';
+
+  beforeAll(async () => {
+    vault = (await createTestVault()).vault;
+    handle = runMcpHttpServer({ port: 0, token: TOKEN, storage, l0: vault });
+    url = `http://127.0.0.1:${await handle.ready}/mcp`;
+  });
+  afterAll(() => { handle?.stop(); });
+
+  type ToolBody = {
+    result: { isError: boolean; structuredContent?: Record<string, unknown>; content: Array<{ text: string }> };
+  };
+  async function tool(id: number, name: string, args: Record<string, unknown> = {}): Promise<ToolBody> {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` },
+      body: JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } }),
+    });
+    return (await res.json()) as ToolBody;
+  }
+
+  it('写入一条 → list_memories 盘点 + get_memory 精确读，均不泄 L0', async () => {
+    const w = await tool(960, 'write_memory', {
+      content: LONG_A, project_id: 'P1', category: 'fact', source_agent: 'mcp-test', tags: ['d5'],
+    });
+    expect(w.result.isError).toBe(false);
+    const id1 = (w.result.structuredContent as { mem_id: string }).mem_id;
+    expect(id1).toMatch(/^mem_/);
+
+    const list = await tool(961, 'list_memories', { project_id: 'P1' });
+    expect(list.result.isError).toBe(false);
+    const out = list.result.structuredContent as { ok: boolean; total: number; items: Array<Record<string, unknown>> };
+    expect(out.ok).toBe(true);
+    expect(out.total).toBe(1);
+    expect(out.items[0].mem_id).toBe(id1);
+    expect(out.items[0]).not.toHaveProperty('content_l0_enc');
+    expect(out.items[0]).not.toHaveProperty('content_orig');
+
+    const one = await tool(962, 'get_memory', { mem_id: id1 });
+    expect(one.result.isError).toBe(false);
+    expect(one.result.structuredContent).toMatchObject({ ok: true, item: { mem_id: id1 } });
+  });
+
+  it('不存在 → ok:false（工具调用本身不报错）；非法参数 → isError:true', async () => {
+    const missing = await tool(963, 'get_memory', { mem_id: 'mem_not_exist' });
+    expect(missing.result.isError).toBe(false);
+    expect(missing.result.structuredContent).toEqual({ ok: false, item: null, reason: '记忆不存在' });
+
+    const bad = await tool(964, 'list_memories', { project_id: 'P1', limit: 0 });
+    expect(bad.result.isError).toBe(true);
+    expect(bad.result.content[0].text).toContain('limit');
+  });
+
+  it('tag 过滤生效；默认 scope=* 下未写入项目返回空清单', async () => {
+    const byTag = await tool(965, 'list_memories', { project_id: 'P1', tag: 'd5' });
+    expect((byTag.result.structuredContent as { total: number }).total).toBe(1);
+    const noTag = await tool(966, 'list_memories', { project_id: 'P1', tag: 'none' });
+    expect((noTag.result.structuredContent as { total: number }).total).toBe(0);
+    const bad = await tool(967, 'list_memories', { project_id: 'P2' });
+    // 默认 account scope='*' → P2 允许但无记忆，返回空清单；越界拒绝由共用模块单测覆盖
+    expect((bad.result.structuredContent as { total: number }).total).toBe(0);
   });
 });
