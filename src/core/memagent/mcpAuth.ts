@@ -11,6 +11,9 @@ export interface McpAccount {
   enterprise_id: string;
   /** 批次26-B P1-10：令牌项目作用域。'*' = 全账本（本机单用户默认）；否则只能命中显式列出的项目 */
   scope_project_ids: string[];
+  /** D6-3：管理员标记。仅显式 true 视为 admin（缺省/undefined/false 均按非 admin）；
+   *  admin 可见 P-archive 与任意 P-<user>，且是 D6-5 create_project/mint_token 的唯一门禁身份。 */
+  is_admin?: boolean;
 }
 
 export const DEFAULT_MCP_ACCOUNT: McpAccount = Object.freeze({
@@ -18,7 +21,14 @@ export const DEFAULT_MCP_ACCOUNT: McpAccount = Object.freeze({
   team_id: 't1',
   enterprise_id: 'e1',
   scope_project_ids: ['*'],
+  // D6-3：默认引导令牌（mcp-token.txt 对应的本机单用户）是管理员——本机单一信任域的属主
+  is_admin: true,
 });
+
+/** D6-3 管理员门禁骨架（D6-5 create_project/mint_token 使用）：仅显式 true 视为 admin */
+export function isAdmin(account: ScopeAccount): boolean {
+  return account.is_admin === true;
+}
 
 /** 三池分类（D6-2）：按 project_id 命名约定判定所属池，无需查注册表即可门禁。
  *  - shared：P-shared（全体可见，恒放行）

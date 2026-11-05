@@ -2,16 +2,29 @@
 // runListProjectsTool 注册表+隐式合并与可见性 / ensureSharedProject 启动自动建。
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
-  classifyProject, projectInScope, DEFAULT_MCP_ACCOUNT, type ScopeAccount,
+  classifyProject, projectInScope, isAdmin, DEFAULT_MCP_ACCOUNT, type ScopeAccount,
 } from '../mcpAuth.ts';
 import { runListProjectsTool, ensureSharedProject } from '../mcpRecall.ts';
 import { InMemoryStorage } from '../storage.ts';
 import type { Memory, ProjectRecord } from '../types.ts';
 
-// is_admin 在 D6-3 才正式进 McpAccount，此处按推断类型构造（结构与 McpAccount 兼容、is_admin 预留）
-const ADMIN = { ...DEFAULT_MCP_ACCOUNT, is_admin: true };
-const BOB = { ...DEFAULT_MCP_ACCOUNT, user_id: 'bob' }; // 普通用户，scope ['*']
-const SCOPED = { ...DEFAULT_MCP_ACCOUNT, scope_project_ids: ['P1'] }; // scope 仅 P1
+// D6-3：引导账户已是 admin；BOB/SCOPED 须显式 is_admin:false 才能代表非 admin 用户（防继承引导身份）
+const ADMIN = { ...DEFAULT_MCP_ACCOUNT };
+const BOB = { ...DEFAULT_MCP_ACCOUNT, user_id: 'bob', is_admin: false as const }; // 普通用户，scope ['*']
+const SCOPED = { ...DEFAULT_MCP_ACCOUNT, scope_project_ids: ['P1'], is_admin: false as const }; // scope 仅 P1
+
+describe('D6-3 is_admin 字段与门禁骨架', () => {
+  it('DEFAULT_MCP_ACCOUNT（默认引导令牌）显式 is_admin:true', () => {
+    expect(DEFAULT_MCP_ACCOUNT.is_admin).toBe(true);
+    expect(isAdmin(DEFAULT_MCP_ACCOUNT)).toBe(true);
+  });
+  it('isAdmin：仅显式 true 视为 admin；undefined/false/其它一律非 admin', () => {
+    expect(isAdmin({ user_id: 'u', scope_project_ids: ['*'], is_admin: true })).toBe(true);
+    expect(isAdmin({ user_id: 'u', scope_project_ids: ['*'] })).toBe(false);
+    expect(isAdmin({ user_id: 'u', scope_project_ids: ['*'], is_admin: false })).toBe(false);
+    expect(isAdmin({ user_id: 'u', scope_project_ids: ['*'], is_admin: 'yes' as unknown as boolean })).toBe(false);
+  });
+});
 
 function mem(pid: string, id: string, ts: number): Memory {
   return {
