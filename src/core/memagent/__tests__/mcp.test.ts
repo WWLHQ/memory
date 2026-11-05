@@ -61,12 +61,12 @@ describe('MCP Server（§19.5）', () => {
     expect(r.result).toBeUndefined();
   });
 
-  it('tools/list 返回九个工具且 schema 正确', async () => {
+  it('tools/list 返回十个工具且 schema 正确', async () => {
     const r = await rpcCall(PORT, { jsonrpc: '2.0', id: 1, method: 'tools/list', params: { token: TOKEN } });
     const tools = (r.result as { tools: Array<{ name: string; inputSchema?: { required?: string[] } }> }).tools;
     expect(tools.map((t) => t.name)).toEqual([
       'recall_memory', 'write_memory', 'list_projects', 'get_preferences', 'get_write_status',
-      'list_memories', 'get_memory', 'feedback', 'manage_memory',
+      'list_memories', 'get_memory', 'feedback', 'manage_memory', 'gc_report',
     ]);
     const recallTool = tools.find((t) => t.name === 'recall_memory')!;
     expect(recallTool.inputSchema!.required).toEqual(['query']); // project_id 可省略（批次11）
@@ -552,12 +552,10 @@ describe('批次44-D5-2：feedback / manage_memory（TCP）', () => {
   const call = (id: number, method: string, params: Record<string, unknown> = {}) =>
     rpcCall(port, { jsonrpc: '2.0', id, method, params: { token: TOKEN, ...params } });
 
-  it('tools/list 暴露 9 个工具（含 D5-2 两个）', async () => {
+  it('tools/list 暴露 D5-2 新增的两个治理工具（总数由主套件断言钉住）', async () => {
     const r = await call(970, 'tools/list');
     const names = (r.result as { tools: Array<{ name: string }> }).tools.map((t) => t.name);
-    expect(names).toHaveLength(9);
-    expect(names).toContain('feedback');
-    expect(names).toContain('manage_memory');
+    expect(names).toEqual(expect.arrayContaining(['feedback', 'manage_memory']));
   });
 
   it('写入一条 → feedback confirm / reject / disputed 三档 trust_delta，回执不泄 L0', async () => {
@@ -671,6 +669,116 @@ describe('批次44-D5-2：feedback / manage_memory（TCP）', () => {
         expect(r.error?.message).not.toContain('P2');
       }
       expect((await storage.getMemory('mem_p2_d5_2'))?.pinned).toBe(false);
+    } finally {
+      scoped.stop();
+    }
+  });
+});
+
+// 批次44-D5-3：gc_report（TCP 端到端，与 HTTP 共用 mcpGcTools）
+describe('批次44-D5-3：gc_report（TCP）', () => {
+  let handle: McpServerHandle;
+  let port = 0;
+  let vault: L0Vault;
+  const storage = new InMemoryStorage();
+  const DAY = 24 * 3600 * 1000;
+
+  beforeAll(async () => {
+    vault = (await createTestVault()).vault;
+    // 直接放一条 hot 且超过 3 天的旧记忆（write_memory 的 created_at 是当下，不会触发衰减）
+    await storage.putMemory({
+      mem_id: 'mem_gc_old', project_id: 'P1', enterprise_id: 'e1', team_id: 't1',
+      category: 'context', layer: 'L1', content: '待衰减的旧上下文', decay_class: 'hot',
+      pinned: false, locked: false, version: 1, half_life_days: 30,
+      created_at: Date.now() - 4 * DAY,
+    });
+    handle = runMcpServer({ port: 0, storage, token: TOKEN, l0: vault });
+    port = await handle.ready;
+  });
+  afterAll(() => { handle?.stop(); });
+
+  const call = (id: number, method: string, params: Record<string, unknown> = {}) =>
+    rpcCall(port, { jsonrpc: '2.0', id, method, params: { token: TOKEN, ...params } });
+
+  it('tools/list 暴露 10 个工具，gc_report schema 要求 project_id', async () => {
+    const r = await call(1000, 'tools/list');
+    const tools = (r.result as { tools: Array<{ name: string; inputSchema?: { required?: string[] } }> }).tools;
+    expect(tools.map((t) => t.name)).toHaveLength(10);
+    const gc = tools.find((t) => t.name === 'gc_report')!;
+    expect(gc.inputSchema!.required).toEqual(['project_id']);
+  });
+
+  it('缺省 dry_run=true → 只演算：报 decayed=1，但记忆未降档、未写审计', async () => {
+    const r = await call(1001, 'gc_report', { project_id: 'P1' });
+    const out = r.result as {
+      ok: boolean; dry_run: boolean; report: Record<string, unknown>;
+      audit_written: boolean; note: string;
+    };
+    expect(out.ok).toBe(true);
+    expect(out.dry_run).toBe(true);
+    expect(out.report.decayed).toBe(1);
+    expect(out.audit_written).toBe(false);
+    expect((await storage.getMemory('mem_gc_old'))?.decay_class).toBe('hot');
+    expect((await storage.getMemory('mem_gc_old'))?.version).toBe(1);
+    expect(await storage.queryAudit({})).toHaveLength(0);
+  });
+
+  it('显式 dry_run=false → 真实降档 + audit_written=true；再演算 decayed=0', async () => {
+    const r = await call(1002, 'gc_report', { project_id: 'P1', dry_run: false });
+    const out = r.result as { dry_run: boolean; report: { decayed: number }; audit_written: boolean };
+    expect(out.dry_run).toBe(false);
+    expect(out.report.decayed).toBe(1);
+    expect(out.audit_written).toBe(true);
+    expect((await storage.getMemory('mem_gc_old'))?.decay_class).toBe('warm');
+    expect((await storage.getMemory('mem_gc_old'))?.version).toBe(2);
+    expect(await storage.queryAudit({})).toHaveLength(1);
+
+    const again = await call(1003, 'gc_report', { project_id: 'P1' });
+    expect((again.result as { report: { decayed: number } }).report.decayed).toBe(0);
+    expect(await storage.queryAudit({})).toHaveLength(1); // 演算未再写审计
+  });
+
+  it('报告只含内核真实三项，note 说明差异，不伪造摘要类统计', async () => {
+    const r = await call(1004, 'gc_report', { project_id: 'P1' });
+    const out = r.result as { report: Record<string, unknown>; note: string };
+    expect(Object.keys(out.report)).toEqual(['decayed', 'merged', 'conflicts_resolved']);
+    expect(out.report).not.toHaveProperty('summaries_created');
+    expect(out.report).not.toHaveProperty('freshness_updated');
+    expect(out.note).toContain('没有对应统计量');
+  });
+
+  it('非法参数 / 越界 / 未实现的 resolve_conflicts → -32602，且不改库', async () => {
+    const cases: Array<Record<string, unknown>> = [
+      {}, { project_id: '' }, { project_id: 'P1', dry_run: 'true' },
+      { project_id: 'P1', dry_run: 1 }, { project_id: 'P1', resolve_conflicts: true },
+      { project_id: 'P2' },
+    ];
+    for (const params of cases) {
+      const r = await call(1005, 'gc_report', params);
+      // 默认 scope='*' 下 P2 合法（只是空项目）；单独用受限令牌另测越界
+      if (params.project_id === 'P2') {
+        expect(r.error).toBeUndefined();
+        expect((r.result as { report: { decayed: number } }).report.decayed).toBe(0);
+      } else {
+        expect(r.error?.code).toBe(-32602);
+      }
+    }
+    expect((await storage.getMemory('mem_gc_old'))?.decay_class).toBe('warm'); // 未被误改
+  });
+
+  it('受限令牌：越界项目 → -32602（不越界演算）', async () => {
+    const scoped = runMcpServer({
+      port: 0, storage, token: TOKEN, l0: vault,
+      account: { user_id: 'u1', team_id: 't1', enterprise_id: 'e1', scope_project_ids: ['P1'] },
+    });
+    const p = await scoped.ready;
+    try {
+      const r = await rpcCall(p, {
+        jsonrpc: '2.0', id: 1006, method: 'gc_report',
+        params: { token: TOKEN, project_id: 'P2' },
+      });
+      expect(r.error?.code).toBe(-32602);
+      expect(r.error?.message).toContain('作用域');
     } finally {
       scoped.stop();
     }

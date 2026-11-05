@@ -193,6 +193,12 @@ export interface GcReq {
   project_id: string;
   /** 是否执行裁决（冲突 → 三模式） */
   resolve_conflicts?: boolean;
+  /**
+   * 批次44-D5-3：true = 只演算不落库（不改记忆、不写审计），用于 gc_report 的默认只读报告。
+   * 未传 / false = 原有行为（真实衰减并落审计）——内核 API ma.gc() 默认行为不变。
+   * MCP 入口由工具层默认置 true，见 mcpGcTools.ts。
+   */
+  dry_run?: boolean;
 }
 
 export interface GcReport {
@@ -200,7 +206,11 @@ export interface GcReport {
   merged: number;                 // 短路嫁接合并条数
   conflicts_resolved: number;
   request_id: string;
-  audit: AuditRef;
+  /**
+   * 批次44-D5-3：dry_run=true 时为 null——演算没有落审计，不伪造审计回执；
+   * 非 dry_run 仍返回原有 AuditRef。
+   */
+  audit: AuditRef | null;
 }
 
 /** ---------- 偏好（19.4） ---------- */

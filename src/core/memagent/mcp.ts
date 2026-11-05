@@ -20,6 +20,7 @@ import { isL0LockedError } from './errors.ts';
 import { MemoryPendingStore, type PendingStore, type WriteKnobs } from './pendingWrites.ts';
 import { runGetMemoryTool, runListMemoriesTool } from './mcpReadTools.ts';
 import { deleteAllowed, runFeedbackTool, runManageMemoryTool } from './mcpManageTools.ts';
+import { runGcReportTool } from './mcpGcTools.ts';
 
 const VERSION = '2.0';
 
@@ -279,6 +280,11 @@ export function runMcpServer(opts: McpOptions): McpServerHandle {
         }
         case 'manage_memory': {
           send(socket, ok(req.id, await runManageMemoryTool(s, sessionStorage, p, account.scope_project_ids, { allowDelete })));
+          return;
+        }
+        // ── gc_report（批次44-D5-3：遗忘周期报告，默认只演算） ──
+        case 'gc_report': {
+          send(socket, ok(req.id, await runGcReportTool(s, p, account.scope_project_ids)));
           return;
         }
 

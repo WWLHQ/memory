@@ -42,7 +42,7 @@ const ma = createMemAgent({
 |---|---|---|---|
 | 召回 | `ma.recall(RecallReq) → RecallResult` | 命中记忆 + 证据 + 预算 + request_id | 2.4 |
 | 写入 | `ma.write(MemReq) → WriteResult` | 新 mem_id + 查重结果 + 审计 | 2.2 / 6.1 |
-| 生命周期 | `ma.gc(GcReq) → GcReport` | 衰减/裁决/嫁接报告 | 9.7 / 6.2 |
+| 生命周期 | `ma.gc(GcReq) → GcReport` | 衰减/裁决/嫁接报告；`dry_run=true` 只演算不落库（§2.4） | 9.7 / 6.2 / 批次44-D5-3 |
 | 偏好 | `ma.getPrefs(user_id) → Pref[]` | 个人偏好（user_id 级跨 Agent） | 19.4 |
 | 一键接入 | `ma.discover(DiscoverReq) → DiscoverResult` | 发现 + 打标 + 绑定 + 测通 | 19.9 |
 | 同步 | `ma.sync(SyncReq) → SyncReport` | 回传/拉取/裁决/对账 | 19.11 / 5.1 |
@@ -116,6 +116,20 @@ score = relevance × ( 0.35·新鲜度 + 0.30·重要性 + 0.15·可信度 + 0.2
 **整改方向（与 `mcp-extension-contract.md` §2 一致）**：`write_memory` 新增可选入参 `importance` / `confidence` / `half_life_days` / `tags`，并新增 `feedback` 工具（confirm +0.1 / reject −0.05 / disputed 挂裁决），解锁两把旋钮。
 
 > 注意：本公式是**衰减/召回排序打分**，与 `recallModes.ts` 的**召回模式选择权重**（如 top_insight 0.20/0.40/0.10/0.30）是两回事，文档与实现须显式区分，避免混淆。
+>
+> **批次44 状态更新（D3 / D5-2 已解除上述两把锁）**：`write_memory` 已支持 `importance` / `confidence` / `half_life_days` / `tags` 四个可选旋钮（`memories.ts` 的 `parseWriteKnobs()`），MCP 已提供 `feedback`（confirm +0.1 / reject −0.05 / disputed 挂裁决）。上表 ❌ 两行与「整改方向」是**立项时的问题来源记录**，保留原貌以便追溯，不再代表当前现状。
+
+## 2.4 `gc` 的 dry_run 演算口径（批次44-D5-3）
+
+`GcReq` 新增可选 `dry_run?: boolean`；`coreGc` 在 `dry_run=true` 时只调用 `classifyLayer` 演算统计，**既不 `putMemory` 也不 `appendAudit`**，并回 `GcReport.audit = null`（不伪造审计引用）。
+
+| 调用 | 记忆状态 | 审计 | `GcReport.audit` |
+|---|---|---|---|
+| `ma.gc({ project_id })`（未传 dry_run） | 真实降档 + `version+1` | 写 `action='gc'` | `AuditRef` |
+| `ma.gc({ project_id, dry_run: false })` | 同上 | 同上 | `AuditRef` |
+| `ma.gc({ project_id, dry_run: true })` | **不变** | **零写入** | `null` |
+
+> 内核 API 默认行为不变：`dry_run` 未传等价于 `false`（真实落库）。**MCP 入口 `gc_report` 反过来默认 `true`**（只读报告更安全），只有客户端显式传 `dry_run=false` 才落库；详见 `mcpGcTools.ts` 与 `需求规格书.md` §19.5。
 
 ## 3. 数据 schema（内核 ↔ 存储）
 

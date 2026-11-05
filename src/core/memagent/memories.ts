@@ -555,20 +555,27 @@ export async function coreBrowse(
  * 半衰期解析统一为「显式 half_life_days 优先，否则 category policy」，
  * 由 classifyLayer → freshnessOf 内部完成；locked/pinned 豁免同源。
  * 同一时刻重复调用不会连续降档（时间未到 → 不推进）。
+ *
+ * 批次44-D5-3：req.dry_run=true 时只演算统计，**既不 putMemory 也不 appendAudit**，
+ * 且回执 audit=null（不伪造审计引用）。未传 / false 保持原有真实落库行为不变。
  */
 export async function coreGc(
   req: GcReq,
   ctx: { storage: StorageBackend; request_id: string; now: number },
 ): Promise<GcReport> {
   const { storage, request_id, now } = ctx;
+  const dryRun = req.dry_run === true;
   const mems = await storage.listMemories({ project_id: req.project_id });
   let decayed = 0;
   for (const m of mems) {
     const next = classifyLayer(m, now);
     if (next && next !== m.decay_class) {
-      await storage.putMemory({ ...m, decay_class: next, version: m.version + 1 });
+      if (!dryRun) await storage.putMemory({ ...m, decay_class: next, version: m.version + 1 });
       decayed++;
     }
+  }
+  if (dryRun) {
+    return { decayed, merged: 0, conflicts_resolved: 0, request_id, audit: null };
   }
   const auditRef: AuditRef = { request_id, action: 'gc' };
   await storage.appendAudit({

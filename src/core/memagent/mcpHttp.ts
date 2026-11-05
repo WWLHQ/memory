@@ -26,6 +26,7 @@ import { isL0LockedError } from './errors.ts';
 import { MemoryPendingStore, type PendingStore, type WriteKnobs } from './pendingWrites.ts';
 import { runGetMemoryTool, runListMemoriesTool } from './mcpReadTools.ts';
 import { deleteAllowed, runFeedbackTool, runManageMemoryTool } from './mcpManageTools.ts';
+import { runGcReportTool } from './mcpGcTools.ts';
 
 const PROTOCOL_VERSION = '2025-06-18';
 
@@ -299,6 +300,10 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
       case 'manage_memory': {
         // 批次44-D5-2：单条生命周期治理（与 TCP 共用 runManageMemoryTool，delete 受同一门禁）
         return { result: await runManageMemoryTool(ma, storage, args, account.scope_project_ids, { allowDelete }) };
+      }
+      case 'gc_report': {
+        // 批次44-D5-3：遗忘周期报告（与 TCP 共用 runGcReportTool，默认 dry_run=true）
+        return { result: await runGcReportTool(ma, args, account.scope_project_ids) };
       }
       case 'get_preferences': {
         const p = args;

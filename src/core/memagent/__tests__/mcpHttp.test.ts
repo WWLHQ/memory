@@ -76,7 +76,7 @@ describe('MCP HTTP（批次2 信任边界）', () => {
     const body = (await header.json()) as { result: { tools: Array<{ name: string; description?: string }> } };
     expect(body.result.tools.map((t) => t.name)).toEqual([
       'recall_memory', 'write_memory', 'list_projects', 'get_preferences', 'get_write_status',
-      'list_memories', 'get_memory', 'feedback', 'manage_memory',
+      'list_memories', 'get_memory', 'feedback', 'manage_memory', 'gc_report',
     ]);
     // 批次14：措辞为「优先使用本工具 + 未命中/不可用再回退」，不是硬禁用
     const recallDesc = body.result.tools.find((t) => t.name === 'recall_memory')?.description ?? '';
@@ -978,5 +978,82 @@ describe('批次44-D5-2：feedback / manage_memory（HTTP）', () => {
     expect(ok.result.structuredContent).toMatchObject({ ok: true, mem: null });
     const after = await tool(994, 'get_memory', { mem_id: id2 });
     expect(after.result.structuredContent).toEqual({ ok: false, item: null, reason: '记忆不存在' });
+  });
+});
+
+// 批次44-D5-3：gc_report（HTTP 端到端，与 TCP 共用 mcpGcTools）
+describe('批次44-D5-3：gc_report（HTTP）', () => {
+  let handle: McpHttpHandle;
+  let url = '';
+  let vault: L0Vault;
+  const storage = new InMemoryStorage();
+  const DAY = 24 * 3600 * 1000;
+
+  beforeAll(async () => {
+    vault = (await createTestVault()).vault;
+    await storage.putMemory({
+      mem_id: 'mem_gc_http', project_id: 'P1', enterprise_id: 'e1', team_id: 't1',
+      category: 'context', layer: 'L1', content: '待衰减的旧上下文', decay_class: 'hot',
+      pinned: false, locked: false, version: 1, half_life_days: 30,
+      created_at: Date.now() - 4 * DAY,
+    });
+    handle = runMcpHttpServer({ port: 0, token: TOKEN, storage, l0: vault });
+    url = `http://127.0.0.1:${await handle.ready}/mcp`;
+  });
+  afterAll(() => { handle?.stop(); });
+
+  type ToolBody = {
+    result: { isError: boolean; structuredContent?: Record<string, unknown>; content: Array<{ text: string }> };
+  };
+  async function tool(id: number, name: string, args: Record<string, unknown> = {}): Promise<ToolBody> {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` },
+      body: JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } }),
+    });
+    return (await res.json()) as ToolBody;
+  }
+
+  it('缺省 dry_run=true → 只演算；显式 false → 真实降档 + audit_written=true', async () => {
+    const dry = await tool(1010, 'gc_report', { project_id: 'P1' });
+    expect(dry.result.isError).toBe(false);
+    const d = dry.result.structuredContent as {
+      dry_run: boolean; report: { decayed: number }; audit_written: boolean;
+    };
+    expect(d.dry_run).toBe(true);
+    expect(d.report.decayed).toBe(1);
+    expect(d.audit_written).toBe(false);
+    expect((await storage.getMemory('mem_gc_http'))?.decay_class).toBe('hot');
+    expect(await storage.queryAudit({})).toHaveLength(0);
+
+    const real = await tool(1011, 'gc_report', { project_id: 'P1', dry_run: false });
+    expect(real.result.isError).toBe(false);
+    const r = real.result.structuredContent as { dry_run: boolean; report: { decayed: number }; audit_written: boolean };
+    expect(r.dry_run).toBe(false);
+    expect(r.report.decayed).toBe(1);
+    expect(r.audit_written).toBe(true);
+    expect((await storage.getMemory('mem_gc_http'))?.decay_class).toBe('warm');
+    expect(await storage.queryAudit({})).toHaveLength(1);
+  });
+
+  it('报告只含内核真实三项，note 说明差异，不伪造摘要类统计', async () => {
+    const out = await tool(1012, 'gc_report', { project_id: 'P1' });
+    const body = out.result.structuredContent as { report: Record<string, unknown>; note: string };
+    expect(Object.keys(body.report)).toEqual(['decayed', 'merged', 'conflicts_resolved']);
+    expect(body.report).not.toHaveProperty('summaries_created');
+    expect(body.report).not.toHaveProperty('migrated');
+    expect(body.note).toContain('没有对应统计量');
+  });
+
+  it('缺 project_id / dry_run 非布尔 / 未实现的 resolve_conflicts → isError:true', async () => {
+    for (const args of [
+      {}, { project_id: '' }, { project_id: 'P1', dry_run: 'true' },
+      { project_id: 'P1', resolve_conflicts: true },
+    ]) {
+      const out = await tool(1013, 'gc_report', args);
+      expect(out.result.isError).toBe(true);
+    }
+    expect((await storage.getMemory('mem_gc_http'))?.decay_class).toBe('warm');
+    expect(await storage.queryAudit({})).toHaveLength(1); // 失败请求未写审计
   });
 });
