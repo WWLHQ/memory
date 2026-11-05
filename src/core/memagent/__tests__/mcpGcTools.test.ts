@@ -9,6 +9,8 @@ import { GC_REPORT_NOTE, runGcReportTool } from '../mcpGcTools.ts';
 import type { MemAgent, Memory } from '../types.ts';
 
 const ACCOUNT = { user_id: 'u1', team_id: 't1', enterprise_id: 'e1' };
+const FULL_ACCOUNT = { ...ACCOUNT, scope_project_ids: ['*'] };
+const SCOPED_P1 = { ...FULL_ACCOUNT, scope_project_ids: ['P1'] };
 const DAY = 24 * 3600 * 1000;
 
 function mem(over: Partial<Memory> = {}): Memory {
@@ -95,7 +97,7 @@ describe('批次44-D5-3：runGcReportTool（MCP 层默认只演算 + 诚实统�
   });
 
   it('缺省 dry_run=true → 报出会降档的条数，但不改库、audit_written=false', async () => {
-    const r = await runGcReportTool(ma, { project_id: 'P1' }, ['*']);
+    const r = await runGcReportTool(ma, { project_id: 'P1' }, FULL_ACCOUNT);
     expect(r.ok).toBe(true);
     expect(r.dry_run).toBe(true);
     expect(r.report.decayed).toBe(1);
@@ -106,7 +108,7 @@ describe('批次44-D5-3：runGcReportTool（MCP 层默认只演算 + 诚实统�
   });
 
   it('显式 dry_run=false → 真实执行衰减、audit_written=true', async () => {
-    const r = await runGcReportTool(ma, { project_id: 'P1', dry_run: false }, ['*']);
+    const r = await runGcReportTool(ma, { project_id: 'P1', dry_run: false }, FULL_ACCOUNT);
     expect(r.dry_run).toBe(false);
     expect(r.report.decayed).toBe(1);
     expect(r.audit_written).toBe(true);
@@ -115,7 +117,7 @@ describe('批次44-D5-3：runGcReportTool（MCP 层默认只演算 + 诚实统�
   });
 
   it('46-4 报告字段对齐：保留三项 + 六项真实字段 + scanned；note 分层说明', async () => {
-    const r = await runGcReportTool(ma, { project_id: 'P1' }, ['*']);
+    const r = await runGcReportTool(ma, { project_id: 'P1' }, FULL_ACCOUNT);
     expect(Object.keys(r.report)).toEqual([
       'decayed', 'merged', 'conflicts_resolved',
       'freshness_updated', 'scanned', 'migrated',
@@ -135,9 +137,9 @@ describe('批次44-D5-3：runGcReportTool（MCP 层默认只演算 + 诚实统�
 
   it('project_id 缺失/空串/越界 → -32602，且不改库、不写审计', async () => {
     for (const args of [{}, { project_id: '' }, { project_id: 123 }]) {
-      await expect(runGcReportTool(ma, args, ['*'])).rejects.toBeInstanceOf(McpToolError);
+      await expect(runGcReportTool(ma, args, FULL_ACCOUNT)).rejects.toBeInstanceOf(McpToolError);
     }
-    await expect(runGcReportTool(ma, { project_id: 'P2' }, ['P1'])).rejects.toThrow(/作用域不含项目 P2/);
+    await expect(runGcReportTool(ma, { project_id: 'P2' }, SCOPED_P1)).rejects.toThrow(/作用域不含项目 P2/);
     expect((await storage.getMemory('mem_old'))?.decay_class).toBe('hot');
     expect(await storage.queryAudit({})).toHaveLength(0);
   });
@@ -151,7 +153,7 @@ describe('批次44-D5-3：runGcReportTool（MCP 层默认只演算 + 诚实统�
     ];
     for (const args of cases) {
       try {
-        await runGcReportTool(ma, args, ['*']);
+        await runGcReportTool(ma, args, FULL_ACCOUNT);
         throw new Error('expected McpToolError');
       } catch (e) {
         expect(e).toBeInstanceOf(McpToolError);
@@ -161,12 +163,12 @@ describe('批次44-D5-3：runGcReportTool（MCP 层默认只演算 + 诚实统�
   });
 
   it('resolve_conflicts=true 不给 verdict → 明确拒绝（禁止自动 auto_override）', async () => {
-    await expect(runGcReportTool(ma, { project_id: 'P1', resolve_conflicts: true }, ['*']))
+    await expect(runGcReportTool(ma, { project_id: 'P1', resolve_conflicts: true }, FULL_ACCOUNT))
       .rejects.toThrow(/verdict|禁止自动/);
   });
 
   it('空项目也如实回零报告（不伪造统计量、不补造记录）', async () => {
-    const r = await runGcReportTool(ma, { project_id: 'P_EMPTY' }, ['*']);
+    const r = await runGcReportTool(ma, { project_id: 'P_EMPTY' }, FULL_ACCOUNT);
     expect(r.report.decayed).toBe(0);
     expect(r.report.freshness_updated).toBe(0);
     expect(r.report.scanned).toBe(0);
@@ -193,7 +195,7 @@ describe('批次46-4：MCP 裁决参数（D3/D8 二者都给才落定）', () =>
   it('resolve_conflicts=true + verdict=auto_override + dry_run=false → 真实落定、成对审计', async () => {
     const r = await runGcReportTool(ma, {
       project_id: 'P1', dry_run: false, resolve_conflicts: true, verdict: 'auto_override',
-    }, ['*']);
+    }, FULL_ACCOUNT);
     expect(r.report.conflicts_resolved).toBe(1);
     expect(r.conflict_resolution).toEqual({ requested: true, verdict: 'auto_override', resolved: 1 });
     expect(r.audit_written).toBe(true);
@@ -219,7 +221,7 @@ describe('批次46-4：MCP 裁决参数（D3/D8 二者都给才落定）', () =>
       const before = (await s.listMemories({})).map((m) => ({ ...m }));
       const r = await runGcReportTool(agent, {
         project_id: 'P1', dry_run: false, resolve_conflicts: true, verdict: v,
-      }, ['*']);
+      }, FULL_ACCOUNT);
       expect(r.report.conflicts_resolved).toBe(0);
       expect(r.conflict_resolution).toEqual({ requested: true, verdict: v, resolved: 0 });
       expect((await s.listMemories({})).map((m) => ({ ...m }))).toEqual(before);
@@ -232,7 +234,7 @@ describe('批次46-4：MCP 裁决参数（D3/D8 二者都给才落定）', () =>
     const before = (await storage.listMemories({})).map((m) => ({ ...m }));
     const r = await runGcReportTool(ma, {
       project_id: 'P1', resolve_conflicts: true, verdict: 'auto_override',
-    }, ['*']);
+    }, FULL_ACCOUNT);
     expect(r.dry_run).toBe(true);
     expect(r.report.conflicts_resolved).toBe(0);
     expect(r.audit_written).toBe(false);
@@ -241,7 +243,7 @@ describe('批次46-4：MCP 裁决参数（D3/D8 二者都给才落定）', () =>
   });
 
   it('只给 verdict 不给 resolve_conflicts → 明确拒绝，不静默忽略高风险参数', async () => {
-    await expect(runGcReportTool(ma, { project_id: 'P1', verdict: 'auto_override' }, ['*']))
+    await expect(runGcReportTool(ma, { project_id: 'P1', verdict: 'auto_override' }, FULL_ACCOUNT))
       .rejects.toThrow(/resolve_conflicts/);
   });
 
@@ -253,7 +255,7 @@ describe('批次46-4：MCP 裁决参数（D3/D8 二者都给才落定）', () =>
     ];
     for (const args of cases) {
       try {
-        await runGcReportTool(ma, args, ['*']);
+        await runGcReportTool(ma, args, FULL_ACCOUNT);
         throw new Error('expected McpToolError');
       } catch (e) {
         expect(e).toBeInstanceOf(McpToolError);
@@ -268,7 +270,7 @@ describe('批次46-4：MCP 裁决参数（D3/D8 二者都给才落定）', () =>
     for (const v of ['auto_override', 'user_confirm', 'merge', 'hold'] as const) {
       const r = await runGcReportTool(ma, {
         project_id: 'P1', dry_run: true, resolve_conflicts: true, verdict: v,
-      }, ['*']);
+      }, FULL_ACCOUNT);
       expect(r.ok).toBe(true);
       expect(r.conflict_resolution).toEqual({ requested: true, verdict: v, resolved: 0 });
     }

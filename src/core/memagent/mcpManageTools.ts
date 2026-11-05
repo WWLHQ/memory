@@ -13,7 +13,7 @@
 //     ↔ MCP `feedback.mem_id/verdict` ↔ 内核 `FeedbackKind`，同走 coreFeedback；
 //   APP `coreMemoryOps` 的 17.3 操作 ↔ MCP `manage_memory.action` ↔ 内核 `MemOp`，同走 coreMemoryOp。
 // MCP 侧统一用 mem_id 以对齐 get_memory / recall_memory 的 hits[].mem_id，不引入 APP 的 memory_id 别名。
-import { projectInScope } from './mcpAuth.ts';
+import { projectInScope, type McpAccount } from './mcpAuth.ts';
 import { McpToolError } from './mcpRecall.ts';
 import { toMemoryView, type MemoryView } from './mcpReadTools.ts';
 import type {
@@ -59,10 +59,10 @@ function requiredId(v: unknown, field: string): string {
 }
 
 /** 越界即拒；不存在时交给内核回 ok:false（诚实降级，不补造空记录、不提前泄露项目信息） */
-async function assertInScope(storage: StorageBackend, memId: string, scope?: string[]): Promise<void> {
+async function assertInScope(storage: StorageBackend, memId: string, account: McpAccount): Promise<void> {
   const m = await storage.getMemory(memId);
-  if (m && !projectInScope(scope, m.project_id)) {
-    throw new McpToolError('当前 MCP 令牌作用域不含该 mem_id 所属项目（scope 校验）');
+  if (m && !projectInScope(account, m.project_id)) {
+    throw new McpToolError('当前 MCP 令牌作用域不含该 mem_id 所属项目（三池可见性校验，D6-2）');
   }
 }
 
@@ -128,14 +128,14 @@ export async function runFeedbackTool(
   ma: MemAgent,
   storage: StorageBackend,
   args: Record<string, unknown>,
-  scope?: string[],
+  account: McpAccount,
 ): Promise<FeedbackToolResult> {
   const memId = requiredId(args.mem_id, 'feedback.mem_id');
   const verdict = args.verdict;
   if (typeof verdict !== 'string' || !VERDICTS.includes(verdict as FeedbackKind)) {
     throw new McpToolError(`feedback.verdict 非法：${String(verdict)}（允许：${VERDICTS.join('/')}）`);
   }
-  await assertInScope(storage, memId, scope);
+  await assertInScope(storage, memId, account);
   const r = await ma.feedback(memId, verdict as FeedbackKind);
   return {
     ok: r.ok,
@@ -150,7 +150,7 @@ export async function runManageMemoryTool(
   ma: MemAgent,
   storage: StorageBackend,
   args: Record<string, unknown>,
-  scope: string[] | undefined,
+  account: McpAccount,
   opts: ManageToolOpts,
 ): Promise<ManageToolResult> {
   const memId = requiredId(args.mem_id, 'manage_memory.mem_id');
@@ -166,7 +166,7 @@ export async function runManageMemoryTool(
     );
   }
   const patch = parsePatch(args.patch, op);
-  await assertInScope(storage, memId, scope);
+  await assertInScope(storage, memId, account);
   const r = await ma.memoryOp(memId, op, patch);
   return {
     ok: r.ok,

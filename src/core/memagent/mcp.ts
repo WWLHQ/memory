@@ -162,14 +162,14 @@ export function runMcpServer(opts: McpOptions): McpServerHandle {
         // ── recall_memory ──────────────────────────────────────────────
         case 'recall_memory': {
           // 批次11：project_id 可省略（唯一项目自动定位）；返回背景/省量/金额提示
-          const out = await runRecallTool(s, sessionStorage, p, undefined, undefined, account.scope_project_ids);
+          const out = await runRecallTool(s, sessionStorage, p, undefined, undefined, account);
           send(socket, ok(req.id, out.payload));
           return;
         }
 
         // ── list_projects ──────────────────────────────────────────────
         case 'list_projects': {
-          send(socket, ok(req.id, await runListProjectsTool(sessionStorage, account.scope_project_ids)));
+          send(socket, ok(req.id, await runListProjectsTool(sessionStorage, account)));
           return;
         }
 
@@ -179,9 +179,9 @@ export function runMcpServer(opts: McpOptions): McpServerHandle {
             send(socket, jsonError(req.id, -32602, 'write_memory.project_id 必填（R2）'));
             return;
           }
-          // 令牌项目作用域（批次26-B P1-10）：'*' 全放行；否则只能写显式列出的项目
-          if (!projectInScope(account.scope_project_ids, p.project_id)) {
-            send(socket, jsonError(req.id, -32602, `当前 MCP 令牌作用域不含项目 ${p.project_id}（scope 校验，批次26-B P1-10）`));
+          // 三池可见性门禁（D6-2）：shared 恒可见 / user 仅 owner 或 admin / archive 仅 admin / general 按令牌 scope 列表
+          if (!projectInScope(account, p.project_id)) {
+            send(socket, jsonError(req.id, -32602, `当前 MCP 令牌作用域不含项目 ${p.project_id}（三池可见性校验，D6-2）`));
             return;
           }
           if (!p.content || typeof p.content !== 'string') {
@@ -265,26 +265,26 @@ export function runMcpServer(opts: McpOptions): McpServerHandle {
 
         // ── list_memories / get_memory（批次44-D5-1：治理盘点 + 精确读） ──
         case 'list_memories': {
-          send(socket, ok(req.id, await runListMemoriesTool(sessionStorage, p, account.scope_project_ids)));
+          send(socket, ok(req.id, await runListMemoriesTool(sessionStorage, p, account)));
           return;
         }
         case 'get_memory': {
-          send(socket, ok(req.id, await runGetMemoryTool(sessionStorage, p, account.scope_project_ids)));
+          send(socket, ok(req.id, await runGetMemoryTool(sessionStorage, p, account)));
           return;
         }
 
         // ── feedback / manage_memory（批次44-D5-2：反馈与生命周期治理） ──
         case 'feedback': {
-          send(socket, ok(req.id, await runFeedbackTool(s, sessionStorage, p, account.scope_project_ids)));
+          send(socket, ok(req.id, await runFeedbackTool(s, sessionStorage, p, account)));
           return;
         }
         case 'manage_memory': {
-          send(socket, ok(req.id, await runManageMemoryTool(s, sessionStorage, p, account.scope_project_ids, { allowDelete })));
+          send(socket, ok(req.id, await runManageMemoryTool(s, sessionStorage, p, account, { allowDelete })));
           return;
         }
         // ── gc_report（批次44-D5-3：遗忘周期报告，默认只演算） ──
         case 'gc_report': {
-          send(socket, ok(req.id, await runGcReportTool(s, p, account.scope_project_ids)));
+          send(socket, ok(req.id, await runGcReportTool(s, p, account)));
           return;
         }
 

@@ -15,7 +15,7 @@
 //    conflicts_resolved 只数本周期经 coreResolveConflict() 真实落定的冲突对。
 // ⑤ project_id 显式必填且必须落在令牌作用域内，不猜项目、不越界演算。
 import { CONFLICT_VERDICTS } from './conflict.ts';
-import { projectInScope } from './mcpAuth.ts';
+import { projectInScope, type McpAccount } from './mcpAuth.ts';
 import { McpToolError } from './mcpRecall.ts';
 import type { ConflictVerdict, MemAgent } from './types.ts';
 
@@ -65,15 +65,15 @@ export interface GcReportToolResult {
 export async function runGcReportTool(
   ma: MemAgent,
   args: Record<string, unknown>,
-  scope?: string[],
+  account: McpAccount,
 ): Promise<GcReportToolResult> {
   const pid = args.project_id;
   if (typeof pid !== 'string' || !pid.trim()) {
     throw new McpToolError('gc_report.project_id 必填且须为非空字符串（不猜项目）');
   }
   const projectId = pid.trim();
-  if (!projectInScope(scope, projectId)) {
-    throw new McpToolError(`当前 MCP 令牌作用域不含项目 ${projectId}（scope 校验）`);
+  if (!projectInScope(account, projectId)) {
+    throw new McpToolError(`当前 MCP 令牌作用域不含项目 ${projectId}（三池可见性校验，D6-2）`);
   }
 
   // ── 46-4 裁决参数校验（D3/D8：全部前置，绝不「先落库再报错」）──

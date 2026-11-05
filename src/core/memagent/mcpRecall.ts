@@ -1,8 +1,8 @@
 // MCP 召回工具编排（批次11/13/29/32/33）：项目自动定位 / 列表 / 提示行与明细组装 / 按客户端能力选档位。
 // 两条传输（HTTP 8204、TCP 8202）共用；所有数字来自 storage 真实账本与 recall 审计。
-import type { MemAgent, Memory, RecallMode, RecallResult, Scene, StorageBackend } from './types.ts';
+import type { MemAgent, Memory, ProjectRecord, RecallMode, RecallResult, Scene, StorageBackend } from './types.ts';
 import { findParamsSnapshot } from './paramsSnapshot.ts';
-import { projectInScope } from './mcpAuth.ts';
+import { projectInScope, DEFAULT_MCP_ACCOUNT, type McpAccount } from './mcpAuth.ts';
 import { RECALL_DETAIL_TTL_MS } from './recallDetailTickets.ts';
 import {
   buildRecallCompactMarkdown, buildRecallDetailPage, buildRecallHint, buildRecallMarkdown,
@@ -156,7 +156,7 @@ export async function runRecallTool(
   args: Record<string, unknown>,
   now?: number,
   client?: string,
-  scope?: string[],
+  account: McpAccount = DEFAULT_MCP_ACCOUNT,
   detail?: RecallToolDetailOpts,
 ): Promise<RecallToolOutput> {
   const query = typeof args.query === 'string' ? args.query.trim() : '';
@@ -186,9 +186,9 @@ export async function runRecallTool(
 
   const infos = projectInfosFromMemories(await storage.listMemories({}));
   const project = resolveProjectId(infos, args.project_id);
-  // 令牌项目作用域（批次26-B P1-10）：'*' 全放行；否则只能命中显式列出的项目
-  if (!projectInScope(scope, project.project_id)) {
-    throw new McpToolError(`当前 MCP 令牌作用域不含项目 ${project.project_id}（scope 校验，批次26-B P1-10）`);
+  // 三池可见性门禁（D6-2）：shared 恒可见 / user 仅 owner 或 admin / archive 仅 admin / general 按令牌 scope 列表
+  if (!projectInScope(account, project.project_id)) {
+    throw new McpToolError(`当前 MCP 令牌作用域不含项目 ${project.project_id}（三池可见性校验，D6-2）`);
   }
   const recall = await ma.recall({
     project_id: project.project_id,
@@ -257,12 +257,57 @@ export function recallDisplayMode(client: string | undefined, detail: boolean): 
   return detail ? 'markdown-full' : 'markdown-compact';
 }
 
-/** 执行 list_projects：真实项目列表（空账本 → 空数组，不造数据）；scope 非空且不含 '*' 时按令牌作用域过滤 */
+/** 执行 list_projects（D6-2 三池）：合并「注册表项目 + 记忆反推的隐式项目」，统一应用三池可见性。
+ *  - 注册表项目：含显式 create_project 建立的（可能尚无记忆），按创建时间兜底 last_activity；
+ *  - 隐式项目：记忆里出现但注册表没有的项目（按 general 兜底）；
+ *  - 可见性：shared 恒可见 / user 仅 owner 或 admin / archive 仅 admin / general 按令牌 scope 列表。
+ *  空账本 → 空数组（不造数据）。 */
 export async function runListProjectsTool(
   storage: StorageBackend,
-  scope?: string[],
+  account: McpAccount,
 ): Promise<{ projects: ProjectInfo[]; total: number }> {
-  const all = projectInfosFromMemories(await storage.listMemories({}));
-  const projects = all.filter((p) => projectInScope(scope, p.project_id));
+  // 注册表项目（可能尚无记忆）
+  let registry: ProjectRecord[] = [];
+  try {
+    registry = await storage.listProjects();
+  } catch {
+    registry = [];
+  }
+  // 记忆反推的隐式项目
+  const implicit = projectInfosFromMemories(await storage.listMemories({}));
+  const byId = new Map<string, ProjectInfo>();
+  for (const rec of registry) {
+    if (!projectInScope(account, rec.project_id)) continue;
+    byId.set(rec.project_id, {
+      project_id: rec.project_id,
+      memories: 0,
+      last_activity: rec.created_at ?? 0,
+    });
+  }
+  for (const info of implicit) {
+    if (!projectInScope(account, info.project_id)) continue;
+    const cur = byId.get(info.project_id);
+    if (cur) {
+      cur.memories += info.memories;
+      cur.last_activity = Math.max(cur.last_activity, info.last_activity);
+    } else {
+      byId.set(info.project_id, { ...info });
+    }
+  }
+  const projects = [...byId.values()].sort(
+    (a, b) => b.last_activity - a.last_activity || a.project_id.localeCompare(b.project_id),
+  );
   return { projects, total: projects.length };
+}
+
+/** D6-2：启动自动建共享项目——若注册表无 P-shared 则建（只读镜像/无写权限时静默跳过，绝不阻碍启动）。 */
+export async function ensureSharedProject(storage: StorageBackend): Promise<void> {
+  try {
+    const existing = await storage.getProject('P-shared');
+    if (!existing) {
+      await storage.createProject({ project_id: 'P-shared', kind: 'shared', created_by: 'bootstrap' });
+    }
+  } catch {
+    // 只读镜像或创建失败：共享池缺省不阻断主流程
+  }
 }

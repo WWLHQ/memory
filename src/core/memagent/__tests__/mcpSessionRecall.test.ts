@@ -11,6 +11,8 @@ import { createTestVault } from './l0Kit.ts';
 import type { MemAgent, Memory } from '../types.ts';
 
 const ACCOUNT = { user_id: 'u1', team_id: 't1', enterprise_id: 'e1' };
+const FULL_ACCOUNT = { ...ACCOUNT, scope_project_ids: ['*'] };
+const SCOPED_P1 = { ...FULL_ACCOUNT, scope_project_ids: ['P1'] };
 const LONG = '项目 P1 决策：会话工作记忆按 session_id 精确过滤并按 created_at 倒序取最近若干条，不走向量语义检索';
 
 function mem(over: Partial<Memory> = {}): Memory {
@@ -177,10 +179,10 @@ describe('批次44-D5-4：runRecallTool 参数校验（C2 输入变异矩阵）'
       { query: 'q', project_id: 'P1', scope: 'session', session_id: 'S1', top_k: 1.5 },
     ];
     for (const args of cases) {
-      await expect(runRecallTool(ma, storage, args, undefined, undefined, ['*']))
+      await expect(runRecallTool(ma, storage, args, undefined, undefined, FULL_ACCOUNT))
         .rejects.toBeInstanceOf(McpToolError);
     }
-    try { await runRecallTool(ma, storage, { query: 'q', project_id: 'P1', scope: 'session' }, undefined, undefined, ['*']); }
+    try { await runRecallTool(ma, storage, { query: 'q', project_id: 'P1', scope: 'session' }, undefined, undefined, FULL_ACCOUNT); }
     catch (e) { expect((e as McpToolError).code).toBe(-32602); }
   });
 
@@ -188,7 +190,7 @@ describe('批次44-D5-4：runRecallTool 参数校验（C2 输入变异矩阵）'
     const out = await runRecallTool(
       ma, storage,
       { query: '刚才', project_id: 'P1', scope: 'session', session_id: 'S1', top_k: 2 },
-      undefined, undefined, ['*'],
+      undefined, undefined, FULL_ACCOUNT,
     );
     expect(out.payload.hits.map((h) => h.mem_id)).toEqual(['s1_b', 's1_c']);
     expect(out.payload.project_id).toBe('P1');
@@ -200,7 +202,7 @@ describe('批次44-D5-4：runRecallTool 参数校验（C2 输入变异矩阵）'
     const out = await runRecallTool(
       ma, storage,
       { query: '会话正文', project_id: 'P1', scope: 'project', session_id: 'S1' },
-      undefined, undefined, ['*'],
+      undefined, undefined, FULL_ACCOUNT,
     );
     expect(out.payload.hits.some((h) => h.mem_id === 'legacy')).toBe(true);
   });
@@ -209,7 +211,7 @@ describe('批次44-D5-4：runRecallTool 参数校验（C2 输入变异矩阵）'
     await expect(runRecallTool(
       ma, storage,
       { query: 'q', project_id: 'P2', scope: 'session', session_id: 'S1' },
-      undefined, undefined, ['P1'],
+      undefined, undefined, SCOPED_P1,
     )).rejects.toThrow(/作用域/);
   });
 });

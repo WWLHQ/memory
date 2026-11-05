@@ -3,7 +3,7 @@
 //
 // 红线：对外只返回白名单摘要字段——绝不携带 content_l0_enc / content_orig / has_l0 等 L0 材料；
 // L0 原文只能通过授权连续会话（browse/decrypt）查阅。所有项目均经 projectInScope 校验。
-import { projectInScope } from './mcpAuth.ts';
+import { projectInScope, type McpAccount } from './mcpAuth.ts';
 import { McpToolError, projectInfosFromMemories, resolveProjectId } from './mcpRecall.ts';
 import { CATEGORIES, isCategory, type Memory, type StorageBackend } from './types.ts';
 
@@ -88,13 +88,13 @@ export interface ListMemoriesResult {
 export async function runListMemoriesTool(
   storage: StorageBackend,
   args: Record<string, unknown>,
-  scope?: string[],
+  account: McpAccount,
 ): Promise<ListMemoriesResult> {
   const infos = projectInfosFromMemories(await storage.listMemories({}))
-    .filter((p) => projectInScope(scope, p.project_id));
+    .filter((p) => projectInScope(account, p.project_id));
   const { project_id, resolved_from } = resolveProjectId(infos, args.project_id);
-  if (!projectInScope(scope, project_id)) {
-    throw new McpToolError(`当前 MCP 令牌作用域不含项目 ${project_id}（scope 校验）`);
+  if (!projectInScope(account, project_id)) {
+    throw new McpToolError(`当前 MCP 令牌作用域不含项目 ${project_id}（三池可见性校验，D6-2）`);
   }
 
   const category = args.category;
@@ -144,7 +144,7 @@ export type GetMemoryResult =
 export async function runGetMemoryTool(
   storage: StorageBackend,
   args: Record<string, unknown>,
-  scope?: string[],
+  account: McpAccount,
 ): Promise<GetMemoryResult> {
   const id = args.mem_id;
   if (!id || typeof id !== 'string' || !id.trim()) {
@@ -152,8 +152,8 @@ export async function runGetMemoryTool(
   }
   const m = await storage.getMemory(id.trim());
   if (!m || m.deleted) return { ok: false, item: null, reason: '记忆不存在' };
-  if (!projectInScope(scope, m.project_id)) {
-    throw new McpToolError(`当前 MCP 令牌作用域不含项目 ${m.project_id}（scope 校验）`);
+  if (!projectInScope(account, m.project_id)) {
+    throw new McpToolError(`当前 MCP 令牌作用域不含项目 ${m.project_id}（三池可见性校验，D6-2）`);
   }
   return { ok: true, item: toMemoryView(m) };
 }

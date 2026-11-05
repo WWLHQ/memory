@@ -14,15 +14,27 @@ const TOKEN = 'mcp-scope-token-0123456789abcdef0123456789abcdef';
 
 const SCOPED_ACCOUNT = { ...DEFAULT_MCP_ACCOUNT, scope_project_ids: ['P1'] };
 
-describe('projectInScope（纯函数）', () => {
-  it("undefined / 空 / 含 '*' → 全放行", () => {
-    expect(projectInScope(undefined, 'P2')).toBe(true);
-    expect(projectInScope([], 'P2')).toBe(true);
-    expect(projectInScope(['*'], 'P2')).toBe(true);
+describe('projectInScope（D6-2 三池纯函数）', () => {
+  const viewer = { user_id: 'u1', scope_project_ids: ['*'] };
+  const bob = { user_id: 'bob', scope_project_ids: ['*'] };
+  const admin = { user_id: 'u1', is_admin: true, scope_project_ids: ['*'] };
+  it('P-shared 全体恒可见（含越界 scope 的普通用户）', () => {
+    expect(projectInScope(viewer, 'P-shared')).toBe(true);
+    expect(projectInScope({ user_id: 'u1', scope_project_ids: ['P1'] }, 'P-shared')).toBe(true);
   });
-  it('显式列表：命中放行、未命中拒绝', () => {
-    expect(projectInScope(['P1'], 'P1')).toBe(true);
-    expect(projectInScope(['P1'], 'P2')).toBe(false);
+  it('P-<user> 仅 owner 或 admin 可见，其它用户拒绝', () => {
+    expect(projectInScope(bob, 'P-bob')).toBe(true);
+    expect(projectInScope(admin, 'P-bob')).toBe(true);
+    expect(projectInScope(viewer, 'P-bob')).toBe(false);
+  });
+  it('P-archive 仅 admin 可见，普通用户拒绝', () => {
+    expect(projectInScope(admin, 'P-archive')).toBe(true);
+    expect(projectInScope(viewer, 'P-archive')).toBe(false);
+  });
+  it('general：scope 含 * 全放行；显式列表命中放行、未命中拒绝', () => {
+    expect(projectInScope(viewer, 'P1')).toBe(true);
+    expect(projectInScope({ user_id: 'u1', scope_project_ids: ['P1'] }, 'P1')).toBe(true);
+    expect(projectInScope({ user_id: 'u1', scope_project_ids: ['P1'] }, 'P2')).toBe(false);
   });
 });
 
@@ -110,12 +122,12 @@ describe('MCP 令牌项目作用域（runRecallTool 直调）', () => {
     expect(full.payload.project_id).toBe('P9');
 
     await expect(
-      runRecallTool(ma, storage, { query: '直调作用域记忆', project_id: 'P9' }, undefined, undefined, ['P1']),
+      runRecallTool(ma, storage, { query: '直调作用域记忆', project_id: 'P9' }, undefined, undefined, { ...DEFAULT_MCP_ACCOUNT, scope_project_ids: ['P1'] }),
     ).rejects.toMatchObject({ code: -32602 } as Partial<McpToolError>);
 
-    const list = await runListProjectsTool(storage, ['P1']);
+    const list = await runListProjectsTool(storage, { ...DEFAULT_MCP_ACCOUNT, scope_project_ids: ['P1'] });
     expect(list.total).toBe(0);
-    const listAll = await runListProjectsTool(storage);
+    const listAll = await runListProjectsTool(storage, DEFAULT_MCP_ACCOUNT);
     expect(listAll.total).toBe(1);
   });
 });

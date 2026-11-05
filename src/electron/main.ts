@@ -40,6 +40,7 @@ import {
 import { createServer as httpCreateServer } from 'node:http';
 import { runMcpServer } from '../core/memagent/mcp.ts';
 import { runMcpHttpServer } from '../core/memagent/mcpHttp.ts';
+import { ensureSharedProject } from '../core/memagent/mcpRecall.ts';
 import { createWebhook } from '../core/memagent/webhook.ts';
 import { createWebhookHttpServer } from './webhookServer.ts';
 import type { AuditAction, Category, Memory } from '../core/memagent/types.ts';
@@ -2573,6 +2574,9 @@ async function bootstrap(): Promise<void> {
   // 批次39：写入只落 L0+L1，深层由这条后台队列补炼（存量启动即入队，幂等；引擎没就绪就先排着不判死）
   registerRefineIpc();
   void startRefineQueue(collectorVector);
+
+  // D6-2：启动自动建共享项目 P-shared（若注册表无则建；只读镜像/无写权限时静默跳过，绝不阻碍启动）
+  await ensureSharedProject(storage);
 
   const mcp = runMcpServer({ storage, port: MCP_PORT, token: mcpToken, l0: l0Vault });
   mcp.ready

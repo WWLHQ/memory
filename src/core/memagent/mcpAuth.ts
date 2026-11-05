@@ -20,11 +20,50 @@ export const DEFAULT_MCP_ACCOUNT: McpAccount = Object.freeze({
   scope_project_ids: ['*'],
 });
 
-/** 项目作用域校验：'*' 全放行；否则 project_id 必须显式在列（recall/write/list_projects 统一口径） */
-export function projectInScope(scope: string[] | undefined, projectId: string): boolean {
-  const list = scope && scope.length > 0 ? scope : ['*'];
-  if (list.includes('*')) return true;
-  return list.includes(projectId);
+/** 三池分类（D6-2）：按 project_id 命名约定判定所属池，无需查注册表即可门禁。
+ *  - shared：P-shared（全体可见，恒放行）
+ *  - archive：P-archive（仅 admin 可见）
+ *  - user：P-<user>（每用户私有，仅 owner 或 admin 可见；owner = 去掉 'P-' 前缀）
+ *  - general：其余（按令牌 scope_project_ids 列表判定） */
+export type ProjectPool = 'shared' | 'user' | 'archive' | 'general';
+
+export function classifyProject(projectId: string): ProjectPool {
+  if (projectId === 'P-shared') return 'shared';
+  if (projectId === 'P-archive') return 'archive';
+  // P-<user>：以 'P-' 开头且后面还有内容（排除裸 'P-'）
+  if (projectId.startsWith('P-') && projectId.length > 2) return 'user';
+  return 'general';
+}
+
+/** 门禁账户视图：门禁只需 identity + admin 标记 + 令牌项目作用域；McpAccount 结构兼容（is_admin 在 D6-3 才真正置位，此处可选） */
+export interface ScopeAccount {
+  user_id: string;
+  is_admin?: boolean;
+  scope_project_ids: string[];
+}
+
+/** 项目可见性/作用域校验（D6-2 三池模型）：
+ *  shared → 全体恒可见；archive → 仅 admin；user → 仅 owner 或 admin；general → 按 scope 列表（'*' 全放行）。
+ *  统一口径下沉到 recall/list/get/write/manage/gc 各门禁点（批次26-B P1-10 的 scope 列表仅作用于 general 池）。 */
+export function projectInScope(account: ScopeAccount, projectId: string): boolean {
+  const pool = classifyProject(projectId);
+  const isAdmin = account.is_admin === true;
+  switch (pool) {
+    case 'shared':
+      return true;
+    case 'archive':
+      return isAdmin;
+    case 'user': {
+      const owner = projectId.slice(2);
+      return account.user_id === owner || isAdmin;
+    }
+    case 'general': {
+      const list = account.scope_project_ids && account.scope_project_ids.length > 0
+        ? account.scope_project_ids : ['*'];
+      if (list.includes('*')) return true;
+      return list.includes(projectId);
+    }
+  }
 }
 
 /** 常数时间比较；长度不同直接不匹配（不泄露逐字节信息） */

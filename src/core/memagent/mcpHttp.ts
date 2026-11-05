@@ -220,20 +220,20 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
   async function callTool(name: string, args: Record<string, unknown>, client: string): Promise<{ result: unknown; text?: string }> {
     switch (name) {
       case 'recall_memory': {
-        const out = await runRecallTool(ma, storage, args, undefined, client, account.scope_project_ids, {
+        const out = await runRecallTool(ma, storage, args, undefined, client, account, {
           tickets: detailTickets, base: detailBase(),
         });
         return { result: out.payload, text: out.text };
       }
       case 'list_projects':
-        return { result: await runListProjectsTool(storage, account.scope_project_ids) };
+        return { result: await runListProjectsTool(storage, account) };
       case 'write_memory': {
         const p = args;
         if (!p.content || typeof p.content !== 'string') throw new Error('write_memory.content 必填');
         if (!p.project_id || typeof p.project_id !== 'string') throw new Error('write_memory.project_id 必填');
-        // 令牌项目作用域（批次26-B P1-10）：'*' 全放行；否则只能写显式列出的项目
-        if (!projectInScope(account.scope_project_ids, p.project_id)) {
-          throw new Error(`当前 MCP 令牌作用域不含项目 ${p.project_id}（scope 校验，批次26-B P1-10）`);
+        // 三池可见性门禁（D6-2）：shared 恒可见 / user 仅 owner 或 admin / archive 仅 admin / general 按令牌 scope 列表
+        if (!projectInScope(account, p.project_id)) {
+          throw new Error(`当前 MCP 令牌作用域不含项目 ${p.project_id}（三池可见性校验，D6-2）`);
         }
         // 租户闭包：客户端只能以会话身份写入，禁止冒用其它 user_id
         if (p.user_id !== undefined && String(p.user_id) !== account.user_id) {
@@ -287,23 +287,23 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
       }
       case 'list_memories': {
         // 批次44-D5-1：治理盘点（与 TCP 共用 runListMemoriesTool）
-        return { result: await runListMemoriesTool(storage, args, account.scope_project_ids) };
+        return { result: await runListMemoriesTool(storage, args, account) };
       }
       case 'get_memory': {
         // 批次44-D5-1：按 mem_id 精确读（与 TCP 共用 runGetMemoryTool）
-        return { result: await runGetMemoryTool(storage, args, account.scope_project_ids) };
+        return { result: await runGetMemoryTool(storage, args, account) };
       }
       case 'feedback': {
         // 批次44-D5-2：用户反馈（与 TCP 共用 runFeedbackTool）
-        return { result: await runFeedbackTool(ma, storage, args, account.scope_project_ids) };
+        return { result: await runFeedbackTool(ma, storage, args, account) };
       }
       case 'manage_memory': {
         // 批次44-D5-2：单条生命周期治理（与 TCP 共用 runManageMemoryTool，delete 受同一门禁）
-        return { result: await runManageMemoryTool(ma, storage, args, account.scope_project_ids, { allowDelete }) };
+        return { result: await runManageMemoryTool(ma, storage, args, account, { allowDelete }) };
       }
       case 'gc_report': {
         // 批次44-D5-3：遗忘周期报告（与 TCP 共用 runGcReportTool，默认 dry_run=true）
-        return { result: await runGcReportTool(ma, args, account.scope_project_ids) };
+        return { result: await runGcReportTool(ma, args, account) };
       }
       case 'get_preferences': {
         const p = args;
