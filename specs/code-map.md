@@ -860,3 +860,19 @@ status: draft
 
 > 诚实边界（批次41-T）：① **本批没有替用户点执行**——通道、卡片、门禁都齐了，那 533 行在用户点之前仍是空的；② `indexed` 只统计「本行**新**建了向量且注入了索引」的行，往已存在向量的行上不会重复 upsert，`vector` 未注入时恒 0（与批次41-B 同口径：行上向量是真写、索引是可丢弃的进程内实例，不假装建过）；③ 缺 `content` 或缺 `content_l1` 的行**不猜**——算不出就原样留着并在预览里明列条数，宁可这行继续召不回，也不给它一个来路不明的向量；④ 卡片与审计都只报字段名、层名与长度，**正文与算出的指纹都不落账本**（有测试断言）；⑤ `unfillable_*` 是「字段缺口」口径下的子集，两个字段都缺且都算不出的行会在两边各计一次，所以 `unfillable_sha256 + unfillable_embedding` 不等于「行数」——卡面上写的是「项」不是「行」。
 
+
+### 批次42：召回模式调度层（自动/手动）+ System Prompt 模板（2026-11-05，用户拍板「1 个自动 1 个手动」）
+
+> 动因：用户粘贴的「5 套记忆召回模式」经核对 = 规格书 §2.4.3 教学版；落地前存在 G1 缺口（5 模式里仅 `minimal` 在 `agent.ts recall()` 真正接分支，其余 4 个声明未实现）。本批新增**调度层模块**作为模式配置与自动分流的单一真源，并补齐类型/枚举对齐；`agent.ts` 实际接线留作下一步（TDD + 每任务一 commit）。
+
+| 环节 | 真源 | 测试 |
+|---|---|---|
+| 调度层模块（§2.4.3 五模式表 + §2.4.4 分流表直译） | `src/core/memagent/recallModes.ts`：`RECALL_MODE_SPECS`（5 模式 selectPriority/trimOrder/preload/conflictRule/weights/disabledLayers/isMinimal）、`COMMON_INVARIANTS`（§2.4.2 公共不变量）、`MODE_FEATURE_WORDS`/`SCENE_PLAN`/`DEFAULT_DISPATCH_CONFIG`、`resolveMode()`（自动/手动唯一入口：手动优先 > 自动分流；多模式命中裁决主/次；critical 禁极简 16.5）、`isManualMode()`/`modeWeights()`/`modeSpec()` | `src/core/memagent/__tests__/recallModes.test.ts` **19 例**（权重/层级断言 + §2.4.4 裁决走查 + 手动优先 + 16.5 硬规则 + 多模式次模式） |
+| 顶层开关语义收敛 | `src/core/memagent/types.ts`：`RecallMode` 增 `'auto'`（与 `null` 同义=自动；收敛此前 null/auto 不一致 G2）；`Scene` 增 `'history_query'`（补此前枚举漂移） | `tsc --noEmit` 干净 |
+| MCP 工具暴露 | `src/core/memagent/mcpSchema.ts`：`mode` 枚举扩为 6 值（`auto` + 5 具体模式，手动必须给具体模式）；`scene` 枚举补 `history_query`；`mode` 描述改为自动/手动措辞 | `tsc --noEmit` 干净 |
+| 设计文档（差距对照表 + 自动/手动设计 + 调度层方案 + UI 交互） | `specs/召回模式设计与实现方案.md` | 人工核对 |
+| System Prompt 模板（5 套 + 冲突约束 + auto 如何选用） | `specs/召回模式SystemPrompt模板.md` | 人工核对 |
+| **待接线（下一步，尚未改行为）** | `src/core/memagent/agent.ts` `recall()` 顶部用 `resolveMode` 替换手搓 `minimal` 分支；`selectRecallBackground`/`scoreMemory` 接入 `resolved.mode`（权重/层级/裁剪）；`RecallResult` 增 `secondary_mode_hint`/`hit_keywords`；审计 `mode_dispatch` | 接线后补 `agent.ts` 回归用例，跑 `npm run verify` |
+
+> 本批发现的规格书缺陷（已锁定，待修订）：① §2.4.3 `pattern_reasoning` 权重 `(0.15,0.25,0.10,0.40)` 求和 **0.90 ≠ 声明「权重和=1.0」**，`recallModes.ts` 保留字面值未擅自归一化，测试显式锁定；② 用户粘贴文档的「层级单条 Token 上限 400/200/100/50、total 800」在规格书与代码（`layerRules.ts` 字符上限 300/200/120/60）均不存在，模板文档已按规格书权重框架修正。
+> 索引：`npm run code:index -- --write` 已更新 `specs/code-index.generated.md`（313 文件）。
