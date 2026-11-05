@@ -28,6 +28,9 @@ export interface MemoryView {
   access_count?: number;
   created_by_agent?: string;
   tags?: string[];
+  /** 批次44-D5-2：用户确认次数（feedback confirm 分家计数）与冲突裁决 ID（disputed 挂起） */
+  reinforce_count?: number;
+  conflict_id?: string;
   /** content_l1（脱敏层）优先，取前 200 字；不含 L0 密文 */
   snippet: string;
 }
@@ -48,6 +51,8 @@ export function toMemoryView(m: Memory): MemoryView {
     access_count: m.access_count,
     created_by_agent: m.created_by_agent,
     tags: m.tags ? [...m.tags] : undefined,
+    reinforce_count: m.reinforce_count,
+    conflict_id: m.conflict_id,
     snippet: String(m.content_l1 ?? m.content ?? '').slice(0, SNIPPET_MAX),
   };
 }

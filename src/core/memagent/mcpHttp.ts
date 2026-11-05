@@ -25,6 +25,7 @@ import { parseWriteKnobs } from './memories.ts';
 import { isL0LockedError } from './errors.ts';
 import { MemoryPendingStore, type PendingStore, type WriteKnobs } from './pendingWrites.ts';
 import { runGetMemoryTool, runListMemoriesTool } from './mcpReadTools.ts';
+import { deleteAllowed, runFeedbackTool, runManageMemoryTool } from './mcpManageTools.ts';
 
 const PROTOCOL_VERSION = '2025-06-18';
 
@@ -141,6 +142,8 @@ export interface McpHttpOptions {
   onViewDetail?: (outcome: 'ok' | 'miss') => void;
   /** 批次44-D4：pending 队列存储端口；缺省内存实现，桌面建议注入 FilePendingStore */
   pending?: PendingStore;
+  /** 批次44-D5-2：是否放行 manage_memory(action=delete)；缺省读环境变量 MCP_ALLOW_DELETE=1 */
+  allowDelete?: boolean;
 }
 
 export interface McpHttpHandle {
@@ -177,6 +180,8 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
   const token = assertMcpToken(opts.token);
   const account = opts.account ?? DEFAULT_MCP_ACCOUNT;
   const storage = opts.storage ?? new InMemoryStorage();
+  // 批次44-D5-2：delete 门禁在启动时定一次，两端同判据（显式注入 > 环境变量）
+  const allowDelete = opts.allowDelete ?? deleteAllowed();
   const ma = createMemAgent({
     form: 'desktop',
     account,
@@ -286,6 +291,14 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
       case 'get_memory': {
         // 批次44-D5-1：按 mem_id 精确读（与 TCP 共用 runGetMemoryTool）
         return { result: await runGetMemoryTool(storage, args, account.scope_project_ids) };
+      }
+      case 'feedback': {
+        // 批次44-D5-2：用户反馈（与 TCP 共用 runFeedbackTool）
+        return { result: await runFeedbackTool(ma, storage, args, account.scope_project_ids) };
+      }
+      case 'manage_memory': {
+        // 批次44-D5-2：单条生命周期治理（与 TCP 共用 runManageMemoryTool，delete 受同一门禁）
+        return { result: await runManageMemoryTool(ma, storage, args, account.scope_project_ids, { allowDelete }) };
       }
       case 'get_preferences': {
         const p = args;

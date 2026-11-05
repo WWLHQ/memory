@@ -76,7 +76,7 @@ describe('MCP HTTP（批次2 信任边界）', () => {
     const body = (await header.json()) as { result: { tools: Array<{ name: string; description?: string }> } };
     expect(body.result.tools.map((t) => t.name)).toEqual([
       'recall_memory', 'write_memory', 'list_projects', 'get_preferences', 'get_write_status',
-      'list_memories', 'get_memory',
+      'list_memories', 'get_memory', 'feedback', 'manage_memory',
     ]);
     // 批次14：措辞为「优先使用本工具 + 未命中/不可用再回退」，不是硬禁用
     const recallDesc = body.result.tools.find((t) => t.name === 'recall_memory')?.description ?? '';
@@ -880,5 +880,103 @@ describe('批次44-D5-1：list_memories / get_memory（HTTP）', () => {
     const bad = await tool(967, 'list_memories', { project_id: 'P2' });
     // 默认 account scope='*' → P2 允许但无记忆，返回空清单；越界拒绝由共用模块单测覆盖
     expect((bad.result.structuredContent as { total: number }).total).toBe(0);
+  });
+});
+
+// 批次44-D5-2：feedback / manage_memory（HTTP 端到端，与 TCP 共用 mcpManageTools）
+describe('批次44-D5-2：feedback / manage_memory（HTTP）', () => {
+  let handle: McpHttpHandle;
+  let url = '';
+  let vault: L0Vault;
+  const storage = new InMemoryStorage();
+  const LONG_A = '运维手册补充：MCP 治理工具反馈与生命周期变更统一转发内核，写审计、推进版本且不回传 L0 密文';
+
+  beforeAll(async () => {
+    vault = (await createTestVault()).vault;
+    handle = runMcpHttpServer({ port: 0, token: TOKEN, storage, l0: vault, allowDelete: true });
+    url = `http://127.0.0.1:${await handle.ready}/mcp`;
+  });
+  afterAll(() => { handle?.stop(); });
+
+  type ToolBody = {
+    result: { isError: boolean; structuredContent?: Record<string, unknown>; content: Array<{ text: string }> };
+  };
+  async function tool(id: number, name: string, args: Record<string, unknown> = {}, base = url): Promise<ToolBody> {
+    const res = await fetch(base, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` },
+      body: JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } }),
+    });
+    return (await res.json()) as ToolBody;
+  }
+
+  it('写入一条 → feedback 三档 trust_delta；回执不泄 L0', async () => {
+    const w = await tool(980, 'write_memory', {
+      content: LONG_A, project_id: 'P1', category: 'fact', source_agent: 'mcp-test',
+    });
+    expect(w.result.isError).toBe(false);
+    const id1 = (w.result.structuredContent as { mem_id: string }).mem_id;
+
+    const c = await tool(981, 'feedback', { mem_id: id1, verdict: 'confirm' });
+    expect(c.result.isError).toBe(false);
+    const cr = c.result.structuredContent as { ok: boolean; trust_delta: number; mem: Record<string, unknown> };
+    expect(cr.ok).toBe(true);
+    expect(cr.trust_delta).toBe(0.1);
+    expect(cr.mem.confidence).toBeCloseTo(0.6);
+    expect(cr.mem.reinforce_count).toBe(1);
+    expect(cr.mem).not.toHaveProperty('content_l0_enc');
+    expect(cr.mem).not.toHaveProperty('content_orig');
+
+    expect((await tool(982, 'feedback', { mem_id: id1, verdict: 'reject' })).result.structuredContent)
+      .toMatchObject({ trust_delta: -0.05 });
+    const dp = await tool(983, 'feedback', { mem_id: id1, verdict: 'disputed' });
+    expect(dp.result.structuredContent).toMatchObject({ trust_delta: 0 });
+    expect((dp.result.structuredContent as { mem: { conflict_id: string } }).mem.conflict_id).toMatch(/^cf_/);
+  });
+
+  it('manage_memory pin / archive 生效；非法 action 与 patch 误用 → isError:true', async () => {
+    const list = await tool(984, 'list_memories', { project_id: 'P1' });
+    const id1 = (list.result.structuredContent as { items: Array<{ mem_id: string }> }).items[0].mem_id;
+
+    const pin = await tool(985, 'manage_memory', { mem_id: id1, action: 'pin' });
+    expect(pin.result.isError).toBe(false);
+    expect((pin.result.structuredContent as { mem: { pinned: boolean } }).mem.pinned).toBe(true);
+    expect((pin.result.structuredContent as { mem: Record<string, unknown> }).mem).not.toHaveProperty('content_l0_enc');
+
+    const arc = await tool(986, 'manage_memory', { mem_id: id1, action: 'archive' });
+    expect((arc.result.structuredContent as { mem: { decay_class: string } }).mem.decay_class).toBe('archived');
+
+    const bad = await tool(987, 'manage_memory', { mem_id: id1, action: 'bogus' });
+    expect(bad.result.isError).toBe(true);
+    expect(bad.result.content[0].text).toContain('action');
+  });
+
+  it('G4 locked 仅 unlock 放行；delete 默认拒绝、显式放行才落墓碑', async () => {
+    const w = await tool(988, 'write_memory', {
+      content: LONG_A + '（第二条用于锁定与删除门禁）', project_id: 'P1', category: 'fact', source_agent: 'mcp-test',
+    });
+    const id2 = (w.result.structuredContent as { mem_id: string }).mem_id;
+
+    await tool(989, 'manage_memory', { mem_id: id2, action: 'lock' });
+    const blocked = await tool(990, 'manage_memory', { mem_id: id2, action: 'archive' });
+    expect(blocked.result.structuredContent).toMatchObject({ ok: false, blocked_locked: true });
+    await tool(991, 'manage_memory', { mem_id: id2, action: 'unlock' });
+
+    // 默认配置（allowDelete:false）→ 明确拒绝
+    const deniedHandle = runMcpHttpServer({ port: 0, token: TOKEN, storage, l0: vault, allowDelete: false });
+    const deniedUrl = `http://127.0.0.1:${await deniedHandle.ready}/mcp`;
+    try {
+      const denied = await tool(992, 'manage_memory', { mem_id: id2, action: 'delete' }, deniedUrl);
+      expect(denied.result.isError).toBe(true);
+      expect(denied.result.content[0].text).toContain('MCP_ALLOW_DELETE');
+    } finally {
+      deniedHandle.stop();
+    }
+
+    const ok = await tool(993, 'manage_memory', { mem_id: id2, action: 'delete' });
+    expect(ok.result.isError).toBe(false);
+    expect(ok.result.structuredContent).toMatchObject({ ok: true, mem: null });
+    const after = await tool(994, 'get_memory', { mem_id: id2 });
+    expect(after.result.structuredContent).toEqual({ ok: false, item: null, reason: '记忆不存在' });
   });
 });

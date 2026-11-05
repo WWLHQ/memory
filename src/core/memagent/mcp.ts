@@ -19,6 +19,7 @@ import { parseWriteKnobs } from './memories.ts';
 import { isL0LockedError } from './errors.ts';
 import { MemoryPendingStore, type PendingStore, type WriteKnobs } from './pendingWrites.ts';
 import { runGetMemoryTool, runListMemoriesTool } from './mcpReadTools.ts';
+import { deleteAllowed, runFeedbackTool, runManageMemoryTool } from './mcpManageTools.ts';
 
 const VERSION = '2.0';
 
@@ -94,6 +95,8 @@ export interface McpOptions {
   maxLineBytes?: number;
   /** 批次44-D4：共享 pending 队列存储端口；缺省内存实现，桌面建议注入 FilePendingStore */
   pending?: PendingStore;
+  /** 批次44-D5-2：是否放行 manage_memory(action=delete)；缺省读环境变量 MCP_ALLOW_DELETE=1 */
+  allowDelete?: boolean;
 }
 
 export interface McpServerHandle {
@@ -116,6 +119,8 @@ export function runMcpServer(opts: McpOptions): McpServerHandle {
   const sockets = new WeakMap<Socket, SocketState>();
   // 批次44-D4：所有 socket 共享一个 pending 队列（缺省内存；桌面可注入文件实现持久化）
   const sharedPending: PendingStore = opts.pending ?? new MemoryPendingStore();
+  // 批次44-D5-2：delete 门禁在启动时定一次，两端同判据（显式注入 > 环境变量）
+  const allowDelete = opts.allowDelete ?? deleteAllowed();
 
   function stateOf(socket: Socket): SocketState {
     let st = sockets.get(socket);
@@ -264,6 +269,16 @@ export function runMcpServer(opts: McpOptions): McpServerHandle {
         }
         case 'get_memory': {
           send(socket, ok(req.id, await runGetMemoryTool(sessionStorage, p, account.scope_project_ids)));
+          return;
+        }
+
+        // ── feedback / manage_memory（批次44-D5-2：反馈与生命周期治理） ──
+        case 'feedback': {
+          send(socket, ok(req.id, await runFeedbackTool(s, sessionStorage, p, account.scope_project_ids)));
+          return;
+        }
+        case 'manage_memory': {
+          send(socket, ok(req.id, await runManageMemoryTool(s, sessionStorage, p, account.scope_project_ids, { allowDelete })));
           return;
         }
 

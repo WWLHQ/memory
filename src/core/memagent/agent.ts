@@ -459,7 +459,9 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
     l0SetupAdminPassword, l0ChangeAdminPassword, l0Migrate,
     // 批次44-D4：写入落盘兜底（L0 锁定不丢 / 解锁自动重放）
     enqueuePending, flushPending, countPending, getWriteStatus,
-    // 测试专用钩子（批次27 P3-1：已移出公开 MemAgent 接口）—— 仅测试灌数，页面代码不得调用
+    // 批次44-D5-2：MCP 治理工具正式入口（与 core* 同源，非新实现）
+    memoryOp, feedback,
+    // 兼容钩子（批次27 P3-1 起供端壳/测试使用；_seedMemory 仅测试灌数，页面代码不得调用）
     _seedMemory: seedMemory, _memoryOp: memoryOp, _feedback: feedback,
   };
 }

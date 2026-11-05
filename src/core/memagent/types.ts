@@ -724,9 +724,13 @@ export interface MemAgent {
    * l0_unlocked / writeDek_present（写密钥是否在内存，同一判据双命名）/ pending_count（解锁时顺带重放）
    */
   getWriteStatus(): Promise<{ l0_unlocked: boolean; writeDek_present: boolean; pending_count: number }>;
+  // ---- 批次44-D5-2：MCP 治理工具正式入口（与下方测试钩子同源，均转发 coreMemoryOp / coreFeedback） ----
   /** 单记忆操作（17.3/P4）：端壳状态变更统一走内核（G4 约束 + 钳制 + 版本 + 审计） */
-  _memoryOp(mem_id: string, op: MemOp, patch?: MemOpPatch): Promise<MemOpResult>;
+  memoryOp(mem_id: string, op: MemOp, patch?: MemOpPatch): Promise<MemOpResult>;
   /** 用户反馈（17.4）：confirm +0.1 / reject −0.05 / disputed 挂 9.7 裁决 */
+  feedback(mem_id: string, kind: FeedbackKind): Promise<FeedbackResult>;
+  /** 兼容别名：端壳历史代码与测试灌数仍走下划线钩子，不删不改行为 */
+  _memoryOp(mem_id: string, op: MemOp, patch?: MemOpPatch): Promise<MemOpResult>;
   _feedback(mem_id: string, kind: FeedbackKind): Promise<FeedbackResult>;
 }
 

@@ -61,12 +61,12 @@ describe('MCP Server（§19.5）', () => {
     expect(r.result).toBeUndefined();
   });
 
-  it('tools/list 返回七个工具且 schema 正确', async () => {
+  it('tools/list 返回九个工具且 schema 正确', async () => {
     const r = await rpcCall(PORT, { jsonrpc: '2.0', id: 1, method: 'tools/list', params: { token: TOKEN } });
     const tools = (r.result as { tools: Array<{ name: string; inputSchema?: { required?: string[] } }> }).tools;
     expect(tools.map((t) => t.name)).toEqual([
       'recall_memory', 'write_memory', 'list_projects', 'get_preferences', 'get_write_status',
-      'list_memories', 'get_memory',
+      'list_memories', 'get_memory', 'feedback', 'manage_memory',
     ]);
     const recallTool = tools.find((t) => t.name === 'recall_memory')!;
     expect(recallTool.inputSchema!.required).toEqual(['query']); // project_id 可省略（批次11）
@@ -471,12 +471,10 @@ describe('批次44-D5-1：list_memories / get_memory（TCP）', () => {
   const call = (id: number, method: string, params: Record<string, unknown> = {}) =>
     rpcCall(port, { jsonrpc: '2.0', id, method, params: { token: TOKEN, ...params } });
 
-  it('tools/list 暴露 7 个工具（含新增两个）', async () => {
+  it('tools/list 暴露 D5-1 新增的两个读工具（总数由主套件断言钉住）', async () => {
     const r = await call(950, 'tools/list');
     const names = (r.result as { tools: Array<{ name: string }> }).tools.map((t) => t.name);
-    expect(names).toHaveLength(7);
-    expect(names).toContain('list_memories');
-    expect(names).toContain('get_memory');
+    expect(names).toEqual(expect.arrayContaining(['list_memories', 'get_memory']));
   });
 
   it('写入两条 → list_memories 盘点不泄 L0，get_memory 精确读', async () => {
@@ -530,6 +528,149 @@ describe('批次44-D5-1：list_memories / get_memory（TCP）', () => {
       });
       expect(r.error?.code).toBe(-32602);
       expect(r.error?.message).toContain('作用域');
+    } finally {
+      scoped.stop();
+    }
+  });
+});
+
+// 批次44-D5-2：feedback / manage_memory（TCP 端到端，与 HTTP 共用 mcpManageTools）
+describe('批次44-D5-2：feedback / manage_memory（TCP）', () => {
+  let handle: McpServerHandle;
+  let port = 0;
+  let vault: L0Vault;
+  const storage = new InMemoryStorage();
+  const LONG_A = '项目 P1 决策：MCP 反馈与生命周期治理统一转发内核 coreFeedback 与 coreMemoryOp，写审计并推进版本';
+
+  beforeAll(async () => {
+    vault = (await createTestVault()).vault;
+    handle = runMcpServer({ port: 0, storage, token: TOKEN, l0: vault, allowDelete: true });
+    port = await handle.ready;
+  });
+  afterAll(() => { handle?.stop(); });
+
+  const call = (id: number, method: string, params: Record<string, unknown> = {}) =>
+    rpcCall(port, { jsonrpc: '2.0', id, method, params: { token: TOKEN, ...params } });
+
+  it('tools/list 暴露 9 个工具（含 D5-2 两个）', async () => {
+    const r = await call(970, 'tools/list');
+    const names = (r.result as { tools: Array<{ name: string }> }).tools.map((t) => t.name);
+    expect(names).toHaveLength(9);
+    expect(names).toContain('feedback');
+    expect(names).toContain('manage_memory');
+  });
+
+  it('写入一条 → feedback confirm / reject / disputed 三档 trust_delta，回执不泄 L0', async () => {
+    const w = await call(971, 'write_memory', {
+      content: LONG_A, project_id: 'P1', category: 'fact', source_agent: 'mcp-test',
+    });
+    const id1 = (w.result as { mem_id: string }).mem_id;
+    expect(id1).toMatch(/^mem_/);
+
+    const c = await call(972, 'feedback', { mem_id: id1, verdict: 'confirm' });
+    const cr = c.result as { ok: boolean; trust_delta: number; mem: Record<string, unknown> };
+    expect(cr.ok).toBe(true);
+    expect(cr.trust_delta).toBe(0.1);
+    expect(cr.mem.confidence).toBeCloseTo(0.6);
+    expect(cr.mem.reinforce_count).toBe(1);
+    expect(cr.mem).not.toHaveProperty('content_l0_enc');
+    expect(cr.mem).not.toHaveProperty('content_orig');
+
+    const rj = await call(973, 'feedback', { mem_id: id1, verdict: 'reject' });
+    expect((rj.result as { trust_delta: number }).trust_delta).toBe(-0.05);
+
+    const dp = await call(974, 'feedback', { mem_id: id1, verdict: 'disputed' });
+    const dr = dp.result as { trust_delta: number; mem: Record<string, unknown> };
+    expect(dr.trust_delta).toBe(0);
+    expect(dr.mem.conflict_id).toMatch(/^cf_/);
+  });
+
+  it('manage_memory pin / archive / param 生效；非法 action 与 patch 误用 → -32602', async () => {
+    const list = await call(975, 'list_memories', { project_id: 'P1' });
+    const id1 = (list.result as { items: Array<{ mem_id: string }> }).items[0].mem_id;
+
+    const pin = await call(976, 'manage_memory', { mem_id: id1, action: 'pin' });
+    expect((pin.result as { ok: boolean; mem: { pinned: boolean } }).mem.pinned).toBe(true);
+    expect((pin.result as { mem: Record<string, unknown> }).mem).not.toHaveProperty('content_l0_enc');
+
+    const arc = await call(977, 'manage_memory', { mem_id: id1, action: 'archive' });
+    expect((arc.result as { mem: { decay_class: string } }).mem.decay_class).toBe('archived');
+
+    const prm = await call(978, 'manage_memory', {
+      mem_id: id1, action: 'param', patch: { importance: 0.8 },
+    });
+    expect((prm.result as { mem: { importance: number } }).mem.importance).toBe(0.8);
+
+    expect((await call(979, 'manage_memory', { mem_id: id1, action: 'bogus' })).error?.code).toBe(-32602);
+    expect((await call(980, 'manage_memory', { mem_id: id1, action: 'pin', patch: { importance: 0.8 } })).error?.code).toBe(-32602);
+    expect((await call(981, 'feedback', { mem_id: id1, verdict: 'bogus' })).error?.code).toBe(-32602);
+  });
+
+  it('G4：locked 仅 unlock 放行；不存在如实 ok:false', async () => {
+    const w = await call(982, 'write_memory', {
+      content: LONG_A + '（第二条用于锁定态校验）', project_id: 'P1', category: 'fact', source_agent: 'mcp-test',
+    });
+    const id2 = (w.result as { mem_id: string }).mem_id;
+    expect((await call(983, 'manage_memory', { mem_id: id2, action: 'lock' })).result).toMatchObject({ ok: true });
+
+    const blocked = await call(984, 'manage_memory', { mem_id: id2, action: 'archive' });
+    expect(blocked.result).toMatchObject({ ok: false, blocked_locked: true });
+    expect((blocked.result as { mem: { decay_class: string } }).mem.decay_class).not.toBe('archived');
+
+    const unlocked = await call(985, 'manage_memory', { mem_id: id2, action: 'unlock' });
+    expect((unlocked.result as { mem: { locked: boolean } }).mem.locked).toBe(false);
+
+    const missing = await call(986, 'manage_memory', { mem_id: 'mem_not_exist', action: 'pin' });
+    expect(missing.result).toMatchObject({ ok: false, mem: null });
+  });
+
+  it('delete 门禁：显式 allowDelete=true 才落墓碑；默认配置明确拒绝', async () => {
+    const w = await call(987, 'write_memory', {
+      content: LONG_A + '（第三条用于删除门禁校验）', project_id: 'P1', category: 'fact', source_agent: 'mcp-test',
+    });
+    const id3 = (w.result as { mem_id: string }).mem_id;
+
+    const denied = runMcpServer({ port: 0, storage, token: TOKEN, l0: vault, allowDelete: false });
+    const dp = await denied.ready;
+    try {
+      const r = await rpcCall(dp, {
+        jsonrpc: '2.0', id: 988, method: 'manage_memory',
+        params: { token: TOKEN, mem_id: id3, action: 'delete' },
+      });
+      expect(r.error?.code).toBe(-32602);
+      expect(r.error?.message).toContain('MCP_ALLOW_DELETE');
+    } finally {
+      denied.stop();
+    }
+
+    const ok = await call(989, 'manage_memory', { mem_id: id3, action: 'delete' });
+    expect(ok.result).toMatchObject({ ok: true, mem: null });
+    const after = await call(990, 'get_memory', { mem_id: id3 });
+    expect(after.result).toEqual({ ok: false, item: null, reason: '记忆不存在' });
+  });
+
+  it('受限令牌：按 mem_id 越界操作被拒，且不回显不可见项目 ID', async () => {
+    await storage.putMemory({
+      mem_id: 'mem_p2_d5_2', project_id: 'P2', enterprise_id: 'e1', team_id: 't1',
+      category: 'fact', layer: 'L1', content: 'P2 正文', decay_class: 'hot',
+      pinned: false, locked: false, version: 1, created_at: Date.now(),
+    });
+    const scoped = runMcpServer({
+      port: 0, storage, token: TOKEN, l0: vault,
+      account: { user_id: 'u1', team_id: 't1', enterprise_id: 'e1', scope_project_ids: ['P1'] },
+    });
+    const p = await scoped.ready;
+    try {
+      for (const [method, params] of [
+        ['feedback', { mem_id: 'mem_p2_d5_2', verdict: 'confirm' }],
+        ['manage_memory', { mem_id: 'mem_p2_d5_2', action: 'pin' }],
+      ] as Array<[string, Record<string, unknown>]>) {
+        const r = await rpcCall(p, { jsonrpc: '2.0', id: 991, method, params: { token: TOKEN, ...params } });
+        expect(r.error?.code).toBe(-32602);
+        expect(r.error?.message).toContain('作用域');
+        expect(r.error?.message).not.toContain('P2');
+      }
+      expect((await storage.getMemory('mem_p2_d5_2'))?.pinned).toBe(false);
     } finally {
       scoped.stop();
     }
