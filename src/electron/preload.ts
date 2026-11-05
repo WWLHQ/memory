@@ -213,6 +213,9 @@ const refineQueue = {
     ipcRenderer.invoke(IPC.refineSetEnabled, enabled, sessionId),
   backfill: (sessionId?: string | null) => ipcRenderer.invoke(IPC.refineBackfill, sessionId),
   retryFailed: (sessionId?: string | null) => ipcRenderer.invoke(IPC.refineRetryFailed, sessionId),
+  // 批次41-I 后续：设置每日额度（限额/不限额 + 行数），仅管理员；payload = {enabled, rows?}
+  setCap: (payload: unknown, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.refineSetCap, payload, sessionId),
 };
 
 // LLM 精炼网关桥（批次31 建，批次32 多引擎化）：读配置需登录会话；写配置/真拨测仅管理员；refine 是内核写路径的逐层代理。

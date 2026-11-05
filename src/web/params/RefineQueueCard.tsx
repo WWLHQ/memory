@@ -1,12 +1,13 @@
 // 参数页 · L2–L6 后台补炼队列卡（批次39）。
 // 干什么：把「写入只落 L0+脱敏 L1，深层交给后台补炼」这条口径做成可见可控的一块——
-//   看进度（待炼 / 已炼 / 失败 / 跳过）、看额度（今日 500 行还剩几行）、开关队列、把存量入队、重试失败行。
-// 三条拍板规则要在卡面上说清，不要让用户猜：单条最多试 3 个引擎、每日最多 500 行、llm_partial 不自动重试。
+//   看进度（待炼 / 已炼 / 失败 / 跳过）、看额度（限额几行 / 不限额，今日已用）、开关队列、把存量入队、重试失败行。
+// 批次39 拍板 + 批次40 梳理的规则要在卡面上说清，不要让用户猜：单条最多试 3 个引擎、每日额度默认 500 行、llm_partial 不自动重试。
 // 批次40-C 追加第四条与一处口径：深度按这条 L1 的料给（不是每条都要炼到 L6），并显示「阶梯停在哪、为什么停」的原因码分布。
+// 批次41-I 后续：每日额度做成「限额 / 不限额」运行时可控（仅管理员）——选「限额」额度框可改，选「不限额」额度框灰掉不可改。
 // 队列文件只有 mem_id 与状态：正文（L0 原文、L1、新深层）一律不出主进程，也不进日志。
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  refineQueueAvailable, refineQueueBackfill, refineQueueRetryFailed, refineQueueSetEnabled, refineQueueState,
+  refineQueueAvailable, refineQueueBackfill, refineQueueRetryFailed, refineQueueSetCap, refineQueueSetEnabled, refineQueueState,
   refineStopRows, type RefineQueueSummary,
 } from './refineQueue.ts';
 import { useSessionContext } from '../shared/session.ts';
@@ -25,6 +26,10 @@ export function RefineQueueCard() {
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // 额度输入框的本地草稿：管理员改数字但还没点「保存」时不影响队列，点保存才落盘
+  const [capDraft, setCapDraft] = useState<string>('');
+  // 用户是否在草稿框里有未保存的编辑——true 时后台轮询/首帧同步都不得覆盖正在打的字
+  const capDirty = useRef(false);
   const available = refineQueueAvailable();
   const stops = refineStopRows(summary?.stop_codes);
 
@@ -43,6 +48,12 @@ export function RefineQueueCard() {
     const t = setInterval(() => void refresh(), POLL_MS);
     return () => clearInterval(t);
   }, [available, refresh]);
+
+  // 额度草稿只在「持久值变了」且用户没在手打时跟随刷新（20s 轮询/首帧同步都不能把用户正在打的字顶掉）
+  const savedCapRows = summary?.cap_rows;
+  useEffect(() => {
+    if (typeof savedCapRows === 'number' && !capDirty.current) setCapDraft(String(savedCapRows));
+  }, [savedCapRows]);
 
   const run = async (action: 'backfill' | 'retry' | 'toggle', next?: boolean) => {
     if (busy) return;
@@ -70,6 +81,27 @@ export function RefineQueueCard() {
     }
   };
 
+  /** 批次41-I 后续：限额/不限额与额度行数的落盘。rows 只在「限额」时发送。 */
+  const applyCap = async (enabled: boolean, rows?: number) => {
+    if (busy) return;
+    setBusy(true);
+    setErr(null);
+    setMsg(null);
+    try {
+      const r = await refineQueueSetCap(enabled, rows);
+      if (!r.ok || !r.view) { setErr(r.error ?? '设置额度没有回执'); return; }
+      setSummary(r.view.summary);
+      setEngine(r.view.engine);
+      // 落盘成功：草稿已等于持久值，解除「手打中」闸门，后续轮询可正常回填框值
+      capDirty.current = false;
+      setMsg(r.view.summary.cap_enabled
+        ? `已设为限额：每自然日最多补炼 ${r.view.summary.cap_rows} 行`
+        : '已设为不限额：今日不按行数截断，pending 会一直排空（唯一约束仍是单条 ≤3 引擎与模型吞吐）');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="card" data-testid="refine-card">
       <div className="section-title">L2–L6 后台补炼队列（写入只落 L0+L1，深层在后台炼）</div>
@@ -78,8 +110,8 @@ export function RefineQueueCard() {
       ) : (
         <>
           <div className="note">
-            口径四条（批次39 拍板 + 批次40 梳理，写进代码里的常量）：单条记忆一次<b>最多试 {summary?.max_engines_per_call ?? 3} 个引擎</b>、
-            每自然日（UTC+08:00）<b>最多补炼 {summary?.day_limit ?? 500} 行</b>、
+            口径四条（批次39 拍板 + 批次40 梳理）：单条记忆一次<b>最多试 {summary?.max_engines_per_call ?? 3} 个引擎</b>、
+            每自然日（UTC+08:00）<b>默认最多补炼 {summary?.cap_rows ?? 500} 行</b>（可在下面「限额 / 不限额」里改，仅管理员）、
             残缺产物 <code>llm_partial</code> <b>不自动重试</b>——要重试请点下面「重试失败行」、
             <b>炼到多深由这条 L1 的料决定</b>（<code>depthCapFor</code>：有效字 ≥30 才炼 L2，≥60 到 L3，≥120 到 L4，≥240 到 L5；L6 索引任何深度都炼）。
           </div>
@@ -94,7 +126,10 @@ export function RefineQueueCard() {
             <div className="note" data-testid="refine-summary">
               待补炼 <b>{summary.pending}</b> · 已炼成 {summary.done} · 失败 <b>{summary.failed}</b> · 跳过 {summary.skipped}
               <br />
-              今日（{summary.day}）已用 {summary.day_rows} / {summary.day_limit}，还剩 {summary.day_left} 行
+              今日（{summary.day}）已用 {summary.day_rows} 行
+              {summary.cap_enabled
+                ? <> / 限额 {summary.day_limit} 行，还剩 {summary.day_left} 行</>
+                : <>（不限额：今日不按行数截断）</>}
               · 队列状态：{summary.enabled ? '开启' : '暂停'} · 上次更新 {hhmmss8(summary.updated_at)}（UTC+08:00）
               <br />
               <span className="dim">状态文件 <code>{summary.queue_path}</code>（只有 mem_id 与状态，正文不落这里）</span>
@@ -136,7 +171,47 @@ export function RefineQueueCard() {
               刷新
             </button>
           </div>
-          {!isAdmin && <div className="note" data-testid="refine-need-admin">需管理员：开关、存量入队与重试失败行都是管理员动作；只读进度不限角色。</div>}
+          {/* 批次41-I 后续：每日额度「限额 / 不限额」——限额时额度框可改，不限额时额度框灰掉不可改（仅管理员） */}
+          <div className="row" data-testid="refine-cap-row">
+            <label data-testid="refine-cap-toggle-wrap">
+              <input
+                type="checkbox"
+                data-testid="refine-cap-toggle"
+                checked={summary?.cap_enabled ?? true}
+                disabled={!isAdmin || busy || !summary}
+                onChange={(e) => {
+                  const on = e.target.checked;
+                  if (!on) { void applyCap(false); return; }
+                  const n = Math.floor(Number(capDraft));
+                  void applyCap(true, Number.isFinite(n) && n >= 1 ? n : summary?.cap_rows ?? 500);
+                }}
+              />{' '}
+              限额（取消勾选＝不限额，今日不按行数截断）
+            </label>
+            <input
+              type="number"
+              data-testid="refine-cap-rows"
+              min={1}
+              step={1}
+              value={capDraft}
+              disabled={!isAdmin || busy || !(summary?.cap_enabled ?? false)}
+              onChange={(e) => { capDirty.current = true; setCapDraft(e.target.value); }}
+              aria-label="每自然日最多补炼行数"
+            />{' '}
+            行 / 日
+            <button
+              type="button"
+              className="btn"
+              data-testid="refine-cap-save"
+              disabled={!isAdmin || busy || !(summary?.cap_enabled ?? false)
+                || !(Math.floor(Number(capDraft)) >= 1)
+                || Math.floor(Number(capDraft)) === (summary?.cap_rows ?? -1)}
+              onClick={() => void applyCap(true, Math.floor(Number(capDraft)))}
+            >
+              保存限额
+            </button>
+          </div>
+          {!isAdmin && <div className="note" data-testid="refine-need-admin">需管理员：开关、额度（限额/不限额）、存量入队与重试失败行都是管理员动作；只读进度不限角色。</div>}
           {msg && <div className="note" data-testid="refine-msg">{msg}</div>}
           {err && <div className="note" data-testid="refine-error" style={{ color: 'var(--err)' }}>{err}</div>}
           <div className="note">

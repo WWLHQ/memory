@@ -1,4 +1,5 @@
 // 批次39 · L2–L6 后台补炼队列的渲染层桥：状态读（需会话）/ 开关与补炼与重试失败行（仅管理员）。
+// 批次41-I 后续：新增「设置每日额度（限额/不限额）」，同样仅管理员。
 // 浏览器模式无主进程 → available()=false，页面如实显示「不可用」，绝不用页面内存对象冒充真队列。
 import { hostCall, hostCapability } from '../../desktop/hostBridge.ts';
 import { getStoredSessionId } from '../Home/crossTabAuth.ts';
@@ -12,8 +13,14 @@ export interface RefineQueueSummary {
   /** 记账日（UTC+08:00）与当日已用/上限 */
   day: string;
   day_rows: number;
-  day_limit: number;
-  day_left: number;
+  /** 批次41-I 后续：每日额度是否限额。false = 不限额（今日不按行数截断）。 */
+  cap_enabled: boolean;
+  /** 限额值（≥1 整数）；不限额时仍带旧值供切回时复用，但不参与截断 */
+  cap_rows: number;
+  /** 上限：限额时 = cap_rows；不限额时 = null（不是一个大数字，UI 须如实显示「不限额」） */
+  day_limit: number | null;
+  /** 还能炼几行：限额时 = 非负整数；不限额时 = null（没有「还剩几行」的概念） */
+  day_left: number | null;
   max_engines_per_call: number;
   /** 批次40-C：阶梯停在哪个原因码的行数分布（回答「为什么这一行只炼到 L2」） */
   stop_codes: Record<string, number>;
@@ -107,7 +114,7 @@ function toResult(r: RefineReply | null | undefined, action: string): RefineResu
   };
 }
 
-type RefineMethod = 'refine:state' | 'refine:setEnabled' | 'refine:backfill' | 'refine:retryFailed';
+type RefineMethod = 'refine:state' | 'refine:setEnabled' | 'refine:backfill' | 'refine:retryFailed' | 'refine:setCap';
 
 async function call(method: RefineMethod, args: unknown[], action: string): Promise<RefineResult> {
   if (!refineQueueAvailable()) return { ok: false, view: null, error: noHost };
@@ -129,3 +136,11 @@ export const refineQueueBackfill = (): Promise<RefineResult> =>
 
 export const refineQueueRetryFailed = (): Promise<RefineResult> =>
   call('refine:retryFailed', [], '重试失败行');
+
+/**
+ * 批次41-I 后续：设置补炼每日额度（仅管理员）。
+ * `enabled=true` → 按 `rows` 限额（rows 须 ≥1 整数，主进程再校验一次）；
+ * `enabled=false` → 不限额（今日不按行数截断），`rows` 一律不发送。
+ */
+export const refineQueueSetCap = (enabled: boolean, rows?: number): Promise<RefineResult> =>
+  call('refine:setCap', [enabled ? { enabled: true, rows } : { enabled: false }], '设置补炼额度');

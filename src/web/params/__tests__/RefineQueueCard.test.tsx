@@ -1,6 +1,7 @@
 // 参数页 · L2–L6 后台补炼队列卡单测（批次39）：浏览器模式诚实降级、进度只读可见、
-// 角色闸门（开关/入队/重试仅管理员）、三个动作的回执原样回显、引擎不可用时说清「只排不炼」、
+// 角色闸门（开关/额度/入队/重试仅管理员）、动作回执原样回显、引擎不可用时说清「只排不炼」、
 // 主进程拒绝时显示原因而不是假装 0 待炼。批次40-C 追加：深度口径文案、阶梯停层原因码分布、入队回执 thin_skipped。
+// 批次41-I 后续追加：限额/不限额切换（不限额时额度框灰掉不可改）、额度仅管理员、summary 不限额文案。
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
@@ -11,7 +12,7 @@ const realFetch = globalThis.fetch;
 
 const SUMMARY = {
   enabled: true, pending: 1585, done: 3, failed: 0, skipped: 2,
-  day: '2026-11-02', day_rows: 5, day_limit: 500, day_left: 495,
+  day: '2026-11-02', day_rows: 5, cap_enabled: true, cap_rows: 500, day_limit: 500, day_left: 495,
   max_engines_per_call: 3, stop_codes: { thin: 2, too_short: 1 },
   updated_at: Date.UTC(2026, 10, 2, 13, 30, 0),
   queue_path: 'C:\\Users\\LHQ\\AppData\\Roaming\\MultiAgent Memory\\refine-queue.json',
@@ -26,6 +27,7 @@ function setHost(opts: {
   setEnabled?: (enabled: unknown) => Promise<unknown>;
   backfill?: () => Promise<unknown>;
   retryFailed?: () => Promise<unknown>;
+  setCap?: (payload: unknown) => Promise<unknown>;
 } = {}) {
   (window as unknown as { __ELECTRON__: boolean }).__ELECTRON__ = true;
   (window as unknown as { api: unknown }).api = {
@@ -34,6 +36,11 @@ function setHost(opts: {
       setEnabled: opts.setEnabled ?? (async (enabled: unknown) => view({ summary: { ...SUMMARY, enabled } })),
       backfill: opts.backfill ?? (async () => view({ report: { added: 1580, already_queued: 5, settled: 0, protected_skipped: 1, not_eligible: 0 } })),
       retryFailed: opts.retryFailed ?? (async () => view({ retried: 7, summary: { ...SUMMARY, failed: 0, pending: SUMMARY.pending + 7 } })),
+      setCap: opts.setCap ?? (async (payload: unknown) => {
+        const p = (payload ?? {}) as { enabled?: boolean; rows?: number };
+        return view({ summary: { ...SUMMARY, cap_enabled: p.enabled === true, cap_rows: p.rows ?? SUMMARY.cap_rows,
+          day_limit: p.enabled === true ? (p.rows ?? SUMMARY.cap_rows) : null, day_left: p.enabled === true ? 0 : null } });
+      }),
     },
     log: { write: () => undefined },
   };
@@ -75,13 +82,16 @@ describe('RefineQueueCard（批次39）', () => {
     await waitFor(() => expect(screen.getByTestId('refine-summary').textContent).toContain('1585'));
     const text = screen.getByTestId('refine-summary').textContent!;
     expect(text).toContain('已炼成 3');
-    expect(text).toContain('5 / 500');
+    expect(text).toContain('限额 500');
     expect(text).toContain('还剩 495');
     expect(text).toContain('refine-queue.json');
     expect(text).toContain('21:30:00'); // updated_at 按 UTC+08:00 显示
     // 口径说明把拍板常量写在卡面上，不让用户猜
     expect(screen.getByTestId('refine-card').textContent).toContain('最多试 3 个引擎');
     expect(screen.getByTestId('refine-card').textContent).toContain('不自动重试');
+    // 批次41-I 后续：限额时额度框可编辑、勾选态为「限额」
+    expect(screen.getByTestId('refine-cap-toggle')).toBeChecked();
+    expect(screen.getByTestId('refine-cap-rows')).toBeEnabled();
     // 批次40-C：深度按料给（不是每条都炼到 L6）+ 阶梯停在哪儿的原因码分布
     expect(screen.getByTestId('refine-card').textContent).toContain('炼到多深由这条 L1 的料决定');
     const stops = screen.getByTestId('refine-stop-codes').textContent!;
@@ -106,8 +116,48 @@ describe('RefineQueueCard（批次39）', () => {
     expect(screen.getByTestId('refine-toggle')).toBeDisabled();
     expect(screen.getByTestId('refine-backfill')).toBeDisabled();
     expect(screen.getByTestId('refine-retry')).toBeDisabled();
+    // 批次41-I 后续：额度控件（限额开关 + 额度框）对普通成员也只读
+    expect(screen.getByTestId('refine-cap-toggle')).toBeDisabled();
+    expect(screen.getByTestId('refine-cap-rows')).toBeDisabled();
     // 只读刷新按钮仍可用
     expect(screen.getByTestId('refine-refresh')).toBeEnabled();
+  });
+
+  test('批次41-I 后续：取消勾选「限额」→ 切不限额（额度框随之灰掉，不发送 rows）', async () => {
+    mockRole('admin');
+    const setCap = vi.fn(async (payload: unknown) => {
+      const p = (payload ?? {}) as { enabled?: boolean };
+      return view({ summary: { ...SUMMARY, cap_enabled: p.enabled === true, day_limit: p.enabled === true ? 500 : null, day_left: p.enabled === true ? 495 : null } });
+    });
+    setHost({ setCap });
+    render(<RefineQueueCard />);
+    await waitFor(() => expect(screen.getByTestId('refine-cap-toggle')).toBeChecked());
+    await userEvent.click(screen.getByTestId('refine-cap-toggle'));
+    await waitFor(() => expect(setCap).toHaveBeenCalledTimes(1));
+    // 取消勾选：只发 {enabled:false}，不带 rows
+    expect(setCap.mock.calls[0][0]).toEqual({ enabled: false });
+    // 切到不限额后：额度框灰掉不可编辑，文案改「不限额」
+    expect(screen.getByTestId('refine-cap-toggle')).not.toBeChecked();
+    expect(screen.getByTestId('refine-cap-rows')).toBeDisabled();
+    expect(screen.getByTestId('refine-summary').textContent).toContain('不限额');
+    expect(screen.getByTestId('refine-msg').textContent).toContain('已设为不限额');
+  });
+
+  test('批次41-I 后续：改额度数字点「保存限额」→ 传 {enabled:true, rows}（管理员）', async () => {
+    mockRole('admin');
+    const setCap = vi.fn(async (payload: unknown) => {
+      void payload;
+      return view({ summary: { ...SUMMARY, cap_enabled: true, cap_rows: 800, day_limit: 800, day_left: 799 } });
+    });
+    setHost({ setCap });
+    render(<RefineQueueCard />);
+    await waitFor(() => expect(screen.getByTestId('refine-cap-rows')).toBeEnabled());
+    await userEvent.clear(screen.getByTestId('refine-cap-rows'));
+    await userEvent.type(screen.getByTestId('refine-cap-rows'), '800');
+    await userEvent.click(screen.getByTestId('refine-cap-save'));
+    await waitFor(() => expect(setCap).toHaveBeenCalledTimes(1));
+    expect(setCap.mock.calls[0][0]).toEqual({ enabled: true, rows: 800 });
+    expect(screen.getByTestId('refine-msg').textContent).toContain('800');
   });
 
   test('点「把存量入队补炼」：显示 added / 已在队 / 受保护 / 不合格 四个真实计数', async () => {

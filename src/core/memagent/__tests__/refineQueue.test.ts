@@ -11,11 +11,11 @@ import { InMemoryStorage } from '../storage.ts';
 import { embedSync, JsVectorBackend, DEFAULT_VECTOR_DIM } from '../vector.ts';
 import type { LlmProvider, Memory } from '../types.ts';
 import {
-  REFINE_MAX_ROWS_PER_DAY, clampRefineQueue, dailyBudgetLeft, emptyRefineQueue,
+  REFINE_MAX_ROWS_PER_DAY, clampRefineQueue, dailyBudgetLeft, effectiveCap, emptyRefineQueue,
   enqueueRows, isRefinable, loadRefineQueue, markRefineFailed, markRefineSkipped, markRefined,
   nextPending, reconcileAndPersistRefineQueue, reconcileRefineQueue, removeRefineQueueRowAndPersist,
   refineRowLayers, removeRefineRows, retryFailed,
-  saveRefineQueue, settleRowOutcome, summarizeRefineQueue, dayKey,
+  saveRefineQueue, setRefineCap, settleRowOutcome, summarizeRefineQueue, dayKey,
   type RefineQueueState,
 } from '../refineQueue.ts';
 
@@ -313,6 +313,63 @@ describe('闸门：开关、日额度与跨日', () => {
     const tomorrow = NOW + 24 * 3600_000;
     expect(dailyBudgetLeft(s, tomorrow)).toBe(REFINE_MAX_ROWS_PER_DAY);
     expect(nextPending(s, tomorrow)).toBe('m0');
+  });
+
+  it('批次41-I 后续：默认限额 500（cap_enabled=true / cap_rows=500）', () => {
+    const s = emptyRefineQueue(NOW);
+    expect(s).toMatchObject({ cap_enabled: true, cap_rows: REFINE_MAX_ROWS_PER_DAY });
+  });
+
+  it('批次41-I 后续：坏 cap 字段归一化——缺省按限额、坏 cap_rows 回落 500、cap_enabled=false 保留', () => {
+    // 缺字段：默认为「限额 + 500」
+    const d = clampRefineQueue({ day: dayKey(NOW) }, NOW);
+    expect(d).toMatchObject({ cap_enabled: true, cap_rows: REFINE_MAX_ROWS_PER_DAY });
+    // cap_rows 坏值（0 / 负 / 小数 / 非数 / Infinity）一律回落 500
+    for (const bad of [0, -5, 12.7, 'x', Number.POSITIVE_INFINITY, Number.NaN]) {
+      expect(clampRefineQueue({ cap_enabled: true, cap_rows: bad }, NOW).cap_rows)
+        .toBe(bad === 12.7 ? 12 : REFINE_MAX_ROWS_PER_DAY); // 有限整数≥1 下取整，其余回落
+    }
+    // cap_rows=1000 合法；cap_enabled=false 如实保留（但 cap_rows 仍存供切回复用）
+    const off = clampRefineQueue({ cap_enabled: false, cap_rows: 1000 }, NOW);
+    expect(off).toMatchObject({ cap_enabled: false, cap_rows: 1000 });
+  });
+
+  it('批次41-I 后续：不限额 = 真不限量，pending 不因额度被挡（哪怕今天已炼很多）', () => {
+    let s = emptyRefineQueue(NOW);
+    s = enqueueRows(s, [mem({ mem_id: 'm0' })], NOW).state;
+    s = setRefineCap(s, { enabled: false });
+    s = { ...s, dayRows: 999_999 }; // 今天已远超任何合理限额
+    expect(effectiveCap(s)).toBe(Number.POSITIVE_INFINITY);
+    expect(dailyBudgetLeft(s, NOW)).toBe(Number.POSITIVE_INFINITY);
+    expect(nextPending(s, NOW)).toBe('m0'); // 不限额：额度不挡活
+  });
+
+  it('批次41-I 后续：setRefineCap 限额校验 + 不限额忽略 rows（保留旧值供切回复用）', () => {
+    let s = emptyRefineQueue(NOW); // cap_enabled=true, cap_rows=500
+    // 切「不限额」：rows 被忽略，旧的 cap_rows=500 原样留着
+    s = setRefineCap(s, { enabled: false, rows: 8888 });
+    expect(s).toMatchObject({ cap_enabled: false, cap_rows: 500 });
+    // 切回「限额」不传 rows → 复用旧的 500
+    s = setRefineCap(s, { enabled: true });
+    expect(s).toMatchObject({ cap_enabled: true, cap_rows: 500 });
+    // 限额给合法 rows（小数下取整）
+    s = setRefineCap(s, { enabled: true, rows: 1234.9 });
+    expect(s.cap_rows).toBe(1234);
+    // 限额给坏 rows（<1 / 非有限）→ 维持原值不动，坏值不冒充「不限额」
+    s = setRefineCap(s, { enabled: true, rows: 0 });
+    expect(s).toMatchObject({ cap_enabled: true, cap_rows: 1234 });
+    s = setRefineCap(s, { enabled: true, rows: Number.NaN });
+    expect(s).toMatchObject({ cap_enabled: true, cap_rows: 1234 });
+  });
+
+  it('批次41-I 后续：summary 不限额时 day_limit/day_left 为 null，限额时为数字', () => {
+    let s = emptyRefineQueue(NOW);
+    s = enqueueRows(s, [mem({ mem_id: 'a' })], NOW).state;
+    s = markRefined(s, 'a', NOW);
+    const capped = summarizeRefineQueue(s, 'q.json', NOW);
+    expect(capped).toMatchObject({ cap_enabled: true, day_limit: REFINE_MAX_ROWS_PER_DAY, day_left: REFINE_MAX_ROWS_PER_DAY - 1 });
+    const free = summarizeRefineQueue(setRefineCap(s, { enabled: false }), 'q.json', NOW);
+    expect(free).toMatchObject({ cap_enabled: false, day_limit: null, day_left: null, day_rows: 1 });
   });
 
   it('done/failed 计入当日额度，skipped 不计（没调用就不算钱）', () => {

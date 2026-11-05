@@ -56,7 +56,7 @@ export type HostMethod =
   | 'rules:rejudgePreview' | 'rules:rejudgeRun'
   /** 批次41-T：存量补齐缺失的 sha256 / 向量（只补元数据，不删行、不改正文） */
   | 'ledger:fieldsPreview' | 'ledger:fieldsBackfill'
-  | 'refine:state' | 'refine:setEnabled' | 'refine:backfill' | 'refine:retryFailed'
+  | 'refine:state' | 'refine:setEnabled' | 'refine:backfill' | 'refine:retryFailed' | 'refine:setCap'
   | 'llm:config' | 'llm:configSet' | 'llm:test' | 'llm:refine';
 
 /** 扁平 channel → preload 暴露的嵌套对象方法（window.api[ns][fn]） */
@@ -135,6 +135,7 @@ const CHANNEL_TO_NATIVE: Record<HostMethod, [string, string]> = {
   'refine:setEnabled': ['refineQueue', 'setEnabled'],
   'refine:backfill': ['refineQueue', 'backfill'],
   'refine:retryFailed': ['refineQueue', 'retryFailed'],
+  'refine:setCap': ['refineQueue', 'setCap'],
   'llm:config': ['llm', 'config'],
   'llm:configSet': ['llm', 'setConfig'],
   'llm:test': ['llm', 'test'],

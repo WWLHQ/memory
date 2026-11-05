@@ -57,9 +57,9 @@ import { scanLedgerForSplit, splitLedger } from '../core/memagent/l0Split.ts';
 import { makeL0Reader, rebuildLayersFromL0, scanRowsForRebuild } from '../core/memagent/rebuild.ts';
 import { buildRecoveryCard, formatRecoveryCode } from '../core/memagent/l0Recovery.ts';
 import {
-  REFINE_MAX_ROWS_PER_DAY, REFINE_QUEUE_FILE, enqueueRows, loadRefineQueue, nextPending,
+  REFINE_QUEUE_FILE, enqueueRows, loadRefineQueue, nextPending,
   reconcileAndPersistRefineQueue, reconcileRefineQueue, removeRefineQueueRowAndPersist,
-  refineRowLayers, retryFailed, saveRefineQueue, settleRowOutcome, summarizeRefineQueue,
+  refineRowLayers, retryFailed, saveRefineQueue, setRefineCap, settleRowOutcome, summarizeRefineQueue,
 } from '../core/memagent/refineQueue.ts';
 import { MemAgentError } from '../core/memagent/errors.ts';
 import { cleanupTempFiles, createHomeLockStore, createL0KeyringStore } from './l0KeyringStore.ts';
@@ -1567,9 +1567,10 @@ function registerLegacyIpc(): void {
 
 // ── §6f L2–L6 后台补炼队列（批次39）──────────────────────────────────────────
 // 用户拍板（2026-11-02）：写入只落 L0（密文）+ 脱敏 L1，L2–L6 交给后台异步队列补炼；
-// 存量 1585 行全量补炼；单条最多试 3 个引擎；每日最多 500 行；llm_partial 不自动重试（要点「重试失败行」才回队）。
-// 〔批次41-I 临时放开〕REFINE_MAX_ROWS_PER_DAY 现为 100_000（约等于不限），为取全量分布定深度档位，
-//   pending 排空、定档后须回落为 500。注意吞吐仍受模型速度限制（~15s tick × 单行多层真调），放开额度只是不再按日截断。
+// 存量 1585 行全量补炼；单条最多试 3 个引擎；每日额度默认 500 行；llm_partial 不自动重试（要点「重试失败行」才回队）。
+// 〔批次41-I 后续 · 已正规化〕每日额度不再是编译期常量：由参数页「限额/不限额」按钮运行时决定
+//   （队列状态 cap_enabled / cap_rows，仅管理员可改）。「不限额」= 今日不按行数截断，主动权交给用户；
+//   常量 REFINE_MAX_ROWS_PER_DAY=500 只剩「默认值 + cap_rows 非法时回落值」。吞吐仍受模型速度限制（~15s tick × 单行多层真调）。
 // 队列状态落 ledger 目录 refine-queue.json（0600，只有 mem_id + 状态 + 原因码，正文一个字不落）。
 // 关键取舍：引擎没就绪时**不起活也不把行判死**——没有真实调用就没有失败，也不消耗当日额度。
 
@@ -1602,7 +1603,8 @@ async function runRefineTick(vector: JsVectorBackend): Promise<void> {
       layers: r.layers.length, targets: r.targets?.length ?? null, llm_calls: r.llm_calls,
       code: r.code ?? null, stop_layer: r.stop_layer ?? null, stop_code: r.stop_code ?? null,
       ms: Date.now() - now,
-      day_rows: settled.dayRows, day_limit: REFINE_MAX_ROWS_PER_DAY,
+      day_rows: settled.dayRows, day_limit: settled.cap_enabled ? settled.cap_rows : null,
+      cap_enabled: settled.cap_enabled,
     });
   } catch (e) {
     actionLog('kernel', 'refine:tick-error', { error: String((e as Error)?.message ?? e) }, { level: 'error' });
@@ -1692,6 +1694,28 @@ function registerRefineIpc(): void {
       const state = loadRefineQueue(refineQueueDir);
       saveRefineQueue(refineQueueDir, { ...state, enabled, updated_at: Date.now() });
       actionLog('kernel', 'refine:set-enabled', { enabled, user: gate.ctx.user_id });
+      return { ok: true, ...view() };
+    } catch (e) { return l0Fail(e); }
+  });
+  // 批次41-I 后续：设置补炼每日额度（限额/不限额），仅管理员。载荷 = {enabled, rows?}
+  handleIpc(IPC.refineSetCap, async (_e, payload: unknown, sessionId?: string) => {
+    const gate = requireAdmin(sessionId, IPC.refineSetCap);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    const p = (payload ?? {}) as { enabled?: unknown; rows?: unknown };
+    if (typeof p.enabled !== 'boolean') return { ok: false, error: '需要一个 {enabled:boolean, rows?:number} 载荷' };
+    if (p.enabled) {
+      if (typeof p.rows !== 'number' || !Number.isFinite(p.rows) || p.rows < 1) {
+        return { ok: false, error: '限额时 rows 必须是 ≥1 的数字' };
+      }
+    }
+    try {
+      const state = loadRefineQueue(refineQueueDir);
+      const next = setRefineCap(state, { enabled: p.enabled, rows: typeof p.rows === 'number' ? p.rows : undefined });
+      saveRefineQueue(refineQueueDir, next);
+      // 只记布尔与计数：没有正文，且不限额时不落一个假的大数字
+      actionLog('kernel', 'refine:set-cap', {
+        cap_enabled: next.cap_enabled, cap_rows: next.cap_enabled ? next.cap_rows : null, user: gate.ctx.user_id,
+      });
       return { ok: true, ...view() };
     } catch (e) { return l0Fail(e); }
   });

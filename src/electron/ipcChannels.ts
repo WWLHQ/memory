@@ -117,6 +117,8 @@ export const IPC = {
   refineSetEnabled: 'refine:setEnabled',
   refineBackfill: 'refine:backfill',
   refineRetryFailed: 'refine:retryFailed',
+  /** 批次41-I 后续：设置补炼每日额度（限额/不限额 + 行数），仅管理员 */
+  refineSetCap: 'refine:setCap',
 } as const;
 
 /** preload 实际暴露的全部 channel（自检基线） */

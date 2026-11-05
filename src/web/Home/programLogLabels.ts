@@ -48,6 +48,7 @@ const ACTION_LABEL: Record<string, string> = {
   'kernel:refine:enqueue-collected': '新采集的行已排队待补炼',
   'kernel:refine:row': '补炼一行完成（产出层级见摘要）',
   'kernel:refine:set-enabled': '切换后台补炼开关',
+  'kernel:refine:set-cap': '设置补炼每日额度（限额 / 不限额）',
   'kernel:refine:retry-failed': '失败行重新入队',
   'kernel:refine:tick-error': '补炼定时异常',
   'kernel:refine:start-error': '补炼队列启动失败',
@@ -214,6 +215,8 @@ const NOTE_KEYS = [
   'protected_rows', 'unfillable_sha256', 'unfillable_embedding', 'failed',
   // 批次41-U：遗忘周期跑完一轮的计数（全是数字，无记忆正文）——「迁了几层、合了几条摘要」要一眼看见
   'freshness_updated', 'summaries_created', 'summaries_filtered', 'merged_originals', 'compressed', 'migrated',
+  // 批次41-I 后续：补炼每日额度切换（值只有布尔与行数，无正文）——「限额几行 / 不限额」要一眼看见
+  'cap_enabled', 'cap_rows',
 ];
 
 /** k 为空串表示「这个字段的值本身就是一句话」（error/reason/message/text），不再挂前缀 */

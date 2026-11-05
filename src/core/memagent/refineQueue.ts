@@ -1,6 +1,6 @@
 // 批次39：L2–L6 后台补炼队列（纯函数 + 落盘状态 + 单行补炼）。
 // 用户拍板口径（2026-11-02 22:xx）：写入只落 L0+脱敏 L1，L2–L6 交给后台异步队列补炼；
-// 单条最多试 3 个引擎；每日最多补炼 500 行；llm_partial 不自动重试（重试要人显式点）；
+// 单条最多试 3 个引擎；每日额度默认 500 行（已由参数页「限额/不限额」按钮运行时可控，仅管理员）；llm_partial 不自动重试（重试要人显式点）；
 // 队列状态落 refine-queue.json（重启续炼），文件里只有 mem_id 与状态，正文一个字都不落。
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -17,13 +17,13 @@ export const REFINE_QUEUE_FILE = 'refine-queue.json';
 /** 单条记忆一次补炼里最多试几个引擎（用户拍板 D：≤3，超出即判失败，不再往下烧） */
 export const REFINE_MAX_ENGINES_PER_CALL = 3;
 /**
- * 每个自然日（UTC+08:00）最多补炼多少行。
- * 批次39 用户拍板 D 的正常口径是 **≤500/日**（成本闸门：补炼会真调引擎花钱）。
- * 〔批次41-I 临时放开〕为取「全量 stop_code × state 分布」以定深度档位，本轮把闸门抬到
- *   100_000（约等于不限，但保持有限值——不能用 Infinity，JSON.stringify(Infinity)=null 会让
- *   参数页卡片 `day_limit ?? 500` 谎报 500）。**pending 排空、41-I 定档完成后必须回落为 500**。
+ * 每个自然日（UTC+08:00）补炼行数的**默认上限**（批次39 用户拍板 D：≤500，成本闸门）。
+ * 〔批次41-I 后续 · 已正规化〕这不再是编译期硬闸门：真实额度由队列状态里的
+ *   `cap_enabled` / `cap_rows` 运行时决定（参数页「限额/不限额」按钮，仅管理员可改）。
+ *   「不限额」= 今日不按行数截断（唯一约束仍是单条 ≤3 引擎 + 模型吞吐），主动权交给用户。
+ *   本常量只剩两个用途：① 没有存过限额时的默认值；② `cap_rows` 缺失/非法时的回落值。
  */
-export const REFINE_MAX_ROWS_PER_DAY = 100_000; // 41-I 临时值，正常口径见上行 = 500
+export const REFINE_MAX_ROWS_PER_DAY = 500;
 
 export type RefineItemState = 'pending' | 'done' | 'failed' | 'skipped';
 
@@ -58,6 +58,13 @@ export interface RefineQueueState {
   /** 当前记账日（UTC+08:00 的 YYYY-MM-DD）与当日已补炼行数；跨日自动归零 */
   day: string;
   dayRows: number;
+  /**
+   * 批次41-I 后续：每日额度是否限额（成本闸门开关）。true = 按 `cap_rows` 截断，
+   * false = 不限额（今日不按行数截断，pending 一直排空；唯一约束仍是单条 ≤3 引擎 + 模型吞吐）。
+   */
+  cap_enabled: boolean;
+  /** 限额时每个自然日最多补炼多少行（≥1 的整数）；不限额时这个值不生效、但保留供切回限额时复用 */
+  cap_rows: number;
   items: Record<string, RefineQueueItem>;
   updated_at: number;
 }
@@ -74,7 +81,11 @@ export function dayKey(now: number): string {
 }
 
 export function emptyRefineQueue(now = Date.now()): RefineQueueState {
-  return { version: 1, enabled: true, day: dayKey(now), dayRows: 0, items: {}, updated_at: now };
+  return {
+    version: 1, enabled: true, day: dayKey(now), dayRows: 0,
+    cap_enabled: true, cap_rows: REFINE_MAX_ROWS_PER_DAY,
+    items: {}, updated_at: now,
+  };
 }
 
 /** 读回来的状态一律归一化：坏字段丢弃、未知状态按 pending、跨日把计数清零 */
@@ -105,6 +116,10 @@ export function clampRefineQueue(raw: unknown, now = Date.now()): RefineQueueSta
     enabled: r.enabled !== false,
     day,
     dayRows: r.day === day && typeof r.dayRows === 'number' && r.dayRows > 0 ? Math.floor(r.dayRows) : 0,
+    // 批次41-I 后续：缺省按「限额」，cap_rows 非有限整数≥1 一律回落到默认 500（坏值不冒充「不限额」）
+    cap_enabled: r.cap_enabled !== false,
+    cap_rows: typeof r.cap_rows === 'number' && Number.isFinite(r.cap_rows) && r.cap_rows >= 1
+      ? Math.floor(r.cap_rows) : REFINE_MAX_ROWS_PER_DAY,
     items,
     updated_at: typeof r.updated_at === 'number' ? r.updated_at : now,
   };
@@ -176,10 +191,36 @@ export function enqueueRows(state: RefineQueueState, memories: Memory[], now = D
   return { state: { ...state, items, updated_at: now }, report };
 }
 
-/** 当日还能炼几行 */
+/**
+ * 批次41-I 后续：本行「运行时生效」的当日额度上限。
+ * 限额 → `cap_rows`；不限额 → `Infinity`（今日不按行数截断，pending 一直排空）。
+ * 用 Infinity 而不是一个很大的数字：不限量就是真不限量，语义诚实，也不会有「超过某个隐藏阈值又变有限」的怪现象。
+ */
+export function effectiveCap(state: RefineQueueState): number {
+  return state.cap_enabled ? state.cap_rows : Number.POSITIVE_INFINITY;
+}
+
+/** 当日还能炼几行（不限额返回 Infinity） */
 export function dailyBudgetLeft(state: RefineQueueState, now = Date.now()): number {
   const used = state.day === dayKey(now) ? state.dayRows : 0;
-  return Math.max(0, REFINE_MAX_ROWS_PER_DAY - used);
+  return Math.max(0, effectiveCap(state) - used);
+}
+
+/**
+ * 批次41-I 后续：设置运行时补炼额度（仅管理员经 IPC 调用）。
+ * - `enabled=true`：按 `rows` 限额；`rows` 须是 ≥1 的有限整数（小数下取整），否则维持原值不动（坏值不冒充「不限额」）。
+ * - `enabled=false`：不限额；`rows` 一律忽略（但保留旧的 `cap_rows` 供切回限额时复用）。
+ * 只改这两个字段，不碰 items/day/dayRows/enabled，落盘由调用方负责。
+ */
+export function setRefineCap(
+  state: RefineQueueState, opts: { enabled: boolean; rows?: number }, now = Date.now(),
+): RefineQueueState {
+  if (!opts.enabled) {
+    return { ...state, cap_enabled: false, updated_at: now };
+  }
+  const r = opts.rows;
+  const capRows = typeof r === 'number' && Number.isFinite(r) && r >= 1 ? Math.floor(r) : state.cap_rows;
+  return { ...state, cap_enabled: true, cap_rows: capRows, updated_at: now };
 }
 
 /** 取下一个可跑条目（插入序）；未启用 / 无 pending / 当日额度用尽 → null */
@@ -305,9 +346,17 @@ export interface RefineQueueSummary {
   skipped: number;
   day: string;
   day_rows: number;
-  day_limit: number;
-  /** 当日还能炼几行（0 = 今天不再起活，明天自动恢复） */
-  day_left: number;
+  /** 批次41-I 后续：每日额度是否限额。false = 不限额（今日不按行数截断）。 */
+  cap_enabled: boolean;
+  /** 限额值（≥1 整数）；不限额时仍带旧值供切回限额时复用，但不参与截断 */
+  cap_rows: number;
+  /**
+   * 当日额度上限：限额时 = `cap_rows`；不限额时 = `null`（不是 Infinity——
+   * `JSON.stringify(Infinity)` 会产出 `null`，索性后端直接给 null，UI `?? 500` 的旧兜底一并去掉）。
+   */
+  day_limit: number | null;
+  /** 当日还能炼几行：限额时 = max(0, cap_rows-used)；不限额时 = null（没有「还剩几行」这个概念）。 */
+  day_left: number | null;
   max_engines_per_call: number;
   /**
    * 批次40-C：阶梯停在哪个原因码的行数分布（done/failed/skipped 都计入）。
@@ -327,6 +376,7 @@ export function summarizeRefineQueue(state: RefineQueueState, queuePath: string,
   }
   const day = dayKey(now);
   const used = state.day === day ? state.dayRows : 0;
+  const cap = effectiveCap(state);
   return {
     enabled: state.enabled,
     pending: counts.pending,
@@ -335,8 +385,10 @@ export function summarizeRefineQueue(state: RefineQueueState, queuePath: string,
     skipped: counts.skipped,
     day,
     day_rows: used,
-    day_limit: REFINE_MAX_ROWS_PER_DAY,
-    day_left: Math.max(0, REFINE_MAX_ROWS_PER_DAY - used),
+    cap_enabled: state.cap_enabled,
+    cap_rows: state.cap_rows,
+    day_limit: state.cap_enabled ? state.cap_rows : null,
+    day_left: state.cap_enabled ? Math.max(0, cap - used) : null,
     max_engines_per_call: REFINE_MAX_ENGINES_PER_CALL,
     stop_codes: stopCodes,
     updated_at: state.updated_at,
