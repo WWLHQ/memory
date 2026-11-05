@@ -28,6 +28,7 @@ import { MemoryPendingStore, type PendingStore, type WriteKnobs } from './pendin
 import { runGetMemoryTool, runListMemoriesTool } from './mcpReadTools.ts';
 import { deleteAllowed, runFeedbackTool, runManageMemoryTool } from './mcpManageTools.ts';
 import { runGcReportTool } from './mcpGcTools.ts';
+import { runCreateProjectTool, runMintTokenTool } from './mcpProjectTools.ts';
 
 const PROTOCOL_VERSION = '2025-06-18';
 
@@ -309,6 +310,14 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
       case 'gc_report': {
         // 批次44-D5-3：遗忘周期报告（与 TCP 共用 runGcReportTool，默认 dry_run=true）
         return { result: await runGcReportTool(ma, args, acct) };
+      }
+      case 'create_project': {
+        // D6-5：受管创建项目（管理员专属，与 TCP 共用 runCreateProjectTool）
+        return { result: await runCreateProjectTool(storage, args, acct) };
+      }
+      case 'mint_token': {
+        // D6-5：签发受限令牌（管理员专属，与 TCP 共用 runMintTokenTool；明文一次性回显）
+        return { result: await runMintTokenTool(opts.tokenStore, args, acct) };
       }
       case 'get_preferences': {
         const p = args;

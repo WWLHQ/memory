@@ -17,7 +17,8 @@ export const MCP_INSTRUCTIONS = `你是接入了 MultiAgent Memory 的 Agent。�
 5. 边界：不要向用户展示 MCP 认证令牌（Authorization 头 / mcp-token.txt 内容）；不要伪造记忆内容、省量或审计回执。工具不可用时（未启动/未授权/连接失败）如实说明并继续回答，不得假装检索过记忆。
 6. 盘点：需要治理记忆（找过时/重复/低价值条目）时用 list_memories 按条件列清单；已知 mem_id 时用 get_memory 精确读单条。两者只返回可读摘要与状态字段，不含 L0 密文；project_id 超出令牌作用域会被拒绝。list_memories 是清单盘点，找答案仍应首选 recall_memory。
 7. 反馈与治理：只有用户明确认可或否定某条召回记忆时，才用 feedback 提交 verdict（confirm/reject/disputed），由内核计算可信度变化，不要凭自己的判断代用户表态。需要置顶/取消置顶、锁定/解锁、归档/恢复、降权/强化、调参或迁移时用 manage_memory；locked 的记忆只有 unlock 能操作。delete 不可逆且默认不开放（需服务端开关），除非用户明确要求删除，一律优先 forget（降权不删）或 archive（归档可恢复）。两工具只回可读摘要，不含 L0 密文；ok:false 或 blocked_locked:true 时必须如实告知，不得声称操作已生效。
-8. 遗忘可观测性：用户觉得「记忆变少了 / 状态变了」时用 gc_report 查本次遗忘周期会降档多少条。dry_run 缺省 true，只演算不改库不写审计；只有用户明确要求执行遗忘周期时才显式传 dry_run=false。报告是分层真实统计：衰减段保留 decayed/merged/conflicts_resolved，摘要合并段给出 freshness_updated/scanned/migrated/summaries_created/summaries_filtered/merged_originals/compressed，全部来自真实事件、note 说明各段口径；不得据此推断或编造任何数字，本入口未注入向量后端故 compressed 恒为 0。若用户明确要求处理已排队冲突，必须同时给 resolve_conflicts=true 与合法 verdict（auto_override/user_confirm/merge/hold）才落定；只给其中一个会被明确拒绝，绝不自动覆盖旧记忆；conflicts_resolved 只数真实落定，dry_run 或 user_confirm/hold 时为 0。`;
+8. 遗忘可观测性：用户觉得「记忆变少了 / 状态变了」时用 gc_report 查本次遗忘周期会降档多少条。dry_run 缺省 true，只演算不改库不写审计；只有用户明确要求执行遗忘周期时才显式传 dry_run=false。报告是分层真实统计：衰减段保留 decayed/merged/conflicts_resolved，摘要合并段给出 freshness_updated/scanned/migrated/summaries_created/summaries_filtered/merged_originals/compressed，全部来自真实事件、note 说明各段口径；不得据此推断或编造任何数字，本入口未注入向量后端故 compressed 恒为 0。若用户明确要求处理已排队冲突，必须同时给 resolve_conflicts=true 与合法 verdict（auto_override/user_confirm/merge/hold）才落定；只给其中一个会被明确拒绝，绝不自动覆盖旧记忆；conflicts_resolved 只数真实落定，dry_run 或 user_confirm/hold 时为 0。
+9. 管理工具（D6，管理员专属）：create_project 登记受管项目（kind=shared/user/archive/general，命名规则见工具描述）与 mint_token 签发受限令牌（scope_project_ids/is_admin/过期）都仅限管理员令牌调用，非管理员会被明确拒绝——被拒时如实转告用户，不要重试或伪装成功。mint_token 返回的明文令牌只在结果里出现一次：必须原样、完整地转交给用户（建议用户写入客户端配置文件），绝不写入记忆库、日志或二次回显之外的地方；丢失后只能重新 mint，无法找回。`;
 
 /** 标准 MCP 工具定义（tools/list 返回；顺序即客户端展示顺序） */
 export const MCP_TOOLS = [
@@ -161,6 +162,35 @@ export const MCP_TOOLS = [
         verdict: { type: 'string', enum: ['auto_override', 'user_confirm', 'merge', 'hold'], description: '用户显式选定的裁决方式：auto_override 归档旧记忆并强化新记忆；user_confirm/hold 保持 pending 不落定；merge 聚合内容（须过质量门）。必须与 resolve_conflicts=true 同时给，禁止默认 auto_override' },
       },
       required: ['project_id'],
+    },
+  },
+  {
+    name: 'create_project',
+    description: '受管创建项目并登记注册表（D6，管理员专属；非管理员令牌会被明确拒绝）。kind=shared 固定 P-shared（全员可见）、kind=user 为 P-<owner_user_id>（该用户私有池，owner_user_id 缺省为调用者）、kind=archive 固定 P-archive（仅管理员可见）、kind=general 用不带 P- 前缀的小写 slug（按令牌 scope_project_ids 控制可见）。重名与非法命名都会被明确拒绝。创建后立即可 write_memory/recall_memory。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        project_id: { type: 'string', description: '项目 ID（必填；命名规则：shared 固定 P-shared、archive 固定 P-archive、user 为 P-<owner_user_id>、general 为不带 P- 前缀的小写 slug）' },
+        kind: { type: 'string', enum: ['shared', 'user', 'archive', 'general'], description: '三池类型（缺省 general）' },
+        owner_user_id: { type: 'string', description: '归属用户（kind=user 时使用；缺省为调用者身份）' },
+        display_name: { type: 'string', description: '展示名（可选）' },
+      },
+      required: ['project_id'],
+    },
+  },
+  {
+    name: 'mint_token',
+    description: '签发受限 MCP 令牌（D6，管理员专属；非管理员令牌会被明确拒绝）。返回一次性明文令牌（mtk_ 前缀），只在本次结果出现一次，服务端只存哈希——必须立即原样转交用户，不得写入记忆库或日志。可指定 user_id、scope_project_ids（general 项目可见范围）、is_admin（true 只能由管理员签发）、label 与 expires_at（毫秒时间戳，过期即失效）。三池可见性按 D6-2 规则在 scope 之上生效。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        user_id: { type: 'string', description: '该令牌代表的租户身份（必填；决定其 P-<user> 私有池归属）' },
+        scope_project_ids: { type: 'array', items: { type: 'string' }, description: '可见的 general 项目列表（至少 1 个；"*" 表示全部 general 项目）' },
+        is_admin: { type: 'boolean', description: '是否管理员令牌（缺省 false；仅管理员可签发 admin 令牌）' },
+        label: { type: 'string', description: '备注（可选，如客户端名）' },
+        expires_at: { type: 'number', description: '过期时间毫秒时间戳（可选，缺省永不过期；须晚于当前时间）' },
+      },
+      required: ['user_id', 'scope_project_ids'],
     },
   },
 ] as const;

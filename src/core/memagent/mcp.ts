@@ -22,6 +22,7 @@ import { MemoryPendingStore, type PendingStore, type WriteKnobs } from './pendin
 import { runGetMemoryTool, runListMemoriesTool } from './mcpReadTools.ts';
 import { deleteAllowed, runFeedbackTool, runManageMemoryTool } from './mcpManageTools.ts';
 import { runGcReportTool } from './mcpGcTools.ts';
+import { runCreateProjectTool, runMintTokenTool } from './mcpProjectTools.ts';
 
 const VERSION = '2.0';
 
@@ -300,6 +301,16 @@ export function runMcpServer(opts: McpOptions): McpServerHandle {
         // ── gc_report（批次44-D5-3：遗忘周期报告，默认只演算） ──
         case 'gc_report': {
           send(socket, ok(req.id, await runGcReportTool(s, p, acct)));
+          return;
+        }
+
+        // ── create_project / mint_token（D6-5：管理员专属管理工具） ──
+        case 'create_project': {
+          send(socket, ok(req.id, await runCreateProjectTool(sessionStorage, p, acct)));
+          return;
+        }
+        case 'mint_token': {
+          send(socket, ok(req.id, await runMintTokenTool(opts.tokenStore, p, acct)));
           return;
         }
 

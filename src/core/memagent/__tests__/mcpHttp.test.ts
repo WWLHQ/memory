@@ -9,6 +9,7 @@ import { InMemoryStorage } from '../storage.ts';
 import type { L0Vault } from '../l0vault.ts';
 import { createTestVault, TEST_ADMIN_PW, TEST_ADMIN_ID } from './l0Kit.ts';
 import { MemoryPendingStore } from '../pendingWrites.ts';
+import { InMemoryTokenStore } from '../tokenStore.ts';
 import type { Memory } from '../types.ts';
 
 const TOKEN = 'mcp-http-token-0123456789abcdef0123456789abcdef';
@@ -78,6 +79,7 @@ describe('MCP HTTP（批次2 信任边界）', () => {
     expect(body.result.tools.map((t) => t.name)).toEqual([
       'recall_memory', 'write_memory', 'list_projects', 'get_preferences', 'get_write_status',
       'list_memories', 'get_memory', 'feedback', 'manage_memory', 'gc_report',
+      'create_project', 'mint_token',
     ]);
     // 批次14：措辞为「优先使用本工具 + 未命中/不可用再回退」，不是硬禁用
     const recallDesc = body.result.tools.find((t) => t.name === 'recall_memory')?.description ?? '';
@@ -1189,7 +1191,7 @@ describe('批次44-D5-4：recall_memory(scope=session)（HTTP 8204 端到端）'
   it('tools/list 仍是 10 个工具；recall/write schema 含 session_id；instructions 点名会话视图', async () => {
     const list = await rpc('tools/list');
     const tools = list.tools as Array<{ name: string; inputSchema: { properties: Record<string, unknown> } }>;
-    expect(tools.map((t) => t.name)).toHaveLength(10); // 参数变体，不新增条目
+    expect(tools.map((t) => t.name)).toHaveLength(12); // D6-5 起 12 个工具
     const props = tools.find((t) => t.name === 'recall_memory')!.inputSchema.properties;
     expect(props).toHaveProperty('scope');
     expect(props).toHaveProperty('session_id');
@@ -1292,5 +1294,66 @@ describe('批次44-D5-4：recall_memory(scope=session)（HTTP 8204 端到端）'
     } finally {
       scoped.stop();
     }
+  });
+});
+
+// D6-5 端到端：create_project / mint_token（管理员门禁 + mint 后新令牌回连 scope 生效）
+describe('D6-5 管理工具端到端（HTTP）', () => {
+  let handle: McpHttpHandle;
+  let url = '';
+  const storage = new InMemoryStorage();
+
+  beforeAll(async () => {
+    handle = runMcpHttpServer({ port: 0, token: TOKEN, storage, tokenStore: new InMemoryTokenStore() });
+    url = `http://127.0.0.1:${await handle.ready}/mcp`;
+  });
+  afterAll(() => { handle?.stop(); });
+
+  function callTool(name: string, args: Record<string, unknown>, token: string): Promise<{ isError: boolean; text: string; structured: Record<string, unknown> }> {
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }),
+    }).then((r) => r.json() as Promise<{ result: { isError: boolean; content: Array<{ text: string }>; structuredContent: Record<string, unknown> } }>)
+      .then((b) => ({ isError: b.result.isError, text: b.result.content[0]?.text ?? '', structured: b.result.structuredContent }));
+  }
+
+  it('admin create_project（general slug）→ 落注册表且 list_projects 可见', async () => {
+    const created = await callTool('create_project', { project_id: 'httpapp', kind: 'general', display_name: 'HTTP 应用' }, TOKEN);
+    expect(created.isError).toBe(false);
+    expect((created.structured as { ok: boolean; project: { project_id: string } }).project.project_id).toBe('httpapp');
+    const list = await callTool('list_projects', {}, TOKEN);
+    expect((list.structured as { projects: Array<{ project_id: string }> }).projects.map((p) => p.project_id)).toContain('httpapp');
+  });
+
+  it('非 admin 令牌调 create_project → 明确拒绝且不落库；调 mint_token → 拒绝', async () => {
+    const minted = await callTool('mint_token', { user_id: 'bob', scope_project_ids: ['httpapp'] }, TOKEN);
+    const bobToken = (minted.structured as { token: string }).token;
+
+    const denied = await callTool('create_project', { project_id: 'bobproj', kind: 'general' }, bobToken);
+    expect(denied.isError).toBe(true);
+    expect(denied.text).toContain('仅管理员');
+    expect(await storage.getProject('bobproj')).toBeNull();
+
+    const mintDenied = await callTool('mint_token', { user_id: 'x', scope_project_ids: ['*'] }, bobToken);
+    expect(mintDenied.isError).toBe(true);
+    expect(mintDenied.text).toContain('仅管理员');
+  });
+
+  it('mint 受限令牌 → 新令牌回连：list_projects 只见 scope 内项目（不含 registry 其它项目）；write 到 scope 外被拒', async () => {
+    await callTool('create_project', { project_id: 'otherproj', kind: 'general' }, TOKEN);
+    const minted = await callTool('mint_token', { user_id: 'carol', scope_project_ids: ['httpapp'] }, TOKEN);
+    expect(minted.isError).toBe(false);
+    const carolToken = (minted.structured as { token: string }).token;
+
+    const list = await callTool('list_projects', {}, carolToken);
+    const ids = (list.structured as { projects: Array<{ project_id: string }> }).projects.map((p) => p.project_id);
+    expect(ids).toContain('httpapp');
+    expect(ids).not.toContain('otherproj');
+
+    const writeOut = await callTool('write_memory', { content: '越界写入', project_id: 'otherproj', category: 'fact', source_agent: 'workbuddy' }, carolToken);
+    expect(writeOut.isError).toBe(true);
+    const writeIn = await callTool('write_memory', { content: '范围内写入', project_id: 'httpapp', category: 'fact', source_agent: 'workbuddy' }, carolToken);
+    expect(writeIn.isError).toBe(false);
   });
 });

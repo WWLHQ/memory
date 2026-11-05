@@ -62,12 +62,13 @@ describe('MCP Server（§19.5）', () => {
     expect(r.result).toBeUndefined();
   });
 
-  it('tools/list 返回十个工具且 schema 正确', async () => {
+  it('tools/list 返回十二个工具且 schema 正确', async () => {
     const r = await rpcCall(PORT, { jsonrpc: '2.0', id: 1, method: 'tools/list', params: { token: TOKEN } });
     const tools = (r.result as { tools: Array<{ name: string; inputSchema?: { required?: string[] } }> }).tools;
     expect(tools.map((t) => t.name)).toEqual([
       'recall_memory', 'write_memory', 'list_projects', 'get_preferences', 'get_write_status',
       'list_memories', 'get_memory', 'feedback', 'manage_memory', 'gc_report',
+      'create_project', 'mint_token',
     ]);
     const recallTool = tools.find((t) => t.name === 'recall_memory')!;
     expect(recallTool.inputSchema!.required).toEqual(['query']); // project_id 可省略（批次11）
@@ -75,6 +76,11 @@ describe('MCP Server（§19.5）', () => {
     const schema = writeTool.inputSchema!;
     expect(schema.required).toContain('content');
     expect(schema.required).toContain('project_id');
+    // D6-5：两个管理工具的 required
+    const createTool = tools.find((t) => t.name === 'create_project')!;
+    expect(createTool.inputSchema!.required).toEqual(['project_id']);
+    const mintTool = tools.find((t) => t.name === 'mint_token')!;
+    expect(mintTool.inputSchema!.required).toEqual(['user_id', 'scope_project_ids']);
   });
 
   it('空账本 recall 省略 project_id → -32602 明示 project_id（不猜项目）', async () => {
@@ -701,12 +707,12 @@ describe('批次44-D5-3：gc_report（TCP）', () => {
   const call = (id: number, method: string, params: Record<string, unknown> = {}) =>
     rpcCall(port, { jsonrpc: '2.0', id, method, params: { token: TOKEN, ...params } });
 
-  it('tools/list 暴露 10 个工具，gc_report schema 要求 project_id', async () => {
+  it('tools/list 暴露 12 个工具，gc_report schema 要求 project_id', async () => {
     const r = await call(1000, 'tools/list');
     const tools = (r.result as {
       tools: Array<{ name: string; inputSchema?: { required?: string[]; properties?: Record<string, unknown> } }>;
     }).tools;
-    expect(tools.map((t) => t.name)).toHaveLength(10); // 46-4 仍是 10 个工具，只改 schema
+    expect(tools.map((t) => t.name)).toHaveLength(12); // D6-5 增 create_project/mint_token 后为 12
     const gc = tools.find((t) => t.name === 'gc_report')!;
     expect(gc.inputSchema!.required).toEqual(['project_id']);
     expect(gc.inputSchema!.properties).toHaveProperty('resolve_conflicts');
@@ -894,7 +900,7 @@ describe('批次44-D5-4：recall_memory(scope=session)（TCP 8202 端到端）',
   it('tools/list：recall_memory 增 scope/session_id；initialize 指令点名会话视图', async () => {
     const list = await call(1100, 'tools/list');
     const tools = (list.result as { tools: Array<{ name: string; inputSchema: { properties: Record<string, unknown> } }> }).tools;
-    expect(tools.map((t) => t.name)).toHaveLength(10); // 参数变体，不新增 tools/list 条目
+    expect(tools.map((t) => t.name)).toHaveLength(12); // D6-5 起 12 个工具
     const props = tools.find((t) => t.name === 'recall_memory')!.inputSchema.properties;
     expect(props).toHaveProperty('scope');
     expect(props).toHaveProperty('session_id');
