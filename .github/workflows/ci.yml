@@ -30,10 +30,12 @@ jobs:
       - name: 安装依赖
         run: npm ci
 
-      - name: 快速门禁（类型 + lint + 索引新鲜度 + 覆盖率阈值 = verify:fast）
+      - name: 快速门禁（类型 + lint + 索引新鲜度 + 演示数据门禁 + 覆盖率阈值 = verify:fast）
         run: npm run verify:fast
         # 批次27 P0-9：由分散的 typecheck/lint/npm test 收敛为 verify:fast 口径，
         # 补上覆盖率阈值与 code:index:check，与本地合入门禁完全一致
+        # 批次42 阶段6：verify:fast 内含 `npm run check:no-demo`（tools/check-no-demo.mjs，
+        # 零白名单，禁止已清除的演示/伪造标识回流）；本 job 与 windows-gate 经 verify:fast 自动覆盖
 
       - name: Electron 主进程构建验证（build:electron）
         run: npm run build:electron

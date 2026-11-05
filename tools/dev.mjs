@@ -99,7 +99,7 @@ async function startBackend(port) {
     if ((await probeBackend(port)).devOriginAllowed) { ready = true; break; }
     await new Promise((r) => setTimeout(r, 200));
   }
-  if (ready) log(`登录后端就绪：${base(port)}（演示账号 user_001 / demo1234）`);
+  if (ready) log(`登录后端就绪：${base(port)}（演示账号 ${process.env.DEV_SEED_USER || 'user_001'} / ${process.env.DEV_SEED_PASSWORD || 'demo1234'}）`);
   else if (!exited) log('登录后端 6 秒内未就绪；请查看上方错误输出。');
   return ready;
 }

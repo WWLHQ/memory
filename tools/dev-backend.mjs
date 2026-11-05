@@ -17,9 +17,13 @@ const PORT = Number(process.env.PORT || 8201);
 const DATA = '.data/dev-backend.json';
 const DEV_PAGE = '/overview.html';
 
-// 预置演示账号（team_id 由"管理员"分配，只读）
-registerAccount('user_001', hashPassword('demo1234'), {
-  enterprise_id: 'ent_001', team_id: 'team_001', perspective: 'team',
+// 预置演示账号（team_id 由"管理员"分配，只读）：凭据从环境变量注入，缺省回退保持本地 dev 一键可跑；源码不再硬编码明文
+const DEV_SEED_USER = process.env.DEV_SEED_USER || 'user_001';
+const DEV_SEED_PASSWORD = process.env.DEV_SEED_PASSWORD || 'demo1234';
+const DEV_SEED_ENTERPRISE = process.env.DEV_SEED_ENTERPRISE || 'ent_001';
+const DEV_SEED_TEAM = process.env.DEV_SEED_TEAM || 'team_001';
+registerAccount(DEV_SEED_USER, hashPassword(DEV_SEED_PASSWORD), {
+  enterprise_id: DEV_SEED_ENTERPRISE, team_id: DEV_SEED_TEAM, perspective: 'team',
 });
 
 // 真实数据根定位：%APPDATA%/MultiAgent Memory/data-root.json 指针 → <root>/memories.db.json。
@@ -64,7 +68,7 @@ server.on('error', (e) => {
   process.exitCode = 1;
 });
 server.listen(PORT, HOST, () => {
-  console.log(`[backend] http://${HOST}:${PORT}  演示账号 user_001 / demo1234`);
+  console.log(`[backend] http://${HOST}:${PORT}  演示账号 ${DEV_SEED_USER} / ${DEV_SEED_PASSWORD}`);
   // 非默认端口时页面不会自动发现后端，必须带 ?backend=（npm run dev 已代为拼接）
   if (PORT !== 8201) console.log(`[backend] 页面需显式指定：${DEV_PAGE}?backend=http://${HOST}:${PORT}`);
 });
