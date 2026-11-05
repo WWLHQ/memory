@@ -16,8 +16,14 @@ import { sha256hex } from './sync.ts';
 export const REFINE_QUEUE_FILE = 'refine-queue.json';
 /** 单条记忆一次补炼里最多试几个引擎（用户拍板 D：≤3，超出即判失败，不再往下烧） */
 export const REFINE_MAX_ENGINES_PER_CALL = 3;
-/** 每个自然日（UTC+08:00）最多补炼多少行（用户拍板 D：≤500） */
-export const REFINE_MAX_ROWS_PER_DAY = 500;
+/**
+ * 每个自然日（UTC+08:00）最多补炼多少行。
+ * 批次39 用户拍板 D 的正常口径是 **≤500/日**（成本闸门：补炼会真调引擎花钱）。
+ * 〔批次41-I 临时放开〕为取「全量 stop_code × state 分布」以定深度档位，本轮把闸门抬到
+ *   100_000（约等于不限，但保持有限值——不能用 Infinity，JSON.stringify(Infinity)=null 会让
+ *   参数页卡片 `day_limit ?? 500` 谎报 500）。**pending 排空、41-I 定档完成后必须回落为 500**。
+ */
+export const REFINE_MAX_ROWS_PER_DAY = 100_000; // 41-I 临时值，正常口径见上行 = 500
 
 export type RefineItemState = 'pending' | 'done' | 'failed' | 'skipped';
 

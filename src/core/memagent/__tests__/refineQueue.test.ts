@@ -304,8 +304,9 @@ describe('闸门：开关、日额度与跨日', () => {
     const off = { ...s, enabled: false };
     expect(nextPending(off, NOW)).toBeNull();
 
-    // 额度用其它 id 烧光（队列里那三行仍是 pending，证明闸门挡的是额度不是空队列）
-    for (let i = 0; i < REFINE_MAX_ROWS_PER_DAY; i++) s = markRefined(s, `burn_${i}`, NOW);
+    // 额度用尽（把 dayRows 直接顶到上限，不逐行 burn——上限是编译常量，循环会随档位漂移而 O(n²) 爆掉；
+    //   这里验的是闸门算术，不是 burn 次数。队列里那三行仍是 pending，证明挡的是额度不是空队列）
+    s = { ...s, dayRows: REFINE_MAX_ROWS_PER_DAY };
     expect(dailyBudgetLeft(s, NOW)).toBe(0);
     expect(nextPending(s, NOW)).toBeNull();
 
