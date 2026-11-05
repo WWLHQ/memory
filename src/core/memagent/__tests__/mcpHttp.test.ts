@@ -2,7 +2,7 @@
 // 批次33-C 追加：一次性召回明细页（GET /recall/<id>）的可点、失效与 Origin/Host 闸门。
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { request } from 'node:http';
-import { runMcpHttpServer, isIdentifiableUserAgent, type McpHttpHandle } from '../mcpHttp.ts';
+import { runMcpHttpServer, isIdentifiableUserAgent, isTrustedClientSelfName, type McpHttpHandle } from '../mcpHttp.ts';
 import { InMemoryStorage } from '../storage.ts';
 import type { L0Vault } from '../l0vault.ts';
 import { createTestVault } from './l0Kit.ts';
@@ -467,6 +467,57 @@ describe('MCP HTTP（批次2 信任边界）', () => {
     expect((byIdentifiable[0].detail as { client?: string }).client).toBe('Cursor/1.2.3');
   });
 
+  it('批次41-S（方案 B）：已知产品自报名即便走通用 UA、不带会话头也保住身份 → 气泡折叠档回归', async () => {
+    // 用 okhttp/ 前缀（通用、无辨识度）复现「Electron 宿主发 node 类 UA」的同一条代码路径，
+    // 且不与上一条用例的 clientByUa['node'] 键相互污染。
+    const GENERIC_UA = 'okhttp/4.9.0';
+    // ① Qoder 宿主：initialize 自报 qoder-desktop-mcp-host（已知产品）→ 通用 UA 也登记
+    const init = await call(
+      { jsonrpc: '2.0', id: 130, method: 'initialize', params: { clientInfo: { name: 'qoder-desktop-mcp-host', version: '1.0.0' } } },
+      { Authorization: `Bearer ${TOKEN}`, 'User-Agent': GENERIC_UA },
+    );
+    expect(init.status).toBe(200);
+    // ② 后续 recall 不带会话头、同通用 UA → 归并回 qoder-desktop-mcp-host（方案 A 会降 unknown）
+    const r = await call(
+      { jsonrpc: '2.0', id: 131, method: 'tools/call', params: { name: 'recall_memory', arguments: { project_id: 'P1', query: '批次41-S-B 保档' } } },
+      { Authorization: `Bearer ${TOKEN}`, 'User-Agent': GENERIC_UA },
+    );
+    const body = (await r.json()) as { result: { structuredContent: { display: { mode: string } } } };
+    // 关键：命中白名单 → 拿到气泡内联折叠档（用户口径「能内联就内联」）
+    expect(body.result.structuredContent.display.mode).toBe('html-details');
+    const byQoder = (await storage.queryAudit({ action: 'recall' }))
+      .filter((a) => (a.detail as { query?: string }).query === '批次41-S-B 保档');
+    expect((byQoder[0].detail as { client?: string }).client).toBe('qoder-desktop-mcp-host/1.0.0');
+
+    // ③ 残留（方案 B 的既定取舍，钉成用例）：同一条通用 UA 上已登记已知产品后，
+    //    一个「不带会话头、同通用 UA」的任意客户端调用会被归并成那个产品。
+    //    彻底消除需客户端回传 Mcp-Session-Id（方案 C）；本机通用 UA 主要就是 Qoder 宿主一家。
+    await call(
+      { jsonrpc: '2.0', id: 132, method: 'tools/call', params: { name: 'recall_memory', arguments: { project_id: 'P1', query: '批次41-S-B 残留归并' } } },
+      { Authorization: `Bearer ${TOKEN}`, 'User-Agent': GENERIC_UA },
+    );
+    const byResidual = (await storage.queryAudit({ action: 'recall' }))
+      .filter((a) => (a.detail as { query?: string }).query === '批次41-S-B 残留归并');
+    expect((byResidual[0].detail as { client?: string }).client).toBe('qoder-desktop-mcp-host/1.0.0');
+  });
+
+  it('批次41-S（方案 B）：任意/探测自报名在通用 UA 下既不登记、也不被归并出来 → 仍 unknown', async () => {
+    const GENERIC_UA = 'java/17';
+    // 甲：非已知产品名（probe-x）在通用 UA 下 initialize → 不得写进 clientByUa
+    await call(
+      { jsonrpc: '2.0', id: 140, method: 'initialize', params: { clientInfo: { name: 'probe-x', version: '0.0.1' } } },
+      { Authorization: `Bearer ${TOKEN}`, 'User-Agent': GENERIC_UA },
+    );
+    // 乙：同通用 UA、不带会话头调 recall → 该 UA 键上没有已知产品 → 落 unknown
+    await call(
+      { jsonrpc: '2.0', id: 141, method: 'tools/call', params: { name: 'recall_memory', arguments: { project_id: 'P1', query: '批次41-S-B 非已知名' } } },
+      { Authorization: `Bearer ${TOKEN}`, 'User-Agent': GENERIC_UA },
+    );
+    const byProbe = (await storage.queryAudit({ action: 'recall' }))
+      .filter((a) => (a.detail as { query?: string }).query === '批次41-S-B 非已知名');
+    expect((byProbe[0].detail as { client?: string }).client).toBe('unknown');
+  });
+
   it('tools/call 非法 category → isError（不静默落 pitfall）', async () => {
     const r = await call(
       {
@@ -542,5 +593,24 @@ describe('isIdentifiableUserAgent（批次41-S 串号闸门）', () => {
     expect(isIdentifiableUserAgent('cursor-desktop/2.0')).toBe(true);
     expect(isIdentifiableUserAgent('claude-code/1.2')).toBe(true);
     expect(isIdentifiableUserAgent('qoder-cn/9.9.9')).toBe(true);
+  });
+});
+
+// 批次41-S（方案 B）：自报名是否「已知客户端产品」——通用 UA 下靠这条保住合法客户端的气泡折叠档。
+describe('isTrustedClientSelfName（批次41-S 方案 B 已知产品闸门）', () => {
+  it('已知产品自报名判是（含大小写、带/不带版本）', () => {
+    expect(isTrustedClientSelfName('qoder-desktop-mcp-host/1.0.0')).toBe(true);
+    expect(isTrustedClientSelfName('Qoder-Desktop-MCP-Host')).toBe(true);
+    expect(isTrustedClientSelfName('qoder/9.9.9')).toBe(true);
+    expect(isTrustedClientSelfName('Cursor/1.2.3')).toBe(true);
+    expect(isTrustedClientSelfName('dsh-mcp-client')).toBe(true);
+  });
+  it('任意/探测名与空值判否：不进 clientByUa、也不会被归并出来', () => {
+    expect(isTrustedClientSelfName('verify-contam/0.0.1')).toBe(false);
+    expect(isTrustedClientSelfName('verify-41r/0.0.1')).toBe(false);
+    expect(isTrustedClientSelfName('probe-x')).toBe(false);
+    expect(isTrustedClientSelfName('unknown')).toBe(false);
+    expect(isTrustedClientSelfName('')).toBe(false);
+    expect(isTrustedClientSelfName(undefined)).toBe(false);
   });
 });

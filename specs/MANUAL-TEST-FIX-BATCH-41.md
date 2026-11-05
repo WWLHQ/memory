@@ -1,6 +1,6 @@
 # 批次41 手动测试报告 · 审计搬出记忆库 + 队列卫生 + 退避/退出/备份校验 + 删除如实告知（收口与首次真机执行）
 
-日期（UTC+08:00）：2026-11-04
+日期（UTC+08:00）：2026-11-04 建档；**2026-11-05 补 41-Q/41-S 收口（§0 表与 §6 第 14 条）**
 分支：`main`（批次 35–41 已按问题点分 11 笔提交，`origin/main` 停在 `3c23bfe`；其后 5 笔未推送：`1652bd8` 41-R、`5845937` 41-S 立案、`bb63b5a` 需求规格书 §19.25、`948bcf5` 41-T 存量字段回填通道、`35755be` 41-T 文档收口。**HEAD 与 ahead 数随每笔提交漂移，本节不再硬编码，核对用 `git log --oneline -1` 与 `git status -sb`**；`git push` 需用户另行授权）
 上一批次：批次40（`specs/MANUAL-TEST-FIX-BATCH-40.md`）
 起因（用户原话）：「审计搬出记忆库」→「跑」（授权走完 41-Z：`verify` → `package` → 本报告）→ 追加「队列幽灵对账」（复查 41-C，产出 **41-P**）→ 追加「轮换 DSH MCP Bearer 令牌」（**41-L 已真机执行**，用户口径「全量换 + 全量重写」）
@@ -12,12 +12,12 @@
 | 项 | 值 |
 |---|---|
 | 安装包 | `release/installer/MultiAgent Memory-0.1.0-setup.exe` |
-| 大小 | **122,051,635 字节 = 116.4 MB**（16:18 版）；上一版 122,048,686 字节 = 116.39 MB（12:11:56，已被取代） |
-| SHA256 | **`b58ad0f1645687d0651f70f79bce0b9196fef772f2a4a2c7feaac8ff5577b862`**（16:18 版）；上一版 `d0f31b70a702236cfb16cc10f9ccf7a050270e23f075c50ce85ff309a4c5cadf` |
-| 落盘完成（UTC+08:00） | **2026-11-04 16:18**（用户授权 push 后按「重新打包」收口 41-V/41-U，本批最后一版；此表原写 12:11:56 那版 `d0f31b70…` / 122,048,686 B，**已被 16:18 版取代**——那一版里没有 41-V 的 `ledger-reset-trigger` 按钮，也没有 41-U 的 `forgetting:cycle`/`mcp-token-ready` 双写） |
-| 出厂核对（不是「源码写了」，是「包里有没有」） | 16:18 版只读比对 `app.asar.unpacked/dist-electron/main.cjs`：`ledger:fieldsBackfill`/`ledger:fieldsPreview`（41-T）**各命中 2**、`actionLog("kernel","forgetting:cycle:done"…)` + `forgetting:cycle:error`（41-U）**各命中**、`bootstrap:mcp-token-ready`（41-U）**命中**；渲染层 `app.asar` 内 `ledger-reset-trigger`（41-V）**命中 1**、`collector:triggerNow` **命中 3**。上一版 12:11:56 的核对（`mcp:recall_detail_view` 双写 + `l0-rebuild` 对账）仍成立，41-T/41-V/41-U 在 16:18 版才一起进包 |
-| 在跑的产物 | 12:14 用 `release/installer/win-unpacked/MultiAgent Memory.exe` 起回，写锁 `{"pid":3880,…}`；8204 可用（真发一次召回得 200） |
-| `npm run verify` | **退出码 0**。最近一次是 **41-T 收口轮（2026-11-04 12:52–12:55 UTC+08:00）**，一整条链跑完未分段（typecheck → oxlint → 索引新鲜度 → 覆盖率 → `build:electron` → E2E）；上一轮为 41-R 收口（12:0x） |
+| 大小 | **122,055,752 字节 = 116.40 MB**（2026-11-05 12:07 版，含 41-S 方案 B）；上一版 122,055,727 字节（11:12，41-Q/41-S 方案 A）已被取代 |
+| SHA256 | **`21a48ec47e53e38b75fd4fdf3c2cae7fe9d64f4f01bc1d205c8edb0abc4a7198`**（2026-11-05 12:07 版）；上一版 `8e57dfe2f6a1c4a755f4e7a0da75eba1d1decda1c30d7ed9b5b6ec78e8e53a74`（11:12，方案 A） |
+| 落盘完成（UTC+08:00） | **2026-11-05 12:07**（41-S 方案 B 取代方案 A 后重新出包，本批最后一版；A 版 11:12 只把通用 UA 判 `unknown`，连带打掉 Qoder 宿主的 `html-details` 折叠档 → B 让「已知产品自报名」在通用 UA 下保住身份，恢复气泡折叠） |
+| 出厂核对（不是「源码写了」，是「包里有没有」） | 2026-11-05 B 版只读比对 `app.asar.unpacked/dist-electron/main.cjs`（**592,961 B**，比 A 版 592,352 B 多 609 B）：`isTrustedClientSelfName`（B 新增函数）**命中 3**（定义 + `initialize` 登记 + 取值顺序两处接线）、`qoder-desktop-mcp-host`（41-Q 白名单 + B 已知产品表）**命中 2**、`dsh-mcp-client`·`trae-cn`·`workbuddy`（B 的 `TRUSTED_CLIENT_SELF_IDS` 成员）命中、`go-http-client/`·`okhttp/`·`python-urllib/`·`wget/`（A 保留的通用 UA 前缀表）各命中 1。此前各版核对全部沿用成立：16:18 版 `ledger:fieldsBackfill`/`ledger:fieldsPreview`（41-T）各命中 2、`forgetting:cycle:done`/`:error` + `bootstrap:mcp-token-ready`（41-U）命中、渲染层 `ledger-reset-trigger`（41-V）命中；12:11:56 版 `mcp:recall_detail_view` 双写 + `l0-rebuild` 对账命中 |
+| 在跑的产物 | 12:14 用 `release/installer/win-unpacked/MultiAgent Memory.exe` 起回（**12:07 B 版**，`release/installer` 被旧实例占用 EPERM，构建临时输出到 `installer-20261105-040739` 后复制+删除收口回 `release/installer`）；写锁 `{"pid":…}`；8204 可用（真发一次召回得 200） |
+| `npm run verify` | **退出码 0**。最近一次是 **41-S 方案 B 收口轮（2026-11-05 12:0x）**，一整条链跑完未分段（typecheck → oxlint 0/0 → 索引新鲜度 → vitest **166 文件 / 1947 例** 全过（B 新增 4 例：两组端到端 + `isTrustedClientSelfName` describe 正反例），Statements **82.59%**（11629/14080） → `build:electron` → E2E **107 passed**）；上一轮为 41-Q/41-S 方案 A 收口（11:12，1943 例） |
 | `npm run typecheck` | 干净（`tsc --noEmit` + `tsc --noEmit -p tsconfig.electron.json`） |
 | `npm run lint` | oxlint **0 warnings / 0 errors** |
 | `npm run code:index:check` | 代码索引已是最新（**308 个文件**；41-T 新增 `fieldBackfill.ts` + `FieldBackfillCard.tsx` 两个文件，从 306 涨上来） |
@@ -230,3 +230,20 @@
 12. **「重新打包让 41-P 进安装包」这条请求的前提已过期（2026-11-04 12:35 只读复核，所以我没有再打一次包）**：现役 `release/installer/`（12:11:56 那一版，`d0f31b70…` / 122,048,686 B）**已经含 41-P**——只读比对 `app.asar.unpacked/dist-electron/main.cjs`：`reconcileRefineQueueDir("l0-rebuild")` 命中 1 次、`recall_detail_view` 双写两行命中；在跑的写锁是 `{"pid":3880,…}`（不是请求里说的 `38552`，那是 10:51 那一版实例的 pid，12:14 已被 41-R 收口包替换）。**再打一次包只会打断正在补炼的实例，换不来任何新代码**，所以这一步按「已满足」处理。真正需要重新打包的是**本节的 41-T**（新代码 + 新卡片），是否现在就打（会结束 pid 3880 的补炼轮次）等你一句话。**〔2026-11-04 16:18 闭合〕**41-V/41-U 收口提交后，用户授权 push 并要求「重新打包」→ 16:18 出包 `b58ad0f1…` / 122,051,635 B，**41-T + 41-V + 41-U 三块一起进包**（出厂核对见 §0），此条「等你一句话」的门槛已满足。
 
 13. **41-T 出厂后的第一条实机核对不是「补了多少」，而是「有没有少」**：执行完必须抽查三件事（§3 步骤③）——补上的 `sha256` 恰等于 `sha256hex(content)`、`embedding` 恰等于 `embedSync(content_l1)`、且 `version`/`updated_at`/`layer`/正文与执行前逐字相同。这个通道的全部风险都在「顺手改了不该改的元数据」，不在「没补上」。
+
+14. **〔2026-11-05 收口〕41-Q 与 41-S 已按用户拍板落地并出厂**（上面第 11 条「本批只测量、没有修」的状态作废，改为「已修」；§0 顶部那条「41-Q 未修」的边界同步更正）。
+
+    - **用户拍板的口径（41-S 有二次改口，如实记）**：41-Q「折叠版，summary 是提示行，内层四段可各自收起」→ 把 Qoder Desktop 宿主自报名加进 `html-details` 白名单。**41-S 先拍 A（通用 UA 一律判 `unknown`），后拍 B（2026-11-05，取代 A）**——用户实机看到气泡折叠档丢失（截图为证：老包能出带 `▶` 折叠与 ¥ 金额的四段卡，新包装不出来了），给出新口径「**尽量能用气泡就通用气泡，实在不能用气泡才用 HTML 页兜底**」。真因是 A 把 Qoder 宿主（UA=`node`、不带会话头、只靠 initialize 自报 `qoder-desktop-mcp-host`）的身份通道一起封了 → 落到 `unknown` → 从 `html-details` 降级为 `markdown-compact`。B 让**已知产品**的自报名在通用 UA 下保住身份，任意/探测名（`verify-41r`）仍不登记，既恢复气泡折叠又留住 A 堵住的串号。
+
+    - **41-Q 改了什么**（`src/core/memagent/mcpRecall.ts:22`）：`clientSupportsHtmlDetails` 的判据从「首段精确等于 `qoder`」改为命中集合 `{qoder, qoder-desktop-mcp-host}`（首段 `trim().toLowerCase()` 后取集合成员判定，大小写不敏感）。命中该档的客户端得到 `<details>` 四段折叠版（summary=提示行，内层项目背景/命中记忆/Token 用量/省钱与费用各自可收起）。`src/core/memagent/__tests__/recallInsight.test.ts` 补 `qoder-desktop-mcp-host/1.0.0`→`html-details`、`Qoder-Desktop-MCP-Host/1.0.0`（大小写）→true、`unknown`→false 三条正反例。**〔2026-11-05 实机校正〕**这条「Qoder 气泡是否真渲染 `<details>`」此前只有 DSH 侧反例、Qoder 侧无实测；**用户截图证明老包（41-A 之前）在真 Qoder Desktop 里确实渲染了带 `▶` 折叠与 ¥ 金额的四段卡** → 白名单前提成立，`qoder-desktop-mcp-host` **不撤**。近期「新包不出折叠卡」不是 `<details>` 渲不出来，而是 41-S 方案 A 把宿主身份降成 `unknown`（落到 `markdown-compact`）——已由 41-S 方案 B 恢复，见下条。
+
+    - **41-S 改了什么（2026-11-05，方案 B 取代方案 A，`src/core/memagent/mcpHttp.ts`）**：**保留** `isIdentifiableUserAgent(ua)` 纯函数（`node`/`curl/`/`python-urllib/`/`wget/`/`go-http-client/`/`okhttp/`/`java/`/`axios/` 与「认不出厂商词的未知 UA」判否，含厂商词判是）；**新增** `isTrustedClientSelfName(client)` 纯函数（自报名首段 `trim().toLowerCase()` 命中「已知客户端产品表」`TRUSTED_CLIENT_SELF_IDS`——`qoder`/`qoder-desktop-mcp-host`/`claude`/`codex`/`cursor`/`gemini`/`qwen`/`trae`/`workbuddy`/`zcode`/`deepseek`/`deepseek-harness`/`dsh-mcp-client` 等——判是，任意/探测名判否）。两处接线在 A 的两条件上各并入「或 已知产品自报名」：① `initialize` 登记条件 `ua && (isIdentifiableUserAgent(ua) || isTrustedClientSelfName(selfId))`——通用 UA 不再被任意名抢注，但已知产品在通用 UA 下仍登记；② 取值顺序 `会话头 → （UA 有辨识度 或 该 UA 上登记的是已知产品）查 clientByUa → clientFromUserAgent(ua)`——非已知产品的通用 UA 调用仍落到 `unknown`。`clientBySession`（真带会话头的客户端）不受影响；TCP 8202 不走这套。测试（`mcpHttp.test.ts`）：A 的「批次41-S 串号闸门」describe 保留（`isIdentifiableUserAgent` 正反例 + `verify-contam` 端到端串号 → `unknown`，因 `verify-contam` 不在已知产品表），**方案 B 新增**两组端到端用例（① 已知产品 `qoder-desktop-mcp-host` 走通用 UA `okhttp/` 不带会话头 → `display.mode=html-details` 且审计 `client=qoder-desktop-mcp-host/1.0.0`，并钉住残留；② 任意名 `probe-x` 走通用 UA `java/17` → `client=unknown`）+ `isTrustedClientSelfName` 单独 describe（已知产品大小写/带不带版本正反例，`verify-contam`/`probe-x`/`unknown`/空/undefined 判否）。
+      - **方案 B 的残留（相对 C 的取舍，明写）**：B 恢复了气泡折叠档，代价是同一条**通用 UA 键**上若已登记某已知产品，后续「不带会话头、同通用 UA」的调用会被归并成那个产品——本机通用 UA（`node`）主要就是 Qoder 宿主一家，实际暴露面小；但展示档位与批次30 接入证据理论上仍可能被同机第二家「搭」上那个已知产品的身份。**彻底消除需方案 C**（强制回传 `Mcp-Session-Id`，本批未做）——这是用户「能内联就内联」口径下接受的残留。A 相对 B 的老残留（同名客户端互串）在 B 下不变。
+
+    - **门禁（真机跑过，非沿用）**：方案 B 改完 `npm run verify` 退出码 **0** —— typecheck 干净 → oxlint 0/0 → 索引最新（`isTrustedClientSelfName` 已写进 `code-index.generated.md`）→ vitest **166 文件 / 1947 例** 全过（Statements **82.59%**，11629/14080）→ Electron 构建 → E2E **107 passed**。
+
+    - **出厂**：`npm run package` 重新出包 `release/installer/MultiAgent Memory-0.1.0-setup.exe`，**122,055,752 B / SHA256 `21a48ec47e53e38b75fd4fdf3c2cae7fe9d64f4f01bc1d205c8edb0abc4a7198`**，落盘 **2026-11-05 12:07（UTC+08:00）**。产物核对按打包产物验证口径（`app.asar.unpacked/dist-electron/main.cjs`，**不是** grep `app.asar` 会假阴性）：该文件（**592,961 B**，比 A 版多 609 B）里 `isTrustedClientSelfName` 命中 **3** 次（定义 + `initialize` 登记 + 取值顺序两处接线）、`qoder-desktop-mcp-host` 命中 **2** 次（41-Q 白名单 + B 已知产品表）、`dsh-mcp-client`/`trae-cn`/`workbuddy`（B 的已知产品成员）命中 = 方案 B 与 41-Q 白名单都在包里。（打包时 `release/installer` 被旧实例占用 EPERM，构建临时输出到 `installer-20261105-040739`，收口按批次21 流程复制+删除回固定目录，产物在 `release/installer`。）
+
+    - **提交口径（诚实记一笔偏差 + B 是新的未提交内容）**：41-Q/41-S **方案 A** 本应按「分问题点提交」各自独立提交，但**是用户把 41-Q/41-S（A）折进了既有的批次41 内核提交 `7d910ed`**，不是我的独立提交。**方案 B 是本轮新改动**（`mcpHttp.ts` 加 `isTrustedClientSelfName` + 两处接线、`mcpHttp.test.ts` 加 4 例、AGENTS.md/code-map/本报告/记忆同步）——**尚未提交，也尚未 push**（push 需用户单独授权）。工作树状态现查 `git status -sb` 与 `git log --oneline -1`，不硬编码。
+
+    - **仍未实机核对（用户目视）**：方案 B 的串号闸门与档位归并由单测 + 端到端用例覆盖（`isTrustedClientSelfName` 正反例 + 「已知产品走通用 UA → `html-details`」/「任意名走通用 UA → `unknown`」），但**「真 Qoder Desktop 气泡是否重新出现 `▶` 四段折叠」这条实机行为本会话没在用户机上跑成**：需用户**重启到 12:07 的 B 版**（旧实例持锁，先关掉再起新包），再调一次 `recall_memory`，肉眼确认折叠卡回归（用户截图那版是老包 A 之前，A 把它打掉了，B 就是把它接回来）。同时确认任意/探测名不会冒充——本会话发的探测脚本自报名（`verify-*`）在 B 下仍应落 `unknown`（审计 `detail.client` 为字面 `unknown`）。

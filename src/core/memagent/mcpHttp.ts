@@ -75,6 +75,27 @@ export function isIdentifiableUserAgent(ua: string | undefined): boolean {
   return clientFromUserAgent(low) !== 'unknown';
 }
 
+/**
+ * 批次41-S（方案 B）：自报名是否「已知客户端产品」——首段命中下表即认。
+ * 用途：允许「UA 是通用运行时串（如 Electron 主进程发出的 `node`）、且不回传 `Mcp-Session-Id`」
+ * 的**合法客户端**凭其在 `initialize` 里的自报名保住身份（否则会被 41-S 方案 A 一律降为 `unknown`，
+ * 连带丢掉气泡内联折叠档——用户口径「能内联就内联，做不到才用 HTML 页兜底」）。
+ * 与方案 A 的区别只在「信什么」：A 只信有辨识度的 UA；B 额外信**已知产品名**这一类自报名。
+ * 任意/探测名（`verify-41r` 这种不在表里的）仍判否——既不覆盖别人的记录，也不会被归并出来。
+ * 残留（诚实声明）：同一条通用 UA 键上，若已登记某已知产品，则后续「不带会话头、同 UA」的调用
+ * 会被归并成那个产品（本机主要就是 Qoder 宿主一家用 `node`，风险有限；彻底消除需客户端回传会话头，属方案 C）。
+ */
+const TRUSTED_CLIENT_SELF_IDS = new Set([
+  'qoder', 'qoder-desktop-mcp-host', 'claude', 'claude-code', 'codex', 'cursor',
+  'gemini', 'gemini-cli', 'qwen', 'qwen-code', 'trae', 'trae-cn', 'workbuddy',
+  'zcode', 'deepseek', 'deepseek-harness', 'dsh-mcp-client',
+]);
+export function isTrustedClientSelfName(client: string | undefined): boolean {
+  if (!client) return false;
+  const seg = client.split('/')[0].trim().toLowerCase();
+  return TRUSTED_CLIENT_SELF_IDS.has(seg);
+}
+
 
 export interface McpHttpOptions {
   storage?: StorageBackend;
@@ -355,16 +376,18 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
             const selfId = clientFromInitialize(params);
             if (selfId) {
               remember(clientBySession, sid, selfId);
-              // 批次41-S：只有「有辨识度」的 UA 才登记到跨请求归并表——通用 UA（node/curl/…）
-              // 登记进去会把自己变成「最近一次 initialize」的抢到名字的那条，串号源头就在这。
-              if (ua && isIdentifiableUserAgent(ua)) remember(clientByUa, ua, selfId);
+              // 批次41-S（方案 B）：有辨识度 UA 才登记；或自报名本身是**已知客户端产品**也登记——
+              // 让 Qoder 宿主这类「UA=`node`、不带会话头、但自报 qoder-desktop-mcp-host」的合法客户端
+              // 保住气泡折叠档。任意/探测名（不在已知表里）仍不登记，从源头堵住被它抢注。
+              if (ua && (isIdentifiableUserAgent(ua) || isTrustedClientSelfName(selfId))) remember(clientByUa, ua, selfId);
             }
             res.setHeader('Mcp-Session-Id', sid);
           }
-          // 批次41-S：取值顺序 会话头 → （仅有辨识度时）同 UA 最近一次 initialize → UA 识别。
-          // 通用 UA 直接跳到 clientFromUserAgent → unknown，不再借用别人的自报名。
+          // 批次41-S（方案 B）：取值顺序 会话头 → （有辨识度 UA，或该 UA 上登记的自报名是已知产品）
+          // 同 UA 最近一次 initialize → UA 识别。通用 UA 上若没登记过已知产品，仍落到 unknown。
+          const uaCached = ua ? clientByUa.get(ua) : undefined;
           const client = clientBySession.get(incomingSid)
-            ?? (ua && isIdentifiableUserAgent(ua) ? clientByUa.get(ua) : undefined)
+            ?? (ua && (isIdentifiableUserAgent(ua) || isTrustedClientSelfName(uaCached)) ? uaCached : undefined)
             ?? clientFromUserAgent(ua);
           const rpcResp = await handleRpc(payload, client);
           res.writeHead(200, { 'Content-Type': 'application/json' });
