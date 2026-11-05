@@ -4,7 +4,9 @@ import type { ConflictAudit, ConflictRecord, ConflictType, Verdict } from './typ
 import { CONFIRM_TYPE_LABEL } from './labels.ts';
 
 /** 冲突类型中文可读名（9.7 四类） */
-export function typeLabel(t: ConflictType): string {
+export function typeLabel(t: ConflictType | null): string {
+  // 批次46-3：内核无检测引擎 → 不伪造类型，如实显示「未检测」
+  if (t === null) return '未检测（内核无检测引擎）';
   return CONFIRM_TYPE_LABEL[t] ?? t;
 }
 

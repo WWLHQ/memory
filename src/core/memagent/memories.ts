@@ -20,6 +20,7 @@ import { findDuplicate } from './dedup.ts';
 import { ulid } from './ulid.ts';
 import { sha256hex } from './sync.ts';
 import { classifyLayer, runForgettingCycle } from './forgetting.ts';
+import { CONFLICT_VERDICTS, coreListConflicts, coreResolveConflict } from './conflict.ts';
 
 export {
   LAYER_SPECS, checkLayerSpec, checkLayerSpecDetailed, sanitizeL1, layerSpecOf, meaningfulLength,
@@ -601,7 +602,8 @@ export async function coreGc(
  *   `main.ts` 每 6h 的生产调度不动。本函数是与 `ma.gc()` 并列的另一条入口，
  *   **勿在同一次执行里同时调用**（两者都会做层迁移，会双计）。
  * - D5：`decayed` 只是 `migrated` 的兼容别名，同一事件只出一个数。
- * - 46-2 **未接冲突裁决**（属 46-3）：`conflicts_resolved` 诚实为 0，不拿别的数字顶替。
+ * - 46-3：`conflicts_resolved` 只数本周期经 `coreResolveConflict()` **真实落定**的冲突对；
+ *   `resolve_conflicts=true` 必须同时给合法 `verdict`（D3/D8），否则明确拒绝、绝不默认覆盖。
  * - `dry_run=true` 全程零写入，`audit` 以真实账本判定而非按入参猜。
  */
 export const GC_FULL_NOTE =
@@ -609,7 +611,8 @@ export const GC_FULL_NOTE =
   + '摘要段：freshness_updated 实为「本轮扫描条数」而非新鲜度更新条数，scanned 为同值如实命名，'
   + 'summaries_created/summaries_filtered/merged_originals/compressed 均来自 runForgettingCycle 真实事件，'
   + 'compressed 只清向量索引副本、不动磁盘正文；'
-  + '裁决段：conflicts_resolved 在 46-2 恒 0（冲突裁决属 46-3，未落定不伪造）；'
+  + '裁决段：conflicts_resolved 只数本周期真实落定的冲突对（46-3 接真），未落定 / dry_run 诚实为 0，'
+  + '须 resolve_conflicts=true 与合法 verdict 同时给才落定，历史 conflict_resolve 审计不回放计数；'
   + 'dry_run=true 按当前账本快照演算、全程零写入（不落记忆/审计/索引）且 audit=null；'
   + '本入口与 ma.gc() 是两条独立路径，勿同时执行以免双计。';
 
@@ -622,6 +625,17 @@ export async function coreGcFull(
   // 这里不新增 ErrorCode 以免扩大 types.ts 错误码枚举的影响面。
   if (!projectId) throw new Error('coreGcFull.project_id 必填且须为非空字符串');
   const dryRun = req.dry_run === true;
+
+  // 批次46-3：裁决参数校验必须**前置**，绝不「先写了库再报错」。
+  // D3/D8：resolve_conflicts=true 与合法 verdict 二者都给才落定；只给前者明确拒绝、不默认覆盖。
+  const shouldResolve = req.resolve_conflicts === true;
+  if (shouldResolve && !req.verdict) {
+    throw new Error('coreGcFull.resolve_conflicts=true 必须同时显式给出 verdict（禁止自动 auto_override）');
+  }
+  if (shouldResolve && !CONFLICT_VERDICTS.includes(req.verdict!)) {
+    throw new Error(`coreGcFull.verdict 非法：须为 ${CONFLICT_VERDICTS.join('/')}`);
+  }
+
   const cycle = await runForgettingCycle(ctx.storage, ctx.now, {
     projectId,
     dryRun,
@@ -629,6 +643,25 @@ export async function coreGcFull(
     ...(req.weeklyCompress !== undefined ? { weeklyCompress: req.weeklyCompress } : {}),
     ...(req.vector ? { vector: req.vector } : {}),
   });
+
+  // 裁决段：只对当前真实排队的冲突对执行用户显式选定的 verdict；每对单独写审计。
+  // 未落定（pending / 拒绝 / dry_run）一律不计入，历史 conflict_resolve 审计不回放。
+  let conflicts_resolved = 0;
+  if (shouldResolve && req.verdict) {
+    const pairs = await coreListConflicts(ctx.storage, { projectId });
+    for (const pair of pairs) {
+      const r = await coreResolveConflict({
+        old_id: pair.old_id,
+        new_id: pair.new_id,
+        conflict_id: pair.conflict_id,
+        project_id: projectId,
+        verdict: req.verdict,
+        dry_run: dryRun,
+      }, ctx);
+      if (r.resolved) conflicts_resolved += r.conflicts_resolved;
+    }
+  }
+
   // 以真实账本判定审计是否落盘，不按入参猜（沿用 D5-3「以内核真实回执判断」口径）
   const audits = await ctx.storage.queryAudit({ request_id: cycle.request_id });
   const audit: AuditRef | null = audits.length > 0
@@ -640,7 +673,7 @@ export async function coreGcFull(
     request_id: cycle.request_id,
     decayed: cycle.migrated,           // D5：兼容别名，不双计
     merged: 0,                         // 历史占位，由 summaries_created 取代
-    conflicts_resolved: 0,             // 46-2 未接裁决，未落定诚实为 0
+    conflicts_resolved,                // 46-3：只数本周期真实落定的冲突对
     freshness_updated: cycle.freshness_updated,
     scanned: cycle.freshness_updated,  // D4：如实命名
     migrated: cycle.migrated,

@@ -195,7 +195,11 @@ export interface LayerDecision {
 /** ---------- 生命周期（9.7 / 6.2） ---------- */
 export interface GcReq {
   project_id: string;
-  /** 是否执行裁决（冲突 → 三模式） */
+  /**
+   * 批次46-3：是否同时处理已排队的显式冲突裁决。
+   * `coreGc` **不读**（D2 一行未改，恒回 conflicts_resolved=0）；
+   * 真实接线在 `coreGcFull()`：必须与 `verdict` 同时给才落定，未给 verdict 明确拒绝。
+   */
   resolve_conflicts?: boolean;
   /**
    * 批次44-D5-3：true = 只演算不落库（不改记忆、不写审计），用于 gc_report 的默认只读报告。
@@ -228,6 +232,11 @@ export interface GcFullReq extends GcReq {
   vector?: VectorBackend;
   /** 自动策略开关（AC-14），透传 runForgettingCycle；缺省 = 启用 */
   enabled?: boolean;
+  /**
+   * 批次46-3：本周期对已排队冲突对该用的**显式** verdict。
+   * 必须与 `resolve_conflicts=true` 同时给才落定；只给其一不落定或明确拒绝（D3/D8）。
+   */
+  verdict?: ConflictVerdict;
 }
 
 /**
@@ -243,7 +252,7 @@ export interface GcFullReport {
   decayed: number;
   /** 历史占位恒 0；由 summaries_created 取代，deprecated，不冒充统计 */
   merged: number;
-  /** 46-2 仍恒 0：冲突裁决属 46-3，未落定不伪造计数 */
+  /** 批次46-3：只数本周期经 coreResolveConflict() **真实落定**的冲突对；未落定 / dry_run 诚实 0 */
   conflicts_resolved: number;
   // ── 摘要合并段（契约 §7 六字段，均有真实事件源）──
   /** 诚实语义 = 本轮扫描条数，**不是**「新鲜度更新条数」（D4）；另见 scanned */
@@ -259,6 +268,61 @@ export interface GcFullReport {
   /** dry_run=true 恒 null：演算未落审计，不伪造回执（沿用 D5-3 口径） */
   audit: AuditRef | null;
   /** 分层口径说明（D6），不是统计量 */
+  note: string;
+}
+
+// ─── 批次46-3：冲突裁决（§9.7 三模式 + P7 hold） ──────────────────────────────
+
+/** 四值语义：用户显式选定才落定；禁止自动 auto_override */
+export type ConflictVerdict = 'auto_override' | 'user_confirm' | 'merge' | 'hold';
+
+/**
+ * 真实冲突配对。内核**没有** `detect_conflicts` 检测引擎（§9.7 是设计伪码），
+ * 因此 `conflict_score` / `conflict_type` 如实为 `null`，不硬编码 0.8、不按正文猜类型。
+ */
+export interface ConflictPair {
+  conflict_id: string;
+  old_id: string;
+  new_id: string;
+  /** 两条必须同项目，且落在调用方作用域内 */
+  project_id: string;
+  conflict_score: null;
+  conflict_type: null;
+  /** 口径说明（不伪造分数/类型） */
+  note: string;
+}
+
+export interface ConflictResolveReq {
+  old_id: string;
+  new_id: string;
+  conflict_id: string;
+  /** 调用方作用域内的项目；与两条记忆的真实归属必须一致 */
+  project_id: string;
+  verdict: ConflictVerdict;
+  /** true = 只演算：零写入、audit=null、conflicts_resolved=0 */
+  dry_run?: boolean;
+}
+
+export interface ConflictResolveResult {
+  ok: boolean;
+  /** 是否真实落定（dry_run / pending / 拒绝 一律 false） */
+  resolved: boolean;
+  /** 本周期内真实落定的冲突对数：1 或 0，历史审计不回放计数 */
+  conflicts_resolved: number;
+  verdict: ConflictVerdict;
+  conflict_id: string;
+  old_id: string;
+  new_id: string;
+  project_id: string;
+  dry_run: boolean;
+  request_id: string;
+  audit: AuditRef | null;
+  merged_mem_id?: string;
+  /** G4：locked 行仅 unlock 放行 */
+  blocked_locked?: boolean;
+  /** merge 聚合内容未过 L0→L1 质量门 → 整组回滚、保持 pending */
+  quality_gate_blocked?: boolean;
+  reason?: string;
   note: string;
 }
 

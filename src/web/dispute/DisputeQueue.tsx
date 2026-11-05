@@ -32,8 +32,10 @@ export function DisputeQueue({ list, now = Date.now(), onSelect, selectedId }: P
             onClick={() => onSelect(r.id)}
           >
             <div className="row-head">
-              <span className={`ctype ${r.conflict_type}`} data-testid={`q-ctype-${i}`}>{typeLabel(r.conflict_type)}</span>
-              <span className="score">conflict {r.conflict_score}</span>
+              <span className={`ctype ${r.conflict_type ?? 'unknown'}`} data-testid={`q-ctype-${i}`}>{typeLabel(r.conflict_type)}</span>
+              <span className="score">
+                {r.conflict_score === null ? 'conflict 未采样（内核无检测引擎）' : `conflict ${r.conflict_score}`}
+              </span>
               {overdue && <span className="badge overdue-badge">超期 {od}d</span>}
             </div>
             <div className="compare">

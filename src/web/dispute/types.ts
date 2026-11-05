@@ -19,9 +19,10 @@ export interface ConflictRecord {
   new_content: string;
   old_confidence: number;
   new_confidence: number;
-  conflict_type: ConflictType;
-  /** >0.7 触发（9.7） */
-  conflict_score: number;
+  /** 内核无 detect_conflicts 检测引擎（§9.7 伪码未实现）→ 如实 null，不猜测类型 */
+  conflict_type: ConflictType | null;
+  /** >0.7 触发（9.7）；内核无采样 → 如实 null，不硬编码 0.8 */
+  conflict_score: number | null;
   /** 队列筛选（12.1 人工审核） */
   dispute_flag: boolean;
   overdue_days: number;

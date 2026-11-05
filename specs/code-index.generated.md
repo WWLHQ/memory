@@ -3,7 +3,7 @@
 > 由 `npm run code:index` 生成，请勿手改；改代码后重跑即可。
 > 用法：先在本表定位文件与导出符号，再只读该文件的局部区间（省 token、少误改）。
 
-共 319 个源码文件。
+共 320 个源码文件。
 
 ## e2e
 
@@ -42,6 +42,7 @@
 |---|---|---|---|
 | [src/core/memagent/agent.ts](src/core/memagent/agent.ts) | 540 | createMemAgent（§1 入口）：内核装配 + 9 核心API + 全动作审计（§3.2） | createMemAgent(fn) |
 | [src/core/memagent/auditLog.ts](src/core/memagent/auditLog.ts) | 392 | 内核审计账本（批次41-A）：从 memories.db.json 里搬出来，独立成追加式 JSONL。 | AUDIT_FILE_NAME(const), AUDIT_ACTIVE_MAX_BYTES(const), AuditLogCorruptError(class), AuditLogLockedError(class), FileAuditLog(class), AuditFilter(type), AuditLogStats(type), FileAuditLogOptions(type) |
+| [src/core/memagent/conflict.ts](src/core/memagent/conflict.ts) | 256 | 批次46-3：内核冲突裁决原子 API（方案 §3 / §9.7 + P7 hold） | coreListConflicts(fn), coreResolveConflict(fn), CONFLICT_NOTE(const), CONFLICT_VERDICTS(const) |
 | [src/core/memagent/crypto.ts](src/core/memagent/crypto.ts) | 330 | L0 加密层（§4.1）：AES-256-GCM + PBKDF2 派生密钥。 | encryptL0(fn), parseL0Envelope(fn), decryptL0(fn), randomBytes(fn), generateDek(fn), newWrapSalt(fn), deriveKek(fn), wrapSecret(fn), unwrapSecret(fn), encryptL0WithKey(fn), parseL0EnvelopeV2(fn), decryptL0WithKey(fn), L0_KEK_ITER(const), L0_DEK_BYTES(const), MASK(const), L0_KEY_BYTES(const), L0Envelope(type), L0EnvelopeV2(type), L0Wrap(type) |
 | [src/core/memagent/dedup.ts](src/core/memagent/dedup.ts) | 192 | 五维查重（§6.1）：语义 35% / 关键词 20% / 实体 15% / 结构 10% / LLM 仲裁 20%。 | layerText(fn), keywordSet(fn), entitySet(fn), structuralSimilarity(fn), baseDimensionScores(fn), fourDimScore(fn), fiveDimScore(fn), findDuplicate(fn), JUDGE_TOP_N(const), DimensionScores(type), DedupEvaluation(type), DedupOutcome(type), DedupOptions(type) |
 | [src/core/memagent/errors.ts](src/core/memagent/errors.ts) | 32 | memagent-core 错误码（§6，各端统一处理） | isL0LockedError(fn), isL0LockedText(fn), MemAgentError(class) |
@@ -64,7 +65,7 @@
 | [src/core/memagent/mcpReadTools.ts](src/core/memagent/mcpReadTools.ts) | 160 | MCP 读工具编排（批次44-D5-1）：list_memories / get_memory。 | toMemoryView(fn), runListMemoriesTool(fn), runGetMemoryTool(fn), MemoryView(type), ListMemoriesResult(type), GetMemoryResult(type) |
 | [src/core/memagent/mcpRecall.ts](src/core/memagent/mcpRecall.ts) | 269 | MCP 召回工具编排（批次11/13/29/32/33）：项目自动定位 / 列表 / 提示行与明细组装 / 按客户端能力选档位。 | clientSupportsHtmlDetails(fn), projectInfosFromMemories(fn), resolveProjectId(fn), runRecallTool(fn), recallDisplayMode(fn), runListProjectsTool(fn), McpToolError(class), ProjectInfo(type), ResolvedProject(type), RecallToolPayload(type), RecallDetailTicketsPort(type), RecallToolDetailOpts(type), RecallToolOutput(type), RecallDisplayMode(type) |
 | [src/core/memagent/mcpSchema.ts](src/core/memagent/mcpSchema.ts) | 165 | MCP 工具清单与初始化指令（批次11/12/13）：HTTP(8204) 与 TCP(8202) 共用同一份 schema/instructions， | MCP_INSTRUCTIONS(const), MCP_TOOLS(const) |
-| [src/core/memagent/memories.ts](src/core/memagent/memories.ts) | 796 | 内核记忆业务（§3 schema + 行为红线）：write 逐层生成/查重/分支嫁接 / browse L0 授权 / gc 衰减 / memoryOp 17.3 操作 | layerSpecsFrom(fn), buildL6Input(fn), makeLayerGenerator(fn), parseWriteKnobs(fn), coreWrite(fn), coreBrowse(fn), coreGc(fn), coreGcFull(fn), coreMemoryOp(fn), coreFeedback(fn), GC_FULL_NOTE(const), WriteInput(type), WriteCtx(type) |
+| [src/core/memagent/memories.ts](src/core/memagent/memories.ts) | 829 | 内核记忆业务（§3 schema + 行为红线）：write 逐层生成/查重/分支嫁接 / browse L0 授权 / gc 衰减 / memoryOp 17.3 操作 | layerSpecsFrom(fn), buildL6Input(fn), makeLayerGenerator(fn), parseWriteKnobs(fn), coreWrite(fn), coreBrowse(fn), coreGc(fn), coreGcFull(fn), coreMemoryOp(fn), coreFeedback(fn), GC_FULL_NOTE(const), WriteInput(type), WriteCtx(type) |
 | [src/core/memagent/paramsSnapshot.ts](src/core/memagent/paramsSnapshot.ts) | 38 | 全局参数快照（params:v1: preference 记忆）的共享读取口。 | parseParamsSnapshot(fn), findParamsSnapshot(fn), autoOrganizeEnabled(fn), PARAMS_PREF_PREFIX(const), ParamsSnapshot(type) |
 | [src/core/memagent/pendingStoreFile.ts](src/core/memagent/pendingStoreFile.ts) | 57 | 文件落盘实现（node-only）：pending 队列持久化到 <dir>/pending-<id>.json。 | FilePendingStore(class) |
 | [src/core/memagent/pendingWrites.ts](src/core/memagent/pendingWrites.ts) | 96 | 落盘兜底队列（A3 §4.4.4 / 批次44-D4） | MemoryPendingStore(class), PendingWrites(class), PendingWrite(type), PendingStore(type), WriteKnobs(type) |
@@ -80,7 +81,7 @@
 | [src/core/memagent/sqliteStorage.ts](src/core/memagent/sqliteStorage.ts) | 131 | SqliteStorage（§5.3）：桌面/CLI 本地库 = P0 主源（需求规格书 §2 端壳注入、§5.3 存储端点表）。 | SqliteStorage(class) |
 | [src/core/memagent/storage.ts](src/core/memagent/storage.ts) | 91 | StorageBackend 接口实现（§5.3）：InMemoryStorage 用于测试/演示； | InMemoryStorage(class) |
 | [src/core/memagent/sync.ts](src/core/memagent/sync.ts) | 371 | REQ-008 云同步（同步机制详细设计 §1–§8）：sha256 幂等 + 向量时钟 LWW + SyncHub 中枢 + 三端引擎 | sha256hex(fn), vcCompare(fn), vcTick(fn), stampForSync(fn), syncUp(fn), syncDown(fn), reconcile(fn), filterSyncAudits(fn), SyncHub(class), SyncConflict(type), SyncAudit(type), SyncUpReport(type), VClock(type), PushOutcome(type), AnySyncHub(type) |
-| [src/core/memagent/types.ts](src/core/memagent/types.ts) | 813 | memagent-core 契约类型（REQ-007 §1/§2/§3/§5/§6 直译，19.10/19.11） | isCategory(fn), CATEGORIES(const), Account(type), RefinedLayers(type), RecallReq(type), Hit(type), Budget(type), RecallBackgroundItem(type), RecallBackground(type), RecallSavings(type), RecallResult(type), MemReq(type), WriteResult(type), LayerDecision(type), GcReq(type), GcReport(type), GcFullReq(type), GcFullReport(type), Pref(type), DiscoverReq(type), DiscoveredAgent(type), DiscoverResult(type), SyncReq(type), SyncReport(type), BrowseReq(type), BrowseRow(type), BrowseResult(type), L0Port(type), L0AccessRequest(type), L0AccessRequestResult(type), L0GrantReq(type), L0GrantView(type), L0GrantResult(type), L0RequestView(type), L0UnlockReq(type), L0UnlockResult(type), L0HeartbeatResult(type), L0VaultStatus(type), L0MigrationReport(type), L0MigrationResult(type), L0AdminPort(type), LogReq(type), LogItem(type), LogPage(type), AuditRef(type), AuditRecord(type), Memory(type), MemOpPatch(type), MemOpResult(type), FeedbackResult(type), ModelInfo(type), LlmCallCtx(type), LlmResp(type), LlmProvider(type), Filter(type), Scored(type), VectorBackend(type), StorageBackend(type), MemAgentOptions(type), MemAgent(type), MemAgentSeedHooks(type), Form(type), Layer(type), DecayClass(type), Category(type), RecallMode(type), Scene(type), ErrorCode(type), DiscoverSignal(type), L0GrantStatus(type), AuditAction(type), MemOp(type), FeedbackKind(type) |
+| [src/core/memagent/types.ts](src/core/memagent/types.ts) | 877 | memagent-core 契约类型（REQ-007 §1/§2/§3/§5/§6 直译，19.10/19.11） | isCategory(fn), CATEGORIES(const), Account(type), RefinedLayers(type), RecallReq(type), Hit(type), Budget(type), RecallBackgroundItem(type), RecallBackground(type), RecallSavings(type), RecallResult(type), MemReq(type), WriteResult(type), LayerDecision(type), GcReq(type), GcReport(type), GcFullReq(type), GcFullReport(type), ConflictPair(type), ConflictResolveReq(type), ConflictResolveResult(type), Pref(type), DiscoverReq(type), DiscoveredAgent(type), DiscoverResult(type), SyncReq(type), SyncReport(type), BrowseReq(type), BrowseRow(type), BrowseResult(type), L0Port(type), L0AccessRequest(type), L0AccessRequestResult(type), L0GrantReq(type), L0GrantView(type), L0GrantResult(type), L0RequestView(type), L0UnlockReq(type), L0UnlockResult(type), L0HeartbeatResult(type), L0VaultStatus(type), L0MigrationReport(type), L0MigrationResult(type), L0AdminPort(type), LogReq(type), LogItem(type), LogPage(type), AuditRef(type), AuditRecord(type), Memory(type), MemOpPatch(type), MemOpResult(type), FeedbackResult(type), ModelInfo(type), LlmCallCtx(type), LlmResp(type), LlmProvider(type), Filter(type), Scored(type), VectorBackend(type), StorageBackend(type), MemAgentOptions(type), MemAgent(type), MemAgentSeedHooks(type), Form(type), Layer(type), DecayClass(type), Category(type), RecallMode(type), Scene(type), ErrorCode(type), ConflictVerdict(type), DiscoverSignal(type), L0GrantStatus(type), AuditAction(type), MemOp(type), FeedbackKind(type) |
 | [src/core/memagent/ulid.ts](src/core/memagent/ulid.ts) | 47 | 简易 ULID：48bit 时间戳 + 80bit 随机（crypto 级），同毫秒内单调递增（契约 §3.1） | ulid(fn) |
 | [src/core/memagent/vector.ts](src/core/memagent/vector.ts) | 92 | VectorBackend（§5.2）当前唯一生产实现：JsVectorBackend（hash bag-of-words + cosine）。 | tokenize(fn), embedSync(fn), cosine(fn), DEFAULT_VECTOR_DIM(const), JsVectorBackend(class) |
 | [src/core/memagent/webhook.ts](src/core/memagent/webhook.ts) | 202 | Webhook 接收端（§19.3 主通道 / §5.4 SHA-256 幂等保真） | createWebhook(fn), HashIndex(class), IngestEvent(type), IngestResult(type), WebhookOptions(type), WebhookServer(type) |
@@ -202,13 +203,13 @@
 | [src/web/audit/useToast.tsx](src/web/audit/useToast.tsx) | 13 | — | useToast(fn) |
 | [src/web/backend.ts](src/web/backend.ts) | 156 | 本机后端地址单一真源（与 src/electron/main.ts 的 MIRROR_PORT / AGENT_ONBOARD_PORT 对齐）。 | backendParam(fn), agentBackendParam(fn), homeBaseUrl(fn), onboardBaseUrl(fn), rememberHomeBase(fn), discoverTrustedDevBackend(fn), HOME_BASE(const), ONBOARD_BASE(const), DEV_FALLBACK_PORTS(const) |
 | [src/web/dispute/DisputePage.tsx](src/web/dispute/DisputePage.tsx) | 150 | 冲突裁决页 T5：完整编排 + mirror · 真实数据接真版 | DisputePage(fn) |
-| [src/web/dispute/DisputeQueue.tsx](src/web/dispute/DisputeQueue.tsx) | 55 | P7-T3 冲突裁决队列组件 | DisputeQueue(fn) |
+| [src/web/dispute/DisputeQueue.tsx](src/web/dispute/DisputeQueue.tsx) | 57 | P7-T3 冲突裁决队列组件 | DisputeQueue(fn) |
 | [src/web/dispute/DisputeVerdict.tsx](src/web/dispute/DisputeVerdict.tsx) | 49 | P7-T4 裁决操作组件 | DisputeVerdict(fn), VERDICTS(const) |
-| [src/web/dispute/coreDispute.ts](src/web/dispute/coreDispute.ts) | 156 | 冲突裁决页（REQ-006 / P7）接真内核：队列 = 真实账本冲突（conflict_id 标记 + conflict_resolve 审计）， | coreConflicts(fn), coreVerdict(fn), VerdictOutcome(type) |
+| [src/web/dispute/coreDispute.ts](src/web/dispute/coreDispute.ts) | 84 | 冲突裁决页（REQ-006 / P7）接真内核：队列与裁决**全部下沉到内核原子 API**（批次46-3）。 | coreConflicts(fn), coreVerdict(fn), DisputeCtx(type), VerdictOutcome(type) |
 | [src/web/dispute/disputeEntry.tsx](src/web/dispute/disputeEntry.tsx) | 10 | 冲突裁决页（REQ-006 / P7）入口：挂载 DisputePage。 | — |
-| [src/web/dispute/labels.ts](src/web/dispute/labels.ts) | 10 | 冲突类型 → 中文标签（规格常量）。页面数据真相 = 内核账本，无演示冲突。 | CONFIRM_TYPE_LABEL(const) |
-| [src/web/dispute/logic.ts](src/web/dispute/logic.ts) | 71 | 冲突裁决页（REQ-006 / P7）纯逻辑层 | typeLabel(fn), overdueDays(fn), isOverdue(fn), applyVerdict(fn), auditPair(fn), queueSort(fn), VerdictResult(type) |
-| [src/web/dispute/types.ts](src/web/dispute/types.ts) | 43 | 冲突裁决页（REQ-006 / P7）数据模型 | ConflictRecord(type), ConflictAudit(type), ConflictType(type), Verdict(type) |
+| [src/web/dispute/labels.ts](src/web/dispute/labels.ts) | 11 | 冲突类型 → 中文标签（规格常量）。页面数据真相 = 内核账本，无演示冲突。 | CONFIRM_TYPE_LABEL(const) |
+| [src/web/dispute/logic.ts](src/web/dispute/logic.ts) | 73 | 冲突裁决页（REQ-006 / P7）纯逻辑层 | typeLabel(fn), overdueDays(fn), isOverdue(fn), applyVerdict(fn), auditPair(fn), queueSort(fn), VerdictResult(type) |
+| [src/web/dispute/types.ts](src/web/dispute/types.ts) | 44 | 冲突裁决页（REQ-006 / P7）数据模型 | ConflictRecord(type), ConflictAudit(type), ConflictType(type), Verdict(type) |
 | [src/web/dispute/useDisputeMirror.ts](src/web/dispute/useDisputeMirror.ts) | 21 | 冲突裁决页后端镜像（阶段5-C 口径统一）：真接 home server POST /api/mirror/audit。 | useDisputeMirror(fn), DisputeMirror(type) |
 | [src/web/dispute/useToast.tsx](src/web/dispute/useToast.tsx) | 22 | 轻量 toast hook（T5）：返回展示节点与 show(msg) | useToast(fn) |
 | [src/web/feedback/FeedbackForm.tsx](src/web/feedback/FeedbackForm.tsx) | 102 | P9-T3 反馈表单（13.7） | FeedbackForm(fn) |
@@ -401,6 +402,7 @@ src/auth/hash.ts 3919b27befef
 src/auth/loginService.ts a0cc1ede21f9
 src/core/memagent/agent.ts 40b5a2de1e90
 src/core/memagent/auditLog.ts 307fbb57f262
+src/core/memagent/conflict.ts e537b2588f67
 src/core/memagent/crypto.ts 6e5f2f4845bb
 src/core/memagent/dedup.ts 7035020d489f
 src/core/memagent/errors.ts 4f68fde40b23
@@ -423,7 +425,7 @@ src/core/memagent/mcpManageTools.ts ae7e7d2e884a
 src/core/memagent/mcpReadTools.ts 6ba2d8e228b7
 src/core/memagent/mcpRecall.ts 673a07c9b432
 src/core/memagent/mcpSchema.ts dbbf302231a2
-src/core/memagent/memories.ts 7e2d8ad53f64
+src/core/memagent/memories.ts 1e62629a5f4c
 src/core/memagent/paramsSnapshot.ts f819e011fbd7
 src/core/memagent/pendingStoreFile.ts 67a02b1b7648
 src/core/memagent/pendingWrites.ts c961e240a28b
@@ -439,7 +441,7 @@ src/core/memagent/sessionCollector.ts 54d49e1d4722
 src/core/memagent/sqliteStorage.ts 0c0c891d84cc
 src/core/memagent/storage.ts 88cdd05e7b35
 src/core/memagent/sync.ts ffdeb7ae3aea
-src/core/memagent/types.ts 86e53856fc4a
+src/core/memagent/types.ts dadad35fddf4
 src/core/memagent/ulid.ts 634c99f1962a
 src/core/memagent/vector.ts 80221de2d059
 src/core/memagent/webhook.ts deae36bbc0ca
@@ -526,13 +528,13 @@ src/web/audit/useAuditMirror.ts 34865de958b6
 src/web/audit/useToast.tsx 85cd09d2e1f5
 src/web/backend.ts 8fdc10aa241d
 src/web/dispute/DisputePage.tsx baac024d11c4
-src/web/dispute/DisputeQueue.tsx 1d5b9886592b
+src/web/dispute/DisputeQueue.tsx cbd0b279cfe9
 src/web/dispute/DisputeVerdict.tsx c16bc4aaec10
-src/web/dispute/coreDispute.ts 3e4a928a4dd9
+src/web/dispute/coreDispute.ts b83ac78a3b21
 src/web/dispute/disputeEntry.tsx dbd10a2b2949
-src/web/dispute/labels.ts 0a7c4f40dbb4
-src/web/dispute/logic.ts 48f85246dcd6
-src/web/dispute/types.ts 17c00b4be676
+src/web/dispute/labels.ts c6d8f1dcee8f
+src/web/dispute/logic.ts 6a360cd936f2
+src/web/dispute/types.ts 34294be31812
 src/web/dispute/useDisputeMirror.ts 3d094f83daac
 src/web/dispute/useToast.tsx c650d8662672
 src/web/feedback/FeedbackForm.tsx d2f31ef7ef80
