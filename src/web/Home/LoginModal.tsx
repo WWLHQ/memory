@@ -32,6 +32,26 @@ function detectForm(): Form {
   return 'desktop';
 }
 
+/** 眼睛图标：明/暗文切换（密码可见性） */
+function Eye() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+function EyeOff() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
+      <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 11 7 11 7a13.16 13.16 0 0 1-1.67 2.68" />
+      <path d="M6.61 6.61A13.526 13.526 0 0 0 1 12s4 7 11 7a9.74 9.74 0 0 0 5.39-1.61" />
+      <line x1="2" y1="2" x2="22" y2="22" />
+    </svg>
+  );
+}
+
 export interface LoginModalProps {
   /** 是否显示（父级控制，默认隐藏） */
   open: boolean;
@@ -58,8 +78,40 @@ export function LoginModal({ open, onClose, onSuccess, onScan, onKey, form }: Lo
   const [err, setErr] = useState('');
   const [toast, setToast] = useState('');
   const [isRegister, setIsRegister] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  /** 登录进行中：禁用按钮 + 显示「登录中…」，避免用户连点误以为没反应 */
+  const [busy, setBusy] = useState(false);
+  /** 账号被锁定的到期时间戳：驱动倒计时提示 */
+  const [lockUntil, setLockUntil] = useState<number | null>(null);
+  /** 锁定剩余时间文案（每分钟/秒刷新） */
+  const [countdown, setCountdown] = useState('');
 
   const detectedForm = form ?? detectForm();
+
+  // 被锁定后每秒刷新倒计时；到期自动清除，允许重试
+  useEffect(() => {
+    if (!lockUntil) {
+      if (countdown) setCountdown('');
+      return;
+    }
+    const tick = () => {
+      const ms = lockUntil - Date.now();
+      if (ms <= 0) {
+        setLockUntil(null);
+        setCountdown('');
+        setErr('');
+        return;
+      }
+      const totalSec = Math.floor(ms / 1000);
+      const m = Math.floor(totalSec / 60);
+      const s = totalSec % 60;
+      setCountdown(m > 0 ? `${m} 分 ${s} 秒` : `${s} 秒`);
+    };
+    tick();
+    const t = setInterval(tick, 1000);
+    return () => clearInterval(t);
+    // lockUntil 变化才重启定时器；countdown 同值跳过重渲染，不会造成抖动
+  }, [lockUntil, countdown]);
 
   // 获取验证码
   useEffect(() => {
@@ -82,6 +134,7 @@ export function LoginModal({ open, onClose, onSuccess, onScan, onKey, form }: Lo
   }
 
   async function handleLogin() {
+    if (busy) return; // 防止连点：上一次登录未结束时忽略重复点击
     if (!account.trim()) {
       setErr('账号不能为空');
       return;
@@ -90,41 +143,58 @@ export function LoginModal({ open, onClose, onSuccess, onScan, onKey, form }: Lo
       setErr('密码不能为空');
       return;
     }
-    const res = await login({ account: account.trim(), password, form: detectedForm });
-    if (res.ok) {
-      setErr('');
-      setToast('');
-      // 登录成功即把真实租户绑定到内核身份（后续写入/审计按真实 user/team/enterprise 记账）
-      bindTenant({
-        user_id: res.context.user_id,
-        team_id: res.context.team_id,
-        enterprise_id: res.context.enterprise_id,
-      });
-      // 批次28-A：浏览器模式登录成功即把内核数据面切到 HTTP 直连真实账本（桌面壳内无害）
-      rebuildKernelForDataPlane();
-      onSuccess(res.context);
-      // 登录瞬间即在后台跑「一键接入本机 Agent」扫描并持久化结果：
-      // 用户之后切到 Agent 接入页时直接显示「已自动接入」完成态，不用等切页才开始扫。
-      // 传真实会话（role/sid）：连通的 MCP 客户端才允许自动写入（管理员门槛由主进程二次校验）。
-      runAutoOnboardOnLogin({
-        role: res.context.role ?? null,
-        sid: res.context.session_id || getStoredSessionId(),
-        form: detectedForm,
-      });
-    } else if (res.reason === 'locked') {
-      const at = res.lockedUntil ? new Date(res.lockedUntil).toLocaleTimeString() : '稍后';
-      setErr(`账号已锁定，请于 ${at} 后重试（错 5 次锁 15min）`);
-    } else if (res.reason === 'no_account') {
-      setErr('账号不存在，已记审计');
-    } else if (res.reason === 'origin_blocked') {
-      setErr(`本机登录后端在线（${homeBaseUrl().replace(/^https?:\/\//, '')}），但当前页面来源未被信任（CORS 白名单外）`
-        + '——该端口多半被安装版桌面端占用。本页已自动探测备用端口（8211–8215）未发现受信的开发后端：'
-        + '请启动/重跑 npm run dev（自动拉起受信登录服务）；桌面端可直接使用已登录的应用。');
-    } else if (res.reason === 'backend_unreachable') {
-      setErr(`登录后端未响应（${homeBaseUrl().replace(/^https?:\/\//, '')}）。`
-        + '请从桌面端打开本应用，或运行 npm run dev（自动拉起登录服务）/ npm run dev:backend（仅起服务）。');
-    } else {
-      setErr('密码错误，已记审计（错 5 次锁 15min）');
+    setBusy(true);
+    try {
+      const res = await login({ account: account.trim(), password, form: detectedForm });
+      if (res.ok) {
+        setErr('');
+        setToast('');
+        setLockUntil(null);
+        setCountdown('');
+        // 登录成功即把真实租户绑定到内核身份（后续写入/审计按真实 user/team/enterprise 记账）
+        bindTenant({
+          user_id: res.context.user_id,
+          team_id: res.context.team_id,
+          enterprise_id: res.context.enterprise_id,
+        });
+        // 批次28-A：浏览器模式登录成功即把内核数据面切到 HTTP 直连真实账本（桌面壳内无害）
+        rebuildKernelForDataPlane();
+        onSuccess(res.context);
+        // 登录瞬间即在后台跑「一键接入本机 Agent」扫描并持久化结果：
+        // 用户之后切到 Agent 接入页时直接显示「已自动接入」完成态，不用等切页才开始扫。
+        // 传真实会话（role/sid）：连通的 MCP 客户端才允许自动写入（管理员门槛由主进程二次校验）。
+        runAutoOnboardOnLogin({
+          role: res.context.role ?? null,
+          sid: res.context.session_id || getStoredSessionId(),
+          form: detectedForm,
+        });
+      } else if (res.reason === 'locked') {
+        if (res.lockedUntil) setLockUntil(res.lockedUntil); // 进入倒计时
+        setErr('账号已锁定，连续 5 次失败已被临时锁定 15 分钟');
+      } else if (res.reason === 'no_account') {
+        setErr('账号不存在，已记审计');
+      } else if (res.reason === 'origin_blocked') {
+        setErr(`本机登录后端在线（${homeBaseUrl().replace(/^https?:\/\//, '')}），但当前页面来源未被信任（CORS 白名单外）`
+          + '——该端口多半被安装版桌面端占用。本页已自动探测备用端口（8211–8215）未发现受信的开发后端：'
+          + '请启动/重跑 npm run dev（自动拉起受信登录服务）；桌面端可直接使用已登录的应用。');
+      } else if (res.reason === 'backend_unreachable') {
+        setErr(`登录后端未响应（${homeBaseUrl().replace(/^https?:\/\//, '')}）。`
+          + '请从桌面端打开本应用，或运行 npm run dev（自动拉起登录服务）/ npm run dev:backend（仅起服务）。');
+      } else {
+        // wrong：优先用后端给出的剩余次数做预警，避免用户无感撞锁
+        const remaining = typeof res.remaining === 'number' ? res.remaining : null;
+        if (remaining === null) {
+          setErr('密码错误，已记审计（错 5 次锁 15min）');
+        } else if (remaining > 1) {
+          setErr(`密码错误，还可尝试 ${remaining} 次（连续 5 次将锁定 15 分钟）`);
+        } else if (remaining === 1) {
+          setErr('密码错误，还可尝试 1 次，再错将被锁定 15 分钟');
+        } else {
+          setErr('密码错误，已连续失败 5 次，账号即将被锁定 15 分钟');
+        }
+      }
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -210,25 +280,47 @@ export function LoginModal({ open, onClose, onSuccess, onScan, onKey, form }: Lo
         </div>
         <div className="row">
           <span className="lbl">密码</span>
-          <input
-            type="password"
-            id="pwd"
-            placeholder={isRegister ? '至少 6 位' : '········'}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
+          <div className="pwd-wrap">
+            <input
+              type={showPassword ? 'text' : 'password'}
+              id="pwd"
+              placeholder={isRegister ? '至少 6 位' : '········'}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+            <button
+              type="button"
+              className="pwd-eye"
+              aria-label={showPassword ? '隐藏密码' : '显示密码'}
+              data-testid="pwd-eye"
+              onClick={() => setShowPassword((v) => !v)}
+            >
+              {showPassword ? <EyeOff /> : <Eye />}
+            </button>
+          </div>
         </div>
         {isRegister && (
           <>
             <div className="row">
               <span className="lbl">确认密码</span>
-              <input
-                type="password"
-                id="confirmPwd"
-                placeholder="再次输入密码"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-              />
+              <div className="pwd-wrap">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  id="confirmPwd"
+                  placeholder="再次输入密码"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="pwd-eye"
+                  aria-label={showPassword ? '隐藏密码' : '显示密码'}
+                  data-testid="confirm-pwd-eye"
+                  onClick={() => setShowPassword((v) => !v)}
+                >
+                  {showPassword ? <EyeOff /> : <Eye />}
+                </button>
+              </div>
             </div>
             <div className="row">
               <span className="lbl">验证码</span>
@@ -262,7 +354,7 @@ export function LoginModal({ open, onClose, onSuccess, onScan, onKey, form }: Lo
               <span className="pill">团队（管理员分配 · 只读 · P12）</span>
             </div>
             <div className="note" data-testid="admin-hint" style={{ fontSize: 11, color: 'var(--muted)' }}>
-              首次使用管理员：<code>admin</code> / <code>Admin@123456</code>（登录后请在「账号与安全」页修改默认密码）
+              首次使用管理员：账号 <code>admin</code> · 初始口令见部署配置（默认 <code>Admin@123456</code>，若已设环境变量 <code>ADMIN_SEED_PASSWORD</code> 则以之为准；登录后请在「账号与安全」页修改）
             </div>
           </>
         )}
@@ -278,13 +370,13 @@ export function LoginModal({ open, onClose, onSuccess, onScan, onKey, form }: Lo
             </>
           ) : (
             <>
-              <button className="btn primary" id="btnLogin" type="button" onClick={handleLogin}>
-                登 录
+              <button className="btn primary" id="btnLogin" type="button" disabled={busy} aria-busy={busy} onClick={handleLogin}>
+                {busy ? '登录中…' : '登 录'}
               </button>
-              <button className="btn" id="btnScan" type="button" onClick={() => { onScan?.(); setToast('Web 扫码登录：同账号（审计 form:web）'); }}>
+              <button className="btn" id="btnScan" type="button" disabled={busy} onClick={() => { onScan?.(); setToast('Web 扫码登录：同账号（审计 form:web）'); }}>
                 扫码（Web）
               </button>
-              <button className="btn" id="btnKey" type="button" onClick={() => { onKey?.(); setToast('mac/CLI 系统密钥登录：非交互 token（审计 form:cli）'); }}>
+              <button className="btn" id="btnKey" type="button" disabled={busy} onClick={() => { onKey?.(); setToast('mac/CLI 系统密钥登录：非交互 token（审计 form:cli）'); }}>
                 系统密钥（mac/CLI）
               </button>
             </>
@@ -292,6 +384,7 @@ export function LoginModal({ open, onClose, onSuccess, onScan, onKey, form }: Lo
         </div>
         <div className="err" id="loginErr">
           {err}
+          {lockUntil ? <span className="lock-count" data-testid="lock-count">（约 {countdown} 后解锁，期间请勿重试）</span> : null}
         </div>
         <div className="toast" id="toast" style={{ display: toast ? 'block' : 'none' }}>
           {toast}

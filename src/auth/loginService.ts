@@ -14,7 +14,8 @@ export const LOCK_WINDOW_MS = 15 * 60 * 1000;
 
 /** 内置管理员（批次7）：固定账号名；初始密码仅在首次播种时使用，登录后可在安全页修改 */
 export const ADMIN_ACCOUNT = 'admin';
-export const DEFAULT_ADMIN_PASSWORD = 'Admin@123456';
+/** 内置管理员初始密码（阶段1 安全前置）：环境变量 ADMIN_SEED_PASSWORD 优先，缺省回退出厂默认值（仅首次播种使用）。生产部署应覆盖 */
+export const DEFAULT_ADMIN_PASSWORD = process.env.ADMIN_SEED_PASSWORD || 'Admin@123456';
 
 /** 内存用户记录：team_id / enterprise_id / perspective / role 均为管理员分配，用户只读 */
 interface AccountRecord {
@@ -296,5 +297,7 @@ export function login(input: LoginForm): LoginResult {
   if (state.failCount >= LOCK_THRESHOLD) {
     state.lockedUntil = now + LOCK_WINDOW_MS;
   }
-  return { ok: false, reason: 'wrong', audit: audit('login_fail', input.form, account) };
+  // 暴露剩余可尝试次数（前端据此预警，避免用户无感撞锁）；防枚举下 no_account 不携带此字段
+  const remaining = Math.max(0, LOCK_THRESHOLD - state.failCount);
+  return { ok: false, reason: 'wrong', failCount: state.failCount, remaining, audit: audit('login_fail', input.form, account) };
 }

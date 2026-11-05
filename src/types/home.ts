@@ -63,10 +63,11 @@ export interface LoginAudit {
   at: number;
 }
 
-/** 登录结果（§0.3：成功注入 context；失败带原因；锁定带 lockedUntil；均带审计描述） */
+/** 登录结果（§0.3：成功注入 context；失败带原因；锁定带 lockedUntil；均带审计描述）
+ *  wrong 时可携带 failCount/remaining，供前端提示「还可尝试 N 次」（防用户无感撞锁） */
 export type LoginResult =
   | { ok: true; context: TenantContext; audit: LoginAudit }
-  | { ok: false; reason: LoginFailReason; lockedUntil?: number; audit: LoginAudit };
+  | { ok: false; reason: LoginFailReason; lockedUntil?: number; failCount?: number; remaining?: number; audit: LoginAudit };
 
 /** 异常速览项（§0.2：置顶 error；可跳日志页 P15 / 机制页 P10 / 反代理 P13） */
 export interface AnomalyItem {

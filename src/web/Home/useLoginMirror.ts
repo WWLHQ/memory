@@ -41,12 +41,20 @@ async function attemptLogin(
     if (body.sessionId) storeSessionId(body.sessionId);
     return { ok: true, context: body.context, audit: body.audit ?? audit };
   }
-  const body = (await res.json().catch(() => ({}))) as { reason?: LoginFailReason; lockedUntil?: number; audit?: typeof audit };
+  const body = (await res.json().catch(() => ({}))) as {
+    reason?: LoginFailReason;
+    lockedUntil?: number;
+    remaining?: number;
+    failCount?: number;
+    audit?: typeof audit;
+  };
   clearStoredSessionId();
   return {
     ok: false,
     reason: body.reason ?? 'wrong',
     lockedUntil: body.lockedUntil,
+    remaining: body.remaining,
+    failCount: body.failCount,
     audit: body.audit ?? audit,
   };
 }

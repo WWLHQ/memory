@@ -47,7 +47,7 @@ export interface ServerOptions {
   captchaTtlMs?: number;
   /** 是否播种内置管理员（缺省 true；测试可关） */
   seedAdmin?: boolean;
-  /** 内置管理员初始密码（缺省 Admin@123456，仅首次播种使用） */
+  /** 内置管理员初始密码（缺省 Admin@123456，仅首次播种使用；可由环境变量 ADMIN_SEED_PASSWORD 覆盖） */
   adminPassword?: string;
   /** 动作日志回调（批次7）：主进程写入 actions.log；缺省静默 */
   onLog?: (scope: string, action: string, detail?: Record<string, unknown>) => void;
@@ -419,7 +419,8 @@ export function createServer(opts: ServerOptions): HomeServer {
           if (result.reason === 'locked') send(res, 423, { reason: 'locked', lockedUntil: result.lockedUntil });
           else if (result.reason === 'empty') send(res, 400, { reason: 'empty' });
           // 批次26-B P2-17 防用户名枚举：账号不存在与密码错误返回同一响应（真实原因只在服务端日志/审计）
-          else send(res, 401, { reason: 'wrong' });
+          // wrong 时携带 remaining/failCount 供前端预警剩余次数；no_account 走此分支但不带该字段（不泄露账号存在性）
+          else send(res, 401, { reason: 'wrong', remaining: result.remaining, failCount: result.failCount });
           return;
         }
 

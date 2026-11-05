@@ -29,7 +29,7 @@ const lockedRes: LoginResult = {
 
 interface HarnessProps {
   initialOpen?: boolean;
-  loginFn?: () => LoginResult;
+  loginFn?: (input: { account: string; password: string; form: string }) => LoginResult | Promise<LoginResult>;
   onSuccess?: (c: TenantContext) => void;
   onScan?: () => void;
   onKey?: () => void;
@@ -160,5 +160,76 @@ describe('T8 登录卡片组件', () => {
       fireEvent.click(container.querySelector('#btnLogin')!);
     });
     expect(container.querySelector('#loginErr')?.textContent).toContain('锁定');
+  });
+
+  it('密码框眼睛按钮 → 切换明文/密文', () => {
+    const { container } = render(<Harness />);
+    const pwd = container.querySelector('#pwd') as HTMLInputElement;
+    expect(pwd.type).toBe('password');
+    fireEvent.click(container.querySelector('[data-testid="pwd-eye"]')!);
+    expect((container.querySelector('#pwd') as HTMLInputElement).type).toBe('text');
+    fireEvent.click(container.querySelector('[data-testid="pwd-eye"]')!);
+    expect((container.querySelector('#pwd') as HTMLInputElement).type).toBe('password');
+  });
+
+  it('点击登录 → 按钮禁用并显示「登录中…」（避免连点误以为没反应）', async () => {
+    let resolve!: (r: LoginResult) => void;
+    const loginFn = vi.fn(
+      () => new Promise<LoginResult>((res) => { resolve = res; }),
+    );
+    const { container } = render(<Harness loginFn={loginFn} />);
+    typeInto(container, 'acc', 'user_001');
+    typeInto(container, 'pwd', 'pw');
+    await act(async () => {
+      fireEvent.click(container.querySelector('#btnLogin')!);
+    });
+    const btn = container.querySelector('#btnLogin') as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(btn.textContent).toContain('登录中');
+    // 解析后恢复可点
+    await act(async () => {
+      resolve(okRes);
+      await Promise.resolve();
+    });
+    expect((container.querySelector('#btnLogin') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('密码错且后端暴露剩余次数 → 显示「还可尝试 N 次」预警', async () => {
+    const wrong2: LoginResult = {
+      ok: false,
+      reason: 'wrong',
+      remaining: 2,
+      failCount: 3,
+      audit: { action: 'login_fail', form: 'desktop', account: 'user_001', at: Date.now() },
+    };
+    const loginFn = vi.fn(() => wrong2);
+    const { container } = render(<Harness loginFn={loginFn} />);
+    typeInto(container, 'acc', 'user_001');
+    typeInto(container, 'pwd', 'bad');
+    await act(async () => {
+      fireEvent.click(container.querySelector('#btnLogin')!);
+    });
+    expect(container.querySelector('#loginErr')?.textContent).toContain('还可尝试 2 次');
+  });
+
+  it('被锁定 → 显示解锁倒计时', async () => {
+    const locked2: LoginResult = {
+      ok: false,
+      reason: 'locked',
+      lockedUntil: Date.now() + 90 * 1000,
+      audit: { action: 'login_fail', form: 'desktop', account: 'user_001', at: Date.now() },
+    };
+    const loginFn = vi.fn(() => locked2);
+    const { container } = render(<Harness loginFn={loginFn} />);
+    typeInto(container, 'acc', 'user_001');
+    typeInto(container, 'pwd', 'bad');
+    await act(async () => {
+      fireEvent.click(container.querySelector('#btnLogin')!);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(container.querySelector('#loginErr')?.textContent).toContain('锁定');
+    expect(container.querySelector('[data-testid="lock-count"]')?.textContent).toContain('后解锁');
   });
 });
