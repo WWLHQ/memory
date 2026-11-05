@@ -59,7 +59,8 @@ export interface WriteReceipt {
   memory_id: string;
   layers: Record<LayerName, ReceiptLayer>;
   /** 内核四态映射：create / graft（分支嫁接）/ merge / keep（duplicated）/ filtered（L0→L1 质量门拦截，未入库） */
-  dedup_action: 'create' | 'graft' | 'merge' | 'overwrite' | 'keep' | 'filtered';
+  /** 阶段5-E / B10：只保留内核写路径真实产出的四种结果（见 coreWrite.ts） */
+  dedup_action: 'create' | 'graft' | 'keep' | 'filtered';
   /** 精炼来源：stub = 未接入 LLM（只落 L1） */
   refined_by: 'stub' | 'llm' | 'llm_partial';
 }

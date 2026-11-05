@@ -28,8 +28,12 @@ function getAgent(): Promise<import('../../core/memagent/types.ts').MemAgent> {
 
 export interface CoreWriteOutcome {
   mem_id: string;
-  /** 内核动作映射：create（new）/ graft（grafted 分支嫁接新建）/ keep（duplicated）/ filtered（L0→L1 质量门拦截） */
-  dedup_action: 'create' | 'graft' | 'merge' | 'overwrite' | 'keep' | 'filtered';
+  /**
+   * 内核动作映射（阶段5-E / B10 收敛为内核真实结果的单一真源）：
+   * create（new）/ graft（grafted 分支嫁接新建）/ keep（duplicated）/ filtered（L0→L1 质量门拦截）。
+   * 旧类型还挂着 merge / overwrite 两种内核从不产出的「用户三模式」值，会诱导出永不命中的 UI 分支，已删除。
+   */
+  dedup_action: 'create' | 'graft' | 'keep' | 'filtered';
   sim: number;
   request_id: string;
   /** 真实产出的精炼层（未接入 LLM 时仅 content_l1） */

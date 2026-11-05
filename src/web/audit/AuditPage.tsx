@@ -107,7 +107,8 @@ export function AuditPage() {
 
       <div className="note">
         红线：enterprise_id 租户隔离（3.x/18.2-A）；所有操作写审计（G6）；request_id 串链（18.2-E）。
-        后端镜像当前为 safe-noop（home server 暂无 audit 端点）。跳检索页为占位（检索页 REQ-012 待实现）。
+        审计上抛经 mirrorClient 真接 home server 的 POST /api/mirror/audit（?backend= 可指定后端；显式关闭时跳过）。后端不可达时失败会显示提示，页面数据不受影响。
+        点行末 ↗ 跳检索页（REQ-012）查看该 request_id 的真实审计链路上下文；账本查无此 id 时如实显示空，不生成模拟结果。
       </div>
 
       {toast.node}

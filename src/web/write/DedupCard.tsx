@@ -1,7 +1,8 @@
 // 写入页（REQ-006 / P2）查重预览卡（T4）
-// 批次25 P0-3：一条真实词面分 + 内核阈值对照。
-// 不再画五条假刻度（全是同一个 Jaccard 的仿射变换，还带未接大模型却展示的 llm_judge），
-// 也不再留点了不生效的「合并/覆盖/保留」按钮（内核写路径不接受该选项）。
+// 批次25 P0-3：一条真实词面分 + 内核阈值对照；移除五条假刻度与点了不生效的原型按钮。
+// 阶段5-E / B10（C 类·诚实重标注）：内核写路径只产出 new / grafted / duplicated / filtered
+// 四种由内核自动裁决的结果，从来没有用户可选的「合并/覆盖/保留」模式。旧 note 把三模式
+// 写成待办式功能缺口，实为规格与实现的设计边界，现如实写清。
 import type { DedupResult } from './types.ts';
 
 export function DedupCard({ result }: { result: DedupResult }) {
@@ -29,7 +30,9 @@ export function DedupCard({ result }: { result: DedupResult }) {
       <div className="note" data-testid="dedup-note">
         本卡只是输入过程中的词面预览，不是入库判定：真正是否重复由内核在点「写入」时按四维
         （语义/关键词/实体/结构，§6.1）对照同一阈值判定，未接入大模型时只查 L1。
-        §9.7 的合并/覆盖/保留三模式尚未接入写路径，因此不提供按钮。
+        内核写路径只有四种真实结果：新建（new）、分支嫁接（grafted）、重复保留（duplicated）、
+        质量门拦截（filtered），全部由内核自动裁决；不存在用户可选的「合并/覆盖/保留」模式，
+        因此本卡不提供这类按钮。
       </div>
     </div>
   );

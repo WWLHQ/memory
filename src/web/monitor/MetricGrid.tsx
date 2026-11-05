@@ -19,7 +19,11 @@ export function MetricGrid({ cards }: { cards: MetricCard[] }) {
                 <div className="mval">
                   {c.value}{c.unit ?? ''}
                 </div>
-                <div className="note">阈值 {c.threshold} · <a href="#" onClick={(e) => e.preventDefault()}>跳 {c.jump}</a></div>
+                <div className="note">
+                  阈值 {c.threshold} · <a href="#" onClick={(e) => e.preventDefault()}>跳 {c.jump}</a>
+                  {/* 兑现「显示「—」并标注未采集」：无真实口径的卡必须可辨识，不能只留一个破折号 */}
+                  {c.value === '—' && <span className="dim"> · 未采集</span>}
+                </div>
               </div>
             ))}
           </div>

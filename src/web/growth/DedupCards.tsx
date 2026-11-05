@@ -16,7 +16,7 @@ export function DedupCard({
       <div className="card" data-testid="dedup-card">
         <b>五维判重 · 当前样本</b>
         <div className="note" data-testid="dedup-empty">
-          当前记忆账本为空，无真实判重样本。请先在「写入页」或「记忆库管理页」产生真实记忆，本页将自动取最近 4 条真实记忆作判重样本（五维实算）。
+          当前记忆账本为空，无真实判重样本。请先在「写入页」或「记忆库管理页」产生真实记忆，本页将自动取最近 4 条真实记忆作判重样本（仅展示有可信测量的维度）。
         </div>
         <div className="row" style={{ gap: 8, marginTop: 8 }}>
           <button className="btn" data-testid="resample-btn" onClick={onResample}>🔄 重新判重</button>
@@ -32,19 +32,24 @@ export function DedupCard({
     <div className="card" data-testid="dedup-card">
       <b>五维判重 · 当前样本（真实记忆）</b>
       <div className="note">
-        样本 = 记忆表真实最近写入内容；semantic/keyword/entity/structure 实算，llm_judge 内核当前未接 judge 模型 → 记 0（诚实未测量）。
+        样本 = 记忆表真实最近写入内容。semantic 取账本写时真实查重相似度，keyword/entity 为本地词面实算；
+        structure 与 llm_judge 无可信单条测量（内核未接 LLM 仲裁）→ 显示「未测量」，绝不填中性值。
+        综合分按已测维度权重归一化，与内核无 LLM 时的四维口径一致。
       </div>
       <div className="row" style={{ alignItems: 'center', gap: 12 }}>
         <span style={{ flex: 1 }} data-testid="sample-label">{sample.label}</span>
         <button className="btn" data-testid="resample-btn" onClick={onResample}>🔄 重新判重</button>
       </div>
       <div className="row" style={{ gap: 14, marginTop: 10 }}>
-        {(Object.keys(DIM_LABELS) as DimKey[]).map((k) => (
-          <span key={k} style={{ fontSize: 12 }}>
-            {DIM_LABELS[k]}：<b data-testid={`dim-${k}`}>{sample.dims[k].toFixed(2)}</b>
-            <span className="dim"> ×{weights[k]}</span>
-          </span>
-        ))}
+        {(Object.keys(DIM_LABELS) as DimKey[]).map((k) => {
+          const v = sample.dims[k];
+          return (
+            <span key={k} style={{ fontSize: 12 }}>
+              {DIM_LABELS[k]}：<b data-testid={`dim-${k}`}>{v === null ? '未测量' : v.toFixed(2)}</b>
+              <span className="dim"> ×{weights[k]}</span>
+            </span>
+          );
+        })}
       </div>
       <div className="row" style={{ gap: 18, marginTop: 10, alignItems: 'center' }}>
         <span data-testid="dedup-score">综合分：<b>{score.toFixed(3)}</b></span>

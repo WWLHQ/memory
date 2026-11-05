@@ -99,7 +99,8 @@ export function composeReceipt(
 ): WriteReceipt {
   const memory_id = opts.memoryId ?? `mem_${Math.abs(hash(content))}`;
   const refined_by = opts.refinedBy ?? 'stub';
-  const noNewLayers = dedupAction === 'merge' || dedupAction === 'keep';
+  // 阶段5-E / B10：内核不存在 merge 动作，只有 duplicated→keep 会不新建层。
+  const noNewLayers = dedupAction === 'keep';
   const layers = {} as WriteReceipt['layers'];
   for (const ln of LAYERS) {
     const real = opts.layers?.[LAYER_FIELD[ln]];
@@ -112,9 +113,7 @@ export function composeReceipt(
           : 'L1 清洗脱敏（原文仅审计展开，15.3）')
         : `${ln} 真实精炼产物`;
     } else if (noNewLayers) {
-      summary = ln === 'L1'
-        ? (dedupAction === 'merge' ? '已并入既有记忆（本次未新建层）' : '已保留原记忆（本次未新建层）')
-        : '本次未新建层';
+      summary = ln === 'L1' ? '已保留原记忆（本次未新建层）' : '本次未新建层';
     } else {
       summary = ln === 'L1' ? '未产出（未入库或被质量门拦截）' : '未精炼（未接入 LLM）';
     }

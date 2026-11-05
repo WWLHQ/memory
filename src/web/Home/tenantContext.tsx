@@ -21,6 +21,8 @@ export type LogoutFn = () => void;
 interface TenantApi {
   /** 当前上下文；未登录为 null（UI 据此灰置） */
   context: TenantContext | null;
+  /** 是否正在用 /api/me 确认真实登录态；true 时 UI 不得提前渲染「未登录」门禁 */
+  restoring: boolean;
   login: LoginFn;
   logout: LogoutFn;
 }
@@ -61,52 +63,56 @@ export function TenantProvider({ children, loginFn = defaultLogin, onLogout, bac
     if (typeof localStorage === 'undefined') return null;
     return localStorage.getItem(SESSION_STORAGE_KEY);
   };
-  const [context, setContext] = useState<TenantContext | null>(() => {
-    const sid = getSessionId();
-    if (!sid) return null;
-    // 有 session 但无 context 记录时，生成一个占位 context
-    return {
-      enterprise_id: 'local',
-      team_id: 'local-readonly',
-      user_id: 'restored-user',
-      perspective: 'personal',
-      session_id: sid,
-    };
-  });
+  // 阶段5-D / A14：未登录就是未登录。localStorage 里只有 sessionId，不是租户身份；
+  // 绝不凭 sid 造占位 context（旧实现的假 user_id 会把「有 sid」冒充成「已登录」）。
+  const [context, setContext] = useState<TenantContext | null>(null);
+  const [restoring, setRestoring] = useState<boolean>(() => !!getSessionId());
 
-  // 有 session 但 context 是占位值时，异步调 /api/me 恢复真实租户上下文
+  // 有 session → 只用后端 /api/me 的真实响应恢复身份；失败/未登录/显式关闭后端一律保持 null。
   useEffect(() => {
-    if (!context || context.user_id !== 'restored-user') return;
+    if (!restoring || context) return;
     const sid = getSessionId();
-    if (!sid) return;
     const base = backendUrl ?? homeBaseUrl();
-    fetch(`${base}/api/me`, { headers: { 'x-session-id': sid } })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (data?.context) setContext(freezeContext(data.context));
-      })
-      .catch(() => { /* 恢复失败：保持占位上下文 */ });
-  }, [context, backendUrl]);
+    if (!sid || !base) { setRestoring(false); return; }
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetch(`${base}/api/me`, { headers: { 'x-session-id': sid } });
+        const data = res.ok ? await res.json() : null;
+        // 只认后端返回的真实 context；缺字段、非 2xx、网络错误都不伪造身份
+        if (alive && data?.context) setContext(freezeContext(data.context));
+      } catch {
+        /* 后端不可达：保持 null */
+      } finally {
+        if (alive) setRestoring(false);
+      }
+    })();
+    return () => { alive = false; };
+  }, [restoring, context, backendUrl]);
 
   const login = useCallback<LoginFn>(async (input) => {
     // 兼容同步 loginFn（T3 本地内核）与异步 loginFn（T11 后端镜像：返回 Promise<LoginResult>）
     const res = loginFn(input);
     if (res instanceof Promise) {
       const settled = await res;
-      if (settled.ok) setContext(freezeContext(settled.context));
+      if (settled.ok) { setContext(freezeContext(settled.context)); setRestoring(false); }
       return settled;
     }
     // 同步路径：不 await，setContext 同步执行（避免额外微任务，T8 组件测试稳定）
-    if (res.ok) setContext(freezeContext(res.context));
+    if (res.ok) { setContext(freezeContext(res.context)); setRestoring(false); }
     return res;
   }, [loginFn]);
 
   const logout = useCallback<LogoutFn>(() => {
     onLogout?.();
     setContext(null);
+    setRestoring(false);
   }, [onLogout]);
 
-  const api = useMemo<TenantApi>(() => ({ context, login, logout }), [context, login, logout]);
+  const api = useMemo<TenantApi>(
+    () => ({ context, restoring, login, logout }),
+    [context, restoring, login, logout],
+  );
 
   return <TenantCtx.Provider value={api}>{children}</TenantCtx.Provider>;
 }
@@ -116,6 +122,15 @@ export function useTenant(): TenantContext | null {
   const api = useContext(TenantCtx);
   if (!api) throw new Error('useTenant 必须在 <TenantProvider> 内使用');
   return api.context;
+}
+
+/** 阶段5-D / A14：是否正在向后端确认真实登录态。
+ *  true 时 UI 应显示「正在确认登录身份…」，既不渲染数据也不提前弹「未登录」门禁，
+ *  避免把「还没问完」误显示成「没登录」。确认结束（成功或失败）后恒为 false。 */
+export function useTenantRestoring(): boolean {
+  const api = useContext(TenantCtx);
+  if (!api) throw new Error('useTenantRestoring 必须在 <TenantProvider> 内使用');
+  return api.restoring;
 }
 
 /** 触发登录；返回 T3 LoginResult（成功已注入 context） */

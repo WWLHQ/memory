@@ -3,7 +3,7 @@
 // FileStorage 持久库；浏览器降级 = 内存态，未写入过即空账本 → 诚实空态，绝不伪造数据）。
 // 本页所有展示数字均由 loadRealGrowth() 从真实账本计算：
 //   · 指标卡（7.1）= 真实召回审计（recall/cold_recall/recall_breach）+ 真实记忆表
-//   · 判重样本 = 真实记忆内容（最近写入的 N 条），相似度取内核真实记录
+//   · 判重样本 = 真实记忆内容（最近写入的 N 条）；五维只填有可信测量的维度，缺的记 null
 //   · 24h 统计 = 真实 merge / filtered 审计条数
 //   · Δ 曲线 = 真实 weight_tuned / growth_op 审计事件（无记录则空态）
 //   · 调度 = 真实配置（非演示数据）
@@ -25,7 +25,7 @@ function getRealStorage(): RealStorage {
   return getKernelStorage();
 }
 
-/** 真实记忆表 → 判重样本（取最近 N 条有内容者；相似度用内核记录的真实 sim 或向量近邻实算） */
+/** 真实记忆表 → 判重样本（取最近 N 条有内容者）。维度只填账本里真有的量，缺的记 null */
 export function samplesFromMemories(mems: Memory[], n = 4): DedupSample[] {
   const withContent = mems
     .filter((m) => m.content && m.content.trim().length > 0)
@@ -39,19 +39,28 @@ export function samplesFromMemories(mems: Memory[], n = 4): DedupSample[] {
   }));
 }
 
-/** 内核未实现五维独立评分器 —— 诚实口径：semantic 取内核真实 sim（写时查重记录），
- *  keyword/entity/structure 由真实字段实算，llm_judge 无 P13 judge 模型记录 → 记 0（诚实未测量）。 */
-function dimsFromMemory(m: Memory): Record<DimKey, number> {
+/**
+ * 批次42 阶段4（B4）：删掉旧实现的「兜底填数」。
+ * 内核 `dedup.ts` 的 baseDimensionScores(a,b,dim) 是**两段文本的对比评分**，不适用于
+ * 「单条记忆自己的五维分」这种展示语义（自己跟自己比会恒为 1.0），因此这里不冒充内核评分：
+ * · semantic = 账本行上写时真实查重相似度 m.sim；无记录 → null（旧实现会硬填分值）
+ * · keyword / entity = 由**真实内容**词面实算的本地启发式（明确非内核五维评分）
+ * · structure = 无可信单条测量（旧实现按层号自造）→ null
+ * · llm_judge = 内核未接 LLM 仲裁（findDuplicate 判 judge:'unavailable'）→ null，不是 0 分
+ * 综合分由 weightedScore 按已测维度权重归一化，与内核 fourDimScore 的无 LLM 口径一致。
+ */
+function dimsFromMemory(m: Memory): Record<DimKey, number | null> {
   const kw = keywordsOf(m.content);
-  const semantic = m.sim ?? 0.5; // 内核写时记录的真实查重相似度（6.1）；无记录用中性 0.5
   const keyword = Math.min(1, kw.length / 8);
   const entities = (m.content.match(/\b[A-Z][A-Za-z0-9]+\b|\d+\b/g) ?? []).length;
   const entity = Math.min(1, entities / 4);
-  const layerNum = Number(m.layer.replace('L', ''));
-  const layerIdx = Number.isFinite(layerNum) ? layerNum : 1;
-  const structure = 0.2 + 0.2 * (layerIdx - 1);
-  const llm_judge = 0;
-  return { semantic, keyword, entity, structure, llm_judge };
+  return {
+    semantic: m.sim ?? null,
+    keyword,
+    entity,
+    structure: null,
+    llm_judge: null,
+  };
 }
 
 function keywordsOf(text: string): string[] {
@@ -83,14 +92,23 @@ export function metricsFromLedger(mems: Memory[], audits: AuditRecord[]): Growth
   const l6 = mems.filter((m) => m.layer === 'L6').length;
   const level_stats_L6 = mems.length ? l6 / mems.length : 0;
 
+  // 阶段5-F：4-I 起内核 recall 审计真写 detail.latency_ms（墙钟耗时）。
+  // 只取有限非负数的真实样本；历史缺字段的行不计入分母（与 4-I 同口径，不拿 0 冒充）。
+  const latencySamples = audits
+    .filter((a) => a.action === 'recall')
+    .map((a) => (a.detail as { latency_ms?: unknown } | undefined)?.latency_ms)
+    .filter((v): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0);
+
   return {
     hit_rate: denom > 0 ? recallHits / denom : 0,
     confirmed,
     rejected,
     low_quality_ratio,
     level_stats_L6,
-    // 检索耗时：账本无真实延迟采样 → 0（UI 显示「—」，诚实标注未采集）
-    latency_ms: 0,
+    latency_ms: latencySamples.length > 0
+      ? latencySamples.reduce((s, v) => s + v, 0) / latencySamples.length
+      : 0,
+    latency_samples: latencySamples.length,
   };
 }
 

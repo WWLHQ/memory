@@ -27,6 +27,7 @@ export const SEED_METRICS: GrowthMetrics = {
   low_quality_ratio: 0.45,
   level_stats_L6: 0.42,
   latency_ms: 218,
+  latency_samples: 3,
 };
 
 export const SEED_DELTA: DeltaPoint[] = [

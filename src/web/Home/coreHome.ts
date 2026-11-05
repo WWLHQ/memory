@@ -1,5 +1,5 @@
 // REQ-005 首页（真实可算）：
-//  · coreTraceLookup：.rid 点击溯源，真查 home server mirror 账本（/api/mirror/audit），safe-noop 语义。
+//  · coreTraceLookup：.rid 点击溯源，真查 home server mirror 账本（/api/mirror/audit）；查询失败由 mirrorClient 记录并可见，不冒充「查无」。
 //  · getHomeFeed：挂载后异步聚合「内核账本真实数据」——四卡（累计记忆/累计动作/近1h调用/待裁决）+
 //    异常速览 + 近 1h 召回 Top3 + 待裁决 全部来自 storage（内核审计 / 记忆主表）真实计算。
 //  设计不变量：首页任何数字都来自真实账本或可明确溯源；无示例/写死假文案（取代原 SEED 硬编码）。
@@ -19,7 +19,7 @@ export interface TraceHit {
   seq?: number;
 }
 
-/** 按 request_id 在 home 账本中溯源（后端不在/未收录 → 空数组，safe-noop 语义） */
+/** 按 request_id 在 home 账本中溯源（后端不可达/未收录 → 空数组，不编造记录；查询失败由 mirrorClient 记录并可见） */
 export async function coreTraceLookup(requestId: string, limit = 200): Promise<TraceHit[]> {
   const { items } = await mirrorFetch(undefined, limit);
   return items
@@ -173,7 +173,7 @@ function deriveTodos(memories: Memory[]): TodoItem[] {
  *  · todos：冲突记忆（真实）
  *  · graph：L1–L6 关系图谱（真实层内容/合并/冲突推导，冷记忆 G3 遮罩）
  *  · effectGains：效果证据四卡（Token 节省/效率/跨 Agent 复用/模型成本，内核账本真实聚合）
- *  · sync：顶栏同步态真实计算（lastReconcileAt = 最近一条真实同步审计 ts；中枢未接线 → wired=false）
+ *  · sync：顶栏同步态真实计算（lastReconcileAt = 最近一条真实同步审计 ts；同步引擎已实现但未接入内核 API → wired=false）
  * storage 不可达时（如纯浏览器无内核）安全降级为空，并把真实原因放进 storageError 由 UI 明示
  * （批次25 P0-7：绝不把「内核读不到」渲染成「账本为空」）。
  */
@@ -226,9 +226,13 @@ export async function getHomeFeed(storage: StorageBackend, opts: GetHomeFeedOpts
     })
     .slice(0, 8);
 
-  // 顶栏同步态（真实）：云端同步在本版本未实现，绝不把任意审计冒充对账时间。
+  // 顶栏同步态（真实）：内核 API 尚未装配同步中枢，绝不把任意审计冒充对账时间。
   // 旧实现取「最近任意审计 ts」冒充对账时间，顶栏会永远显示「已同步」——
-  // 而同步中枢尚未接线（agent.sync 抛 E_NOT_IMPLEMENTED），故 wired=false 固定诚实标注「同步未实现」。
+  // 同步引擎（SyncHub / PgSyncHub + syncUp / syncDown）已实现并有集成测试，但未接入 agent.sync 与桌面主进程，
+  // agent.sync 因此抛 E_NOT_IMPLEMENTED，故 wired=false 固定诚实标注「同步未实现」。
+  // 阶段5-E / B11：lastReconcileAt 只记录账本里真实出现过的同步类审计时间，供 wired=true 时展示；
+  // wired=false 时 TopBar 完全不读取它，绝不把本地/历史审计时间渲染成「已同步」。
+  // SyncHub 的集成测试与进程内中枢不构成云端同步已接通的证据，不拿来翻 wired。
   const SYNC_ACTIONS = new Set<AuditRecord['action']>([
     'sync', 'sync_up', 'sync_down', 'sync_reconcile',
   ]);
@@ -256,7 +260,7 @@ export async function getHomeFeed(storage: StorageBackend, opts: GetHomeFeedOpts
   };
 }
 
-/** 未加载/内核不可达时的同步态占位（offline · 从未对账 · 本版本未实现） */
+/** 未加载/内核不可达时的同步态占位（offline · 从未对账 · 同步中枢未接入内核 API） */
 export function emptySync(): SyncState {
   return { form: 'desktop', role: 'offline', lastReconcileAt: 0, pendingSync: 0, wired: false };
 }

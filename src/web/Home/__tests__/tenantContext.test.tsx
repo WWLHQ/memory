@@ -3,7 +3,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import { renderHook, act } from '@testing-library/react';
-import { TenantProvider, useTenant, useLogin, useLogout } from '../tenantContext.tsx';
+import { TenantProvider, useTenant, useTenantRestoring, useLogin, useLogout } from '../tenantContext.tsx';
 import { login as localLogin, registerAccount, resetAuthStore } from '../../../auth/loginService.ts';
 import { hashPassword } from '../../../auth/hash.ts';
 import type { LoginForm, TenantContext } from '../../../types/home.ts';
@@ -29,9 +29,10 @@ function wrapperWith(overrides: { loginFn?: any; onLogout?: any } = {}) {
 describe('T5 全局租户上下文 Provider', () => {
   beforeEach(() => {
     resetAuthStore();
+    localStorage.removeItem('session:realpage'); // 阶段5-D：隔离跨用例的 session 残留
     registerAccount(ACCOUNT, hashPassword('pw'), { enterprise_id: 'ent_001', team_id: 'team_readonly_009', perspective: 'team' });
   });
-  afterEach(() => resetAuthStore());
+  afterEach(() => { resetAuthStore(); vi.unstubAllGlobals(); });
 
   it('未登录 useTenant() 返回 null', () => {
     const { result } = renderHook(() => useTenant(), { wrapper: wrapperWith() });
@@ -117,10 +118,8 @@ describe('T5 全局租户上下文 Provider', () => {
     expect(result.current.t).toBeNull();
   });
 
-  it('有 session 但无 context 时，异步调 /api/me 恢复真实租户上下文', async () => {
-    // 设置 localStorage 有 session（模拟从首页登录后切换到接入页）
+  it('阶段5-D：有 session 时只认 /api/me 的真实租户，恢复前不伪造占位身份', async () => {
     localStorage.setItem('session:realpage', 'sess_real_123');
-    // mock fetch 返回真实租户上下文
     const realCtx = {
       enterprise_id: 'ent_real',
       team_id: 'team_real',
@@ -135,7 +134,7 @@ describe('T5 全局租户上下文 Provider', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const { result } = renderHook(
-      () => useTenant(),
+      () => ({ t: useTenant(), restoring: useTenantRestoring() }),
       {
         wrapper: ({ children }) => (
           <TenantProvider loginFn={localLogin} backendUrl="http://localhost:8201">
@@ -145,25 +144,58 @@ describe('T5 全局租户上下文 Provider', () => {
       },
     );
 
-    // 初始是占位上下文
-    expect(result.current?.user_id).toBe('restored-user');
+    // 恢复前：未登录就是未登录，绝不出现 'restored-user' 之类的占位身份
+    expect(result.current.t).toBeNull();
+    expect(result.current.restoring).toBe(true);
 
-    // 等待异步恢复完成
     await act(async () => {
       await new Promise((r) => setTimeout(r, 100));
     });
 
-    // 恢复后是真实租户上下文
     expect(fetchMock).toHaveBeenCalledWith(
       'http://localhost:8201/api/me',
       expect.objectContaining({ headers: expect.objectContaining({ 'x-session-id': 'sess_real_123' }) }),
     );
-    expect(result.current?.user_id).toBe('user_real');
-    expect(result.current?.enterprise_id).toBe('ent_real');
-    expect(result.current?.team_id).toBe('team_real');
+    expect(result.current.restoring).toBe(false);
+    expect(result.current.t?.user_id).toBe('user_real');
+    expect(result.current.t?.enterprise_id).toBe('ent_real');
+    expect(result.current.t?.team_id).toBe('team_real');
+  });
 
-    // 清理
-    localStorage.removeItem('session:realpage');
-    vi.unstubAllGlobals();
+  it('阶段5-D：/api/me 非 2xx / 缺 context / 网络失败一律保持未登录', async () => {
+    localStorage.setItem('session:realpage', 'sess_bad');
+    const cases: Array<() => Promise<unknown>> = [
+      async () => ({ ok: false }),
+      async () => ({ ok: true, json: async () => ({}) }),
+      async () => { throw new Error('offline'); },
+    ];
+    for (const impl of cases) {
+      vi.stubGlobal('fetch', vi.fn(impl));
+      const { result, unmount } = renderHook(
+        () => ({ t: useTenant(), restoring: useTenantRestoring() }),
+        { wrapper: ({ children }) => (
+          <TenantProvider loginFn={localLogin} backendUrl="http://localhost:8201">{children}</TenantProvider>
+        ) },
+      );
+      await act(async () => { await new Promise((r) => setTimeout(r, 30)); });
+      expect(result.current.t).toBeNull();
+      expect(result.current.restoring).toBe(false);
+      unmount();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('阶段5-D：无 session 不发起 /api/me，直接未登录', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(
+      () => ({ t: useTenant(), restoring: useTenantRestoring() }),
+      { wrapper: ({ children }) => (
+        <TenantProvider loginFn={localLogin} backendUrl="http://localhost:8201">{children}</TenantProvider>
+      ) },
+    );
+    expect(result.current.t).toBeNull();
+    expect(result.current.restoring).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

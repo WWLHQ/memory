@@ -14,7 +14,7 @@ export interface NormalConfig {
   retention: Retention;
   auto_organize: boolean;
   importance: ImportanceLevel;
-  /** 成本单价（¥ / 百万 token）；null = 未设置，聊天提示不显示金额 */
+  /** 成本单价（¥ / 百万预算单位 t）；null = 未设置，聊天提示不显示金额 */
   cost_cny_per_mtok: number | null;
 }
 

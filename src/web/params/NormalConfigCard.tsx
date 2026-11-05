@@ -73,10 +73,10 @@ export function NormalConfigCard({ cfg, onChange }: Props) {
           onChange={(e) => {
             const raw = e.target.value.trim();
             const v = raw === '' ? null : Number(raw);
-            set({ cost_cny_per_mtok: Number.isFinite(v) ? v : null }, `成本单价=${raw === '' ? '未设置' : `¥${raw}/百万token`}`);
+            set({ cost_cny_per_mtok: Number.isFinite(v) ? v : null }, `成本单价=${raw === '' ? '未设置' : `¥${raw}/百万预算单位 t`}`);
           }}
         />
-        <span className="dim">¥ / 百万 token；留空 = 不显示金额（聊天提示本次/今日/全部费用）</span>
+        <span className="dim">¥ / 百万预算单位 t；金额按本地预算单位估算（非厂商账单）；留空 = 不显示金额</span>
       </div>
     </div>
   );

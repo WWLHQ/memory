@@ -2,7 +2,8 @@
 // 结构/文案/交互点严格对齐 design/ui/登录与首页_原型.html：
 //   .topbar / .hi(#hiUnauth) / #btnOpenLogin / .hi(#hiAuth) / .pill.ok(#syncPill) / #btnLogout
 // 未登录「欢迎使用…未登录 · 当前端[桌面] · [▶ 登录]」；
-// 已登录「你好 user_001 · 团队 team_001（管理员分配 · 只读）· 当前端[桌面·主源] · 同步未实现 · [登出]」。
+// 已登录「你好 <真实租户显示名> · 团队 <管理员分配的团队>（只读）· 当前端[桌面·主源] · 同步未实现 · [登出]」。
+// 值全部来自 useTenant 的真实会话；此处不再写死示例账号/团队名（阶段5-B 清理原型文案）。
 // 团队只读（无编辑控件）；登录/登出动作委托父级（T9 接线），自身只消费 useTenant 渲染。
 import { useTenant } from './tenantContext.tsx';
 import type { SyncState, SyncRole } from '../../types/home.ts';
@@ -59,7 +60,10 @@ export function TopBar({ onLogin, onLogout, sync }: TopBarProps) {
 
   const formLabel = sync ? FORM_LABEL[sync.form] : '桌面';
   const roleLabel = sync ? ROLE_LABEL[sync.role] : '主源';
-  // 云端同步本版本未实现：绝不以本地/旧审计冒充「已同步」，只如实标注未实现
+  // 同步引擎已实现但未接入内核 API / 主进程（agent.sync 抛 E_NOT_IMPLEMENTED）：
+  // 绝不以本地/旧审计冒充「已同步」，只如实标注未接入。
+  // 阶段5-E / B11：wired=false 时即使 lastReconcileAt 非零也不渲染 formatAgo()，
+  // 避免把账本时间显示成云端对账时间。
   const syncText =
     sync?.wired === true
       ? `已同步 · ${formatAgo(sync.lastReconcileAt)}`

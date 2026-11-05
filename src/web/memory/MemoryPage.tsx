@@ -133,7 +133,7 @@ export function MemoryPage({ load = coreListMemories }: { load?: () => Promise<M
 
       <div className="note">
         红线：租户 ID 全局注入禁手填（G1）；cold/dormant 仅 L2 占位符（G3）；locked 仅可解锁（G4）；
-        pinned 免检置顶（G5）；操作写审计（G6）。后端镜像当前为 safe-noop（home server 暂无 memory 端点）。
+        pinned 免检置顶（G5）；操作写审计（G6）。审计上抛真接 POST /api/mirror/audit；后端不可达时失败会显示提示，本地数据不受影响。
       </div>
 
       {toast.node}

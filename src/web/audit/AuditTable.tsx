@@ -1,8 +1,9 @@
 // 审计日志页（REQ-006 / P11）审计列表（T4）
-// 行全量字段（4.3）+ 点 request_id 展开同链路全行（18.2-E）+ 跳检索页占位。
+// 行全量字段（4.3）+ 点 request_id 展开同链路全行（18.2-E）+ 跳检索页查看真实链路上下文（阶段5-A 接真）。
 // 批次24：固定表头 + 可拖拽列宽（固化到 localStorage，重登/刷新后保持）；分页由父组件持有，行序号用全局下标。
 import type { AuditEntry } from './types.ts';
 import { actionLabel } from './logic.ts';
+import { retrievalContextHref } from './auditLink.ts';
 import { ColResizeHandle, useColWidths } from '../shared/useColWidths.tsx';
 import '../shared/tableResize.css';
 
@@ -77,7 +78,7 @@ export function AuditTable({ entries, activeRequestId, onToggleChain, indexOffse
                     <td>{e.pipeline_llm_tokens}</td>
                     <td className="dim">{e.user_id}@{e.ip_address}</td>
                     <td>
-                      <a href="/overview.html" data-testid={`jump-${e.request_id}-${i}`} title="跳检索页上下文（占位）">↗</a>
+                      <a href={retrievalContextHref(e.request_id)} data-testid={`jump-${e.request_id}-${i}`} title="跳检索页查看该 request_id 的真实审计链路上下文">↗</a>
                     </td>
                   </tr>
                 );

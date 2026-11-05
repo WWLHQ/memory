@@ -41,7 +41,7 @@ export function LifecyclePage() {
         setRecords(list);
         setSelectedId(list[0]?.id ?? null);
       })
-      .catch(() => {}) // 内核不可达 → 保持空列表（safe-noop）
+      .catch(() => {}) // 内核不可达 → 保持空列表（不编造记录）
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, []);

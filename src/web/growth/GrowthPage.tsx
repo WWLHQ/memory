@@ -3,7 +3,7 @@
 // FileStorage 持久库；浏览器降级 = 内存态，未写入过即空账本 → 诚实空态，绝不伪造数据）。
 // 本页所有展示数字均由 loadRealGrowth() 从真实账本实算（见 useGrowthReal.ts）：
 //   · 指标卡 = 真实召回审计 + 真实记忆表
-//   · 判重样本 = 真实记忆内容（最近 4 条），五维实算
+//   · 判重样本 = 真实记忆内容（最近 4 条），五维只填有可信测量的维度（缺的显示「未测量」）
 //   · 24h 统计 = 真实 merge / filtered 审计条数
 //   · Δ 曲线 = 真实 weight_tuned / growth_op 审计事件（无记录则空态）
 //   · 调度 / 权重 / 阈值 = 真实配置（非演示数据）
@@ -29,7 +29,7 @@ import { DeltaPanel, GrowthCards, OptimizationList, ScheduleTimeline } from './G
 import { useToast } from './useToast.tsx';
 
 const EMPTY_METRICS: GrowthMetrics = {
-  hit_rate: 0, confirmed: 0, rejected: 0, low_quality_ratio: 0, level_stats_L6: 0, latency_ms: 0,
+  hit_rate: 0, confirmed: 0, rejected: 0, low_quality_ratio: 0, level_stats_L6: 0, latency_ms: 0, latency_samples: 0,
 };
 
 export function GrowthPage() {
@@ -153,7 +153,7 @@ export function GrowthPage() {
         </label>
       </h1>
       <div className="sub">
-        自净化（6.1 五维 + 6.2 短路嫁接）+ 自生长（7.1 指标 / 7.2 Δ / 13.3 调度 全部真实账本实算）·
+        自净化（6.1 五维：仅展示有可信测量的维度 + 6.2 短路嫁接）+ 自生长（7.1 指标 / 7.2 Δ / 13.3 调度 真实账本实算）·
         账本规模：记忆 {real?.memCount ?? 0} 条 / 审计 {real?.auditCount ?? 0} 条
       </div>
 

@@ -8,14 +8,15 @@ export function GrowthCards({ m, empty }: { m: GrowthMetrics; empty?: boolean })
     ['rejected', '拒绝数（−0.05）', String(m.rejected), 'm-rejected'],
     ['low_quality', '低质占比（cold/dormant/archived）', m.low_quality_ratio.toFixed(2), 'm-lowq'],
     ['level_L6', 'L6 层命中', m.level_stats_L6.toFixed(2), 'm-l6'],
-    ['latency', '检索耗时', m.latency_ms ? `${m.latency_ms}ms` : '—', 'm-latency'],
+    ['latency', '检索耗时', m.latency_samples > 0 ? `${Math.round(m.latency_ms)}ms` : '—', 'm-latency'],
   ];
   return (
     <div className="card" data-testid="growth-cards">
       <b>反馈指标（7.1，只读 · 真实账本实算）</b>
       <div className="note">
         全部数字来自真实记忆账本：命中率 = recall/cold_recall 命中数 ÷ (命中+违约)；低质/L6 占比 = 记忆表真实衰减分层与层分布；
-        确认/拒绝 = 真实用户反馈审计条数；耗时账本未采样 → 显示「—」。{empty ? '当前账本为空，无真实数据。' : ''}
+        确认/拒绝 = 真实用户反馈审计条数；检索耗时 = 真实 recall 审计 <code>detail.latency_ms</code> 的平均值（阶段5-F 接真），
+        无样本时显示「—」而非 0ms。{empty ? '当前账本为空，无真实数据。' : ''}
       </div>
       <div className="row" style={{ gap: 16, marginTop: 8, flexWrap: 'wrap' }}>
         {items.map(([key, label, val, tid]) => (

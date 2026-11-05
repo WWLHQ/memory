@@ -1,31 +1,15 @@
-// 写入页后端镜像（T5）：沿用 ?backend= 覆盖模式。
-// ⚠ 本地内存态为真相；home server 暂无 write/memory 端点，故 mirror 为 safe-noop（fire-and-forget，失败静默）。
-import { useEffect, useRef } from 'react';
+// 写入页后端镜像（阶段5-C 口径统一）：真接 home server POST /api/mirror/audit。
+// 内核账本是真相；?backend= 显式关闭时跳过上抛，后端不可达时失败由 mirrorClient 记录、
+// 经全局提示条与运行日志可见（不再静默），页面数据与交互不受影响。
 import { mirrorReport } from '../mirrorClient.ts';
 
-import { homeBaseUrl } from '../backend.ts';
-
-export function resolveBackendUrl(): string {
-  return homeBaseUrl();
-}
-
 export interface WriteMirror {
-  /** 写入/覆盖/合并审计上抛：当前 safe-noop */
+  /** 写入/覆盖/合并审计上抛：真发 /api/mirror/audit；失败可见但不中断交互 */
   audit: (action: string) => void;
 }
 
 export function useWriteMirror(): WriteMirror {
-  const urlRef = useRef<string | null>(null);
-  if (urlRef.current === null) urlRef.current = resolveBackendUrl();
-
-  useEffect(() => {
-    // 预留：未来 home server 提供 /api/memories 写入时在此回填（失败静默）。
-  }, []);
-
   return {
-    audit: (action) => {
-      // G6 上抛：write dedup 回执（后端不在时静默）
-      mirrorReport('write', action);
-    },
+    audit: (action) => mirrorReport('write', action),
   };
 }

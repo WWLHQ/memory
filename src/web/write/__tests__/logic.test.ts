@@ -129,9 +129,11 @@ describe('composeReceipt', () => {
     expect(r.layers.L3.summary).toContain('未精炼');
   });
 
-  it('合并/保留：回执说明本次未新建层', () => {
-    const r = composeReceipt('x', 'merge');
+  it('重复保留（duplicated→keep）：回执说明本次未新建层', () => {
+    // 阶段5-E / B10：内核不存在 merge 动作，旧用例用伪造的 'merge' 测同一分支，改走真实 keep。
+    const r = composeReceipt('x', 'keep');
     expect(r.layers.L1.produced).toBe(false);
+    expect(r.layers.L1.summary).toContain('已保留原记忆');
     expect(r.layers.L1.summary).toContain('未新建层');
   });
 

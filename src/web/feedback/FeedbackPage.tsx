@@ -21,7 +21,7 @@ export function FeedbackPage() {
     let alive = true;
     coreLoadFeedbackRecords()
       .then((list) => { if (alive) setRecords(list); })
-      .catch(() => {}); // 内核不可达 → 保持空列表（safe-noop 语义）
+      .catch(() => {}); // 内核不可达 → 保持空列表（不编造记录）
     return () => { alive = false; };
   }, []);
 
@@ -41,7 +41,7 @@ export function FeedbackPage() {
     }
     const rec = composeRecord(draft, out.request_id);
     setRecords([rec, ...records]);
-    mirror.audit('feedback', rec, out.request_id); // G6 safe-noop
+    mirror.audit('feedback', rec, out.request_id); // G6 上抛：/api/mirror/audit（失败可见）
     const delta = out.trust_delta;
     show(
       draft.action === 'disputed'

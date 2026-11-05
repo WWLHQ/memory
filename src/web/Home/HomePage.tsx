@@ -33,7 +33,8 @@ export interface HomePageProps {
   loginFn?: LoginFn;
   /** 注入登出副作用（T11 后端写审计）；缺省无操作 */
   onLogout?: LogoutFn;
-  /** 是否要求登录才能查看首页内容（默认 true）；false 时跳过门控（如内联标识演示页） */
+  /** 是否要求登录才能查看首页内容（默认 true）；false 时跳过门控（?requireLogin=false，由入口 URL 控制）。
+   *  阶段5-D：内联标识演示页已改为接真登录态，不再依赖本开关跳过门控。 */
   requireLogin?: boolean;
 }
 

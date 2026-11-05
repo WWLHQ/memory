@@ -5,10 +5,22 @@ import type {
 } from './types.ts';
 import { LAYERS, OPT_CONDITIONS } from './spec.ts';
 
-/** 六维加权平均（6.1：五维权重，和=1.0） */
-export function weightedScore(dims: Record<DimKey, number>, w: DimWeights): number {
-  const sum = (Object.keys(dims) as DimKey[]).reduce((acc, k) => acc + dims[k] * w[k], 0);
-  return Math.round(sum * 1000) / 1000;
+/**
+ * 6.1 五维加权：只累加有真实测量的维度，并按参与权重归一化。
+ * 内核 `fourDimScore`（dedup.ts）在无 LLM 仲裁时就是去掉 judge 权重后归一化；
+ * 这里同口径 —— 未测量维（null）不按 0 拉低综合分，也不偷偷补中性值。
+ * 五维齐全时 weightSum=1，结果与直接加权完全一致（保持既有契约）。
+ */
+export function weightedScore(dims: Record<DimKey, number | null>, w: DimWeights): number {
+  let sum = 0;
+  let weightSum = 0;
+  for (const k of Object.keys(dims) as DimKey[]) {
+    const v = dims[k];
+    if (v === null) continue;
+    sum += v * w[k];
+    weightSum += w[k];
+  }
+  return weightSum > 0 ? Math.round((sum / weightSum) * 1000) / 1000 : 0;
 }
 
 export function layerThresholdOf(layer: Layer, t: LayerThresholds): number {

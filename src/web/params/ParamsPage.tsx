@@ -1,5 +1,7 @@
 // 全局参数页（REQ-006 / P5）T4 编排
 // ⚠ 内核读不到（批次25 P0-7）：不再静默把默认值当成「已保存参数」——三态加载 + 来源说明 + 重试。
+// 阶段5-E / B9：知识库策略表恒为内核 policyFor() 真值的只读镜像，不再是可编辑偏好，
+// 因此挂载/重试回填只覆盖 cfg / dev，旧快照里的 kbs（可能是原型期中文分类与旧数值）不再回流 UI。
 import { useEffect, useRef, useState } from 'react';
 import { DEFAULT_CONFIG, DEFAULT_DEV, DEFAULT_KB_POLICIES } from './defaults.ts';
 import { validateAll } from './logic.ts';
@@ -14,14 +16,15 @@ import { LlmEngineCard } from './LlmEngineCard.tsx';
 import { RefineQueueCard } from './RefineQueueCard.tsx';
 import { DevPanel } from './DevPanel.tsx';
 import { useToast } from './useToast.tsx';
-import type { DevParams, KbPolicyRow, NormalConfig } from './types.ts';
+import type { DevParams, NormalConfig } from './types.ts';
 
 type ParamsSnapshot = Awaited<ReturnType<typeof coreLoadParams>>;
 
 export function ParamsPage({ load = coreLoadParams }: { load?: () => Promise<ParamsSnapshot> } = {}) {
   const [cfg, setCfg] = useState<NormalConfig>(DEFAULT_CONFIG);
-  const [kbs, setKbs] = useState<KbPolicyRow[]>(DEFAULT_KB_POLICIES);
   const [dev, setDev] = useState<DevParams>(DEFAULT_DEV);
+  // 知识库策略不是页面状态：它恒等于内核当下真实策略，不随用户编辑或旧快照变化。
+  const kbs = DEFAULT_KB_POLICIES;
   const [changed, setChanged] = useState<string[]>([]);
   const { node: toast, show } = useToast();
   const mirror = useParamsMirror();
@@ -34,7 +37,6 @@ export function ParamsPage({ load = coreLoadParams }: { load?: () => Promise<Par
   useEffect(() => {
     if (phase !== 'ok' || !saved || touchedRef.current) return;
     setCfg(saved.cfg);
-    setKbs(saved.kbs);
     setDev(saved.dev);
   }, [phase, saved]);
 
@@ -70,7 +72,7 @@ export function ParamsPage({ load = coreLoadParams }: { load?: () => Promise<Par
       {phase === 'error' && <KernelLoadError what="读取内核已保存参数" error={loadError} onRetry={retry} />}
       {phase === 'ok' && !saved && (
         <div className="note" data-testid="params-default">
-          内核暂无已保存参数快照，下表是<b>默认值</b>（不是内核里的设置）。点「保存全局参数」即写入内核账本并记 param_save 审计。
+          内核暂无已保存参数快照，其余表单是<b>默认值</b>（不是内核里的设置）；「知识库策略表」是内核真实策略的只读展示，不属快照。点「保存全局参数」即写入内核账本并记 param_save 审计。
         </div>
       )}
       {phase === 'ok' && saved && <div className="note" data-testid="params-from-kernel">当前表单已回填内核中已保存的参数快照。</div>}
@@ -79,10 +81,7 @@ export function ParamsPage({ load = coreLoadParams }: { load?: () => Promise<Par
         cfg={cfg}
         onChange={(next, label) => { setCfg(next); track(label); }}
       />
-      <KbPolicyTable
-        rows={kbs}
-        onChange={(next, label) => { setKbs(next); track(label); }}
-      />
+      <KbPolicyTable />
       <KbManagementCard />
       <LlmEngineCard />
       <RefineQueueCard />

@@ -55,7 +55,7 @@ export function DisputePage({ load = coreConflicts }: { load?: () => Promise<Con
       const out = await coreVerdict(selected, v);
       const evt = auditPair(selected, v, reqId);
       setAuditLog((prev) => [{ ...evt, note: out.merged_mem_id ? `${evt.note}（合并记忆 ${out.merged_mem_id}）` : evt.note }, ...prev]);
-      // G6 上抛：safe-noop（mirror 为 safe-noop）
+      // G6 上抛：真发 /api/mirror/audit（失败由 mirrorClient 记录并可见）
       mirror.audit('dispute', selected as unknown as never, null as unknown as never);
       show(`${evt.note}（${reqId}）`);
       // 内核裁决后刷新队列：resolved 出队；user_confirm/hold 保持 pending（真实语义）

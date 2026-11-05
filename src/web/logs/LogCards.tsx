@@ -82,19 +82,36 @@ export function LogTable({ logs, onAudit, indexOffset = 0 }: LogTableProps) {
   );
 }
 
-export function ErrorAggr({ logs, onJump }: { logs: LogEntry[]; onJump: (target: string) => void }) {
+/** 阶段5-B：有真实处置页的分类渲染真链接；确无对应页面的分类只给诚实说明，不再用假提示冒充跳转。 */
+export function ErrorAggr({ logs }: { logs: LogEntry[] }) {
   const aggr = aggrErrors(logs);
   if (aggr.length === 0) return null;
   return (
     <div className="card" data-testid="error-aggr">
       <div className="row-head"><b>异常分类（§2.3，error 置顶）</b></div>
       <div className="row">
-        {aggr.map((a) => (
-          <span key={a.kind} className="status deprecated" style={{ cursor: 'pointer' }} data-testid={`aggr-${a.kind}`} onClick={() => onJump(a.target)}>
-            {a.kind} × {a.count} → {a.target}
+        {aggr.map((a) => (a.href ? (
+          <a
+            key={a.kind}
+            href={a.href}
+            className="status deprecated"
+            data-testid={`aggr-${a.kind}`}
+            title={`打开处置页：${a.target}`}
+          >
+            {a.kind} × {a.count} → {a.target}<span className="dim"> · 打开处置页</span>
+          </a>
+        ) : (
+          <span
+            key={a.kind}
+            className="status deprecated"
+            data-testid={`aggr-${a.kind}`}
+            title={a.note ?? ''}
+          >
+            {a.kind} × {a.count} → {a.target}<span className="dim"> · {a.note}</span>
           </span>
-        ))}
+        )))}
       </div>
+      <div className="note">有处置页的分类是真链接（浏览器真导航）；无对应处置页的分类只给本版本可执行说明，不伪造跳转。</div>
     </div>
   );
 }

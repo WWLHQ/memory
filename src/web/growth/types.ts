@@ -8,11 +8,11 @@ export type DimWeights = Record<DimKey, number>;
 export type Layer = 'L1' | 'L2' | 'L3' | 'L4' | 'L5' | 'L6';
 export type LayerThresholds = Record<Layer, number>;
 
-/** 判重样本：五维得分 + 目标写入层 */
+/** 判重样本：五维得分 + 目标写入层。null = 内核/账本无该维的可信测量，绝不拿中性值冒充 */
 export interface DedupSample {
   id: string;
   label: string;
-  dims: Record<DimKey, number>;
+  dims: Record<DimKey, number | null>;
   target: Layer;
 }
 
@@ -33,7 +33,10 @@ export interface GrowthMetrics {
   rejected: number;
   low_quality_ratio: number;
   level_stats_L6: number;
+  /** 阶段5-F：真实 recall 审计 detail.latency_ms 的平均值；无样本为 0（配 latency_samples 判空） */
   latency_ms: number;
+  /** 阶段5-F：真实延迟样本条数；0 = 未采集 / 历史缺字段，UI 显示「—」而非 0ms */
+  latency_samples: number;
 }
 
 export type OptState = 'triggered' | 'running' | 'idle';

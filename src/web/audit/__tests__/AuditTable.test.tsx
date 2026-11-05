@@ -43,8 +43,15 @@ describe('AuditTable (T4)', () => {
     expect(screen.getByText('无匹配审计记录')).toBeInTheDocument();
   });
 
-  it('跳检索页占位链接存在', () => {
+  it('跳检索页为带真实 request_id 的链路上下文链接（阶段5-A 接真）', () => {
     render(<AuditTable entries={[mk({ request_id: 'r1' })]} activeRequestId={null} onToggleChain={vi.fn()} />);
-    expect(screen.getByTestId('jump-r1-0')).toHaveAttribute('href', '/overview.html');
+    const link = screen.getByTestId('jump-r1-0');
+    expect(link).toHaveAttribute('href', '/retrieval.html?request_id=r1');
+    expect(link.getAttribute('title')).not.toContain('占位');
+  });
+
+  it('request_id 含空格/& 时 URL 编码，不切断参数', () => {
+    render(<AuditTable entries={[mk({ request_id: 'req a&b' })]} activeRequestId={null} onToggleChain={vi.fn()} />);
+    expect(screen.getByTestId('jump-req a&b-0')).toHaveAttribute('href', '/retrieval.html?request_id=req%20a%26b');
   });
 });

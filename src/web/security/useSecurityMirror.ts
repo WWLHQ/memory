@@ -1,29 +1,15 @@
-// 账号与安全页后端镜像（T4）：safe-noop 模式。
-import { useEffect, useRef } from 'react';
+// 账号与安全页后端镜像（阶段5-C 口径统一）：真接 home server POST /api/mirror/audit。
+// 内核账本是真相；?backend= 显式关闭时跳过上抛，后端不可达时失败由 mirrorClient 记录、
+// 经全局提示条与运行日志可见（不再静默），页面数据与交互不受影响。
 import { mirrorReport } from '../mirrorClient.ts';
 
-import { homeBaseUrl } from '../backend.ts';
-
-export function resolveBackendUrl(): string {
-  return homeBaseUrl();
-}
-
 export interface SecurityMirror {
+  /** 安全配置变更审计上抛：真发 /api/mirror/audit；失败可见但不中断交互 */
   audit: (action: string, requestId: string) => void;
 }
 
 export function useSecurityMirror(): SecurityMirror {
-  const urlRef = useRef<string | null>(null);
-  if (urlRef.current === null) urlRef.current = resolveBackendUrl();
-
-  useEffect(() => {
-    // 预留：home server 提供 /api/security 时上抛（失败静默）。
-  }, []);
-
   return {
-    audit: (action, requestId) => {
-      // G6 上抛：安全配置变更（后端不在时静默）
-      mirrorReport('security', action, requestId);
-    },
+    audit: (action, requestId) => mirrorReport('security', action, requestId),
   };
 }

@@ -145,7 +145,7 @@ export function LogsPage() {
         }}
         count={shown.length}
       />
-      <ErrorAggr logs={shown} onJump={(t) => show(`跳转处置：${t}（占位）`)} />
+      <ErrorAggr logs={shown} />
       <LogTable
         logs={paged.items}
         indexOffset={(paged.page - 1) * paged.pageSize}

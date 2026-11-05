@@ -11,16 +11,17 @@ import { composeReceipt, scoreDedup, validateDraft } from './logic.ts';
 import { coreWrite, coreListExisting } from './coreWrite.ts';
 import { KernelLoadError, kernelErrorText, useKernelLoad } from '../shared/kernelLoad.tsx';
 import { DEFAULT_PROJECT_ID, listProjectIds } from '../shared/kernelProjects.ts';
+import { newRequestId } from '../kernel.ts';
 import type { ExistingMemory, LayerName, MemoryDraft, WriteReceipt } from './types.ts';
 
-// 全局注入（演示值；真实环境由租户上下文注入，禁手填，R2）
-// 批次27 P2-7：项目 ID 从账本真实派生（listProjectIds）；账本为空时回落 DEFAULT_PROJECT_ID 占位
-const INJECTED = { session_id: 's1', project_id: DEFAULT_PROJECT_ID };
+// 项目 ID 从账本真实派生（listProjectIds）；账本为空时回落 DEFAULT_PROJECT_ID 占位（A10，非空账本务必用真实项目）
 
 export function WritePage({ load = coreListExisting }: { load?: () => Promise<ExistingMemory[]> } = {}) {
+  // session_id 由页面生成真实唯一值（不再用演示值 's1'）；真实环境可由租户上下文覆盖（R2）
+  const [sessionId] = useState(() => newRequestId('sess'));
   const [draft, setDraft] = useState<MemoryDraft>({
     content: '', category: 'fact', tags: [], source: 'conversation',
-    session_id: INJECTED.session_id, project_id: INJECTED.project_id,
+    session_id: sessionId, project_id: DEFAULT_PROJECT_ID,
   });
   const [receipt, setReceipt] = useState<WriteReceipt | null>(null);
   const toast = useToast();
@@ -69,15 +70,15 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
         void load().then((list) => replace(list)).catch(() => {});
         mirror.audit(`memory_${cw.dedup_action}`);
         toast.show(
+          // 阶段5-E / B10：内核只有 create / graft / keep / filtered 四种结果，
+          // 删掉永不命中的 merge 分支（旧「用户三模式」残留），filtered 落到质量门拦截说明。
           cw.dedup_action === 'create'
             ? '已写入记忆。'
             : cw.dedup_action === 'graft'
               ? `与既有记忆相似（sim=${cw.sim.toFixed(2)}），已新建并分支嫁接。`
-              : cw.dedup_action === 'merge'
-                ? `与既有记忆相似（sim=${cw.sim.toFixed(2)}），已合并写入。`
-                : cw.dedup_action === 'keep'
-                  ? `与既有记忆完全重复（sim=${cw.sim.toFixed(2)}），保留原记忆。`
-                  : '内容被 L0→L1 质量门拦截（无信息量/过短/无用内容），未写入记忆库。',
+              : cw.dedup_action === 'keep'
+                ? `与既有记忆完全重复（sim=${cw.sim.toFixed(2)}），保留原记忆。`
+                : '内容被 L0→L1 质量门拦截（无信息量/过短/无用内容），未写入记忆库。',
         );
       } catch (e) {
         toast.show(`写入失败：${kernelErrorText(e)}`);
@@ -121,7 +122,7 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
 
       <div className="note">
         红线：project_id 全局注入禁手填（R2）；L1 原文仅审计展开（15.3）；查重判定与动作由内核写路径执行并写审计（G6）。
-        后端镜像当前为 safe-noop（home server 暂无 write/memory 端点）。
+        审计上抛真接 home server 的 POST /api/mirror/audit（?backend= 可指定后端）；后端不可达时失败会显示提示，本地数据不受影响。
       </div>
 
       {toast.node}

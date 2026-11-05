@@ -42,13 +42,48 @@ export const ERROR_TARGET: Record<ErrorKind, string> = {
   conflict_pending: 'P8 冲突裁决页',
 };
 
-export function aggrErrors(list: LogEntry[]): { kind: ErrorKind; count: number; target: string }[] {
+export interface ErrorTargetRoute {
+  /** 真实页面入口（与 overview/Overview.tsx 的 VIEWS 同源，全小写）；null = 本版本没有对应处置页 */
+  href: string | null;
+  /** 无跳转时的诚实说明：告诉用户本版本能做什么，绝不假装存在处置页 */
+  note: string | null;
+}
+
+/**
+ * 阶段5-B：处置入口接真。
+ * 旧实现把 6 类异常一律交给一个假的跳转提示 toast，既不跳转也不说明。
+ * 现在三类有真实落地页面 → 渲染真链接；三类确实没有对应页面 → 只给可执行说明，不伪造跳转。
+ */
+export const ERROR_TARGET_ROUTE: Record<ErrorKind, ErrorTargetRoute> = {
+  breaker_open: { href: '/agentonboard.html', note: null },
+  sync_fail: { href: null, note: '同步引擎已实现但未接入内核 API，本版本无对应处置页' },
+  quota_exceed: { href: '/models.html', note: null },
+  l0_decrypt_fail: { href: null, note: '请在本页「L0 授权」卡片重新解锁' },
+  vector_error: { href: null, note: '内核唯一向量后端是 JS 实现，自动回退，无对应处置页' },
+  conflict_pending: { href: '/dispute.html', note: null },
+};
+
+export interface ErrorAggrItem {
+  kind: ErrorKind;
+  count: number;
+  target: string;
+  href: string | null;
+  note: string | null;
+}
+
+export function aggrErrors(list: LogEntry[]): ErrorAggrItem[] {
   const map = new Map<ErrorKind, number>();
   for (const l of list) {
     const k = classifyError(l);
     if (k) map.set(k, (map.get(k) ?? 0) + 1);
   }
-  return [...map.entries()].map(([kind, count]) => ({ kind, count, target: ERROR_TARGET[kind] }));
+  return [...map.entries()].map(([kind, count]) => ({
+    kind,
+    count,
+    target: ERROR_TARGET[kind],
+    href: ERROR_TARGET_ROUTE[kind].href,
+    note: ERROR_TARGET_ROUTE[kind].note,
+  }));
 }
 
 /** R-LOG1 + §2.1：过滤六维 AND，error 恒置顶（不被时间窗过滤掉），同级 ts 倒序 */
