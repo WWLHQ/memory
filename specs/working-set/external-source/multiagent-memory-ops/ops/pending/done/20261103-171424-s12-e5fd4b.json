@@ -1,0 +1,10 @@
+{
+    "status":  "pending",
+    "content":  "[MCP Extension Contract v1.0 - Section 12]\n\n## 12. 落地顺序建议\n| 批次 | 内容 | 理由 |\n|---|---|---|\n| **第一批** | §2（write_memory 新入参）+ §3（feedback）+ **§11（get_write_status）** | 投入最小、解锁两把锁死的旋钮、让 Agent 写前就能知道锁状态，直接决定衰减与排序质量 |\n| **第二批** | §4（manage_memory，不含 delete）+ §5（list_memories） | 让 Agent 具备\"减\"的能力，止住库膨胀；delete 暂不开 |\n| **第三批** | §6（recall scope=session）+ §7（gc_report） | 补工作记忆出口与可观测性 |\n| **第四批** | 按需开 `delete`（配置开关 + 人工确认话术） | 风险最高，最后评估 |\n\n---\n\n\u003e 变更纪律：所有新增工具必须遵守 **§1 设计原则 5 条**；任何绕过内核既有约束（locked 豁免、钳制、作用域、审计）的实现一律不予合入。",
+    "project_id":  "P1",
+    "category":  "context",
+    "user_id":  "u1",
+    "source_agent":  "workbuddy",
+    "session_id":  "",
+    "created_at":  "2026-11-03T17:14:24.4839959+08:00"
+}

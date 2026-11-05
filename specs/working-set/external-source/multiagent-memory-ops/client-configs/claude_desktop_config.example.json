@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "MultiAgent Memory": {
+      "type": "http",
+      "url": "http://127.0.0.1:8204/mcp",
+      "headers": {
+        "Authorization": "Bearer <BEARER_TOKEN_FROM_MCP_JSON>"
+      }
+    }
+  }
+}

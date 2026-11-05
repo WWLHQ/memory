@@ -1,0 +1,32 @@
+# 将本机记忆库安全暴露到内网/公网，供异地或云端 Agent 连接
+# 适用场景：需要让不在同一台机器上的 Agent 也能连上 MultiAgent Memory
+#
+# 前置假设：
+#   - memagent-mcp 后端实际监听在某个内网地址（例如 127.0.0.1:8205，请替换为真实后端端口）
+#   - Caddy 监听 8204（或直接用域名），反向代理到上面的真实后端
+#   - 当前 8204 已经是一层代理，本配置演示如何给它加上 TLS / 来源限制
+#
+# 用法：caddy run --config Caddyfile
+
+# 方案 A：用域名 + 自动 HTTPS（推荐用于跨机/公网）
+# memory.your-domain.com {
+#     # 仅放行可信 Agent 出口 IP 或内网段，其余 403
+#     @allowed remote_ip 10.0.0.0/8 192.168.0.0/16 203.0.113.0/24
+#     respond @not_allowed "forbidden" 403
+#
+#     reverse_proxy 127.0.0.1:8205 {
+#         header_up Authorization "{http.request.header.Authorization}"
+#     }
+#
+#     tls your@email.com
+# }
+
+# 方案 B：仅本机/内网，不申请证书，只做来源限制与反代
+:8204 {
+    @allowed remote_ip 127.0.0.1 10.0.0.0/8 192.168.0.0/16
+    respond @not_allowed "forbidden" 403
+
+    reverse_proxy 127.0.0.1:8205 {
+        header_up Authorization "{http.request.header.Authorization}"
+    }
+}
