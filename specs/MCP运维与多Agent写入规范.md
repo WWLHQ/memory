@@ -27,7 +27,7 @@
 |---|---|---|---|
 | 1 | §4.1「`write_memory` 带 `source_agent`（MCP 默认 `'mcp'`）」 | **过时**：批次44-D1（`14af325`）已去除默认值，TCP/HTTP 两端均要求 `source_agent` 必填且拒绝字面 `mcp`（`mcp.ts:201-205`、`mcpHttp.ts:246-250`、`mcpSchema.ts:53`） | 就地改为「必填、无默认值」 |
 | 2 | §4.3「默认身份禁用」列为待补缺口 | **已落地**，同 D1；不是待办 | 标注「已闭合」并写明证据 |
-| 3 | §3.2 / §3.3「Token Broker 已能 mint `['P-shared','P-<user>']`」 | **错误**：全仓 `src/` 对 `TokenBroker` / `tokenBroker` / `mint` 零命中，多用户三池与令牌代理 mint 受限令牌尚未实现，属 **D6**（用户已确认 `create_project` 并入 D6） | 改为「未落地，跨机前须先完成 D6」 |
+| 3 | §3.2 / §3.3「Token Broker 已能 mint `['P-shared','P-<user>']`」 | **错误**：全仓 `src/` 对 `TokenBroker` / `tokenBroker` / `mint` 零命中，多用户三池与令牌代理 mint 受限令牌尚未实现，属 **D6**（用户已确认 `create_project` 并入 D6） | 改为「未落地，跨机前须先完成 D6」。〔**批次46-D6 已落地（2026-11-06）**〕D6-4 落地内核级令牌库 `tokenStore.ts`（`mcp-tokens.json` 0600、只存 sha256、`mint`/`resolve`）+ D6-5 `mint_token` 管理工具；三池门禁 D6-2 落地（`classifyProject`/`projectInScope` 三池版）；本条历史校验记录保留，当前能力以 `记忆库工具能力清单.md` 为准 |
 | 4 | §4.2 条款 4「删除(`memory_op` delete)需配置开关 + 人工确认」 | MCP 工具名是 `manage_memory`，且 delete 默认关闭由 `MCP_ALLOW_DELETE=1` / `allowDelete:true` 放行（批次44-D5-2） | 名称与开关口径对齐 |
 
 > 未校正项经复核仍成立：MCP 无 `GET /health`（`mcpHttp.ts` 对 `health` 零命中）；`sync` 未接线（`agent.ts` 如实抛 `E_NOT_IMPLEMENTED`）；`GET /recall/<id>` 明细页只听回环；`audit.jsonl` 为召回/写入权威审计源。
@@ -113,14 +113,14 @@ TCP 8202、HTTP 8204 均绑 `127.0.0.1`，本地优先、无云；认证为单�
 
 ### 3.2 三大硬约束
 1. **本地优先定位冲突**：跨机=数据或传输跨网络，需重做威胁模型，可能偏离产品定位——先确认"真跨机"还是"同机多客户端"。
-2. **单令牌不够**：一个共享密钥跨网分发=任意持有者可读写全部可见池；需升级为**每客户端/每 Agent 独立凭据 + 独立 scope**。〔校正〕令牌代理 mint 受限令牌与多用户三池 `P-shared`/`P-<user>`/`P-archive` **尚未落地**（内核零命中），属 D6；跨机前须先完成 D6，不能当作既有能力。
+2. **单令牌不够**：一个共享密钥跨网分发=任意持有者可读写全部可见池；需升级为**每客户端/每 Agent 独立凭据 + 独立 scope**。〔校正〕令牌代理 mint 受限令牌与多用户三池 `P-shared`/`P-<user>`/`P-archive` **曾未落地**（内核零命中），属 D6。〔**批次46-D6 已落地（2026-11-06）**〕：`tokenStore.ts` 令牌库（0600、仅哈希、过期即失效）+ `mint_token` 管理工具（仅管理员）+ 三池门禁 `projectInScope` 三池版；每令牌独立 `user_id`/`scope_project_ids`/`is_admin`，跨机部署前能力已就绪（跨机传输层本身仍属方向 3 未实现）。
 3. **单写锁禁止多机并发写**：多机写只有两条路——① 单一写者（中心库）；② 分片（每机独立池 + `pgSyncHub` 同步中枢）。注意 `sync` 当前**未接线（诚实报错）**，跨机写前提是先接通 `sync`。
 
 ### 3.3 推荐方案（若确要跨机）
 | 层 | 做法 | 说明 |
 |---|---|---|
 | 传输 | 反向代理（nginx/Caddy）TLS 终结，MCP 仍绑 127.0.0.1 由代理暴露 | **不要直接 `0.0.0.0` 裸奔**；回环明文可接受，跨网必须 TLS |
-| 认证 | 每客户端独立令牌 + `projectInScope` scope；强制 mTLS 或 token+IP 白名单；防重放(nonce/时间戳) | 替换单一共享密钥；**mint/三池属 D6 未落地，须先补** |
+| 认证 | 每客户端独立令牌 + `projectInScope` scope；强制 mTLS 或 token+IP 白名单；防重放(nonce/时间戳) | 替换单一共享密钥；〔**批次46-D6 已落地**〕mint/三池已就绪（`tokenStore.ts` + `mint_token` 工具 + 三池门禁），跨机传输层（mTLS/白名单）本身仍待方向 3 |
 | 数据 | 中心写者（一写多读）或 分片 + `pgSyncHub` 同步 | 多机写必须先接通 `sync` |
 | 审计 | 跨机调用方 `detail.client` 已记录（批次41-S 校正：不带 session-id 按 UA→最近 initialize 归并，可能串） | 跨机更需可靠归属，先修 41-S 判据 |
 
