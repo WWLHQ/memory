@@ -153,6 +153,8 @@ score = relevance × ( 0.35·新鲜度 + 0.30·重要性 + 0.15·可信度 + 0.2
 >
 > **〔批次46 定稿补注〕两条 GC 路径不可混用**：本节的 `ma.gc()` → `coreGc()` 只做 `classifyLayer` 降档（`merged`/`conflicts_resolved` 恒 0 占位）；另一条 `forgetting.ts::runForgettingCycle()` 是独立的遗忘周期引擎（新鲜度扫描 / 层迁移 / 相似聚类摘要 / 质量门拦截 / 冷压缩），由 `electron/main.ts` 每 6h 调度，产出 `ForgettingCycleReport` 六字段并写 `action='gc'` 带 `task='forgetting_cycle'` 的审计。二者**签名、调用方、审计 detail、默认行为都不同**，接 `gc_report` 时不得把两者数字相加或互相顶替（`migrated` 与 `decayed` 是同一事件的两种命名）。见 `specs/批次46-真正冲突裁决与摘要合并统计_落地方案.md`。
 
+> **〔批次46-4 已落地 2026-11-05〕** 上段「两条 GC 路径不可混用」仍准确描述内核 `ma.gc()`（`coreGc`）与 `runForgettingCycle()`（遗忘周期引擎）的边界；但 MCP `gc_report` 入口已从 `ma.gc()` 切到 **`ma.gcFull()`**（46-4，`coreGcFull() → runForgettingCycle()` 并可选真实冲突裁决）。故 `gc_report` 返回的报告不再是「只含 coreGc 三项」，而是 D6 分层十字段 + `conflict_resolution` 回执，并新增 `resolve_conflicts` + `verdict` 两个入参（二者都给才落定）。上表 148-150 行的 `ma.gc()` 三态仍描述内核 `coreGc` 本身行为、未变。
+
 ## 3. 数据 schema（内核 ↔ 存储）
 
 ### 3.1 记忆主表 `memories`
