@@ -1,7 +1,7 @@
 // IpcStorageBackend 验收：6 方法纯转发到注入的 StorageIpc，参数/返回值透传无误（§5.3 桌面桥接）。
 import { describe, it, expect, vi } from 'vitest';
 import { IpcStorageBackend, type StorageIpc } from '../ipcStorage.ts';
-import type { AuditRecord, Memory, ProjectRecord } from '../../core/memagent/types.ts';
+import type { AuditRecord, CreateProjectInput, Memory, ProjectRecord } from '../../core/memagent/types.ts';
 
 function fakeIpc(): StorageIpc {
   const mem: Memory = { mem_id: 'm1', project_id: 'P1' } as Memory;
@@ -14,8 +14,15 @@ function fakeIpc(): StorageIpc {
     deleteMemory: vi.fn(async () => {}),
     appendAudit: vi.fn(async () => {}),
     queryAudit: vi.fn(async () => [audit]),
-    // ── 批次46-D6：项目注册表转发 ──
-    createProject: vi.fn(async () => project),
+    // ── 批次46-D6：项目注册表转发（createProject 按输入回显，验真正的透传语义） ──
+    createProject: vi.fn(async (input: CreateProjectInput) => ({
+      project_id: input.project_id,
+      kind: input.kind ?? 'general',
+      owner_user_id: input.owner_user_id,
+      display_name: input.display_name,
+      created_at: 1,
+      created_by: input.created_by,
+    })),
     getProject: vi.fn(async () => null),
     listProjects: vi.fn(async () => [project]),
   };
