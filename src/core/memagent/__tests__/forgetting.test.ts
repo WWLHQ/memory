@@ -1,8 +1,8 @@
 // REQ-010 遗忘机制契约测试（17.11 AC 覆盖 + 17.7 迁移规则 + 17.6 策略表）
 import { describe, expect, it } from 'vitest';
 import {
-  buildSummary, classifyLayer, forgetOne, freshnessOf, hardFilter, policyFor,
-  reinforceOne, restoreOne, runForgettingCycle, scoreMemory,
+  buildSummary, classifyLayer, clusterSimilar, forgetOne, freshnessOf, hardFilter,
+  policyFor, reinforceOne, restoreOne, runForgettingCycle, scoreMemory,
 } from '../forgetting.ts';
 import { InMemoryStorage } from '../storage.ts';
 import { DEFAULT_VECTOR_DIM, JsVectorBackend, cosine, embedSync } from '../vector.ts';
@@ -290,5 +290,123 @@ describe('17.10 后台周期任务', () => {
       expect(r.summaries_created).toBe(0);
       expect(storage.size).toBe(3);
     }
+  });
+});
+
+/**
+ * 批次42 阶段4（4-A）变异杀手：17.9「相似」判据接真。
+ * 旧实现按 `content.slice(0, 8)` 分组，下面两例分别打它的两个失效面：
+ * ① 同主题换措辞（前缀不同）本应合并却漏掉；② 前缀相同但主题无关本不该合并却硬凑。
+ * 把聚类改回前缀分组，这两例必红。
+ */
+describe('批次42 阶段4：17.9 相似判据接真（语义余弦，非内容前缀）', () => {
+  it('clusterSimilar 纯函数：同主题聚一簇、异主题分簇；阈值生效且结果可复现', () => {
+    const group = [
+      mem({ mem_id: 'b2', content: 'alpha deploy docker guide part', category: 'decision' }),
+      mem({ mem_id: 'a1', content: 'beta deploy docker guide part', category: 'decision' }),
+      mem({ mem_id: 'c3', content: 'gamma deploy docker guide part', category: 'decision' }),
+      mem({ mem_id: 'd4', content: 'redis cluster failover runbook', category: 'decision' }),
+    ];
+    const clusters = clusterSimilar(group);
+    expect(clusters.map((c) => c.length).sort()).toEqual([1, 3]);
+    // 按 mem_id 排序后以 a1 为种子，重复调用结果一致
+    expect(clusters.find((c) => c.length === 3)!.map((m) => m.mem_id)).toEqual(['a1', 'b2', 'c3']);
+    expect(clusterSimilar(group)).toEqual(clusters);
+    // 阈值 >1（cosine 上限）→ 全部独立成簇，证明判据确实是相似度而非别的
+    expect(clusterSimilar(group, 2)).toHaveLength(4);
+  });
+
+  it('杀手①：同主题仅换首个词（内容前 8 字符各不相同）→ 仍应生成 1 条摘要', async () => {
+    const storage = new InMemoryStorage();
+    await storage.putMemory(mem({ mem_id: 's0', content: 'alpha deploy docker guide part', category: 'decision' }));
+    await storage.putMemory(mem({ mem_id: 's1', content: 'beta deploy docker guide part', category: 'decision' }));
+    await storage.putMemory(mem({ mem_id: 's2', content: 'gamma deploy docker guide part', category: 'decision' }));
+    const r = await runForgettingCycle(storage, NOW);
+    expect(r.summaries_created).toBe(1);
+    expect(r.merged_originals).toBe(3);
+  });
+
+  it('杀手②：内容前 8 字符完全相同但主题无关 → 不得产生任何合并候选组', async () => {
+    // 三条前 8 字符都是 'deploy x'，差异全在第 9 字符之后：旧前缀判据必把它们塞进同一组
+    const storage = new InMemoryStorage();
+    await storage.putMemory(mem({ mem_id: 'u0', content: 'deploy x alpha beta gamma delta', category: 'decision' }));
+    await storage.putMemory(mem({ mem_id: 'u1', content: 'deploy x redis kafka nginx setup', category: 'decision' }));
+    await storage.putMemory(mem({ mem_id: 'u2', content: 'deploy x quantum orbit photon spin', category: 'decision' }));
+    const r = await runForgettingCycle(storage, NOW);
+    // 旧的前缀分组要么生成摘要、要么被质量门记为 filtered —— 两者都不允许
+    expect(r.summaries_created).toBe(0);
+    expect(r.summaries_filtered).toBe(0);
+    expect(storage.size).toBe(3);
+  });
+});
+
+/**
+ * 批次42 阶段4（4-B）变异杀手：17.10 冷压缩接真。
+ * 旧实现 `report.compressed = colds.length` 只数数、不碰索引也不写回；把这段重新注入，
+ * 杀手③（索引副本未清 / 无压缩痕迹 / 不幂等）与杀手④（无后端仍虚报）必红。
+ */
+describe('批次42 阶段4：17.10 冷压缩接真（清索引副本，非仅计数）', () => {
+  const coldRow = (i: number): Memory => {
+    const content = `cold ledger row ${i}`;
+    return mem({
+      mem_id: `c${i}`, category: 'fact', decay_class: 'cold', content,
+      embedding: embedSync(content, DEFAULT_VECTOR_DIM),
+    });
+  };
+
+  it('杀手③：真清索引副本、行上向量保留、留压缩痕迹，且 7 天内幂等', async () => {
+    const storage = new InMemoryStorage();
+    const vector = new JsVectorBackend();
+    for (let i = 0; i < 3; i++) {
+      const row = coldRow(i);
+      await storage.putMemory(row);
+      await vector.upsert(row.mem_id, row.content, { project_id: 'P1', layer: 'L2' });
+    }
+    const probe = embedSync('cold ledger row 0', vector.dim);
+    expect((await vector.search(probe, 10, {})).map((h) => h.mem_id)).toContain('c0'); // 前态确实在索引里
+
+    const r = await runForgettingCycle(storage, NOW, { weeklyCompress: true, vector });
+    expect(r.compressed).toBe(3);
+    expect(await vector.search(probe, 10, {})).toHaveLength(0); // 后态：索引副本真被清掉
+    for (let i = 0; i < 3; i++) {
+      const row = await storage.getMemory(`c${i}`);
+      // §2.2 不变量 7「向量源自 L1」不破：冷层补查与 41-T 回填照常工作
+      expect(row?.embedding).toEqual(embedSync(`cold ledger row ${i}`, DEFAULT_VECTOR_DIM));
+      expect(row?.compressed_at).toBe(NOW);
+      expect(row?.version).toBe(2);
+    }
+    // 幂等：同一周内再跑一轮不重复计数、不重复写回
+    const r2 = await runForgettingCycle(storage, NOW, { weeklyCompress: true, vector });
+    expect(r2.compressed).toBe(0);
+    expect((await storage.getMemory('c0'))?.version).toBe(2);
+  });
+
+  it('杀手④：无向量后端时 compressed 必须为 0（不拿冷层行数冒充压缩成绩）', async () => {
+    const storage = new InMemoryStorage();
+    for (let i = 0; i < 3; i++) await storage.putMemory(coldRow(i));
+    const r = await runForgettingCycle(storage, NOW, { weeklyCompress: true });
+    expect(r.compressed).toBe(0);
+    expect((await storage.getMemory('c0'))?.compressed_at).toBeUndefined();
+    expect(storage.size).toBe(3); // AC-01：一个字节的知识都没动
+  });
+
+  it('压缩范围：cold/archived/dormant 参与，hot/warm 不参与', async () => {
+    const storage = new InMemoryStorage();
+    const vector = new JsVectorBackend();
+    const classes = ['cold', 'archived', 'dormant', 'hot', 'warm'] as const;
+    for (let i = 0; i < classes.length; i++) {
+      const row = mem({
+        mem_id: `x${i}`, category: 'fact', decay_class: classes[i],
+        content: `row ${i}`, embedding: embedSync(`row ${i}`, DEFAULT_VECTOR_DIM),
+      });
+      await storage.putMemory(row);
+      await vector.upsert(row.mem_id, row.content, { project_id: 'P1', layer: 'L2' });
+    }
+    const r = await runForgettingCycle(storage, NOW, { weeklyCompress: true, vector });
+    expect(r.compressed).toBe(3);
+    expect((await storage.getMemory('x3'))?.compressed_at).toBeUndefined();
+    expect((await storage.getMemory('x4'))?.compressed_at).toBeUndefined();
+    const probe = embedSync('row 0', vector.dim);
+    expect((await vector.search(probe, 10, {})).map((h) => h.mem_id).sort()).toEqual(['x3', 'x4']);
   });
 });

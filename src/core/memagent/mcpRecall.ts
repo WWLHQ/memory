@@ -13,16 +13,20 @@ import {
 /** 批次32-C：聊天窗口明细档位（HTML 折叠 / 纯 Markdown 四小节 / 短摘要 + 按需展开） */
 export type RecallDisplayMode = 'html-details' | 'markdown-full' | 'markdown-compact';
 
-/**
- * 客户端能否渲染 HTML <details>：白名单只收**实测渲染过折叠块**的客户端（批次13 Qoder CN）。
- * fail-safe：未知客户端（dsh-mcp-client / zcode / 无 clientInfo 的 TCP 等）一律不走 HTML 档。
- * DSH 两次实测都不渲染：批次29 的 2026-10-31 截图 + 批次33 的 2026-11-01 09:33 实机复读
- * （<details>/<summary> 原样露出成文本）→ 它的「点开才看明细」改用本机明细页链接（批次33-C）。
- */
+/** 批次41-Q：白名单——首段命中即给 HTML <details> 折叠档。
+ *  `qoder` = Qoder CN IDE/CLI 自报名（批次13 实测渲染过折叠块）；
+ *  `qoder-desktop-mcp-host` = Qoder Desktop 的 MCP 宿主自报名（本机 2026-11-04 实测 recall 审计里
+ *  出现的就是这一条，原先「精确等于 `qoder`」的判据把它挡在门外 → `html-details` 档在该机从未生效，
+ *  见 AGENTS §1.1 / §9 批次29 校正）。
+ *  fail-safe：其余客户端一律不走 HTML 档——DSH 两次实测都不渲染 `<details>`（批次29 2026-10-31 截图
+ *  + 批次33 2026-11-01 09:33 实机复读，标签原样露成文本，其「点开才看明细」改用本机明细页链接 33-C）；
+ *  dsh-mcp-client / zcode / 无 clientInfo 的 TCP / `unknown` 同理。 */
+const HTML_DETAILS_CLIENT_IDS = new Set(['qoder', 'qoder-desktop-mcp-host']);
+
 export function clientSupportsHtmlDetails(client?: string): boolean {
   if (!client) return false;
   const name = client.split('/')[0].trim().toLowerCase();
-  return name === 'qoder';
+  return HTML_DETAILS_CLIENT_IDS.has(name);
 }
 
 /** 参数快照专用项目（pinned preference，非用户项目；不参与项目定位/列表） */

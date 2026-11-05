@@ -56,6 +56,25 @@ export function clientFromUserAgent(ua: string | undefined): string {
   return hit ? `${hit[1]} (UA)` : 'unknown';
 }
 
+/**
+ * 批次41-S（方案 A）：UA 是否「有辨识度」——能否据它把「同 UA 最近一次 initialize 的自报名」
+ * 归给当前这次调用。通用运行时 UA 一律判否：Node/Electron 的 fetch 默认发字面量 `node`，
+ * curl、Python-urllib 等也是多客户端共用的运行时标识，凭它们归并身份会把甲客户端的调用
+ * 记成乙客户端的自报名（本机 2026-11-04 实测串号，见 AGENTS §9 批次41-S）。
+ * 命中下方前缀/相等即判否；含可识别厂商词（见 `clientFromUserAgent`）的一律判是。
+ */
+export function isIdentifiableUserAgent(ua: string | undefined): boolean {
+  if (!ua) return false;
+  const low = ua.trim().toLowerCase();
+  if (!low) return false;
+  // 明确无辨识度的通用运行时 UA：不相等/不前缀命中即视为有辨识度
+  if (low === 'node') return false;
+  const genericPrefixes = ['curl/', 'python-urllib/', 'wget/', 'go-http-client/', 'okhttp/', 'java/', 'axios/'];
+  if (genericPrefixes.some((p) => low.startsWith(p))) return false;
+  // 能认出具体客户端的 UA（含厂商词）保留；其余未知 UA 不作跨请求归并依据（fail-safe）
+  return clientFromUserAgent(low) !== 'unknown';
+}
+
 
 export interface McpHttpOptions {
   storage?: StorageBackend;
@@ -336,12 +355,16 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
             const selfId = clientFromInitialize(params);
             if (selfId) {
               remember(clientBySession, sid, selfId);
-              if (ua) remember(clientByUa, ua, selfId);
+              // 批次41-S：只有「有辨识度」的 UA 才登记到跨请求归并表——通用 UA（node/curl/…）
+              // 登记进去会把自己变成「最近一次 initialize」的抢到名字的那条，串号源头就在这。
+              if (ua && isIdentifiableUserAgent(ua)) remember(clientByUa, ua, selfId);
             }
             res.setHeader('Mcp-Session-Id', sid);
           }
+          // 批次41-S：取值顺序 会话头 → （仅有辨识度时）同 UA 最近一次 initialize → UA 识别。
+          // 通用 UA 直接跳到 clientFromUserAgent → unknown，不再借用别人的自报名。
           const client = clientBySession.get(incomingSid)
-            ?? (ua ? clientByUa.get(ua) : undefined)
+            ?? (ua && isIdentifiableUserAgent(ua) ? clientByUa.get(ua) : undefined)
             ?? clientFromUserAgent(ua);
           const rpcResp = await handleRpc(payload, client);
           res.writeHead(200, { 'Content-Type': 'application/json' });

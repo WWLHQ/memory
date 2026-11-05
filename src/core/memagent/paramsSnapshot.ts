@@ -7,7 +7,7 @@ export const PARAMS_PREF_PREFIX = 'params:v1:';
 export interface ParamsSnapshot {
   cfg: {
     auto_organize?: boolean;
-    /** 成本单价（¥ / 百万 token）；缺省/非法 = 未设置（旧快照兼容，不显示金额） */
+    /** 成本单价（¥ / 百万预算单位 t）；缺省/非法 = 未设置（旧快照兼容，不显示金额） */
     cost_cny_per_mtok?: number | null;
     [key: string]: unknown;
   };

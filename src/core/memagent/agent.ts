@@ -163,8 +163,17 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
       background,
       savings,
     };
+    // 阶段4-I / B8：把真实可采的监控字段写进审计 detail（监控页与审计页据此实算，历史缺字段的行不计入）。
+    //  · evidence_thin：2.4.3 逃生阀的真实结果（undefined = 未触发，落 false，不拿「无字段」冒充 false 之外的语义）；
+    //  · latency_ms：本次召回的真实墙钟耗时（业务侧，含 embed/扫描/打分/裁剪，不含审计写入本身）；
+    //  · pipeline_llm_tokens：RecallResult 的诚实值（当前恒 0 —— 召回管线不调用 LLM，网关真实 usage 未接入）；
+    //    监控页不得拿这些 0 算 p95 冒充「已接通」，见 useMonitorReal.ts 的未采集说明。
+    const latency_ms = Date.now() - now;
     await audit(request_id, 'recall', {
       query: req.query, hits: hits.length, payload_tokens, scene, mode: result.mode,
+      evidence_thin: evidence_thin ?? false,
+      latency_ms,
+      pipeline_llm_tokens: result.pipeline_llm_tokens,
       // 批次15：区分是哪个 Agent 真的调用了召回（未识别时不写，避免伪归属）
       ...(req.client ? { client: req.client } : {}),
       mems: hits.map((h) => h.mem_id),
@@ -252,13 +261,15 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
 
   async function sync(req: SyncReq): Promise<SyncReport> {
     const request_id = newRequestId();
-    // 云端同步本版本未实现（syncUp/syncDown/SyncHub 无生产调用方）。
-    // 禁止用本地条数伪造 pushed/pulled 成功 —— 明确报未实现并审计留痕。
+    // 诚实边界（阶段4-H）：**同步引擎已实现且有集成测试** —— sync.ts 的 SyncHub /
+    // syncUp / syncDown / reconcile，以及 pgSyncHub.ts 的 Postgres 中枢落地；
+    // 但它们**尚未接入内核 API 与桌面主进程**（MemAgent 无 hub 注入口、主进程零调用方）。
+    // 因此本 API 如实报「未接入」，绝不拿本地条数或内存中枢伪造 pushed/pulled 云端同步成功。
     await audit(request_id, 'sync', {
       direction: req.direction, project_id: req.project_id,
-      implemented: false, reason: 'cloud sync not implemented in this version',
+      implemented: false, reason: 'sync engine implemented but not wired into kernel API / desktop main process',
     });
-    throw new MemAgentError('E_NOT_IMPLEMENTED', '云端同步未实现（本版本不提供云端同步）', {
+    throw new MemAgentError('E_NOT_IMPLEMENTED', '云端同步未接入内核 API：同步引擎已实现，但本版本未装配同步中枢（§REQ-008）', {
       direction: req.direction, project_id: req.project_id, request_id,
     });
   }
@@ -346,10 +357,11 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
     return mem;
   }
 
-  // ─── L0 授权与会话（§4.4）：委托端壳 L0AdminPort；未接线显式 E_NOT_IMPLEMENTED ───
+  // ─── L0 授权与会话（§4.4）：桌面壳经 kernel.hostL0Ports() 真注入 HostL0Admin（主进程 L0Vault IPC）；
+  //      仅当纯浏览器 / 测试未提供端口时才 E_NOT_IMPLEMENTED —— 这是诚实降级，不是功能缺失。 ───
   function l0Admin(): L0AdminPort {
     if (!opts.l0Admin) {
-      throw new MemAgentError('E_NOT_IMPLEMENTED', 'L0 授权管理未接线：仅桌面端主进程提供（§4.4）');
+      throw new MemAgentError('E_NOT_IMPLEMENTED', 'L0 授权端口未注入：桌面壳由主进程 L0Vault 提供，纯浏览器不提供（§4.4）');
     }
     return opts.l0Admin;
   }
@@ -405,6 +417,7 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
     l0RequestAccess, l0ListRequests, l0ListGrants, l0GrantAccess, l0DenyRequest, l0RevokeGrant,
     l0Unlock, l0Heartbeat, l0Lock, l0UnlockWrite, l0LockWrite, l0Status,
     l0SetupAdminPassword, l0ChangeAdminPassword, l0Migrate,
+    // 测试专用钩子（批次27 P3-1：已移出公开 MemAgent 接口）—— 仅测试灌数，页面代码不得调用
     _seedMemory: seedMemory, _memoryOp: memoryOp, _feedback: feedback,
   };
 }

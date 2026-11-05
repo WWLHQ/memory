@@ -2,7 +2,7 @@
 // 批次33-C 追加：一次性召回明细页（GET /recall/<id>）的可点、失效与 Origin/Host 闸门。
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { request } from 'node:http';
-import { runMcpHttpServer, type McpHttpHandle } from '../mcpHttp.ts';
+import { runMcpHttpServer, isIdentifiableUserAgent, type McpHttpHandle } from '../mcpHttp.ts';
 import { InMemoryStorage } from '../storage.ts';
 import type { L0Vault } from '../l0vault.ts';
 import { createTestVault } from './l0Kit.ts';
@@ -315,7 +315,7 @@ describe('MCP HTTP（批次2 信任边界）', () => {
     expect(body.result.content[3].text).toContain('detail=true 的明细返回');
   });
 
-  it('配置单价后 recall → 金额可核算（¥/百万 token）', async () => {
+  it('配置单价后 recall → 金额可核算（¥/百万预算单位 t · 估算）', async () => {
     const now = Date.now();
     await storage.putMemory({
       mem_id: 'mem_params_price', project_id: 'P_SYSTEM', user_id: 'system',
@@ -361,7 +361,8 @@ describe('MCP HTTP（批次2 信任边界）', () => {
       { Authorization: `Bearer ${TOKEN}` },
     );
     const fullBody = (await full.json()) as { result: { structuredContent: { display: { markdown: string } } } };
-    expect(fullBody.result.structuredContent.display.markdown).toContain('单价：¥10/百万 token（用户在全局参数页设置，非厂商账单）');
+    expect(fullBody.result.structuredContent.display.markdown).toContain('单价：¥10/百万预算单位 t（用户在全局参数页设置，非厂商账单）');
+    expect(fullBody.result.structuredContent.display.markdown).toContain('金额口径：本地预算单位 t');
     expect(fullBody.result.structuredContent.display.markdown).toContain('今日');
     expect(fullBody.result.structuredContent.display.markdown).toContain('全部');
   });
@@ -427,6 +428,45 @@ describe('MCP HTTP（批次2 信任边界）', () => {
     expect((byUa[0].detail as { client?: string }).client).toBe('Cursor (UA)');
   });
 
+  it('批次41-S：通用 UA（node）不做跨请求身份归并——甲客户端 initialize 不污染乙客户端的审计归属', async () => {
+    // ① 甲客户端：以 UA `node` 做 initialize 并自报 verify-contam；因 UA 无辨识度，不得进 clientByUa
+    const init = await call(
+      { jsonrpc: '2.0', id: 120, method: 'initialize', params: { clientInfo: { name: 'verify-contam', version: '0.0.1' } } },
+      { Authorization: `Bearer ${TOKEN}`, 'User-Agent': 'node' },
+    );
+    expect(init.status).toBe(200);
+    // 甲自己的会话头仍可信（clientBySession 不受本修法影响）
+    const sid = init.headers.get('mcp-session-id');
+    expect(sid).toBeTruthy();
+
+    // ② 乙客户端：同样 UA `node`，不带会话头调 recall——修复前会读到 clientByUa['node']=verify-contam（串号）
+    await call(
+      { jsonrpc: '2.0', id: 121, method: 'tools/call', params: { name: 'recall_memory', arguments: { project_id: 'P1', query: '批次41-S 串号-乙' } } },
+      { Authorization: `Bearer ${TOKEN}`, 'User-Agent': 'node' },
+    );
+    const byVictim = (await storage.queryAudit({ action: 'recall' }))
+      .filter((a) => (a.detail as { query?: string }).query === '批次41-S 串号-乙');
+    expect(byVictim).toHaveLength(1);
+    // 修复后：通用 UA 一律 unknown，绝不借用甲的自报名
+    expect((byVictim[0].detail as { client?: string }).client).toBe('unknown');
+
+    // ③ 有辨识度的 UA 仍走「同 UA 最近一次 initialize」归并（不回归批次15 能力）
+    const identInit = await call(
+      { jsonrpc: '2.0', id: 122, method: 'initialize', params: { clientInfo: { name: 'Cursor', version: '1.2.3' } } },
+      { Authorization: `Bearer ${TOKEN}`, 'User-Agent': 'cursor-desktop/2.0' },
+    );
+    expect(identInit.status).toBe(200);
+    await call(
+      { jsonrpc: '2.0', id: 123, method: 'tools/call', params: { name: 'recall_memory', arguments: { project_id: 'P1', query: '批次41-S 归并-有辨识度' } } },
+      { Authorization: `Bearer ${TOKEN}`, 'User-Agent': 'cursor-desktop/2.0' },
+    );
+    const byIdentifiable = (await storage.queryAudit({ action: 'recall' }))
+      .filter((a) => (a.detail as { query?: string }).query === '批次41-S 归并-有辨识度');
+    expect(byIdentifiable).toHaveLength(1);
+    // clientByUa['cursor-desktop/2.0'] = 'Cursor/1.2.3'（initialize 自报），不带会话头也归并对
+    expect((byIdentifiable[0].detail as { client?: string }).client).toBe('Cursor/1.2.3');
+  });
+
   it('tools/call 非法 category → isError（不静默落 pitfall）', async () => {
     const r = await call(
       {
@@ -481,5 +521,26 @@ describe('批次41-R：明细页查看回调 onViewDetail 只回 outcome', () =>
     expect(seen).toEqual(['ok', 'miss']);
     // 回调值域只有这两个字面量——一次性 id 与页面正文都不出这道口
     expect(seen.every((s) => s === 'ok' || s === 'miss')).toBe(true);
+  });
+});
+
+// 批次41-S（方案 A）：通用运行时 UA 不作跨请求身份归并依据。串号的源头是 clientByUa 被
+// 一次 initialize 抢注；这里钉住「哪些 UA 有辨识度」这条判据本身。
+describe('isIdentifiableUserAgent（批次41-S 串号闸门）', () => {
+  it('通用 UA 判否：node / curl / python-urllib / 空 / 未知都不借用别人的自报名', () => {
+    expect(isIdentifiableUserAgent('node')).toBe(false);
+    expect(isIdentifiableUserAgent('Node')).toBe(false);
+    expect(isIdentifiableUserAgent('  node  ')).toBe(false);
+    expect(isIdentifiableUserAgent('curl/8.4.0')).toBe(false);
+    expect(isIdentifiableUserAgent('python-urllib/3.12')).toBe(false);
+    expect(isIdentifiableUserAgent('')).toBe(false);
+    expect(isIdentifiableUserAgent(undefined)).toBe(false);
+    // 认不出具体客户端的未知 UA 一律 fail-safe（不识别 = 不归并）
+    expect(isIdentifiableUserAgent('MyInternalAgent/1.0')).toBe(false);
+  });
+  it('有辨识度的 UA 判是：含可识别厂商词，仍可据同 UA 最近一次 initialize 归并', () => {
+    expect(isIdentifiableUserAgent('cursor-desktop/2.0')).toBe(true);
+    expect(isIdentifiableUserAgent('claude-code/1.2')).toBe(true);
+    expect(isIdentifiableUserAgent('qoder-cn/9.9.9')).toBe(true);
   });
 });

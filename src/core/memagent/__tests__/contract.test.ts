@@ -139,7 +139,7 @@ describe('§8 契约级验收', () => {
     expect(Object.keys(r2.layers ?? {})).toEqual(['content_l1']);
   });
 
-  it('gc 单一衰减引擎（17.7 固定天数）+ locked/pinned 豁免；sync 未接线 → E_NOT_IMPLEMENTED', async () => {
+  it('gc 单一衰减引擎（17.7 固定天数）+ locked/pinned 豁免；sync 未接入 API 层 → E_NOT_IMPLEMENTED', async () => {
     const ma = makeAgent();
     const DAY = 24 * 3600 * 1000;
     // hot >3 天 → warm（D5：coreGc 与 forgetting.classifyLayer 同一引擎，按 created_at 固定天数）
@@ -154,7 +154,7 @@ describe('§8 契约级验收', () => {
     const after = await ma.gc({ project_id: 'P1' });
     expect(after.decayed).toBe(0);
     expect(m1.mem_id).toBeTruthy();
-    // 同步中枢未接线 → 诚实报 E_NOT_IMPLEMENTED（绝不伪造 pushed/pulled 成功）
+    // 同步引擎已实现但未接入 agent.sync → 诚实报 E_NOT_IMPLEMENTED（绝不伪造 pushed/pulled 成功）
     await ma._seedMemory({ content: 'conflicted memory', category: 'fact', project_id: 'P2', conflict_id: 'cf1' });
     await expect(ma.sync({ direction: 'push', project_id: 'P2' })).rejects.toMatchObject({ code: 'E_NOT_IMPLEMENTED' });
   });

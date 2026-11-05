@@ -3,7 +3,7 @@
 import { ulid } from './ulid.ts';
 import { checkL0ToL1Quality, QUALITY_GATE_VERSION } from './qualityGate.ts';
 import { layerSpecOf } from './layerRules.ts';
-import { DEFAULT_VECTOR_DIM, embedSync } from './vector.ts';
+import { DEFAULT_VECTOR_DIM, cosine, embedSync } from './vector.ts';
 import { sha256hex } from './sync.ts';
 import type {
   AuditAction, AuditRecord, Category, DecayClass, Memory, StorageBackend, VectorBackend,
@@ -213,6 +213,7 @@ export interface ForgettingCycleReport {
   /** 批次10：被 L0→L1 质量门拦下的合并组数（原文保持原状） */
   summaries_filtered: number;
   merged_originals: number;
+  /** 本轮真实清掉向量索引副本并写回的冷层行数（无 vector 后端时为 0；7 天内对同一行幂等） */
   compressed: number;
   request_id: string;
 }
@@ -231,8 +232,49 @@ export interface ForgettingOptions {
 }
 
 /**
+ * 17.9「相似」判据：同行语义向量的余弦相似度阈值。
+ * hash bag-of-words 起步向量下同主题碎片通常 ≥0.8，取 0.75 留出分词/浮点余量；
+ * 与 15.3 冷层补查阈值 0.85 同族但更宽松——合并针对同主题碎片，不是精确召回。
+ * 聚合产物仍要过 buildSummary 的 L0→L1 质量门，噪声不会因此被写进账本。
+ */
+export const MERGE_SIM_THRESHOLD = 0.75;
+
+/** 行上向量优先；历史行缺向量时按 L1 正文现算（纯函数、不落盘，维度与写入路径一致） */
+function vectorOf(m: Memory): number[] {
+  if (m.embedding && m.embedding.length > 0) return m.embedding;
+  return embedSync(m.content_l1 ?? m.content, DEFAULT_VECTOR_DIM);
+}
+
+/**
+ * 17.9 重复识别：桶内按语义相似度聚类。以簇种子为中心做单遍贪心（不做链式传递，
+ * 避免 A~B、B~C 但 A≁C 时被串成一组造成语义漂移）；按 mem_id 排序保证结果可复现。
+ * 零向量（无正文历史行）与任何向量相似度都是 0，不会被误并。
+ */
+export function clusterSimilar(mems: Memory[], threshold = MERGE_SIM_THRESHOLD): Memory[][] {
+  const sorted = [...mems].sort((a, b) => a.mem_id.localeCompare(b.mem_id));
+  const vectors = new Map(sorted.map((m) => [m.mem_id, vectorOf(m)]));
+  const used = new Set<string>();
+  const clusters: Memory[][] = [];
+  for (const seed of sorted) {
+    if (used.has(seed.mem_id)) continue;
+    const seedVec = vectors.get(seed.mem_id)!;
+    const cluster = [seed];
+    used.add(seed.mem_id);
+    for (const m of sorted) {
+      if (used.has(m.mem_id)) continue;
+      if (cosine(seedVec, vectors.get(m.mem_id)!) >= threshold) {
+        cluster.push(m);
+        used.add(m.mem_id);
+      }
+    }
+    clusters.push(cluster);
+  }
+  return clusters;
+}
+
+/**
  * 17.10 一轮生命周期任务：新鲜度计算 → 层迁移 → 重复识别合并 → 冷压缩。
- * 不阻塞用户交互（纯同步内存操作，演示级）；锁定项跳过；结果全审计。
+ * 不阻塞用户交互（纯内存计算 + 账本写回，不调用 LLM）；锁定项跳过；结果全审计。
  */
 export async function runForgettingCycle(
   storage: StorageBackend,
@@ -261,44 +303,59 @@ export async function runForgettingCycle(
     }
   }
 
-  // 2) 重复识别合并（17.9：同 category 相似 ≥3 → 摘要；演示用内容前缀聚类）
-  // 分组键必须含租户/团队/项目：只按 category+内容前缀分组会把不同项目、甚至不同租户的记忆
-  // 合成一条摘要（摘要继承首条归属），造成跨项目串档。auto_merge=false 的类别不自动合并
+  // 2) 重复识别合并（17.9：同实体/主题「相似」≥3 → 摘要）
+  // 批次42 阶段4：原按内容前 8 字符分组只是字符串前缀近似 —— 前缀相同但主题无关的行会被
+  // 硬凑成一组，同主题换措辞的行又永远聚不到一起。现按行上语义向量的余弦相似度聚类（clusterSimilar）。
+  // 分桶键必须含租户/团队/项目/类别：跨归属绝不合并（摘要继承首条归属，混组会串档），
+  // buildSummary 内还有一道同归属二次校验。auto_merge=false 的类别不自动合并
   //（17.6；'cautious' 暂按不自动合并处理，需人工确认）。
   const live = (await storage.listMemories({})).filter((m) => !m.merged_into && !m.locked);
-  const groups = new Map<string, Memory[]>();
+  const buckets = new Map<string, Memory[]>();
   for (const m of live) {
     if (policyFor(m.category).auto_merge !== true) continue;
-    const key = [m.enterprise_id, m.team_id, m.project_id, m.category, m.content.slice(0, 8)].join('\u0000');
-    groups.set(key, [...(groups.get(key) ?? []), m]);
+    const key = [m.enterprise_id, m.team_id, m.project_id, m.category].join('\u0000');
+    buckets.set(key, [...(buckets.get(key) ?? []), m]);
   }
   const filterReasons: string[] = [];
-  for (const group of groups.values()) {
-    const built = buildSummary(group, now);
-    if (!built) continue;
-    if (!built.ok) {
-      report.summaries_filtered++;
-      filterReasons.push(built.reason);
-      continue;
+  for (const bucket of buckets.values()) {
+    for (const group of clusterSimilar(bucket)) {
+      if (group.length < 3) continue; // 17.9 触发条件：≥3 条相似
+      const built = buildSummary(group, now);
+      if (!built) continue;
+      if (!built.ok) {
+        report.summaries_filtered++;
+        filterReasons.push(built.reason);
+        continue;
+      }
+      await storage.putMemory(built.summary);
+      // 批次41-B：摘要行也要进向量索引（与 memories.ts 写入路径同口径：按 content_l1 建索引）
+      if (opts.vector) {
+        await opts.vector.upsert(built.summary.mem_id, built.summary.content_l1!, {
+          project_id: built.summary.project_id, layer: 'L1',
+        });
+      }
+      for (const o of built.originals) await storage.putMemory(o);
+      report.summaries_created++;
+      report.merged_originals += built.originals.length;
     }
-    await storage.putMemory(built.summary);
-    // 批次41-B：摘要行也要进向量索引（与 memories.ts 写入路径同口径：按 content_l1 建索引）
-    if (opts.vector) {
-      await opts.vector.upsert(built.summary.mem_id, built.summary.content_l1!, {
-        project_id: built.summary.project_id, layer: 'L1',
-      });
-    }
-    for (const o of built.originals) await storage.putMemory(o);
-    report.summaries_created++;
-    report.merged_originals += built.originals.length;
   }
 
-  // 3) 冷压缩（17.10 每周；演示 = cold/archived/dormant 计数）
-  if (opts.weeklyCompress) {
+  // 3) 冷压缩（17.10 每周）：真实移除冷层在向量索引里的副本，降低索引内存占用。
+  // 行上 embedding 一律保留 —— agent.ts 冷层补查读行上向量（§2.2 不变量 7「向量源自 L1」），
+  // fieldBackfill（41-T）还会把缺向量的行判「缺失」并回填；清行上向量等于制造假删 + 反复回填。
+  // 磁盘正文压缩（L0 分库 / 冷表折叠）尚未落地，此处不假装做了：见 specs/demo-data-baseline.md。
+  // 只有给了 vector 后端才有可压缩对象；没后端时 compressed 诚实为 0，不拿冷层行数冒充成绩。
+  if (opts.weeklyCompress && opts.vector) {
     const colds = (await storage.listMemories({})).filter(
       (m) => m.decay_class === 'cold' || m.decay_class === 'archived' || m.decay_class === 'dormant',
     );
-    report.compressed = colds.length;
+    for (const m of colds) {
+      // 幂等：7 天内已压过的行不重复 remove / 不重复计数 / 不重复写回（与每周调度同频）
+      if (m.compressed_at !== undefined && now - m.compressed_at < 7 * DAY) continue;
+      await opts.vector.remove(m.mem_id);
+      await storage.putMemory({ ...m, compressed_at: now, version: m.version + 1 });
+      report.compressed++;
+    }
   }
 
   await auditWrite(storage, request_id, 'gc', {

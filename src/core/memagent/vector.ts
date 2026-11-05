@@ -1,5 +1,7 @@
-// VectorBackend（§5.2）：JsVectorBackend 起步实现（hash bag-of-words + cosine）；
-// RustWasmVectorBackend 为性能层，接口同构、切换无感（19.11 结论 2）—— 契约级用 JS 实现演示可替换性。
+// VectorBackend（§5.2）当前唯一生产实现：JsVectorBackend（hash bag-of-words + cosine）。
+// 接口可插拔，但规格 §5.2 / 19.11 结论 2 规划的 Rust/WASM 性能层尚未实现，不得写成现状。
+// 这是内存里的可丢弃索引（进程重启为空，由写入/补炼/重建路径按需 upsert）；语义召回的真依据是
+// 行上 embedding（§2.2 不变量 7），索引缺失不等于知识缺失 —— 冷压缩可安全清掉冷层副本。
 import { MemAgentError } from './errors.ts';
 import type { Filter, Scored, VectorBackend } from './types.ts';
 
@@ -66,7 +68,8 @@ export class JsVectorBackend implements VectorBackend {
     }
   }
 
-  /** 建索引：内核在 write 后调用（演示用内存倒排） */
+  /** 建索引：内核在 write 后调用。按 mem_id 存 (向量, filter)，search 时全表 cosine 扫描后排序取 top-k；
+   *  不是倒排索引，也不持久化（可丢弃索引，见文件头说明）。 */
   async upsert(mem_id: string, text: string, filter: Filter): Promise<void> {
     this.index.set(mem_id, { vec: embedSync(text, this.dim), filter });
   }

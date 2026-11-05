@@ -5,8 +5,16 @@ import type {
   AuditRecord, Category, Hit, Memory, RecallBackground, RecallBackgroundItem, RecallResult, RecallSavings,
 } from './types.ts';
 
-/** 粗略 token 估算（契约级演示：≈ chars/2，与召回预算同一口径） */
-export const estTokens = (s: string) => Math.ceil(s.length / 2);
+/**
+ * 本地预算单位 t 的确定性换算：全链路同源 —— 召回硬熔断裁剪（agent.ts）、背景选入、
+ * 省量核算、金额换算都读它。**不是 LLM tokenizer 的 token 数**，也未接入网关真实 usage。
+ * 已知限制：中文按「2 字 1t」会低估真实 BPE 分词（常见汉字约 1 字 1–2 token），
+ * 因此 3000t 是项目内预算刻度，不代表真实上下文长度；真实用量应以网关 usage 为准。
+ * 改这个口径会同时改变新写入的 payload_tokens 与历史审计的统计含义，必须整体迁移，
+ * 不得只改本函数（见 specs/MANUAL-TEST-FIX-BATCH-42.md §9）。
+ */
+export const CHARS_PER_BUDGET_UNIT = 2;
+export const estTokens = (s: string): number => Math.ceil(s.length / CHARS_PER_BUDGET_UNIT);
 
 /** 项目背景上限：最多 5 条、单条 160 字、合计 300t（且不得挤占 payload 硬熔断余量） */
 export const BACKGROUND_MAX_ITEMS = 5;
@@ -112,6 +120,11 @@ export interface RecallMoneyBlock {
   legacy_calls: number;
 }
 
+/**
+ * 阶段5-F：金额是**估算**，不是账单。
+ * 口径 = 本地预算单位 t（estTokens = 字符数 / CHARS_PER_BUDGET_UNIT）× 用户在全局参数页自设的单价；
+ * 未接入网关真实 usage，且中文按「2 字 1t」会低估真实 BPE。UI 必须带「估算」字样，不得显示成真实扣费。
+ */
 export interface RecallMoney {
   unit_price_cny_per_mtok: number;
   this_call: { injected_tokens: number; cost_cny: number; saved_cny: number };
@@ -215,8 +228,8 @@ export function buildRecallHint(
   /** 批次33-C 折叠档第二行：本次花费/省额 + 今日/全部次数（今日/全部的金额明细挪到本机明细页，仍同源） */
   let moneyShort: string;
   if (price === null) {
-    moneyPart = '💰 金额未开：未设置单价（全局参数页可设 ¥/百万 token）';
-    moneyShort = `💰 金额未开（参数页可设 ¥/百万 token） ｜ 今日 ${rollup.today_calls} 次 ｜ 全部 ${rollup.all_calls} 次`;
+    moneyPart = '💰 金额未开：未设置单价（全局参数页可设 ¥/百万预算单位 t；金额按本地预算单位估算）';
+    moneyShort = `💰 金额未开（参数页可设 ¥/百万预算单位 t） ｜ 今日 ${rollup.today_calls} 次 ｜ 全部 ${rollup.all_calls} 次`;
   } else {
     money = {
       unit_price_cny_per_mtok: price,
@@ -238,10 +251,10 @@ export function buildRecallHint(
         legacy_calls: rollup.all_legacy_calls,
       },
     };
-    moneyPart = `💰 本次 ${formatCny(money.this_call.cost_cny)}（省 ${formatCny(money.this_call.saved_cny)}）`
+    moneyPart = `💰 金额估算（本地预算单位 t × 单价）：本次 ${formatCny(money.this_call.cost_cny)}（省 ${formatCny(money.this_call.saved_cny)}）`
       + ` ｜ 今日 ${rollup.today_calls} 次 ${formatCny(money.today.cost_cny)}（省 ${formatCny(money.today.saved_cny)}）`
       + ` ｜ 全部 ${rollup.all_calls} 次 ${formatCny(money.all.cost_cny)}（省 ${formatCny(money.all.saved_cny)}）`;
-    moneyShort = `💰 本次 ${formatCny(money.this_call.cost_cny)}（省 ${formatCny(money.this_call.saved_cny)}）`
+    moneyShort = `💰 估算 本次 ${formatCny(money.this_call.cost_cny)}（省 ${formatCny(money.this_call.saved_cny)}）`
       + ` ｜ 今日 ${rollup.today_calls} 次 ｜ 全部 ${rollup.all_calls} 次`;
     if (rollup.today_legacy_calls > 0) {
       warnings.push(`⚠ 今日含 ${rollup.today_legacy_calls} 次旧记录（无省量字段，金额按载荷下限计）`);
@@ -319,14 +332,15 @@ export function buildRecallSections(
 
   const saveLines: string[] = [];
   if (price === null || money === null) {
-    saveLines.push(`本次省：${fmtInt(t.saved_tokens)}t（金额未开：未设置单价，全局参数页可设 ¥/百万 token）`);
+    saveLines.push(`本次省：${fmtInt(t.saved_tokens)}t（金额未开：未设置单价，全局参数页可设 ¥/百万预算单位 t）`);
     saveLines.push(`今日：${r.today_calls} 次，省 ${fmtInt(r.today_saved_tokens)}t`);
     saveLines.push(`全部：${r.all_calls} 次，省 ${fmtInt(r.all_saved_tokens)}t`);
   } else {
-    saveLines.push(`本次：花费 ${formatCny(money.this_call.cost_cny)}（省 ${formatCny(money.this_call.saved_cny)}；省 ${fmtInt(t.saved_tokens)}t）`);
-    saveLines.push(`今日：${r.today_calls} 次，花费 ${formatCny(money.today.cost_cny)}（省 ${formatCny(money.today.saved_cny)}）`);
-    saveLines.push(`全部：${r.all_calls} 次，花费 ${formatCny(money.all.cost_cny)}（省 ${formatCny(money.all.saved_cny)}）`);
-    saveLines.push(`单价：${formatCny(price)}/百万 token（用户在全局参数页设置，非厂商账单）`);
+    saveLines.push(`本次：估算花费 ${formatCny(money.this_call.cost_cny)}（省 ${formatCny(money.this_call.saved_cny)}；省 ${fmtInt(t.saved_tokens)}t）`);
+    saveLines.push(`今日：${r.today_calls} 次，估算花费 ${formatCny(money.today.cost_cny)}（省 ${formatCny(money.today.saved_cny)}）`);
+    saveLines.push(`全部：${r.all_calls} 次，估算花费 ${formatCny(money.all.cost_cny)}（省 ${formatCny(money.all.saved_cny)}）`);
+    saveLines.push(`单价：${formatCny(price)}/百万预算单位 t（用户在全局参数页设置，非厂商账单）`);
+    saveLines.push('金额口径：本地预算单位 t（estTokens = 字符数 / CHARS_PER_BUDGET_UNIT）× 单价，为估算值，不是网关真实 usage 账单。');
   }
   if (r.today_legacy_calls > 0) {
     saveLines.push(`今日含 ${r.today_legacy_calls} 次旧记录（无省量字段，金额按载荷下限计）`);

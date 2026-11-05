@@ -164,7 +164,7 @@ describe('rollupRecalls / 金额（批次11）', () => {
     expect(hint.line).toContain('全部 2 次');
     expect(hint.line).not.toContain('\n');
     expect(hint.money).not.toBeNull();
-    // 10 元/百万 token：本次注入 102t → 0.00102 → ¥0.00102（6 位）
+    // 10 元/百万预算单位 t：本次注入 102t → 0.00102 → ¥0.00102（6 位，估算值）
     expect(hint.money!.this_call.cost_cny).toBeCloseTo(0.00102, 10);
     expect(hint.money!.today.cost_cny).toBeCloseTo(0.009, 10); // 900t
     expect(hint.money!.today.saved_cny).toBeCloseTo(0.05, 10); // 5000t
@@ -313,10 +313,11 @@ describe('buildRecallMarkdown（批次13）', () => {
     const r = recallResult();
     const hint = buildRecallHint(r, none(), 10);
     const md = buildRecallMarkdown(r, hint, 10);
-    expect(md).toContain('本次：花费 ¥0.00102（省 ¥0.099；省 9,898t）');
-    expect(md).toContain('今日：0 次，花费 ¥0（省 ¥0）');
-    expect(md).toContain('全部：0 次，花费 ¥0（省 ¥0）');
-    expect(md).toContain('单价：¥10/百万 token');
+    expect(md).toContain('本次：估算花费 ¥0.00102（省 ¥0.099；省 9,898t）');
+    expect(md).toContain('今日：0 次，估算花费 ¥0（省 ¥0）');
+    expect(md).toContain('全部：0 次，估算花费 ¥0（省 ¥0）');
+    expect(md).toContain('单价：¥10/百万预算单位 t');
+    expect(md).toContain('金额口径：本地预算单位 t');
   });
 
   it('记忆内容含尖括号与 & → 转义，不破坏折叠结构', () => {
@@ -392,7 +393,7 @@ describe('buildRecallCompactMarkdown + recallDisplayMode（批次32-C/33-C 默�
     expect(rows[0]).toContain('🧠 Memory');
     expect(rows[0]).toContain('命中 2 条（100t）');
     expect(rows[0]).not.toContain('💰'); // 金额只在第二行，避免第一行过长换行
-    expect(rows[1]).toBe('💰 金额未开（参数页可设 ¥/百万 token） ｜ 今日 0 次 ｜ 全部 0 次');
+    expect(rows[1]).toBe('💰 金额未开（参数页可设 ¥/百万预算单位 t） ｜ 今日 0 次 ｜ 全部 0 次');
     // 完整提示行仍是单行（HTML 折叠档 / detail=true 档用）
     expect(hint.line).not.toContain('\n');
   });
@@ -405,7 +406,7 @@ describe('buildRecallCompactMarkdown + recallDisplayMode（批次32-C/33-C 默�
     );
     const hint = buildRecallHint(recallResult(), rollup, 10);
     const rows = hint.shortLine.split('\n');
-    expect(rows[1]).toBe('💰 本次 ¥0.00102（省 ¥0.099） ｜ 今日 1 次 ｜ 全部 1 次');
+    expect(rows[1]).toBe('💰 估算 本次 ¥0.00102（省 ¥0.099） ｜ 今日 1 次 ｜ 全部 1 次');
     // 今日/全部的金额仍在完整提示行里（同源，只是折叠档不占聊天两行）
     expect(hint.line).toContain(`今日 1 次 ${formatCny(rollup.today_injected_tokens * 10 / 1e6)}`);
   });
@@ -445,6 +446,8 @@ describe('buildRecallCompactMarkdown + recallDisplayMode（批次32-C/33-C 默�
   it('档位判定：HTML 客户端恒折叠版；其余默认紧凑、detail=true 才给四小节', () => {
     expect(recallDisplayMode('Qoder/9.9.9', false)).toBe('html-details');
     expect(recallDisplayMode('Qoder/9.9.9', true)).toBe('html-details'); // 已可点开，不必二次调用
+    // 批次41-Q：Qoder Desktop 宿主自报名同样拿折叠版
+    expect(recallDisplayMode('qoder-desktop-mcp-host/1.0.0', false)).toBe('html-details');
     expect(recallDisplayMode('dsh-mcp-client/0.0.1', false)).toBe('markdown-compact');
     expect(recallDisplayMode('dsh-mcp-client/0.0.1', true)).toBe('markdown-full');
     expect(recallDisplayMode(undefined, false)).toBe('markdown-compact'); // TCP/无 clientInfo 保守档
@@ -487,7 +490,7 @@ describe('buildRecallDetailPage + buildRecallSections（批次33-C 本机明细�
     const hint = buildRecallHint(r, none(), null);
     const html = buildRecallDetailPage(r, hint, null, meta());
     expect(html).toContain('<p class="sum">🧠 Memory ｜ 命中 2 条（100t） ｜ 📎 背景 2 条（2t） ｜ ⚡ 本次省 9,898t（全量约 10,000t）</p>');
-    expect(html).toContain('<p class="sum">💰 金额未开（参数页可设 ¥/百万 token） ｜ 今日 0 次 ｜ 全部 0 次</p>');
+    expect(html).toContain('<p class="sum">💰 金额未开（参数页可设 ¥/百万预算单位 t） ｜ 今日 0 次 ｜ 全部 0 次</p>');
     expect(html).toContain('金额未开：未设置单价');
     expect(html).not.toContain('单价：¥');
   });
@@ -513,7 +516,7 @@ describe('buildRecallDetailPage + buildRecallSections（批次33-C 本机明细�
       '💰 省钱与费用（本次省 9,898t）',
     ]);
     expect(sections[1].lines[0]).toBe('[L1/hot] ' + 'a'.repeat(100) + '（相关度 0.90）');
-    expect(sections[3].lines.some((l) => l.startsWith('单价：¥10/百万 token'))).toBe(true); // formatCny 口径
+    expect(sections[3].lines.some((l) => l.startsWith('单价：¥10/百万预算单位 t'))).toBe(true); // formatCny 口径
     const html = buildRecallDetailPage(r, hint, 10, meta());
     for (const s of sections) expect(html).toContain(`<summary>${htmlEscape(s.title)}</summary>`);
     expect(html).toContain('非厂商账单');
@@ -534,12 +537,17 @@ describe('buildRecallDetailPage + buildRecallSections（批次33-C 本机明细�
   });
 });
 
-describe('clientSupportsHtmlDetails（批次29 白名单）', () => {  it('只放行实测渲染 HTML 折叠的 Qoder；未知/无标识一律纯 Markdown（fail-safe）', () => {
+describe('clientSupportsHtmlDetails（批次29 白名单 + 批次41-Q 扩 Qoder Desktop）', () => {  it('放行实测渲染 HTML 折叠的 Qoder CN 与 Qoder Desktop 宿主；未知/无标识一律纯 Markdown（fail-safe）', () => {
     expect(clientSupportsHtmlDetails('Qoder/9.9.9')).toBe(true);
     expect(clientSupportsHtmlDetails('qoder/1.0')).toBe(true);
+    // 批次41-Q：Qoder Desktop 的 MCP 宿主自报名首段是 qoder-desktop-mcp-host，原先精确等于 qoder 挡在门外
+    expect(clientSupportsHtmlDetails('qoder-desktop-mcp-host/1.0.0')).toBe(true);
+    expect(clientSupportsHtmlDetails('Qoder-Desktop-MCP-Host/1.0.0')).toBe(true);
     expect(clientSupportsHtmlDetails('dsh-mcp-client/0.0.1')).toBe(false);
     expect(clientSupportsHtmlDetails('zcode/0.16.9')).toBe(false);
     expect(clientSupportsHtmlDetails('Cursor (UA)')).toBe(false);
+    // 批次41-S 产出的 unknown 不得吃到 HTML 档
+    expect(clientSupportsHtmlDetails('unknown')).toBe(false);
     expect(clientSupportsHtmlDetails(undefined)).toBe(false);
   });
 });

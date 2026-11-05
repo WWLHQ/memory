@@ -2,25 +2,24 @@
 import { MemAgentError } from './errors.ts';
 import type { LlmProvider, ModelInfo } from './types.ts';
 
-/** 演示 Provider：fake 模型表（真实端各自实现 Desktop/Remote/System） */
+/**
+ * 诚实 stub Provider：零模型纯 stub（对照 createHostLlm 经 llm:config 快照下发真实模型）。
+ * 不再内置任何假模型表与假用量字段（批次42 阶段3-A 已删除）；
+ * listModels 默认返回空 → routeProxy 无合格代理源 → 内核诚实回退本地、只落 L1，绝不伪造 L2–L6。
+ * 真实端（Desktop/Remote/System）的模型来自主进程 llmGateway 快照，经 llm:refine IPC 代理，不在此硬编码。
+ */
 export class FakeLlmProvider implements LlmProvider {
   /** 显式 stub：写入管线据此只落 L1，不伪造 L2–L6 */
   readonly isStub = true;
 
-  constructor(private models: ModelInfo[] = [
-    { model: 'claude-free', tier: 'free', price: 0, quota: 1000, used: 100 },
-    { model: 'gpt4o-mini', tier: 'cheap', price: 0.01, quota: 2000, used: 200 },
-    { model: 'local-small', tier: 'paid', price: 0, quota: 0, used: 0 }, // 本地兜底
-  ]) {}
+  constructor(private models: ModelInfo[] = []) {}
 
   listModels(): ModelInfo[] {
     return this.models.map((m) => ({ ...m }));
   }
 
-  async call(model: string, prompt: string, _ctx: { request_id: string; usage: string }): Promise<{ text: string; tokens: number }> {
-    const m = this.models.find((x) => x.model === model);
-    if (!m) throw new MemAgentError('E_QUOTA', `模型不可用：${model}`);
-    return { text: `[${model}] ${prompt.slice(0, 40)}`, tokens: Math.ceil(prompt.length / 2) };
+  async call(_model: string, _prompt: string, _ctx: { request_id: string; usage: string }): Promise<{ text: string; tokens: number }> {
+    throw new MemAgentError('E_QUOTA', 'stub LLM 无可用模型（网关未配置，请接入宿主 LLM 网关）');
   }
 }
 

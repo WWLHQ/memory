@@ -510,6 +510,8 @@ export interface Memory {
   tags?: string[];                // 标签集合
   merged_from?: string[];         // 被哪些原始记忆合并（17.9）
   merged_into?: string;           // 是否被合并到某条摘要
+  /** 17.10 冷压缩：本行在向量索引中的副本被清除的时间（每周幂等；行上 embedding 始终保留） */
+  compressed_at?: number;
   // ---- 分支嫁接（§6.2，2026-10-30） ----
   graft_to?: string;              // 本条新记忆嫁接到的目标记忆 ID
   graft_layer?: Exclude<Layer, 'L0'>; // 命中层（生成到该层即停止）
@@ -676,7 +678,7 @@ export interface MemAgent {
   browse(req: BrowseReq): Promise<BrowseResult>;
   logs(req: LogReq): Promise<LogPage>;
   unbind(agent: string): Promise<void>;
-  // ---- L0 授权与会话（§4.4；端壳注入 L0AdminPort，缺省显式 E_NOT_IMPLEMENTED） ----
+  // ---- L0 授权与会话（§4.4；桌面壳注入 L0AdminPort，未提供端口时显式 E_NOT_IMPLEMENTED） ----
   l0RequestAccess(req: L0AccessRequest): Promise<L0AccessRequestResult>;
   l0ListRequests(): Promise<L0RequestView[]>;
   l0ListGrants(): Promise<L0GrantView[]>;
