@@ -5,6 +5,7 @@ import { autoDispatch, budgetLevel, resolveSceneBudget, sortHits, freshness } fr
 import type { Memory, RecallReq } from '../../core/memagent/types.ts';
 import type { MemAgent } from '../../core/memagent/types.ts';
 import { getKernel, getKernelStorage } from '../kernel.ts';
+import { DEFAULT_PROJECT_ID, listProjectIds } from '../shared/kernelProjects.ts';
 import type { StorageBackend } from '../../core/memagent/types.ts';
 
 export interface EngineResult {
@@ -79,14 +80,18 @@ export async function coreReorderMemory(memId: string, op: 'remember' | 'forget'
   return { ok: r.ok, blocked_locked: Boolean(r.blocked_locked) };
 }
 
-export async function coreEngine(query: string, scene: Scene, modeSel: ModeSel, _requestId: string): Promise<EngineResult> {  const ma = await getAgent();
+export async function coreEngine(query: string, scene: Scene, modeSel: ModeSel, _requestId: string): Promise<EngineResult> {
+  const ma = await getAgent();
   const table = resolveSceneBudget(scene);
   const dispatch = modeSel ? { mode: modeSel, hit_keywords: [] as string[] } : autoDispatch(query, scene);
 
   // 内核 recall（17.5/17.8 打分 + pinned 免检 + 冷层补查 + critical 禁 minimal）
   // 页面 Scene 含 history_query（演示扩展），内核场景三值 → 映射 default
   const coreScene = scene === 'critical' ? 'critical' : scene === 'task_start' ? 'task_start' : 'default';
-  const req: RecallReq = { query, project_id: 'P1', scene: coreScene, mode: modeSel, top_k: 5 };
+  // 项目 ID 从账本真实派生（listProjectIds）；空账本回落 DEFAULT_PROJECT_ID 占位（A10，非空账本务必用真实项目）
+  const projects = await listProjectIds();
+  const project_id = projects[0] ?? DEFAULT_PROJECT_ID;
+  const req: RecallReq = { query, project_id, scene: coreScene, mode: modeSel, top_k: 5 };
   const r = await ma.recall(req);
 
   const memByMid = await loadMemByMids(r.hits.map((h) => h.mem_id));
@@ -115,12 +120,14 @@ export async function coreEngine(query: string, scene: Scene, modeSel: ModeSel, 
 
   const budget: BudgetData = {
     payload_tokens: payload,
-    pipeline_llm_tokens: table.rerank === true ? 640 : 0,
+    // 本地 rerank（规则排序），无 LLM 消耗；不再写死 640
+    pipeline_llm_tokens: 0,
     stage1_count: ordered.length,
     stage2_count: Math.min(5, ordered.length),
     rerank_applied: table.rerank === true,
     budget_breach: budgetLevel(payload) !== 'ok',
-    breach_detail: budgetLevel(payload) !== 'ok' ? ['L2 摘要 × 1 条'] : undefined,
+    // 真实 breach 时由核心引擎补充明细；不写死估算文案
+    breach_detail: undefined,
   };
 
   return { hits: ordered, banner, budget, evidence_thin, breach };

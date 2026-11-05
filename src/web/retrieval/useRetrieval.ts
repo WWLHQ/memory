@@ -22,27 +22,16 @@ export function useRetrieval() {
   /** 硬熔断禁用检索 3s（§6） */
   const [cooldown, setCooldown] = useState(false);
 
-  const search = useCallback((query: string, scene: Scene, mode: ModeSel, opts?: { forceBreach?: boolean; forceTimeout?: boolean }) => {
+  const search = useCallback((query: string, scene: Scene, mode: ModeSel) => {
     if (cooldown) return;
     seq.current += 1;
     const requestId = newRequestId('req');
     setPhase('LOADING');
     setErrorKind(null);
-    // 引擎 = memagent-core 内核 recall（同步内存实现，微任务级）；setTimeout 模拟网络 + §6 超时/熔断触发
+    // 引擎 = memagent-core 内核 recall（同步内存实现，微任务级）；setTimeout 仅模拟网络延迟，绝不伪造数据
     setTimeout(() => {
       void (async () => {
-        if (opts?.forceTimeout) {
-          setErrorKind('timeout');
-          setPhase('ERROR');
-          return;
-        }
         const r = await coreEngine(query, scene, mode, requestId);
-        if (opts?.forceBreach) {
-          r.budget.payload_tokens = 3100;
-          r.budget.budget_breach = true;
-          r.budget.breach_detail = ['L2 摘要 × 3 条', '关联记忆 × 2 条'];
-          r.breach = true;
-        }
         if (r.breach) {
           setErrorKind('breach');
           setPhase('ERROR');

@@ -3,6 +3,7 @@
 // 写入路径：顶层窗口 → preload log.write → 主进程 actions.log；iframe → 父窗口消息桥转发。
 // 敏感值绝不记录：输入框只记类型，不记内容（密码/密钥永不出渲染层）。
 import { hostLog, type HostLogOptions } from '../../desktop/hostBridge.ts';
+import { installMirrorFailureNotice } from './mirrorFailureNotice.ts';
 
 export function uiLog(scope: string, action: string, detail?: unknown, opts?: HostLogOptions): void {
   try {
@@ -100,3 +101,5 @@ export function installUiActionLog(): void {
 
 // 模块加载即安装（引擎会把它注入每个页面入口）
 installUiActionLog();
+// 阶段5-C：镜像上抛失败的全局可见提示（幂等；只在真实页面且真失败时创建 DOM）
+installMirrorFailureNotice();

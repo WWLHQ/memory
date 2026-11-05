@@ -8,6 +8,7 @@ import { BudgetPanel } from './BudgetPanel.tsx';
 import { ContextPanel } from './ContextPanel.tsx';
 import { useRetrieval } from './useRetrieval.ts';
 import { coreReorderMemory } from './coreEngine.ts';
+import { AuditTrailCard } from './AuditTrailCard.tsx';
 import { useToast } from './useToast.tsx';
 
 export function RetrievalPage() {
@@ -22,9 +23,9 @@ export function RetrievalPage() {
     window.setTimeout(() => setToastMsg(null), 2200);
   };
 
-  const doSearch = (opts?: { forceBreach?: boolean; forceTimeout?: boolean }) => {
+  const doSearch = () => {
     setSelectedId(null);
-    search(qv.query, qv.scene, qv.mode, opts);
+    search(qv.query, qv.scene, qv.mode);
   };
 
   // 记住/忘记 = 内核 17.3 真操作（写账本 + memory_op 审计），随后重查以反映真实权重
@@ -40,7 +41,8 @@ export function RetrievalPage() {
       if (r.ok) doSearch();
     });
   };
-  const feedback = (id: string) => flash(`跳反馈页预填 memory_id=${id}（占位）`);
+  // 跳反馈页（真实导航，预填 memory_id），不再弹假提示
+  const feedback = (id: string) => { window.location.href = `/feedback.html?memory_id=${encodeURIComponent(id)}`; };
 
   const loading = phase === 'LOADING';
   const displayHits = result?.hits ?? [];
@@ -50,6 +52,9 @@ export function RetrievalPage() {
     <div className="wrap" data-testid="retrieval-page">
       <h1>🔎 检索页 <span className="badge p2">REQ-012</span></h1>
       <div className="sub">透明化召回：scene/mode 分流（2.4.4）+ 预算三档（R9）+ 异常态（§6）· 数据真相 = 内核账本</div>
+
+      {/* 阶段5-A：从审计页 ↗ 带 ?request_id= 跳来时，真查账本回放该链路；无参数不渲染 */}
+      <AuditTrailCard search={typeof window === 'undefined' ? '' : window.location.search} />
 
       <QueryBar
         value={qv}
@@ -71,7 +76,6 @@ export function RetrievalPage() {
           </div>
           <div className="row" style={{ marginTop: 8 }}>
             {errorKind === 'timeout' && <button type="button" className="btn" data-testid="retry-btn" onClick={() => doSearch()}>重试</button>}
-            {errorKind === 'breach' && <button type="button" className="btn" data-testid="breach-demo" onClick={() => doSearch({ forceBreach: true })}>模拟硬熔断</button>}
           </div>
           {cooldown && <div className="note">已禁用检索 3 秒（§6）</div>}
         </div>
@@ -90,7 +94,7 @@ export function RetrievalPage() {
         <>
           <ModeBanner
             data={result.banner}
-            onRequestId={(id) => flash(`跳审计页定位 ${id} 全链路（占位）`)}
+            onRequestId={(id) => { window.location.href = `/audit.html?request_id=${encodeURIComponent(id)}`; }}
             onFactRetry={() => { setQv({ ...qv, mode: 'fact_first' }); doSearch(); }}
           />
           <ResultList
@@ -109,16 +113,9 @@ export function RetrievalPage() {
               <ContextPanel
                 hit={current}
                 query={qv.query}
-                onLifecycle={(id) => flash(`跳生命周期页带 memory_id=${id}（占位）`)}
-                onAudit={(id) => flash(`查 ${id} 审计（占位）`)}
+                onLifecycle={(id) => { window.location.href = `/lifecycle.html?memory_id=${encodeURIComponent(id)}`; }}
+                onAudit={(id) => { window.location.href = `/audit.html?memory_id=${encodeURIComponent(id)}`; }}
               />
-            </div>
-          </div>
-          <div className="card">
-            <b>异常态演示（§6）</b>
-            <div className="row">
-              <button type="button" className="btn" data-testid="demo-breach" onClick={() => doSearch({ forceBreach: true })}>模拟硬熔断（payload&gt;3000）</button>
-              <button type="button" className="btn" data-testid="demo-timeout" onClick={() => doSearch({ forceTimeout: true })}>模拟超时</button>
             </div>
           </div>
         </>

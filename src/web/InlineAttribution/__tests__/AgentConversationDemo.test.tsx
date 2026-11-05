@@ -3,10 +3,21 @@
 // 「所有接入的 agent 使用同一个记忆库，不区分来源」口径：
 //   切换 agent 只改变窗口头部标识，召回池始终是全部真实记忆（不按 created_by_agent 过滤）。
 // 测试断言：① 接入页真实持久化的 agent 名单驱动切换器 ② 有 agent 无记忆 → 诚实空态 ③ 切 agent 同账本 ④ off 降级。
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { AgentConversationDemo } from '../AgentConversationDemo.tsx';
-import { getKernelWithSeed, resetKernelForTests } from '../../kernel.ts';
+import { getKernelWithSeed, resetKernelForTests, setKernelStorageForTests } from '../../kernel.ts';
+import { InMemoryStorage } from '../../../core/memagent/storage.ts';
+import { SESSION_STORAGE_KEY } from '../../../shared/sessionKey.ts';
+
+/** /api/me 返回的真实租户（阶段5-D：本页只认这个来源的身份） */
+const REAL_CTX = {
+  enterprise_id: 'ent_real',
+  team_id: 'team_real',
+  user_id: 'user_real',
+  perspective: 'team' as const,
+  session_id: 'sess_real_123',
+};
 
 /** 写入接入页真实持久化状态（接入页一键接入后会写入该键） */
 function seedOnboard(agentNames: string[]) {
@@ -17,9 +28,31 @@ function seedOnboard(agentNames: string[]) {
   }));
 }
 
+/** 阶段5-D：种真实 session + 提供 /api/me 真响应，让用例走接真登录态而非绕过门控 */
+function seedRealTenant() {
+  localStorage.setItem(SESSION_STORAGE_KEY, REAL_CTX.session_id);
+  const realFetch = globalThis.fetch;
+  vi.stubGlobal('fetch', vi.fn(async (input: unknown, init?: unknown) => {
+    if (String(input).endsWith('/api/me')) {
+      return { ok: true, json: async () => ({ context: REAL_CTX }) };
+    }
+    // 其它请求（内核数据面等）保持原行为，绝不返回伪造响应破坏账本加载
+    return realFetch
+      ? realFetch(input as RequestInfo, init as RequestInit)
+      : Promise.reject(new Error('no fetch in test env'));
+  }));
+}
+
 beforeEach(() => {
   resetKernelForTests();
+  // 阶段5-D：真 session 会让账本切到 HTTP 数据面（同批次28-A），单测固定走内存账本
+  setKernelStorageForTests(new InMemoryStorage());
   localStorage.clear(); // 隔离 localStorage 残留（agentOnboardState / agentOnboardDetectedAgents）
+  seedRealTenant();
+});
+afterEach(() => {
+  vi.restoreAllMocks(); // 「内核不可达」用例的 loadRealInline spy 不得泄漏到后续用例
+  vi.unstubAllGlobals();
 });
 
 describe('AgentConversationDemo 宿主集成（接真口径·统一记忆库不区分来源）', () => {
@@ -83,5 +116,39 @@ describe('AgentConversationDemo 宿主集成（接真口径·统一记忆库不�
     expect(screen.getByTestId('kernel-error-reason')).toHaveTextContent('E_IPC_TIMEOUT');
     expect(screen.queryByTestId('inline-empty')).not.toBeInTheDocument();
     expect(screen.queryByTestId('agent-switcher')).not.toBeInTheDocument();
+  });
+
+  // ── 阶段5-D / A13：接真登录态 ──────────────────────────────────────────
+  it('阶段5-D：未登录 → 登录门禁，不渲染账本数据或身份占位', async () => {
+    localStorage.removeItem(SESSION_STORAGE_KEY);
+    seedOnboard(['deepseek harness']);
+    render(<AgentConversationDemo />);
+    expect(await screen.findByTestId('inline-login-gate')).toBeInTheDocument();
+    expect(screen.getByTestId('inline-goto-login')).toBeInTheDocument();
+    expect(screen.queryByTestId('agent-switcher')).toBeNull();
+    expect(screen.queryByTestId('inline-empty')).toBeNull();
+    expect(screen.queryByTestId('inline-tenant')).toBeNull();
+    expect(screen.queryByText(/project=P1|user=U1/)).toBeNull();
+  });
+
+  it('阶段5-D：/api/me 失败 → 保持门禁，绝不回落到演示身份', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false })));
+    seedOnboard(['deepseek harness']);
+    render(<AgentConversationDemo />);
+    await waitFor(() => expect(screen.getByTestId('inline-login-gate')).toBeInTheDocument());
+    expect(screen.queryByTestId('agent-switcher')).toBeNull();
+    expect(screen.queryByText(/project=P1|user=U1|演示占位/)).toBeNull();
+  });
+
+  it('阶段5-D：已登录 → 头部只显示 /api/me 的真实租户标识', async () => {
+    seedOnboard(['deepseek harness']);
+    render(<AgentConversationDemo />);
+    await waitFor(() => expect(screen.getByTestId('agent-switcher')).toBeInTheDocument());
+    const tenant = screen.getByTestId('inline-tenant');
+    expect(tenant).toHaveTextContent('user=user_real');
+    expect(tenant).toHaveTextContent('ent_real/team_real');
+    expect(tenant.textContent).not.toContain('project=P1');
+    expect(tenant.textContent).not.toContain('演示占位');
+    expect(screen.queryByTestId('inline-login-gate')).toBeNull();
   });
 });

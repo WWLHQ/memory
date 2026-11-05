@@ -194,9 +194,10 @@ export function backgroundFromMemories(mems: Memory[]): BackgroundMark {
   return { count: items.length, items };
 }
 
-/** 真实 token 节省估算（与内核 estTokens 同口径）：
- *  实际 = 注入摘要 token；基线 = 同一批记忆全文 token（按 memory_id 对照账本）。
- *  mems 缺省或无匹配全文 → 基线 = 实际（saved 0），绝不虚构倍数。 */
+/** 本地预算单位 t 的节省估算（与内核 estTokens 同口径，非 LLM tokenizer 的真实 token）：
+ *  实际 = 注入摘要的预算单位；基线 = 同一批记忆全文的预算单位（按 memory_id 对照账本）。
+ *  mems 缺省或无匹配全文 → 基线 = 实际（saved 0），绝不虚构倍数。
+ *  阶段5-F：这是字符数换算的本地刻度，未接网关 usage，故不再自称「真实 token」。 */
 export function tokenSavingFromMarks(injections: MemoryInjectionMark[], mems: Memory[] = []): TokenSaving {
   const actual = injections.reduce((s, m) => s + estTokens(m.summaryL2), 0);
   const injectedIds = new Set(injections.map((m) => m.memory_id));

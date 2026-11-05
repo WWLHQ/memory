@@ -136,7 +136,7 @@ describe('useRetrieval (T6 状态机)', () => {
   });
   afterEach(() => { vi.useRealTimers(); });
 
-  it('IDLE→LOADING→RESULT；硬熔断→ERROR + 冷却 3s', async () => {
+  it('IDLE→LOADING→RESULT（真实内核 recall，空库如实 EMPTY）', async () => {
     // 真实内核账本预置一条命中记忆（recall 走内核，空库会如实返回 EMPTY）
     await getKernelWithSeed()._seedMemory({ content: '缓存 TTL 设为 300s（生产默认）', category: 'fact', project_id: 'P1' });
     const { result: r } = renderHook(() => useRetrieval());
@@ -145,9 +145,5 @@ describe('useRetrieval (T6 状态机)', () => {
     expect(r.current.phase).toBe('LOADING');
     await actHook(async () => { await vi.advanceTimersByTimeAsync(200); });
     expect(r.current.phase).toBe('RESULT');
-    actHook(() => r.current.search('x', 'default', null, { forceBreach: true }));
-    await actHook(async () => { await vi.advanceTimersByTimeAsync(200); });
-    expect(r.current.phase).toBe('ERROR');
-    expect(r.current.cooldown).toBe(true);
   });
 });

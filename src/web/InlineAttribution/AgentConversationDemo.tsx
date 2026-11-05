@@ -10,13 +10,15 @@
 //     切换 agent 只改变窗口头部标识，注入 / 背景 / token / 写入沉淀全部来自同一共享账本（不随 agent 变化）；
 //   · 应用原则 = Claude Code 应用原则（§19.7 内联标识 + 2.4.1 预算 + 9.6 aging_hint + 7.2 反馈自生长）；
 //   · 无 agent / 账本为空 → 诚实空态，绝不硬编码演示数据。
-//   租户上下文：有真实登录态 → 经 ?backend= 调 /api/me 恢复真实租户；无登录态 → 演示占位（不阻塞 UI，§0.2 红线⑤）。
+//   租户上下文（阶段5-D / A13·接真登录态）：只认 /api/me 返回的真实租户；
+//   正在确认 → 「正在确认登录身份…」；确认后仍无真实 context → 登录门禁，不渲染账本数据、不显示身份占位。
+//   本页不再跳过登录门控，也不再硬编码演示项目标识 / 假用户名之类的占位值。
 //   规格 §4 降级：宿主不支持完整标记（off 级别）→ 退化为「回答前一行统计 + 可点展开」，不阻塞主输出；
 //   evidence_thin / aging 诚实约束项不可关闭。
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import './inlineAttribution.css';
-// 内联标识演示页不要求登录（pure UI demo），显式跳过门控
-import { TenantProvider, useTenant } from '../Home/tenantContext.tsx';
+import { TenantProvider, useTenant, useTenantRestoring } from '../Home/tenantContext.tsx';
+import type { TenantContext } from '../../types/home.ts';
 import { useLoginMirror } from '../Home/useLoginMirror.ts';
 import { AttributionConfigProvider, useAttributionConfig } from './AttributionConfig.tsx';
 import { AttributionToggle } from './AttributionToggle.tsx';
@@ -35,25 +37,64 @@ import type {
 } from '../../types/inlineAttribution.ts';
 
 export function AgentConversationDemo() {
-  // 外层包 TenantProvider（有 session 时 /api/me 自动恢复真实租户；无则 null），
-  // 内层 Probe 读 useTenant() 注入 user_id，让数据里的 user 标识反映真实登录身份。
   return (
     <TenantWrapper>
-      <InlineInner />
+      <InlineGate />
     </TenantWrapper>
   );
 }
 
-/** 外层：接真实登录镜像（有 session 时 /api/me 恢复真实租户；无 session 时 null，不阻塞演示） */
+/** 外层：接真实登录镜像；租户身份只由 /api/me 恢复，恢复失败即未登录 */
 function TenantWrapper({ children }: { children: ReactNode }) {
   const mirror = useLoginMirror();
   return <TenantProvider loginFn={mirror.login} onLogout={mirror.logout}>{children}</TenantProvider>;
 }
 
-/** 内层：读真实租户 user_id + 真实账本数据（接真口径）渲染 agent 切换器 + 对话头部与标记 */
-function InlineInner() {
+/** 阶段5-D / A13：登录门控。未登录/身份未确认时不挂载数据层，既不读账本也不渲染身份占位。 */
+function InlineGate() {
   const ctx = useTenant();
-  const userId = ctx?.user_id ?? 'U1';
+  const restoring = useTenantRestoring();
+  if (restoring) {
+    return (
+      <div className="wrap" data-testid="inline-tenant-restoring">
+        <div className="note">正在确认登录身份…（正在向后端核对真实租户，不显示任何账本数据）</div>
+      </div>
+    );
+  }
+  if (!ctx) return <InlineLoginGate />;
+  return <InlineInner ctx={ctx} />;
+}
+
+/** 未登录门禁：真跳首页登录，不伪造身份、不渲染演示内容 */
+function InlineLoginGate() {
+  return (
+    <div className="wrap" data-testid="inline-login-gate">
+      <h1>◆ Agent 界面内联标识</h1>
+      <div className="card">
+        <b>请先登录</b>
+        <div className="note">
+          本页展示真实租户下的统一记忆库内联标识。未登录时不渲染账本数据，也不显示任何身份占位。
+          请先在首页登录（跨页面登录态经 session 共享）后重试。
+        </div>
+        <button
+          type="button"
+          data-testid="inline-goto-login"
+          onClick={() => {
+            if (window.opener) window.close();
+            else window.location.href = '/index.html';
+          }}
+          style={{ marginTop: 14, padding: '7px 14px', cursor: 'pointer' }}
+        >
+          → 前往登录页
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** 内层：ctx 恒为 /api/me 返回的真实租户；user 标识直接取真实 user_id */
+function InlineInner({ ctx }: { ctx: TenantContext }) {
+  const userId = ctx.user_id;
   const [toast, setToast] = useState<string | null>(null);
   const [agentName, setAgentName] = useState<string | null>(null);
 
@@ -173,7 +214,7 @@ function InlineInnerBody({
   onAgentChange: (n: string | null) => void;
   currentAgent: ConnectedAgent | null;
   userId: string;
-  ctx: ReturnType<typeof useTenant>;
+  ctx: TenantContext;
   showToast: (msg: string) => void;
   handleFeedback: (id: string, action: FeedbackAction) => void;
   handleOpenAudit: (req: string) => void;
@@ -203,7 +244,10 @@ function InlineInnerBody({
         <div className="agenthead">
           <span className="logo">◆ {currentAgent?.name ?? 'Agent'}</span>
           <span className="who">{currentAgent?.label ?? '扩展'} · 记忆助手 MCP 已接入</span>
-          <span className="who right">project=P1 · user={userId}{ctx ? '' : '（演示占位）'}</span>
+          {/* 阶段5-D：只显示 /api/me 返回的真实租户标识，不再硬编码演示项目 P1 / 假 user */}
+          <span className="who right" data-testid="inline-tenant">
+            user={userId}{' · '}{ctx.enterprise_id}/{ctx.team_id}
+          </span>
         </div>
 
         {/* 已接入 agent 切换器（统一记忆库·不区分来源：底层同一共享账本，所有已接入 agent 一视同仁，
