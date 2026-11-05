@@ -1,5 +1,6 @@
 // E2E 测试：大模型配置页（REQ-009 / P13）自包含（系统分配端口）
-// 覆盖用例：C1 渲染 / C2 judge 温度锁 / C5 换维度重建提示+估时 / C6 重建中禁切换 / C7 auto 免费优先 / C13 price_cap=0 禁付费
+// 覆盖用例：C1 渲染 / C2 judge 温度锁 / C5 换维度重建提示+估时 / C6 重建中禁切换 / C7 auto 模拟(dry-run·无源回退本地) / C13 price_cap=0 仅免费可见
+// 注：静态构建无宿主 LLM 网关 → 页面走「未配置引擎」诚实空态；反代理路由深逻辑由单测（logic.test.ts / coreModels.test.ts）覆盖。
 import { test, expect, disconnectBrowser, collectErrors } from './harness.ts';
 import { startStatic, type StaticServer } from './servers.ts';
 
@@ -17,7 +18,7 @@ test.afterAll(async () => {
 });
 
 test.describe('大模型配置页', () => {
-  test('C1 页面渲染：向量卡 384 维 + 4 用途表 + 反代理映射表', async ({ page }) => {
+  test('C1 页面渲染：向量卡 384 维 + 4 用途表 + 反代理诚实空态（未配置引擎）', async ({ page }) => {
     const errors = collectErrors(page);
     await page.goto(APP);
     await expect(page.locator('[data-testid="models-page"]')).toBeVisible();
@@ -26,8 +27,9 @@ test.describe('大模型配置页', () => {
     await expect(page.locator('[data-testid="usage-judge"]')).toBeVisible();
     await expect(page.locator('[data-testid="usage-rerank"]')).toBeVisible();
     await expect(page.locator('[data-testid="usage-growth"]')).toBeVisible();
-    await expect(page.locator('[data-testid="proxy-claude-code"]')).toContainText('claude-free');
-    await expect(page.locator('[data-testid="proxy-x-agent"]')).toContainText('deepseek-v3');
+    // 阶段3-B/3-C：无网关 → 诚实空态，绝不渲染假代理行（PROXY_CATALOG 已删）
+    await expect(page.locator('[data-testid="proxy-empty-state"]')).toContainText('未配置引擎');
+    await expect(page.locator('[data-testid="proxy-rows"]')).toHaveCount(0);
     expect(errors).toEqual([]);
   });
 
@@ -69,38 +71,29 @@ test.describe('大模型配置页', () => {
     await expect(page.locator('[data-testid="usage-write-masked"]')).not.toContainText('secret-123456');
   });
 
-  test('C7 auto 择优（dry-run）：命中免费源 claude-code，不写账本、不扣余量', async ({ page }) => {
+  test('C7 auto 模拟（dry-run）：无可用源 → 回退本地，不写账本、不扣余量', async ({ page }) => {
     await page.goto(APP);
-    const remainBefore = await page.locator('[data-testid="proxy-remain-claude-code"]').textContent();
     await page.locator('[data-testid="proxy-simulate"]').click();
     await expect(page.locator('[data-testid="toast"]')).toContainText('dry-run（未写账本）');
-    await expect(page.locator('[data-testid="toast"]')).toContainText('claude-code/claude-free');
-    await expect(page.locator('[data-testid="toast"]')).toContainText('免费优先');
+    await expect(page.locator('[data-testid="toast"]')).toContainText('回退本地');
     await expect(page.locator('[data-testid="audit-echo"]')).toContainText('暂无本会话审计条目');
-    await expect(page.locator('[data-testid="proxy-remain-claude-code"]')).toHaveText(remainBefore!);
   });
 
-  test('C8/R7 manual：勾选超 price_cap 的 cheap 源 → 拒绝并回退本地（dry-run）', async ({ page }) => {
+  test('C8/R7 manual：无可用源时模拟 → 回退本地（dry-run，不伪造代理）', async ({ page }) => {
     await page.goto(APP);
     await page.locator('[data-testid="mode-manual"]').check();
-    await page.locator('[data-testid="proxy-check-claude-code"]').uncheck();
-    await page.locator('[data-testid="proxy-check-cursor-trial"]').uncheck();
-    await page.locator('[data-testid="proxy-check-codex"]').check();
-    await page.locator('[data-testid="price-cap"]').fill('0');
     await page.locator('[data-testid="proxy-simulate"]').click();
-    await expect(page.locator('[data-testid="toast"]')).toContainText('R7 拒绝');
     await expect(page.locator('[data-testid="toast"]')).toContainText('dry-run（未写账本）');
+    await expect(page.locator('[data-testid="toast"]')).toContainText('回退本地');
   });
 
-  test('C13 price_cap=0：仅免费提示 + cheap 源被禁（manual 勾选被拒）', async ({ page }) => {
+  test('C13 price_cap=0：仅免费提示可见；模拟 → 回退本地（无可用源）', async ({ page }) => {
     await page.goto(APP);
     await page.locator('[data-testid="price-cap"]').fill('0');
     await expect(page.locator('[data-testid="free-only-hint"]')).toBeVisible();
-    await page.locator('[data-testid="mode-manual"]').check();
-    await page.locator('[data-testid="proxy-check-claude-code"]').uncheck();
-    await page.locator('[data-testid="proxy-check-codex"]').check();
     await page.locator('[data-testid="proxy-simulate"]').click();
-    await expect(page.locator('[data-testid="toast"]')).toContainText('R7 拒绝');
+    await expect(page.locator('[data-testid="toast"]')).toContainText('dry-run（未写账本）');
+    await expect(page.locator('[data-testid="toast"]')).toContainText('回退本地');
     await expect(page.locator('[data-testid="audit-echo"]')).toContainText('暂无本会话审计条目');
   });
 

@@ -137,7 +137,7 @@ status: draft
 | 能力 | 代码落点 | 测试 |
 |---|---|---|
 | 四段折叠明细 | `src/core/memagent/recallInsight.ts` 的 `buildRecallMarkdown`：HTML 版外层 `<details>`（summary = 提示行）+ 内层四段；**批次29 纯 Markdown 版**（`htmlDetails:false`，`**小节标题**` + 正文，零 HTML 标签、不转义）给只渲染 Markdown 的客户端（如 DSH 实测） | `recallInsight.test.ts`（5 对 `<details>`、转义、纯 Markdown 无标签断言、转义差异对照） |
-| 数据同源 | `mcpRecall.ts`：`display.markdown` 与 `display.line` 由同一次 recall + 同一份 `recall` 审计累计生成；批次29 `clientSupportsHtmlDetails(client)` 白名单（仅 `qoder/*` → HTML 版，其余 fail-safe 纯 Markdown）；**批次32 起非 HTML 客户端默认只给一行摘要**（见批次32 段） | `mcpHttp.test.ts`（无会话紧凑档 / Qoder 会话 `<details>`）、`recallInsight.test.ts`（白名单 + 档位矩阵用例） |
+| 数据同源 | `mcpRecall.ts`：`display.markdown` 与 `display.line` 由同一次 recall + 同一份 `recall` 审计累计生成；批次29 `clientSupportsHtmlDetails(client)` 白名单（批次41-Q 扩为 `{qoder, qoder-desktop-mcp-host}` → HTML 版，其余 fail-safe 纯 Markdown）；**批次32 起非 HTML 客户端默认只给一行摘要**（见批次32 段） | `mcpHttp.test.ts`（无会话紧凑档 / Qoder 会话 `<details>`）、`recallInsight.test.ts`（白名单含 41-Q 正反例 + 档位矩阵用例） |
 | 传输下发 | `mcpHttp.ts`：`tools/call` 内容块 = `[display.line, 完整 JSON, display.markdown, recallEchoNote(mode)]`；批次32 起 `mode` 从**本次 payload 自己的 `display.mode`** 取（单一真源），TCP 8202 无 clientInfo → fail-safe 紧凑档 | `mcpHttp.test.ts`（长度 4、末块文案与档位一致）、`mcp.test.ts` |
 | 回显策略 | `mcpSchema.ts`：`MCP_INSTRUCTIONS` 规则 2 与 `recall_memory` 描述改为格式中立——「服务端已按客户端适配格式（HTML 折叠或纯 Markdown），原样输出即可，不要自行添加 HTML 标签」 | 指令含 `display.markdown`/`display.line` 断言 |
 
@@ -832,17 +832,17 @@ status: draft
 > **真机已验（2026-11-04 12:14，本批新产物，写锁 `{"pid":3880}`）**：真发一次 `recall_memory`（客户端自报 `verify-41r`）→ `mode=markdown-compact` + `detail_url` → 打开 **200 / 5,548 B**（页面里检索当前令牌命中 0）→ 假 id **404** → `actions.log` 该键由 **0 条 → 2 条**（`{"outcome":"ok"}` / `{"outcome":"miss"}`），`main.log` 由 3 条 → 5 条（双写、非搬移）。核对步骤与期望行见 `specs/MANUAL-TEST-FIX-BATCH-41.md` §3。
 > 诚实边界（批次41-R）：① 只修观测，票据口径（30 分钟、纯内存、不消费）与闸门（Host 绑定 + 免令牌）一字未动；② 同批量到的 **41-Q 没在本批修**——`clientSupportsHtmlDetails` 判据是 `client.split('/')[0]` **精确等于 `qoder`**，本机 Qoder Desktop 自报 `qoder-desktop-mcp-host/1.0.0`，recall 审计 **0 命中**（11:51 实测 100 条、12:15 复测 102 条，含本会话为验证而发的 2 条）→ `html-details` 档从未生效；把它加进白名单的前提是「Qoder 气泡真渲染 `<details>`」，这条**尚无证据**（DSH 侧 2026-10-31/11-01 两次实测是原样吐纯文本），盲改会把失效 HTML 铺回聊天窗口，所以留待用户拍板；③ 上面那条真机验证**自己也进了账**——那次 `verify-41r` 召回在 `audit.jsonl` 里留下一条真实 recall 行（观测修复的验证必然污染被观测的计数，所以上面的数字都带时刻）。
 
-### 批次41-S：MCP 调用方身份可跨客户端串号（立案，**本批未修**；由 41-R 的真机验证顺带量出）
+### 批次41-S：MCP 调用方身份可跨客户端串号（**已按用户拍板的方案 A 落地**；立案由 41-R 的真机验证顺带量出）
 
 > 这条不是读代码读出来的怀疑，是**两次真调用打在同一台机器上撞出来的**：12:14:49 我的 Node 探测脚本 `initialize(clientInfo.name=verify-41r)`，12:21:21 Qoder Desktop 连接器真调一次召回，`audit.jsonl` 里**两行的 `detail.client` 都是 `verify-41r/0.0.1`**。
 
 | 环节 | 真源与后果 |
 |---|---|
-| 判据（为什么能串） | `src/core/memagent/mcpHttp.ts:124-126` 两张表：`clientBySession`（`initialize` 生成的 sid → 自报名）、`clientByUa`（**UA → 最近一次 `initialize` 的自报名**）；`mcpHttp.ts:343-345` 的取值顺序 = `Mcp-Session-Id` 命中 → **同 UA 最近一次 initialize** → `clientFromUserAgent(ua)`。凡是「做过 initialize、后续请求不回传会话头」的客户端都落在同一条 UA 记录上，而 `remember()`（`:135-142`）是 delete+set → **最后一次 initialize 赢**。本机实测 **Node 的 `fetch` 默认发字面量 `User-Agent: node`**（一次性回显服务返回 `{"ua":"node","session":null}`），Electron 主进程本身就是 Node → 同机多客户端必然共键。**边界**：这段里能确证的观测只有「我的探测脚本没写会话头」和「Node `fetch` 默认 UA 是 `node`」两条；Qoder 连接器到底带不带 `Mcp-Session-Id` 服务端不落原始请求头、无法证明，所以「UA 撞车」是按取值顺序**推**出的最解释得通的一条，不是看到的（观测到的确定事实只有「两次调用的 `detail.client` 字面相同」）。 |
-| 后果面 ①（展示档位） | `clientSupportsHtmlDetails(client)`（`mcpRecall.ts:22-26`）按这个自报名选三档之一 → 甲客户端可能吃到乙客户端的档位。本机这次两侧首段都不是 `qoder`，所以结果没变，但**41-Q 的「0 命中」计数里部分行的真实调用方不可证**。 |
-| 后果面 ②（接入证据，最重） | `applyRecallEvidence`（`src/electron/mcpClients.ts`，批次30）按 `client.split('/')[0]` 匹配 `MCP_CLIENT_SPECS[].id`/`auditClientIds`，把 `no_config/missing_entry/missing_auth` 升成「审计检测到真实调用 N 次 = 已接入」。串号等于**把 A 的调用算成 B 的接入证据**，与 AGENTS §7.4「绝不伪造已接入」直接冲突。（既有那道「UA 兜底串 `Cursor (UA)` 不匹配任何 id」的防线挡不住这一类——串的是**自报名**，不是 UA 识别名。） |
-| 测试现状 | `mcpHttp.test.ts` **没有**任何「同 UA 两个客户端」的串号用例；`批次41-R` describe 只锁 `onViewDetail` 的值域。 |
-| 待定口径（要用户拍板，本批一条没动） | **A** 通用 UA（`node`/`curl/*`/`Python-urllib/*`…）一律判 `unknown`，fail-safe 走纯 Markdown 档且不作接入证据；**B** 取消 `clientByUa`，只认客户端回传的 `Mcp-Session-Id`（最干净，但今天靠 UA 兜底才认得出的客户端会一起降级，批次30 的 Zcode/DSH 类升级失效）；**C** 判据不动，改为在文档与面板明写「`detail.client` 只作观测、不作接入证据」。**选 A 或 B 都要补串号用例；选 C 要改 §9 批次30 的口径。** |
+| 判据（为什么能串） | `src/core/memagent/mcpHttp.ts:124-126` 两张表：`clientBySession`（`initialize` 生成的 sid → 自报名）、`clientByUa`（**UA → 最近一次 `initialize` 的自报名**）；取值顺序 = `Mcp-Session-Id` 命中 → 同 UA 最近一次 initialize → `clientFromUserAgent(ua)`。凡是「做过 initialize、后续请求不回传会话头」的客户端都落在同一条 UA 记录上，而 `remember()`（`:135-142`）是 delete+set → **最后一次 initialize 赢**。本机实测 **Node 的 `fetch` 默认发字面量 `User-Agent: node`**（一次性回显服务返回 `{"ua":"node","session":null}`），Electron 主进程本身就是 Node → 同机多客户端必然共键。**边界**：这段里能确证的观测只有「我的探测脚本没写会话头」和「Node `fetch` 默认 UA 是 `node`」两条；Qoder 连接器到底带不带 `Mcp-Session-Id` 服务端不落原始请求头、无法证明，所以「UA 撞车」是按取值顺序**推**出的最解释得通的一条，不是看到的（观测到的确定事实只有「两次调用的 `detail.client` 字面相同」）。 |
+| 后果面 ①（展示档位） | `clientSupportsHtmlDetails(client)`（`mcpRecall.ts`）按这个自报名选三档之一 → 甲客户端可能吃到乙客户端的档位。方案 A 落地后通用 UA 归为 `unknown`，不再吃到别人的档位；`clientBySession`（真会话头）不受影响。 |
+| 后果面 ②（接入证据，最重） | `applyRecallEvidence`（`src/electron/mcpClients.ts`，批次30）按 `client.split('/')[0]` 匹配 `MCP_CLIENT_SPECS[].id`/`auditClientIds`，把 `no_config/missing_entry/missing_auth` 升成「审计检测到真实调用 N 次 = 已接入」。串号等于**把 A 的调用算成 B 的接入证据**，与 AGENTS §7.4「绝不伪造已接入」直接冲突。方案 A 后：通用 UA 的调用审计记为 `unknown`，`unknown` 不匹配任何 `spec.id`/`auditClientIds`（`mcpClients.ts` 首段判空即 `continue`）→ 不再作为任何一家的接入证据。 |
+| 方案 A 实现 | 新增纯函数 `mcpHttp.isIdentifiableUserAgent(ua)`（`node`/`curl/`/`python-urllib/`/`wget/`/`go-http-client/`/`okhttp/`/`java/`/`axios/` 与「认不出厂商词的未知 UA」判否，含厂商词判是）；接线两处——`initialize` 只有 `ua && isIdentifiableUserAgent(ua)` 才 `remember(clientByUa, …)`（源头不抢注共享键），取值顺序改为 `会话头 → (仅有辨识度时) 同 UA 归并 → clientFromUserAgent`。TCP 8202 不涉及（`clientByUa` 只在 HTTP 侧）。**残留**：带辨识度 UA 但不回传会话头、且同机有两台同名客户端时理论上仍互串——这是 A 相对 B（彻底取消 `clientByUa`）的取舍，用户选 A 明确接受。 |
+| 测试现状 | `mcpHttp.test.ts`「批次41-S 串号闸门」describe：`isIdentifiableUserAgent` 通用/未知/厂商词正反例 + 端到端串号用例（甲以 `node` 自报 `verify-contam` → 乙以 `node` 不带会话头调 recall 记为 `unknown`；对照组有辨识度 UA 仍归并，批次15 能力不回归）。41-Q 白名单另在 `recallInsight.test.ts` 补 `qoder-desktop-mcp-host` 正反例。 |
 
 ### 批次41-T：存量补齐缺失的 `sha256` 与 `embedding`（批次41-B 声明的「533 行缺指纹 + 1 行缺向量」存量，本批给出通道）
 

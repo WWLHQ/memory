@@ -1,6 +1,6 @@
 // E2E 测试：记忆管理页（REQ-006 / P8）
 // 自包含模式：自带静态服务（系统分配端口）serving dist/memory.html。
-// 该页为独立入口（无登录门控），后端镜像为 safe-noop，无需起 home 后端。
+// 该页为独立入口（无登录门控）；审计上抛真接 /api/mirror/audit，未起 home 后端时失败提示可见但不影响页面数据。
 // 注：种子数据已移除（见需求：真实账本无演示数据），测试覆盖空态渲染 + 页面无脚本异常。
 // 写入流程由 e2e/write.spec.ts 独立覆盖（纯浏览器如实报 E_L0_LOCKED；真实加密写入在桌面主进程）。
 import { test, expect, disconnectBrowser, collectErrors } from './harness.ts';
