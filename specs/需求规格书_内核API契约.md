@@ -94,6 +94,29 @@ interface WriteResult {
 ```
 > L0 加密由端壳注入的 `L0Vault` 完成；`MemReq` **不接受明文 L0 密码**。写密钥未解锁 → `E_L0_LOCKED`，不落明文、不降级。逐层生成/查重/嫁接规则见《需求规格书》§2.2/§6.1/§6.2。
 
+## 2.3 记忆打分与衰减公式（批次43 对齐自 SOP §13.2 / 契约 §0）
+
+召回排序与衰减计分采用固定权重公式（来源 `forgetting.ts`）：
+
+```
+score = relevance × ( 0.35·新鲜度 + 0.30·重要性 + 0.15·可信度 + 0.20·访问boost ) + pinned×0.15
+```
+
+| 输入 | 权重 | 应由谁写入 | MCP 现状 | 后果 |
+|---|---|---|---|---|
+| 新鲜度 f | 0.35 | recall 自动回写 `last_access_time` | ✅ 通 | — |
+| 重要性 imp | 0.30（最高） | 写入时标注 | ❌ `write_memory` 无入参 → 恒 0.5 | `fact`(365天) 与 `context`(2天) 的半衰期差异无法表达 |
+| 可信度 conf | 0.15 | 用户 confirm/reject | ❌ 无 feedback 工具 → 恒 0.5 | 被纠正过的错误记忆与新写入的正确记忆衰减速度相同 |
+| 访问 boost | 0.20 | `access_count/10` | ⚠️ 只能被动 | Agent 无法主动强化 |
+
+**两把锁死旋钮**（当前 MCP 通道无法表达）：
+- `importance` 因 `write_memory` 无入参，恒 0.5，无法区分规范(应 0.9) / 架构决策(0.8) / 踩坑(0.7) / 临时上下文(0.3)；
+- `confidence` 因无 `feedback` 工具，恒 0.5，用户 confirm/reject 无法回写。
+
+**整改方向（与 `mcp-extension-contract.md` §2 一致）**：`write_memory` 新增可选入参 `importance` / `confidence` / `half_life_days` / `tags`，并新增 `feedback` 工具（confirm +0.1 / reject −0.05 / disputed 挂裁决），解锁两把旋钮。
+
+> 注意：本公式是**衰减/召回排序打分**，与 `recallModes.ts` 的**召回模式选择权重**（如 top_insight 0.20/0.40/0.10/0.30）是两回事，文档与实现须显式区分，避免混淆。
+
 ## 3. 数据 schema（内核 ↔ 存储）
 
 ### 3.1 记忆主表 `memories`
