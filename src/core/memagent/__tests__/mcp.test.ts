@@ -113,6 +113,26 @@ describe('MCP Server（§19.5）', () => {
     expect(r.error?.message).toContain('租户');
   });
 
+  it('write_memory：缺 source_agent → -32602（禁止依赖默认 mcp）', async () => {
+    const r = await rpcCall(PORT, {
+      jsonrpc: '2.0', id: 33,
+      method: 'write_memory',
+      params: { content: '缺来源写入', project_id: 'P1', category: 'pitfall', token: TOKEN },
+    });
+    expect(r.error?.code).toBe(-32602);
+    expect(r.error?.message).toContain('source_agent');
+  });
+
+  it('write_memory：source_agent 为默认 mcp → -32602', async () => {
+    const r = await rpcCall(PORT, {
+      jsonrpc: '2.0', id: 34,
+      method: 'write_memory',
+      params: { content: '默认mcp', project_id: 'P1', category: 'pitfall', source_agent: 'mcp', token: TOKEN },
+    });
+    expect(r.error?.code).toBe(-32602);
+    expect(r.error?.message).toContain('mcp');
+  });
+
   it('write_memory：合法入参 → 成功 + L0 阶梯管道 + 审计落库', async () => {
     const r = await rpcCall(PORT, {
       jsonrpc: '2.0', id: 4,
@@ -178,6 +198,7 @@ describe('MCP Server（§19.5）', () => {
           content: 'tools/call 路径测试',
           project_id: 'P1',
           category: 'fact',
+          source_agent: 'mcp-test',
         },
         token: TOKEN,
       },

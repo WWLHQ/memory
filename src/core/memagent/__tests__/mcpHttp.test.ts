@@ -181,13 +181,26 @@ describe('MCP HTTP（批次2 信任边界）', () => {
     const r = await call(
       {
         jsonrpc: '2.0', id: 9, method: 'tools/call',
-        params: { name: 'write_memory', arguments: { content: 'MCP HTTP 写入测试', project_id: 'P1', category: 'fact' } },
+        params: { name: 'write_memory', arguments: { content: 'MCP HTTP 写入测试', project_id: 'P1', category: 'fact', source_agent: 'workbuddy' } },
       },
       { Authorization: `Bearer ${TOKEN}` },
     );
     const body = (await r.json()) as { result: { isError: boolean; content: Array<{ text: string }> } };
     expect(body.result.isError).toBe(false);
     expect(body.result.content[0].text).toContain('mem_');
+  });
+
+  it('tools/call 缺 source_agent → isError=true（禁止依赖默认 mcp）', async () => {
+    const r = await call(
+      {
+        jsonrpc: '2.0', id: 92, method: 'tools/call',
+        params: { name: 'write_memory', arguments: { content: '缺来源写入', project_id: 'P1', category: 'fact' } },
+      },
+      { Authorization: `Bearer ${TOKEN}` },
+    );
+    const body = (await r.json()) as { result: { isError: boolean; content: Array<{ text: string }> } };
+    expect(body.result.isError).toBe(true);
+    expect(body.result.content[0].text).toContain('source_agent');
   });
 
   it('list_projects 返回真实项目（P1 + 条数）', async () => {
@@ -373,7 +386,7 @@ describe('MCP HTTP（批次2 信任边界）', () => {
     const w = await call(
       {
         jsonrpc: '2.0', id: 94, method: 'tools/call',
-        params: { name: 'write_memory', arguments: { content: '项目 P2 决策：本地持久化使用 PGlite 17，禁止放进漫游目录', project_id: 'P2', category: 'decision' } },
+        params: { name: 'write_memory', arguments: { content: '项目 P2 决策：本地持久化使用 PGlite 17，禁止放进漫游目录', project_id: 'P2', category: 'decision', source_agent: 'workbuddy' } },
       },
       { Authorization: `Bearer ${TOKEN}` },
     );

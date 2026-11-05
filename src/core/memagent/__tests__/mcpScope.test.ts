@@ -75,7 +75,7 @@ describe('MCP 令牌项目作用域（批次26-B P1-10，HTTP 传输全链路）
   });
 
   it('write 作用域内项目 → 正常落库', async () => {
-    const inScope = await callTool('write_memory', { content: '作用域内写入', project_id: 'P1', category: 'fact' });
+    const inScope = await callTool('write_memory', { content: '作用域内写入', project_id: 'P1', category: 'fact', source_agent: 'workbuddy' });
     expect(inScope.isError).toBe(false);
   });
 

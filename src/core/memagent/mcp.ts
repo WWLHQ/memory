@@ -182,13 +182,19 @@ export function runMcpServer(opts: McpOptions): McpServerHandle {
             send(socket, jsonError(req.id, -32602, `write_memory.category 非法：${String(category)}（允许：${CATEGORIES.join('/')}）`));
             return;
           }
+          // A5（§7.1）：来源 agent 必须显式标识，禁止依赖默认 'mcp'
+          const sa = typeof p.source_agent === 'string' ? p.source_agent.trim().toLowerCase() : '';
+          if (!sa || sa === 'mcp') {
+            send(socket, jsonError(req.id, -32602, 'write_memory.source_agent 必填且须显式标识来源 agent（禁止依赖默认 mcp，命名见 §7.1）'));
+            return;
+          }
           const result = await s.write({
             content: p.content,
             category,
             project_id: p.project_id,
             user_id: sessionUser,
             session_id: p.session_id ? String(p.session_id) : undefined,
-            source_agent: p.source_agent ? String(p.source_agent) : 'mcp',
+            source_agent: sa,
           });
           send(socket, ok(req.id, result));
           return;

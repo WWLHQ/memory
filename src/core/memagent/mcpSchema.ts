@@ -45,7 +45,7 @@ export const MCP_TOOLS = [
         category: { type: 'string', enum: ['fact', 'decision', 'pitfall', 'insight', 'preference', 'context'], description: '类别' },
         user_id: { type: 'string', description: '用户 ID（须与会话身份一致）' },
         session_id: { type: 'string', description: '会话 ID（溯源）' },
-        source_agent: { type: 'string', description: '来源 agent 标识（如 deepseek-harness / workbuddy）' },
+        source_agent: { type: 'string', description: '来源 agent 标识（必填，须显式标识：workbuddy / claude-desktop / cursor / gemini-cli / codex 或自定义小写连字符；禁止默认 mcp，命名见 §7.1）' },
       },
       required: ['content', 'project_id'],
     },

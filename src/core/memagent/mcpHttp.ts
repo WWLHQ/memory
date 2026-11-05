@@ -229,6 +229,11 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
         if (!isCategory(category)) {
           throw new Error(`write_memory.category 非法：${String(category)}（允许：${CATEGORIES.join('/')}）`);
         }
+        // A5（§7.1）：来源 agent 必须显式标识，禁止依赖默认 'mcp'
+        const sa = typeof p.source_agent === 'string' ? p.source_agent.trim().toLowerCase() : '';
+        if (!sa || sa === 'mcp') {
+          throw new Error('write_memory.source_agent 必填且须显式标识来源 agent（禁止依赖默认 mcp，命名见 §7.1）');
+        }
         return {
           result: await ma.write({
             content: p.content,
@@ -236,7 +241,7 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
             project_id: p.project_id,
             user_id: account.user_id,
             session_id: p.session_id ? String(p.session_id) : undefined,
-            source_agent: p.source_agent ? String(p.source_agent) : 'mcp-http',
+            source_agent: sa,
           }),
         };
       }
