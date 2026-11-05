@@ -41,13 +41,29 @@ export interface ProxySource {
 
 export type ProxySelectMode = 'auto' | 'manual';
 
-/** 反代理审计条目（R10） */
-export interface ProxyAuditEntry {
+/** R10：真实代理调用审计（账本 llm_proxy / llm_fallback） */
+export interface ProxyCallAuditEntry {
   event: 'llm_proxy';
   llm_proxy_source: string;
   cost: number;
   mode: ProxySelectMode | 'local';
   at: number;
-  /** 账本事件种类：缺省 = 代理调用；model_config = 保存模型配置（param_save 审计回显） */
-  kind?: 'model_config';
 }
+
+/**
+ * 保存模型配置（账本 param_save + detail.kind=model_config）。
+ * 它不是代理调用，**没有** llm_proxy_source / cost / mode，绝不拿 0 或 agent:local 冒充。
+ * 字段全部取自账本 detail；历史记录缺字段时为 null（UI 显示「未记录」）。
+ */
+export interface ModelConfigAuditEntry {
+  event: 'model_config';
+  at: number;
+  vector: string | null;
+  dims: number | null;
+  reembedded: number | null;
+  persisted: boolean | null;
+  api_key_persisted: boolean | null;
+}
+
+/** 审计回显条目 = 账面真实事件的可辨识联合（阶段4-G / B6 接真） */
+export type ProxyAuditEntry = ProxyCallAuditEntry | ModelConfigAuditEntry;

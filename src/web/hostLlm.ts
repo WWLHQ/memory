@@ -67,6 +67,11 @@ export function applyHostLlmSnapshot(v: LlmGatewaySnapshot | null): void {
   snapshot = v;
 }
 
+/** 读取当前网关快照（反代理源单一真源；无网关/未配置 → null，按诚实空态处理） */
+export function getHostLlmSnapshot(): LlmGatewaySnapshot | null {
+  return snapshot;
+}
+
 // routeProxy 记账元数据（与主进程 llmGateway 同口径；price/quota 是 19.8 成本路由的记账值，非真实账单）
 const LOCAL_HOST = /^(localhost|127\.\d+\.\d+\.\d+|\[::1\]|::1)$/i;
 

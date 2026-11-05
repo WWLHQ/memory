@@ -1,5 +1,5 @@
 // P13 纯逻辑（T2）：向量模型信息 / Key 脱敏 / 用途校验 / 反代理择优与审计
-import type { LlmUsage, ProxyAuditEntry, ProxySelectMode, ProxySource, UsageConfig, VectorModelInfo, VectorModelKey } from './types.ts';
+import type { LlmUsage, ProxyCallAuditEntry, ProxySelectMode, ProxySource, UsageConfig, VectorModelInfo, VectorModelKey } from './types.ts';
 import { VECTOR_MODELS } from './catalog.ts';
 
 /** R3：fallback_local 恒开，无关闭入口 */
@@ -91,7 +91,7 @@ export function manualPick(selected: ProxySource[], priceCap: number, _now: numb
 }
 
 /** R10：反代理调用审计 —— llm_proxy_source=agent:<name> + 花费 + 模式 */
-export function auditProxy(src: ProxySource | null, cost: number, mode: ProxySelectMode | 'local'): ProxyAuditEntry {
+export function auditProxy(src: ProxySource | null, cost: number, mode: ProxySelectMode | 'local'): ProxyCallAuditEntry {
   return {
     event: 'llm_proxy',
     llm_proxy_source: src ? `agent:${src.agent}` : 'agent:local',

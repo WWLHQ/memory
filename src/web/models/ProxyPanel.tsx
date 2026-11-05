@@ -1,8 +1,13 @@
-// P13-T3 反代理面板：全量映射表 + 来源单选 + auto/manual 模式 + price_cap/cost_cap/预算条（19.8 / R7–R12）
+// P13-T3 反代理面板：来源映射表 + 来源单选 + auto/manual 模式 + price_cap/cost_cap/预算条（19.8 / R7–R12）
+// 三态由 ModelsPage 经 state 下发：configured=真模型表；unconfigured/degraded=诚实空态（绝不伪造假行）。
+// price/quota 列已按批次42 阶段3-C 口径默认隐藏（不展示声明额度/单价，仅保留真实余量/预算条）。
 import type { ProxySelectMode, ProxySource } from './types.ts';
 import { remainingOf, proxyBudgetOf } from './logic.ts';
 
+export type ProxyState = 'configured' | 'unconfigured' | 'degraded';
+
 interface Props {
+  state: ProxyState;
   sources: ProxySource[];
   /** manual 模式下勾选的 agent 名单 */
   selected: string[];
@@ -38,6 +43,7 @@ function Bar({ used, budget }: { used: number; budget: number }) {
 }
 
 export function ProxyPanel(p: Props) {
+  const configured = p.state === 'configured';
   return (
     <div className="card" data-testid="proxy-panel">
       <b>反代理来源映射（19.8）</b>
@@ -45,52 +51,57 @@ export function ProxyPanel(p: Props) {
         R7 仅免费/低价（≤ price_cap）源可入代理，paid 档永不 · R8 当日预算 = 声明额度 × 0.9 ·
         R12 全不可用一律回退本地 · R10 每次代理调用写审计。
       </div>
-      <table className="ltable" data-testid="proxy-rows">
-        <thead>
-          <tr>
-            <th style={{ width: 36 }}></th>
-            <th style={{ textAlign: 'left' }}>Agent</th>
-            <th style={{ textAlign: 'left' }}>模型</th>
-            <th>档位</th>
-            <th>单价(¥/千次)</th>
-            <th>声明额度</th>
-            <th style={{ textAlign: 'left' }}>余量 / 预算</th>
-          </tr>
-        </thead>
-        <tbody>
-          {p.sources.map((s) => {
-            const budget = proxyBudgetOf(s);
-            const remain = remainingOf(s);
-            const checked = p.selected.includes(s.agent);
-            return (
-              <tr key={s.agent} data-testid={`proxy-${s.agent}`} style={remain <= 0 ? { opacity: 0.55 } : undefined}>
-                <td>
-                  <input
-                    type="checkbox"
-                    data-testid={`proxy-check-${s.agent}`}
-                    checked={checked}
-                    onChange={() => p.onToggleSource(s.agent)}
-                    title="manual 模式勾选源"
-                  />
-                </td>
-                <td style={{ textAlign: 'left' }}>{s.agent}</td>
-                <td style={{ textAlign: 'left' }}>{s.model}</td>
-                <td style={{ textAlign: 'center' }}>{tierBadge(s.tier)}</td>
-                <td style={{ textAlign: 'center' }}>{s.price === 0 ? '—' : `¥${s.price}`}</td>
-                <td style={{ textAlign: 'center' }}>{s.quota}</td>
-                <td>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span data-testid={`proxy-remain-${s.agent}`} style={{ color: remain <= 0 ? 'var(--danger,#ff5d5d)' : undefined }}>
-                      {remain}
-                    </span>
-                    <Bar used={s.used} budget={budget} />
-                  </div>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+
+      {configured ? (
+        <table className="ltable" data-testid="proxy-rows">
+          <thead>
+            <tr>
+              <th style={{ width: 36 }}></th>
+              <th style={{ textAlign: 'left' }}>Agent</th>
+              <th style={{ textAlign: 'left' }}>模型</th>
+              <th>档位</th>
+              <th style={{ textAlign: 'left' }}>余量 / 预算</th>
+            </tr>
+          </thead>
+          <tbody>
+            {p.sources.map((s) => {
+              const budget = proxyBudgetOf(s);
+              const remain = remainingOf(s);
+              const checked = p.selected.includes(s.agent);
+              return (
+                <tr key={s.agent} data-testid={`proxy-${s.agent}`} style={remain <= 0 ? { opacity: 0.55 } : undefined}>
+                  <td>
+                    <input
+                      type="checkbox"
+                      data-testid={`proxy-check-${s.agent}`}
+                      checked={checked}
+                      onChange={() => p.onToggleSource(s.agent)}
+                      title="manual 模式勾选源"
+                    />
+                  </td>
+                  <td style={{ textAlign: 'left' }}>{s.agent}</td>
+                  <td style={{ textAlign: 'left' }}>{s.model}</td>
+                  <td style={{ textAlign: 'center' }}>{tierBadge(s.tier)}</td>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span data-testid={`proxy-remain-${s.agent}`} style={{ color: remain <= 0 ? 'var(--danger,#ff5d5d)' : undefined }}>
+                        {remain}
+                      </span>
+                      <Bar used={s.used} budget={budget} />
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      ) : (
+        <div className="card" data-testid="proxy-empty-state" style={{ borderColor: p.state === 'degraded' ? 'var(--warn,#ffb84d)' : 'var(--border,#2a3442)' }}>
+          {p.state === 'degraded'
+            ? '已降级：网关已连接但当前不可用，代理调用将回退本地（fallback_local），写入仅落 L1，不伪造精炼结果。'
+            : '未配置引擎：未接入宿主 LLM 网关，当前无可用反代理源（诚实空态）。可在桌面端接入网关，或在参数页配置本地/网络通道后由真实快照下发。'}
+        </div>
+      )}
 
       <div className="row" style={{ gap: 24, marginTop: 12, alignItems: 'center' }}>
         <span>

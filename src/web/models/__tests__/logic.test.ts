@@ -1,6 +1,6 @@
 // P13 纯逻辑单测：覆盖 R1–R12 红线与 C3/C7/C8/C9/C11/C13 用例
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_USAGES, PROXY_CATALOG } from '../catalog.ts';
+import { DEFAULT_USAGES } from '../catalog.ts';
 import {
   FALLBACK_ALWAYS_ON,
   auditProxy,
@@ -18,7 +18,11 @@ import {
 import type { ProxySource, UsageConfig } from '../types.ts';
 
 const NOW = 1_700_000_000_000;
-const PROXY_SOURCES: ProxySource[] = PROXY_CATALOG.map((c) => ({ ...c, used: 120 }));
+// 反代理源不再来自硬编码 PROXY_CATALOG（批次42 阶段3-B 删除）；这里用手写样例覆盖纯逻辑。
+const PROXY_SOURCES: ProxySource[] = [
+  { agent: 'local-a', model: 'local-model-a', tier: 'free', price: 0, quota: 100_000, used: 120 },
+  { agent: 'cloud-b', model: 'cloud-model-b', tier: 'cheap', price: 0.01, quota: 100_000, used: 120 },
+];
 const src = (o: Partial<ProxySource>): ProxySource => ({
   agent: 'a', model: 'm', tier: 'free', price: 0, quota: 1000, used: 0, ...o,
 });
@@ -96,7 +100,7 @@ describe('反代理预算与资格（R7/R8/R12）', () => {
 describe('auto 择优（C7/C8/C13）', () => {
   it('C7：免费有余量者优先', () => {
     const r = autoPick(PROXY_SOURCES, 0.01, NOW);
-    expect(r.source?.agent).toBe('claude-code');
+    expect(r.source?.agent).toBe('local-a');
     expect(r.reason).toContain('免费优先');
   });
 
@@ -144,9 +148,9 @@ describe('manual 择优（C9/C11/R7）', () => {
 
 describe('审计与反代理目录（R8/R10）', () => {
   it('R10：审计条目含 agent:<name> + 花费 + 模式', () => {
-    const e = auditProxy(PROXY_SOURCES[2], 0.35, 'auto');
+    const e = auditProxy(PROXY_SOURCES[1], 0.35, 'auto');
     expect(e.event).toBe('llm_proxy');
-    expect(e.llm_proxy_source).toBe('agent:codex');
+    expect(e.llm_proxy_source).toBe('agent:cloud-b');
     expect(e.cost).toBe(0.35);
     expect(e.mode).toBe('auto');
     const local = auditProxy(null, 0, 'auto');
@@ -154,8 +158,8 @@ describe('审计与反代理目录（R8/R10）', () => {
     expect(local.mode).toBe('local');
   });
 
-  it('反代理目录：x-agent 低价源在额度内（余量 > 0）', () => {
-    const x = PROXY_SOURCES.find((s) => s.agent === 'x-agent')!;
+  it('反代理目录：低价源在额度内（余量 > 0）', () => {
+    const x = PROXY_SOURCES.find((s) => s.tier === 'cheap')!;
     expect(remainingOf(x)).toBeGreaterThan(0);
   });
 });

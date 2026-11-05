@@ -1,7 +1,7 @@
-// P13 大模型配置页：规格常量 + 反代理源目录（19.8）。
-// 这里只放「配置事实」：模型清单、档位、单价、声明额度、默认用途参数。
-// 已用次数（used）不在这里 —— 由 coreModels 从内核审计账本当日 llm_proxy 明细实算。
-import type { LlmUsage, ProxyTier, UsageConfig, VectorModelInfo, VectorModelKey } from './types.ts';
+// P13 大模型配置页：规格常量（向量模型 + 四用途默认参数）。
+// 反代理源不再硬编码虚构目录（批次42 阶段3-B 已删除）—— 真实模型来自主进程网关快照，
+// 经 hostLlm.getHostLlmSnapshot() 单一真源下发；used 由 coreModels 从内核审计账本当日 llm_proxy 明细实算。
+import type { LlmUsage, UsageConfig, VectorModelInfo, VectorModelKey } from './types.ts';
 
 export const VECTOR_MODELS: VectorModelInfo[] = [
   { key: 'st', label: 'sentence-transformers（本地）', dims: 384, deploy: '本地', needsKey: false },
@@ -31,24 +31,3 @@ export const DEFAULT_USAGES: Record<LlmUsage, UsageConfig> = {
   rerank: defaultUsage(),
   growth: defaultUsage(),
 };
-
-export interface ProxyCatalogEntry {
-  agent: string;
-  model: string;
-  tier: ProxyTier;
-  /** 单价 ¥/千次 */
-  price: number;
-  /** 声明日额度（次数） */
-  quota: number;
-}
-
-/**
- * 反代理源目录（19.8）：免费 → 低价阶梯。额度为真实声明值，
- * 当日已用量由账本审计实算（coreModels.loadSources）。
- */
-export const PROXY_CATALOG: ProxyCatalogEntry[] = [
-  { agent: 'claude-code', model: 'claude-free', tier: 'free', price: 0, quota: 5000 },
-  { agent: 'cursor-trial', model: 'glm-free', tier: 'free', price: 0, quota: 5000 },
-  { agent: 'codex', model: 'gpt4o-mini', tier: 'cheap', price: 0.01, quota: 2000 },
-  { agent: 'x-agent', model: 'deepseek-v3', tier: 'cheap', price: 0.03, quota: 2000 },
-];

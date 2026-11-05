@@ -5,10 +5,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { LlmUsage, ProxyAuditEntry, ProxySelectMode, ProxySource, UsageConfig, VectorModelKey } from './types.ts';
 import {
-  DEFAULT_VECTOR_KEY, PROXY_CATALOG, USAGE_KEYS, USAGE_LABELS,
+  DEFAULT_VECTOR_KEY, USAGE_KEYS, USAGE_LABELS,
 } from './catalog.ts';
 import { manualPick, validatePriceCap, validateUsage, vectorInfo } from './logic.ts';
 import { coreAuditTail, coreLoadSources, coreSaveConfig, coreSimulateAuto, coreVectorCount, coreVectorProbe } from './coreModels.ts';
+import { getHostLlmSnapshot, hostLlmAvailable, refreshHostLlmSnapshotOnce } from '../hostLlm.ts';
 import { hydrateUsages, readModelConfig } from './modelConfig.ts';
 import { VectorCard } from './VectorCard.tsx';
 import { LlmUsageTable } from './LlmUsageTable.tsx';
@@ -20,11 +21,10 @@ export function ModelsPage() {
   // 挂载即回填已落盘配置（Phase C3：刷新/重开页面后选择仍生效；API Key 不落盘）
   const [vectorKey, setVectorKey] = useState<VectorModelKey>(() => readModelConfig()?.vectorKey ?? DEFAULT_VECTOR_KEY);
   const [usages, setUsages] = useState<Record<LlmUsage, UsageConfig>>(() => hydrateUsages(readModelConfig()?.usages));
-  const [sources, setSources] = useState<ProxySource[]>(
-    PROXY_CATALOG.map((c) => ({ ...c, used: 0 })),
-  );
+  const [sources, setSources] = useState<ProxySource[]>([]); // 真实源由挂载时 coreLoadSources 从快照回填；无网关 → 空态（3-C 补三态）
+  const [gatewayState, setGatewayState] = useState<'configured' | 'unconfigured' | 'degraded'>('unconfigured');
   const [vectorCount, setVectorCount] = useState(0);
-  const [selected, setSelected] = useState<string[]>(['claude-code']);
+  const [selected, setSelected] = useState<string[]>([]); // 真实源挂载后由用户勾选；初始无伪造默认勾选
   const [selectMode, setSelectMode] = useState<ProxySelectMode>('auto');
   const [priceCap, setPriceCap] = useState(0.01);
   const [costCap, setCostCap] = useState(2);
@@ -32,17 +32,19 @@ export function ModelsPage() {
   const [saving, setSaving] = useState(false);
   const { node: toast, show } = useToast();
 
-  // 挂载：审计回显 + 当日已用量 + 向量条数，全部来自真实账本
+  // 挂载：快照刷新（桌面壳）→ 三态判定 + 审计回显 + 真实用量 + 向量条数
   useEffect(() => {
     let alive = true;
-    Promise.all([coreAuditTail(), coreLoadSources(), coreVectorCount()])
-      .then(([tail, srcs, count]) => {
-        if (!alive) return;
-        if (tail.length > 0) setAuditLog(tail);
-        setSources(srcs);
-        setVectorCount(count);
-      })
-      .catch(() => { /* 账本不可用：保持初始空用量与空审计（不伪造） */ });
+    (async () => {
+      if (hostLlmAvailable()) await refreshHostLlmSnapshotOnce(); // 桌面壳才刷新；浏览器静态环境跳过，避免伪 hostCall
+      const snap = getHostLlmSnapshot();
+      const [tail, srcs, count] = await Promise.all([coreAuditTail(), coreLoadSources(), coreVectorCount()]);
+      if (!alive) return;
+      setGatewayState(snap ? (snap.usable ? 'configured' : 'degraded') : 'unconfigured');
+      if (tail.length > 0) setAuditLog(tail);
+      setSources(srcs);
+      setVectorCount(count);
+    })().catch(() => { /* 账本/网关不可用：保持初始空用量与空审计（不伪造） */ });
     return () => { alive = false; };
   }, []);
 
@@ -121,6 +123,7 @@ export function ModelsPage() {
       />
       <LlmUsageTable usages={usages} onChange={patchUsage} />
       <ProxyPanel
+        state={gatewayState}
         sources={sources}
         selected={selected}
         selectMode={selectMode}
@@ -135,14 +138,25 @@ export function ModelsPage() {
 
       <div className="card models-audit" data-testid="audit-echo">
         <b>审计回显（R10 / 4.3）</b>
-        <div className="note">保存 model_config 写 param_save 审计；真实代理调用写 llm_proxy/llm_fallback；「模拟」为 dry-run，不写账本。</div>
+        <div className="note">保存 model_config 写 param_save 审计；真实代理调用写 llm_proxy/llm_fallback；「模拟」为 dry-run，不写账本。回显按账本真实事件类型，配置保存不冒充代理调用。</div>
         {auditLog.length === 0 && <div className="dim" style={{ padding: '6px 0' }}>暂无本会话审计条目</div>}
         {auditLog.map((e, i) => (
           <div className="aentry" key={`${e.at}-${i}`} data-testid={`audit-entry-${i}`}>
-            <span className="aev">{e.kind === 'model_config' ? 'model_config' : e.llm_proxy_source === 'agent:local' ? 'local 回退' : 'llm_proxy'}</span>
-            <span className="adim">llm_proxy_source={e.llm_proxy_source}</span>
-            <span className="adim">cost=¥{e.cost.toFixed(4)}</span>
-            <span className="adim">mode={e.mode}</span>
+            {e.event === 'model_config' ? (
+              <>
+                <span className="aev">model_config</span>
+                <span className="adim">vector={e.vector ?? '未记录'}{e.dims === null ? '' : `（${e.dims} 维）`}</span>
+                <span className="adim">重嵌入 {e.reembedded ?? '未记录'} 条</span>
+                <span className="adim">{e.persisted === null ? '持久化：未记录' : e.persisted ? '已持久化' : '仅本次运行'}</span>
+              </>
+            ) : (
+              <>
+                <span className="aev">{e.llm_proxy_source === 'agent:local' ? 'local 回退' : 'llm_proxy'}</span>
+                <span className="adim">llm_proxy_source={e.llm_proxy_source}</span>
+                <span className="adim">cost=¥{e.cost.toFixed(4)}</span>
+                <span className="adim">mode={e.mode}</span>
+              </>
+            )}
           </div>
         ))}
       </div>

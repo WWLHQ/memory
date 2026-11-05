@@ -1,4 +1,5 @@
-// P13-T3 向量模型卡：切换联动 dims/deploy；换维度需保存后按新维度重建（R5）；连通测试（Phase C3 如实探测）
+// P13-T3 向量模型卡：切换联动 dims/deploy；换维度需保存后按新维度重建（R5）。
+// 「探测本地后端」只验证内核内置 hash 嵌入后端能否产出指定维度的向量，不验证所选模型权重、也不测云端通道。
 import { useState } from 'react';
 import type { VectorModelKey } from './types.ts';
 import { VECTOR_MODELS } from './catalog.ts';
@@ -10,7 +11,7 @@ interface Props {
   /** 已入库向量条数（估时用） */
   count: number;
   onToast: (msg: string) => void;
-  /** 真实连通探测（返回如实结果，未验证/失败不得谎报通过） */
+  /** 本地嵌入后端探测（ok=true 仅代表 hash 后端可用；所选模型权重/云端通道未接入，不得谎报模型连通） */
   onProbe: (apiKey: string) => Promise<{ ok: boolean; message: string }>;
   /** 保存落盘/重嵌入进行中（R5：此时禁止再次切换） */
   saving?: boolean;
@@ -44,7 +45,9 @@ export function VectorCard({ value, onChange, count, onToast, onProbe, saving = 
     setProbing(true);
     try {
       const r = await onProbe(apiKey);
-      onToast(`${r.ok ? '连通测试通过' : '连通测试未通过'}：${r.message}`);
+      // ok=true 只说明内核内置 hash 后端能产出向量；所选向量模型的权重与云端通道均未接入，
+      // 因此不得用「测试通过」这类会被读成「模型已连通」的结论前缀。
+      onToast(`${r.ok ? '本地 hash 后端可用（非所选模型连通）' : '模型连通未验证'}：${r.message}`);
     } finally {
       setProbing(false);
     }
@@ -56,6 +59,7 @@ export function VectorCard({ value, onChange, count, onToast, onProbe, saving = 
       <div className="note">
         嵌入维度决定索引结构，换维度需重建索引（9.x）；重建期间禁止再次切换（R5）。
         当前嵌入由内核 JsVectorBackend（hash 起步实现）执行，模型名用于维度/部署声明，本地权重与云端通道尚未接入。
+        「探测本地后端」只验证内核 hash 后端能否产出指定维度向量，不代表所选模型权重已加载或云端通道已连通。
       </div>
       <div className="row" style={{ alignItems: 'center', gap: 10 }}>
         <select
@@ -70,7 +74,7 @@ export function VectorCard({ value, onChange, count, onToast, onProbe, saving = 
           ))}
         </select>
         <button className="btn" data-testid="vector-ping" disabled={probing} onClick={handleProbe}>
-          {probing ? '测试中…' : '连通测试'}
+          {probing ? '探测中…' : '探测本地后端'}
         </button>
       </div>
       <div className="row" style={{ gap: 18, marginTop: 8 }}>

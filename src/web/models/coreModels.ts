@@ -8,15 +8,16 @@ import { routeProxy } from '../../core/memagent/llm.ts';
 import type { StorageBackend } from '../../core/memagent/types.ts';
 import { embedSync, JsVectorBackend } from '../../core/memagent/vector.ts';
 import { getKernelStorage, newRequestId, KERNEL_FORM, rebuildKernelFromModelConfig } from '../kernel.ts';
-import { PROXY_CATALOG } from './catalog.ts';
+import { getHostLlmSnapshot, isLocalBase } from '../hostLlm.ts';
 import { readModelConfig, sanitizeUsages, writeModelConfig } from './modelConfig.ts';
 import { vectorInfo } from './logic.ts';
-import type { LlmUsage, ProxyAuditEntry, ProxySource, UsageConfig, VectorModelKey } from './types.ts';
+import type { LlmUsage, ModelConfigAuditEntry, ProxyAuditEntry, ProxyCallAuditEntry, ProxySource, UsageConfig, VectorModelKey } from './types.ts';
 
 const DAY = 24 * 3600 * 1000;
 
 interface Ctx {
   models: ModelInfo[];   // 内核路由输入（used 由账本当日 llm_proxy 明细实算）
+  sources: ProxySource[]; // 反代理源（真实快照 + 账本实算 used）
   usedToday: number;     // 19.8 cost_cap 口径（账本当日 llm_proxy 花费求和）
   storage: StorageBackend;
 }
@@ -47,24 +48,24 @@ async function getCtx(): Promise<Ctx> {
   const storage = getKernelStorage();
   const audits = await storage.queryAudit({});
   const used = usedByModel(audits);
-  const models: ModelInfo[] = PROXY_CATALOG.map((s) => ({
-    model: s.model, tier: s.tier, price: s.price, quota: s.quota, used: used[s.model] ?? 0,
-  }));
-  return { models, usedToday: costToday(audits), storage };
+  // 反代理源单一真源：主进程网关快照（hostLlm），不再内置虚构目录（批次42 阶段3-B）。
+  // 只保留真实引擎（enabled 且可用：本地，或云端已置 Key）；used 由账本当日 llm_proxy 明细实算。
+  const snap = getHostLlmSnapshot();
+  const engines = (snap?.engines ?? []).filter((e) => e.enabled && e.model && (!e.needsKey || e.keySet));
+  const sources: ProxySource[] = engines.map((e) => {
+    const local = isLocalBase(e.baseURL);
+    const tier = local ? 'free' : 'cheap';
+    const price = local ? 0 : 0.01;
+    return { agent: e.name, model: e.model, tier, price, quota: 100_000, used: used[e.model] ?? 0 };
+  });
+  const models: ModelInfo[] = sources.map((s) => ({ model: s.model, tier: s.tier, price: s.price, quota: s.quota, used: s.used }));
+  return { models, sources, usedToday: costToday(audits), storage };
 }
 
-/** 反代理源列表（真实账本已用量回填） */
+/** 反代理源列表（真实快照 + 账本实算已用量） */
 export async function coreLoadSources(): Promise<ProxySource[]> {
   const ctx = await getCtx();
-  const entryOf = (model: string) => PROXY_CATALOG.find((c) => c.model === model)!;
-  return ctx.models.map((m) => ({
-    agent: entryOf(m.model).agent,
-    model: m.model,
-    tier: m.tier,
-    price: m.price,
-    quota: m.quota,
-    used: m.used,
-  }));
+  return ctx.sources;
 }
 
 /** 已入库向量条数（账本中带 embedding 的记忆数，真实统计） */
@@ -86,14 +87,13 @@ export interface SimulateOutcome {
 export async function coreSimulateAuto(priceCap: number, costCap: number): Promise<SimulateOutcome> {
   const ctx = await getCtx();
   const r = routeProxy(ctx.models, priceCap, costCap, ctx.usedToday);
-  const catalog = r.model ? PROXY_CATALOG.find((c) => c.model === r.model) : undefined;
-  const used = r.model ? (ctx.models.find((m) => m.model === r.model)?.used ?? 0) : 0;
-  const source: ProxySource | null = catalog ? { ...catalog, used } : null;
+  const source: ProxySource | null = r.model ? (ctx.sources.find((c) => c.model === r.model) ?? null) : null;
   return { source, reason: r.reason, cost: r.cost, dryRun: true };
 }
 
 export interface SaveConfigOutcome {
-  entry: ProxyAuditEntry;
+  /** 与账本 param_save 事件同形的真实回执；不是代理调用，无 llm_proxy_source/cost/mode */
+  entry: ModelConfigAuditEntry;
   /** 本次按新维度重嵌入的记忆条数（维度未变 → 0） */
   reembedded: number;
   /** 配置是否已持久化落盘（localStorage 不可用/配额满 → false，UI 不得谎报已保存） */
@@ -147,11 +147,17 @@ export async function coreSaveConfig(
       api_key_persisted: false,
     },
   });
-  return {
-    entry: { event: 'llm_proxy', llm_proxy_source: 'agent:local', cost: 0, mode: 'local', at, kind: 'model_config' },
+  // 保存配置不是代理调用：回执只带 param_save 里真实写下的字段，不编造 source/cost/mode。
+  const entry: ModelConfigAuditEntry = {
+    event: 'model_config',
+    at,
+    vector: vectorLabel,
+    dims,
     reembedded,
     persisted,
+    api_key_persisted: false,
   };
+  return { entry, reembedded, persisted };
 }
 
 export interface VectorProbeResult {
@@ -160,8 +166,9 @@ export interface VectorProbeResult {
 }
 
 /**
- * 向量连通测试（Phase C3 诚实版）：
- *  · 本地档：真实跑一次嵌入，校验维度与输出非全零；
+ * 向量嵌入探测（Phase C3 诚实版；阶段4-F 重标注）：
+ *  · 本地档：真实跑一次内置 JsVectorBackend 嵌入，校验维度与输出非全零；
+ *    ok=true 仅代表「本地 hash 后端可用」，所选模型权重未加载，**不等于模型连通**。
  *  · 云端档：内核尚未接入云端嵌入通道 → 如实「未验证」，绝不谎报通过。
  */
 export async function coreVectorProbe(vectorKey: VectorModelKey, apiKey: string): Promise<VectorProbeResult> {
@@ -176,7 +183,7 @@ export async function coreVectorProbe(vectorKey: VectorModelKey, apiKey: string)
   }
   try {
     const backend = new JsVectorBackend(info.dims);
-    const [vec] = await backend.embed(['向量连通测试 vector probe']);
+    const [vec] = await backend.embed(['本地嵌入探测 vector probe']);
     if (vec.length !== info.dims) {
       return { ok: false, message: `维度不符：期望 ${info.dims}，实际 ${vec.length}` };
     }
@@ -192,7 +199,12 @@ export async function coreVectorProbe(vectorKey: VectorModelKey, apiKey: string)
   }
 }
 
-/** 审计回显 = 内核审计流（llm_proxy / llm_fallback / model_config，最新在前，最多 20 条） */
+/**
+ * 审计回显 = 内核审计流按**真实事件类型**回放（最新在前，最多 20 条）。
+ *  · llm_proxy / llm_fallback → ProxyCallAuditEntry；
+ *  · param_save(kind=model_config) → ModelConfigAuditEntry，**不映射成 llm_proxy**，
+ *    字段全部读账本 detail；历史记录缺字段记 null，不拿 0 / 空串 / agent:local 冒充。
+ */
 export async function coreAuditTail(): Promise<ProxyAuditEntry[]> {
   const storage = getKernelStorage();
   const records = await storage.queryAudit({});
@@ -201,22 +213,27 @@ export async function coreAuditTail(): Promise<ProxyAuditEntry[]> {
       a.action === 'llm_proxy'
       || a.action === 'llm_fallback'
       || (a.action === 'param_save' && a.detail.kind === 'model_config'))
-    .map((a) => {
-      const d = a.detail as {
-        llm_proxy_source?: string; source?: string; cost?: number; mode?: ProxyAuditEntry['mode']; model?: string;
-      };
+    .map((a): ProxyAuditEntry => {
       if (a.action === 'param_save') {
+        const d = a.detail as {
+          vector?: string; dims?: number; reembedded?: number;
+          persisted?: boolean; api_key_persisted?: boolean;
+        };
         return {
-          event: 'llm_proxy' as const,
-          llm_proxy_source: 'agent:local',
-          cost: 0,
-          mode: 'local' as const,
+          event: 'model_config',
           at: a.ts,
-          kind: 'model_config' as const,
+          vector: d.vector ?? null,
+          dims: d.dims ?? null,
+          reembedded: d.reembedded ?? null,
+          persisted: d.persisted ?? null,
+          api_key_persisted: d.api_key_persisted ?? null,
         };
       }
+      const d = a.detail as {
+        llm_proxy_source?: string; source?: string; cost?: number; mode?: ProxyCallAuditEntry['mode'];
+      };
       return {
-        event: 'llm_proxy' as const,
+        event: 'llm_proxy',
         llm_proxy_source: d.llm_proxy_source ?? d.source ?? 'agent:local',
         cost: d.cost ?? 0,
         mode: d.mode ?? 'local',
