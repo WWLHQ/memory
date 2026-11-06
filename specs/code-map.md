@@ -1288,3 +1288,21 @@ status: draft
 > **C·变异验证**：C1 把「有 failed test/suite → assertion-fail」改成 `return 'pass'`（吞掉断言失败）→ 同一注入失败用例的门禁**变绿且 `totals.failed=1`**（防线失效被肉眼可见地证明）→ 原样还原后再跑同一用例 → **exit=1、判红、重试 0** 复绿。C2 输入矩阵：无报告非崩溃（过滤零命中）/ 有报告断言失败 / 模拟崩溃一次 / 模拟崩溃两次 / 报告全绿但非 0 退出 —— 分类结果逐一断言（前两类判红不重试、中两类只重试一次、最后一类判红不重试）。
 > **已知边界**：分片按 vitest `--shard` 的文件哈希分配，片间用例数不均（578/573/603/702）属正常；`0xC0000409` 本身未能在本环境按需复现，重试分支用自检开关验证（`MAM_TEST_GATE_SELFTEST_CRASH`，只影响指定分片的第一/两次尝试，不改判据）。
 
+### 批次48 A30：演示页与生产产物（2026-11-06，D3=b）
+
+> 口径（P3-3）：**保留** inline 演示页与悬浮覆盖层，但**强制演示标识**（页面显著位置标明为演示）、**不进入主导航**；生产构建可达但必须带标识。演示页数据仍取自本机真实账本，标识只声明「形态演示、非正式功能入口」，不谎称数据造假。
+
+| 能力 | 代码落点 | 测试/证据 |
+|---|---|---|
+| 强制演示标识（演示页） | `src/web/shared/DemoBadge.tsx`（`data-testid="demo-badge"`、`role="note"`）；`src/web/InlineAttribution/inlineAttributionEntry.tsx` 首屏渲染 `<DemoBadge />`（在登录门禁/数据加载之外） | `a30DemoBadge.test.tsx`（2 例）、`a30InlineDemoBadge.test.tsx`（2 例：首屏可见；`#root` 缺失显式抛错） |
+| 强制演示标识（浮层） | `src/web/InlineAttribution/floatEntry.tsx` 在拖拽条下渲染 `<DemoBadge compact />`（280px 窗宽紧凑形态） | `floatEntry.test.tsx` 增加断言：`demo-badge` 含「演示（DEMO）」 |
+| 不进主导航 | `src/web/overview/Overview.tsx` 的 `VIEWS` 移除 `inline` 项（17 → 16 个已落地视图）；顶部说明去掉 `REQ-004 内联标识`；悬浮层按钮改名「🧠 悬浮标识层（演示）」并补 title | `a30DemoNav.test.tsx`（3 例：导航项不含内联标识、计数 16、按钮显式标注演示）；`e2e/overview.spec.ts` 改为断言主导航无该项 |
+| 生产构建可达且带标识 | 两个 HTML 入口保留在 vite inputs，`vite build` 产出 `dist/inlineattribution.html`、`dist/floatattribution.html`；`e2e/overview.spec.ts` 直接 `goto` 演示页并断言 `demo-badge` 可见且含「演示页（DEMO）」 | 构建产物清单含两页；`Get-ChildItem dist/assets -Filter *.js` 命中「演示页（DEMO）」/「形态演示，非正式功能入口」 |
+
+> **A30 三道闸门证据**：
+> **A·影响面回归**：影响面 = 新增 `DemoBadge.tsx` + 3 个测试文件；改 `inlineAttributionEntry.tsx`、`floatEntry.tsx`、`Overview.tsx`、`e2e/overview.spec.ts`。**全量门禁 `npm run test:gate` = 211 文件 / 2463 例全绿**（53/53/53/52 文件，580/576/609/698 例）。typecheck 两工程 0 错；`oxlint` 603 文件 0/0；`check:no-demo` 337 文件 21 判据 0 命中（演示标识用「演示」而非被禁的伪造口径词）；`build` + `build:electron` 通过，`dist/` 含 `inlineattribution.html`、`floatattribution.html`，产物 JS 内含演示标识文案。
+> **B·效果验证**：① 单元/组件：标识在演示页首屏（登录门禁外）与浮层紧凑形态均可见；② 主导航：`.nav .item` 不含「Agent 界面内联标识」，计数 16，`REQ-004` 不再出现在顶部说明；③ 生产构建：两页产物存在且打包 JS 命中演示标识文案；④ e2e 断言（真浏览器，本机未跑：需 dist + 浏览器）——直接 goto 演示页要求 `demo-badge` 可见并含「演示页（DEMO）」；⑤ **A27 门禁实机复验**：本次全量第 4 片首跑真出现原生崩溃 `0xC0000409`（exit=3221226505，无 JSON 报告），门禁按口径**重试一次**后 52 文件 / 698 例通过，`summary.json` 记 `retries=[{shard:4, reason:'0xC0000409'}]`。
+> **C·变异验证**：C1-a 删除浮层 `<DemoBadge compact />` → `floatEntry.test.tsx` **1 红**；C1-b 把 `inline` 视图加回 `VIEWS` → `a30DemoNav.test.tsx` **2 红**（导航项与计数）；C1-c 删除演示页入口的 `<DemoBadge />` → `a30InlineDemoBadge.test.tsx` **1 红**。三处均原样还原后 4 文件 / 11 例复绿。C2 边界：`#root` 缺失显式抛错、无 preload 桥仍显示标识、浮层紧凑形态不省略演示文案。
+> **已知边界**：`floatattribution.html` 是独立透明窗（依赖 preload 桥），浏览器直开只显示「桥缺失」占位 + 演示标识，属既有诚实降级，未改；e2e 真浏览器路径本机未执行，逻辑已在 spec 中落定。
+
+

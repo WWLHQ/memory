@@ -27,6 +27,8 @@ describe('floatEntry 悬浮覆盖层入口（P3-11 冒烟）', () => {
     await import('../floatEntry.tsx');
     await waitFor(() => expect(screen.getByText(/preload 桥缺失/)).toBeInTheDocument());
     expect(screen.getByText('◦ 记忆标识层')).toBeInTheDocument();
+    // 批次48 A30：浮层强制演示标识
+    expect(screen.getByTestId('demo-badge')).toHaveTextContent('演示（DEMO）');
   });
 
   it('有桥：detectClaude 命中 → setPosition 贴到 Claude 右侧（x = right + 8）', async () => {

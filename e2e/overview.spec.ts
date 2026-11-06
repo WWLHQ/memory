@@ -75,14 +75,15 @@ test.describe('REQ-003 + REQ-005 通览页 · 点击级 E2E', () => {
     await expect(cards).toHaveCount(3);
     await expect(cards.nth(0)).toContainText('未配置');
 
-    // 切到内联标识演示页（REQ-004，已从规划中提升为已落地）
-    // 统一账本为空 → 已接入 agent 切换器 + 共享账本空态（不伪造 🧠 标记）
-    await page.click('.nav .item:has-text("Agent 界面内联标识")');
-    await expect(page.locator('#stage')).toHaveAttribute('src', /\/inlineattribution\.html/);
-    const frame = page.frameLocator('#stage');
-    await expect(frame.locator('[data-testid="agent-switcher"]')).toBeVisible();
-    await expect(frame.locator('[data-testid="inline-shared-empty"]')).toBeVisible();
-    await expect(frame.locator('.mem-tag')).toHaveCount(0);
+    // 批次48 A30：内联演示页不进入主导航（页面与浮层保留，直接 URL 仍可达）
+    await expect(page.locator('.nav .item:has-text("Agent 界面内联标识")')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /悬浮标识层（演示）/ })).toBeVisible();
+
+    // 演示页生产构建可达，但首屏必须带「演示」标识（不依赖登录态/账本加载）
+    // 同源静态服务 + 同一 backend 透传；inlineattribution 忽略 agentBackend 参数
+    await page.goto(APP.replace('/overview.html', '/inlineattribution.html'));
+    await expect(page.locator('[data-testid="demo-badge"]')).toBeVisible();
+    await expect(page.locator('[data-testid="demo-badge"]')).toContainText('演示页（DEMO）');
 
     expect(errors).toEqual([]);
   });

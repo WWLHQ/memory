@@ -8,6 +8,7 @@ import { createRoot } from 'react-dom/client';
 import '../shared/actionLog.ts';
 import './inlineAttribution.css';
 import './floatLayer.css';
+import { DemoBadge } from '../shared/DemoBadge.tsx';
 import { AgentConversationDemo } from './AgentConversationDemo.tsx';
 
 /** 悬浮窗贴到 Claude 窗口右侧内沿（原生挂件感） */
@@ -80,6 +81,8 @@ function FloatWrapper() {
         </label>
         <span className="close" title="关闭" onClick={() => window.api?.floatAttribution?.close()}>✕</span>
       </div>
+      {/* 批次48 A30：浮层同为演示产物，显著位置强制标识，不随登录态/账本开关隐藏 */}
+      <DemoBadge compact />
       {initErr && (
         <div style={{ margin: '4px 8px', padding: '6px 8px', background: 'rgba(255,92,92,0.15)', border: '1px solid rgba(255,92,92,0.4)', borderRadius: 6, fontSize: 11, color: '#ff8c8c' }}>
           ⚠ {initErr}

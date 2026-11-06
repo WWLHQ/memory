@@ -3,7 +3,7 @@
 > 由 `npm run code:index` 生成，请勿手改；改代码后重跑即可。
 > 用法：先在本表定位文件与导出符号，再只读该文件的局部区间（省 token、少误改）。
 
-共 342 个源码文件。
+共 343 个源码文件。
 
 ## e2e
 
@@ -206,8 +206,8 @@
 | [src/web/InlineAttribution/MemoryInjectionTag.tsx](src/web/InlineAttribution/MemoryInjectionTag.tsx) | 58 | REQ-004 T3 ① 记忆注入标记（答案段落内联 🧠 + hover/click 弹层） | MemoryInjectionTag(fn) |
 | [src/web/InlineAttribution/TokenSavingBar.tsx](src/web/InlineAttribution/TokenSavingBar.tsx) | 28 | REQ-004 T4 ② Token 节省标记（回答底部 ⚡ 一行 + 分解） | TokenSavingBar(fn) |
 | [src/web/InlineAttribution/coreInline.ts](src/web/InlineAttribution/coreInline.ts) | 51 | 内联标识演示页（REQ-004 / T10）接真内核：干预反馈走 ma._feedback（confirm +0.1 / | ledgerHasMemory(fn), coreInlineFeedback(fn), coreInlineAuditCount(fn), coreLedgerMemoryCount(fn) |
-| [src/web/InlineAttribution/floatEntry.tsx](src/web/InlineAttribution/floatEntry.tsx) | 100 | 悬浮覆盖层入口（REQ-004 扩展）：无边框透明窗，**贴合到 Claude Desktop 窗口右侧**显示内联记忆标识。 | — |
-| [src/web/InlineAttribution/inlineAttributionEntry.tsx](src/web/InlineAttribution/inlineAttributionEntry.tsx) | 15 | REQ-004 宿主演示页入口 | — |
+| [src/web/InlineAttribution/floatEntry.tsx](src/web/InlineAttribution/floatEntry.tsx) | 103 | 悬浮覆盖层入口（REQ-004 扩展）：无边框透明窗，**贴合到 Claude Desktop 窗口右侧**显示内联记忆标识。 | — |
+| [src/web/InlineAttribution/inlineAttributionEntry.tsx](src/web/InlineAttribution/inlineAttributionEntry.tsx) | 18 | REQ-004 宿主演示页入口 | — |
 | [src/web/InlineAttribution/useInlineReal.ts](src/web/InlineAttribution/useInlineReal.ts) | 299 | 内联标识演示页（REQ-004 / T10）· 真实数据接真层 | collectConnectedAgents(fn), sharedMemories(fn), injectionsFromMemories(fn), backgroundFromMemories(fn), tokenSavingFromMarks(fn), writeBackFromAudits(fn), agingWarnsFromMarks(fn), loadRealInline(fn), INLINE_REAL_DATA_SOURCE(const), ConnectedAgent(type), RealInline(type), RealStorage(type) |
 | [src/web/audit/AuditPage.tsx](src/web/audit/AuditPage.tsx) | 118 | 审计日志页（REQ-006 / P11）· 完整编排（T5） | AuditPage(fn) |
 | [src/web/audit/AuditTable.tsx](src/web/audit/AuditTable.tsx) | 93 | 审计日志页（REQ-006 / P11）审计列表（T4） | AuditTable(fn), AuditTableProps(type) |
@@ -316,7 +316,7 @@
 | [src/web/monitor/useMonitorMirror.ts](src/web/monitor/useMonitorMirror.ts) | 13 | 监控仪表盘后端镜像：挂载视图上抛（G6 fire-and-forget，monitor_view）。 | useMonitorMirror(fn) |
 | [src/web/monitor/useMonitorReal.ts](src/web/monitor/useMonitorReal.ts) | 160 | 监控仪表盘（REQ-006 / P6）· 真实数据接真层 | percentile(fn), metricsFromLedger(fn), realLoadAlerts(fn), loadRealMonitorData(fn), MONITOR_REAL_DATA_SOURCE(const), RealMonitor(type), RealStorage(type) |
 | [src/web/monitor/useToast.tsx](src/web/monitor/useToast.tsx) | 13 | — | useToast(fn) |
-| [src/web/overview/Overview.tsx](src/web/overview/Overview.tsx) | 159 | REQ-003 + REQ-005 配合展示（通览演示页） | Overview(fn) |
+| [src/web/overview/Overview.tsx](src/web/overview/Overview.tsx) | 160 | REQ-003 + REQ-005 配合展示（通览演示页） | Overview(fn) |
 | [src/web/overview/overviewEntry.tsx](src/web/overview/overviewEntry.tsx) | 20 | REQ-003 + REQ-005 通览演示页入口 | — |
 | [src/web/params/DevPanel.tsx](src/web/params/DevPanel.tsx) | 87 | P5-T3 开发者模式（折叠面板，暴露底层参数；2.4.3 / 2.4.1 / 15.3 / 9.10 / 15.1） | DevPanel(fn) |
 | [src/web/params/KbManagementCard.tsx](src/web/params/KbManagementCard.tsx) | 297 | 全局参数页（REQ-006 / P5）· 记忆库管理卡片 | KbManagementCard(fn) |
@@ -371,6 +371,7 @@
 | [src/web/security/useToast.tsx](src/web/security/useToast.tsx) | 13 | — | useToast(fn) |
 | [src/web/setup/SetupPage.tsx](src/web/setup/SetupPage.tsx) | 341 | 首启向导（批次37-B）：把「两个库放在哪 + L0 管理密码 + 恢复卡导出」三件事一次性逼完，走完才放行主界面。 | SetupPage(fn) |
 | [src/web/setup/setupEntry.tsx](src/web/setup/setupEntry.tsx) | 10 | 首启向导入口（批次37-B） | — |
+| [src/web/shared/DemoBadge.tsx](src/web/shared/DemoBadge.tsx) | 51 | 批次48 A30：演示页强制标识。inline 演示页（inlineattribution.html）与悬浮覆盖层（floatattribution.html） | DemoBadge(fn), DemoBadgeProps(type) |
 | [src/web/shared/L0WriteUnlock.tsx](src/web/shared/L0WriteUnlock.tsx) | 97 | 批次41-W：L0 写密钥未解锁 → 就地提示 + 就地解锁入口。 | L0WriteUnlock(fn), L0WriteUnlockProps(type) |
 | [src/web/shared/PageNav.tsx](src/web/shared/PageNav.tsx) | 102 | 分页导航条（批次24）：首页/上一页/跳页输入/下一页/尾页 + 每页条数（默认 10）。 | PageNav(fn), PageNavProps(type) |
 | [src/web/shared/actionLog.ts](src/web/shared/actionLog.ts) | 106 | 渲染层动作日志（批次7）：任何页面 import 本模块即自动安装全局捕获。 | uiLog(fn), installUiActionLog(fn) |
@@ -553,8 +554,8 @@ src/web/InlineAttribution/BackgroundChip.tsx 0ee6a31b5bc2
 src/web/InlineAttribution/MemoryInjectionTag.tsx 89d423e840e8
 src/web/InlineAttribution/TokenSavingBar.tsx 40dbf2ece0f2
 src/web/InlineAttribution/coreInline.ts f8d0b7c28727
-src/web/InlineAttribution/floatEntry.tsx 9ef26ad231da
-src/web/InlineAttribution/inlineAttributionEntry.tsx 8947281e61dd
+src/web/InlineAttribution/floatEntry.tsx fcfe57cd95fe
+src/web/InlineAttribution/inlineAttributionEntry.tsx 2b4292f07d56
 src/web/InlineAttribution/useInlineReal.ts c26fa3eaa091
 src/web/audit/AuditPage.tsx 6037c69f5b58
 src/web/audit/AuditTable.tsx 014506dbdb05
@@ -663,7 +664,7 @@ src/web/monitor/types.ts 31210fc87ca9
 src/web/monitor/useMonitorMirror.ts 9e87dd8cc071
 src/web/monitor/useMonitorReal.ts 62e7e61b2f57
 src/web/monitor/useToast.tsx 85cd09d2e1f5
-src/web/overview/Overview.tsx 4a9f4690fb75
+src/web/overview/Overview.tsx b4303483348f
 src/web/overview/overviewEntry.tsx 5f4488678cc7
 src/web/params/DevPanel.tsx 4d2f45da1bcd
 src/web/params/KbManagementCard.tsx 42c5a719d2f8
@@ -718,6 +719,7 @@ src/web/security/useSecurityMirror.ts 26ac38844bbb
 src/web/security/useToast.tsx 85cd09d2e1f5
 src/web/setup/SetupPage.tsx d1c7c1911be4
 src/web/setup/setupEntry.tsx e1911c5ffb71
+src/web/shared/DemoBadge.tsx 29e08265f189
 src/web/shared/L0WriteUnlock.tsx 83af39cb0ce1
 src/web/shared/PageNav.tsx fed5dc790db7
 src/web/shared/actionLog.ts f21305492f55

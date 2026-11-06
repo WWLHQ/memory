@@ -22,7 +22,8 @@ const AUDIT_VIEW: View = { id: 'audit', ic: '📋', lbl: '审计日志页', desc
 const VIEWS: View[] = [
   { id: 'login', ic: '🏠', lbl: '首页 + 登录卡片', desc: 'P0 落地页含登录态 · 团队管理员分配 · 功劳收口', src: '/index.html', req: 'REQ-005' },
   { id: 'agent', ic: '🔌', lbl: 'Agent 接入配置页', desc: '⚡一键接入 · 双通道 · 隔离 · 效果证据', src: '/agentonboard.html', req: 'REQ-003' },
-  { id: 'inline', ic: '🧠', lbl: 'Agent 界面内联标识', desc: '让功劳当场可见（19.7）· 对话内联 🧠/⚡/📎/⚠️ · 可干预', src: '/inlineattribution.html', req: 'REQ-004' },
+  // 批次48 A30：REQ-004 内联标识是演示产物，保留页面与浮层（生产构建可达），但**不进入主导航**。
+  // 直接访问 inlineattribution.html / floatattribution.html 可见（页面顶部强制演示标识）。
   { id: 'memory', ic: '🗂️', lbl: '记忆库管理页', desc: 'P8 · 列表 + 17.3 操作（记住/忘记/置顶/锁定/归档）', src: '/memory.html', req: 'REQ-006' },
   { id: 'memory-layered', ic: '📚', lbl: '记忆层级管理页', desc: 'P8 · L0-L6 全层查阅（19.11）· L0 需授权+密码', src: '/memory-layered.html', req: 'REQ-006' },
   { id: 'lifecycle', ic: '⏳', lbl: '生命周期页', desc: 'P4 · 六态机（9.10）+ 调参（17.4/17.5）', src: '/lifecycle.html', req: 'REQ-006' },
@@ -90,7 +91,7 @@ export function Overview() {
     <>
       <div className="top">
         <span className="logo">🧠 多 Agent 记忆助手 · UI 通览</span>
-        <span className="tag">REQ-005 首页 / REQ-003 接入页 / REQ-004 内联标识 / REQ-006 记忆·写入·审计·生命周期·冲突</span>
+        <span className="tag">REQ-005 首页 / REQ-003 接入页 / REQ-006 记忆·写入·审计·生命周期·冲突</span>
         <span className="right">{VIEWS.length} 个已落地视图 · iframe 隔离</span>
       </div>
       <div className="body">
@@ -141,9 +142,9 @@ export function Overview() {
             className="btn"
             style={{ marginLeft: 'auto', background: '#9d6bff', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 11, cursor: 'pointer' }}
             onClick={openFloatLayer}
-            title="启动独立透明悬浮窗，贴 Claude Desktop 窗口旁显示内联记忆标识"
+            title="演示：启动独立透明悬浮窗，贴 Claude Desktop 窗口旁显示内联记忆标识（非正式功能入口）"
           >
-            🧠 悬浮标识层
+            🧠 悬浮标识层（演示）
           </button>
         </div>
         {cur.src ? (
