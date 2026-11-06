@@ -122,6 +122,7 @@ npm run rejudge -- --code narration --limit 20   # 只看某个拦截码；--jso
 切换数据根只复制白名单文件（`DATA_ROOT_MIGRATE_FILES` 已含两个库、密钥环与 `audit.jsonl`；`DATA_ROOT_MIGRATE_DIRS` 含 `backups`/`memories-export`/`audit-archive`），不覆盖、不删源；指针固定 `%APPDATA%/MultiAgent Memory/data-root.json`，批次37-B 起另带 `ledgerDir`/`l0Dir`（两个库各自选目录，缺省=root，属**兼容读取**）与 `setupDone`（首启向导三件事——两库位置、L0 管理密码、恢复卡导出——全做完才置真；没置真每次都进向导，升级的老指针同样强制）。
 `backups/` 里四类文件按前缀分：`memories-<UTC时间戳>.json`（记忆库）/`meml0-…`（L0 原库）/`l0key-…`（密钥环）/`memaudit-<UTC时间戳>.jsonl`（批次41-A 审计账本），各按 `keep` 份数滚动，滚动互不挤占（`backupFiles.ts`）——**只备记忆库会让审计账本成为唯一没有退路的那一份**。
 批次39 起 **L1–L6 所在目录（`ledgerDir`）另有一个 `refine-queue.json`**（0600，后台补炼队列：mem_id → 状态/原因码/时间，**正文与密文都不落这里**）。它**不在** `DATA_ROOT_MIGRATE_FILES` 白名单里——丢了也不丢数据：启动时 `startRefineQueue` 按「有 L1 但无任何深层」重新扫出存量并入队，等价于一次自动「把存量入队补炼」。
+批次42 起 **数据根另有一个 `sync-hub/` 目录**（云端同步中枢，主进程 pglite 进程内 Postgres 落盘——各端账本的上行镜像 + 裁决队列 + 中枢审计）。它与 `refine-queue.json` 同口径：**不在迁移白名单、不进备份四源配方**——中枢是**衍生可重建数据**（真源在各端本地账本；丢失恢复 = 任一端 `syncUp` 全量上行，sha256 幂等 + 向量时钟保证不丢不重），且热复制 pglite 落盘目录有一致性风险（备份需中枢 close/checkpoint，复杂度与收益不匹配）。应用退出经 `before-quit` **优雅关闭**（`PgSyncHub.close()`，pglite 显式 close 才保证 WASM 存储层完整刷盘）。换数据根后中枢在新根首启自动重建（空镜像），各端重新同步即恢复。
 
 ## 7. 编码约定（评审会按此检查）
 

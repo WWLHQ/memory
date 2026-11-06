@@ -3399,7 +3399,12 @@ if (app && gotSingleInstanceLock) {
   });
   // 未捕获异常/未处理拒绝由顶部 process.on 统一记录（app 上没有同名事件，别写 app.on）
   // L0 安全钩子（§4.4.3/§4.4.4）：退出清空内存密钥；锁屏/休眠在 whenReady 内注册（powerMonitor 需 app ready）
-  app.on('before-quit', () => { void l0VaultRef?.onExit().catch(() => undefined); });
+  app.on('before-quit', () => {
+    void l0VaultRef?.onExit().catch(() => undefined);
+    // 批次42-D：中枢优雅关闭——pglite 需显式 close 才保证 WASM 存储层完整刷盘；
+    // close 失败只忽略（退出路径绝不阻断），中枢本身是衍生镜像（真源在各端账本，可 syncUp 重建）。
+    void syncHub?.close().catch(() => undefined);
+  });
   app.on('browser-window-created', (_e, win) => {
     win.webContents.on('did-fail-load', (_e, code, desc, url) => console.error('[fail-load]', code, desc, url));
     win.webContents.on('render-process-gone', (_e, d) => console.error('[gone]', JSON.stringify(d)));
