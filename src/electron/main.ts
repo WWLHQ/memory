@@ -42,6 +42,7 @@ import { runMcpServer } from '../core/memagent/mcp.ts';
 import { runMcpHttpServer } from '../core/memagent/mcpHttp.ts';
 import { ensureSharedProject } from '../core/memagent/mcpRecall.ts';
 import { FileTokenStore } from '../core/memagent/tokenStore.ts';
+import { FileMemberStore } from '../core/memagent/memberStore.ts';
 import { loadOrCreateTenant } from './tenantSource.ts';
 import { createWebhook } from '../core/memagent/webhook.ts';
 import { createWebhookHttpServer } from './webhookServer.ts';
@@ -2625,6 +2626,14 @@ async function bootstrap(): Promise<void> {
   // D6-4 令牌代理：文件化受限令牌库 userData/mcp-tokens.json（0600；缺库 = 空库，引导令牌兜底 admin）。
   // 库损坏 fail-fast（抛错阻断启动，绝不静默清空既有授权）；TCP 与 HTTP 共用同一实例。
   const tokenStore = new FileTokenStore(join(USER_DATA, 'mcp-tokens.json'));
+
+  // 批次45-B1 成员/API 密钥域模型：文件化成员库 userData/members.json（0600）。
+  // 构造时缺文件即落一份**真实空表**（{ members: [], api_keys: [] }）——§9 欠账的表从第一天起就真实存在；
+  // 损坏 fail-fast（与 mcp-tokens.json 同口径）。成员登记 / 密钥签发的调用入口在 45-B2（home 账号打通）与 45-B3（MCP 门）。
+  const memberStore = new FileMemberStore(join(USER_DATA, 'members.json'));
+  void memberStore; // 45-B2/B3 接入前暂无消费方（空表已真实落盘）；显式 void 防未使用告警
+  void mlog('bootstrap:member-store-ready', { file: join(USER_DATA, 'members.json') });
+  actionLog('app', 'bootstrap:member-store-ready', { file: 'members.json' });
 
   // 45-A1：引导账户三元组来自租户真源（缺省 u1/t1/e1，行为等价；is_admin=true = 本机属主，D6-3 口径不变）
   const mcpBootstrapAccount = {
