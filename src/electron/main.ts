@@ -56,6 +56,7 @@ import { demoteStubLayers, scanStubLayers } from '../core/memagent/legacyLayers.
 import { purgeLedger, scanLedgerForReset } from '../core/memagent/ledgerReset.ts';
 import { rejudgeRows, scanRowsForRejudge } from '../core/memagent/rejudge.ts';
 import { backfillMissingFields, scanRowsForBackfill } from '../core/memagent/fieldBackfill.ts';
+import { normalizeTenantFields, scanRowsForTenantNormalize } from '../core/memagent/tenantNormalize.ts';
 import { scanLedgerForSplit, splitLedger } from '../core/memagent/l0Split.ts';
 import { makeL0Reader, rebuildLayersFromL0, scanRowsForRebuild } from '../core/memagent/rebuild.ts';
 import { buildRecoveryCard, formatRecoveryCode } from '../core/memagent/l0Recovery.ts';
@@ -2431,6 +2432,45 @@ async function bootstrap(): Promise<void> {
       actionLog('kernel', 'audit:log-corrupt', a.corruption, { level: 'error' });
     }
   }
+  // 批次45-A1 单一租户真源：数据根级 tenant.json（0600）。采集器 / webhook / MCP 引导账户统一读它，
+  // 不再各自写死三元组（首建 = 规范缺省 u1/t1/e1，与存量账本一致）；损坏 fail-fast 阻断启动。
+  const tenantTriple = loadOrCreateTenant(USER_DATA);
+  void mlog('bootstrap:tenant-source', { file: join(USER_DATA, 'tenant.json'), ...tenantTriple });
+  actionLog('app', 'bootstrap:tenant-source', { user_id: tenantTriple.user_id, team_id: tenantTriple.team_id, enterprise_id: tenantTriple.enterprise_id });
+
+  // 批次45-A2 存量租户归一：把历史行的 team_id/enterprise_id 重盖成 tenant.json 规范值（user_id 保留），
+  // 幂等（已归一 mismatched=0 零写盘）、逐行审计。沿用批次41-A 审计迁移口径：改写前先备份
+  //（备份失败即本次不迁，绝不无备份动用户的账本）；只读镜像同样不迁——等持有写锁的进程自己迁。
+  {
+    const target = { team_id: tenantTriple.team_id, enterprise_id: tenantTriple.enterprise_id };
+    const preview = await scanRowsForTenantNormalize(storage, target);
+    if (preview.mismatched > 0 && storage.auditStats.readonly) {
+      void mlog('bootstrap:tenant-normalize-deferred', { mismatched: preview.mismatched, reason: 'readonly' });
+    } else if (preview.mismatched > 0) {
+      try {
+        const dir = await backupBeforeKernelChange('tenant-normalize', 'ledger:tenant-backup');
+        const now = Date.now();
+        const report = await normalizeTenantFields({
+          storage, target, admin_user_id: tenantTriple.user_id,
+          request_id: `req_tenant_norm_${now}`, now, backup_confirmed: true,
+        });
+        void mlog('bootstrap:tenant-normalized', {
+          mismatched: preview.mismatched, normalized: report.normalized, failed: report.failed,
+          by_field: report.by_field, by_user: report.by_user, to: dir,
+        });
+        actionLog('kernel', 'ledger:tenant-normalized', {
+          total: report.total, mismatched: report.mismatched, normalized: report.normalized,
+          failed: report.failed, tombstones: report.tombstones, target, backup_dir: dir,
+        });
+      } catch (e) {
+        const msg = String((e as Error)?.message ?? e);
+        void mlog('bootstrap:tenant-normalize-skipped', { mismatched: preview.mismatched, error: msg });
+        actionLog('kernel', 'ledger:tenant-normalize-skipped', { mismatched: preview.mismatched, error: msg }, { level: 'warn' });
+      }
+    } else {
+      void mlog('bootstrap:tenant-normalize-clean', { total: preview.total, target });
+    }
+  }
   void mlog('bootstrap:data-root', {
     root: USER_DATA,
     defaultRoot: DEFAULT_DATA_ROOT,
@@ -2559,11 +2599,7 @@ async function bootstrap(): Promise<void> {
     throw e;
   });
 
-  // 批次45-A1 单一租户真源：数据根级 tenant.json（0600）。采集器 / webhook / MCP 引导账户统一读它，
-  // 不再各自写死三元组（首建 = 规范缺省 u1/t1/e1，与存量账本一致）；损坏 fail-fast 阻断启动。
-  const tenantTriple = loadOrCreateTenant(USER_DATA);
-  void mlog('bootstrap:tenant-source', { file: join(USER_DATA, 'tenant.json'), ...tenantTriple });
-  actionLog('app', 'bootstrap:tenant-source', { user_id: tenantTriple.user_id, team_id: tenantTriple.team_id, enterprise_id: tenantTriple.enterprise_id });
+  // 批次45-A1 的 tenantTriple 装配已上移至存量归一块之前（两个批次共用同一真源）。
 
   // MCP 两端口都要求令牌：HTTP 走 Authorization/x-mcp-token，TCP 走 initialize params.token。
   // 令牌只落 userData/mcp-token.txt（0600），用户把它配置给 Agent；日志只记路径，绝不记明文。
