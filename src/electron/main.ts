@@ -2538,6 +2538,13 @@ async function bootstrap(): Promise<void> {
   // window.__ELECTRON__/window.api 属预期行为：子页面统一走 desktop/hostBridge.ts 的消息桥，
   // 由顶层窗口代理 storage.*/hostScan.* 等能力。session.registerPreloadScript 对子 frame 无效，勿再尝试。
 
+  // 批次45-B1/B2 成员/API 密钥域模型：文件化成员库 userData/members.json（0600）。
+  // 构造时缺文件即落一份**真实空表**（{ members: [], api_keys: [] }）——§9 欠账的表从第一天起就真实存在；
+  // 损坏 fail-fast（与 mcp-tokens.json 同口径）。45-B2 起 home 账号域经 ServerOptions.memberStore 单向同步进本库。
+  const memberStore = new FileMemberStore(join(USER_DATA, 'members.json'));
+  void mlog('bootstrap:member-store-ready', { file: join(USER_DATA, 'members.json') });
+  actionLog('app', 'bootstrap:member-store-ready', { file: 'members.json' });
+
   // home server（登录/审计镜像）：CORS/IPC 同源白名单 = 静态服务精确来源
   const home = createServer({
     port: MIRROR_PORT,
@@ -2549,6 +2556,8 @@ async function bootstrap(): Promise<void> {
     // 桌面端持有写锁（唯一写者），HTTP 数据面与 IPC 数据面共用同一账本实例。
     kernelStorage: storage,
     kernelInfo: { readonly: storage.readOnly, db_path: DB_PATH },
+    // 批次45-B2：home 账号 → 内核 Member 单向同步（注册/角色/团队变更 + 启动对账）
+    memberStore,
     onLog: (scope, action, detail) => { actionLog(scope, action, detail); },
   });
   // 登录会话真源：敏感 IPC（数据位置/备份/安全）用 getSessionContext 校验管理员
@@ -2627,13 +2636,7 @@ async function bootstrap(): Promise<void> {
   // 库损坏 fail-fast（抛错阻断启动，绝不静默清空既有授权）；TCP 与 HTTP 共用同一实例。
   const tokenStore = new FileTokenStore(join(USER_DATA, 'mcp-tokens.json'));
 
-  // 批次45-B1 成员/API 密钥域模型：文件化成员库 userData/members.json（0600）。
-  // 构造时缺文件即落一份**真实空表**（{ members: [], api_keys: [] }）——§9 欠账的表从第一天起就真实存在；
-  // 损坏 fail-fast（与 mcp-tokens.json 同口径）。成员登记 / 密钥签发的调用入口在 45-B2（home 账号打通）与 45-B3（MCP 门）。
-  const memberStore = new FileMemberStore(join(USER_DATA, 'members.json'));
-  void memberStore; // 45-B2/B3 接入前暂无消费方（空表已真实落盘）；显式 void 防未使用告警
-  void mlog('bootstrap:member-store-ready', { file: join(USER_DATA, 'members.json') });
-  actionLog('app', 'bootstrap:member-store-ready', { file: 'members.json' });
+  // 批次45-B1 成员库装配已上移至 home server 创建之前（45-B2 同步注入）；此处不再重复创建。
 
   // 45-A1：引导账户三元组来自租户真源（缺省 u1/t1/e1，行为等价；is_admin=true = 本机属主，D6-3 口径不变）
   const mcpBootstrapAccount = {

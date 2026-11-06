@@ -76,6 +76,13 @@ export interface MemberStorePort {
   /** 登记成员（幂等：member_id 已存在显式拒绝）；now 可注入（测试用），缺省真实时钟 */
   createMember(input: CreateMemberInput, now?: number): MemberRecord;
   getMember(member_id: string): MemberRecord | null;
+  /** 更新成员（45-B2 home 同步用）：member_id/user_id **不可变**（身份锚点）；未知成员 → null。by 必填（审计留痕） */
+  updateMember(
+    member_id: string,
+    patch: { name?: string; role?: MemberRole; team_id?: string; enterprise_id?: string },
+    by: string,
+    now?: number,
+  ): MemberRecord | null;
   listMembers(filter?: { role?: MemberRole; status?: MemberStatus }): MemberRecord[];
   /** 给 active 成员签发 API 密钥（明文一次性回显） */
   mintApiKey(input: MintApiKeyInput, now?: number): MintedApiKey;
@@ -166,6 +173,28 @@ export class InMemoryMemberStore implements MemberStorePort {
 
   getMember(member_id: string): MemberRecord | null {
     return this.members.find((m) => m.member_id === member_id) ?? null;
+  }
+
+  updateMember(
+    member_id: string,
+    patch: { name?: string; role?: MemberRole; team_id?: string; enterprise_id?: string },
+    by: string,
+    now?: number,
+  ): MemberRecord | null {
+    if (typeof by !== 'string' || !by.trim()) throw new Error('updateMember.by 必填且须为非空字符串');
+    const rec = this.members.find((m) => m.member_id === member_id);
+    if (!rec) return null;
+    // patch 校验：提供的字段必须合法；member_id / user_id 不在 patch 里（身份锚点不可变）
+    if (patch.role !== undefined && !MEMBER_ROLES.includes(patch.role)) throw new Error('updateMember.role 必须为 admin | member');
+    if (patch.name !== undefined && (typeof patch.name !== 'string' || !patch.name.trim())) throw new Error('updateMember.name 须为非空字符串');
+    if (patch.team_id !== undefined && (typeof patch.team_id !== 'string' || !patch.team_id.trim())) throw new Error('updateMember.team_id 须为非空字符串');
+    if (patch.enterprise_id !== undefined && (typeof patch.enterprise_id !== 'string' || !patch.enterprise_id.trim())) throw new Error('updateMember.enterprise_id 须为非空字符串');
+    if (patch.name !== undefined) rec.name = patch.name.trim();
+    if (patch.role !== undefined) rec.role = patch.role;
+    if (patch.team_id !== undefined) rec.team_id = patch.team_id.trim();
+    if (patch.enterprise_id !== undefined) rec.enterprise_id = patch.enterprise_id.trim();
+    void now; // 成员元数据不带 updated_at 时间戳（与 ProjectRecord 口径一致）；参数保留给未来扩展
+    return { ...rec };
   }
 
   listMembers(filter?: { role?: MemberRole; status?: MemberStatus }): MemberRecord[] {
@@ -282,6 +311,17 @@ export class FileMemberStore extends InMemoryMemberStore {
   override createMember(input: CreateMemberInput, now?: number): MemberRecord {
     const rec = super.createMember(input, now);
     this.save();
+    return rec;
+  }
+
+  override updateMember(
+    member_id: string,
+    patch: { name?: string; role?: MemberRole; team_id?: string; enterprise_id?: string },
+    by: string,
+    now?: number,
+  ): MemberRecord | null {
+    const rec = super.updateMember(member_id, patch, by, now);
+    if (rec) this.save();
     return rec;
   }
 

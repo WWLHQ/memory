@@ -16,6 +16,8 @@ import {
   readLockState, writeLockState, clearLockState, isDefaultAdminPasswordInUse,
 } from '../auth/loginService.ts';
 import { hashPassword } from '../auth/hash.ts';
+import { syncMembersFromHomeNow, type MemberSyncReport } from '../auth/memberSync.ts';
+import type { MemberStorePort } from '../core/memagent/memberStore.ts';
 import { createOriginPolicy, rejectUntrustedOrigin, rejectUntrustedHost, applyCorsHeaders } from '../shared/localOrigin.ts';
 import { validateAuditRecord } from '../shared/auditShape.ts';
 import type { Form } from '../types/agentOnboard.ts';
@@ -51,6 +53,12 @@ export interface ServerOptions {
   adminPassword?: string;
   /** 动作日志回调（批次7）：主进程写入 actions.log；缺省静默 */
   onLog?: (scope: string, action: string, detail?: Record<string, unknown>) => void;
+  /**
+   * 批次45-B2：内核成员库（MemberStorePort）——home 账号域单向同步进内核 Member
+   * （注册/角色/团队变更经 persistAccounts 汇聚点触发 + 启动首帧对账）。
+   * 缺省未装配 → 内核成员表保持空表（诚实空态），同步不发生。
+   */
+  memberStore?: MemberStorePort;
   /**
    * 批次28-A：内核数据面 —— 把进程内的记忆账本（StorageBackend）挂到 HTTP 端点，
    * 浏览器页面凭登录会话直读/直写真实账本，而不是进程内空账本。
@@ -156,6 +164,12 @@ export function createServer(opts: ServerOptions): HomeServer {
       log('home', seeded.created ? 'admin_created' : 'admin_upgraded', { account: seeded.account });
     }
   }
+  // 批次45-B2：启动首帧对账——快照导入的存量账号也登记进内核成员库
+  //（播种路径经 persistAccounts 已同步，此处幂等兜底；created/updated=0 时零日志零写盘）
+  if (opts.memberStore) {
+    const r0: MemberSyncReport = syncMembersFromHomeNow(opts.memberStore);
+    if (r0.created > 0 || r0.updated > 0) log('home', 'member_sync', { created: r0.created, updated: r0.updated, scanned: r0.scanned });
+  }
   // mirror 上抛账本持久化（REQ-006 端壳 G6）
   const mirrorFile = join(dirname(auditFile), 'home-mirror.json');
   let mirrorAudit: MirrorAuditEntry[] = [];
@@ -195,6 +209,12 @@ export function createServer(opts: ServerOptions): HomeServer {
   }
   function persistAccounts(): void {
     writeFileSync(accountsFile, JSON.stringify(exportAccountSnapshot(), null, 2));
+    // 批次45-B2：账号域任何变更（注册/角色/团队/密码落盘）都汇聚到这里——
+    // 顺路把 home 账号单向同步进内核成员库（幂等 upsert；缺 memberStore = 内核域未装配，跳过不报错）
+    if (opts.memberStore) {
+      const r = syncMembersFromHomeNow(opts.memberStore);
+      if (r.created > 0 || r.updated > 0) log('home', 'member_sync', { created: r.created, updated: r.updated, scanned: r.scanned });
+    }
   }
   function appendAudit(a: LoginAudit): void {
     audit.push(a);

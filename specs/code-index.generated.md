@@ -3,7 +3,7 @@
 > 由 `npm run code:index` 生成，请勿手改；改代码后重跑即可。
 > 用法：先在本表定位文件与导出符号，再只读该文件的局部区间（省 token、少误改）。
 
-共 326 个源码文件。
+共 327 个源码文件。
 
 ## e2e
 
@@ -35,6 +35,7 @@
 |---|---|---|---|
 | [src/auth/hash.ts](src/auth/hash.ts) | 42 | REQ-005 T2：密码哈希与校验（规格 §4.1 安全） | hashPassword(fn), verifyPassword(fn) |
 | [src/auth/loginService.ts](src/auth/loginService.ts) | 304 | REQ-005 T3：登录业务逻辑 + 锁定策略（规格 §0.3 / §4.2 / §4.3） | registerAccount(fn), hasAccount(fn), resetAuthStore(fn), exportAccountSnapshot(fn), importAccountSnapshot(fn), listAccounts(fn), adminCount(fn), isDefaultAdminPasswordInUse(fn), seedAdminAccount(fn), changePassword(fn), setAccountRole(fn), assignAccountTeam(fn), lockoutState(fn), exportLockSnapshot(fn), readLockState(fn), writeLockState(fn), clearLockState(fn), importLockSnapshot(fn), login(fn), LOCK_THRESHOLD(const), LOCK_WINDOW_MS(const), ADMIN_ACCOUNT(const), DEFAULT_ADMIN_PASSWORD(const), AccountView(type) |
+| [src/auth/memberSync.ts](src/auth/memberSync.ts) | 67 | 批次45-B2：home 账号 ↔ 内核 Member 打通。 | syncMembersFromHome(fn), syncMembersFromHomeNow(fn), MemberSyncReport(type) |
 
 ## src/core
 
@@ -66,7 +67,7 @@
 | [src/core/memagent/mcpReadTools.ts](src/core/memagent/mcpReadTools.ts) | 160 | MCP 读工具编排（批次44-D5-1）：list_memories / get_memory。 | toMemoryView(fn), runListMemoriesTool(fn), runGetMemoryTool(fn), MemoryView(type), ListMemoriesResult(type), GetMemoryResult(type) |
 | [src/core/memagent/mcpRecall.ts](src/core/memagent/mcpRecall.ts) | 314 | MCP 召回工具编排（批次11/13/29/32/33）：项目自动定位 / 列表 / 提示行与明细组装 / 按客户端能力选档位。 | clientSupportsHtmlDetails(fn), projectInfosFromMemories(fn), resolveProjectId(fn), runRecallTool(fn), recallDisplayMode(fn), runListProjectsTool(fn), ensureSharedProject(fn), McpToolError(class), ProjectInfo(type), ResolvedProject(type), RecallToolPayload(type), RecallDetailTicketsPort(type), RecallToolDetailOpts(type), RecallToolOutput(type), RecallDisplayMode(type) |
 | [src/core/memagent/mcpSchema.ts](src/core/memagent/mcpSchema.ts) | 197 | MCP 工具清单与初始化指令（批次11/12/13）：HTTP(8204) 与 TCP(8202) 共用同一份 schema/instructions， | MCP_INSTRUCTIONS(const), MCP_TOOLS(const) |
-| [src/core/memagent/memberStore.ts](src/core/memagent/memberStore.ts) | 300 | 成员 / API 密钥内核域模型（批次45-B1，ROADMAP §二 45-B1）： | InMemoryMemberStore(class), FileMemberStore(class), MemberRecord(type), CreateMemberInput(type), ApiKeyRecord(type), MintApiKeyInput(type), MintedApiKey(type), MemberStorePort(type), MemberRole(type), MemberStatus(type) |
+| [src/core/memagent/memberStore.ts](src/core/memagent/memberStore.ts) | 340 | 成员 / API 密钥内核域模型（批次45-B1，ROADMAP §二 45-B1）： | InMemoryMemberStore(class), FileMemberStore(class), MemberRecord(type), CreateMemberInput(type), ApiKeyRecord(type), MintApiKeyInput(type), MintedApiKey(type), MemberStorePort(type), MemberRole(type), MemberStatus(type) |
 | [src/core/memagent/memories.ts](src/core/memagent/memories.ts) | 829 | 内核记忆业务（§3 schema + 行为红线）：write 逐层生成/查重/分支嫁接 / browse L0 授权 / gc 衰减 / memoryOp 17.3 操作 | layerSpecsFrom(fn), buildL6Input(fn), makeLayerGenerator(fn), parseWriteKnobs(fn), coreWrite(fn), coreBrowse(fn), coreGc(fn), coreGcFull(fn), coreMemoryOp(fn), coreFeedback(fn), GC_FULL_NOTE(const), WriteInput(type), WriteCtx(type) |
 | [src/core/memagent/paramsSnapshot.ts](src/core/memagent/paramsSnapshot.ts) | 38 | 全局参数快照（params:v1: preference 记忆）的共享读取口。 | parseParamsSnapshot(fn), findParamsSnapshot(fn), autoOrganizeEnabled(fn), PARAMS_PREF_PREFIX(const), ParamsSnapshot(type) |
 | [src/core/memagent/pendingStoreFile.ts](src/core/memagent/pendingStoreFile.ts) | 57 | 文件落盘实现（node-only）：pending 队列持久化到 <dir>/pending-<id>.json。 | FilePendingStore(class) |
@@ -110,7 +111,7 @@
 | [src/electron/ipcChannels.ts](src/electron/ipcChannels.ts) | 157 | preload 暴露的 IPC channel 清单（唯一真源）。 | missingChannels(fn), formatBootFailure(fn), handleBootFailure(fn), IPC(const), PRELOAD_CHANNELS(const), BootFailureDeps(type) |
 | [src/electron/l0KeyringStore.ts](src/electron/l0KeyringStore.ts) | 72 | L0 密钥环落盘适配（§4.4.8）：l0-keyring.json 原子写（temp → fsync → rename）， | writeFileAtomic(fn), createL0KeyringStore(fn), createHomeLockStore(fn), cleanupTempFiles(fn) |
 | [src/electron/llmGateway.ts](src/electron/llmGateway.ts) | 497 | 批次32：LLM 精炼网关（主进程唯一真源）——通用 OpenAI 兼容**多引擎**，路由口径「哪个能用、哪个快用哪个」。 | defaultLlmConfig(fn), loadLlmConfig(fn), saveLlmConfig(fn), loadLlmKeys(fn), saveLlmKey(fn), keyExists(fn), buildLayerPrompt(fn), chatEndpoint(fn), testEngine(fn), applyProbeResult(fn), loadLlmGateway(fn), llmEngineViews(fn), mergeLlmConfig(fn), LLM_CONFIG_FILE(const), LLM_KEYS_FILE(const), LEGACY_DEEPSEEK_KEY_FILE(const), LLM_PRESETS(const), LlmGatewayProvider(class), LlmEngineConfig(type), LlmGatewayConfig(type), LlmPreset(type), EngineTestResult(type), LlmGatewayView(type), LlmEnginePatch(type), LlmAddEngine(type), LlmConfigPatch(type), LlmEngineView(type) |
-| [src/electron/main.ts](src/electron/main.ts) | 3333 | Electron 主进程入口： | — |
+| [src/electron/main.ts](src/electron/main.ts) | 3336 | Electron 主进程入口： | — |
 | [src/electron/mcpClients.ts](src/electron/mcpClients.ts) | 303 | MCP 客户端配置读写 · node 层（批次15，仅 Electron 主进程使用）。 | expandHome(fn), applyRecallEvidence(fn), scanMcpClients(fn), snippetForClient(fn), wireMcpClient(fn), McpClientStatus(type), McpClientsScan(type), McpWireResult(type), McpRecallEvidence(type) |
 | [src/electron/preload.ts](src/electron/preload.ts) | 258 | Electron preload：contextIsolation 开启下，经 contextBridge 向渲染进程暴露存储桥接面与运行标识。 | — |
 | [src/electron/tenantSource.ts](src/electron/tenantSource.ts) | 44 | 批次45-A1 单一租户真源：数据根级 tenant.json（0600），类比 dataRoot 指针 / mcp-token.txt 的启动期指针文件。 | loadOrCreateTenant(fn), TENANT_FILE_NAME(const), TENANT_SCHEMA(const) |
@@ -121,7 +122,7 @@
 | 文件 | 行数 | 摘要 | 导出 |
 |---|---|---|---|
 | [src/home/dashboard.ts](src/home/dashboard.ts) | 58 | REQ-005 T4：首页 Dashboard 数据聚合（纯函数，§0.2） | buildDashboard(fn), RawHomeFeed(type) |
-| [src/home/server.ts](src/home/server.ts) | 623 | REQ-005 T10：登录后端 HTTP 服务（零依赖，可选镜像，§4.1/§4.3） | createServer(fn), MirrorAuditEntry(type), ServerOptions(type), HomeServer(type) |
+| [src/home/server.ts](src/home/server.ts) | 643 | REQ-005 T10：登录后端 HTTP 服务（零依赖，可选镜像，§4.1/§4.3） | createServer(fn), MirrorAuditEntry(type), ServerOptions(type), HomeServer(type) |
 
 ## src/inlineAttribution
 
@@ -406,6 +407,7 @@ src/agentOnboard/stateMachine.ts 8959634e14b2
 src/agentOnboard/validators.ts a7372fc705a7
 src/auth/hash.ts 3919b27befef
 src/auth/loginService.ts a0cc1ede21f9
+src/auth/memberSync.ts dd7d2d4ed60e
 src/core/memagent/agent.ts 40b5a2de1e90
 src/core/memagent/auditLog.ts 307fbb57f262
 src/core/memagent/conflict.ts e537b2588f67
@@ -432,7 +434,7 @@ src/core/memagent/mcpProjectTools.ts 465a286c11df
 src/core/memagent/mcpReadTools.ts 43f033b6dacc
 src/core/memagent/mcpRecall.ts 91735c8dae42
 src/core/memagent/mcpSchema.ts c31fee0290f2
-src/core/memagent/memberStore.ts aa9b63bea18f
+src/core/memagent/memberStore.ts c84183cdfeed
 src/core/memagent/memories.ts 1e62629a5f4c
 src/core/memagent/paramsSnapshot.ts f819e011fbd7
 src/core/memagent/pendingStoreFile.ts 67a02b1b7648
@@ -466,13 +468,13 @@ src/electron/hostScan.ts 694d58d7048c
 src/electron/ipcChannels.ts 3c34d5081c37
 src/electron/l0KeyringStore.ts b900f5d523d5
 src/electron/llmGateway.ts 6de278fcf527
-src/electron/main.ts bece5a060bb5
+src/electron/main.ts b7818e1f804b
 src/electron/mcpClients.ts df9527333225
 src/electron/preload.ts 5577abd97cf1
 src/electron/tenantSource.ts 8d493e4182d2
 src/electron/webhookServer.ts 62157c0b1e21
 src/home/dashboard.ts a23bc82dbf9d
-src/home/server.ts 66bac2b9a1e0
+src/home/server.ts d26d6fa3b993
 src/inlineAttribution/decay.ts c5e1d8e82628
 src/inlineAttribution/feedback.ts b40da561e8c4
 src/shared/actionLog.ts 4183f74a0f21
