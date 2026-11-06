@@ -576,6 +576,11 @@ export type AuditAction =
   | 'insufficient_samples'
   | 'weight_regression'
   | 'weight_tuned'
+  // 批次49 A29：Agent 接入状态统一写内核审计（撤销沿用 unbound，一键接入沿用 auto_bind）
+  | 'agent_onboard'
+  | 'agent_test'
+  | 'agent_rotate'
+  | 'agent_revoke'
   | 'monitor_alert'
   | 'security_change'
   // 真实质量/可靠性事件（监控仪表盘与冲突队列的真实口径来源）

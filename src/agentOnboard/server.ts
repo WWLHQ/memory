@@ -213,10 +213,12 @@ export function createServer({
 
     // 批次26-A P0-5：写端点会话闸门（x-session-id 经 home server 会话真源校验；不信任渲染层自报角色）。
     // 未接会话真源（getSession 缺省）= 无法校验 → 写端点一律拒绝（fail-closed，绝不退回匿名可写）。
+    let requestCtx: TenantContext | null = null;
     if (req.method === 'POST' || req.method === 'DELETE') {
       const sidHeader = req.headers['x-session-id'];
       const sid = Array.isArray(sidHeader) ? sidHeader[0] : sidHeader;
       const ctx = getSession ? getSession(sid) : null;
+      requestCtx = ctx;
       const destructive = req.method === 'DELETE'
         || (req.method === 'POST' && parts[0] === 'agents' && (parts[2] === 'rotate-key' || parts[2] === 'revoke-key'));
       if (!ctx) {
@@ -233,20 +235,32 @@ export function createServer({
       }
     }
 
+    // A29：租户归属随会话写入卡片与审计（请求处理内先设置，避免跨请求串租户）
+    service.setTenant(requestCtx
+      ? { enterprise_id: requestCtx.enterprise_id, team_id: requestCtx.team_id }
+      : undefined);
+    // A29 并发版本校验：body.expectedRev 或 ?rev= 显式传入才校验（旧调用方不受影响）
+    const revRaw = body.expectedRev ?? url.searchParams.get('rev');
+    const revNum = revRaw === undefined || revRaw === null || revRaw === '' ? NaN : Number(revRaw);
+    const revArg = Number.isFinite(revNum) ? revNum : undefined;
+
     let out: any;
     try {
       if (req.method === 'POST' && parts[0] === 'agents' && parts.length === 1) {
-        out = service.configure(body as unknown as AgentCardInput);
+        out = service.configure({
+          ...(body as unknown as AgentCardInput),
+          ...(revArg !== undefined ? { expectedRev: revArg } : {}),
+        });
       } else if (req.method === 'POST' && parts[0] === 'agents' && parts[2] === 'test') {
-        out = service.testConnect(decodeURIComponent(parts[1]));
+        out = service.testConnect(decodeURIComponent(parts[1]), revArg);
       } else if (req.method === 'POST' && parts[0] === 'agents' && parts[2] === 'rotate-key') {
-        out = service.rotateKey(decodeURIComponent(parts[1]));
+        out = service.rotateKey(decodeURIComponent(parts[1]), revArg);
       } else if (req.method === 'POST' && parts[0] === 'agents' && parts[2] === 'revoke-key') {
-        out = service.revokeKey(decodeURIComponent(parts[1]));
+        out = service.revokeKey(decodeURIComponent(parts[1]), revArg);
       } else if (req.method === 'POST' && parts[0] === 'discover') {
         out = service.oneClickOnboard((body.agents ?? []) as DiscoverInput[], body.form as Form);
       } else if (req.method === 'DELETE' && parts[0] === 'agents' && parts.length === 2) {
-        out = service.revokeBind(decodeURIComponent(parts[1]));
+        out = service.revokeBind(decodeURIComponent(parts[1]), revArg);
       } else if (req.method === 'GET' && parts[0] === 'audit') {
         // 批次26-A P0-5：出站前脱敏（probe 失败 reason 可能含本机安装路径）
         out = { ok: true, audit: sanitizeAuditEntries(service.getAudit()) };
@@ -263,7 +277,8 @@ export function createServer({
       return;
     }
 
-    if (out && !out.ok && (out.violations || out.reason)) res.statusCode = 422;
+    if (out && !out.ok && out.reason === 'version_conflict') res.statusCode = 409;
+    else if (out && !out.ok && (out.violations || out.reason)) res.statusCode = 422;
     persist();
     res.end(JSON.stringify(out));
   });

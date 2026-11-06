@@ -11,11 +11,12 @@ import type { AgentCard, AgentCardInput, Form, Priority } from '../types/agentOn
 export interface OnboardBackend {
   cards: Map<string, AgentCard>;
   configure(input: AgentCardInput): Promise<ConfigureResult> | ConfigureResult;
-  testConnect(name: string): Promise<TestResult> | TestResult;
-  rotateKey(name: string): Promise<RotateResult> | RotateResult;
-  revokeKey(name: string): Promise<{ ok: boolean }> | { ok: boolean };
+  /** expectedRev：并发版本校验（A29），缺省不校验（兼容旧调用方） */
+  testConnect(name: string, expectedRev?: number): Promise<TestResult> | TestResult;
+  rotateKey(name: string, expectedRev?: number): Promise<RotateResult> | RotateResult;
+  revokeKey(name: string, expectedRev?: number): Promise<RevokeKeyResult> | RevokeKeyResult;
   oneClickOnboard(agents: DiscoverInput[], form?: Form): Promise<OneClickResult> | OneClickResult;
-  revokeBind(name: string): Promise<{ ok: boolean }> | { ok: boolean };
+  revokeBind(name: string, expectedRev?: number): Promise<RevokeBindResult> | RevokeBindResult;
   getAudit(): Promise<AuditEntry[]> | AuditEntry[];
   getCards(): Promise<AgentCard[]> | AgentCard[];
 }
@@ -24,12 +25,18 @@ export interface ConfigureResult {
   ok: boolean;
   card?: AgentCard;
   violations?: Violation[];
+  /** 并发版本冲突等拒绝原因（A29） */
+  reason?: string;
+  /** 当前账本版本（reason=version_conflict 时回显，供调用方刷新后重试） */
+  rev?: number;
 }
 export interface TestResult {
   ok: boolean;
   card?: AgentCard;
   requestId?: string;
   reason?: string;
+  /** 当前账本版本（A29 冲突回显） */
+  rev?: number;
 }
 export interface RotateResult {
   ok: boolean;
@@ -37,6 +44,20 @@ export interface RotateResult {
   /** 一次性明文密钥：仅本次响应返回，服务端只保存 keyHash/keyTail */
   key?: string;
   reason?: string;
+  /** 当前账本版本（A29 冲突回显） */
+  rev?: number;
+}
+
+/** 撤销密钥 / 撤销绑定（A29：带并发版本校验与冲突回显） */
+export interface RevokeKeyResult {
+  ok: boolean;
+  reason?: string;
+  rev?: number;
+}
+export interface RevokeBindResult {
+  ok: boolean;
+  reason?: string;
+  rev?: number;
 }
 
 /** 单家 Agent 的真实探测结果（失败原因必填，供 UI 如实展示） */
@@ -54,11 +75,41 @@ export interface ProbeResult {
  */
 export type AgentProbe = (agentNames: string[]) => Map<string, ProbeResult>;
 
+/**
+ * A29 同步范围：接入卡片是本机接入配置（密钥/通道/探测结论），**不进 sync 上行/下行**
+ * —— 同步只搬记忆主表，跨机复制本机密钥与安装痕迹既不安全也失真。
+ */
+export const ONBOARD_SYNC_SCOPE = 'local-only' as const;
+/**
+ * A29 防衰减：接入卡片不是 Memory 行，不进 gc/遗忘周期，也不存在 DecayClass；
+ * 因此**天然豁免衰减，无需 pin**（pin 只对记忆主表行有意义）。
+ */
+export const ONBOARD_DECAY_EXEMPT = true as const;
+
+/** 租户归属（R1：租户只由会话注入，UI 不手填） */
+export interface TenantStamp {
+  enterprise_id?: string;
+  team_id?: string;
+}
+
+/**
+ * 审计持久化（A29）：服务层审计不再只靠内存数组。
+ * 注入后每次 `_audit` 同步落盘（本地 localStorage / 服务端 JSON），重启/新实例可 `load()` 回来。
+ */
+export interface AuditStore {
+  load(): AuditEntry[];
+  append(entry: AuditEntry): void;
+}
+
 export interface OnboardServiceOptions {
   /** 真实拨测（桌面壳注入本机安装痕迹探测；测试注入 fake） */
   probe?: AgentProbe;
   /** 密钥哈希（服务端注入 SHA-256；浏览器侧不注入 → 只存尾号，不存明文） */
   keyHasher?: (key: string) => string;
+  /** 审计持久化（缺省 = 仅内存，兼容旧调用方） */
+  auditStore?: AuditStore;
+  /** 租户归属（会话/宿主注入；写入卡片与审计） */
+  tenant?: TenantStamp;
 }
 
 /** 生成真实接入密钥（24 字节随机 → 48 hex，形如 mam_sk_<hex>）；界面恒脱敏，仅服务端持有明文 */
@@ -104,14 +155,24 @@ function rid(): string {
  * `B = OnboardBackend`（注入 HTTP 客户端）→ 全部 **async**。
  * 这样调用方（含测试）无需自行断言同步/异步，类型即文档。
  */
+/** Agent 名归一化（重复发现只更新同一条，不刷出多张卡片） */
+function agentKey(name: string): string {
+  return name.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
 export class AgentOnboardService<B extends OnboardBackend | null = null> {
   backend: B;
   cards: Map<string, AgentCard>;
-  audit: AuditEntry[] = [];
+  /** 内存视图；注入 auditStore 后与持久化同源（append 即落盘，构造时 load 回填） */
+  audit: AuditEntry[];
   /** 真实拨测；缺省 → 无法验证连通（测试只降级不谎报） */
   probe?: AgentProbe;
   /** 密钥哈希；缺省不保存哈希（只保留尾号） */
   keyHasher?: (key: string) => string;
+  /** A29：审计持久化 */
+  auditStore?: AuditStore;
+  /** A29：租户归属（写入卡片与审计） */
+  tenant?: TenantStamp;
 
   /** B=null 时同步，B=OnboardBackend 时异步 */
   private _wrap<R>(sync: () => R, asyncFn: () => Promise<R>): R | Promise<R> {
@@ -121,6 +182,9 @@ export class AgentOnboardService<B extends OnboardBackend | null = null> {
   constructor(backend?: B, options: OnboardServiceOptions = {}) {
     this.probe = options.probe;
     this.keyHasher = options.keyHasher;
+    this.auditStore = options.auditStore;
+    this.tenant = options.tenant;
+    this.audit = options.auditStore?.load() ?? [];
     this.backend = (backend ?? null) as B;
     if (this.backend) {
       this.cards = (this.backend as unknown as OnboardBackend).cards;
@@ -129,8 +193,59 @@ export class AgentOnboardService<B extends OnboardBackend | null = null> {
     }
   }
 
-  _audit(action: string, detail: Record<string, unknown>): void {
-    this.audit.push({ ts: Date.now(), action, ...detail });
+  /** 会话切换/请求上下文变化时更新租户（卡片与后续审计随之带租户） */
+  setTenant(t?: TenantStamp): void {
+    this.tenant = t;
+  }
+
+  /**
+   * 审计：写内存 + 注入的持久化（A29 修复「内存数组重启即丢」）。
+   * 每条都带 sync_scope / decay_exempt 两个硬口径，避免被误读为同步/衰减对象。
+   */
+  _audit(action: string, detail: Record<string, unknown>): AuditEntry {
+    const entry: AuditEntry = {
+      ts: Date.now(),
+      action,
+      ...detail,
+      ...(this.tenant?.enterprise_id ? { enterprise_id: this.tenant.enterprise_id } : {}),
+      ...(this.tenant?.team_id ? { team_id: this.tenant.team_id } : {}),
+      sync_scope: ONBOARD_SYNC_SCOPE,
+      decay_exempt: ONBOARD_DECAY_EXEMPT,
+    };
+    this.audit.push(entry);
+    try {
+      this.auditStore?.append(entry);
+    } catch {
+      /* 持久化失败不阻断接入；内存视图仍可回显（下次重试会再写） */
+    }
+    return entry;
+  }
+
+  /** 按归一化名找卡片（大小写/空白不同不视为两家 Agent） */
+  cardKeyOf(name: string): string | undefined {
+    if (this.cards.has(name)) return name;
+    const key = agentKey(name);
+    for (const k of this.cards.keys()) {
+      if (agentKey(k) === key) return k;
+    }
+    return undefined;
+  }
+
+  findCard(name: string): AgentCard | undefined {
+    const key = this.cardKeyOf(name);
+    return key ? this.cards.get(key) : undefined;
+  }
+
+  /** 并发版本校验：expectedRev 缺省不校验；不一致 → 记审计并拒绝 */
+  private _checkRev(action: string, name: string, card: AgentCard, expectedRev?: number): { ok: true } | { ok: false; rev: number } {
+    if (expectedRev === undefined) return { ok: true };
+    const rev = card.rev ?? 1;
+    if (rev === expectedRev) return { ok: true };
+    this._audit(action, {
+      agent: name, op: 'version_conflict', result: 'rejected',
+      reason: 'version_conflict', expectedRev, rev,
+    });
+    return { ok: false, rev };
   }
 
   getAudit(): B extends null ? AuditEntry[] : Promise<AuditEntry[]> {
@@ -152,16 +267,43 @@ export class AgentOnboardService<B extends OnboardBackend | null = null> {
    * 对应 AC-003.1/AC-003.5/AC-003.6/AC-003.7/AC-003.9。
    */
   private _configure(input: AgentCardInput): ConfigureResult {
-    const card: AgentCard = { ...input, status: AgentStatus.ONBOARD };
+    const existing = this.findCard(input.agent_name);
+    const conflict = existing
+      ? this._checkRev('configure', input.agent_name, existing, input.expectedRev)
+      : { ok: true as const };
+    if (!conflict.ok) return { ok: false, reason: 'version_conflict', rev: conflict.rev };
+
+    const card: AgentCard = {
+      ...input,
+      // 重复发现/重复保存只更新同一条卡片，保留首次登记的名字，避免列表出现两行
+      agent_name: existing?.agent_name ?? input.agent_name,
+      status: AgentStatus.ONBOARD,
+      rev: (existing?.rev ?? 0) + 1,
+      ...(this.tenant?.enterprise_id ? { enterprise_id: this.tenant.enterprise_id } : {}),
+      ...(this.tenant?.team_id ? { team_id: this.tenant.team_id } : {}),
+    };
     const { ok, violations } = validateOnboard(card);
     if (!ok) return { ok: false, violations };
     card.status = AgentStatus.CONFIGURED;
+    // 版本号/写前校验值属于请求参数，不落卡片
+    delete (card as AgentCard & { expectedRev?: number }).expectedRev;
     // 密钥字段只由 rotateKey 维护；客户端不得注入哈希/尾号
     card.apiKeyPlaintext = null;
     delete card.keyHash;
     delete card.keyTail;
-    this.cards.set(input.agent_name, card);
-    this._audit('configure', { agent: input.agent_name });
+    if (existing) {
+      // 更新语义：服务端维护的密钥/探测结论不因再次保存配置而被抹掉
+      if (card.keyRotatedAt === undefined && existing.keyRotatedAt !== undefined) card.keyRotatedAt = existing.keyRotatedAt;
+      if (card.keyGraceUntil === undefined && existing.keyGraceUntil !== undefined) card.keyGraceUntil = existing.keyGraceUntil;
+      if (card.keyRevoked === undefined && existing.keyRevoked !== undefined) card.keyRevoked = existing.keyRevoked;
+      if (card.tested === undefined) card.tested = existing.tested;
+      if (card.lastTest === undefined) card.lastTest = existing.lastTest;
+    }
+    this.cards.set(card.agent_name, card);
+    this._audit('configure', {
+      agent: card.agent_name, op: 'configure', result: 'ok', rev: card.rev,
+      status: card.status, ...(existing ? { updated: true } : { created: true }),
+    });
     return { ok: true, card };
   }
 
@@ -172,12 +314,15 @@ export class AgentOnboardService<B extends OnboardBackend | null = null> {
     ) as unknown as B extends null ? ConfigureResult : Promise<ConfigureResult>;
   }
 
-  private _testConnect(agentName: string): TestResult {
-    const card = this.cards.get(agentName);
+  private _testConnect(agentName: string, expectedRev?: number): TestResult {
+    const card = this.findCard(agentName);
     if (!card) return { ok: false, reason: 'no-card' };
+    const conflict = this._checkRev('test', agentName, card, expectedRev);
+    if (!conflict.ok) return { ok: false, reason: 'version_conflict', rev: conflict.rev };
     const requestId = rid();
     card.requestId = requestId;
     card.tested = true;
+    card.rev = (card.rev ?? 1) + 1;
 
     // 主通道熔断：直接降级（不再冒充测通）
     if (card.circuit === 'OPEN') {
@@ -216,16 +361,18 @@ export class AgentOnboardService<B extends OnboardBackend | null = null> {
    * 真实拨测失败 → TEST_FAIL → DEGRADED（已连通卡片同样回落，见状态机）。
    * 对应 AC-003.3 / AC-003.8。
    */
-  testConnect(agentName: string): B extends null ? TestResult : Promise<TestResult> {
+  testConnect(agentName: string, expectedRev?: number): B extends null ? TestResult : Promise<TestResult> {
     return this._wrap(
-      () => this._testConnect(agentName),
-      () => Promise.resolve((this.backend as unknown as OnboardBackend).testConnect(agentName)),
+      () => this._testConnect(agentName, expectedRev),
+      () => Promise.resolve((this.backend as unknown as OnboardBackend).testConnect(agentName, expectedRev)),
     ) as unknown as B extends null ? TestResult : Promise<TestResult>;
   }
 
-  private _rotateKey(agentName: string): RotateResult {
-    const card = this.cards.get(agentName);
+  private _rotateKey(agentName: string, expectedRev?: number): RotateResult {
+    const card = this.findCard(agentName);
     if (!card) return { ok: false, reason: 'no-card' };
+    const conflict = this._checkRev('rotate', agentName, card, expectedRev);
+    if (!conflict.ok) return { ok: false, reason: 'version_conflict', rev: conflict.rev };
     const now = Date.now();
     const key = newApiKey();
     // 明文只在本次响应一次性返回；卡片只存哈希与尾 4 位（旧实现把明文随 JSON 落盘 + GET 泄露）
@@ -235,32 +382,36 @@ export class AgentOnboardService<B extends OnboardBackend | null = null> {
     card.keyRotatedAt = now;
     card.keyGraceUntil = now + 24 * 3600 * 1000; // 24h 宽限（§4/R6）
     card.keyRevoked = false; // 轮换即恢复可用（旧 Key 宽限期内有效）
+    card.rev = (card.rev ?? 1) + 1;
     // 审计只记尾 4 位，绝不落明文
-    this._audit('rotate', { agent: agentName, keyTail: card.keyTail });
+    this._audit('rotate', { agent: card.agent_name, keyTail: card.keyTail, rev: card.rev });
     return { ok: true, card, key };
   }
 
-  rotateKey(agentName: string): B extends null ? RotateResult : Promise<RotateResult> {
+  rotateKey(agentName: string, expectedRev?: number): B extends null ? RotateResult : Promise<RotateResult> {
     return this._wrap(
-      () => this._rotateKey(agentName),
-      () => Promise.resolve((this.backend as unknown as OnboardBackend).rotateKey(agentName)),
+      () => this._rotateKey(agentName, expectedRev),
+      () => Promise.resolve((this.backend as unknown as OnboardBackend).rotateKey(agentName, expectedRev)),
     ) as unknown as B extends null ? RotateResult : Promise<RotateResult>;
   }
 
-  revokeKey(agentName: string): B extends null ? { ok: boolean } : Promise<{ ok: boolean }> {
+  revokeKey(agentName: string, expectedRev?: number): B extends null ? RevokeKeyResult : Promise<RevokeKeyResult> {
     return this._wrap(
-      () => this._revokeKey(agentName),
-      () => Promise.resolve((this.backend as unknown as OnboardBackend).revokeKey(agentName)),
-    ) as unknown as B extends null ? { ok: boolean } : Promise<{ ok: boolean }>;
+      () => this._revokeKey(agentName, expectedRev),
+      () => Promise.resolve((this.backend as unknown as OnboardBackend).revokeKey(agentName, expectedRev)),
+    ) as unknown as B extends null ? RevokeKeyResult : Promise<RevokeKeyResult>;
   }
 
-  private _revokeKey(agentName: string): { ok: boolean } {
-    const card = this.cards.get(agentName);
-    if (!card) return { ok: false };
+  private _revokeKey(agentName: string, expectedRev?: number): RevokeKeyResult {
+    const card = this.findCard(agentName);
+    if (!card) return { ok: false, reason: 'no-card' };
+    const conflict = this._checkRev('revoke', agentName, card, expectedRev);
+    if (!conflict.ok) return { ok: false, reason: 'version_conflict', rev: conflict.rev };
     card.apiKeyPlaintext = null;
     card.keyHash = undefined; // 吊销后哈希不再可用
     card.keyRevoked = true; // R5/R6 立即失效
-    this._audit('revoke', { agent: agentName });
+    card.rev = (card.rev ?? 1) + 1;
+    this._audit('revoke', { agent: card.agent_name, rev: card.rev });
     return { ok: true };
   }
 
@@ -286,7 +437,9 @@ export class AgentOnboardService<B extends OnboardBackend | null = null> {
       const p2 = a.priority === 'P2';
       const probeResult: ProbeResult = probeResults?.get(a.name)
         ?? { ok: false, reason: this.probe ? `探测未返回「${a.name}」的结果` : '未配置本机探测能力，无法验证连通（not_probed）' };
-      const card: AgentCard = {
+      // A29 重复发现 = 更新同一条（按归一化名匹配），不新建第二张卡片、不覆盖已有密钥/用户配置
+      const existing = this.findCard(a.name);
+      const card: AgentCard = existing ? { ...existing } : {
         agent_name: a.name,
         priority: a.priority,
         status: AgentStatus.CONFIGURED,
@@ -299,13 +452,8 @@ export class AgentOnboardService<B extends OnboardBackend | null = null> {
         channels: { webhook: true, apiPull: true }, // R4 双通道至少一
         apiKeyPlaintext: null, // R5 脱敏
         circuit: 'CLOSED',
-        tested: probeResult.ok,
-        requestId: probeResult.ok ? rid() : null,
-        // 把本轮真实拨测耗时随卡片下发：/agents 回填时即使审计读取失败，UI 仍有真实延时样本
-        lastTest: {
-          ok: probeResult.ok, reason: probeResult.reason, at: Date.now(),
-          ...(probeMs !== undefined ? { durationMs: probeMs } : {}),
-        },
+        tested: false,
+        requestId: null,
         oneClick: {
           enabled: true,
           defaultReadOnly: true, // R8 默认只读召回
@@ -316,12 +464,27 @@ export class AgentOnboardService<B extends OnboardBackend | null = null> {
         discover: { enabled: true, crossMachine: false }, // R10 限本机
         form,
       };
+      // 发现结果更新（配置类字段保留用户已改的值）
+      card.agent_name = existing?.agent_name ?? card.agent_name;
+      card.priority = a.priority;
+      card.tested = probeResult.ok;
+      card.requestId = probeResult.ok ? rid() : null;
+      card.lastTest = {
+        ok: probeResult.ok, reason: probeResult.reason, at: Date.now(),
+        ...(probeMs !== undefined ? { durationMs: probeMs } : {}),
+      };
+      card.rev = (card.rev ?? 0) + 1;
+      if (!card.circuit) card.circuit = 'CLOSED';
+      if (this.tenant?.enterprise_id) card.enterprise_id = this.tenant.enterprise_id;
+      if (this.tenant?.team_id) card.team_id = this.tenant.team_id;
       // 真实探测通过 → CONNECTED；失败/无探测 → DEGRADED（不谎报已连通）
       card.status = transition(card.status, probeResult.ok ? 'TEST_PASS' : 'TEST_FAIL');
-      this.cards.set(a.name, card);
+      this.cards.set(card.agent_name, card);
       this._audit('auto_bind', {
-        agent: a.name, signal: a.signal, form, priority: a.priority,
+        agent: card.agent_name, signal: a.signal, form, priority: a.priority,
+        op: existing ? 'duplicate_update' : 'create',
         status: card.status, result: probeResult.ok ? 'pass' : 'fail', reason: probeResult.reason,
+        rev: card.rev,
         ...(probeMs !== undefined ? { durationMs: probeMs } : {}),
       });
       result.push(card);
@@ -329,15 +492,21 @@ export class AgentOnboardService<B extends OnboardBackend | null = null> {
     return { ok: true, cards: result };
   }
 
-  /** 撤销自动绑定（R9 / 审计 unbound） */
-  revokeBind(agentName: string): B extends null ? { ok: boolean } : Promise<{ ok: boolean }> {
+  /** 撤销自动绑定（R9 / 审计 unbound；A29 带并发版本校验） */
+  revokeBind(agentName: string, expectedRev?: number): B extends null ? RevokeBindResult : Promise<RevokeBindResult> {
     return this._wrap(
       () => {
-        const existed = this.cards.delete(agentName);
-        if (existed) this._audit('unbound', { agent: agentName });
-        return { ok: existed };
+        const card = this.findCard(agentName);
+        if (!card) return { ok: false, reason: 'no-card' };
+        const conflict = this._checkRev('unbound', agentName, card, expectedRev);
+        if (!conflict.ok) return { ok: false, reason: 'version_conflict', rev: conflict.rev };
+        const rev = card.rev ?? 1;
+        // 删除真实登记键（大小写/空白不同也能删到）
+        this.cards.delete(this.cardKeyOf(agentName) ?? agentName);
+        this._audit('unbound', { agent: card.agent_name, rev });
+        return { ok: true };
       },
-      () => Promise.resolve((this.backend as unknown as OnboardBackend).revokeBind(agentName)),
-    ) as unknown as B extends null ? { ok: boolean } : Promise<{ ok: boolean }>;
+      () => Promise.resolve((this.backend as unknown as OnboardBackend).revokeBind(agentName, expectedRev)),
+    ) as unknown as B extends null ? RevokeBindResult : Promise<RevokeBindResult>;
   }
 }

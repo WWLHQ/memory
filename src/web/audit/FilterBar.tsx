@@ -10,6 +10,7 @@ const ACTIONS: AuditAction[] = [
   'graft', 'memory_op',
   'l0_view', 'l0_auth_fail', 'l0_auth_request', 'l0_auth_grant',
   'l0_auth_deny', 'l0_auth_revoke', 'l0_auth_expire', 'security_change',
+  'agent_onboard', 'agent_test', 'agent_rotate', 'agent_revoke', 'auto_bind', 'unbound',
 ];
 
 export function FilterBar({

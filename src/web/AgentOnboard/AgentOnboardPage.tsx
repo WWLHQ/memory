@@ -17,7 +17,11 @@ import {
   type OnboardMcpSummary, type OnboardState,
 } from './onboardState.ts';
 import { getOnboardInjectPreview } from './coreOnboard.ts';
-import { getKernelStorage } from '../kernel.ts';
+import { getKernelStorage, getTenant } from '../kernel.ts';
+import {
+  loadAgentLedger, mergeLedgerIntoCards, recordAgentAction,
+  type AgentActionInput, type OnboardTenant,
+} from './ledger.ts';
 import { normalizeAgentKey, statsForAgent, useBackendMirror } from './useBackendMirror.ts';
 import {
   ONBOARD_FAILURE_KEY, hasAutoScannedSession, readOnboardFailure, resetAutoOnboardState, runAutoOnboard,
@@ -170,11 +174,42 @@ export function AgentOnboardPage() {
     }
   }, [refreshBackend]);
 
+  /** A29：当前租户（会话优先，缺省回退本机默认租户；账本按它隔离） */
+  const ledgerTenant = useMemo<OnboardTenant>(() => {
+    const t = getTenant();
+    return {
+      enterprise_id: session.context?.enterprise_id ?? t.enterprise_id,
+      team_id: session.context?.team_id ?? t.team_id,
+      ...(session.context?.user_id ? { user_id: session.context.user_id } : {}),
+    };
+  }, [session.context]);
+
+  /** A29：从内核账本重建页面状态（账本为空 → 保留本地缓存，不臆造） */
+  const syncLedger = useCallback(async () => {
+    try {
+      const ledger = await loadAgentLedger(getKernelStorage(), ledgerTenant);
+      if (ledger.agents.length === 0) return;
+      setAgents((prev) => mergeLedgerIntoCards(prev, ledger));
+    } catch {
+      /* 账本不可达：保留本地快照，不伪造状态 */
+    }
+  }, [ledgerTenant]);
+
+  /** A29：接入动作统一写内核审计（写后立即按账本重建状态） */
+  const logAgent = useCallback((input: Omit<AgentActionInput, 'tenant' | 'form'>) => {
+    void recordAgentAction(getKernelStorage(), { ...input, tenant: ledgerTenant, form })
+      .then(() => syncLedger())
+      .catch(() => { /* 账本写入失败：动作本身已完成，页面保留当前状态 */ });
+  }, [ledgerTenant, form, syncLedger]);
+
   useEffect(() => () => {
     clearTimeout(toastTimer.current);
     clearStageTimers();
     for (const t of statTimers.current) clearTimeout(t);
   }, [clearStageTimers]);
+
+  // A29：挂载即按账本重建（本地缓存被清/换窗口时，状态仍由内核审计恢复）
+  useEffect(() => { void syncLedger(); }, [syncLedger]);
 
   // 从别的窗口/页面回到接入页时重拉一次真实指标（不轮询，不伪造）
   useEffect(() => {
@@ -295,6 +330,13 @@ export function AgentOnboardPage() {
           else next[a.name] = r.reason ?? '接入后端不可达，本地未验证';
           return next;
         });
+        // A29：测试结论也写内核账本（页面状态随后从账本重建，不依赖后端 JSON 审计）
+        logAgent({
+          action: 'agent_test', agent: a.name, op: 'test',
+          result: r.ok ? 'pass' : 'fail', status: r.status, reason: r.reason,
+          durationMs: typeof r.rtt === 'number' ? r.rtt : undefined,
+          requestId: r.requestId ?? undefined, rev: r.rev,
+        });
         void refreshStats(); // 指标（成功率/平均延时/最近测试）随真实审计刷新
         toast(r.ok
           ? `测试通过：${a.name}${r.requestId ? ` · ${r.requestId}` : ''} · ${r.rtt}ms（已记审计）`
@@ -309,6 +351,10 @@ export function AgentOnboardPage() {
           return;
         }
         patchAgent(i, (x) => ({ ...x, key: { ...x.key, last: '刚轮换', rotated: true } }));
+        logAgent({
+          action: 'agent_rotate', agent: a.name, op: 'rotate', result: 'ok',
+          keyTail: r.card?.keyTail, rev: r.rev,
+        });
         refreshStats();
         toast(`已轮换，旧 Key ${a.key.grace}h 内有效（4.1）`);
       });
@@ -318,6 +364,8 @@ export function AgentOnboardPage() {
       if (r2) { toast(r2); return; }
       toast(`已保存 ${a.name} 接入配置`);
       backend.save(a);
+      // A29：接入/改配置写内核审计（result=ok 才会被账本回放采用）
+      logAgent({ action: 'agent_onboard', agent: a.name, op: 'configure', result: 'ok', status: 'CONFIGURED', rev: a.rev });
     }
   };
 
@@ -367,6 +415,21 @@ export function AgentOnboardPage() {
             return;
           }
           if (out.state) applyStoredState(out.state);
+          // A29：一键接入逐家写内核审计（状态/原因取后端回执，后端不可达则如实标失败）
+          const byName = new Map((out.backendCards ?? []).map((c) => [normalizeAgentKey(c.agent_name), c]));
+          for (const d of out.discovered) {
+            const c = byName.get(normalizeAgentKey(d.name));
+            const connected = c?.status === 'CONNECTED';
+            logAgent({
+              action: 'auto_bind', agent: d.name, op: 'one_click',
+              result: connected ? 'pass' : 'fail',
+              status: c?.status ?? 'DEGRADED',
+              priority: c?.priority,
+              reason: c?.lastTest?.reason ?? out.backendError,
+              durationMs: c?.lastTest?.durationMs,
+              rev: c?.rev,
+            });
+          }
           const mcpNote = out.mcp?.changed.length ? `；MCP 已写入 ${out.mcp.changed.join('、')}` : '';
           const mcpFailed = out.mcp?.failed.length ? `；${out.mcp.failed.length} 个客户端写入失败（见下方说明）` : '';
           toast(`一键接入完成：自动发现 ${out.discovered.length} 个 Agent 并绑定${mcpNote}${mcpFailed}`);
@@ -386,7 +449,7 @@ export function AgentOnboardPage() {
         });
     };
     stageTimers.current.push(setTimeout(begin, mode === 'discover' ? 430 * 3 : 0));
-  }, [running, session.role, session.sid, form, toast, applyStoredState, clearStageTimers]);
+  }, [running, session.role, session.sid, form, toast, applyStoredState, clearStageTimers, logAgent]);
 
   // 批次18：应用重启恢复会话时没有登录事件 → 接入页挂载后补跑一轮三路真扫。
   // 批次33-A：改按「本次登录会话是否已扫过」判定（用户反馈：首次登录扫一次即可，切页面不该再扫）。
@@ -405,7 +468,10 @@ export function AgentOnboardPage() {
 
   const onRebindAll = () => {
     if (running) return;
-    for (const d of discovered) backend.unbind(d.name);
+    for (const d of discovered) {
+      backend.unbind(d.name);
+      logAgent({ action: 'unbound', agent: d.name, op: 'rebind_all', result: 'ok' });
+    }
     resetAutoOnboardState();
     setAutoOnboarded(false);
     setDiscovered([]);
@@ -423,6 +489,7 @@ export function AgentOnboardPage() {
     setDiscovered(next);
     setAgents((prev) => prev.map((a) => (a.name === d.name ? { ...a, state: 'onboard' as const } : a)));
     backend.unbind(d.name);
+    logAgent({ action: 'unbound', agent: d.name, op: 'unbind', result: 'ok' });
     // 持久化名单同步移除，避免刷新后又回到「已绑定」
     const st = readOnboardState();
     if (st) {
@@ -446,6 +513,7 @@ export function AgentOnboardPage() {
     addAgentCard(f.agent, card);
     setAgents((prev) => [...prev, card]);
     backend.save(card);
+    logAgent({ action: 'agent_onboard', agent: f.agent, op: 'manual_add', result: 'ok', status: 'CONFIGURED' });
     refreshStats();
     toast(`已新增接入卡片：${f.agent}（未连通；点「测试接入」验证）`);
   };

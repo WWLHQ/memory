@@ -9,7 +9,10 @@ export type AuditAction =
   | 'graft' | 'memory_op'
   | 'l0_view' | 'l0_auth_fail'
   | 'l0_auth_request' | 'l0_auth_grant' | 'l0_auth_deny' | 'l0_auth_revoke' | 'l0_auth_expire'
-  | 'security_change';
+  | 'security_change'
+  // A29：Agent 接入动作（接入/测试/轮换/吊销/自动绑定/撤销绑定）
+  | 'agent_onboard' | 'agent_test' | 'agent_rotate' | 'agent_revoke'
+  | 'auto_bind' | 'unbound';
 
 export interface AuditEntry {
   enterprise_id: string;

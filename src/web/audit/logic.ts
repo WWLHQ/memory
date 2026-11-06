@@ -29,6 +29,12 @@ export const ACTION_LABEL: Record<AuditAction, string> = {
   l0_auth_revoke: 'L0 授权撤销',
   l0_auth_expire: 'L0 授权过期',
   security_change: '安全变更',
+  agent_onboard: 'Agent 接入',
+  agent_test: 'Agent 连通测试',
+  agent_rotate: 'Agent 密钥轮换',
+  agent_revoke: 'Agent 密钥吊销',
+  auto_bind: 'Agent 自动绑定',
+  unbound: 'Agent 撤销绑定',
 };
 
 export function actionLabel(a: AuditAction): string {

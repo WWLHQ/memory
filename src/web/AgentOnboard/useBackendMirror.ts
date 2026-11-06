@@ -2,7 +2,7 @@
 // GET /audit 汇总每家 Agent 的真实统计（测试次数/通过率/最近轮换）。
 // ⚠ 不改变原型视觉与同步交互：失败仅静默（页面与原型完全一致）。
 import { useCallback, useEffect, useRef } from 'react';
-import { AgentOnboardService } from '../../agentOnboard/service.ts';
+import { AgentOnboardService, type AuditStore } from '../../agentOnboard/service.ts';
 import { AgentOnboardClient } from '../../agentOnboard/client.ts';
 import type { AgentCard, AgentCardInput, AgentRealStats, Form, UiAgentCard } from '../../types/agentOnboard.ts';
 import type { AuditEntry, TestResult } from '../../agentOnboard/service.ts';
@@ -14,10 +14,34 @@ export function resolveBackendUrl(): string {
   return onboardBaseUrl();
 }
 
+/** 浏览器兜底（无接入后端）时的审计落盘键：A29 修复「服务层审计内存数组重启即丢」 */
+const LOCAL_AUDIT_KEY = 'mam.agentOnboard.audit.v1';
+
+/** localStorage 审计存储（同步 load/append；不可用环境自动退化为仅内存） */
+function localAuditStore(): AuditStore {
+  let memory: AuditEntry[] = [];
+  try {
+    const raw = globalThis.localStorage?.getItem(LOCAL_AUDIT_KEY);
+    if (raw) {
+      const parsed: unknown = JSON.parse(raw);
+      if (Array.isArray(parsed)) memory = parsed as AuditEntry[];
+    }
+  } catch { /* 反序列化失败 → 从空账本开始，不伪造历史 */ }
+  const flush = () => {
+    try {
+      globalThis.localStorage?.setItem(LOCAL_AUDIT_KEY, JSON.stringify(memory.slice(-500)));
+    } catch { /* 配额/禁用：内存仍可用，下一次重启会丢失这部分 */ }
+  };
+  return {
+    load: () => [...memory],
+    append: (e) => { memory.push(e); flush(); },
+  };
+}
+
 export function createService(url: string): AgentOnboardService<AgentOnboardClient | null> {
   return url
     ? new AgentOnboardService<AgentOnboardClient>(new AgentOnboardClient(url, globalThis.fetch, () => currentSessionId()))
-    : new AgentOnboardService();
+    : new AgentOnboardService(null, { auditStore: localAuditStore() });
 }
 
 /** UiAgentCard（原型形状）→ 服务层入参（只取可映射字段） */
@@ -168,13 +192,15 @@ export interface TestOutcome {
   reason?: string;
   /** 服务层落定的卡片状态（CONNECTED / DEGRADED …），UI 据此同步状态点 */
   status?: string;
+  /** A29：服务端账本版本（写内核审计时带同一版本，冲突可复核） */
+  rev?: number;
 }
 
 export interface BackendMirror {
   svc: AgentOnboardService<AgentOnboardClient | null>;
   test: (name: string) => Promise<TestOutcome>;
   /** 真实轮换：后端不可达/卡片不存在 → ok:false + reason（UI 不得先报成功） */
-  rotate: (name: string) => Promise<{ ok: boolean; reason?: string }>;
+  rotate: (name: string) => Promise<{ ok: boolean; reason?: string; card?: AgentCard; rev?: number }>;
   save: (a: UiAgentCard) => void;
   discover: (names: Array<{ name: string; priority: string; signal: string }>, form: Form) => void;
   unbind: (name: string) => void;
@@ -260,13 +286,13 @@ export function useBackendMirror(
       const t0 = Date.now();
       const finish = (
         ok: boolean, requestId: string | undefined, via: 'backend' | 'local',
-        reason?: string, status?: string,
-      ): TestOutcome => ({ ok, requestId, via, rtt: Date.now() - t0, reason, status });
+        reason?: string, status?: string, rev?: number,
+      ): TestOutcome => ({ ok, requestId, via, rtt: Date.now() - t0, reason, status, rev });
       try {
         return Promise.resolve(svcRef.current!.testConnect(name))
           .then((res) => {
             const r = res as TestResult;
-            return finish(Boolean(r?.ok), r?.requestId, 'backend', r?.reason, r?.card?.status);
+            return finish(Boolean(r?.ok), r?.requestId, 'backend', r?.reason, r?.card?.status, r?.rev);
           })
           .catch(() => finish(false, undefined, 'local', '接入后端不可达，本地未验证'));
       } catch {
@@ -277,8 +303,8 @@ export function useBackendMirror(
       try {
         return Promise.resolve(svcRef.current!.rotateKey(name))
           .then((res) => {
-            const r = res as { ok?: boolean; reason?: string };
-            return { ok: Boolean(r?.ok), reason: r?.reason };
+            const r = res as { ok?: boolean; reason?: string; card?: AgentCard; rev?: number };
+            return { ok: Boolean(r?.ok), reason: r?.reason, card: r?.card, rev: r?.rev };
           })
           .catch(() => ({ ok: false, reason: '接入后端不可达，密钥未轮换' }));
       } catch {

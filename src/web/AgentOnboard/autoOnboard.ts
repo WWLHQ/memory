@@ -137,6 +137,8 @@ export interface AutoOnboardOutcome {
   state?: OnboardState;
   backendOk: boolean;
   backendError?: string;
+  /** A29：后端回执卡片（逐家 status/lastTest/rev），供页面写内核审计时如实带状态 */
+  backendCards?: AgentCard[];
   ms: number;
 }
 
@@ -243,7 +245,7 @@ export function runAutoOnboard(opts: RunAutoOnboardOptions = {}): Promise<AutoOn
 
     return {
       ok: true, scan, discovered: scan.discovered, installed: scan.installed,
-      installedProbes: scan.installedProbes, mcp, state, backendOk, backendError,
+      installedProbes: scan.installedProbes, mcp, state, backendOk, backendError, backendCards,
       ms: Date.now() - started,
     };
   })().finally(() => { inFlight = null; });

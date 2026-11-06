@@ -96,6 +96,8 @@ export interface AgentCard {
   oneClick?: OneClickFlags;
   discover?: DiscoverFlags;
   form?: Form;
+  /** A29：乐观并发版本（每次写 +1；写操作可带 expectedRev 做冲突校验） */
+  rev?: number;
 }
 
 /**
@@ -117,7 +119,11 @@ export type AgentCardCandidate = DeepPartial<AgentCard>;
  * configure 的入参：status 由服务层在校验通过后自行落定（CONFIGURED），
  * 故调用方不需（也不应）预设状态。
  */
-export type AgentCardInput = Omit<AgentCard, 'status'> & { status?: AgentStatus };
+export type AgentCardInput = Omit<AgentCard, 'status'> & {
+  status?: AgentStatus;
+  /** A29：调用方最后看到的版本；与账本不一致 → 拒绝写入并审计（缺省不校验） */
+  expectedRev?: number;
+};
 
 /* ============ 原型 UI 形状（严格对齐 Agent接入页_原型.html 的 AGENTS） ============ */
 
@@ -183,6 +189,8 @@ export interface UiAgentCard {
   chan: UiChan;
   key: UiKey;
   state: UiState;
+  /** A29：账本版本（并发校验用；缺省=本地缓存未同步过账本） */
+  rev?: number;
 }
 
 /** 本机已安装 Agent（主进程五路安装痕迹：CLI/安装目录 exe/开始菜单/配置/注册表卸载项） */
