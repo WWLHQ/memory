@@ -1305,4 +1305,24 @@ status: draft
 > **C·变异验证**：C1-a 删除浮层 `<DemoBadge compact />` → `floatEntry.test.tsx` **1 红**；C1-b 把 `inline` 视图加回 `VIEWS` → `a30DemoNav.test.tsx` **2 红**（导航项与计数）；C1-c 删除演示页入口的 `<DemoBadge />` → `a30InlineDemoBadge.test.tsx` **1 红**。三处均原样还原后 4 文件 / 11 例复绿。C2 边界：`#root` 缺失显式抛错、无 preload 桥仍显示标识、浮层紧凑形态不省略演示文案。
 > **已知边界**：`floatattribution.html` 是独立透明窗（依赖 preload 桥），浏览器直开只显示「桥缺失」占位 + 演示标识，属既有诚实降级，未改；e2e 真浏览器路径本机未执行，逻辑已在 spec 中落定。
 
+### 批次48 A31：厂商计费接入（2026-11-07）
+
+> 口径（用户 2026-11-06 拍板 + 2026-11-07 裁定 A）：**逐字段 provenance**，不整块打标。余额只有真厂商端点成功才 `vendor_live`；日配额/单价厂商 API 一律不提供 → 模型页按引擎手工配置并持久化；单次 cost 只能是 `usage × 单价` 的推算值。适配器范围按现有 **13 个 preset** 落地（openai/anthropic 非 preset，暂不接入，矩阵如实记录）。A31-a 的实测矩阵见 `specs/A31-BILLING-MATRIX.md`（不写产品代码）。
+
+| 能力 | 代码落点 | 测试 |
+|---|---|---|
+| 条款/归一化/文案（单一真源） | `src/shared/billing.ts`：`ManualBilling` / `UNSET_MANUAL_BILLING` / `normalizeManualBilling`（空串不当 0）/ `billingProvenanceText`（四档文案 + openrouter `key_limit` 标注）/ `billingAmountText` / `estimateCallCostCny`；线上契约 `BillingEngineView` | `src/shared/__tests__/billing.test.ts`（归一化 / 四档文案 / key 限额标注 / 单次推算边界） |
+| 厂商适配器 + 五级降级 | `src/electron/llmBilling.ts`：`BILLING_ADAPTERS`（deepseek `/user/balance`、kimi `/v1/users/me/balance`、siliconflow `/v1/user/info`、openrouter `/key`+`/credits`；6 家云端 `no_endpoint` 不发 HTTP；本机 3 家 `local_free`）+ `LlmBillingService`（TTL 10 分钟、`lastGood` 永不覆盖、401/403→manual、超时/5xx→stale、无凭据→manual） | `src/electron/__tests__/llmBilling.test.ts`（12 例：成功解析 / 401 降级 / stale 保留 as_of / no_endpoint 零请求 / 无凭据 / 本机 / **openrouter 普通 key 的 `total_credits:0` 不当余额** / management key 走 credits / TTL 与 force / 凭据槽） |
+| 独立 billing 凭据槽 | `BILLING_CREDS_FILE='llm-billing-keys.json'`（`loadBillingCredentials` / `saveBillingCredential`，0600，与 `llm-keys.json` 同级）；`src/electron/dataRoot.ts` 迁移白名单补该文件；IPC `llm:billingKey` 仅管理员，日志只记「写/清」不记明文 | 同上（槽独立、空串清除）；`dataRoot` 迁移用例随既有测试 |
+| 手工配置持久化（按引擎） | `src/electron/llmGateway.ts`：`LlmEngineConfig.billing: ManualBilling` + `LlmEnginePatch.billing`（合并写 `updatedAt`，全空归 null）+ `clampEngine` 归一 | `src/electron/__tests__/llmGateway.test.ts` 既有用例保持全绿 |
+| IPC 通道 | `src/electron/ipcChannels.ts`（`llm:billing` / `llm:billingKey`）；`src/electron/main.ts` §6d：`llmBillingView(force)` 读配置 + 推理 key + 手工值；余额查询**不计 cost_cap、不写 llm_proxy 审计**；`src/electron/preload.ts` 暴露 `llm.billing/setBillingKey`；`src/desktop/hostBridge.ts` 方法表补两项 | 逻辑由单测覆盖；IPC 注册完整性由 `ipcChannels` 既有校验 |
+| 模型页展示（A31-d） | `src/web/models/BillingPanel.tsx`（余额值 + provenance + 降级原因 + 凭据 keySet + 手工余额/日配额/单价）；`ModelsPage.tsx` 挂载拉取 / 手动刷新 / 保存手工值 / 保存凭据；审计回显 cost 文案改「usage × 单价推算，非厂商账单」；`src/web/hostLlm.ts` 视图类型补 `billing?`（缺省按未填） | 纯函数口径由 `billing.test.ts` 钉住；页面构建通过 |
+
+> **A31 三道闸门证据（b/c/d 共用一份组合代码树；b 的 IPC 契约是 c/d 的前置）**：
+> **A·影响面回归**：`typecheck` 两工程 0 错；oxlint **0/0**；`check:no-demo` 通过（新增文件无演示词，单价单位改用「¥/百万词元」以避 C02 规则）；`build` + `build:electron` 通过。
+> **B·全量测试门禁**：`npm run test:gate` 4 分片全绿 **213 文件 / 2482 例**（基线 211/2463 → +2 文件 / +19 例），JSON 报告留档 `test-results/test-gate/<runId>/`。
+> **C·变异验证**：把 openrouter 适配器的 `if (is_management_key !== true)` 短路成永不成立 → `llmBilling.test.ts` **2 红**（普通 key 走 key 限额、`total_credits:0` 不当余额），还原后复绿。C2 边界：空串/负值/配额 0 / 无凭据 / 无接口 / 401 / 5xx / 超时 / TTL 命中与 force / management key。
+> **已知边界**：deepseek、kimi、siliconflow 的响应形状未经真实 key 验证（本环境无凭据），缺字段一律返 `error` 而非猜值；引擎级单价只用于引擎级展示与推算，`llm_proxy` 审计的 `cost` 仍按参数快照的全局单价计算（A24 口径未改），两者不一致时以审计的 `unit_price_cny_per_mtok` 为准，页面不冒充厂商账单。
+
+
 
