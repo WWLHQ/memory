@@ -1,4 +1,4 @@
-// 生命周期页（REQ-006 / P4）入口：挂载 LifecyclePage。
+// 生命周期页（REQ-010 / P4）入口：挂载 LifecyclePage。
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../shared/actionLog.ts';

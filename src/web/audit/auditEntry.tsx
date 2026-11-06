@@ -1,4 +1,4 @@
-// 审计日志页（REQ-006 / P11）入口：挂载 AuditPage。
+// 审计日志页（REQ-011 / P11）入口：挂载 AuditPage。
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../shared/actionLog.ts';

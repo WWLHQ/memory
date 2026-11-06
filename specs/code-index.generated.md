@@ -202,7 +202,7 @@
 | [src/web/audit/AuditPage.tsx](src/web/audit/AuditPage.tsx) | 118 | 审计日志页（REQ-006 / P11）· 完整编排（T5） | AuditPage(fn) |
 | [src/web/audit/AuditTable.tsx](src/web/audit/AuditTable.tsx) | 93 | 审计日志页（REQ-006 / P11）审计列表（T4） | AuditTable(fn), AuditTableProps(type) |
 | [src/web/audit/FilterBar.tsx](src/web/audit/FilterBar.tsx) | 82 | 审计日志页（REQ-006 / P11）过滤栏（T3） | FilterBar(fn) |
-| [src/web/audit/auditEntry.tsx](src/web/audit/auditEntry.tsx) | 10 | 审计日志页（REQ-006 / P11）入口：挂载 AuditPage。 | — |
+| [src/web/audit/auditEntry.tsx](src/web/audit/auditEntry.tsx) | 10 | 审计日志页（REQ-011 / P11）入口：挂载 AuditPage。 | — |
 | [src/web/audit/auditLink.ts](src/web/audit/auditLink.ts) | 26 | 审计行 → 检索页「链路上下文」的真实跳转契约（阶段5-A / A15）。 | retrievalContextHref(fn), readTrailRequestId(fn), trailEntries(fn), RETRIEVAL_CONTEXT_PAGE(const), RETRIEVAL_CONTEXT_PARAM(const) |
 | [src/web/audit/coreAudit.ts](src/web/audit/coreAudit.ts) | 55 | 审计日志页（REQ-006 / P11）接真内核：审计流存内核 InMemoryStorage（append-only）， | coreLoadAudit(fn) |
 | [src/web/audit/logic.ts](src/web/audit/logic.ts) | 82 | 审计日志页（REQ-006 / P11）纯逻辑层 | actionLabel(fn), filterEntries(fn), chainByRequest(fn), exportCsv(fn), exportJson(fn), ACTION_LABEL(const) |
@@ -248,7 +248,7 @@
 | [src/web/lifecycle/ParamPanel.tsx](src/web/lifecycle/ParamPanel.tsx) | 75 | 生命周期页（REQ-006 / P4）调参面板（T4） | ParamPanel(fn) |
 | [src/web/lifecycle/constants.ts](src/web/lifecycle/constants.ts) | 4 | 生命周期阈值常量（9.10.1）。列表数据真相 = 内核账本，无演示记忆。 | N_DAYS(const), M_DAYS(const) |
 | [src/web/lifecycle/coreLifecycle.ts](src/web/lifecycle/coreLifecycle.ts) | 141 | 生命周期页（REQ-006 / P4）接真内核：迁移/调参/批量统一走 ma._memoryOp | toLifecycleRecord(fn), coreListLifecycle(fn), coreLifeOp(fn), DECAY_TO_STATUS(const), STATUS_TO_DECAY(const) |
-| [src/web/lifecycle/lifecycleEntry.tsx](src/web/lifecycle/lifecycleEntry.tsx) | 10 | 生命周期页（REQ-006 / P4）入口：挂载 LifecyclePage。 | — |
+| [src/web/lifecycle/lifecycleEntry.tsx](src/web/lifecycle/lifecycleEntry.tsx) | 10 | 生命周期页（REQ-010 / P4）入口：挂载 LifecyclePage。 | — |
 | [src/web/lifecycle/lifecycleFilter.ts](src/web/lifecycle/lifecycleFilter.ts) | 19 | 生命周期页（REQ-006 / P4）· 分页纯逻辑 | pagedList(fn), LIFECYCLE_DEFAULT_PAGE_SIZE(const), LIFECYCLE_PAGE_SIZES(const), LifecyclePageSize(type) |
 | [src/web/lifecycle/logic.ts](src/web/lifecycle/logic.ts) | 92 | 生命周期页（REQ-006 / P4）纯逻辑层 | freshnessPreview(fn), canMigrate(fn), importanceLevel(fn), staleCheck(fn), applyLifecycle(fn), STATUS_FLOW(const) |
 | [src/web/lifecycle/types.ts](src/web/lifecycle/types.ts) | 48 | 生命周期页（REQ-006 / P4）数据模型 | LifecycleRecord(type), OpResult(type), MemoryStatus(type), DecayClass(type), LifeOp(type) |
@@ -539,7 +539,7 @@ src/web/InlineAttribution/useInlineReal.ts 4168e198d086
 src/web/audit/AuditPage.tsx 6037c69f5b58
 src/web/audit/AuditTable.tsx 014506dbdb05
 src/web/audit/FilterBar.tsx e3841ffb3c54
-src/web/audit/auditEntry.tsx 2ee6f92922ca
+src/web/audit/auditEntry.tsx 930ff4df73b2
 src/web/audit/auditLink.ts c202a89c574b
 src/web/audit/coreAudit.ts 2844b7df889b
 src/web/audit/logic.ts 026d577ecde4
@@ -585,7 +585,7 @@ src/web/lifecycle/LifecyclePage.tsx 4787689f0ea1
 src/web/lifecycle/ParamPanel.tsx 5858a0c4c600
 src/web/lifecycle/constants.ts 4bbab102ec8b
 src/web/lifecycle/coreLifecycle.ts af3caad421f9
-src/web/lifecycle/lifecycleEntry.tsx 4179fa9bc287
+src/web/lifecycle/lifecycleEntry.tsx 265f2cf1ac2e
 src/web/lifecycle/lifecycleFilter.ts 1f8538e5fdb8
 src/web/lifecycle/logic.ts 7574f2b0fe12
 src/web/lifecycle/types.ts b96b0c4d96c0
