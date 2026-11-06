@@ -1,15 +1,15 @@
 // 自我净化与生长页规格常量（非演示数据）：五维默认权重 / 逐层阈值 / 标签 / 调度。
-import type {
-  DimKey, DimWeights, LayerThresholds, ScheduleItem,
-} from './types.ts';
+// 权重与阈值默认值单一真源在 shared/growthConfig.ts（内核、页面、测试共用一份）。
+import type { DimWeights, LayerThresholds, ScheduleItem } from './types.ts';
+import {
+  DEFAULT_THRESHOLDS as SHARED_THRESHOLDS,
+  DEFAULT_WEIGHTS as SHARED_WEIGHTS,
+  type DimKey,
+} from '../../shared/growthConfig.ts';
 
-export const DEFAULT_WEIGHTS: DimWeights = {
-  semantic: 0.35, keyword: 0.20, entity: 0.15, structure: 0.10, llm_judge: 0.20,
-};
+export const DEFAULT_WEIGHTS: DimWeights = { ...SHARED_WEIGHTS };
 
-export const DEFAULT_THRESHOLDS: LayerThresholds = {
-  L1: 0.70, L2: 0.75, L3: 0.80, L4: 0.85, L5: 0.90, L6: 0.90,
-};
+export const DEFAULT_THRESHOLDS: LayerThresholds = { ...SHARED_THRESHOLDS };
 
 export const DIM_LABELS: Record<DimKey, string> = {
   semantic: '语义（semantic）',

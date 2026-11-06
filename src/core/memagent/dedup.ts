@@ -2,9 +2,13 @@
 // 逐层阈值见 layerRules.DEDUP_THRESHOLDS；无真实 LLM → 四维归一化（去掉仲裁权重）。
 import { cosine, embedSync } from './vector.ts';
 import {
-  DEDUP_THRESHOLDS, DEDUP_WEIGHTS, DEDUP_WEIGHTS_NO_LLM,
+  DEDUP_WEIGHTS,
   type RefineLayer,
 } from './layerRules.ts';
+import {
+  DEFAULT_THRESHOLDS, DEFAULT_WEIGHTS, DIM_KEYS,
+  type DimWeights, type LayerThresholds,
+} from '../../shared/growthConfig.ts';
 import type { LlmProvider, Memory } from './types.ts';
 
 export interface DimensionScores {
@@ -113,24 +117,54 @@ export function baseDimensionScores(a: string, b: string, dim: number): Dimensio
   };
 }
 
-export function fourDimScore(d: DimensionScores): number {
-  return clamp01(
-    d.semantic * DEDUP_WEIGHTS_NO_LLM.semantic
-    + d.keyword * DEDUP_WEIGHTS_NO_LLM.keyword
-    + d.entity * DEDUP_WEIGHTS_NO_LLM.entity
-    + d.structure * DEDUP_WEIGHTS_NO_LLM.structure,
-  );
+/** 查重策略（权重/阈值）——由账本里的生长配置提供；缺省用默认常量 */
+export interface DedupPolicy {
+  weights: DimWeights;
+  thresholds: LayerThresholds;
 }
 
-export function fiveDimScore(d: DimensionScores): number {
-  return clamp01(
-    d.semantic * DEDUP_WEIGHTS.semantic
-    + d.keyword * DEDUP_WEIGHTS.keyword
-    + d.entity * DEDUP_WEIGHTS.entity
-    + d.structure * DEDUP_WEIGHTS.structure
-    + (d.judge ?? 0) * DEDUP_WEIGHTS.judge,
-  );
+export const DEFAULT_DEDUP_POLICY: DedupPolicy = {
+  weights: DEFAULT_WEIGHTS,
+  thresholds: DEFAULT_THRESHOLDS,
+};
+
+/**
+ * 五维加权合成（0–1）：`judge` 缺失时按其余维权重归一化，
+ * 与原「四维归一化」口径完全等价（默认权重下 0.35/0.8 等即原 DEDUP_WEIGHTS_NO_LLM）。
+ */
+export function weightedDedupScore(d: DimensionScores, w: DimWeights): number {
+  let sum = 0;
+  let total = 0;
+  for (const k of DIM_KEYS) {
+    if (k === 'llm_judge') {
+      if (typeof d.judge !== 'number') continue;
+      sum += clamp01(d.judge) * w.llm_judge;
+    } else {
+      sum += clamp01(d[k]) * w[k];
+    }
+    total += w[k];
+  }
+  return clamp01(total > 0 ? sum / total : 0);
 }
+
+/** 四维基础分（保持旧签名；默认权重下与五维函数在缺 judge 时等价） */
+export function fourDimScore(d: DimensionScores): number {
+  return weightedDedupScore(d, DEDUP_WEIGHTS_ALIAS);
+}
+
+/** 五维分（用于 LLM 仲裁后重算） */
+export function fiveDimScore(d: DimensionScores, w: DimWeights = DEDUP_WEIGHTS_ALIAS): number {
+  return weightedDedupScore(d, w);
+}
+
+/** 旧常量用 `judge` 键，合成函数用 `llm_judge` 键；此处做一次显式映射 */
+const DEDUP_WEIGHTS_ALIAS: DimWeights = {
+  semantic: DEDUP_WEIGHTS.semantic,
+  keyword: DEDUP_WEIGHTS.keyword,
+  entity: DEDUP_WEIGHTS.entity,
+  structure: DEDUP_WEIGHTS.structure,
+  llm_judge: DEDUP_WEIGHTS.judge,
+};
 
 /** top-N 候选先按四维排序，再交给 LLM 仲裁（§6.1） */
 export const JUDGE_TOP_N = 3;
@@ -140,6 +174,8 @@ export interface DedupOptions {
   request_id: string;
   llm?: LlmProvider;
   model?: string;
+  /** 账本生长配置（权重/阈值）；缺省用 DEFAULT_DEDUP_POLICY */
+  policy?: DedupPolicy;
 }
 
 /**
@@ -154,14 +190,15 @@ export async function findDuplicate(
   candidates: Memory[],
   opts: DedupOptions,
 ): Promise<DedupOutcome> {
-  const threshold = DEDUP_THRESHOLDS[level];
+  const policy = opts.policy ?? DEFAULT_DEDUP_POLICY;
+  const threshold = policy.thresholds[level];
   const scored: DedupEvaluation[] = [];
   for (const m of candidates) {
     if (m.deleted) continue;
     const ct = layerText(m, level);
     if (!ct) continue;
     const dims = baseDimensionScores(text, ct, opts.dim);
-    scored.push({ mem: m, text: ct, dims, score: round3(fourDimScore(dims)), judge: 'unavailable' });
+    scored.push({ mem: m, text: ct, dims, score: round3(weightedDedupScore(dims, policy.weights)), judge: 'unavailable' });
   }
   if (scored.length === 0) return { best: null, evaluated: 0, threshold };
 
@@ -178,7 +215,7 @@ export async function findDuplicate(
           request_id: opts.request_id, usage: 'judge',
         });
         cand.dims.judge = clamp01(raw);
-        cand.score = round3(fiveDimScore(cand.dims));
+        cand.score = round3(weightedDedupScore(cand.dims, policy.weights));
         cand.judge = 'llm';
       } catch {
         // 仲裁失败 → 保持四维分（不阻断写入）

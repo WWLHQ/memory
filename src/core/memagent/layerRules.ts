@@ -1,6 +1,7 @@
 // 层级规则单一真源（§2.1/§2.2/§6.1/§6.2/§16.1/§4.4）：每层规格、查重阈值/权重、L0 授权常量、L1 脱敏与规格校验。
 // 任何页面/入口/测试都引用本文件，不得各自复制一套规则。
 import { MASK } from './crypto.ts';
+import { DEFAULT_THRESHOLDS, DEFAULT_WEIGHTS } from '../../shared/growthConfig.ts';
 
 /** 精炼层顺序（L0 不在内：L0 是落盘密文层，不参与生成/查重/检索） */
 export const LAYER_ORDER = ['L1', 'L2', 'L3', 'L4', 'L5', 'L6'] as const;
@@ -52,19 +53,17 @@ export function layerSpecOf(id: RefineLayer): LayerSpec {
   return LAYER_SPECS.find((s) => s.id === id)!;
 }
 
-/** 逐层查重阈值（§6.1） */
-export const DEDUP_THRESHOLDS: Record<RefineLayer, number> = {
-  L1: 0.70, L2: 0.75, L3: 0.80, L4: 0.85, L5: 0.90, L6: 0.90,
-};
+/** 逐层查重阈值（§6.1）——默认值单一真源在 shared/growthConfig.ts（页面可改，内核按账本配置执行） */
+export const DEDUP_THRESHOLDS: Record<RefineLayer, number> = { ...DEFAULT_THRESHOLDS };
 
-/** 五维查重权重（§6.1 全层统一） */
+/** 五维查重权重（§6.1 全层统一）——默认值单一真源同上；`judge` 是 `llm_judge` 的内核别名 */
 export const DEDUP_WEIGHTS = {
-  semantic: 0.35,
-  keyword: 0.20,
-  entity: 0.15,
-  structure: 0.10,
-  judge: 0.20,
-} as const;
+  semantic: DEFAULT_WEIGHTS.semantic,
+  keyword: DEFAULT_WEIGHTS.keyword,
+  entity: DEFAULT_WEIGHTS.entity,
+  structure: DEFAULT_WEIGHTS.structure,
+  judge: DEFAULT_WEIGHTS.llm_judge,
+};
 
 /** 无真实 LLM 时四维归一化（去掉 20% 的 LLM 仲裁） */
 export const DEDUP_WEIGHTS_NO_LLM = {

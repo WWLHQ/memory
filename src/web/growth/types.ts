@@ -1,12 +1,7 @@
 // P14 自我净化与生长页（REQ-009 6.1/6.2/7.1/7.2/13.3）数据模型
-/** 五维查重维度（6.1） */
-export type DimKey = 'semantic' | 'keyword' | 'entity' | 'structure' | 'llm_judge';
-
-export type DimWeights = Record<DimKey, number>;
-
-/** 层级 L1–L6（9.10） */
-export type Layer = 'L1' | 'L2' | 'L3' | 'L4' | 'L5' | 'L6';
-export type LayerThresholds = Record<Layer, number>;
+// 权重/阈值/层号类型单一真源在 shared/growthConfig.ts（内核与页面共用，避免两套定义漂移）
+import type { DimKey, DimWeights, Layer, LayerThresholds } from '../../shared/growthConfig.ts';
+export type { DimKey, DimWeights, Layer, LayerThresholds };
 
 /** 判重样本：五维得分 + 目标写入层。null = 内核/账本无该维的可信测量，绝不拿中性值冒充 */
 export interface DedupSample {

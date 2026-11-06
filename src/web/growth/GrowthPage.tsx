@@ -20,7 +20,8 @@ import {
   auditOptimization, evaluateOptimizations, growthDelta,
   shortCircuitPath, validateSchedule, validateThresholds, validateWeights,
 } from './logic.ts';
-import { coreGrowthAudit } from './coreGrowth.ts';
+import { coreGrowthAudit, coreLoadGrowthConfig, coreSaveGrowthConfig } from './coreGrowth.ts';
+import { DEFAULT_SCHEDULE_FLAGS, type ScheduleFlags } from '../../shared/growthConfig.ts';
 import { useGrowthMirror } from './useGrowthMirror.ts';
 import { newRequestId } from '../kernel.ts';
 import { loadRealGrowthData } from './useGrowthReal.ts';
@@ -44,16 +45,21 @@ export function GrowthPage() {
   const { node: toast, show } = useToast();
   const reportMirror = useGrowthMirror();
 
-  // 挂载：加载真实账本（记忆表 + 全量审计 + growth_op 历史）
+  // 挂载：加载真实账本（记忆表 + 全量审计 + growth_op 历史）+ 已保存的生长配置（权重/阈值/调度）
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        const r = await loadRealGrowthData();
+        const [r, cfg] = await Promise.all([loadRealGrowthData(), coreLoadGrowthConfig()]);
         if (!alive) return;
         setReal(r);
         setAudit(r.growthAudit.slice().reverse());
-        setSchedule(DEFAULT_SCHEDULE.map((s) => ({ ...s })));
+        setWeights(cfg.weights);
+        setThresholds(cfg.thresholds);
+        setSchedule(DEFAULT_SCHEDULE.map((s) => ({
+          ...s,
+          enabled: s.key === 'decay' ? true : cfg.schedule[s.key],
+        })));
       } finally {
         if (alive) setLoading(false);
       }
@@ -93,6 +99,25 @@ export function GrowthPage() {
     setThresholds((t) => ({ ...t, [l]: v }));
   }
 
+  /** 调度项 → 内核开关（衰减恒开，R5） */
+  function flagsOf(items: ScheduleItem[]): ScheduleFlags {
+    const out = { ...DEFAULT_SCHEDULE_FLAGS, decay: true };
+    for (const s of items) if (s.key !== 'decay') out[s.key] = s.enabled;
+    return out;
+  }
+
+  async function handleSaveConfig() {
+    const bad = !wCheck.ok ? wCheck.msg : !tCheck.ok ? tCheck.msg : !sCheck.ok ? sCheck.msg : null;
+    if (bad) { show(bad); return; }
+    const requestId = newRequestId('req');
+    try {
+      await coreSaveGrowthConfig({ weights, thresholds, schedule: flagsOf(schedule) }, requestId);
+      show('判重参数已写入内核 preference 账本（真实审计 param_save）· 下次写入即按新配置查重');
+    } catch {
+      show('保存失败：内核暂不可达');
+    }
+  }
+
   async function handleManualTrigger() {
     // 手动触发 = 等价一次 ⑤ 权重回归，写 weight_tuned 审计（真实内核账本）；曲线追加 is_tuned 点
     const entry = auditOptimization(
@@ -126,6 +151,8 @@ export function GrowthPage() {
     };
     const requestId = newRequestId('req');
     try {
+      // 先落配置（内核下次写入即生效），再落审计；两步都成功才改页面状态
+      await coreSaveGrowthConfig({ weights, thresholds, schedule: flagsOf(next) }, newRequestId('req'));
       await coreGrowthAudit(entry, requestId);
       reportMirror('schedule_changed', requestId, entry);
       setSchedule(next);
@@ -167,7 +194,7 @@ export function GrowthPage() {
       <ShortCircuitFlow steps={steps} stats={dedupStats} />
       <DevTunePanel
         devMode={devMode} weights={weights} thresholds={thresholds}
-        onWeights={patchWeights} onThresholds={patchThresholds}
+        onWeights={patchWeights} onThresholds={patchThresholds} onSave={handleSaveConfig}
       />
 
       <GrowthCards m={metrics} empty={empty} />

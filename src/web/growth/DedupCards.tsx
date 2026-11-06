@@ -101,13 +101,14 @@ export function ShortCircuitFlow({ steps, stats }: { steps: ShortCircuitStep[]; 
 }
 
 export function DevTunePanel({
-  devMode, weights, thresholds, onWeights, onThresholds,
+  devMode, weights, thresholds, onWeights, onThresholds, onSave,
 }: {
   devMode: boolean;
   weights: DimWeights;
   thresholds: LayerThresholds;
   onWeights: (k: DimKey, v: number) => void;
   onThresholds: (l: (typeof LAYERS)[number], v: number) => void;
+  onSave: () => void;
 }) {
   if (!devMode) {
     return (
@@ -147,6 +148,12 @@ export function DevTunePanel({
         ))}
       </div>
       <div className="note" style={{ marginTop: 8 }}>R1：权重和=1.0；逐层阈值 L1→L6 单调不减。</div>
+      <button data-testid="save-growth-config" onClick={onSave} style={{ marginTop: 8 }}>
+        保存到内核（写入 preference 账本，param_save 审计）
+      </button>
+      <div className="note" style={{ marginTop: 4 }}>
+        未点保存 = 仅本地草稿；内核查重仍按账本里已保存的配置执行。
+      </div>
     </div>
   );
 }

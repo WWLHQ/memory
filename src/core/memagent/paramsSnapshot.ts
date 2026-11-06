@@ -7,8 +7,15 @@ import { autoArchiveDaysOf, halfLifeDaysOf } from '../../shared/normalParams.ts'
 import {
   UNSET_PROXY_ACCOUNTING, normalizeAccountingPrice, normalizeAccountingQuota, type ProxyAccounting,
 } from '../../shared/proxyAccounting.ts';
+import { normalizeGrowthConfig, type GrowthConfig } from '../../shared/growthConfig.ts';
 
 export const PARAMS_PREF_PREFIX = 'params:v1:';
+/**
+ * 批次48 A23：生长配置（权重/阈值/调度）独立 preference 记录。
+ * 不塞进 params:v1: 的理由：参数页保存是「整条 delete + put」，两个页面共用一条记录会互相覆盖；
+ * 独立前缀让生长页只读写自己那段，参数页与生长页任一保存都不会清掉对方的数据。
+ */
+export const GROWTH_PREF_PREFIX = 'growth:v1:';
 
 export interface ParamsSnapshot {
   cfg: {
@@ -82,4 +89,22 @@ export function proxyAccountingFromSnapshot(mems: Memory[]): ProxyAccounting {
     price_cny_per_kcall: normalizeAccountingPrice(cfg.proxy_price_cny_per_kcall),
     daily_quota: normalizeAccountingQuota(cfg.proxy_daily_quota),
   };
+}
+
+/** 生长页只认自己的 preference 记录（preference / system / growth:v1: 前缀） */
+export function findGrowthMemory(mems: Memory[]): Memory | null {
+  return mems.find(
+    (m) => m.category === 'preference' && m.user_id === 'system' && m.content.startsWith(GROWTH_PREF_PREFIX),
+  ) ?? null;
+}
+
+/** 账本记录 → 合法生长配置；无记录/坏记录一律回退默认（旧账本兼容，不做猜测性迁移） */
+export function growthConfigFromLedger(mems: Memory[]): GrowthConfig {
+  const m = findGrowthMemory(mems);
+  if (!m) return normalizeGrowthConfig(null);
+  try {
+    return normalizeGrowthConfig(JSON.parse(m.content.slice(GROWTH_PREF_PREFIX.length)));
+  } catch {
+    return normalizeGrowthConfig(null);
+  }
 }

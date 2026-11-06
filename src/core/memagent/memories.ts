@@ -16,7 +16,8 @@ import {
   isFullyRefined, meaningfulLength, targetLayers,
   type RefineLayer,
 } from './layerRules.ts';
-import { findDuplicate } from './dedup.ts';
+import { findDuplicate, type DedupPolicy } from './dedup.ts';
+import { growthConfigFromLedger } from './paramsSnapshot.ts';
 import { ulid } from './ulid.ts';
 import { sha256hex } from './sync.ts';
 import { classifyLayer, runForgettingCycle } from './forgetting.ts';
@@ -228,6 +229,10 @@ export async function coreWrite(input: WriteInput, ctx: WriteCtx): Promise<Write
   // 2) 查重候选：同 project、未删除；层文本由 findDuplicate 按层过滤（深层记忆也含浅层）
   const candidates = (await storage.listMemories({ project_id: input.project_id })).filter((m) => !m.deleted);
 
+  // 批次48 A23：查重权重/阈值以账本生长配置为准（无记录/坏记录 → 默认常量；旧账本无需迁移）
+  const growth = growthConfigFromLedger(await storage.listMemories({}));
+  const dedupPolicy: DedupPolicy = { weights: growth.weights, thresholds: growth.thresholds };
+
   // 3) 逐层生成 → 校验 → 查重；命中即嫁接停止（不再生成下一层）
   const generator = makeLayerGenerator(ctx.llm, ctx.llmModel, input.category, request_id);
   // 批次40-C：这一行该炼到哪几层由 L1 的有效字数决定（料不够不硬凑深层，见 targetLayers）
@@ -278,7 +283,7 @@ export async function coreWrite(input: WriteInput, ctx: WriteCtx): Promise<Write
     generated[layer] = text;
     // 每层查重：命中 → 分支嫁接并停止；未命中 → 记录分数继续下一层
     const dup = await findDuplicate(text, layer, candidates, {
-      dim, request_id, llm: ctx.llm, model: ctx.llmModel,
+      dim, request_id, llm: ctx.llm, model: ctx.llmModel, policy: dedupPolicy,
     });
     if (dup.best && dup.best.score >= dup.threshold) {
       decisions.push({
