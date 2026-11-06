@@ -1225,3 +1225,18 @@ status: draft
 > **A·影响面回归**：影响面 = `agent.ts` / `llm.ts` / `paramsSnapshot.ts` / `types.ts` / `shared/proxyAccounting.ts` / `electron/llmGateway.ts` / `electron/main.ts` / `web/hostLlm.ts` / `web/models/*` / `web/params/coreParams.ts` + 2 个新测试文件。全量 `vitest run --maxWorkers=1` **205 文件 / 2440 例全绿**（A29 基线 203 文件 → +2 文件；期间一次原生崩溃 `0xC0000409`，按 A27 同口径重跑一次即全绿，非断言失败）；`npm run typecheck` 两工程 0 错；oxlint **0 warnings / 0 errors**；`check:no-demo` 通过；`npm run build` + `build:electron` 通过。既有行为钉住：模型页 simulate/审计渲染、参数页保存、`llmHonesty`/`refine` 精炼口径、`coreSimulateAuto(0.01, 2)` 显式传参用例均在全量中通过。
 > **B·效果验证**：AC 逐条 → `a24.test.ts`（6 例）+ `a24Caps.test.ts`（6 例）+ `llmGateway.test.ts`（含新增 2 例）。**状态真的变了**：未设置快照 → 低价源不入选且审计原因是「price_cap 未设置」（不再是 0.01 判定）；写入快照 0.03 → 真实路由命中 `cheap-x` 并落 `llm_proxy`；账本 seed ¥2.0 + `cost_cap=2` → 本次回退且 reason 含「成本封顶 2.00」；`usage=100` + 单价 3 → `cost=0.0003`；无 usage → `tokens/cost=null`；模型页 `coreSimulateAuto()` 无参读同一快照。**反向断言**：空值/NaN/-1 → 未设置；值未变 → 不写快照；参数页再保存不冲掉封顶；24h 窗口外花费不计入 `used`。
 > **C·变异验证（两次代码级变异，均原样还原）**：① `agent.write` 把 `caps.price_cap/cost_cap` 换回写死的 `0.01/2` → `a24.test.ts` **6/6 全红**（原因断言不再出现「price_cap 未设置」）；② `usedToday` 改回 `0`（进程内计数语义）→ usedToday 用例 **1 红**（`llm_fallback` 缺失 / 成本封顶不再触发）→ 还原后 3 个 A24 相关文件复绿。C2 矩阵：未设置/0/0.03/NaN/-1、usage 有/无/单价有/无、24h 内外、参数页交叉保存 —— 全部明确断言。未做 C3（本提交含代码）。
+
+### 批次48 A25：监控页宿主 Agent 下拉真实化（2026-11-06）
+
+> 动因（P2-1）：`src/web/monitor/options.ts` 曾写死 `AGENT_OPTIONS = ['all','coder-01','writer-02','sync-00']`，与真实账本无关；e2e 用例还把「空账本 4 个选项」当成「来自真实宿主清单」。现改为只由账本派生，空账本只留「全部」。
+
+| 能力 | 代码落点 | 测试 |
+|---|---|---|
+| 选项派生纯函数 | `src/web/monitor/options.ts`：`ALL_AGENTS_OPTION` + `agentOptionsFromLedger(alerts, createdBy)`（告警 `agent` 字段 + 记忆 `created_by_agent`；trim、去空、去重、排除 `all`、字典序，`all` 恒在首位） | `src/web/monitor/__tests__/a25AgentOptions.test.tsx`（空账本 / 去重排序 / 页面两项） |
+| 页面接真 | `src/web/monitor/useMonitorReal.ts`：`RealMonitor.agentOptions` 由 `loadRealMonitorData` 用同一份 `mems`/`alerts` 实算；`MonitorPage.tsx` 渲染 `real?.agentOptions ?? ['all']`，`all` 显示为「全部」 | 同上 + 既有 `MonitorPage.test.tsx`（mock 缺字段回落 `['all']` 仍通过） |
+| e2e 口径修正 | `e2e/monitor.spec.ts`：用例名改为「选项由真实账本派生，空账本只保留「全部」」，断言 1 项、含「全部」、不含 `sync-00`/`coder-01` | e2e 依赖 dist + 浏览器栈，本环境未执行；口径已由单测钉住 |
+
+> **A25 三道闸门证据**：
+> **A·影响面回归**：影响面 = `web/monitor/{options,useMonitorReal,MonitorPage}.tsx` + `e2e/monitor.spec.ts`。全量 `vitest run --maxWorkers=1` **206 文件 / 2444 例全绿**（A24 基线 205/2440 → +1 文件 / +4 例）；`typecheck` 两工程 0 错；oxlint **0/0**；`check:no-demo` 通过；`build` + `build:electron` 通过。
+> **B·效果验证**：空账本 → 下拉 **1 项「全部」**，不再出现占位 agent；账本有 `sync-00` → 选项 `['all','sync-00']` 且可选中、命中 0 条并显示诚实空态；`agentOptionsFromLedger` 对空白/重复/`all` 混合输入给出确定排序。**反向断言**：显式断言不含 `sync-00` / `coder-01`（防止占位名回潮）。
+> **C·变异验证**：把 `agentOptionsFromLedger` 改回旧常量 `['all','coder-01','writer-02','sync-00']` → `a25AgentOptions.test.tsx` **3/4 红**（空账本、合并排序、页面下拉），还原后复绿。C2 边界：空数组 / 空白串 / undefined / 重复名 / `all` 混入。未做 C3。

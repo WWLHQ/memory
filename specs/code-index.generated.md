@@ -307,14 +307,14 @@
 | [src/web/models/useToast.tsx](src/web/models/useToast.tsx) | 13 | — | useToast(fn) |
 | [src/web/monitor/AlertTimeline.tsx](src/web/monitor/AlertTimeline.tsx) | 48 | P6-T3 告警时间线（12.2：request_id/memory_id 可点跳审计） | AlertTimeline(fn) |
 | [src/web/monitor/MetricGrid.tsx](src/web/monitor/MetricGrid.tsx) | 35 | P6-T3 指标卡网格（12.1：6 组 14 卡，级别徽标 + 跳转） | MetricGrid(fn) |
-| [src/web/monitor/MonitorPage.tsx](src/web/monitor/MonitorPage.tsx) | 109 | 监控仪表盘（REQ-006 / P6）· 完整编排（T5）· 真实数据接真版 | MonitorPage(fn) |
+| [src/web/monitor/MonitorPage.tsx](src/web/monitor/MonitorPage.tsx) | 111 | 监控仪表盘（REQ-006 / P6）· 完整编排（T5）· 真实数据接真版 | MonitorPage(fn) |
 | [src/web/monitor/coreMonitor.ts](src/web/monitor/coreMonitor.ts) | 39 | 监控仪表盘（REQ-006 / P6）接真内核：告警时间线读真实账本（action='monitor_alert'，只读回放，不再灌种子）。 | coreLoadAlerts(fn), coreRaiseAlert(fn) |
 | [src/web/monitor/logic.ts](src/web/monitor/logic.ts) | 47 | 监控仪表盘（REQ-006 / P6）纯逻辑层 | evalLevel(fn), inWindow(fn), filterAlerts(fn), groupMetrics(fn), percentile(fn), levelBadge(fn) |
 | [src/web/monitor/monitorEntry.tsx](src/web/monitor/monitorEntry.tsx) | 10 | 监控仪表盘（REQ-006 / P6）入口（T1 壳） | — |
-| [src/web/monitor/options.ts](src/web/monitor/options.ts) | 3 | 监控页宿主 Agent 筛选选项（真实可选值；指标/告警数据真相 = 内核账本）。 | AGENT_OPTIONS(const) |
+| [src/web/monitor/options.ts](src/web/monitor/options.ts) | 28 | 监控页宿主 Agent 筛选选项（批次48 A25：只由真实账本派生，不内置占位 agent 名）。 | agentOptionsFromLedger(fn), ALL_AGENTS_OPTION(const) |
 | [src/web/monitor/types.ts](src/web/monitor/types.ts) | 36 | 监控仪表盘（REQ-006 / P6）数据模型 | MetricCard(type), AlertItem(type), MonitorFilter(type), AlertLevel(type) |
 | [src/web/monitor/useMonitorMirror.ts](src/web/monitor/useMonitorMirror.ts) | 13 | 监控仪表盘后端镜像：挂载视图上抛（G6 fire-and-forget，monitor_view）。 | useMonitorMirror(fn) |
-| [src/web/monitor/useMonitorReal.ts](src/web/monitor/useMonitorReal.ts) | 155 | 监控仪表盘（REQ-006 / P6）· 真实数据接真层 | percentile(fn), metricsFromLedger(fn), realLoadAlerts(fn), loadRealMonitorData(fn), MONITOR_REAL_DATA_SOURCE(const), RealMonitor(type), RealStorage(type) |
+| [src/web/monitor/useMonitorReal.ts](src/web/monitor/useMonitorReal.ts) | 160 | 监控仪表盘（REQ-006 / P6）· 真实数据接真层 | percentile(fn), metricsFromLedger(fn), realLoadAlerts(fn), loadRealMonitorData(fn), MONITOR_REAL_DATA_SOURCE(const), RealMonitor(type), RealStorage(type) |
 | [src/web/monitor/useToast.tsx](src/web/monitor/useToast.tsx) | 13 | — | useToast(fn) |
 | [src/web/overview/Overview.tsx](src/web/overview/Overview.tsx) | 159 | REQ-003 + REQ-005 配合展示（通览演示页） | Overview(fn) |
 | [src/web/overview/overviewEntry.tsx](src/web/overview/overviewEntry.tsx) | 20 | REQ-003 + REQ-005 通览演示页入口 | — |
@@ -654,14 +654,14 @@ src/web/models/types.ts 973af42c99c1
 src/web/models/useToast.tsx 85cd09d2e1f5
 src/web/monitor/AlertTimeline.tsx 24c506f1e565
 src/web/monitor/MetricGrid.tsx 1ae0b818ee11
-src/web/monitor/MonitorPage.tsx d439da9419c8
+src/web/monitor/MonitorPage.tsx e4c3926a0f78
 src/web/monitor/coreMonitor.ts 6b0c29922b63
 src/web/monitor/logic.ts 047ec4b39ad1
 src/web/monitor/monitorEntry.tsx 9a24cb52cf96
-src/web/monitor/options.ts 6c9a71c785f2
+src/web/monitor/options.ts 59d853ad7cd4
 src/web/monitor/types.ts 31210fc87ca9
 src/web/monitor/useMonitorMirror.ts 9e87dd8cc071
-src/web/monitor/useMonitorReal.ts b682e3e7b165
+src/web/monitor/useMonitorReal.ts 62e7e61b2f57
 src/web/monitor/useToast.tsx 85cd09d2e1f5
 src/web/overview/Overview.tsx 4a9f4690fb75
 src/web/overview/overviewEntry.tsx 5f4488678cc7

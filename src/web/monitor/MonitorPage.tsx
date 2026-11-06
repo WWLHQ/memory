@@ -4,7 +4,7 @@
 // 与记忆库管理页一致：数据真相 = 内核账本（桌面 = 主进程 FileStorage 持久库）。
 // ⚠ 内核读不到（批次25 P0-7）→ 三态加载：显示内核原因 + 重试，绝不渲染成「账本为空」。
 import { useState } from 'react';
-import { AGENT_OPTIONS } from './options.ts';
+import { ALL_AGENTS_OPTION } from './options.ts';
 import { filterAlerts } from './logic.ts';
 import { loadRealMonitorData, type RealMonitor } from './useMonitorReal.ts';
 import { useMonitorMirror } from './useMonitorMirror.ts';
@@ -70,7 +70,9 @@ export function MonitorPage({ load = loadRealMonitorData }: { load?: () => Promi
           </select>
           <label style={{ fontSize: 12 }}>宿主 Agent</label>
           <select data-testid="f-agent" value={filter.agent} onChange={(e) => setFilter({ ...filter, agent: e.target.value })}>
-            {AGENT_OPTIONS.map((a) => <option key={a} value={a}>{a}</option>)}
+            {(real?.agentOptions ?? [ALL_AGENTS_OPTION]).map((a) => (
+              <option key={a} value={a}>{a === ALL_AGENTS_OPTION ? '全部' : a}</option>
+            ))}
           </select>
           <span className="dim">命中 {alerts.length} 条</span>
         </div>

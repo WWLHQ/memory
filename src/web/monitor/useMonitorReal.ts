@@ -17,6 +17,7 @@ import type { Memory, AuditRecord } from '../../core/memagent/types.ts';
 import type { StorageBackend } from '../../core/memagent/types.ts';
 import { getKernelStorage } from '../kernel.ts';
 import type { AlertItem, MetricCard } from './types.ts';
+import { agentOptionsFromLedger } from './options.ts';
 
 export type RealStorage = Pick<StorageBackend, 'listMemories' | 'queryAudit'>;
 
@@ -132,6 +133,8 @@ export interface RealMonitor {
   auditCount: number;
   metrics: MetricCard[];
   alerts: AlertItem[];
+  /** 批次48 A25：宿主 Agent 筛选选项（账本 agent 字段 + created_by_agent 派生；空账本 = ['all']） */
+  agentOptions?: string[];
 }
 
 // 真实账本实算标记（供构建产物核验）
@@ -150,5 +153,7 @@ export async function loadRealMonitorData(): Promise<RealMonitor> {
     auditCount: audits.length,
     metrics: metricsFromLedger(mems, audits),
     alerts,
+    // 批次48 A25：选项只来自真实账本，空账本只留「全部」
+    agentOptions: agentOptionsFromLedger(alerts, mems.map((m) => m.created_by_agent)),
   };
 }

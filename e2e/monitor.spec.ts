@@ -47,12 +47,15 @@ test.describe('监控仪表盘 · 真实账本', () => {
     await expect(page.locator('[data-testid="alert-2"]')).toHaveCount(0);
   });
 
-  test('宿主 Agent 筛选：选项来自真实宿主清单，空账本仍 0 条', async ({ page }) => {
+  test('宿主 Agent 筛选：选项由真实账本派生，空账本只保留「全部」', async ({ page }) => {
     await page.goto(APP);
     const opts = page.locator('[data-testid="f-agent"] option');
-    await expect(opts).toHaveCount(4);
-    await expect(page.locator('[data-testid="f-agent"]')).toContainText('sync-00');
-    await page.locator('[data-testid="f-agent"]').selectOption('sync-00');
+    // 批次48 A25：不再内置 coder-01 / writer-02 / sync-00 之类占位名；空账本 = 仅「全部」
+    await expect(opts).toHaveCount(1);
+    await expect(page.locator('[data-testid="f-agent"]')).toContainText('全部');
+    await expect(page.locator('[data-testid="f-agent"]')).not.toContainText('sync-00');
+    await expect(page.locator('[data-testid="f-agent"]')).not.toContainText('coder-01');
+    await page.locator('[data-testid="f-agent"]').selectOption('all');
     await expect(page.locator('[data-testid="monitor-page"]')).toContainText('命中 0 条');
     await expect(page.locator('[data-testid="alerts-empty"]')).toBeVisible();
   });
