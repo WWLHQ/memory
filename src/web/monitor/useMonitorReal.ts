@@ -74,9 +74,11 @@ export function metricsFromLedger(mems: Memory[], audits: AuditRecord[], now: nu
   const syncFail24h = audits.filter((a) => a.action === 'sync_fail' && within(a, DAY, now)).length;
 
   // 人工审核（真实账本实算；规格是「待裁决数 / 超期未处理」，无时间窗口）
-  const conflictAudits = audits.filter((a) => a.action === 'conflict_resolve').length;
+  // 批次48 A15：待裁决 = 当前仍挂在 conflict_id 的记忆数（队列现存量）。
+  // 旧实现取 Math.max(历史 conflict_resolve 审计数, 当前冲突记忆数)：历史处置次数只增不减，
+  // 会把「已裁决完的历史」当成「还在等裁决」→ 数字虚高且永不下降，已移除。
   const conflictMems = mems.filter((m) => m.conflict_id && m.decay_class !== 'archived' && m.decay_class !== 'dormant').length;
-  const pendingReview = Math.max(conflictAudits, conflictMems);
+  const pendingReview = conflictMems;
   const overdue7d = mems.filter((m) => m.conflict_id && m.decay_class !== 'archived' && m.decay_class !== 'dormant'
     && now - (m.created_at ?? now) > 7 * DAY).length;
 

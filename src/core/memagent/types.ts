@@ -912,10 +912,11 @@ export interface MemAgent {
   /** 单记忆操作（17.3/P4）：端壳状态变更统一走内核（G4 约束 + 钳制 + 版本 + 审计） */
   memoryOp(mem_id: string, op: MemOp, patch?: MemOpPatch): Promise<MemOpResult>;
   /** 用户反馈（17.4）：confirm +0.1 / reject −0.05 / disputed 挂 9.7 裁决 */
-  feedback(mem_id: string, kind: FeedbackKind): Promise<FeedbackResult>;
+  feedback(mem_id: string, kind: FeedbackKind, meta?: { rating?: number; comment?: string }): Promise<FeedbackResult>;
   /** 兼容别名：端壳历史代码与测试灌数仍走下划线钩子，不删不改行为 */
   _memoryOp(mem_id: string, op: MemOp, patch?: MemOpPatch): Promise<MemOpResult>;
-  _feedback(mem_id: string, kind: FeedbackKind): Promise<FeedbackResult>;
+  /** 批次48 A13：meta.rating（1–5）与 comment 随反馈审计落账本（缺省则记为未评分） */
+  _feedback(mem_id: string, kind: FeedbackKind, meta?: { rating?: number; comment?: string }): Promise<FeedbackResult>;
 }
 
 /**

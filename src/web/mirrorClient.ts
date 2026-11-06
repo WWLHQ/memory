@@ -6,6 +6,7 @@
 // ③ 经 uiLog 写主进程 actions.log（level:error）。页面交互永不因上抛失败而中断。
 import { homeBaseUrl } from './backend.ts';
 import { uiLog } from './shared/actionLog.ts';
+import { currentSessionId } from './shared/session.ts';
 import { MIRROR_FAILURE_EVENT, type MirrorFailure } from './shared/mirrorFailureEvent.ts';
 
 export { MIRROR_FAILURE_EVENT } from './shared/mirrorFailureEvent.ts';
@@ -55,9 +56,11 @@ export function mirrorReport(source: string, action: string, requestId?: string,
   const base = mirrorBackendUrl();
   if (!base) return;
   try {
+    // 批次47 P0-1：账本按登录会话归属；无会话时不伪造身份，交给服务端如实 401 → 记为可见失败。
+    const sid = currentSessionId();
     fetch(`${base}/api/mirror/audit`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(sid ? { 'x-session-id': sid } : {}) },
       body: JSON.stringify({ source, action, request_id: requestId, payload: payload ?? null }),
       keepalive: true,
     })
@@ -76,7 +79,8 @@ export async function mirrorFetch(source?: string, limit = 50): Promise<{ items:
     const u = new URL(`${base}/api/mirror/audit`);
     if (source) u.searchParams.set('source', source);
     u.searchParams.set('limit', String(limit));
-    const res = await fetch(u.toString());
+    const sid = currentSessionId();
+    const res = await fetch(u.toString(), { headers: sid ? { 'x-session-id': sid } : {} });
     if (!res.ok) {
       recordFailure(source ?? 'mirror', 'fetch', `HTTP ${res.status}`);
       return { items: [], total: 0 };

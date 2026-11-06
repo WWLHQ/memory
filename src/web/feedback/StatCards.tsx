@@ -17,7 +17,7 @@ export function StatCards({ stats }: { stats: FeedbackStats }) {
         {stats.ratingDist.map((n, i) => (
           <span key={i} data-testid={`dist-${i + 1}`}>{i + 1}★×{n}</span>
         ))}
-        <span className="dim">均分 {stats.avgRating}</span>
+        <span className="dim" data-testid="stat-avg">均分 {stats.ratingDist.some((n) => n > 0) ? stats.avgRating : '—（暂无评分）'}</span>
       </div>
       <div className="row" style={{ gap: 24 }}>
         <div>

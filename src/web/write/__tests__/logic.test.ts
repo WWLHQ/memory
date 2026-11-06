@@ -3,7 +3,9 @@ import {
   estimateTokens, needsRefine, validateDraft, scoreDedup, thresholdForLayer, composeReceipt, jaccard,
 } from '../logic.ts';
 import { DEDUP_THRESHOLDS } from '../../../core/memagent/layerRules.ts';
-import type { MemoryDraft } from '../types.ts';
+import { policyFor } from '../../../core/memagent/forgetting.ts';
+import { CATEGORY_PREVIEW, KERNEL_CATEGORY } from '../spec.ts';
+import type { MemoryDraft, MemoryCategory } from '../types.ts';
 
 const draft = (over: Partial<MemoryDraft>): MemoryDraft => ({
   content: 'x', category: 'fact', tags: [], source: 'conversation', session_id: 's1', project_id: 'p1', ...over,
@@ -146,5 +148,25 @@ describe('composeReceipt', () => {
     expect(r.layers.L1.produced).toBe(true);
     expect(r.layers.L1.summary).toContain('分支嫁接');
     expect(r.layers.L2.produced).toBe(false);
+  });
+});
+
+describe('批次48 A18：写入页策略预览取内核真源', () => {
+  const CATEGORIES: MemoryCategory[] = ['decision', 'pitfall', 'preference', 'fact', 'project', 'feedback'];
+
+  it('六类预览逐项等于 policyFor(KERNEL_CATEGORY[c])：不再允许手抄表漂移', () => {
+    for (const c of CATEGORIES) {
+      const p = policyFor(KERNEL_CATEGORY[c]);
+      expect(CATEGORY_PREVIEW[c].halfLifeDays).toBe(p.half_life_days);
+      expect(CATEGORY_PREVIEW[c].archive).toBe(`${p.auto_archive_days} 天`);
+      const expectedMerge = p.auto_merge === true ? '自动合并（相似≥3）' : p.auto_merge === 'cautious' ? '需人工确认' : '不自动合并';
+      expect(CATEGORY_PREVIEW[c].merge).toBe(expectedMerge);
+    }
+  });
+
+  it('旧手抄表的三个错数已纠正（fact 90→365 / decision 180→30 / preference 365→180）', () => {
+    expect(CATEGORY_PREVIEW.fact.halfLifeDays).toBe(365);
+    expect(CATEGORY_PREVIEW.decision.halfLifeDays).toBe(30);
+    expect(CATEGORY_PREVIEW.preference.halfLifeDays).toBe(180);
   });
 });

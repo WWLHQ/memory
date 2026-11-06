@@ -1,14 +1,16 @@
 // 全局参数页（REQ-006 / P5）纯逻辑层
 import type { DevParams, KbPolicyRow, NormalConfig } from './types.ts';
+import { FORGET_SPEED_HALF_LIFE_DAYS, RETENTION_ARCHIVE_DAYS } from '../../shared/normalParams.ts';
 
+// 批次48 A17：折算表与内核遗忘调度共用 shared/normalParams.ts（单一真源）。
 /** 遗忘速度 → half_life 档位（17.6） */
 export function speedToHalfLife(s: NormalConfig['forget_speed']): number {
-  return s === 'slow' ? 60 : s === 'mid' ? 30 : 7;
+  return FORGET_SPEED_HALF_LIFE_DAYS[s];
 }
 
 /** 保留时长 → 归档阈值档（17.6） */
 export function retentionToArchive(r: NormalConfig['retention']): number {
-  return r === 'long' ? 365 : r === 'months' ? 180 : r === 'weeks' ? 90 : 30;
+  return RETENTION_ARCHIVE_DAYS[r];
 }
 
 /** 权重校验（2.4.3）：和=1.0（容差 1e-6）且各 ≥0 */

@@ -75,6 +75,7 @@ export interface AnomalyItem {
   title: string;
   detail: string;
   level: 'error' | 'warn';
+  /** 真实审计 request_id；'' = 账本未提供链路（不得编造，UI 只显示「账本无链路」且不可点） */
   request_id: string;
   jump?: string; // 如 'P15' / 'P10' / 'P13'
 }
@@ -84,6 +85,7 @@ export interface ActiveMemory {
   title: string;
   hits: number;
   decayClass: 'hot' | 'warm' | 'cold';
+  /** 真实 recall 审计 request_id；'' = 无链路（不合成） */
   request_id: string;
 }
 
@@ -91,6 +93,7 @@ export interface ActiveMemory {
 export interface TodoItem {
   label: string;
   detail: string;
+  /** 真实冲突审计 request_id；'' = 账本无该链路（不把 mem_id 冒充 request_id） */
   request_id: string;
   kind?: 'dispute' | 'proxy_budget';
 }

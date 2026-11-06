@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { LifecyclePage } from '../LifecyclePage.tsx';
 import { resetKernelForTests } from '../../kernel.ts';
@@ -61,9 +61,30 @@ describe('LifecyclePage 集成（T5）', () => {
     fireEvent.click(screen.getByTestId('batch-run'));
     await waitFor(() => expect(screen.getByTestId('toast')).toHaveTextContent('批量迁移 1 条 → archived'));
   });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
 
-  it('request_id 展示（内核同一 ULID 口径）', async () => {
+  it('request_id 只由内核回填：操作前不展示客户端合成 id（批次48 A20）', async () => {
     render(<LifecyclePage />);
-    await waitFor(() => expect(screen.getAllByText(/req_lc_/).length).toBeGreaterThanOrEqual(1));
+    await waitFor(() => expect(screen.getByTestId('lifecycle-table')).toBeInTheDocument());
+    // 未操作前没有任何预生成 request_id（旧实现是客户端 newRequestId('req_lc') 假 id）
+    expect(screen.queryByText(/req_[0-9A-Z]/)).toBeNull();
+    expect(screen.getByTestId('lifecycle-page')).toHaveTextContent('暂无（操作后由内核返回）');
+
+    fireEvent.click(screen.getByTestId('mig-hibernating'));
+    await waitFor(() => expect(screen.getAllByText(/req_[0-9A-Z]/).length).toBeGreaterThanOrEqual(1));
+  });
+
+  it('迁移失败：错误 toast 不被成功 toast 覆盖（批次48 A20）', async () => {
+    const mod = await import('../coreLifecycle.ts');
+    vi.spyOn(mod, 'coreLifeOp').mockResolvedValue({
+      ok: false, affected: [], audit: 'lifecycle_change', request_id: '', message: '已锁定（G4）：仅可解锁',
+    });
+    render(<LifecyclePage />);
+    await waitFor(() => expect(screen.getByTestId('mig-hibernating')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('mig-hibernating'));
+    await waitFor(() => expect(screen.getByTestId('toast')).toHaveTextContent('已锁定（G4）：仅可解锁'));
+    expect(screen.getByTestId('toast')).not.toHaveTextContent('已迁移');
   });
 });

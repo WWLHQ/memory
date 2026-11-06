@@ -37,7 +37,14 @@ export function MemoryInjectionTag({
           <div className="m">层：decay_class={mark.decay_class}（cold 仅 L2 占位符，15.3）</div>
           {aging && <div className="m warn">{aging}</div>}
           {thin && <div className="m warn">⚠ 证据不足，已补查 Cold 层 / 建议切事实优先重试（2.4.3）</div>}
-          <div className="m">request_id：<a href="#" onClick={(e) => { e.preventDefault(); onOpenAudit?.(mark.request_id); }}>{mark.request_id}</a></div>
+          <div className="m">
+            request_id：
+            {mark.request_id ? (
+              <a href="#" onClick={(e) => { e.preventDefault(); onOpenAudit?.(mark.request_id); }}>{mark.request_id}</a>
+            ) : (
+              <span data-testid="mem-no-trace">账本无链路</span>
+            )}
+          </div>
           <div className="acts">
             <button onClick={() => onFeedback?.(mark.memory_id, 'confirm')}>记住 +0.1</button>
             <button onClick={() => onFeedback?.(mark.memory_id, 'reject')}>忘记 −0.05</button>

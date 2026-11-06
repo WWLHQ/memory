@@ -6,11 +6,12 @@ import { createServer } from '../server.ts';
 import type { Server } from 'node:http';
 import { request as httpRequest } from 'node:http';
 import { registerAccount, resetAuthStore } from '../server.ts';
-import { ADMIN_ACCOUNT, DEFAULT_ADMIN_PASSWORD } from '../../auth/loginService.ts';
+import { ADMIN_ACCOUNT, DEFAULT_ADMIN_PASSWORD, listAccounts } from '../../auth/loginService.ts';
 import { hashPassword } from '../../auth/hash.ts';
-import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, readdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { GENESIS_HASH } from '../mirrorLedger.ts';
 
 const ACCOUNT = 'user_001';
 const TEAM = 'team_001';
@@ -51,6 +52,13 @@ function readAccounts(tmpDir: string): Array<{ account: string; passwordHash: st
   return JSON.parse(readFileSync(join(tmpDir, 'home-accounts.json'), 'utf8')) as Array<{ account: string; passwordHash: string }>;
 }
 
+/** 取一个真实登录会话（mirror 等端点自批次47 起要求会话） */
+async function loginAs(url: string, account: string, password: string): Promise<string> {
+  const r = await postLogin(url, account, password);
+  expect(r.status).toBe(200);
+  return ((await r.json()) as { sessionId: string }).sessionId;
+}
+
 describe('T10 登录后端 HTTP 服务', () => {
   beforeEach(async () => {
     resetAuthStore();
@@ -63,6 +71,30 @@ describe('T10 登录后端 HTTP 服务', () => {
   afterEach(async () => {
     await close(server);
     rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('mirror 账本绑定会话：匿名 POST/GET 401；登录后写入并可按来源回填', async () => {
+    const anonPost = await fetch(`${base}/api/mirror/audit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: 'audit', action: 'security_change' }),
+    });
+    expect(anonPost.status).toBe(401);
+    expect((await fetch(`${base}/api/mirror/audit`)).status).toBe(401);
+
+    const sid = ((await (await postLogin(base, ACCOUNT, 'pw')).json()) as { sessionId: string }).sessionId;
+    const okPost = await fetch(`${base}/api/mirror/audit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-session-id': sid },
+      body: JSON.stringify({ source: 'audit', action: 'security_change', request_id: 'req_1' }),
+    });
+    expect(okPost.status).toBe(200);
+
+    const q = await fetch(`${base}/api/mirror/audit?source=audit`, { headers: { 'x-session-id': sid } });
+    expect(q.status).toBe(200);
+    const body = (await q.json()) as { items: Array<{ source: string }>; total: number };
+    expect(body.items.map((i) => i.source)).toEqual(['audit']);
+    expect(body.total).toBe(1);
   });
 
   it('POST /api/login 正确 → 200 + 返回 TenantContext', async () => {
@@ -154,31 +186,33 @@ describe('mirror 审计上抛端点（REQ-006 G6 持久账本）', () => {
   });
 
   it('POST /api/mirror/audit 上抛 → 200 + seq 自增；GET 回填可查', async () => {
+    const sid = await loginAs(base, ACCOUNT, 'pw');
     const r1 = await fetch(`${base}/api/mirror/audit`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-session-id': sid },
       body: JSON.stringify({ source: 'memory', action: 'memory_forget', payload: { mem_id: 'mem_002', op: 'forget' } }),
     });
     expect(r1.status).toBe(200);
     expect(((await r1.json()) as { seq: number }).seq).toBe(1);
 
     const r2 = await fetch(`${base}/api/mirror/audit`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-session-id': sid },
       body: JSON.stringify({ source: 'dispute', action: 'dispute', request_id: 'req_d1', payload: { old_id: 'a', new_id: 'b', verdict: 'auto_override' } }),
     });
     expect(((await r2.json()) as { seq: number }).seq).toBe(2);
 
-    const q = (await (await fetch(`${base}/api/mirror/audit`)).json()) as { items: Array<{ source: string; action: string }>; total: number };
+    const q = (await (await fetch(`${base}/api/mirror/audit`, { headers: { 'x-session-id': sid } })).json()) as { items: Array<{ source: string; action: string }>; total: number };
     expect(q.total).toBe(2);
     expect(q.items.map((i) => i.action)).toEqual(['memory_forget', 'dispute']);
 
     // source 过滤
-    const q2 = (await (await fetch(`${base}/api/mirror/audit?source=memory`)).json()) as { items: unknown[]; total: number };
+    const q2 = (await (await fetch(`${base}/api/mirror/audit?source=memory`, { headers: { 'x-session-id': sid } })).json()) as { items: unknown[]; total: number };
     expect(q2.items.length).toBe(1);
   });
 
   it('持久化：重启后 mirror 账本保留（home-mirror.json）', async () => {
+    const sid = await loginAs(base, ACCOUNT, 'pw');
     await fetch(`${base}/api/mirror/audit`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-session-id': sid },
       body: JSON.stringify({ source: 'feedback', action: 'feedback', request_id: 'req_fb1' }),
     });
     await close(server);
@@ -186,15 +220,172 @@ describe('mirror 审计上抛端点（REQ-006 G6 持久账本）', () => {
     base = await listen(server2);
     server = server2;
 
-    const q = (await (await fetch(`${base}/api/mirror/audit?source=feedback`)).json()) as { items: Array<{ request_id?: string }>; total: number };
+    // 会话随进程重启失效：重新登录后再查询（证明账本持久化，而不是复用旧会话）
+    const sid2 = await loginAs(base, ACCOUNT, 'pw');
+    const q = (await (await fetch(`${base}/api/mirror/audit?source=feedback`, { headers: { 'x-session-id': sid2 } })).json()) as { items: Array<{ request_id?: string }>; total: number };
     expect(q.total).toBe(1);
     expect(q.items[0].request_id).toBe('req_fb1');
   });
 
+  it('A8 签名链：条目带 hash/sig/prev_hash 并落盘，GET integrity.ok=true', async () => {
+    const sid = await loginAs(base, ACCOUNT, 'pw');
+    await fetch(`${base}/api/mirror/audit`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-session-id': sid },
+      body: JSON.stringify({ source: 'memory', action: 'memory_forget', request_id: 'r1', payload: { mem_id: 'm1' } }),
+    });
+    await fetch(`${base}/api/mirror/audit`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-session-id': sid },
+      body: JSON.stringify({ source: 'dispute', action: 'dispute', request_id: 'r2', payload: { old_id: 'a', new_id: 'b' } }),
+    });
+    const q = (await (await fetch(`${base}/api/mirror/audit`, { headers: { 'x-session-id': sid } })).json()) as {
+      items: Array<{ prev_hash?: string; hash?: string; sig?: string }>;
+      integrity: { ok: boolean; sealed: number; legacy_unsealed: number; algorithm: string; note: string };
+    };
+    expect(q.integrity).toMatchObject({ ok: true, sealed: 2, legacy_unsealed: 0, algorithm: 'HMAC-SHA256(chain)' });
+    expect(q.integrity.note).toContain('不抵御本机管理员'); // 不夸大成防篡改
+    expect(q.items[0].prev_hash).toBe(GENESIS_HASH);
+    expect(q.items[1].prev_hash).toBe(q.items[0].hash);
+    expect(q.items[1].hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(q.items[1].sig).toMatch(/^[0-9a-f]{64}$/);
+
+    // 落盘内容同样带签名（重启后仍能校验）
+    const persisted = JSON.parse(readFileSync(join(tmp, 'home-mirror.json'), 'utf8')) as Array<{ hash?: string }>;
+    expect(persisted[1].hash).toBe(q.items[1].hash);
+  });
+
+  it('A8 篡改检出：账本条目被改写 → integrity.ok=false 且点名 seq', async () => {
+    const sid = await loginAs(base, ACCOUNT, 'pw');
+    for (const source of ['memory', 'dispute']) {
+      await fetch(`${base}/api/mirror/audit`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-session-id': sid },
+        body: JSON.stringify({ source, action: 'act', payload: { v: 1 } }),
+      });
+    }
+    await close(server);
+    const file = join(tmp, 'home-mirror.json');
+    const entries = JSON.parse(readFileSync(file, 'utf8')) as Array<{ payload?: unknown }>;
+    entries[0].payload = { v: 999 }; // 保留原 hash/sig，只改内容
+    writeFileSync(file, JSON.stringify(entries));
+    server = createServer({ port: 0, dataFile });
+    base = await listen(server);
+
+    const sid2 = await loginAs(base, ACCOUNT, 'pw');
+    const q = (await (await fetch(`${base}/api/mirror/audit`, { headers: { 'x-session-id': sid2 } })).json()) as {
+      integrity: { ok: boolean; broken_at_seq?: number; reason?: string };
+    };
+    expect(q.integrity).toMatchObject({ ok: false, broken_at_seq: 1, reason: '条目内容与 hash 不符（被改写）' });
+  });
+
+  it('A8 账本不可读：POST 503 拒收（fail-closed），GET 如实报告 ledger_unreadable', async () => {
+    await loginAs(base, ACCOUNT, 'pw');
+    await close(server);
+    writeFileSync(join(tmp, 'home-mirror.json'), '{"broken":');
+    server = createServer({ port: 0, dataFile });
+    base = await listen(server);
+
+    const sid = await loginAs(base, ACCOUNT, 'pw');
+    const post = await fetch(`${base}/api/mirror/audit`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-session-id': sid },
+      body: JSON.stringify({ source: 'audit', action: 'audit_query' }),
+    });
+    expect(post.status).toBe(503);
+    expect((await post.json()) as { reason: string }).toMatchObject({ reason: 'mirror_ledger_unreadable' });
+
+    const q = (await (await fetch(`${base}/api/mirror/audit`, { headers: { 'x-session-id': sid } })).json()) as {
+      integrity: { ok: boolean; reason?: string; load_error?: string };
+    };
+    expect(q.integrity.ok).toBe(false);
+    expect(q.integrity.reason).toBe('ledger_unreadable');
+  });
+
+  it('A8 旧无签名条目：链首如实计数，新条目从链首锚点续链', async () => {
+    await close(server);
+    const legacy = [
+      { seq: 1, source: 'audit', action: 'audit_query', ts: 1 },
+      { seq: 2, source: 'audit', action: 'audit_query', ts: 2 },
+    ];
+    writeFileSync(join(tmp, 'home-mirror.json'), JSON.stringify(legacy));
+    server = createServer({ port: 0, dataFile });
+    base = await listen(server);
+
+    const sid = await loginAs(base, ACCOUNT, 'pw');
+    await fetch(`${base}/api/mirror/audit`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-session-id': sid },
+      body: JSON.stringify({ source: 'memory', action: 'memory_forget' }),
+    });
+    const q = (await (await fetch(`${base}/api/mirror/audit`, { headers: { 'x-session-id': sid } })).json()) as {
+      items: Array<{ prev_hash?: string }>;
+      integrity: { ok: boolean; sealed: number; legacy_unsealed: number };
+    };
+    expect(q.integrity).toMatchObject({ ok: true, sealed: 1, legacy_unsealed: 2 });
+    expect(q.items[2].prev_hash).toBe(GENESIS_HASH);
+  });
+
+  it('A9 账号文件损坏：不播种默认管理员，登录/注册 503，原件保留并留 .corrupt 备份', async () => {
+    await close(server);
+    resetAuthStore(); // 清掉本文件 beforeEach 里已播种的 admin，模拟「损坏文件 + 冷启动」
+    const raw = '{"accounts": ['; // 截断的非法 JSON（真实故障形态）
+    writeFileSync(join(tmp, 'home-accounts.json'), raw);
+    const logs: Array<{ action: string; detail?: Record<string, unknown> }> = [];
+    server = createServer({ port: 0, dataFile, onLog: (_s, action, detail) => logs.push({ action, detail }) });
+    base = await listen(server);
+
+    // 健康探测明示账号域损坏（而不是只报「在线」）
+    const health = (await (await fetch(`${base}/api/health`)).json()) as { accounts?: string };
+    expect(health.accounts).toBe('unreadable');
+
+    // 默认口令管理员绝不能被播种顶替：账号表里必须仍然没有 admin
+    expect(listAccounts().some((a) => a.account === ADMIN_ACCOUNT)).toBe(false);
+    // 登录被明示拒绝，而不是 401/成功
+    const login = await postLogin(base, ADMIN_ACCOUNT, DEFAULT_ADMIN_PASSWORD);
+    expect(login.status).toBe(503);
+    expect((await login.json()) as { reason: string }).toMatchObject({ reason: 'accounts_unreadable' });
+
+    // 注册同样拒绝（不能把损坏当空白环境覆盖写）
+    const reg = await fetch(`${base}/api/register`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account: 'new_user', password: 'pw', confirmPassword: 'pw' }),
+    });
+    expect(reg.status).toBe(503);
+
+    // 原件原样保留（本进程不覆盖写）；损坏副本已备份
+    expect(readFileSync(join(tmp, 'home-accounts.json'), 'utf8')).toBe(raw);
+    const backups = readdirSync(tmp).filter((f) => f.includes('.corrupt-'));
+    expect(backups.length).toBe(1);
+    expect(readFileSync(join(tmp, backups[0]), 'utf8')).toBe(raw);
+    expect(logs.some((l) => l.action === 'accounts_unreadable')).toBe(true);
+  });
+
+  it('A9 账号文件结构非法（能解析但记录缺字段）：同样 fail-closed，不播种默认管理员', async () => {
+    await close(server);
+    resetAuthStore();
+    const raw = JSON.stringify([{ account: 'user_001' }]); // 缺 passwordHash/租户字段
+    writeFileSync(join(tmp, 'home-accounts.json'), raw);
+    server = createServer({ port: 0, dataFile });
+    base = await listen(server);
+
+    expect(listAccounts()).toEqual([]); // 损坏时不播种任何账号
+    const login = await postLogin(base, ADMIN_ACCOUNT, DEFAULT_ADMIN_PASSWORD);
+    expect(login.status).toBe(503);
+    expect(readFileSync(join(tmp, 'home-accounts.json'), 'utf8')).toBe(raw);
+  });
+
+  it('A9 空账号文件 [] 仍按正常首次启动播种管理员（不误伤合法空态）', async () => {
+    await close(server);
+    resetAuthStore();
+    writeFileSync(join(tmp, 'home-accounts.json'), '[]');
+    server = createServer({ port: 0, dataFile });
+    base = await listen(server);
+
+    const login = await postLogin(base, ADMIN_ACCOUNT, DEFAULT_ADMIN_PASSWORD);
+    expect(login.status).toBe(200);
+  });
+
   it('缺字段容错：空 body → source/action 落 unknown，不 500', async () => {
-    const r = await fetch(`${base}/api/mirror/audit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const sid = await loginAs(base, ACCOUNT, 'pw');
+    const r = await fetch(`${base}/api/mirror/audit`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-session-id': sid }, body: '{}' });
     expect(r.status).toBe(200);
-    const q = (await (await fetch(`${base}/api/mirror/audit`)).json()) as { items: Array<{ source: string; action: string }> };
+    const q = (await (await fetch(`${base}/api/mirror/audit`, { headers: { 'x-session-id': sid } })).json()) as { items: Array<{ source: string; action: string }> };
     expect(q.items[0].source).toBe('unknown');
     expect(q.items[0].action).toBe('unknown');
   });
@@ -270,13 +461,13 @@ describe('A1 注册接口：不接管、不锁死、不污染登录审计', () =
   });
 
   it('新账号注册 → 200 + personal team_id；随后可用新密码登录；审计记 team_assign 而非 login', async () => {
-    const r = await postRegister(base, 'newbie@example.com', 'secret123');
+    const r = await postRegister(base, 'newbie@example.com', 'Secret#123');
     expect(r.status).toBe(200);
     const body = (await r.json()) as { ok: boolean; team_id: string };
     expect(body.ok).toBe(true);
     expect(body.team_id).toBe('personal-newbie@example.com');
 
-    expect((await postLogin(base, 'newbie@example.com', 'secret123')).status).toBe(200);
+    expect((await postLogin(base, 'newbie@example.com', 'Secret#123')).status).toBe(200);
 
     const audit = JSON.parse(readFileSync(dataFile, 'utf8')) as Array<{ action: string; account: string }>;
     expect(audit.some((a) => a.action === 'team_assign' && a.account === 'newbie@example.com')).toBe(true);
@@ -285,34 +476,99 @@ describe('A1 注册接口：不接管、不锁死、不污染登录审计', () =
   });
 
   it('已存在账号重复注册 → 409，passwordHash 不被覆盖，新密码不能登录', async () => {
-    expect((await postRegister(base, 'dup@example.com', 'oldpass1')).status).toBe(200);
+    expect((await postRegister(base, 'dup@example.com', 'OldPass#1')).status).toBe(200);
     const hashBefore = readAccounts(tmp).find((a) => a.account === 'dup@example.com')!.passwordHash;
 
-    const again = await postRegister(base, 'dup@example.com', 'newpass2');
+    const again = await postRegister(base, 'dup@example.com', 'NewPass#2');
     expect(again.status).toBe(409);
     expect(((await again.json()) as { reason: string }).reason).toBe('exists');
 
     expect(readAccounts(tmp).find((a) => a.account === 'dup@example.com')!.passwordHash).toBe(hashBefore);
-    expect((await postLogin(base, 'dup@example.com', 'newpass2')).status).toBe(401);
-    expect((await postLogin(base, 'dup@example.com', 'oldpass1')).status).toBe(200);
+    expect((await postLogin(base, 'dup@example.com', 'NewPass#2')).status).toBe(401);
+    expect((await postLogin(base, 'dup@example.com', 'OldPass#1')).status).toBe(200);
   });
 
   it('注册探测不计失败：连续 5 次重复注册后仍可正常登录（不被锁）', async () => {
-    expect((await postRegister(base, 'probe@example.com', 'rightpass')).status).toBe(200);
+    expect((await postRegister(base, 'probe@example.com', 'RightPass#1')).status).toBe(200);
     for (let i = 0; i < 5; i++) {
       expect((await postRegister(base, 'probe@example.com', `wrongpass${i}`)).status).toBe(409);
     }
-    expect((await postLogin(base, 'probe@example.com', 'rightpass')).status).toBe(200);
+    expect((await postLogin(base, 'probe@example.com', 'RightPass#1')).status).toBe(200);
   });
 
   it('锁定账号注册试探 → 409，且不重置锁定（正确密码仍 423）', async () => {
-    expect((await postRegister(base, 'locked@example.com', 'goodpass')).status).toBe(200);
+    expect((await postRegister(base, 'locked@example.com', 'GoodPass#1')).status).toBe(200);
     for (let i = 0; i < 5; i++) {
       expect((await postLogin(base, 'locked@example.com', 'bad')).status).toBe(401);
     }
     expect((await postRegister(base, 'locked@example.com', 'hijack1')).status).toBe(409);
     // 注册没走 login()，锁定态与密码均未被改动
-    expect((await postLogin(base, 'locked@example.com', 'goodpass')).status).toBe(423);
+    expect((await postLogin(base, 'locked@example.com', 'GoodPass#1')).status).toBe(423);
+  });
+
+  it('A10 策略持久化：admin 保存落盘，重启后仍生效；member 保存 403；无会话 401', async () => {
+    const admin = await adminLoginSid(base);
+    const g0 = (await (await fetch(`${base}/api/policy`, { headers: { 'x-session-id': admin } })).json()) as {
+      policy: { min_len: number };
+    };
+    expect(g0.policy.min_len).toBe(8); // 内置默认
+
+    const saved = await fetch(`${base}/api/policy`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-session-id': admin },
+      body: JSON.stringify({ min_len: 12, max_len: 64, upper: true, lower: true, digit: true, special: false, history_count: 5 }),
+    });
+    expect(saved.status).toBe(200);
+    expect(((await saved.json()) as { policy: { min_len: number; special: boolean } }).policy).toMatchObject({ min_len: 12, special: false });
+
+    // 真实落盘
+    const persisted = JSON.parse(readFileSync(join(tmp, 'home-policy.json'), 'utf8')) as { min_len: number };
+    expect(persisted.min_len).toBe(12);
+
+    // 权限：member 403；无会话 401（本 describe 无预置账号，先注册一个真实成员）
+    expect((await postRegister(base, 'member@example.com', 'LongMember#2026')).status).toBe(200);
+    const member = await loginAs(base, 'member@example.com', 'LongMember#2026');
+    const denied = await fetch(`${base}/api/policy`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-session-id': member },
+      body: JSON.stringify({ min_len: 6 }),
+    });
+    expect(denied.status).toBe(403);
+    expect((await fetch(`${base}/api/policy`)).status).toBe(401);
+
+    // 重启后仍是保存值（会话失效需重新登录）
+    await close(server);
+    server = createServer({ port: 0, dataFile });
+    base = await listen(server);
+    const admin2 = await adminLoginSid(base);
+    const g2 = (await (await fetch(`${base}/api/policy`, { headers: { 'x-session-id': admin2 } })).json()) as {
+      policy: { min_len: number; special: boolean };
+    };
+    expect(g2.policy).toMatchObject({ min_len: 12, special: false });
+  });
+
+  it('A10 策略真实生效：注册与修改密码都按后端策略校验（不是只展示）', async () => {
+    // 默认策略：≥8 位 + 大小写/数字/特殊
+    const weakReg = await postRegister(base, 'weak@example.com', 'weakpass1');
+    expect(weakReg.status).toBe(400);
+    expect((await weakReg.json()) as { reason: string; message: string }).toMatchObject({ reason: 'weak_password' });
+    expect((await postRegister(base, 'strong@example.com', 'Strong#123')).status).toBe(200);
+
+    expect((await postRegister(base, 'member@example.com', 'OldPass#1')).status).toBe(200);
+    const sid = await loginAs(base, 'member@example.com', 'OldPass#1');
+    const weakChg = await fetch(`${base}/api/password`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-session-id': sid },
+      body: JSON.stringify({ oldPassword: 'OldPass#1', newPassword: 'abcdefgh' }),
+    });
+    expect(weakChg.status).toBe(400);
+    const body = (await weakChg.json()) as { reason: string; error: string };
+    expect(body.reason).toBe('weak');
+    expect(body.error).toContain('大写字母');
+
+    const okChg = await fetch(`${base}/api/password`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-session-id': sid },
+      body: JSON.stringify({ oldPassword: 'OldPass#1', newPassword: 'NewStr0ng#1' }),
+    });
+    expect(okChg.status).toBe(200);
+    expect((await postLogin(base, 'member@example.com', 'NewStr0ng#1')).status).toBe(200);
   });
 });
 
@@ -343,12 +599,14 @@ describe('A5 跨源闸门（home server）', () => {
     expect(((await r.json()) as { error: string }).error).toBe('origin_not_allowed');
     expect(r.headers.get('access-control-allow-origin')).toBeNull();
 
-    const q = (await (await fetch(`${base}/api/mirror/audit`)).json()) as { total: number };
+    const sid = await loginAs(base, ADMIN_ACCOUNT, DEFAULT_ADMIN_PASSWORD);
+    const q = (await (await fetch(`${base}/api/mirror/audit`, { headers: { 'x-session-id': sid } })).json()) as { total: number };
     expect(q.total).toBe(0);
   });
 
   it('白名单 Origin：回显 ACAO + Vary，且请求正常放行', async () => {
-    const r = await fetch(`${base}/api/mirror/audit`, { headers: { Origin: ALLOWED } });
+    const sid = await loginAs(base, ADMIN_ACCOUNT, DEFAULT_ADMIN_PASSWORD);
+    const r = await fetch(`${base}/api/mirror/audit`, { headers: { Origin: ALLOWED, 'x-session-id': sid } });
     expect(r.status).toBe(200);
     expect(r.headers.get('access-control-allow-origin')).toBe(ALLOWED);
     expect(r.headers.get('vary')).toContain('Origin');
@@ -456,7 +714,7 @@ describe('批次26-B P2-14/16/17（Host 绑定 / 限速 / 防枚举 / 默认口�
   it('P2-17 注册限速：11 次注册 → 第 11 次 429', async () => {
     const statuses: number[] = [];
     for (let i = 0; i < 11; i++) {
-      statuses.push((await postRegister(base, `bulk${i}@example.com`, 'secret123')).status);
+      statuses.push((await postRegister(base, `bulk${i}@example.com`, 'Secret#123')).status);
     }
     expect(statuses.slice(0, 10)).toEqual(Array(10).fill(200));
     expect(statuses[10]).toBe(429);
@@ -488,6 +746,13 @@ async function loginSid(url: string): Promise<string> {
   return ((await r.json()) as { sessionId: string }).sessionId;
 }
 
+/** 内置管理员会话（admin 才能调破坏性/账本方法） */
+async function adminLoginSid(url: string): Promise<string> {
+  const r = await postLogin(url, ADMIN_ACCOUNT, DEFAULT_ADMIN_PASSWORD);
+  expect(r.status).toBe(200);
+  return ((await r.json()) as { sessionId: string }).sessionId;
+}
+
 function invoke(url: string, sid: string, body: unknown) {
   return fetch(`${url}/api/kernel/invoke`, {
     method: 'POST',
@@ -510,8 +775,9 @@ describe('批次28-A 内核数据面端点', () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
+  // 归属字段与会话真源对齐（ACCOUNT/ent_001/TEAM）：批次48 A7 起 putMemory 校验归属
   const MEM = {
-    mem_id: 'mem_k1', project_id: 'P1', enterprise_id: 'e1', team_id: 't1',
+    mem_id: 'mem_k1', project_id: 'P1', enterprise_id: 'ent_001', team_id: TEAM, user_id: ACCOUNT,
     category: 'fact', layer: 'L1', content: '内核数据面直连测试记忆内容',
     decay_class: 'hot', pinned: false, locked: false, version: 1,
     created_at: 1_800_000_000_000,
@@ -549,12 +815,95 @@ describe('批次28-A 内核数据面端点', () => {
     expect(body.result.map((m) => m.mem_id)).toEqual(['mem_k1']);
   });
 
+  it('角色闸门：member 可读写但不可删记忆/写账本；admin 可删可写（拒绝留痕）', async () => {
+    const { InMemoryStorage } = await import('../../core/memagent/storage.ts');
+    const logs: Array<{ action: string }> = [];
+    await close(server);
+    server = createServer({
+      port: 0, dataFile,
+      kernelStorage: new InMemoryStorage(),
+      onLog: (_scope, action) => logs.push({ action }),
+    });
+    base = await listen(server);
+
+    const member = await loginSid(base);
+    const admin = await adminLoginSid(base);
+
+    // member 常规读写放行
+    expect((await invoke(base, member, { method: 'putMemory', args: [MEM] })).status).toBe(200);
+    expect((await invoke(base, member, { method: 'listMemories', args: [{}] })).status).toBe(200);
+
+    // member 破坏性/账本方法 → 403 forbidden
+    const del = await invoke(base, member, { method: 'deleteMemory', args: ['mem_k1'] });
+    expect(del.status).toBe(403);
+    expect(((await del.json()) as { reason: string }).reason).toBe('forbidden');
+
+    const aud = await invoke(base, member, { method: 'appendAudit', args: [{ request_id: 'req_m_1', action: 'memory_op', ts: Date.now() }] });
+    expect(aud.status).toBe(403);
+
+    // admin 放行
+    const audOk = await invoke(base, admin, { method: 'appendAudit', args: [{ request_id: 'req_a_1', action: 'memory_op', ts: Date.now() }] });
+    expect(audOk.status).toBe(200);
+    expect((await invoke(base, admin, { method: 'deleteMemory', args: ['mem_k1'] })).status).toBe(200);
+
+    expect(logs.some((l) => l.action === 'kernel_invoke_forbidden')).toBe(true);
+  });
+
+  it('归属校验（A7）：member 不能跨租户新建/覆盖他人记忆；admin 不受限', async () => {
+    const { InMemoryStorage } = await import('../../core/memagent/storage.ts');
+    const storage = new InMemoryStorage();
+    const logs: Array<{ action: string }> = [];
+    await close(server);
+    server = createServer({
+      port: 0, dataFile, kernelStorage: storage,
+      onLog: (_scope, action) => logs.push({ action }),
+    });
+    base = await listen(server);
+
+    const member = await loginSid(base);
+
+    // 1) 新建到别的租户 → 403，且不落盘
+    const foreign = { ...MEM, mem_id: 'mem_foreign', enterprise_id: 'ent_other', team_id: 'team_other' };
+    const r1 = await invoke(base, member, { method: 'putMemory', args: [foreign] });
+    expect(r1.status).toBe(403);
+    expect((await r1.json()) as { reason: string }).toMatchObject({ reason: 'forbidden' });
+    expect(await storage.getMemory('mem_foreign')).toBeNull();
+
+    // 2) 同租户内覆盖他人记忆 → 403，原文不变
+    await storage.putMemory({ ...MEM, mem_id: 'mem_other', user_id: 'other_user' });
+    const r2 = await invoke(base, member, { method: 'putMemory', args: [{ ...MEM, mem_id: 'mem_other', content: '被篡改' }] });
+    expect(r2.status).toBe(403);
+    expect((await storage.getMemory('mem_other'))?.content).toBe('内核数据面直连测试记忆内容');
+
+    // 3) 覆盖他租户已有行（即使写入行伪装成本会话租户）→ 403
+    await storage.putMemory({ ...MEM, mem_id: 'mem_x', enterprise_id: 'ent_x', team_id: 'team_x', user_id: 'other_user' });
+    const r3 = await invoke(base, member, { method: 'putMemory', args: [{ ...MEM, mem_id: 'mem_x', content: '被篡改' }] });
+    expect(r3.status).toBe(403);
+
+    // 4) 覆盖他租户的删除墓碑（防借覆盖复活别人的记忆）→ 403
+    await storage.putMemory({ ...MEM, mem_id: 'mem_tomb', deleted: true, enterprise_id: 'ent_x', team_id: 'team_x', user_id: 'other_user' });
+    const r4 = await invoke(base, member, { method: 'putMemory', args: [{ ...MEM, mem_id: 'mem_tomb' }] });
+    expect(r4.status).toBe(403);
+
+    // 5) 自己的记忆仍可正常写入
+    const ok = await invoke(base, member, { method: 'putMemory', args: [MEM] });
+    expect(ok.status).toBe(200);
+    expect((await ok.json()) as { ok: boolean }).toMatchObject({ ok: true });
+
+    // 6) admin 不受归属限制（跨租户维护能力保留）
+    const admin = await adminLoginSid(base);
+    const adminPut = await invoke(base, admin, { method: 'putMemory', args: [foreign] });
+    expect(adminPut.status).toBe(200);
+
+    expect(logs.filter((l) => l.action === 'kernel_put_ownership_denied').length).toBe(4);
+  });
+
   it('appendAudit 形状校验：非法审计行 400（伪造/畸形在服务端就拒收）', async () => {
     const { InMemoryStorage } = await import('../../core/memagent/storage.ts');
     await close(server);
     server = createServer({ port: 0, dataFile, kernelStorage: new InMemoryStorage() });
     base = await listen(server);
-    const sid = await loginSid(base);
+    const sid = await adminLoginSid(base);
 
     const bad = await invoke(base, sid, { method: 'appendAudit', args: [{ request_id: 'req_x;DROP', action: 'memory_op', ts: 'not-a-number' }] });
     expect(bad.status).toBe(400);

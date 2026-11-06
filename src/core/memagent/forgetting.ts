@@ -37,11 +37,12 @@ export function policyFor(category: Category): ForgettingPolicy {
   return { ...POLICIES[category] };
 }
 
-/** 17.5 新鲜度：0.5^(age_days / half_life_days)，钳制 ≥0.05 */
-export function freshnessOf(m: Memory, now: number): number {
+/** 17.5 新鲜度：0.5^(age_days / half_life_days)，钳制 ≥0.05。
+ *  halfLifeOverride：批次48 A17 参数页「遗忘速度」全局折算值（天）；行上 half_life_days 仍优先。 */
+export function freshnessOf(m: Memory, now: number, halfLifeOverride?: number): number {
   const last = m.last_access_time ?? m.created_at;
   const ageDays = Math.max(0, (now - last) / DAY);
-  const hl = m.half_life_days ?? policyFor(m.category).half_life_days;
+  const hl = m.half_life_days ?? halfLifeOverride ?? policyFor(m.category).half_life_days;
   return Math.max(CLAMP.freshness, Math.pow(0.5, ageDays / hl));
 }
 
@@ -73,11 +74,11 @@ export function hardFilter(m: Memory): boolean {
  * 17.7 层迁移单条判定（返回新 decay_class 或 null = 不变）。
  * locked/pinned 只豁免降级方向；升级（命中/恢复/强化）不受 locked 影响（17.4：在线召回正常参与）。
  */
-export function classifyLayer(m: Memory, now: number): DecayClass | null {
+export function classifyLayer(m: Memory, now: number, halfLifeOverride?: number): DecayClass | null {
   if (m.locked || m.pinned) return null; // AC-04：锁定/置顶不参与自动迁移
   const last = m.last_access_time ?? m.created_at;
   const ageDays = (now - last) / DAY;
-  const f = freshnessOf(m, now);
+  const f = freshnessOf(m, now, halfLifeOverride);
   const conf = m.confidence ?? 0.5;
 
   switch (m.decay_class) {
@@ -215,6 +216,8 @@ export interface ForgettingCycleReport {
   merged_originals: number;
   /** 本轮真实清掉向量索引副本并写回的冷层行数（无 vector 后端时为 0；7 天内对同一行幂等） */
   compressed: number;
+  /** 批次48 A17：参数页「保留时长」全局阈值触发、真实归档的行数（无该配置时为 0） */
+  archived: number;
   request_id: string;
 }
 
@@ -234,6 +237,12 @@ export interface ForgettingOptions {
    * **缺省 = 全库**，main.ts 每 6h 的生产调度行为一字不变。
    */
   projectId?: string;
+  /** 批次48 A17：参数页「遗忘速度」全局半衰期（天）；行上 half_life_days 优先 */
+  halfLifeDays?: number;
+  /** 批次48 A17：参数页「保留时长」全局归档阈值（天）；到龄且未锁定/置顶的行转 archived */
+  autoArchiveDays?: number;
+  /** 批次48 A17：参数页「重要程度=locked」→ 全局豁免后台遗忘任务（只写 skipped 审计） */
+  exemptAll?: boolean;
   /**
    * 批次46-2：true = 只演算，不 putMemory / appendAudit / vector.upsert|remove。
    * 计数照常演算（诚实反映「若真实执行会发生什么」），缺省 = 原有真实落库行为。
@@ -299,11 +308,16 @@ export async function runForgettingCycle(
   const listFilter: Filter = opts.projectId ? { project_id: opts.projectId } : {};
   const report: ForgettingCycleReport = {
     freshness_updated: 0, migrated: 0, summaries_created: 0, summaries_filtered: 0,
-    merged_originals: 0, compressed: 0, request_id,
+    merged_originals: 0, compressed: 0, archived: 0, request_id,
   };
   if (opts.enabled === false) {
     if (!dryRun) await auditWrite(storage, request_id, 'gc', { skipped: true, reason: 'auto_policy_disabled' }, now);
     return report; // AC-14：可关闭
+  }
+  // 批次48 A17：参数页「重要程度 = 锁定」→ 全局豁免后台任务（17.6 承诺；只写 skipped 审计）
+  if (opts.exemptAll) {
+    if (!dryRun) await auditWrite(storage, request_id, 'gc', { skipped: true, reason: 'global_importance_locked' }, now);
+    return report;
   }
 
   const mems = await storage.listMemories(listFilter);
@@ -311,11 +325,24 @@ export async function runForgettingCycle(
 
   // 1) 层迁移（locked/pinned 豁免在 classifyLayer 内）
   for (const m of mems) {
-    const next = classifyLayer(m, now);
+    const next = classifyLayer(m, now, opts.halfLifeDays);
     if (next && next !== m.decay_class) {
       // 批次46-2：dryRun 只演算计数，不落库（计数仍诚实反映「会迁移几条」）
       if (!dryRun) await storage.putMemory({ ...m, decay_class: next, version: m.version + 1 });
       report.migrated++;
+    }
+  }
+
+  // 1.5) 批次48 A17：参数页「保留时长」→ 全局归档阈值。到龄且未锁定/置顶/未合并的行转 archived。
+  // 未配置（undefined）时整段不执行 —— 与旧行为一字不差，只有用户显式保存保留时长才改变调度结果。
+  if (typeof opts.autoArchiveDays === 'number' && opts.autoArchiveDays > 0) {
+    const current = await storage.listMemories(listFilter);
+    for (const m of current) {
+      if (m.locked || m.pinned || m.merged_into) continue;
+      if (m.decay_class === 'archived' || m.decay_class === 'dormant') continue;
+      if ((now - m.created_at) / DAY <= opts.autoArchiveDays) continue;
+      if (!dryRun) await storage.putMemory({ ...m, decay_class: 'archived', version: m.version + 1 });
+      report.archived++;
     }
   }
 

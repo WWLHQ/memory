@@ -50,4 +50,15 @@ describe('statShare（7.1/7.2）', () => {
     expect(s.topLiked[0].rating).toBe(5);
     expect(s.topDisliked[0].rating).toBe(2);
   });
+  it('未评分记录（rating=0）不进均值/分布/TopN，也不冒充 3 星（批次48 A13）', () => {
+    const mixed = statShare([
+      { id: 'a', memory_id: 'm1', action: 'confirm', rating: 0, comment: '', trust_delta: 0.1, created_at: '' },
+      { id: 'b', memory_id: 'm2', action: 'reject', rating: 5, comment: '过时', trust_delta: -0.05, created_at: '' },
+    ]);
+    expect(mixed.ratingDist).toEqual([0, 0, 0, 0, 1]);
+    expect(mixed.avgRating).toBe(5);
+    expect(mixed.topLiked.map((r) => r.id)).toEqual(['b']);
+    expect(mixed.topDisliked.map((r) => r.id)).toEqual(['b']);
+    expect(mixed.total).toBe(2);      // 动作占比仍按全部记录
+  });
 });

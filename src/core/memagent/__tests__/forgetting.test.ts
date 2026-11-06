@@ -7,6 +7,7 @@ import {
 import { InMemoryStorage } from '../storage.ts';
 import { DEFAULT_VECTOR_DIM, JsVectorBackend, cosine, embedSync } from '../vector.ts';
 import { sha256hex } from '../sync.ts';
+import { forgettingPrefsFromSnapshot } from '../paramsSnapshot.ts';
 import type { Memory } from '../types.ts';
 
 const DAY = 24 * 3600 * 1000;
@@ -408,5 +409,73 @@ describe('批次42 阶段4：17.10 冷压缩接真（清索引副本，非仅计
     expect((await storage.getMemory('x4'))?.compressed_at).toBeUndefined();
     const probe = embedSync('row 0', vector.dim);
     expect((await vector.search(probe, 10, {})).map((h) => h.mem_id).sort()).toEqual(['x3', 'x4']);
+  });
+});
+
+describe('批次48 A17 参数页普通配置真实生效', () => {
+  it('遗忘速度 → 全局半衰期覆盖；行上 half_life_days 仍优先', () => {
+    const plain = mem({ created_at: NOW - 30 * DAY });
+    // fact 默认 365 天 → 30 天时 freshness≈0.945；覆盖 30 天后 = 0.5（真实改变判定）
+    expect(freshnessOf(plain, NOW)).toBeGreaterThan(0.9);
+    expect(freshnessOf(plain, NOW, 30)).toBeCloseTo(0.5, 5);
+    const own = mem({ created_at: NOW - 30 * DAY, half_life_days: 60 });
+    expect(freshnessOf(own, NOW, 30)).toBeCloseTo(Math.pow(0.5, 0.5), 5); // 行上 60 天优先
+    // warm 25 天：内核默认（fact 365）新鲜度≈0.954 → 不降档；覆盖 7 天后 f=0.5^(25/7)≈0.084<0.1 → 降 cold
+    expect(classifyLayer(mem({ created_at: NOW - 25 * DAY, decay_class: 'warm' }), NOW)).toBeNull();
+    expect(classifyLayer(mem({ created_at: NOW - 25 * DAY, decay_class: 'warm' }), NOW, 7)).toBe('cold');
+  });
+
+  it('保留时长 → 到龄自动归档；locked/pinned 豁免；dryRun 只演算不落库', async () => {
+    const storage = new InMemoryStorage();
+    const old = mem({ mem_id: 'old', category: 'fact', decay_class: 'cold', created_at: NOW - 400 * DAY });
+    const pinned = mem({ mem_id: 'pin', category: 'fact', decay_class: 'cold', created_at: NOW - 400 * DAY, pinned: true });
+    const locked = mem({ mem_id: 'lock', category: 'fact', decay_class: 'cold', created_at: NOW - 400 * DAY, locked: true });
+    await storage.putMemory(old); await storage.putMemory(pinned); await storage.putMemory(locked);
+
+    const dry = await runForgettingCycle(storage, NOW, { autoArchiveDays: 365, dryRun: true });
+    expect(dry.archived).toBe(1);                       // 演算计数照实
+    expect((await storage.getMemory('old'))?.decay_class).toBe('cold'); // 未落库
+
+    const real = await runForgettingCycle(storage, NOW, { autoArchiveDays: 365 });
+    expect(real.archived).toBe(1);
+    expect((await storage.getMemory('old'))?.decay_class).toBe('archived');
+    expect((await storage.getMemory('pin'))?.decay_class).toBe('cold');
+    expect((await storage.getMemory('lock'))?.decay_class).toBe('cold');
+    const gcAudits = await storage.queryAudit({ action: 'gc' });
+    expect((gcAudits[gcAudits.length - 1].detail as { archived?: number }).archived).toBe(1);
+
+    // 未配置（undefined）→ 完全不归档：与旧行为一致
+    const s2 = new InMemoryStorage();
+    await s2.putMemory(old);
+    expect((await runForgettingCycle(s2, NOW, {})).archived).toBe(0);
+    expect((await s2.getMemory('old'))?.decay_class).toBe('cold');
+  });
+
+  it('重要程度=锁定 → 全局豁免后台任务：只写 skipped 审计，零迁移零归档', async () => {
+    const storage = new InMemoryStorage();
+    await storage.putMemory(mem({ mem_id: 'x', decay_class: 'hot', created_at: NOW - 400 * DAY }));
+    const r = await runForgettingCycle(storage, NOW, { exemptAll: true, autoArchiveDays: 30, halfLifeDays: 7 });
+    expect(r.migrated).toBe(0);
+    expect(r.archived).toBe(0);
+    expect((await storage.getMemory('x'))?.decay_class).toBe('hot');
+    const gcAudits = await storage.queryAudit({ action: 'gc' });
+    expect(gcAudits[gcAudits.length - 1].detail).toMatchObject({ skipped: true, reason: 'global_importance_locked' });
+  });
+
+  it('参数快照折算：三项一起进入调度 prefs；旧快照缺字段不覆盖内核默认', () => {
+    const snap = mem({
+      mem_id: 'p_snap', category: 'preference', layer: 'L1', user_id: 'system',
+      content: `params:v1:${JSON.stringify({ cfg: { forget_speed: 'fast', retention: 'short', importance: 'locked' }, kbs: [], dev: {} })}`,
+    });
+    expect(forgettingPrefsFromSnapshot([snap])).toEqual({
+      enabled: true, halfLifeDays: 7, autoArchiveDays: 30, exemptAll: true,
+    });
+    // 无快照 / 旧快照（只有 auto_organize）→ 不覆盖
+    expect(forgettingPrefsFromSnapshot([])).toEqual({ enabled: true, exemptAll: false });
+    const legacy = mem({
+      mem_id: 'p_legacy', category: 'preference', layer: 'L1', user_id: 'system',
+      content: `params:v1:${JSON.stringify({ cfg: { auto_organize: false }, kbs: [], dev: {} })}`,
+    });
+    expect(forgettingPrefsFromSnapshot([legacy])).toEqual({ enabled: false, exemptAll: false });
   });
 });

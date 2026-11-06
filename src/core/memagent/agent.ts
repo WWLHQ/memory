@@ -47,8 +47,15 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
   }
 
   /** 用户反馈（17.4）：trust_delta 内核计算（confirm +0.1 / reject −0.05 / disputed 挂裁决） */
-  async function feedback(mem_id: string, kind: FeedbackKind): Promise<FeedbackResult> {
-    return coreFeedback(mem_id, kind, { storage, request_id: newRequestId(), now: Date.now() });
+  async function feedback(
+    mem_id: string,
+    kind: FeedbackKind,
+    meta?: { rating?: number; comment?: string },
+  ): Promise<FeedbackResult> {
+    return coreFeedback(mem_id, kind, {
+      storage, request_id: newRequestId(), now: Date.now(),
+      rating: meta?.rating, comment: meta?.comment,
+    });
   }
 
   async function audit(

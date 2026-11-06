@@ -192,6 +192,8 @@ export async function coreWrite(input: WriteInput, ctx: WriteCtx): Promise<Write
     throw new Error(`非法 category：${String(input.category)}（允许：fact/decision/pitfall/insight/preference/context）`);
   }
   const { storage, vector, account, request_id, now } = ctx;
+  // 批次48 A12：真实耗时采样（不含渲染/网络，只覆盖本条写入的内核路径：质量门→加密→查重→分层）
+  const costStart = Date.now();
   const dim = dimOf(vector);
   const auditRef: AuditRef = { request_id, action: 'write' };
 
@@ -389,6 +391,7 @@ export async function coreWrite(input: WriteInput, ctx: WriteCtx): Promise<Write
       score: graft ? round3(graft.score) : 0,
       threshold: graft?.threshold,
       mem_id: mem.mem_id,
+      cost_ms: Math.max(0, Date.now() - costStart),
     },
   });
   if (graft) {
@@ -796,9 +799,13 @@ export async function coreMemoryOp(
 export async function coreFeedback(
   mem_id: string,
   kind: FeedbackKind,
-  ctx: { storage: StorageBackend; request_id: string; now: number },
+  ctx: {
+    storage: StorageBackend; request_id: string; now: number;
+    /** 批次48 A13：用户在反馈页打的真实评分（1–5）与原因，随 memory_op 审计落账本，供 P9 统计真实分布 */
+    rating?: number; comment?: string;
+  },
 ): Promise<FeedbackResult> {
-  const { storage, request_id, now } = ctx;
+  const { storage, request_id, now, rating, comment } = ctx;
   const m = await storage.getMemory(mem_id);
   if (!m) return { ok: false, mem: null, trust_delta: 0, request_id };
 
@@ -820,9 +827,16 @@ export async function coreFeedback(
   }
   next = { ...next, version: m.version + 1, updated_at: now };
   await storage.putMemory(next);
+  // 评分只接受 1–5 整数；缺省/非法不落字段（历史与 MCP 入口没有评分 → 统计时按「未评分」处理，不补默认星）
+  const rated = typeof rating === 'number' && Number.isInteger(rating) && rating >= 1 && rating <= 5 ? rating : undefined;
+  const note = typeof comment === 'string' && comment.trim() ? comment.trim() : undefined;
   await storage.appendAudit({
     request_id, action: 'memory_op', ts: now, project_id: m.project_id,
-    detail: { op: kind, trust_delta: delta, mem_id, confidence: next.confidence },
+    detail: {
+      op: kind, trust_delta: delta, mem_id, confidence: next.confidence,
+      ...(rated !== undefined ? { rating: rated } : {}),
+      ...(note !== undefined ? { comment: note } : {}),
+    },
   });
   return { ok: true, mem: next, trust_delta: delta, request_id };
 }

@@ -177,6 +177,23 @@ describe('阶段5-C · mirror 真接 + 失败可见', () => {
     expect(src('src/web/shared/mirrorFailureEvent.ts')).toContain("export const MIRROR_FAILURE_EVENT");
   });
 
+  it('⑰ 有登录会话时上抛/查询都携带 x-session-id（服务端按会话收账）', async () => {
+    window.localStorage.setItem('session:realpage', 's_test_1');
+    try {
+      mirrorReport('audit', 'security_change');
+      await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1));
+      const init = (fetchSpy.mock.calls[0][1] ?? {}) as { headers?: Record<string, string> };
+      expect(init.headers?.['x-session-id']).toBe('s_test_1');
+
+      fetchSpy.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ items: [], total: 0 }) });
+      await mirrorFetch('audit');
+      const getInit = (fetchSpy.mock.calls[1][1] ?? {}) as { headers?: Record<string, string> };
+      expect(getInit.headers?.['x-session-id']).toBe('s_test_1');
+    } finally {
+      window.localStorage.removeItem('session:realpage');
+    }
+  });
+
   it('⑯ 服务端事实：home server 真的实现并持久化 POST/GET /api/mirror/audit', () => {
     const s = src('src/home/server.ts');
     expect(s).toContain("path === '/api/mirror/audit'");

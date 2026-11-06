@@ -1,7 +1,7 @@
 // token 节省口径单测（批次11）：基线必须来自同一批记忆全文，缺对照时不虚构节省。
 import { describe, it, expect } from 'vitest';
-import { tokenSavingFromMarks } from '../useInlineReal.ts';
-import type { Memory } from '../../../core/memagent/types.ts';
+import { tokenSavingFromMarks, injectionsFromMemories } from '../useInlineReal.ts';
+import type { Memory, AuditRecord } from '../../../core/memagent/types.ts';
 import type { MemoryInjectionMark } from '../../../types/inlineAttribution.ts';
 
 function mark(id: string, summary: string): MemoryInjectionMark {
@@ -36,5 +36,20 @@ describe('tokenSavingFromMarks（estTokens 同口径）', () => {
   it('空注入 → 全 0', () => {
     const saving = tokenSavingFromMarks([], [mem('m1', 'ffff')]);
     expect(saving).toMatchObject({ actual_payload: 0, full_baseline: 0, saved: 0 });
+  });
+});
+
+describe('injectionsFromMemories request_id（批次48 A14）', () => {
+  it('取该记忆最近一次真实 write 审计的 request_id', () => {
+    const audits: AuditRecord[] = [
+      { request_id: 'req_old', action: 'write', ts: 100, detail: { mem_id: 'm1' } },
+      { request_id: 'req_new', action: 'write', ts: 300, detail: { mem_id: 'm1' } },
+    ];
+    const marks = injectionsFromMemories([mem('m1', '真实内容')], audits);
+    expect(marks[0].request_id).toBe('req_new');
+  });
+  it('账本没有该记忆的 write 链路 → 空串（不再合成 req_+mem_id）', () => {
+    const marks = injectionsFromMemories([mem('m1', '真实内容')], []);
+    expect(marks[0].request_id).toBe('');
   });
 });

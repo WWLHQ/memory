@@ -31,6 +31,16 @@ export interface DashboardProps {
   onTrace: (requestId: string) => void;
 }
 
+/** 溯源 id：只有真实 request_id 才渲染成可点 .rid；空串 → 如实显示「账本无链路」，不编造可点 id */
+function TraceRef({ id, onTrace }: { id: string; onTrace: (requestId: string) => void }) {
+  if (!id) return <span className="mid" data-testid="no-trace">账本无链路</span>;
+  return (
+    <span className="rid" role="button" tabIndex={0} onClick={() => onTrace(id)}>
+      {id}
+    </span>
+  );
+}
+
 export function Dashboard({ raw, sync, graph, effectGains, storageError, onRefreshGraph, onTrace }: DashboardProps) {
   const ctx = useTenant();
   const dash = buildDashboard(ctx, raw);
@@ -92,19 +102,12 @@ export function Dashboard({ raw, sync, graph, effectGains, storageError, onRefre
             {dash.anomalies.length === 0 ? (
               <div className="item dim" id="anomEmpty">暂无真实异常（内核账本为空 · 有动作后实时聚合）</div>
             ) : (
-              dash.anomalies.map((a) => (
-                <div className={`item ${a.level === 'error' ? 'err' : ''}`} key={a.request_id}>
+              dash.anomalies.map((a, i) => (
+                <div className={`item ${a.level === 'error' ? 'err' : ''}`} key={`${a.request_id || a.title}-${i}`}>
                   <div className="v">{a.title}</div>
                   <div className="k">
                     {a.detail}{' '}
-                    <span
-                      className="rid"
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => onTrace(a.request_id)}
-                    >
-                      {a.request_id}
-                    </span>
+                    <TraceRef id={a.request_id} onTrace={onTrace} />
                     {a.jump ? ` [跳 ${a.jump}]` : ''}
                   </div>
                 </div>
@@ -120,35 +123,21 @@ export function Dashboard({ raw, sync, graph, effectGains, storageError, onRefre
               <div className="item dim" id="recallEmpty">暂无真实记录（内核账本为空 · 有召回/冲突后实时聚合）</div>
             ) : (
               <>
-                {dash.activeMemories.map((m) => (
-                  <div className="item" key={m.request_id}>
+                {dash.activeMemories.map((m, i) => (
+                  <div className="item" key={`${m.request_id || m.title}-${i}`}>
                     <div className="v">{m.title}</div>
                     <div className="k">
                       命中{m.hits}条 · decay={m.decayClass} ·{' '}
-                      <span
-                        className="rid"
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => onTrace(m.request_id)}
-                      >
-                        {m.request_id}
-                      </span>
+                      <TraceRef id={m.request_id} onTrace={onTrace} />
                     </div>
                   </div>
                 ))}
-                {dash.todos.map((t) => (
-                  <div className="item" key={t.request_id}>
+                {dash.todos.map((t, i) => (
+                  <div className="item" key={`${t.request_id || t.label}-${i}`}>
                     <div className="v">{t.label}</div>
                     <div className="k">
                       {t.detail} ·{' '}
-                      <span
-                        className="rid"
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => onTrace(t.request_id)}
-                      >
-                        {t.request_id}
-                      </span>
+                      <TraceRef id={t.request_id} onTrace={onTrace} />
                     </div>
                   </div>
                 ))}

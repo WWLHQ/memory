@@ -7,7 +7,7 @@
 // 锁定表持久化：每次登录后把 T3 锁定态快照写入 .data/home-locks.json，启动时 importLockSnapshot 恢复。
 // 审计写入统一 audit 表（4.3.1 枚举 login/logout/login_fail/team_assign）。
 import { createServer as httpCreateServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, copyFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
@@ -20,19 +20,21 @@ import { syncMembersFromHomeNow, type MemberSyncReport } from '../auth/memberSyn
 import type { MemberStorePort } from '../core/memagent/memberStore.ts';
 import { createOriginPolicy, rejectUntrustedOrigin, rejectUntrustedHost, applyCorsHeaders } from '../shared/localOrigin.ts';
 import { validateAuditRecord } from '../shared/auditShape.ts';
+import { checkMemoryWriteOwnership, findExistingMemoryRow } from '../shared/memoryOwnership.ts';
+import {
+  DEFAULT_PWD_POLICY, normalizePwdPolicy, validatePasswordAgainstPolicy, type PwdPolicy,
+} from '../shared/passwordPolicy.ts';
 import type { Form } from '../types/agentOnboard.ts';
 import type { TenantContext, LoginAudit, AccountRole } from '../types/home.ts';
 import type { StorageBackend } from '../core/memagent/types.ts';
 
-/** 端壳 mirror 上抛条目（G6：全动作、成对/上下文放 payload） */
-export interface MirrorAuditEntry {
-  seq: number;
-  source: string;                 // 来源页：memory/lifecycle/dispute/audit/write/feedback/params/security
-  action: string;                 // 端动作枚举（memory_forget / lifecycle_change / dispute / audit_query…）
-  request_id?: string;
-  payload?: unknown;
-  ts: number;
-}
+// 端壳 mirror 上抛条目（G6）类型与链式签名实现统一放在 mirrorLedger.ts（批次48 A8）
+import {
+  GENESIS_HASH, MIRROR_INTEGRITY_NOTE, loadOrCreateMirrorKey, sealMirrorEntry, verifyMirrorChain,
+  type MirrorIntegrity,
+} from './mirrorLedger.ts';
+export type { MirrorAuditEntry } from './mirrorLedger.ts';
+import type { MirrorAuditEntry } from './mirrorLedger.ts';
 
 export interface ServerOptions {
   /** 监听端口；测试用 0（随机端口） */
@@ -96,6 +98,13 @@ const KERNEL_METHODS = [
   'createProject', 'getProject', 'listProjects',
 ] as const;
 
+/**
+ * 破坏性/账本色方法：仅 admin 会话可调用。
+ * putMemory 等常规读写允许任意已登录成员（页面正常读写要用），
+ * 但批次48 A7 起写入必须落在会话自己的租户/用户名下（shared/memoryOwnership.ts）。
+ */
+const ADMIN_ONLY_KERNEL_METHODS = new Set<string>(['deleteMemory', 'appendAudit']);
+
 class BodyTooLargeError extends Error {}
 
 function readJsonBody(req: IncomingMessage, maxBytes: number): Promise<Record<string, unknown>> {
@@ -147,16 +156,57 @@ export function createServer(opts: ServerOptions): HomeServer {
   } catch {
     /* 无锁定快照则跳过 */
   }
+  // 批次48 A9：账号文件损坏必须 fail-closed —— 不再把「文件存在但读不了/结构非法」当成首次启动，
+  // 否则会播种默认口令管理员（admin/Admin@123456），等于把损坏当成全新环境静默开箱。
+  // 处理：原件原样保留 + 复制一份 .corrupt-<ts> 备份 + 拒绝登录/注册（503 accounts_unreadable），
+  // 由运维修复或移走损坏文件后重启恢复；本进程绝不覆盖写该文件。
+  let accountsBroken: string | null = null;
   try {
-    importAccountSnapshot(
-      JSON.parse(readFileSync(accountsFile, 'utf8')) as Parameters<typeof importAccountSnapshot>[0],
-    );
-  } catch {
-    /* 首次启动：无账号文件，等待真实注册 */
+    const raw = readFileSync(accountsFile, 'utf8');
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) throw new Error('账号文件格式不是数组');
+    for (const item of parsed) {
+      const a = item as Record<string, unknown> | null;
+      if (!a || typeof a !== 'object' || Array.isArray(a)) throw new Error('账号记录不是对象');
+      if (typeof a.account !== 'string' || !a.account.trim()) throw new Error('账号记录缺少 account');
+      if (typeof a.passwordHash !== 'string' || !a.passwordHash) throw new Error(`账号记录缺少 passwordHash（${String(a.account)}）`);
+      if (typeof a.enterprise_id !== 'string' || typeof a.team_id !== 'string') {
+        throw new Error(`账号记录缺少 enterprise_id/team_id（${String(a.account)}）`);
+      }
+    }
+    importAccountSnapshot(parsed as Parameters<typeof importAccountSnapshot>[0]);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+      /* 首次启动：无账号文件，等待真实注册/播种 */
+    } else {
+      accountsBroken = String((e as Error)?.message ?? e);
+      let backup: string | null = null;
+      try {
+        backup = `${accountsFile}.corrupt-${Date.now()}`;
+        copyFileSync(accountsFile, backup);
+      } catch {
+        backup = null;
+      }
+      log('home', 'accounts_unreadable', { error: accountsBroken, backup });
+    }
+  }
+
+  // 批次48 A10：密码策略持久化（home-policy.json）。策略是配置不是凭据：文件坏了 → 回落默认并留日志，
+  // 不阻塞登录；但保存后对「注册 / 修改密码」都真实生效（不再是前端 useState 假配置）。
+  const policyFile = join(dirname(auditFile), 'home-policy.json');
+  let pwdPolicy: PwdPolicy = DEFAULT_PWD_POLICY;
+  try {
+    pwdPolicy = normalizePwdPolicy(JSON.parse(readFileSync(policyFile, 'utf8')));
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') log('home', 'policy_unreadable', { error: String((e as Error)?.message ?? e) });
+  }
+  function persistPolicy(): void {
+    writeFileSync(policyFile, JSON.stringify(pwdPolicy, null, 2));
   }
 
   // 批次7：内置管理员。无 admin 则播种（默认密码仅首次使用，登录后可改）；旧快照缺角色则升级。
-  if (opts.seedAdmin !== false) {
+  // 批次48 A9：账号文件损坏时不播种（accountsBroken 优先于任何回调）。
+  if (opts.seedAdmin !== false && !accountsBroken) {
     const seeded = seedAdminAccount(opts.adminPassword);
     if (seeded.created || seeded.upgraded) {
       persistAccounts();
@@ -171,12 +221,30 @@ export function createServer(opts: ServerOptions): HomeServer {
     if (r0.created > 0 || r0.updated > 0) log('home', 'member_sync', { created: r0.created, updated: r0.updated, scanned: r0.scanned });
   }
   // mirror 上抛账本持久化（REQ-006 端壳 G6）
+  // 批次48 A8：条目链式签名；读文件失败/密钥不可用 → 标记 fail-closed（拒收新条目，查询如实报告），
+  // 不再把「解析失败」静默当成空账本继续覆盖写。
   const mirrorFile = join(dirname(auditFile), 'home-mirror.json');
   let mirrorAudit: MirrorAuditEntry[] = [];
+  let mirrorLoadError: string | null = null;
   try {
-    mirrorAudit = JSON.parse(readFileSync(mirrorFile, 'utf8')) as MirrorAuditEntry[];
-  } catch {
+    const raw = readFileSync(mirrorFile, 'utf8');
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) throw new Error('mirror 账本格式不是数组');
+    mirrorAudit = parsed as MirrorAuditEntry[];
+  } catch (e) {
     mirrorAudit = [];
+    if ((e as NodeJS.ErrnoException).code !== 'ENOENT') {
+      mirrorLoadError = String((e as Error)?.message ?? e);
+      log('home', 'mirror_ledger_unreadable', { error: mirrorLoadError });
+    }
+  }
+  let mirrorKey: Buffer | null = null;
+  let mirrorKeyError: string | null = null;
+  try {
+    mirrorKey = loadOrCreateMirrorKey(dirname(auditFile));
+  } catch (e) {
+    mirrorKeyError = String((e as Error)?.message ?? e);
+    log('home', 'mirror_key_unavailable', { error: mirrorKeyError });
   }
 
   const sessions = new Map<string, Session>();
@@ -314,11 +382,15 @@ export function createServer(opts: ServerOptions): HomeServer {
       .then(async () => {
         // 批次22：健康探测（前端用 no-cors 探针区分「后端未启动」与「来源被拒」）
         if (req.method === 'GET' && path === '/api/health') {
-          send(res, 200, { ok: true, service: 'home', ts: Date.now() });
+          // ok/service 保持原探测语义（前端据 service==='home' 判定后端在线）；
+          // accounts 字段明示账号域状态，损坏时前端/运维能看见而不是只看到「在线」。
+          send(res, 200, { ok: true, service: 'home', ts: Date.now(), accounts: accountsBroken ? 'unreadable' : 'ok' });
           return;
         }
 
         if (req.method === 'POST' && path === '/api/register') {
+          // 批次48 A9：账号文件损坏时拒绝注册（否则把损坏状态当空白环境写新文件，旧账号被静默丢弃）
+          if (accountsBroken) { send(res, 503, { ok: false, reason: 'accounts_unreadable' }); return; }
           // 批次26-B P2-17：注册全局限速（防本机脚本批量刷号；正常使用一次注册 2 个请求，远达不到 10/min）
           if (rateLimited('register', MAX_REGISTER_PER_MIN)) {
             log('home', 'register_rate_limited', {});
@@ -375,6 +447,14 @@ export function createServer(opts: ServerOptions): HomeServer {
             return;
           }
 
+          // 批次48 A10：注册密码按已持久化策略校验（与安全页展示同一份策略）。
+          // 放在 hasAccount 之后：重复注册仍回 409（防枚举/防接管优先），不对密码强度做额外区分。
+          const policyErr = validatePasswordAgainstPolicy(password, pwdPolicy);
+          if (policyErr) {
+            send(res, 400, { reason: 'weak_password', message: policyErr });
+            return;
+          }
+
           // 新用户注册
           const teamId = `personal-${account}`;
           registerAccount(account, hashPassword(password), { enterprise_id: 'local', team_id: teamId, perspective: 'personal' });
@@ -409,6 +489,8 @@ export function createServer(opts: ServerOptions): HomeServer {
         }
 
         if (req.method === 'POST' && path === '/api/login') {
+          // 批次48 A9：账号文件损坏 → 明示拒绝（不伪装成「密码错」，也不让默认管理员顶替）
+          if (accountsBroken) { send(res, 503, { ok: false, reason: 'accounts_unreadable' }); return; }
           const body = await readJsonBody(req, maxBodyBytes);
           const account = typeof body.account === 'string' ? body.account : '';
           const password = typeof body.password === 'string' ? body.password : '';
@@ -495,6 +577,16 @@ export function createServer(opts: ServerOptions): HomeServer {
             send(res, 400, { ok: false, error: `不支持的方法：${method || '(空)'}` });
             return;
           }
+          // 批次47 P0-2：方法级角色闸门。此前只校验会话存在 → member 可删记忆、可写账本审计。
+          if (ADMIN_ONLY_KERNEL_METHODS.has(method) && s.context.role !== 'admin') {
+            log('home', 'kernel_invoke_forbidden', {
+              method,
+              user_id: s.context.user_id,
+              role: s.context.role,
+            });
+            send(res, 403, { ok: false, reason: 'forbidden', error: '该操作需管理员账号' });
+            return;
+          }
           const args = Array.isArray(body.args) ? body.args : [];
           if (method === 'appendAudit') {
             try {
@@ -509,6 +601,21 @@ export function createServer(opts: ServerOptions): HomeServer {
             if (typeof member !== 'function') {
               send(res, 400, { ok: false, error: `不支持的方法：${method || '(空)'}` });
               return;
+            }
+            // 批次48 A7：putMemory 归属校验 —— 非管理员只能写自己租户/自己用户名下，
+            // 且不得覆盖他人/他租户已有行（含墓碑）。管理员不受限（调用方在此留痕）。
+            if (method === 'putMemory') {
+              const existing = await findExistingMemoryRow(opts.kernelStorage, args[0]);
+              const verdict = checkMemoryWriteOwnership({ incoming: args[0], existing, session: s.context });
+              if (!verdict.ok) {
+                log('home', 'kernel_put_ownership_denied', {
+                  user_id: s.context.user_id,
+                  role: s.context.role,
+                  reason: verdict.reason,
+                });
+                send(res, 403, { ok: false, reason: 'forbidden', error: verdict.reason });
+                return;
+              }
             }
             // .call 以接收者调用（fn(...args) 会丢 this，内存后端字段全挂在实例上）
             const result = await member.call(opts.kernelStorage, ...args);
@@ -649,6 +756,13 @@ export function createServer(opts: ServerOptions): HomeServer {
           const body = await readJsonBody(req, maxBodyBytes);
           const oldPassword = typeof body.oldPassword === 'string' ? body.oldPassword : '';
           const newPassword = typeof body.newPassword === 'string' ? body.newPassword : '';
+          // 批次48 A10：改密按已持久化策略校验（先于账号存在性/旧密码，避免策略形同虚设）
+          const policyErr = validatePasswordAgainstPolicy(newPassword, pwdPolicy);
+          if (policyErr) {
+            log('home', 'password_change_fail', { account: s.context.user_id, reason: 'policy' });
+            send(res, 400, { ok: false, reason: 'weak', error: policyErr });
+            return;
+          }
           const r = changePassword(s.context.user_id, oldPassword, newPassword);
           if (!r.ok) {
             log('home', 'password_change_fail', { account: s.context.user_id, reason: r.reason });
@@ -664,29 +778,74 @@ export function createServer(opts: ServerOptions): HomeServer {
           return;
         }
 
-        // REQ-006 端壳 mirror 上抛（G6 全动作审计持久账本）
-        if (req.method === 'POST' && path === '/api/mirror/audit') {
+        // 批次48 A10：密码策略读写（GET 任意登录会话；POST 仅 admin，真实落盘 .data/home-policy.json）
+        if (req.method === 'GET' && path === '/api/policy') {
+          const s = getSession(sessionIdOf(req));
+          if (!s) { send(res, 401, { ok: false, reason: 'no_session' }); return; }
+          send(res, 200, { ok: true, policy: pwdPolicy });
+          return;
+        }
+        if (req.method === 'POST' && path === '/api/policy') {
+          const s = getSession(sessionIdOf(req));
+          if (!s) { send(res, 401, { ok: false, reason: 'no_session' }); return; }
+          if (s.context.role !== 'admin') {
+            log('home', 'policy_update_denied', { account: s.context.user_id });
+            send(res, 403, { ok: false, reason: 'forbidden' });
+            return;
+          }
           const body = await readJsonBody(req, maxBodyBytes);
-          const entry: MirrorAuditEntry = {
+          pwdPolicy = normalizePwdPolicy(body.policy ?? body);
+          persistPolicy();
+          log('home', 'policy_update', { account: s.context.user_id, policy: pwdPolicy });
+          send(res, 200, { ok: true, policy: pwdPolicy });
+          return;
+        }
+
+        // REQ-006 端壳 mirror 上抛（G6 全动作审计持久账本）
+        // 批次47 P0-1：此账本是审计页 G6 的展示数据源，必须绑定登录会话。
+        // 此前匿名可写 → 任意本机进程都能伪造"安全操作已审计"的假证据。
+        if (req.method === 'POST' && path === '/api/mirror/audit') {
+          const s = getSession(sessionIdOf(req));
+          if (!s) { send(res, 401, { ok: false, reason: 'no_session' }); return; }
+          // 批次48 A8：账本读不了 / 密钥不可用 → 拒收（fail-closed），绝不在未知状态上追加
+          if (mirrorLoadError) { send(res, 503, { ok: false, reason: 'mirror_ledger_unreadable' }); return; }
+          if (!mirrorKey) { send(res, 503, { ok: false, reason: 'mirror_key_unavailable' }); return; }
+          const body = await readJsonBody(req, maxBodyBytes);
+          const prevHash = mirrorAudit.length > 0 && mirrorAudit[mirrorAudit.length - 1].hash
+            ? mirrorAudit[mirrorAudit.length - 1].hash!
+            : GENESIS_HASH;
+          const entry = sealMirrorEntry({
             seq: mirrorAudit.length + 1,
             source: typeof body.source === 'string' ? body.source : 'unknown',
             action: typeof body.action === 'string' ? body.action : 'unknown',
             request_id: typeof body.request_id === 'string' ? body.request_id : undefined,
             payload: body.payload ?? null,
             ts: Date.now(),
-          };
+          }, prevHash, mirrorKey);
           mirrorAudit.push(entry);
           persistMirror();
-          send(res, 200, { ok: true, seq: entry.seq });
+          send(res, 200, { ok: true, seq: entry.seq, hash: entry.hash });
           return;
         }
 
         if (req.method === 'GET' && path === '/api/mirror/audit') {
+          // 批次47 P0-1：查询侧同样要求真实会话（防止匿名读取全量端动作账本）
+          const s = getSession(sessionIdOf(req));
+          if (!s) { send(res, 401, { ok: false, reason: 'no_session' }); return; }
           const q = new URL(url, 'http://localhost').searchParams;
           const source = q.get('source');
           const limit = Math.max(1, Math.min(500, Number(q.get('limit') ?? 50) || 50));
           const items = mirrorAudit.filter((e) => !source || e.source === source).slice(-limit);
-          send(res, 200, { items, total: mirrorAudit.length });
+          // 批次48 A8：整条链的完整校验结果随查询返回；旧的无签名条目如实计为 legacy_unsealed
+          let integrity: MirrorIntegrity & { algorithm: string; note: string; load_error?: string };
+          if (mirrorLoadError) {
+            integrity = { ok: false, sealed: 0, legacy_unsealed: 0, reason: 'ledger_unreadable', algorithm: 'HMAC-SHA256(chain)', note: MIRROR_INTEGRITY_NOTE, load_error: mirrorLoadError };
+          } else if (!mirrorKey) {
+            integrity = { ok: false, sealed: 0, legacy_unsealed: 0, reason: 'key_unavailable', algorithm: 'HMAC-SHA256(chain)', note: MIRROR_INTEGRITY_NOTE };
+          } else {
+            integrity = { ...verifyMirrorChain(mirrorAudit, mirrorKey), algorithm: 'HMAC-SHA256(chain)', note: MIRROR_INTEGRITY_NOTE };
+          }
+          send(res, 200, { items, total: mirrorAudit.length, integrity });
           return;
         }
 

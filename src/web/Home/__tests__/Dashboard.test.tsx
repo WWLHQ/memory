@@ -123,6 +123,21 @@ describe('T7 首页 Dashboard 区块组件', () => {
     expect(onTrace).toHaveBeenCalledWith(id);
   });
 
+  it('账本没给 request_id：不渲染可点 .rid，如实显示「账本无链路」（批次48 A11）', () => {
+    const noRidRaw: RawHomeFeed = {
+      ...raw,
+      anomalies: [{ title: '无链路异常', detail: '来自旧账本', level: 'warn' }],
+      activeMemories: (raw.activeMemories ?? []).map((m) => ({ ...m, request_id: '' })),
+      todos: (raw.todos ?? []).map((t) => ({ ...t, request_id: '' })),
+    };
+    const onTrace = vi.fn();
+    const { container } = renderAuth({ onTrace, rawProp: noRidRaw });
+    expect(container.querySelectorAll('.rid')).toHaveLength(0);
+    expect(container.querySelectorAll('[data-testid="no-trace"]').length).toBeGreaterThanOrEqual(1);
+    expect(container.textContent).toContain('账本无链路');
+    expect(onTrace).not.toHaveBeenCalled();
+  });
+
   it('功劳 4 卡复用 Gains（渲染 🪙⚡🔁💸）', () => {
     const { container } = renderAuth({ onTrace: () => {} });
     // #gains 由 Gains 组件渲染（复用 REQ-003）

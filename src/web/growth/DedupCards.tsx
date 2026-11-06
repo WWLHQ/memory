@@ -65,7 +65,7 @@ export function DedupCard({
   );
 }
 
-export function ShortCircuitFlow({ steps, stats }: { steps: ShortCircuitStep[]; stats: { short_circuit_hits: number; merged: number; avg_cost_ms: number } }) {
+export function ShortCircuitFlow({ steps, stats }: { steps: ShortCircuitStep[]; stats: { short_circuit_hits: number; merged: number; avg_cost_ms: number; avg_cost_samples: number } }) {
   return (
     <div className="card" data-testid="short-circuit-card">
       <b>短路嫁接路径（6.2）</b>
@@ -92,9 +92,9 @@ export function ShortCircuitFlow({ steps, stats }: { steps: ShortCircuitStep[]; 
         <div className="note" style={{ marginTop: 6 }}>{steps[steps.length - 1].action}</div>
       )}
       <div className="row" style={{ gap: 22, marginTop: 10 }} data-testid="stats-24h">
-        <span>24h 短路命中（真实 filtered 审计）：<b>{stats.short_circuit_hits}</b></span>
-        <span>24h 合并数（真实 merge 审计）：<b>{stats.merged}</b></span>
-        <span>平均查重耗时：{stats.avg_cost_ms ? <b>{stats.avg_cost_ms}ms</b> : <b>—</b>}（账本未采样）</span>
+        <span>24h 查重/质量门拦截（真实 write 审计）：<b>{stats.short_circuit_hits}</b></span>
+        <span>24h 嫁接数（真实 graft 审计）：<b>{stats.merged}</b></span>
+        <span>平均查重耗时：{stats.avg_cost_samples > 0 ? <b>{stats.avg_cost_ms}ms</b> : <b>—</b>}（{stats.avg_cost_samples > 0 ? `真实采样 ${stats.avg_cost_samples} 条写入` : '账本未采样'}）</span>
       </div>
     </div>
   );

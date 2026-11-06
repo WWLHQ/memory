@@ -41,6 +41,22 @@ describe('MonitorPage (P6-T5 编排·真实账本接真版)', () => {
     await waitFor(() => expect(screen.getAllByTestId(/^alert-\d+$/)).toHaveLength(1));
   });
 
+  it('待裁决 = 当前冲突记忆数；历史 conflict_resolve 审计不冒充待办（批次48 A15）', async () => {
+    const { metricsFromLedger } = await import('../useMonitorReal.ts');
+    const mkMem = (id: string, conflict?: string) => ({
+      mem_id: id, content: 'x', category: 'fact', project_id: 'P1', layer: 'L2', decay_class: 'hot',
+      pinned: false, locked: false, version: 1, created_at: Date.now(), conflict_id: conflict,
+    });
+    const mems = [mkMem('m1', 'c1'), mkMem('m2', 'c2'), mkMem('m3')];
+    // 100 条历史已处置记录：旧实现 Math.max(100, 2)=100 → 虚高
+    const audits = Array.from({ length: 100 }, (_, i) => ({
+      request_id: `r${i}`, action: 'conflict_resolve', form: 'web', ts: Date.now(),
+    }));
+    const cards = metricsFromLedger(mems as never, audits as never);
+    const pending = cards.find((c) => c.group === '人工审核' && c.metric === '待裁决');
+    expect(pending?.value).toBe(2);
+  });
+
   it('筛选 crit → 时间线只剩严重告警（真实告警过滤）', async () => {
     vi.spyOn(await import('../useMonitorReal.ts'), 'loadRealMonitorData')
       .mockResolvedValue({ available: true, memCount: 0, auditCount: 0, metrics: [], alerts: SEED_ALERTS });

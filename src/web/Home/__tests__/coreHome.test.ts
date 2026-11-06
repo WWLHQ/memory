@@ -116,12 +116,22 @@ describe('getHomeFeed（首页真实可算，内核账本聚合）', () => {
     expect(top.request_id).toMatch(/^r/);
   });
 
-  it('含 conflict_id 的记忆 → 真实待裁决待办', async () => {
+  it('含 conflict_id 的记忆 → 真实待裁决待办；无冲突审计时 request_id 留空（不把 mem_id 冒充 request_id）', async () => {
     const conflictMem = { ...memA, mem_id: 'mem_c', conflict_id: 'cf_1' } as unknown as Memory;
     const feed = await getHomeFeed(fakeStorage({ memories: [conflictMem] }));
     expect(feed.raw.todos!).toHaveLength(1);
     expect(feed.raw.todos![0].kind).toBe('dispute');
     expect(feed.raw.todos![0].label).toContain('待裁决');
+    expect(feed.raw.todos![0].request_id).toBe(''); // 批次48 A11：不冒用 mem_id
+  });
+
+  it('待裁决 request_id 取真实冲突审计（conflict_resolve 且 detail 引用该冲突）', async () => {
+    const conflictMem = { ...memA, mem_id: 'mem_c', conflict_id: 'cf_1' } as unknown as Memory;
+    const audits: AuditRecord[] = [
+      { request_id: 'req_real', action: 'conflict_resolve', ts: Date.now(), detail: { conflict_id: 'cf_1', old_id: 'mem_a', new_id: 'mem_c', verdict: 'hold', pending: true } },
+    ];
+    const feed = await getHomeFeed(fakeStorage({ memories: [conflictMem], audits }));
+    expect(feed.raw.todos![0].request_id).toBe('req_real');
   });
 
   it('同步未实现：任意审计不得冒充对账时间（wired=false · lastReconcileAt=0）', async () => {

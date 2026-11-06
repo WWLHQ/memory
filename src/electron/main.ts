@@ -21,6 +21,7 @@ import {
 import { validateAuditRecord as sharedValidateAuditRecord } from '../shared/auditShape.ts';
 import { scanHost } from './hostScan.ts';
 import { IPC, missingChannels, handleBootFailure } from './ipcChannels.ts';
+import { createStorageReadWriteHandlers } from './storageIpc.ts';
 import { initActionLog, actionLog, actionLogError, tailActionLog } from './actionLog.ts';
 import type { TenantContext } from '../types/home.ts';
 import {
@@ -73,7 +74,7 @@ import { MemAgentError } from '../core/memagent/errors.ts';
 import { cleanupTempFiles, createHomeLockStore, createL0KeyringStore } from './l0KeyringStore.ts';
 import type { L0GrantReq, L0UnlockReq } from '../core/memagent/types.ts';
 import { runForgettingCycle } from '../core/memagent/forgetting.ts';
-import { autoOrganizeEnabled } from '../core/memagent/paramsSnapshot.ts';
+import { forgettingPrefsFromSnapshot } from '../core/memagent/paramsSnapshot.ts';
 import { JsVectorBackend } from '../core/memagent/vector.ts';
 import { readFile, appendFile, mkdir, writeFile, copyFile, readdir, unlink, stat } from 'node:fs/promises';
 import { join, extname, normalize, sep, basename, dirname } from 'node:path';
@@ -1968,9 +1969,19 @@ function requireDataPlaneSession(sessionId: unknown, channel: string): void {
 const validateAuditRecord = sharedValidateAuditRecord;
 
 async function registerStorageIpc(): Promise<void> {
-  handleIpc(IPC.storagePutMemory, (_e, m) => storage.putMemory(m as Parameters<typeof storage.putMemory>[0]));
-  handleIpc(IPC.storageGetMemory, (_e, id) => storage.getMemory(id as string));
-  handleIpc(IPC.storageListMemories, (_e, f) => storage.listMemories(f as Parameters<typeof storage.listMemories>[0]));
+  // 批次47 P0-3：读写通道也需登录会话（此前只有删除/审计写有闸门，读与 putMemory 匿名可用）
+  const rw = createStorageReadWriteHandlers({
+    storage,
+    requireSession: (sessionId, channel) => requireDataPlaneSession(sessionId, channel),
+    // 批次48 A7：归属校验按 home server 会话真源判定（不接受渲染层自报租户）
+    getSessionContext: (sessionId) => {
+      const sid = typeof sessionId === 'string' ? sessionId.trim() : '';
+      return sid ? homeServerRef?.getSessionContext(sid) ?? null : null;
+    },
+  });
+  handleIpc(IPC.storagePutMemory, (_e, m, sessionId?: unknown) => rw.putMemory(m, sessionId));
+  handleIpc(IPC.storageGetMemory, (_e, id, sessionId?: unknown) => rw.getMemory(id, sessionId));
+  handleIpc(IPC.storageListMemories, (_e, f, sessionId?: unknown) => rw.listMemories(f, sessionId));
   handleIpc(IPC.storageDeleteMemory, async (_e, id, sessionId?: unknown) => {
     requireDataPlaneSession(sessionId, IPC.storageDeleteMemory);
     const r = await storage.deleteMemory(id as string);
@@ -1983,7 +1994,7 @@ async function registerStorageIpc(): Promise<void> {
     validateAuditRecord(a);
     return storage.appendAudit(a as Parameters<typeof storage.appendAudit>[0]);
   });
-  handleIpc(IPC.storageQueryAudit, (_e, f) => storage.queryAudit(f as Parameters<typeof storage.queryAudit>[0]));
+  handleIpc(IPC.storageQueryAudit, (_e, f, sessionId?: unknown) => rw.queryAudit(f, sessionId));
   // ── 批次46-D6：项目注册表（多用户三池基础）──
   handleIpc(IPC.storageCreateProject, (_e, input) => storage.createProject(input as Parameters<typeof storage.createProject>[0]));
   handleIpc(IPC.storageGetProject, (_e, id) => storage.getProject(id as string));
@@ -3289,7 +3300,9 @@ async function bootstrap(): Promise<void> {
     const now = Date.now();
     try {
       const mems = await storage.listMemories({});
-      const enabled = autoOrganizeEnabled(mems);
+      // 批次48 A17：普通配置四项真实生效 —— 开关 / 遗忘速度（半衰期）/ 保留时长（归档阈值）/ 重要程度（locked 全局豁免）
+      const prefs = forgettingPrefsFromSnapshot(mems);
+      const enabled = prefs.enabled;
       const gcAudits = await storage.queryAudit({ action: 'gc' });
       const lastCompress = Math.max(
         0,
@@ -3299,10 +3312,15 @@ async function bootstrap(): Promise<void> {
       // 一轮写盘一次（层迁移/合并可能涉及上千条），避免逐条全量 persist 卡住主进程
       storage.beginBatch?.();
       try {
-        const report = await runForgettingCycle(storage, now, { enabled, weeklyCompress, vector: collectorVector });
-        void mlog('forgetting:cycle:done', { why, enabled, weeklyCompress, ...report });
+        const report = await runForgettingCycle(storage, now, {
+          enabled, weeklyCompress, vector: collectorVector,
+          halfLifeDays: prefs.halfLifeDays,
+          autoArchiveDays: prefs.autoArchiveDays,
+          exemptAll: prefs.exemptAll,
+        });
+        void mlog('forgetting:cycle:done', { why, enabled, prefs, weeklyCompress, ...report });
         // 批次41-U：双写进 actions.log（与批次34/41-R 同口径）——值只有计数与原因码，正文一个字不落
-        actionLog('kernel', 'forgetting:cycle:done', { why, enabled, weeklyCompress, ...report });
+        actionLog('kernel', 'forgetting:cycle:done', { why, enabled, prefs, weeklyCompress, ...report });
       } finally {
         storage.commitBatch();
       }

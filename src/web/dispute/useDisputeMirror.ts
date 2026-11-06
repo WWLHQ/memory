@@ -5,14 +5,17 @@ import { mirrorReport } from '../mirrorClient.ts';
 import type { ConflictRecord } from './types.ts';
 
 export interface DisputeMirror {
-  /** 18.4 约束5 成对审计（old_id/new_id 必须成对出现）：真发 /api/mirror/audit */
-  audit: (action: string, rec: ConflictRecord, verdict: string | null) => void;
+  /**
+   * 18.4 约束5 成对审计（old_id/new_id 必须成对出现）：真发 /api/mirror/audit。
+   * 批次48 A19：verdict 与 request_id 都必须是本次内核裁决的真实结果（旧实现 verdict 写死 null）。
+   */
+  audit: (action: string, rec: ConflictRecord, verdict: string | null, requestId: string) => void;
 }
 
 export function useDisputeMirror(): DisputeMirror {
   return {
-    audit: (action, rec, verdict) => {
-      mirrorReport('dispute', action, undefined, {
+    audit: (action, rec, verdict, requestId) => {
+      mirrorReport('dispute', action, requestId, {
         conflict_id: rec.id, old_id: rec.old_id, new_id: rec.new_id, verdict,
       });
     },

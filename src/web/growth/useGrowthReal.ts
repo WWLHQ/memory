@@ -76,9 +76,14 @@ function truncate(s: string, n: number): string {
 
 /** 7.1 反馈指标：全部从真实账本实算（无记录则 null，UI 显示「—」，不伪造） */
 export function metricsFromLedger(mems: Memory[], audits: AuditRecord[]): GrowthMetrics {
-  const recallHits = audits.filter((a) => a.action === 'recall' || a.action === 'cold_recall').length;
-  const recallBreach = audits.filter((a) => a.action === 'recall_breach').length;
-  const denom = recallHits + recallBreach;
+  // 命中率 = 真实 recall/cold_recall 审计中「本次有命中」的占比。
+  // 批次47：此前用不存在的 action='recall_breach' 做分母（内核从不写该动作），等价于「只要有召回就算 100%」。
+  const recalls = audits.filter((a) => a.action === 'recall' || a.action === 'cold_recall');
+  const hitsOf = (a: AuditRecord): number => {
+    const v = (a.detail as { hits?: unknown } | undefined)?.hits;
+    return typeof v === 'number' && Number.isFinite(v) ? v : 0;
+  };
+  const recallHits = recalls.filter((a) => hitsOf(a) > 0).length;
 
   // 确认/拒绝：真实反馈审计（memory_op confirm/reject）；无记录则 0（诚实：尚无用户反馈）
   const confirmed = audits.filter((a) => a.action === 'memory_op' && (a.detail as { op?: string })?.op === 'confirm').length;
@@ -100,7 +105,7 @@ export function metricsFromLedger(mems: Memory[], audits: AuditRecord[]): Growth
     .filter((v): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0);
 
   return {
-    hit_rate: denom > 0 ? recallHits / denom : 0,
+    hit_rate: recalls.length > 0 ? recallHits / recalls.length : 0,
     confirmed,
     rejected,
     low_quality_ratio,
@@ -112,19 +117,30 @@ export function metricsFromLedger(mems: Memory[], audits: AuditRecord[]): Growth
   };
 }
 
-/** 24h 短路嫁接统计：真实 merge / filtered 审计实算 */
+/** 24h 短路嫁接统计：只认真实 graft 审计与真实的查重/质量门拦截动作 */
 export function dedupStatsFromLedger(audits: AuditRecord[]): {
-  short_circuit_hits: number; merged: number; avg_cost_ms: number;
+  short_circuit_hits: number; merged: number; avg_cost_ms: number; avg_cost_samples: number;
 } {
   const cutoff = Date.now() - DAY;
-  const merged = audits.filter((a) => a.action === 'merge' && a.ts >= cutoff).length;
-  // 短路命中 = 写时被查重拦截（detail.action 含 filtered / dedup）
-  const shortCircuit = audits.filter(
-    (a) => a.action === 'write' && a.ts >= cutoff &&
-      /filter|dedup|dup/i.test(JSON.stringify(a.detail ?? {})),
-  ).length;
-  // 平均耗时：账本未采样真实 IO 延迟 → 0（UI 显示「—」）
-  return { short_circuit_hits: shortCircuit, merged, avg_cost_ms: 0 };
+  // 嫁接数 = 内核真实 graft 审计（memories.ts 在 graft 成功后写 action='graft'）。
+  // 批次47：此前统计 action='merge' —— 该动作只由冲突裁决 conflict.ts 写入，
+  // 属于「冲突合并」而非「查重嫁接」，会把两个语义不同的数字混在一个卡面。
+  const merged = audits.filter((a) => a.action === 'graft' && a.ts >= cutoff).length;
+  // 短路命中 = 写时被真实拦截：命中重复→嫁接（detail.dedup='grafted'）或质量门过滤（detail.action='filtered_l0_to_l1'）。
+  // 批次47：此前对整条 detail 做 /filter|dedup|dup/ 子串匹配，连「未命中/新建」的普通写入也会命中 → 短路数=全部写入数。
+  const shortCircuit = audits.filter((a) => {
+    if (a.action !== 'write' || a.ts < cutoff) return false;
+    const d = a.detail as { dedup?: unknown; action?: unknown } | undefined;
+    return d?.dedup === 'grafted' || d?.action === 'filtered_l0_to_l1';
+  }).length;
+  // 平均耗时 = 24h 内真实 write 审计里的 cost_ms 均值（批次48 A12：内核 coreWrite 实测写入路径耗时）。
+  // 没有采样 → 0 + samples=0，UI 如实显示「—（账本未采样）」；绝不拿固定值冒充。
+  const costs = audits
+    .filter((a) => a.action === 'write' && a.ts >= cutoff)
+    .map((a) => (a.detail as { cost_ms?: unknown } | undefined)?.cost_ms)
+    .filter((v): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0);
+  const avg = costs.length > 0 ? Math.round((costs.reduce((s, v) => s + v, 0) / costs.length) * 10) / 10 : 0;
+  return { short_circuit_hits: shortCircuit, merged, avg_cost_ms: avg, avg_cost_samples: costs.length };
 }
 
 /** Δ 曲线：真实 weight_tuned / growth_op 审计事件（按日聚合）；无记录则空数组（UI 空态） */
@@ -155,7 +171,7 @@ export interface RealGrowth {
   auditCount: number;
   metrics: GrowthMetrics;
   samples: DedupSample[];
-  dedupStats: { short_circuit_hits: number; merged: number; avg_cost_ms: number };
+  dedupStats: { short_circuit_hits: number; merged: number; avg_cost_ms: number; avg_cost_samples: number };
   deltaSeries: DeltaPoint[];
   growthAudit: GrowthAuditEntry[];
 }

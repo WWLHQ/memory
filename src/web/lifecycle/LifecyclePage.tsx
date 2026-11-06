@@ -7,7 +7,6 @@ import { LifecycleCard } from './LifecycleCard.tsx';
 import { ParamPanel } from './ParamPanel.tsx';
 import { useToast } from './useToast.tsx';
 import { useLifecycleMirror } from './useLifecycleMirror.ts';
-import { newRequestId } from '../kernel.ts';
 import { canMigrate, importanceLevel } from './logic.ts';
 import { coreListLifecycle, coreLifeOp } from './coreLifecycle.ts';
 import { LIFECYCLE_DEFAULT_PAGE_SIZE, LIFECYCLE_PAGE_SIZES, pagedList } from './lifecycleFilter.ts';
@@ -48,24 +47,26 @@ export function LifecyclePage() {
 
   const selected = records.find((r) => r.id === selectedId) ?? null;
 
-  // 展示用 request_id：首次操作后回填内核真实 request_id（ULID）
-  const [reqId, setReqId] = useState(() => newRequestId('req_lc'));
+  // 展示用 request_id：只能由内核操作回填；未操作前留空，不用客户端 ULID 冒充（批次48 A20）
+  const [reqId, setReqId] = useState('');
 
-  async function applySingle(rec: LifecycleRecord, op: Parameters<typeof coreLifeOp>[2]) {
+  async function applySingle(rec: LifecycleRecord, op: Parameters<typeof coreLifeOp>[2]): Promise<boolean> {
     const res = await coreLifeOp(records, rec, op);
     if (res.request_id) setReqId(res.request_id);
     if (!res.ok) {
       toast.show(res.message ?? '操作未生效');
-      return;
+      return false;
     }
     const byId = new Map(res.affected.map((r) => [r.id, r]));
     setRecords((list) => list.map((r) => byId.get(r.id) ?? r));
     mirror.audit(res.audit, res.request_id || reqId);
+    return true;
   }
 
   async function handleMigrate(target: MemoryStatus) {
     if (!selected) return;
-    await applySingle(selected, { kind: 'migrate', target });
+    // 批次48 A20：失败时 applySingle 已给出错误 toast，这里不得再叠加成功 toast 把错误盖掉
+    if (!(await applySingle(selected, { kind: 'migrate', target }))) return;
     toast.show(`已迁移 ${selected.id} → ${target}（真实审计）`);
   }
 
@@ -82,6 +83,10 @@ export function LifecyclePage() {
     }
     const res = await coreLifeOp(records, selected ?? records[0], { kind: 'batch_migrate', ids: [...checked], target: batchTarget });
     if (res.request_id) setReqId(res.request_id);
+    if (!res.ok) {
+      toast.show(res.message ?? '批量迁移未生效');
+      return;
+    }
     const byId = new Map(res.affected.map((r) => [r.id, r]));
     setRecords((list) => list.map((r) => byId.get(r.id) ?? r));
     setChecked(new Set());
@@ -113,6 +118,7 @@ export function LifecyclePage() {
       <div className="wrap" data-testid="lifecycle-page">
         <h1>⏳ 生命周期页 <span className="badge p2">REQ-006 · P4</span></h1>
         <div className="note">加载真实账本中…</div>
+        {toast.node}
       </div>
     );
   }
@@ -128,6 +134,7 @@ export function LifecyclePage() {
             温度（decay_class）/ 重要度 / 半衰期 / 访问与强化计数。空账本不伪造数据。
           </div>
         </div>
+        {toast.node}
       </div>
     );
   }
@@ -135,7 +142,7 @@ export function LifecyclePage() {
   return (
     <div className="wrap" data-testid="lifecycle-page">
       <h1>⏳ 生命周期页 <span className="badge p2">REQ-006 · P4</span></h1>
-      <div className="sub">六态机（9.10）+ 调参（17.4/17.5）· 数据真相 = 内核账本（{records.length} 条真实记忆）· request_id={reqId}</div>
+      <div className="sub">六态机（9.10）+ 调参（17.4/17.5）· 数据真相 = 内核账本（{records.length} 条真实记忆）· request_id={reqId || '暂无（操作后由内核返回）'}</div>
 
       <div className="card">
         <table className="ltable" data-testid="lifecycle-table">
@@ -270,7 +277,7 @@ export function LifecyclePage() {
 
       <div className="card">
         <div className="row" style={{ justifyContent: 'space-between' }}>
-          <b>批量迁移（9.10.4，写真实审计 lifecycle_change + {reqId}）</b>
+          <b>批量迁移（9.10.4，写真实审计 lifecycle_change + {reqId || '操作后回填真实 request_id'}）</b>
           <div className="row">
             <label style={{ fontSize: 12, color: 'var(--muted)' }}>目标态</label>
             <select data-testid="batch-target" value={batchTarget} onChange={(e) => setBatchTarget(e.target.value as MemoryStatus)}>

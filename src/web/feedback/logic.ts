@@ -28,21 +28,23 @@ export interface FeedbackStats {
 }
 
 export function statShare(list: FeedbackRecord[]): FeedbackStats {
-  const n = list.length || 1;
+  // 批次48 A13：只统计真实打过分的记录（1–5）；rating=0 = 未评分，不进均值/分布/好评差评榜，
+  // 避免把默认值 3 星算成「真实口碑」。
+  const rated = list.filter((f) => Number.isInteger(f.rating) && f.rating >= 1 && f.rating <= 5);
   const ratingDist = [0, 0, 0, 0, 0];
   let sum = 0;
-  for (const f of list) {
+  for (const f of rated) {
     ratingDist[f.rating - 1] += 1;
     sum += f.rating;
   }
-  const byRating = [...list].sort((a, b) => b.rating - a.rating);
+  const byRating = [...rated].sort((a, b) => b.rating - a.rating);
   return {
     confirm: list.filter((f) => f.action === 'confirm').length,
     reject: list.filter((f) => f.action === 'reject').length,
     disputed: list.filter((f) => f.action === 'disputed').length,
     total: list.length,
     ratingDist,
-    avgRating: Math.round((sum / n) * 100) / 100,
+    avgRating: rated.length > 0 ? Math.round((sum / rated.length) * 100) / 100 : 0,
     trustTotal: Math.round(list.reduce((s, f) => s + f.trust_delta, 0) * 100) / 100,
     topLiked: byRating.slice(0, 2),
     topDisliked: byRating.slice(-2).reverse(),

@@ -62,7 +62,7 @@ export function GrowthPage() {
   }, []);
 
   const metrics = useMemo<GrowthMetrics>(() => real?.metrics ?? EMPTY_METRICS, [real]);
-  const dedupStats = real?.dedupStats ?? { short_circuit_hits: 0, merged: 0, avg_cost_ms: 0 };
+  const dedupStats = real?.dedupStats ?? { short_circuit_hits: 0, merged: 0, avg_cost_ms: 0, avg_cost_samples: 0 };
   const samples = real?.samples ?? [];
   const series: DeltaPoint[] = real?.deltaSeries ?? [];
   const empty = real ? !real.available : true;

@@ -20,12 +20,12 @@ const sidArg = (): string | null => {
 };
 
 const storage = {
-  putMemory: (m: unknown) => ipcRenderer.invoke(IPC.storagePutMemory, m),
-  getMemory: (id: string) => ipcRenderer.invoke(IPC.storageGetMemory, id),
-  listMemories: (f: unknown) => ipcRenderer.invoke(IPC.storageListMemories, f),
+  putMemory: (m: unknown) => ipcRenderer.invoke(IPC.storagePutMemory, m, sidArg()),
+  getMemory: (id: string) => ipcRenderer.invoke(IPC.storageGetMemory, id, sidArg()),
+  listMemories: (f: unknown) => ipcRenderer.invoke(IPC.storageListMemories, f, sidArg()),
   deleteMemory: (id: string) => ipcRenderer.invoke(IPC.storageDeleteMemory, id, sidArg()),
   appendAudit: (a: unknown) => ipcRenderer.invoke(IPC.storageAppendAudit, a, sidArg()),
-  queryAudit: (f: unknown) => ipcRenderer.invoke(IPC.storageQueryAudit, f),
+  queryAudit: (f: unknown) => ipcRenderer.invoke(IPC.storageQueryAudit, f, sidArg()),
   // ── 批次46-D6：项目注册表（多用户三池基础）──
   createProject: (input: unknown) => ipcRenderer.invoke(IPC.storageCreateProject, input),
   getProject: (id: string) => ipcRenderer.invoke(IPC.storageGetProject, id),

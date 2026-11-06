@@ -178,18 +178,48 @@ async function deriveRecallTop3(audits: AuditRecord[], storage: StorageBackend, 
   return out;
 }
 
-/** 待办（真实）：9.7 冲突队列——含 conflict_id 的记忆 */
-function deriveTodos(memories: Memory[]): TodoItem[] {
+/**
+ * 待办（真实）：9.7 冲突队列——含 conflict_id 的记忆。
+ * request_id 必须来自真实冲突审计（dispute / conflict_resolve / conflict_detected 且 detail 引用该记忆或 conflict_id）；
+ * 账本没有这类审计 → request_id 留空串（旧实现把 conflicts[0].mem_id 当 request_id，属冒用/合成，已移除）。
+ */
+function deriveTodos(memories: Memory[], audits: AuditRecord[]): TodoItem[] {
   const conflicts = memories.filter((m) => Boolean((m as { conflict_id?: unknown }).conflict_id));
   if (conflicts.length === 0) return [];
+  const first = conflicts[0] as Memory & { conflict_id?: unknown };
+  const conflictId = typeof first.conflict_id === 'string' ? first.conflict_id : '';
+  const requestId = findConflictRequestId(first.mem_id, conflictId, audits);
   return [
     {
       label: `待裁决 ${conflicts.length} 条`,
       detail: '9.7 冲突队列',
-      request_id: conflicts[0].mem_id,
+      request_id: requestId,
       kind: 'dispute',
     },
   ];
+}
+
+/** 在真实审计里找「这条冲突/记忆」的 request_id；找不到返回 ''（绝不编造） */
+function findConflictRequestId(memId: string, conflictId: string, audits: AuditRecord[]): string {
+  const CONFLICT_ACTIONS = new Set<AuditRecord['action']>(['conflict_resolve']);
+  const refsOf = (detail: unknown): string[] => {
+    const d = asRecord(detail);
+    const list: string[] = [];
+    for (const k of ['old_id', 'new_id', 'mem_id', 'memory_id', 'conflict_id', 'merged_mem_id']) {
+      const v = d[k];
+      if (typeof v === 'string') list.push(v.split('@')[0]);
+    }
+    if (Array.isArray(d.mems)) for (const v of d.mems) if (typeof v === 'string') list.push(v.split('@')[0]);
+    return list;
+  };
+  // 从最近往前找：优先最近一次真实处置
+  for (let i = audits.length - 1; i >= 0; i--) {
+    const a = audits[i];
+    if (!CONFLICT_ACTIONS.has(a.action) || !a.request_id) continue;
+    const refs = refsOf(a.detail);
+    if ((conflictId && refs.includes(conflictId)) || refs.includes(memId)) return a.request_id;
+  }
+  return '';
 }
 
 /**
@@ -229,7 +259,7 @@ export async function getHomeFeed(storage: StorageBackend, opts: GetHomeFeedOpts
     storageOk = true;
     anomalies = anomalies.concat(deriveKernelAnomalies(audits, now));
     activeMemories = await deriveRecallTop3(audits, storage, 3);
-    todos = deriveTodos(memories);
+    todos = deriveTodos(memories, audits);
   } catch (e) {
     /* storage 不可达 → 仅用 mirror 兜底（浏览器无内核）；原因上抛给 UI 明示，绝不冒充空账本 */
     storageError = kernelErrorText(e);
@@ -242,13 +272,14 @@ export async function getHomeFeed(storage: StorageBackend, opts: GetHomeFeedOpts
     anomalies = anomalies.concat(deriveMirrorAnomalies(opts.mirrorItems));
   }
 
-  // error 置顶、去重取近 8 条
+  // error 置顶、去重取近 8 条；无 request_id 的行按标题+明细去重（不能所有空 id 都被第一条吞掉）
   const seen = new Set<string>();
   const sorted = [...anomalies]
     .sort((a, b) => (a.level === 'error' ? 0 : 1) - (b.level === 'error' ? 0 : 1))
     .filter((a) => {
-      if (seen.has(a.request_id)) return false;
-      seen.add(a.request_id);
+      const key = a.request_id || `no-rid|${a.title}|${a.detail}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
       return true;
     })
     .slice(0, 8);

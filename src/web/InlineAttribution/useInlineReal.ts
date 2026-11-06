@@ -154,8 +154,11 @@ export function sharedMemories(mems: Memory[]): Memory[] {
   return mems;
 }
 
-/** 真实注入标记：从统一账本全部真实记忆生成（取最近 3 条有内容者，诚实口径；不区分来源 agent） */
-export function injectionsFromMemories(mems: Memory[], n = 3): MemoryInjectionMark[] {
+/** 真实注入标记：从统一账本全部真实记忆生成（取最近 3 条有内容者，诚实口径；不区分来源 agent）
+ *  批次48 A14：request_id 只能来自该记忆的真实 write 审计（detail.mem_id 对应）；
+ *  账本里没有写入链路 → 空串（旧实现用 `req_` + mem_id 前缀合成，属假溯源），UI 显示「账本无链路」。 */
+export function injectionsFromMemories(mems: Memory[], audits: AuditRecord[] = [], n = 3): MemoryInjectionMark[] {
+  const writeIds = writeRequestIdsByMemory(audits);
   const withContent = mems
     .filter((m) => m.content && m.content.trim().length > 0)
     .sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0))
@@ -165,8 +168,19 @@ export function injectionsFromMemories(mems: Memory[], n = 3): MemoryInjectionMa
     summaryL2: truncate(m.content, 60),
     decay_class: m.decay_class === 'archived' ? 'cold' : m.decay_class,
     aging_hint: agingHintOf(m),
-    request_id: `req_${m.mem_id.slice(0, 12)}`,
+    request_id: writeIds.get(m.mem_id) ?? '',
   }));
+}
+
+/** write 审计 → 该记忆最近一次写入的 request_id（按 ts 升序覆盖，取最新） */
+function writeRequestIdsByMemory(audits: AuditRecord[]): Map<string, string> {
+  const map = new Map<string, string>();
+  const sorted = [...audits].filter((a) => a.action === 'write' && a.request_id).sort((a, b) => a.ts - b.ts);
+  for (const a of sorted) {
+    const mid = (a.detail as { mem_id?: unknown } | undefined)?.mem_id;
+    if (typeof mid === 'string' && mid) map.set(mid, a.request_id);
+  }
+  return map;
 }
 
 /** 真实老化提示（9.6）：按 created_at 计算距今天数；>45 天提示「代码可能已改动，请校验」 */
@@ -269,7 +283,7 @@ export async function loadRealInline(_agentName?: string | null): Promise<RealIn
   ]);
   // 记忆库统一且不区分来源：共享池 = 全部真实记忆（所有已接入 agent 一视同仁）
   const shared = sharedMemories(allMems);
-  const injections = injectionsFromMemories(shared, 3);
+  const injections = injectionsFromMemories(shared, audits, 3);
   return {
     available: shared.length > 0,
     agents: collectConnectedAgents(allMems),

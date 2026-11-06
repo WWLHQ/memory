@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { FeedbackPage } from '../FeedbackPage.tsx';
-import { bindTenant, getTenant, resetKernelForTests } from '../../kernel.ts';
+import { bindTenant, getTenant, getKernelStorage, resetKernelForTests } from '../../kernel.ts';
 import { seedFeedbackMemories } from './fixtures.ts';
 
 /** 下拉候选从真实账本异步加载 → 等到目标 memory 出现 */
@@ -66,5 +66,35 @@ describe('FeedbackPage (P9-T4 编排)', () => {
     fireEvent.change(screen.getByTestId('f-memory'), { target: { value: 'mem_012' } });
     fireEvent.click(screen.getByTestId('action-reject'));
     expect(screen.getByTestId('fb-warning')).toHaveTextContent(/自生长/);
+  });
+
+  it('评分真实落账本：星级 + 原因写进 memory_op 审计，统计卡按真实分布（批次48 A13）', async () => {
+    render(<FeedbackPage />);
+    await waitOption('mem_001');
+    fireEvent.change(screen.getByTestId('f-memory'), { target: { value: 'mem_001' } });
+    fireEvent.click(screen.getByTestId('star-4'));
+    fireEvent.change(screen.getByTestId('f-comment'), { target: { value: '结论可直接复用' } });
+    fireEvent.click(screen.getByTestId('fb-submit'));
+    await waitFor(() => expect(screen.getByTestId('toast')).toHaveTextContent('+0.1'));
+
+    const audits = await getKernelStorage().queryAudit({ action: 'memory_op' });
+    const last = audits[audits.length - 1].detail as { rating?: number; comment?: string; mem_id?: string };
+    expect(last.mem_id).toBe('mem_001');
+    expect(last.rating).toBe(4);                          // 真实评分，不是默认 3
+    expect(last.comment).toBe('结论可直接复用');
+    // 统计卡读真实记录：4★×1（不是 3★×1）
+    expect(screen.getByTestId('dist-4')).toHaveTextContent('4★×1');
+    expect(screen.getByTestId('dist-3')).toHaveTextContent('3★×0');
+  });
+
+  it('页面挂载读历史真实评分：账本里 rating=5 的记录直接出现在分布与均分（批次48 A13）', async () => {
+    await getKernelStorage().appendAudit({
+      request_id: 'req_seed_rating', action: 'memory_op', ts: Date.now(),
+      detail: { op: 'confirm', mem_id: 'mem_001', trust_delta: 0.1, rating: 5, comment: '真实历史评分' },
+    });
+    render(<FeedbackPage />);
+    await waitFor(() => expect(screen.getByTestId('dist-5')).toHaveTextContent('5★×1'));
+    expect(screen.getByTestId('dist-3')).toHaveTextContent('3★×0'); // 不是默认 3 星
+    expect(screen.getByTestId('stat-avg')).toHaveTextContent('均分 5');
   });
 });

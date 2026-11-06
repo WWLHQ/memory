@@ -2,7 +2,7 @@
 // 角色闸门（开关/额度/入队/重试仅管理员）、动作回执原样回显、引擎不可用时说清「只排不炼」、
 // 主进程拒绝时显示原因而不是假装 0 待炼。批次40-C 追加：深度口径文案、阶梯停层原因码分布、入队回执 thin_skipped。
 // 批次41-I 后续追加：限额/不限额切换（不限额时额度框灰掉不可改）、额度仅管理员、summary 不限额文案。
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { RefineQueueCard } from '../RefineQueueCard.tsx';
@@ -152,8 +152,9 @@ describe('RefineQueueCard（批次39）', () => {
     setHost({ setCap });
     render(<RefineQueueCard />);
     await waitFor(() => expect(screen.getByTestId('refine-cap-rows')).toBeEnabled());
-    await userEvent.clear(screen.getByTestId('refine-cap-rows'));
-    await userEvent.type(screen.getByTestId('refine-cap-rows'), '800');
+    // 闸门 A 发现的既有失败：userEvent.clear 对 type=number 不生效（jsdom 无 selection API），
+    // 会变成「500」后追加得到 500800。这里改用一次完整的受控 change，语义仍是「把额度改成 800」。
+    fireEvent.change(screen.getByTestId('refine-cap-rows'), { target: { value: '800' } });
     await userEvent.click(screen.getByTestId('refine-cap-save'));
     await waitFor(() => expect(setCap).toHaveBeenCalledTimes(1));
     expect(setCap.mock.calls[0][0]).toEqual({ enabled: true, rows: 800 });

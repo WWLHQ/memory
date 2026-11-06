@@ -6,6 +6,7 @@ import { coreGrowthAudit, coreLoadGrowthAudit } from '../coreGrowth.ts';
 import { useGrowthMirror } from '../useGrowthMirror.ts';
 import { resetKernelForTests } from '../../kernel.ts';
 import { auditOptimization } from '../logic.ts';
+import { ShortCircuitFlow } from '../DedupCards.tsx';
 
 async function renderLoaded() {
   const utils = render(<GrowthPage />);
@@ -56,5 +57,20 @@ describe('GrowthPage × 内核审计账本', () => {
 
   it('useGrowthMirror 暴露上抛回调（fire-and-forget）', () => {
     expect(typeof useGrowthMirror).toBe('function');
+  });
+
+  it('平均查重耗时只认真实采样：无采样显示「—/账本未采样」，有采样才显示 ms（批次48 A12）', () => {
+    const { rerender } = render(
+      <ShortCircuitFlow steps={[]} stats={{ short_circuit_hits: 0, merged: 0, avg_cost_ms: 0, avg_cost_samples: 0 }} />,
+    );
+    const row = screen.getByTestId('stats-24h');
+    expect(row).toHaveTextContent('平均查重耗时：—');
+    expect(row).toHaveTextContent('账本未采样');
+
+    rerender(
+      <ShortCircuitFlow steps={[]} stats={{ short_circuit_hits: 1, merged: 1, avg_cost_ms: 12.5, avg_cost_samples: 4 }} />,
+    );
+    expect(row).toHaveTextContent('12.5ms');
+    expect(row).toHaveTextContent('真实采样 4 条写入');
   });
 });

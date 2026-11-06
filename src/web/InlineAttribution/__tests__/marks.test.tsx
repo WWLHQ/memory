@@ -40,6 +40,17 @@ describe('T3 MemoryInjectionTag', () => {
     fireEvent.click(screen.getByText(/记住/));
     expect(onFeedback).toHaveBeenCalledWith('mem_005', 'confirm');
   });
+
+  it('账本无链路：request_id 空串不渲染假审计链接（批次48 A14）', () => {
+    const onOpenAudit = vi.fn();
+    const { container } = render(
+      <AttributionConfigProvider><MemoryInjectionTag mark={inj({ request_id: '' })} onOpenAudit={onOpenAudit} /></AttributionConfigProvider>,
+    );
+    fireEvent.click(screen.getByText('🧠'));
+    expect(container.querySelector('.m a')).toBeNull();
+    expect(screen.getByTestId('mem-no-trace')).toHaveTextContent('账本无链路');
+    expect(onOpenAudit).not.toHaveBeenCalled();
+  });
 });
 
 describe('T4/T5/T8 普通标记', () => {

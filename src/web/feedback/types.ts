@@ -6,6 +6,7 @@ export type FeedbackAction = 'confirm' | 'reject' | 'disputed';
 export interface FeedbackDraft {
   memory_id: string;
   action: FeedbackAction;
+  /** 1–5 星；0 = 该条历史记录未评分（旧内核/MCP 入口），统计时不计入均值与分布 */
   rating: number;
   comment: string;
 }

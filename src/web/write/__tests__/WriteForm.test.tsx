@@ -35,9 +35,10 @@ describe('WriteForm (T3)', () => {
 
   it('类别预览随类别变化', () => {
     const { rerender } = render(<WriteForm draft={base} onChange={vi.fn()} onSubmit={vi.fn()} />);
-    expect(screen.getByTestId('cat-preview')).toHaveTextContent('90 天'); // fact
+    // 批次48 A18：预览取内核 17.6 真源（旧手抄表 fact 90 / decision 180 已纠正）
+    expect(screen.getByTestId('cat-preview')).toHaveTextContent('365 天'); // fact
     rerender(<WriteForm draft={{ ...base, category: 'decision' }} onChange={vi.fn()} onSubmit={vi.fn()} />);
-    expect(screen.getByTestId('cat-preview')).toHaveTextContent('180 天'); // decision
+    expect(screen.getByTestId('cat-preview')).toHaveTextContent('30 天'); // decision
   });
 
   it('切换类别 → 触发 onChange', () => {

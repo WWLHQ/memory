@@ -49,15 +49,17 @@ export function DisputePage({ load = coreConflicts }: { load?: () => Promise<Con
     setSelectedId((cur) => (conflicts.some((r) => r.id === cur) ? cur : conflicts[0]?.id ?? null));
   }, [phase, conflicts]);
 
-  const handleVerdict = async (v: Verdict, _result: unknown, reqId: string) => {
+  const handleVerdict = async (v: Verdict, _result: unknown) => {
     if (!selected) return;
     try {
       const out = await coreVerdict(selected, v);
+      // 批次48 A19：request_id 只能来自内核裁决返回值；内核没给就不显示假 id
+      const reqId = out.kernel_request_ids[0] ?? '';
       const evt = auditPair(selected, v, reqId);
       setAuditLog((prev) => [{ ...evt, note: out.merged_mem_id ? `${evt.note}（合并记忆 ${out.merged_mem_id}）` : evt.note }, ...prev]);
-      // G6 上抛：真发 /api/mirror/audit（失败由 mirrorClient 记录并可见）
-      mirror.audit('dispute', selected as unknown as never, null as unknown as never);
-      show(`${evt.note}（${reqId}）`);
+      // G6 上抛：真发 /api/mirror/audit（失败由 mirrorClient 记录并可见），携带真实 verdict 与 request_id
+      mirror.audit('dispute', selected, v, reqId);
+      show(reqId ? `${evt.note}（${reqId}）` : `${evt.note}（内核未返回 request_id）`);
       // 内核裁决后刷新队列：resolved 出队；user_confirm/hold 保持 pending（真实语义）
       ledger.replace(await coreConflicts());
     } catch (e) {
@@ -137,7 +139,7 @@ export function DisputePage({ load = coreConflicts }: { load?: () => Promise<Con
           <ul data-testid="audit-log">
             {auditLog.map((e, i) => (
               <li key={i} data-testid={`audit-row-${i}`}>
-                <span className="mid">{e.request_id}</span> · {e.action} · {e.note}
+                <span className="mid">{e.request_id || '账本无 request_id'}</span> · {e.action} · {e.note}
               </li>
             ))}
           </ul>

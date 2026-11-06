@@ -71,9 +71,10 @@ describe('DisputeQueue (T3)', () => {
 
 describe('DisputeVerdict (T4)', () => {
   const base = SEED_CONFLICTS[0];
-  it('渲染 4 按钮与 request 预告', () => {
+  it('渲染 4 按钮，且不预生成假 request_id（真实 id 只能由内核裁决返回，批次48 A19）', () => {
     render(<DisputeVerdict record={base} onVerdict={() => {}} />);
-    expect(screen.getByText(/req_[0-9A-Z]+/)).toBeInTheDocument();
+    expect(screen.queryByText(/req_[0-9A-Za-z]+/)).toBeNull();
+    expect(screen.getByTestId('req-hint')).toHaveTextContent('内核裁决返回');
     expect(screen.getByTestId('verdict-panel')).toBeInTheDocument();
     expect(screen.getAllByTestId(/^verdict-(auto_override|user_confirm|merge|hold)$/).length).toBe(4);
   });

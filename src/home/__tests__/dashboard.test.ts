@@ -60,13 +60,15 @@ describe('T4 首页 Dashboard 数据聚合', () => {
     }
   });
 
-  it('每个异常/记忆/待办项 request_id 非空（可溯源）', () => {
+  it('账本能给的 request_id 原样透传，缺失的留空串（可溯源但不编造）', () => {
     const d = buildDashboard(ctx, raw);
     expect(d).not.toBeNull();
     if (d) {
-      expect(d.anomalies.every((a) => a.request_id && a.request_id.length > 0)).toBe(true);
-      expect(d.activeMemories.every((m) => m.request_id && m.request_id.length > 0)).toBe(true);
-      expect(d.todos.every((t) => t.request_id && t.request_id.length > 0)).toBe(true);
+      expect(d.anomalies.find((a) => a.title === 'Codex 熔断 OPEN')?.request_id).toBe('req_x1');
+      expect(d.activeMemories.every((m) => m.request_id.startsWith('req_'))).toBe(true);
+      expect(d.todos.every((t) => t.request_id.startsWith('req_'))).toBe(true);
+      // 原始数据里没有 request_id 的异常保持空串（不合成 anom_N）
+      expect(d.anomalies.find((a) => a.title === '同步慢')?.request_id).toBe('');
     }
   });
 
@@ -89,7 +91,7 @@ describe('T4 首页 Dashboard 数据聚合', () => {
     }
   });
 
-  it('缺失 request_id 的原始项被兜底生成溯源 id（保证不变量）', () => {
+  it('缺失 request_id 的原始项保持空串：不合成假溯源 id（账本没给链路就如实留空）', () => {
     const d = buildDashboard(ctx, {
       anomalies: [{ title: '无溯源', detail: 'x', level: 'warn' }],
       activeMemories: [{ title: 'm', hits: 1, decayClass: 'warm' }],
@@ -97,9 +99,14 @@ describe('T4 首页 Dashboard 数据聚合', () => {
     });
     expect(d).not.toBeNull();
     if (d) {
-      expect(d.anomalies[0].request_id).toMatch(/^anom_/);
-      expect(d.activeMemories[0].request_id).toMatch(/^mem_/);
-      expect(d.todos[0].request_id).toMatch(/^todo_/);
+      expect(d.anomalies[0].request_id).toBe('');
+      expect(d.activeMemories[0].request_id).toBe('');
+      expect(d.todos[0].request_id).toBe('');
     }
+  });
+
+  it('空白 request_id（只含空格）同样不冒充链路', () => {
+    const d = buildDashboard(ctx, { anomalies: [{ title: '空白', detail: 'y', level: 'warn', request_id: '   ' }] });
+    expect(d?.anomalies[0].request_id).toBe('');
   });
 });

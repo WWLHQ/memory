@@ -63,7 +63,7 @@ describe('批次45-B2 home 账号 → 内核成员库同步（server 集成）',
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        account: '13800000001', password: 'dave-pw-123', confirmPassword: 'dave-pw-123',
+        account: '13800000001', password: 'Dave#1234', confirmPassword: 'Dave#1234',
         captchaCode: cap.code, captchaId: cap.id, form: 'desktop',
       }),
     });
@@ -148,11 +148,11 @@ describe('批次45-B3 /api/keys 管理端点（admin 专属）', () => {
     await fetch(`${base}/api/register`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        account: '13800000002', password: 'member-pw-9', confirmPassword: 'member-pw-9',
+        account: '13800000002', password: 'Member#2026', confirmPassword: 'Member#2026',
         captchaCode: cap.code, captchaId: cap.id, form: 'desktop',
       }),
     });
-    const mem = await login('13800000002', 'member-pw-9');
+    const mem = await login('13800000002', 'Member#2026');
     expect(mem.sessionId).toBeTruthy();
     const forbidden = await fetch(`${base}/api/keys`, { headers: { 'x-session-id': mem.sessionId! } });
     expect(forbidden.status).toBe(403);

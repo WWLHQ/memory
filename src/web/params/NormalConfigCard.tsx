@@ -13,7 +13,10 @@ export function NormalConfigCard({ cfg, onChange }: Props) {
   return (
     <div className="card" data-testid="normal-config">
       <b>普通配置（17.6）</b>
-      <div className="note">按使用习惯选择，参数已折算到底层策略；改动后需点「保存」生效。</div>
+      <div className="note">
+        保存后由内核 6h 遗忘调度真实执行：遗忘速度 → 全局半衰期；保留时长 → 到龄自动归档；
+        自动整理 → 后台任务总开关；重要程度=锁定 → 全局豁免。记忆行自带 half_life_days 时以行上为准。
+      </div>
       <div className="row">
         <label>遗忘速度</label>
         {(['slow', 'mid', 'fast'] as const).map((s) => (
@@ -26,7 +29,7 @@ export function NormalConfigCard({ cfg, onChange }: Props) {
             {SPEED_LABEL[s]}
           </label>
         ))}
-        <span className="dim">（半衰期折算 {speedToHalfLife(cfg.forget_speed)} 天）</span>
+        <span className="dim">（内核全局半衰期 {speedToHalfLife(cfg.forget_speed)} 天；行上自带值优先）</span>
       </div>
       <div className="row">
         <label>保留时长</label>
@@ -40,7 +43,7 @@ export function NormalConfigCard({ cfg, onChange }: Props) {
             {RETENTION_LABEL[r]}
           </label>
         ))}
-        <span className="dim">（归档阈值折算 {retentionToArchive(cfg.retention)} 天）</span>
+        <span className="dim">（到龄自动归档阈值 {retentionToArchive(cfg.retention)} 天）</span>
       </div>
       <div className="row">
         <label>自动整理</label>
@@ -62,7 +65,7 @@ export function NormalConfigCard({ cfg, onChange }: Props) {
             {IMPORTANCE_LABEL[i]}
           </label>
         ))}
-        <span className="dim">锁定 → 全局豁免后台任务</span>
+        <span className="dim">锁定 → 全局豁免后台任务（本轮只记 skipped 审计）</span>
       </div>
       <div className="row">
         <label>成本单价</label>
