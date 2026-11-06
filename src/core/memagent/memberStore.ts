@@ -13,6 +13,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { scopeHasWildcard, type McpAccount } from './mcpAuth.ts';
 
 export type MemberRole = 'admin' | 'member';
 export type MemberStatus = 'active' | 'suspended';
@@ -206,6 +207,11 @@ export class InMemoryMemberStore implements MemberStorePort {
     const owner = this.getMember(input.owner_member_id);
     if (!owner) throw new Error(`mintApiKey.owner_member_id 不存在：${input.owner_member_id}`);
     if (owner.status !== 'active') throw new Error(`mintApiKey：成员 ${owner.member_id} 状态为 ${owner.status}，已停用成员不可签发`);
+    // 批次45-B3（45-A3 收紧口径延伸到 API 密钥域）：'*' 全放行仅限 admin **角色**成员的密钥——
+    // member 角色成员的密钥必须显式列出可见项目（与 mint_token 同一口径，防止单机默认泄漏）
+    if (owner.role !== 'admin' && scopeHasWildcard(input.scope_project_ids)) {
+      throw new Error(`mintApiKey：scope_project_ids 含 '*' 仅限 admin 角色成员的密钥（45-A3 口径）；成员 ${owner.member_id} 角色为 ${owner.role}，请显式列出可见项目`);
+    }
     const key = `apk_${randomBytes(32).toString('hex')}`;
     const record: ApiKeyRecord = {
       key_id: `key_${randomBytes(12).toString('hex')}`,
@@ -336,4 +342,28 @@ export class FileMemberStore extends InMemoryMemberStore {
     if (rec) this.save();
     return rec;
   }
+}
+
+/**
+ * 批次45-B3：按 API 密钥明文解析 MCP 会话账户（鉴权链第三环，mcpAuth 由 key 而来）。
+ * 解析语义（fail-closed，绝不放行存疑凭据）：
+ *   ① resolveSecret 未命中 / 已吊销 → null（吊销 = 不存在，不泄露曾存在）；
+ *   ② owner 成员不存在 / 已停用（suspended）→ null——成员停用立即断其全部密钥；
+ *   ③ owner 非 admin 角色而密钥 scope 含 '*'（存量/被篡改记录）→ null（45-A3 收紧口径 fail-closed）；
+ *   ④ 命中 → McpAccount：租户三元组取 owner 成员（45-A1 归一身份域），scope 取密钥，
+ *      is_admin = owner.role === 'admin'（B2 角色映射进 MCP 门禁）。
+ */
+export function resolveApiKeyAccount(store: MemberStorePort, candidate: string | undefined, now?: number): McpAccount | null {
+  const rec = store.resolveSecret(candidate, now);
+  if (!rec) return null;
+  const owner = store.getMember(rec.owner_member_id);
+  if (!owner || owner.status !== 'active') return null;
+  if (owner.role !== 'admin' && scopeHasWildcard(rec.scope_project_ids)) return null;
+  return {
+    user_id: owner.user_id,
+    team_id: owner.team_id,
+    enterprise_id: owner.enterprise_id,
+    scope_project_ids: [...rec.scope_project_ids],
+    is_admin: owner.role === 'admin',
+  };
 }

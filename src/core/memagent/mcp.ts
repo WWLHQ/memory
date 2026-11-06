@@ -12,6 +12,7 @@ import { JsVectorBackend } from './vector.ts';
 import { FakeLlmProvider } from './llm.ts';
 import { assertMcpToken, DEFAULT_MCP_ACCOUNT, projectInScope, type McpAccount } from './mcpAuth.ts';
 import { resolveAccountFor, type TokenStorePort } from './tokenStore.ts';
+import type { MemberStorePort } from './memberStore.ts';
 import { MCP_INSTRUCTIONS, MCP_TOOLS } from './mcpSchema.ts';
 import { McpToolError, runListProjectsTool, runRecallTool } from './mcpRecall.ts';
 import type { StorageBackend, Pref, L0Port, MemReq, WriteResult } from './types.ts';
@@ -96,6 +97,8 @@ export interface McpOptions {
   account?: McpAccount;
   /** D6-4 令牌代理：受限令牌库（缺省无库 = 仅引导令牌可用，现状行为不变） */
   tokenStore?: TokenStorePort;
+  /** 批次45-B3：成员 API 密钥库（apk_）——鉴权链第三环；缺省未装配 = 仅引导/令牌库可用（现状不变） */
+  memberStore?: MemberStorePort;
   /** 单行 JSON 上限（字节），缺省 1 MiB */
   maxLineBytes?: number;
   /** 批次44-D4：共享 pending 队列存储端口；缺省内存实现，桌面建议注入 FilePendingStore */
@@ -158,7 +161,7 @@ export function runMcpServer(opts: McpOptions): McpServerHandle {
       const st = stateOf(socket);
       if (!st.authed) {
         const resolved = resolveAccountFor(typeof p.token === 'string' ? p.token : undefined, {
-          serverToken: token, store: opts.tokenStore, bootstrap: account,
+          serverToken: token, store: opts.tokenStore, bootstrap: account, memberStore: opts.memberStore,
         });
         if (!resolved) {
           send(socket, jsonError(req.id, -32001, 'unauthorized: 缺少或无效的 MCP token'));

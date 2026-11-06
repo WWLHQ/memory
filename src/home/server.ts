@@ -567,6 +567,82 @@ export function createServer(opts: ServerOptions): HomeServer {
           return;
         }
 
+        // ── 批次45-B3：成员 API 密钥管理（仅 admin 会话；明文只在 mint 响应出现一次）─────────
+        if (req.method === 'GET' && path === '/api/keys') {
+          const s = getSession(sessionIdOf(req));
+          if (!s) { send(res, 401, { ok: false, reason: 'no_session' }); return; }
+          if (s.context.role !== 'admin') {
+            log('home', 'keys_forbidden', { account: s.context.user_id });
+            send(res, 403, { ok: false, reason: 'forbidden' });
+            return;
+          }
+          if (!opts.memberStore) { send(res, 501, { ok: false, error: '内核成员库未装配（memberStore）' }); return; }
+          // 视图只含元数据：secret_hash 是 sha256，仍不外泄（无用且无必要）
+          const items = opts.memberStore.listApiKeys({ include_revoked: true }).map((k) => ({
+            key_id: k.key_id, owner_member_id: k.owner_member_id, scope_project_ids: k.scope_project_ids,
+            label: k.label, created_at: k.created_at, created_by: k.created_by,
+            revoked_at: k.revoked_at, revoked_by: k.revoked_by,
+          }));
+          send(res, 200, { ok: true, items });
+          return;
+        }
+
+        if (req.method === 'POST' && path === '/api/keys/mint') {
+          const s = getSession(sessionIdOf(req));
+          if (!s) { send(res, 401, { ok: false, reason: 'no_session' }); return; }
+          if (s.context.role !== 'admin') {
+            log('home', 'keys_mint_forbidden', { account: s.context.user_id });
+            send(res, 403, { ok: false, reason: 'forbidden' });
+            return;
+          }
+          if (!opts.memberStore) { send(res, 501, { ok: false, error: '内核成员库未装配（memberStore）' }); return; }
+          const body = await readJsonBody(req, maxBodyBytes);
+          const owner = typeof body.owner_member_id === 'string' ? body.owner_member_id.trim() : '';
+          const scope = Array.isArray(body.scope_project_ids) ? body.scope_project_ids : [];
+          const label = typeof body.label === 'string' ? body.label.trim() : undefined;
+          if (!owner || scope.length === 0 || scope.some((x) => typeof x !== 'string' || !x.trim())) {
+            send(res, 400, { ok: false, error: 'owner_member_id 与 scope_project_ids（非空字符串数组）必填' });
+            return;
+          }
+          try {
+            const minted = opts.memberStore.mintApiKey({
+              owner_member_id: owner,
+              scope_project_ids: scope.map((x) => String(x).trim()),
+              ...(label ? { label } : {}),
+              created_by: s.context.user_id,
+            });
+            // 审计不含明文（key_id 是可追溯句柄；明文只在本次响应出现一次）
+            appendAudit({ action: 'key_mint', form: 'desktop', account: s.context.user_id, at: Date.now() });
+            log('home', 'key_mint', { by: s.context.user_id, owner, key_id: minted.record.key_id, scope: minted.record.scope_project_ids });
+            send(res, 200, { ok: true, key: minted.key, record: { ...minted.record, secret_hash: undefined } });
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            log('home', 'key_mint_rejected', { by: s.context.user_id, owner, error: msg });
+            send(res, 400, { ok: false, error: msg });
+          }
+          return;
+        }
+
+        if (req.method === 'POST' && path === '/api/keys/revoke') {
+          const s = getSession(sessionIdOf(req));
+          if (!s) { send(res, 401, { ok: false, reason: 'no_session' }); return; }
+          if (s.context.role !== 'admin') {
+            log('home', 'keys_revoke_forbidden', { account: s.context.user_id });
+            send(res, 403, { ok: false, reason: 'forbidden' });
+            return;
+          }
+          if (!opts.memberStore) { send(res, 501, { ok: false, error: '内核成员库未装配（memberStore）' }); return; }
+          const body = await readJsonBody(req, maxBodyBytes);
+          const keyId = typeof body.key_id === 'string' ? body.key_id.trim() : '';
+          if (!keyId) { send(res, 400, { ok: false, error: 'key_id 必填' }); return; }
+          const rec = opts.memberStore.revokeApiKey(keyId, s.context.user_id);
+          if (!rec) { send(res, 404, { ok: false, error: '密钥不存在' }); return; }
+          appendAudit({ action: 'key_revoke', form: 'desktop', account: s.context.user_id, at: Date.now() });
+          log('home', 'key_revoke', { by: s.context.user_id, key_id: keyId, owner: rec.owner_member_id });
+          send(res, 200, { ok: true, record: { ...rec, secret_hash: undefined } });
+          return;
+        }
+
         if (req.method === 'POST' && path === '/api/password') {
           const s = getSession(sessionIdOf(req));
           if (!s) { send(res, 401, { ok: false, reason: 'no_session' }); return; }

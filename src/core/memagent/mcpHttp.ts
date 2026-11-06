@@ -15,6 +15,7 @@ import { FakeLlmProvider } from './llm.ts';
 import { ulid } from './ulid.ts';
 import { assertMcpToken, tokenFromHeaders, DEFAULT_MCP_ACCOUNT, projectInScope, type McpAccount } from './mcpAuth.ts';
 import { resolveAccountFor, type TokenStorePort } from './tokenStore.ts';
+import type { MemberStorePort } from './memberStore.ts';
 import { MCP_INSTRUCTIONS, MCP_TOOLS } from './mcpSchema.ts';
 import { runListProjectsTool, runRecallTool, type RecallDisplayMode } from './mcpRecall.ts';
 import { RecallDetailTickets } from './recallDetailTickets.ts';
@@ -139,6 +140,8 @@ export interface McpHttpOptions {
   account?: McpAccount;
   /** D6-4 令牌代理：受限令牌库（缺省无库 = 仅引导令牌可用，现状行为不变） */
   tokenStore?: TokenStorePort;
+  /** 批次45-B3：成员 API 密钥库（apk_）——鉴权链第三环；缺省未装配 = 仅引导/令牌库可用（现状不变） */
+  memberStore?: MemberStorePort;
   /** 请求体上限（字节），缺省 1 MiB */
   maxBodyBytes?: number;
   /**
@@ -440,7 +443,7 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
     // D6-4：令牌 → 账户按库解析（引导令牌 → 引导账户；库令牌 → 各自 scope/is_admin/user_id；
     // 未配置库时仅引导令牌可用 = 现状行为不变）。解析失败一律 401。
     const reqAccount = resolveAccountFor(tokenFromHeaders(req.headers), {
-      serverToken: token, store: opts.tokenStore, bootstrap: account,
+      serverToken: token, store: opts.tokenStore, bootstrap: account, memberStore: opts.memberStore,
     });
     if (!reqAccount) {
       res.writeHead(401, { 'Content-Type': 'application/json', 'WWW-Authenticate': 'Bearer' });

@@ -13,6 +13,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { tokenEquals, DEFAULT_MCP_ACCOUNT, scopeHasWildcard, type McpAccount } from './mcpAuth.ts';
+import { resolveApiKeyAccount, type MemberStorePort } from './memberStore.ts';
 
 /** 令牌库记录：token_hash = sha256(明文) hex —— 绝不存明文 */
 export interface TokenRecord {
@@ -203,18 +204,26 @@ export class FileTokenStore implements TokenStorePort {
 }
 
 /**
- * 鉴权编排（D6-4）：按候选令牌解析会话账户。
+ * 鉴权编排（D6-4 → 45-B3 三环）：
  * ① 与引导令牌（serverToken）常数时间相等 → 引导账户（默认 admin，McpOptions.account 可覆盖）；
- * ② 否则查令牌库 → 命中返回库账户；
- * ③ 未配置库或未命中 → null（传输层回 unauthorized；无库时仅引导令牌可用 = 现状行为不变）。
+ * ② 查受限令牌库（mtk_）→ 命中返回库账户；
+ * ③ 查成员 API 密钥（apk_，45-B3）→ 按 owner 成员解析账户（role=admin 映射 is_admin；吊销/停用 fail-closed）；
+ * ④ 未配置任何库或全部未命中 → null（传输层回 unauthorized；仅引导令牌可用 = 现状行为不变）。
  */
 export function resolveAccountFor(
   candidate: string | undefined,
-  opts: { serverToken: string; store?: TokenStorePort; bootstrap?: McpAccount },
+  opts: { serverToken: string; store?: TokenStorePort; bootstrap?: McpAccount; memberStore?: MemberStorePort },
 ): McpAccount | null {
   if (tokenEquals(candidate, opts.serverToken)) {
     return opts.bootstrap ?? DEFAULT_MCP_ACCOUNT;
   }
-  if (opts.store) return opts.store.resolve(candidate);
+  if (opts.store) {
+    const viaToken = opts.store.resolve(candidate);
+    if (viaToken) return viaToken;
+  }
+  if (opts.memberStore) {
+    const viaKey = resolveApiKeyAccount(opts.memberStore, candidate);
+    if (viaKey) return viaKey;
+  }
   return null;
 }

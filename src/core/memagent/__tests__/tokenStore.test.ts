@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_MCP_ACCOUNT } from '../mcpAuth.ts';
 import { InMemoryTokenStore, FileTokenStore, resolveAccountFor } from '../tokenStore.ts';
+import { InMemoryMemberStore } from '../memberStore.ts';
 
 const SERVER_TOKEN = 'bootstrap-token-0123456789abcdef0123456789abcdef';
 
@@ -176,5 +177,40 @@ describe('批次45-A3："*" 仅属本机属主引导账户', () => {
     const store = new FileTokenStore(file);
     expect(store.resolve(plain)).toBeNull(); // fail-closed，绝不放行
     expect(store.list()).toHaveLength(1);     // 记录还在（可审计），只是解析即拒
+  });
+});
+
+describe('批次45-B3：鉴权链第三环（成员 API 密钥 apk_）', () => {
+  it('resolveAccountFor：引导令牌 > mtk_ 令牌 > apk_ 密钥 三环顺序；apk_ 按 owner 成员解析', () => {
+    const tokens = new InMemoryTokenStore();
+    const members = new InMemoryMemberStore();
+    members.createMember({ member_id: 'carol', name: 'carol', role: 'member', user_id: 'carol', team_id: 'team_c', enterprise_id: 'local', created_by: 'x' });
+    const { key } = members.mintApiKey({ owner_member_id: 'carol', scope_project_ids: ['P1'], created_by: 'x' });
+    const opts = { serverToken: SERVER_TOKEN, store: tokens, memberStore: members };
+    // 三环 1：引导令牌
+    expect(resolveAccountFor(SERVER_TOKEN, opts)).toMatchObject({ is_admin: true });
+    // 三环 3：apk_ 密钥 → owner 成员身份 + scope；member 角色 → is_admin false
+    const acct = resolveAccountFor(key, opts);
+    expect(acct).toMatchObject({
+      user_id: 'carol', team_id: 'team_c', enterprise_id: 'local',
+      scope_project_ids: ['P1'], is_admin: false,
+    });
+    // 三环 2：mtk_ 优先于 apk_（令牌库命中即返回）
+    const { token: mtk } = tokens.mint({ user_id: 'alice', scope_project_ids: ['P9'], is_admin: true, created_by: 'u1' });
+    expect(resolveAccountFor(mtk, opts)).toMatchObject({ user_id: 'alice' });
+    // 全部未命中 → null
+    expect(resolveAccountFor('apk_unknown', opts)).toBeNull();
+    // 未装配 memberStore：apk_ 不可用（现状不变）
+    expect(resolveAccountFor(key, { serverToken: SERVER_TOKEN, store: tokens })).toBeNull();
+  });
+
+  it('admin 角色成员的密钥映射 is_admin=true；吊销后 401 链路（null）', () => {
+    const members = new InMemoryMemberStore();
+    members.createMember({ member_id: 'root', name: 'root', role: 'admin', user_id: 'u1', team_id: 't1', enterprise_id: 'e1', created_by: 'x' });
+    const { key, record } = members.mintApiKey({ owner_member_id: 'root', scope_project_ids: ['*'], created_by: 'x' });
+    const opts = { serverToken: SERVER_TOKEN, memberStore: members };
+    expect(resolveAccountFor(key, opts)).toMatchObject({ is_admin: true, scope_project_ids: ['*'] });
+    members.revokeApiKey(record.key_id, 'root');
+    expect(resolveAccountFor(key, opts)).toBeNull();
   });
 });

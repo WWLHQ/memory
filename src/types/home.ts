@@ -57,7 +57,8 @@ export type LoginFailReason = 'empty' | 'no_account' | 'wrong' | 'locked' | 'bac
 /** 登录审计事件（§4.3：登录必记审计 action=login · form:<端>；4.3.1 统一审计枚举 login/logout/login_fail/team_assign；
  *  批次7 追加 admin_seed/password_change/role_change） */
 export interface LoginAudit {
-  action: 'login' | 'login_fail' | 'logout' | 'team_assign' | 'admin_seed' | 'password_change' | 'role_change';
+  action: 'login' | 'login_fail' | 'logout' | 'team_assign' | 'admin_seed' | 'password_change' | 'role_change'
+    | 'key_mint' | 'key_revoke'; // 批次45-B3：成员 API 密钥轮换/撤销走管理员 + 审计（不含明文）
   form: Form;
   account: string;
   at: number;

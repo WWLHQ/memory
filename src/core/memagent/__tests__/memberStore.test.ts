@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, statSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  InMemoryMemberStore, FileMemberStore,
+  InMemoryMemberStore, FileMemberStore, resolveApiKeyAccount,
   type CreateMemberInput, type MintApiKeyInput,
 } from '../memberStore.ts';
 
@@ -145,5 +145,58 @@ describe('FileMemberStore：真实空表 + 持久化 + 损坏 fail-fast', () => 
     expect(() => new FileMemberStore(file2)).toThrow(/成员库损坏/);
     // 既有数据不被静默清空：损坏文件内容原样保留
     expect(readFileSync(file2, 'utf8')).toContain('not-array');
+  });
+});
+
+describe("批次45-B3：API 密钥进 MCP 门（'*' 门禁延伸 + resolveApiKeyAccount）", () => {
+  it('mintApiKey：member 角色成员签含 "*" 的 scope → 拒签（45-A3 口径延伸）；admin 角色成员放行', () => {
+    const s = new InMemoryMemberStore();
+    s.createMember(alice, NOW); // alice 是 admin 角色
+    s.createMember({ ...alice, member_id: 'mb_mem', name: 'Mem', role: 'member' }, NOW);
+    expect(() => s.mintApiKey({ owner_member_id: 'mb_mem', scope_project_ids: ['*'], created_by: 'x' }, NOW))
+      .toThrow(/仅限 admin 角色成员/);
+    expect(() => s.mintApiKey({ owner_member_id: 'mb_mem', scope_project_ids: ['*', 'P1'], created_by: 'x' }, NOW))
+      .toThrow(/45-A3/);
+    // admin 角色成员的密钥可持 '*'（本机属主委托）
+    const { record } = s.mintApiKey({ owner_member_id: 'mb_alice', scope_project_ids: ['*'], created_by: 'x' }, NOW);
+    expect(record.scope_project_ids).toEqual(['*']);
+    // member 角色成员签显式 scope 放行
+    const r2 = s.mintApiKey({ owner_member_id: 'mb_mem', scope_project_ids: ['P1'], created_by: 'x' }, NOW);
+    expect(r2.record.scope_project_ids).toEqual(['P1']);
+  });
+
+  it('resolveApiKeyAccount：命中 → owner 三元组 + scope + role=admin 映射 is_admin', () => {
+    const s = new InMemoryMemberStore();
+    s.createMember(alice, NOW); // admin 角色，t1/e1
+    const { key, record } = s.mintApiKey({ owner_member_id: 'mb_alice', scope_project_ids: ['P1'], created_by: 'x' }, NOW);
+    const acct = resolveApiKeyAccount(s, key, NOW);
+    expect(acct).not.toBeNull();
+    expect(acct).toMatchObject({
+      user_id: 'u1', team_id: 't1', enterprise_id: 'e1',
+      scope_project_ids: ['P1'], is_admin: true,
+    });
+    expect(record.key_id).toBeTruthy();
+  });
+
+  it('resolveApiKeyAccount fail-closed：未命中 / 已吊销 / owner 已停用 / member 角色 idx存量 "*" 记录 → 全部 null', () => {
+    const s = new InMemoryMemberStore();
+    s.createMember({ ...alice, member_id: 'mb_mem', name: 'Mem', role: 'member' }, NOW);
+    const { key } = s.mintApiKey({ owner_member_id: 'mb_mem', scope_project_ids: ['P1'], created_by: 'x' }, NOW);
+    expect(resolveApiKeyAccount(s, key, NOW)).toMatchObject({ is_admin: false });
+    // 吊销 → null
+    s.revokeApiKey(s.listApiKeys()[0].key_id, 'x', NOW + 1);
+    expect(resolveApiKeyAccount(s, key, NOW + 2)).toBeNull();
+    // 停用成员 → 其密钥立即失效
+    const { key: k2 } = s.mintApiKey({ owner_member_id: 'mb_mem', scope_project_ids: ['P2'], created_by: 'x' }, NOW + 3);
+    s.createMember({ ...alice, member_id: 'mb_tmp', name: 'T', role: 'member' }, NOW);
+    const { key: k3 } = s.mintApiKey({ owner_member_id: 'mb_tmp', scope_project_ids: ['P3'], created_by: 'x' }, NOW);
+    // 手工停用 mb_tmp（updateMember 无 status —— 用内部状态模拟内核侧停用动作）
+    const inner = s as unknown as { members: Array<{ member_id: string; status: string }> };
+    inner.members.find((m) => m.member_id === 'mb_tmp')!.status = 'suspended';
+    expect(resolveApiKeyAccount(s, k3, NOW + 4)).toBeNull(); // 停用立即断密钥
+    expect(resolveApiKeyAccount(s, k2, NOW + 4)).toMatchObject({ scope_project_ids: ['P2'] }); // 未停用不受影响
+    // 未命中
+    expect(resolveApiKeyAccount(s, 'apk_deadbeef', NOW)).toBeNull();
+    expect(resolveApiKeyAccount(s, undefined, NOW)).toBeNull();
   });
 });
