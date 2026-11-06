@@ -88,6 +88,17 @@ describe('阶段5-C · mirror 真接 + 失败可见', () => {
     expect(getLastMirrorFailure()?.reason).toBe('HTTP 500');
   });
 
+  it('⑱ 未登录启动：mirrorFetch HTTP 401 → 空结果但不报全局故障（不弹「镜像上抛失败」）', async () => {
+    fetchSpy.mockResolvedValueOnce({ ok: false, status: 401 });
+    const seen: string[] = [];
+    const off = subscribeMirrorFailure((f) => seen.push(f.reason));
+    expect(await mirrorFetch('mirror')).toEqual({ items: [], total: 0 });
+    await Promise.resolve();
+    expect(seen).toHaveLength(0);
+    expect(getLastMirrorFailure()).toBeNull();
+    off();
+  });
+
   it('⑧ mirrorFetch 成功 → 返回真实账本数据，无失败记录', async () => {
     fetchSpy.mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ items: [{ seq: 1 }], total: 1 }) });
     expect(await mirrorFetch('audit')).toEqual({ items: [{ seq: 1 }], total: 1 });

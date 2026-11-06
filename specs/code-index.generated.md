@@ -289,7 +289,7 @@
 | [src/web/memory/types.ts](src/web/memory/types.ts) | 90 | 记忆管理页（REQ-006 / P8）数据模型 | MemoryRecord(type), OpResult(type), MemoryStoreLocation(type), MemoryStatus(type), DecayClass(type), MemoryType(type), MemoryOp(type) |
 | [src/web/memory/useMemoryMirror.ts](src/web/memory/useMemoryMirror.ts) | 19 | 记忆管理页后端镜像（阶段5-C 口径统一）：真接 home server POST /api/mirror/audit。 | useMemoryMirror(fn), MemoryMirror(type) |
 | [src/web/memory/useToast.tsx](src/web/memory/useToast.tsx) | 22 | 轻量 toast hook（T5）：返回展示节点与 show(msg) | useToast(fn) |
-| [src/web/mirrorClient.ts](src/web/mirrorClient.ts) | 94 | REQ-006 端壳 mirror 客户端（G6 审计上抛）：fire-and-forget，失败可观测。 | mirrorBackendUrl(fn), getLastMirrorFailure(fn), resetMirrorFailures(fn), subscribeMirrorFailure(fn), mirrorReport(fn), mirrorFetch(fn) |
+| [src/web/mirrorClient.ts](src/web/mirrorClient.ts) | 101 | REQ-006 端壳 mirror 客户端（G6 审计上抛）：fire-and-forget，失败可观测。 | mirrorBackendUrl(fn), getLastMirrorFailure(fn), resetMirrorFailures(fn), subscribeMirrorFailure(fn), mirrorReport(fn), mirrorFetch(fn) |
 | [src/web/models/LlmUsageTable.tsx](src/web/models/LlmUsageTable.tsx) | 113 | P13-T3 LLM 四用途表：本地/网络复选 + 端点/Key 脱敏槽 + 温度 + 超时 + fallback 恒开（R1/R2/R3/R4） | LlmUsageTable(fn) |
 | [src/web/models/ModelsPage.tsx](src/web/models/ModelsPage.tsx) | 175 | 大模型配置页（REQ-009 / P13）T4 编排 | ModelsPage(fn) |
 | [src/web/models/ProxyPanel.tsx](src/web/models/ProxyPanel.tsx) | 148 | P13-T3 反代理面板：来源映射表 + 来源单选 + auto/manual 模式 + price_cap/cost_cap/预算条（19.8 / R7–R12） | ProxyPanel(fn), ProxyState(type) |
@@ -632,7 +632,7 @@ src/web/memory/memoryLayeredEntry.tsx 329f002ac527
 src/web/memory/types.ts cdd9cf789484
 src/web/memory/useMemoryMirror.ts 50fcdb730ba3
 src/web/memory/useToast.tsx c650d8662672
-src/web/mirrorClient.ts 940d5a2b9fd4
+src/web/mirrorClient.ts f097d285d960
 src/web/models/LlmUsageTable.tsx 074fe4014d88
 src/web/models/ModelsPage.tsx 3989099b471b
 src/web/models/ProxyPanel.tsx 844b5d4ee462

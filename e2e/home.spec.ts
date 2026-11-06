@@ -50,6 +50,9 @@ test.describe('REQ-005 首页与登录卡片 · 点击级 E2E', () => {
     await expect(page.locator('#dashGrid')).toHaveCount(0);
     // 程序运行日志窗口已迁至日志记录页（批次19）：首页不再渲染
     await expect(page.locator('#programLog')).toHaveCount(0);
+    // 未登录启动会触发 mirror 查询 → 服务端如实 401；这是预期状态，不得弹「镜像上抛失败」全局提示
+    await page.waitForLoadState('networkidle');
+    await expect(page.getByTestId('mirror-failure-notice')).toHaveCount(0);
     expect(errors).toEqual([]);
   });
 

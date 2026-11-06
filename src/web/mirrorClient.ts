@@ -81,6 +81,13 @@ export async function mirrorFetch(source?: string, limit = 50): Promise<{ items:
     u.searchParams.set('limit', String(limit));
     const sid = currentSessionId();
     const res = await fetch(u.toString(), { headers: sid ? { 'x-session-id': sid } : {} });
+    // 401 = 未登录 / 会话失效（服务端 sessions 为进程内状态，应用重启后旧 sid 即失效），
+    // 是打开应用时的预期状态，不是「可选后端不可达」。若按失败记录，全局提示条会在每次
+    // 未登录启动时误报「镜像上抛失败」。身份由页面自身登录门禁处理，这里只留 warn 运行日志。
+    if (res.status === 401) {
+      uiLog('mirror', 'fetch_unauthorized', { source: source ?? 'mirror' }, { level: 'warn' });
+      return { items: [], total: 0 };
+    }
     if (!res.ok) {
       recordFailure(source ?? 'mirror', 'fetch', `HTTP ${res.status}`);
       return { items: [], total: 0 };
