@@ -202,3 +202,44 @@ describe('PgSyncHub × 三端引擎集成（syncUp/syncDown/reconcile）', () =>
     await pgHub2.close();
   }, 20_000); // 同上：两次 PGlite 启停，慢盘/并行下超 5s
 });
+
+describe('PgSyncHub B1 多机硬过滤（multiTenant + canonicalTenant）', () => {
+  const canon = { team_id: 't-canon', enterprise_id: 'e1', user_id: 'u1' };
+
+  it('规范团队正常读写；跨机伪造 team_id 的 push/pull/reconcile 全部 fail-closed 拒绝', async () => {
+    const hub = new PgSyncHub(undefined, { multiTenant: true, canonicalTenant: canon });
+    await hub.init();
+    // 规范团队：正常
+    expect(await hub.push(mem({ mem_id: 'c1', team_id: 't-canon', content: 'canon note' }), 'desktop')).toBe('applied');
+    const r = await hub.pull({ team_id: 't-canon' }, 0);
+    expect(r.items.map((m) => m.mem_id)).toContain('c1');
+    expect((await hub.reconcile({ team_id: 't-canon' })).items.map((m) => m.mem_id)).toContain('c1');
+
+    // 跨机伪造：push 拒（B1 入口拦截，中枢不落入侵者数据）
+    await expect(hub.push(mem({ mem_id: 'evil1', team_id: 't-evil', content: 'intrusion' }), 'desktop'))
+      .rejects.toThrow(/B1/);
+    // 跨机伪造：pull 拒
+    await expect(hub.pull({ team_id: 't-evil' }, 0)).rejects.toThrow(/B1/);
+    // 跨机伪造：reconcile 拒
+    await expect(hub.reconcile({ team_id: 't-evil' })).rejects.toThrow(/B1/);
+    // 中枢确未落入侵者数据（规范团队视图里看不到 evil1）
+    expect((await hub.reconcile({ team_id: 't-canon' })).items.map((m) => m.mem_id)).not.toContain('evil1');
+    await hub.close();
+  });
+
+  it('未开 multiTenant（单机默认）：不做团队硬过滤，跨团队写入照常', async () => {
+    const hub = new PgSyncHub(undefined); // 默认不启用 B1
+    await hub.init();
+    expect(await hub.push(mem({ mem_id: 'x1', team_id: 't-other', content: 'other team' }), 'desktop')).toBe('applied');
+    const r = await hub.pull({ team_id: 't-other' }, 0);
+    expect(r.items.map((m) => m.mem_id)).toContain('x1');
+    await hub.close();
+  });
+
+  it('canonicalTenant 未传但 multiTenant=1：等效关闭（无基准比对），不误拒', async () => {
+    const hub = new PgSyncHub(undefined, { multiTenant: true }); // 无 canonicalTenant
+    await hub.init();
+    expect(await hub.push(mem({ mem_id: 'y1', team_id: 't-any', content: 'any team' }), 'desktop')).toBe('applied');
+    await hub.close();
+  });
+});

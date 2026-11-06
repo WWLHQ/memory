@@ -1,13 +1,93 @@
 // PgSyncHub（REQ-008 §2 服务端中枢 Postgres 落地）：与内存版 SyncHub 接口同构、语义一致。
 // 基于 @electric-sql/pglite（进程内真 Postgres WASM）：无参 = 内存库；传 dataDir = 落盘持久化。
+//
+// B4（批次B类）：中枢可配置——默认（SYNC_HUB_PG_URL 未设）= 单机 pglite 落盘（现状行为零变化）；
+//   设了 URL = 接远端 Postgres（共享中枢，多机前提），SQL 为标准 PG 方言，pglite / pg 双后端同构。
+// B1（批次B类）：多机硬过滤——SYNC_MULTI_TENANT=1 且传入 canonicalTenant 时，push/pull 拒绝非规范
+//   团队的读写（跨机伪造 team_id fail-closed）；单机 pglite 各端独立，B1 无意义、默认不启用。
+//
 // 账本：hub_memories（镜像 + 全局单调 version_seq + #loser# 墓碑行）/ hub_seen（sha256 幂等）
-//       / hub_conflicts（9.7 裁决队列）/ hub_audits（§6 审计）/ hub_meta（cursor 游标）。
+//       / hub_conflicts（9.7 裁决队列）/ hub_audits（§6 审计）/ hub_meta（cursor 游标 + canonical_tenant）。
 import { PGlite } from '@electric-sql/pglite';
+import type { Pool } from 'pg';
 import { ulid } from './ulid.ts';
 import { sha256hex, type SyncAudit, type SyncConflict, vcCompare } from './sync.ts';
 import type { Form, Memory } from './types.ts';
 
 type PushResult = 'applied' | 'dedup' | 'behind' | 'conflict' | 'lww';
+
+/** 中枢底层数据访问抽象：pglite 与远端 pg 共用同一套标准 PG SQL（B4 双后端同构） */
+export interface HubDb {
+  exec(sql: string): Promise<void>;
+  query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: T[] }>;
+  close(): Promise<void>;
+}
+
+/** pglite 后端（默认）：进程内 WASM Postgres，无参=内存、dataDir=落盘 */
+class PgliteBackend implements HubDb {
+  private db: PGlite;
+  constructor(dataDir?: string) {
+    this.db = new PGlite(dataDir);
+  }
+  async exec(sql: string): Promise<void> {
+    await this.db.exec(sql);
+  }
+  async query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: T[] }> {
+    return this.db.query<T>(sql, params);
+  }
+  async close(): Promise<void> {
+    await this.db.close();
+  }
+}
+
+/** 远端 pg 后端（B4）：依赖 `pg` 客户端；构造期只存 URL，connect()（init 内）才动态加载并建连接。
+ *  未安装 pg 或未提供服务端时，仅当 SYNC_HUB_PG_URL 被设置才触发加载——默认 pglite 路径零依赖。 */
+class PgRemoteBackend implements HubDb {
+  private pool: Pool | null = null;
+  constructor(private readonly pgUrl: string) {}
+
+  async connect(): Promise<void> {
+    if (this.pool) return;
+    // 动态加载：避免默认 pglite 路径硬依赖 pg（纯 JS 客户端，但仅远端模式需要）
+    const pg = await import('pg');
+    this.pool = new pg.Pool({ connectionString: this.pgUrl });
+  }
+
+  async exec(sql: string): Promise<void> {
+    if (!this.pool) throw new Error('PgRemoteBackend 未连接（先调 connect）');
+    // 简单查询协议支持多语句（SCHEMA 内含多条 CREATE TABLE）
+    await this.pool.query(sql);
+  }
+
+  async query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: T[] }> {
+    if (!this.pool) throw new Error('PgRemoteBackend 未连接（先调 connect）');
+    const res = await (params ? this.pool.query(sql, params) : this.pool.query(sql));
+    return { rows: (res.rows ?? []) as T[] };
+  }
+
+  async close(): Promise<void> {
+    if (this.pool) {
+      await this.pool.end();
+      this.pool = null;
+    }
+  }
+}
+
+/** B1 多机规范三元组（中枢层硬过滤比对基准） */
+export interface CanonicalTenant {
+  team_id: string;
+  enterprise_id: string;
+  user_id?: string;
+}
+
+export interface PgSyncHubOptions {
+  /** B4：远端 PG 连接串；设了且 pg 已安装 → 走远端后端 */
+  pgUrl?: string;
+  /** B1：多机规范三元组（与 45-A1 tenant.json 同域） */
+  canonicalTenant?: CanonicalTenant;
+  /** B1：开启跨机团队硬过滤（默认关；单机 pglite 无意义） */
+  multiTenant?: boolean;
+}
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS hub_memories (
@@ -47,21 +127,51 @@ const SCHEMA = `
 `;
 
 export class PgSyncHub {
-  private db: PGlite;
+  private db: HubDb;
+  private readonly canonicalTenant?: CanonicalTenant;
+  private readonly multiTenant: boolean;
+  private readonly isRemote: boolean;
 
-  constructor(dataDir?: string) {
-    this.db = new PGlite(dataDir);
+  /** 构造向后兼容：可只传 dataDir（现状）；B4 用 opts.pgUrl 接远端；B1 用 opts.canonicalTenant/multiTenant 开硬过滤 */
+  constructor(dataDir?: string, opts?: PgSyncHubOptions) {
+    this.multiTenant = opts?.multiTenant === true;
+    this.canonicalTenant = opts?.canonicalTenant;
+    if (opts?.pgUrl) {
+      this.isRemote = true;
+      this.db = new PgRemoteBackend(opts.pgUrl);
+    } else {
+      this.isRemote = false;
+      this.db = new PgliteBackend(dataDir);
+    }
   }
 
-  /** 建表（幂等）；构造后调用一次 */
+  /** 建表（幂等）；构造后调用一次。B4 远端后端在此动态加载 pg 并建连；B1 在此登记规范三元组 */
   async init(): Promise<void> {
+    if (this.isRemote) await (this.db as PgRemoteBackend).connect();
     await this.db.exec(SCHEMA);
     await this.db.exec("INSERT INTO hub_meta (k, v) VALUES ('cursor', '0') ON CONFLICT (k) DO NOTHING");
+    if (this.multiTenant && this.canonicalTenant) {
+      // 用 query（带参）而非 exec（exec 接口无参，pglite/pg 均不支持 exec 绑定参数）
+      await this.db.query(
+        `INSERT INTO hub_meta (k, v) VALUES ('canonical_tenant', $1) ON CONFLICT (k) DO NOTHING`,
+        [JSON.stringify(this.canonicalTenant)],
+      );
+    }
   }
 
-  /** 优雅关闭（测试/进程退出前） */
+  /** 优雅关闭（测试/进程退出前；B4 远端 = pool.end，pglite = WASM 存储层刷盘） */
   async close(): Promise<void> {
     await this.db.close();
+  }
+
+  /** B1 多机硬过滤：非规范团队的读写 fail-closed（跨机伪造 team_id 不得落中枢） */
+  private assertSameTenant(teamId: string): void {
+    if (!this.multiTenant || !this.canonicalTenant) return;
+    if (teamId !== this.canonicalTenant.team_id) {
+      throw new Error(
+        `B1 跨机团队硬过滤拒绝：team_id=${teamId} 越权访问规范团队 ${this.canonicalTenant.team_id} 的中枢`,
+      );
+    }
   }
 
   private async audit(a: Omit<SyncAudit, 'request_id' | 'ts'>): Promise<void> {
@@ -82,6 +192,7 @@ export class PgSyncHub {
   }
 
   async push(mem: Memory, form: Form): Promise<PushResult> {
+    this.assertSameTenant(mem.team_id); // B1
     const sha = mem.sha256 ?? sha256hex(mem.content);
 
     // sha256 幂等去重（§5：不同 mem_id 同内容 → 跳过）；墓碑内容为空，不参与该去重
@@ -164,6 +275,7 @@ export class PgSyncHub {
 
   /** 下行（§3.3）：since=version_seq 增量，team_id 隔离，败者墓碑与异 user 偏好不下发 */
   async pull(scope: { team_id: string; user_id?: string }, since: number, form: Form = 'web'): Promise<{ items: Memory[]; cursor: number }> {
+    this.assertSameTenant(scope.team_id); // B1
     const rows = await this.db.query<{ doc: Memory }>(
       `SELECT doc FROM hub_memories WHERE team_id = $1 AND is_loser = false AND version_seq > $2 ORDER BY version_seq`,
       [scope.team_id, since],
@@ -177,6 +289,7 @@ export class PgSyncHub {
 
   /** 每日全量对账（§3.4）：sha256 比对；losers 单列（败者留档可查，不混入对账项） */
   async reconcile(scope: { team_id: string }): Promise<{ items: Memory[]; losers: Memory[]; missing_local: string[] }> {
+    this.assertSameTenant(scope.team_id); // B1
     const rows = await this.db.query<{ key: string; doc: Memory }>(
       'SELECT key, doc FROM hub_memories WHERE team_id = $1 ORDER BY version_seq', [scope.team_id],
     );

@@ -2450,19 +2450,39 @@ async function bootstrap(): Promise<void> {
   // 批次42-B 云端同步中枢：主进程 pglite 落盘（数据根 sync-hub/，跨端同机中枢——桌面/Web/CLI 同源）。
   // 建表幂等；init 失败不阻断启动（同步是增量能力，ROADMAP 批次42 总边界），置 null + 日志，
   // sync:* handler 如实报「中枢未就绪」，绝不假装可用。
+  //
+  // B4（批次B类）：SYNC_HUB_PG_URL 设置 = 接远端共享 Postgres 中枢（多机前提，标准 PG 方言，pglite/pg 双后端同构）；
+  //   未设置则沿用单机 pglite 落盘——现状行为零变化。远端模式 init 失败 = 连接/建表失败，明确报
+  //   sync-hub-remote-fail，**绝不静默退回本地 pglite**（fail-fast，避免远端配置下悄悄丢到本地库）。
+  // B1（批次B类）：SYNC_MULTI_TENANT=1 + tenant.json 规范三元组 = 中枢层跨机团队硬过滤（fail-closed）；
+  //   远端共享中枢被多机共用时，伪造 team_id 的越权读写在 push/pull/reconcile 入口即拒。
   {
     const hubDir = join(USER_DATA, 'sync-hub');
+    const syncHubPgUrl = process.env.SYNC_HUB_PG_URL?.trim() || undefined;
+    const syncMultiTenant = process.env.SYNC_MULTI_TENANT === '1' || process.env.SYNC_MULTI_TENANT === 'true';
+    const syncHubOpts = {
+      pgUrl: syncHubPgUrl,
+      canonicalTenant: {
+        team_id: tenantTriple.team_id,
+        enterprise_id: tenantTriple.enterprise_id,
+        user_id: tenantTriple.user_id,
+      },
+      multiTenant: syncMultiTenant,
+    };
     try {
-      const hub = new PgSyncHub(hubDir);
+      const hub = syncHubPgUrl
+        ? new PgSyncHub(undefined, syncHubOpts) // B4 远端：dataDir 无意义，走 pgUrl 后端
+        : new PgSyncHub(hubDir, syncHubOpts);   // 默认：单机 pglite 落盘
       await hub.init();
       syncHub = hub;
-      void mlog('bootstrap:sync-hub', { dir: hubDir });
-      actionLog('app', 'bootstrap:sync-hub', { dir: hubDir });
+      void mlog('bootstrap:sync-hub', { dir: hubDir, remote: !!syncHubPgUrl, multiTenant: syncMultiTenant, team_id: tenantTriple.team_id });
+      actionLog('app', 'bootstrap:sync-hub', { dir: hubDir, remote: !!syncHubPgUrl, multiTenant: syncMultiTenant, team_id: tenantTriple.team_id });
     } catch (e) {
       syncHub = null;
       const err = String((e as Error)?.message ?? e);
-      void mlog('bootstrap:sync-hub-fail', { dir: hubDir, error: err });
-      actionLog('app', 'bootstrap:sync-hub-fail', { dir: hubDir, error: err }, { level: 'error' });
+      const tag = syncHubPgUrl ? 'sync-hub-remote-fail' : 'sync-hub-fail';
+      void mlog(tag, { dir: hubDir, pgUrl: syncHubPgUrl ? '(set)' : '(unset)', multiTenant: syncMultiTenant, error: err });
+      actionLog('app', tag, { dir: hubDir, pgUrl: syncHubPgUrl ? '(set)' : '(unset)', multiTenant: syncMultiTenant, error: err }, { level: 'error' });
     }
   }
 

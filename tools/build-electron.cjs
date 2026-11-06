@@ -17,7 +17,7 @@ buildSync({
   platform: 'node',
   format: 'cjs',
   outfile: path.join(root, 'dist-electron/main.cjs'),
-  external: ['electron'],
+  external: ['electron', 'pg'],
   logLevel: 'warning',
 });
 console.log('main.cjs built OK');
@@ -28,7 +28,7 @@ buildSync({
   platform: 'node',
   format: 'cjs',
   outfile: path.join(root, 'dist-electron/preload.cjs'),
-  external: ['electron'],
+  external: ['electron', 'pg'],
   logLevel: 'warning',
 });
 console.log('preload.cjs built OK');
