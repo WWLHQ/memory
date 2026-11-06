@@ -3,6 +3,7 @@
 > 背景：B2（45-B3 API 密钥进 MCP 门）经 B 类审查**确认已全量落地并接线生产**（见 §0）。
 > 本方案只覆盖**真正未落地**的三项：B4、B1、B3。
 > 纪律：先勘察 → 方案 → 编码；每项过 A 影响面回归 + B 效果验证 + C 变异验证三道闸门。
+> **实施状态（2026-11-06）**：**B4 与 B1 已实现并提交 `0b729c9`**（env 门控，默认行为零变化，单测全绿；B4 远端 path 因本环境无 PG 服务端未端到端验证，代码已就位，待你提供服务端后补 e2e）；**B3 仍待你提供真实 LLM Key + 预算**（启用链路核查见 §3.3，未拍板前不写新代码）。
 
 ## 0. B2 已落地（无需重做，仅登记）
 
@@ -27,13 +28,15 @@
 - 默认（`SYNC_HUB_PG_URL` 未设）= 现状 pglite 落盘，**行为零变化、单测全绿**。
 - 设了 URL = 接远端 Postgres（共享中枢，多机前提）。
 
-### 1.3 实施草图（待你拍板后落地）
+### 1.3 实施草图（已落地 `0b729c9`）
 1. 新增依赖 `pg`（需 `npm i pg` + 进 electron 打包白名单；属重依赖，需你授权）。
 2. `PgSyncHub` 构造改为 `constructor(opts: { dataDir?: string; pgUrl?: string })`：
    - `pgUrl` 存在 → 懒加载 `pg`、建立 `Pool/Client`；SQL 不变（已兼容）。
    - 否则 → 沿用 pglite（现状路径，单测覆盖）。
 3. `main.ts` 读 `SYNC_HUB_PG_URL` 决定构造参数；`before-quit` 优雅关闭对两种后端都生效。
 4. 连接失败 fail-fast（不静默退回 pglite 冒充远端）。
+
+> **已落地（2026-11-06，`0b729c9`）**：`PgSyncHubOptions{pgUrl?,canonicalTenant?,multiTenant?}` 取代原 `dataDir` 单一参数（构造签名向后兼容 `new PgSyncHub()` / `new PgSyncHub(dataDir)`）；`PgRemoteBackend` 经 `dynamic import('pg')` 实现**运行时按需加载**——未设 `SYNC_HUB_PG_URL` 时永不强依赖 pg，`pg` 已列入 `build-electron.cjs` 的 `external`（不打包）。默认 pglite 路径 6 例单测零退化。远端 path 的 e2e 集成测试**待你提供 PG 服务端后补**（本环境 5432 不可达，无法验证）。
 
 ### 1.4 测试边界（诚实）
 - 默认 pglite 路径：现有 `pgSyncHub` 测试继续全绿（B4 不能破默认行为）。
@@ -55,10 +58,12 @@
 - 客户端上行/下行携带的 `team_id/enterprise_id` 与中枢规范三元组一致（由 45-A1 归一保证，已具备）；
 - 任一端的"非本租户"读写在**中枢层**也被拒（中枢已按 `team_id` 过滤，但需明确：跨机伪造 team_id 时仍按传入 team_id 落库——需 B4 远端 + 一个 `SYNC_MULTI_TENANT=1` 开关来强制"客户端 tenant 必须 == 中枢规范 tenant"，否则 fail-closed）。
 
-### 2.3 实施草图（依赖 B4）
+### 2.3 实施草图（已落地 `0b729c9`）
 - 新增 env `SYNC_MULTI_TENANT`：开启后，`PgSyncHub.push/pull` 校验传入 `team_id` 必须等于中枢规范三元组（中枢侧存一份 `hub_meta` 的 canonical tenant），不符即拒（不静默跨租户写）。
 - 单测：构造两个不同 canonical tenant 的 hub 实例，断言跨 tenant 写入被拒、同 tenant 正常。
 - 仍属"中枢层"过滤；客户端层三池门禁已先行落地。
+
+> **已落地（2026-11-06，`0b729c9`）**：`PgSyncHub.assertSameTenant(teamId)` 在 push/pull/reconcile 入口 fail-closed；`main.ts` 经 `SYNC_MULTI_TENANT` 开关 + `tenant.json` 规范三元组注入 `canonicalTenant`。B1 硬过滤**不依赖远端服务端**——纯中枢层逻辑，已用两个 pglite hub 实例单测覆盖（同 tenant 正常 / 跨 tenant 全拒 / 未开开关不误拒）。
 
 ### 2.4 前置
 - 依赖 B4 远端中枢落地（单机 pglite 各端独立，无"跨机"语义，B1 在单机下无意义）。
@@ -88,7 +93,7 @@
 - 红线（沿用）：中枢失败 fail-fast 不静默降级；密钥零明文落盘/日志/URL；远端路径不可绿则不进主构建。
 - 不做的代价（诚实）：B4/B1 不处理，多机共享中枢与跨机硬隔离做不到（单机数据正确性不受影响）；B3 不处理，深层 L2–L6 全 L1、检索/生长维度偏薄（但属诚实 stub，不谎报）。
 
-## 5. 待你拍板
-- B4：是否授权新增 `pg` 依赖？是否提供远端 PG 服务端（或允许本地起临时 PG 做集成验证）？
-- B3：提供哪家真实 LLM Key？是否授权精炼预算？
-- 拍板后按 §1.3 / §2.3 / §3.3 落地，每项过三道闸门 + code-map 登记。
+## 5. 拍板状态
+- **B4：已拍板并已落地 `0b729c9`**（授权新增 `pg` 依赖 + 提供/本地起服务端）。`pg` 依赖已装、`SYNC_HUB_PG_URL` 接线完成；远端 e2e 验证**待你提供可访问的 PG 服务端**后补。
+- **B1：已随 B4 落地 `0b729c9`**（`SYNC_MULTI_TENANT` + 规范三元组，纯中枢层，已单测覆盖，无需服务端）。
+- **B3：仍待拍板**——提供真实 LLM Key + 授权精炼预算后，按 §3.3 先做启用链路核查（确认有密钥时管线不再 stub 短路），再决定补炼存量。
