@@ -53,6 +53,7 @@ import {
   createReconciler, applyScanToStore, defaultAgentSources,
   type CollectorCursor, type ScanResult,
 } from '../core/memagent/sessionCollector.ts';
+import { DAEMON_DIR_NAME, drainCollectPending, PENDING_DIR_NAME } from '../core/memagent/collectDaemon.ts';
 import { coreWrite } from '../core/memagent/memories.ts';
 import { L0Vault } from '../core/memagent/l0vault.ts';
 import { demoteStubLayers, scanStubLayers } from '../core/memagent/legacyLayers.ts';
@@ -2746,6 +2747,36 @@ async function bootstrap(): Promise<void> {
     // 首次启动 / 文件损坏 → 从空游标开始（不阻塞启动）
   }
 
+  // 批次44-A：交接独立采集守护（daemon 只扫描+暂存，永不碰账本——collectDaemon.ts 头注口径）。
+  // 桌面端是唯一写者（持 L0 写密钥）：逐条 coreWrite（dedup 幂等兜底重复），分片全成功才删除。
+  const drainDaemonPending = async (why: string): Promise<void> => {
+    try {
+      const r = await drainCollectPending({
+        pendingDir: join(USER_DATA, DAEMON_DIR_NAME, PENDING_DIR_NAME),
+        write: async (it) => {
+          await coreWrite(
+            {
+              content: it.content,
+              category: (it.category as Category) ?? 'context',
+              project_id: 'P1',
+              source_agent: it.agent,
+              session_id: undefined,
+            },
+            { storage, vector: collectorVector, account: tenantTriple, request_id: `req_daemon_${Date.now()}`, now: Date.now(), l0: l0Vault },
+          );
+        },
+      });
+      if (r.files > 0 || r.errors.length > 0) {
+        void mlog('collector:daemon-drain', { why, files: r.files, written: r.written, failed: r.failedFiles.length });
+        if (r.errors.length > 0) {
+          actionLog('collector', 'daemon-drain-error', { why, errors: r.errors.slice(0, 3) }, { level: 'warn' });
+        }
+      }
+    } catch (e) {
+      void mlog('collector:daemon-drain-error', { why, error: String((e as Error)?.message ?? e) });
+    }
+  };
+
   // 首扫：等窗口 ready-to-show 后延迟触发一次（避免启动即抢 IO 卡住首屏）；
   // 之后由 reconciler 每 5min 自动对账，单轮最多 COLLECTOR_MAX_PER_ROUND 条。
   const startFirstScan = () => {
@@ -2753,7 +2784,10 @@ async function bootstrap(): Promise<void> {
     setTimeout(() => {
       void mlog('collector:first-scan:start');
       reconciler.runOnce()
-        .then((s) => void mlog('collector:first-scan:done', { collected: s.collected, deduped: s.deduped, roleSkipped: s.roleSkipped, skipped: s.skipped.length }))
+        .then((s) => {
+          void mlog('collector:first-scan:done', { collected: s.collected, deduped: s.deduped, roleSkipped: s.roleSkipped, skipped: s.skipped.length });
+          void drainDaemonPending('first-scan');
+        })
         .catch((e) => void mlog('collector:first-scan:error', String((e as Error)?.message ?? e)));
     }, COLLECTOR_FIRST_SCAN_DELAY_MS);
   };
@@ -2989,6 +3023,7 @@ async function bootstrap(): Promise<void> {
         rounds, items, exhausted: rounds >= RECOLLECT_MAX_ROUNDS,
         written: lastApply?.written ?? 0, filtered: lastApply?.filtered ?? 0,
       });
+      void drainDaemonPending('recollect');
     } catch (e) {
       void mlog('collector:recollect-error', { rounds, error: String((e as Error)?.message ?? e) });
     } finally {
