@@ -1,6 +1,7 @@
 // P14-T3 自生长侧组件：指标卡 + 五项优化 + Δ 收益曲线 + 调度时间轴（7.1/7.2/13.3）
 import type {
-  DeltaPoint, GrowthAuditEntry, GrowthMetrics, OptimizationItem, ScheduleItem, ScheduleRunInfo,
+  DeltaPoint, GrowthAuditEntry, GrowthMetrics, OptimizationItem, RegressionOutcome,
+  ScheduleItem, ScheduleRunInfo,
 } from './types.ts';
 
 export function GrowthCards({ m, empty }: { m: GrowthMetrics; empty?: boolean }) {
@@ -76,13 +77,33 @@ export function OptimizationList({ opts }: { opts: OptimizationItem[] }) {
   );
 }
 
+/** 批次48 A23.3：回归四态文案（四者必须可区分，绝不合并成「无变化」） */
+export function regressionStatusText(r: RegressionOutcome): string {
+  if (r.kind === 'never_run') return '未到运行时间：每周日 03:00（账本暂无回归记录）';
+  if (r.kind === 'insufficient_samples') {
+    const c = r.counts;
+    return c
+      ? `样本不足：累计 ${c.total} 条（负例 ${c.negatives} 条，窗口 ${c.window_days} 天）· 正在积累样本，非故障`
+      : '样本不足：继续积累样本，非故障';
+  }
+  const metricsText = r.before && r.after
+    ? `测试集 F1 ${r.before.f1} → ${r.after.f1}，precision ${r.before.precision} → ${r.after.precision}`
+    : '指标缺失';
+  if (r.kind === 'not_adopted') {
+    return `已评估未达门槛（${r.reason ?? '未给出原因'}）· ${metricsText} · 未采纳，配置未改动`;
+  }
+  return `已采纳：${metricsText} · 权重/阈值已写入 growth:v1 账本`;
+}
+
 export function DeltaPanel({
-  series, delta, audit, onManualTrigger,
+  series, delta, audit, onManualTrigger, regression,
 }: {
   series: DeltaPoint[];
   delta: number;
   audit: GrowthAuditEntry[];
   onManualTrigger: () => void;
+  /** 真实回归最近一次结果（四态；无记录 = 未到运行时间） */
+  regression: RegressionOutcome;
 }) {
   const max = Math.max(0.06, ...series.map((p) => Math.abs(p.delta)));
   const W = 560, H = 120, PAD = 28;
@@ -124,6 +145,9 @@ export function DeltaPanel({
         </svg>
       )}
       <div className="note">🔴 = weight_tuned 触发点 · 真实账本审计：{audit.length} 条（R2）</div>
+      <div className="note" data-testid="regression-status" style={{ marginTop: 4 }}>
+        自生长回归状态：{regressionStatusText(regression)}
+      </div>
       {audit.length > 0 && (
         <div className="note" data-testid="growth-audit" style={{ marginTop: 6 }}>
           {audit.slice(0, 3).map((a, i) => (

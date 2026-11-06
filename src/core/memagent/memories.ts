@@ -16,7 +16,9 @@ import {
   isFullyRefined, meaningfulLength, targetLayers,
   type RefineLayer,
 } from './layerRules.ts';
-import { findDuplicate, type DedupPolicy } from './dedup.ts';
+import {
+  DEDUP_EVAL_SCHEMA_V, findDuplicate, type DedupPolicy, type DimensionScores,
+} from './dedup.ts';
 import { growthConfigFromLedger } from './paramsSnapshot.ts';
 import { ulid } from './ulid.ts';
 import { sha256hex } from './sync.ts';
@@ -242,6 +244,14 @@ export async function coreWrite(input: WriteInput, ctx: WriteCtx): Promise<Write
   const violations: string[] = [];
   let refineError: string | undefined;
   let graft: { target: Memory; layer: RefineLayer; score: number; threshold: number } | null = null;
+  // 批次48 A23.3：写入期决策埋点 —— 最优候选的五维分 + 当时阈值 + 是否合并。
+  // 只记「真正参与决策的那一对」（每层覆盖为最深一层/命中层），旧记录没有这段就不参与回归
+  // （规则 6：冷启动不回溯推断历史五维分）。
+  let dedupEval: {
+    schema_v: number; layer: RefineLayer; dims: DimensionScores;
+    score: number; threshold: number; merged: boolean;
+    policy: { weights: DedupPolicy['weights']; thresholds: DedupPolicy['thresholds'] };
+  } | null = null;
 
   for (let i = 0; i < targets.length; i++) {
     const layer = targets[i];
@@ -285,6 +295,14 @@ export async function coreWrite(input: WriteInput, ctx: WriteCtx): Promise<Write
     const dup = await findDuplicate(text, layer, candidates, {
       dim, request_id, llm: ctx.llm, model: ctx.llmModel, policy: dedupPolicy,
     });
+    if (dup.best) {
+      dedupEval = {
+        schema_v: DEDUP_EVAL_SCHEMA_V, layer, dims: { ...dup.best.dims },
+        score: round3(dup.best.score), threshold: dup.threshold,
+        merged: dup.best.score >= dup.threshold,
+        policy: { weights: { ...dedupPolicy.weights }, thresholds: { ...dedupPolicy.thresholds } },
+      };
+    }
     if (dup.best && dup.best.score >= dup.threshold) {
       decisions.push({
         layer, action: 'duplicate', by, score: dup.best.score, threshold: dup.threshold,
@@ -397,6 +415,8 @@ export async function coreWrite(input: WriteInput, ctx: WriteCtx): Promise<Write
       threshold: graft?.threshold,
       mem_id: mem.mem_id,
       cost_ms: Math.max(0, Date.now() - costStart),
+      // 批次48 A23.3：回归样本埋点（schema_v=1；无候选时 null，绝不事后补算）
+      dedup_eval: dedupEval,
     },
   });
   if (graft) {

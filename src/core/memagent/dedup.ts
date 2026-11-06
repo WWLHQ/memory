@@ -33,6 +33,13 @@ export interface DedupOutcome {
   threshold: number;
 }
 
+/**
+ * 批次48 A23.3：写入审计里 `dedup_eval` 的格式版本。
+ * 1 = dims(五维) + 当时 policy 快照 + 决策标签。变更维度口径必须递增，
+ * 回归只采信当前版本 —— 旧版本不做回溯补算（冷启动规则）。
+ */
+export const DEDUP_EVAL_SCHEMA_V = 1;
+
 const clamp01 = (v: number) => Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0));
 const round3 = (v: number) => Math.round(v * 1000) / 1000;
 

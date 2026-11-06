@@ -77,6 +77,31 @@ status: active
 
 ---
 
+## 自我净化与生长页 · 判重权重回归（批次48 A23.3）
+
+用户已确认的 6 条定义（原方案落地，`src/core/memagent/regression.ts`）：
+1. 目标函数 = 写入期「合并 / 不合并」二分类 **F1**（positive = 合并）。
+2. 成功门槛 = 测试集 F1 提升 ≥ 0.02 **且** precision 下降 ≤ 0.05，两者同时满足才采纳。
+3. 样本不足（总数 < 40 或负例 < 10）→ 不调整，写 `insufficient_samples` 审计并带 counts。
+4. 允许同时调整权重与阈值（阈值限 [0.50,0.95]、六层单调不减、末尾合法性校验，不合法回滚）。
+5. 反馈时间窗 30 天，同一记忆多次写入/反馈取最近一次。
+6. 冷启动不回溯推断历史五维分：只采信写入审计里的 `dedup_eval`（schema_v=1 + dims + policy 快照），
+   旧账本记录一律不参与；样本不足期间如实 no-op。
+
+自动化覆盖：
+- `src/core/memagent/__tests__/regression.test.ts`：窗口/schema 版本/取最近一次、样本不足（总数与负例两种）、
+  确定性 70/30 哈希划分、阈值 0.9→0.5 采纳、已最优未达门槛、classify 指标、`insufficient_samples` 与
+  `weight_tuned` + `param_save` 落账（账本配置真变）。
+- `src/web/growth/__tests__/scheduleRuns.test.ts`：四态投影（never_run / insufficient_samples / not_adopted /
+  adopted）与 `regressionStatusText` 四态文案两两不同；冷启动文案必须含「正在积累样本，非故障」。
+- `src/web/growth/__tests__/GrowthPage.test.tsx`：空账本手动触发 → 只写 `insufficient_samples`、不产生 `weight_tuned`。
+- `e2e/growth.spec.ts`：页面先显示「未到运行时间」；手动触发后显示「样本不足 · 积累样本」，Δ 曲线保持空态。
+
+审计字段（全部真实可查）：`insufficient_samples`（kind/counts/minimum）、`weight_regression`
+（kind/status/reason/counts/before/after/proposed）、`weight_tuned`（kind/status/counts/before/after 配置快照/metrics）。
+
+---
+
 ## 当前自动化门禁（2026-10-30）
 
 | 命令 | 内容 | 通过标准 |

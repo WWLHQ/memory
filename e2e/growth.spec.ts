@@ -34,6 +34,8 @@ test.describe('自我净化与生长页 · 真实账本', () => {
     await expect(page.locator('[data-testid="sched-run-self_growth"]')).toContainText('未运行');
     await expect(page.locator('[data-testid="sched-next-self_growth"]')).toContainText('无记录');
     await expect(page.locator('[data-testid="sched-host-self_growth"]')).toContainText('浏览器降级，不会自动执行');
+    // 批次48 A23.3：无回归记录 = 未到运行时间，不能显示「无变化」也不能伪造结论
+    await expect(page.locator('[data-testid="regression-status"]')).toContainText('未到运行时间');
     expect(errors).toEqual([]);
   });
 
@@ -59,16 +61,19 @@ test.describe('自我净化与生长页 · 真实账本', () => {
     await expect(page.locator('[data-testid="growth-audit"]')).toHaveCount(0);
   });
 
-  test('C3/R4：手动触发自生长 → 真实审计 weight_tuned + 曲线出现触发点', async ({ page }) => {
+  test('C3/R4：手动触发自生长 → 冷启动如实 no-op（样本不足，不伪造 weight_tuned）', async ({ page }) => {
     await page.goto(APP);
     await expect(page.locator('[data-testid="tuned-point"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="regression-status"]')).toContainText('未到运行时间');
     await page.locator('[data-testid="manual-trigger"]').click();
-    await expect(page.locator('[data-testid="toast"]')).toContainText('weight_tuned');
-    // 触发后从真实账本重算：曲线出现 1 个 is_tuned 点，审计含 weight_tuned + manual
-    await expect(page.locator('[data-testid="tuned-point"]')).toHaveCount(1);
-    await expect(page.locator('[data-testid="delta-chart"]')).toBeVisible();
-    await expect(page.locator('[data-testid="growth-audit"]')).toContainText('weight_tuned');
-    await expect(page.locator('[data-testid="growth-audit"]')).toContainText('manual');
+    // 真实回归在没有 dedup_eval 样本时只会写 insufficient_samples 审计：
+    // 页面必须如实提示「样本不足 · 正在积累样本」，且不产生任何 weight_tuned 点/曲线
+    await expect(page.locator('[data-testid="toast"]')).toContainText('样本不足');
+    await expect(page.locator('[data-testid="regression-status"]')).toContainText('样本不足');
+    await expect(page.locator('[data-testid="regression-status"]')).toContainText('积累样本，非故障');
+    await expect(page.locator('[data-testid="tuned-point"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="delta-chart"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="growth-audit"]')).toHaveCount(0);
   });
 
   test('判重样本空态：无样本时不伪造综合分；重新判重按钮可用', async ({ page }) => {

@@ -2,7 +2,8 @@
 // 缺记录 = 未运行，不从 cron 反推「应该跑过」。
 import { describe, expect, it } from 'vitest';
 import type { AuditRecord } from '../../../core/memagent/types.ts';
-import { scheduleRunsFromLedger, scheduleReal } from '../useGrowthReal.ts';
+import { regressionOutcomeFromLedger, scheduleRunsFromLedger, scheduleReal } from '../useGrowthReal.ts';
+import { regressionStatusText } from '../GrowthPanels.tsx';
 
 function audit(o: Partial<AuditRecord> & { detail?: Record<string, unknown> }): AuditRecord {
   return {
@@ -51,5 +52,84 @@ describe('scheduleRunsFromLedger', () => {
     const items = scheduleReal();
     expect(items.map((s) => s.key)).toEqual(['decay', 'verdict_reminder', 'self_growth', 'archive']);
     for (const s of items) expect(s.run).toBeUndefined();
+  });
+});
+
+describe('regressionOutcomeFromLedger × regressionStatusText（四态必须可区分）', () => {
+  const counts = { total: 12, positives: 6, negatives: 6, window_days: 30 };
+
+  it('无记录 → never_run（未到运行时间，不冒充「无变化」）', () => {
+    const r = regressionOutcomeFromLedger([audit({ action: 'write' })]);
+    expect(r).toEqual({ kind: 'never_run', ts: null });
+    expect(regressionStatusText(r)).toContain('未到运行时间');
+  });
+
+  it('样本不足 → insufficient_samples + counts，并注明正在积累样本', () => {
+    const r = regressionOutcomeFromLedger([
+      audit({ ts: 5, action: 'insufficient_samples', detail: { kind: 'dedup_regression', ...counts } }),
+    ]);
+    expect(r.kind).toBe('insufficient_samples');
+    expect(r.counts).toEqual(counts);
+    const text = regressionStatusText(r);
+    expect(text).toContain('样本不足');
+    expect(text).toContain('12');
+    expect(text).toContain('非故障');
+  });
+
+  it('已评估未达门槛 → not_adopted + reason + 前后测试指标', () => {
+    const r = regressionOutcomeFromLedger([
+      audit({
+        ts: 6, action: 'weight_regression',
+        detail: {
+          kind: 'dedup_regression', status: 'not_adopted', reason: 'f1_gain_below_threshold',
+          counts, before: { test: { f1: 0.9, precision: 0.88 } }, after: { test: { f1: 0.905, precision: 0.87 } },
+        },
+      }),
+    ]);
+    expect(r.kind).toBe('not_adopted');
+    expect(r.reason).toBe('f1_gain_below_threshold');
+    expect(r.before).toEqual({ f1: 0.9, precision: 0.88 });
+    expect(r.after).toEqual({ f1: 0.905, precision: 0.87 });
+    const text = regressionStatusText(r);
+    expect(text).toContain('已评估未达门槛');
+    expect(text).toContain('0.9');
+    expect(text).toContain('未采纳');
+  });
+
+  it('已采纳 → adopted + 前后测试指标，文案与前三态互不相同', () => {
+    const r = regressionOutcomeFromLedger([
+      audit({
+        ts: 7, action: 'weight_tuned',
+        detail: {
+          kind: 'dedup_regression', status: 'adopted', counts,
+          metrics: { before: { test: { f1: 0.62, precision: 0.75 } }, after: { test: { f1: 0.88, precision: 0.74 } } },
+        },
+      }),
+    ]);
+    expect(r.kind).toBe('adopted');
+    expect(r.before).toEqual({ f1: 0.62, precision: 0.75 });
+    expect(r.after).toEqual({ f1: 0.88, precision: 0.74 });
+    expect(regressionStatusText(r)).toContain('已采纳');
+    expect(regressionStatusText(r)).toContain('0.88');
+  });
+
+  it('取最近一条：先不足后可采纳 → 以最新结论为准；无关 kind 一律忽略', () => {
+    const r = regressionOutcomeFromLedger([
+      audit({ ts: 1, action: 'insufficient_samples', detail: { kind: 'dedup_regression', ...counts } }),
+      audit({ ts: 2, action: 'growth_op', detail: { entry: { event: 'weight_tuned' } } }), // 历史页面临时记录，不算回归结论
+      audit({ ts: 3, action: 'weight_tuned', detail: { kind: 'dedup_regression', status: 'adopted', counts } }),
+    ]);
+    expect(r.kind).toBe('adopted');
+    expect(r.ts).toBe(3);
+  });
+
+  it('文案四态两两不同（不得混成一个「无变化」）', () => {
+    const never = regressionStatusText({ kind: 'never_run', ts: null });
+    const insuf = regressionStatusText({ kind: 'insufficient_samples', ts: 1, counts });
+    const notAd = regressionStatusText({ kind: 'not_adopted', ts: 2, reason: 'f1_gain_below_threshold' });
+    const adopted = regressionStatusText({ kind: 'adopted', ts: 3 });
+    const all = [never, insuf, notAd, adopted];
+    expect(new Set(all).size).toBe(4);
+    for (const t of all) expect(t).not.toBe('无变化');
   });
 });

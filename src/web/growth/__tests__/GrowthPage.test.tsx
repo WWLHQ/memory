@@ -18,17 +18,16 @@ async function renderLoaded() {
 describe('GrowthPage × 内核审计账本', () => {
   beforeEach(() => resetKernelForTests());
 
-  it('手动触发 → toast + Δ 曲线取账本实算 + weight_tuned 审计真写内核（detail.entry 保真）', async () => {
+  it('冷启动手动触发 → 真实回归 no-op：toast/状态显示「样本不足 · 积累样本」，不伪造 weight_tuned', async () => {
     await renderLoaded();
     fireEvent.click(screen.getByTestId('manual-trigger'));
-    await waitFor(() => expect(screen.getByTestId('toast')).toHaveTextContent(/weight_tuned/));
-    // 曲线 = 账本中真实 weight_tuned 事件（触发 1 次 → 1 个点）
-    await waitFor(() => expect(screen.getAllByTestId('tuned-point')).toHaveLength(1));
-    await waitFor(() => expect(screen.getByTestId('growth-audit')).toHaveTextContent(/manual/));
-    // 内核账本可查（事件/动作保真）
-    const entries = await coreLoadGrowthAudit();
-    expect(entries.length).toBeGreaterThanOrEqual(1);
-    expect(entries.some((e) => e.event === 'weight_tuned' && e.action === 'regress_mode_weights')).toBe(true);
+    await waitFor(() => expect(screen.getByTestId('toast')).toHaveTextContent(/样本不足/));
+    await waitFor(() => expect(screen.getByTestId('regression-status')).toHaveTextContent(/样本不足/));
+    expect(screen.getByTestId('regression-status')).toHaveTextContent(/积累样本，非故障/);
+    // 空账本没有样本 → 不会产生任何 weight_tuned 点，也不会手写假配置
+    expect(screen.queryAllByTestId('tuned-point')).toHaveLength(0);
+    const audits = await coreLoadGrowthAudit();
+    expect(audits.some((e) => e.event === 'weight_tuned')).toBe(false);
   });
 
   it('调度停用 → schedule_changed 审计真写内核', async () => {

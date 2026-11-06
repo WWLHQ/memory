@@ -76,6 +76,23 @@ export interface ScheduleRunInfo {
   ts: number;
 }
 
+/**
+ * 批次48 A23.3：自生长回归的**四种可区分状态**（页面不允许把它们混成「无变化」）：
+ *   never_run            未到运行时间（账本无任何回归记录）
+ *   insufficient_samples 样本不足（正在积累样本，非故障）
+ *   not_adopted          已评估但未达门槛（不改配置）
+ *   adopted              已采纳（权重/阈值已写入 growth:v1）
+ */
+export interface RegressionOutcome {
+  kind: 'never_run' | 'insufficient_samples' | 'not_adopted' | 'adopted';
+  ts: number | null;
+  counts?: { total: number; positives: number; negatives: number; window_days: number };
+  reason?: string;
+  /** 测试集指标（before/after 都来自审计，缺失不编造） */
+  before?: { f1: number; precision: number };
+  after?: { f1: number; precision: number };
+}
+
 /** 自生长收益曲线点（7.2 / 13.3） */
 export interface DeltaPoint {
   day: string;

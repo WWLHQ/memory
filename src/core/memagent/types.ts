@@ -572,6 +572,10 @@ export type AuditAction =
   | 'growth_op'
   // 批次48 A23.2：cron 周期任务的真实执行记录（task / next_due_at / duration_ms / status）
   | 'schedule_run'
+  // 批次48 A23.3：判重权重回归的三种结果（样本不足 / 已评估未采纳 / 已采纳记 weight_tuned）
+  | 'insufficient_samples'
+  | 'weight_regression'
+  | 'weight_tuned'
   | 'monitor_alert'
   | 'security_change'
   // 真实质量/可靠性事件（监控仪表盘与冲突队列的真实口径来源）

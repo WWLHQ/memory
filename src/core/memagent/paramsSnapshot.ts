@@ -2,7 +2,8 @@
 // Web 参数页负责写入；主进程遗忘调度读取普通配置（AC-14 / 17.6）。
 // 批次48 A17：此前只读 auto_organize，遗忘速度/保留时长/重要程度保存后不改变任何行为；
 // 现由 forgettingPrefsFromSnapshot 统一折算成内核调度参数（折算表在 shared/normalParams.ts）。
-import type { Memory } from './types.ts';
+import type { Memory, StorageBackend, Form } from './types.ts';
+import { ulid } from './ulid.ts';
 import { autoArchiveDaysOf, halfLifeDaysOf } from '../../shared/normalParams.ts';
 import {
   UNSET_PROXY_ACCOUNTING, normalizeAccountingPrice, normalizeAccountingQuota, type ProxyAccounting,
@@ -107,4 +108,41 @@ export function growthConfigFromLedger(mems: Memory[]): GrowthConfig {
   } catch {
     return normalizeGrowthConfig(null);
   }
+}
+
+export interface GrowthConfigSaveOptions {
+  requestId: string;
+  /** 写入方形态（web 页面 / desktop 主进程回归任务） */
+  form: Form;
+  enterpriseId?: string;
+  teamId?: string;
+}
+
+/**
+ * 批次48 A23.3：生长配置落账本的**唯一写入口**（页面保存与主进程回归采纳共用）。
+ * 语义与 A23.1 保持一致：旧记录 delete + 新记录 put（pinned 豁免 gc、单条不累积），
+ * 并写 `param_save` 审计（detail.kind='growth_config' + 完整配置快照，可回放）。
+ */
+export async function saveGrowthConfigToLedger(
+  storage: StorageBackend, cfg: GrowthConfig, opts: GrowthConfigSaveOptions,
+): Promise<{ mem_id: string; version: number }> {
+  const old = findGrowthMemory(await storage.listMemories({}));
+  if (old) await storage.deleteMemory(old.mem_id);
+  const now = Date.now();
+  const mem: Memory = {
+    mem_id: `growth_${ulid(now)}`,
+    project_id: 'P_SYSTEM', user_id: 'system',
+    enterprise_id: opts.enterpriseId ?? '', team_id: opts.teamId ?? '',
+    category: 'preference', layer: 'L2',
+    content: `${GROWTH_PREF_PREFIX}${JSON.stringify(cfg)}`,
+    decay_class: 'hot', pinned: true, locked: false,
+    version: (old?.version ?? 0) + 1, created_at: now, updated_at: now,
+  };
+  await storage.putMemory(mem);
+  await storage.appendAudit({
+    request_id: opts.requestId, action: 'param_save', form: opts.form,
+    project_id: 'P_SYSTEM', user_id: 'system', ts: now,
+    detail: { kind: 'growth_config', growth: cfg, version: mem.version },
+  });
+  return { mem_id: mem.mem_id, version: mem.version };
 }

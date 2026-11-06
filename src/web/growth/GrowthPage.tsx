@@ -17,10 +17,12 @@ import {
   DEFAULT_SCHEDULE, DEFAULT_THRESHOLDS, DEFAULT_WEIGHTS,
 } from './spec.ts';
 import {
-  auditOptimization, evaluateOptimizations, growthDelta,
+  evaluateOptimizations, growthDelta,
   shortCircuitPath, validateSchedule, validateThresholds, validateWeights,
 } from './logic.ts';
-import { coreGrowthAudit, coreLoadGrowthConfig, coreSaveGrowthConfig } from './coreGrowth.ts';
+import {
+  coreGrowthAudit, coreLoadGrowthConfig, coreRunGrowthRegression, coreSaveGrowthConfig,
+} from './coreGrowth.ts';
 import { DEFAULT_SCHEDULE_FLAGS, type ScheduleFlags } from '../../shared/growthConfig.ts';
 import { useGrowthMirror } from './useGrowthMirror.ts';
 import { newRequestId } from '../kernel.ts';
@@ -121,19 +123,24 @@ export function GrowthPage() {
   }
 
   async function handleManualTrigger() {
-    // 手动触发 = 等价一次 ⑤ 权重回归，写 weight_tuned 审计（真实内核账本）；曲线追加 is_tuned 点
-    const entry = auditOptimization(
-      { auditName: 'weight_tuned', action: 'regress_mode_weights', key: 'regress_weights' },
-      { trigger: 'manual', delta_before: delta },
-      true,
-    );
-    const requestId = newRequestId('req');
+    // 手动触发 = 跑**真实**回归（与主进程 cron 同一核心算法）；
+    // 三种结果由 core 落审计，页面只转述真实结论，不再手写 weight_tuned。
     try {
-      await coreGrowthAudit(entry, requestId);
-      reportMirror('weight_tuned', requestId, entry);
-      setAudit((a) => [entry, ...a]);
-      setReal(await loadRealGrowthData()); // 曲线/指标从真实账本重新实算（不手工拼点）
-      show('已手动触发一次自生长（等价 ⑤ 回归）· 真实审计 weight_tuned');
+      const r = await coreRunGrowthRegression();
+      if (r.status === 'insufficient_samples') {
+        const c = r.counts;
+        show(`样本不足（累计 ${c.total} 条 / 负例 ${c.negatives} 条）· 正在积累样本，非故障`);
+      } else if (r.status === 'not_adopted') {
+        show(`已评估未达门槛（${r.reason}）· 未改动权重/阈值`);
+      } else {
+        show(`已采纳：测试集 F1 ${r.before.test.f1} → ${r.after.test.f1}（F1 升 ≥0.02 且 precision 降 ≤0.05）`);
+      }
+      // 真实重载：曲线/指标/权重/阈值全部来自账本，不手工拼点
+      const [fresh, cfg] = await Promise.all([loadRealGrowthData(), coreLoadGrowthConfig()]);
+      setReal(fresh);
+      setWeights(cfg.weights);
+      setThresholds(cfg.thresholds);
+      setAudit(fresh.growthAudit.slice().reverse());
     } catch {
       show('触发失败：内核暂不可达');
     }
@@ -201,7 +208,10 @@ export function GrowthPage() {
 
       <GrowthCards m={metrics} empty={empty} />
       <OptimizationList opts={opts} />
-      <DeltaPanel series={series} delta={delta} audit={audit} onManualTrigger={handleManualTrigger} />
+      <DeltaPanel
+        series={series} delta={delta} audit={audit} onManualTrigger={handleManualTrigger}
+        regression={real?.regression ?? { kind: 'never_run', ts: null }}
+      />
       <ScheduleTimeline schedule={schedule} onToggle={handleToggle} hostKind={hostCapability()} />
 
       <div className="card">

@@ -12,7 +12,7 @@ import type { StorageBackend } from '../../core/memagent/types.ts';
 import { getKernelStorage } from '../kernel.ts';
 import type {
   DedupSample, DeltaPoint, DimKey, DimWeights, GrowthMetrics, LayerThresholds,
-  ScheduleItem, GrowthAuditEntry, ScheduleRunInfo,
+  ScheduleItem, GrowthAuditEntry, ScheduleRunInfo, RegressionOutcome,
 } from './types.ts';
 import { DEFAULT_SCHEDULE, DEFAULT_THRESHOLDS, DEFAULT_WEIGHTS } from './spec.ts';
 import { SCHEDULE_KEYS, type ScheduleKey } from '../../shared/growthConfig.ts';
@@ -162,6 +162,67 @@ export function scheduleReal(): ScheduleItem[] {
   return DEFAULT_SCHEDULE.map((s) => ({ ...s }));
 }
 
+const REGRESSION_ACTIONS = new Set<string>(['insufficient_samples', 'weight_regression', 'weight_tuned']);
+
+function testMetricsOf(v: unknown): { f1: number; precision: number } | undefined {
+  const t = (v as { test?: { f1?: unknown; precision?: unknown } } | undefined)?.test;
+  if (!t || typeof t.f1 !== 'number' || typeof t.precision !== 'number') return undefined;
+  return { f1: t.f1, precision: t.precision };
+}
+
+function countsOf(v: unknown): RegressionOutcome['counts'] | undefined {
+  const c = v as { total?: unknown; positives?: unknown; negatives?: unknown; window_days?: unknown } | undefined;
+  if (!c || typeof c.total !== 'number' || typeof c.positives !== 'number' || typeof c.negatives !== 'number') {
+    return undefined;
+  }
+  return {
+    total: c.total, positives: c.positives, negatives: c.negatives,
+    window_days: typeof c.window_days === 'number' ? c.window_days : 30,
+  };
+}
+
+/**
+ * 批次48 A23.3：回归结果四态（只认 kind='dedup_regression' 的真实审计）。
+ * 无任何记录 = never_run（未到运行时间）；有记录但字段缺失时保留缺失，
+ * 不用默认值冒充「F1 0」之类的结论。
+ */
+export function regressionOutcomeFromLedger(audits: AuditRecord[]): RegressionOutcome {
+  let latest: { a: AuditRecord; kind: RegressionOutcome['kind'] } | null = null;
+  for (const a of audits) {
+    if (!REGRESSION_ACTIONS.has(a.action)) continue;
+    const d = a.detail as Record<string, unknown> | undefined;
+    if (d?.kind !== 'dedup_regression') continue;
+    if (!latest || a.ts > latest.a.ts) {
+      latest = {
+        a,
+        kind: a.action === 'insufficient_samples' ? 'insufficient_samples'
+          : a.action === 'weight_regression' ? 'not_adopted' : 'adopted',
+      };
+    }
+  }
+  if (!latest) return { kind: 'never_run', ts: null };
+
+  const d = latest.a.detail as Record<string, unknown>;
+  const out: RegressionOutcome = { kind: latest.kind, ts: latest.a.ts };
+  const counts = countsOf(latest.kind === 'insufficient_samples' ? d : d.counts);
+  if (counts) out.counts = counts;
+  if (typeof d.reason === 'string') out.reason = d.reason;
+
+  if (latest.kind === 'not_adopted') {
+    const before = testMetricsOf(d.before);
+    const after = testMetricsOf(d.after);
+    if (before) out.before = before;
+    if (after) out.after = after;
+  } else if (latest.kind === 'adopted') {
+    const m = d.metrics as Record<string, unknown> | undefined;
+    const before = testMetricsOf(m?.before);
+    const after = testMetricsOf(m?.after);
+    if (before) out.before = before;
+    if (after) out.after = after;
+  }
+  return out;
+}
+
 const SCHEDULE_KEY_SET = new Set<string>(SCHEDULE_KEYS);
 
 /**
@@ -215,6 +276,8 @@ export interface RealGrowth {
   growthAudit: GrowthAuditEntry[];
   /** 每个调度任务最近一次真实运行记录（无记录 = 该任务未运行） */
   scheduleRuns: Partial<Record<ScheduleKey, ScheduleRunInfo>>;
+  /** 自生长回归的最近一次结果（四态可区分；无记录 = 未到运行时间） */
+  regression: RegressionOutcome;
 }
 
 // 真实账本实算标记（供构建产物核验）
@@ -241,6 +304,7 @@ export async function loadRealGrowthData(): Promise<RealGrowth> {
     deltaSeries: deltaSeriesFromLedger(audits),
     growthAudit,
     scheduleRuns: scheduleRunsFromLedger(audits),
+    regression: regressionOutcomeFromLedger(audits),
   };
 }
 

@@ -3,12 +3,16 @@
 // 与记忆库管理页一致：复用 InMemoryStorage 单例（桌面 Electron 下自动绑定主进程
 // FileStorage 持久账本；浏览器降级内存态）。数据真相 = 内核账本，无种子兜底。
 import type { MemAgent } from '../../core/memagent/types.ts';
-import type { Memory, StorageBackend } from '../../core/memagent/types.ts';
+import type { StorageBackend } from '../../core/memagent/types.ts';
 import { getKernel, getKernelStorage, getTenant, newRequestId } from '../kernel.ts';
-import { GROWTH_PREF_PREFIX, findGrowthMemory, growthConfigFromLedger } from '../../core/memagent/paramsSnapshot.ts';
+import {
+  growthConfigFromLedger, saveGrowthConfigToLedger,
+} from '../../core/memagent/paramsSnapshot.ts';
+import {
+  runGrowthRegression, type RegressionRunResult,
+} from '../../core/memagent/regression.ts';
 import type { GrowthConfig } from '../../shared/growthConfig.ts';
 import type { GrowthAuditEntry } from './types.ts';
-
 interface GrowthCtx {
   ma: MemAgent;
   storage: StorageBackend;
@@ -47,28 +51,30 @@ export async function coreLoadGrowthConfig(): Promise<GrowthConfig> {
 }
 
 /**
- * 保存生长配置：写 growth:v1: preference 记录（旧记录 delete + 新记录 put，pinned 豁免 gc），
- * 并落 param_save 审计（detail.kind='growth_config'）。内核下次写入即按新权重/阈值查重。
+ * 保存生长配置：唯一写入口在 core（saveGrowthConfigToLedger），页面与主进程回归采纳共用。
+ * 写 growth:v1: preference 记录（旧记录 delete + 新记录 put，pinned 豁免 gc）+ param_save 审计。
  */
 export async function coreSaveGrowthConfig(
   cfg: GrowthConfig, requestId: string,
 ): Promise<{ request_id: string; mem_id: string; version: number }> {
   const { storage } = await getCtx();
   const tenant = getTenant();
-  const old = findGrowthMemory(await storage.listMemories({}));
-  if (old) await storage.deleteMemory(old.mem_id);
-  const mem: Memory = {
-    mem_id: newRequestId('growth'),
-    project_id: 'P_SYSTEM', user_id: 'system', enterprise_id: tenant.enterprise_id, team_id: tenant.team_id,
-    category: 'preference', layer: 'L2',
-    content: `${GROWTH_PREF_PREFIX}${JSON.stringify(cfg)}`,
-    decay_class: 'hot', pinned: true, locked: false,
-    version: (old?.version ?? 0) + 1, created_at: Date.now(), updated_at: Date.now(),
-  };
-  await storage.putMemory(mem);
-  await storage.appendAudit({
-    request_id: requestId, action: 'param_save', form: 'web', project_id: 'P_SYSTEM', user_id: 'system',
-    ts: Date.now(), detail: { kind: 'growth_config', growth: cfg, version: mem.version },
+  const saved = await saveGrowthConfigToLedger(storage, cfg, {
+    requestId, form: 'web', enterpriseId: tenant.enterprise_id, teamId: tenant.team_id,
   });
-  return { request_id: requestId, mem_id: mem.mem_id, version: mem.version };
+  return { request_id: requestId, mem_id: saved.mem_id, version: saved.version };
+}
+
+/**
+ * 批次48 A23.3：页面「立即执行」= 跑**真实**回归（同一核心算法，与主进程 cron 一致），
+ * 结果由 core 写 insufficient_samples / weight_regression / weight_tuned 审计；
+ * 采纳时才落新配置。页面据返回 status 如实提示，不再写假的 weight_tuned。
+ */
+export async function coreRunGrowthRegression(): Promise<RegressionRunResult> {
+  const { storage } = await getCtx();
+  const tenant = getTenant();
+  return runGrowthRegression(storage, {
+    requestId: newRequestId('reg'), form: 'web',
+    enterpriseId: tenant.enterprise_id, teamId: tenant.team_id,
+  });
 }

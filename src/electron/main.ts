@@ -81,6 +81,7 @@ import { UNSET_PROXY_ACCOUNTING } from '../shared/proxyAccounting.ts';
 import { nextDue } from '../shared/cron.ts';
 import { SCHEDULE_TASKS, type ScheduleKey, type ScheduleTaskSpec } from '../shared/growthConfig.ts';
 import { ulid } from '../core/memagent/ulid.ts';
+import { regressionRequestId, runGrowthRegression } from '../core/memagent/regression.ts';
 import { JsVectorBackend } from '../core/memagent/vector.ts';
 import { readFile, appendFile, mkdir, writeFile, copyFile, readdir, unlink, stat } from 'node:fs/promises';
 import { join, extname, normalize, sep, basename, dirname } from 'node:path';
@@ -3409,14 +3410,40 @@ async function bootstrap(): Promise<void> {
     }
   };
 
-  /** self_growth：回归算法（A23.3）定义未确认前只如实记 skipped，绝不伪造 weight_tuned */
-  const runSelfGrowthTask = async (): Promise<TaskOutcome> => ({
-    status: 'skipped',
-    result: {
-      reason: 'regression_pending',
-      note: 'A23.3 回归算法（目标函数/标签来源/评分口径/成功阈值）待确认后接入；本任务不写 weight_tuned',
-    },
-  });
+  /**
+   * self_growth：跑真实回归（目标函数 = 写入期合并/不合并的 F1，门槛见 core/regression.ts）。
+   * 三种结果都如实落账：insufficient_samples / weight_regression(not_adopted) / weight_tuned(adopted)，
+   * schedule_run 的 status 同步区分「样本不足 / 未达门槛 / 已采纳」。
+   */
+  const runSelfGrowthTask = async (): Promise<TaskOutcome> => {
+    const now = Date.now();
+    const result = await runGrowthRegression(storage, {
+      now, requestId: regressionRequestId(now), form: 'desktop',
+      enterpriseId: tenantTriple.enterprise_id, teamId: tenantTriple.team_id,
+    });
+    if (result.status === 'insufficient_samples') {
+      return {
+        status: 'skipped',
+        result: { reason: 'insufficient_samples', counts: result.counts, accumulating: true },
+      };
+    }
+    if (result.status === 'not_adopted') {
+      return {
+        status: 'skipped',
+        result: {
+          reason: result.reason, not_adopted: true, counts: result.counts,
+          before_f1: result.before.test.f1, after_f1: result.after.test.f1,
+        },
+      };
+    }
+    return {
+      status: 'ok',
+      result: {
+        adopted: true, counts: result.counts,
+        before_f1: result.before.test.f1, after_f1: result.after.test.f1,
+      },
+    };
+  };
 
   const scheduleRunners: Record<ScheduleKey, () => Promise<TaskOutcome>> = {
     decay: runDecayTask,
