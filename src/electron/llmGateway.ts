@@ -11,6 +11,7 @@ import { layerBand, layerSpecOf, type RefineLayer } from '../core/memagent/layer
 // 单条引擎预算的单一真源在批次39 的队列模块（core → electron 依赖方向不变），避免两处各写一个 3
 import { REFINE_MAX_ENGINES_PER_CALL } from '../core/memagent/refineQueue.ts';
 import { UNSET_PROXY_ACCOUNTING, proxyModelMeta, type ProxyAccounting } from '../shared/proxyAccounting.ts';
+import { UNSET_MANUAL_BILLING, normalizeManualBilling, type ManualBilling } from '../shared/billing.ts';
 
 // ── 配置与密钥落盘（数据根，随迁移白名单走）────────────────────────────────────
 
@@ -36,6 +37,12 @@ export interface LlmEngineConfig {
   /** 拨测时刻（epoch 毫秒，UI 侧按 UTC+08:00 展示） */
   lastProbeAt: number | null;
   lastProbeOk: boolean | null;
+  /**
+   * 批次48 A31-c：该引擎的计费手工兜底配置（余额/日配额/单价）。
+   * 厂商 API 不提供配额与单价，厂商余额接不了时也只能手工填；这里随 llm-config.json 持久化，
+   * 与密钥（llm-keys.json）分文件，renderer 只读配置值、不接触凭据明文。
+   */
+  billing: ManualBilling;
 }
 
 export interface LlmGatewayConfig {
@@ -82,6 +89,7 @@ function engine(preset: LlmPreset, over: Partial<LlmEngineConfig> = {}): LlmEngi
     lastLatencyMs: null,
     lastProbeAt: null,
     lastProbeOk: null,
+    billing: { ...UNSET_MANUAL_BILLING },
     ...over,
   };
 }
@@ -110,6 +118,8 @@ function clampEngine(raw: unknown, fallback: LlmEngineConfig): LlmEngineConfig {
     lastLatencyMs: numOrNull(r.lastLatencyMs),
     lastProbeAt: numOrNull(r.lastProbeAt),
     lastProbeOk: typeof r.lastProbeOk === 'boolean' ? r.lastProbeOk : null,
+    // A31-c：未写过的旧配置按「未填」归一（不拿 0 冒充），保留 fallback 里已有的手填值
+    billing: normalizeManualBilling((r as { billing?: unknown }).billing ?? fallback.billing),
   };
 }
 
@@ -491,6 +501,13 @@ export interface LlmEnginePatch {
   enabled?: boolean;
   baseURL?: string;
   model?: string;
+  /** A31-c：手工兜底配置（余额/日配额/单价）；只提交改动字段，主进程合并并写 updatedAt */
+  billing?: {
+    balance?: number | null;
+    currency?: string;
+    dailyQuota?: number | null;
+    priceCnyPerMTok?: number | null;
+  };
 }
 
 export interface LlmAddEngine {
@@ -517,8 +534,19 @@ export function mergeLlmConfig(cfg: LlmGatewayConfig, patch: LlmConfigPatch): { 
     const i = engines.findIndex((e) => e.id === p.id);
     if (i < 0) continue;
     const cur = engines[i];
+    const nextBilling = p.billing === undefined
+      ? cur.billing
+      : (() => {
+          const merged = normalizeManualBilling({ ...cur.billing, ...p.billing });
+          const filled = merged.balance !== null || merged.dailyQuota !== null || merged.priceCnyPerMTok !== null;
+          // updatedAt 是「手工值写入时刻」：清空任何一项后只要还有值就刷新，全空则归 null（不当成 0）
+          return { ...merged, updatedAt: filled ? Date.now() : null };
+        })();
     engines[i] = clampEngine(
-      { ...cur, name: p.name ?? cur.name, enabled: p.enabled ?? cur.enabled, baseURL: p.baseURL ?? cur.baseURL, model: p.model ?? cur.model },
+      {
+        ...cur, name: p.name ?? cur.name, enabled: p.enabled ?? cur.enabled,
+        baseURL: p.baseURL ?? cur.baseURL, model: p.model ?? cur.model, billing: nextBilling,
+      },
       cur,
     );
   }
@@ -535,7 +563,7 @@ export function mergeLlmConfig(cfg: LlmGatewayConfig, patch: LlmConfigPatch): { 
       engines.push(
         clampEngine(
           { id, name, baseURL, model: add.model, needsKey: !isLocalBase(baseURL) },
-          { id, name, enabled: false, baseURL, model: str(add.model), needsKey: true, lastLatencyMs: null, lastProbeAt: null, lastProbeOk: null },
+          { id, name, enabled: false, baseURL, model: str(add.model), needsKey: true, lastLatencyMs: null, lastProbeAt: null, lastProbeOk: null, billing: { ...UNSET_MANUAL_BILLING } },
         ),
       );
     }

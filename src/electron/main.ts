@@ -38,6 +38,8 @@ import {
   applyProbeResult, applyProxyAccounting, llmEngineViews, loadLlmConfig, loadLlmGateway, loadLlmKeys, mergeLlmConfig,
   saveLlmConfig, saveLlmKey, testEngine, type LlmConfigPatch, type LlmGatewayProvider,
 } from './llmGateway.ts';
+import { BILLING_TTL_MS, LlmBillingService } from './llmBilling.ts';
+import { UNSET_MANUAL_BILLING } from '../shared/billing.ts';
 import { createServer as httpCreateServer } from 'node:http';
 import { runMcpServer } from '../core/memagent/mcp.ts';
 import { runMcpHttpServer } from '../core/memagent/mcpHttp.ts';
@@ -972,7 +974,23 @@ function llmGatewayView() {
   return llmEngineViews(loadLlmConfig(USER_DATA), loadLlmKeys(USER_DATA));
 }
 
+/**
+ * 批次48 A31：余额查询服务（独立 billing 凭据槽 + 每引擎 10 分钟 TTL）。
+ * 余额查询只打厂商余额端点：不计入 cost_cap、不写 llm_proxy 审计（用户拍板口径）。
+ */
+let llmBillingSvc: LlmBillingService | null = null;
+
+/** 余额视图：逐引擎 refreshAll（force=页面手动刷新，绕过 TTL）；凭据明文不出主进程 */
+async function llmBillingView(force: boolean) {
+  if (!llmBillingSvc) return { ok: false, error: '余额查询服务未初始化' };
+  const cfg = loadLlmConfig(USER_DATA);
+  const manualOf = (id: string) => cfg.engines.find((e) => e.id === id)?.billing ?? UNSET_MANUAL_BILLING;
+  const engines = await llmBillingSvc.refreshAll(cfg, loadLlmKeys(USER_DATA), manualOf, force);
+  return { ok: true, ttlMs: BILLING_TTL_MS, asOf: Date.now(), engines };
+}
+
 function registerLlmIpc(): void {
+  llmBillingSvc = new LlmBillingService({ dataDir: USER_DATA });
   handleIpc(IPC.llmConfigGet, (_e, sessionId?: string) => {
     const gate = requireSession(sessionId, IPC.llmConfigGet);
     if (!gate.ok) throw new Error(gate.error);
@@ -1044,6 +1062,26 @@ function registerLlmIpc(): void {
       return { ok: true, ...r };
     }
     throw new Error('llm:refine 参数非法');
+  });
+  // 批次48 A31-b：余额视图（需登录会话；force = 页面手动刷新）。不写 llm_proxy 审计、不计 cost_cap。
+  handleIpc(IPC.llmBilling, async (_e, req: unknown, sessionId?: string) => {
+    const gate = requireSession(sessionId, IPC.llmBilling);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    const force = !!((req ?? {}) as { force?: unknown }).force;
+    return await llmBillingView(force);
+  });
+  // 批次48 A31-b：独立 billing 凭据写入/清除（仅管理员）。凭据只落 0600 文件，日志只记「写/清」不记明文。
+  handleIpc(IPC.llmBillingKey, async (_e, payload: unknown, sessionId?: string) => {
+    const gate = requireAdmin(sessionId, IPC.llmBillingKey);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    const p = (payload ?? {}) as { id?: unknown; value?: unknown };
+    const id = typeof p.id === 'string' ? p.id.trim() : '';
+    if (!id) return { ok: false, error: '缺少引擎 id' };
+    const value = typeof p.value === 'string' ? p.value.trim() : '';
+    llmBillingSvc?.saveCredential(id, value);
+    actionLog('llm', 'billing-key', { by: gate.ctx.user_id, engine: id, cleared: !value });
+    // 凭据变了就立即重查（绕过 TTL），页面能马上看到新的 provenance
+    return await llmBillingView(true);
   });
 }
 

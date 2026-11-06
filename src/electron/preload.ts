@@ -241,6 +241,16 @@ const llm = {
     ipcRenderer.invoke(IPC.llmTest, engineId, sessionId) as Promise<{ ok: boolean; model?: string; latencyMs?: number; error?: string; enabled?: boolean }>,
   refine: (payload: unknown, sessionId?: string | null) =>
     ipcRenderer.invoke(IPC.llmRefine, payload, sessionId) as Promise<{ ok: boolean; text?: string; tokens?: number; error?: string }>,
+  /** 批次48 A31：各引擎余额视图（逐字段 provenance；force=true 绕过 10 分钟 TTL 手动刷新） */
+  billing: (req?: { force?: boolean }, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.llmBilling, req ?? {}, sessionId) as Promise<{
+      ok: boolean; ttlMs?: number; asOf?: number; engines?: unknown[]; error?: string;
+    }>,
+  /** 批次48 A31：独立 billing 凭据（仅管理员；value 为空串 = 清除；返回只含 keySet 布尔） */
+  setBillingKey: (id: string, value: string, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.llmBillingKey, { id, value }, sessionId) as Promise<{
+      ok: boolean; ttlMs?: number; asOf?: number; engines?: unknown[]; error?: string;
+    }>,
 };
 
 // 悬浮覆盖层桥：渲染层调 detectClaude() 拿 Claude 窗口位置，setPosition() 移动悬浮窗

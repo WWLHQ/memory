@@ -115,6 +115,10 @@ export const IPC = {
   llmConfigSet: 'llm:configSet',
   llmTest: 'llm:test',
   llmRefine: 'llm:refine',
+  /** 批次48 A31：厂商余额查询（需会话；force=true 为页面手动刷新，绕过 10 分钟 TTL；余额查询不写 llm_proxy 审计） */
+  llmBilling: 'llm:billing',
+  /** 批次48 A31：独立 billing 凭据写入/清除（仅管理员；返回值只含 keySet 布尔，绝不含凭据明文） */
+  llmBillingKey: 'llm:billingKey',
   /** 批次39：L2–L6 后台补炼队列 —— 状态（需会话）/ 开关与补炼与重试失败行（仅管理员） */
   refineState: 'refine:state',
   refineSetEnabled: 'refine:setEnabled',

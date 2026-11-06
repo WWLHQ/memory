@@ -38,6 +38,8 @@ export const DATA_ROOT_MIGRATE_FILES = [
   'l0-keyring.json',
   'llm-config.json',
   'llm-keys.json',
+  // 批次48 A31-b：独立 billing 凭据槽（0600，与推理密钥分开；随数据根迁移）
+  'llm-billing-keys.json',
   'llm-deepseek-key.txt',
 ] as const;
 

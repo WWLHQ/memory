@@ -14,6 +14,7 @@ import {
   loadLlmKeys, mergeLlmConfig, saveLlmConfig, saveLlmKey, testEngine,
   type LlmEngineConfig, type LlmGatewayConfig,
 } from '../llmGateway.ts';
+import { UNSET_MANUAL_BILLING } from '../../shared/billing.ts';
 import { UNSET_PROXY_ACCOUNTING } from '../../shared/proxyAccounting.ts';
 
 const KEY = 'sk-test-key-abcdef123456';
@@ -78,7 +79,8 @@ function eng(id: string, over: Partial<LlmEngineConfig> = {}): LlmEngineConfig {
   const preset = LLM_PRESETS.find((p) => p.preset === id)!;
   return {
     id: preset.preset, name: preset.name, enabled: true, baseURL: base[id], model: `${id}-mock`,
-    needsKey: preset.needsKey, lastLatencyMs: null, lastProbeAt: null, lastProbeOk: null, ...over,
+    needsKey: preset.needsKey, lastLatencyMs: null, lastProbeAt: null, lastProbeOk: null,
+    billing: { ...UNSET_MANUAL_BILLING }, ...over,
   };
 }
 

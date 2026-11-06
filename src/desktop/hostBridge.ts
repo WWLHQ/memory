@@ -61,7 +61,9 @@ export type HostMethod =
   /** 批次42-B：云端同步中枢（主进程 PgSyncHub 代理） */
   | 'sync:push' | 'sync:pull' | 'sync:reconcile' | 'sync:conflicts' | 'sync:resolve'
   | 'sync:cursor' | 'sync:auditCount' | 'sync:auditsFrom'
-  | 'llm:config' | 'llm:configSet' | 'llm:test' | 'llm:refine';
+  | 'llm:config' | 'llm:configSet' | 'llm:test' | 'llm:refine'
+  /** 批次48 A31：厂商余额视图（需会话）/ 独立 billing 凭据（仅管理员） */
+  | 'llm:billing' | 'llm:billingKey';
 
 /** 扁平 channel → preload 暴露的嵌套对象方法（window.api[ns][fn]） */
 const CHANNEL_TO_NATIVE: Record<HostMethod, [string, string]> = {
@@ -155,6 +157,8 @@ const CHANNEL_TO_NATIVE: Record<HostMethod, [string, string]> = {
   'llm:configSet': ['llm', 'setConfig'],
   'llm:test': ['llm', 'test'],
   'llm:refine': ['llm', 'refine'],
+  'llm:billing': ['llm', 'billing'],
+  'llm:billingKey': ['llm', 'setBillingKey'],
 };
 
 /** 顶层窗口是否具备原生 preload 能力 */

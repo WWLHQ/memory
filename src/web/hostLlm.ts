@@ -8,6 +8,7 @@ import type { RefineLayer } from '../core/memagent/layerRules.ts';
 import { hostCall, hostCapability } from '../desktop/hostBridge.ts';
 import { getStoredSessionId } from './Home/crossTabAuth.ts';
 import { UNSET_PROXY_ACCOUNTING, proxyModelMeta, type ProxyAccounting } from '../shared/proxyAccounting.ts';
+import { UNSET_MANUAL_BILLING, type ManualBilling } from '../shared/billing.ts';
 
 /** 引擎视图（与主进程 llmGateway.LlmEngineView 同形；keySet 只表「有没有」，绝不含密钥本体） */
 export interface LlmEngineView {
@@ -21,6 +22,13 @@ export interface LlmEngineView {
   lastLatencyMs: number | null;
   lastProbeAt: number | null;
   lastProbeOk: boolean | null;
+  /** 批次48 A31-c：计费手工兜底（余额/日配额/单价）；旧快照可能缺省 → 按「未填」处理 */
+  billing?: ManualBilling;
+}
+
+/** 引擎的手工兜底配置（缺省一律按未填，不用 0 占位） */
+export function engineBillingOf(e: LlmEngineView): ManualBilling {
+  return e.billing ?? { ...UNSET_MANUAL_BILLING };
 }
 
 export interface LlmPresetView {
