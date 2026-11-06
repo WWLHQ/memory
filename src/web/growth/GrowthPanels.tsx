@@ -162,8 +162,24 @@ export function DeltaPanel({
 const HOST_LABEL: Record<'native' | 'bridge' | 'none', string> = {
   native: '主进程（Electron）',
   bridge: '主进程（Electron，宿主桥）',
-  none: '不可用（浏览器降级，不会自动执行）',
+  none: '不可用（Web 端不执行调度）',
 };
+
+/** 批次48 A23.4：调度架构说明（Web 端只能说明「调度由桌面端执行」，绝不呈现「已调度」） */
+function scheduleArchText(hostKind: 'native' | 'bridge' | 'none'): string {
+  if (hostKind === 'none') {
+    return '调度由桌面端执行：周期任务由 Electron 主进程单 tick 引擎运行；'
+      + '当前是 Web/浏览器环境 —— 本页不执行调度、不设置定时器，只读展示配置与账本运行记录。';
+  }
+  return '调度由桌面端执行：周期任务由 Electron 主进程单 tick 引擎运行；'
+    + '本页只读展示其账本运行记录，不自行调度。';
+}
+
+/** 调度宿主：优先取审计里真实的 host 字段，无记录时按当前端能力如实标注 */
+function hostText(hostKind: 'native' | 'bridge' | 'none', run?: ScheduleRunInfo | null): string {
+  if (run?.host === 'electron-main') return '主进程（Electron）';
+  return HOST_LABEL[hostKind];
+}
 
 const RUN_STATUS_LABEL: Record<ScheduleRunInfo['status'], string> = {
   ok: '成功', skipped: '跳过', error: '失败',
@@ -199,9 +215,10 @@ export function ScheduleTimeline({
   return (
     <div className="card" data-testid="schedule-timeline">
       <b>调度时间轴（13.3，只读时刻 + 可启停）</b>
+      <div className="note" data-testid="sched-arch">{scheduleArchText(hostKind)}</div>
       <div className="note">
-        R5：调度时刻可配但不可全部停用 —— 至少保留每日 02:00 衰减。
-        运行记录来自内核真实审计 action=schedule_run；无记录即「未运行」，不从 cron 反推。
+        R5：调度时刻可配但不可全部停用 —— 至少保留每日 02:00 衰减。启停只改配置（growth:v1），
+        实际执行只由桌面端主进程完成。运行记录来自内核真实审计 action=schedule_run；无记录即「尚未运行」，不从 cron 反推。
       </div>
       <div className="row" style={{ gap: 18, marginTop: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         {schedule.map((s) => (
@@ -218,17 +235,18 @@ export function ScheduleTimeline({
             </label>
             <div className="note" data-testid={`sched-run-${s.key}`} style={{ marginLeft: 22, marginTop: 2 }}>
               {s.run
-                ? `最近运行 ${fmtTime(s.run.ts)} · ${RUN_STATUS_LABEL[s.run.status]}`
+                ? `最近运行（schedule_run 审计）${fmtTime(s.run.ts)} · ${RUN_STATUS_LABEL[s.run.status]}`
                   + (s.run.duration_ms != null ? ` · ${s.run.duration_ms}ms` : '')
                   + (runReason(s.run) ? ` · 原因 ${runReason(s.run)}` : '')
-                : '未运行（账本无 schedule_run 记录）'}
+                : '最近运行：尚未运行（账本无 schedule_run 记录）'}
             </div>
             <div className="note" data-testid={`sched-next-${s.key}`} style={{ marginLeft: 22 }}>
-              {s.run?.next_due_at ? `下次到期 ${fmtTime(s.run.next_due_at)}` : '下次到期 —（无记录）'}
-              {' · '}
-              <span data-testid={`sched-host-${s.key}`}>
-                宿主 {s.run?.host === 'electron-main' ? '主进程（Electron）' : HOST_LABEL[hostKind]}
-              </span>
+              {s.run?.next_due_at
+                ? `下次到期：${fmtTime(s.run.next_due_at)}`
+                : '下次到期：—（尚未运行，无记录）'}
+            </div>
+            <div className="note" data-testid={`sched-host-${s.key}`} style={{ marginLeft: 22 }}>
+              调度宿主：{hostText(hostKind, s.run)}
             </div>
           </div>
         ))}
@@ -236,3 +254,5 @@ export function ScheduleTimeline({
     </div>
   );
 }
+
+

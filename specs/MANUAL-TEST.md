@@ -267,26 +267,27 @@ status: done
 6. 点「恢复默认位置」：若默认目录已有旧数据，确认框会说明冲突文件将备份为 `*.bak-<时间戳>` 后覆盖；恢复后重启，数据以当前目录为准。
 7. 把指针指向的目录删除或改为只读后重启：应弹「数据目录不可用，请重新选择」，不得静默换目录或丢数据。
 
-## 5. 周期调度（批次48 A23.2 改为 cron 单 tick）
+## 5. 周期调度（批次48 A23.2 改为 cron 单 tick；A23.4 Web 端只读标注）
 
 1. 启动应用，等待首跑（默认 60s；可用环境变量缩短）。四个任务按 cron 到期：衰减每日 02:00、冲突裁决提醒每日 08:00、自生长每周日 03:00、归档每月 1 日 04:00。
-2. 在 `main.log` / `actions.log` 中确认 `schedule:run`，detail 含 `task / status / duration_ms / next_due_at`；账本审计 `action=schedule_run`（生长页调度卡显示「最近运行 / 下次到期 / 宿主」）。
+2. 在 `main.log` / `actions.log` 中确认 `schedule:run`，detail 含 `task / status / duration_ms / next_due_at`；账本审计 `action=schedule_run`（生长页调度卡显示「调度宿主 / 最近运行（schedule_run 审计）/ 下次到期」三项）。
 3. 到「生长」页关闭某个任务开关并保存，等待下一次到期。
-4. **预期**：该任务不再产生新的 `schedule_run` 记录（页面显示未运行），其余任务照常；衰减开关不可停。
-5. 快捷验收（不等到点）：启动前设置
+4. **预期**：该任务不再产生新的 `schedule_run` 记录（页面显示尚未运行），其余任务照常；衰减开关不可停。开关只改 `growth:v1` 配置，页面不得显示「已调度」。
+5. **A23.4 验收（Web 端）**：用浏览器打开生长页 —— 调度卡顶部必须写明「调度由桌面端执行」+「本页不执行调度、不设置定时器」；每个任务显示「调度宿主：不可用（Web 端不执行调度）」「最近运行：尚未运行（账本无 schedule_run 记录）」「下次到期：—（尚未运行，无记录）」，全卡不得出现「已调度」。桌面端有真实 `schedule_run` 记录时，宿主/最近运行时间/下次到期必须与审计一致。
+6. 快捷验收（不等到点）：启动前设置
    - `MAM_SCHEDULE_FIRST_DELAY_MS=5000`（首 tick 延迟，兼容旧名 `MAM_FORGETTING_FIRST_DELAY_MS`）
    - `MAM_SCHEDULE_TICK_MS=60000`（tick 间隔）
    - 只关闭遗忘两项 `MAM_FORGETTING_DISABLED=1`；完全关闭调度 `MAM_SCHEDULE_DISABLED=1`（日志出现 `schedule:scheduler-disabled`）。
-6. **预期（聚类安全）**：不同项目/团队/租户的相似内容**不会**被合成同一摘要；`fact/context` 与 `preference（cautious）` 类别不自动合并。
-7. **预期（归档）**：参数页「保留时长」配置后，归档只在每月 1 日执行一次；衰减周期不再顺带归档（无双跑）。
-8. **预期（自生长 · 批次48 A23.3）**：自生长任务跑真实回归。空账本/样本不足时写 `insufficient_samples` 审计（带 total/positives/negatives/window_days），`schedule_run` 记 `status=skipped, result.reason=insufficient_samples, result.accumulating=true`，**不写** `weight_tuned`。
-9. **四态验收（生长页「自生长回归状态」）**：
-   - 从未跑过 → 「未到运行时间：每周日 03:00（账本暂无回归记录）」；
-   - 样本不足 → 「样本不足：累计 N 条（负例 M 条，窗口 30 天）· 正在积累样本，非故障」；
-   - 已评估未达门槛 → 「已评估未达门槛（f1_gain_below_threshold / precision_drop_over_threshold）· 测试集 F1 … · 未采纳，配置未改动」，账本多一条 `weight_regression`；
-   - 已采纳 → 「已采纳：测试集 F1 … → …」+ 账本多一条 `weight_tuned` 与 `param_save`，权重/阈值卡片显示新值。
-   四种文案不得混成同一个「无变化」。
-10. **快捷验证回归**：空账本时点「⚡ 手动触发一次自生长」→ toast 显示「样本不足…正在积累样本」，Δ 曲线保持空态（无 `tuned-point`）。
+7. **预期（聚类安全）**：不同项目/团队/租户的相似内容**不会**被合成同一摘要；`fact/context` 与 `preference（cautious）` 类别不自动合并。
+8. **预期（归档）**：参数页「保留时长」配置后，归档只在每月 1 日执行一次；衰减周期不再顺带归档（无双跑）。
+9. **预期（自生长 · 批次48 A23.3）**：自生长任务跑真实回归。空账本/样本不足时写 `insufficient_samples` 审计（带 total/positives/negatives/window_days），`schedule_run` 记 `status=skipped, result.reason=insufficient_samples, result.accumulating=true`，**不写** `weight_tuned`。
+10. **四态验收（生长页「自生长回归状态」）**：
+    - 从未跑过 → 「未到运行时间：每周日 03:00（账本暂无回归记录）」；
+    - 样本不足 → 「样本不足：累计 N 条（负例 M 条，窗口 30 天）· 正在积累样本，非故障」；
+    - 已评估未达门槛 → 「已评估未达门槛（f1_gain_below_threshold / precision_drop_over_threshold）· 测试集 F1 … · 未采纳，配置未改动」，账本多一条 `weight_regression`；
+    - 已采纳 → 「已采纳：测试集 F1 … → …」+ 账本多一条 `weight_tuned` 与 `param_save`，权重/阈值卡片显示新值。
+    四种文案不得混成同一个「无变化」。
+11. **快捷验证回归**：空账本时点「⚡ 手动触发一次自生长」→ toast 显示「样本不足…正在积累样本」，Δ 曲线保持空态（无 `tuned-point`）。
 
 > 参数页「知识库策略表」的半衰期/归档/合并数值当前只保存为偏好记忆，尚未被调度消费；页面已标注该限制。
 

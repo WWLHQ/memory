@@ -240,7 +240,7 @@
 | [src/web/feedback/useToast.tsx](src/web/feedback/useToast.tsx) | 13 | — | useToast(fn) |
 | [src/web/growth/DedupCards.tsx](src/web/growth/DedupCards.tsx) | 160 | P14-T3 自净化侧组件：五维评分卡 + 短路嫁接流程 + 24h 统计 + 开发者调参（6.1/6.2，G7） | DedupCard(fn), ShortCircuitFlow(fn), DevTunePanel(fn) |
 | [src/web/growth/GrowthPage.tsx](src/web/growth/GrowthPage.tsx) | 238 | 自我净化与生长页（REQ-009 / P14）· 真实数据接真版 | GrowthPage(fn) |
-| [src/web/growth/GrowthPanels.tsx](src/web/growth/GrowthPanels.tsx) | 239 | P14-T3 自生长侧组件：指标卡 + 五项优化 + Δ 收益曲线 + 调度时间轴（7.1/7.2/13.3） | GrowthCards(fn), OptimizationList(fn), regressionStatusText(fn), DeltaPanel(fn), ScheduleTimeline(fn) |
+| [src/web/growth/GrowthPanels.tsx](src/web/growth/GrowthPanels.tsx) | 259 | P14-T3 自生长侧组件：指标卡 + 五项优化 + Δ 收益曲线 + 调度时间轴（7.1/7.2/13.3） | GrowthCards(fn), OptimizationList(fn), regressionStatusText(fn), DeltaPanel(fn), ScheduleTimeline(fn) |
 | [src/web/growth/coreGrowth.ts](src/web/growth/coreGrowth.ts) | 81 | 自我净化与生长页（REQ-009 / P14）接真内核：优化/调度动作审计真写 storage 账本 | coreGrowthAudit(fn), coreLoadGrowthAudit(fn), coreLoadGrowthConfig(fn), coreSaveGrowthConfig(fn), coreRunGrowthRegression(fn) |
 | [src/web/growth/growthEntry.tsx](src/web/growth/growthEntry.tsx) | 10 | 自我净化与生长页（REQ-009 / P14）入口 | — |
 | [src/web/growth/logic.ts](src/web/growth/logic.ts) | 139 | P14 纯逻辑（T2）：五维加权 / 逐层阈值 / 短路嫁接 / 优化评估 / Δ 收益 / 调度校验 / 审计 | weightedScore(fn), layerThresholdOf(fn), isDuplicate(fn), validateWeights(fn), validateThresholds(fn), shortCircuitPath(fn), evaluateOptimizations(fn), growthDelta(fn), appendTunedPoint(fn), validateSchedule(fn), auditOptimization(fn) |
@@ -586,7 +586,7 @@ src/web/feedback/useFeedbackMirror.ts 6bd1d844d78c
 src/web/feedback/useToast.tsx 85cd09d2e1f5
 src/web/growth/DedupCards.tsx fff9e745c003
 src/web/growth/GrowthPage.tsx 5c188431e831
-src/web/growth/GrowthPanels.tsx 53cda23ca7e7
+src/web/growth/GrowthPanels.tsx aaf46d4e3cc3
 src/web/growth/coreGrowth.ts 45eec04fbb7f
 src/web/growth/growthEntry.tsx af1f1a1c4b42
 src/web/growth/logic.ts 53b37d83d095

@@ -102,6 +102,22 @@ status: active
 
 ---
 
+## 生长页 · Web 端调度架构与「未调度」标注（批次48 A23.4）
+
+- 调度唯一宿主 = 桌面端 Electron 主进程；Web 端不执行调度、不设置定时器，只读展示配置与账本。
+- 三件事必须可见：**调度宿主**（审计 `host` 优先）、**最近一次 `schedule_run` 审计时间**、**下次到期**（审计 `next_due_at`）。
+- 无记录一律「尚未运行（账本无 schedule_run 记录）」「下次到期 —（无记录）」，禁止由 cron 反推。
+- 页面任何位置不出现「已调度」；启停开关只写 `growth:v1` 配置，不代表已调度。
+
+自动化覆盖：
+- `src/web/growth/__tests__/GrowthPage.test.tsx` 的「ScheduleTimeline × 调度架构与未调度标注」：无记录三处文案 + 架构说明；
+  有真实审计时按审计时间/`next_due_at`/`host` 展示；两例均断言卡片文本不含「已调度」。
+- `e2e/growth.spec.ts`：Web 端 `sched-arch` 含「调度由桌面端执行」「本页不执行调度」，`sched-run-self_growth`
+  含「尚未运行」「schedule_run 记录」，`sched-next-self_growth` 含「无记录」，`sched-host-self_growth` 含
+  「Web 端不执行调度」，且 `schedule-timeline` 不含「已调度」。
+
+---
+
 ## 当前自动化门禁（2026-10-30）
 
 | 命令 | 内容 | 通过标准 |
