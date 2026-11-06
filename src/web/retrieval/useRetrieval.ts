@@ -2,7 +2,7 @@
 // T7：引擎切换为 memagent-core 内核 recall（coreEngine），fakeEngine 保留作对照。
 import { useCallback, useRef, useState } from 'react';
 import type { ModeSel, Scene } from './types.ts';
-import { coreEngine } from './coreEngine.ts';
+import { ALL_PROJECTS_SCOPE, coreEngine } from './coreEngine.ts';
 import { newRequestId } from '../kernel.ts';
 
 export type Phase = 'IDLE' | 'LOADING' | 'RESULT' | 'EMPTY' | 'ERROR';
@@ -22,7 +22,8 @@ export function useRetrieval() {
   /** 硬熔断禁用检索 3s（§6） */
   const [cooldown, setCooldown] = useState(false);
 
-  const search = useCallback((query: string, scene: Scene, mode: ModeSel) => {
+  /** 批次48 A26：projectScope 缺省 = 全部项目（单项目场景行为不变） */
+  const search = useCallback((query: string, scene: Scene, mode: ModeSel, projectScope: string = ALL_PROJECTS_SCOPE) => {
     if (cooldown) return;
     seq.current += 1;
     const requestId = newRequestId('req');
@@ -31,7 +32,7 @@ export function useRetrieval() {
     // 引擎 = memagent-core 内核 recall（同步内存实现，微任务级）；setTimeout 仅模拟网络延迟，绝不伪造数据
     setTimeout(() => {
       void (async () => {
-        const r = await coreEngine(query, scene, mode, requestId);
+        const r = await coreEngine(query, scene, mode, requestId, projectScope);
         if (r.breach) {
           setErrorKind('breach');
           setPhase('ERROR');

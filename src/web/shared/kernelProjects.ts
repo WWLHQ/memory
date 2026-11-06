@@ -4,11 +4,14 @@ import { getKernelStorage } from '../kernel.ts';
 
 export const DEFAULT_PROJECT_ID = 'P1';
 
-/** 账本里真实存在的项目 ID（去重、稳定序；空账本 → 空数组，不造数据） */
+/** 内部系统项目（参数快照等 preference 记忆），不是用户项目，不进项目选择器 */
+const INTERNAL_PROJECT = 'P_SYSTEM';
+
+/** 账本里真实存在的用户项目 ID（去重、稳定序；空账本 → 空数组，不造数据） */
 export async function listProjectIds(): Promise<string[]> {
   const all = await getKernelStorage().listMemories({});
   const ids = all
     .map((m) => m.project_id)
-    .filter((p): p is string => typeof p === 'string' && p.length > 0);
+    .filter((p): p is string => typeof p === 'string' && p.length > 0 && p !== INTERNAL_PROJECT);
   return [...new Set(ids)];
 }

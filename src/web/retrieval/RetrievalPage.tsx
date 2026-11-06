@@ -1,18 +1,20 @@
 // 检索页（REQ-012）T6 编排：查询栏 + 横幅 + 结果 + 预算 + 上下文 + 异常态
 // 数据源 = 内核账本（禁止注入种子；空库即 EMPTY 态）
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { QueryBar, type QueryBarValue } from './QueryBar.tsx';
 import { ResultList } from './ResultList.tsx';
 import { ModeBanner } from './ModeBanner.tsx';
 import { BudgetPanel } from './BudgetPanel.tsx';
 import { ContextPanel } from './ContextPanel.tsx';
 import { useRetrieval } from './useRetrieval.ts';
-import { coreReorderMemory } from './coreEngine.ts';
+import { ALL_PROJECTS_SCOPE, coreReorderMemory } from './coreEngine.ts';
+import { listProjectIds } from '../shared/kernelProjects.ts';
 import { AuditTrailCard } from './AuditTrailCard.tsx';
 import { useToast } from './useToast.tsx';
 
 export function RetrievalPage() {
-  const [qv, setQv] = useState<QueryBarValue>({ query: '', scene: 'default', mode: null });
+  const [qv, setQv] = useState<QueryBarValue>({ query: '', scene: 'default', mode: null, project: ALL_PROJECTS_SCOPE });
+  const [projects, setProjects] = useState<string[]>([]);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const { phase, errorKind, result, cooldown, search } = useRetrieval();
@@ -23,9 +25,16 @@ export function RetrievalPage() {
     window.setTimeout(() => setToastMsg(null), 2200);
   };
 
+  // 批次48 A26：项目选择器选项 = 账本真实项目（空账本只有「全部项目」）
+  useEffect(() => {
+    let alive = true;
+    void listProjectIds().then((ps) => { if (alive) setProjects(ps); });
+    return () => { alive = false; };
+  }, []);
+
   const doSearch = () => {
     setSelectedId(null);
-    search(qv.query, qv.scene, qv.mode);
+    search(qv.query, qv.scene, qv.mode, qv.project ?? ALL_PROJECTS_SCOPE);
   };
 
   // 记住/忘记 = 内核 17.3 真操作（写账本 + memory_op 审计），随后重查以反映真实权重
@@ -58,6 +67,7 @@ export function RetrievalPage() {
 
       <QueryBar
         value={qv}
+        projects={projects}
         loading={loading}
         disabled={cooldown}
         onChange={(v, t) => { setQv(v); if (t) flash(t); }}

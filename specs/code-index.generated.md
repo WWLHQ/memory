@@ -338,15 +338,15 @@
 | [src/web/retrieval/BudgetPanel.tsx](src/web/retrieval/BudgetPanel.tsx) | 40 | REQ-012 T5 预算面板（§5/R9）：三档变色 + 漏斗 + 重排闸门 + 裁剪明细 | BudgetPanel(fn) |
 | [src/web/retrieval/ContextPanel.tsx](src/web/retrieval/ContextPanel.tsx) | 42 | REQ-012 T5 上下文面板（§4）：全文（cold 仅 L2 + 审计展开）/ 关联 / 参数只读 / 跳转 | ContextPanel(fn) |
 | [src/web/retrieval/ModeBanner.tsx](src/web/retrieval/ModeBanner.tsx) | 47 | REQ-012 T5 生效模式横幅（§2） | ModeBanner(fn) |
-| [src/web/retrieval/QueryBar.tsx](src/web/retrieval/QueryBar.tsx) | 86 | REQ-012 T3 查询栏（§1）：query/scene/mode + 校验 + 联动 | QueryBar(fn), QueryBarValue(type) |
+| [src/web/retrieval/QueryBar.tsx](src/web/retrieval/QueryBar.tsx) | 100 | REQ-012 T3 查询栏（§1）：query/scene/mode + 校验 + 联动 | QueryBar(fn), QueryBarValue(type) |
 | [src/web/retrieval/ResultList.tsx](src/web/retrieval/ResultList.tsx) | 50 | REQ-012 T4 结果列表（§3：Top K 默认 3-5，加载更多至 10） | ResultList(fn) |
 | [src/web/retrieval/ResultRow.tsx](src/web/retrieval/ResultRow.tsx) | 52 | REQ-012 T4 结果行（§3.1 字段 + §3.2 操作） | ResultRow(fn) |
-| [src/web/retrieval/RetrievalPage.tsx](src/web/retrieval/RetrievalPage.tsx) | 129 | 检索页（REQ-012）T6 编排：查询栏 + 横幅 + 结果 + 预算 + 上下文 + 异常态 | RetrievalPage(fn) |
-| [src/web/retrieval/coreEngine.ts](src/web/retrieval/coreEngine.ts) | 135 | REQ-012 接真内核引擎（T7）：与 fakeEngine 同签名（async），内部走 memagent-core ma.recall | coreReorderMemory(fn), coreEngine(fn), EngineResult(type) |
+| [src/web/retrieval/RetrievalPage.tsx](src/web/retrieval/RetrievalPage.tsx) | 139 | 检索页（REQ-012）T6 编排：查询栏 + 横幅 + 结果 + 预算 + 上下文 + 异常态 | RetrievalPage(fn) |
+| [src/web/retrieval/coreEngine.ts](src/web/retrieval/coreEngine.ts) | 157 | REQ-012 接真内核引擎（T7）：与 fakeEngine 同签名（async），内部走 memagent-core ma.recall | coreReorderMemory(fn), coreEngine(fn), ALL_PROJECTS_SCOPE(const), EngineResult(type) |
 | [src/web/retrieval/logic.ts](src/web/retrieval/logic.ts) | 134 | 检索页（REQ-012）纯逻辑层 | modeName(fn), sceneName(fn), normalizeScene(fn), normalizeMode(fn), resolveSceneBudget(fn), resolveModeLinkage(fn), isMinimalCandidate(fn), autoDispatch(fn), sortHits(fn), freshness(fn), decayClass(fn), budgetLevel(fn), validateQuery(fn) |
 | [src/web/retrieval/retrievalEntry.tsx](src/web/retrieval/retrievalEntry.tsx) | 10 | 检索页（REQ-012）入口 | — |
 | [src/web/retrieval/types.ts](src/web/retrieval/types.ts) | 68 | 检索页（REQ-012）数据模型 | RetrievalHit(type), SceneBudget(type), ModeBannerData(type), BudgetData(type), Scene(type), Mode(type), ModeSel(type), PageState(type), DecayClass(type), BudgetLevel(type) |
-| [src/web/retrieval/useRetrieval.ts](src/web/retrieval/useRetrieval.ts) | 50 | REQ-012 T6 状态机 hook（§0/§6）：IDLE→LOADING→RESULT/EMPTY/ERROR；二次查询保留 session，request_id 每次新生成（R7/§7.6）。 | useRetrieval(fn), RetrievalState(type), Phase(type) |
+| [src/web/retrieval/useRetrieval.ts](src/web/retrieval/useRetrieval.ts) | 51 | REQ-012 T6 状态机 hook（§0/§6）：IDLE→LOADING→RESULT/EMPTY/ERROR；二次查询保留 session，request_id 每次新生成（R7/§7.6）。 | useRetrieval(fn), RetrievalState(type), Phase(type) |
 | [src/web/retrieval/useToast.tsx](src/web/retrieval/useToast.tsx) | 13 | — | useToast(fn) |
 | [src/web/security/AccountAdminCard.tsx](src/web/security/AccountAdminCard.tsx) | 164 | 管理员账号卡片（批次7）：账号列表 / 角色切换 / 团队分配 / 修改我的密码。 | AdminAccountCard(fn) |
 | [src/web/security/FieldBackfillCard.tsx](src/web/security/FieldBackfillCard.tsx) | 178 | 安全页 · 存量字段回填卡（批次41-T） | FieldBackfillCard(fn) |
@@ -375,7 +375,7 @@
 | [src/web/shared/PageNav.tsx](src/web/shared/PageNav.tsx) | 102 | 分页导航条（批次24）：首页/上一页/跳页输入/下一页/尾页 + 每页条数（默认 10）。 | PageNav(fn), PageNavProps(type) |
 | [src/web/shared/actionLog.ts](src/web/shared/actionLog.ts) | 106 | 渲染层动作日志（批次7）：任何页面 import 本模块即自动安装全局捕获。 | uiLog(fn), installUiActionLog(fn) |
 | [src/web/shared/kernelLoad.tsx](src/web/shared/kernelLoad.tsx) | 95 | 内核数据加载三态（批次25 P0-7）：loading / ok / error —— 「读不到」绝不渲染成「账本为空」。 | kernelErrorText(fn), useKernelLoad(fn), KernelLoadError(fn), KernelLoadResult(type), KernelLoadPhase(type) |
-| [src/web/shared/kernelProjects.ts](src/web/shared/kernelProjects.ts) | 15 | 项目 ID 真源（批次27 P2-7）：真实项目从内核账本派生（与 MCP list_projects 同口径）， | listProjectIds(fn), DEFAULT_PROJECT_ID(const) |
+| [src/web/shared/kernelProjects.ts](src/web/shared/kernelProjects.ts) | 18 | 项目 ID 真源（批次27 P2-7）：真实项目从内核账本派生（与 MCP list_projects 同口径）， | listProjectIds(fn), DEFAULT_PROJECT_ID(const) |
 | [src/web/shared/l0BlobStore.ts](src/web/shared/l0BlobStore.ts) | 53 | 渲染层 L0 原数据库只读端口（批次37-A）：拆库后 L1–L6 行只带 has_l0，密文信封在**主进程**的 memories.l0.json。 | HostL0BlobStore(class) |
 | [src/web/shared/l0Port.ts](src/web/shared/l0Port.ts) | 178 | 渲染层 L0 端口（§4.4）：把内核 L0Port / L0AdminPort 调用转发到主进程 L0Vault。 | l0HostAvailable(fn), HostL0Port(class), HostL0Admin(class) |
 | [src/web/shared/layerTime.ts](src/web/shared/layerTime.ts) | 12 | 层级生成时间口径（批次24 拍板：一条记忆只记一个「本组层内容生成时间」，不逐层记）。 | fmtLayerGen(fn), LAYER_GEN_UNRECORDED(const) |
@@ -685,15 +685,15 @@ src/web/retrieval/AuditTrailCard.tsx ec4eb45c6bad
 src/web/retrieval/BudgetPanel.tsx 37d9e0b3efe7
 src/web/retrieval/ContextPanel.tsx ced78de9c9db
 src/web/retrieval/ModeBanner.tsx 6fe6fc992fae
-src/web/retrieval/QueryBar.tsx d397ce2b3f0a
+src/web/retrieval/QueryBar.tsx af31e1000b03
 src/web/retrieval/ResultList.tsx 12804bf53d10
 src/web/retrieval/ResultRow.tsx 37402263bf53
-src/web/retrieval/RetrievalPage.tsx 047b02ad03d3
-src/web/retrieval/coreEngine.ts f57e4b4249b4
+src/web/retrieval/RetrievalPage.tsx 5e817151235e
+src/web/retrieval/coreEngine.ts f28f4aa2f735
 src/web/retrieval/logic.ts a39b8afe5920
 src/web/retrieval/retrievalEntry.tsx 48813d404181
 src/web/retrieval/types.ts 02c4f1b8beba
-src/web/retrieval/useRetrieval.ts 61184e45fee0
+src/web/retrieval/useRetrieval.ts ecd58a163f68
 src/web/retrieval/useToast.tsx 85cd09d2e1f5
 src/web/security/AccountAdminCard.tsx 23692c9117df
 src/web/security/FieldBackfillCard.tsx e25b5b82223e
@@ -722,7 +722,7 @@ src/web/shared/L0WriteUnlock.tsx 83af39cb0ce1
 src/web/shared/PageNav.tsx fed5dc790db7
 src/web/shared/actionLog.ts f21305492f55
 src/web/shared/kernelLoad.tsx 210a4fbe17f4
-src/web/shared/kernelProjects.ts a3b48cd2181f
+src/web/shared/kernelProjects.ts e204655f0df7
 src/web/shared/l0BlobStore.ts a7ae63e8ff9b
 src/web/shared/l0Port.ts eca5be9d579c
 src/web/shared/layerTime.ts 6c21b4d94211

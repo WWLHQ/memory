@@ -1240,3 +1240,18 @@ status: draft
 > **A·影响面回归**：影响面 = `web/monitor/{options,useMonitorReal,MonitorPage}.tsx` + `e2e/monitor.spec.ts`。全量 `vitest run --maxWorkers=1` **206 文件 / 2444 例全绿**（A24 基线 205/2440 → +1 文件 / +4 例）；`typecheck` 两工程 0 错；oxlint **0/0**；`check:no-demo` 通过；`build` + `build:electron` 通过。
 > **B·效果验证**：空账本 → 下拉 **1 项「全部」**，不再出现占位 agent；账本有 `sync-00` → 选项 `['all','sync-00']` 且可选中、命中 0 条并显示诚实空态；`agentOptionsFromLedger` 对空白/重复/`all` 混合输入给出确定排序。**反向断言**：显式断言不含 `sync-00` / `coder-01`（防止占位名回潮）。
 > **C·变异验证**：把 `agentOptionsFromLedger` 改回旧常量 `['all','coder-01','writer-02','sync-00']` → `a25AgentOptions.test.tsx` **3/4 红**（空账本、合并排序、页面下拉），还原后复绿。C2 边界：空数组 / 空白串 / undefined / 重复名 / `all` 混入。未做 C3。
+
+### 批次48 A26：检索项目范围（2026-11-06）
+
+> 动因（P2-4）：`coreEngine` 原先只取 `listProjectIds()[0]` 做单项目召回，多项目账本下**静默丢弃其它项目命中**。现增加项目选择器，默认「全部项目」，多项目逐项召回后合并；单项目场景行为不变。
+
+| 能力 | 代码落点 | 测试 |
+|---|---|---|
+| 多项目召回合并 | `src/web/retrieval/coreEngine.ts`：`ALL_PROJECTS_SCOPE='all'`；`coreEngine(..., projectScope='all')` 对 `all` 走全部真实项目（空账本回落 `DEFAULT_PROJECT_ID`），逐项目 `ma.recall` 后按 `mem_id` 去重合并、`sortHits` 统一排序；payload = 各项目之和，`evidence_thin` = 任一项触发补查后的合并口径 | `src/web/retrieval/__tests__/a26Projects.test.tsx`（默认 all 两项目都命中 / 显式非首项目只命中自身 / 单项目 all≡指定） |
+| 项目选择器 | `src/web/retrieval/QueryBar.tsx`：`QueryBarValue.project?` + `projects` 属性 + `data-testid="q-project"`（首项「全部项目」）；`useRetrieval.search(..., projectScope)`；`RetrievalPage.tsx` 挂载时 `listProjectIds()` 回填、检索传 `qv.project ?? 'all'` | 同上（默认 selected=all、切换回调带 project） |
+| 项目清单口径 | `src/web/shared/kernelProjects.ts`：`listProjectIds()` 排除内部 `P_SYSTEM`（参数快照等 preference 不进用户项目选择器） | `a26Projects.test.tsx`（P_SYSTEM 不进清单） |
+
+> **A26 三道闸门证据**：
+> **A·影响面回归**：影响面 = `retrieval/{coreEngine,useRetrieval,QueryBar,RetrievalPage}` + `shared/kernelProjects.ts`（项目清单被写页/记忆页/日志页共用，排除 `P_SYSTEM` 对它们只是少一个内部项）。全量 `vitest run --maxWorkers=1` **207 文件 / 2450 例全绿**（A25 基线 206/2444 → +1 文件 / +6 例；首次运行再次遇到原生崩溃 `0xC0000409`，按 A27 口径重跑一次全绿，非断言失败）；`typecheck` 两工程 0 错；oxlint 0/0；`check:no-demo` 通过；`build` + `build:electron` 通过。既有 `components.test.tsx`（16 例）与 `coreEngine.realdata.test.ts`（4 例）全绿，未改其断言。
+> **B·效果验证**：两个项目各有「缓存 TTL」记忆时，默认检索**同时返回 300s 与 600s 两条**（证明不丢其它项目命中）；显式选 `P-b` 只回 600s；单项目账本下 `all` 与显式选择命中集合完全一致（`memory_id` 数组相等）；选择器默认值 = `all`、首项文案「全部项目」、切换回调携带 `project`。**反向断言**：显式断言不含另一项目内容。
+> **C·变异验证**：把 `scopes` 改回旧式 `[projects[0] ?? DEFAULT_PROJECT_ID]` → `a26Projects.test.tsx` **1 红**（默认 all 只剩首个项目命中），还原后 4 文件 46 例复绿。C2 边界：空账本 / 单项目 / 两项目 / 显式非首个项目 / 内部 `P_SYSTEM` 混入。未做 C3。

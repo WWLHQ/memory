@@ -80,7 +80,16 @@ export async function coreReorderMemory(memId: string, op: 'remember' | 'forget'
   return { ok: r.ok, blocked_locked: Boolean(r.blocked_locked) };
 }
 
-export async function coreEngine(query: string, scene: Scene, modeSel: ModeSel, _requestId: string): Promise<EngineResult> {
+/** 批次48 A26：项目范围 —— 'all' = 全部真实项目（默认），其余 = 指定项目 */
+export const ALL_PROJECTS_SCOPE = 'all';
+
+export async function coreEngine(
+  query: string,
+  scene: Scene,
+  modeSel: ModeSel,
+  _requestId: string,
+  projectScope: string = ALL_PROJECTS_SCOPE,
+): Promise<EngineResult> {
   const ma = await getAgent();
   const table = resolveSceneBudget(scene);
   const dispatch = modeSel ? { mode: modeSel, hit_keywords: [] as string[] } : autoDispatch(query, scene);
@@ -88,23 +97,36 @@ export async function coreEngine(query: string, scene: Scene, modeSel: ModeSel, 
   // 内核 recall（17.5/17.8 打分 + pinned 免检 + 冷层补查 + critical 禁 minimal）
   // 页面 Scene 含 history_query（演示扩展），内核场景三值 → 映射 default
   const coreScene = scene === 'critical' ? 'critical' : scene === 'task_start' ? 'task_start' : 'default';
-  // 项目 ID 从账本真实派生（listProjectIds）；空账本回落 DEFAULT_PROJECT_ID 占位（A10，非空账本务必用真实项目）
+  // 批次48 A26：项目范围。默认「全部项目」——逐个项目真实召回后合并，绝不静默丢弃其它项目命中；
+  // 单项目场景下 all ≡ 该项目，行为与原先一致。空账本回落 DEFAULT_PROJECT_ID 占位（A10）。
   const projects = await listProjectIds();
-  const project_id = projects[0] ?? DEFAULT_PROJECT_ID;
-  const req: RecallReq = { query, project_id, scene: coreScene, mode: modeSel, top_k: 5 };
-  const r = await ma.recall(req);
+  const scopes: string[] = projectScope === ALL_PROJECTS_SCOPE
+    ? (projects.length > 0 ? projects : [DEFAULT_PROJECT_ID])
+    : [projectScope];
+  const recalls = await Promise.all(scopes.map((project_id) => {
+    const req: RecallReq = { query, project_id, scene: coreScene, mode: modeSel, top_k: 5 };
+    return ma.recall(req);
+  }));
+  // 合并命中（按 mem_id 去重，真实项目间不会重复；去重仅为防御）
+  const mergedHits = new Map<string, (typeof recalls)[number]['hits'][number]>();
+  for (const rr of recalls) {
+    for (const h of rr.hits) if (!mergedHits.has(h.mem_id)) mergedHits.set(h.mem_id, h);
+  }
+  const r = recalls[recalls.length - 1] ?? null;
+  const hitList = [...mergedHits.values()];
 
-  const memByMid = await loadMemByMids(r.hits.map((h) => h.mem_id));
-  const hits: RetrievalHit[] = r.hits
+  const memByMid = await loadMemByMids(hitList.map((h) => h.mem_id));
+  const hits: RetrievalHit[] = hitList
     .map((h) => toRetrievalHit(h, memByMid.get(h.mem_id) ?? null));
   const ordered = sortHits(hits);
 
-  const payload = r.payload_tokens;
+  const payload = recalls.reduce((sum, rr) => sum + rr.payload_tokens, 0);
   const breach = budgetLevel(payload) === 'breach';
 
-  // 2.4.3 逃生阀：内核 evidence_thin=true 表示触发过补查；补查后仍有命中 → backfill_hit
-  const evidence_thin: EngineResult['evidence_thin'] = r.evidence_thin
-    ? (r.hits.length > 0 ? 'backfill_hit' : 'backfill_miss')
+  // 2.4.3 逃生阀：任一项目触发过补查 → 合并后按是否有命中归档
+  const anyThin = recalls.some((rr) => rr.evidence_thin);
+  const evidence_thin: EngineResult['evidence_thin'] = anyThin
+    ? (ordered.length > 0 ? 'backfill_hit' : 'backfill_miss')
     : 'none';
 
   const banner: ModeBannerData = {
@@ -113,7 +135,7 @@ export async function coreEngine(query: string, scene: Scene, modeSel: ModeSel, 
     fallback: !modeSel,
     hit_keywords: dispatch.hit_keywords,
     secondary_mode_hint: dispatch.mode === 'minimal' ? null : { mode: 'minimal', note: '≤200t 摘要注入（2.4.3 次模式）' },
-    request_id: r.request_id,
+    request_id: r?.request_id ?? _requestId,
     evidence_thin,
     cold_recall: evidence_thin === 'backfill_hit',
   };

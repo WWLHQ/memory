@@ -7,10 +7,14 @@ export interface QueryBarValue {
   query: string;
   scene: Scene;
   mode: ModeSel;
+  /** 批次48 A26：检索项目范围；缺省 = 全部项目 */
+  project?: string;
 }
 
 interface Props {
   value: QueryBarValue;
+  /** 账本真实项目清单（不含内部 P_SYSTEM）；空账本只有「全部项目」 */
+  projects?: string[];
   onChange: (v: QueryBarValue, toast: string | null) => void;
   onSubmit: () => void;
   loading: boolean;
@@ -20,7 +24,7 @@ interface Props {
 const SCENES: Scene[] = ['default', 'task_start', 'history_query', 'critical'];
 const ALL_MODES: NonNullable<ModeSel>[] = ['top_insight', 'fact_first', 'event_replay', 'pattern_reasoning', 'minimal'];
 
-export function QueryBar({ value, onChange, onSubmit, loading, disabled }: Props) {
+export function QueryBar({ value, projects = [], onChange, onSubmit, loading, disabled }: Props) {
   const { error, minimalHint } = useMemo(() => validateQuery(value.query), [value.query]);
   const table = resolveSceneBudget(value.scene);
   const critical = value.scene === 'critical';
@@ -58,6 +62,16 @@ export function QueryBar({ value, onChange, onSubmit, loading, disabled }: Props
         <label style={{ fontSize: 12 }}>场景</label>
         <select data-testid="q-scene" value={value.scene} onChange={(e) => setScene(e.target.value as Scene)}>
           {SCENES.map((s) => <option key={s} value={s}>{sceneName(s)}（预算 {resolveSceneBudget(s).budget}t）</option>)}
+        </select>
+
+        <label style={{ fontSize: 12 }}>项目</label>
+        <select
+          data-testid="q-project"
+          value={value.project ?? 'all'}
+          onChange={(e) => onChange({ ...value, project: e.target.value }, null)}
+        >
+          <option value="all">全部项目</option>
+          {projects.map((p) => <option key={p} value={p}>{p}</option>)}
         </select>
 
         <label style={{ fontSize: 12 }}>模式</label>
