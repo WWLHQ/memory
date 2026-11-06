@@ -12,6 +12,7 @@
   "scripts": {
     "lint": "oxlint",
     "test": "vitest run",
+    "test:gate": "node tools/test-gate.mjs",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.electron.json",

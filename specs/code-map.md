@@ -1270,3 +1270,21 @@ status: draft
 > **A·影响面回归**：影响面 = `web/models/modelConfig.ts` + 所有经 `readModelConfig` 的模型页状态（`ModelsPage.tsx`、`configuredVectorDim` 内核装配、`coreModels` 保存）。全量 `vitest run --maxWorkers=1` **208 文件 / 2456 例全绿**（A26 基线 207/2450 → +1 文件 / +6 例；其间连续两次原生崩溃 `0xC0000409`、第三次通过，均非断言失败——该不稳定性即 A27 的治理对象）；`typecheck` 两工程 0 错；oxlint 0/0；`check:no-demo` 通过；`build` + `build:electron` 通过。既有模型页/配置用例（`ModelsPage.test.tsx` 7 例、`coreModels.test.ts` 12 例）全绿未改断言。
 > **B·效果验证**：租户 A 写入后切租户 B 读为 null（不串读），切回 A 原样读回；旧 key 有值 + 租户 key 为空 → 首次读取迁移并删除旧 key，之后切 B 也拿不到；租户 key 已有值时旧 key 保持不动；无租户身份时 key = 旧 key 且读写正常。**反向断言**：迁移后旧 key 必须为 null、B 必须 null、已有数据不被旧值覆盖。
 > **C·变异验证**：`tenantStorageKey()` 改回常量 `mam.modelConfig.v1` → `a28Tenant.test.ts` **4/6 红**（key 形状/隔离、迁移删旧、切租户、已有数据不覆盖），还原后 6 例复绿。C2 边界：空租户 / 单租户 / 两租户切换 / 旧 key 有值/无值 / 租户 key 已有值。未做 C3。
+
+### 批次48 A27：全量测试门禁稳定化（2026-11-06，D2=S1）
+
+> 动因（P2-3）：全量 `vitest run --maxWorkers=1` 在单进程内跑 200+ 文件，A24/A26/A28 期间多次原生崩溃 `0xC0000409`（STATUS_STACK_BUFFER_OVERRUN）——既不可复现定位，又逼人「重跑一次」；此前没有任何书面口径，重跑会连断言失败一起吞掉。
+
+| 能力 | 代码落点 | 测试/证据 |
+|---|---|---|
+| 4 分片串行 | `tools/test-gate.mjs`：逐片 `spawn` 本地 `node_modules/vitest/vitest.mjs run --maxWorkers=1 --shard=i/N --reporter=json --outputFile=<片报告>`；片数默认 4（`--shards=N` 可调 1–8） | `npm run test:gate` → 4 片 **52+52+52+52 文件 / 2456 例全绿**，总耗时约 66s |
+| 仅 0xC0000409 重试一次 | `classifyAttempt` 判定顺序固定：先看 JSON 报告（有 failed test/suite → `assertion-fail` 立即判红）→ 再看退出码/崩溃码（`0xC0000409` = 3221226505 / -1073740791，或 stderr 命中该码 → `crash` 允许重试一次；重试后仍崩溃判红） | 自检 `MAM_TEST_GATE_SELFTEST_CRASH="1:once"` → 第 1 次崩溃、重试通过（重试 1 次）；`"1:twice"` → 重试后仍判红（不无限重试） |
+| 断言失败绝不重试/不吞 | 报告 `numFailedTests > 0` 或 `numFailedTestSuites > 0` → 直接失败，`retries=[]`；无报告且非崩溃码（过滤零命中 / unhandled error / 报告全绿但非 0 退出）一律判红不重试 | 注入真实失败用例（`expect(1+1).toBe(3)`）→ 门禁 **exit=1、失败 1 例、重试 0 次**，`summary.json.failedTests` 记录用例名 |
+| JSON 报告留档 | 每片 `test-results/test-gate/<runId>/shard-<i>-a<n>.json` + `summary.json`（状态/分片/重试/失败用例名/耗时；重试保留两轮报告） | `summary.json` 实跑产物 |
+
+> **A27 三道闸门证据**：
+> **A·影响面回归**：影响面 = 新增 `tools/test-gate.mjs` + `package.json` 的 `test:gate` 脚本 + `specs/开发纪律_三道闸门.md` A2 口径；不改任何生产代码与既有测试。**新门禁全量 = 208 文件 / 2456 例全绿、重试 0 次**（与 A28 基线同口径同数字，证明分片未漏测/重复测：52×4 = 208）；既有 `npm test`（单进程 vitest）保留不变；`typecheck` 两工程 0 错；`oxlint tools/test-gate.mjs` 0/0；`check:no-demo` 通过；`build` + `build:electron` 通过。
+> **B·效果验证**：① 正常全量 → 4 片全通过、`totals = 208 文件 / 2456 例`、`retries=[]`；② 注入真实断言失败用例 → **门禁判红且 `retries=[]`**（证明不重试、不吞，`summary.json` 里 `failedTests` 带用例全名）；③ 自检崩溃一次 → 重试 1 次后通过（`retries=[{shard:1, reason:'0xC0000409'}]`）；④ 自检崩溃两次 → 重试 1 次后判红（证明只重试一次、不无限重试）；⑤ 过滤零命中（`no-such-test-file-xyz`）→ 报告 0 例、判红且不重试。**（②③④⑤ 均为实机跑出，非纸面推断）**
+> **C·变异验证**：C1 把「有 failed test/suite → assertion-fail」改成 `return 'pass'`（吞掉断言失败）→ 同一注入失败用例的门禁**变绿且 `totals.failed=1`**（防线失效被肉眼可见地证明）→ 原样还原后再跑同一用例 → **exit=1、判红、重试 0** 复绿。C2 输入矩阵：无报告非崩溃（过滤零命中）/ 有报告断言失败 / 模拟崩溃一次 / 模拟崩溃两次 / 报告全绿但非 0 退出 —— 分类结果逐一断言（前两类判红不重试、中两类只重试一次、最后一类判红不重试）。
+> **已知边界**：分片按 vitest `--shard` 的文件哈希分配，片间用例数不均（578/573/603/702）属正常；`0xC0000409` 本身未能在本环境按需复现，重试分支用自检开关验证（`MAM_TEST_GATE_SELFTEST_CRASH`，只影响指定分片的第一/两次尝试，不改判据）。
+
