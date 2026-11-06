@@ -22,6 +22,7 @@ export default defineConfig({
         audit: 'audit.html',
         lifecycle: 'lifecycle.html',
         dispute: 'dispute.html',
+        sync: 'sync.html',
         params: 'params.html',
         monitor: 'monitor.html',
         feedback: 'feedback.html',

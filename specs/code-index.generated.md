@@ -3,7 +3,7 @@
 > 由 `npm run code:index` 生成，请勿手改；改代码后重跑即可。
 > 用法：先在本表定位文件与导出符号，再只读该文件的局部区间（省 token、少误改）。
 
-共 328 个源码文件。
+共 331 个源码文件。
 
 ## e2e
 
@@ -375,6 +375,9 @@
 | [src/web/shared/syncHub.ts](src/web/shared/syncHub.ts) | 69 | 渲染层同步中枢代理（批次42-B）：把内核 AnySyncHub 接口转发到主进程 PgSyncHub。 | HostSyncHub(class) |
 | [src/web/shared/useColWidths.tsx](src/web/shared/useColWidths.tsx) | 97 | 表头列宽拖拽与固化（批次24）：记忆库 / 日志记录 / 审计日志三张表共用同一实现。 | loadColWidths(fn), saveColWidths(fn), useColWidths(fn), ColResizeHandle(fn), MIN_COL_WIDTH(const), ColWidths(type) |
 | [src/web/shared/useL0Session.ts](src/web/shared/useL0Session.ts) | 155 | 渲染层 L0 连续查阅会话（§4.4.3，日志页 / 记忆层级页共用）： | useL0Session(fn), formatRemaining(fn), L0_HEARTBEAT_MS(const), L0SessionView(type), L0SessionApi(type), L0UnlockOutcome(type), L0RequestOutcome(type) |
+| [src/web/sync/SyncPage.tsx](src/web/sync/SyncPage.tsx) | 131 | 同步与裁决页（批次42-C）：「立即同步」（真实报告）+ 中枢对账视图 + §9.7 人工裁决队列。 | SyncPage(fn) |
+| [src/web/sync/coreSyncPage.ts](src/web/sync/coreSyncPage.ts) | 103 | 同步与裁决页（批次42-C）数据逻辑：内核 agent.sync 真跑 + §9.7 裁决队列经 HostSyncHub 代理。 | runSync(fn), listSyncConflicts(fn), resolveConflict(fn), hubOverview(fn), SyncPageHub(type), SyncPageCtx(type), SyncRunView(type), HubOverviewView(type) |
+| [src/web/sync/syncEntry.tsx](src/web/sync/syncEntry.tsx) | 11 | 同步与裁决页（批次42-C）入口：挂载 SyncPage。 | — |
 | [src/web/test-setup.ts](src/web/test-setup.ts) | 1 | — | — |
 | [src/web/vite-env.d.ts](src/web/vite-env.d.ts) | 2 | Vite 侧效应导入（CSS）的类型声明 | — |
 | [src/web/write/DedupCard.tsx](src/web/write/DedupCard.tsx) | 40 | 写入页（REQ-006 / P2）查重预览卡（T4） | DedupCard(fn) |
@@ -708,6 +711,9 @@ src/web/shared/session.ts 2bc9578bb923
 src/web/shared/syncHub.ts 831b0d785108
 src/web/shared/useColWidths.tsx a6e14931a82b
 src/web/shared/useL0Session.ts c917a61c99d9
+src/web/sync/SyncPage.tsx 1282b8549322
+src/web/sync/coreSyncPage.ts e25ef86eaea4
+src/web/sync/syncEntry.tsx 4f1348160022
 src/web/test-setup.ts 3a2ad06d2218
 src/web/vite-env.d.ts 191b7a12f3de
 src/web/write/DedupCard.tsx f1a434a39892

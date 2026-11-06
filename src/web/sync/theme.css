@@ -1,0 +1,17 @@
+/*
+ * 同步与裁决页样式（批次42-C）—— 复用审计页暗色设计系统，仅补本页专属类。
+ */
+h2 { font-size:15px; margin:0 0 6px; }
+.report { margin-top:10px; font-size:13px; line-height:1.7; }
+.report b { color:var(--accent); }
+.err { color:var(--err); font-size:12.5px; margin-top:8px; }
+
+/* 冲突裁决表 */
+.tbl { width:100%; border-collapse:collapse; font-size:12.5px; margin-top:10px; }
+.tbl th, .tbl td { padding:8px 10px; text-align:left; border-bottom:1px solid var(--line); vertical-align:top; }
+.tbl th { color:var(--muted); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.4px; }
+.tbl tr:hover { background:var(--panel2); }
+.tbl .btn { margin-right:6px; }
+
+.toast.ok { border-color:var(--ok); color:var(--ok); }
+.toast.err { border-color:var(--err); color:var(--err); }
