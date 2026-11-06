@@ -44,9 +44,10 @@ import { ensureSharedProject } from '../core/memagent/mcpRecall.ts';
 import { FileTokenStore } from '../core/memagent/tokenStore.ts';
 import { FileMemberStore } from '../core/memagent/memberStore.ts';
 import { loadOrCreateTenant } from './tenantSource.ts';
+import { PgSyncHub } from '../core/memagent/pgSyncHub.ts';
 import { createWebhook } from '../core/memagent/webhook.ts';
 import { createWebhookHttpServer } from './webhookServer.ts';
-import type { AuditAction, Category, Memory } from '../core/memagent/types.ts';
+import type { AuditAction, Category, Form, Memory } from '../core/memagent/types.ts';
 import {
   createReconciler, applyScanToStore, defaultAgentSources,
   type CollectorCursor, type ScanResult,
@@ -126,6 +127,11 @@ let L0_DB_PATH: string;
 let AUDIT_PATH: string;
 /** 批次37-A：L0 原数据库实例（主进程独占写；页面只能经 l0:blobs 按会话批量回读密文） */
 let l0Store: FileL0BlobStore;
+/**
+ * 批次42-B：云端同步中枢（主进程 pglite 落盘，dataDir = 数据根 sync-hub/）。
+ * init 失败不阻断应用启动（同步是增量能力）：置 null 并记日志，sync:* handler 如实报「中枢未就绪」。
+ */
+let syncHub: PgSyncHub | null = null;
 /**
  * 批次37-B：两个库 + 密钥环的真实路径（按指针 ledgerDir/l0Dir 解析）。
  * 未走过首启向导的老指针两个字段都没有 → 都跟随数据根，行为与拆库前一致；
@@ -2439,6 +2445,25 @@ async function bootstrap(): Promise<void> {
   void mlog('bootstrap:tenant-source', { file: join(USER_DATA, 'tenant.json'), ...tenantTriple });
   actionLog('app', 'bootstrap:tenant-source', { user_id: tenantTriple.user_id, team_id: tenantTriple.team_id, enterprise_id: tenantTriple.enterprise_id });
 
+  // 批次42-B 云端同步中枢：主进程 pglite 落盘（数据根 sync-hub/，跨端同机中枢——桌面/Web/CLI 同源）。
+  // 建表幂等；init 失败不阻断启动（同步是增量能力，ROADMAP 批次42 总边界），置 null + 日志，
+  // sync:* handler 如实报「中枢未就绪」，绝不假装可用。
+  {
+    const hubDir = join(USER_DATA, 'sync-hub');
+    try {
+      const hub = new PgSyncHub(hubDir);
+      await hub.init();
+      syncHub = hub;
+      void mlog('bootstrap:sync-hub', { dir: hubDir });
+      actionLog('app', 'bootstrap:sync-hub', { dir: hubDir });
+    } catch (e) {
+      syncHub = null;
+      const err = String((e as Error)?.message ?? e);
+      void mlog('bootstrap:sync-hub-fail', { dir: hubDir, error: err });
+      actionLog('app', 'bootstrap:sync-hub-fail', { dir: hubDir, error: err }, { level: 'error' });
+    }
+  }
+
   // 批次45-A2 存量租户归一：把历史行的 team_id/enterprise_id 重盖成 tenant.json 规范值（user_id 保留），
   // 幂等（已归一 mismatched=0 零写盘）、逐行审计。沿用批次41-A 审计迁移口径：改写前先备份
   //（备份失败即本次不迁，绝不无备份动用户的账本）；只读镜像同样不迁——等持有写锁的进程自己迁。
@@ -3109,6 +3134,90 @@ async function bootstrap(): Promise<void> {
         failed: report.failed, dir: backupDir,
       });
       return { ok: true, report, backup_dir: backupDir };
+    } catch (e) { return l0Fail(e); }
+  });
+
+  // 批次42-B：云端同步中枢 sync:* 通道。上行/下行/对账/冲突列表/审计游标需会话；
+  // 人工裁决（sync:resolve）需管理员（§42-B 口径：裁决是管理动作）。team_id 由渲染层
+  // kernelAccount 传入（45-A1 已归一为 tenant.json 规范真值；主进程校验非空，不校验来源——
+  // 信任边界 = 本机渲染层，与 storage:* 通道一致）。
+  const syncHubReady = () => syncHub !== null;
+  handleIpc(IPC.syncPush, async (_e, mem?: unknown, form?: unknown, sessionId?: string) => {
+    const gate = requireSession(sessionId, IPC.syncPush);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    if (!syncHubReady()) return { ok: false, code: 'E_NOT_IMPLEMENTED', error: '同步中枢未就绪（sync-hub 初始化失败，见 actions.log）' };
+    if (!mem || typeof mem !== 'object') return { ok: false, error: 'sync:push 需要记忆行对象' };
+    try {
+      const r = await syncHub!.push(mem as Memory, (typeof form === 'string' ? form : 'desktop') as Form);
+      return { ok: true, result: r };
+    } catch (e) { return l0Fail(e); }
+  });
+  handleIpc(IPC.syncPull, async (_e, scope?: unknown, since?: unknown, form?: unknown, sessionId?: string) => {
+    const gate = requireSession(sessionId, IPC.syncPull);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    if (!syncHubReady()) return { ok: false, code: 'E_NOT_IMPLEMENTED', error: '同步中枢未就绪（sync-hub 初始化失败，见 actions.log）' };
+    const sc = (scope ?? {}) as { team_id?: unknown; user_id?: unknown };
+    if (typeof sc.team_id !== 'string' || !sc.team_id) return { ok: false, error: 'sync:pull 需要 team_id（渲染层 kernelAccount 规范三元组）' };
+    try {
+      const r = await syncHub!.pull(
+        { team_id: sc.team_id, user_id: typeof sc.user_id === 'string' ? sc.user_id : undefined },
+        Number(since) || 0,
+        (typeof form === 'string' ? form : 'desktop') as Form,
+      );
+      return { ok: true, items: r.items, cursor: r.cursor };
+    } catch (e) { return l0Fail(e); }
+  });
+  handleIpc(IPC.syncReconcile, async (_e, scope?: unknown, sessionId?: string) => {
+    const gate = requireSession(sessionId, IPC.syncReconcile);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    if (!syncHubReady()) return { ok: false, code: 'E_NOT_IMPLEMENTED', error: '同步中枢未就绪（sync-hub 初始化失败，见 actions.log）' };
+    const sc = (scope ?? {}) as { team_id?: unknown };
+    if (typeof sc.team_id !== 'string' || !sc.team_id) return { ok: false, error: 'sync:reconcile 需要 team_id' };
+    try {
+      const r = await syncHub!.reconcile({ team_id: sc.team_id });
+      return { ok: true, items: r.items, losers: r.losers, missing_local: r.missing_local };
+    } catch (e) { return l0Fail(e); }
+  });
+  handleIpc(IPC.syncConflicts, async (_e, teamId?: unknown, sessionId?: string) => {
+    const gate = requireSession(sessionId, IPC.syncConflicts);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    if (!syncHubReady()) return { ok: false, code: 'E_NOT_IMPLEMENTED', error: '同步中枢未就绪（sync-hub 初始化失败，见 actions.log）' };
+    try {
+      const conflicts = await syncHub!.listConflicts(typeof teamId === 'string' && teamId ? teamId : undefined);
+      return { ok: true, conflicts };
+    } catch (e) { return l0Fail(e); }
+  });
+  handleIpc(IPC.syncResolve, async (_e, conflictId?: unknown, winner?: unknown, sessionId?: string) => {
+    const gate = requireAdmin(sessionId, IPC.syncResolve);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    if (!syncHubReady()) return { ok: false, code: 'E_NOT_IMPLEMENTED', error: '同步中枢未就绪（sync-hub 初始化失败，见 actions.log）' };
+    if (typeof conflictId !== 'string' || !conflictId) return { ok: false, error: 'sync:resolve 需要 conflict_id' };
+    if (winner !== 'local' && winner !== 'remote') return { ok: false, error: "sync:resolve winner 只能是 'local' | 'remote'" };
+    try {
+      await syncHub!.resolve(conflictId, winner);
+      actionLog('kernel', 'sync:resolve', { conflict_id: conflictId, winner, by: gate.ctx.user_id });
+      return { ok: true };
+    } catch (e) { return l0Fail(e); }
+  });
+  handleIpc(IPC.syncCursor, async (_e, sessionId?: string) => {
+    const gate = requireSession(sessionId, IPC.syncCursor);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    if (!syncHubReady()) return { ok: false, code: 'E_NOT_IMPLEMENTED', error: '同步中枢未就绪（sync-hub 初始化失败，见 actions.log）' };
+    try { return { ok: true, cursor: await syncHub!.getCursor() }; } catch (e) { return l0Fail(e); }
+  });
+  handleIpc(IPC.syncAuditCount, async (_e, sessionId?: string) => {
+    const gate = requireSession(sessionId, IPC.syncAuditCount);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    if (!syncHubReady()) return { ok: false, code: 'E_NOT_IMPLEMENTED', error: '同步中枢未就绪（sync-hub 初始化失败，见 actions.log）' };
+    try { return { ok: true, count: await syncHub!.auditCount() }; } catch (e) { return l0Fail(e); }
+  });
+  handleIpc(IPC.syncAuditsFrom, async (_e, start?: unknown, sessionId?: string) => {
+    const gate = requireSession(sessionId, IPC.syncAuditsFrom);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    if (!syncHubReady()) return { ok: false, code: 'E_NOT_IMPLEMENTED', error: '同步中枢未就绪（sync-hub 初始化失败，见 actions.log）' };
+    try {
+      const audits = await syncHub!.auditsFrom(Number(start) || 0);
+      return { ok: true, audits };
     } catch (e) { return l0Fail(e); }
   });
 

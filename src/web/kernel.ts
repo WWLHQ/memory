@@ -17,6 +17,7 @@ import { DEFAULT_TENANT } from '../shared/tenantDefaults.ts';
 import { configuredVectorDim } from './models/modelConfig.ts';
 import { HostL0Admin, HostL0Port, l0HostAvailable } from './shared/l0Port.ts';
 import { HostL0BlobStore } from './shared/l0BlobStore.ts';
+import { HostSyncHub } from './shared/syncHub.ts';
 import { hostCall, hostCapability } from '../desktop/hostBridge.ts';
 import { currentSessionId } from './shared/session.ts';
 import { homeBaseUrl } from './backend.ts';
@@ -182,6 +183,15 @@ export function getKernelWithSeed(): MemAgent & MemAgentSeedHooks {
   return getKernel() as MemAgent & MemAgentSeedHooks;
 }
 
+/**
+ * 批次42-B：同步中枢（桌面壳内经 IPC 代理主进程 PgSyncHub，dataDir=sync-hub/）。
+ * 与 L0 端口同一宿主能力判定：纯浏览器不注入 → agent.sync() 如实报 E_NOT_IMPLEMENTED（诚实降级）。
+ */
+function hostSyncHub(): { hub?: import('../core/memagent/sync.ts').AnySyncHub } {
+  if (!l0HostAvailable()) return {};
+  return { hub: new HostSyncHub() };
+}
+
 /** 全局唯一内核实例；首次调用时的 llm/vector 覆盖生效（模型页等需要自定义路由输入的场景） */
 export function getKernel(overrides: KernelOverrides = {}): MemAgent {
   if (!agentSingleton) {
@@ -194,6 +204,7 @@ export function getKernel(overrides: KernelOverrides = {}): MemAgent {
       vector: overrides.vector ?? new JsVectorBackend(configuredVectorDim()),
       storage: getKernelStorage(),
       ...hostL0Ports(),
+      ...hostSyncHub(),
     });
   }
   return agentSingleton;
@@ -209,6 +220,7 @@ export function createKernelOnSameStorage(overrides: KernelOverrides = {}): MemA
     vector: overrides.vector ?? new JsVectorBackend(configuredVectorDim()),
     storage: getKernelStorage(),
     ...hostL0Ports(),
+    ...hostSyncHub(),
   });
 }
 

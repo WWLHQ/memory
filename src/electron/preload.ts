@@ -253,5 +253,26 @@ const floatAttribution = {
   log: (msg: string) => void ipcRenderer.send(IPC.floatLog, msg),
 };
 
+// 云端同步中枢（批次42-B）：渲染层代理主进程 PgSyncHub。上行/下行/对账需会话（sessionId 末参），
+// 人工裁决 resolve 需管理员（主进程 requireAdmin 二次校验，角色不由渲染层自报）。
+const sync = {
+  push: (mem: unknown, form: string, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.syncPush, mem, form, sessionId) as Promise<{ ok: boolean; result?: string; error?: string }>,
+  pull: (scope: unknown, since: number, form: string, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.syncPull, scope, since, form, sessionId) as Promise<{ ok: boolean; items?: unknown[]; cursor?: number; error?: string }>,
+  reconcile: (scope: unknown, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.syncReconcile, scope, sessionId) as Promise<{ ok: boolean; items?: unknown[]; losers?: unknown[]; missing_local?: string[]; error?: string }>,
+  conflicts: (teamId?: string, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.syncConflicts, teamId, sessionId) as Promise<{ ok: boolean; conflicts?: unknown[]; error?: string }>,
+  resolve: (conflictId: string, winner: 'local' | 'remote', sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.syncResolve, conflictId, winner, sessionId) as Promise<{ ok: boolean; error?: string }>,
+  cursor: (sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.syncCursor, sessionId) as Promise<{ ok: boolean; cursor?: number; error?: string }>,
+  auditCount: (sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.syncAuditCount, sessionId) as Promise<{ ok: boolean; count?: number; error?: string }>,
+  auditsFrom: (start: number, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.syncAuditsFrom, start, sessionId) as Promise<{ ok: boolean; audits?: unknown[]; error?: string }>,
+};
+
 contextBridge.exposeInMainWorld('__ELECTRON__', true);
-contextBridge.exposeInMainWorld('api', { storage, hostScan, hostAgentDetect, tenant, mcpClients, floatAttribution, collector, backup, dataRoot, log, l0, setup, legacy, ledgerReset, rulesRejudge, ledgerFields, refineQueue, llm });
+contextBridge.exposeInMainWorld('api', { storage, hostScan, hostAgentDetect, tenant, mcpClients, floatAttribution, collector, backup, dataRoot, log, l0, setup, legacy, ledgerReset, rulesRejudge, ledgerFields, refineQueue, sync, llm });

@@ -281,8 +281,22 @@ export interface SyncUpReport {
   audits: SyncAudit[];
 }
 
+/** 中枢最小接口（引擎依赖面，42-B）：内存 SyncHub（同步）/ PgSyncHub（异步）/ 宿主 IPC 代理（42-B HostSyncHub）均结构兼容 */
+export interface SyncHubLike {
+  push(mem: Memory, form: Form): Promise<PushOutcome> | PushOutcome;
+  pull(scope: { team_id: string; user_id?: string }, since: number, form?: Form):
+    Promise<{ items: Memory[]; cursor: number }> | { items: Memory[]; cursor: number };
+  reconcile(scope: { team_id: string }):
+    Promise<{ items: Memory[]; losers: Memory[]; missing_local: string[] }> | { items: Memory[]; losers: Memory[]; missing_local: string[] };
+  listConflicts(team_id?: string): Promise<SyncConflict[]> | SyncConflict[];
+  resolve(conflict_id: string, winner: 'local' | 'remote'): Promise<void> | void;
+  getCursor(): Promise<number> | number;
+  auditCount(): Promise<number> | number;
+  auditsFrom(start: number, team_id?: string): Promise<SyncAudit[]> | SyncAudit[];
+}
+
 /** 中枢联合：内存版（同步返回）与 Postgres 版（异步返回）接口同构，引擎函数双兼容 */
-export type AnySyncHub = SyncHub | import('./pgSyncHub.ts').PgSyncHub;
+export type AnySyncHub = SyncHubLike;
 
 /** 上行（桌面实时 / Web 即时 / 移动批量回传 / CLI 命令触发） */
 export async function syncUp(local: { listMemories(f: Filter): Promise<Memory[]>; putMemory(m: Memory): Promise<void> }, hub: AnySyncHub, form: Form, filter?: { onlyPending?: boolean }): Promise<SyncUpReport> {

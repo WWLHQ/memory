@@ -122,6 +122,15 @@ export const IPC = {
   refineRetryFailed: 'refine:retryFailed',
   /** 批次41-I 后续：设置补炼每日额度（限额/不限额 + 行数），仅管理员 */
   refineSetCap: 'refine:setCap',
+  /** 批次42-B：云端同步中枢（主进程 PgSyncHub，dataDir=sync-hub/）——上行/下行/对账/冲突列表/审计游标需会话；人工裁决（resolve）需管理员 */
+  syncPush: 'sync:push',
+  syncPull: 'sync:pull',
+  syncReconcile: 'sync:reconcile',
+  syncConflicts: 'sync:conflicts',
+  syncResolve: 'sync:resolve',
+  syncCursor: 'sync:cursor',
+  syncAuditCount: 'sync:auditCount',
+  syncAuditsFrom: 'sync:auditsFrom',
 } as const;
 
 /** preload 实际暴露的全部 channel（自检基线） */

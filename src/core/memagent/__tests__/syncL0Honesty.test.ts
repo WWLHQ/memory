@@ -110,12 +110,13 @@ describe('同步与 L0 接线诚实边界（阶段4-H / B7 变异杀手）', () 
     await expect(wired.l0ListGrants()).resolves.toEqual([{ grant_id: 'g1' }]);
   });
 
-  it('桌面壳装配契约：hostL0Ports() 真注入 HostL0Admin；SyncHub / PgSyncHub 中枢真实存在', () => {
+  it('桌面壳装配契约：hostL0Ports() 真注入 HostL0Admin；SyncHub / PgSyncHub 中枢真实存在；kernel hostSyncHub() 真注入（42-B）', () => {
     const kernel = src('src/web/kernel.ts');
     const pg = src('src/core/memagent/pgSyncHub.ts');
     const sync = src('src/core/memagent/sync.ts');
     expect(kernel).toMatch(/l0Admin: new HostL0Admin\(\)/);
     expect(kernel).toMatch(/if \(!l0HostAvailable\(\)\) return \{\}/); // 仅纯浏览器不注入端口
+    expect(kernel).toMatch(/\.\.\.hostSyncHub\(\)/); // 42-B：桌面壳内 agent 拿到中枢代理，纯浏览器不注入
     expect(pg).toMatch(/export class PgSyncHub/);
     expect(sync).toMatch(/export class SyncHub/);
     expect(sync).toMatch(/export async function syncUp/);

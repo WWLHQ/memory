@@ -58,6 +58,9 @@ export type HostMethod =
   /** 批次41-T：存量补齐缺失的 sha256 / 向量（只补元数据，不删行、不改正文） */
   | 'ledger:fieldsPreview' | 'ledger:fieldsBackfill'
   | 'refine:state' | 'refine:setEnabled' | 'refine:backfill' | 'refine:retryFailed' | 'refine:setCap'
+  /** 批次42-B：云端同步中枢（主进程 PgSyncHub 代理） */
+  | 'sync:push' | 'sync:pull' | 'sync:reconcile' | 'sync:conflicts' | 'sync:resolve'
+  | 'sync:cursor' | 'sync:auditCount' | 'sync:auditsFrom'
   | 'llm:config' | 'llm:configSet' | 'llm:test' | 'llm:refine';
 
 /** 扁平 channel → preload 暴露的嵌套对象方法（window.api[ns][fn]） */
@@ -140,6 +143,14 @@ const CHANNEL_TO_NATIVE: Record<HostMethod, [string, string]> = {
   'refine:backfill': ['refineQueue', 'backfill'],
   'refine:retryFailed': ['refineQueue', 'retryFailed'],
   'refine:setCap': ['refineQueue', 'setCap'],
+  'sync:push': ['sync', 'push'],
+  'sync:pull': ['sync', 'pull'],
+  'sync:reconcile': ['sync', 'reconcile'],
+  'sync:conflicts': ['sync', 'conflicts'],
+  'sync:resolve': ['sync', 'resolve'],
+  'sync:cursor': ['sync', 'cursor'],
+  'sync:auditCount': ['sync', 'auditCount'],
+  'sync:auditsFrom': ['sync', 'auditsFrom'],
   'llm:config': ['llm', 'config'],
   'llm:configSet': ['llm', 'setConfig'],
   'llm:test': ['llm', 'test'],
