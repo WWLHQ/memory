@@ -45,7 +45,8 @@ export type ProxySelectMode = 'auto' | 'manual';
 export interface ProxyCallAuditEntry {
   event: 'llm_proxy';
   llm_proxy_source: string;
-  cost: number;
+  /** 真实花费（usage × 单价）；null = usage/单价未记录（不拿 0 冒充已计费，批次48 A24） */
+  cost: number | null;
   mode: ProxySelectMode | 'local';
   at: number;
 }

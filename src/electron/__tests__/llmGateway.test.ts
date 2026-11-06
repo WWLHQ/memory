@@ -33,6 +33,9 @@ afterEach(() => { for (const d of temps.splice(0)) rmSync(d, { recursive: true, 
 interface Captured { engine: string; url: string; auth: string | null; body: { model?: string; messages?: { content?: string }[] } }
 const captures: Captured[] = [];
 const failing = new Set<string>(); // 放 engine 名 → 该引擎所有请求 500
+const noUsage = new Set<string>(); // 放 engine 名 → 该引擎响应不带 usage
+/** mock 上游真实 usage（批次48 A24：内核据此记账，不再按字符数估算） */
+const MOCK_TOKENS = 12;
 
 function chatServer(engine: string): Server {
   return createServer((req: IncomingMessage, res) => {
@@ -49,7 +52,10 @@ function chatServer(engine: string): Server {
         return;
       }
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ choices: [{ message: { content: `mock-${engine}-out` } }] }));
+      res.end(JSON.stringify({
+        choices: [{ message: { content: `mock-${engine}-out` } }],
+        ...(noUsage.has(engine) ? {} : { usage: { total_tokens: MOCK_TOKENS } }),
+      }));
     });
   });
 }
@@ -81,7 +87,7 @@ function cfg(over: Partial<LlmEngineConfig> = {}): LlmGatewayConfig {
   return { engines: [eng('ollama', over), eng('deepseek', over), eng('kimi', over)] };
 }
 
-beforeEach(() => { captures.length = 0; failing.clear(); });
+beforeEach(() => { captures.length = 0; failing.clear(); noUsage.clear(); });
 
 // ── 路由：哪个能用、哪个快用哪个 ───────────────────────────────────────────────
 
@@ -219,13 +225,33 @@ describe('LlmGatewayProvider usable/listModels/call', () => {
     applyProxyAccounting(UNSET_PROXY_ACCOUNTING); // 不把全局配置泄漏给后续用例
   });
 
-  test('call（judge/rerank 用途）走同一套延时优先并回 tokens 估算', async () => {
+  test('call（judge/rerank 用途）走同一套延时优先并回真实 usage tokens', async () => {
     const c = cfg();
     c.engines[2].lastLatencyMs = 10;
     const r = await new LlmGatewayProvider(c, KEYS).call('', '原始提示词', { request_id: 'r', usage: 'judge' });
     expect(r.text).toBe('mock-kimi-out');
-    expect(r.tokens).toBe(Math.ceil('mock-kimi-out'.length / 2));
+    expect(r.tokens).toBe(MOCK_TOKENS);
     expect(captures[0].engine).toBe('kimi');
+    // 批次48 A24：响应无 usage → 回 0，绝不按 text.length/2 估算
+    captures.length = 0;
+    noUsage.add('kimi');
+    const r2 = await new LlmGatewayProvider(c, KEYS).call('', '原始提示词', { request_id: 'r', usage: 'judge' });
+    expect(r2.tokens).toBe(0);
+  });
+
+  test('takeUsage：精炼累计真实 usage，取用即清零；上游无 usage 如实 null', async () => {
+    const c = cfg();
+    const p = new LlmGatewayProvider(c, KEYS);
+    expect(p.takeUsage()).toBeNull(); // 尚未调用
+    await p.refineLayer('', 'L2', '文本', 'fact', CTX);
+    await p.refineLayer('', 'L3', '文本', 'fact', CTX);
+    expect(p.takeUsage()).toEqual({ tokens: MOCK_TOKENS * 2 });
+    expect(p.takeUsage()).toBeNull(); // 已取用清零
+
+    noUsage.add('ollama');
+    const only = new LlmGatewayProvider({ engines: [eng('ollama')] }, {});
+    await only.refineLayer('', 'L2', '文本', 'fact', CTX);
+    expect(only.takeUsage()).toEqual({ tokens: null }); // 不猜、不估算
   });
 });
 

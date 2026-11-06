@@ -39,3 +39,51 @@ export function remainingText(remain: number | null): string {
   if (remain === null) return '未设置';
   return Number.isFinite(remain) ? String(remain) : '不限';
 }
+
+// ---------- 批次48 A24：代理封顶（price_cap / cost_cap） ----------
+// 封顶随参数快照持久化；null = 未设置。真实路由与页面模拟必须读同一个快照值，不得回落 0.01 / 2。
+
+export interface ProxyCaps {
+  /** 低价档单价上限（¥/千次）；null = 未设置 → 低价档不入选，仅免费可用 */
+  price_cap: number | null;
+  /** 当日成本封顶（¥/日）；null = 未设置 → 不封顶（不回落写死的 2） */
+  cost_cap: number | null;
+}
+
+export const UNSET_PROXY_CAPS: ProxyCaps = { price_cap: null, cost_cap: null };
+
+/** 封顶值：有限非负；其余一律未设置（不把空串/NaN 悄悄当 0） */
+export function normalizeProxyCap(v: unknown): number | null {
+  if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) return null;
+  return v;
+}
+
+export function proxyCapsFromCfg(cfg: unknown): ProxyCaps {
+  const c = (cfg && typeof cfg === 'object' ? cfg : {}) as Record<string, unknown>;
+  return {
+    price_cap: normalizeProxyCap(c.proxy_price_cap),
+    cost_cap: normalizeProxyCap(c.proxy_cost_cap),
+  };
+}
+
+/** 代理当日花费窗口：与页面「已用」同源（滚动 24h；重启不归零） */
+export const PROXY_COST_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * 从账本实算当日（滚动 24h）代理花费：只统计真实发生的 `llm_proxy` 及其数值 cost。
+ * 口径与模型页「已用」同源（重启不归零）；cost 为 null（usage/单价未设置）的条目跳过，不做估算。
+ */
+export function proxyCostToday(
+  audits: readonly { ts: number; action: string; detail?: unknown }[],
+  now: number = Date.now(),
+): number {
+  let sum = 0;
+  for (const a of audits) {
+    if (a.action !== 'llm_proxy') continue;
+    if (!(now - a.ts >= 0 && now - a.ts < PROXY_COST_WINDOW_MS)) continue;
+    const d = (a.detail && typeof a.detail === 'object' ? a.detail : {}) as Record<string, unknown>;
+    const c = Number(d.cost);
+    if (Number.isFinite(c) && c > 0) sum += c;
+  }
+  return sum;
+}

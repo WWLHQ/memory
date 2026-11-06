@@ -14,13 +14,22 @@ interface Props {
   /** manual 模式下勾选的 agent 名单 */
   selected: string[];
   selectMode: ProxySelectMode;
-  priceCap: number;
-  costCap: number;
+  /** 批次48 A24：null = 未设置（不回落 0.01 / 2） */
+  priceCap: number | null;
+  costCap: number | null;
   onToggleSource: (agent: string) => void;
   onSelectMode: (m: ProxySelectMode) => void;
-  onPriceCap: (v: number) => void;
-  onCostCap: (v: number) => void;
+  onPriceCap: (v: number | null) => void;
+  onCostCap: (v: number | null) => void;
   onSimulate: () => void;
+}
+
+/** 输入框 → 封顶值：空串/非法一律「未设置」（null），不把空串悄悄当 0 */
+function parseCapInput(raw: string): number | null {
+  const s = raw.trim();
+  if (!s) return null;
+  const n = Number(s);
+  return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
 function tierBadge(t: ProxySource['tier']): string {
@@ -130,13 +139,36 @@ export function ProxyPanel(p: Props) {
       <div className="row" style={{ gap: 24, marginTop: 10, alignItems: 'center' }}>
         <label>
           price_cap（¥/千次）：
-          <input data-testid="price-cap" type="number" min={0} step={0.01} value={p.priceCap} onChange={(e) => p.onPriceCap(Number(e.target.value))} style={{ width: 80 }} />
+          <input
+            data-testid="price-cap"
+            type="number"
+            min={0}
+            step={0.01}
+            value={p.priceCap ?? ''}
+            placeholder="未设置"
+            onChange={(e) => p.onPriceCap(parseCapInput(e.target.value))}
+            style={{ width: 80 }}
+          />
         </label>
         <label>
           cost_cap（¥/日）：
-          <input data-testid="cost-cap" type="number" min={0} step={0.5} value={p.costCap} onChange={(e) => p.onCostCap(Number(e.target.value))} style={{ width: 80 }} />
+          <input
+            data-testid="cost-cap"
+            type="number"
+            min={0}
+            step={0.5}
+            value={p.costCap ?? ''}
+            placeholder="未设置"
+            onChange={(e) => p.onCostCap(parseCapInput(e.target.value))}
+            style={{ width: 80 }}
+          />
         </label>
       </div>
+      {p.priceCap === null && (
+        <div className="note" data-testid="price-cap-unset" style={{ marginTop: 8 }}>
+          price_cap 未设置 —— 低价档不进入自动择优，仅免费源可代理（不回落硬编码 0.01）。
+        </div>
+      )}
       {p.priceCap === 0 && (
         <div className="note" data-testid="free-only-hint" style={{ marginTop: 8 }}>
           C13：price_cap=0 —— 仅免费源可代理，付费源一律回退本地。

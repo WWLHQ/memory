@@ -6,7 +6,8 @@ import type { Memory, StorageBackend, Form } from './types.ts';
 import { ulid } from './ulid.ts';
 import { autoArchiveDaysOf, halfLifeDaysOf } from '../../shared/normalParams.ts';
 import {
-  UNSET_PROXY_ACCOUNTING, normalizeAccountingPrice, normalizeAccountingQuota, type ProxyAccounting,
+  UNSET_PROXY_ACCOUNTING, UNSET_PROXY_CAPS, normalizeAccountingPrice, normalizeAccountingQuota,
+  normalizeProxyCap, type ProxyAccounting, type ProxyCaps,
 } from '../../shared/proxyAccounting.ts';
 import { normalizeGrowthConfig, type GrowthConfig } from '../../shared/growthConfig.ts';
 
@@ -30,6 +31,9 @@ export interface ParamsSnapshot {
     /** 批次48 A16 反代理记账（旧快照可能缺字段 → 未设置） */
     proxy_price_cny_per_kcall?: number | null;
     proxy_daily_quota?: number | null;
+    /** 批次48 A24 反代理封顶（旧快照可能缺字段 → 未设置，不回落 0.01 / 2） */
+    proxy_price_cap?: number | null;
+    proxy_cost_cap?: number | null;
     [key: string]: unknown;
   };
   kbs: unknown[];
@@ -90,6 +94,63 @@ export function proxyAccountingFromSnapshot(mems: Memory[]): ProxyAccounting {
     price_cny_per_kcall: normalizeAccountingPrice(cfg.proxy_price_cny_per_kcall),
     daily_quota: normalizeAccountingQuota(cfg.proxy_daily_quota),
   };
+}
+
+/**
+ * 批次48 A24：反代理封顶 —— 页面模拟与内核真实路由共用这一份快照取值。
+ * 无快照/字段缺失 → 未设置（null），不回落到旧的 0.01 / 2。
+ */
+export function proxyCapsFromSnapshot(mems: Memory[]): ProxyCaps {
+  const cfg = findParamsSnapshot(mems)?.cfg;
+  if (!cfg) return { ...UNSET_PROXY_CAPS };
+  return { price_cap: normalizeProxyCap(cfg.proxy_price_cap), cost_cap: normalizeProxyCap(cfg.proxy_cost_cap) };
+}
+
+export interface ProxyCapsSaveOptions {
+  requestId: string;
+  form: Form;
+  enterpriseId?: string;
+  teamId?: string;
+}
+
+/**
+ * A24：封顶落参数快照（读旧快照 → 只改 cfg 两个字段 → delete + put，保留 kbs/dev 等其它字段）。
+ * 单条不累积；写 `param_save` 审计（kind='proxy_caps'）便于回放与排查。
+ */
+export async function saveProxyCapsToLedger(
+  storage: StorageBackend, caps: ProxyCaps, opts: ProxyCapsSaveOptions,
+): Promise<{ mem_id: string; version: number }> {
+  const mems = await storage.listMemories({});
+  const old = mems.find(
+    (m) => m.category === 'preference' && m.user_id === 'system' && m.content.startsWith(PARAMS_PREF_PREFIX),
+  );
+  let snapshot: ParamsSnapshot;
+  if (old) {
+    snapshot = parseParamsSnapshot(old.content) ?? { cfg: {}, kbs: [], dev: {} };
+    await storage.deleteMemory(old.mem_id);
+  } else {
+    snapshot = { cfg: {}, kbs: [], dev: {} };
+  }
+  const price_cap = normalizeProxyCap(caps.price_cap);
+  const cost_cap = normalizeProxyCap(caps.cost_cap);
+  snapshot.cfg = { ...snapshot.cfg, proxy_price_cap: price_cap, proxy_cost_cap: cost_cap };
+  const now = Date.now();
+  const mem: Memory = {
+    mem_id: `params_${ulid(now)}`,
+    project_id: 'P_SYSTEM', user_id: 'system',
+    enterprise_id: opts.enterpriseId ?? '', team_id: opts.teamId ?? '',
+    category: 'preference', layer: 'L2',
+    content: `${PARAMS_PREF_PREFIX}${JSON.stringify(snapshot)}`,
+    decay_class: 'hot', pinned: true, locked: false,
+    version: (old?.version ?? 0) + 1, created_at: old?.created_at ?? now, updated_at: now,
+  };
+  await storage.putMemory(mem);
+  await storage.appendAudit({
+    request_id: opts.requestId, action: 'param_save', form: opts.form,
+    project_id: 'P_SYSTEM', user_id: 'system', ts: now,
+    detail: { kind: 'proxy_caps', price_cap, cost_cap, version: mem.version },
+  });
+  return { mem_id: mem.mem_id, version: mem.version };
 }
 
 /** 生长页只认自己的 preference 记录（preference / system / growth:v1: 前缀） */

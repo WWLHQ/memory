@@ -5,7 +5,7 @@ import type { StorageBackend } from '../../core/memagent/types.ts';
 import { getKernel, getKernelStorage, getTenant, newRequestId } from '../kernel.ts';
 import { PARAMS_PREF_PREFIX as PREF_PREFIX, parseParamsSnapshot } from '../../core/memagent/paramsSnapshot.ts';
 import { normalizeUnitPrice } from '../../core/memagent/recallInsight.ts';
-import { normalizeAccountingPrice, normalizeAccountingQuota } from '../../shared/proxyAccounting.ts';
+import { normalizeAccountingPrice, normalizeAccountingQuota, normalizeProxyCap } from '../../shared/proxyAccounting.ts';
 import { setHostProxyAccounting } from '../hostLlm.ts';
 import type { DevParams, KbPolicyRow, NormalConfig } from './types.ts';
 
@@ -55,19 +55,26 @@ export async function coreSaveParams(
   const { storage } = await getCtx();
   const tenant = getTenant();
   const old = await findParamsMemory(storage);
+  // 批次48 A24：参数页保存不得清掉模型页写入的封顶（整条 delete + put，需显式带回旧快照里的两个字段）
+  const prevCfg = old ? parseParamsSnapshot(old.content)?.cfg : undefined;
+  const cfgWithCaps = {
+    ...cfg,
+    proxy_price_cap: normalizeProxyCap(prevCfg?.proxy_price_cap),
+    proxy_cost_cap: normalizeProxyCap(prevCfg?.proxy_cost_cap),
+  } as NormalConfig;
   if (old) await storage.deleteMemory(old.mem_id);
   const mem: Memory = {
     mem_id: newRequestId('params'),
     project_id: 'P_SYSTEM', user_id: 'system', enterprise_id: tenant.enterprise_id, team_id: tenant.team_id,
     category: 'preference', layer: 'L2',
-    content: packContent({ cfg, kbs, dev }),
+    content: packContent({ cfg: cfgWithCaps, kbs, dev }),
     decay_class: 'hot', pinned: true, locked: false,
     version: (old?.version ?? 0) + 1, created_at: Date.now(), updated_at: Date.now(),
   };
   await storage.putMemory(mem);
   await storage.appendAudit({
     request_id: requestId, action: 'param_save', form: 'web', project_id: 'P_SYSTEM', user_id: 'system',
-    ts: Date.now(), detail: { cfg, kbs, dev, version: mem.version },
+    ts: Date.now(), detail: { cfg: cfgWithCaps, kbs, dev, version: mem.version },
   });
   // 保存后立即把新的反代理记账值交给渲染层内核（写路径的 routeProxy 用同一份口径）
   setHostProxyAccounting({

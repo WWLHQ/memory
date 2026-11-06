@@ -1034,7 +1034,9 @@ function registerLlmIpc(): void {
         p.category as Parameters<typeof llmGateway.refineLayer>[3],
         { request_id, usage: 'write' },
       );
-      return { ok: true, text };
+      // 批次48 A24：把本层调用的真实 usage 一并回传，渲染层内核按 tokens × 单价记账
+      const usage = llmGateway.takeUsage();
+      return { ok: true, text, tokens: usage ? usage.tokens : null };
     }
     if (p.mode === 'raw') {
       if (typeof p.prompt !== 'string' || !p.prompt) throw new Error('llm:refine 参数非法');

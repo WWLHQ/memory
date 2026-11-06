@@ -7,10 +7,10 @@ import type { ModelInfo } from '../../core/memagent/types.ts';
 import { routeProxy } from '../../core/memagent/llm.ts';
 import type { StorageBackend } from '../../core/memagent/types.ts';
 import { embedSync, JsVectorBackend } from '../../core/memagent/vector.ts';
-import { getKernelStorage, newRequestId, KERNEL_FORM, rebuildKernelFromModelConfig } from '../kernel.ts';
+import { getKernelStorage, getTenant, newRequestId, KERNEL_FORM, rebuildKernelFromModelConfig } from '../kernel.ts';
 import { getHostLlmSnapshot, isLocalBase } from '../hostLlm.ts';
-import { proxyAccountingFromSnapshot } from '../../core/memagent/paramsSnapshot.ts';
-import { proxyModelMeta } from '../../shared/proxyAccounting.ts';
+import { proxyAccountingFromSnapshot, proxyCapsFromSnapshot, saveProxyCapsToLedger } from '../../core/memagent/paramsSnapshot.ts';
+import { normalizeProxyCap, proxyCostToday, proxyModelMeta, type ProxyCaps } from '../../shared/proxyAccounting.ts';
 import { readModelConfig, sanitizeUsages, writeModelConfig } from './modelConfig.ts';
 import { vectorInfo } from './logic.ts';
 import type { LlmUsage, ModelConfigAuditEntry, ProxyAuditEntry, ProxyCallAuditEntry, ProxySource, UsageConfig, VectorModelKey } from './types.ts';
@@ -21,6 +21,8 @@ interface Ctx {
   models: ModelInfo[];   // 内核路由输入（used 由账本当日 llm_proxy 明细实算）
   sources: ProxySource[]; // 反代理源（真实快照 + 账本实算 used）
   usedToday: number;     // 19.8 cost_cap 口径（账本当日 llm_proxy 花费求和）
+  /** 批次48 A24：price_cap / cost_cap 取自参数快照（与内核真实路由同一份取值） */
+  caps: ProxyCaps;
   storage: StorageBackend;
 }
 
@@ -35,15 +37,6 @@ function usedByModel(audits: { ts: number; action: string; detail: Record<string
     out[model] = (out[model] ?? 0) + 1;
   }
   return out;
-}
-
-/** 当日真实代理花费（llm_proxy 审计 detail.cost 求和） */
-function costToday(audits: { ts: number; action: string; detail: Record<string, unknown> }[]): number {
-  const since = Date.now() - DAY;
-  return audits.reduce((sum, a) => {
-    if (a.action !== 'llm_proxy' || a.ts < since) return sum;
-    return sum + (typeof a.detail.cost === 'number' ? a.detail.cost : 0);
-  }, 0);
 }
 
 async function getCtx(): Promise<Ctx> {
@@ -66,7 +59,8 @@ async function getCtx(): Promise<Ctx> {
   const models: ModelInfo[] = sources
     .filter((s) => s.price !== null && s.quota !== null)
     .map((s) => ({ model: s.model, tier: s.tier, price: s.price!, quota: s.quota!, used: s.used }));
-  return { models, sources, usedToday: costToday(audits), storage };
+  // 批次48 A24：当日花费与内核 usedToday 共用同一实算口径（滚动 24h、只算真实 llm_proxy）
+  return { models, sources, usedToday: proxyCostToday(audits), caps: proxyCapsFromSnapshot(mems), storage };
 }
 
 /** 反代理源列表（真实快照 + 账本实算已用量） */
@@ -90,12 +84,49 @@ export interface SimulateOutcome {
   dryRun: true;
 }
 
-/** auto 模拟调用（dry-run）：内核统一路由先免费 → 低价 ≤ price_cap → cost_cap → 回退本地 */
-export async function coreSimulateAuto(priceCap: number, costCap: number): Promise<SimulateOutcome> {
+/**
+ * auto 模拟调用（dry-run）：内核统一路由先免费 → 低价 ≤ price_cap → cost_cap → 回退本地。
+ * 批次48 A24：不传封顶 → 直接读参数快照（与内核真实路由同一份取值）；未设置按「未设置」处理。
+ * 显式传参仅供调用方做对比演练，页面正常路径不传。
+ */
+export async function coreSimulateAuto(
+  priceCap?: number | null,
+  costCap?: number | null,
+): Promise<SimulateOutcome> {
   const ctx = await getCtx();
-  const r = routeProxy(ctx.models, priceCap, costCap, ctx.usedToday);
+  const price = priceCap === undefined ? ctx.caps.price_cap : normalizeProxyCap(priceCap);
+  const cost = costCap === undefined ? ctx.caps.cost_cap : normalizeProxyCap(costCap);
+  const r = routeProxy(ctx.models, price, cost, ctx.usedToday);
   const source: ProxySource | null = r.model ? (ctx.sources.find((c) => c.model === r.model) ?? null) : null;
   return { source, reason: r.reason, cost: r.cost, dryRun: true };
+}
+
+/** 读取参数快照里的封顶（页面挂载时回填输入框；未设置 → null） */
+export async function coreLoadProxyCaps(): Promise<ProxyCaps> {
+  const mems = await getKernelStorage().listMemories({});
+  return proxyCapsFromSnapshot(mems);
+}
+
+/**
+ * 封顶落参数快照（批次48 A24）。
+ * 值未变化 → 不写（避免输入框每次按键都刷一条 param_save）；变化才 delete + put 整条快照。
+ */
+export async function coreSaveProxyCaps(caps: ProxyCaps): Promise<{ changed: boolean; version: number | null }> {
+  const storage = getKernelStorage();
+  const prev = proxyCapsFromSnapshot(await storage.listMemories({}));
+  const next = {
+    price_cap: normalizeProxyCap(caps.price_cap),
+    cost_cap: normalizeProxyCap(caps.cost_cap),
+  };
+  if (prev.price_cap === next.price_cap && prev.cost_cap === next.cost_cap) {
+    return { changed: false, version: null };
+  }
+  const tenant = getTenant();
+  const r = await saveProxyCapsToLedger(storage, next, {
+    requestId: newRequestId('req'), form: KERNEL_FORM,
+    enterpriseId: tenant.enterprise_id, teamId: tenant.team_id,
+  });
+  return { changed: true, version: r.version };
 }
 
 export interface SaveConfigOutcome {
@@ -237,12 +268,13 @@ export async function coreAuditTail(): Promise<ProxyAuditEntry[]> {
         };
       }
       const d = a.detail as {
-        llm_proxy_source?: string; source?: string; cost?: number; mode?: ProxyCallAuditEntry['mode'];
+        llm_proxy_source?: string; source?: string; cost?: unknown; mode?: ProxyCallAuditEntry['mode'];
       };
       return {
         event: 'llm_proxy',
         llm_proxy_source: d.llm_proxy_source ?? d.source ?? 'agent:local',
-        cost: d.cost ?? 0,
+        // 批次48 A24：cost 缺失/为 null 如实回显 null（历史记录不再拿 0 冒充已计费）
+        cost: typeof d.cost === 'number' && Number.isFinite(d.cost) ? d.cost : null,
         mode: d.mode ?? 'local',
         at: a.ts,
       };

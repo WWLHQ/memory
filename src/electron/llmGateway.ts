@@ -236,12 +236,31 @@ function safeErrorText(engine: string, status: number, bodyText: string): string
   return `${engine} HTTP ${status}：${brief || '(无响应体)'}`;
 }
 
+interface ChatUsage {
+  /** 上游返回的真实用量；null = 响应未带 usage（如实未知，不按字符数估算） */
+  tokens: number | null;
+}
+
+/** OpenAI 兼容 usage 解析：优先 total_tokens，其次 prompt+completion；其余一律 null */
+function parseUsage(raw: unknown): number | null {
+  const u = (raw && typeof raw === 'object' ? raw : null) as Record<string, unknown> | null;
+  if (!u) return null;
+  const total = u.total_tokens;
+  if (typeof total === 'number' && Number.isFinite(total) && total >= 0) return total;
+  const prompt = u.prompt_tokens;
+  const completion = u.completion_tokens;
+  if (typeof prompt === 'number' && Number.isFinite(prompt) && typeof completion === 'number' && Number.isFinite(completion)) {
+    return prompt + completion;
+  }
+  return null;
+}
+
 async function chat(
   eng: LlmEngineConfig,
   apiKey: string,
   prompt: string,
   fetchImpl: FetchLike,
-): Promise<string> {
+): Promise<{ text: string; usage: ChatUsage }> {
   if (!eng.model) throw new Error(`${eng.name} 未配置模型名`);
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (eng.needsKey) headers.Authorization = `Bearer ${apiKey}`; // 本地端点（needsKey=false）绝不带密钥
@@ -257,10 +276,10 @@ async function chat(
     signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
   });
   if (!res.ok) throw new Error(safeErrorText(eng.name, res.status, await res.text().catch(() => '')));
-  const data = (await res.json()) as { choices?: { message?: { content?: unknown } }[] };
+  const data = (await res.json()) as { choices?: { message?: { content?: unknown } }[]; usage?: unknown };
   const text = data.choices?.[0]?.message?.content;
   if (typeof text !== 'string' || !text.trim()) throw new Error(`${eng.name} 返回空内容`);
-  return text.trim();
+  return { text: text.trim(), usage: { tokens: parseUsage(data.usage) } };
 }
 
 // ── 路由 Provider（注入内核的 LlmProvider 实现）───────────────────────────────
@@ -307,6 +326,9 @@ export class LlmGatewayProvider implements LlmProvider {
    */
   private readonly maxEnginesPerCall: number;
 
+  /** 精炼调用的真实 usage 累计（批次48 A24；`unknown` = 有响应未带 usage） */
+  private usageAcc = { calls: 0, tokens: 0, unknown: false };
+
   constructor(
     private cfg: LlmGatewayConfig,
     private keys: Record<string, string> = {},
@@ -339,13 +361,22 @@ export class LlmGatewayProvider implements LlmProvider {
       .map(({ e }) => e);
   }
 
-  private async race(prompt: string): Promise<{ text: string; engine: string }> {
+  /** 取用并清零精炼 usage 累计（无精炼调用 → null） */
+  takeUsage(): { tokens: number | null } | null {
+    if (this.usageAcc.calls === 0) return null;
+    const out = { tokens: this.usageAcc.unknown ? null : this.usageAcc.tokens };
+    this.usageAcc = { calls: 0, tokens: 0, unknown: false };
+    return out;
+  }
+
+  private async race(prompt: string): Promise<{ text: string; engine: string; tokens: number | null }> {
     const all = this.callOrder();
     const order = all.slice(0, this.maxEnginesPerCall);
     const failures: string[] = [];
     for (const eng of order) {
       try {
-        return { text: await chat(eng, this.keys[eng.id] ?? '', prompt, this.fetchImpl), engine: eng.name };
+        const r = await chat(eng, this.keys[eng.id] ?? '', prompt, this.fetchImpl);
+        return { text: r.text, engine: eng.name, tokens: r.usage.tokens };
       } catch (e) {
         failures.push(String((e as Error)?.message ?? e));
       }
@@ -361,7 +392,12 @@ export class LlmGatewayProvider implements LlmProvider {
     void model; // 厂商由内部排队决定；内核传入的 model 仅用于 routeProxy 记账
     const prompt = buildLayerPrompt(layer, input, category);
     try {
-      return (await this.race(prompt)).text;
+      const r = await this.race(prompt);
+      // 精炼调用的真实 usage 计入本次写入（cost = tokens × 单价，见 agent.write）
+      this.usageAcc.calls += 1;
+      if (r.tokens === null) this.usageAcc.unknown = true;
+      else this.usageAcc.tokens += r.tokens;
+      return r.text;
     } catch (e) {
       throw new Error(`LLM 精炼失败（${layer}，request_id=${ctx.request_id}）：${String((e as Error)?.message ?? e)}`);
     }
@@ -370,8 +406,9 @@ export class LlmGatewayProvider implements LlmProvider {
   /** 通用调用（judge/rerank 等用途）：同一套延时优先 + 逐个回退 */
   async call(model: string, prompt: string, _ctx: { request_id: string; usage: string }): Promise<{ text: string; tokens: number }> {
     void model;
-    const { text } = await this.race(prompt);
-    return { text, tokens: Math.ceil(text.length / 2) };
+    const r = await this.race(prompt);
+    // 批次48 A24：只回上游真实 usage；未返回 usage → 0（调用方不得当作精确计费）
+    return { text: r.text, tokens: r.tokens ?? 0 };
   }
 }
 

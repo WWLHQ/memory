@@ -769,6 +769,12 @@ export interface LlmProvider {
   judgeDuplicate?(model: string, a: string, b: string, ctx: LlmCallCtx): Promise<number>;
   /** true = 显式本地 stub（不产生真实精炼产物；写入只落 L1） */
   readonly isStub?: boolean;
+  /**
+   * 批次48 A24：取用宿主网关自上次取用以来**精炼调用**的真实 usage。
+   * 返回 `{ tokens: null }` = 上游未返回 usage（如实未知，绝不按文本长度估算）；
+   * 返回 null = 本次没有精炼调用。未实现该方法的 Provider 一律按「无真实 usage」处理。
+   */
+  takeUsage?(): { tokens: number | null } | null;
 }
 
 export interface Filter {

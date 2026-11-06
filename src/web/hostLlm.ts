@@ -115,17 +115,28 @@ function modelsFromSnapshot(s: LlmGatewaySnapshot): ModelInfo[] {
 export function createHostLlm(): LlmProvider | null {
   if (!hostLlmAvailable()) return null;
   void refreshHostLlmSnapshotOnce();
+  // 批次48 A24：精炼调用的真实 usage 累计（`unknown` = 主进程回 tokens=null，即上游未带 usage）
+  let usage = { calls: 0, tokens: 0, unknown: false };
   return {
     get isStub() { return !(snapshot?.usable ?? false); },
+    takeUsage(): { tokens: number | null } | null {
+      if (usage.calls === 0) return null;
+      const out = { tokens: usage.unknown ? null : usage.tokens };
+      usage = { calls: 0, tokens: 0, unknown: false };
+      return out;
+    },
     listModels(): ModelInfo[] {
       return snapshot?.usable ? modelsFromSnapshot(snapshot) : [];
     },
     async refineLayer(_model: string, layer: RefineLayer, input: string, category: Category, ctx: { request_id: string; usage: string }): Promise<string> {
-      const r = await hostCall<{ ok: boolean; text?: string; error?: string }>(
+      const r = await hostCall<{ ok: boolean; text?: string; tokens?: number | null; error?: string }>(
         'llm:refine',
         [{ mode: 'layer', layer, input, category, request_id: ctx.request_id }, getStoredSessionId()],
       );
       if (!r.ok) throw new Error(r.error ?? 'LLM 精炼失败');
+      usage.calls += 1;
+      if (typeof r.tokens === 'number') usage.tokens += r.tokens;
+      else usage.unknown = true;
       return r.text ?? '';
     },
     async call(_model: string, prompt: string, ctx: { request_id: string; usage: string }): Promise<{ text: string; tokens: number }> {
@@ -135,7 +146,8 @@ export function createHostLlm(): LlmProvider | null {
       );
       if (!r.ok) throw new Error(r.error ?? 'LLM 调用失败');
       const text = r.text ?? '';
-      return { text, tokens: r.tokens ?? Math.ceil(text.length / 2) };
+      // 批次48 A24：不再按字符数估算；上游未返回 usage → tokens=0
+      return { text, tokens: typeof r.tokens === 'number' ? r.tokens : 0 };
     },
   };
 }

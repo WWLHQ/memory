@@ -39,10 +39,13 @@ export interface ProxyPick {
  */
 export function routeProxy(
   models: ModelInfo[],
-  priceCap: number,
-  costCap: number,
+  priceCap: number | null | undefined,
+  costCap: number | null | undefined,
   usedToday: number,
 ): ProxyPick {
+  // 批次48 A24：封顶取参数快照值；null/undefined = 未设置 → 不回落旧写死的 0.01 / 2
+  const price = typeof priceCap === 'number' && Number.isFinite(priceCap) ? priceCap : null;
+  const cap = typeof costCap === 'number' && Number.isFinite(costCap) ? costCap : null;
   const budget = (m: ModelInfo) => Math.floor(m.quota * 0.9) - m.used;
   // 本地端点额度按定义不限量（Infinity）→ 文案如实写「不限」，不打印 Infinity
   const budgetText = (m: ModelInfo) => (Number.isFinite(budget(m)) ? String(budget(m)) : '不限');
@@ -52,21 +55,29 @@ export function routeProxy(
   if (free.length > 0) {
     const pick = free[0];
     const cost = pick.price / 1000;
-    if (usedToday + cost > costCap) {
-      return { model: null, source: 'agent:local', cost: 0, fallback: true, reason: `成本封顶（${usedToday.toFixed(2)}+¥${cost.toFixed(4)} > ¥${costCap}）→ 回退本地` };
+    if (cap !== null && usedToday + cost > cap) {
+      return { model: null, source: 'agent:local', cost: 0, fallback: true, reason: `成本封顶（${usedToday.toFixed(2)}+¥${cost.toFixed(4)} > ¥${cap}）→ 回退本地` };
     }
-    return { model: pick.model, source: `agent:${pick.model}`, cost, fallback: false, reason: `免费优先（余量 ${budgetText(pick)}）` };
+    return {
+      model: pick.model, source: `agent:${pick.model}`, cost, fallback: false,
+      reason: `免费优先（余量 ${budgetText(pick)}${cap === null ? '；cost_cap 未设置，不封顶' : ''}）`,
+    };
   }
 
-  const cheap = eligible.filter((m) => m.tier === 'cheap' && m.price <= priceCap).sort((a, b) => a.price - b.price);
+  const cheap = price === null
+    ? []
+    : eligible.filter((m) => m.tier === 'cheap' && m.price <= price).sort((a, b) => a.price - b.price);
   if (cheap.length > 0) {
     const pick = cheap[0];
     const cost = pick.price / 1000;
-    if (usedToday + cost > costCap) {
-      return { model: null, source: 'agent:local', cost: 0, fallback: true, reason: `成本封顶 → 回退本地` };
+    if (cap !== null && usedToday + cost > cap) {
+      return { model: null, source: 'agent:local', cost: 0, fallback: true, reason: `成本封顶（已用 ¥${usedToday.toFixed(2)} + 本次 ¥${cost.toFixed(4)} > ¥${cap}）→ 回退本地` };
     }
-    return { model: pick.model, source: `agent:${pick.model}`, cost, fallback: false, reason: `低价 ¥${pick.price}/千次 ≤ cap ¥${priceCap}` };
+    return { model: pick.model, source: `agent:${pick.model}`, cost, fallback: false, reason: `低价 ¥${pick.price}/千次 ≤ cap ¥${price}` };
   }
 
-  return { model: null, source: 'agent:local', cost: 0, fallback: true, reason: '无合格代理源（免费耗尽/低价超 cap）→ 回退本地' };
+  return {
+    model: null, source: 'agent:local', cost: 0, fallback: true,
+    reason: `无合格代理源（免费耗尽 / ${price === null ? 'price_cap 未设置' : '低价超 cap'}）→ 回退本地`,
+  };
 }

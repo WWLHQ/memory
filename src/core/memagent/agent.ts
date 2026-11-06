@@ -5,8 +5,10 @@ import { coreBrowse, coreFeedback, coreGc, coreGcFull, coreMemoryOp, coreWrite }
 import { syncDown, syncUp } from './sync.ts';
 import { MemoryPendingStore, PendingWrites, type WriteKnobs } from './pendingWrites.ts';
 import { hardFilter, scoreMemory } from './forgetting.ts';
+import { findParamsSnapshot, proxyCapsFromSnapshot } from './paramsSnapshot.ts';
+import { proxyCostToday } from '../../shared/proxyAccounting.ts';
 import {
-  BACKGROUND_MAX_TOKENS, computeRecallSavings, estTokens, selectRecallBackground,
+  BACKGROUND_MAX_TOKENS, computeRecallSavings, estTokens, normalizeUnitPrice, selectRecallBackground,
 } from './recallInsight.ts';
 import { cosine, embedSync, DEFAULT_VECTOR_DIM } from './vector.ts';
 import type { L0BlobStore } from './l0Store.ts';
@@ -33,7 +35,6 @@ const BUDGET = { soft: 1500, warn: 2000, hard: 3000 } as const;
 
 export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHooks {
   const { form, account, llm, vector, storage } = opts;
-  let usedToday = 0; // 反代理当日花费（19.8 cost_cap）
   // 批次44-D4：写入落盘兜底队列。缺省内存实现（进程内不丢），桌面可注入 FilePendingStore 持久化。
   const pending = new PendingWrites(opts.pending ?? new MemoryPendingStore());
 
@@ -265,12 +266,19 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
 
   async function write(req: MemReq): Promise<WriteResult> {
     const request_id = newRequestId();
+    // 批次48 A24：封顶（price_cap / cost_cap）与当日花费都取真实账本 —— 与模型页模拟同一份取值，
+    // 未设置按「未设置」处理（不回落旧写死的 0.01 / 2）；usedToday 每次从审计实算，重启不归零。
+    const [mems, audits] = await Promise.all([storage.listMemories({}), storage.queryAudit({})]);
+    const caps = proxyCapsFromSnapshot(mems);
+    const usedToday = proxyCostToday(audits);
     // LLM 用途（write 精炼）走反代理路由（19.8）；选中模型但精炼未产出 → 回退本地语义。
-    const pick = routeProxy(llm.listModels(), /* price_cap */ 0.01, /* cost_cap */ 2, usedToday);
+    const pick = routeProxy(llm.listModels(), caps.price_cap, caps.cost_cap, usedToday);
+    llm.takeUsage?.(); // 丢弃与本条写入无关的残留 usage 计数
     const r = await coreWrite(req, {
       storage, vector, account, request_id, now: Date.now(), llm, llmModel: pick.model ?? undefined,
       l0: opts.l0,
     });
+    const usage = llm.takeUsage?.() ?? null;
     // 显式 stub = 本就没有真实 LLM，不属于"代理失败回退"，不写 llm_fallback 噪音。
     // 逐层管道下只有真的调用过 LLM 却没产出 L2+ 才算回退（L1 层直接嫁接/过滤不算）。
     const realLlm = llm.isStub !== true;
@@ -278,9 +286,14 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
     // Provider 未实现 refine/refineLayer → 管道在 L2 前 skipped（L1 直接嫁接不产生该决策）
     const llmUnavailable = (r.layer_decisions ?? []).some((d) => d.action === 'skipped');
     if (realLlm && pick.model && r.refined_by === 'llm') {
-      usedToday += pick.cost;
+      // 批次48 A24：tokens 取宿主网关真实 usage（无 usage → null，不估算）；cost = usage × 单价。
+      // 单价未设置 → cost 也为 null（如实「未设置」，不拿 0 冒充已计费）。
+      const price = normalizeUnitPrice(findParamsSnapshot(mems)?.cfg?.cost_cny_per_mtok);
+      const tokens = usage ? usage.tokens : null;
+      const cost = tokens !== null && price !== null ? (tokens * price) / 1_000_000 : null;
       await audit(request_id, 'llm_proxy', {
-        llm_proxy_source: pick.source, source: pick.source, model: pick.model, cost: pick.cost, mode: 'auto',
+        llm_proxy_source: pick.source, source: pick.source, model: pick.model,
+        cost, tokens, unit_price_cny_per_mtok: price, mode: 'auto',
         reason: pick.reason, layers: Object.keys(r.layers ?? {}),
       });
     } else if (realLlm && pick.model && (attemptedLlm || llmUnavailable)) {

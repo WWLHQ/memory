@@ -8,7 +8,11 @@ import {
   DEFAULT_VECTOR_KEY, USAGE_KEYS, USAGE_LABELS,
 } from './catalog.ts';
 import { manualPick, validatePriceCap, validateUsage, vectorInfo } from './logic.ts';
-import { coreAuditTail, coreLoadSources, coreSaveConfig, coreSimulateAuto, coreVectorCount, coreVectorProbe } from './coreModels.ts';
+import {
+  coreAuditTail, coreLoadProxyCaps, coreLoadSources, coreSaveConfig, coreSaveProxyCaps,
+  coreSimulateAuto, coreVectorCount, coreVectorProbe,
+} from './coreModels.ts';
+import type { ProxyCaps } from '../../shared/proxyAccounting.ts';
 import { getHostLlmSnapshot, hostLlmAvailable, refreshHostLlmSnapshotOnce } from '../hostLlm.ts';
 import { hydrateUsages, readModelConfig } from './modelConfig.ts';
 import { VectorCard } from './VectorCard.tsx';
@@ -26,8 +30,9 @@ export function ModelsPage() {
   const [vectorCount, setVectorCount] = useState(0);
   const [selected, setSelected] = useState<string[]>([]); // 真实源挂载后由用户勾选；初始无伪造默认勾选
   const [selectMode, setSelectMode] = useState<ProxySelectMode>('auto');
-  const [priceCap, setPriceCap] = useState(0.01);
-  const [costCap, setCostCap] = useState(2);
+  // 批次48 A24：封顶默认「未设置」（null），挂载时从参数快照回填；不回落写死的 0.01 / 2
+  const [priceCap, setPriceCap] = useState<number | null>(null);
+  const [costCap, setCostCap] = useState<number | null>(null);
   const [auditLog, setAuditLog] = useState<ProxyAuditEntry[]>([]);
   const [saving, setSaving] = useState(false);
   const { node: toast, show } = useToast();
@@ -38,12 +43,17 @@ export function ModelsPage() {
     (async () => {
       if (hostLlmAvailable()) await refreshHostLlmSnapshotOnce(); // 桌面壳才刷新；浏览器静态环境跳过，避免伪 hostCall
       const snap = getHostLlmSnapshot();
-      const [tail, srcs, count] = await Promise.all([coreAuditTail(), coreLoadSources(), coreVectorCount()]);
+      const [tail, srcs, count, caps] = await Promise.all([
+        coreAuditTail(), coreLoadSources(), coreVectorCount(), coreLoadProxyCaps(),
+      ]);
       if (!alive) return;
       setGatewayState(snap ? (snap.usable ? 'configured' : 'degraded') : 'unconfigured');
       if (tail.length > 0) setAuditLog(tail);
       setSources(srcs);
       setVectorCount(count);
+      // 封顶回填：快照未设置 → 仍是 null，输入框显示「未设置」
+      setPriceCap(caps.price_cap);
+      setCostCap(caps.cost_cap);
     })().catch(() => { /* 账本/网关不可用：保持初始空用量与空审计（不伪造） */ });
     return () => { alive = false; };
   }, []);
@@ -81,10 +91,30 @@ export function ModelsPage() {
     }
   }
 
+  /** 封顶变更即落参数快照（值未变不写）；真实路由与模拟随后都读同一份快照 */
+  async function persistCaps(next: ProxyCaps) {
+    try {
+      await coreSaveProxyCaps(next);
+    } catch (e) {
+      show(`封顶保存失败：${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  function handlePriceCap(v: number | null) {
+    setPriceCap(v);
+    void persistCaps({ price_cap: v, cost_cap: costCap });
+  }
+
+  function handleCostCap(v: number | null) {
+    setCostCap(v);
+    void persistCaps({ price_cap: priceCap, cost_cap: v });
+  }
+
   async function handleSimulate() {
     if (selectMode === 'auto') {
       // 内核统一路由（19.8）预览：先免费 → 低价 ≤ cap → cost_cap → 回退本地
-      const out = await coreSimulateAuto(priceCap, costCap);
+      // 批次48 A24：不传页面状态，直接读参数快照 —— 与内核真实路由同一份取值
+      const out = await coreSimulateAuto();
       show(out.source
         ? `dry-run（未写账本）：auto 将命中 ${out.source.agent}/${out.source.model} · 预估 ¥${out.cost.toFixed(4)} —— ${out.reason}`
         : `dry-run（未写账本）：将回退本地 —— ${out.reason}`);
@@ -131,8 +161,8 @@ export function ModelsPage() {
         costCap={costCap}
         onToggleSource={(a) => setSelected((s) => (s.includes(a) ? s.filter((x) => x !== a) : [...s, a]))}
         onSelectMode={setSelectMode}
-        onPriceCap={setPriceCap}
-        onCostCap={setCostCap}
+        onPriceCap={handlePriceCap}
+        onCostCap={handleCostCap}
         onSimulate={handleSimulate}
       />
 
@@ -153,7 +183,7 @@ export function ModelsPage() {
               <>
                 <span className="aev">{e.llm_proxy_source === 'agent:local' ? 'local 回退' : 'llm_proxy'}</span>
                 <span className="adim">llm_proxy_source={e.llm_proxy_source}</span>
-                <span className="adim">cost=¥{e.cost.toFixed(4)}</span>
+                <span className="adim">cost={e.cost === null ? '未记录（usage/单价未设置）' : `¥${e.cost.toFixed(4)}`}</span>
                 <span className="adim">mode={e.mode}</span>
               </>
             )}
@@ -165,7 +195,7 @@ export function ModelsPage() {
         <b>保存</b>
         <div className="row" style={{ marginTop: 8, alignItems: 'center', gap: 14 }}>
           <button className="btn" data-testid="save-config" onClick={handleSave}>保存 model_config</button>
-          <span className="dim">price_cap 校验：{capCheck.ok ? '通过' : capCheck.msg}</span>
+          <span className="dim">price_cap 校验：{priceCap === null ? '未设置' : capCheck.ok ? '通过' : capCheck.msg}</span>
         </div>
       </div>
       {toast}

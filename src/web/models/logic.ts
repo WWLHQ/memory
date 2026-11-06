@@ -48,15 +48,18 @@ export function remainingOf(src: ProxySource): number | null {
 }
 
 /** R7/R12：档位资格 —— 免费恒可；低价需 price ≤ price_cap；paid 永不入代理。
- *  批次48 A16：云端单价未设置 → 无法判定资格，按不合格处理（不拿占位数字蒙）。 */
-export function proxyEligible(src: ProxySource, priceCap: number): boolean {
+ *  批次48 A16：云端单价未设置 → 无法判定资格，按不合格处理（不拿占位数字蒙）。
+ *  批次48 A24：price_cap 未设置（null）→ 低价档不入选（仅免费可代理），不回落写死的 0.01。 */
+export function proxyEligible(src: ProxySource, priceCap: number | null): boolean {
   if (src.tier === 'paid') return false;
   if (src.tier === 'free') return true;
+  if (priceCap === null) return false;
   return src.price !== null && src.price <= priceCap;
 }
 
-/** C13：price_cap ≥ 0；=0 时仅免费源可用 */
-export function validatePriceCap(v: number): { ok: boolean; freeOnly: boolean; msg: string } {
+/** C13：price_cap ≥ 0；=0 时仅免费源可用；null = 未设置（低价档不入选，不回落硬编码） */
+export function validatePriceCap(v: number | null): { ok: boolean; freeOnly: boolean; msg: string } {
+  if (v === null) return { ok: true, freeOnly: false, msg: '未设置：低价档不进入自动择优，仅免费源可代理' };
   if (!Number.isFinite(v) || v < 0) return { ok: false, freeOnly: false, msg: 'price_cap 必须 ≥ 0' };
   if (v === 0) return { ok: true, freeOnly: true, msg: 'price_cap=0：仅免费源可代理，付费源一律回退本地' };
   return { ok: true, freeOnly: false, msg: '' };
@@ -68,7 +71,7 @@ export type ProxyPick = { source: ProxySource | null; reason: string };
  * auto 择优（C7/C8/C13）：免费（余量多者优先，耗尽者剔除）→ 低价 ≤ price_cap（价低者优先）→ 无合格回退本地。
  * 余量 ≤ 0（超限，如 x-agent 演示源）一律剔除。
  */
-export function autoPick(srcs: ProxySource[], priceCap: number, _now: number): ProxyPick {
+export function autoPick(srcs: ProxySource[], priceCap: number | null, _now: number): ProxyPick {
   const remain = (s: ProxySource) => remainingOf(s);
   const eligible = srcs.filter((s) => {
     const r = remain(s);
@@ -80,7 +83,8 @@ export function autoPick(srcs: ProxySource[], priceCap: number, _now: number): P
   }
   const cheap = eligible.filter((s) => s.tier === 'cheap').sort((a, b) => (a.price ?? 0) - (b.price ?? 0));
   if (cheap.length > 0) {
-    return { source: cheap[0], reason: `无可用免费源，走低价：${cheap[0].agent}/${cheap[0].model}（¥${cheap[0].price}/千次 ≤ cap ¥${priceCap}）` };
+    const capText = priceCap === null ? '未设置' : `¥${priceCap}`;
+    return { source: cheap[0], reason: `无可用免费源，走低价：${cheap[0].agent}/${cheap[0].model}（¥${cheap[0].price}/千次 ≤ cap ${capText}）` };
   }
   return { source: null, reason: '无合格代理源（免费耗尽 / 低价超 cap / 单价或配额未设置）→ 回退本地 fallback_local（R12）' };
 }
@@ -90,13 +94,15 @@ export function autoPick(srcs: ProxySource[], priceCap: number, _now: number): P
  * 勾选中含不具备资格的（paid 或 cheap 超 cap）→ 直接拒绝并报错（不静默转其他源）；
  * 勾选源全部耗尽 → 回退本地，不转未勾选源。
  */
-export function manualPick(selected: ProxySource[], priceCap: number, _now: number): ProxyPick {
+export function manualPick(selected: ProxySource[], priceCap: number | null, _now: number): ProxyPick {
   const ineligible = selected.filter((s) => !proxyEligible(s, priceCap));
   if (ineligible.length > 0) {
     const s = ineligible[0];
     const why = s.tier === 'paid'
       ? 'paid 档不可入代理'
-      : s.price === null ? '单价未设置（参数页配置）' : `¥${s.price}/千次 超 price_cap ¥${priceCap}`;
+      : s.price === null ? '单价未设置（参数页配置）'
+      : priceCap === null ? 'price_cap 未设置（低价档不入代理）'
+      : `¥${s.price}/千次 超 price_cap ¥${priceCap}`;
     return { source: null, reason: `R7 拒绝：勾选源 ${s.agent}/${s.model}（${why}）` };
   }
   const first = selected.find((s) => {
@@ -108,7 +114,7 @@ export function manualPick(selected: ProxySource[], priceCap: number, _now: numb
 }
 
 /** R10：反代理调用审计 —— llm_proxy_source=agent:<name> + 花费 + 模式 */
-export function auditProxy(src: ProxySource | null, cost: number, mode: ProxySelectMode | 'local'): ProxyCallAuditEntry {
+export function auditProxy(src: ProxySource | null, cost: number | null, mode: ProxySelectMode | 'local'): ProxyCallAuditEntry {
   return {
     event: 'llm_proxy',
     llm_proxy_source: src ? `agent:${src.agent}` : 'agent:local',
