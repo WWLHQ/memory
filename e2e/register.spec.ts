@@ -44,10 +44,12 @@ test.describe('用户注册功能', () => {
     const captchaText = await captchaBtn.textContent();
     const captchaCode = captchaText?.match(/(\d{6})/)?.[1] ?? '';
 
-    // 填写注册表单
+    // 填写注册表单。批次48 A10：注册按已持久化密码策略校验（默认策略要求大写/小写/数字/特殊字符，
+    // min_len 8），旧用 password123 会被 400 weak_password 拒绝 → 这里用符合默认策略的真实密码。
+    const PWD = 'Password123!';
     await page.locator('#acc').fill(ACC);
-    await page.locator('#pwd').fill('password123');
-    await page.locator('#confirmPwd').fill('password123');
+    await page.locator('#pwd').fill(PWD);
+    await page.locator('#confirmPwd').fill(PWD);
     await page.locator('#captcha').fill(captchaCode);
     await page.locator('#btnRegister').click();
 
@@ -60,7 +62,7 @@ test.describe('用户注册功能', () => {
 
     // 现在用新账号登录
     await page.locator('#acc').fill(ACC);
-    await page.locator('#pwd').fill('password123');
+    await page.locator('#pwd').fill(PWD);
     await page.locator('#btnLogin').click();
 
     // 登录成功

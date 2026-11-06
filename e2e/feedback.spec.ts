@@ -21,9 +21,10 @@ test.describe('用户反馈页 · 真实账本', () => {
     const errors = collectErrors(page);
     await page.goto(APP);
     await expect(page.locator('[data-testid="feedback-page"]')).toBeVisible();
-    // 真实租户（内核 getTenant）：user_id 形如 u_xxx，企业 ent_local；无登录态时不冒充 user_001
-    await expect(page.locator('[data-testid="ctx-user"]')).toContainText('u_');
-    await expect(page.locator('[data-testid="ctx-enterprise"]')).toBeVisible();
+    // 真实租户（内核 getTenant，批次45-A1 单一真源 DEFAULT_TENANT）：无登录态 = u1/t1/e1，
+    // 不再现造 u_<ulid> 本机身份，也不冒充 user_001（跨页/采集器/MCP 同一套缺省三元组）
+    await expect(page.locator('[data-testid="ctx-user"]')).toHaveText('u1');
+    await expect(page.locator('[data-testid="ctx-enterprise"]')).toContainText('e1');
     await expect(page.locator('[data-testid="injected-ctx"]')).toContainText('禁手填');
     await expect(page.locator('[data-testid="stat-confirm"]')).toBeVisible();
     // 空账本 → memory 下拉仅占位项（不注入种子记忆）
