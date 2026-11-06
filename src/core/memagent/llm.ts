@@ -44,6 +44,8 @@ export function routeProxy(
   usedToday: number,
 ): ProxyPick {
   const budget = (m: ModelInfo) => Math.floor(m.quota * 0.9) - m.used;
+  // 本地端点额度按定义不限量（Infinity）→ 文案如实写「不限」，不打印 Infinity
+  const budgetText = (m: ModelInfo) => (Number.isFinite(budget(m)) ? String(budget(m)) : '不限');
   const eligible = models.filter((m) => m.tier !== 'paid' && budget(m) > 0);
 
   const free = eligible.filter((m) => m.tier === 'free');
@@ -53,7 +55,7 @@ export function routeProxy(
     if (usedToday + cost > costCap) {
       return { model: null, source: 'agent:local', cost: 0, fallback: true, reason: `成本封顶（${usedToday.toFixed(2)}+¥${cost.toFixed(4)} > ¥${costCap}）→ 回退本地` };
     }
-    return { model: pick.model, source: `agent:${pick.model}`, cost, fallback: false, reason: `免费优先（余量 ${budget(pick)}）` };
+    return { model: pick.model, source: `agent:${pick.model}`, cost, fallback: false, reason: `免费优先（余量 ${budgetText(pick)}）` };
   }
 
   const cheap = eligible.filter((m) => m.tier === 'cheap' && m.price <= priceCap).sort((a, b) => a.price - b.price);

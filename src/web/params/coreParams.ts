@@ -5,6 +5,8 @@ import type { StorageBackend } from '../../core/memagent/types.ts';
 import { getKernel, getKernelStorage, getTenant, newRequestId } from '../kernel.ts';
 import { PARAMS_PREF_PREFIX as PREF_PREFIX, parseParamsSnapshot } from '../../core/memagent/paramsSnapshot.ts';
 import { normalizeUnitPrice } from '../../core/memagent/recallInsight.ts';
+import { normalizeAccountingPrice, normalizeAccountingQuota } from '../../shared/proxyAccounting.ts';
+import { setHostProxyAccounting } from '../hostLlm.ts';
 import type { DevParams, KbPolicyRow, NormalConfig } from './types.ts';
 
 interface ParamsCtx {
@@ -35,8 +37,15 @@ export async function coreLoadParams(): Promise<{ cfg: NormalConfig; kbs: KbPoli
   const m = await findParamsMemory(storage);
   const saved = m ? tryParsePayload(m.content) : null;
   if (!saved) return null;
-  // 旧快照没有 cost_cny_per_mtok 字段：归一为 null（不显示金额），避免页面拿到 undefined
-  return { ...saved, cfg: { ...saved.cfg, cost_cny_per_mtok: normalizeUnitPrice(saved.cfg?.cost_cny_per_mtok) } };
+  // 旧快照没有 cost_cny_per_mtok / proxy_* 字段：归一为 null（未设置），避免页面拿到 undefined
+  const cfg = {
+    ...saved.cfg,
+    cost_cny_per_mtok: normalizeUnitPrice(saved.cfg?.cost_cny_per_mtok),
+    proxy_price_cny_per_kcall: normalizeAccountingPrice(saved.cfg?.proxy_price_cny_per_kcall),
+    proxy_daily_quota: normalizeAccountingQuota(saved.cfg?.proxy_daily_quota),
+  };
+  setHostProxyAccounting({ price_cny_per_kcall: cfg.proxy_price_cny_per_kcall, daily_quota: cfg.proxy_daily_quota });
+  return { ...saved, cfg };
 }
 
 /** 保存：快照写内核（旧快照 delete + 新快照 put，pinned 豁免 gc）+ param_save 审计落账本 */
@@ -59,6 +68,11 @@ export async function coreSaveParams(
   await storage.appendAudit({
     request_id: requestId, action: 'param_save', form: 'web', project_id: 'P_SYSTEM', user_id: 'system',
     ts: Date.now(), detail: { cfg, kbs, dev, version: mem.version },
+  });
+  // 保存后立即把新的反代理记账值交给渲染层内核（写路径的 routeProxy 用同一份口径）
+  setHostProxyAccounting({
+    price_cny_per_kcall: normalizeAccountingPrice(cfg.proxy_price_cny_per_kcall),
+    daily_quota: normalizeAccountingQuota(cfg.proxy_daily_quota),
   });
   return { request_id: requestId, mem_id: mem.mem_id, version: mem.version };
 }

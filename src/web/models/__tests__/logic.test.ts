@@ -75,6 +75,32 @@ describe('用途校验（R1/C3/R4）', () => {
   });
 });
 
+describe('批次48 A16：未设置单价/配额不给假数字', () => {
+  it('配额未设置 → 预算/余量为 null（页面显示「未设置」）', () => {
+    expect(proxyBudgetOf(src({ quota: null }))).toBeNull();
+    expect(remainingOf(src({ quota: null }))).toBeNull();
+  });
+
+  it('云端单价未设置 → 不合格（自动回退本地，不拿占位价蒙）', () => {
+    const unset = src({ tier: 'cheap', price: null, quota: 5000 });
+    expect(proxyEligible(unset, 0.01)).toBe(false);
+    const picked = autoPick([unset], 0.01, NOW);
+    expect(picked.source).toBeNull();
+    expect(picked.reason).toContain('单价或配额未设置');
+    // 本地源不受影响
+    const free = src({ tier: 'free', quota: Number.POSITIVE_INFINITY });
+    expect(proxyEligible(free, 0.01)).toBe(true);
+    expect(remainingOf(free)).toBe(Number.POSITIVE_INFINITY);
+  });
+
+  it('手动勾选未设置的云端源 → R7 拒绝并说明原因', () => {
+    const unset = src({ agent: 'cloud-x', tier: 'cheap', price: null, quota: 5000 });
+    const r = manualPick([unset], 0.01, NOW);
+    expect(r.source).toBeNull();
+    expect(r.reason).toContain('单价未设置');
+  });
+});
+
 describe('反代理预算与资格（R7/R8/R12）', () => {
   it('R8：预算 = 声明额度 × 0.9', () => {
     expect(proxyBudgetOf(src({ quota: 1000 }))).toBe(900);

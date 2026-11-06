@@ -1,8 +1,10 @@
 // P13-T3 反代理面板：来源映射表 + 来源单选 + auto/manual 模式 + price_cap/cost_cap/预算条（19.8 / R7–R12）
 // 三态由 ModelsPage 经 state 下发：configured=真模型表；unconfigured/degraded=诚实空态（绝不伪造假行）。
 // price/quota 列已按批次42 阶段3-C 口径默认隐藏（不展示声明额度/单价，仅保留真实余量/预算条）。
+// 批次48 A16：余量/预算取参数页真实配置；未设置 → 显示「未设置」，不画假预算条。
 import type { ProxySelectMode, ProxySource } from './types.ts';
 import { remainingOf, proxyBudgetOf } from './logic.ts';
+import { remainingText } from '../../shared/proxyAccounting.ts';
 
 export type ProxyState = 'configured' | 'unconfigured' | 'degraded';
 
@@ -69,7 +71,7 @@ export function ProxyPanel(p: Props) {
               const remain = remainingOf(s);
               const checked = p.selected.includes(s.agent);
               return (
-                <tr key={s.agent} data-testid={`proxy-${s.agent}`} style={remain <= 0 ? { opacity: 0.55 } : undefined}>
+                <tr key={s.agent} data-testid={`proxy-${s.agent}`} style={remain !== null && remain <= 0 ? { opacity: 0.55 } : undefined}>
                   <td>
                     <input
                       type="checkbox"
@@ -84,10 +86,19 @@ export function ProxyPanel(p: Props) {
                   <td style={{ textAlign: 'center' }}>{tierBadge(s.tier)}</td>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span data-testid={`proxy-remain-${s.agent}`} style={{ color: remain <= 0 ? 'var(--danger,#ff5d5d)' : undefined }}>
-                        {remain}
+                      <span
+                        data-testid={`proxy-remain-${s.agent}`}
+                        style={{ color: remain !== null && remain <= 0 ? 'var(--danger,#ff5d5d)' : undefined }}
+                      >
+                        {remainingText(remain)}
                       </span>
-                      <Bar used={s.used} budget={budget} />
+                      {budget === null || !Number.isFinite(budget) ? (
+                        <span className="dim" style={{ fontSize: 11 }} data-testid={`proxy-unset-${s.agent}`}>
+                          {budget === null ? '单价/配额未设置（参数页填写）' : '不限量'}
+                        </span>
+                      ) : (
+                        <Bar used={s.used} budget={budget} />
+                      )}
                     </div>
                   </td>
                 </tr>

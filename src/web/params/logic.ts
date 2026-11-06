@@ -47,6 +47,14 @@ export function validateUnitPrice(v: number | null | undefined): string | null {
   return null;
 }
 
+/** 批次48 A16：反代理配额校验 —— null = 未设置（合法）；否则须为正整数（次/日） */
+export function validateProxyQuota(v: number | null | undefined): string | null {
+  if (v === null || v === undefined) return null;
+  if (!Number.isFinite(v) || !Number.isInteger(v)) return '反代理日配额须为正整数';
+  if (v <= 0) return '反代理日配额须大于 0';
+  return null;
+}
+
 /** 全量校验：返回错误文案数组（空=可保存） */
 export function validateAll(cfg: NormalConfig, kbs: KbPolicyRow[], dev: DevParams): string[] {
   const errs: string[] = [];
@@ -62,6 +70,10 @@ export function validateAll(cfg: NormalConfig, kbs: KbPolicyRow[], dev: DevParam
   if (nm) errs.push(nm);
   const price = validateUnitPrice(cfg.cost_cny_per_mtok);
   if (price) errs.push(price);
+  const proxyPrice = validateUnitPrice(cfg.proxy_price_cny_per_kcall);
+  if (proxyPrice) errs.push(`反代理${proxyPrice}`);
+  const proxyQuota = validateProxyQuota(cfg.proxy_daily_quota);
+  if (proxyQuota) errs.push(proxyQuota);
   if (!cfg.auto_organize) errs.push('⚠ 自动整理已关闭：合并/摘要后台任务将停用（15.2/17.10）');
   return errs;
 }

@@ -35,7 +35,7 @@ import { AUDIT_FILE_NAME } from '../core/memagent/auditLog.ts';
 import { detectLocalAgents, hostAgentConfig } from './agentDetect.ts';
 import { applyRecallEvidence, scanMcpClients, snippetForClient, wireMcpClient } from './mcpClients.ts';
 import {
-  applyProbeResult, llmEngineViews, loadLlmConfig, loadLlmGateway, loadLlmKeys, mergeLlmConfig,
+  applyProbeResult, applyProxyAccounting, llmEngineViews, loadLlmConfig, loadLlmGateway, loadLlmKeys, mergeLlmConfig,
   saveLlmConfig, saveLlmKey, testEngine, type LlmConfigPatch, type LlmGatewayProvider,
 } from './llmGateway.ts';
 import { createServer as httpCreateServer } from 'node:http';
@@ -74,7 +74,8 @@ import { MemAgentError } from '../core/memagent/errors.ts';
 import { cleanupTempFiles, createHomeLockStore, createL0KeyringStore } from './l0KeyringStore.ts';
 import type { L0GrantReq, L0UnlockReq } from '../core/memagent/types.ts';
 import { runForgettingCycle } from '../core/memagent/forgetting.ts';
-import { forgettingPrefsFromSnapshot } from '../core/memagent/paramsSnapshot.ts';
+import { forgettingPrefsFromSnapshot, PARAMS_PREF_PREFIX, proxyAccountingFromSnapshot } from '../core/memagent/paramsSnapshot.ts';
+import { UNSET_PROXY_ACCOUNTING } from '../shared/proxyAccounting.ts';
 import { JsVectorBackend } from '../core/memagent/vector.ts';
 import { readFile, appendFile, mkdir, writeFile, copyFile, readdir, unlink, stat } from 'node:fs/promises';
 import { join, extname, normalize, sep, basename, dirname } from 'node:path';
@@ -944,6 +945,18 @@ function registerMcpClientsIpc(token: string): void {
 // 拨测/精炼错误文本已由网关 safeErrorText 清洗（状态码 + 截断响应体，不含密钥）。
 
 let llmGateway: LlmGatewayProvider | null = null;
+
+/**
+ * 批次48 A16：反代理记账（云端单价/日配额）由参数页写入参数快照，主进程内核路由读取同一份真源。
+ * 启动时与每次 params 快照写入后刷新；读不到 → 未设置（云端引擎不进入路由，不编造）。
+ */
+async function refreshProxyAccounting(): Promise<void> {
+  try {
+    applyProxyAccounting(proxyAccountingFromSnapshot(await storage.listMemories({})));
+  } catch {
+    applyProxyAccounting(UNSET_PROXY_ACCOUNTING);
+  }
+}
 
 const LLM_REFINE_LAYERS = ['L2', 'L3', 'L4', 'L5', 'L6'] as const;
 const LLM_REFINE_CATEGORIES = ['fact', 'decision', 'pitfall', 'insight', 'preference', 'context'] as const;
@@ -1979,7 +1992,13 @@ async function registerStorageIpc(): Promise<void> {
       return sid ? homeServerRef?.getSessionContext(sid) ?? null : null;
     },
   });
-  handleIpc(IPC.storagePutMemory, (_e, m, sessionId?: unknown) => rw.putMemory(m, sessionId));
+  handleIpc(IPC.storagePutMemory, async (_e, m, sessionId?: unknown) => {
+    const r = await rw.putMemory(m, sessionId);
+    // 批次48 A16：参数快照写入后立即刷新反代理记账（后续路由/审计用新值，无需重启）
+    const content = (m as { content?: unknown } | null)?.content;
+    if (typeof content === 'string' && content.startsWith(PARAMS_PREF_PREFIX)) await refreshProxyAccounting();
+    return r;
+  });
   handleIpc(IPC.storageGetMemory, (_e, id, sessionId?: unknown) => rw.getMemory(id, sessionId));
   handleIpc(IPC.storageListMemories, (_e, f, sessionId?: unknown) => rw.listMemories(f, sessionId));
   handleIpc(IPC.storageDeleteMemory, async (_e, id, sessionId?: unknown) => {
@@ -2681,6 +2700,7 @@ async function bootstrap(): Promise<void> {
   registerMcpClientsIpc(mcpToken);
   // LLM 精炼网关（批次31）：配置/密钥就绪后内核写路径才能产出 L2–L6；未配置时保持 stub 口径
   llmGateway = loadLlmGateway(USER_DATA);
+  await refreshProxyAccounting();
   void mlog('bootstrap:llm-gateway', { usable: !!llmGateway });
   registerLlmIpc();
   // 批次39：写入只落 L0+L1，深层由这条后台队列补炼（存量启动即入队，幂等；引擎没就绪就先排着不判死）

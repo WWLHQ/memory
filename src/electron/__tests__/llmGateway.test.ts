@@ -9,11 +9,12 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { AddressInfo } from 'node:net';
 import {
-  LEGACY_DEEPSEEK_KEY_FILE, LLM_CONFIG_FILE, LLM_KEYS_FILE, LLM_PRESETS, LlmGatewayProvider, applyProbeResult,
+  LEGACY_DEEPSEEK_KEY_FILE, LLM_CONFIG_FILE, LLM_KEYS_FILE, LLM_PRESETS, LlmGatewayProvider, applyProbeResult, applyProxyAccounting,
   buildLayerPrompt, chatEndpoint, defaultLlmConfig, keyExists, llmEngineViews, loadLlmConfig, loadLlmGateway,
   loadLlmKeys, mergeLlmConfig, saveLlmConfig, saveLlmKey, testEngine,
   type LlmEngineConfig, type LlmGatewayConfig,
 } from '../llmGateway.ts';
+import { UNSET_PROXY_ACCOUNTING } from '../../shared/proxyAccounting.ts';
 
 const KEY = 'sk-test-key-abcdef123456';
 const KEYS = { deepseek: KEY, kimi: KEY }; // ollama 本地端点不需要密钥
@@ -190,22 +191,32 @@ describe('LlmGatewayProvider 延时排序路由（批次32：取消 L2/深层的
 // ── Provider 元数据（内核 routeProxy 19.8）────────────────────────────────────
 
 describe('LlmGatewayProvider usable/listModels/call', () => {
-  test('listModels 只列可调用引擎；本地=free、远端=cheap（记账值，非真实账单）', () => {
+  test('listModels 只列可调用引擎；本地=free/不限量；云端需参数页配置单价+配额（未设置不入路由）', () => {
     expect(new LlmGatewayProvider(defaultLlmConfig(), {}).usable()).toBe(false);
     expect(new LlmGatewayProvider(defaultLlmConfig(), {}).listModels()).toEqual([]);
-    // 档位按主机名判定（本机引擎常带 /v1 路径），与是否真的拨过无关
-    const models = new LlmGatewayProvider({ engines: [
+    const engines = [
       eng('ollama', { baseURL: 'http://127.0.0.1:11434/v1' }),
       eng('deepseek', { baseURL: 'https://api.deepseek.com' }),
       eng('kimi', { baseURL: 'http://localhost:8080/v1' }),
-    ] }, KEYS).listModels();
+    ];
+    // 批次48 A16：默认未配置 → 云端源不进入路由（不再用 0.01 / 100000 占位数字）
+    applyProxyAccounting(UNSET_PROXY_ACCOUNTING);
+    expect(new LlmGatewayProvider({ engines }, KEYS).listModels().map((m) => m.model))
+      .toEqual(['ollama-mock', 'kimi-mock']);
+
+    applyProxyAccounting({ price_cny_per_kcall: 0.02, daily_quota: 5000 });
+    // 档位按主机名判定（本机引擎常带 /v1 路径），与是否真的拨过无关
+    const models = new LlmGatewayProvider({ engines }, KEYS).listModels();
     expect(models.map((m) => m.model)).toEqual(['ollama-mock', 'deepseek-mock', 'kimi-mock']);
     expect(models.map((m) => m.tier)).toEqual(['free', 'cheap', 'free']);
     expect(models[0].price).toBe(0);
-    expect(models[1].price).toBe(0.01);
+    expect(models[0].quota).toBe(Number.POSITIVE_INFINITY);
+    expect(models[1].price).toBe(0.02);
+    expect(models[1].quota).toBe(5000);
     // 远端引擎缺密钥 → 不入表
     expect(new LlmGatewayProvider(cfg(), { deepseek: KEY }).listModels().map((m) => m.model))
       .toEqual(['ollama-mock', 'deepseek-mock']);
+    applyProxyAccounting(UNSET_PROXY_ACCOUNTING); // 不把全局配置泄漏给后续用例
   });
 
   test('call（judge/rerank 用途）走同一套延时优先并回 tokens 估算', async () => {

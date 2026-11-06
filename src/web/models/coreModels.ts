@@ -9,6 +9,8 @@ import type { StorageBackend } from '../../core/memagent/types.ts';
 import { embedSync, JsVectorBackend } from '../../core/memagent/vector.ts';
 import { getKernelStorage, newRequestId, KERNEL_FORM, rebuildKernelFromModelConfig } from '../kernel.ts';
 import { getHostLlmSnapshot, isLocalBase } from '../hostLlm.ts';
+import { proxyAccountingFromSnapshot } from '../../core/memagent/paramsSnapshot.ts';
+import { proxyModelMeta } from '../../shared/proxyAccounting.ts';
 import { readModelConfig, sanitizeUsages, writeModelConfig } from './modelConfig.ts';
 import { vectorInfo } from './logic.ts';
 import type { LlmUsage, ModelConfigAuditEntry, ProxyAuditEntry, ProxyCallAuditEntry, ProxySource, UsageConfig, VectorModelKey } from './types.ts';
@@ -46,19 +48,24 @@ function costToday(audits: { ts: number; action: string; detail: Record<string, 
 
 async function getCtx(): Promise<Ctx> {
   const storage = getKernelStorage();
-  const audits = await storage.queryAudit({});
+  const [audits, mems] = await Promise.all([storage.queryAudit({}), storage.listMemories({})]);
   const used = usedByModel(audits);
   // 反代理源单一真源：主进程网关快照（hostLlm），不再内置虚构目录（批次42 阶段3-B）。
   // 只保留真实引擎（enabled 且可用：本地，或云端已置 Key）；used 由账本当日 llm_proxy 明细实算。
+  // 批次48 A16：云端单价/日配额取参数快照（用户填写、真实持久化）；未设置 → price/quota 为 null，
+  // 页面如实显示「未设置」，且该源不进入内核路由（不拿 0.01 / 100000 之类占位数字冒充）。
+  const acc = proxyAccountingFromSnapshot(mems);
   const snap = getHostLlmSnapshot();
   const engines = (snap?.engines ?? []).filter((e) => e.enabled && e.model && (!e.needsKey || e.keySet));
   const sources: ProxySource[] = engines.map((e) => {
     const local = isLocalBase(e.baseURL);
-    const tier = local ? 'free' : 'cheap';
-    const price = local ? 0 : 0.01;
-    return { agent: e.name, model: e.model, tier, price, quota: 100_000, used: used[e.model] ?? 0 };
+    const meta = proxyModelMeta(local, acc, used[e.model] ?? 0);
+    if (meta) return { agent: e.name, model: e.model, tier: meta.tier, price: meta.price, quota: meta.quota, used: meta.used };
+    return { agent: e.name, model: e.model, tier: 'cheap', price: null, quota: null, used: used[e.model] ?? 0 };
   });
-  const models: ModelInfo[] = sources.map((s) => ({ model: s.model, tier: s.tier, price: s.price, quota: s.quota, used: s.used }));
+  const models: ModelInfo[] = sources
+    .filter((s) => s.price !== null && s.quota !== null)
+    .map((s) => ({ model: s.model, tier: s.tier, price: s.price!, quota: s.quota!, used: s.used }));
   return { models, sources, usedToday: costToday(audits), storage };
 }
 

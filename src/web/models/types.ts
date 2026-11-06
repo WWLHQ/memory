@@ -32,10 +32,10 @@ export interface ProxySource {
   agent: string;
   model: string;
   tier: ProxyTier;
-  /** 单价 ¥/千次 */
-  price: number;
-  /** 声明日额度（次数） */
-  quota: number;
+  /** 单价 ¥/千次；null = 未设置（批次48 A16：云端无真实计费接口，由参数页配置） */
+  price: number | null;
+  /** 声明日额度（次数）；null = 未设置；Infinity = 不限量（本地端点） */
+  quota: number | null;
   used: number;
 }
 

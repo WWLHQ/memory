@@ -10,6 +10,8 @@ export const DEFAULT_CONFIG: NormalConfig = {
   auto_organize: true,
   importance: 'important',
   cost_cny_per_mtok: null,
+  proxy_price_cny_per_kcall: null,
+  proxy_daily_quota: null,
 };
 
 export const SPEED_LABEL: Record<NormalConfig['forget_speed'], string> = {

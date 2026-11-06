@@ -4,6 +4,9 @@
 // 现由 forgettingPrefsFromSnapshot 统一折算成内核调度参数（折算表在 shared/normalParams.ts）。
 import type { Memory } from './types.ts';
 import { autoArchiveDaysOf, halfLifeDaysOf } from '../../shared/normalParams.ts';
+import {
+  UNSET_PROXY_ACCOUNTING, normalizeAccountingPrice, normalizeAccountingQuota, type ProxyAccounting,
+} from '../../shared/proxyAccounting.ts';
 
 export const PARAMS_PREF_PREFIX = 'params:v1:';
 
@@ -16,6 +19,9 @@ export interface ParamsSnapshot {
     forget_speed?: string;
     retention?: string;
     importance?: string;
+    /** 批次48 A16 反代理记账（旧快照可能缺字段 → 未设置） */
+    proxy_price_cny_per_kcall?: number | null;
+    proxy_daily_quota?: number | null;
     [key: string]: unknown;
   };
   kbs: unknown[];
@@ -62,5 +68,18 @@ export function forgettingPrefsFromSnapshot(mems: Memory[]): ForgettingPrefs {
     halfLifeDays: halfLifeDaysOf(cfg?.forget_speed),
     autoArchiveDays: autoArchiveDaysOf(cfg?.retention),
     exemptAll: cfg?.importance === 'locked',
+  };
+}
+
+/**
+ * 批次48 A16：反代理记账单价/配额 —— 参数页写入、模型页/内核路由读取（同一份参数快照）。
+ * 无快照或字段缺失 → 未设置（不伪造 0.01 / 100000 之类占位数字）。
+ */
+export function proxyAccountingFromSnapshot(mems: Memory[]): ProxyAccounting {
+  const cfg = findParamsSnapshot(mems)?.cfg;
+  if (!cfg) return { ...UNSET_PROXY_ACCOUNTING };
+  return {
+    price_cny_per_kcall: normalizeAccountingPrice(cfg.proxy_price_cny_per_kcall),
+    daily_quota: normalizeAccountingQuota(cfg.proxy_daily_quota),
   };
 }

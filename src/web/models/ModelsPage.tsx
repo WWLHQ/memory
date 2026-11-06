@@ -93,7 +93,7 @@ export function ModelsPage() {
     // manual：R7/C11 约束在页面逻辑层；同样只预览，不写账本、不扣额度
     const pool = sources.filter((s) => selected.includes(s.agent));
     const r = manualPick(pool, priceCap, Date.now());
-    const cost = r.source ? r.source.price / 1000 : 0;
+    const cost = r.source && r.source.price !== null ? r.source.price / 1000 : 0;
     show(r.source
       ? `dry-run（未写账本）：manual 将命中 ${r.source.agent}/${r.source.model} · 预估 ¥${cost.toFixed(4)} —— ${r.reason}`
       : `dry-run（未写账本）：将回退本地 —— ${r.reason}`);

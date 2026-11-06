@@ -10,6 +10,7 @@ import type { Category, LlmProvider, ModelInfo } from '../core/memagent/types.ts
 import { layerBand, layerSpecOf, type RefineLayer } from '../core/memagent/layerRules.ts';
 // 单条引擎预算的单一真源在批次39 的队列模块（core → electron 依赖方向不变），避免两处各写一个 3
 import { REFINE_MAX_ENGINES_PER_CALL } from '../core/memagent/refineQueue.ts';
+import { UNSET_PROXY_ACCOUNTING, proxyModelMeta, type ProxyAccounting } from '../shared/proxyAccounting.ts';
 
 // ── 配置与密钥落盘（数据根，随迁移白名单走）────────────────────────────────────
 
@@ -264,9 +265,17 @@ async function chat(
 
 // ── 路由 Provider（注入内核的 LlmProvider 实现）───────────────────────────────
 
-/** 本地回环端点记 free 档；其余记 cheap 档（≤ 内核 routeProxy 价帽 0.01）。
- *  注意：price/quota 是内核 19.8 成本路由的记账元数据，不是厂商真实账单。 */
+/** 本地回环端点记 free 档；其余记 cheap 档。
+ *  批次48 A16：price/quota 不再用占位数字 —— 云端单价/日配额由参数页写入参数快照，
+ *  主进程经 applyProxyAccounting 下发；未设置 → 该云端引擎不进入路由（诚实「未设置」）。 */
 const LOCAL_HOST = /^(localhost|127\.\d+\.\d+\.\d+|\[::1\]|::1)$/i;
+
+let proxyAccounting: ProxyAccounting = { ...UNSET_PROXY_ACCOUNTING };
+
+/** 参数快照变化后由 main.ts 下发（与渲染层 hostLlm 同一份口径） */
+export function applyProxyAccounting(acc: ProxyAccounting): void {
+  proxyAccounting = acc;
+}
 
 /** 只看主机名判定是否本机回环：本机引擎常带路径（…/v1、…/api/show），不能整串匹配 */
 function isLocalBase(baseURL: string): boolean {
@@ -277,10 +286,9 @@ function isLocalBase(baseURL: string): boolean {
   }
 }
 
-function modelInfoOf(eng: LlmEngineConfig): Omit<ModelInfo, 'model'> {
-  return isLocalBase(eng.baseURL)
-    ? { tier: 'free', price: 0, quota: 100_000, used: 0 }
-    : { tier: 'cheap', price: 0.01, quota: 100_000, used: 0 };
+/** 云端未配置单价/配额 → null（不可路由）；本地 → free / 0 元 / 不限量 */
+function modelInfoOf(eng: LlmEngineConfig): Omit<ModelInfo, 'model'> | null {
+  return proxyModelMeta(isLocalBase(eng.baseURL), proxyAccounting, 0);
 }
 
 /** 引擎是否具备被调用的最低条件：启用 + 有模型名 +（不需要密钥 或 已配密钥） */
@@ -313,9 +321,13 @@ export class LlmGatewayProvider implements LlmProvider {
   }
 
   listModels(): ModelInfo[] {
-    return this.cfg.engines
-      .filter((e) => runnable(e, this.keys[e.id] ?? ''))
-      .map((e) => ({ model: e.model, ...modelInfoOf(e) }));
+    const out: ModelInfo[] = [];
+    for (const e of this.cfg.engines) {
+      if (!runnable(e, this.keys[e.id] ?? '')) continue;
+      const meta = modelInfoOf(e);
+      if (meta) out.push({ model: e.model, ...meta });
+    }
+    return out;
   }
 
   /** 调用顺序 = 最近拨测延时升序（未拨测排后，保持列表顺序）；同一次调用内固定 */

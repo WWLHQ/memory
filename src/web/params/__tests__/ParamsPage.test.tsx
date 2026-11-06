@@ -4,6 +4,7 @@ import { ParamsPage } from '../ParamsPage.tsx';
 import { DevPanel } from '../DevPanel.tsx';
 import { DEFAULT_DEV } from '../defaults.ts';
 import { coreLoadParams, coreSaveParams } from '../coreParams.ts';
+import { getHostProxyAccounting } from '../../hostLlm.ts';
 import { getKernelStorage, resetKernelForTests } from '../../kernel.ts';
 
 describe('ParamsPage (P5-T4 编排)', () => {
@@ -66,6 +67,37 @@ describe('ParamsPage × 内核持久化（preference 快照）', () => {
     // 重挂载 → 回填快照值（speed-fast 选中而非默认 mid）
     render(<ParamsPage />);
     await waitFor(() => expect((screen.getByTestId('speed-fast') as HTMLInputElement).checked).toBe(true));
+  });
+});
+
+describe('ParamsPage × 反代理单价/配额（批次48 A16）', () => {
+  it('填写 → 保存快照 → 重挂载回填；未填写如实「未设置」，内核 provider 同口径', async () => {
+    resetKernelForTests();
+    const first = render(<ParamsPage />);
+    await waitFor(() => expect(screen.getByTestId('speed-mid')).toBeChecked());
+    expect(screen.getByTestId('proxy-price')).toHaveValue(null);
+    expect(screen.getByTestId('proxy-quota')).toHaveValue(null);
+
+    fireEvent.change(screen.getByTestId('proxy-price'), { target: { value: '0.02' } });
+    fireEvent.change(screen.getByTestId('proxy-quota'), { target: { value: '5000' } });
+    expect(screen.getByTestId('changed-list')).toHaveTextContent(/反代理单价/);
+    expect(screen.getByTestId('changed-list')).toHaveTextContent(/反代理日配额/);
+    fireEvent.click(screen.getByTestId('save-btn'));
+    await waitFor(() => expect(screen.getByTestId('toast')).toHaveTextContent(/req_/));
+    // 保存即刻把新值交给内核 provider（不依赖后续 reload；写路径 routeProxy 同口径）
+    expect(getHostProxyAccounting()).toEqual({ price_cny_per_kcall: 0.02, daily_quota: 5000 });
+    first.unmount();
+
+    // 真落账本（刷新/重启回读同一路径）
+    const saved = await coreLoadParams();
+    expect(saved!.cfg.proxy_price_cny_per_kcall).toBe(0.02);
+    expect(saved!.cfg.proxy_daily_quota).toBe(5000);
+    // 渲染层内核 provider 收到同一份值（写路径 routeProxy 口径）
+    expect(getHostProxyAccounting()).toEqual({ price_cny_per_kcall: 0.02, daily_quota: 5000 });
+
+    render(<ParamsPage />);
+    await waitFor(() => expect((screen.getByTestId('proxy-price') as HTMLInputElement).value).toBe('0.02'));
+    expect((screen.getByTestId('proxy-quota') as HTMLInputElement).value).toBe('5000');
   });
 });
 

@@ -7,6 +7,7 @@ import type { Category, LlmProvider, ModelInfo } from '../core/memagent/types.ts
 import type { RefineLayer } from '../core/memagent/layerRules.ts';
 import { hostCall, hostCapability } from '../desktop/hostBridge.ts';
 import { getStoredSessionId } from './Home/crossTabAuth.ts';
+import { UNSET_PROXY_ACCOUNTING, proxyModelMeta, type ProxyAccounting } from '../shared/proxyAccounting.ts';
 
 /** 引擎视图（与主进程 llmGateway.LlmEngineView 同形；keySet 只表「有没有」，绝不含密钥本体） */
 export interface LlmEngineView {
@@ -72,7 +73,19 @@ export function getHostLlmSnapshot(): LlmGatewaySnapshot | null {
   return snapshot;
 }
 
-// routeProxy 记账元数据（与主进程 llmGateway 同口径；price/quota 是 19.8 成本路由的记账值，非真实账单）
+// routeProxy 记账元数据（与主进程 llmGateway 同口径；批次48 A16 起单价/配额由参数快照下发，
+// 未设置 → 云端源不进入路由，不再用 0.01 / 100000 占位数字）
+let proxyAccounting: ProxyAccounting = { ...UNSET_PROXY_ACCOUNTING };
+
+/** 参数页加载/保存后把反代理记账值交给内核 provider（同一份参数快照真源） */
+export function setHostProxyAccounting(acc: ProxyAccounting): void {
+  proxyAccounting = acc;
+}
+
+export function getHostProxyAccounting(): ProxyAccounting {
+  return proxyAccounting;
+}
+
 const LOCAL_HOST = /^(localhost|127\.\d+\.\d+\.\d+|\[::1\]|::1)$/i;
 
 /** 只看主机名：本机引擎常带路径（…/v1），与主进程 isLocalBase 同口径；参数页据此标注本地/云端 */
@@ -85,14 +98,14 @@ export function isLocalBase(baseURL: string): boolean {
 }
 
 function modelsFromSnapshot(s: LlmGatewaySnapshot): ModelInfo[] {
-  return s.engines
-    .filter((e) => e.enabled && e.model && (!e.needsKey || e.keySet))
-    .map((e) => ({
-      model: e.model,
-      ...(isLocalBase(e.baseURL)
-        ? { tier: 'free' as const, price: 0, quota: 100_000, used: 0 }
-        : { tier: 'cheap' as const, price: 0.01, quota: 100_000, used: 0 }),
-    }));
+  const out: ModelInfo[] = [];
+  for (const e of s.engines) {
+    if (!e.enabled || !e.model || (e.needsKey && !e.keySet)) continue;
+    // 云端缺单价/配额 → proxyModelMeta 返回 null：不可路由（页面显示「未设置」，绝不编造）
+    const meta = proxyModelMeta(isLocalBase(e.baseURL), proxyAccounting, 0);
+    if (meta) out.push({ model: e.model, ...meta });
+  }
+  return out;
 }
 
 /**

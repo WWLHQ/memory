@@ -5,6 +5,8 @@ import { coreLoadSources, coreSaveConfig, coreSimulateAuto, coreVectorCount, cor
 import { clearModelConfig, hydrateUsages, readModelConfig, sanitizeUsages, writeModelConfig } from '../modelConfig.ts';
 import { getKernel, getKernelStorage, getKernelWithSeed, rebuildKernelFromModelConfig, resetKernelForTests } from '../../kernel.ts';
 import { applyHostLlmSnapshot, type LlmGatewaySnapshot } from '../../hostLlm.ts';
+import { coreSaveParams } from '../../params/coreParams.ts';
+import { DEFAULT_CONFIG, DEFAULT_DEV, DEFAULT_KB_POLICIES } from '../../params/defaults.ts';
 import type { UsageConfig } from '../types.ts';
 
 beforeEach(() => {
@@ -160,6 +162,38 @@ describe('反代理源单一真源不变式（阶段3-B 变异杀手）', () => 
     // 本地/云端档位映射正确（isLocalBase）
     expect(s.find((x) => x.agent === 'G1')?.tier).toBe('free');
     expect(s.find((x) => x.agent === 'G2')?.tier).toBe('cheap');
+  });
+});
+
+describe('反代理单价/配额来自参数快照（批次48 A16）', () => {
+  const SNAP: LlmGatewaySnapshot = {
+    usable: true,
+    engines: [
+      { id: 'l', name: 'Local', enabled: true, baseURL: 'http://localhost:11434', model: 'local-a', needsKey: false, keySet: false, lastLatencyMs: null, lastProbeAt: null, lastProbeOk: null },
+      { id: 'c', name: 'Cloud', enabled: true, baseURL: 'https://api.deepseek.com', model: 'cloud-a', needsKey: true, keySet: true, lastLatencyMs: 5, lastProbeAt: 1, lastProbeOk: true },
+    ],
+    presets: [],
+  };
+
+  it('未设置 → 云端 price/quota 为 null（如实未设置），本地=free/不限量；保存快照后真实生效', async () => {
+    applyHostLlmSnapshot(SNAP);
+    const before = await coreLoadSources();
+    expect(before.find((s) => s.agent === 'Local')?.quota).toBe(Number.POSITIVE_INFINITY);
+    expect(before.find((s) => s.agent === 'Cloud')?.price).toBeNull();
+    expect(before.find((s) => s.agent === 'Cloud')?.quota).toBeNull();
+    // 未设置的云端源不进入内核路由 → 自动模拟只可能选本地
+    const sim0 = await coreSimulateAuto(0.05, 10);
+    expect(sim0.source?.agent).toBe('Local');
+
+    // 参数页真实保存链路（preference 快照，pinned）
+    await coreSaveParams(
+      { ...DEFAULT_CONFIG, proxy_price_cny_per_kcall: 0.02, proxy_daily_quota: 5000 },
+      DEFAULT_KB_POLICIES, DEFAULT_DEV, 'req_a16',
+    );
+    // 重新读取账本快照（等价于刷新/重启后的回读路径）
+    const after = await coreLoadSources();
+    expect(after.find((s) => s.agent === 'Cloud')?.price).toBe(0.02);
+    expect(after.find((s) => s.agent === 'Cloud')?.quota).toBe(5000);
   });
 });
 

@@ -1,6 +1,7 @@
 // P13 纯逻辑（T2）：向量模型信息 / Key 脱敏 / 用途校验 / 反代理择优与审计
 import type { LlmUsage, ProxyCallAuditEntry, ProxySelectMode, ProxySource, UsageConfig, VectorModelInfo, VectorModelKey } from './types.ts';
 import { VECTOR_MODELS } from './catalog.ts';
+import { remainingText } from '../../shared/proxyAccounting.ts';
 
 /** R3：fallback_local 恒开，无关闭入口 */
 export const FALLBACK_ALWAYS_ON = true;
@@ -35,21 +36,23 @@ export function validateUsage(usage: LlmUsage, cfg: UsageConfig): { errors: stri
   return { errors, normalized };
 }
 
-/** R8：反代理预算 = 声明额度 × 0.9 */
-export function proxyBudgetOf(src: ProxySource): number {
-  return Math.floor(src.quota * 0.9);
+/** R8：反代理预算 = 声明额度 × 0.9；配额未设置 → null（无法算预算，不编造） */
+export function proxyBudgetOf(src: ProxySource): number | null {
+  return src.quota === null ? null : Math.floor(src.quota * 0.9);
 }
 
-/** 当日余量（可为负 = 超限） */
-export function remainingOf(src: ProxySource): number {
-  return proxyBudgetOf(src) - src.used;
+/** 当日余量（可为负 = 超限）；配额未设置 → null */
+export function remainingOf(src: ProxySource): number | null {
+  const budget = proxyBudgetOf(src);
+  return budget === null ? null : budget - src.used;
 }
 
-/** R7/R12：档位资格 —— 免费恒可；低价需 price ≤ price_cap；paid 永不入代理 */
+/** R7/R12：档位资格 —— 免费恒可；低价需 price ≤ price_cap；paid 永不入代理。
+ *  批次48 A16：云端单价未设置 → 无法判定资格，按不合格处理（不拿占位数字蒙）。 */
 export function proxyEligible(src: ProxySource, priceCap: number): boolean {
   if (src.tier === 'paid') return false;
   if (src.tier === 'free') return true;
-  return src.price <= priceCap;
+  return src.price !== null && src.price <= priceCap;
 }
 
 /** C13：price_cap ≥ 0；=0 时仅免费源可用 */
@@ -66,12 +69,20 @@ export type ProxyPick = { source: ProxySource | null; reason: string };
  * 余量 ≤ 0（超限，如 x-agent 演示源）一律剔除。
  */
 export function autoPick(srcs: ProxySource[], priceCap: number, _now: number): ProxyPick {
-  const eligible = srcs.filter((s) => proxyEligible(s, priceCap) && remainingOf(s) > 0);
-  const free = eligible.filter((s) => s.tier === 'free').sort((a, b) => remainingOf(b) - remainingOf(a));
-  if (free.length > 0) return { source: free[0], reason: `免费优先：${free[0].agent}/${free[0].model}（余量 ${remainingOf(free[0])}）` };
-  const cheap = eligible.filter((s) => s.tier === 'cheap').sort((a, b) => a.price - b.price);
-  if (cheap.length > 0) return { source: cheap[0], reason: `无可用免费源，走低价：${cheap[0].agent}/${cheap[0].model}（¥${cheap[0].price}/千次 ≤ cap ¥${priceCap}）` };
-  return { source: null, reason: '无合格代理源（免费耗尽 / 低价超 cap / 超限剔除）→ 回退本地 fallback_local（R12）' };
+  const remain = (s: ProxySource) => remainingOf(s);
+  const eligible = srcs.filter((s) => {
+    const r = remain(s);
+    return proxyEligible(s, priceCap) && r !== null && r > 0;
+  });
+  const free = eligible.filter((s) => s.tier === 'free').sort((a, b) => (remain(b) ?? 0) - (remain(a) ?? 0));
+  if (free.length > 0) {
+    return { source: free[0], reason: `免费优先：${free[0].agent}/${free[0].model}（余量 ${remainingText(remain(free[0])!)}）` };
+  }
+  const cheap = eligible.filter((s) => s.tier === 'cheap').sort((a, b) => (a.price ?? 0) - (b.price ?? 0));
+  if (cheap.length > 0) {
+    return { source: cheap[0], reason: `无可用免费源，走低价：${cheap[0].agent}/${cheap[0].model}（¥${cheap[0].price}/千次 ≤ cap ¥${priceCap}）` };
+  }
+  return { source: null, reason: '无合格代理源（免费耗尽 / 低价超 cap / 单价或配额未设置）→ 回退本地 fallback_local（R12）' };
 }
 
 /**
@@ -83,11 +94,17 @@ export function manualPick(selected: ProxySource[], priceCap: number, _now: numb
   const ineligible = selected.filter((s) => !proxyEligible(s, priceCap));
   if (ineligible.length > 0) {
     const s = ineligible[0];
-    return { source: null, reason: `R7 拒绝：勾选源 ${s.agent}/${s.model}（${s.tier === 'paid' ? 'paid 档不可入代理' : `¥${s.price}/千次 超 price_cap ¥${priceCap}`}）` };
+    const why = s.tier === 'paid'
+      ? 'paid 档不可入代理'
+      : s.price === null ? '单价未设置（参数页配置）' : `¥${s.price}/千次 超 price_cap ¥${priceCap}`;
+    return { source: null, reason: `R7 拒绝：勾选源 ${s.agent}/${s.model}（${why}）` };
   }
-  const first = selected.find((s) => remainingOf(s) > 0);
-  if (first) return { source: first, reason: `手动指定：${first.agent}/${first.model}（余量 ${remainingOf(first)}）` };
-  return { source: null, reason: '勾选源当日余量已耗尽 → 回退本地 fallback_local，不转未勾选源（C11）' };
+  const first = selected.find((s) => {
+    const r = remainingOf(s);
+    return r !== null && r > 0;
+  });
+  if (first) return { source: first, reason: `手动指定：${first.agent}/${first.model}（余量 ${remainingText(remainingOf(first)!)}）` };
+  return { source: null, reason: '勾选源当日余量已耗尽或配额未设置 → 回退本地 fallback_local，不转未勾选源（C11）' };
 }
 
 /** R10：反代理调用审计 —— llm_proxy_source=agent:<name> + 花费 + 模式 */

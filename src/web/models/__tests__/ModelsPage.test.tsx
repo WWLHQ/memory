@@ -91,6 +91,15 @@ describe('ModelsPage 三态与列隐藏（阶段3-C）', () => {
     expect(screen.getByText('余量 / 预算')).toBeInTheDocument();
   });
 
+  it('批次48 A16：未配置单价/配额 → 云端余量显示「未设置」，本地显示「不限」（不画假预算）', async () => {
+    applyHostLlmSnapshot(SNAP);
+    render(<ModelsPage />);
+    await waitFor(() => expect(screen.getByTestId('proxy-rows')).toBeInTheDocument());
+    expect(screen.getByTestId('proxy-remain-Cloud DeepSeek')).toHaveTextContent('未设置');
+    expect(screen.getByTestId('proxy-remain-Local Ollama')).toHaveTextContent('不限');
+    expect(screen.getByTestId('proxy-unset-Cloud DeepSeek')).toHaveTextContent('未设置');
+  });
+
   it('降级（degraded）→ 网关不可用提示，不渲染代理行', async () => {
     applyHostLlmSnapshot({ usable: false, engines: [], presets: [] });
     render(<ModelsPage />);

@@ -81,6 +81,36 @@ export function NormalConfigCard({ cfg, onChange }: Props) {
         />
         <span className="dim">¥ / 百万预算单位 t；金额按本地预算单位估算（非厂商账单）；留空 = 不显示金额</span>
       </div>
+      <div className="row">
+        <label>反代理单价</label>
+        <input
+          type="number" min={0} step={0.01} style={{ width: 96 }}
+          value={cfg.proxy_price_cny_per_kcall ?? ''}
+          placeholder="未设置"
+          data-testid="proxy-price"
+          onChange={(e) => {
+            const raw = e.target.value.trim();
+            const v = raw === '' ? null : Number(raw);
+            set({ proxy_price_cny_per_kcall: Number.isFinite(v) ? v : null }, `反代理单价=${raw === '' ? '未设置' : `¥${raw}/千次`}`);
+          }}
+        />
+        <span className="dim">¥ / 千次（云端引擎）；留空 = 未设置，该源不参与自动路由（不伪造金额）</span>
+      </div>
+      <div className="row">
+        <label>反代理日配额</label>
+        <input
+          type="number" min={1} step={1} style={{ width: 96 }}
+          value={cfg.proxy_daily_quota ?? ''}
+          placeholder="未设置"
+          data-testid="proxy-quota"
+          onChange={(e) => {
+            const raw = e.target.value.trim();
+            const v = raw === '' ? null : Number(raw);
+            set({ proxy_daily_quota: Number.isFinite(v) ? v : null }, `反代理日配额=${raw === '' ? '未设置' : `${raw} 次/日`}`);
+          }}
+        />
+        <span className="dim">次 / 日（云端引擎）；当日预算 = 配额 × 0.9（R8）；留空 = 未设置</span>
+      </div>
     </div>
   );
 }
