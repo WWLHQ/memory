@@ -2,6 +2,7 @@
 // 输入校验、持久化、损坏 fail-fast、resolveAccountFor 引导令牌兼容矩阵。
 import { describe, it, expect, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_MCP_ACCOUNT } from '../mcpAuth.ts';
@@ -141,5 +142,39 @@ describe('resolveAccountFor（引导令牌兼容矩阵）', () => {
   it('无库时仅引导令牌可用（现状行为不变）；未携带令牌 → null', () => {
     expect(resolveAccountFor(SERVER_TOKEN, { serverToken: SERVER_TOKEN })).toEqual(DEFAULT_MCP_ACCOUNT);
     expect(resolveAccountFor(undefined, { serverToken: SERVER_TOKEN, store })).toBeNull();
+  });
+});
+
+describe('批次45-A3："*" 仅属本机属主引导账户', () => {
+  it('mint 非 admin + scope 含 "*" → 库层拒签（与 mint_token 编排层双保险）', () => {
+    const store = new InMemoryTokenStore();
+    expect(() => store.mint({ user_id: 'bob', scope_project_ids: ['*'], created_by: 'u1' }))
+      .toThrow(/'\*' 仅限 is_admin=true/);
+    expect(() => store.mint({ user_id: 'bob', scope_project_ids: ['*', 'P1'], created_by: 'u1' }))
+      .toThrow(/45-A3/);
+    expect(() => store.mint({ user_id: 'bob', scope_project_ids: ['*'], is_admin: false, created_by: 'u1' }))
+      .toThrow(/45-A3/);
+    expect(store.list()).toHaveLength(0); // 零副作用
+    // admin 签 '*' 仍放行（本机属主委托）
+    const { token } = store.mint({ user_id: 'root', scope_project_ids: ['*'], is_admin: true, created_by: 'u1' });
+    expect(store.resolve(token)!.scope_project_ids).toEqual(['*']);
+  });
+
+  it('resolve 防御纵深：存量「非 admin 持 "*"」记录 fail-closed（等同不存在）', () => {
+    const file = join(tmpdir(), `tokens-a3-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
+    dirs.push(file);
+    const plain = `mtk_${'a'.repeat(64)}`;
+    // 手工构造一条绕过 mint 校验的存量记录（模拟 D6-4 时代遗留 / 文件被篡改）
+    writeFileSync(file, JSON.stringify({
+      schema: 'mcp-tokens/1',
+      tokens: [{
+        token_hash: createHash('sha256').update(plain, 'utf8').digest('hex'),
+        user_id: 'bob', scope_project_ids: ['*'], is_admin: false,
+        created_at: 1, created_by: 'legacy',
+      }],
+    }));
+    const store = new FileTokenStore(file);
+    expect(store.resolve(plain)).toBeNull(); // fail-closed，绝不放行
+    expect(store.list()).toHaveLength(1);     // 记录还在（可审计），只是解析即拒
   });
 });

@@ -17,6 +17,8 @@ describe('D6-3 is_admin 字段与门禁骨架', () => {
   it('DEFAULT_MCP_ACCOUNT（默认引导令牌）显式 is_admin:true', () => {
     expect(DEFAULT_MCP_ACCOUNT.is_admin).toBe(true);
     expect(isAdmin(DEFAULT_MCP_ACCOUNT)).toBe(true);
+    // 批次45-A3 不变式：'*' 全放行的**唯一合法持有者** = 本机属主引导账户（本机单租户拍板口径）
+    expect(DEFAULT_MCP_ACCOUNT.scope_project_ids).toEqual(['*']);
   });
   it('isAdmin：仅显式 true 视为 admin；undefined/false/其它一律非 admin', () => {
     expect(isAdmin({ user_id: 'u', scope_project_ids: ['*'], is_admin: true })).toBe(true);

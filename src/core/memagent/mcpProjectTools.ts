@@ -9,7 +9,7 @@
 // ③ mint_token 返回一次性明文令牌：只在本结果里出现这一次，库里只存 sha256 哈希；
 //    `is_admin=true` 的令牌只能由已持有 admin 的令牌签发（本编排的 admin 门禁天然保证）；
 // ④ 未装配令牌库时 mint_token 明确报错（不是静默成功）。
-import { isAdmin, type McpAccount } from './mcpAuth.ts';
+import { isAdmin, scopeHasWildcard, type McpAccount } from './mcpAuth.ts';
 import { McpToolError } from './mcpRecall.ts';
 import type { CreateProjectInput, ProjectKind, ProjectRecord, StorageBackend } from './types.ts';
 import type { TokenStorePort } from './tokenStore.ts';
@@ -125,6 +125,14 @@ export async function runMintTokenTool(
   const scope = (rawScope as unknown[]).map((s) => String(s).trim());
   const mintAdmin = args.is_admin === undefined ? false : args.is_admin;
   if (typeof mintAdmin !== 'boolean') throw new McpToolError('mint_token.is_admin 须为布尔值');
+  // 批次45-A3：'*' 全放行仅属本机属主引导账户——admin 可给 admin 令牌签 '*'，
+  // 非 admin 受限令牌必须显式列出项目（防止「单机默认」泄漏成「任意令牌全放行」）。
+  if (scopeHasWildcard(scope) && !mintAdmin) {
+    throw new McpToolError(
+      "mint_token：scope_project_ids 含 '*' 仅限 is_admin=true 的令牌（45-A3：'*' 全放行属于本机属主引导账户）；"
+      + '非 admin 受限令牌请显式列出可见项目（三池可见性仍在其上生效）',
+    );
+  }
   let expiresAt: number | undefined;
   if (args.expires_at !== undefined) {
     if (typeof args.expires_at !== 'number' || !Number.isFinite(args.expires_at)) {

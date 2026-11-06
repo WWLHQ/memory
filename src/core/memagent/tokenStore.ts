@@ -12,7 +12,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { tokenEquals, DEFAULT_MCP_ACCOUNT, type McpAccount } from './mcpAuth.ts';
+import { tokenEquals, DEFAULT_MCP_ACCOUNT, scopeHasWildcard, type McpAccount } from './mcpAuth.ts';
 
 /** 令牌库记录：token_hash = sha256(明文) hex —— 绝不存明文 */
 export interface TokenRecord {
@@ -73,6 +73,10 @@ function assertMintInput(input: MintTokenInput, now: number): void {
     || input.scope_project_ids.some((s) => typeof s !== 'string' || !s.trim())) {
     throw new Error('mint.scope_project_ids 必须为至少 1 个非空字符串的数组（"*" 亦可）');
   }
+  // 批次45-A3：'*' 全放行仅属本机属主引导账户——非 admin 令牌在库层也拒签（与 mint_token 编排层双保险）
+  if (!input.is_admin && scopeHasWildcard(input.scope_project_ids)) {
+    throw new Error("mint：scope_project_ids 含 '*' 仅限 is_admin=true 的令牌（45-A3：'*' 全放行属本机属主引导账户，非 admin 请显式列出项目）");
+  }
   if (input.expires_at !== undefined && (!Number.isFinite(input.expires_at) || input.expires_at <= now)) {
     throw new Error('mint.expires_at 必须晚于当前时间（签发立即过期的令牌无意义）');
   }
@@ -113,6 +117,8 @@ function resolveRecord(records: TokenRecord[], candidate: string | undefined, no
   const hash = hashToken(candidate);
   for (const rec of records) {
     if (!constantTimeHexEqual(hash, rec.token_hash)) continue;
+    // 批次45-A3 防御纵深：存量/被篡改的「非 admin 持 '*'」记录一律 fail-closed（等同不存在，不泄露曾存在）
+    if (!rec.is_admin && scopeHasWildcard(rec.scope_project_ids)) return null;
     if (rec.expires_at !== undefined && rec.expires_at <= now) return null; // 过期 = 不存在
     return recordToAccount(rec);
   }

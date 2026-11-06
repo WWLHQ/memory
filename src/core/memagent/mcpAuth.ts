@@ -30,6 +30,14 @@ export function isAdmin(account: ScopeAccount): boolean {
   return account.is_admin === true;
 }
 
+/** 批次45-A3：'*' 全放行只属于**本机属主引导账户**（DEFAULT_MCP_ACCOUNT / main.ts 注入真源三元组的
+ *  引导账户，均 is_admin=true）——这是「本机单租户」拍板口径下的唯一合法 '*' 持有者。
+ *  非 admin 受限账户持有 '*' 即违规：mint 层拒签（mcpProjectTools/tokenStore）、
+ *  resolve 层对存量记录 fail-closed（tokenStore.resolveRecord）。本辅助供三处共用判定，防止口径分家。 */
+export function scopeHasWildcard(scope: readonly string[] | undefined): boolean {
+  return Array.isArray(scope) && scope.includes('*');
+}
+
 /** 三池分类（D6-2）：按 project_id 命名约定判定所属池，无需查注册表即可门禁。
  *  - shared：P-shared（全体可见，恒放行）
  *  - archive：P-archive（仅 admin 可见）

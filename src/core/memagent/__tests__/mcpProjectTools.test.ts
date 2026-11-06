@@ -86,6 +86,21 @@ describe('D6-5 runMintTokenTool', () => {
     expect(acct!.scope_project_ids).toEqual(['app1']);
   });
 
+  it('批次45-A3：admin 给**非 admin** 令牌签 scope 含 "*" → -32602 拒绝（"*" 仅属本机属主引导账户）', async () => {
+    const before = store.list().length;
+    await expect(runMintTokenTool(store, { user_id: 'bob', scope_project_ids: ['*'] }, ADMIN))
+      .rejects.toMatchObject({ code: -32602 } as Partial<McpToolError>);
+    await expect(runMintTokenTool(store, { user_id: 'bob', scope_project_ids: ['*', 'P1'] }, ADMIN))
+      .rejects.toThrow(/45-A3/);
+    // 混合数组里只要含 '*' 即拒，零副作用：库中无新令牌
+    expect(store.list()).toHaveLength(before);
+  });
+
+  it('批次45-A3：admin 给 **admin** 令牌签 "*" 放行（本机属主委托）；非 admin 门禁仍先行', async () => {
+    const r = await runMintTokenTool(store, { user_id: 'root', scope_project_ids: ['*'], is_admin: true }, ADMIN);
+    expect(store.resolve(r.token)!.scope_project_ids).toEqual(['*']);
+  });
+
   it('admin 可签发 admin 令牌；is_admin 非布尔拒绝；scope/expires 校验', async () => {
     const r = await runMintTokenTool(store, { user_id: 'root', scope_project_ids: ['*'], is_admin: true }, ADMIN);
     expect(store.resolve(r.token)!.is_admin).toBe(true);

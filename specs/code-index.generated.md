@@ -58,11 +58,11 @@
 | [src/core/memagent/legacyLayers.ts](src/core/memagent/legacyLayers.ts) | 164 | 遗留账本清理（批次24）：把「未接真实 LLM 却带 L2–L6」的历史行诚实降级回 L1。 | isStubDeepLayered(fn), isMislabeledLayer(fn), scanStubLayers(fn), demoteStubLayers(fn), LegacyScan(type), LegacyDemoteReport(type), LegacyDemoteCtx(type) |
 | [src/core/memagent/llm.ts](src/core/memagent/llm.ts) | 71 | LlmProvider（§5.1）+ 内核统一反代理路由（19.8：先免费 → 后低价 ≤ price_cap → cost_cap → 回退本地） | routeProxy(fn), FakeLlmProvider(class), ProxyPick(type) |
 | [src/core/memagent/mcp.ts](src/core/memagent/mcp.ts) | 403 | MCP Server（§19.5）：JSON-RPC 2.0 over TCP，暴露记忆工具，供 Agent 调用记忆助手。 | runMcpServer(fn), McpOptions(type), McpServerHandle(type) |
-| [src/core/memagent/mcpAuth.ts](src/core/memagent/mcpAuth.ts) | 105 | MCP 鉴权：MCP 端口只对持有本机令牌的 Agent 开放。 | isAdmin(fn), classifyProject(fn), projectInScope(fn), tokenEquals(fn), tokenFromHeaders(fn), assertMcpToken(fn), MCP_TOKEN_HEADER(const), DEFAULT_MCP_ACCOUNT(const), McpAccount(type), ScopeAccount(type), ProjectPool(type) |
+| [src/core/memagent/mcpAuth.ts](src/core/memagent/mcpAuth.ts) | 113 | MCP 鉴权：MCP 端口只对持有本机令牌的 Agent 开放。 | isAdmin(fn), scopeHasWildcard(fn), classifyProject(fn), projectInScope(fn), tokenEquals(fn), tokenFromHeaders(fn), assertMcpToken(fn), MCP_TOKEN_HEADER(const), DEFAULT_MCP_ACCOUNT(const), McpAccount(type), ScopeAccount(type), ProjectPool(type) |
 | [src/core/memagent/mcpGcTools.ts](src/core/memagent/mcpGcTools.ts) | 147 | MCP 遗忘引擎报告编排（批次44-D5-3 → 批次46-4）：gc_report。 | runGcReportTool(fn), GC_REPORT_NOTE(const), GcReportToolResult(type) |
 | [src/core/memagent/mcpHttp.ts](src/core/memagent/mcpHttp.ts) | 538 | 标准 MCP（Model Context Protocol）streamable-http 服务器 | normalizeClientLabel(fn), clientFromInitialize(fn), clientFromUserAgent(fn), isIdentifiableUserAgent(fn), isTrustedClientSelfName(fn), clientFromExplicitHeader(fn), recallEchoNote(fn), runMcpHttpServer(fn), MCP_CLIENT_HEADER(const), McpHttpOptions(type), McpHttpHandle(type) |
 | [src/core/memagent/mcpManageTools.ts](src/core/memagent/mcpManageTools.ts) | 178 | MCP 治理工具编排（批次44-D5-2）：feedback / manage_memory。 | deleteAllowed(fn), runFeedbackTool(fn), runManageMemoryTool(fn), ManageToolOpts(type), FeedbackToolResult(type), ManageToolResult(type) |
-| [src/core/memagent/mcpProjectTools.ts](src/core/memagent/mcpProjectTools.ts) | 158 | MCP 管理工具编排（D6-5 / 子方案 §3.3）：create_project / mint_token。 | runCreateProjectTool(fn), runMintTokenTool(fn), CreateProjectToolResult(type), MintTokenToolResult(type) |
+| [src/core/memagent/mcpProjectTools.ts](src/core/memagent/mcpProjectTools.ts) | 166 | MCP 管理工具编排（D6-5 / 子方案 §3.3）：create_project / mint_token。 | runCreateProjectTool(fn), runMintTokenTool(fn), CreateProjectToolResult(type), MintTokenToolResult(type) |
 | [src/core/memagent/mcpReadTools.ts](src/core/memagent/mcpReadTools.ts) | 160 | MCP 读工具编排（批次44-D5-1）：list_memories / get_memory。 | toMemoryView(fn), runListMemoriesTool(fn), runGetMemoryTool(fn), MemoryView(type), ListMemoriesResult(type), GetMemoryResult(type) |
 | [src/core/memagent/mcpRecall.ts](src/core/memagent/mcpRecall.ts) | 314 | MCP 召回工具编排（批次11/13/29/32/33）：项目自动定位 / 列表 / 提示行与明细组装 / 按客户端能力选档位。 | clientSupportsHtmlDetails(fn), projectInfosFromMemories(fn), resolveProjectId(fn), runRecallTool(fn), recallDisplayMode(fn), runListProjectsTool(fn), ensureSharedProject(fn), McpToolError(class), ProjectInfo(type), ResolvedProject(type), RecallToolPayload(type), RecallDetailTicketsPort(type), RecallToolDetailOpts(type), RecallToolOutput(type), RecallDisplayMode(type) |
 | [src/core/memagent/mcpSchema.ts](src/core/memagent/mcpSchema.ts) | 197 | MCP 工具清单与初始化指令（批次11/12/13）：HTTP(8204) 与 TCP(8202) 共用同一份 schema/instructions， | MCP_INSTRUCTIONS(const), MCP_TOOLS(const) |
@@ -84,7 +84,7 @@
 | [src/core/memagent/storage.ts](src/core/memagent/storage.ts) | 124 | StorageBackend 接口实现（§5.3）：InMemoryStorage 用于测试/演示； | InMemoryStorage(class) |
 | [src/core/memagent/sync.ts](src/core/memagent/sync.ts) | 371 | REQ-008 云同步（同步机制详细设计 §1–§8）：sha256 幂等 + 向量时钟 LWW + SyncHub 中枢 + 三端引擎 | sha256hex(fn), vcCompare(fn), vcTick(fn), stampForSync(fn), syncUp(fn), syncDown(fn), reconcile(fn), filterSyncAudits(fn), SyncHub(class), SyncConflict(type), SyncAudit(type), SyncUpReport(type), VClock(type), PushOutcome(type), AnySyncHub(type) |
 | [src/core/memagent/tenantNormalize.ts](src/core/memagent/tenantNormalize.ts) | 182 | 批次45-A2 存量账本租户归一：把历史行的 team_id/enterprise_id 重盖成 tenant.json 规范值（user_id 保留原值）。 | scanRowsForTenantNormalize(fn), normalizeTenantFields(fn), TenantNormalizeTarget(type), TenantNormalizeDecision(type), TenantNormalizePreview(type), TenantNormalizeReport(type), TenantNormalizeCtx(type) |
-| [src/core/memagent/tokenStore.ts](src/core/memagent/tokenStore.ts) | 215 | 令牌代理（D6-4，方案 A1 / 子方案 §3.2）：文件化令牌库 mcp-tokens.json（0600） | resolveAccountFor(fn), InMemoryTokenStore(class), FileTokenStore(class), TokenRecord(type), MintTokenInput(type), MintedToken(type), TokenStorePort(type) |
+| [src/core/memagent/tokenStore.ts](src/core/memagent/tokenStore.ts) | 221 | 令牌代理（D6-4，方案 A1 / 子方案 §3.2）：文件化令牌库 mcp-tokens.json（0600） | resolveAccountFor(fn), InMemoryTokenStore(class), FileTokenStore(class), TokenRecord(type), MintTokenInput(type), MintedToken(type), TokenStorePort(type) |
 | [src/core/memagent/types.ts](src/core/memagent/types.ts) | 912 | memagent-core 契约类型（REQ-007 §1/§2/§3/§5/§6 直译，19.10/19.11） | isCategory(fn), CATEGORIES(const), Account(type), RefinedLayers(type), RecallReq(type), Hit(type), Budget(type), RecallBackgroundItem(type), RecallBackground(type), RecallSavings(type), RecallResult(type), MemReq(type), WriteResult(type), LayerDecision(type), GcReq(type), GcReport(type), GcFullReq(type), GcFullReport(type), ConflictPair(type), ConflictResolveReq(type), ConflictResolveResult(type), Pref(type), DiscoverReq(type), DiscoveredAgent(type), DiscoverResult(type), SyncReq(type), SyncReport(type), BrowseReq(type), BrowseRow(type), BrowseResult(type), L0Port(type), L0AccessRequest(type), L0AccessRequestResult(type), L0GrantReq(type), L0GrantView(type), L0GrantResult(type), L0RequestView(type), L0UnlockReq(type), L0UnlockResult(type), L0HeartbeatResult(type), L0VaultStatus(type), L0MigrationReport(type), L0MigrationResult(type), L0AdminPort(type), LogReq(type), LogItem(type), LogPage(type), AuditRef(type), AuditRecord(type), Memory(type), MemOpPatch(type), MemOpResult(type), FeedbackResult(type), ModelInfo(type), LlmCallCtx(type), LlmResp(type), LlmProvider(type), Filter(type), Scored(type), VectorBackend(type), ProjectRecord(type), CreateProjectInput(type), ListProjectsFilter(type), StorageBackend(type), MemAgentOptions(type), MemAgent(type), MemAgentSeedHooks(type), Form(type), Layer(type), DecayClass(type), Category(type), RecallMode(type), Scene(type), ErrorCode(type), ConflictVerdict(type), DiscoverSignal(type), L0GrantStatus(type), AuditAction(type), MemOp(type), FeedbackKind(type), ProjectKind(type) |
 | [src/core/memagent/ulid.ts](src/core/memagent/ulid.ts) | 47 | 简易 ULID：48bit 时间戳 + 80bit 随机（crypto 级），同毫秒内单调递增（契约 §3.1） | ulid(fn) |
 | [src/core/memagent/vector.ts](src/core/memagent/vector.ts) | 92 | VectorBackend（§5.2）当前唯一生产实现：JsVectorBackend（hash bag-of-words + cosine）。 | tokenize(fn), embedSync(fn), cosine(fn), DEFAULT_VECTOR_DIM(const), JsVectorBackend(class) |
@@ -424,11 +424,11 @@ src/core/memagent/ledgerReset.ts 02fddcaebf0b
 src/core/memagent/legacyLayers.ts 8f912218cef5
 src/core/memagent/llm.ts 651a60641c34
 src/core/memagent/mcp.ts b136eeaa364a
-src/core/memagent/mcpAuth.ts 750aaaa27f4f
+src/core/memagent/mcpAuth.ts c916f8e72e4a
 src/core/memagent/mcpGcTools.ts ec508b6f8cf9
 src/core/memagent/mcpHttp.ts 4bbbb5c1eb84
 src/core/memagent/mcpManageTools.ts a1cfb45dcd98
-src/core/memagent/mcpProjectTools.ts 808a2155e702
+src/core/memagent/mcpProjectTools.ts 465a286c11df
 src/core/memagent/mcpReadTools.ts 43f033b6dacc
 src/core/memagent/mcpRecall.ts 91735c8dae42
 src/core/memagent/mcpSchema.ts c31fee0290f2
@@ -450,7 +450,7 @@ src/core/memagent/sqliteStorage.ts 4dfd71190c1d
 src/core/memagent/storage.ts 954adabfd88a
 src/core/memagent/sync.ts ffdeb7ae3aea
 src/core/memagent/tenantNormalize.ts 3cbf77699400
-src/core/memagent/tokenStore.ts 1536b056ad3c
+src/core/memagent/tokenStore.ts 44f8e2735cfd
 src/core/memagent/types.ts abbc996945e4
 src/core/memagent/ulid.ts 634c99f1962a
 src/core/memagent/vector.ts 80221de2d059
