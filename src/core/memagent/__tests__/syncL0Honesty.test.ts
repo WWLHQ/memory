@@ -1,8 +1,8 @@
-// 阶段4-H / B7：诚实边界契约 —— 「已实现」不等于「已接线」，「未接线」也不等于「没实现」。
-// 事实：SyncHub / PgSyncHub + syncUp/syncDown/reconcile 已实现并有集成测试，只是未接入内核 API 与桌面主进程；
-//       桌面壳 kernel.hostL0Ports() 真注入 HostL0Admin（主进程 L0Vault IPC），缺端口只是纯浏览器的诚实降级。
-// 旧注释把前者写成「本版本未实现」、把后者写成「L0 授权未接线」，本套件锁住这两条事实，
-// 同时锁住 agent.sync() 绝不拿本地条数/内存中枢伪造 pushed/pulled 云端同步成功。
+// 阶段4-H / B7 → 42-A：诚实边界契约 —— 「已实现」不等于「已接线」，「未装配」也不等于「没实现」。
+// 事实（42-A 后）：SyncHub / PgSyncHub + syncUp/syncDown/reconcile 已实现并有集成测试，内核 sync()
+// 已支持 hub 注入真调引擎；hub 未注入时 agent.sync 仍如实报 E_NOT_IMPLEMENTED（诚实降级保留）；
+// 桌面壳 kernel.hostL0Ports() 真注入 HostL0Admin（主进程 L0Vault IPC），缺端口只是纯浏览器的诚实降级。
+// 本套件锁住这两条事实，同时锁住：注入后 pushed/pulled 是引擎真实结果，绝不伪造。
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -54,7 +54,7 @@ describe('同步与 L0 接线诚实边界（阶段4-H / B7 变异杀手）', () 
     expect((await web.getMemory('m1'))?.content).toBe('desktop authored note');
   });
 
-  it('agent.sync 未接入 API 层 → 抛 E_NOT_IMPLEMENTED + implemented:false 审计，绝不伪造 pushed/pulled', async () => {
+  it('agent.sync hub 未注入 → 仍抛 E_NOT_IMPLEMENTED + implemented:false 审计（42-A 诚实降级保留），绝不伪造 pushed/pulled', async () => {
     const storage = new InMemoryStorage();
     const ma = makeAgent(storage);
     await expect(ma.sync({ direction: 'push', project_id: 'P1' })).rejects.toMatchObject({ code: 'E_NOT_IMPLEMENTED' });
@@ -63,6 +63,42 @@ describe('同步与 L0 接线诚实边界（阶段4-H / B7 变异杀手）', () 
     expect(audits[0].detail).toMatchObject({ implemented: false, direction: 'push', project_id: 'P1' });
     expect(audits[0].detail).not.toHaveProperty('pushed');
     expect(audits[0].detail).not.toHaveProperty('pulled');
+  });
+
+  it('agent.sync hub 注入 → 真调引擎：push 上行落中枢 + implemented:true 审计，绝不伪造数字', async () => {
+    const storage = new InMemoryStorage();
+    const hub = new SyncHub();
+    const ma = createMemAgent({
+      form: 'desktop' as const, account: ACCOUNT,
+      llm: new FakeLlmProvider(), vector: new JsVectorBackend(), storage, hub,
+    });
+    await storage.putMemory(mem({ mem_id: 'm1' }));
+    await storage.putMemory(mem({ mem_id: 'm2', content: 'second note' }));
+    const r = await ma.sync({ direction: 'push', project_id: 'P1' });
+    expect(r.pushed).toBe(2);
+    expect(r.conflicts).toBe(0);
+    expect(hub.reconcile({ team_id: 't1' }).items).toHaveLength(2);
+    const audits = await storage.queryAudit({ action: 'sync' });
+    expect(audits[0].detail).toMatchObject({ implemented: true, direction: 'push', pushed: 2 });
+  });
+
+  it('agent.sync hub 注入 → pull 真下行：他端上行的行落本地 + cursor 回传', async () => {
+    const storage = new InMemoryStorage();
+    const hub = new SyncHub();
+    // 他端（web）先上行一行
+    const other = new InMemoryStorage();
+    await other.putMemory(mem({ mem_id: 'm9', content: 'from web end' }));
+    await syncUp(other, hub, 'web');
+    const ma = createMemAgent({
+      form: 'desktop' as const, account: ACCOUNT,
+      llm: new FakeLlmProvider(), vector: new JsVectorBackend(), storage, hub,
+    });
+    const r = await ma.sync({ direction: 'pull', project_id: 'P1' });
+    expect(r.pulled).toBe(1);
+    expect(r.cursor).toBeGreaterThan(0);
+    expect((await storage.getMemory('m9'))?.content).toBe('from web end');
+    const audits = await storage.queryAudit({ action: 'sync' });
+    expect(audits[0].detail).toMatchObject({ implemented: true, direction: 'pull', pulled: 1 });
   });
 
   it('L0AdminPort 未提供 → 诚实 E_NOT_IMPLEMENTED；注入后真委托（桌面壳确实能接通）', async () => {

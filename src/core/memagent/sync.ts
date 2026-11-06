@@ -276,6 +276,8 @@ export function stampForSync(m: Memory, form: Form): Memory {
 
 export interface SyncUpReport {
   applied: number; dedup: number; behind: number; conflicts: string[]; lww: number;
+  /** 42-A 红线：L0 密文层不进同步上行 —— has_l0 / content_l0_enc 行跳过并如实计数（绝不静默丢弃） */
+  l0_skipped: number;
   audits: SyncAudit[];
 }
 
@@ -286,11 +288,13 @@ export type AnySyncHub = SyncHub | import('./pgSyncHub.ts').PgSyncHub;
 export async function syncUp(local: { listMemories(f: Filter): Promise<Memory[]>; putMemory(m: Memory): Promise<void> }, hub: AnySyncHub, form: Form, filter?: { onlyPending?: boolean }): Promise<SyncUpReport> {
   // 删除墓碑必须参与上行，否则删除无法传播（D2）；UI 默认列表仍不显示墓碑
   const mems = await local.listMemories({ include_deleted: true });
-  const report: SyncUpReport = { applied: 0, dedup: 0, behind: 0, conflicts: [], lww: 0, audits: [] };
+  const report: SyncUpReport = { applied: 0, dedup: 0, behind: 0, conflicts: [], lww: 0, l0_skipped: 0, audits: [] };
   const auditStart = await hub.auditCount();
   for (const m of mems) {
-    if (filter?.onlyPending && !m.pending_sync) continue;
     if (m.mem_id.includes('#loser#')) continue; // 败者不回传
+    // 42-A 红线：L0 密文层不进同步上行（方案红线：L0 原文/信封不落远端中枢）——跳过并计数，不静默
+    if (m.has_l0 || m.content_l0_enc) { report.l0_skipped++; continue; }
+    if (filter?.onlyPending && !m.pending_sync) continue;
     const stamped = stampForSync(m, form);
     const r = await hub.push(stamped, form);
     if (r === 'applied' || r === 'lww') {

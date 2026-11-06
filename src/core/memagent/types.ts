@@ -362,6 +362,8 @@ export interface DiscoverResult {
 export interface SyncReq {
   direction: 'push' | 'pull';
   project_id: string;
+  /** 42-A：下行游标（上次 syncDown 返回的 cursor）。缺省 0 = 全量下行，靠版本比对去重，游标优化属端壳职责 */
+  since?: number;
 }
 
 export interface SyncReport {
@@ -370,6 +372,14 @@ export interface SyncReport {
   conflicts: number;
   request_id: string;
   audit: AuditRef;
+  /** 42-A：上行细分 —— 幂等跳过 / 中枢更新本端落后 / LWW 本端胜（push 时回传，如实不冒充） */
+  dedup?: number;
+  behind?: number;
+  lww?: number;
+  /** 42-A 红线：L0 密文行被引擎跳过未上行的条数（如实回报，不静默） */
+  l0_skipped?: number;
+  /** 42-A：下行新游标（pull 时回传，端壳可保存作下次 since） */
+  cursor?: number;
 }
 
 /** ---------- 查阅（§4.1 / §4.4） ---------- */
@@ -844,6 +854,12 @@ export interface MemAgentOptions {
    * 缺省 = 内存实现（进程内不丢，重启清空）；桌面应传入 FilePendingStore 以持久化。
    */
   pending?: PendingStore;
+  /**
+   * 42-A：同步中枢注入口（内存 SyncHub 或进程内 pglite PgSyncHub）。
+   * 缺省 = sync() 如实报 E_NOT_IMPLEMENTED（引擎已实现，缺中枢装配属诚实降级，不是功能缺失）；
+   * 注入后 sync() 真调 syncUp/syncDown 引擎（sha256 幂等 + 自动 LWW + since 增量）。
+   */
+  hub?: import('./sync.ts').AnySyncHub;
 }
 
 /** createMemAgent 返回的核心 API 面（§2） */

@@ -2,6 +2,7 @@
 import { MemAgentError } from './errors.ts';
 import { routeProxy } from './llm.ts';
 import { coreBrowse, coreFeedback, coreGc, coreGcFull, coreMemoryOp, coreWrite } from './memories.ts';
+import { syncDown, syncUp } from './sync.ts';
 import { MemoryPendingStore, PendingWrites, type WriteKnobs } from './pendingWrites.ts';
 import { hardFilter, scoreMemory } from './forgetting.ts';
 import {
@@ -373,17 +374,43 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
 
   async function sync(req: SyncReq): Promise<SyncReport> {
     const request_id = newRequestId();
-    // 诚实边界（阶段4-H）：**同步引擎已实现且有集成测试** —— sync.ts 的 SyncHub /
-    // syncUp / syncDown / reconcile，以及 pgSyncHub.ts 的 Postgres 中枢落地；
-    // 但它们**尚未接入内核 API 与桌面主进程**（MemAgent 无 hub 注入口、主进程零调用方）。
-    // 因此本 API 如实报「未接入」，绝不拿本地条数或内存中枢伪造 pushed/pulled 云端同步成功。
+    // 42-A 双分支：同步引擎已实现（sync.ts 的 SyncHub / syncUp / syncDown / reconcile +
+    // pgSyncHub.ts 的 Postgres 中枢落地）。hub 未注入时如实报未接入内核 API（E_NOT_IMPLEMENTED，
+    // 诚实降级，不是功能缺失）；注入后真调引擎 —— push = sha256 幂等上行 + 自动 LWW（仅语义
+    // 互斥进 §9.7 队列），pull = since 增量下行（缺省 0 全量，靠版本比对去重）。
+    // L0 密文层不进同步上行：红线在 syncUp 引擎层（l0_skipped 计数如实回报）。
+    if (!opts.hub) {
+      await audit(request_id, 'sync', {
+        direction: req.direction, project_id: req.project_id,
+        implemented: false, reason: 'sync engine implemented but hub not injected into kernel options',
+      });
+      throw new MemAgentError('E_NOT_IMPLEMENTED', '同步中枢未装配：引擎已实现且有集成测试，端壳未注入 hub（42-B 接线，§REQ-008）', {
+        direction: req.direction, project_id: req.project_id, request_id,
+      });
+    }
+    if (req.direction === 'push') {
+      const up = await syncUp(storage, opts.hub, form);
+      await audit(request_id, 'sync', {
+        direction: 'push', project_id: req.project_id, implemented: true,
+        pushed: up.applied + up.lww, dedup: up.dedup, behind: up.behind,
+        lww: up.lww, conflicts: up.conflicts.length, l0_skipped: up.l0_skipped,
+      }, { project_id: req.project_id });
+      return {
+        pushed: up.applied + up.lww, pulled: 0, conflicts: up.conflicts.length,
+        request_id, audit: { request_id, action: 'sync' },
+        dedup: up.dedup, behind: up.behind, lww: up.lww, l0_skipped: up.l0_skipped,
+      };
+    }
+    const down = await syncDown(opts.hub, storage, { team_id: account.team_id, user_id: account.user_id }, req.since ?? 0, form);
     await audit(request_id, 'sync', {
-      direction: req.direction, project_id: req.project_id,
-      implemented: false, reason: 'sync engine implemented but not wired into kernel API / desktop main process',
-    });
-    throw new MemAgentError('E_NOT_IMPLEMENTED', '云端同步未接入内核 API：同步引擎已实现，但本版本未装配同步中枢（§REQ-008）', {
-      direction: req.direction, project_id: req.project_id, request_id,
-    });
+      direction: 'pull', project_id: req.project_id, implemented: true,
+      pulled: down.pulled, cursor: down.cursor,
+    }, { project_id: req.project_id });
+    return {
+      pushed: 0, pulled: down.pulled, conflicts: 0,
+      request_id, audit: { request_id, action: 'sync' },
+      cursor: down.cursor,
+    };
   }
 
   async function browse(req: Parameters<MemAgent['browse']>[0]): Promise<BrowseResult> {
