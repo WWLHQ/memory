@@ -45,6 +45,7 @@ import { FileTokenStore } from '../core/memagent/tokenStore.ts';
 import { FileMemberStore } from '../core/memagent/memberStore.ts';
 import { loadOrCreateTenant } from './tenantSource.ts';
 import { PgSyncHub } from '../core/memagent/pgSyncHub.ts';
+import { reconcile as syncReconcileEngine } from '../core/memagent/sync.ts';
 import { createWebhook } from '../core/memagent/webhook.ts';
 import { createWebhookHttpServer } from './webhookServer.ts';
 import type { AuditAction, Category, Form, Memory } from '../core/memagent/types.ts';
@@ -3265,6 +3266,38 @@ async function bootstrap(): Promise<void> {
     }, FORGETTING_FIRST_DELAY_MS);
     void mlog('bootstrap:forgetting-scheduled', {
       firstDelayMs: FORGETTING_FIRST_DELAY_MS, intervalMs: FORGETTING_INTERVAL_MS,
+    });
+  }
+
+  // 批次43-A：§3.4 每日全量对账调度 —— reconcile(hub, local, {team_id}) 补本地缺的行 +
+  // 指纹校验（integrity_issues 只如实报，绝不静默覆盖已有行）。中枢未装配（sync-hub init
+  // 失败）时跳过：没有远端可对账，不伪造对账回执。引擎侧 sync_reconcile 审计由 hub 落账。
+  const SYNC_RECONCILE_INTERVAL_MS = Number(process.env.MAM_SYNC_RECONCILE_INTERVAL_MS) || 24 * 3600_000;
+  const SYNC_RECONCILE_FIRST_DELAY_MS = Number(process.env.MAM_SYNC_RECONCILE_FIRST_DELAY_MS) || 10 * 60_000;
+  const runSyncReconcileScheduled = async (why: string): Promise<void> => {
+    if (!syncHub) return;
+    try {
+      const r = await syncReconcileEngine(syncHub, storage, { team_id: tenantTriple.team_id, user_id: tenantTriple.user_id });
+      void mlog('sync:reconcile-scheduled', { why, backfilled: r.backfilled, integrity_issues: r.integrity_issues });
+      actionLog('kernel', 'sync:reconcile-scheduled', {
+        why, backfilled: r.backfilled, integrity_issues: r.integrity_issues,
+      }, r.integrity_issues.length > 0 ? { level: 'warn' } : undefined);
+    } catch (err) {
+      const e = String((err as Error)?.message ?? err);
+      void mlog('sync:reconcile-scheduled:error', { why, error: e });
+      actionLog('kernel', 'sync:reconcile-scheduled:error', { why, error: e }, { level: 'error' });
+    }
+  };
+  if (process.env.MAM_SYNC_RECONCILE_DISABLED === '1') {
+    void mlog('sync:reconcile-scheduler-disabled', { reason: 'MAM_SYNC_RECONCILE_DISABLED=1' });
+  } else {
+    setTimeout(() => {
+      void runSyncReconcileScheduled('first');
+      setInterval(() => void runSyncReconcileScheduled('interval'), SYNC_RECONCILE_INTERVAL_MS);
+    }, SYNC_RECONCILE_FIRST_DELAY_MS);
+    void mlog('bootstrap:sync-reconcile-scheduled', {
+      firstDelayMs: SYNC_RECONCILE_FIRST_DELAY_MS, intervalMs: SYNC_RECONCILE_INTERVAL_MS,
+      hubReady: syncHub !== null,
     });
   }
 
