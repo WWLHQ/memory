@@ -301,7 +301,7 @@
 | [src/web/models/catalog.ts](src/web/models/catalog.ts) | 34 | P13 大模型配置页：规格常量（向量模型 + 四用途默认参数）。 | defaultUsage(fn), VECTOR_MODELS(const), DEFAULT_VECTOR_KEY(const), USAGE_KEYS(const), USAGE_LABELS(const), DEFAULT_USAGES(const) |
 | [src/web/models/coreModels.ts](src/web/models/coreModels.ts) | 285 | 大模型配置页（REQ-009 / P13）接真内核： | coreLoadSources(fn), coreVectorCount(fn), coreSimulateAuto(fn), coreLoadProxyCaps(fn), coreSaveProxyCaps(fn), coreSaveConfig(fn), coreVectorProbe(fn), coreAuditTail(fn), SimulateOutcome(type), SaveConfigOutcome(type), VectorProbeResult(type) |
 | [src/web/models/logic.ts](src/web/models/logic.ts) | 126 | P13 纯逻辑（T2）：向量模型信息 / Key 脱敏 / 用途校验 / 反代理择优与审计 | vectorInfo(fn), maskKey(fn), rebuildEta(fn), validateUsage(fn), proxyBudgetOf(fn), remainingOf(fn), proxyEligible(fn), validatePriceCap(fn), autoPick(fn), manualPick(fn), auditProxy(fn), FALLBACK_ALWAYS_ON(const), ProxyPick(type) |
-| [src/web/models/modelConfig.ts](src/web/models/modelConfig.ts) | 81 | 模型配置真落盘（Phase C3）：向量模型/维度是内核构造参数，保存后必须参与 getKernel 装配。 | readModelConfig(fn), writeModelConfig(fn), configuredVectorDim(fn), sanitizeUsages(fn), hydrateUsages(fn), clearModelConfig(fn), ModelConfig(type), PersistedUsage(type) |
+| [src/web/models/modelConfig.ts](src/web/models/modelConfig.ts) | 145 | 模型配置真落盘（Phase C3）：向量模型/维度是内核构造参数，保存后必须参与 getKernel 装配。 | tenantStorageKey(fn), readModelConfig(fn), writeModelConfig(fn), configuredVectorDim(fn), sanitizeUsages(fn), hydrateUsages(fn), clearModelConfig(fn), ModelConfig(type), PersistedUsage(type) |
 | [src/web/models/modelsEntry.tsx](src/web/models/modelsEntry.tsx) | 10 | 大模型配置页（REQ-009 / P13）入口 | — |
 | [src/web/models/types.ts](src/web/models/types.ts) | 71 | P13 大模型配置页（REQ-009 13.2 / 19.8）数据模型 | VectorModelInfo(type), UsageConfig(type), ProxySource(type), ProxyCallAuditEntry(type), ModelConfigAuditEntry(type), VectorModelKey(type), LlmUsage(type), ProxyTier(type), ProxySelectMode(type), ProxyAuditEntry(type) |
 | [src/web/models/useToast.tsx](src/web/models/useToast.tsx) | 13 | — | useToast(fn) |
@@ -648,7 +648,7 @@ src/web/models/VectorCard.tsx f9951358d9c0
 src/web/models/catalog.ts 79a4992557bf
 src/web/models/coreModels.ts 7dd6087867a7
 src/web/models/logic.ts 4dda97baeeaa
-src/web/models/modelConfig.ts 6ce0b9cbca4b
+src/web/models/modelConfig.ts 929edda56559
 src/web/models/modelsEntry.tsx de9c4158e6c0
 src/web/models/types.ts 973af42c99c1
 src/web/models/useToast.tsx 85cd09d2e1f5

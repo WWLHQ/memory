@@ -4,7 +4,66 @@ import { DEFAULT_VECTOR_DIM } from '../../core/memagent/vector.ts';
 import { DEFAULT_USAGES, USAGE_KEYS, VECTOR_MODELS } from './catalog.ts';
 import type { LlmUsage, UsageConfig, VectorModelKey } from './types.ts';
 
-const KEY = 'mam.modelConfig.v1';
+// 批次48 A28：模型配置按租户/用户隔离。旧 key 保留为「空租户缺省」并在首次读取时一次性迁移到租户 key。
+const LEGACY_KEY = 'mam.modelConfig.v1';
+const TENANT_STORAGE_KEY = 'mam.tenant.v1';
+
+interface TenantStamp {
+  user_id?: string;
+  team_id?: string;
+  enterprise_id?: string;
+}
+
+/** 读已持久化的租户三元组（与 kernel.getTenant 同一存储源；此处只读，避免 kernel ↔ modelConfig 循环依赖） */
+function storedTenant(): TenantStamp {
+  if (typeof localStorage === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(TENANT_STORAGE_KEY);
+    if (!raw) return {};
+    const t = JSON.parse(raw) as TenantStamp;
+    return {
+      user_id: typeof t.user_id === 'string' ? t.user_id : undefined,
+      team_id: typeof t.team_id === 'string' ? t.team_id : undefined,
+      enterprise_id: typeof t.enterprise_id === 'string' ? t.enterprise_id : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * 当前租户的配置 key。
+ * 三元组全空 = 空租户 → 回退缺省 key（旧 key），不因缺身份而拒绝读写。
+ * 否则形如 `mam.modelConfig.v1:e=<ent>:t=<team>:u=<user>`（encodeURIComponent，避免分隔符冲突）。
+ */
+export function tenantStorageKey(): string {
+  const t = storedTenant();
+  if (!t.user_id && !t.team_id && !t.enterprise_id) return LEGACY_KEY;
+  const enc = (v?: string): string => encodeURIComponent(v ?? '-');
+  return `${LEGACY_KEY}:e=${enc(t.enterprise_id)}:t=${enc(t.team_id)}:u=${enc(t.user_id)}`;
+}
+
+/**
+ * 旧 key 一次性迁移：租户 key 尚无数据、旧 key 有数据时复制过去并删除旧 key。
+ * 只迁移一次（删旧），同一浏览器后续切换租户不会重复拿到别人的配置。
+ */
+function migrateLegacyIfNeeded(key: string): string | null {
+  if (key === LEGACY_KEY) return null;
+  let legacy: string | null = null;
+  try {
+    legacy = localStorage.getItem(LEGACY_KEY);
+  } catch {
+    return null;
+  }
+  if (!legacy) return null;
+  try {
+    localStorage.setItem(key, legacy);
+    localStorage.removeItem(LEGACY_KEY);
+    return legacy;
+  } catch {
+    return null;
+  }
+}
 
 /** 可落盘的用途配置（去掉 apiKey 明文） */
 export type PersistedUsage = Omit<UsageConfig, 'apiKey'>;
@@ -23,7 +82,8 @@ function isVectorKey(v: unknown): v is VectorModelKey {
 export function readModelConfig(): ModelConfig | null {
   if (typeof localStorage === 'undefined') return null;
   try {
-    const raw = localStorage.getItem(KEY);
+    const key = tenantStorageKey();
+    const raw = localStorage.getItem(key) ?? migrateLegacyIfNeeded(key);
     if (!raw) return null;
     const p = JSON.parse(raw) as Partial<ModelConfig>;
     if (!isVectorKey(p.vectorKey)) return null;
@@ -42,7 +102,7 @@ export function readModelConfig(): ModelConfig | null {
 export function writeModelConfig(cfg: ModelConfig): void {
   if (typeof localStorage === 'undefined') return;
   try {
-    localStorage.setItem(KEY, JSON.stringify(cfg));
+    localStorage.setItem(tenantStorageKey(), JSON.stringify(cfg));
   } catch {
     /* 隐私模式/配额满：仅本次运行生效，UI 不谎报已落盘 */
   }
@@ -73,8 +133,12 @@ export function hydrateUsages(persisted?: Partial<Record<LlmUsage, PersistedUsag
   return out;
 }
 
-/** 测试辅助：清除已保存的模型配置（生产代码不得调用） */
+/** 测试辅助：清除已保存的模型配置（当前租户 key + 旧 key；生产代码不得调用） */
 export function clearModelConfig(): void {
   if (typeof localStorage === 'undefined') return;
-  localStorage.removeItem(KEY);
+  // 清掉旧 key 与所有租户维度的 key（测试隔离；正常运行时只会有一份当前租户配置）
+  for (const k of Object.keys(localStorage)) {
+    if (k === LEGACY_KEY || k.startsWith(`${LEGACY_KEY}:`)) localStorage.removeItem(k);
+  }
+  localStorage.removeItem(TENANT_STORAGE_KEY);
 }

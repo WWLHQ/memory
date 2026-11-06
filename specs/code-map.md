@@ -1255,3 +1255,18 @@ status: draft
 > **A·影响面回归**：影响面 = `retrieval/{coreEngine,useRetrieval,QueryBar,RetrievalPage}` + `shared/kernelProjects.ts`（项目清单被写页/记忆页/日志页共用，排除 `P_SYSTEM` 对它们只是少一个内部项）。全量 `vitest run --maxWorkers=1` **207 文件 / 2450 例全绿**（A25 基线 206/2444 → +1 文件 / +6 例；首次运行再次遇到原生崩溃 `0xC0000409`，按 A27 口径重跑一次全绿，非断言失败）；`typecheck` 两工程 0 错；oxlint 0/0；`check:no-demo` 通过；`build` + `build:electron` 通过。既有 `components.test.tsx`（16 例）与 `coreEngine.realdata.test.ts`（4 例）全绿，未改其断言。
 > **B·效果验证**：两个项目各有「缓存 TTL」记忆时，默认检索**同时返回 300s 与 600s 两条**（证明不丢其它项目命中）；显式选 `P-b` 只回 600s；单项目账本下 `all` 与显式选择命中集合完全一致（`memory_id` 数组相等）；选择器默认值 = `all`、首项文案「全部项目」、切换回调携带 `project`。**反向断言**：显式断言不含另一项目内容。
 > **C·变异验证**：把 `scopes` 改回旧式 `[projects[0] ?? DEFAULT_PROJECT_ID]` → `a26Projects.test.tsx` **1 红**（默认 all 只剩首个项目命中），还原后 4 文件 46 例复绿。C2 边界：空账本 / 单项目 / 两项目 / 显式非首个项目 / 内部 `P_SYSTEM` 混入。未做 C3。
+
+### 批次48 A28：模型配置按租户（2026-11-06）
+
+> 动因（P3-1）：`mam.modelConfig.v1` 是单机全局 key，同一浏览器切换租户/用户会串用别人的向量模型与用途配置。现按租户/用户加维度，旧 key 一次性迁移，空租户回退缺省。
+
+| 能力 | 代码落点 | 测试 |
+|---|---|---|
+| 租户维度 key | `src/web/models/modelConfig.ts`：`tenantStorageKey()` = `mam.modelConfig.v1:e=<ent>:t=<team>:u=<user>`（`encodeURIComponent`）；身份读 `mam.tenant.v1`（与 `kernel.getTenant` 同源，只读避免循环依赖）；三元组全空 → 回退旧 key | `src/web/models/__tests__/a28Tenant.test.ts`（key 形状 / 租户隔离 / 空租户） |
+| 旧 key 一次性迁移 | `readModelConfig()`：租户 key 无数据 → `migrateLegacyIfNeeded` 复制旧值并删除旧 key；租户 key 已有数据时不动旧 key、不覆盖 | 同上（迁移并删旧 / 切租户不二次迁移 / 已有数据不覆盖） |
+| 读写与清理 | `writeModelConfig` 写当前租户 key；`clearModelConfig`（测试辅助）清旧 key 与全部租户维度 key | 同上（clear 后无残留） |
+
+> **A28 三道闸门证据**：
+> **A·影响面回归**：影响面 = `web/models/modelConfig.ts` + 所有经 `readModelConfig` 的模型页状态（`ModelsPage.tsx`、`configuredVectorDim` 内核装配、`coreModels` 保存）。全量 `vitest run --maxWorkers=1` **208 文件 / 2456 例全绿**（A26 基线 207/2450 → +1 文件 / +6 例；其间连续两次原生崩溃 `0xC0000409`、第三次通过，均非断言失败——该不稳定性即 A27 的治理对象）；`typecheck` 两工程 0 错；oxlint 0/0；`check:no-demo` 通过；`build` + `build:electron` 通过。既有模型页/配置用例（`ModelsPage.test.tsx` 7 例、`coreModels.test.ts` 12 例）全绿未改断言。
+> **B·效果验证**：租户 A 写入后切租户 B 读为 null（不串读），切回 A 原样读回；旧 key 有值 + 租户 key 为空 → 首次读取迁移并删除旧 key，之后切 B 也拿不到；租户 key 已有值时旧 key 保持不动；无租户身份时 key = 旧 key 且读写正常。**反向断言**：迁移后旧 key 必须为 null、B 必须 null、已有数据不被旧值覆盖。
+> **C·变异验证**：`tenantStorageKey()` 改回常量 `mam.modelConfig.v1` → `a28Tenant.test.ts` **4/6 红**（key 形状/隔离、迁移删旧、切租户、已有数据不覆盖），还原后 6 例复绿。C2 边界：空租户 / 单租户 / 两租户切换 / 旧 key 有值/无值 / 租户 key 已有值。未做 C3。
