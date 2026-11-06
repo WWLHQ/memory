@@ -84,6 +84,8 @@
 - 核查启用链路是否还有 stub 短路（确认 `isStub` 仅在"无可用引擎"时为真，有密钥即真实生成）；
 - 若有遗漏的诚实短路点，修正使其在有密钥时能真产出。
 
+> **启用链路核查已完成（2026-11-06，无代码改动）**：追踪三条入口——写时 `memories.ts:248` `if (!generator.canLlm)` / 队列 `refineQueue.ts:475` `if (!generator.canLlm)` / 重建 `rebuild.ts`。`stub` 的唯一闸门是 `canLlm = llm && llm.isStub===false && model && (typeof refineLayer==='function' || typeof refine==='function')`（`memories.ts:79`），**无任何硬编码短路点**。接线：桌面主进程 `main.ts:1608` 直传 `LlmGatewayProvider`（`isStub=false` 硬编码）；渲染层 `kernel.ts:202` 的 `createHostLlm` 用**动态** `isStub = !(snapshot?.usable)`。结论：**有可用引擎即真产出 `refined_by=llm/llm_partial`，无遗留"有密钥也强制 stub"的点，无需改代码**。`refineQueue.test.ts`(36)/`refine.test.ts`(50)/`llmHonesty.test.ts`(6) 共 **92 例**仿真真 provider 下 `refined_by=llm/llm_partial`、stub 下 `no_llm/stub` 全覆盖。**真实产出（存量 L1→L2–L6 补炼）需在桌面端跑**——本沙箱无桌面 LLM 密钥/端点，不能在此产出真实深层行；桌面端参数页开启后台补炼即执行（≤500 行/日，可切"不限额"）。
+
 ## 4. 总排序与风险
 
 1. **B4 远端 PG 可配置化**（架构前提，需你授权 `pg` + 服务端）—— 默认行为不变。
@@ -96,4 +98,4 @@
 ## 5. 拍板状态
 - **B4：已拍板并已落地 `0b729c9`**（授权新增 `pg` 依赖 + 提供/本地起服务端）。`pg` 依赖已装、`SYNC_HUB_PG_URL` 接线完成；远端 e2e 验证**待你提供可访问的 PG 服务端**后补。
 - **B1：已随 B4 落地 `0b729c9`**（`SYNC_MULTI_TENANT` + 规范三元组，纯中枢层，已单测覆盖，无需服务端）。
-- **B3：仍待拍板**——提供真实 LLM Key + 授权精炼预算后，按 §3.3 先做启用链路核查（确认有密钥时管线不再 stub 短路），再决定补炼存量。
+- **B3：Key 已提供（桌面 LLM 已接通）、启用链路核查已完成（2026-11-06）**——无遗留 stub 短路点，真实精炼管线在接通后即为「真精炼」（同一条管线，仅 `provider.isStub` 与 `canLlm` 不同）；**未做代码改动**。`refineQueue.test.ts`/`refine.test.ts`/`llmHonesty.test.ts` 共 92 例全绿已作实证。真实产出（存量 L1→L2–L6 补炼）需在桌面端开启后台补炼执行——本环境不可验证，留待桌面端。
