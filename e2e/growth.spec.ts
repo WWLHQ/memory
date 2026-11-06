@@ -29,6 +29,11 @@ test.describe('自我净化与生长页 · 真实账本', () => {
     await expect(page.locator('[data-testid="delta-panel"]')).toBeVisible();
     await expect(page.locator('[data-testid="sched-decay"]')).toContainText('每日 02:00');
     await expect(page.locator('[data-testid="sched-decay"]')).toContainText('记忆衰减（遗忘曲线推进）（不可停）');
+    // 批次48 A23.2：调度运行信息只来自真实审计 —— 浏览器端没有主进程调度记录，
+    // 必须显示「未运行」并如实标注宿主不可用，不得用 cron 反推「应该跑过」。
+    await expect(page.locator('[data-testid="sched-run-self_growth"]')).toContainText('未运行');
+    await expect(page.locator('[data-testid="sched-next-self_growth"]')).toContainText('无记录');
+    await expect(page.locator('[data-testid="sched-host-self_growth"]')).toContainText('浏览器降级，不会自动执行');
     expect(errors).toEqual([]);
   });
 

@@ -267,17 +267,19 @@ status: done
 6. 点「恢复默认位置」：若默认目录已有旧数据，确认框会说明冲突文件将备份为 `*.bak-<时间戳>` 后覆盖；恢复后重启，数据以当前目录为准。
 7. 把指针指向的目录删除或改为只读后重启：应弹「数据目录不可用，请重新选择」，不得静默换目录或丢数据。
 
-## 5. 遗忘调度（批次 4 新增）
+## 5. 周期调度（批次48 A23.2 改为 cron 单 tick）
 
-1. 启动应用，等待首跑（默认 10 分钟；可用环境变量缩短）。
-2. 在 `main.log` 中确认 `forgetting:cycle:done`，detail 含 `freshness_updated / migrated / summaries_created`。
-3. 到「参数」页关闭「自动整理」并保存，等待下一轮。
-4. **预期**：下一轮审计 `gc` 带 `skipped:true, reason:"auto_policy_disabled"`，记忆不发生迁移/合并。
-5. 快捷验收（不等待 10 分钟）：启动前设置
-   - `MAM_FORGETTING_FIRST_DELAY_MS=5000`
-   - `MAM_FORGETTING_INTERVAL_MS=60000`
-   - 需要完全关闭调度时 `MAM_FORGETTING_DISABLED=1`（日志出现 `forgetting:scheduler-disabled`）。
+1. 启动应用，等待首跑（默认 60s；可用环境变量缩短）。四个任务按 cron 到期：衰减每日 02:00、冲突裁决提醒每日 08:00、自生长每周日 03:00、归档每月 1 日 04:00。
+2. 在 `main.log` / `actions.log` 中确认 `schedule:run`，detail 含 `task / status / duration_ms / next_due_at`；账本审计 `action=schedule_run`（生长页调度卡显示「最近运行 / 下次到期 / 宿主」）。
+3. 到「生长」页关闭某个任务开关并保存，等待下一次到期。
+4. **预期**：该任务不再产生新的 `schedule_run` 记录（页面显示未运行），其余任务照常；衰减开关不可停。
+5. 快捷验收（不等到点）：启动前设置
+   - `MAM_SCHEDULE_FIRST_DELAY_MS=5000`（首 tick 延迟，兼容旧名 `MAM_FORGETTING_FIRST_DELAY_MS`）
+   - `MAM_SCHEDULE_TICK_MS=60000`（tick 间隔）
+   - 只关闭遗忘两项 `MAM_FORGETTING_DISABLED=1`；完全关闭调度 `MAM_SCHEDULE_DISABLED=1`（日志出现 `schedule:scheduler-disabled`）。
 6. **预期（聚类安全）**：不同项目/团队/租户的相似内容**不会**被合成同一摘要；`fact/context` 与 `preference（cautious）` 类别不自动合并。
+7. **预期（归档）**：参数页「保留时长」配置后，归档只在每月 1 日执行一次；衰减周期不再顺带归档（无双跑）。
+8. **预期（自生长）**：回归算法接入前，自生长任务如实记 `status=skipped, reason=regression_pending`，不写 `weight_tuned`。
 
 > 参数页「知识库策略表」的半衰期/归档/合并数值当前只保存为偏好记忆，尚未被调度消费；页面已标注该限制。
 

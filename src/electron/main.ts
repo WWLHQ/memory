@@ -73,9 +73,14 @@ import {
 import { MemAgentError } from '../core/memagent/errors.ts';
 import { cleanupTempFiles, createHomeLockStore, createL0KeyringStore } from './l0KeyringStore.ts';
 import type { L0GrantReq, L0UnlockReq } from '../core/memagent/types.ts';
-import { runForgettingCycle } from '../core/memagent/forgetting.ts';
-import { forgettingPrefsFromSnapshot, PARAMS_PREF_PREFIX, proxyAccountingFromSnapshot } from '../core/memagent/paramsSnapshot.ts';
+import { runForgettingCycle, archiveAgedMemories } from '../core/memagent/forgetting.ts';
+import {
+  forgettingPrefsFromSnapshot, growthConfigFromLedger, PARAMS_PREF_PREFIX, proxyAccountingFromSnapshot,
+} from '../core/memagent/paramsSnapshot.ts';
 import { UNSET_PROXY_ACCOUNTING } from '../shared/proxyAccounting.ts';
+import { nextDue } from '../shared/cron.ts';
+import { SCHEDULE_TASKS, type ScheduleKey, type ScheduleTaskSpec } from '../shared/growthConfig.ts';
+import { ulid } from '../core/memagent/ulid.ts';
 import { JsVectorBackend } from '../core/memagent/vector.ts';
 import { readFile, appendFile, mkdir, writeFile, copyFile, readdir, unlink, stat } from 'node:fs/promises';
 import { join, extname, normalize, sep, basename, dirname } from 'node:path';
@@ -3311,55 +3316,232 @@ async function bootstrap(): Promise<void> {
   console.log(`[collector] 会话采集器已创建（§5.1 周期 ${COLLECTOR_INTERVAL_MS / 1000}s，预设 5min）`);
   void mlog('bootstrap:collector-created', { intervalMs: COLLECTOR_INTERVAL_MS });
 
-  // 遗忘引擎周期调度（REQ-010 17.10）：runForgettingCycle 此前只有定义、无生产调用，
-  // 参数页「自动整理」开关也未生效。现按 6h 真实执行；auto_organize=false 时按 AC-14
-  // 只记 skipped 审计、不改任何记忆；冷压缩每周最多一次。可用 MAM_FORGETTING_DISABLED=1 整体关闭。
-  const FORGETTING_FIRST_DELAY_MS = Number(process.env.MAM_FORGETTING_FIRST_DELAY_MS) || 10 * 60_000;
-  const FORGETTING_INTERVAL_MS = Number(process.env.MAM_FORGETTING_INTERVAL_MS) || 6 * 3600_000;
-  const runForgettingScheduled = async (why: string): Promise<void> => {
+  // ── 统一周期调度（批次48 A23.2）：单 tick 驱动四个 cron 任务 ────────────────────
+  // 旧实现（批次4 起）：setTimeout(10min) + setInterval(6h) 只跑 runForgettingCycle，
+  // 该周期把「层迁移 + 到龄归档 + 合并摘要 + 每周冷压缩」塞在同一轮里。
+  // 新实现：同一批内核函数按 cron 拆成四个任务（decay / verdict_reminder / self_growth / archive），
+  // 由**一个** 60s tick 统一评估到期；旧固定 interval 已整体删除（不存在两套调度器并跑）。
+  //
+  // 等价迁移（逐项说清）：
+  //   · decay   ← 旧周期的「层迁移 + 合并摘要 + 每周冷压缩」。现在每日 02:00 执行（13.3 口径，
+  //     旧的 6h 频率按调度规格收口；weeklyCompress 仍按 7 天窗口判定，不受频率变化影响）。
+  //   · archive ← 旧周期里的 autoArchiveDays 段。现在每月 1 日 04:00 单独执行；decay 不再传
+  //     autoArchiveDays → 同一 tick 内绝不会两处归档（无双跑）。
+  //   · 漏跑补跑：到期判定 = 「上次真实 schedule_run 记录的 next_due_at」。应用关闭期间错过的
+  //     时间点在启动后首个 tick 立即补跑一次；补跑写完新的 next_due_at 后不会在同一周期重复。
+  //   · 开关：growth:v1 快照的 schedule 四项（decay 恒开 R5）。用户停用某项 → 到期只推进内存中
+  //     的下次到期，不写运行审计；页面据「无 schedule_run 记录」显示未运行，不伪造已执行。
+  //   · MAM_FORGETTING_DISABLED=1 仍只停 decay/archive（旧语义）；MAM_SCHEDULE_DISABLED=1 停整个 tick。
+  //   · 每条真实执行（含 skipped/error）都写 action='schedule_run' 审计，detail 含
+  //     task / host / expr / tz_offset_min / trigger / started_at / duration_ms / status / result / next_due_at。
+  const SCHEDULE_HOST = 'electron-main';
+  const SCHEDULE_TICK_MS = Number(process.env.MAM_SCHEDULE_TICK_MS) || 60_000;
+  const SCHEDULE_FIRST_DELAY_MS = Number(
+    process.env.MAM_SCHEDULE_FIRST_DELAY_MS || process.env.MAM_FORGETTING_FIRST_DELAY_MS,
+  ) || 60_000;
+  // 固定时区偏移（分钟，东为正）。Asia/Shanghai = +480；不读系统时区/夏令时表，调度计算是纯函数。
+  const SCHEDULE_TZ_OFFSET_MIN = -new Date().getTimezoneOffset();
+  const SCHEDULE_DISABLED = process.env.MAM_SCHEDULE_DISABLED === '1';
+  const FORGETTING_DISABLED = process.env.MAM_FORGETTING_DISABLED === '1';
+
+  type TaskOutcome = { status: 'ok' | 'skipped' | 'error'; result?: Record<string, unknown>; error?: string };
+
+  /** decay：层迁移 + 合并摘要 + 每周冷压缩（**不带 autoArchiveDays**，归档归 archive 任务） */
+  const runDecayTask = async (): Promise<TaskOutcome> => {
     const now = Date.now();
+    const prefs = forgettingPrefsFromSnapshot(await storage.listMemories({}));
+    const gcAudits = await storage.queryAudit({ action: 'gc' });
+    const lastCompress = Math.max(
+      0, ...gcAudits.filter((a) => a.detail?.weeklyCompress === true).map((a) => a.ts),
+    );
+    const weeklyCompress = now - lastCompress >= 7 * 24 * 3600_000;
+    storage.beginBatch?.();
     try {
-      const mems = await storage.listMemories({});
-      // 批次48 A17：普通配置四项真实生效 —— 开关 / 遗忘速度（半衰期）/ 保留时长（归档阈值）/ 重要程度（locked 全局豁免）
-      const prefs = forgettingPrefsFromSnapshot(mems);
-      const enabled = prefs.enabled;
-      const gcAudits = await storage.queryAudit({ action: 'gc' });
-      const lastCompress = Math.max(
-        0,
-        ...gcAudits.filter((a) => a.detail?.weeklyCompress === true).map((a) => a.ts),
-      );
-      const weeklyCompress = now - lastCompress >= 7 * 24 * 3600_000;
-      // 一轮写盘一次（层迁移/合并可能涉及上千条），避免逐条全量 persist 卡住主进程
-      storage.beginBatch?.();
-      try {
-        const report = await runForgettingCycle(storage, now, {
-          enabled, weeklyCompress, vector: collectorVector,
-          halfLifeDays: prefs.halfLifeDays,
-          autoArchiveDays: prefs.autoArchiveDays,
-          exemptAll: prefs.exemptAll,
+      const report = await runForgettingCycle(storage, now, {
+        enabled: prefs.enabled, weeklyCompress, vector: collectorVector,
+        halfLifeDays: prefs.halfLifeDays,
+        exemptAll: prefs.exemptAll,
+      });
+      void mlog('forgetting:cycle:done', { why: 'cron', prefs, weeklyCompress, ...report });
+      actionLog('kernel', 'forgetting:cycle:done', { why: 'cron', prefs, weeklyCompress, ...report });
+      const skipped = !prefs.enabled ? 'auto_policy_disabled'
+        : prefs.exemptAll ? 'global_importance_locked' : null;
+      return {
+        status: skipped ? 'skipped' : 'ok',
+        result: { ...report, weeklyCompress, skipped_reason: skipped, enabled: prefs.enabled },
+      };
+    } finally {
+      storage.commitBatch();
+    }
+  };
+
+  /** archive：只做到龄归档（与 decay 拆开，避免同一轮重复执行） */
+  const runArchiveTask = async (): Promise<TaskOutcome> => {
+    const now = Date.now();
+    const prefs = forgettingPrefsFromSnapshot(await storage.listMemories({}));
+    if (prefs.exemptAll) return { status: 'skipped', result: { reason: 'global_importance_locked' } };
+    if (typeof prefs.autoArchiveDays !== 'number' || prefs.autoArchiveDays <= 0) {
+      return { status: 'skipped', result: { reason: 'retention_not_configured' } };
+    }
+    storage.beginBatch?.();
+    try {
+      const archived = await archiveAgedMemories(storage, now, { autoArchiveDays: prefs.autoArchiveDays });
+      if (archived > 0) {
+        await storage.appendAudit({
+          request_id: `req_${ulid(now)}`, action: 'archive', form: 'desktop', project_id: 'P_SYSTEM',
+          ts: now, detail: { archived, source: 'schedule', threshold_days: prefs.autoArchiveDays },
         });
-        void mlog('forgetting:cycle:done', { why, enabled, prefs, weeklyCompress, ...report });
-        // 批次41-U：双写进 actions.log（与批次34/41-R 同口径）——值只有计数与原因码，正文一个字不落
-        actionLog('kernel', 'forgetting:cycle:done', { why, enabled, prefs, weeklyCompress, ...report });
-      } finally {
-        storage.commitBatch();
+      }
+      return { status: 'ok', result: { archived, threshold_days: prefs.autoArchiveDays } };
+    } finally {
+      storage.commitBatch();
+    }
+  };
+
+  /** verdict_reminder：真实查一次待裁决冲突数（中枢未装配 → 如实 skipped，不伪造提醒） */
+  const runVerdictReminderTask = async (): Promise<TaskOutcome> => {
+    if (!syncHub) return { status: 'skipped', result: { reason: 'sync_hub_unavailable' } };
+    try {
+      const conflicts = await syncHub.listConflicts(tenantTriple.team_id);
+      return { status: 'ok', result: { team_id: tenantTriple.team_id, pending_conflicts: conflicts.length } };
+    } catch (e) {
+      return { status: 'error', error: String((e as Error)?.message ?? e) };
+    }
+  };
+
+  /** self_growth：回归算法（A23.3）定义未确认前只如实记 skipped，绝不伪造 weight_tuned */
+  const runSelfGrowthTask = async (): Promise<TaskOutcome> => ({
+    status: 'skipped',
+    result: {
+      reason: 'regression_pending',
+      note: 'A23.3 回归算法（目标函数/标签来源/评分口径/成功阈值）待确认后接入；本任务不写 weight_tuned',
+    },
+  });
+
+  const scheduleRunners: Record<ScheduleKey, () => Promise<TaskOutcome>> = {
+    decay: runDecayTask,
+    verdict_reminder: runVerdictReminderTask,
+    self_growth: runSelfGrowthTask,
+    archive: runArchiveTask,
+  };
+
+  // 调度态只放内存：启动时从真实 schedule_run 审计恢复，运行后更新并落审计。
+  /** 某任务的下次到期（毫秒）；无记录 = 立即到期（首跑/补跑） */
+  const nextDueByTask = new Map<ScheduleKey, number>();
+  const lastRunByTask = new Map<ScheduleKey, number>();
+  let scheduleReady: Promise<void> | null = null;
+  let tickBusy = false;
+
+  const bootstrapScheduleState = async (): Promise<void> => {
+    try {
+      const rows = await storage.queryAudit({ action: 'schedule_run' });
+      for (const row of rows) {
+        const d = row.detail as { task?: unknown; next_due_at?: unknown };
+        if (typeof d?.task !== 'string') continue;
+        const task = SCHEDULE_TASKS.find((t) => t.key === d.task);
+        if (!task) continue;
+        if (row.ts <= (lastRunByTask.get(task.key) ?? 0)) continue;
+        lastRunByTask.set(task.key, row.ts);
+        const next = typeof d.next_due_at === 'number' && Number.isFinite(d.next_due_at)
+          ? d.next_due_at
+          : (nextDue(task.expr, row.ts, SCHEDULE_TZ_OFFSET_MIN) ?? row.ts + 24 * 3600_000);
+        nextDueByTask.set(task.key, next);
+      }
+    } catch (e) {
+      void mlog('schedule:bootstrap-error', { error: String((e as Error)?.message ?? e) });
+    }
+    const now = Date.now();
+    for (const t of SCHEDULE_TASKS) if (!nextDueByTask.has(t.key)) nextDueByTask.set(t.key, now);
+  };
+  const ensureScheduleReady = (): Promise<void> => (scheduleReady ??= bootstrapScheduleState());
+
+  const runScheduledTask = async (task: ScheduleTaskSpec, trigger: 'first' | 'cron' | 'catch_up'): Promise<void> => {
+    const startedAt = Date.now();
+    let outcome: TaskOutcome;
+    try {
+      outcome = await scheduleRunners[task.key]();
+    } catch (e) {
+      outcome = { status: 'error', error: String((e as Error)?.message ?? e) };
+    }
+    const finishedAt = Date.now();
+    const next = nextDue(task.expr, finishedAt, SCHEDULE_TZ_OFFSET_MIN) ?? finishedAt + 24 * 3600_000;
+    lastRunByTask.set(task.key, finishedAt);
+    nextDueByTask.set(task.key, next);
+    const detail = {
+      task: task.key, host: SCHEDULE_HOST, expr: task.expr, tz_offset_min: SCHEDULE_TZ_OFFSET_MIN,
+      trigger, started_at: startedAt, duration_ms: finishedAt - startedAt,
+      status: outcome.status, result: outcome.result ?? {}, error: outcome.error ?? null,
+      next_due_at: next,
+    };
+    try {
+      await storage.appendAudit({
+        request_id: `req_${ulid(finishedAt)}`, action: 'schedule_run', form: 'desktop',
+        project_id: 'P_SYSTEM', ts: finishedAt, detail,
+      });
+    } catch (e) {
+      // 审计写盘失败：内存态仍前进（避免每分钟重跑），但必须留痕，页面会继续显示旧记录
+      void mlog('schedule:audit-error', { task: task.key, error: String((e as Error)?.message ?? e) });
+      actionLog('kernel', 'schedule:audit-error', { task: task.key, error: String((e as Error)?.message ?? e) }, { level: 'error' });
+    }
+    void mlog('schedule:run', detail);
+    actionLog('kernel', 'schedule:run', detail, outcome.status === 'error' ? { level: 'error' } : undefined);
+  };
+
+  const runScheduleTick = async (why: string): Promise<void> => {
+    if (tickBusy) {
+      void mlog('schedule:tick-skip', { why, reason: 'busy' });
+      return;
+    }
+    tickBusy = true;
+    try {
+      await ensureScheduleReady();
+      const now = Date.now();
+      const due = SCHEDULE_TASKS.filter((t) => (nextDueByTask.get(t.key) ?? now) <= now);
+      if (due.length === 0) return;
+      // 只有真有到期任务时才读一次 growth:v1 快照（避免每 60s 全库扫描）
+      const cfg = growthConfigFromLedger(await storage.listMemories({}));
+      for (const task of due) {
+        // 旧环境变量语义：只停遗忘相关两项；其余任务照常
+        if (FORGETTING_DISABLED && (task.key === 'decay' || task.key === 'archive')) {
+          nextDueByTask.set(task.key, nextDue(task.expr, now, SCHEDULE_TZ_OFFSET_MIN) ?? now + 24 * 3600_000);
+          continue;
+        }
+        // 用户停用（decay 恒开）：只推进下次到期，不写运行审计（页面显示「未运行」而非伪造）
+        if (task.key !== 'decay' && !cfg.schedule[task.key]) {
+          nextDueByTask.set(task.key, nextDue(task.expr, now, SCHEDULE_TZ_OFFSET_MIN) ?? now + 24 * 3600_000);
+          void mlog('schedule:task-disabled', { task: task.key, next_due_at: nextDueByTask.get(task.key) });
+          continue;
+        }
+        const scheduledAt = nextDueByTask.get(task.key) ?? now;
+        const hasRun = lastRunByTask.has(task.key);
+        const trigger: 'first' | 'cron' | 'catch_up' = !hasRun ? 'first'
+          : (now - scheduledAt >= 10 * 60_000 ? 'catch_up' : 'cron');
+        await runScheduledTask(task, trigger);
       }
     } catch (e) {
       const err = String((e as Error)?.message ?? e);
-      void mlog('forgetting:cycle:error', { why, error: err });
-      actionLog('kernel', 'forgetting:cycle:error', { why, error: err }, { level: 'error' });
+      void mlog('schedule:tick-error', { why, error: err });
+      actionLog('kernel', 'schedule:tick-error', { why, error: err }, { level: 'error' });
+    } finally {
+      tickBusy = false;
     }
   };
-  if (process.env.MAM_FORGETTING_DISABLED === '1') {
-    void mlog('forgetting:scheduler-disabled', { reason: 'MAM_FORGETTING_DISABLED=1' });
+
+  if (SCHEDULE_DISABLED) {
+    void mlog('schedule:scheduler-disabled', { reason: 'MAM_SCHEDULE_DISABLED=1' });
   } else {
+    void ensureScheduleReady();
     setTimeout(() => {
-      void runForgettingScheduled('first');
-      setInterval(() => void runForgettingScheduled('interval'), FORGETTING_INTERVAL_MS);
-    }, FORGETTING_FIRST_DELAY_MS);
-    void mlog('bootstrap:forgetting-scheduled', {
-      firstDelayMs: FORGETTING_FIRST_DELAY_MS, intervalMs: FORGETTING_INTERVAL_MS,
+      void runScheduleTick('first');
+      setInterval(() => void runScheduleTick('interval'), SCHEDULE_TICK_MS);
+    }, SCHEDULE_FIRST_DELAY_MS);
+    void mlog('bootstrap:schedule-created', {
+      host: SCHEDULE_HOST, tickMs: SCHEDULE_TICK_MS, firstDelayMs: SCHEDULE_FIRST_DELAY_MS,
+      tzOffsetMin: SCHEDULE_TZ_OFFSET_MIN, tasks: SCHEDULE_TASKS.map((t) => t.key),
     });
+  }
+  if (FORGETTING_DISABLED) {
+    void mlog('forgetting:scheduler-disabled', { reason: 'MAM_FORGETTING_DISABLED=1' });
   }
 
   // 批次43-A：§3.4 每日全量对账调度 —— reconcile(hub, local, {team_id}) 补本地缺的行 +

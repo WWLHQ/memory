@@ -1,5 +1,7 @@
 // P14-T3 自生长侧组件：指标卡 + 五项优化 + Δ 收益曲线 + 调度时间轴（7.1/7.2/13.3）
-import type { DeltaPoint, GrowthAuditEntry, GrowthMetrics, OptimizationItem, ScheduleItem } from './types.ts';
+import type {
+  DeltaPoint, GrowthAuditEntry, GrowthMetrics, OptimizationItem, ScheduleItem, ScheduleRunInfo,
+} from './types.ts';
 
 export function GrowthCards({ m, empty }: { m: GrowthMetrics; empty?: boolean }) {
   const items: Array<[string, string, string, string]> = [
@@ -133,28 +135,78 @@ export function DeltaPanel({
   );
 }
 
+const HOST_LABEL: Record<'native' | 'bridge' | 'none', string> = {
+  native: '主进程（Electron）',
+  bridge: '主进程（Electron，宿主桥）',
+  none: '不可用（浏览器降级，不会自动执行）',
+};
+
+const RUN_STATUS_LABEL: Record<ScheduleRunInfo['status'], string> = {
+  ok: '成功', skipped: '跳过', error: '失败',
+};
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
+/** 本地时间展示（与调度审计 next_due_at 同一时间基准，不做时区转换） */
+function fmtTime(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+/** 跳过/失败原因：错误文本优先，其次 result.reason / result.skipped_reason（都来自真实审计） */
+function runReason(run: ScheduleRunInfo): string {
+  if (run.error) return run.error;
+  const r = run.result;
+  if (typeof r?.reason === 'string') return r.reason;
+  if (typeof r?.skipped_reason === 'string') return r.skipped_reason;
+  return '';
+}
+
 export function ScheduleTimeline({
-  schedule, onToggle,
+  schedule, onToggle, hostKind,
 }: {
   schedule: ScheduleItem[];
   onToggle: (key: ScheduleItem['key']) => void;
+  /** 当前端实际可用的调度宿主（native/bridge = 桌面主进程；none = 浏览器降级） */
+  hostKind: 'native' | 'bridge' | 'none';
 }) {
   return (
     <div className="card" data-testid="schedule-timeline">
       <b>调度时间轴（13.3，只读时刻 + 可启停）</b>
-      <div className="note">R5：调度时刻可配但不可全部停用 —— 至少保留每日 02:00 衰减。</div>
-      <div className="row" style={{ gap: 18, marginTop: 8, flexWrap: 'wrap' }}>
+      <div className="note">
+        R5：调度时刻可配但不可全部停用 —— 至少保留每日 02:00 衰减。
+        运行记录来自内核真实审计 action=schedule_run；无记录即「未运行」，不从 cron 反推。
+      </div>
+      <div className="row" style={{ gap: 18, marginTop: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
         {schedule.map((s) => (
-          <label key={s.key} data-testid={`sched-${s.key}`} style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <input
-              type="checkbox"
-              data-testid={`sched-check-${s.key}`}
-              checked={s.enabled}
-              disabled={s.required}
-              onChange={() => onToggle(s.key)}
-            />
-            <span>{s.cron} · {s.label}{s.required ? '（不可停）' : ''}</span>
-          </label>
+          <div key={s.key} data-testid={`sched-${s.key}`} style={{ minWidth: 280 }}>
+            <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input
+                type="checkbox"
+                data-testid={`sched-check-${s.key}`}
+                checked={s.enabled}
+                disabled={s.required}
+                onChange={() => onToggle(s.key)}
+              />
+              <span>{s.cron} · {s.label}{s.required ? '（不可停）' : ''}</span>
+            </label>
+            <div className="note" data-testid={`sched-run-${s.key}`} style={{ marginLeft: 22, marginTop: 2 }}>
+              {s.run
+                ? `最近运行 ${fmtTime(s.run.ts)} · ${RUN_STATUS_LABEL[s.run.status]}`
+                  + (s.run.duration_ms != null ? ` · ${s.run.duration_ms}ms` : '')
+                  + (runReason(s.run) ? ` · 原因 ${runReason(s.run)}` : '')
+                : '未运行（账本无 schedule_run 记录）'}
+            </div>
+            <div className="note" data-testid={`sched-next-${s.key}`} style={{ marginLeft: 22 }}>
+              {s.run?.next_due_at ? `下次到期 ${fmtTime(s.run.next_due_at)}` : '下次到期 —（无记录）'}
+              {' · '}
+              <span data-testid={`sched-host-${s.key}`}>
+                宿主 {s.run?.host === 'electron-main' ? '主进程（Electron）' : HOST_LABEL[hostKind]}
+              </span>
+            </div>
+          </div>
         ))}
       </div>
     </div>

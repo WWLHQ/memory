@@ -2,8 +2,9 @@
 import { describe, expect, it } from 'vitest';
 import type { Memory } from '../../core/memagent/types.ts';
 import { GROWTH_PREF_PREFIX, growthConfigFromLedger } from '../../core/memagent/paramsSnapshot.ts';
+import { parseCron } from '../cron.ts';
 import {
-  DEFAULT_THRESHOLDS, DEFAULT_WEIGHTS, normalizeGrowthConfig, validThresholds, validWeights,
+  DEFAULT_THRESHOLDS, DEFAULT_WEIGHTS, SCHEDULE_TASKS, normalizeGrowthConfig, validThresholds, validWeights,
 } from '../growthConfig.ts';
 
 function pref(content: string): Memory {
@@ -46,6 +47,16 @@ describe('growthConfig 单一真源', () => {
       schedule: { decay: true, verdict_reminder: false, self_growth: true, archive: false },
     };
     expect(normalizeGrowthConfig(custom)).toEqual(custom);
+  });
+
+  it('调度任务真源（A23.2）：四项齐全、cron 全部可解析、衰减不可停', () => {
+    expect(SCHEDULE_TASKS.map((t) => t.key)).toEqual(['decay', 'verdict_reminder', 'self_growth', 'archive']);
+    for (const t of SCHEDULE_TASKS) {
+      expect(parseCron(t.expr), `${t.key} 的 cron 必须可解析`).not.toBeNull();
+      expect(t.when.length).toBeGreaterThan(0);
+    }
+    expect(SCHEDULE_TASKS.find((t) => t.key === 'decay')!.required).toBe(true);
+    expect(SCHEDULE_TASKS.filter((t) => t.required).map((t) => t.key)).toEqual(['decay']);
   });
 });
 

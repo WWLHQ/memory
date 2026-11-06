@@ -4,6 +4,7 @@ import type { DimWeights, LayerThresholds, ScheduleItem } from './types.ts';
 import {
   DEFAULT_THRESHOLDS as SHARED_THRESHOLDS,
   DEFAULT_WEIGHTS as SHARED_WEIGHTS,
+  SCHEDULE_TASKS,
   type DimKey,
 } from '../../shared/growthConfig.ts';
 
@@ -29,10 +30,11 @@ export const OPT_CONDITIONS = {
   regress_weights: '每周日 03:00',
 } as const;
 
-/** 调度（13.3）：衰减不可停（R5） */
-export const DEFAULT_SCHEDULE: ScheduleItem[] = [
-  { key: 'decay', label: '记忆衰减（遗忘曲线推进）', cron: '每日 02:00', required: true, enabled: true },
-  { key: 'verdict_reminder', label: '冲突裁决提醒', cron: '每日 08:00', required: false, enabled: true },
-  { key: 'self_growth', label: '自生长（权重回归）', cron: '每周日 03:00', required: false, enabled: true },
-  { key: 'archive', label: '冷记忆归档', cron: '每月 1 日 04:00', required: false, enabled: true },
-];
+/**
+ * 调度（13.3）：衰减不可停（R5）。
+ * 批次48 A23.2：时刻/标签/是否可停全部来自 shared/growthConfig.ts 的 SCHEDULE_TASKS
+ * （主进程 cron 与页面展示同一份真源），这里只补页面态 enabled。
+ */
+export const DEFAULT_SCHEDULE: ScheduleItem[] = SCHEDULE_TASKS.map((t) => ({
+  key: t.key, label: t.label, cron: t.when, required: t.required, enabled: true,
+}));

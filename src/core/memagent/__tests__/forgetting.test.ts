@@ -1,6 +1,7 @@
 // REQ-010 遗忘机制契约测试（17.11 AC 覆盖 + 17.7 迁移规则 + 17.6 策略表）
 import { describe, expect, it } from 'vitest';
 import {
+  archiveAgedMemories,
   buildSummary, classifyLayer, clusterSimilar, forgetOne, freshnessOf, hardFilter,
   policyFor, reinforceOne, restoreOne, runForgettingCycle, scoreMemory,
 } from '../forgetting.ts';
@@ -477,5 +478,38 @@ describe('批次48 A17 参数页普通配置真实生效', () => {
       content: `params:v1:${JSON.stringify({ cfg: { auto_organize: false }, kbs: [], dev: {} })}`,
     });
     expect(forgettingPrefsFromSnapshot([legacy])).toEqual({ enabled: false, exemptAll: false });
+  });
+});
+
+// 批次48 A23.2：归档单独成趟（cron 的 archive 任务用它；decay 不再顺带归档）
+describe('archiveAgedMemories（独立归档趟）', () => {
+  it('只归档到龄行，不碰层迁移；locked/pinned/已有归档状态按规则跳过；重复调用幂等', async () => {
+    const storage = new InMemoryStorage();
+    const old = mem({ mem_id: 'old', decay_class: 'cold', created_at: NOW - 400 * DAY });
+    const warmRecent = mem({ mem_id: 'warm', decay_class: 'warm', created_at: NOW - 25 * DAY });
+    const pinned = mem({ mem_id: 'pin', decay_class: 'cold', pinned: true, created_at: NOW - 400 * DAY });
+    const locked = mem({ mem_id: 'lock', decay_class: 'cold', locked: true, created_at: NOW - 400 * DAY });
+    await storage.putMemory(old);
+    await storage.putMemory(warmRecent);
+    await storage.putMemory(pinned);
+    await storage.putMemory(locked);
+
+    expect(await archiveAgedMemories(storage, NOW, { autoArchiveDays: 365 })).toBe(1);
+    expect((await storage.getMemory('old'))?.decay_class).toBe('archived');
+    // 25 天的 warm 行不在归档趟里被降层（层迁移属于 decay 任务）
+    expect((await storage.getMemory('warm'))?.decay_class).toBe('warm');
+    expect((await storage.getMemory('pin'))?.decay_class).toBe('cold');
+    expect((await storage.getMemory('lock'))?.decay_class).toBe('cold');
+    // 幂等：同一批再跑一次不再计数
+    expect(await archiveAgedMemories(storage, NOW, { autoArchiveDays: 365 })).toBe(0);
+    // 未配置阈值 = 不归档（旧行为）
+    expect(await archiveAgedMemories(storage, NOW, {})).toBe(0);
+  });
+
+  it('dryRun 只演算计数，不落库', async () => {
+    const storage = new InMemoryStorage();
+    await storage.putMemory(mem({ mem_id: 'old2', decay_class: 'cold', created_at: NOW - 400 * DAY }));
+    expect(await archiveAgedMemories(storage, NOW, { autoArchiveDays: 365, dryRun: true })).toBe(1);
+    expect((await storage.getMemory('old2'))?.decay_class).toBe('cold');
   });
 });

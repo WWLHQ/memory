@@ -293,8 +293,42 @@ export function clusterSimilar(mems: Memory[], threshold = MERGE_SIM_THRESHOLD):
   return clusters;
 }
 
+export interface ArchivePassOptions {
+  /** 参数页「保留时长」全局归档阈值（天）；未配置/非正数 = 不归档（与旧行为一致） */
+  autoArchiveDays?: number;
+  /** 项目隔离（与 runForgettingCycle 同口径；缺省 = 全库） */
+  projectId?: string;
+  /** true = 只演算计数，不落库 */
+  dryRun?: boolean;
+}
+
 /**
- * 17.10 一轮生命周期任务：新鲜度计算 → 层迁移 → 重复识别合并 → 冷压缩。
+ * 批次48 A23.2：到龄归档**单独成趟**（供 cron 的 archive 任务独立驱动）。
+ * 与中间层迁移/合并拆开的原因：旧实现把归档塞在 6h 遗忘周期里，若 cron 再按「每月 1 日」
+ * 单独跑归档，同一 tick 会出现两处归档（双跑）。拆开后：
+ *   · runForgettingCycle 仍在被调用时支持 autoArchiveDays（内部调用本函数，行为不变）；
+ *   · 调度器只把 autoArchiveDays 交给 archive 任务，decay 任务不再顺带归档。
+ * 幂等：已 archived/dormant、locked/pinned/merged_into 的行不动（重复调用不会重复计数）。
+ */
+export async function archiveAgedMemories(
+  storage: StorageBackend, now: number, opts: ArchivePassOptions = {},
+): Promise<number> {
+  const days = opts.autoArchiveDays;
+  if (typeof days !== 'number' || days <= 0) return 0;
+  const listFilter: Filter = opts.projectId ? { project_id: opts.projectId } : {};
+  const current = await storage.listMemories(listFilter);
+  let archived = 0;
+  for (const m of current) {
+    if (m.locked || m.pinned || m.merged_into) continue;
+    if (m.decay_class === 'archived' || m.decay_class === 'dormant') continue;
+    if ((now - m.created_at) / DAY <= days) continue;
+    if (opts.dryRun !== true) await storage.putMemory({ ...m, decay_class: 'archived', version: m.version + 1 });
+    archived++;
+  }
+  return archived;
+}
+
+/** 17.10 一轮生命周期任务：新鲜度计算 → 层迁移 → 重复识别合并 → 冷压缩。
  * 不阻塞用户交互（纯内存计算 + 账本写回，不调用 LLM）；锁定项跳过；结果全审计。
  */
 export async function runForgettingCycle(
@@ -333,18 +367,12 @@ export async function runForgettingCycle(
     }
   }
 
-  // 1.5) 批次48 A17：参数页「保留时长」→ 全局归档阈值。到龄且未锁定/置顶/未合并的行转 archived。
+  // 1.5) 批次48 A17/A23.2：参数页「保留时长」→ 全局归档阈值，逻辑在 archiveAgedMemories
+  // （cron 的 archive 任务也调用同一函数；调度器不会把该参数传给 decay，避免同一轮双跑）。
   // 未配置（undefined）时整段不执行 —— 与旧行为一字不差，只有用户显式保存保留时长才改变调度结果。
-  if (typeof opts.autoArchiveDays === 'number' && opts.autoArchiveDays > 0) {
-    const current = await storage.listMemories(listFilter);
-    for (const m of current) {
-      if (m.locked || m.pinned || m.merged_into) continue;
-      if (m.decay_class === 'archived' || m.decay_class === 'dormant') continue;
-      if ((now - m.created_at) / DAY <= opts.autoArchiveDays) continue;
-      if (!dryRun) await storage.putMemory({ ...m, decay_class: 'archived', version: m.version + 1 });
-      report.archived++;
-    }
-  }
+  report.archived = await archiveAgedMemories(storage, now, {
+    autoArchiveDays: opts.autoArchiveDays, projectId: opts.projectId, dryRun,
+  });
 
   // 2) 重复识别合并（17.9：同实体/主题「相似」≥3 → 摘要）
   // 批次42 阶段4：原按内容前 8 字符分组只是字符串前缀近似 —— 前缀相同但主题无关的行会被

@@ -55,6 +55,25 @@ export interface ScheduleItem {
   /** 是否允许停用（衰减不可停，R5） */
   required: boolean;
   enabled: boolean;
+  /**
+   * 批次48 A23.2：账本里真实存在的最近一次 schedule_run 记录（无记录 = null = 未运行）。
+   * 全部字段只来自审计，不从 cron 推算「应该运行过」。
+   */
+  run?: ScheduleRunInfo | null;
+}
+
+/** 一次真实调度执行记录（action='schedule_run' 的 detail 投影） */
+export interface ScheduleRunInfo {
+  task: 'decay' | 'verdict_reminder' | 'self_growth' | 'archive';
+  /** 执行宿主（如 electron-main）；未知记录不冒充 */
+  host: string;
+  status: 'ok' | 'skipped' | 'error';
+  trigger?: string;
+  duration_ms: number | null;
+  next_due_at: number | null;
+  error: string | null;
+  result: Record<string, unknown>;
+  ts: number;
 }
 
 /** 自生长收益曲线点（7.2 / 13.3） */

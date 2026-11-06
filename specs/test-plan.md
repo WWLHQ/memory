@@ -52,7 +52,7 @@ status: active
 ## TC-010 遗忘机制测试
 对应 AC-010：遗忘操作可见且生效。
 - 引擎：`runForgettingCycle`（层迁移 / 重复识别合并 / 冷压缩）+ 单测覆盖跨项目、跨团队、跨租户拒绝合并，以及 17.6 `auto_merge=false` 类别不自动合并。
-- 调度：Electron 主进程按 6h 周期执行（首跑 10min），受参数页「自动整理」开关控制；可用 `MAM_FORGETTING_DISABLED=1` / `MAM_FORGETTING_INTERVAL_MS` / `MAM_FORGETTING_FIRST_DELAY_MS` 手动验收。
+- 调度（批次48 A23.2）：Electron 主进程单 tick（默认 60s）评估四个 cron 任务（衰减/裁决提醒/自生长/归档），时刻真源 `shared/growthConfig.ts#SCHEDULE_TASKS`，cron 计算纯函数 `shared/cron.ts`；每次执行写 `schedule_run` 审计。`MAM_SCHEDULE_DISABLED=1` 全关，`MAM_FORGETTING_DISABLED=1` 只关衰减/归档，`MAM_SCHEDULE_TICK_MS` / `MAM_SCHEDULE_FIRST_DELAY_MS` 可调。
 - 参数页知识库策略表（半衰期/归档/合并）目前只保存为偏好记忆，尚未被调度消费。
 
 ## TC-011 日志页测试

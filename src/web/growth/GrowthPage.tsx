@@ -24,6 +24,7 @@ import { coreGrowthAudit, coreLoadGrowthConfig, coreSaveGrowthConfig } from './c
 import { DEFAULT_SCHEDULE_FLAGS, type ScheduleFlags } from '../../shared/growthConfig.ts';
 import { useGrowthMirror } from './useGrowthMirror.ts';
 import { newRequestId } from '../kernel.ts';
+import { hostCapability } from '../../desktop/hostBridge.ts';
 import { loadRealGrowthData } from './useGrowthReal.ts';
 import { DedupCard, DevTunePanel, ShortCircuitFlow } from './DedupCards.tsx';
 import { DeltaPanel, GrowthCards, OptimizationList, ScheduleTimeline } from './GrowthPanels.tsx';
@@ -59,6 +60,7 @@ export function GrowthPage() {
         setSchedule(DEFAULT_SCHEDULE.map((s) => ({
           ...s,
           enabled: s.key === 'decay' ? true : cfg.schedule[s.key],
+          run: r.scheduleRuns[s.key] ?? null,
         })));
       } finally {
         if (alive) setLoading(false);
@@ -200,7 +202,7 @@ export function GrowthPage() {
       <GrowthCards m={metrics} empty={empty} />
       <OptimizationList opts={opts} />
       <DeltaPanel series={series} delta={delta} audit={audit} onManualTrigger={handleManualTrigger} />
-      <ScheduleTimeline schedule={schedule} onToggle={handleToggle} />
+      <ScheduleTimeline schedule={schedule} onToggle={handleToggle} hostKind={hostCapability()} />
 
       <div className="card">
         <b>红线自检</b>

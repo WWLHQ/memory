@@ -570,6 +570,8 @@ export type AuditAction =
   | 'memory_op'
   | 'param_save'
   | 'growth_op'
+  // 批次48 A23.2：cron 周期任务的真实执行记录（task / next_due_at / duration_ms / status）
+  | 'schedule_run'
   | 'monitor_alert'
   | 'security_change'
   // 真实质量/可靠性事件（监控仪表盘与冲突队列的真实口径来源）

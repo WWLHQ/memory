@@ -26,6 +26,28 @@ export const DEFAULT_SCHEDULE_FLAGS: ScheduleFlags = {
   decay: true, verdict_reminder: true, self_growth: true, archive: true,
 };
 
+/**
+ * 调度任务真源（批次48 A23.2）：主进程 cron 与页面展示共用同一份，避免「页面写 02:00、
+ * 主进程跑 03:00」这类静默漂移。
+ * - `expr` = 主进程实际执行的 5 段 cron（解释见 shared/cron.ts）；
+ * - `when` = 页面展示口径（由同一规格人工维护，测试校验 expr 可解析）。
+ */
+export interface ScheduleTaskSpec {
+  key: ScheduleKey;
+  label: string;
+  when: string;
+  expr: string;
+  /** 是否允许停用（衰减不可停，R5） */
+  required: boolean;
+}
+
+export const SCHEDULE_TASKS: readonly ScheduleTaskSpec[] = [
+  { key: 'decay', label: '记忆衰减（遗忘曲线推进）', when: '每日 02:00', expr: '0 2 * * *', required: true },
+  { key: 'verdict_reminder', label: '冲突裁决提醒', when: '每日 08:00', expr: '0 8 * * *', required: false },
+  { key: 'self_growth', label: '自生长（权重回归）', when: '每周日 03:00', expr: '0 3 * * 0', required: false },
+  { key: 'archive', label: '冷记忆归档', when: '每月 1 日 04:00', expr: '0 4 1 * *', required: false },
+];
+
 export interface GrowthConfig {
   weights: DimWeights;
   thresholds: LayerThresholds;

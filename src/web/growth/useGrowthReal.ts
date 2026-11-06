@@ -12,9 +12,10 @@ import type { StorageBackend } from '../../core/memagent/types.ts';
 import { getKernelStorage } from '../kernel.ts';
 import type {
   DedupSample, DeltaPoint, DimKey, DimWeights, GrowthMetrics, LayerThresholds,
-  ScheduleItem, GrowthAuditEntry,
+  ScheduleItem, GrowthAuditEntry, ScheduleRunInfo,
 } from './types.ts';
 import { DEFAULT_SCHEDULE, DEFAULT_THRESHOLDS, DEFAULT_WEIGHTS } from './spec.ts';
+import { SCHEDULE_KEYS, type ScheduleKey } from '../../shared/growthConfig.ts';
 
 export type RealStorage = Pick<StorageBackend, 'listMemories' | 'queryAudit'>;
 
@@ -161,6 +162,44 @@ export function scheduleReal(): ScheduleItem[] {
   return DEFAULT_SCHEDULE.map((s) => ({ ...s }));
 }
 
+const SCHEDULE_KEY_SET = new Set<string>(SCHEDULE_KEYS);
+
+/**
+ * 批次48 A23.2：从真实审计里取每个调度任务**最近一次** schedule_run 记录。
+ * 只认内核写的 detail（task/host/status/duration_ms/next_due_at）；字段缺失按 null，
+ * 任务未知或动作不对一律忽略 —— 页面因此能区分「宿主真实跑过」与「从未运行」，
+ * 不需要也不允许从 cron 反推「应该跑过」。
+ */
+export function scheduleRunsFromLedger(
+  audits: AuditRecord[],
+): Partial<Record<ScheduleKey, ScheduleRunInfo>> {
+  const out: Partial<Record<ScheduleKey, ScheduleRunInfo>> = {};
+  for (const a of audits) {
+    if (a.action !== 'schedule_run') continue;
+    const d = a.detail as Record<string, unknown> | undefined;
+    const task = d?.task;
+    if (typeof task !== 'string' || !SCHEDULE_KEY_SET.has(task)) continue;
+    const key = task as ScheduleKey;
+    const prev = out[key];
+    if (prev && prev.ts >= a.ts) continue;
+    const statusRaw = d?.status;
+    const status: ScheduleRunInfo['status'] =
+      statusRaw === 'ok' || statusRaw === 'error' ? statusRaw : 'skipped';
+    out[key] = {
+      task: key,
+      host: typeof d?.host === 'string' ? d.host : 'unknown',
+      status,
+      trigger: typeof d?.trigger === 'string' ? d.trigger : undefined,
+      duration_ms: typeof d?.duration_ms === 'number' && Number.isFinite(d.duration_ms) ? d.duration_ms : null,
+      next_due_at: typeof d?.next_due_at === 'number' && Number.isFinite(d.next_due_at) ? d.next_due_at : null,
+      error: typeof d?.error === 'string' ? d.error : null,
+      result: (d?.result && typeof d.result === 'object' ? d.result : {}) as Record<string, unknown>,
+      ts: a.ts,
+    };
+  }
+  return out;
+}
+
 export { DEFAULT_WEIGHTS, DEFAULT_THRESHOLDS };
 export type { DimWeights, LayerThresholds };
 
@@ -174,6 +213,8 @@ export interface RealGrowth {
   dedupStats: { short_circuit_hits: number; merged: number; avg_cost_ms: number; avg_cost_samples: number };
   deltaSeries: DeltaPoint[];
   growthAudit: GrowthAuditEntry[];
+  /** 每个调度任务最近一次真实运行记录（无记录 = 该任务未运行） */
+  scheduleRuns: Partial<Record<ScheduleKey, ScheduleRunInfo>>;
 }
 
 // 真实账本实算标记（供构建产物核验）
@@ -199,6 +240,7 @@ export async function loadRealGrowthData(): Promise<RealGrowth> {
     dedupStats: dedupStatsFromLedger(audits),
     deltaSeries: deltaSeriesFromLedger(audits),
     growthAudit,
+    scheduleRuns: scheduleRunsFromLedger(audits),
   };
 }
 
