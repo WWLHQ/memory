@@ -147,6 +147,8 @@ export class SqliteStorage implements StorageBackend {
     request_id?: string;
     action?: AuditAction;
     since?: number;
+    until?: number;
+    agent?: string;
   }): Promise<AuditRecord[]> {
     const conds: string[] = [];
     const params: (string | number)[] = [];
@@ -158,15 +160,20 @@ export class SqliteStorage implements StorageBackend {
       conds.push('action = ?');
       params.push(filter.action);
     }
-    if (filter.since) {
+    if (filter.since !== undefined) {
       conds.push('ts >= ?');
       params.push(filter.since);
+    }
+    if (filter.until !== undefined) {
+      conds.push('ts <= ?');
+      params.push(filter.until);
     }
     const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
     const rows = this.db
       .prepare(`SELECT doc FROM audit ${where} ORDER BY seq`)
       .all(...params) as { doc: string }[];
-    return rows.map((r) => JSON.parse(r.doc) as AuditRecord);
+    const records = rows.map((r) => JSON.parse(r.doc) as AuditRecord);
+    return filter.agent ? records.filter((a) => a.agent === filter.agent) : records;
   }
 
   /** 优雅关闭（测试/进程退出前调用，确保 WAL 落盘）；幂等，重复调用无害 */

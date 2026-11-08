@@ -77,7 +77,7 @@ export class HttpStorageBackend implements StorageBackend {
     return this.invoke('appendAudit', a).then(() => undefined);
   }
 
-  queryAudit(filter: { request_id?: string; action?: AuditAction; since?: number }): Promise<AuditRecord[]> {
+  queryAudit(filter: { request_id?: string; action?: AuditAction; since?: number; until?: number; agent?: string }): Promise<AuditRecord[]> {
     return this.invoke<AuditRecord[]>('queryAudit', filter);
   }
 

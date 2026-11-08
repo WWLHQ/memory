@@ -529,6 +529,8 @@ export class FileStorage implements StorageBackend {
     request_id?: string;
     action?: AuditAction;
     since?: number;
+    until?: number;
+    agent?: string;
   }): Promise<AuditRecord[]> {
     this.maybeReload();
     const inLog = this.auditLog.query(filter);
@@ -537,6 +539,8 @@ export class FileStorage implements StorageBackend {
       if (filter.request_id && a.request_id !== filter.request_id) return false;
       if (filter.action && filter.action !== a.action) return false;
       if (filter.since !== undefined && a.ts < filter.since) return false;
+      if (filter.until !== undefined && a.ts > filter.until) return false;
+      if (filter.agent && a.agent !== filter.agent) return false;
       return true;
     });
     return legacy.length === 0 ? inLog : [...legacy, ...inLog];

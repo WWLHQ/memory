@@ -1,58 +1,63 @@
-/*
- * 审计日志页样式 —— 复用本项目暗色设计系统（与 memory/write/theme.css 同源变量）。
- */
-:root {
-  --bg:#0f1419; --panel:#1a212b; --panel2:#202833; --line:#2b3441;
-  --txt:#e6edf3; --muted:#8b98a7; --dim:#5b6675; --accent:#4d9fff;
-  --ok:#3ecf8e; --warn:#ffd166; --err:#ff5c5c;
-}
-* { box-sizing:border-box; }
-body {
-  margin:0; background:var(--bg); color:var(--txt);
-  font:14px/1.55 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
-}
-.wrap { max-width:1280px; margin:0 auto; padding:18px; }
-h1 { font-size:18px; margin:0 0 2px; }
-.sub { color:var(--muted); font-size:12px; margin-bottom:14px; }
-.card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:14px; }
-.badge {
-  font-size:10px; font-weight:700; padding:2px 8px;
-  border-radius:6px; border:1px solid var(--line);
-}
-.badge.p0 { background:#12324a; color:#8cc7ff; }
-.badge.p1 { background:#1a3320; color:#7fe0a0; }
-.badge.p2 { background:#3a2f10; color:#ffd166; }
-.badge.p3 { background:var(--panel2); color:var(--muted); }
+/* 审计页：p0 基元之上的表格 / 链路视图补充样式（亮暗令牌统一由 shared/p0.css 提供） */
 
-/* 过滤栏 */
-.filter { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; }
-.filter .f { display:flex; flex-direction:column; gap:3px; }
-.filter .f label { font-size:11px; color:var(--muted); }
-.filter input, .filter select {
-  background:var(--panel2); color:var(--txt); border:1px solid var(--line);
-  border-radius:8px; padding:7px 9px; font:inherit; min-width:120px;
+/* 过滤栏：三列（窄屏两列/单列），压缩纵向高度 */
+.p0-filter {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  gap: 6px 12px;
 }
-.actions { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
+.p0-filter .p0-frow > label { flex: 0 0 62px; font-size: 10.5px; }
+@media (max-width: 860px) { .p0-filter { grid-template-columns: repeat(2, minmax(180px, 1fr)); } }
+@media (max-width: 560px) { .p0-filter { grid-template-columns: 1fr; } }
+
+/* 审计表（复用固定表头 + 拖拽列宽） */
+.atable { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+.atable th, .atable td { box-sizing: border-box; padding: 5px 7px; text-align: left; border-bottom: 1px solid var(--line-2); vertical-align: middle; }
+.atable td.num { white-space: nowrap; }
+.atable th {
+  color: var(--muted); font-weight: 600; font-size: 11px; background: var(--chip);
+  border-bottom: 1px solid var(--line); white-space: nowrap;
+}
+.atable tbody tr:hover td { background: var(--sel); color: var(--sel-text); }
+.atable tr.chain td { background: var(--accent-weak); }
+.atable .rid { font-family: var(--mono); color: var(--accent); cursor: pointer; }
+.atable .rid:hover { text-decoration: underline; }
+.atable .rid.active { text-decoration: underline; font-weight: 600; }
+.atable .ev { color: var(--warn); font-size: 10.5px; }
+.atable .dim { color: var(--faint); }
+/* 原始 action 副行：单行省略（完整值在 title），避免长动作名把行高撑爆 */
+.atable .ev-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.atable .act-raw { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.atable td.src { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* 链路视图 5 段 */
+.p0-chain { display: grid; grid-template-columns: repeat(5, minmax(150px, 1fr)); gap: 8px; }
+@media (max-width: 900px) { .p0-chain { grid-template-columns: repeat(2, minmax(150px, 1fr)); } }
+.p0-chain-node {
+  display: flex; gap: 8px; padding: 8px; border: 1px solid var(--line);
+  border-radius: 4px; background: var(--chip); min-width: 0;
+}
+.p0-chain-node.missing { border-style: dashed; color: var(--faint); background: transparent; }
+.p0-chain-dot {
+  flex: 0 0 18px; height: 18px; border-radius: 50%; background: var(--accent);
+  color: #fff; font: 700 10px/18px var(--mono); text-align: center;
+}
+.p0-chain-node.missing .p0-chain-dot { background: var(--field); color: var(--faint); }
+.p0-chain-body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.p0-chain-body b { font-size: 11.5px; }
+.p0-chain-body .mono { overflow-wrap: anywhere; }
+
+/* 旧组件兼容（PageNav / Toast） */
 .btn {
-  background:var(--panel2); border:1px solid var(--line); color:var(--txt);
-  border-radius:8px; padding:7px 12px; cursor:pointer; font-size:12px;
+  height: 24px; padding: 0 10px; border: 1px solid var(--line); border-radius: 3px;
+  background: var(--chip); color: var(--text); font: inherit; font-size: 11.5px; cursor: pointer;
 }
-.btn.primary { background:var(--accent); color:#04121f; border-color:var(--accent); font-weight:600; }
-
-/* 审计表 */
-.atable { width:100%; border-collapse:collapse; font-size:12.5px; }
-.atable th, .atable td { padding:8px 10px; text-align:left; border-bottom:1px solid var(--line); vertical-align:top; }
-.atable th { color:var(--muted); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.4px; cursor:pointer; }
-.atable tr:hover { background:var(--panel2); }
-.atable tr.chain { background:#14263a; }
-.atable .rid { font-family:monospace; color:var(--accent); cursor:pointer; }
-.atable .rid.active { text-decoration:underline; }
-.atable .ev { color:var(--warn); font-size:11px; }
-.atable .dim { color:var(--dim); }
+.btn:hover { border-color: var(--accent); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
 
 .toast {
-  position:fixed; bottom:18px; left:50%; transform:translateX(-50%);
-  background:var(--panel2); border:1px solid var(--line); border-radius:8px;
-  padding:9px 16px; font-size:13px; z-index:80;
+  position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+  background: var(--win); border: 1px solid var(--line); border-radius: 4px;
+  box-shadow: var(--shadow); padding: 7px 14px; font-size: 12px; z-index: 80;
 }
-.note { font-size:11px; color:var(--dim); margin-top:14px; line-height:1.6; }

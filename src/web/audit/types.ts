@@ -31,6 +31,16 @@ export interface AuditEntry {
   payload_tokens: number;
   pipeline_llm_tokens: number;
   created_at: string;
+  /** 以下字段来自内核 AuditRecord / detail，取不到时不填（页面如实显示「—」，不补值） */
+  agent?: string;
+  /** 结果（detail.result / detail.status，如 ok / denied / blocked / skip / 401） */
+  result?: string;
+  /** 来源（detail.source） */
+  source?: string;
+  /** 内核耗时（detail.duration_ms） */
+  duration_ms?: number;
+  /** 备注（detail.message / detail.note） */
+  note?: string;
 }
 
 export interface AuditFilter {
@@ -40,6 +50,7 @@ export interface AuditFilter {
   device_info?: string;
   action?: AuditAction | '';
   request_id?: string;
-  from?: string; // created_at 起（ISO）
-  to?: string;   // created_at 止（ISO）
+  agent?: string;
+  from?: string; // created_at 起（datetime-local / ISO）
+  to?: string;   // created_at 止（datetime-local / ISO）
 }

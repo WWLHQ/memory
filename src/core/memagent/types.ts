@@ -843,7 +843,7 @@ export interface StorageBackend {
   listProjects(filter?: ListProjectsFilter): Promise<ProjectRecord[]>;
   /** 审计（append-only） */
   appendAudit(a: AuditRecord): Promise<void>;
-  queryAudit(filter: { request_id?: string; action?: AuditAction; since?: number }): Promise<AuditRecord[]>;
+  queryAudit(filter: { request_id?: string; action?: AuditAction; since?: number; until?: number; agent?: string }): Promise<AuditRecord[]>;
   /** 批量写入模式（会话采集等大批量入库）：begin 后写操作延迟落盘，commit 一次性持久化。
    *  无批量需求的后端可空实现（InMemory 直接 no-op，FileStorage 延迟同步写盘）。 */
   beginBatch?(): void;

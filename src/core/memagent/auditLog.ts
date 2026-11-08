@@ -45,6 +45,10 @@ export interface AuditFilter {
   request_id?: string;
   action?: AuditAction;
   since?: number;
+  /** 截止时间（含上界）；与 since 组合成真实时间窗筛选 */
+  until?: number;
+  /** 宿主 Agent（AuditRecord.agent） */
+  agent?: string;
 }
 
 /** 回显给设置页/诊断的真实账本状态（数字全部实测，不估算） */
@@ -103,6 +107,8 @@ function matches(a: AuditRecord, filter: AuditFilter): boolean {
   if (filter.request_id && a.request_id !== filter.request_id) return false;
   if (filter.action && a.action !== filter.action) return false;
   if (filter.since !== undefined && a.ts < filter.since) return false;
+  if (filter.until !== undefined && a.ts > filter.until) return false;
+  if (filter.agent && a.agent !== filter.agent) return false;
   return true;
 }
 

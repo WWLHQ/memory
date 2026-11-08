@@ -105,23 +105,23 @@ describe('AuditPage 集成（T5，审计流来自内核）', () => {
     render(<AuditPage />);
     await waitFor(() => expect(screen.getByTestId('audit-table')).toBeInTheDocument());
     expect(screen.getAllByTestId(/^audit-th-\d+$/)).toHaveLength(9);
-    expect(screen.getByTestId('audit-th-0')).toHaveAttribute('data-w', '150');
+    expect(screen.getByTestId('audit-th-0')).toHaveAttribute('data-w', '80');
     expect(screen.queryByTestId('audit-col-reset')).toBeNull();
 
-    fireEvent.mouseDown(screen.getByTestId('col-resize-0'), { clientX: 150 });
+    fireEvent.mouseDown(screen.getByTestId('col-resize-0'), { clientX: 80 });
     act(() => {
-      fireEvent.mouseMove(document, { clientX: 260 });
+      fireEvent.mouseMove(document, { clientX: 190 });
       fireEvent.mouseUp(document);
     });
-    expect(screen.getByTestId('audit-th-0')).toHaveAttribute('data-w', '260');
-    expect(JSON.parse(localStorage.getItem('auditColWidths') ?? '[]')[0]).toBe(260);
+    expect(screen.getByTestId('audit-th-0')).toHaveAttribute('data-w', '190');
+    expect(JSON.parse(localStorage.getItem('auditColWidths') ?? '[]')[0]).toBe(190);
     expect(screen.getByTestId('audit-col-reset')).toBeInTheDocument();
 
     cleanup();
     render(<AuditPage />);
-    await waitFor(() => expect(screen.getByTestId('audit-th-0')).toHaveAttribute('data-w', '260'));
+    await waitFor(() => expect(screen.getByTestId('audit-th-0')).toHaveAttribute('data-w', '190'));
 
     fireEvent.click(screen.getByTestId('audit-col-reset'));
-    expect(screen.getByTestId('audit-th-0')).toHaveAttribute('data-w', '150');
+    expect(screen.getByTestId('audit-th-0')).toHaveAttribute('data-w', '80');
   });
 });

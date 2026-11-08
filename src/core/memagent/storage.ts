@@ -101,11 +101,13 @@ export class InMemoryStorage implements StorageBackend {
     this.audits.push({ ...a }); // append-only（4.3）
   }
 
-  async queryAudit(filter: { request_id?: string; action?: AuditAction; since?: number }): Promise<AuditRecord[]> {
+  async queryAudit(filter: { request_id?: string; action?: AuditAction; since?: number; until?: number; agent?: string }): Promise<AuditRecord[]> {
     return this.audits.filter((a) => {
       if (filter.request_id && a.request_id !== filter.request_id) return false;
       if (filter.action && a.action !== filter.action) return false;
-      if (filter.since && a.ts < filter.since) return false;
+      if (filter.since !== undefined && a.ts < filter.since) return false;
+      if (filter.until !== undefined && a.ts > filter.until) return false;
+      if (filter.agent && a.agent !== filter.agent) return false;
       return true;
     });
   }
