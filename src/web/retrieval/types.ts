@@ -26,6 +26,10 @@ export interface RetrievalHit {
   importance: number;
   confidence: number;
   score: number;
+  /** 来源项目（默认「全部项目」召回时逐条标明，不静默丢弃） */
+  project_id?: string;
+  /** 该记忆当前主层（L1–L6），用于结果行标注 */
+  layer?: string;
   tags: string[];
   merged_from?: string[];
   /** 冲突仲裁说明（2.4.2 规则6） */
@@ -64,4 +68,26 @@ export interface BudgetData {
   rerank_fallback?: boolean;
   budget_breach: boolean;
   breach_detail?: string[];
+  /** 本次查询条设定的预算（tokens）；页面按可见高度/场景给默认值 */
+  budget_tokens?: number;
+  /** 按预算实际注入（命中仍全部展示，注入条数单独计数） */
+  injected_tokens?: number;
+  injected_count?: number;
+  /** 因预算被裁掉的结果条数（真实计算，不是演示值） */
+  dropped_count?: number;
+  /** 注入深度（L1 / L1–L3 / L1–L6；注入纪律仍只 L1） */
+  depth?: string;
+}
+
+/** 检索历史（来源：账本审计 action=recall，无演示数据） */
+export interface RecallHistoryRow {
+  request_id: string;
+  ts: number;
+  query: string;
+  scene: string;
+  mode: string;
+  hits: number;
+  payload_tokens: number;
+  latency_ms: number | null;
+  evidence_thin: boolean;
 }

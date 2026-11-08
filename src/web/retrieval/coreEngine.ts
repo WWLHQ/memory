@@ -1,7 +1,7 @@
 // REQ-012 接真内核引擎（T7）：与 fakeEngine 同签名（async），内部走 memagent-core ma.recall
 // 数据源 = 内核 InMemoryStorage（禁止注入种子；空库即无命中，返回 EMPTY 态）；UI 类型/横幅/预算语义不变。
-import type { BudgetData, ModeBannerData, RetrievalHit, Scene, ModeSel } from './types.ts';
-import { autoDispatch, budgetLevel, resolveSceneBudget, sortHits, freshness } from './logic.ts';
+import type { BudgetData, ModeBannerData, RetrievalHit, Scene, ModeSel, RecallHistoryRow } from './types.ts';
+import { autoDispatch, budgetLevel, resolveSceneBudget, sortHits, freshness, approxTokens } from './logic.ts';
 import type { Memory, RecallReq } from '../../core/memagent/types.ts';
 import type { MemAgent } from '../../core/memagent/types.ts';
 import { getKernel, getKernelStorage } from '../kernel.ts';
@@ -14,6 +14,18 @@ export interface EngineResult {
   budget: BudgetData;
   evidence_thin: 'none' | 'backfill_hit' | 'backfill_miss';
   breach: boolean;
+  /** 本次真实墙钟耗时（毫秒） */
+  latency_ms: number;
+  /** 本次查询条注入深度选择 */
+  depth: string;
+}
+
+/** 查询条可选参数（预算 / 深度）；缺省时行为与旧签名完全一致 */
+export interface EngineOptions {
+  /** 预算（tokens）；给定时按分数顺序真实裁剪注入集，命中仍全部展示 */
+  budgetTokens?: number;
+  /** 注入深度：仅影响展示口径，注入纪律始终只 L1 */
+  depth?: string;
 }
 
 const DAY = 24 * 3600 * 1000;
@@ -32,7 +44,7 @@ function getAgent(): Promise<MemAgent> {
  * 冷/归档/休眠层或 L2 层 → l2_only=true；无种子兜底。
  */
 function toRetrievalHit(
-  h: { mem_id: string; content: string; decay_class: string; pinned: boolean; locked: boolean; score: number },
+  h: { mem_id: string; content: string; layer?: string; decay_class: string; pinned: boolean; locked: boolean; score: number },
   mem: Memory | null,
 ): RetrievalHit {
   const now = Date.now();
@@ -53,6 +65,8 @@ function toRetrievalHit(
     importance: mem?.importance ?? 0.5,
     confidence: mem?.confidence ?? 0.5,
     score: h.score,
+    project_id: mem?.project_id,
+    layer: h.layer ?? mem?.layer,
     tags: mem?.tags ?? [],
     conflict_note: mem?.conflict_id ? `[冲突] ${mem.conflict_id}` : undefined,
     age_days,
@@ -89,7 +103,10 @@ export async function coreEngine(
   modeSel: ModeSel,
   _requestId: string,
   projectScope: string = ALL_PROJECTS_SCOPE,
+  opts: EngineOptions = {},
 ): Promise<EngineResult> {
+  const started = Date.now();
+  const depth = opts.depth ?? 'L1';
   const ma = await getAgent();
   const table = resolveSceneBudget(scene);
   const dispatch = modeSel ? { mode: modeSel, hit_keywords: [] as string[] } : autoDispatch(query, scene);
@@ -107,18 +124,33 @@ export async function coreEngine(
     const req: RecallReq = { query, project_id, scene: coreScene, mode: modeSel, top_k: 5 };
     return ma.recall(req);
   }));
-  // 合并命中（按 mem_id 去重，真实项目间不会重复；去重仅为防御）
-  const mergedHits = new Map<string, (typeof recalls)[number]['hits'][number]>();
-  for (const rr of recalls) {
-    for (const h of rr.hits) if (!mergedHits.has(h.mem_id)) mergedHits.set(h.mem_id, h);
-  }
+  // 合并命中（按 mem_id 去重；同时记下每条命中的来源项目，供结果行标注）
+  const mergedHits = new Map<string, { hit: (typeof recalls)[number]['hits'][number]; project_id: string }>();
+  recalls.forEach((rr, i) => {
+    for (const h of rr.hits) {
+      if (!mergedHits.has(h.mem_id)) mergedHits.set(h.mem_id, { hit: h, project_id: scopes[i] ?? DEFAULT_PROJECT_ID });
+    }
+  });
   const r = recalls[recalls.length - 1] ?? null;
   const hitList = [...mergedHits.values()];
 
-  const memByMid = await loadMemByMids(hitList.map((h) => h.mem_id));
-  const hits: RetrievalHit[] = hitList
-    .map((h) => toRetrievalHit(h, memByMid.get(h.mem_id) ?? null));
+  const memByMid = await loadMemByMids(hitList.map((v) => v.hit.mem_id));
+  const hits: RetrievalHit[] = hitList.map((v) => {
+    const mapped = toRetrievalHit(v.hit, memByMid.get(v.hit.mem_id) ?? null);
+    return { ...mapped, project_id: mapped.project_id ?? v.project_id };
+  });
   const ordered = sortHits(hits);
+
+  // 预算真实裁剪：按分数顺序累计 L1 近似 token，超出预算的命中不计入注入集（结果仍全部展示）
+  let injectedTokens = 0;
+  let injectedCount = 0;
+  for (const h of ordered) {
+    const t = approxTokens(h.content);
+    if (opts.budgetTokens !== undefined && injectedTokens + t > opts.budgetTokens) continue;
+    injectedTokens += t;
+    injectedCount += 1;
+  }
+  const droppedCount = Math.max(0, ordered.length - injectedCount);
 
   const payload = recalls.reduce((sum, rr) => sum + rr.payload_tokens, 0);
   const breach = budgetLevel(payload) === 'breach';
@@ -150,7 +182,38 @@ export async function coreEngine(
     budget_breach: budgetLevel(payload) !== 'ok',
     // 真实 breach 时由核心引擎补充明细；不写死估算文案
     breach_detail: undefined,
+    budget_tokens: opts.budgetTokens,
+    injected_tokens: injectedTokens,
+    injected_count: injectedCount,
+    dropped_count: droppedCount,
+    depth,
   };
 
-  return { hits: ordered, banner, budget, evidence_thin, breach };
+  return { hits: ordered, banner, budget, evidence_thin, breach, latency_ms: Date.now() - started, depth };
+}
+
+/**
+ * 检索历史 = 账本审计 action=recall 的真实记录（最近 N 条）。
+ * 缺字段（旧行没写 latency_ms 等）如实留空，不用演示值补齐。
+ */
+export async function coreRecallHistory(limit = 10): Promise<RecallHistoryRow[]> {
+  const rows = await getStorage().queryAudit({ action: 'recall' });
+  return rows
+    .slice()
+    .sort((a, b) => b.ts - a.ts)
+    .slice(0, limit)
+    .map((a) => {
+      const d = a.detail as Record<string, unknown>;
+      return {
+        request_id: a.request_id,
+        ts: a.ts,
+        query: typeof d.query === 'string' ? d.query : '—',
+        scene: typeof d.scene === 'string' ? d.scene : '—',
+        mode: typeof d.mode === 'string' ? d.mode : '—',
+        hits: typeof d.hits === 'number' ? d.hits : 0,
+        payload_tokens: typeof d.payload_tokens === 'number' ? d.payload_tokens : 0,
+        latency_ms: typeof d.latency_ms === 'number' ? d.latency_ms : null,
+        evidence_thin: d.evidence_thin === true,
+      };
+    });
 }

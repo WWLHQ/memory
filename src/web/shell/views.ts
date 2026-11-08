@@ -232,7 +232,7 @@ export const RIBBON: RibbonTab[] = [
         label: '接口', items: [
           { label: 'ma.read 快照', icon: 'db', go: 'home', big: true },
           { label: 'Agent 探针', icon: 'agent', go: 'agent' },
-          { label: '检索结果导出', icon: 'export', unavailable: '检索页未提供导出能力' },
+          { label: '检索结果导出', icon: 'export', go: 'retrieval' },
         ],
       },
     ],

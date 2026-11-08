@@ -3,7 +3,7 @@
 > 由 `npm run code:index` 生成，请勿手改；改代码后重跑即可。
 > 用法：先在本表定位文件与导出符号，再只读该文件的局部区间（省 token、少误改）。
 
-共 364 个源码文件。
+共 365 个源码文件。
 
 ## e2e
 
@@ -41,7 +41,7 @@
 
 | 文件 | 行数 | 摘要 | 导出 |
 |---|---|---|---|
-| [src/core/memagent/agent.ts](src/core/memagent/agent.ts) | 587 | createMemAgent（§1 入口）：内核装配 + 9 核心API + 全动作审计（§3.2） | createMemAgent(fn) |
+| [src/core/memagent/agent.ts](src/core/memagent/agent.ts) | 594 | createMemAgent（§1 入口）：内核装配 + 9 核心API + 全动作审计（§3.2） | createMemAgent(fn) |
 | [src/core/memagent/auditLog.ts](src/core/memagent/auditLog.ts) | 392 | 内核审计账本（批次41-A）：从 memories.db.json 里搬出来，独立成追加式 JSONL。 | AUDIT_FILE_NAME(const), AUDIT_ACTIVE_MAX_BYTES(const), AuditLogCorruptError(class), AuditLogLockedError(class), FileAuditLog(class), AuditFilter(type), AuditLogStats(type), FileAuditLogOptions(type) |
 | [src/core/memagent/collectDaemon.ts](src/core/memagent/collectDaemon.ts) | 161 | 批次44-A：独立采集守护（headless）——daemon 只做「扫描 + 指纹去重 + 暂存分片」，**永不碰账本**。 | runDaemonRound(fn), drainCollectPending(fn), DAEMON_DIR_NAME(const), PENDING_DIR_NAME(const), DaemonState(type), DaemonRoundReport(type), DrainReport(type) |
 | [src/core/memagent/conflict.ts](src/core/memagent/conflict.ts) | 256 | 批次46-3：内核冲突裁决原子 API（方案 §3 / §9.7 + P7 hold） | coreListConflicts(fn), coreResolveConflict(fn), CONFLICT_NOTE(const), CONFLICT_VERDICTS(const) |
@@ -284,7 +284,7 @@
 | [src/web/memory/MemoryActions.tsx](src/web/memory/MemoryActions.tsx) | 80 | 记忆管理页（REQ-006 / P8）操作区（T4） | MemoryActions(fn) |
 | [src/web/memory/MemoryDrawer.tsx](src/web/memory/MemoryDrawer.tsx) | 160 | 记忆管理页详情/编辑抽屉（T5） | MemoryDrawer(fn) |
 | [src/web/memory/MemoryLayeredPage.tsx](src/web/memory/MemoryLayeredPage.tsx) | 670 | 记忆层级管理页（REQ-006 / P8 · 19.11） | MemoryLayeredPage(fn), LayerId(type) |
-| [src/web/memory/MemoryManagementPage.tsx](src/web/memory/MemoryManagementPage.tsx) | 1164 | 记忆管理统一视图（批次：记忆管理组）：六标签 + 9 列账本 + 分层策略 + L0 + 四模式冲突裁决。 | MemoryManagementPage(fn) |
+| [src/web/memory/MemoryManagementPage.tsx](src/web/memory/MemoryManagementPage.tsx) | 1177 | 记忆管理统一视图（批次：记忆管理组）：六标签 + 9 列账本 + 分层策略 + L0 + 四模式冲突裁决。 | MemoryManagementPage(fn) |
 | [src/web/memory/MemoryPage.tsx](src/web/memory/MemoryPage.tsx) | 175 | 记忆库管理页（REQ-006 / P8）· 完整编排（T5） | MemoryPage(fn) |
 | [src/web/memory/MemoryRow.tsx](src/web/memory/MemoryRow.tsx) | 80 | 记忆管理页（REQ-006 / P8）单行（T3） | MemoryRow(fn) |
 | [src/web/memory/MemoryTable.tsx](src/web/memory/MemoryTable.tsx) | 255 | 记忆管理页（REQ-006 / P8）列表（T3）+ 过滤 + 分页 + 可拖拽列宽 | MemoryTable(fn), TYPE_OPTIONS(const), STATUS_OPTIONS(const), SOURCE_OPTIONS(const), MemoryTableFilterState(type), PageSize(type) |
@@ -344,18 +344,18 @@
 | [src/web/params/useParamsMirror.ts](src/web/params/useParamsMirror.ts) | 19 | 全局参数页后端镜像（阶段5-C 口径统一）：真接 home server POST /api/mirror/audit。 | useParamsMirror(fn), ParamsMirror(type) |
 | [src/web/params/useToast.tsx](src/web/params/useToast.tsx) | 13 | — | useToast(fn) |
 | [src/web/retrieval/AuditTrailCard.tsx](src/web/retrieval/AuditTrailCard.tsx) | 54 | 检索页「审计链路上下文」卡（阶段5-A / A15 接线）。 | AuditTrailCard(fn) |
-| [src/web/retrieval/BudgetPanel.tsx](src/web/retrieval/BudgetPanel.tsx) | 40 | REQ-012 T5 预算面板（§5/R9）：三档变色 + 漏斗 + 重排闸门 + 裁剪明细 | BudgetPanel(fn) |
+| [src/web/retrieval/BudgetPanel.tsx](src/web/retrieval/BudgetPanel.tsx) | 56 | REQ-012 T5 预算面板（定稿）：场景预算 / 实际注入 / 丢弃条数 + R9 三档 + 漏斗与重排闸门 | BudgetPanel(fn) |
 | [src/web/retrieval/ContextPanel.tsx](src/web/retrieval/ContextPanel.tsx) | 42 | REQ-012 T5 上下文面板（§4）：全文（cold 仅 L2 + 审计展开）/ 关联 / 参数只读 / 跳转 | ContextPanel(fn) |
 | [src/web/retrieval/ModeBanner.tsx](src/web/retrieval/ModeBanner.tsx) | 47 | REQ-012 T5 生效模式横幅（§2） | ModeBanner(fn) |
-| [src/web/retrieval/QueryBar.tsx](src/web/retrieval/QueryBar.tsx) | 100 | REQ-012 T3 查询栏（§1）：query/scene/mode + 校验 + 联动 | QueryBar(fn), QueryBarValue(type) |
-| [src/web/retrieval/ResultList.tsx](src/web/retrieval/ResultList.tsx) | 50 | REQ-012 T4 结果列表（§3：Top K 默认 3-5，加载更多至 10） | ResultList(fn) |
-| [src/web/retrieval/ResultRow.tsx](src/web/retrieval/ResultRow.tsx) | 52 | REQ-012 T4 结果行（§3.1 字段 + §3.2 操作） | ResultRow(fn) |
-| [src/web/retrieval/RetrievalPage.tsx](src/web/retrieval/RetrievalPage.tsx) | 139 | 检索页（REQ-012）T6 编排：查询栏 + 横幅 + 结果 + 预算 + 上下文 + 异常态 | RetrievalPage(fn) |
-| [src/web/retrieval/coreEngine.ts](src/web/retrieval/coreEngine.ts) | 157 | REQ-012 接真内核引擎（T7）：与 fakeEngine 同签名（async），内部走 memagent-core ma.recall | coreReorderMemory(fn), coreEngine(fn), ALL_PROJECTS_SCOPE(const), EngineResult(type) |
-| [src/web/retrieval/logic.ts](src/web/retrieval/logic.ts) | 134 | 检索页（REQ-012）纯逻辑层 | modeName(fn), sceneName(fn), normalizeScene(fn), normalizeMode(fn), resolveSceneBudget(fn), resolveModeLinkage(fn), isMinimalCandidate(fn), autoDispatch(fn), sortHits(fn), freshness(fn), decayClass(fn), budgetLevel(fn), validateQuery(fn) |
-| [src/web/retrieval/retrievalEntry.tsx](src/web/retrieval/retrievalEntry.tsx) | 10 | 检索页（REQ-012）入口 | — |
-| [src/web/retrieval/types.ts](src/web/retrieval/types.ts) | 68 | 检索页（REQ-012）数据模型 | RetrievalHit(type), SceneBudget(type), ModeBannerData(type), BudgetData(type), Scene(type), Mode(type), ModeSel(type), PageState(type), DecayClass(type), BudgetLevel(type) |
-| [src/web/retrieval/useRetrieval.ts](src/web/retrieval/useRetrieval.ts) | 51 | REQ-012 T6 状态机 hook（§0/§6）：IDLE→LOADING→RESULT/EMPTY/ERROR；二次查询保留 session，request_id 每次新生成（R7/§7.6）。 | useRetrieval(fn), RetrievalState(type), Phase(type) |
+| [src/web/retrieval/QueryBar.tsx](src/web/retrieval/QueryBar.tsx) | 164 | REQ-012 T3 查询条（定稿 6 项）：查询 / 场景 / 项目 / 模式 / 预算 / 注入深度 + 联动校验 | QueryBar(fn), DEPTH_OPTIONS(const), QueryBarValue(type) |
+| [src/web/retrieval/ResultList.tsx](src/web/retrieval/ResultList.tsx) | 62 | REQ-012 T4 结果列表（定稿结果行）：分数 + 正文/元信息 + 行内操作；Top 5 默认，加载更多至 10。 | ResultList(fn) |
+| [src/web/retrieval/ResultRow.tsx](src/web/retrieval/ResultRow.tsx) | 54 | REQ-012 T4 结果行（定稿）：score / 正文 / 元信息（id · 层 · 重要度 · 来源项目 · 温度） / 操作 | ResultRow(fn) |
+| [src/web/retrieval/RetrievalPage.tsx](src/web/retrieval/RetrievalPage.tsx) | 396 | 检索页（REQ-012）· 定稿三标签：检索工作台 / 历史查询 / 规则 | RetrievalPage(fn) |
+| [src/web/retrieval/coreEngine.ts](src/web/retrieval/coreEngine.ts) | 220 | REQ-012 接真内核引擎（T7）：与 fakeEngine 同签名（async），内部走 memagent-core ma.recall | coreReorderMemory(fn), coreEngine(fn), coreRecallHistory(fn), ALL_PROJECTS_SCOPE(const), EngineResult(type), EngineOptions(type) |
+| [src/web/retrieval/logic.ts](src/web/retrieval/logic.ts) | 141 | 检索页（REQ-012）纯逻辑层 | modeName(fn), sceneName(fn), normalizeScene(fn), normalizeMode(fn), resolveSceneBudget(fn), resolveModeLinkage(fn), isMinimalCandidate(fn), autoDispatch(fn), sortHits(fn), freshness(fn), decayClass(fn), budgetLevel(fn), approxTokens(fn), validateQuery(fn) |
+| [src/web/retrieval/retrievalEntry.tsx](src/web/retrieval/retrievalEntry.tsx) | 11 | 检索页（REQ-012）入口 | — |
+| [src/web/retrieval/types.ts](src/web/retrieval/types.ts) | 94 | 检索页（REQ-012）数据模型 | RetrievalHit(type), SceneBudget(type), ModeBannerData(type), BudgetData(type), RecallHistoryRow(type), Scene(type), Mode(type), ModeSel(type), PageState(type), DecayClass(type), BudgetLevel(type) |
+| [src/web/retrieval/useRetrieval.ts](src/web/retrieval/useRetrieval.ts) | 64 | REQ-012 T6 状态机 hook（§0/§6）：IDLE→LOADING→RESULT/EMPTY/ERROR；二次查询保留 session，request_id 每次新生成（R7/§7.6）。 | useRetrieval(fn), RetrievalState(type), Phase(type) |
 | [src/web/retrieval/useToast.tsx](src/web/retrieval/useToast.tsx) | 13 | — | useToast(fn) |
 | [src/web/security/AccountAdminCard.tsx](src/web/security/AccountAdminCard.tsx) | 164 | 管理员账号卡片（批次7）：账号列表 / 角色切换 / 团队分配 / 修改我的密码。 | AdminAccountCard(fn) |
 | [src/web/security/FieldBackfillCard.tsx](src/web/security/FieldBackfillCard.tsx) | 178 | 安全页 · 存量字段回填卡（批次41-T） | FieldBackfillCard(fn) |
@@ -392,7 +392,7 @@
 | [src/web/shared/layerTime.ts](src/web/shared/layerTime.ts) | 12 | 层级生成时间口径（批次24 拍板：一条记忆只记一个「本组层内容生成时间」，不逐层记）。 | fmtLayerGen(fn), LAYER_GEN_UNRECORDED(const) |
 | [src/web/shared/mirrorFailureEvent.ts](src/web/shared/mirrorFailureEvent.ts) | 10 | 阶段5-C：mirror 上抛失败事件与载荷（零依赖共享，避免 mirrorClient ↔ actionLog 循环 import）。 | MIRROR_FAILURE_EVENT(const), MirrorFailure(type) |
 | [src/web/shared/mirrorFailureNotice.ts](src/web/shared/mirrorFailureNotice.ts) | 81 | 阶段5-C：镜像上抛失败的全局可见提示。 | installMirrorFailureNotice(fn), resetMirrorFailureNoticeForTests(fn) |
-| [src/web/shared/paginate.ts](src/web/shared/paginate.ts) | 31 | 列表分页纯函数（批次24）：记忆库 / 日志记录 / 审计日志共用同一口径。 | paginate(fn), PAGE_SIZES(const), DEFAULT_PAGE_SIZE(const), PageParams(type), Paged(type) |
+| [src/web/shared/paginate.ts](src/web/shared/paginate.ts) | 49 | 列表分页纯函数（批次24）：记忆库 / 日志记录 / 审计日志共用同一口径。 | autoPageSize(fn), paginate(fn), PAGE_SIZES(const), DEFAULT_PAGE_SIZE(const), MIN_AUTO_PAGE_SIZE(const), PageParams(type), Paged(type) |
 | [src/web/shared/selectionChannel.ts](src/web/shared/selectionChannel.ts) | 71 | 选中项回传通道（S4）：中心区真实页面把「用户当前选中的一条真实记录」回传给壳层属性检查器。 | parseSelection(fn), publishSelection(fn), SELECTION_MSG(const), SelectionField(type), SelectionPayload(type) |
 | [src/web/shared/session.ts](src/web/shared/session.ts) | 57 | 当前会话（批次7）：跨 iframe 共享的 sessionId + home server /api/me 的真实上下文。 | currentSessionId(fn), fetchSessionContext(fn), useSessionContext(fn), SessionState(type), SessionRole(type) |
 | [src/web/shared/shellNavigate.ts](src/web/shared/shellNavigate.ts) | 12 | 中心区 iframe → 壳层导航（概览页快捷胶囊 / 洞察跳转用）。 | requestShellView(fn), SHELL_GOTO_MSG(const) |
@@ -413,16 +413,17 @@
 | [src/web/sync/syncEntry.tsx](src/web/sync/syncEntry.tsx) | 11 | 同步与裁决页（批次42-C）入口：挂载 SyncPage。 | — |
 | [src/web/test-setup.ts](src/web/test-setup.ts) | 1 | — | — |
 | [src/web/vite-env.d.ts](src/web/vite-env.d.ts) | 2 | Vite 侧效应导入（CSS）的类型声明 | — |
-| [src/web/write/DedupCard.tsx](src/web/write/DedupCard.tsx) | 40 | 写入页（REQ-006 / P2）查重预览卡（T4） | DedupCard(fn) |
-| [src/web/write/WriteForm.tsx](src/web/write/WriteForm.tsx) | 124 | 写入页（REQ-006 / P2）表单（T3） | WriteForm(fn) |
-| [src/web/write/WritePage.tsx](src/web/write/WritePage.tsx) | 149 | 写入页（REQ-006 / P2）· 完整编排（T5） | WritePage(fn) |
-| [src/web/write/coreWrite.ts](src/web/write/coreWrite.ts) | 78 | 写入页（REQ-006 / P2）接真内核：ma.write（六类 + 查重短路嫁接 + 审计） | coreWrite(fn), coreListExisting(fn), CoreWriteOutcome(type) |
-| [src/web/write/logic.ts](src/web/write/logic.ts) | 139 | 写入页（REQ-006 / P2）纯逻辑层 | estimateTokens(fn), needsRefine(fn), validateDraft(fn), jaccard(fn), scoreDedup(fn), thresholdForLayer(fn), composeReceipt(fn), ReceiptOptions(type) |
+| [src/web/write/DedupCard.tsx](src/web/write/DedupCard.tsx) | 45 | 写入页（REQ-006 / P2）查重预览卡（T4） | DedupCard(fn) |
+| [src/web/write/WriteForm.tsx](src/web/write/WriteForm.tsx) | 161 | 写入页（REQ-006 / P2）表单（T3） | WriteForm(fn) |
+| [src/web/write/WritePage.tsx](src/web/write/WritePage.tsx) | 308 | 写入页（REQ-006 / P2）· 定稿三标签：写入表单 / 最近回执 / 查重与 L0 规则 | WritePage(fn) |
+| [src/web/write/WriteReceiptCard.tsx](src/web/write/WriteReceiptCard.tsx) | 156 | 写入页回执（定稿）：四类结果 + 真实 request_id / memory_id / 层级，不编辑、不重放。 | fmtClock(fn), WriteReceiptCard(fn), WriteRefusalCard(fn), WriteReceiptTable(fn) |
+| [src/web/write/coreWrite.ts](src/web/write/coreWrite.ts) | 126 | 写入页（REQ-006 / P2）接真内核：ma.write（六类 + 查重短路嫁接 + 审计） | coreWrite(fn), coreListExisting(fn), coreWriteStatus(fn), requestIdOfError(fn), coreWriteReceipts(fn), CoreWriteOutcome(type) |
+| [src/web/write/logic.ts](src/web/write/logic.ts) | 148 | 写入页（REQ-006 / P2）纯逻辑层 | estimateTokens(fn), needsRefine(fn), validateDraft(fn), jaccard(fn), scoreDedup(fn), thresholdForLayer(fn), composeReceipt(fn), L1_CHAR_LIMIT(const), ReceiptOptions(type) |
 | [src/web/write/spec.ts](src/web/write/spec.ts) | 48 | 写入页（REQ-006 / P2）规格常量（非演示数据） | TAG_SUGGESTIONS(const), KERNEL_CATEGORY(const), CATEGORY_PREVIEW(const), LAYER_THRESHOLDS(const) |
-| [src/web/write/types.ts](src/web/write/types.ts) | 72 | 写入页（REQ-006 / P2）数据模型 | MemoryDraft(type), ExistingMemory(type), DedupResult(type), ReceiptLayer(type), WriteReceipt(type), ValidationResult(type), MemoryCategory(type), SourceKind(type), LayerName(type) |
+| [src/web/write/types.ts](src/web/write/types.ts) | 98 | 写入页（REQ-006 / P2）数据模型 | MemoryDraft(type), ExistingMemory(type), DedupResult(type), ReceiptLayer(type), WriteReceipt(type), WriteRefusal(type), WriteReceiptHistoryRow(type), ValidationResult(type), MemoryCategory(type), SourceKind(type), LayerName(type) |
 | [src/web/write/useToast.tsx](src/web/write/useToast.tsx) | 22 | 轻量 toast hook（T5）：返回展示节点与 show(msg) | useToast(fn) |
 | [src/web/write/useWriteMirror.ts](src/web/write/useWriteMirror.ts) | 16 | 写入页后端镜像（阶段5-C 口径统一）：真接 home server POST /api/mirror/audit。 | useWriteMirror(fn), WriteMirror(type) |
-| [src/web/write/writeEntry.tsx](src/web/write/writeEntry.tsx) | 10 | 写入页（REQ-006 / P2）入口：挂载 WritePage。 | — |
+| [src/web/write/writeEntry.tsx](src/web/write/writeEntry.tsx) | 11 | 写入页（REQ-006 / P2）入口：挂载 WritePage。 | — |
 
 ## 指纹（P2-18）
 
@@ -445,7 +446,7 @@ src/agentOnboard/validators.ts a7372fc705a7
 src/auth/hash.ts 3919b27befef
 src/auth/loginService.ts a0cc1ede21f9
 src/auth/memberSync.ts dd7d2d4ed60e
-src/core/memagent/agent.ts 71c81cbf7c90
+src/core/memagent/agent.ts 52de34ca4495
 src/core/memagent/auditLog.ts 307fbb57f262
 src/core/memagent/collectDaemon.ts 1c66b6cd74c0
 src/core/memagent/conflict.ts e537b2588f67
@@ -653,7 +654,7 @@ src/web/memory/LayerMemoryTable.tsx 6fd085b03ff4
 src/web/memory/MemoryActions.tsx 9983e64102b0
 src/web/memory/MemoryDrawer.tsx 9f6b29b0d433
 src/web/memory/MemoryLayeredPage.tsx c88f822305e7
-src/web/memory/MemoryManagementPage.tsx ec093134a86a
+src/web/memory/MemoryManagementPage.tsx edf743f590a3
 src/web/memory/MemoryPage.tsx 420d1c28a208
 src/web/memory/MemoryRow.tsx 0be7881628bf
 src/web/memory/MemoryTable.tsx d0e26f9d929e
@@ -713,18 +714,18 @@ src/web/params/types.ts 9840a32c5e5d
 src/web/params/useParamsMirror.ts 5529b48cfccc
 src/web/params/useToast.tsx 85cd09d2e1f5
 src/web/retrieval/AuditTrailCard.tsx ec4eb45c6bad
-src/web/retrieval/BudgetPanel.tsx 37d9e0b3efe7
+src/web/retrieval/BudgetPanel.tsx 8a99ac90d148
 src/web/retrieval/ContextPanel.tsx ced78de9c9db
 src/web/retrieval/ModeBanner.tsx 6fe6fc992fae
-src/web/retrieval/QueryBar.tsx af31e1000b03
-src/web/retrieval/ResultList.tsx 12804bf53d10
-src/web/retrieval/ResultRow.tsx 37402263bf53
-src/web/retrieval/RetrievalPage.tsx 5e817151235e
-src/web/retrieval/coreEngine.ts f28f4aa2f735
-src/web/retrieval/logic.ts a39b8afe5920
-src/web/retrieval/retrievalEntry.tsx 48813d404181
-src/web/retrieval/types.ts 02c4f1b8beba
-src/web/retrieval/useRetrieval.ts ecd58a163f68
+src/web/retrieval/QueryBar.tsx 20856f75ecc7
+src/web/retrieval/ResultList.tsx 7601b8d14c2b
+src/web/retrieval/ResultRow.tsx 7a392df30391
+src/web/retrieval/RetrievalPage.tsx 80b2e46f6cf5
+src/web/retrieval/coreEngine.ts ea3caa5c9ba6
+src/web/retrieval/logic.ts af47fabed86b
+src/web/retrieval/retrievalEntry.tsx a168eb39c7b8
+src/web/retrieval/types.ts 258fc8fef808
+src/web/retrieval/useRetrieval.ts 48cee0abfa58
 src/web/retrieval/useToast.tsx 85cd09d2e1f5
 src/web/security/AccountAdminCard.tsx 23692c9117df
 src/web/security/FieldBackfillCard.tsx e25b5b82223e
@@ -761,7 +762,7 @@ src/web/shared/l0Port.ts eca5be9d579c
 src/web/shared/layerTime.ts 6c21b4d94211
 src/web/shared/mirrorFailureEvent.ts b3b97ae09cd1
 src/web/shared/mirrorFailureNotice.ts 3b984898459c
-src/web/shared/paginate.ts d79b09857836
+src/web/shared/paginate.ts 2d638d875228
 src/web/shared/selectionChannel.ts e826341f42e1
 src/web/shared/session.ts 2bc9578bb923
 src/web/shared/shellNavigate.ts b8b75188302d
@@ -775,20 +776,21 @@ src/web/shell/layers.ts 8f18e012b258
 src/web/shell/overview.ts da3fd4e65972
 src/web/shell/statusbar.ts adb851ba53b2
 src/web/shell/taskpane.ts 39d5562ae71b
-src/web/shell/views.ts 3c86aa7dbad9
+src/web/shell/views.ts 306d8175648e
 src/web/shell/workspaceEntry.tsx d81475dafbfc
 src/web/sync/SyncPage.tsx 1282b8549322
 src/web/sync/coreSyncPage.ts e25ef86eaea4
 src/web/sync/syncEntry.tsx 4f1348160022
 src/web/test-setup.ts 3a2ad06d2218
 src/web/vite-env.d.ts 191b7a12f3de
-src/web/write/DedupCard.tsx f1a434a39892
-src/web/write/WriteForm.tsx ae3bb29058ff
-src/web/write/WritePage.tsx 869c8f162885
-src/web/write/coreWrite.ts cd1d5bf295a1
-src/web/write/logic.ts ecb4e9d45e79
+src/web/write/DedupCard.tsx f606fcffe64a
+src/web/write/WriteForm.tsx aa69f524ec22
+src/web/write/WritePage.tsx 4ed658bcd7b8
+src/web/write/WriteReceiptCard.tsx b8f0a5a29685
+src/web/write/coreWrite.ts 4496b6e19427
+src/web/write/logic.ts ad3be491e5ba
 src/web/write/spec.ts e3be40666e69
-src/web/write/types.ts 80336a796cbd
+src/web/write/types.ts 37367e5fac58
 src/web/write/useToast.tsx c650d8662672
 src/web/write/useWriteMirror.ts 699df53d6c7c
-src/web/write/writeEntry.tsx b4a67bb13466
+src/web/write/writeEntry.tsx a1f5c6bd7227

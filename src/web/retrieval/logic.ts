@@ -125,6 +125,13 @@ export function budgetLevel(payload: number): BudgetLevel {
   return 'breach';
 }
 
+/** 注入 token 估算（与写入页同口径：CJK ≈ 2 token/字，其它 ≈ 1.3 token/词） */
+export function approxTokens(text: string): number {
+  const cjk = (text.match(/[一-鿿]/g) || []).length;
+  const other = (text.replace(/[一-鿿\s]/g, '').match(/[a-zA-Z0-9]+/g) || []).length;
+  return Math.round(cjk * 2 + other * 1.3);
+}
+
 /** §7.1 query 校验：trim 非空 + 极简提示信号（不阻止提交） */
 export function validateQuery(query: string): { error: string | null; minimalHint: boolean } {
   const q = query.trim();

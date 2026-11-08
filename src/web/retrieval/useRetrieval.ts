@@ -22,8 +22,15 @@ export function useRetrieval() {
   /** 硬熔断禁用检索 3s（§6） */
   const [cooldown, setCooldown] = useState(false);
 
-  /** 批次48 A26：projectScope 缺省 = 全部项目（单项目场景行为不变） */
-  const search = useCallback((query: string, scene: Scene, mode: ModeSel, projectScope: string = ALL_PROJECTS_SCOPE) => {
+  /** 批次48 A26：projectScope 缺省 = 全部项目；budgetTokens/depth 缺省 = 与旧签名一致 */
+  const search = useCallback((
+    query: string,
+    scene: Scene,
+    mode: ModeSel,
+    projectScope: string = ALL_PROJECTS_SCOPE,
+    budgetTokens?: number,
+    depth?: string,
+  ) => {
     if (cooldown) return;
     seq.current += 1;
     const requestId = newRequestId('req');
@@ -32,16 +39,22 @@ export function useRetrieval() {
     // 引擎 = memagent-core 内核 recall（同步内存实现，微任务级）；setTimeout 仅模拟网络延迟，绝不伪造数据
     setTimeout(() => {
       void (async () => {
-        const r = await coreEngine(query, scene, mode, requestId, projectScope);
-        if (r.breach) {
-          setErrorKind('breach');
+        try {
+          const r = await coreEngine(query, scene, mode, requestId, projectScope, { budgetTokens, depth });
+          if (r.breach) {
+            setErrorKind('breach');
+            setPhase('ERROR');
+            setCooldown(true);
+            setTimeout(() => setCooldown(false), 3000);
+            return;
+          }
+          setResult(r);
+          setPhase(r.hits.length === 0 ? 'EMPTY' : 'RESULT');
+        } catch {
+          // 内核不可达 = 诚实错误态，不伪造空结果
+          setErrorKind('timeout');
           setPhase('ERROR');
-          setCooldown(true);
-          setTimeout(() => setCooldown(false), 3000);
-          return;
         }
-        setResult(r);
-        setPhase(r.hits.length === 0 ? 'EMPTY' : 'RESULT');
       })();
     }, 120);
   }, [cooldown]);
