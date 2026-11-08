@@ -9,7 +9,7 @@
 //   · 调度 / 权重 / 阈值 = 真实配置（非演示数据）
 import { useEffect, useMemo, useState } from 'react';
 import type {
-  DeltaPoint, DimKey, DimWeights, GrowthAuditEntry, GrowthMetrics,
+  DeltaPoint, DimKey, DimWeights, GrowthAuditEntry, GrowthMetrics, GrowthReceipt,
   Layer, LayerThresholds, ScheduleItem,
 } from './types.ts';
 import type { RealGrowth } from './useGrowthReal.ts';
@@ -29,7 +29,7 @@ import { newRequestId } from '../kernel.ts';
 import { hostCapability } from '../../desktop/hostBridge.ts';
 import { loadRealGrowthData } from './useGrowthReal.ts';
 import { DedupCard, DevTunePanel, ShortCircuitFlow } from './DedupCards.tsx';
-import { DeltaPanel, GrowthCards, OptimizationList, ScheduleTimeline } from './GrowthPanels.tsx';
+import { DeltaPanel, GrowthCards, OptimizationList, RegressionTable, ScheduleTimeline } from './GrowthPanels.tsx';
 import { useToast } from './useToast.tsx';
 
 const EMPTY_METRICS: GrowthMetrics = {
@@ -44,6 +44,7 @@ export function GrowthPage() {
   const [audit, setAudit] = useState<GrowthAuditEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [real, setReal] = useState<RealGrowth | null>(null);
+  const [receipt, setReceipt] = useState<GrowthReceipt | null>(null);
   const [sampleIdx, setSampleIdx] = useState(0);
   const { node: toast, show } = useToast();
   const reportMirror = useGrowthMirror();
@@ -86,7 +87,16 @@ export function GrowthPage() {
   // R3：Δ 取自真实 7.1 反馈（调权重前后命中率差；最近一次 weight_tuned 审计的 payload）
   const lastTuned = audit.filter((a) => a.event === 'weight_tuned').slice(0, 1)[0];
   const deltaBefore = real && lastTuned ? extractDeltaBefore(lastTuned) : 0;
-  const delta = useMemo(() => growthDelta(deltaBefore, metrics.hit_rate), [deltaBefore, metrics.hit_rate]);
+  const delta = useMemo(() => {
+    // Δ 优先取真实回归采纳的测试集 F1 提升；无采纳记录才退回历史 weight_tuned 的命中率差。
+    const adopted = real?.regressionRecords.find(
+      (r) => r.kind === 'adopted' && r.before && r.after,
+    );
+    if (adopted?.before && adopted.after) {
+      return Math.round((adopted.after.f1 - adopted.before.f1) * 1000) / 1000;
+    }
+    return growthDelta(deltaBefore, metrics.hit_rate);
+  }, [real, deltaBefore, metrics.hit_rate]);
 
   const wCheck = validateWeights(weights);
   const tCheck = validateThresholds(thresholds);
@@ -126,7 +136,8 @@ export function GrowthPage() {
     // 手动触发 = 跑**真实**回归（与主进程 cron 同一核心算法）；
     // 三种结果由 core 落审计，页面只转述真实结论，不再手写 weight_tuned。
     try {
-      const r = await coreRunGrowthRegression();
+      const { result: r, receipt: rc } = await coreRunGrowthRegression();
+      setReceipt(rc);
       if (r.status === 'insufficient_samples') {
         const c = r.counts;
         show(`样本不足（累计 ${c.total} 条 / 负例 ${c.negatives} 条）· 正在积累样本，非故障`);
@@ -173,52 +184,86 @@ export function GrowthPage() {
 
   if (loading) {
     return (
-      <div className="wrap" data-testid="growth-page">
-        <h1>🌱 自我净化与生长页 <span className="badge p2">REQ-009 · P14</span></h1>
+      <div className="p0-page" data-testid="growth-page">
+        <div className="p0-hd">
+          <h2>🌱 生长与自进化</h2>
+          <span className="p0-tag">REQ-009 · P14</span>
+        </div>
         <div className="note">加载真实账本中…</div>
       </div>
     );
   }
 
   return (
-    <div className="wrap" data-testid="growth-page">
-      <h1>
-        🌱 自我净化与生长页 <span className="badge p2">REQ-009 · P14</span>
-        <label style={{ fontSize: 13, marginLeft: 14, fontWeight: 400 }}>
-          <input type="checkbox" data-testid="dev-mode" checked={devMode} onChange={(e) => setDevMode(e.target.checked)} /> 开发者模式（G7）
-        </label>
-      </h1>
+    <div className="p0-page" data-testid="growth-page">
+      <div className="p0-hd">
+        <h2>🌱 生长与自进化</h2>
+        <span className="p0-tag">REQ-009 · P14</span>
+        <span className="p0-tag info">真实 growth:v1</span>
+        <div className="p0-right">
+          <label style={{ fontSize: 11.5 }}>
+            <input type="checkbox" data-testid="dev-mode" checked={devMode} onChange={(e) => setDevMode(e.target.checked)} /> 开发者模式（G7）
+          </label>
+        </div>
+      </div>
       <div className="sub">
         自净化（6.1 五维：仅展示有可信测量的维度 + 6.2 短路嫁接）+ 自生长（7.1 指标 / 7.2 Δ / 13.3 调度 真实账本实算）·
         账本规模：记忆 {real?.memCount ?? 0} 条 / 审计 {real?.auditCount ?? 0} 条
       </div>
 
       {(devMode && (!wCheck.ok || !tCheck.ok)) && (
-        <div className="card" data-testid="tune-errors" style={{ borderColor: 'var(--danger,#ff5d5d)' }}>
+        <div className="p0-banner err" data-testid="tune-errors">
           ⚠ {wCheck.ok ? tCheck.msg : wCheck.msg}
         </div>
       )}
 
-      <DedupCard sample={sample} weights={weights} thresholds={thresholds} onResample={handleResample} />
-      <ShortCircuitFlow steps={steps} stats={dedupStats} />
-      <DevTunePanel
-        devMode={devMode} weights={weights} thresholds={thresholds}
-        onWeights={patchWeights} onThresholds={patchThresholds} onSave={handleSaveConfig}
-      />
+      <div className="p0-sec" data-testid="growth-sec-dedup">
+        <div className="p0-sec-hd">
+          <h3>一、判重与嫁接</h3>
+          <span className="p0-tag">6.1 五维判重 · 6.2 多层短路</span>
+        </div>
+        <DedupCard sample={sample} weights={weights} thresholds={thresholds} onResample={handleResample} />
+        <ShortCircuitFlow steps={steps} stats={dedupStats} />
+        <DevTunePanel
+          devMode={devMode} weights={weights} thresholds={thresholds}
+          onWeights={patchWeights} onThresholds={patchThresholds} onSave={handleSaveConfig}
+        />
+      </div>
 
-      <GrowthCards m={metrics} empty={empty} />
-      <OptimizationList opts={opts} />
-      <DeltaPanel
-        series={series} delta={delta} audit={audit} onManualTrigger={handleManualTrigger}
-        regression={real?.regression ?? { kind: 'never_run', ts: null }}
-      />
-      <ScheduleTimeline schedule={schedule} onToggle={handleToggle} hostKind={hostCapability()} />
+      <div className="p0-sec" data-testid="growth-sec-regression">
+        <div className="p0-sec-hd">
+          <h3>二、回归评估</h3>
+          <span className="p0-tag">7.1 指标 · 7.2 Δ · 7.3 回归</span>
+        </div>
+        <GrowthCards m={metrics} empty={empty} />
+        <OptimizationList opts={opts} />
+        <RegressionTable records={real?.regressionRecords ?? []} />
+        <DeltaPanel
+          series={series} delta={delta} audit={audit} onManualTrigger={handleManualTrigger}
+          regression={real?.regression ?? { kind: 'never_run', ts: null }}
+          receipt={receipt}
+        />
+      </div>
 
-      <div className="card">
-        <b>红线自检</b>
-        <div className="note" data-testid="redline-status">
-          R1 权重和={wCheck.sum.toFixed(3)} {wCheck.ok ? '✓' : '✗'} · 阈值单调 {tCheck.ok ? '✓' : '✗'} ·
-          R2 优化全记真实审计 ✓ · R3 Δ 取自真实反馈 ✓ · R5 调度 {sCheck.ok ? '合法 ✓' : sCheck.msg}
+      <div className="p0-sec" data-testid="growth-sec-schedule">
+        <div className="p0-sec-hd">
+          <h3>三、调度</h3>
+          <span className="p0-tag">13.3 周期任务</span>
+        </div>
+        <ScheduleTimeline schedule={schedule} onToggle={handleToggle} hostKind={hostCapability()} />
+      </div>
+
+      <div className="p0-sec" data-testid="growth-sec-check">
+        <div className="p0-sec-hd">
+          <h3>四、红线自检</h3>
+          <span className="p0-tag">R1–R10</span>
+        </div>
+        <div className="card">
+          <b>红线自检</b>
+          <div className="note" data-testid="redline-status">
+            R1 权重和={wCheck.sum.toFixed(3)} {wCheck.ok ? '✓' : '✗'} · 阈值单调 {tCheck.ok ? '✓' : '✗'} ·
+            R2 优化全记真实审计 ✓ · R3 Δ 取自真实反馈 ✓ · R5 调度 {sCheck.ok ? '合法 ✓' : sCheck.msg}
+          </div>
         </div>
       </div>
       {toast}

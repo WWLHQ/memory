@@ -1,7 +1,7 @@
 // P14-T3 自生长侧组件：指标卡 + 五项优化 + Δ 收益曲线 + 调度时间轴（7.1/7.2/13.3）
 import type {
-  DeltaPoint, GrowthAuditEntry, GrowthMetrics, OptimizationItem, RegressionOutcome,
-  ScheduleItem, ScheduleRunInfo,
+  DeltaPoint, GrowthAuditEntry, GrowthMetrics, GrowthReceipt, OptimizationItem, RegressionOutcome,
+  RegressionRecord, ScheduleItem, ScheduleRunInfo,
 } from './types.ts';
 
 export function GrowthCards({ m, empty }: { m: GrowthMetrics; empty?: boolean }) {
@@ -95,8 +95,88 @@ export function regressionStatusText(r: RegressionOutcome): string {
   return `已采纳：${metricsText} · 权重/阈值已写入 growth:v1 账本`;
 }
 
+const REGRESSION_VERDICT: Record<RegressionRecord['kind'], { text: string; cls: string }> = {
+  insufficient_samples: { text: '样本不足', cls: '' },
+  not_adopted: { text: '未采纳', cls: 'warn' },
+  adopted: { text: '已采纳', cls: 'ok' },
+};
+
+const REASON_TEXT: Record<string, string> = {
+  f1_gain_below_threshold: '测试集 F1 提升未达 ≥0.02',
+  precision_drop_over_threshold: '精确率下降 > 0.05',
+  test_split_degenerate: '测试集切分退化（全正/全负或样本不足 10）',
+  invalid_proposal: '候选权重/阈值不合法，已回滚',
+};
+
+function signed(v: number, digits = 3): string {
+  return `${v >= 0 ? '+' : ''}${v.toFixed(digits)}`;
+}
+
+/** 回归评估表：每次真实回归一行；字段缺失显示「未记录」，不编造结论 */
+export function RegressionTable({ records }: { records: RegressionRecord[] }) {
+  return (
+    <div className="card" data-testid="regression-table">
+      <b>回归评估（7.3 · 真实账本逐条）</b>
+      <div className="note">
+        每行对应一条真实回归审计（insufficient_samples / weight_regression / weight_tuned）。
+        仅「已采纳」会把新权重/阈值写入 growth:v1；其余一律未改动配置。
+      </div>
+      {records.length === 0 ? (
+        <div className="p0-empty dashed" data-testid="regression-empty">
+          账本暂无回归记录 —— 未到运行时间（每周日 03:00），可在下方「手动触发」跑一次真实回归。
+        </div>
+      ) : (
+        <table className="ltable" data-testid="regression-rows">
+          <thead>
+            <tr>
+              <th>批次（request_id）</th>
+              <th>触发时间</th>
+              <th>样本</th>
+              <th>基线 F1</th>
+              <th>新 F1</th>
+              <th>精确率 Δ</th>
+              <th>结论</th>
+              <th>裁决</th>
+              <th>配置生效</th>
+            </tr>
+          </thead>
+          <tbody>
+            {records.map((r) => {
+              const verdict = REGRESSION_VERDICT[r.kind];
+              const gain = r.before && r.after ? r.after.f1 - r.before.f1 : null;
+              const precDelta = r.before && r.after ? r.after.precision - r.before.precision : null;
+              const conclusion = r.kind === 'insufficient_samples'
+                ? `累计 ${r.counts?.total ?? '未记录'} / 40 · 负例 ${r.counts?.negatives ?? '未记录'} / 10`
+                : r.kind === 'not_adopted'
+                  ? (REASON_TEXT[r.reason ?? ''] ?? (r.reason ?? '未给出原因'))
+                  : `测试集 F1 ${signed(gain ?? 0)} · 精确率 Δ ${signed(precDelta ?? 0)}`;
+              return (
+                <tr key={`${r.requestId}-${r.ts}`} data-testid={`regression-row-${r.requestId}`}>
+                  <td className="mono" title={r.requestId}>{r.requestId}</td>
+                  <td>{fmtTime(r.ts)}</td>
+                  <td>{r.counts ? `${r.counts.total}（正 ${r.counts.positives} / 负 ${r.counts.negatives}）` : '未记录'}</td>
+                  <td>{r.before ? r.before.f1.toFixed(3) : '—'}</td>
+                  <td>{r.after ? r.after.f1.toFixed(3) : '—'}</td>
+                  <td>{precDelta === null ? '—' : signed(precDelta)}</td>
+                  <td>{conclusion}</td>
+                  <td>
+                    <span className={`p0-tag ${verdict.cls}${verdict.cls ? '' : ''}`} data-testid={`regression-verdict-${r.requestId}`}>
+                      {verdict.text}
+                    </span>
+                  </td>
+                  <td>{r.applied ? 'growth:v1 已改' : '未修改'}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 export function DeltaPanel({
-  series, delta, audit, onManualTrigger, regression,
+  series, delta, audit, onManualTrigger, regression, receipt,
 }: {
   series: DeltaPoint[];
   delta: number;
@@ -104,6 +184,8 @@ export function DeltaPanel({
   onManualTrigger: () => void;
   /** 真实回归最近一次结果（四态；无记录 = 未到运行时间） */
   regression: RegressionOutcome;
+  /** 手动触发的真实审计回执（request_id / action / 账本累计条数） */
+  receipt: GrowthReceipt | null;
 }) {
   const max = Math.max(0.06, ...series.map((p) => Math.abs(p.delta)));
   const W = 560, H = 120, PAD = 28;
@@ -114,7 +196,7 @@ export function DeltaPanel({
       <b>自生长收益（7.2 · 联动效果看板 KPI9 · 真实账本）</b>
       <div className="note">
         Δ 取自真实 7 日反馈（7.1）；weight_tuned 触发点 = 每周日 03:00（13.3）。
-        曲线数据 = 真实 weight_tuned / growth_op 审计事件按日聚合，无记录则显示空态（不伪造数值）。
+        曲线数据 = 真实 weight_tuned 审计事件（回归采纳 + 历史 growth_op）按日聚合，无记录则显示空态（不伪造数值）。
       </div>
       <div className="row" style={{ alignItems: 'baseline', gap: 16, marginTop: 8 }}>
         <span data-testid="delta-value" style={{ fontSize: 26, fontWeight: 800, color: 'var(--ok,#5dd39e)' }}>
@@ -148,6 +230,12 @@ export function DeltaPanel({
       <div className="note" data-testid="regression-status" style={{ marginTop: 4 }}>
         自生长回归状态：{regressionStatusText(regression)}
       </div>
+      {receipt && (
+        <div className="note" data-testid="manual-receipt" style={{ marginTop: 4 }}>
+          审计回执：request_id=<span className="mono">{receipt.requestId}</span> · action=<b>{receipt.action}</b>
+          {' '}· 账本累计 {receipt.total} 条 · {fmtTime(receipt.at)}
+        </div>
+      )}
       {audit.length > 0 && (
         <div className="note" data-testid="growth-audit" style={{ marginTop: 6 }}>
           {audit.slice(0, 3).map((a, i) => (

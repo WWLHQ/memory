@@ -12,7 +12,7 @@ import type { StorageBackend } from '../../core/memagent/types.ts';
 import { getKernelStorage } from '../kernel.ts';
 import type {
   DedupSample, DeltaPoint, DimKey, DimWeights, GrowthMetrics, LayerThresholds,
-  ScheduleItem, GrowthAuditEntry, ScheduleRunInfo, RegressionOutcome,
+  ScheduleItem, GrowthAuditEntry, ScheduleRunInfo, RegressionOutcome, RegressionRecord,
 } from './types.ts';
 import { DEFAULT_SCHEDULE, DEFAULT_THRESHOLDS, DEFAULT_WEIGHTS } from './spec.ts';
 import { SCHEDULE_KEYS, type ScheduleKey } from '../../shared/growthConfig.ts';
@@ -144,16 +144,30 @@ export function dedupStatsFromLedger(audits: AuditRecord[]): {
   return { short_circuit_hits: shortCircuit, merged, avg_cost_ms: avg, avg_cost_samples: costs.length };
 }
 
-/** Δ 曲线：真实 weight_tuned / growth_op 审计事件（按日聚合）；无记录则空数组（UI 空态） */
+/**
+ * Δ 曲线：只取真实 **weight_tuned** 事件（7.2）。
+ * 两个真实来源：
+ *  · 回归采纳 audit（action='weight_tuned', detail.kind='dedup_regression'）→ Δ = 测试集 F1 提升；
+ *  · 页面/历史优化审计（action='growth_op', entry.event='weight_tuned'）→ Δ = 调权重后命中率 − 调权重前命中率。
+ * 无记录 → 空数组（UI 空态），不从 cron 反推、不造点。
+ */
 export function deltaSeriesFromLedger(audits: AuditRecord[]): DeltaPoint[] {
-  const tuned = audits.filter((a) => a.action === 'growth_op' &&
-    (a.detail as { entry?: GrowthAuditEntry })?.entry?.event === 'weight_tuned')
-    .sort((a, b) => a.ts - b.ts);
+  const tuned = audits.filter((a) => {
+    if (a.action === 'growth_op') {
+      return (a.detail as { entry?: GrowthAuditEntry })?.entry?.event === 'weight_tuned';
+    }
+    if (a.action === 'weight_tuned') {
+      const d = a.detail as Record<string, unknown> | undefined;
+      return d?.kind === 'dedup_regression';
+    }
+    return false;
+  }).sort((a, b) => a.ts - b.ts);
   if (tuned.length === 0) return [];
   const DAY_NAMES = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
   return tuned.slice(-14).map((a) => {
     const d = new Date(a.ts);
-    return { day: DAY_NAMES[d.getDay()], delta: deltaBeforeOf(a), is_tuned: true };
+    const gain = regressionF1GainOf(a);
+    return { day: DAY_NAMES[d.getDay()], delta: gain ?? deltaBeforeOf(a), is_tuned: true };
   });
 }
 
@@ -223,6 +237,45 @@ export function regressionOutcomeFromLedger(audits: AuditRecord[]): RegressionOu
   return out;
 }
 
+/**
+ * 逐条回归记录（回归评估表）：只认 kind='dedup_regression' 的真实审计，
+ * 最新在前；字段缺失保持 undefined（表格显示「未记录」），不编造 F1/精确率。
+ */
+export function regressionRecordsFromLedger(audits: AuditRecord[]): RegressionRecord[] {
+  const out: RegressionRecord[] = [];
+  for (const a of audits) {
+    if (!REGRESSION_ACTIONS.has(a.action)) continue;
+    const d = a.detail as Record<string, unknown> | undefined;
+    if (d?.kind !== 'dedup_regression') continue;
+    const kind: RegressionRecord['kind'] = a.action === 'insufficient_samples'
+      ? 'insufficient_samples'
+      : a.action === 'weight_regression' ? 'not_adopted' : 'adopted';
+    const rec: RegressionRecord = {
+      requestId: a.request_id,
+      ts: a.ts,
+      kind,
+      applied: kind === 'adopted',
+    };
+    const counts = countsOf(kind === 'insufficient_samples' ? d : d.counts);
+    if (counts) rec.counts = counts;
+    if (typeof d.reason === 'string') rec.reason = d.reason;
+    if (kind === 'not_adopted') {
+      const before = testMetricsOf(d.before);
+      const after = testMetricsOf(d.after);
+      if (before) rec.before = before;
+      if (after) rec.after = after;
+    } else if (kind === 'adopted') {
+      const m = d.metrics as Record<string, unknown> | undefined;
+      const before = testMetricsOf(m?.before);
+      const after = testMetricsOf(m?.after);
+      if (before) rec.before = before;
+      if (after) rec.after = after;
+    }
+    out.push(rec);
+  }
+  return out.sort((x, y) => y.ts - x.ts);
+}
+
 const SCHEDULE_KEY_SET = new Set<string>(SCHEDULE_KEYS);
 
 /**
@@ -278,6 +331,8 @@ export interface RealGrowth {
   scheduleRuns: Partial<Record<ScheduleKey, ScheduleRunInfo>>;
   /** 自生长回归的最近一次结果（四态可区分；无记录 = 未到运行时间） */
   regression: RegressionOutcome;
+  /** 每次真实回归的逐条记录（最新在前；无记录 = 空数组） */
+  regressionRecords: RegressionRecord[];
 }
 
 // 真实账本实算标记（供构建产物核验）
@@ -305,7 +360,19 @@ export async function loadRealGrowthData(): Promise<RealGrowth> {
     growthAudit,
     scheduleRuns: scheduleRunsFromLedger(audits),
     regression: regressionOutcomeFromLedger(audits),
+    regressionRecords: regressionRecordsFromLedger(audits),
   };
+}
+
+/** 回归采纳审计 → 测试集 F1 提升（missing 字段 → null，不拿 0 冒充） */
+function regressionF1GainOf(a: AuditRecord): number | null {
+  if (a.action !== 'weight_tuned') return null;
+  const d = a.detail as { kind?: unknown; metrics?: { before?: unknown; after?: unknown } } | undefined;
+  if (d?.kind !== 'dedup_regression') return null;
+  const before = testMetricsOf(d.metrics?.before);
+  const after = testMetricsOf(d.metrics?.after);
+  if (!before || !after) return null;
+  return Math.round((after.f1 - before.f1) * 1000) / 1000;
 }
 
 /** 审计 payload（JSON 字符串）→ delta_before；解析失败按 0（账本不伪造） */

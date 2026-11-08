@@ -93,6 +93,30 @@ export interface RegressionOutcome {
   after?: { f1: number; precision: number };
 }
 
+/**
+ * 一次真实回归的账本记录（回归评估表逐行呈现）。
+ * 全部字段只取真实审计 detail；缺字段保持 undefined，不用 0 / 假值补齐。
+ */
+export interface RegressionRecord {
+  requestId: string;
+  ts: number;
+  kind: 'insufficient_samples' | 'not_adopted' | 'adopted';
+  counts?: { total: number; positives: number; negatives: number; window_days: number };
+  before?: { f1: number; precision: number };
+  after?: { f1: number; precision: number };
+  reason?: string;
+  /** true = 已采纳并把新权重/阈值写入 growth:v1 账本；false = 未改动任何配置 */
+  applied: boolean;
+}
+
+/** 手动触发的真实审计回执（request_id + 动作 + 该动作账本累计条数） */
+export interface GrowthReceipt {
+  requestId: string;
+  action: string;
+  total: number;
+  at: number;
+}
+
 /** 自生长收益曲线点（7.2 / 13.3） */
 export interface DeltaPoint {
   day: string;

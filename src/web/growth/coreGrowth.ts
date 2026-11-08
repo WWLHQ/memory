@@ -69,12 +69,29 @@ export async function coreSaveGrowthConfig(
  * 批次48 A23.3：页面「立即执行」= 跑**真实**回归（同一核心算法，与主进程 cron 一致），
  * 结果由 core 写 insufficient_samples / weight_regression / weight_tuned 审计；
  * 采纳时才落新配置。页面据返回 status 如实提示，不再写假的 weight_tuned。
+ * 同时回传真实审计回执（request_id / 写入的 action / 该动作账本累计条数）。
  */
-export async function coreRunGrowthRegression(): Promise<RegressionRunResult> {
+export interface RegressionReceipt {
+  requestId: string;
+  action: 'insufficient_samples' | 'weight_regression' | 'weight_tuned';
+  total: number;
+  at: number;
+}
+
+export async function coreRunGrowthRegression(): Promise<{
+  result: RegressionRunResult;
+  receipt: RegressionReceipt;
+}> {
   const { storage } = await getCtx();
   const tenant = getTenant();
-  return runGrowthRegression(storage, {
-    requestId: newRequestId('reg'), form: 'web',
+  const requestId = newRequestId('reg');
+  const result = await runGrowthRegression(storage, {
+    requestId, form: 'web',
     enterpriseId: tenant.enterprise_id, teamId: tenant.team_id,
   });
+  const action = result.status === 'insufficient_samples'
+    ? 'insufficient_samples'
+    : result.status === 'not_adopted' ? 'weight_regression' : 'weight_tuned';
+  const total = (await storage.queryAudit({ action })).length;
+  return { result, receipt: { requestId, action, total, at: Date.now() } };
 }

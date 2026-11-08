@@ -1,0 +1,107 @@
+/* 旧组件类名 → p0 基元映射（生长 / 模型与成本 / 参数三页共用）。
+   这些页面原先依赖 shared/theme.css 的暗色版式；本组统一到定稿 p0 令牌后，
+   用本文件把 .card/.btn/.ltable/.note 等旧类按 p0 尺寸与亮暗令牌重绘，避免逐组件重写。 */
+
+:root {
+  --border: var(--line);
+  --fg: var(--text);
+  --danger: var(--err);
+  --bg2: var(--field);
+}
+html[data-theme="dark"] {
+  --border: var(--line);
+  --fg: var(--text);
+  --danger: var(--err);
+  --bg2: var(--field);
+}
+
+h1 { font-size: 14.5px; margin: 0; font-weight: 600; line-height: 1.2; }
+.sub { color: var(--muted); font-size: 11px; margin: 2px 0 8px; line-height: 1.55; }
+
+/* 卡片：定稿 p0 的 4px 圆角 / 8×10 内距 */
+.card {
+  background: var(--win);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+.card > b { font-size: 12.5px; }
+.card b { font-weight: 600; }
+
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 7px 0; }
+.dim { color: var(--faint); }
+.mid, code { font-family: var(--mono); font-size: 10.5px; color: var(--accent); }
+.note { font-size: 10.5px; color: var(--muted); margin-top: 6px; line-height: 1.55; }
+.note b { color: var(--text); }
+
+.badge {
+  display: inline-flex; align-items: center; height: 19px; padding: 0 6px;
+  font-size: 10.5px; font-weight: 500; border-radius: 3px;
+  border: 1px solid var(--line); background: var(--chip); color: var(--muted);
+}
+.badge.p2 { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); background: color-mix(in srgb, var(--warn) 8%, var(--win)); }
+
+.btn {
+  height: 24px; padding: 0 10px; border: 1px solid var(--line); border-radius: 3px;
+  background: var(--chip); color: var(--text); font: inherit; font-size: 11.5px;
+  cursor: pointer;
+}
+.btn:hover { border-color: var(--accent); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+
+.panel {
+  background: var(--chip); border: 1px solid var(--line); border-radius: 4px; padding: 8px 10px;
+}
+
+/* 表格 */
+.ltable, .tbl { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+.ltable th, .ltable td, .tbl th, .tbl td {
+  padding: 5px 7px; text-align: left; vertical-align: middle;
+  border-bottom: 1px solid var(--line-2);
+}
+.ltable th, .tbl th {
+  color: var(--muted); font-weight: 600; font-size: 11px;
+  background: var(--chip); border-bottom: 1px solid var(--line); white-space: nowrap;
+}
+.ltable tbody tr:hover td, .tbl tbody tr:hover td { background: var(--sel); color: var(--sel-text); }
+.ltable input[type=checkbox], .tbl input[type=checkbox] { cursor: pointer; accent-color: var(--accent); }
+
+/* 表单控件 */
+input:not([type=checkbox]):not([type=radio]),
+select, textarea {
+  background: var(--field); color: var(--text); border: 1px solid var(--line);
+  border-radius: 3px; padding: 3px 7px; font: inherit; font-size: 11.5px;
+  max-width: 100%;
+}
+input:not([type=checkbox]):not([type=radio]):focus,
+select:focus, textarea:focus { border-color: var(--accent); outline: none; }
+input:disabled, select:disabled, textarea:disabled { opacity: .45; cursor: not-allowed; }
+label { font-size: 11.5px; color: var(--text); }
+
+/* 六态 / 状态徽标 */
+.status { display: inline-block; font-size: 10.5px; padding: 1px 7px; border-radius: 3px; border: 1px solid var(--line); color: var(--muted); }
+.status.active { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); }
+.status.deprecated { color: var(--err); border-color: color-mix(in srgb, var(--err) 45%, var(--line)); }
+.status.stale { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.status.hibernating { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
+.status.archived, .status.dormant { color: var(--faint); background: var(--chip); }
+
+.toast {
+  position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+  background: var(--win); border: 1px solid var(--line); border-radius: 4px;
+  box-shadow: var(--shadow); padding: 7px 14px; font-size: 12px; z-index: 80;
+}
+
+.section-title { font-size: 11px; color: var(--muted); font-weight: 600; letter-spacing: .4px; margin: 14px 0 6px; }
+
+/* 定稿四段/三段结构的分段头 */
+.p0-sec { margin-bottom: 10px; }
+.p0-sec-hd {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 2px 5px; border-bottom: 1px solid var(--line); margin-bottom: 8px;
+}
+.p0-sec-hd h3 { font-size: 12.5px; margin: 0; font-weight: 600; }
+.p0-sec-hd .p0-tag { margin-left: auto; }
