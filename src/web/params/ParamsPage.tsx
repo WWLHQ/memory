@@ -64,9 +64,16 @@ export function ParamsPage({ load = coreLoadParams }: { load?: () => Promise<Par
   };
 
   return (
-    <div className="wrap" data-testid="params-page">
-      <h1>🧩 全局参数页 <span className="badge p2">REQ-006 · P5</span></h1>
-      <div className="sub">17.6 文案化配置（G7 不暴露参数名）· 内核 preference 快照为真相</div>
+    <div className="p0-page" data-testid="params-page">
+      <div className="p0-hd">
+        <h2>🧩 参数</h2>
+        <span className="p0-tag">REQ-006 · P5</span>
+        <span className="p0-tag info">params:v1 · param_save 审计</span>
+      </div>
+      <div className="sub">
+        17.6 文案化配置（G7 不暴露参数名）· 内核 preference 快照为真相 ·
+        卡片：普通配置 / 知识库策略（内核真值只读）/ 知识库管理 / 引擎 / 提炼队列 / 开发者（仅记录）
+      </div>
 
       {phase === 'loading' && <div className="note" data-testid="params-loading">正在从内核读取已保存参数…</div>}
       {phase === 'error' && <KernelLoadError what="读取内核已保存参数" error={loadError} onRetry={retry} />}

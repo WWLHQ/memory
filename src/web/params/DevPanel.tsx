@@ -26,7 +26,13 @@ export function DevPanel({ dev, onChange }: Props) {
 
   return (
     <details className="card" data-testid="dev-panel">
-      <summary style={{ cursor: 'pointer' }}><b>开发者模式（底层参数）</b> <span className="dim">— 普通用户无需展开（G7）</span></summary>
+      <summary style={{ cursor: 'pointer' }}>
+        <b>开发者模式（底层参数）</b> <span className="dim">— 普通用户无需展开（G7）</span>
+      </summary>
+      <div className="p0-banner warn" data-testid="dev-not-effective" style={{ marginTop: 8 }}>
+        仅记录、不生效：以下底层参数保存只写 params:v1 preference 快照并记 param_save 审计；
+        内核检索/遗忘/短路当前使用固定常量（见 core/memagent），不会读取这些值 —— 页面不谎称「已折算到底层策略」。
+      </div>
 
       <div className="row" style={{ marginTop: 10 }}>
         <b>模式权重（2.4.3，和 = 1.0）</b>

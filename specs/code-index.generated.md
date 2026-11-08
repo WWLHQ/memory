@@ -244,15 +244,15 @@
 | [src/web/feedback/useFeedbackMirror.ts](src/web/feedback/useFeedbackMirror.ts) | 21 | 用户反馈页后端镜像（阶段5-C 口径统一）：真接 home server POST /api/mirror/audit。 | useFeedbackMirror(fn), FeedbackMirror(type) |
 | [src/web/feedback/useToast.tsx](src/web/feedback/useToast.tsx) | 13 | — | useToast(fn) |
 | [src/web/growth/DedupCards.tsx](src/web/growth/DedupCards.tsx) | 160 | P14-T3 自净化侧组件：五维评分卡 + 短路嫁接流程 + 24h 统计 + 开发者调参（6.1/6.2，G7） | DedupCard(fn), ShortCircuitFlow(fn), DevTunePanel(fn) |
-| [src/web/growth/GrowthPage.tsx](src/web/growth/GrowthPage.tsx) | 238 | 自我净化与生长页（REQ-009 / P14）· 真实数据接真版 | GrowthPage(fn) |
-| [src/web/growth/GrowthPanels.tsx](src/web/growth/GrowthPanels.tsx) | 259 | P14-T3 自生长侧组件：指标卡 + 五项优化 + Δ 收益曲线 + 调度时间轴（7.1/7.2/13.3） | GrowthCards(fn), OptimizationList(fn), regressionStatusText(fn), DeltaPanel(fn), ScheduleTimeline(fn) |
-| [src/web/growth/coreGrowth.ts](src/web/growth/coreGrowth.ts) | 81 | 自我净化与生长页（REQ-009 / P14）接真内核：优化/调度动作审计真写 storage 账本 | coreGrowthAudit(fn), coreLoadGrowthAudit(fn), coreLoadGrowthConfig(fn), coreSaveGrowthConfig(fn), coreRunGrowthRegression(fn) |
-| [src/web/growth/growthEntry.tsx](src/web/growth/growthEntry.tsx) | 10 | 自我净化与生长页（REQ-009 / P14）入口 | — |
+| [src/web/growth/GrowthPage.tsx](src/web/growth/GrowthPage.tsx) | 283 | 自我净化与生长页（REQ-009 / P14）· 真实数据接真版 | GrowthPage(fn) |
+| [src/web/growth/GrowthPanels.tsx](src/web/growth/GrowthPanels.tsx) | 347 | P14-T3 自生长侧组件：指标卡 + 五项优化 + Δ 收益曲线 + 调度时间轴（7.1/7.2/13.3） | GrowthCards(fn), OptimizationList(fn), regressionStatusText(fn), RegressionTable(fn), DeltaPanel(fn), ScheduleTimeline(fn) |
+| [src/web/growth/coreGrowth.ts](src/web/growth/coreGrowth.ts) | 98 | 自我净化与生长页（REQ-009 / P14）接真内核：优化/调度动作审计真写 storage 账本 | coreGrowthAudit(fn), coreLoadGrowthAudit(fn), coreLoadGrowthConfig(fn), coreSaveGrowthConfig(fn), coreRunGrowthRegression(fn), RegressionReceipt(type) |
+| [src/web/growth/growthEntry.tsx](src/web/growth/growthEntry.tsx) | 11 | 自我净化与生长页（REQ-009 / P14）入口 | — |
 | [src/web/growth/logic.ts](src/web/growth/logic.ts) | 139 | P14 纯逻辑（T2）：五维加权 / 逐层阈值 / 短路嫁接 / 优化评估 / Δ 收益 / 调度校验 / 审计 | weightedScore(fn), layerThresholdOf(fn), isDuplicate(fn), validateWeights(fn), validateThresholds(fn), shortCircuitPath(fn), evaluateOptimizations(fn), growthDelta(fn), appendTunedPoint(fn), validateSchedule(fn), auditOptimization(fn) |
 | [src/web/growth/spec.ts](src/web/growth/spec.ts) | 41 | 自我净化与生长页规格常量（非演示数据）：五维默认权重 / 逐层阈值 / 标签 / 调度。 | DEFAULT_WEIGHTS(const), DEFAULT_THRESHOLDS(const), DIM_LABELS(const), LAYERS(const), OPT_CONDITIONS(const), DEFAULT_SCHEDULE(const) |
-| [src/web/growth/types.ts](src/web/growth/types.ts) | 111 | P14 自我净化与生长页（REQ-009 6.1/6.2/7.1/7.2/13.3）数据模型 | DedupSample(type), ShortCircuitStep(type), GrowthMetrics(type), OptimizationItem(type), ScheduleItem(type), ScheduleRunInfo(type), RegressionOutcome(type), DeltaPoint(type), GrowthAuditEntry(type), OptState(type) |
+| [src/web/growth/types.ts](src/web/growth/types.ts) | 135 | P14 自我净化与生长页（REQ-009 6.1/6.2/7.1/7.2/13.3）数据模型 | DedupSample(type), ShortCircuitStep(type), GrowthMetrics(type), OptimizationItem(type), ScheduleItem(type), ScheduleRunInfo(type), RegressionOutcome(type), RegressionRecord(type), GrowthReceipt(type), DeltaPoint(type), GrowthAuditEntry(type), OptState(type) |
 | [src/web/growth/useGrowthMirror.ts](src/web/growth/useGrowthMirror.ts) | 11 | 自我净化与生长页后端镜像：growth_op 动作审计上抛（G6 fire-and-forget）。 | useGrowthMirror(fn) |
-| [src/web/growth/useGrowthReal.ts](src/web/growth/useGrowthReal.ts) | 322 | 自我净化与生长页（REQ-009 / P14）· 真实数据接真层 | samplesFromMemories(fn), metricsFromLedger(fn), dedupStatsFromLedger(fn), deltaSeriesFromLedger(fn), scheduleReal(fn), regressionOutcomeFromLedger(fn), scheduleRunsFromLedger(fn), loadRealGrowthData(fn), GROWTH_REAL_DATA_SOURCE(const), RealGrowth(type), RealStorage(type) |
+| [src/web/growth/useGrowthReal.ts](src/web/growth/useGrowthReal.ts) | 389 | 自我净化与生长页（REQ-009 / P14）· 真实数据接真层 | samplesFromMemories(fn), metricsFromLedger(fn), dedupStatsFromLedger(fn), deltaSeriesFromLedger(fn), scheduleReal(fn), regressionOutcomeFromLedger(fn), regressionRecordsFromLedger(fn), scheduleRunsFromLedger(fn), loadRealGrowthData(fn), GROWTH_REAL_DATA_SOURCE(const), RealGrowth(type), RealStorage(type) |
 | [src/web/growth/useToast.tsx](src/web/growth/useToast.tsx) | 13 | — | useToast(fn) |
 | [src/web/hostLlm.ts](src/web/hostLlm.ts) | 162 | 批次31 建 / 批次32 多引擎化：渲染层 LLM Provider —— 内核写路径的逐层精炼经 llm:refine IPC 代理主进程网关。 | engineBillingOf(fn), hostLlmAvailable(fn), refreshHostLlmSnapshot(fn), refreshHostLlmSnapshotOnce(fn), applyHostLlmSnapshot(fn), getHostLlmSnapshot(fn), setHostProxyAccounting(fn), getHostProxyAccounting(fn), isLocalBase(fn), createHostLlm(fn), LlmEngineView(type), LlmPresetView(type), LlmGatewaySnapshot(type) |
 | [src/web/httpStorage.ts](src/web/httpStorage.ts) | 116 | 批次28-A：浏览器内核数据面 —— StorageBackend 的 HTTP 透传实现。 | fetchKernelInfo(fn), KernelUnavailableError(class), HttpStorageBackend(class), HttpStorageOptions(type), KernelInfo(type) |
@@ -303,14 +303,14 @@
 | [src/web/mirrorClient.ts](src/web/mirrorClient.ts) | 101 | REQ-006 端壳 mirror 客户端（G6 审计上抛）：fire-and-forget，失败可观测。 | mirrorBackendUrl(fn), getLastMirrorFailure(fn), resetMirrorFailures(fn), subscribeMirrorFailure(fn), mirrorReport(fn), mirrorFetch(fn) |
 | [src/web/models/BillingPanel.tsx](src/web/models/BillingPanel.tsx) | 211 | 批次48 A31-c/A31-d：模型页「厂商余额与手工兜底」面板。 | BillingPanel(fn), ManualPatch(type) |
 | [src/web/models/LlmUsageTable.tsx](src/web/models/LlmUsageTable.tsx) | 113 | P13-T3 LLM 四用途表：本地/网络复选 + 端点/Key 脱敏槽 + 温度 + 超时 + fallback 恒开（R1/R2/R3/R4） | LlmUsageTable(fn) |
-| [src/web/models/ModelsPage.tsx](src/web/models/ModelsPage.tsx) | 290 | 大模型配置页（REQ-009 / P13）T4 编排 | ModelsPage(fn) |
+| [src/web/models/ModelsPage.tsx](src/web/models/ModelsPage.tsx) | 335 | 大模型配置页（REQ-009 / P13）T4 编排 | ModelsPage(fn) |
 | [src/web/models/ProxyPanel.tsx](src/web/models/ProxyPanel.tsx) | 180 | P13-T3 反代理面板：来源映射表 + 来源单选 + auto/manual 模式 + price_cap/cost_cap/预算条（19.8 / R7–R12） | ProxyPanel(fn), ProxyState(type) |
 | [src/web/models/VectorCard.tsx](src/web/models/VectorCard.tsx) | 104 | P13-T3 向量模型卡：切换联动 dims/deploy；换维度需保存后按新维度重建（R5）。 | VectorCard(fn) |
 | [src/web/models/catalog.ts](src/web/models/catalog.ts) | 34 | P13 大模型配置页：规格常量（向量模型 + 四用途默认参数）。 | defaultUsage(fn), VECTOR_MODELS(const), DEFAULT_VECTOR_KEY(const), USAGE_KEYS(const), USAGE_LABELS(const), DEFAULT_USAGES(const) |
 | [src/web/models/coreModels.ts](src/web/models/coreModels.ts) | 285 | 大模型配置页（REQ-009 / P13）接真内核： | coreLoadSources(fn), coreVectorCount(fn), coreSimulateAuto(fn), coreLoadProxyCaps(fn), coreSaveProxyCaps(fn), coreSaveConfig(fn), coreVectorProbe(fn), coreAuditTail(fn), SimulateOutcome(type), SaveConfigOutcome(type), VectorProbeResult(type) |
 | [src/web/models/logic.ts](src/web/models/logic.ts) | 126 | P13 纯逻辑（T2）：向量模型信息 / Key 脱敏 / 用途校验 / 反代理择优与审计 | vectorInfo(fn), maskKey(fn), rebuildEta(fn), validateUsage(fn), proxyBudgetOf(fn), remainingOf(fn), proxyEligible(fn), validatePriceCap(fn), autoPick(fn), manualPick(fn), auditProxy(fn), FALLBACK_ALWAYS_ON(const), ProxyPick(type) |
 | [src/web/models/modelConfig.ts](src/web/models/modelConfig.ts) | 145 | 模型配置真落盘（Phase C3）：向量模型/维度是内核构造参数，保存后必须参与 getKernel 装配。 | tenantStorageKey(fn), readModelConfig(fn), writeModelConfig(fn), configuredVectorDim(fn), sanitizeUsages(fn), hydrateUsages(fn), clearModelConfig(fn), ModelConfig(type), PersistedUsage(type) |
-| [src/web/models/modelsEntry.tsx](src/web/models/modelsEntry.tsx) | 10 | 大模型配置页（REQ-009 / P13）入口 | — |
+| [src/web/models/modelsEntry.tsx](src/web/models/modelsEntry.tsx) | 11 | 大模型配置页（REQ-009 / P13）入口 | — |
 | [src/web/models/types.ts](src/web/models/types.ts) | 71 | P13 大模型配置页（REQ-009 13.2 / 19.8）数据模型 | VectorModelInfo(type), UsageConfig(type), ProxySource(type), ProxyCallAuditEntry(type), ModelConfigAuditEntry(type), VectorModelKey(type), LlmUsage(type), ProxyTier(type), ProxySelectMode(type), ProxyAuditEntry(type) |
 | [src/web/models/useToast.tsx](src/web/models/useToast.tsx) | 13 | — | useToast(fn) |
 | [src/web/monitor/AlertTimeline.tsx](src/web/monitor/AlertTimeline.tsx) | 74 | P6-T3 告警时间线（12.2） | AlertTimeline(fn) |
@@ -328,18 +328,18 @@
 | [src/web/overview/OverviewPage.tsx](src/web/overview/OverviewPage.tsx) | 229 | 概览页（定稿 .ovx 版式）：一句话结论 + 4 张统计卡 + 范围行 + 编号洞察 01–04 + 快捷胶囊 + 建议 chips + 输入框。 | OverviewPage(fn) |
 | [src/web/overview/overviewEntry.tsx](src/web/overview/overviewEntry.tsx) | 20 | REQ-003 + REQ-005 通览演示页入口 | — |
 | [src/web/overview/overviewPageData.ts](src/web/overview/overviewPageData.ts) | 374 | 概览页（定稿 .ovx 版式）的纯派生层：把真实快照翻译成「一句话结论 / 4 卡 / 范围行 / 洞察 / 胶囊 / 建议」。 | deriveOverviewView(fn), answerOverviewQuestion(fn), OverviewStatView(type), OverviewInsightView(type), OverviewScopeView(type), OverviewView(type), OverviewAnswer(type), PillTone(type) |
-| [src/web/params/DevPanel.tsx](src/web/params/DevPanel.tsx) | 87 | P5-T3 开发者模式（折叠面板，暴露底层参数；2.4.3 / 2.4.1 / 15.3 / 9.10 / 15.1） | DevPanel(fn) |
+| [src/web/params/DevPanel.tsx](src/web/params/DevPanel.tsx) | 93 | P5-T3 开发者模式（折叠面板，暴露底层参数；2.4.3 / 2.4.1 / 15.3 / 9.10 / 15.1） | DevPanel(fn) |
 | [src/web/params/KbManagementCard.tsx](src/web/params/KbManagementCard.tsx) | 297 | 全局参数页（REQ-006 / P5）· 记忆库管理卡片 | KbManagementCard(fn) |
 | [src/web/params/KbPolicyTable.tsx](src/web/params/KbPolicyTable.tsx) | 40 | P5-T3 知识库策略表（17.6 六类）—— 阶段5-E / B9：内核 policyFor() 的只读镜像。 | KbPolicyTable(fn) |
 | [src/web/params/LlmEngineCard.tsx](src/web/params/LlmEngineCard.tsx) | 312 | 全局参数页 · LLM 精炼引擎卡片（批次31 建 / 批次32 多引擎化）：任意多家 OpenAI 兼容引擎（预设快选或自定义）， | LlmEngineCard(fn) |
 | [src/web/params/NormalConfigCard.tsx](src/web/params/NormalConfigCard.tsx) | 117 | P5-T3 普通配置卡（17.6 文案化，G7 不暴露参数名） | NormalConfigCard(fn) |
-| [src/web/params/ParamsPage.tsx](src/web/params/ParamsPage.tsx) | 109 | 全局参数页（REQ-006 / P5）T4 编排 | ParamsPage(fn) |
+| [src/web/params/ParamsPage.tsx](src/web/params/ParamsPage.tsx) | 116 | 全局参数页（REQ-006 / P5）T4 编排 | ParamsPage(fn) |
 | [src/web/params/RefineQueueCard.tsx](src/web/params/RefineQueueCard.tsx) | 230 | 参数页 · L2–L6 后台补炼队列卡（批次39）。 | RefineQueueCard(fn) |
 | [src/web/params/coreParams.ts](src/web/params/coreParams.ts) | 86 | 全局参数页（REQ-006 / P5）接真内核：参数快照存内核 preference 记忆（params:v1: JSON， | coreLoadParams(fn), coreSaveParams(fn) |
 | [src/web/params/defaults.ts](src/web/params/defaults.ts) | 77 | 全局参数页默认值与展示标签（规格常量；用户保存后以内核 preference 快照为真相）。 | kernelKbPolicies(fn), DEFAULT_CONFIG(const), SPEED_LABEL(const), RETENTION_LABEL(const), IMPORTANCE_LABEL(const), CATEGORY_LABEL(const), DEFAULT_KB_POLICIES(const), DEFAULT_DEV(const), LEVEL_MAPPING(const) |
 | [src/web/params/llmEngine.ts](src/web/params/llmEngine.ts) | 83 | 全局参数页 · LLM 精炼引擎桥（批次31 建 / 批次32 多引擎化）：渲染层经宿主桥走 llm:* IPC 调主进程网关。 | llmEngineAvailable(fn), llmGetConfig(fn), llmSaveConfig(fn), llmTestEngine(fn), LlmEnginePatch(type), LlmConfigPatch(type), LlmTestResult(type) |
 | [src/web/params/logic.ts](src/web/params/logic.ts) | 89 | 全局参数页（REQ-006 / P5）纯逻辑层 | speedToHalfLife(fn), retentionToArchive(fn), validateWeights(fn), payloadOrdered(fn), validateKbRow(fn), validateNM(fn), validateUnitPrice(fn), validateProxyQuota(fn), validateAll(fn), auditParams(fn) |
-| [src/web/params/paramsEntry.tsx](src/web/params/paramsEntry.tsx) | 10 | 全局参数页（REQ-006 / P5）入口 | — |
+| [src/web/params/paramsEntry.tsx](src/web/params/paramsEntry.tsx) | 11 | 全局参数页（REQ-006 / P5）入口 | — |
 | [src/web/params/refineQueue.ts](src/web/params/refineQueue.ts) | 147 | 批次39 · L2–L6 后台补炼队列的渲染层桥：状态读（需会话）/ 开关与补炼与重试失败行（仅管理员）。 | refineStopRows(fn), refineQueueAvailable(fn), REFINE_STOP_LABELS(const), refineStopLabel(const), refineQueueState(const), refineQueueSetEnabled(const), refineQueueBackfill(const), refineQueueRetryFailed(const), refineQueueSetCap(const), RefineQueueSummary(type), RefineQueueView(type), RefineEnqueueReport(type), RefineResult(type) |
 | [src/web/params/types.ts](src/web/params/types.ts) | 45 | 全局参数页（REQ-006 / P5）数据模型 | NormalConfig(type), KbPolicyRow(type), DevParams(type), ForgetSpeed(type), Retention(type), ImportanceLevel(type) |
 | [src/web/params/useParamsMirror.ts](src/web/params/useParamsMirror.ts) | 19 | 全局参数页后端镜像（阶段5-C 口径统一）：真接 home server POST /api/mirror/audit。 | useParamsMirror(fn), ParamsMirror(type) |
@@ -615,15 +615,15 @@ src/web/feedback/types.ts 938ae560ed3e
 src/web/feedback/useFeedbackMirror.ts 6bd1d844d78c
 src/web/feedback/useToast.tsx 85cd09d2e1f5
 src/web/growth/DedupCards.tsx fff9e745c003
-src/web/growth/GrowthPage.tsx 5c188431e831
-src/web/growth/GrowthPanels.tsx aaf46d4e3cc3
-src/web/growth/coreGrowth.ts 45eec04fbb7f
-src/web/growth/growthEntry.tsx af1f1a1c4b42
+src/web/growth/GrowthPage.tsx 6de761cedfa1
+src/web/growth/GrowthPanels.tsx 83181b07dc0a
+src/web/growth/coreGrowth.ts 506517347a95
+src/web/growth/growthEntry.tsx 5b43a02238b6
 src/web/growth/logic.ts 53b37d83d095
 src/web/growth/spec.ts b0d713d66185
-src/web/growth/types.ts 2f26ea874ea1
+src/web/growth/types.ts 627a34f2b8ea
 src/web/growth/useGrowthMirror.ts f485e5b5dae2
-src/web/growth/useGrowthReal.ts 409815b8b49c
+src/web/growth/useGrowthReal.ts 266d08f08bd1
 src/web/growth/useToast.tsx 85cd09d2e1f5
 src/web/hostLlm.ts 6b12c99be4b7
 src/web/httpStorage.ts d08876fec3ca
@@ -672,16 +672,16 @@ src/web/memory/types.ts 51eb8e91195f
 src/web/memory/useMemoryMirror.ts 50fcdb730ba3
 src/web/memory/useToast.tsx c650d8662672
 src/web/mirrorClient.ts f097d285d960
-src/web/models/BillingPanel.tsx e53c1d08dded
+src/web/models/BillingPanel.tsx 0653b59b0646
 src/web/models/LlmUsageTable.tsx 074fe4014d88
-src/web/models/ModelsPage.tsx 14a2c3766620
+src/web/models/ModelsPage.tsx e97c86317452
 src/web/models/ProxyPanel.tsx 702e3e775f9b
 src/web/models/VectorCard.tsx f9951358d9c0
 src/web/models/catalog.ts 79a4992557bf
 src/web/models/coreModels.ts 7dd6087867a7
 src/web/models/logic.ts 4dda97baeeaa
 src/web/models/modelConfig.ts 929edda56559
-src/web/models/modelsEntry.tsx de9c4158e6c0
+src/web/models/modelsEntry.tsx 3ddbadcf3a9e
 src/web/models/types.ts 973af42c99c1
 src/web/models/useToast.tsx 85cd09d2e1f5
 src/web/monitor/AlertTimeline.tsx 6fa33bdfb738
@@ -699,18 +699,18 @@ src/web/overview/Overview.tsx b4303483348f
 src/web/overview/OverviewPage.tsx a99b31fa000e
 src/web/overview/overviewEntry.tsx 5f4488678cc7
 src/web/overview/overviewPageData.ts aac381e4c1fa
-src/web/params/DevPanel.tsx 4d2f45da1bcd
+src/web/params/DevPanel.tsx adbe8f5c483f
 src/web/params/KbManagementCard.tsx 42c5a719d2f8
 src/web/params/KbPolicyTable.tsx c39b52ed1039
 src/web/params/LlmEngineCard.tsx 4c938ef647cb
 src/web/params/NormalConfigCard.tsx c9d2b664ee4f
-src/web/params/ParamsPage.tsx 0d41514ca4f5
+src/web/params/ParamsPage.tsx 3bc1e155e1a5
 src/web/params/RefineQueueCard.tsx 82f73cc8f0ad
 src/web/params/coreParams.ts 450ba203beb2
 src/web/params/defaults.ts 6dd5728ef0ec
 src/web/params/llmEngine.ts bd46b6e725ef
 src/web/params/logic.ts 1e5af0361e3b
-src/web/params/paramsEntry.tsx 47657233be13
+src/web/params/paramsEntry.tsx b515fd3e8d65
 src/web/params/refineQueue.ts 00f06b45c16c
 src/web/params/types.ts 9840a32c5e5d
 src/web/params/useParamsMirror.ts 5529b48cfccc
