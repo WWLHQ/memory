@@ -13,6 +13,7 @@ import { useToast } from './useToast.tsx';
 import { useMemoryMirror } from './useMemoryMirror.ts';
 import { OP_TOAST } from './logic.ts';
 import { initialMemoryFilter } from './memoryFilter.ts';
+import { publishSelection } from '../shared/selectionChannel.ts';
 import { coreApplyOp, coreListMemories, coreUpdateContent, storageLocation, openMemoryFile } from './coreMemoryOps.ts';
 import { KernelLoadError, useKernelLoad } from '../shared/kernelLoad.tsx';
 import type { MemoryOp, MemoryRecord, MemoryStoreLocation } from './types.ts';
@@ -32,6 +33,34 @@ export function MemoryPage({ load = coreListMemories }: { load?: () => Promise<M
   const mirror = useMemoryMirror();
 
   const selected = memories.find((m) => m.id === selectedId) ?? null;
+
+  // S4：把真实选中记录回传给壳层属性检查器（取消选中回传 null；壳层不做任何补值）
+  useEffect(() => {
+    if (!selected) {
+      publishSelection(null);
+      return;
+    }
+    publishSelection({
+      v: 1,
+      page: 'memory.html',
+      title: `记忆 ${selected.id}`,
+      subtitle: `真实账本记录 · 状态 ${selected.status}`,
+      fields: [
+        { k: 'ID', v: selected.id, mono: true },
+        { k: '状态', v: selected.status },
+        { k: '类型', v: selected.type },
+        { k: '来源', v: selected.source_agent ? selected.source_agent : 'manual（手动写入页）' },
+        { k: '层级', v: selected.layer ?? '未记录（内核未给 layer）' },
+        { k: '重要度', v: selected.importance.toFixed(2) },
+        { k: '置信度', v: selected.confidence.toFixed(2) },
+        { k: '访问次数', v: String(selected.access_count) },
+        { k: '创建时间', v: selected.created_at },
+        { k: '更新时间', v: selected.updated_at },
+        { k: '锁定', v: selected.locked ? '是' : '否' },
+        { k: '归档', v: selected.archived ? '是' : '否' },
+      ],
+    });
+  }, [selected]);
 
   // 账本位置（诚实标注「存储在哪」）；读不到时保持 null，由抽屉显示未知
   useEffect(() => {

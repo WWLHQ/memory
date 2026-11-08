@@ -7,7 +7,8 @@
 // 无真实冲突 → 诚实空态并引导去写入页产生真实记忆。
 // ⚠ 内核读不到（批次25 P0-7）→ 三态加载：显示内核原因 + 重试，绝不渲染成「无待裁决冲突」。
 import { useEffect, useState } from 'react';
-import { queueSort, auditPair, initialConflictId } from './logic.ts';
+import { queueSort, auditPair, initialConflictId, overdueDays } from './logic.ts';
+import { publishSelection } from '../shared/selectionChannel.ts';
 import { useDisputeMirror } from './useDisputeMirror.ts';
 import { coreConflicts, coreVerdict } from './coreDispute.ts';
 import { KernelLoadError, kernelErrorText, useKernelLoad } from '../shared/kernelLoad.tsx';
@@ -43,6 +44,31 @@ export function DisputePage({ load = coreConflicts }: { load?: () => Promise<Con
   const now = Date.now();
   const filtered = queueSort(conflicts, now);
   const selected = conflicts.find((r) => r.id === selectedId) ?? null;
+
+  // S4：把真实待裁决冲突回传给壳层属性检查器（无选中回传 null）
+  useEffect(() => {
+    if (!selected) {
+      publishSelection(null);
+      return;
+    }
+    const days = overdueDays(selected.created_at, Date.now());
+    publishSelection({
+      v: 1,
+      page: 'dispute.html',
+      title: `冲突 ${selected.id}`,
+      subtitle: '真实账本 pending 冲突 · 内核检测结果原样回传',
+      fields: [
+        { k: 'ID', v: selected.id, mono: true },
+        { k: '旧记忆', v: selected.old_id, mono: true },
+        { k: '新记忆', v: selected.new_id, mono: true },
+        { k: '旧置信度', v: String(selected.old_confidence) },
+        { k: '新置信度', v: String(selected.new_confidence) },
+        { k: '待裁决标记', v: selected.dispute_flag ? 'dispute_flag=true' : 'dispute_flag=false' },
+        { k: '创建时间', v: selected.created_at },
+        { k: '超期天数', v: `${days} 天（>7 天高亮）` },
+      ],
+    });
+  }, [selected]);
 
   // 首次读到队列 → 默认选中第一条；裁决后出队 → 顺延选中
   useEffect(() => {

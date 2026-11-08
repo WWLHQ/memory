@@ -3,7 +3,7 @@
 > 由 `npm run code:index` 生成，请勿手改；改代码后重跑即可。
 > 用法：先在本表定位文件与导出符号，再只读该文件的局部区间（省 token、少误改）。
 
-共 351 个源码文件。
+共 352 个源码文件。
 
 ## e2e
 
@@ -222,7 +222,7 @@
 | [src/web/audit/useAuditMirror.ts](src/web/audit/useAuditMirror.ts) | 20 | 审计日志页后端镜像（T5）：沿用 ?backend= 覆盖模式。 | useAuditMirror(fn), AuditMirror(type) |
 | [src/web/audit/useToast.tsx](src/web/audit/useToast.tsx) | 13 | — | useToast(fn) |
 | [src/web/backend.ts](src/web/backend.ts) | 156 | 本机后端地址单一真源（与 src/electron/main.ts 的 MIRROR_PORT / AGENT_ONBOARD_PORT 对齐）。 | backendParam(fn), agentBackendParam(fn), homeBaseUrl(fn), onboardBaseUrl(fn), rememberHomeBase(fn), discoverTrustedDevBackend(fn), HOME_BASE(const), ONBOARD_BASE(const), DEV_FALLBACK_PORTS(const) |
-| [src/web/dispute/DisputePage.tsx](src/web/dispute/DisputePage.tsx) | 153 | 冲突裁决页 T5：完整编排 + mirror · 真实数据接真版 | DisputePage(fn) |
+| [src/web/dispute/DisputePage.tsx](src/web/dispute/DisputePage.tsx) | 179 | 冲突裁决页 T5：完整编排 + mirror · 真实数据接真版 | DisputePage(fn) |
 | [src/web/dispute/DisputeQueue.tsx](src/web/dispute/DisputeQueue.tsx) | 57 | P7-T3 冲突裁决队列组件 | DisputeQueue(fn) |
 | [src/web/dispute/DisputeVerdict.tsx](src/web/dispute/DisputeVerdict.tsx) | 44 | P7-T4 裁决操作组件 | DisputeVerdict(fn), VERDICTS(const) |
 | [src/web/dispute/coreDispute.ts](src/web/dispute/coreDispute.ts) | 84 | 冲突裁决页（REQ-006 / P7）接真内核：队列与裁决**全部下沉到内核原子 API**（批次46-3）。 | coreConflicts(fn), coreVerdict(fn), DisputeCtx(type), VerdictOutcome(type) |
@@ -280,8 +280,8 @@
 | [src/web/memory/LayerMemoryTable.tsx](src/web/memory/LayerMemoryTable.tsx) | 174 | 层级管理页每层内的记忆表格（带可拖拽表头列宽） | LayerMemoryTable(fn) |
 | [src/web/memory/MemoryActions.tsx](src/web/memory/MemoryActions.tsx) | 80 | 记忆管理页（REQ-006 / P8）操作区（T4） | MemoryActions(fn) |
 | [src/web/memory/MemoryDrawer.tsx](src/web/memory/MemoryDrawer.tsx) | 160 | 记忆管理页详情/编辑抽屉（T5） | MemoryDrawer(fn) |
-| [src/web/memory/MemoryLayeredPage.tsx](src/web/memory/MemoryLayeredPage.tsx) | 642 | 记忆层级管理页（REQ-006 / P8 · 19.11） | MemoryLayeredPage(fn), LayerId(type) |
-| [src/web/memory/MemoryPage.tsx](src/web/memory/MemoryPage.tsx) | 146 | 记忆库管理页（REQ-006 / P8）· 完整编排（T5） | MemoryPage(fn) |
+| [src/web/memory/MemoryLayeredPage.tsx](src/web/memory/MemoryLayeredPage.tsx) | 668 | 记忆层级管理页（REQ-006 / P8 · 19.11） | MemoryLayeredPage(fn), LayerId(type) |
+| [src/web/memory/MemoryPage.tsx](src/web/memory/MemoryPage.tsx) | 175 | 记忆库管理页（REQ-006 / P8）· 完整编排（T5） | MemoryPage(fn) |
 | [src/web/memory/MemoryRow.tsx](src/web/memory/MemoryRow.tsx) | 80 | 记忆管理页（REQ-006 / P8）单行（T3） | MemoryRow(fn) |
 | [src/web/memory/MemoryTable.tsx](src/web/memory/MemoryTable.tsx) | 255 | 记忆管理页（REQ-006 / P8）列表（T3）+ 过滤 + 分页 + 可拖拽列宽 | MemoryTable(fn), TYPE_OPTIONS(const), STATUS_OPTIONS(const), SOURCE_OPTIONS(const), MemoryTableFilterState(type), PageSize(type) |
 | [src/web/memory/backup.ts](src/web/memory/backup.ts) | 111 | 记忆库管理页 · 自动备份（P8 扩展）：渲染层经 hostCall 走 preload IPC 调主进程备份能力。 | backupAvailable(fn), backupGetConfig(fn), backupSaveConfig(fn), backupChooseDir(fn), backupRunNow(fn), backupList(fn), BACKUP_KIND_LABEL(const), BackupConfigView(type), BackupItem(type), BackupRunReceipt(type), BackupKind(type), BackupOpResult(type) |
@@ -386,12 +386,13 @@
 | [src/web/shared/mirrorFailureEvent.ts](src/web/shared/mirrorFailureEvent.ts) | 10 | 阶段5-C：mirror 上抛失败事件与载荷（零依赖共享，避免 mirrorClient ↔ actionLog 循环 import）。 | MIRROR_FAILURE_EVENT(const), MirrorFailure(type) |
 | [src/web/shared/mirrorFailureNotice.ts](src/web/shared/mirrorFailureNotice.ts) | 81 | 阶段5-C：镜像上抛失败的全局可见提示。 | installMirrorFailureNotice(fn), resetMirrorFailureNoticeForTests(fn) |
 | [src/web/shared/paginate.ts](src/web/shared/paginate.ts) | 31 | 列表分页纯函数（批次24）：记忆库 / 日志记录 / 审计日志共用同一口径。 | paginate(fn), PAGE_SIZES(const), DEFAULT_PAGE_SIZE(const), PageParams(type), Paged(type) |
+| [src/web/shared/selectionChannel.ts](src/web/shared/selectionChannel.ts) | 71 | 选中项回传通道（S4）：中心区真实页面把「用户当前选中的一条真实记录」回传给壳层属性检查器。 | parseSelection(fn), publishSelection(fn), SELECTION_MSG(const), SelectionField(type), SelectionPayload(type) |
 | [src/web/shared/session.ts](src/web/shared/session.ts) | 57 | 当前会话（批次7）：跨 iframe 共享的 sessionId + home server /api/me 的真实上下文。 | currentSessionId(fn), fetchSessionContext(fn), useSessionContext(fn), SessionState(type), SessionRole(type) |
 | [src/web/shared/syncHub.ts](src/web/shared/syncHub.ts) | 69 | 渲染层同步中枢代理（批次42-B）：把内核 AnySyncHub 接口转发到主进程 PgSyncHub。 | HostSyncHub(class) |
 | [src/web/shared/useColWidths.tsx](src/web/shared/useColWidths.tsx) | 97 | 表头列宽拖拽与固化（批次24）：记忆库 / 日志记录 / 审计日志三张表共用同一实现。 | loadColWidths(fn), saveColWidths(fn), useColWidths(fn), ColResizeHandle(fn), MIN_COL_WIDTH(const), ColWidths(type) |
 | [src/web/shared/useL0Session.ts](src/web/shared/useL0Session.ts) | 155 | 渲染层 L0 连续查阅会话（§4.4.3，日志页 / 记忆层级页共用）： | useL0Session(fn), formatRemaining(fn), L0_HEARTBEAT_MS(const), L0SessionView(type), L0SessionApi(type), L0UnlockOutcome(type), L0RequestOutcome(type) |
 | [src/web/shell/Icons.tsx](src/web/shell/Icons.tsx) | 72 | 壳层图标：定稿里的线性图标集，按需内联渲染（不引入外部图标库、不依赖网络）。 | Icon(fn) |
-| [src/web/shell/Workspace.tsx](src/web/shell/Workspace.tsx) | 661 | 工作台壳层（批次48 S1）：Ribbon + 导航树 + 标签条 + 属性检查器 + 任务窗 + 底部五标签 + 状态栏。 | Workspace(fn) |
+| [src/web/shell/Workspace.tsx](src/web/shell/Workspace.tsx) | 708 | 工作台壳层（批次48 S1）：Ribbon + 导航树 + 标签条 + 属性检查器 + 任务窗 + 底部五标签 + 状态栏。 | Workspace(fn) |
 | [src/web/shell/overview.ts](src/web/shell/overview.ts) | 118 | 壳层「概览」数据条（批次48 S2）：只从真实链路取值，逐项标明来源与失败原因。 | loadOverview(fn), OverviewHealth(type), OverviewBilling(type), OverviewSnapshot(type) |
 | [src/web/shell/views.ts](src/web/shell/views.ts) | 374 | 工作台壳层的视图映射（批次48 S1）。 | flattenNav(fn), findNav(fn), navPages(fn), PAGES(const), NAV(const), RIBBON(const), BOTTOM_TABS(const), NavGroup(type), NavItem(type), RibbonItem(type), RibbonGroup(type), RibbonTab(type), BottomTab(type), PageKey(type), NavEntry(type), IconName(type), ShellAction(type), BottomTabId(type) |
 | [src/web/shell/workspaceEntry.tsx](src/web/shell/workspaceEntry.tsx) | 20 | 工作台壳层入口（批次48 S1）：Electron 主窗口加载 workspace.html。 | — |
@@ -578,7 +579,7 @@ src/web/audit/types.ts ae4fa882565c
 src/web/audit/useAuditMirror.ts 34865de958b6
 src/web/audit/useToast.tsx 85cd09d2e1f5
 src/web/backend.ts 8fdc10aa241d
-src/web/dispute/DisputePage.tsx 79a8967d5987
+src/web/dispute/DisputePage.tsx be1b8a6f5785
 src/web/dispute/DisputeQueue.tsx cbd0b279cfe9
 src/web/dispute/DisputeVerdict.tsx 5cd67c1da73a
 src/web/dispute/coreDispute.ts b83ac78a3b21
@@ -636,8 +637,8 @@ src/web/memory/LayerFilterBar.tsx 5f8c2bea1169
 src/web/memory/LayerMemoryTable.tsx 6fd085b03ff4
 src/web/memory/MemoryActions.tsx 9983e64102b0
 src/web/memory/MemoryDrawer.tsx 9f6b29b0d433
-src/web/memory/MemoryLayeredPage.tsx bc7ff109fd9a
-src/web/memory/MemoryPage.tsx 98e72d1c0ee5
+src/web/memory/MemoryLayeredPage.tsx 49a8b6283931
+src/web/memory/MemoryPage.tsx 420d1c28a208
 src/web/memory/MemoryRow.tsx 0be7881628bf
 src/web/memory/MemoryTable.tsx d0e26f9d929e
 src/web/memory/backup.ts e6e666400feb
@@ -742,12 +743,13 @@ src/web/shared/layerTime.ts 6c21b4d94211
 src/web/shared/mirrorFailureEvent.ts b3b97ae09cd1
 src/web/shared/mirrorFailureNotice.ts 3b984898459c
 src/web/shared/paginate.ts d79b09857836
+src/web/shared/selectionChannel.ts e826341f42e1
 src/web/shared/session.ts 2bc9578bb923
 src/web/shared/syncHub.ts 831b0d785108
 src/web/shared/useColWidths.tsx a6e14931a82b
 src/web/shared/useL0Session.ts c917a61c99d9
 src/web/shell/Icons.tsx 19cebaeba156
-src/web/shell/Workspace.tsx 663377ac4ece
+src/web/shell/Workspace.tsx 8b669f4702a1
 src/web/shell/overview.ts 0765a086262d
 src/web/shell/views.ts 679a99c2f98c
 src/web/shell/workspaceEntry.tsx d81475dafbfc

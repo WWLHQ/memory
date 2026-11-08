@@ -1,6 +1,7 @@
 // 壳层渲染行为（批次48 S1）：导航、不可用态、状态栏诚实口径、底部标签。
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { SELECTION_MSG } from '../../shared/selectionChannel.ts';
 
 // 概览条的数据加载走真实内核/网络；组件单测只验证渲染契约，故固定快照。
 vi.mock('../overview.ts', () => ({
@@ -128,5 +129,70 @@ describe('S3 深链接线（D4）：壳层把初值真的交给目标真实页�
     const src = activeFrameSrc(container);
     expect(src).toContain('/memory.html');
     expect(src).not.toContain('status=archived');
+  });
+});
+
+describe('S4 属性检查器：只显示真实页面回传的选中项', () => {
+  const PAYLOAD = {
+    v: 1 as const,
+    page: 'memory.html',
+    title: '记忆 mem_1',
+    subtitle: '真实账本记录 · 状态 active',
+    fields: [
+      { k: 'ID', v: 'mem_1', mono: true },
+      { k: '状态', v: 'active' },
+    ],
+  };
+
+  async function dispatchTo(container: HTMLElement, payload: unknown, opts: { origin?: string } = {}) {
+    const frame = container.querySelector('.page-pane.active iframe.page-frame') as HTMLIFrameElement | null;
+    expect(frame?.contentWindow).toBeTruthy();
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent('message', {
+        data: { [SELECTION_MSG]: payload },
+        origin: opts.origin ?? window.location.origin,
+        source: frame!.contentWindow,
+      }));
+    });
+  }
+
+  it('收到当前页合法回传 → 检查器显示字段与来源，不显示「尚未接入」占位', async () => {
+    const { container } = await renderShell();
+    fireEvent.click(screen.getByRole('button', { name: /记忆列表/ }));
+    await dispatchTo(container, PAYLOAD);
+    expect(screen.getByText(/记忆 mem_1/)).toBeInTheDocument();
+    expect(screen.getByText('mem_1')).toBeInTheDocument();
+    expect(screen.getByText(/来源：memory.html 回传的真实账本字段/)).toBeInTheDocument();
+    expect(screen.queryByText(/中心页尚未回传选中项/)).toBeNull();
+  });
+
+  it('回传 null → 检查器退回诚实空态（不保留上一份选区）', async () => {
+    const { container } = await renderShell();
+    fireEvent.click(screen.getByRole('button', { name: /记忆列表/ }));
+    await dispatchTo(container, PAYLOAD);
+    await dispatchTo(container, null);
+    expect(screen.queryByText('mem_1')).toBeNull();
+    expect(screen.getByText(/中心页尚未回传选中项/)).toBeInTheDocument();
+  });
+
+  it('非同源来源的回传被丢弃', async () => {
+    const { container } = await renderShell();
+    fireEvent.click(screen.getByRole('button', { name: /记忆列表/ }));
+    await dispatchTo(container, PAYLOAD, { origin: 'http://evil.example' });
+    expect(screen.queryByText('mem_1')).toBeNull();
+  });
+
+  it('页面与当前激活标签不符的回传被丢弃（避免后台标签串数据）', async () => {
+    const { container } = await renderShell();
+    // 当前激活仍是概览 index.html
+    await dispatchTo(container, PAYLOAD);
+    expect(screen.queryByText('mem_1')).toBeNull();
+  });
+
+  it('形状不合法的回传被丢弃', async () => {
+    const { container } = await renderShell();
+    fireEvent.click(screen.getByRole('button', { name: /记忆列表/ }));
+    await dispatchTo(container, { v: 1, page: 'memory.html', title: 'x', fields: [] });
+    expect(screen.queryByText('x')).toBeNull();
   });
 });

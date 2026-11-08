@@ -15,6 +15,7 @@ import { useL0Session, formatRemaining } from '../shared/useL0Session.ts';
 import { useSessionContext } from '../shared/session.ts';
 import { fmtLayerGen } from '../shared/layerTime.ts';
 import { LayerFilterBar, LayerPager } from './LayerFilterBar.tsx';
+import { publishSelection } from '../shared/selectionChannel.ts';
 import { LayerMemoryTable } from './LayerMemoryTable.tsx';
 import { filterLayerPaged, initialLayerSource, LAYER_DEFAULT_FILTER } from './layerFilter.ts';
 import type { LayerFilterState } from './layerFilter.ts';
@@ -206,6 +207,31 @@ export function MemoryLayeredPage({ load = coreListMemories }: { load?: () => Pr
   }
 
   const selectedMem = visibleMemories.find((m) => m.id === selectedMemId) ?? null;
+
+  // S4：把层级页当前选中的真实记忆回传给壳层属性检查器
+  useEffect(() => {
+    if (!selectedMem || !selectedLayer) {
+      publishSelection(null);
+      return;
+    }
+    const layerText = layerContent[selectedLayer]?.[selectedMem.id];
+    const contentLen = layerText ? layerText.length : 0;
+    publishSelection({
+      v: 1,
+      page: 'memory-layered.html',
+      title: `记忆 ${selectedMem.id} · ${selectedLayer}`,
+      subtitle: `分层查阅选中项 · 数据真相 = 本机账本`,
+      fields: [
+        { k: 'ID', v: selectedMem.id, mono: true },
+        { k: '当前查阅层', v: selectedLayer },
+        { k: '内核层级', v: selectedMem.layer ?? '未记录（内核未给 layer）' },
+        { k: '状态', v: selectedMem.status },
+        { k: '来源', v: selectedMem.source_agent ? selectedMem.source_agent : 'manual（手动写入页）' },
+        { k: '该层内容', v: layerText ? `${contentLen} 字` : '该层暂无内容（账本真实为空）' },
+        { k: '更新时间', v: selectedMem.updated_at },
+      ],
+    });
+  }, [selectedMem, selectedLayer, layerContent]);
 
   /**
    * 保存 = 真写内核账本（批次25 P0-1）。旧实现只 dispatchEvent('layered-memory-save')，

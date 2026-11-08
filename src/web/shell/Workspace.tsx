@@ -15,6 +15,7 @@ import {
   type BottomTabId, type IconName, type NavEntry, type NavItem, type PageKey,
   type RibbonItem, type ShellAction,
 } from './views.ts';
+import { SELECTION_MSG, parseSelection, type SelectionPayload } from '../shared/selectionChannel.ts';
 
 const STORE_THEME = 'memdesk.shell.theme.v1';
 const STORE_DENSITY = 'memdesk.shell.density.v1';
@@ -127,7 +128,10 @@ export function Workspace() {
   const [sessionActive, setSessionActive] = useState(() => hasActiveSession());
   const [overview, setOverview] = useState<OverviewSnapshot | null>(null);
   const [overviewBusy, setOverviewBusy] = useState(false);
+  /** S4：中心区真实页面回传的选中项（null = 未选中/无回传，绝不推测） */
+  const [selection, setSelection] = useState<SelectionPayload | null>(null);
   const frameRefs = useRef<Record<string, HTMLIFrameElement | null>>({});
+  const activePageRef = useRef<PageKey | undefined>(undefined);
 
   const refreshOverview = useCallback(() => {
     setOverviewBusy(true);
@@ -184,6 +188,36 @@ export function Workspace() {
 
   const active = useMemo(() => openTabs.find((t) => t.id === activeId) ?? openTabs[0], [activeId, openTabs]);
   const activeNav = active ? findNav(active.id) : undefined;
+
+  useEffect(() => { activePageRef.current = active?.page; }, [active?.page]);
+  // 切换标签即清空选中项：绝不把上一页的选区挂到新页面上
+  useEffect(() => { setSelection(null); }, [activeId]);
+
+  // S4：接收中心区真实页面的选中项回传（只接受同源、且来自本壳当前嵌入的 iframe）
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onMsg = (e: MessageEvent) => {
+      if (e.origin !== window.location.origin) return;
+      const data = e.data as Record<string, unknown> | null;
+      if (!data || typeof data !== 'object' || !(SELECTION_MSG in data)) return;
+      const fromOurs = Object.values(frameRefs.current)
+        .some((f) => f?.contentWindow === (e.source as unknown as Window | null));
+      if (!fromOurs) return;
+      const raw = data[SELECTION_MSG];
+      if (raw === null) {
+        setSelection(null);
+        return;
+      }
+      const parsed = parseSelection(raw);
+      if (!parsed) return;
+      const page = activePageRef.current;
+      // 只接受当前激活标签对应页面的回传；其它页（含后台标签）一律丢弃
+      if (!page || PAGES[page].file !== parsed.page) return;
+      setSelection(parsed);
+    };
+    window.addEventListener('message', onMsg);
+    return () => window.removeEventListener('message', onMsg);
+  }, []);
 
   // 缩放由 .shell 的 CSS zoom 统一承担（含 iframe），不再单独改写子页面文档，避免双重缩放
 
@@ -491,7 +525,20 @@ export function Workspace() {
                   </div>
                   <div className="insp-sec">
                     <div className="insp-sec-title">选中项</div>
-                    <div className="insp-note">尚未接入：选中一条记忆后在此显示属性。子页面回传通道将在后续动作接线，当前不做推测。</div>
+                    {selection ? (
+                      <>
+                        <div className="insp-note">
+                          <b>{selection.title}</b>
+                          {selection.subtitle ? ` · ${selection.subtitle}` : ''}
+                        </div>
+                        {selection.fields.map((f) => (
+                          <Prop key={f.k} k={f.k} v={f.v} mono={f.mono} />
+                        ))}
+                        <div className="insp-note">来源：{selection.page} 回传的真实账本字段，壳层未加工。</div>
+                      </>
+                    ) : (
+                      <div className="insp-note">中心页尚未回传选中项：在真实页面选中一条记录后，其账本字段会原样显示在此；没有回传时此处保持为空，不做推测。</div>
+                    )}
                   </div>
                 </>
               ) : (
