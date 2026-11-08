@@ -25,7 +25,7 @@ vi.mock('../taskpane.ts', () => ({
   loadPendingWrites: vi.fn(),
 }));
 
-// 底部面板数据源走真实宿主/账本；渲染测试只验证契约，加载器可替换，派生函数保留真实实现。
+// 底部面板/状态栏数据源走真实宿主与账本；渲染测试替换加载器，契约不变。
 vi.mock('../dock.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../dock.ts')>();
   return {
@@ -36,8 +36,22 @@ vi.mock('../dock.ts', async (importOriginal) => {
   };
 });
 
+vi.mock('../statusbar.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../statusbar.ts')>();
+  return {
+    ...actual,
+    loadStatusbar: vi.fn(),
+  };
+});
+
+vi.mock('../layers.ts', () => ({
+  loadLayerPanel: vi.fn(),
+}));
+
 import { Workspace } from '../Workspace.tsx';
 import { loadAuditForMemory, loadOutputLog, loadScheduleRuns } from '../dock.ts';
+import { loadStatusbar } from '../statusbar.ts';
+import { loadLayerPanel } from '../layers.ts';
 import { loadPendingWrites } from '../taskpane.ts';
 
 beforeEach(() => {
@@ -59,6 +73,30 @@ beforeEach(() => {
   });
   vi.mocked(loadAuditForMemory).mockReset();
   vi.mocked(loadAuditForMemory).mockResolvedValue({ status: 'ok', view: [] });
+  vi.mocked(loadStatusbar).mockReset();
+  vi.mocked(loadStatusbar).mockResolvedValue({
+    location: { status: 'ok', view: { kind: 'file', path: 'C:\\data\\memories.db.json', source: 'ipc' } },
+    l0: { status: 'ok', view: { has_admin_wrap: true, write_unlocked: false, active_sessions: 0, active_grants: 0 } },
+    collector: {
+      status: 'ok',
+      view: { running: true, intervalMs: 60_000, lastAt: 1_790_000_000_000, lastCollected: 12, autoRetryStopped: false, consecutiveFails: 0 },
+    },
+  });
+  vi.mocked(loadLayerPanel).mockReset();
+  vi.mocked(loadLayerPanel).mockResolvedValue({
+    status: 'ok',
+    view: {
+      total: 7,
+      layers: [
+        { layer: 'L6', count: 1 }, { layer: 'L5', count: 2 }, { layer: 'L4', count: 0 },
+        { layer: 'L3', count: null }, { layer: 'L2', count: 1 }, { layer: 'L1', count: 2 },
+      ],
+      failed: ['L3'],
+      l0: { status: 'ok', view: { has_admin_wrap: true, write_unlocked: false, active_sessions: 0, active_grants: 0 } },
+      kernelMode: 'host',
+      loadedAt: 1_790_000_000_000,
+    },
+  });
 });
 
 /** 渲染并等待概览异步加载落地（避免 act 警告，也确保断言发生在真实渲染之后） */
@@ -118,11 +156,35 @@ describe('工作台壳层', () => {
     expect(screen.getByText(/程序未提供终端命令通道/)).toBeInTheDocument();
   });
 
-  it('状态栏只写未接入，不用「—」冒充真实读数', async () => {
+  it('状态栏接真实读数：库/L0/后台/已选/行高可追溯，且无「—」占位', async () => {
     const { container } = await renderShell();
-    const bar = container.querySelector('.statusbar');
-    expect(bar?.textContent ?? '').not.toMatch(/—/);
-    expect(bar?.textContent ?? '').toContain('未接入');
+    await screen.findByTestId('sb-l0');
+    const bar = container.querySelector('.statusbar') as HTMLElement;
+    expect(bar.textContent).not.toMatch(/—/);
+    expect(screen.getByTestId('sb-storage').textContent).toContain('memories.db.json');
+    expect(screen.getByTestId('sb-storage').getAttribute('title')).toContain('C:\\data\\memories.db.json');
+    expect(screen.getByTestId('sb-l0').textContent).toContain('已锁定');
+    expect(screen.getByTestId('sb-l0').getAttribute('title')).toContain('有效授权 0');
+    expect(screen.getByTestId('sb-bg').textContent).toContain('运行中');
+    expect(screen.getByTestId('sb-bg').getAttribute('title')).toContain('间隔 60000 ms');
+    expect(screen.getByTestId('sb-selected').textContent).toContain('无');
+    expect(bar.textContent).toContain('行高 26 px');
+  });
+
+  it('状态栏不可用态写原因，不用 0 或「—」冒充读数', async () => {
+    vi.mocked(loadStatusbar).mockResolvedValue({
+      location: { status: 'ok', view: { kind: 'memory', source: 'browser-memory' } },
+      l0: { status: 'unavailable', detail: '浏览器模式：L0 会话由桌面主进程的 L0Vault 保管，浏览器读不到。' },
+      collector: { status: 'error', detail: '主进程未返回 ok（采集器状态不可读）' },
+    });
+    const { container } = await renderShell();
+    await screen.findByTestId('sb-l0');
+    const bar = container.querySelector('.statusbar') as HTMLElement;
+    expect(screen.getByTestId('sb-storage').textContent).toContain('内存态');
+    expect(screen.getByTestId('sb-l0').textContent).toContain('不可用');
+    expect(screen.getByTestId('sb-l0').getAttribute('title')).toContain('L0Vault');
+    expect(screen.getByTestId('sb-bg').textContent).toContain('异常');
+    expect(bar.textContent).not.toMatch(/—/);
   });
 
   it('主题切换会写到 html[data-theme]，并被状态栏按钮反映', async () => {
@@ -155,6 +217,8 @@ describe('S3 深链接线（D4）：壳层把初值真的交给目标真实页�
     const src = activeFrameSrc(container);
     expect(src).toContain('/memory-layered.html');
     expect(src).toContain('#l0bar');
+    // 顺手等分层条真实读数落地，避免异步状态更新落在 act 之外
+    await screen.findByTestId('layer-strip');
   });
 
   it('无 href 的命令仍复用原有标签，不凭空新增重复标签', async () => {
@@ -442,6 +506,7 @@ describe('S6 底部五标签：只渲染真实数据，不可用就给原因', (
     expect(row.textContent).toContain('"op":"pin"');
     expect(loadAuditForMemory).toHaveBeenCalledWith('mem_1');
     expect(badge(container, '审计')).toBe('1');
+    expect(screen.getByTestId('sb-selected').textContent).toContain('1 条');
   });
 
   it('终端仍为不可用（程序确实没有命令通道）', async () => {
@@ -449,5 +514,28 @@ describe('S6 底部五标签：只渲染真实数据，不可用就给原因', (
     await act(async () => { fireEvent.click(tabButton(container, '终端')); });
     expect(await screen.findByTestId('dock-term-unavailable')).toBeInTheDocument();
     expect(screen.getByText(/程序未提供终端命令通道/)).toBeInTheDocument();
+  });
+});
+
+describe('S7 分层 L1–L6 / L0 面板：只在分层页出现，数字全部来自真实 browse', () => {
+  it('打开分层页才出现分层条；失败层显示读取失败而不是 0', async () => {
+    await renderShell();
+    expect(screen.queryByTestId('layer-strip')).toBeNull();
+    fireEvent.click(screen.getByText('分层 L1–L6'));
+    const strip = await screen.findByTestId('layer-strip');
+    expect(strip.textContent).toContain('账本 7 条');
+    expect(strip.textContent).toContain('L6 1');
+    expect(strip.textContent).toContain('L4 0');
+    expect(strip.textContent).toContain('L3 读取失败');
+    expect(screen.getByTestId('layer-strip-l0').textContent).toContain('已锁定');
+    expect(loadLayerPanel).toHaveBeenCalledTimes(1);
+  });
+
+  it('分层读取失败 → 给原因，不渲染任何数字', async () => {
+    vi.mocked(loadLayerPanel).mockResolvedValue({ status: 'error', detail: '账本读取失败：E_LEDGER_LOCKED' });
+    await renderShell();
+    fireEvent.click(screen.getByText('分层 L1–L6'));
+    expect((await screen.findByTestId('layer-strip-error')).textContent).toContain('E_LEDGER_LOCKED');
+    expect(screen.queryByText(/账本 7 条/)).toBeNull();
   });
 });

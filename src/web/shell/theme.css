@@ -763,6 +763,55 @@ button:disabled { cursor: not-allowed; }
   text-overflow: ellipsis;
   color: var(--tx2);
 }
+.sb-cell.warn b { color: var(--amber); }
+.sb-cell.ok b { color: var(--green); }
+
+/* S7：分层 L1–L6 / L0 面板条（数据与中心层级页同源） */
+.layer-strip {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 25px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--line2);
+  background: var(--panel2);
+  color: var(--tx2);
+  font-size: 10.5px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.layer-strip b { color: var(--tx); }
+.ls-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border: 1px solid var(--line2);
+  border-radius: 3px;
+  background: var(--panel);
+}
+.ls-cell.ok b { color: var(--green); }
+.ls-cell.err { color: var(--red); border-color: var(--red-soft); }
+.ls-cell.err b { color: var(--red); }
+.ls-total { color: var(--mu); }
+.ls-note {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--mu);
+}
+.ls-note.err { color: var(--red); }
+.ls-refresh {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  color: var(--mu);
+  font-size: 10px;
+}
+.ls-refresh:hover { background: var(--accent-soft); color: var(--accent); }
 .sb-theme {
   margin-left: auto;
   display: inline-flex;

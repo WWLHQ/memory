@@ -21,6 +21,8 @@ import {
   loadAuditForMemory, loadOutputLog, loadScheduleRuns, problemsFromLog,
   type AuditRow, type DockResult, type OutputLogView, type ScheduleRun,
 } from './dock.ts';
+import { loadStatusbar, shortLocation, type StatusSnapshot } from './statusbar.ts';
+import { loadLayerPanel, type LayerPanelView } from './layers.ts';
 import { SELECTION_MSG, parseSelection, type SelectionPayload } from '../shared/selectionChannel.ts';
 
 const STORE_THEME = 'memdesk.shell.theme.v1';
@@ -146,6 +148,10 @@ export function Workspace() {
   const [dockTasksBusy, setDockTasksBusy] = useState(false);
   const [dockAudit, setDockAudit] = useState<DockResult<AuditRow[]> | null>(null);
   const [dockAuditBusy, setDockAuditBusy] = useState(false);
+  /** S7：状态栏真实读数（账本位置 / L0 保险库 / 采集器后台） */
+  const [status, setStatus] = useState<StatusSnapshot | null>(null);
+  /** S7：分层 L1–L6 / L0 面板（仅在中心页为分层或 L0 时读取） */
+  const [layerPanel, setLayerPanel] = useState<DockResult<LayerPanelView> | null>(null);
   const pendingBusyRef = useRef(false);
   const frameRefs = useRef<Record<string, HTMLIFrameElement | null>>({});
   const activePageRef = useRef<PageKey | undefined>(undefined);
@@ -231,6 +237,13 @@ export function Workspace() {
     void refreshDockAudit(selectionId);
   }, [dockOpen, dockTab, selectionId, refreshDockAudit]);
 
+  // S7：状态栏读数（挂载 + 登录态变化时读一次；F5/刷新动作也会清空重读）
+  const refreshStatus = useCallback(async () => {
+    setStatus(await loadStatusbar());
+  }, []);
+
+  useEffect(() => { void refreshStatus(); }, [refreshStatus, sessionActive]);
+
   const resolvedTheme = theme === 'system' ? (darkSystem ? 'dark' : 'light') : theme;
 
   // 主题：写入 <html data-theme>，样式表按此切换（仅作用于壳层；21 页表现层本轮不改）
@@ -271,6 +284,14 @@ export function Workspace() {
 
   const active = useMemo(() => openTabs.find((t) => t.id === activeId) ?? openTabs[0], [activeId, openTabs]);
   const activeNav = active ? findNav(active.id) : undefined;
+
+  /** S7：分层条只在中心页是「分层 L1–L6」或「L0 密文」时出现（数据与中心页同源） */
+  const showLayerStrip = active?.id === 'ledger-layers' || active?.id === 'ledger-l0';
+
+  useEffect(() => {
+    if (!showLayerStrip || layerPanel) return;
+    void (async () => setLayerPanel(await loadLayerPanel()))();
+  }, [showLayerStrip, layerPanel]);
 
   useEffect(() => { activePageRef.current = active?.page; }, [active?.page]);
   // 切换标签即清空选中项：绝不把上一页的选区挂到新页面上
@@ -350,9 +371,10 @@ export function Workspace() {
         break;
       case 'refresh':
         setReloadNonce((n) => n + 1);
-        // 底部面板同样重读：清空缓存后由可见标签的 effect 重新拉真实数据
+        // 底部面板与状态栏同样重读：清空缓存后由可见部位重新拉真实数据
         setDockLog(null); setDockTasks(null); setDockAudit(null);
-        setMessage('已刷新中心区真实页面与底部面板读数。');
+        setStatus(null); setLayerPanel(null);
+        setMessage('已刷新中心区真实页面与底部面板/状态栏读数。');
         break;
       case 'focusFilter':
         setMessage(`「${label}」请在页面内使用各自的筛选框；壳层未提供跨页搜索，不会伪造查找结果。`);
@@ -392,6 +414,29 @@ export function Workspace() {
     tasks: dockTasks?.status === 'ok' ? dockTasks.view.length : null,
     term: null,
   };
+
+  // S7：状态栏各单元格的真实文案与可追溯 title
+  const locView = status?.location.status === 'ok' ? shortLocation(status.location.view) : null;
+  const locText = !status ? '读取中' : locView ? locView.text : '未知';
+  const locTitle = status?.location.status === 'ok' ? locView?.title ?? '' : status ? status.location.detail : '尚未读取';
+
+  const collector = status?.collector;
+  const collectorText = !status ? '读取中'
+    : collector?.status === 'ok' ? (collector.view.running ? '运行中' : '空闲')
+    : collector?.status === 'unavailable' ? '不可用' : '异常';
+  const collectorTitle = !status ? '尚未读取'
+    : collector?.status === 'ok'
+      ? `采集器${collector.view.running ? '正在跑' : '空闲'}${collector.view.intervalMs ? ` · 间隔 ${collector.view.intervalMs} ms` : ''}${collector.view.lastAt ? ` · 最近一轮 ${new Date(collector.view.lastAt).toLocaleString('zh-CN')}` : ' · 暂无已完成轮次'}${collector.view.lastCollected != null ? ` · 上轮采集 ${collector.view.lastCollected} 条` : ''}${collector.view.autoRetryStopped ? ` · 自动重试已停（连续失败 ${collector.view.consecutiveFails ?? '?'} 轮）` : ''}`
+      : collector ? collector.detail : '尚未读取';
+
+  const l0 = status?.l0;
+  const l0Text = !status ? '读取中'
+    : l0?.status === 'ok' ? (l0.view.active_sessions > 0 ? `${l0.view.active_sessions} 会话` : '已锁定')
+    : '不可用';
+  const l0Title = !status ? '尚未读取'
+    : l0?.status === 'ok'
+      ? `L0 保险库：活动会话 ${l0.view.active_sessions} · 有效授权 ${l0.view.active_grants} · 管理密钥${l0.view.has_admin_wrap ? '已设置' : '未设置'} · 写入锁${l0.view.write_unlocked ? '已解锁' : '锁定'}（只读，不含任何密钥材料）`
+      : l0 ? l0.detail : '尚未读取';
 
   return (
     <div
@@ -518,6 +563,42 @@ export function Workspace() {
               <button className="ov-refresh" onClick={refreshOverview} disabled={overviewBusy} title="重新读取真实数据" type="button">
                 <Icon name="refresh" size={11} />{overviewBusy ? '读取中' : '刷新'}
               </button>
+            </div>
+          )}
+
+          {showLayerStrip && (
+            <div className="layer-strip" data-testid="layer-strip" title="与中心层级页同源：storage.listMemories + storage.browse(L1–L6) + l0Status">
+              <Icon name="layers" size={12} />
+              <b>分层 L1–L6</b>
+              {!layerPanel ? (
+                <span className="ls-note">读取中…</span>
+              ) : layerPanel.status !== 'ok' ? (
+                <span className="ls-note err" data-testid="layer-strip-error">读取失败：{layerPanel.detail}</span>
+              ) : (
+                <>
+                  <span className="ls-total">账本 <b>{layerPanel.view.total}</b> 条</span>
+                  <span className="ls-note">{layerPanel.view.kernelMode === 'browser' ? '浏览器内存账本（非本机库）' : '本机账本'}</span>
+                  {layerPanel.view.layers.map((l) => (
+                    <span className={`ls-cell${l.count == null ? ' err' : ''}`} key={l.layer}
+                      title={l.count == null ? `storage.browse(${l.layer}) 读取失败（不是 0 条）` : `${l.layer} 有内容的记忆数（storage.browse ${l.layer}）`}>
+                      {l.layer} <b>{l.count == null ? '读取失败' : l.count}</b>
+                    </span>
+                  ))}
+                  <span className={`ls-cell${layerPanel.view.l0.status === 'ok' && layerPanel.view.l0.view.active_sessions > 0 ? ' ok' : ''}`}
+                    data-testid="layer-strip-l0"
+                    title={layerPanel.view.l0.status === 'ok'
+                      ? `L0 保险库：活动会话 ${layerPanel.view.l0.view.active_sessions} · 有效授权 ${layerPanel.view.l0.view.active_grants} · 写锁${layerPanel.view.l0.view.write_unlocked ? '已解锁' : '锁定'}`
+                      : layerPanel.view.l0.detail}>
+                    L0 <b>{layerPanel.view.l0.status === 'ok'
+                      ? (layerPanel.view.l0.view.active_sessions > 0 ? `${layerPanel.view.l0.view.active_sessions} 会话` : '已锁定')
+                      : '不可用'}</b>
+                  </span>
+                  <span className="ls-note">失败层显示「读取失败」而非 0；L0 只读状态，不含密钥材料</span>
+                  <button className="ls-refresh" type="button" onClick={() => setLayerPanel(null)} title="重新读取分层计数">
+                    <Icon name="refresh" size={11} />重读
+                  </button>
+                </>
+              )}
             </div>
           )}
 
@@ -718,13 +799,20 @@ export function Workspace() {
             会话 <b>{sessionActive ? '已登录' : '未登录'}</b>{sessionActive ? '' : ' · 只读'}
           </span>
           <span className="sb-cell sb-msg">{message}</span>
-          <span className="sb-cell" title="账本位置将由 storage:location 提供（后续动作接入）">库 <b>待读取</b></span>
-          <span className="sb-cell" title="余额与成本口径以「模型与成本」页为准（后续动作汇总）">成本 <b>未接入</b></span>
-          <span className="sb-cell" title="程序暂无调度运行记录的持久化存储">后台 <b>未接入</b></span>
-          <span className="sb-cell" title="L0 会话状态将在后续动作接入">L0 <b>未接入</b></span>
+          <span className="sb-cell" title={locTitle} data-testid="sb-storage">库 <b>{locText}</b></span>
+          <span className={`sb-cell${overview?.billing.status === 'unavailable' ? ' warn' : ''}`}
+            title={overview?.billing.detail ?? '尚未查询'} data-testid="sb-billing">
+            成本 <b>{overview?.billing.status === 'ok' ? `${overview.billing.live ?? 0}/${overview.billing.total ?? 0}` : '不可用'}</b>
+          </span>
+          <span className={`sb-cell${collector?.status === 'ok' && collector.view.autoRetryStopped ? ' warn' : ''}`}
+            title={collectorTitle} data-testid="sb-bg">后台 <b>{collectorText}</b></span>
+          <span className={`sb-cell${l0?.status === 'ok' && l0.view.active_sessions > 0 ? ' ok' : ''}`}
+            title={l0Title} data-testid="sb-l0">L0 <b>{l0Text}</b></span>
           <span className="sb-spring" />
-          <span className="sb-cell">已选 <b>未接入</b></span>
-          <span className="sb-cell">行高 <b>{density === 'compact' ? 24 : 28}</b> px</span>
+          <span className="sb-cell" title={selectionId ? `已选记忆 ${selectionId}` : '中心页未选中任何记忆'} data-testid="sb-selected">
+            已选 <b>{selectionId ? '1 条' : '无'}</b>
+          </span>
+          <span className="sb-cell" title="壳层实际行高（CSS --row-h）">行高 <b>{density === 'compact' ? 22 : 26}</b> px</span>
           <span className="sb-cell">{zoom}%</span>
           <span className="sb-cell click" onClick={() => setDockOpen((v) => !v)} title="折叠 / 展开底部面板">面板 <b>{dockOpen ? '开' : '收'}</b></span>
           <span className="sb-cell click" onClick={() => setTaskOpen((v) => !v)} title="任务窗格">任务窗 <b>{taskOpen ? '开' : '收'}</b></span>
