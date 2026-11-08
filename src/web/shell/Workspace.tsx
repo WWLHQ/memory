@@ -52,6 +52,35 @@ interface OpenTab {
   unavailable?: string;
 }
 
+/** 顶部第 1 段快速访问工具条（定稿 12 个位置；无对应能力的置灰并写明原因） */
+interface QaSpec {
+  id?: string;
+  sep?: boolean;
+  icon?: IconName;
+  title?: string;
+  disabled?: boolean;
+  run?: () => void;
+}
+
+/** 顶部第 2 段自建中文菜单：命令行与 Ribbon 命令同源，无能力项置灰并带原因 */
+interface MenuRowSpec {
+  head?: string;
+  sep?: boolean;
+  label?: string;
+  icon?: IconName;
+  kbd?: string;
+  checked?: boolean;
+  disabled?: boolean;
+  reason?: string;
+  run?: () => void;
+}
+
+interface MenuSpec {
+  id: string;
+  label: string;
+  rows: MenuRowSpec[];
+}
+
 /**
  * 顶层 ?backend= / ?agentBackend= 透传给 iframe 内页面（与 Overview 的透传口径一致）。
  * href 只做两件事：追加查询参数（`?k=v`）或锚点（`#id`），由目标页自己解析成真实筛选/定位。
@@ -123,6 +152,8 @@ export function Workspace() {
   const [navQuery, setNavQuery] = useState('');
   const [ribbonTab, setRibbonTab] = useState<string>('start');
   const [ribbonFolded, setRibbonFolded] = useState(false);
+  /** 第 2 段中文菜单当前展开项（null = 全部收起） */
+  const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const [navCollapsed, setNavCollapsed] = useState(false);
   const [inspCollapsed, setInspCollapsed] = useState(false);
   const [taskOpen, setTaskOpen] = useState(false);
@@ -460,6 +491,24 @@ export function Workspace() {
 
   const navEntries = useMemo(() => filterEntries(NAV, navQuery.trim().toLowerCase()), [navQuery]);
 
+  // 菜单收起：点菜单栏以外或按 Esc。只做收起，不吞其它按键。
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if ((e.target as HTMLElement | null)?.closest('.menubar')) return;
+      setMenuOpen(null);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(null);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [menuOpen]);
+
   const activeRibbon = RIBBON.find((r) => r.id === ribbonTab) ?? RIBBON[0];
 
   /** 底部标签角标：只在真实读到数据后显示计数；未读/不可用一律不显示，绝不用 0 冒充 */
@@ -494,9 +543,128 @@ export function Workspace() {
       ? `L0 保险库：活动会话 ${l0.view.active_sessions} · 有效授权 ${l0.view.active_grants} · 管理密钥${l0.view.has_admin_wrap ? '已设置' : '未设置'} · 写入锁${l0.view.write_unlocked ? '已解锁' : '锁定'}（只读，不含任何密钥材料）`
       : l0 ? l0.detail : '尚未读取';
 
-  // 顶部唯一标题栏的「当前库/文档」：库 = 真实账本文件（storage:location），文档 = 当前视图标签。
-  const docLabel = `${locView ? locView.text : (status ? '库位置未知' : '库读取中')} · ${active?.label ?? '未选择'}`;
+  // 第 1 段「当前库/文档」：只放真实的账本文件名（定稿里的 mem-prod-cn — 记忆库.mem 是演示名）。
+  const docLabel = locView ? locView.text : (status ? '库位置未知' : '库读取中');
   const docTitle = `当前库：${locText}（${locTitle}） · 当前视图：${active?.label ?? '未选择'}`;
+
+  // ── 第 1 段：快速访问工具条（12 个位置照定稿保留；无能力项置灰并写明原因）──
+  const themeIcon: IconName = theme === 'system' ? 'system' : theme === 'light' ? 'sun' : 'moon';
+  const themeTip = theme === 'system'
+    ? '主题：跟随系统（点击切到浅色）'
+    : theme === 'light' ? '主题：浅色（点击切到深色）' : '主题：深色（点击切回跟随系统）';
+  const cycleTheme = () => setTheme((t) => (t === 'system' ? 'light' : t === 'light' ? 'dark' : 'system'));
+  const openNav = (id: string) => {
+    const target = findNav(id);
+    if (target) openView(target);
+  };
+  const demoOnly = '定稿演示命令：本程序概览未提供该动作，不伪造执行结果';
+  const qaSpecs: QaSpec[] = [
+    { id: 'save', icon: 'save', title: '保存（只读）：本程序无文档编辑，保存不适用', disabled: true },
+    { id: 'undo', icon: 'undo', title: '撤销（无历史）：壳层不保存编辑历史', disabled: true },
+    { id: 'refresh', icon: 'refresh', title: '刷新中心区与底部/状态栏读数（F5）', run: () => runShellAction('refresh', '刷新') },
+    { id: 'find', icon: 'search', title: '查找左侧功能导航（Ctrl+F / Ctrl+K）', run: () => runShellAction('focusFilter', '查找') },
+    { sep: true },
+    { id: 'syncCheck', icon: 'sync', title: '同步检查：程序未提供独立指令；请在「同步」视图查看通道状态', disabled: true },
+    { id: 'balance', icon: 'scale', title: '余额探测：程序未提供独立指令；请在「模型与成本」视图查看计费状态', disabled: true },
+    { sep: true },
+    { id: 'theme', icon: themeIcon, title: themeTip, run: cycleTheme },
+    { sep: true },
+    { id: 'ask', icon: 'receipt', title: `问账本（概览）：${demoOnly}`, disabled: true },
+    { id: 'metrics', icon: 'chart', title: `指标明细（概览）：${demoOnly}`, disabled: true },
+    { id: 'pending', icon: 'archive', title: '待处理（概览）：定稿演示命令；待重放写入请在「任务窗格」只读查看', disabled: true },
+    { id: 'exportCsv', icon: 'export', title: `导出概览 CSV（概览）：${demoOnly}`, disabled: true },
+    { id: 'more', icon: 'more', title: '更多命令：暂无；命令入口以菜单栏为准', disabled: true },
+  ];
+
+  // ── 第 2 段：自建中文菜单（命令与 Ribbon 同源；无能力项置灰并写原因）──
+  const menuSpecs: MenuSpec[] = [
+    {
+      id: 'file', label: '文件', rows: [
+        { label: '新建记忆', icon: 'plus', kbd: 'Ctrl+N', run: () => openNav('write') },
+        { label: '打开记忆库…', icon: 'folder', kbd: 'Ctrl+O', disabled: true, reason: '程序未提供库切换指令；数据根位置在「参数」页查看' },
+        { head: '最近打开' },
+        { label: `当前库：${locView ? locView.text : '未选择'}`, icon: 'db', disabled: true, reason: '仅展示当前账本文件；切换库需改数据根并重启' },
+        { sep: true },
+        { label: '打印回执…', icon: 'receipt', kbd: 'Ctrl+P', disabled: true, reason: '程序未提供打印通道' },
+        { label: '关闭当前视图', icon: 'x', run: () => closeTab(activeId) },
+        { sep: true },
+        { label: '退出', icon: 'x', disabled: true, reason: '请使用窗口右上角关闭按钮（系统覆盖层）' },
+      ],
+    },
+    {
+      id: 'edit', label: '编辑', rows: [
+        { label: '撤销', icon: 'undo', kbd: 'Ctrl+Z', disabled: true, reason: '壳层不保存编辑历史' },
+        {
+          label: '复制记忆 ID', icon: 'copy',
+          disabled: !selectionId,
+          reason: '中心页未选中记忆；先在列表选中一条记录',
+          run: () => {
+            if (!selectionId) return;
+            const copy = navigator.clipboard?.writeText(selectionId);
+            if (!copy) { setMessage('复制失败：剪贴板不可用。'); return; }
+            copy.then(() => setMessage(`已复制记忆 ID：${selectionId}`))
+              .catch(() => setMessage('复制失败：剪贴板未授权。'));
+          },
+        },
+        { label: '全选', icon: 'check', kbd: 'Ctrl+A', disabled: true, reason: '请在输入框内使用 Ctrl+A（系统编辑命令）' },
+        { sep: true },
+        { label: '查找', icon: 'search', kbd: 'Ctrl+F', run: () => runShellAction('focusFilter', '查找') },
+        { label: '冲突待裁决', icon: 'warn', run: () => openNav('ledger-conflict') },
+        { label: '首选项…', icon: 'gear', run: () => openNav('params') },
+      ],
+    },
+    {
+      id: 'view', label: '视图', rows: [
+        { label: '任务窗格', icon: 'panel', checked: taskOpen, run: () => runShellAction('toggleTaskPane', '任务窗格') },
+        { label: '折叠功能区', icon: 'fold', kbd: 'Ctrl+F1', checked: ribbonFolded, run: () => runShellAction('foldRibbon', '折叠功能区') },
+        { label: '折叠详情面板', icon: 'panel', checked: inspCollapsed, run: () => setInspCollapsed((v) => !v) },
+        { label: '分层 L1–L6', icon: 'layers', run: () => openNav('ledger-layers') },
+        { label: '折叠功能导航', icon: 'chev', kbd: 'Ctrl+B', checked: navCollapsed, run: () => setNavCollapsed((v) => !v) },
+        { sep: true },
+        { label: '重置布局', icon: 'refresh', run: () => runShellAction('resetLayout', '重置布局') },
+        { label: '刷新', icon: 'refresh', kbd: 'F5', run: () => runShellAction('refresh', '刷新') },
+        { sep: true },
+        { label: '显示 L0 密文', icon: 'lock', run: () => openNav('ledger-l0') },
+        { label: '显示底部面板', icon: 'panel', checked: dockOpen, run: () => runShellAction('toggleDock', '底部面板') },
+        { label: '显示状态栏', icon: 'info', checked: statusVisible, run: () => runShellAction('toggleStatus', '状态栏') },
+        { label: '紧凑密度', icon: 'panel', checked: density === 'compact', run: () => runShellAction('density', '紧凑密度') },
+        { sep: true },
+        { label: '主题：跟随系统', icon: 'system', checked: theme === 'system', run: () => setTheme('system') },
+        { label: '主题：浅色', icon: 'sun', checked: theme === 'light', run: () => setTheme('light') },
+        { label: '主题：深色', icon: 'moon', checked: theme === 'dark', run: () => setTheme('dark') },
+      ],
+    },
+    {
+      id: 'tools', label: '工具', rows: [
+        { label: '运行检索（只读）', icon: 'search', kbd: 'F6', run: () => openNav('retrieval') },
+        { label: '安全体检', icon: 'shield', kbd: 'F9', run: () => openNav('security') },
+        { label: '生长调度状态', icon: 'layers', run: () => openNav('growth') },
+        { label: 'Agent 通道探针', icon: 'agent', run: () => openNav('agent') },
+        { label: '查看写入回执', icon: 'receipt', kbd: 'Ctrl+R', run: () => openNav('write') },
+        { label: '打开诊断日志', icon: 'list', kbd: 'Ctrl+L', run: () => openNav('logs') },
+        { sep: true },
+        { label: '余额探测', icon: 'scale', kbd: 'F7', disabled: true, reason: '探测在「模型与成本」页内执行' },
+        { label: '同步检查', icon: 'sync', kbd: 'F8', disabled: true, reason: '同步检查在「同步」视图执行' },
+        { label: '写入预检', icon: 'check', disabled: true, reason: '程序未提供独立预检指令；在写入页内执行' },
+        { label: '去重策略', icon: 'filter', disabled: true, reason: '程序未提供独立去重策略命令' },
+      ],
+    },
+    {
+      id: 'help', label: '帮助', rows: [
+        { label: '快捷键参考', icon: 'help', kbd: 'F1', run: () => runShellShortcut('help') },
+        { label: '产品能力与限制', icon: 'info', run: () => setMessage('壳层只提供导航与布局；中心区为本机真实页面。未接线的部位会明确标注原因，不显示推测值。') },
+        { label: '命令清单', icon: 'list', run: () => setMessage('菜单命令与 Ribbon 项同源；无对应能力的项已置灰并在提示中写明原因。') },
+        { sep: true },
+        { label: '演示数据声明', icon: 'check', run: () => setMessage('本程序全站零演示数据：读数来自本机真实链路，缺失或不可用一律如实标注。') },
+        { label: '检查更新', icon: 'refresh', disabled: true, reason: '程序未提供更新检查通道' },
+        { label: '关于 MemoryDesk 记忆工作台', icon: 'spark', run: () => setMessage('MemoryDesk 记忆工作台（多Agent记忆助手）。') },
+      ],
+    },
+  ];
+
+  // 第 2 段右侧范围读数：库位置与会话态取真实值；总条数壳层未接线，按既有口径显示「—」。
+  const scopeText = `库：${locView ? locView.text : (status ? '未知' : '读取中')} · — 条 · 会话 ${sessionActive ? '已登录' : '只读'}`;
+  const scopeTitle = `${locTitle} · 条数：壳层未读取总条数，按既有口径显示「—」 · 会话：${sessionActive ? '已登录' : '只读（未登录）'}`;
 
   return (
     <div
@@ -509,9 +677,27 @@ export function Workspace() {
       } as CSSProperties}
     >
       <div className="ribbon">
-        {/* 顶部唯一一条自绘标题栏：应用名 / 当前库与文档 / Ribbon 标签 / 查找 / 功能区折叠。
-            右侧为系统窗口按钮（最小化/最大化/关闭）覆盖层，桌面端在 CSS 里预留宽度。 */}
-        <div className="ribbon-tabs" data-testid="shell-titlebar">
+        {/* 顶部四段（按定稿 final-01-workspace 实测）：
+            ① 32px 标题行（QA 工具条 / 品牌与真实库文档名 / 系统三按钮覆盖层）
+            ② 26px 自建中文菜单行（默认 Electron 菜单已删除）
+            ③ 31px Ribbon 标签行（8 标签 + 查找框 + 折叠）
+            ④ 94px 功能区（命令分组） */}
+        <div className="titlebar" data-testid="shell-titlebar">
+          <div className="qa" aria-label="快速访问工具条">
+            {qaSpecs.map((q, i) => q.sep ? (
+              <span className="qa-sep" key={`qa-sep-${i}`} aria-hidden="true" />
+            ) : (
+              <button
+                key={q.id}
+                className={`qa-btn${q.disabled ? ' off' : ''}`}
+                type="button"
+                aria-label={q.title}
+                aria-disabled={q.disabled || undefined}
+                title={q.title}
+                onClick={q.disabled ? undefined : q.run}
+              ><Icon name={q.icon ?? 'dot'} size={15} /></button>
+            ))}
+          </div>
           <div className="tb-left">
             <span className="app-mark"><Icon name="layers" size={11} /></span>
             <span className="app-name">MemoryDesk 记忆工作台</span>
@@ -524,6 +710,57 @@ export function Workspace() {
                 : '未登录：数据面写操作会被主进程拒绝，界面按只读展示'}
             >{sessionActive ? '已登录' : '只读会话'}</span>
           </div>
+          {/* 右端留给系统三按钮覆盖层：这里只占位，不重复造窗口按钮 */}
+          <div className="win-space" aria-hidden="true" />
+        </div>
+
+        <div className="menubar" data-testid="shell-menubar" role="menubar" aria-label="主菜单">
+          {menuSpecs.map((m) => (
+            <div className="menu-wrap" key={m.id}>
+              <button
+                className={`menu-item${menuOpen === m.id ? ' open' : ''}`}
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded={menuOpen === m.id}
+                onClick={() => setMenuOpen((v) => (v === m.id ? null : m.id))}
+              >{m.label}</button>
+              {menuOpen === m.id && (
+                <div className="menu-pop" role="menu" aria-label={`${m.label}菜单`}>
+                  {m.rows.map((row, i) => {
+                    if (row.sep) return <div className="menu-sep" key={`sep-${i}`} aria-hidden="true" />;
+                    if (row.head) return <div className="menu-row head" key={`head-${i}`}>{row.head}</div>;
+                    const showCheck = row.checked && !row.disabled;
+                    return (
+                      <button
+                        key={`row-${i}`}
+                        className={`menu-row${row.disabled ? ' disabled' : ''}`}
+                        type="button"
+                        role="menuitem"
+                        aria-disabled={row.disabled || undefined}
+                        title={row.reason ?? row.label}
+                        onClick={() => {
+                          if (row.disabled) return;
+                          row.run?.();
+                          setMenuOpen(null);
+                        }}
+                      >
+                        <span className="mi-ic">
+                          <Icon name={showCheck ? 'check' : (row.icon ?? 'dot')} size={12} />
+                        </span>
+                        <span>{row.label}</span>
+                        {row.kbd && <span className="mi-kbd">{row.kbd}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ))}
+          <span className="rib-spring" />
+          <span className="menu-scope" title={scopeTitle}>{scopeText}</span>
+        </div>
+
+        <div className="ribbon-tabs">
           <div className="rib-tabs">
             {RIBBON.map((tab) => (
               <button
@@ -542,7 +779,7 @@ export function Workspace() {
               ref={navSearchRef}
               value={navQuery}
               onChange={(e) => setNavQuery(e.target.value)}
-              placeholder="查找功能（左侧导航）"
+              placeholder="在当前视图查找（Ctrl+F）"
               spellCheck={false}
               aria-label="查找功能导航"
             />

@@ -113,7 +113,7 @@ export type IconName =
   | 'gear' | 'agent' | 'plus' | 'refresh' | 'export' | 'filter' | 'panel' | 'fold'
   | 'copy' | 'archive' | 'key' | 'check' | 'scale' | 'play2' | 'info' | 'help'
   | 'unlock' | 'eye' | 'broken' | 'ring' | 'system' | 'sun' | 'moon' | 'terminal'
-  | 'chev' | 'caret' | 'x' | 'folder' | 'link' | 'dot';
+  | 'chev' | 'caret' | 'x' | 'folder' | 'link' | 'dot' | 'save' | 'undo' | 'more';
 
 export interface RibbonItem {
   label: string;

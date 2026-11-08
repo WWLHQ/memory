@@ -49,6 +49,9 @@ const PATHS: Record<IconName, JSX.Element> = {
   folder: <><path d="M4 5h6l2 2h8v12H4z" /></>,
   link: <><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7L11.5 6.8" /><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1.5-1.5" /></>,
   dot: <><circle cx="12" cy="12" r="3.5" /></>,
+  save: <><path d="M5 4h11l3 3v13H5V4Z" /><path d="M8 4v5h7V4M8 20v-6h8v6" /></>,
+  undo: <><path d="M9 7 4 12l5 5" /><path d="M4 12h9a6 6 0 0 1 6 6" /></>,
+  more: <><circle cx="5" cy="12" r="1.4" /><circle cx="12" cy="12" r="1.4" /><circle cx="19" cy="12" r="1.4" /></>,
 };
 
 export function Icon({ name, size = 16 }: { name: IconName; size?: number }) {

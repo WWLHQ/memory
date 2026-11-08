@@ -392,8 +392,8 @@
 | [src/web/shared/syncHub.ts](src/web/shared/syncHub.ts) | 69 | 渲染层同步中枢代理（批次42-B）：把内核 AnySyncHub 接口转发到主进程 PgSyncHub。 | HostSyncHub(class) |
 | [src/web/shared/useColWidths.tsx](src/web/shared/useColWidths.tsx) | 97 | 表头列宽拖拽与固化（批次24）：记忆库 / 日志记录 / 审计日志三张表共用同一实现。 | loadColWidths(fn), saveColWidths(fn), useColWidths(fn), ColResizeHandle(fn), MIN_COL_WIDTH(const), ColWidths(type) |
 | [src/web/shared/useL0Session.ts](src/web/shared/useL0Session.ts) | 155 | 渲染层 L0 连续查阅会话（§4.4.3，日志页 / 记忆层级页共用）： | useL0Session(fn), formatRemaining(fn), L0_HEARTBEAT_MS(const), L0SessionView(type), L0SessionApi(type), L0UnlockOutcome(type), L0RequestOutcome(type) |
-| [src/web/shell/Icons.tsx](src/web/shell/Icons.tsx) | 72 | 壳层图标：定稿里的线性图标集，按需内联渲染（不引入外部图标库、不依赖网络）。 | Icon(fn) |
-| [src/web/shell/Workspace.tsx](src/web/shell/Workspace.tsx) | 1190 | 工作台壳层（批次48 S1）：Ribbon + 导航树 + 标签条 + 属性检查器 + 任务窗 + 底部五标签 + 状态栏。 | Workspace(fn) |
+| [src/web/shell/Icons.tsx](src/web/shell/Icons.tsx) | 75 | 壳层图标：定稿里的线性图标集，按需内联渲染（不引入外部图标库、不依赖网络）。 | Icon(fn) |
+| [src/web/shell/Workspace.tsx](src/web/shell/Workspace.tsx) | 1427 | 工作台壳层（批次48 S1）：Ribbon + 导航树 + 标签条 + 属性检查器 + 任务窗 + 底部五标签 + 状态栏。 | Workspace(fn) |
 | [src/web/shell/dock.ts](src/web/shell/dock.ts) | 170 | 底部面板真实数据源（S6）：输出=程序动作日志尾读；问题=该日志派生的错误/警告； | loadOutputLog(fn), problemsFromLog(fn), loadScheduleRuns(fn), auditMentions(fn), loadAuditForMemory(fn), OutputLogView(type), ProblemRow(type), ScheduleRun(type), AuditRow(type), DockResult(type) |
 | [src/web/shell/layers.ts](src/web/shell/layers.ts) | 75 | L1–L6 / L0 面板真实数据（S7）：只在中心页为「分层 L1–L6」或「L0 密文」时显示的壳层条。 | loadLayerPanel(fn), PANEL_LAYERS(const), LayerCount(type), LayerPanelView(type), PanelLayer(type) |
 | [src/web/shell/overview.ts](src/web/shell/overview.ts) | 118 | 壳层「概览」数据条（批次48 S2）：只从真实链路取值，逐项标明来源与失败原因。 | loadOverview(fn), OverviewHealth(type), OverviewBilling(type), OverviewSnapshot(type) |
@@ -501,7 +501,7 @@ src/electron/ipcChannels.ts b914010b7f6e
 src/electron/l0KeyringStore.ts b900f5d523d5
 src/electron/llmBilling.ts 82ae5edccb1c
 src/electron/llmGateway.ts 5056e6447738
-src/electron/main.ts b8894dcf10b4
+src/electron/main.ts 7e3699716e9f
 src/electron/mcpClients.ts df9527333225
 src/electron/preload.ts 7b15f19e204b
 src/electron/storageIpc.ts 9edb5f55187a
@@ -754,14 +754,14 @@ src/web/shared/session.ts 2bc9578bb923
 src/web/shared/syncHub.ts 831b0d785108
 src/web/shared/useColWidths.tsx a6e14931a82b
 src/web/shared/useL0Session.ts c917a61c99d9
-src/web/shell/Icons.tsx 19cebaeba156
-src/web/shell/Workspace.tsx ea23e2f1069b
+src/web/shell/Icons.tsx 3a8fad33fa2d
+src/web/shell/Workspace.tsx 7ebf76b742d3
 src/web/shell/dock.ts 029c48568f1d
 src/web/shell/layers.ts 8f18e012b258
 src/web/shell/overview.ts 0765a086262d
 src/web/shell/statusbar.ts 52798840aff4
 src/web/shell/taskpane.ts 39d5562ae71b
-src/web/shell/views.ts b2494bcf70c1
+src/web/shell/views.ts 93fdb6e6367c
 src/web/shell/workspaceEntry.tsx d81475dafbfc
 src/web/sync/SyncPage.tsx 1282b8549322
 src/web/sync/coreSyncPage.ts e25ef86eaea4

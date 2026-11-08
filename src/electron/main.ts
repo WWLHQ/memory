@@ -181,11 +181,11 @@ const WEBHOOK_PORT = 8203;
 /** 批次37-A：l0:blobs 单次回读上限（渲染层按 200 一批，留出余量；超限如实拒绝而不是静默截断） */
 const L0_BLOBS_MAX_IDS = 500;
 /**
- * 批次48 S10：顶部只有一条自绘标题栏。
- * titleBarStyle='hidden' 后系统不再画标题栏文字，只保留三个窗口按钮（最小化/最大化/关闭），
- * 由 titleBarOverlay 覆盖在自绘标题栏右侧；高度必须与壳层 .ribbon-tabs 一致。
+ * 批次48 S11：顶部四段（定稿 final-01-workspace 实测）——
+ * 第 1 段标题行高 32px，系统只画三个窗口按钮（titleBarOverlay 覆盖在标题行右侧）；
+ * 菜单行 / Ribbon 标签行 / 功能区都在自绘内容里，不占用系统标题栏高度。
  */
-const TITLEBAR_HEIGHT = 34;
+const TITLEBAR_HEIGHT = 32;
 const TITLEBAR_LIGHT = { color: '#f6f7fa', symbolColor: '#1f2430' };
 const TITLEBAR_DARK = { color: '#1c2330', symbolColor: '#dde4f2' };
 
