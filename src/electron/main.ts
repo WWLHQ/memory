@@ -792,7 +792,7 @@ function ensureBackupScheduler(): void {
   backupTicker.unref?.();
 }
 
-type AdminGate = { ok: true; ctx: TenantContext } | { ok: false; error: string };
+type AdminGate = { ok: true; ctx: TenantContext } | { ok: false; error: string; code?: string };
 
 /**
  * 敏感 IPC 的管理员闸门（批次7）：会话必须是 home server 真源里的有效会话，且 role=admin。
@@ -805,11 +805,11 @@ function requireAdmin(sessionId: unknown, channel: string): AdminGate {
   const ctx = sid ? homeServerRef?.getSessionContext(sid) ?? null : null;
   if (!ctx) {
     actionLog('ipc', channel, { denied: 'no_session' }, { level: 'warn' });
-    return { ok: false, error: '需要登录后操作（会话已过期或未登录）' };
+    return { ok: false, code: 'E_AUTH_SESSION', error: '需要登录后操作（会话已过期或未登录）' };
   }
   if (ctx.role !== 'admin') {
     actionLog('ipc', channel, { denied: 'not_admin', user: ctx.user_id }, { level: 'warn' });
-    return { ok: false, error: '需要管理员权限' };
+    return { ok: false, code: 'E_AUTH_FORBIDDEN', error: '需要管理员权限' };
   }
   return { ok: true, ctx };
 }
@@ -1110,7 +1110,7 @@ function requireSession(sessionId: unknown, channel: string): AdminGate {
   const ctx = sid ? homeServerRef?.getSessionContext(sid) ?? null : null;
   if (!ctx) {
     actionLog('ipc', channel, { denied: 'no_session' }, { level: 'warn' });
-    return { ok: false, error: '需要登录后操作（会话已过期或未登录）' };
+    return { ok: false, code: 'E_AUTH_SESSION', error: '需要登录后操作（会话已过期或未登录）' };
   }
   return { ok: true, ctx };
 }
@@ -3329,7 +3329,7 @@ async function bootstrap(): Promise<void> {
   const syncHubReady = () => syncHub !== null;
   handleIpc(IPC.syncPush, async (_e, mem?: unknown, form?: unknown, sessionId?: string) => {
     const gate = requireSession(sessionId, IPC.syncPush);
-    if (!gate.ok) return { ok: false, error: gate.error };
+    if (!gate.ok) return { ok: false, code: gate.code ?? 'E_AUTH_SESSION', error: gate.error };
     if (!syncHubReady()) return { ok: false, code: 'E_NOT_IMPLEMENTED', error: '同步中枢未就绪（sync-hub 初始化失败，见 actions.log）' };
     if (!mem || typeof mem !== 'object') return { ok: false, error: 'sync:push 需要记忆行对象' };
     try {
@@ -3339,7 +3339,7 @@ async function bootstrap(): Promise<void> {
   });
   handleIpc(IPC.syncPull, async (_e, scope?: unknown, since?: unknown, form?: unknown, sessionId?: string) => {
     const gate = requireSession(sessionId, IPC.syncPull);
-    if (!gate.ok) return { ok: false, error: gate.error };
+    if (!gate.ok) return { ok: false, code: gate.code ?? 'E_AUTH_SESSION', error: gate.error };
     if (!syncHubReady()) return { ok: false, code: 'E_NOT_IMPLEMENTED', error: '同步中枢未就绪（sync-hub 初始化失败，见 actions.log）' };
     const sc = (scope ?? {}) as { team_id?: unknown; user_id?: unknown };
     if (typeof sc.team_id !== 'string' || !sc.team_id) return { ok: false, error: 'sync:pull 需要 team_id（渲染层 kernelAccount 规范三元组）' };
@@ -3354,7 +3354,7 @@ async function bootstrap(): Promise<void> {
   });
   handleIpc(IPC.syncReconcile, async (_e, scope?: unknown, sessionId?: string) => {
     const gate = requireSession(sessionId, IPC.syncReconcile);
-    if (!gate.ok) return { ok: false, error: gate.error };
+    if (!gate.ok) return { ok: false, code: gate.code ?? 'E_AUTH_SESSION', error: gate.error };
     if (!syncHubReady()) return { ok: false, code: 'E_NOT_IMPLEMENTED', error: '同步中枢未就绪（sync-hub 初始化失败，见 actions.log）' };
     const sc = (scope ?? {}) as { team_id?: unknown };
     if (typeof sc.team_id !== 'string' || !sc.team_id) return { ok: false, error: 'sync:reconcile 需要 team_id' };
@@ -3365,7 +3365,7 @@ async function bootstrap(): Promise<void> {
   });
   handleIpc(IPC.syncConflicts, async (_e, teamId?: unknown, sessionId?: string) => {
     const gate = requireSession(sessionId, IPC.syncConflicts);
-    if (!gate.ok) return { ok: false, error: gate.error };
+    if (!gate.ok) return { ok: false, code: gate.code ?? 'E_AUTH_SESSION', error: gate.error };
     if (!syncHubReady()) return { ok: false, code: 'E_NOT_IMPLEMENTED', error: '同步中枢未就绪（sync-hub 初始化失败，见 actions.log）' };
     try {
       const conflicts = await syncHub!.listConflicts(typeof teamId === 'string' && teamId ? teamId : undefined);
@@ -3374,7 +3374,7 @@ async function bootstrap(): Promise<void> {
   });
   handleIpc(IPC.syncResolve, async (_e, conflictId?: unknown, winner?: unknown, sessionId?: string) => {
     const gate = requireAdmin(sessionId, IPC.syncResolve);
-    if (!gate.ok) return { ok: false, error: gate.error };
+    if (!gate.ok) return { ok: false, code: gate.code ?? 'E_AUTH_SESSION', error: gate.error };
     if (!syncHubReady()) return { ok: false, code: 'E_NOT_IMPLEMENTED', error: '同步中枢未就绪（sync-hub 初始化失败，见 actions.log）' };
     if (typeof conflictId !== 'string' || !conflictId) return { ok: false, error: 'sync:resolve 需要 conflict_id' };
     if (winner !== 'local' && winner !== 'remote') return { ok: false, error: "sync:resolve winner 只能是 'local' | 'remote'" };
@@ -3386,19 +3386,19 @@ async function bootstrap(): Promise<void> {
   });
   handleIpc(IPC.syncCursor, async (_e, sessionId?: string) => {
     const gate = requireSession(sessionId, IPC.syncCursor);
-    if (!gate.ok) return { ok: false, error: gate.error };
+    if (!gate.ok) return { ok: false, code: gate.code ?? 'E_AUTH_SESSION', error: gate.error };
     if (!syncHubReady()) return { ok: false, code: 'E_NOT_IMPLEMENTED', error: '同步中枢未就绪（sync-hub 初始化失败，见 actions.log）' };
     try { return { ok: true, cursor: await syncHub!.getCursor() }; } catch (e) { return l0Fail(e); }
   });
   handleIpc(IPC.syncAuditCount, async (_e, sessionId?: string) => {
     const gate = requireSession(sessionId, IPC.syncAuditCount);
-    if (!gate.ok) return { ok: false, error: gate.error };
+    if (!gate.ok) return { ok: false, code: gate.code ?? 'E_AUTH_SESSION', error: gate.error };
     if (!syncHubReady()) return { ok: false, code: 'E_NOT_IMPLEMENTED', error: '同步中枢未就绪（sync-hub 初始化失败，见 actions.log）' };
     try { return { ok: true, count: await syncHub!.auditCount() }; } catch (e) { return l0Fail(e); }
   });
   handleIpc(IPC.syncAuditsFrom, async (_e, start?: unknown, sessionId?: string) => {
     const gate = requireSession(sessionId, IPC.syncAuditsFrom);
-    if (!gate.ok) return { ok: false, error: gate.error };
+    if (!gate.ok) return { ok: false, code: gate.code ?? 'E_AUTH_SESSION', error: gate.error };
     if (!syncHubReady()) return { ok: false, code: 'E_NOT_IMPLEMENTED', error: '同步中枢未就绪（sync-hub 初始化失败，见 actions.log）' };
     try {
       const audits = await syncHub!.auditsFrom(Number(start) || 0);

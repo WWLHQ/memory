@@ -67,8 +67,9 @@ export class HostSyncHub {
     return unwrap(res, 'E_NOT_IMPLEMENTED').count;
   }
 
-  async auditsFrom(start: number, team_id?: string): Promise<SyncAudit[]> {
-    const res = await hostCall<IpcResult<{ audits: SyncAudit[] }>>('sync:auditsFrom', [start, team_id, sid()]);
+  async auditsFrom(start: number): Promise<SyncAudit[]> {
+    // 主进程/预加载 auditsFrom 只收 (start, sessionId)：多传 team_id 会被当成会话而拒绝
+    const res = await hostCall<IpcResult<{ audits: SyncAudit[] }>>('sync:auditsFrom', [start, sid()]);
     return unwrap(res, 'E_NOT_IMPLEMENTED').audits;
   }
 }

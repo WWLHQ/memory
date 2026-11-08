@@ -45,6 +45,8 @@ describe('批次42-B HostSyncHub（主进程 PgSyncHub 代理）', () => {
     expect(hostCall).toHaveBeenCalledWith('sync:pull', [{ team_id: 't1', user_id: 'u1' }, 0, 'desktop', null]);
     await expect(h.auditCount()).resolves.toBe(3);
     await expect(h.auditsFrom(2)).resolves.toEqual([]);
+    // 预加载/主进程只收 (start, sessionId)：多传 team_id 会被当成会话→ E_AUTH_SESSION
+    expect(hostCall).toHaveBeenCalledWith('sync:auditsFrom', [2, null]);
   });
 
   it('reconcile/conflicts/resolve/cursor：全方法通道面（42-C 裁决页与每日对账的代理底座）', async () => {
