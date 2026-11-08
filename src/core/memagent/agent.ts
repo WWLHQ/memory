@@ -13,6 +13,8 @@ import {
 import { cosine, embedSync, DEFAULT_VECTOR_DIM } from './vector.ts';
 import type { L0BlobStore } from './l0Store.ts';
 import { ulid } from './ulid.ts';
+import { createPersonalApi, selectPersonalRecall } from './personal.ts';
+import type { PersonalApi } from './personal.ts';
 import type {
   AuditRecord, BrowseResult, DiscoverReq, DiscoverResult, DiscoverSignal, FeedbackKind, FeedbackResult, Form,
   GcFullReport, GcFullReq, GcReq, GcReport,
@@ -37,6 +39,13 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
   const { form, account, llm, vector, storage } = opts;
   // 批次44-D4：写入落盘兜底队列。缺省内存实现（进程内不丢），桌面可注入 FilePendingStore 持久化。
   const pending = new PendingWrites(opts.pending ?? new MemoryPendingStore());
+  /** 第一轮个人记忆：与 Memory 主表完全独立的存储端口（未注入 = 诚实不可用，召回零改变） */
+  const personal: PersonalApi = createPersonalApi({
+    store: opts.personal,
+    owner: account.user_id,
+    form,
+    appendAudit: (a) => storage.appendAudit(a),
+  });
 
   function newRequestId(): string {
     return `req_${ulid()}`;
@@ -215,6 +224,27 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
       }
     }
 
+    // 第一轮个人记忆召回准入：只有 confirmed 条目进召回（pending / rejected / 墓碑一律不进）。
+    // 独立于项目记忆打分：按关键词重合度取前 3 条，与项目命中同受 3000t 硬熔断约束。
+    let personalHits: string[] = [];
+    if (opts.personal) {
+      const picks = await selectPersonalRecall(opts.personal, account.user_id, req.query, 3);
+      if (picks.length > 0) {
+        for (const { entry, score } of picks) {
+          hits.push({
+            mem_id: `pm:${entry.id}`, content: entry.content, layer: entry.layer,
+            decay_class: 'hot', pinned: false, locked: false, score,
+            evidence_ref: `personal:${entry.id}`,
+          });
+        }
+        preCapTokens += picks.reduce((a, { entry }) => a + estTokens(entry.content), 0);
+        capped = applyHardCap(hits);
+        hits = capped.hits;
+        payload_tokens = capped.payload;
+        personalHits = hits.filter((h) => h.mem_id.startsWith('pm:')).map((h) => h.mem_id.slice(3));
+      }
+    }
+
     // 批次11：项目背景与省量（背景走硬熔断余量，payload + background 永不超过 3000t）
     const background = selectRecallBackground(all, consideredIds, {
       minimal,
@@ -253,6 +283,7 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
       // 批次15：区分是哪个 Agent 真的调用了召回（未识别时不写，避免伪归属）
       ...(req.client ? { client: req.client } : {}),
       mems: hits.map((h) => h.mem_id),
+      ...(personalHits.length ? { personal_mems: personalHits } : {}),
       scanned_memories: all.length,
       background_tokens: background.tokens,
       bg_mems: background.items.map((i) => i.mem_id),
@@ -589,5 +620,7 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
     memoryOp, feedback,
     // 兼容钩子（批次27 P3-1 起供端壳/测试使用；_seedMemory 仅测试灌数，页面代码不得调用）
     _seedMemory: seedMemory, _memoryOp: memoryOp, _feedback: feedback,
+    // 第一轮个人记忆本机闭环（独立存储；未注入时如实不可用）
+    personal,
   };
 }

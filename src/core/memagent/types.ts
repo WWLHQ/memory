@@ -589,7 +589,9 @@ export type AuditAction =
   | 'login' | 'login_fail' | 'logout'
   // 页面真实动作（4.3 全动作可查：日志页/审计页按动作回放，不允许账本里出现未知动作）
   | 'mode_dispatch' | 'sync_up' | 'sync_down' | 'sync_reconcile' | 'rerank_fallback'
-  | 'team_assign' | 'audit_delete' | 'archive' | 'l0_auth_fail';
+  | 'team_assign' | 'audit_delete' | 'archive' | 'l0_auth_fail'
+  // 第一轮个人记忆本机闭环：quick_add / confirm / reject / revoke / delete 各写一条
+  | 'personal_memory';
 
 export interface AuditRef {
   request_id: string;
@@ -877,6 +879,11 @@ export interface MemAgentOptions {
    * 注入后 sync() 真调 syncUp/syncDown 引擎（sha256 幂等 + 自动 LWW + since 增量）。
    */
   hub?: import('./sync.ts').AnySyncHub;
+  /**
+   * 第一轮个人记忆（本机闭环）：独立存储端口，不与 Memory 主表混用。
+   * 缺省 = 个人记忆 API 如实 E_NOT_IMPLEMENTED，召回也不追加个人条目（不改变任何现有行为）。
+   */
+  personal?: import('./personalStore.ts').PersonalMemoryStore;
 }
 
 /** createMemAgent 返回的核心 API 面（§2） */
@@ -934,6 +941,11 @@ export interface MemAgent {
   _memoryOp(mem_id: string, op: MemOp, patch?: MemOpPatch): Promise<MemOpResult>;
   /** 批次48 A13：meta.rating（1–5）与 comment 随反馈审计落账本（缺省则记为未评分） */
   _feedback(mem_id: string, kind: FeedbackKind, meta?: { rating?: number; comment?: string }): Promise<FeedbackResult>;
+  /**
+   * 第一轮个人记忆本机闭环：独立存储的内核 API（owner = 内核账号 user_id）。
+   * 存储未注入时 available=false，读写均如实 E_NOT_IMPLEMENTED。
+   */
+  personal: import('./personal.ts').PersonalApi;
 }
 
 /**
