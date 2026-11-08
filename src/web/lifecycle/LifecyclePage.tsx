@@ -7,9 +7,10 @@ import { LifecycleCard } from './LifecycleCard.tsx';
 import { ParamPanel } from './ParamPanel.tsx';
 import { useToast } from './useToast.tsx';
 import { useLifecycleMirror } from './useLifecycleMirror.ts';
-import { canMigrate, importanceLevel } from './logic.ts';
+import { canMigrate, freshnessPreview, importanceLevel } from './logic.ts';
 import { coreListLifecycle, coreLifeOp } from './coreLifecycle.ts';
 import { LIFECYCLE_DEFAULT_PAGE_SIZE, LIFECYCLE_PAGE_SIZES, pagedList } from './lifecycleFilter.ts';
+import { M_DAYS, N_DAYS } from './constants.ts';
 import type { LifeOp, LifecycleRecord, MemoryStatus } from './types.ts';
 
 export function LifecyclePage() {
@@ -18,6 +19,8 @@ export function LifecyclePage() {
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [batchTarget, setBatchTarget] = useState<MemoryStatus>('archived');
   const [loading, setLoading] = useState(true);
+  /** 定稿 3 页签：六状态 / 批量迁移 / 衰减与阈值 */
+  const [tab, setTab] = useState(0);
   // 分页状态（复制记忆库管理页口径；默认每页 5 条）
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(LIFECYCLE_DEFAULT_PAGE_SIZE);
@@ -91,7 +94,13 @@ export function LifecyclePage() {
     setRecords((list) => list.map((r) => byId.get(r.id) ?? r));
     setChecked(new Set());
     mirror.audit(res.audit, res.request_id || reqId);
-    toast.show(`批量迁移 ${res.affected.length} 条 → ${batchTarget}（真实审计）`);
+    const skipped = checked.size - res.affected.length;
+    if (res.affected.length === 0) {
+      // 失败/全部跳过不许报成功：内核没改任何一条时如实说「未生效」
+      toast.show(`批量迁移未生效：勾选 ${checked.size} 条均被内核跳过（锁定 G4 / 已处目标态 / 非法迁移）`);
+      return;
+    }
+    toast.show(`批量迁移 ${res.affected.length} 条 → ${batchTarget}${skipped > 0 ? `（${skipped} 条被内核跳过）` : ''}（真实审计）`);
   }
 
   // 勾选操作：批量只作用于当前页（避免跨页误选），全选/取消勾选全表
@@ -143,6 +152,19 @@ export function LifecyclePage() {
     <div className="wrap" data-testid="lifecycle-page">
       <h1>⏳ 生命周期页 <span className="badge p2">REQ-006 · P4</span></h1>
       <div className="sub">六态机（9.10）+ 调参（17.4/17.5）· 数据真相 = 内核账本（{records.length} 条真实记忆）· request_id={reqId || '暂无（操作后由内核返回）'}</div>
+
+      <div className="p0-tabs" role="tablist" data-testid="lifecycle-tabs">
+        {['六状态', '批量迁移', '衰减与阈值'].map((label, i) => (
+          <button
+            key={label} type="button" role="tab" aria-selected={tab === i}
+            className={`p0-tab${tab === i ? ' active' : ''}`}
+            data-testid={`lifecycle-tab-${i}`} data-tab={i}
+            onClick={() => setTab(i)}
+          >{label}</button>
+        ))}
+      </div>
+
+      <div hidden={tab !== 0} data-testid="lifecycle-panel-0">
 
       <div className="card">
         <table className="ltable" data-testid="lifecycle-table">
@@ -275,22 +297,71 @@ export function LifecyclePage() {
         )}
       </div>
 
-      <div className="card">
-        <div className="row" style={{ justifyContent: 'space-between' }}>
-          <b>批量迁移（9.10.4，写真实审计 lifecycle_change + {reqId || '操作后回填真实 request_id'}）</b>
-          <div className="row">
-            <label style={{ fontSize: 12, color: 'var(--muted)' }}>目标态</label>
-            <select data-testid="batch-target" value={batchTarget} onChange={(e) => setBatchTarget(e.target.value as MemoryStatus)}>
-              {(['active', 'hibernating', 'archived', 'deprecated', 'stale', 'dormant'] as MemoryStatus[]).map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
-            <button type="button" className="btn primary" data-testid="batch-run" onClick={handleBatch}>
-              批量迁移（{checked.size} 条）
-            </button>
+      </div>
+
+      <div hidden={tab !== 1} data-testid="lifecycle-panel-1">
+        <div className="card">
+          <div className="row" style={{ justifyContent: 'space-between' }}>
+            <b>批量迁移（9.10.4，写真实审计 lifecycle_change + {reqId || '操作后回填真实 request_id'}）</b>
+            <div className="row">
+              <label style={{ fontSize: 12, color: 'var(--muted)' }}>目标态</label>
+              <select data-testid="batch-target" value={batchTarget} onChange={(e) => setBatchTarget(e.target.value as MemoryStatus)}>
+                {(['active', 'hibernating', 'archived', 'deprecated', 'stale', 'dormant'] as MemoryStatus[]).map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+              <button type="button" className="btn primary" data-testid="batch-run" onClick={handleBatch}>
+                批量迁移（{checked.size} 条）
+              </button>
+            </div>
+          </div>
+          <div className="note">合法迁移：{canMigrate('active', 'hibernating') ? 'active→hibernating 等' : '—'}；锁定（G4）与已处目标态的行自动跳过；0 条改动会如实显示「未生效」。</div>
+          <div className="note" data-testid="batch-selection" style={{ marginTop: 8 }}>
+            勾选在「六状态」页完成 · 当前已勾选 <b>{checked.size}</b> 条
+            {checked.size > 0 ? `：${[...checked].join('、')}` : '（先去六状态页勾选要迁移的行）'}
           </div>
         </div>
-        <div className="note">合法迁移：{canMigrate('active', 'hibernating') ? 'active→hibernating 等' : '—'}；锁定（G4）与已处目标态的行自动跳过。</div>
+      </div>
+
+      <div hidden={tab !== 2} data-testid="lifecycle-panel-2">
+        <div className="card">
+          <b>衰减阈值与温度档（9.10.1 / 17.5 / 17.7）</b>
+          <table className="ltable" data-testid="decay-thresholds" style={{ marginTop: 8 }}>
+            <thead>
+              <tr><th>阈值</th><th>值</th><th>说明</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>hibernating 触发</td><td>{N_DAYS} 天</td><td>age ≥ N 天进入休眠（仍可读）</td></tr>
+              <tr><td>archived 触发</td><td>{M_DAYS} 天</td><td>age ≥ M 天进入归档（仍可读，不是删除）</td></tr>
+              <tr><td>freshness</td><td>0.5^(age/half)</td><td>下限 0.05；由真实 age 与半衰期计算</td></tr>
+              <tr><td>温度五档</td><td>hot / warm / cold / archived / dormant</td><td>内核真实 decay_class；页面六态由它翻译</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div className="card">
+          <b>本页真实记忆的衰减预览（{records.length} 条）</b>
+          {records.length === 0 ? (
+            <div className="p0-empty dashed" data-testid="decay-empty">账本为空：无真实衰减数据，不伪造阈值样本。</div>
+          ) : (
+            <table className="ltable" data-testid="decay-table" style={{ marginTop: 8 }}>
+              <thead>
+                <tr><th>ID</th><th>温度</th><th>状态</th><th>age（天）</th><th>半衰期</th><th>freshness</th></tr>
+              </thead>
+              <tbody>
+                {records.map((r) => (
+                  <tr key={r.id} data-testid={`decay-row-${r.id}`}>
+                    <td className="mid">{r.id}</td>
+                    <td><span className={`temp ${r.decay_class}`}>{r.decay_class}</span></td>
+                    <td><span className={`status ${r.status}`}>{r.status}</span></td>
+                    <td>{r.ageDays}</td>
+                    <td>{r.half_life_days}</td>
+                    <td>{freshnessPreview(r.ageDays, r.half_life_days).toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       </div>
 
       {toast.node}
