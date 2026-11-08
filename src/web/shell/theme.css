@@ -818,13 +818,13 @@ html[data-theme='dark'] .qa { border-right-color: #39414c; }
   background: var(--panel2);
   border-top: 1px solid var(--line);
 }
-.bottom-panel.collapsed { height: 28px; }
+.bottom-panel.collapsed { height: 31px; }
 
 .bp-head {
   flex: none;
   display: flex;
   align-items: stretch;
-  height: 28px;
+  height: 29px;
   padding: 0 5px;
   gap: 1px;
   border-bottom: 1px solid var(--line2);

@@ -417,8 +417,22 @@ describe('S6 底部五标签：只渲染真实数据，不可用就给原因', (
     return el as HTMLButtonElement;
   }
 
+  /** 定稿 D1 默认收起底部面板：点底部标签即展开，再断言面板内真实数据 */
+  async function openDock(container: HTMLElement) {
+    await act(async () => { fireEvent.click(tabButton(container, '输出')); });
+  }
+
+  it('定稿默认：底部面板收起，只留标签栏；不渲染面板体与拖拽条', async () => {
+    const { container } = await renderShell();
+    const panel = container.querySelector('.bottom-panel') as HTMLElement;
+    expect(panel.classList.contains('collapsed')).toBe(true);
+    expect(container.querySelector('.bp-body')).toBeNull();
+    expect(container.querySelector('.dock-resizer')).toBeNull();
+  });
+
   it('输出：浏览器模式如实不可用，且不显示任何角标数字', async () => {
     const { container } = await renderShell();
+    await openDock(container);
     const note = await screen.findByTestId('dock-log-unavailable');
     expect(note.textContent).toContain('浏览器模式');
     expect(container.querySelectorAll('.bp-tab .bn')).toHaveLength(0);
@@ -439,6 +453,7 @@ describe('S6 底部五标签：只渲染真实数据，不可用就给原因', (
       },
     });
     const { container } = await renderShell();
+    await openDock(container);
     const rows = await screen.findAllByTestId('dock-log-row');
     expect(rows).toHaveLength(3);
     expect(screen.getByText(/tick 超过 100ms/)).toBeInTheDocument();
@@ -459,6 +474,7 @@ describe('S6 底部五标签：只渲染真实数据，不可用就给原因', (
       ] },
     });
     const { container } = await renderShell();
+    await openDock(container);
     await screen.findByTestId('dock-log-row');
     await act(async () => { fireEvent.click(tabButton(container, '问题')); });
     expect(await screen.findByTestId('dock-problems-empty')).toBeInTheDocument();

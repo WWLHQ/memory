@@ -158,7 +158,8 @@ export function Workspace() {
   const [navCollapsed, setNavCollapsed] = useState(false);
   const [inspCollapsed, setInspCollapsed] = useState(false);
   const [taskOpen, setTaskOpen] = useState(false);
-  const [dockOpen, setDockOpen] = useState(true);
+  /** 定稿 D1：底部面板默认收起（只留 31px 标签栏），把纵向空间让给中心区；点标签/状态栏可展开 */
+  const [dockOpen, setDockOpen] = useState(false);
   const [dockTab, setDockTab] = useState<BottomTabId>('output');
   const [statusVisible, setStatusVisible] = useState(true);
   const [theme, setTheme] = useState<ThemeMode>(() => {
