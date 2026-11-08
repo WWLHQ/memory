@@ -40,6 +40,8 @@ export function GrowthPage() {
   const [weights, setWeights] = useState<DimWeights>({ ...DEFAULT_WEIGHTS });
   const [thresholds, setThresholds] = useState<LayerThresholds>({ ...DEFAULT_THRESHOLDS });
   const [devMode, setDevMode] = useState(false);
+  // 结构照定稿：4 个页签（判重与嫁接 / 回归评估 / 调度 / 红线自检），只渲染当前页签
+  const [tab, setTab] = useState(0);
   const [schedule, setSchedule] = useState<ScheduleItem[]>([]);
   const [audit, setAudit] = useState<GrowthAuditEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -217,9 +219,21 @@ export function GrowthPage() {
         </div>
       )}
 
+      <div className="p0-tabs" role="tablist" data-testid="growth-tabs">
+        {['判重与嫁接', '回归评估', '调度', '红线自检'].map((label, i) => (
+          <button
+            key={label} type="button" role="tab" aria-selected={tab === i}
+            className={`p0-tab${tab === i ? ' active' : ''}`}
+            data-testid={`gtab-${i}`} data-tab={i}
+            onClick={() => setTab(i)}
+          >{label}</button>
+        ))}
+      </div>
+
+      {tab === 0 && (
       <div className="p0-sec" data-testid="growth-sec-dedup">
         <div className="p0-sec-hd">
-          <h3>一、判重与嫁接</h3>
+          <h3>判重与嫁接</h3>
           <span className="p0-tag">6.1 五维判重 · 6.2 多层短路</span>
         </div>
         <DedupCard sample={sample} weights={weights} thresholds={thresholds} onResample={handleResample} />
@@ -229,10 +243,12 @@ export function GrowthPage() {
           onWeights={patchWeights} onThresholds={patchThresholds} onSave={handleSaveConfig}
         />
       </div>
+      )}
 
+      {tab === 1 && (
       <div className="p0-sec" data-testid="growth-sec-regression">
         <div className="p0-sec-hd">
-          <h3>二、回归评估</h3>
+          <h3>回归评估</h3>
           <span className="p0-tag">7.1 指标 · 7.2 Δ · 7.3 回归</span>
         </div>
         <GrowthCards m={metrics} empty={empty} />
@@ -244,18 +260,22 @@ export function GrowthPage() {
           receipt={receipt}
         />
       </div>
+      )}
 
+      {tab === 2 && (
       <div className="p0-sec" data-testid="growth-sec-schedule">
         <div className="p0-sec-hd">
-          <h3>三、调度</h3>
+          <h3>调度</h3>
           <span className="p0-tag">13.3 周期任务</span>
         </div>
         <ScheduleTimeline schedule={schedule} onToggle={handleToggle} hostKind={hostCapability()} />
       </div>
+      )}
 
+      {tab === 3 && (
       <div className="p0-sec" data-testid="growth-sec-check">
         <div className="p0-sec-hd">
-          <h3>四、红线自检</h3>
+          <h3>红线自检</h3>
           <span className="p0-tag">R1–R10</span>
         </div>
         <div className="card">
@@ -266,6 +286,7 @@ export function GrowthPage() {
           </div>
         </div>
       </div>
+      )}
       {toast}
     </div>
   );

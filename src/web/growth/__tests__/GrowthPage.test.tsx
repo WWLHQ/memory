@@ -13,6 +13,9 @@ import type { ScheduleItem } from '../types.ts';
 async function renderLoaded() {
   const utils = render(<GrowthPage />);
   await waitFor(() => expect(screen.getByTestId('growth-page')).toBeInTheDocument());
+  // 定稿页签结构：默认「判重与嫁接」，回归评估在 gtab-1
+  await waitFor(() => expect(screen.getByTestId('gtab-1')).toBeInTheDocument());
+  fireEvent.click(screen.getByTestId('gtab-1'));
   await waitFor(() => expect(screen.getByTestId('manual-trigger')).toBeInTheDocument());
   return utils;
 }
@@ -34,6 +37,7 @@ describe('GrowthPage × 内核审计账本', () => {
 
   it('调度停用 → schedule_changed 审计真写内核', async () => {
     await renderLoaded();
+    fireEvent.click(screen.getByTestId('gtab-2'));
     fireEvent.click(screen.getByTestId('sched-check-verdict_reminder')); // 非 required 项可停
     await waitFor(async () => {
       const entries = await coreLoadGrowthAudit();
@@ -53,6 +57,8 @@ describe('GrowthPage × 内核审计账本', () => {
     const first = await renderLoaded();
     first.unmount();
     render(<GrowthPage />);
+    await waitFor(() => expect(screen.getByTestId('gtab-1')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('gtab-1'));
     await waitFor(() => expect(screen.getByTestId('growth-audit')).toHaveTextContent(/weight_tuned/));
   });
 

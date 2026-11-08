@@ -12,6 +12,11 @@ beforeEach(() => {
   applyHostLlmSnapshot(null); // 默认无网关（诚实空态），配置态测试另行注入
 });
 
+/** 定稿页签结构：0=引擎 / 1=计费 / 2=反向代理 */
+function openTab(i: number) {
+  fireEvent.click(screen.getByTestId(`mtab-${i}`));
+}
+
 const SNAP: LlmGatewaySnapshot = {
   usable: true,
   engines: [
@@ -32,6 +37,7 @@ describe('ModelsPage（Phase C3 接真）', () => {
 
   it('模拟为 dry-run：不写审计、不扣额度，toast 明确标注未写账本', async () => {
     render(<ModelsPage />);
+    openTab(2);
     fireEvent.click(screen.getByTestId('proxy-simulate'));
     await waitFor(() => expect(screen.getByTestId('toast')).toHaveTextContent('dry-run（未写账本）'));
     expect(await getKernelStorage().queryAudit({})).toHaveLength(0);
@@ -47,6 +53,7 @@ describe('ModelsPage（Phase C3 接真）', () => {
     expect(before.embedding).toHaveLength(64);
 
     render(<ModelsPage />);
+    openTab(1);
     fireEvent.click(screen.getByTestId('save-config'));
     await waitFor(() => expect(screen.getByTestId('toast')).toHaveTextContent('已持久化'));
     expect(screen.getByTestId('toast')).toHaveTextContent('384 维');
@@ -66,6 +73,7 @@ describe('ModelsPage（Phase C3 接真）', () => {
 describe('ModelsPage 三态与列隐藏（阶段3-C）', () => {
   it('未配置网关（unconfigured）→ 诚实空态，绝不渲染假代理行', async () => {
     render(<ModelsPage />);
+    openTab(2);
     await waitFor(() => expect(screen.getByTestId('proxy-empty-state')).toBeInTheDocument());
     expect(screen.queryByTestId('proxy-rows')).toBeNull(); // 无假目录行
     expect(screen.getByTestId('proxy-empty-state')).toHaveTextContent('未配置引擎');
@@ -77,6 +85,7 @@ describe('ModelsPage 三态与列隐藏（阶段3-C）', () => {
   it('已配置（configured）→ 渲染真实快照引擎，且不展示 price/quota 列', async () => {
     applyHostLlmSnapshot(SNAP);
     render(<ModelsPage />);
+    openTab(2);
     await waitFor(() => expect(screen.getByTestId('proxy-rows')).toBeInTheDocument());
     expect(screen.queryByTestId('proxy-empty-state')).toBeNull();
     // 真实引擎 + 模型名（来自快照，非硬编码）
@@ -94,6 +103,7 @@ describe('ModelsPage 三态与列隐藏（阶段3-C）', () => {
   it('批次48 A16：未配置单价/配额 → 云端余量显示「未设置」，本地显示「不限」（不画假预算）', async () => {
     applyHostLlmSnapshot(SNAP);
     render(<ModelsPage />);
+    openTab(2);
     await waitFor(() => expect(screen.getByTestId('proxy-rows')).toBeInTheDocument());
     expect(screen.getByTestId('proxy-remain-Cloud DeepSeek')).toHaveTextContent('未设置');
     expect(screen.getByTestId('proxy-remain-Local Ollama')).toHaveTextContent('不限');
@@ -103,6 +113,7 @@ describe('ModelsPage 三态与列隐藏（阶段3-C）', () => {
   it('降级（degraded）→ 网关不可用提示，不渲染代理行', async () => {
     applyHostLlmSnapshot({ usable: false, engines: [], presets: [] });
     render(<ModelsPage />);
+    openTab(2);
     await waitFor(() => expect(screen.getByTestId('proxy-empty-state')).toBeInTheDocument());
     expect(screen.getByTestId('proxy-empty-state')).toHaveTextContent('已降级');
     expect(screen.queryByTestId('proxy-rows')).toBeNull();

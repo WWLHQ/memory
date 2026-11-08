@@ -85,6 +85,7 @@ describe('审计回显事件类型诚实化（阶段4-G / B6 变异杀手）', (
 
   it('ModelsPage 审计回显：保存配置显示真实配置字段，绝不显示 llm_proxy_source/cost/mode 假列', async () => {
     render(<ModelsPage />);
+    fireEvent.click(screen.getByTestId('mtab-1')); // 计费页签
     fireEvent.click(screen.getByTestId('save-config'));
     await waitFor(() => expect(screen.getByTestId('audit-entry-0')).toBeInTheDocument());
     const row = screen.getByTestId('audit-entry-0');

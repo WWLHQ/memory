@@ -49,6 +49,8 @@ export function ModelsPage() {
   const [costCap, setCostCap] = useState<number | null>(null);
   const [auditLog, setAuditLog] = useState<ProxyAuditEntry[]>([]);
   const [saving, setSaving] = useState(false);
+  // 结构照定稿：3 个页签（引擎 / 计费 / 反向代理），只渲染当前页签
+  const [tab, setTab] = useState(0);
   const { node: toast, show } = useToast();
   // 批次48 A31-c/A31-d：余额视图（逐字段 provenance）+ 手工兜底（配额/单价/余额）
   const [billingViews, setBillingViews] = useState<BillingEngineView[]>([]);
@@ -221,9 +223,21 @@ export function ModelsPage() {
         </div>
       )}
 
+      <div className="p0-tabs" role="tablist" data-testid="models-tabs">
+        {['引擎', '计费', '反向代理'].map((label, i) => (
+          <button
+            key={label} type="button" role="tab" aria-selected={tab === i}
+            className={`p0-tab${tab === i ? ' active' : ''}`}
+            data-testid={`mtab-${i}`} data-tab={i}
+            onClick={() => setTab(i)}
+          >{label}</button>
+        ))}
+      </div>
+
+      {tab === 0 && (
       <div className="p0-sec" data-testid="models-sec-engine">
         <div className="p0-sec-hd">
-          <h3>一、引擎</h3>
+          <h3>引擎</h3>
           <span className="p0-tag">向量模型 · 宿主网关真实引擎</span>
         </div>
         <VectorCard
@@ -256,10 +270,12 @@ export function ModelsPage() {
           </div>
         </div>
       </div>
+      )}
 
+      {tab === 1 && (
       <div className="p0-sec" data-testid="models-sec-billing">
         <div className="p0-sec-hd">
-          <h3>二、计费</h3>
+          <h3>计费</h3>
           <span className="p0-tag">四用途 · 余额 provenance · 手工单价/配额</span>
         </div>
         <LlmUsageTable usages={usages} onChange={patchUsage} />
@@ -308,10 +324,12 @@ export function ModelsPage() {
           </div>
         </div>
       </div>
+      )}
 
+      {tab === 2 && (
       <div className="p0-sec" data-testid="models-sec-proxy">
         <div className="p0-sec-hd">
-          <h3>三、反向代理</h3>
+          <h3>反向代理</h3>
           <span className="p0-tag">来源映射 · price_cap / cost_cap（与内核路由同源）</span>
         </div>
         <ProxyPanel
@@ -328,6 +346,7 @@ export function ModelsPage() {
           onSimulate={handleSimulate}
         />
       </div>
+      )}
       {toast}
     </div>
   );
