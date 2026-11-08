@@ -4,7 +4,7 @@
 import type { Category as CoreCategory } from '../../core/memagent/types.ts';
 import type { StorageBackend } from '../../core/memagent/types.ts';
 import { getKernel, getKernelStorage } from '../kernel.ts';
-import type { MemoryCategory } from './types.ts';
+import type { MemoryCategory, WriteReceiptHistoryRow } from './types.ts';
 import type { ExistingMemory } from './types.ts';
 
 /** 页面六类（§P2）→ 内核六类（17.6） */
@@ -74,4 +74,52 @@ export async function coreListExisting(): Promise<ExistingMemory[]> {
   return mems
     .filter((m) => !m.merged_into && Boolean(m.content))
     .map((m) => ({ id: m.mem_id, content: m.content }));
+}
+
+/** 写密钥状态（真实内核 getWriteStatus；pending 条数只用于内部判断，不在界面展示） */
+export async function coreWriteStatus(): Promise<{ l0_unlocked: boolean; pending_count: number }> {
+  const ma = await getAgent();
+  const r = await ma.getWriteStatus();
+  return { l0_unlocked: r.l0_unlocked, pending_count: r.pending_count };
+}
+
+/** 从内核错误里取本次真实 request_id（未签发返回 null，界面不得补造） */
+export function requestIdOfError(e: unknown): string | null {
+  const id = (e as { detail?: { request_id?: unknown } } | null | undefined)?.detail?.request_id;
+  return typeof id === 'string' && id.length > 0 ? id : null;
+}
+
+function asRecord(v: unknown): Record<string, unknown> {
+  return typeof v === 'object' && v !== null ? (v as Record<string, unknown>) : {};
+}
+
+/**
+ * 最近回执 = 账本审计 action=write 的真实记录（含质量门 filtered）。
+ * 写密钥锁定等被拒请求在持久化前就被内核拦下，不会留下回执行；界面如实说明，不补造。
+ */
+export async function coreWriteReceipts(limit = 10): Promise<WriteReceiptHistoryRow[]> {
+  await getAgent();
+  const rows = await getStorage().queryAudit({ action: 'write' });
+  return rows
+    .slice()
+    .sort((a, b) => b.ts - a.ts)
+    .slice(0, limit)
+    .map((a) => {
+      const d = asRecord(a.detail);
+      const dedup = typeof d.dedup === 'string' ? d.dedup : '—';
+      const sim = typeof d.score === 'number' ? d.score : null;
+      const memId = typeof d.mem_id === 'string' ? d.mem_id : null;
+      const layerKeys = typeof d.layers === 'object' && d.layers !== null ? Object.keys(d.layers) : [];
+      return {
+        request_id: a.request_id,
+        ts: a.ts,
+        action: a.action,
+        result: dedup === 'filtered' ? '质量门拦截' : dedup === 'grafted' ? 'graft 嫁接' : dedup === 'new' ? 'create 新建' : dedup,
+        dedup,
+        sim,
+        memory_id: memId,
+        layers: layerKeys.length > 0 ? layerKeys.join(' / ') : '—',
+        source: typeof d.source_agent === 'string' ? d.source_agent : (a.agent ?? '—'),
+      };
+    });
 }

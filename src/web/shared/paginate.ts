@@ -18,6 +18,24 @@ export interface Paged<T> {
 export const PAGE_SIZES = [10, 20, 50, 100] as const;
 export const DEFAULT_PAGE_SIZE = 10;
 
+/** 账本表格按可见高度自适应时的最少行数（高度放大后不得留大片空白） */
+export const MIN_AUTO_PAGE_SIZE = 25;
+
+/**
+ * 按可见高度算每页行数：去掉表头后按行高整除，最少 MIN_AUTO_PAGE_SIZE 行。
+ * 行高/表头尺寸取记忆管理账本的真实 CSS（28px 行 + 1px 分隔线 / 24px 表头 + 1px）。
+ */
+export function autoPageSize(
+  visiblePx: number,
+  rowPx = 29,
+  headerPx = 25,
+  min = MIN_AUTO_PAGE_SIZE,
+): number {
+  const usable = Math.max(0, Math.floor(visiblePx) - headerPx);
+  const rows = Math.floor(usable / Math.max(1, rowPx));
+  return Math.max(min, rows);
+}
+
 export function paginate<T>(items: readonly T[], p: PageParams): Paged<T> {
   const total = items.length;
   const rawSize = Math.floor(p.pageSize);

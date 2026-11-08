@@ -8,16 +8,21 @@ import { resetKernelForTests, setKernelL0ForTests } from '../../kernel.ts';
 import { createTestVault } from '../../../core/memagent/__tests__/l0Kit.ts';
 import * as coreWriteMod from '../coreWrite.ts';
 
-vi.mock('../coreWrite.ts', () => ({
-  coreWrite: vi.fn(async () => ({
-    dedup_action: 'create',
-    mem_id: 'mem_test',
-    layers: {},
-    sim: 1,
-    refined_by: 'stub',
-  })),
-  coreListExisting: vi.fn(async () => []),
-}));
+vi.mock('../coreWrite.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../coreWrite.ts')>();
+  return {
+    ...actual,
+    coreWrite: vi.fn(async () => ({
+      dedup_action: 'create',
+      mem_id: 'mem_test',
+      layers: {},
+      sim: 1,
+      refined_by: 'stub',
+      request_id: 'req_test',
+    })),
+    coreListExisting: vi.fn(async () => []),
+  };
+});
 
 const typedCoreWrite = coreWriteMod.coreWrite as ReturnType<typeof vi.fn>;
 

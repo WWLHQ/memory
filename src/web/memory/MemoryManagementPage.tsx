@@ -6,7 +6,7 @@
 // - 个人记忆按 D2 保持「程序暂无数据模型」的标签内不可用态，不显示任何计数；
 // - 冲突裁决以内核返回的 ok/resolved 为准，拒绝或未落定一律不当成功。
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { hostCapability } from '../../desktop/hostBridge.ts';
 import { coreConflicts, coreVerdict } from '../dispute/coreDispute.ts';
 import { VERDICTS } from '../dispute/DisputeVerdict.tsx';
@@ -14,7 +14,7 @@ import type { ConflictRecord, Verdict } from '../dispute/types.ts';
 import { useDisputeMirror } from '../dispute/useDisputeMirror.ts';
 import { useHostTheme } from '../shared/hostTheme.ts';
 import { kernelErrorText, useKernelLoad } from '../shared/kernelLoad.tsx';
-import { PAGE_SIZES, DEFAULT_PAGE_SIZE } from '../shared/paginate.ts';
+import { autoPageSize, MIN_AUTO_PAGE_SIZE } from '../shared/paginate.ts';
 import { publishSelection } from '../shared/selectionChannel.ts';
 import { useSessionContext } from '../shared/session.ts';
 import { requestShellView } from '../shared/shellNavigate.ts';
@@ -291,7 +291,9 @@ export function MemoryManagementPage() {
   const [tab, setTab] = useState<TabId>(initialTab);
   const [filter, setFilter] = useState<MemoryFilter>(() => initialMemoryFilter(location.search));
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
+  // 分页容量不再写死 10：按账本滚动区真实可见高度自适应，最少 25 行（高度放大后不留空白）
+  const [pageSize, setPageSize] = useState<number>(MIN_AUTO_PAGE_SIZE);
+  const tableAreaRef = useRef<HTMLDivElement>(null);
   const [selectedLayer, setSelectedLayer] = useState<LayerId | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [snapshotAt, setSnapshotAt] = useState<Date | null>(null);
@@ -360,6 +362,18 @@ export function MemoryManagementPage() {
   }, [memories.data, tab, selectedLayer]);
 
   const paged = useMemo(() => filterAndPaged(tableSource, filter, { page, pageSize }), [tableSource, filter, page, pageSize]);
+
+  // 每页行数跟随账本滚动区的真实可见高度（窗口/底栏开合/分辨率变化都会重新量）
+  useEffect(() => {
+    const el = tableAreaRef.current;
+    if (!el) return;
+    const measure = () => setPageSize(autoPageSize(el.clientHeight));
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [tab]);
 
   const layerTotal = useMemo(
     () => (memories.data ?? []).filter((m) => m.layer && m.layer !== 'L0').length,
@@ -655,9 +669,8 @@ export function MemoryManagementPage() {
           <span className="mm-filter-count">{paged.total} / {tableSource.length} 条</span>
           <label className="mm-size">
             每页
-            <select className="mm-in" value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}>
-              {PAGE_SIZES.map((n) => <option key={n} value={n}>{n}</option>)}
-            </select>
+            <b className="mm-size-auto" data-testid="mm-page-size">{pageSize}</b>
+            条（按可见高度自适应，最少 {MIN_AUTO_PAGE_SIZE}）
           </label>
           <button type="button" className="mm-btn" onClick={resetFilter} disabled={!filtersActive}>重置</button>
         </div>
@@ -758,7 +771,7 @@ export function MemoryManagementPage() {
               </div>
             ) : null}
 
-            <div className="mm-table-area">
+            <div className="mm-table-area" ref={tableAreaRef}>
               {memories.phase === 'loading' ? (
                 <div className="p0-empty">正在读取真实账本…</div>
               ) : memories.phase === 'error' ? (

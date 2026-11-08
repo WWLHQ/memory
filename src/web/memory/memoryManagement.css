@@ -171,6 +171,7 @@ html[data-theme="dark"] .vtab.active .vcount { background: #163049; color: #8cc4
 .mm-filter-count { color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .mm-size { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); white-space: nowrap; }
 .mm-size .mm-in { max-width: 62px; }
+.mm-size-auto { font: 600 11px/1 var(--mono); color: var(--text); font-variant-numeric: tabular-nums; }
 .mm-btn {
   height: 24px;
   border: 1px solid var(--line);

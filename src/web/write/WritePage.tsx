@@ -1,33 +1,58 @@
-// 写入页（REQ-006 / P2）· 完整编排（T5）
-// 表单(T3) + 查重卡(T4) + 写入回执（memory_id + L1–L6 折叠，L1 仅审计展开）+ toast + 后端 mirror。
-// T7 接真内核：提交走 memagent-core ma.write（查重 new/merged/duplicated 真实判定）。
-// ⚠ 禁止注入演示/种子数据：查重候选来自真实账本（空库即无候选）；写入只产生真实记忆。
-import { useState, useEffect } from 'react';
+// 写入页（REQ-006 / P2）· 定稿三标签：写入表单 / 最近回执 / 查重与 L0 规则
+// 表单 → Jaccard 查重预判 → 内核 ma.write → L1–L6 回执。
+// 回执必须是内核真实返回：被拒时只显示原因与内核 request_id（未签发就写未签发），不做乐观成功。
+// ⚠ 禁止注入演示/种子数据：查重候选与最近回执全部读真实账本（空库即无候选 / 无回执）。
+import { useEffect, useState } from 'react';
 import { WriteForm } from './WriteForm.tsx';
 import { DedupCard } from './DedupCard.tsx';
+import { WriteReceiptCard, WriteReceiptTable, WriteRefusalCard } from './WriteReceiptCard.tsx';
 import { useToast } from './useToast.tsx';
 import { useWriteMirror } from './useWriteMirror.ts';
-import { composeReceipt, scoreDedup, validateDraft } from './logic.ts';
-import { coreWrite, coreListExisting } from './coreWrite.ts';
+import { composeReceipt, scoreDedup, validateDraft, L1_CHAR_LIMIT } from './logic.ts';
+import { coreWrite, coreListExisting, coreWriteStatus, coreWriteReceipts, requestIdOfError } from './coreWrite.ts';
 import { KernelLoadError, kernelErrorText, useKernelLoad } from '../shared/kernelLoad.tsx';
 import { L0WriteUnlock } from '../shared/L0WriteUnlock.tsx';
+import { useHostTheme } from '../shared/hostTheme.ts';
 import { isL0LockedError } from '../../core/memagent/errors.ts';
 import { DEFAULT_PROJECT_ID, listProjectIds } from '../shared/kernelProjects.ts';
 import { newRequestId } from '../kernel.ts';
-import type { ExistingMemory, LayerName, MemoryDraft, WriteReceipt } from './types.ts';
+import { LAYER_SPECS } from '../../core/memagent/layerRules.ts';
+import type {
+  ExistingMemory, MemoryDraft, WriteReceipt, WriteReceiptHistoryRow, WriteRefusal,
+} from './types.ts';
 
-// 项目 ID 从账本真实派生（listProjectIds）；账本为空时回落 DEFAULT_PROJECT_ID 占位（A10，非空账本务必用真实项目）
+type WriteTab = 'form' | 'receipts' | 'rules';
+const TABS: { id: WriteTab; label: string }[] = [
+  { id: 'form', label: '写入表单' },
+  { id: 'receipts', label: '最近回执' },
+  { id: 'rules', label: '查重与 L0 规则' },
+];
+
+const RECEIPT_RULES = [
+  { k: 'create', label: 'create · 新建', body: 'L1 与账本最相近记忆的词面分低于 L1 阈值（0.70）→ 新建条目并签发 L1–L6。' },
+  { k: 'graft', label: 'graft · 分支嫁接', body: '与既有记忆达 L1 阈值 → 内核新建并嫁接到最近分支；回执给新条目的真实 memory_id。' },
+  { k: 'keep', label: 'keep · 保留原记忆', body: '内核返回 duplicated 时不新建层，保留原记忆；当前写路径只在重复判定命中该分支时产出。' },
+  { k: 'filtered', label: 'filtered · 质量门拦截', body: 'L0→L1 质量门判定无信息量 / 过短 / 无用内容 → 不入库，回执如实写 filtered。' },
+];
 
 export function WritePage({ load = coreListExisting }: { load?: () => Promise<ExistingMemory[]> } = {}) {
-  // session_id 由页面生成真实唯一值（不再用演示值 's1'）；真实环境可由租户上下文覆盖（R2）
+  useHostTheme();
+  const [tab, setTab] = useState<WriteTab>('form');
+  // session_id 由页面生成真实唯一值；真实环境可由租户上下文覆盖（R2）
   const [sessionId] = useState(() => newRequestId('sess'));
   const [draft, setDraft] = useState<MemoryDraft>({
     content: '', category: 'fact', tags: [], source: 'conversation',
     session_id: sessionId, project_id: DEFAULT_PROJECT_ID,
   });
   const [receipt, setReceipt] = useState<WriteReceipt | null>(null);
-  // 批次41-W：本次提交是不是「L0 写密钥锁着」挡下的——是就在原地给解锁入口，不要把用户赶去别的页面
+  const [refusal, setRefusal] = useState<WriteRefusal | null>(null);
+  // L0 写密钥锁定挡下的提交：原地给解锁入口，解锁后自动重放（不把用户赶去别的页面）
   const [l0Locked, setL0Locked] = useState(false);
+  const [showUnlock, setShowUnlock] = useState(false);
+  const [status, setStatus] = useState<{ phase: 'loading' | 'ready' | 'error'; unlocked?: boolean; error?: string }>({ phase: 'loading' });
+  const [history, setHistory] = useState<{ phase: 'loading' | 'ready' | 'error'; rows: WriteReceiptHistoryRow[]; error?: string }>({
+    phase: 'ready', rows: [],
+  });
   const toast = useToast();
   const mirror = useWriteMirror();
 
@@ -45,7 +70,28 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
     });
   }, [existingData]);
 
-  // 词面预览随内容实时计算（纯函数，候选来自真实账本；对照层 L1 = 未接大模型时内核唯一查重层）
+  // 写密钥真实状态（内核 getWriteStatus；pending 条数不展示，定稿明确队列页不存在）
+  useEffect(() => {
+    let alive = true;
+    coreWriteStatus()
+      .then((s) => { if (alive) setStatus({ phase: 'ready', unlocked: s.l0_unlocked }); })
+      .catch((e: unknown) => { if (alive) setStatus({ phase: 'error', error: kernelErrorText(e) }); });
+    return () => { alive = false; };
+  }, [receipt, refusal]);
+
+  const loadHistory = () => {
+    setHistory((h) => ({ ...h, phase: 'loading' }));
+    coreWriteReceipts(10)
+      .then((rows) => setHistory({ phase: 'ready', rows }))
+      .catch((e: unknown) => setHistory({ phase: 'error', rows: [], error: kernelErrorText(e) }));
+  };
+
+  useEffect(() => {
+    if (tab === 'receipts') loadHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
+
+  // 词面预览随内容实时计算（纯函数，候选来自真实账本；未接大模型时内核只查 L1）
   const result = scoreDedup(draft.content, existing);
 
   function handleSubmit() {
@@ -57,7 +103,7 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
     void doWrite();
   }
 
-  /** 真正提交一条写入；解锁成功后可以直接重放（批次41-W），不必让用户再点一次「写入」 */
+  /** 真正提交一条写入；解锁成功后直接重放（不必让用户再点一次「写入」） */
   function doWrite() {
     return (async () => {
       try {
@@ -65,22 +111,24 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
           content: draft.content, category: draft.category,
           project_id: draft.project_id, session_id: draft.session_id, source: draft.source,
         });
+        const createdAt = new Date().toISOString();
         setL0Locked(false);
-        if (cw.dedup_action === 'filtered') {
-          setReceipt(null);
-        } else {
-          setReceipt(composeReceipt(draft.content, cw.dedup_action, {
-            memoryId: cw.mem_id,
-            layers: cw.layers,
-            refinedBy: cw.refined_by,
-          }));
-        }
+        setShowUnlock(false);
+        setRefusal(null);
+        // 四类回执全部照内核真实返回展示（filtered 也出回执，但明确未入库）
+        setReceipt(composeReceipt(draft.content, cw.dedup_action, {
+          requestId: cw.request_id,
+          memoryId: cw.mem_id,
+          createdAt,
+          layers: cw.layers,
+          refinedBy: cw.refined_by,
+        }));
         // 账本已变 → 刷新查重候选（保留旧列表直到新列表返回，避免闪烁）
         void load().then((list) => replace(list)).catch(() => {});
+        if (tab === 'receipts') loadHistory();
         mirror.audit(`memory_${cw.dedup_action}`);
         toast.show(
-          // 阶段5-E / B10：内核只有 create / graft / keep / filtered 四种结果，
-          // 删掉永不命中的 merge 分支（旧「用户三模式」残留），filtered 落到质量门拦截说明。
+          // 内核写路径真实产出：create / graft / keep / filtered（keep 仅在 duplicated 时出现）
           cw.dedup_action === 'create'
             ? '已写入记忆。'
             : cw.dedup_action === 'graft'
@@ -90,9 +138,18 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
                 : '内容被 L0→L1 质量门拦截（无信息量/过短/无用内容），未写入记忆库。',
         );
       } catch (e) {
-        if (isL0LockedError(e)) {
-          // 批次41-W：这类失败不是内容问题，是写密钥锁着——给就地解锁入口，而不是只甩一句错误码
-          setL0Locked(true);
+        // 拒绝也必须出「拒绝回执」：原因 + 内核请求号，不做乐观成功
+        const now = new Date().toISOString();
+        const locked = isL0LockedError(e);
+        setReceipt(null);
+        setRefusal({
+          reason: kernelErrorText(e),
+          request_id: requestIdOfError(e),
+          created_at: now,
+          l0_locked: locked,
+        });
+        setL0Locked(locked);
+        if (locked) {
           toast.show('未写入：L0 写密钥未解锁（原文没法封成密文）。解锁写密钥后会自动重放这条写入。');
           return;
         }
@@ -101,46 +158,148 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
     })();
   }
 
+  const statusText = status.phase === 'loading'
+    ? '写密钥：读取中'
+    : status.phase === 'error'
+      ? `写密钥：状态不可读（${status.error}）`
+      : status.unlocked ? '写密钥：已解锁' : '写密钥：未解锁';
+
   return (
-    <div className="wrap" data-testid="write-page">
-      <h1>✍️ 写入页 <span className="badge p2">REQ-006 · P2</span></h1>
-      <div className="sub">写入 + 本地词面查重预览（判重在内核）+ L1–L6 回执（13.6 / 2.2）· 数据本地内存态为真相</div>
+    <div className="p0-page" data-testid="write-page">
+      <div className="p0-hd page-hd">
+        <h2>写入记忆 · ma.write</h2>
+        <span className="p0-sub">程序：单条表单 → Jaccard 查重预判 → 内核签发 request_id → L1–L6 压缩 → 回执</span>
+        <span className="p0-right">
+          <span className={`p0-tag ${status.unlocked ? 'ok' : status.phase === 'error' ? 'err' : 'warn'}`} data-testid="write-key-status">
+            {statusText}
+          </span>
+          {!status.unlocked && (
+            <button type="button" className="p0-btn" data-testid="unlock-btn" onClick={() => setShowUnlock((v) => !v)}>
+              解锁写密钥
+            </button>
+          )}
+        </span>
+      </div>
 
-      <WriteForm draft={draft} onChange={setDraft} onSubmit={handleSubmit} />
+      <div className="p0-tabs" role="tablist" aria-label="写入页标签">
+        {TABS.map((t) => (
+          <button
+            type="button"
+            key={t.id}
+            role="tab"
+            aria-selected={tab === t.id}
+            className={`p0-tab${tab === t.id ? ' active' : ''}`}
+            data-testid={`write-tab-${t.id}`}
+            onClick={() => setTab(t.id)}
+          >
+            {t.label}
+            {t.id === 'receipts' && history.rows.length > 0 ? <span className="p0-tabnum">{history.rows.length}</span> : null}
+          </button>
+        ))}
+      </div>
 
-      {draft.content.trim().length > 0 && phase === 'error' && (
-        <KernelLoadError what="读取查重候选（真实账本）" error={dedupError} onRetry={retryDedup} />
+      {showUnlock && (
+        <L0WriteUnlock scene="写入页" onUnlocked={() => { setShowUnlock(false); void doWrite(); }} />
       )}
-      {draft.content.trim().length > 0 && phase !== 'error' && <DedupCard result={result} />}
 
-      {l0Locked && <L0WriteUnlock scene="这条手动写入" onUnlocked={doWrite} />}
+      {tab === 'form' && (
+        <div className="p0-grid2">
+          <div className="p0-col">
+            <WriteForm
+              draft={draft}
+              onChange={setDraft}
+              onSubmit={handleSubmit}
+              onReset={() => { setDraft((d) => ({ ...d, content: '', tags: [] })); setReceipt(null); setRefusal(null); }}
+            />
 
-      {receipt && (
-        <div className="card receipt" data-testid="receipt">
-          <b>写入回执</b>
-          <div>
-            memory_id：<span className="mid" data-testid="receipt-id">{receipt.memory_id}</span> · 动作 {receipt.dedup_action}
-            {' '}· 精炼 {receipt.refined_by === 'stub' ? '未精炼（未接入 LLM）' : 'LLM'}
+            {draft.content.trim().length > 0 && phase === 'error' && (
+              <KernelLoadError what="读取查重候选（真实账本）" error={dedupError} onRetry={retryDedup} />
+            )}
+
+            <div className="p0-card" data-testid="l0-pending-note">
+              <div className="p0-hd">
+                <h3>L0 写密钥与待重放</h3>
+                <span className={`p0-tag ${status.unlocked ? 'ok' : 'warn'}`}>{status.unlocked ? '已解锁' : '未解锁'}</span>
+              </div>
+              <div className="p0-note">
+                写密钥未解锁时，内核会把本条写入放进 pendingWrites，解锁后按 created_at 顺序重放；
+                程序没有该队列的页面，因此本界面不显示队列条数，也不伪造「已重放」。
+              </div>
+              {l0Locked && <L0WriteUnlock scene="这条手动写入" onUnlocked={doWrite} />}
+            </div>
           </div>
-          <div className="note">L1–L6 逐层（只展示真实产出；L1 原文仅审计展开，15.3）：</div>
-          {(['L1', 'L2', 'L3', 'L4', 'L5', 'L6'] as LayerName[]).map((ln) => (
-            <details className="layer" key={ln} data-testid={`layer-${ln}`}>
-              <summary>{ln} · {receipt.layers[ln].summary}</summary>
-              {receipt.layers[ln].auditOnly && (
-                <div className="audit">⚠ 仅审计可展开原文（15.3）</div>
-              )}
-              {receipt.layers[ln].text && (
-                <div className="layer-body" data-testid={`layer-body-${ln}`}>{receipt.layers[ln].text}</div>
-              )}
-            </details>
-          ))}
+
+          <div className="p0-col">
+            {draft.content.trim().length > 0 && phase !== 'error' && <DedupCard result={result} />}
+            {receipt && <WriteReceiptCard receipt={receipt} />}
+            {refusal && <WriteRefusalCard refusal={refusal} />}
+            {!receipt && !refusal && (
+              <div className="p0-card" data-testid="receipt-placeholder">
+                <div className="p0-hd"><h3>写入回执</h3></div>
+                <div className="p0-empty dashed">
+                  <b>等待真实提交</b>
+                  <div>提交后这里展示内核返回的 request_id / memory_id 与四类结果；被拒则展示拒绝原因，不会先显示成功。</div>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
-      <div className="note">
-        红线：project_id 全局注入禁手填（R2）；L1 原文仅审计展开（15.3）；查重判定与动作由内核写路径执行并写审计（G6）。
-        审计上抛真接 home server 的 POST /api/mirror/audit（?backend= 可指定后端）；后端不可达时失败会显示提示，本地数据不受影响。
-      </div>
+      {tab === 'receipts' && (
+        <WriteReceiptTable
+          rows={history.rows}
+          phase={history.phase}
+          error={history.error}
+          onRetry={loadHistory}
+        />
+      )}
+
+      {tab === 'rules' && (
+        <div className="p0-grid3">
+          <div className="p0-card">
+            <div className="p0-hd"><h3>四类回执</h3></div>
+            <div className="p0-kvlist">
+              {RECEIPT_RULES.map((r) => (
+                <div className="p0-kvitem" key={r.k}>
+                  <b className="mono">{r.label}</b>
+                  <span>{r.body}</span>
+                </div>
+              ))}
+            </div>
+            <div className="p0-note">不提供用户可选的「合并/覆盖/保留」按钮：结果由内核写路径自动裁决。</div>
+          </div>
+
+          <div className="p0-card">
+            <div className="p0-hd"><h3>L1–L6 上限（内核 LAYER_SPECS）</h3></div>
+            <table className="p0-table">
+              <thead><tr><th>层</th><th>名称</th><th>上限</th><th>下限</th></tr></thead>
+              <tbody>
+                {LAYER_SPECS.map((s) => (
+                  <tr key={s.id}>
+                    <td className="mono">{s.id}</td>
+                    <td>{s.name}</td>
+                    <td className="num">{s.maxChars === null ? '不限' : `${s.maxChars} 字`}</td>
+                    <td className="num">{s.minChars === null ? '—' : `${s.minChars} 字`}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="p0-note">正文计数按定稿 300 字提示；内核 L1 当前不限长，L2 摘要按 300 字生成。</div>
+          </div>
+
+          <div className="p0-card">
+            <div className="p0-hd"><h3>失败与诚实态</h3></div>
+            <ul className="p0-bullets">
+              <li>写密钥未解锁：原文无法封成密文 → 内核拒绝，界面显示拒绝原因与 request_id（未签发则如实写「未签发」），并把本条放入 pendingWrites 待重放。</li>
+              <li>L0→L1 质量门拦截：不伪造 success，回执明确 filtered 且 memory_id 为空。</li>
+              <li>内核不可达：查重候选读取失败如实报错，不冒充「无候选」，不画预览分。</li>
+              <li>回执只读：不可编辑、不提供重放按钮；最近回执取账本 action=write 审计行。</li>
+            </ul>
+            <div className="p0-note">正文上限提示 = {L1_CHAR_LIMIT} 字；超出不拦截，以内核真实写入为准。</div>
+          </div>
+        </div>
+      )}
 
       {toast.node}
     </div>

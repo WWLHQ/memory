@@ -11,7 +11,12 @@ export function DedupCard({ result }: { result: DedupResult }) {
 
   return (
     <div className={`card dedup${is_duplicate ? ' dup' : ''}`} data-testid="dedup-card">
-      <b>查重预览（本地词面）</b>
+      <div className="p0-hd">
+        <h3>查重预览 · Jaccard</h3>
+        <span className={`p0-tag ${is_duplicate ? 'warn' : 'info'}`} data-testid="dedup-guess">
+          {is_duplicate ? '预判 graft（内核会嫁接）' : '预判 create'}
+        </span>
+      </div>
       <div className="dimrow">
         <div className="k">
           <span>词面相似度（分词重合度，本机实算）</span>

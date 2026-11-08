@@ -56,13 +56,39 @@ export interface ReceiptLayer {
 }
 
 export interface WriteReceipt {
+  /** 内核本次真实签发的请求号（拒绝时也可能由内核带在错误详情里） */
+  request_id: string;
   memory_id: string;
+  /** 内核回执时间（页面记录的真实落定时刻） */
+  created_at: string;
   layers: Record<LayerName, ReceiptLayer>;
-  /** 内核四态映射：create / graft（分支嫁接）/ merge / keep（duplicated）/ filtered（L0→L1 质量门拦截，未入库） */
+  /** 内核四态映射：create / graft（分支嫁接）/ keep（duplicated）/ filtered（L0→L1 质量门拦截，未入库） */
   /** 阶段5-E / B10：只保留内核写路径真实产出的四种结果（见 coreWrite.ts） */
   dedup_action: 'create' | 'graft' | 'keep' | 'filtered';
   /** 精炼来源：stub = 未接入 LLM（只落 L1） */
   refined_by: 'stub' | 'llm' | 'llm_partial';
+}
+
+/** 被内核拒绝的写入：不生成成功回执，只如实展示原因与 request_id（可能未签发） */
+export interface WriteRefusal {
+  reason: string;
+  request_id: string | null;
+  created_at: string;
+  /** L0 写密钥锁定 = 可原地解锁后重放，不是内容问题 */
+  l0_locked: boolean;
+}
+
+/** 最近回执行（来源：账本审计 action=write，无演示数据） */
+export interface WriteReceiptHistoryRow {
+  request_id: string;
+  ts: number;
+  action: string;
+  result: string;
+  dedup: string;
+  sim: number | null;
+  memory_id: string | null;
+  layers: string;
+  source: string;
 }
 
 export interface ValidationResult {

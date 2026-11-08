@@ -12,6 +12,9 @@ export function estimateTokens(text: string): number {
   return Math.round(cjk * 2 + other * 1.3);
 }
 
+/** 写入页正文计数上限（定稿 300 字）。内核 L1 规格当前 maxChars=null（不限长），界面只做提示，不据此拦截。 */
+export const L1_CHAR_LIMIT = 300;
+
 /** ≥500 字（CJK 计字，其它计词）触发「将精炼为 L1–L6」（§2.2） */
 export function needsRefine(content: string): boolean {
   const units = (content.match(/[一-鿿]/g) || []).length + (content.trim().match(/[a-zA-Z0-9]+/g) || []).length;
@@ -75,8 +78,12 @@ export function thresholdForLayer(layer: LayerName): number {
 }
 
 export interface ReceiptOptions {
+  /** 内核真实签发的 request_id（回执必须展示真实值，不补造） */
+  requestId?: string;
   /** 内核返回的真实 mem_id */
   memoryId?: string;
+  /** 回执落定时间（ISO；页面记录本次真实提交时刻） */
+  createdAt?: string;
   /** 内核真实产出的层（未接入 LLM 时仅 content_l1） */
   layers?: Record<string, string>;
   refinedBy?: 'stub' | 'llm' | 'llm_partial';
@@ -93,11 +100,12 @@ const LAYERS: LayerName[] = ['L1', 'L2', 'L3', 'L4', 'L5', 'L6'];
  * 未接入 LLM 时 L1 有值，L2–L6 明确标「未精炼（未接入 LLM）」，不再编造摘要。
  */
 export function composeReceipt(
-  content: string,
+  _content: string,
   dedupAction: WriteReceipt['dedup_action'] = 'create',
   opts: ReceiptOptions = {},
 ): WriteReceipt {
-  const memory_id = opts.memoryId ?? `mem_${Math.abs(hash(content))}`;
+  // 不补造 mem_id：内核没返回就留空，界面显示「—」（filtered 未入库时本来就没有）
+  const memory_id = opts.memoryId ?? '';
   const refined_by = opts.refinedBy ?? 'stub';
   // 阶段5-E / B10：内核不存在 merge 动作，只有 duplicated→keep 会不新建层。
   const noNewLayers = dedupAction === 'keep';
@@ -124,15 +132,16 @@ export function composeReceipt(
       text: ln === 'L1' ? undefined : (produced ? real : undefined),
     };
   }
-  return { memory_id, layers, dedup_action: dedupAction, refined_by };
+  return {
+    request_id: opts.requestId ?? '',
+    memory_id,
+    created_at: opts.createdAt ?? new Date().toISOString(),
+    layers,
+    dedup_action: dedupAction,
+    refined_by,
+  };
 }
 
 function round2(v: number): number {
   return Math.round(Math.max(0, Math.min(1, v)) * 100) / 100;
-}
-
-function hash(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
-  return h;
 }

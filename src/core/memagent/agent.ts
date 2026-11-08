@@ -274,10 +274,17 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
     // LLM 用途（write 精炼）走反代理路由（19.8）；选中模型但精炼未产出 → 回退本地语义。
     const pick = routeProxy(llm.listModels(), caps.price_cap, caps.cost_cap, usedToday);
     llm.takeUsage?.(); // 丢弃与本条写入无关的残留 usage 计数
-    const r = await coreWrite(req, {
-      storage, vector, account, request_id, now: Date.now(), llm, llmModel: pick.model ?? undefined,
-      l0: opts.l0,
-    });
+    let r: WriteResult;
+    try {
+      r = await coreWrite(req, {
+        storage, vector, account, request_id, now: Date.now(), llm, llmModel: pick.model ?? undefined,
+        l0: opts.l0,
+      });
+    } catch (e) {
+      // 被拒写入也要能对账：把内核本次真实 request_id 带在错误详情上，界面不得伪造回执号
+      if (e instanceof MemAgentError) e.detail.request_id = request_id;
+      throw e;
+    }
     const usage = llm.takeUsage?.() ?? null;
     // 显式 stub = 本就没有真实 LLM，不属于"代理失败回退"，不写 llm_fallback 噪音。
     // 逐层管道下只有真的调用过 LLM 却没产出 L2+ 才算回退（L1 层直接嫁接/过滤不算）。
