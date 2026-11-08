@@ -1,11 +1,13 @@
 // E2E 用：进程内静态文件服务器 + 复用真实后端，避免 Playwright webServer 子进程在 Windows 上卡 teardown。
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { readFileSync, statSync, existsSync } from 'node:fs';
-import { dirname, join, extname, normalize, sep } from 'node:path';
+import { readFileSync, statSync, existsSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, basename, extname, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer as createHomeServer } from '../src/home/server.ts';
 import type { HomeServer } from '../src/home/server.ts';
+import { importLockSnapshot } from '../src/auth/loginService.ts';
 import type { RunningServer } from '../src/agentOnboard/server.ts';
 import { InMemoryStorage } from '../src/core/memagent/storage.ts';
 import { InMemoryPersonalStore } from '../src/core/memagent/personalStore.ts';
@@ -74,8 +76,16 @@ export async function startHomeBackend(opts: {
   /** 第一轮个人记忆：缺省挂进程内独立存储（真实内核，非 mock）；用例可传共享实例做跨页断言 */
   personalStore?: PersonalMemoryStore;
 }): Promise<{ server: http.Server; homeServer: HomeServer; port: number; stop: () => Promise<void> }> {
+  // server.ts 把锁定表/账号表/镜像写在 dirname(dataFile) 下（home-locks.json 等）。
+  // E2E 是同一进程串跑多份后端，若 dataFile 都直接落在 tmpdir 根，就会共用同一份锁定快照，
+  // 上一个 spec / 上一轮运行的锁定态会被下一个后端原样读回（home.spec 的 e2e_lock 就这样被污染过）。
+  // 因此每个后端实例独占一个临时目录，锁、账号、镜像都随它隔离。
+  const dataDir = mkdtempSync(join(tmpdir(), 'e2e-home-'));
+  // loginService 的锁定表是模块级 Map，单 worker 下跨 spec 存活；生产里每次起服都是新进程。
+  // 起服前清空，等价于「进程重启」的干净锁表，避免历史失败计数串到本轮用例。
+  importLockSnapshot({});
   const homeServer = createHomeServer({
-    dataFile: opts.dataFile,
+    dataFile: join(dataDir, basename(opts.dataFile)),
     allowedOrigins: opts.allowedOrigins,
     kernelStorage: opts.kernelStorage ?? new InMemoryStorage(),
     kernelInfo: { readonly: false, db_path: 'e2e-in-memory' },
