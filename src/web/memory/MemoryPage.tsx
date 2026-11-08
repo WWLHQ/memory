@@ -21,7 +21,9 @@ import type { MemoryOp, MemoryRecord, MemoryStoreLocation } from './types.ts';
 export function MemoryPage({ load = coreListMemories }: { load?: () => Promise<MemoryRecord[]> } = {}) {
   const ledger = useKernelLoad('memory', load);
   const memories = ledger.data ?? [];
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(() => (
+    new URLSearchParams(location.search).get('mem_id')
+  ));
   const [loc, setLoc] = useState<MemoryStoreLocation | null>(null);
   const [filterState, setFilterState] = useState<MemoryTableFilterState>({
     search: '', type: 'all', status: 'all', source: 'all',

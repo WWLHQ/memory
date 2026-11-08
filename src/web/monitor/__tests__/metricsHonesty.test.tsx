@@ -4,7 +4,7 @@
 // 谎称「账本无口径」显示「—」，而 agent.ts 的 recall 审计 detail 里本来就有 payload_tokens。
 // 本套件锁住：真实时间窗口、真实 detail 字段分位数、内核审计字段接线、无口径卡「未采集」标注。
 import { describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { metricsFromLedger, percentile } from '../useMonitorReal.ts';
@@ -136,13 +136,14 @@ describe('监控指标时间窗口与真实字段（阶段4-I / B8 变异杀手�
     expect(cards.find((c) => c.metric === 'pipeline_llm_tokens p95')?.value).toBe('—');
   });
 
-  it('MetricGrid 对「—」卡渲染「未采集」标注，有值卡不标注', () => {
+  it('MetricGrid 空值卡值位标「未采集」、有值卡不标', () => {
     const empty = metricsFromLedger([], [], NOW);
-    const { unmount } = render(<MetricGrid cards={empty} />);
-    expect(screen.getAllByText(/未采集/)).toHaveLength(14);
-    unmount();
-    render(<MetricGrid cards={empty.map((c, i) => (i === 0 ? { ...c, value: 42 } : c))} />);
-    expect(screen.getAllByText(/未采集/)).toHaveLength(13);
+    const first = render(<MetricGrid cards={empty} />);
+    expect(first.container.querySelectorAll('.mval.empty')).toHaveLength(14);
+    expect([...first.container.querySelectorAll('.mval')].every((n) => (n.textContent || '').trim() === '未采集')).toBe(true);
+    first.unmount();
+    const second = render(<MetricGrid cards={empty.map((c, i) => (i === 0 ? { ...c, value: 42 } : c))} />);
+    expect([...second.container.querySelectorAll('.mval')].filter((n) => (n.textContent || '').trim() === '未采集')).toHaveLength(13);
   });
 
   it('源码声明契约：旧全量分母 / 假分位数 / 缺接线不得回流', () => {

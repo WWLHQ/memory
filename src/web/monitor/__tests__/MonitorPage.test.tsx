@@ -5,23 +5,23 @@ import { AlertTimeline } from '../AlertTimeline.tsx';
 import { SEED_ALERTS } from './fixtures.ts';
 import { resetKernelForTests } from '../../kernel.ts';
 
-// 页面接真：指标卡 = 真实账本实算（无数据口径显「—」未采集），告警时间线 = 真实账本 monitor_alert 审计。
+// 页面接真：指标卡 = 真实账本实算（无数据口径值位标「未采集」，不拿「—」冒充读数），告警时间线 = 真实账本 monitor_alert 审计。
 // jsdom/浏览器 = 内存态空账本 → 诚实空态（metrics-empty / alerts-empty），绝不伪造演示数字。
 // SEED_ALERTS / SEED_METRICS 仅作 AlertTimeline 组件单测夹具，页面不渲染。
 describe('MonitorPage (P6-T5 编排·真实账本接真版)', () => {
   beforeEach(() => resetKernelForTests());
   afterEach(() => vi.restoreAllMocks());
 
-  it('空账本（jsdom 内存态）→ 14 张卡全部「—」未采集 + 无告警诚实空态（不伪造演示数字）', async () => {
+  it('空账本（jsdom 内存态）→ 14 张卡值位全标「未采集」+ 无告警诚实空态（不伪造演示数字）', async () => {
     render(<MonitorPage />);
     await waitFor(() => expect(screen.getByTestId('metric-grid')).toBeInTheDocument());
     const cards = [...document.querySelectorAll('[data-testid^="metric-"]')]
       .filter((el) => el.getAttribute('data-testid') !== 'metric-grid');
     expect(cards).toHaveLength(14);
-    // 诚实口径：账本为空 → 每个数值位都是「—」，不出现伪造数字
+    // 诚实口径：账本为空 → 每个值位都如实标「未采集」，不出现「—」冒充读数或伪造数字
     const vals = [...document.querySelectorAll('.mval')].map((el) => el.textContent?.trim() ?? '');
     expect(vals).toHaveLength(14);
-    expect(vals.every((v) => v.startsWith('—'))).toBe(true);
+    expect(vals.every((v) => v === '未采集')).toBe(true);
     await waitFor(() => expect(screen.getByTestId('alerts-empty')).toBeInTheDocument());
     expect(screen.getByTestId('alerts-empty')).toHaveTextContent('无 monitor_alert 告警记录');
   });
