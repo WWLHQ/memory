@@ -3,7 +3,7 @@
 > 由 `npm run code:index` 生成，请勿手改；改代码后重跑即可。
 > 用法：先在本表定位文件与导出符号，再只读该文件的局部区间（省 token、少误改）。
 
-共 357 个源码文件。
+共 363 个源码文件。
 
 ## e2e
 
@@ -192,7 +192,7 @@
 | [src/web/Home/LoginModal.tsx](src/web/Home/LoginModal.tsx) | 412 | REQ-005 T8：登录卡片组件（§0.3 弹出子视图） | LoginModal(fn), LoginModalProps(type) |
 | [src/web/Home/ProgramLogPanel.tsx](src/web/Home/ProgramLogPanel.tsx) | 240 | 程序运行日志窗口（批次17 建，批次19 从首页迁至日志记录页）：真实尾读 <数据根>/actions.log。 | ProgramLogPanel(fn), ProgramLogPanelProps(type) |
 | [src/web/Home/TopBar.tsx](src/web/Home/TopBar.tsx) | 88 | REQ-005 T6：首页顶栏组件（登录态自适应，§0.2 顶栏） | TopBar(fn), TopBarProps(type) |
-| [src/web/Home/coreHome.ts](src/web/Home/coreHome.ts) | 331 | REQ-005 首页（真实可算）： | coreTraceLookup(fn), emptyGains(fn), getHomeFeed(fn), emptySync(fn), fetchMirrorItems(fn), L0_LOCK_ANOMALY_WINDOW_MS(const), TraceHit(type), MirrorItem(type), GetHomeFeedOpts(type), HomeFeedResult(type) |
+| [src/web/Home/coreHome.ts](src/web/Home/coreHome.ts) | 375 | REQ-005 首页（真实可算）： | coreTraceLookup(fn), emptyGains(fn), getHomeFeed(fn), emptySync(fn), fetchMirrorItems(fn), L0_LOCK_ANOMALY_WINDOW_MS(const), TraceHit(type), MirrorItem(type), GetHomeFeedOpts(type), HomeFeedResult(type), HomeFacts(type) |
 | [src/web/Home/crossTabAuth.ts](src/web/Home/crossTabAuth.ts) | 49 | 跨 iframe 登录态共享（localStorage）—— REQ-005 T11 补充 | getStoredSessionId(fn), storeSessionId(fn), clearStoredSessionId(fn), setTestOverride(fn), hasActiveSession(fn), useCrossTabAuth(fn) |
 | [src/web/Home/layerGraph.ts](src/web/Home/layerGraph.ts) | 328 | 首页 L1–L6 关系图谱数据推导（批次8-A，纯函数）： | categoryMeta(fn), memoryLayerText(fn), deriveLayerGraph(fn), emptyLayerGraph(fn), GRAPH_LAYERS(const), GRAPH_CATEGORIES(const), LayerMeta(type), CategoryMeta(type), LayerHubNode(type), MemoryGraphNode(type), LayerGraphEdge(type), LayerGraphStats(type), LayerGraph(type), LayerGraphOptions(type), GraphLayerId(type), GraphCategoryId(type), GraphEdgeKind(type) |
 | [src/web/Home/layerGraphLayout.ts](src/web/Home/layerGraphLayout.ts) | 190 | 首页 L1–L6 关系图谱布局（批次8-A，纯函数）： | layoutLayerGraph(fn), LayoutPoint(type), PositionedHub(type), PositionedNode(type), PositionedEdge(type), LayoutSpoke(type), LayerGraphLayout(type), LayerGraphLayoutOptions(type) |
@@ -267,6 +267,8 @@
 | [src/web/lifecycle/types.ts](src/web/lifecycle/types.ts) | 48 | 生命周期页（REQ-006 / P4）数据模型 | LifecycleRecord(type), OpResult(type), MemoryStatus(type), DecayClass(type), LifeOp(type) |
 | [src/web/lifecycle/useLifecycleMirror.ts](src/web/lifecycle/useLifecycleMirror.ts) | 14 | 生命周期页后端镜像（阶段5-C 口径统一）：真接 home server POST /api/mirror/audit。 | useLifecycleMirror(fn), LifecycleMirror(type) |
 | [src/web/lifecycle/useToast.tsx](src/web/lifecycle/useToast.tsx) | 13 | — | useToast(fn) |
+| [src/web/login/LoginPage.tsx](src/web/login/LoginPage.tsx) | 275 | 登录页（D7）：常规桌面登录形态（应用标识 + 账号 + 密码 + 登录按钮），走真实 POST /api/login。 | LoginPage(fn) |
+| [src/web/login/loginEntry.tsx](src/web/login/loginEntry.tsx) | 18 | 登录页入口（login.html）：真实 /api/login，会话写入 localStorage（session:realpage）。 | — |
 | [src/web/logs/LogCards.tsx](src/web/logs/LogCards.tsx) | 305 | REQ-011 T3 日志列表（§2.2）+ 异常聚合卡（§2.3）+ 审计 modal（R-LOG6，按 request_id 真查内核账本）+ L0 授权卡（§2.4） | LogTable(fn), ErrorAggr(fn), AuditModal(fn), L0AuthCard(fn), LogTableProps(type), L0AuthCardProps(type) |
 | [src/web/logs/LogFilterBar.tsx](src/web/logs/LogFilterBar.tsx) | 66 | REQ-011 T3 过滤区（§2.1 六维） | LogFilterBar(fn) |
 | [src/web/logs/LogsPage.tsx](src/web/logs/LogsPage.tsx) | 173 | 日志记录页（REQ-011 / P15）T4 编排 | LogsPage(fn) |
@@ -276,7 +278,7 @@
 | [src/web/logs/logsEntry.tsx](src/web/logs/logsEntry.tsx) | 10 | 日志记录页（REQ-011 / P15）入口 | — |
 | [src/web/logs/types.ts](src/web/logs/types.ts) | 52 | 日志记录页（REQ-011 / P15）数据模型 | LogEntry(type), LogFilter(type), L0State(type), LogLevel(type), LogForm(type), LogAction(type), ErrorKind(type) |
 | [src/web/logs/useToast.tsx](src/web/logs/useToast.tsx) | 13 | — | useToast(fn) |
-| [src/web/main.tsx](src/web/main.tsx) | 151 | 应用入口（REQ-005 首页路由 · T12 路由决策：首页 = HomePage，覆盖 REQ-003 默认页） | — |
+| [src/web/main.tsx](src/web/main.tsx) | 19 | 概览页入口（index.html）：按定稿 .ovx 版式整页重做，替换旧首页（问候语 + emoji 大卡）。 | — |
 | [src/web/memory/LayerFilterBar.tsx](src/web/memory/LayerFilterBar.tsx) | 189 | 记忆层级管理页（19.11）· 每层 L0-L6 过滤栏 + 分页控件 | LayerFilterBar(fn), LayerPager(fn) |
 | [src/web/memory/LayerMemoryTable.tsx](src/web/memory/LayerMemoryTable.tsx) | 174 | 层级管理页每层内的记忆表格（带可拖拽表头列宽） | LayerMemoryTable(fn) |
 | [src/web/memory/MemoryActions.tsx](src/web/memory/MemoryActions.tsx) | 80 | 记忆管理页（REQ-006 / P8）操作区（T4） | MemoryActions(fn) |
@@ -321,7 +323,9 @@
 | [src/web/monitor/useMonitorReal.ts](src/web/monitor/useMonitorReal.ts) | 160 | 监控仪表盘（REQ-006 / P6）· 真实数据接真层 | percentile(fn), metricsFromLedger(fn), realLoadAlerts(fn), loadRealMonitorData(fn), MONITOR_REAL_DATA_SOURCE(const), RealMonitor(type), RealStorage(type) |
 | [src/web/monitor/useToast.tsx](src/web/monitor/useToast.tsx) | 13 | — | useToast(fn) |
 | [src/web/overview/Overview.tsx](src/web/overview/Overview.tsx) | 160 | REQ-003 + REQ-005 配合展示（通览演示页） | Overview(fn) |
+| [src/web/overview/OverviewPage.tsx](src/web/overview/OverviewPage.tsx) | 229 | 概览页（定稿 .ovx 版式）：一句话结论 + 4 张统计卡 + 范围行 + 编号洞察 01–04 + 快捷胶囊 + 建议 chips + 输入框。 | OverviewPage(fn) |
 | [src/web/overview/overviewEntry.tsx](src/web/overview/overviewEntry.tsx) | 20 | REQ-003 + REQ-005 通览演示页入口 | — |
+| [src/web/overview/overviewPageData.ts](src/web/overview/overviewPageData.ts) | 374 | 概览页（定稿 .ovx 版式）的纯派生层：把真实快照翻译成「一句话结论 / 4 卡 / 范围行 / 洞察 / 胶囊 / 建议」。 | deriveOverviewView(fn), answerOverviewQuestion(fn), OverviewStatView(type), OverviewInsightView(type), OverviewScopeView(type), OverviewView(type), OverviewAnswer(type), PillTone(type) |
 | [src/web/params/DevPanel.tsx](src/web/params/DevPanel.tsx) | 87 | P5-T3 开发者模式（折叠面板，暴露底层参数；2.4.3 / 2.4.1 / 15.3 / 9.10 / 15.1） | DevPanel(fn) |
 | [src/web/params/KbManagementCard.tsx](src/web/params/KbManagementCard.tsx) | 297 | 全局参数页（REQ-006 / P5）· 记忆库管理卡片 | KbManagementCard(fn) |
 | [src/web/params/KbPolicyTable.tsx](src/web/params/KbPolicyTable.tsx) | 40 | P5-T3 知识库策略表（17.6 六类）—— 阶段5-E / B9：内核 policyFor() 的只读镜像。 | KbPolicyTable(fn) |
@@ -379,6 +383,7 @@
 | [src/web/shared/L0WriteUnlock.tsx](src/web/shared/L0WriteUnlock.tsx) | 97 | 批次41-W：L0 写密钥未解锁 → 就地提示 + 就地解锁入口。 | L0WriteUnlock(fn), L0WriteUnlockProps(type) |
 | [src/web/shared/PageNav.tsx](src/web/shared/PageNav.tsx) | 102 | 分页导航条（批次24）：首页/上一页/跳页输入/下一页/尾页 + 每页条数（默认 10）。 | PageNav(fn), PageNavProps(type) |
 | [src/web/shared/actionLog.ts](src/web/shared/actionLog.ts) | 106 | 渲染层动作日志（批次7）：任何页面 import 本模块即自动安装全局捕获。 | uiLog(fn), installUiActionLog(fn) |
+| [src/web/shared/hostTheme.ts](src/web/shared/hostTheme.ts) | 42 | 中心区 iframe 跟随壳层主题（浅/深）。 | useHostTheme(fn), SHELL_THEME_KEY(const) |
 | [src/web/shared/kernelLoad.tsx](src/web/shared/kernelLoad.tsx) | 95 | 内核数据加载三态（批次25 P0-7）：loading / ok / error —— 「读不到」绝不渲染成「账本为空」。 | kernelErrorText(fn), useKernelLoad(fn), KernelLoadError(fn), KernelLoadResult(type), KernelLoadPhase(type) |
 | [src/web/shared/kernelProjects.ts](src/web/shared/kernelProjects.ts) | 18 | 项目 ID 真源（批次27 P2-7）：真实项目从内核账本派生（与 MCP list_projects 同口径）， | listProjectIds(fn), DEFAULT_PROJECT_ID(const) |
 | [src/web/shared/l0BlobStore.ts](src/web/shared/l0BlobStore.ts) | 53 | 渲染层 L0 原数据库只读端口（批次37-A）：拆库后 L1–L6 行只带 has_l0，密文信封在**主进程**的 memories.l0.json。 | HostL0BlobStore(class) |
@@ -389,17 +394,18 @@
 | [src/web/shared/paginate.ts](src/web/shared/paginate.ts) | 31 | 列表分页纯函数（批次24）：记忆库 / 日志记录 / 审计日志共用同一口径。 | paginate(fn), PAGE_SIZES(const), DEFAULT_PAGE_SIZE(const), PageParams(type), Paged(type) |
 | [src/web/shared/selectionChannel.ts](src/web/shared/selectionChannel.ts) | 71 | 选中项回传通道（S4）：中心区真实页面把「用户当前选中的一条真实记录」回传给壳层属性检查器。 | parseSelection(fn), publishSelection(fn), SELECTION_MSG(const), SelectionField(type), SelectionPayload(type) |
 | [src/web/shared/session.ts](src/web/shared/session.ts) | 57 | 当前会话（批次7）：跨 iframe 共享的 sessionId + home server /api/me 的真实上下文。 | currentSessionId(fn), fetchSessionContext(fn), useSessionContext(fn), SessionState(type), SessionRole(type) |
+| [src/web/shared/shellNavigate.ts](src/web/shared/shellNavigate.ts) | 12 | 中心区 iframe → 壳层导航（概览页快捷胶囊 / 洞察跳转用）。 | requestShellView(fn), SHELL_GOTO_MSG(const) |
 | [src/web/shared/syncHub.ts](src/web/shared/syncHub.ts) | 69 | 渲染层同步中枢代理（批次42-B）：把内核 AnySyncHub 接口转发到主进程 PgSyncHub。 | HostSyncHub(class) |
 | [src/web/shared/useColWidths.tsx](src/web/shared/useColWidths.tsx) | 97 | 表头列宽拖拽与固化（批次24）：记忆库 / 日志记录 / 审计日志三张表共用同一实现。 | loadColWidths(fn), saveColWidths(fn), useColWidths(fn), ColResizeHandle(fn), MIN_COL_WIDTH(const), ColWidths(type) |
 | [src/web/shared/useL0Session.ts](src/web/shared/useL0Session.ts) | 155 | 渲染层 L0 连续查阅会话（§4.4.3，日志页 / 记忆层级页共用）： | useL0Session(fn), formatRemaining(fn), L0_HEARTBEAT_MS(const), L0SessionView(type), L0SessionApi(type), L0UnlockOutcome(type), L0RequestOutcome(type) |
 | [src/web/shell/Icons.tsx](src/web/shell/Icons.tsx) | 75 | 壳层图标：定稿里的线性图标集，按需内联渲染（不引入外部图标库、不依赖网络）。 | Icon(fn) |
-| [src/web/shell/Workspace.tsx](src/web/shell/Workspace.tsx) | 1427 | 工作台壳层（批次48 S1）：Ribbon + 导航树 + 标签条 + 属性检查器 + 任务窗 + 底部五标签 + 状态栏。 | Workspace(fn) |
+| [src/web/shell/Workspace.tsx](src/web/shell/Workspace.tsx) | 1445 | 工作台壳层（批次48 S1）：Ribbon + 导航树 + 标签条 + 属性检查器 + 任务窗 + 底部五标签 + 状态栏。 | Workspace(fn) |
 | [src/web/shell/dock.ts](src/web/shell/dock.ts) | 170 | 底部面板真实数据源（S6）：输出=程序动作日志尾读；问题=该日志派生的错误/警告； | loadOutputLog(fn), problemsFromLog(fn), loadScheduleRuns(fn), auditMentions(fn), loadAuditForMemory(fn), OutputLogView(type), ProblemRow(type), ScheduleRun(type), AuditRow(type), DockResult(type) |
 | [src/web/shell/layers.ts](src/web/shell/layers.ts) | 75 | L1–L6 / L0 面板真实数据（S7）：只在中心页为「分层 L1–L6」或「L0 密文」时显示的壳层条。 | loadLayerPanel(fn), PANEL_LAYERS(const), LayerCount(type), LayerPanelView(type), PanelLayer(type) |
-| [src/web/shell/overview.ts](src/web/shell/overview.ts) | 118 | 壳层「概览」数据条（批次48 S2）：只从真实链路取值，逐项标明来源与失败原因。 | loadOverview(fn), OverviewHealth(type), OverviewBilling(type), OverviewSnapshot(type) |
+| [src/web/shell/overview.ts](src/web/shell/overview.ts) | 132 | 壳层「概览」数据条（批次48 S2）：只从真实链路取值，逐项标明来源与失败原因。 | loadOverview(fn), OverviewHealth(type), OverviewBilling(type), OverviewSnapshot(type) |
 | [src/web/shell/statusbar.ts](src/web/shell/statusbar.ts) | 103 | 状态栏真实数据（S7）：账本位置 / L0 保险库状态 / 采集器后台状态。 | loadL0Status(fn), loadCollectorStatus(fn), loadStatusbar(fn), shortLocation(fn), StoragePlaceView(type), CollectorView(type), StatusSnapshot(type) |
 | [src/web/shell/taskpane.ts](src/web/shell/taskpane.ts) | 40 | 任务窗「待重放写入」只读视图（S5 / D6）：经 hostBridge 读 l0:pendingWrites。 | loadPendingWrites(fn), PendingWritesResult(type) |
-| [src/web/shell/views.ts](src/web/shell/views.ts) | 377 | 工作台壳层的视图映射（批次48 S1）。 | flattenNav(fn), findNav(fn), navPages(fn), PAGES(const), NAV(const), RIBBON(const), BOTTOM_TABS(const), NavGroup(type), NavItem(type), RibbonItem(type), RibbonGroup(type), RibbonTab(type), BottomTab(type), PageKey(type), NavEntry(type), IconName(type), ShellAction(type), BottomTabId(type) |
+| [src/web/shell/views.ts](src/web/shell/views.ts) | 379 | 工作台壳层的视图映射（批次48 S1）。 | flattenNav(fn), findNav(fn), navPages(fn), PAGES(const), NAV(const), RIBBON(const), BOTTOM_TABS(const), NavGroup(type), NavItem(type), RibbonItem(type), RibbonGroup(type), RibbonTab(type), BottomTab(type), PageKey(type), NavEntry(type), IconName(type), ShellAction(type), BottomTabId(type) |
 | [src/web/shell/workspaceEntry.tsx](src/web/shell/workspaceEntry.tsx) | 20 | 工作台壳层入口（批次48 S1）：Electron 主窗口加载 workspace.html。 | — |
 | [src/web/sync/SyncPage.tsx](src/web/sync/SyncPage.tsx) | 131 | 同步与裁决页（批次42-C）：「立即同步」（真实报告）+ 中枢对账视图 + §9.7 人工裁决队列。 | SyncPage(fn) |
 | [src/web/sync/coreSyncPage.ts](src/web/sync/coreSyncPage.ts) | 103 | 同步与裁决页（批次42-C）数据逻辑：内核 agent.sync 真跑 + §9.7 裁决队列经 HostSyncHub 代理。 | runSync(fn), listSyncConflicts(fn), resolveConflict(fn), hubOverview(fn), SyncPageHub(type), SyncPageCtx(type), SyncRunView(type), HubOverviewView(type) |
@@ -554,7 +560,7 @@ src/web/Home/LayerGraphPanel.tsx 7c94457e288e
 src/web/Home/LoginModal.tsx c9224c5e3622
 src/web/Home/ProgramLogPanel.tsx 7951f28c2a5d
 src/web/Home/TopBar.tsx 5a0e8315bc3a
-src/web/Home/coreHome.ts 1b79670f7395
+src/web/Home/coreHome.ts 628af2ab2ad1
 src/web/Home/crossTabAuth.ts d85780df575e
 src/web/Home/layerGraph.ts 9a728a7ec61e
 src/web/Home/layerGraphLayout.ts 8215d57492af
@@ -629,6 +635,8 @@ src/web/lifecycle/logic.ts 7574f2b0fe12
 src/web/lifecycle/types.ts b96b0c4d96c0
 src/web/lifecycle/useLifecycleMirror.ts 99f7105a6f07
 src/web/lifecycle/useToast.tsx 85cd09d2e1f5
+src/web/login/LoginPage.tsx ab7ef832b9a9
+src/web/login/loginEntry.tsx 9855ac21b42f
 src/web/logs/LogCards.tsx 84db004bae6d
 src/web/logs/LogFilterBar.tsx 70ba5e38635e
 src/web/logs/LogsPage.tsx a0a3a9aacdb3
@@ -638,7 +646,7 @@ src/web/logs/logic.ts 27b2603804cf
 src/web/logs/logsEntry.tsx c4bc7bde74d8
 src/web/logs/types.ts c57557c7576e
 src/web/logs/useToast.tsx 85cd09d2e1f5
-src/web/main.tsx 9173d0a9af75
+src/web/main.tsx d194914b0d06
 src/web/memory/LayerFilterBar.tsx 5f8c2bea1169
 src/web/memory/LayerMemoryTable.tsx 6fd085b03ff4
 src/web/memory/MemoryActions.tsx 9983e64102b0
@@ -683,7 +691,9 @@ src/web/monitor/useMonitorMirror.ts 9e87dd8cc071
 src/web/monitor/useMonitorReal.ts 62e7e61b2f57
 src/web/monitor/useToast.tsx 85cd09d2e1f5
 src/web/overview/Overview.tsx b4303483348f
+src/web/overview/OverviewPage.tsx a99b31fa000e
 src/web/overview/overviewEntry.tsx 5f4488678cc7
+src/web/overview/overviewPageData.ts aac381e4c1fa
 src/web/params/DevPanel.tsx 4d2f45da1bcd
 src/web/params/KbManagementCard.tsx 42c5a719d2f8
 src/web/params/KbPolicyTable.tsx c39b52ed1039
@@ -741,6 +751,7 @@ src/web/shared/DemoBadge.tsx 29e08265f189
 src/web/shared/L0WriteUnlock.tsx 83af39cb0ce1
 src/web/shared/PageNav.tsx fed5dc790db7
 src/web/shared/actionLog.ts f21305492f55
+src/web/shared/hostTheme.ts a9c462fce846
 src/web/shared/kernelLoad.tsx 210a4fbe17f4
 src/web/shared/kernelProjects.ts e204655f0df7
 src/web/shared/l0BlobStore.ts a7ae63e8ff9b
@@ -751,17 +762,18 @@ src/web/shared/mirrorFailureNotice.ts 3b984898459c
 src/web/shared/paginate.ts d79b09857836
 src/web/shared/selectionChannel.ts e826341f42e1
 src/web/shared/session.ts 2bc9578bb923
+src/web/shared/shellNavigate.ts b8b75188302d
 src/web/shared/syncHub.ts 831b0d785108
 src/web/shared/useColWidths.tsx a6e14931a82b
 src/web/shared/useL0Session.ts c917a61c99d9
 src/web/shell/Icons.tsx 3a8fad33fa2d
-src/web/shell/Workspace.tsx 7ebf76b742d3
+src/web/shell/Workspace.tsx 8b2f98bfeead
 src/web/shell/dock.ts 029c48568f1d
 src/web/shell/layers.ts 8f18e012b258
-src/web/shell/overview.ts 0765a086262d
+src/web/shell/overview.ts da3fd4e65972
 src/web/shell/statusbar.ts 52798840aff4
 src/web/shell/taskpane.ts 39d5562ae71b
-src/web/shell/views.ts 93fdb6e6367c
+src/web/shell/views.ts da05e8e3b785
 src/web/shell/workspaceEntry.tsx d81475dafbfc
 src/web/sync/SyncPage.tsx 1282b8549322
 src/web/sync/coreSyncPage.ts e25ef86eaea4

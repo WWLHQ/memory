@@ -241,6 +241,33 @@ export interface HomeFeedResult {
   effectGains: Gain[];
   /** 内核账本读取失败时的真实原因；null = 已读到（可能为空账本） */
   storageError: string | null;
+  /** 真实数值快照；storage 读不到时为 null（不拿 0 冒充成功读数） */
+  facts: HomeFacts | null;
+}
+
+/** 概览页用的数值快照（全部来自同一次账本读取，供统计卡直接显示真实数字） */
+export interface HomeFacts {
+  /** 内核记忆主表条数 */
+  memories: number;
+  /** 审计流水累计条数 */
+  audits: number;
+  /** 今日 00:00 起 action=write 条数 */
+  writeToday: number;
+  /** 今日 00:00 起 action=recall 条数 */
+  recallToday: number;
+  /** 含 conflict_id 的记忆条数（待裁决） */
+  conflicts: number;
+}
+
+export interface HomeFeedResult {
+  raw: RawHomeFeed;
+  sync: SyncState;
+  graph: LayerGraph;
+  effectGains: Gain[];
+  /** 内核账本读取失败时的真实原因；null = 已读到（可能为空账本） */
+  storageError: string | null;
+  /** 真实数值快照；storage 读不到时为 null（不拿 0 冒充成功读数） */
+  facts: HomeFacts | null;
 }
 
 export async function getHomeFeed(storage: StorageBackend, opts: GetHomeFeedOpts = {}): Promise<HomeFeedResult> {
@@ -309,12 +336,29 @@ export async function getHomeFeed(storage: StorageBackend, opts: GetHomeFeedOpts
     wired: false,
   };
 
+  const dayStart = new Date(now);
+  dayStart.setHours(0, 0, 0, 0);
+  const facts: HomeFacts | null = storageOk
+    ? {
+        memories: memories.length,
+        audits: audits.length,
+        writeToday: audits.filter(
+          (a) => a.action === 'write' && typeof a.ts === 'number' && a.ts >= dayStart.getTime(),
+        ).length,
+        recallToday: audits.filter(
+          (a) => a.action === 'recall' && typeof a.ts === 'number' && a.ts >= dayStart.getTime(),
+        ).length,
+        conflicts: conflictCount,
+      }
+    : null;
+
   return {
     raw: { gains, anomalies: sorted, activeMemories, todos },
     sync,
     graph: storageOk ? deriveLayerGraph(memories) : emptyLayerGraph(),
     effectGains: storageOk ? computeOnboardGains(audits, memories) : emptyOnboardGains(),
     storageError,
+    facts,
   };
 }
 

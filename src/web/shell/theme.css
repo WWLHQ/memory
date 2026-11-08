@@ -541,75 +541,43 @@ html[data-theme='dark'] .qa { border-right-color: #39414c; }
   background: var(--panel);
 }
 
-/* 概览数据条：只显示真实来源读数；失败给原因，不用 0 或「—」冒充 */
-.ov-strip {
+/* 未登录只读条 + 概览读取失败条：说明「程序实际能力」，不提供假功能入口 */
+.auth-strip {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 5px 9px;
+  gap: 7px;
+  padding: 4px 9px;
   border-bottom: 1px solid var(--line);
   background: var(--panel2);
-  overflow: hidden;
+  color: var(--tx2);
+  font-size: 11px;
 }
-.ov-kpis {
-  display: flex;
-  align-items: stretch;
-  gap: 6px;
-  min-width: 0;
-  overflow-x: auto;
-}
-.ov-kpi {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 86px;
-  padding: 3px 8px;
-  border: 1px solid var(--line2);
+.auth-strip svg { flex: none; color: var(--amber); }
+.auth-strip > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.auth-strip button {
+  flex: none;
+  padding: 1px 9px;
+  border: 1px solid var(--accent);
   border-radius: var(--r);
   background: var(--panel);
-}
-.ov-t { font-size: 10px; color: var(--mu); white-space: nowrap; }
-.ov-b { font-size: 15px; line-height: 1.25; color: var(--tx); font-variant-numeric: tabular-nums; }
-.ov-s { font-size: 9px; color: var(--mu); white-space: nowrap; }
-.ov-loading { color: var(--mu); font-size: 11px; padding: 6px 2px; }
-
-.ov-chips {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  flex-wrap: wrap;
-  min-width: 0;
-}
-.ov-chip {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 7px;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  background: var(--panel);
-  color: var(--tx2);
-  font-size: 10px;
-  white-space: nowrap;
-}
-.ov-chip.warn { border-color: var(--amber); color: var(--amber); }
-.ov-chip.err { border-color: var(--red); color: var(--red); background: var(--red-soft); }
-
-.ov-refresh {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-left: auto;
-  padding: 2px 8px;
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  background: var(--panel);
-  color: var(--tx2);
+  color: var(--accent);
   font-size: 10.5px;
+  cursor: pointer;
+}
+.auth-strip button:hover { background: var(--accent); color: #fff; }
+
+.ov-error-strip {
+  flex: none;
+  padding: 4px 9px;
+  border-bottom: 1px solid var(--line);
+  background: var(--red-soft);
+  color: var(--red);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
-.ov-refresh:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-.ov-refresh:disabled { opacity: 0.6; }
 
 .tabstrip {
   flex: none;

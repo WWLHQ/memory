@@ -7,13 +7,14 @@
 // - 个人记忆按 D2 标为不可用（程序无该数据模型），不显示任何计数。
 
 export type PageKey =
-  | 'home' | 'memory' | 'layered' | 'dispute' | 'write' | 'retrieval'
+  | 'home' | 'login' | 'memory' | 'layered' | 'dispute' | 'write' | 'retrieval'
   | 'lifecycle' | 'audit' | 'logs' | 'security' | 'growth' | 'models'
   | 'monitor' | 'sync' | 'params' | 'setup' | 'agent';
 
 /** 真实页面清单（文件名与 vite.config.ts 的 rollupOptions.input 对齐） */
 export const PAGES: Record<PageKey, { file: string; label: string; source: string }> = {
-  home: { file: 'index.html', label: '首页 + 登录卡片', source: 'getHomeFeed / health / me' },
+  home: { file: 'index.html', label: '概览页', source: 'getHomeFeed（单次账本读取）+ /api/health + llm:billing' },
+  login: { file: 'login.html', label: '登录与会话页', source: 'POST /api/login · /api/me · session:realpage' },
   memory: { file: 'memory.html', label: '记忆库管理页', source: '账本清单 + 单条操作' },
   layered: { file: 'memory-layered.html', label: '记忆层级管理页', source: 'L0–L6 分层查阅' },
   dispute: { file: 'dispute.html', label: '冲突裁决页', source: '同步冲突队列 + 三模式裁决' },
@@ -61,6 +62,7 @@ export type NavEntry = NavGroup | NavItem;
 export const NAV: NavEntry[] = [
   { kind: 'group', label: '工作区' },
   { kind: 'item', id: 'home', label: '概览', icon: 'spark', page: 'home' },
+  { kind: 'item', id: 'login', label: '登录与会话', icon: 'user', page: 'login' },
   { kind: 'group', label: '记忆' },
   {
     kind: 'item', id: 'ledger', label: '记忆管理', icon: 'db', defaultOpen: true, children: [

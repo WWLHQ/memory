@@ -1,0 +1,228 @@
+/* 概览页样式：数值取自定稿 .ovx（final-01-workspace.html 第 676–760 行 + 深色 800–845 行）。
+   作用域 .ov-page；浅/深由 html[data-theme] 驱动（壳层主题经 storage 同步到本 iframe）。 */
+
+:root {
+  --ov-accent: #0f6cbd;
+  --ov-accent-soft: rgba(15, 108, 189, 0.14);
+  --ov-mono: Consolas, "Cascadia Mono", "SFMono-Regular", monospace;
+}
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: #f3f5f8;
+  color: #22262c;
+  font-family: -apple-system, "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+  font-size: 12px;
+  -webkit-font-smoothing: antialiased;
+}
+html[data-theme="dark"] body { background: #15181d; color: #e5e9ef; }
+
+.ov-page {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: #f3f5f8;
+}
+html[data-theme="dark"] .ov-page { background: #15181d; }
+
+.ov-scroll { flex: 1; min-height: 0; overflow: auto; padding: 0; }
+.ovx { max-width: 1080px; margin: 0 auto; padding: 14px 26px 0; }
+
+.ovx-top { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.ovx-logo {
+  width: 28px; height: 28px; border-radius: 50%; flex: none; display: grid; place-items: center;
+  color: #0f6cbd;
+  background: radial-gradient(circle at 30% 25%, #fff 0%, #e8f1fc 55%, #dbe9f9 100%);
+  border: 1px solid #d3e1f1;
+  box-shadow: 0 1px 2px rgba(15, 108, 189, 0.12);
+}
+.ovx-title { font-size: 19px; font-weight: 600; letter-spacing: -0.25px; color: #1b1f24; margin: 0; line-height: 1.3; }
+.ovx-title .dim { color: #666e7a; font-weight: 500; }
+.ovx-time {
+  margin-left: auto;
+  font-family: var(--ov-mono);
+  font-size: 10.5px;
+  color: #666e7a;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+.ovx-time:hover { border-color: #d9dfe7; color: #0b5a9e; background: #fff; }
+.ovx-time:disabled { cursor: default; opacity: 0.7; }
+
+/* 一句话结论（用户要求逐条对齐的定稿块；定稿该行是标题下的总结句） */
+.ovx-concl {
+  font-size: 16.5px; font-weight: 600; letter-spacing: -0.2px; line-height: 1.45;
+  color: #1b1f24; margin: 0 0 11px;
+}
+.ovx-concl.error { color: #b02a1b; font-weight: 600; }
+html[data-theme="dark"] .ovx-concl { color: #eef1f5; }
+html[data-theme="dark"] .ovx-concl.error { color: #ff8b7e; }
+
+.ovx-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.ovx-stat {
+  background: #fff; border: 1px solid #e3e7ee; border-radius: 9px;
+  padding: 9px 11px 7px; min-height: 72px; display: flex; flex-direction: column;
+}
+.ovx-stat .k { font-size: 10.5px; color: #5f6874; display: flex; align-items: center; gap: 5px; }
+.ovx-stat .k svg { color: #7a828d; }
+.ovx-stat .v {
+  font-size: 20px; font-weight: 650; letter-spacing: -0.5px; color: #15181c;
+  line-height: 1.2; margin: 2px 0; font-variant-numeric: tabular-nums;
+}
+.ovx-stat .v .em { font-size: 12px; color: #666e7a; font-weight: 500; letter-spacing: 0; }
+.ovx-stat .m {
+  margin-top: auto; font-family: var(--ov-mono); font-size: 9.5px; color: #666e7a;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.ovx-scope {
+  display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 6px 2px 9px;
+  font-size: 10.5px; color: #666e7a;
+}
+.ovx-scope b { color: #3f4650; font-weight: 500; }
+.ovx-scope .sc { display: inline-flex; align-items: center; gap: 4px; }
+.ovx-scope .sc svg { color: #98a0aa; }
+
+.ovx-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ovx-row {
+  display: flex; align-items: center; gap: 12px;
+  background: #fff; border: 1px solid #e3e7ee; border-radius: 9px; padding: 7px 12px;
+}
+.ovx-row.clickable { cursor: pointer; }
+.ovx-row:hover { border-color: #c3d1e2; }
+.ovx-row .num { font-family: var(--ov-mono); font-size: 10px; color: #5f6874; flex: none; width: 24px; }
+.ovx-row .main { flex: 1; min-width: 0; display: block; }
+.ovx-row .t { display: block; font-size: 12.5px; font-weight: 600; color: #1e2329; line-height: 1.4; }
+.ovx-row .src {
+  display: block; margin-top: 3px; font-size: 10.5px; color: #5f6874; line-height: 1.5;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ovx-row .go { flex: none; display: flex; color: #98a0aa; }
+.ovx-row:hover .go { color: #0b5a9e; }
+
+.ovx-pill {
+  flex: none; display: inline-flex; align-items: center; gap: 5px;
+  font-size: 10px; line-height: 18px; padding: 0 7px; border-radius: 3px;
+  border: 1px solid; white-space: nowrap;
+}
+.ovx-pill .dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.ovx-pill.err { border-color: #ecc9c4; background: #fdf3f1; color: #b02a1b; }
+.ovx-pill.warn { border-color: #e8d3a4; background: #fdf7ea; color: #8a5a00; }
+.ovx-pill.mut { border-color: #dde1e7; background: #f6f7f9; color: #5f6874; }
+.ovx-pill.ok { border-color: #bfdcc4; background: #f2faf4; color: #0e6b1f; }
+
+.ovx-quick { display: flex; flex-wrap: wrap; gap: 7px; margin: 7px 0 2px; }
+.ovx-pillbtn {
+  height: 25px; display: inline-flex; align-items: center; gap: 5px;
+  border: 1px solid #dce1e8; background: #fff; border-radius: 13px;
+  color: #3f4650; font: inherit; font-size: 10.5px; padding: 0 11px; cursor: pointer;
+}
+.ovx-pillbtn:hover { border-color: var(--ov-accent); color: #0b5a9e; background: #f8fbff; }
+.ovx-pillbtn svg { color: #7a828d; }
+
+.ovx-answers { display: flex; flex-direction: column; gap: 9px; margin-top: 12px; }
+.ovx-answer { background: #fff; border: 1px solid #e3e7ee; border-radius: 9px; padding: 11px 13px 12px; }
+.ovx-answer .aq { display: flex; align-items: center; gap: 5px; font-size: 10.5px; color: #666e7a; margin-bottom: 7px; }
+.ovx-answer .aq svg { color: #98a0aa; }
+.ovx-answer .lead { font-size: 17px; font-weight: 600; letter-spacing: -0.2px; color: #1b1f24; line-height: 1.4; }
+.ovx-answer .body { font-size: 11.5px; line-height: 1.65; color: #3f4650; margin-top: 7px; }
+.ovx-answer .state { display: flex; align-items: center; gap: 5px; margin-top: 8px; font-family: var(--ov-mono); font-size: 9.5px; color: #666e7a; }
+
+.ovx-wait { font-size: 11.5px; color: #666e7a; padding: 18px 2px; }
+
+.ov-ask { flex: none; padding: 8px 26px 10px; background: #f3f5f8; border-top: 1px solid #e1e5eb; }
+.ov-ask-box {
+  max-width: 1080px; margin: 0 auto; display: flex; align-items: flex-end; gap: 8px;
+  background: #fff; border: 1px solid #d9dfe7; border-radius: 11px;
+  padding: 7px 8px 7px 10px; box-shadow: 0 1px 3px rgba(16, 24, 40, 0.05);
+}
+.ov-ask-box:focus-within { border-color: var(--ov-accent); box-shadow: 0 0 0 3px var(--ov-accent-soft); }
+.ov-ask-box .ask-ic { color: #0f6cbd; display: flex; flex: none; padding-bottom: 5px; }
+.ov-ask-box textarea {
+  flex: 1; min-width: 0; border: 0; outline: 0; resize: none; background: transparent;
+  color: #22262c; font: inherit; font-size: 12px; line-height: 1.5; padding: 4px 0 5px; max-height: 90px;
+}
+.ov-ask-box textarea::placeholder { color: #98a0aa; }
+.ov-send {
+  width: 29px; height: 29px; border-radius: 50%; border: 1px solid var(--ov-accent);
+  background: var(--ov-accent); color: #fff; display: grid; place-items: center; flex: none; cursor: pointer;
+}
+.ov-send:hover { background: #0b5a9e; }
+.ov-send:disabled { opacity: 0.55; cursor: default; }
+.ov-sugg {
+  max-width: 1080px; margin: 0 auto 7px; display: flex; flex-wrap: nowrap; gap: 6px;
+  overflow-x: auto; scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(to right, #000 92%, transparent);
+  mask-image: linear-gradient(to right, #000 92%, transparent);
+}
+.ov-sugg::-webkit-scrollbar { display: none; }
+.ov-sugg .sugg {
+  height: 24px; flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px;
+  border: 1px solid #dce1e8; background: #fff; border-radius: 12px; color: #3f4650;
+  font: inherit; font-size: 10.5px; padding: 0 10px; white-space: nowrap; cursor: pointer;
+}
+.ov-sugg .sugg:hover { border-color: var(--ov-accent); color: #0b5a9e; }
+.ov-sugg .sugg svg { color: #7a828d; }
+.ov-ask-foot {
+  max-width: 1080px; margin: 7px auto 0; display: flex; gap: 10px;
+  font-size: 9.5px; color: #666e7a;
+}
+.ov-ask-foot span { display: inline-flex; align-items: center; gap: 4px; }
+.ov-ask-foot span:last-child { margin-left: auto; }
+
+/* ── 深色（与定稿 800–845 行一致） ── */
+html[data-theme="dark"] .ovx-logo {
+  background: radial-gradient(circle at 30% 25%, #20344a 0%, #182638 60%, #15202e 100%);
+  border-color: #2b4056; color: #79b9ff; box-shadow: none;
+}
+html[data-theme="dark"] .ovx-title { color: #eef1f5; }
+html[data-theme="dark"] .ovx-title .dim { color: #8b95a2; }
+html[data-theme="dark"] .ovx-time { color: #8b95a2; }
+html[data-theme="dark"] .ovx-time:hover { background: #1d2229; border-color: #333b45; color: #79b9ff; }
+html[data-theme="dark"] .ovx-stat { background: #1d2229; border-color: #2a3038; }
+html[data-theme="dark"] .ovx-stat .k { color: #98a2af; }
+html[data-theme="dark"] .ovx-stat .k svg { color: #7d8794; }
+html[data-theme="dark"] .ovx-stat .v { color: #eef1f5; }
+html[data-theme="dark"] .ovx-stat .v .em { color: #8b95a2; }
+html[data-theme="dark"] .ovx-stat .m { color: #8b95a2; }
+html[data-theme="dark"] .ovx-scope { color: #8b95a2; }
+html[data-theme="dark"] .ovx-scope b { color: #c3cbd6; }
+html[data-theme="dark"] .ovx-row { background: #1d2229; border-color: #2a3038; }
+html[data-theme="dark"] .ovx-row:hover { border-color: #3a4451; }
+html[data-theme="dark"] .ovx-row .num { color: #8b95a2; }
+html[data-theme="dark"] .ovx-row .t { color: #eef1f5; }
+html[data-theme="dark"] .ovx-row .src { color: #98a2af; }
+html[data-theme="dark"] .ovx-row .go { color: #6f7986; }
+html[data-theme="dark"] .ovx-row:hover .go { color: #79b9ff; }
+html[data-theme="dark"] .ovx-pill.err { background: #2b1c1a; border-color: #4a2a26; color: #ff8b7e; }
+html[data-theme="dark"] .ovx-pill.warn { background: #2a2313; border-color: #4a3b1b; color: #f0c37a; }
+html[data-theme="dark"] .ovx-pill.mut { background: #232932; border-color: #333b45; color: #98a2af; }
+html[data-theme="dark"] .ovx-pill.ok { background: #15251a; border-color: #2f5138; color: #7fd18b; }
+html[data-theme="dark"] .ovx-pillbtn { background: #1d2229; border-color: #333b45; color: #c3cbd6; }
+html[data-theme="dark"] .ovx-pillbtn:hover { background: #1a2b3c; border-color: #3d6d95; color: #79b9ff; }
+html[data-theme="dark"] .ovx-answer { background: #1d2229; border-color: #2a3038; }
+html[data-theme="dark"] .ovx-answer .aq { color: #8b95a2; }
+html[data-theme="dark"] .ovx-answer .lead { color: #eef1f5; }
+html[data-theme="dark"] .ovx-answer .body { color: #c3cbd6; }
+html[data-theme="dark"] .ovx-answer .state { color: #8b95a2; }
+html[data-theme="dark"] .ovx-wait { color: #8b95a2; }
+html[data-theme="dark"] .ov-ask { background: #15181d; border-top-color: #2a3038; }
+html[data-theme="dark"] .ov-ask-box { background: #1d2229; border-color: #333b45; box-shadow: none; }
+html[data-theme="dark"] .ov-ask-box textarea { color: #e5e9ef; }
+html[data-theme="dark"] .ov-ask-box textarea::placeholder { color: #7d8794; }
+html[data-theme="dark"] .ov-sugg .sugg { background: #1d2229; border-color: #333b45; color: #c3cbd6; }
+html[data-theme="dark"] .ov-sugg .sugg:hover { border-color: #3d6d95; color: #79b9ff; }
+html[data-theme="dark"] .ov-ask-foot { color: #8b95a2; }
+html[data-theme="dark"] .ov-ask-box .ask-ic { color: #79b9ff; }
+
+/* 定稿在窄容器同样保持 4 卡一行；只有真正接近手机宽度（壳层中心区 < 440）才切 2 列 */
+@media (max-width: 440px) {
+  .ovx-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ovx { padding: 14px 16px 0; }
+  .ov-ask { padding: 8px 16px 10px; }
+}

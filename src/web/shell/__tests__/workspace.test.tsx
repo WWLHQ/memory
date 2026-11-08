@@ -1,6 +1,7 @@
 // 壳层渲染行为（批次48 S1）：导航、不可用态、状态栏诚实口径、底部标签。
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { setTestOverride } from '../../Home/crossTabAuth.ts';
 import { SELECTION_MSG } from '../../shared/selectionChannel.ts';
 
 // 概览条的数据加载走真实内核/网络；组件单测只验证渲染契约，故固定快照。
@@ -56,6 +57,7 @@ import { loadPendingWrites } from '../taskpane.ts';
 
 beforeEach(() => {
   localStorage.clear();
+  setTestOverride(false);
   vi.mocked(loadPendingWrites).mockReset();
   vi.mocked(loadPendingWrites).mockResolvedValue({
     status: 'unavailable',
@@ -102,7 +104,8 @@ beforeEach(() => {
 /** 渲染并等待概览异步加载落地（避免 act 警告，也确保断言发生在真实渲染之后） */
 async function renderShell() {
   const r = render(<Workspace />);
-  await screen.findByText('累计记忆');
+  await screen.findByTestId('sb-overview-refresh');
+  await act(async () => { await Promise.resolve(); });
   return r;
 }
 
@@ -115,15 +118,25 @@ describe('工作台壳层', () => {
     expect((frames[0] as HTMLIFrameElement).getAttribute('src')).toContain('/index.html');
   });
 
-  it('概览条显示内核真实读数，并给每个字段标注来源', async () => {
-    await renderShell();
-    expect(screen.getByText('7')).toBeInTheDocument();
-    expect(screen.getAllByText('内核账本·实时').length).toBe(4);
-    expect(screen.getByText(/内核 桌面 IPC/)).toBeInTheDocument();
-    expect(screen.getByText(/后端 可达/)).toBeInTheDocument();
-    // 未登录时成本查询如实不可用，不显示编造余额
-    expect(screen.getByText(/成本 不可用/)).toBeInTheDocument();
-    expect(screen.getByText(/成本 不可用/).getAttribute('title')).toContain('需登录');
+  it('概览页整页渲染在 iframe 内：壳层不再叠旧首页数据条，未登录显示只读条', async () => {
+    const { container } = await renderShell();
+    // 旧 ov-strip（4 卡 + chips）已移除，避免与概览页统计卡叠层重复
+    expect(container.querySelector('.ov-strip')).toBeNull();
+    expect(screen.queryByText('累计记忆')).toBeNull();
+    // 未登录：按程序实际能力标为只读，并提供真实登录入口
+    expect(screen.getByTestId('auth-readonly-strip')).toBeInTheDocument();
+    expect(screen.getByTestId('auth-readonly-strip').textContent).toContain('本地账本仍可读');
+    // 成本余额需会话：如实不可用，不显示编造余额
+    expect(screen.getByTestId('sb-billing').textContent).toContain('不可用');
+    expect(screen.getByTestId('sb-billing').getAttribute('title')).toContain('需登录');
+  });
+
+  it('登录与会话是主导航里的真实页面 login.html', async () => {
+    const { container } = await renderShell();
+    fireEvent.click(screen.getByRole('treeitem', { name: /登录与会话/ }));
+    const frames = container.querySelectorAll('iframe.page-frame');
+    expect(frames.length).toBe(2);
+    expect((frames[1] as HTMLIFrameElement).getAttribute('src')).toContain('/login.html');
   });
 
   it('演示通览不进主导航', async () => {
@@ -202,6 +215,8 @@ describe('S3 深链接线（D4）：壳层把初值真的交给目标真实页�
   }
 
   it('Ribbon「归档（需登录）」开独立标签，iframe src 带 ?status=archived', async () => {
+    // 该动作按程序能力需登录：临时置会话有效，验证深链初值确实交给目标页
+    setTestOverride(true);
     const { container } = await renderShell();
     fireEvent.click(screen.getByRole('button', { name: /归档（需登录）/ }));
     const src = activeFrameSrc(container);
@@ -209,6 +224,14 @@ describe('S3 深链接线（D4）：壳层把初值真的交给目标真实页�
     expect(src).toContain('status=archived');
     // 归档与「全部记忆」是同一页面不同初值 → 必须是独立标签，不能复用旧标签
     expect(container.querySelector('.tabstrip')?.textContent ?? '').toContain('归档（需登录）');
+    setTestOverride(false);
+  });
+
+  it('未登录时「需登录」动作按程序实际能力禁用并给出原因', async () => {
+    await renderShell();
+    const archive = screen.getByRole('button', { name: /归档（需登录）/ });
+    expect(archive).toBeDisabled();
+    expect(archive.getAttribute('title')).toContain('未登录（会话 401）');
   });
 
   it('导航「L0 密文（需解锁）」指向层级页并带 #l0bar 锚点', async () => {
@@ -523,7 +546,7 @@ describe('S7 分层 L1–L6 / L0 面板：只在分层页出现，数字全部�
     expect(screen.queryByTestId('layer-strip')).toBeNull();
     fireEvent.click(screen.getByText('分层 L1–L6'));
     const strip = await screen.findByTestId('layer-strip');
-    expect(strip.textContent).toContain('账本 7 条');
+    await waitFor(() => expect(strip.textContent).toContain('账本 7 条'));
     expect(strip.textContent).toContain('L6 1');
     expect(strip.textContent).toContain('L4 0');
     expect(strip.textContent).toContain('L3 读取失败');

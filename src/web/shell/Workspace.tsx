@@ -24,6 +24,7 @@ import {
 import { loadStatusbar, shortLocation, type StatusSnapshot } from './statusbar.ts';
 import { loadLayerPanel, type LayerPanelView } from './layers.ts';
 import { SELECTION_MSG, parseSelection, type SelectionPayload } from '../shared/selectionChannel.ts';
+import { SHELL_GOTO_MSG } from '../shared/shellNavigate.ts';
 
 const STORE_THEME = 'memdesk.shell.theme.v1';
 const STORE_DENSITY = 'memdesk.shell.density.v1';
@@ -206,7 +207,11 @@ export function Workspace() {
       .then((s) => setOverview(s))
       .catch((e) => setOverview({
         loadedAt: Date.now(), kernelMode: 'browser', storageError: String(e),
-        gains: [], health: { status: 'down', detail: '概览聚合异常', checkedAt: Date.now() },
+        gains: [],
+        raw: { gains: [], anomalies: [], activeMemories: [], todos: [] },
+        pendingSync: 0,
+        facts: null,
+        health: { status: 'down', detail: '概览聚合异常', checkedAt: Date.now() },
         session: hasActiveSession(), billing: { status: 'unavailable', detail: '概览聚合异常' },
       }))
       .finally(() => setOverviewBusy(false));
@@ -382,6 +387,24 @@ export function Workspace() {
       : [...tabs, { id: item.id, label: item.label, page: item.page, href: item.href, unavailable: item.unavailable }]);
     setMessage(`已切换到「${item.label}」。`);
   }, []);
+
+  // 概览页快捷胶囊 / 编号洞察 → 壳层导航（只接受本壳嵌入的 iframe 发来的请求）
+  useEffect(() => {
+    const onGoto = (e: MessageEvent) => {
+      if (e.origin !== window.location.origin) return;
+      const data = e.data as Record<string, unknown> | null;
+      if (!data || typeof data !== 'object') return;
+      const id = data[SHELL_GOTO_MSG];
+      if (typeof id !== 'string') return;
+      const fromOurs = Object.values(frameRefs.current)
+        .some((f) => f?.contentWindow === (e.source as unknown as Window | null));
+      if (!fromOurs) return;
+      const target = findNav(id);
+      if (target) openView(target);
+    };
+    window.addEventListener('message', onGoto);
+    return () => window.removeEventListener('message', onGoto);
+  }, [openView]);
 
   const closeTab = useCallback((id: string) => {
     setOpenTabs((tabs) => {
@@ -791,7 +814,18 @@ export function Workspace() {
         {!ribbonFolded && (
           <div className="ribbon-body">
             {activeRibbon.groups.map((g) => (
-              <RibbonGroupView key={g.label} group={g} onItem={onRibbonItem} />
+              <RibbonGroupView
+                key={g.label}
+                group={!sessionActive
+                  ? {
+                      ...g,
+                      items: g.items.map((it) => (it.label.includes('需登录')
+                        ? { ...it, unavailable: '未登录（会话 401）：该动作需要登录后才能执行' }
+                        : it)),
+                    }
+                  : g}
+                onItem={onRibbonItem}
+              />
             ))}
           </div>
         )}
@@ -843,40 +877,19 @@ export function Workspace() {
             ))}
           </div>
 
-          {active?.page === 'home' && (
-            <div className="ov-strip" aria-label="概览真实数据">
-              <div className="ov-kpis">
-                {overview ? overview.gains.map((g) => (
-                  <div className="ov-kpi" key={g.title} title={`${g.desc}（来源：${g.src}）`}>
-                    <span className="ov-t">{g.title}</span>
-                    <b className="ov-b">{g.big}</b>
-                    <span className="ov-s">{g.src}</span>
-                  </div>
-                )) : <span className="ov-loading">概览读取中…</span>}
-              </div>
-              <div className="ov-chips">
-                <span className={`ov-chip${overview?.kernelMode === 'browser' ? ' warn' : ''}`}
-                  title={overview?.kernelMode === 'browser' ? '浏览器模式使用的是进程内内存账本，不是本机记忆库' : '桌面壳经 IPC 读取主进程账本'}>
-                  内核 {overview?.kernelMode === 'browser' ? '浏览器内存（非本机库）' : '桌面 IPC'}
-                </span>
-                <span className={`ov-chip${overview?.health.status === 'down' ? ' err' : ''}`}
-                  title={overview ? `${overview.health.detail} · ${new Date(overview.health.checkedAt).toLocaleTimeString('zh-CN')}` : '尚未探测'}>
-                  后端 {overview ? (overview.health.status === 'ok' ? '可达' : '不可达') : '探测中'}
-                </span>
-                <span className="ov-chip" title="本机会话标记（localStorage），仅表示是否登录">
-                  会话 {overview?.session ? '已登录' : '未登录'}
-                </span>
-                <span className={`ov-chip${overview?.billing.status === 'unavailable' ? ' warn' : ''}`}
-                  title={overview?.billing.detail ?? '尚未查询'}>
-                  成本 {overview?.billing.status === 'ok' ? `余额可查 ${overview.billing.live}/${overview.billing.total}` : '不可用'}
-                </span>
-                {overview?.storageError && (
-                  <span className="ov-chip err" title={overview.storageError}>账本读取失败</span>
-                )}
-              </div>
-              <button className="ov-refresh" onClick={refreshOverview} disabled={overviewBusy} title="重新读取真实数据" type="button">
-                <Icon name="refresh" size={11} />{overviewBusy ? '读取中' : '刷新'}
-              </button>
+          {!sessionActive && (
+            <div className="auth-strip" role="status" data-testid="auth-readonly-strip">
+              <Icon name="lock" size={11} />
+              <span>
+                未登录 · 按程序实际能力只读：成本余额、同步、账号等需会话的后端接口不可用；本地账本仍可读。
+              </span>
+              <button type="button" onClick={() => { const t = findNav('login'); if (t) openView(t); }}>去登录</button>
+            </div>
+          )}
+
+          {active?.page === 'home' && overview?.storageError && (
+            <div className="ov-error-strip" data-testid="overview-storage-error">
+              账本读取失败：{overview.storageError}（这不是空账本，概览页会如实标注）
             </div>
           )}
 
@@ -1114,6 +1127,11 @@ export function Workspace() {
           </span>
           <span className="sb-cell sb-msg">{message}</span>
           <span className="sb-cell" title={locTitle} data-testid="sb-storage">库 <b>{locText}</b></span>
+          <span className="sb-cell click" onClick={refreshOverview}
+            title={`重新读取真实账本/健康/成本${overview ? ` · 上次 ${new Date(overview.loadedAt).toLocaleTimeString('zh-CN')}` : ''}`}
+            data-testid="sb-overview-refresh">
+            概览 <b>{overviewBusy ? '读取中' : overview ? '已读' : '未读'}</b>
+          </span>
           <span className={`sb-cell${overview?.billing.status === 'unavailable' ? ' warn' : ''}`}
             title={overview?.billing.detail ?? '尚未查询'} data-testid="sb-billing">
             成本 <b>{overview?.billing.status === 'ok' ? `${overview.billing.live ?? 0}/${overview.billing.total ?? 0}` : '不可用'}</b>

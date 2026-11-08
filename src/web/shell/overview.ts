@@ -10,11 +10,13 @@
 
 import { homeBaseUrl } from '../backend.ts';
 import { hasActiveSession } from '../Home/crossTabAuth.ts';
-import { getHomeFeed } from '../Home/coreHome.ts';
+import { getHomeFeed, emptySync } from '../Home/coreHome.ts';
+import type { RawHomeFeed } from '../../home/dashboard.ts';
 import { getKernelStorage } from '../kernel.ts';
 import { currentSessionId } from '../shared/session.ts';
-import { hostCapability } from '../../desktop/hostBridge.ts';
+import { hostCall, hostCapability } from '../../desktop/hostBridge.ts';
 import type { Gain } from '../../types/agentOnboard.ts';
+import type { HomeFacts } from '../Home/coreHome.ts';
 
 export interface OverviewHealth {
   status: 'ok' | 'down';
@@ -37,9 +39,15 @@ export interface OverviewSnapshot {
   kernelMode: 'host' | 'browser';
   storageError: string | null;
   gains: Gain[];
+  /** 异常速览（真实账本派生；概览页编号洞察用） */
+  raw: RawHomeFeed;
+  /** 待回传条数（sync.wired=false 的诚实标注） */
+  pendingSync: number;
   health: OverviewHealth;
   session: boolean;
   billing: OverviewBilling;
+  /** 同一次账本读取得到的数值快照；读不到时 null（概览页统计卡直接显示真实数字） */
+  facts: HomeFacts | null;
 }
 
 interface RawBillingEngine {
@@ -73,13 +81,12 @@ async function probeHealth(): Promise<OverviewHealth> {
 async function probeBilling(session: boolean): Promise<OverviewBilling> {
   if (hostCapability() === 'none') return { status: 'unavailable', detail: '非桌面壳：无 llm:billing 通道' };
   if (!session) return { status: 'unavailable', detail: '需登录后查询（余额视图按会话鉴权）' };
-  interface BillingApi {
-    llm?: { billing?: (req?: { force?: boolean }, sid?: string | null) => Promise<{ ok: boolean; engines?: unknown[]; error?: string }> };
-  }
-  const api = (window as unknown as { api?: BillingApi }).api;
-  if (!api?.llm?.billing) return { status: 'unavailable', detail: '桌面桥未暴露 llm.billing' };
   try {
-    const r = await api.llm.billing({ force: false }, currentSessionId());
+    // 统一走宿主调用：桌面壳主 frame 与中心区 iframe 都能拿到真实结果
+    const r = await hostCall<{ ok: boolean; engines?: unknown[]; error?: string }>(
+      'llm:billing',
+      [{ force: false }, currentSessionId()],
+    );
     if (!r?.ok) return { status: 'unavailable', detail: `查询失败：${r?.error ?? '未知原因'}` };
     const engines = (r.engines ?? []) as RawBillingEngine[];
     const live = engines.filter((e) => e.provenance === 'vendor_live').length;
@@ -99,8 +106,12 @@ export async function loadOverview(): Promise<OverviewSnapshot> {
   const session = hasActiveSession();
   const [feed, health, billing] = await Promise.all([
     getHomeFeed(getKernelStorage()).catch((e) => ({
-      raw: { gains: [] },
+      raw: { gains: [], anomalies: [], activeMemories: [], todos: [] } as RawHomeFeed,
+      sync: emptySync(),
+      graph: null,
+      effectGains: [],
       storageError: describeError(e),
+      facts: null,
     })),
     probeHealth(),
     probeBilling(session),
@@ -110,8 +121,11 @@ export async function loadOverview(): Promise<OverviewSnapshot> {
     kernelMode: hostCapability() === 'none' ? 'browser' : 'host',
     storageError: (feed as { storageError?: string | null }).storageError ?? null,
     gains: (feed.raw.gains ?? []) as Gain[],
+    raw: feed.raw,
+    pendingSync: (feed as { sync?: { pendingSync?: number } }).sync?.pendingSync ?? 0,
     health,
     session,
     billing,
+    facts: (feed as { facts?: HomeFacts | null }).facts ?? null,
   };
 }
