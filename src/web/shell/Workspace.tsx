@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import { hasActiveSession } from '../Home/crossTabAuth.ts';
 import { Icon } from './Icons.tsx';
+import { loadOverview, type OverviewSnapshot } from './overview.ts';
 import {
   BOTTOM_TABS, NAV, PAGES, RIBBON, findNav,
   type BottomTabId, type IconName, type NavEntry, type NavItem, type PageKey,
@@ -113,7 +114,24 @@ export function Workspace() {
   const [reloadNonce, setReloadNonce] = useState(0);
   const [message, setMessage] = useState('工作台已就绪：中心区为同源真实页面，壳层尚未接线的部位会明确标注原因。');
   const [sessionActive, setSessionActive] = useState(() => hasActiveSession());
+  const [overview, setOverview] = useState<OverviewSnapshot | null>(null);
+  const [overviewBusy, setOverviewBusy] = useState(false);
   const frameRefs = useRef<Record<string, HTMLIFrameElement | null>>({});
+
+  const refreshOverview = useCallback(() => {
+    setOverviewBusy(true);
+    loadOverview()
+      .then((s) => setOverview(s))
+      .catch((e) => setOverview({
+        loadedAt: Date.now(), kernelMode: 'browser', storageError: String(e),
+        gains: [], health: { status: 'down', detail: '概览聚合异常', checkedAt: Date.now() },
+        session: hasActiveSession(), billing: { status: 'unavailable', detail: '概览聚合异常' },
+      }))
+      .finally(() => setOverviewBusy(false));
+  }, []);
+
+  // 概览真实数据：挂载时读取一次；登录态变化后重读（成本/会话字段随真实会话变化）
+  useEffect(() => { refreshOverview(); }, [refreshOverview, sessionActive]);
 
   const resolvedTheme = theme === 'system' ? (darkSystem ? 'dark' : 'light') : theme;
 
@@ -321,6 +339,43 @@ export function Workspace() {
               </div>
             ))}
           </div>
+
+          {active?.page === 'home' && (
+            <div className="ov-strip" aria-label="概览真实数据">
+              <div className="ov-kpis">
+                {overview ? overview.gains.map((g) => (
+                  <div className="ov-kpi" key={g.title} title={`${g.desc}（来源：${g.src}）`}>
+                    <span className="ov-t">{g.title}</span>
+                    <b className="ov-b">{g.big}</b>
+                    <span className="ov-s">{g.src}</span>
+                  </div>
+                )) : <span className="ov-loading">概览读取中…</span>}
+              </div>
+              <div className="ov-chips">
+                <span className={`ov-chip${overview?.kernelMode === 'browser' ? ' warn' : ''}`}
+                  title={overview?.kernelMode === 'browser' ? '浏览器模式使用的是进程内内存账本，不是本机记忆库' : '桌面壳经 IPC 读取主进程账本'}>
+                  内核 {overview?.kernelMode === 'browser' ? '浏览器内存（非本机库）' : '桌面 IPC'}
+                </span>
+                <span className={`ov-chip${overview?.health.status === 'down' ? ' err' : ''}`}
+                  title={overview ? `${overview.health.detail} · ${new Date(overview.health.checkedAt).toLocaleTimeString('zh-CN')}` : '尚未探测'}>
+                  后端 {overview ? (overview.health.status === 'ok' ? '可达' : '不可达') : '探测中'}
+                </span>
+                <span className="ov-chip" title="本机会话标记（localStorage），仅表示是否登录">
+                  会话 {overview?.session ? '已登录' : '未登录'}
+                </span>
+                <span className={`ov-chip${overview?.billing.status === 'unavailable' ? ' warn' : ''}`}
+                  title={overview?.billing.detail ?? '尚未查询'}>
+                  成本 {overview?.billing.status === 'ok' ? `余额可查 ${overview.billing.live}/${overview.billing.total}` : '不可用'}
+                </span>
+                {overview?.storageError && (
+                  <span className="ov-chip err" title={overview.storageError}>账本读取失败</span>
+                )}
+              </div>
+              <button className="ov-refresh" onClick={refreshOverview} disabled={overviewBusy} title="重新读取真实数据" type="button">
+                <Icon name="refresh" size={11} />{overviewBusy ? '读取中' : '刷新'}
+              </button>
+            </div>
+          )}
 
           <div className="center-body">
             {openTabs.map((t) => {

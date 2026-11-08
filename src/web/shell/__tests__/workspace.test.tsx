@@ -1,28 +1,65 @@
 // 壳层渲染行为（批次48 S1）：导航、不可用态、状态栏诚实口径、底部标签。
 import { fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+// 概览条的数据加载走真实内核/网络；组件单测只验证渲染契约，故固定快照。
+vi.mock('../overview.ts', () => ({
+  loadOverview: vi.fn(async () => ({
+    loadedAt: 1,
+    kernelMode: 'host' as const,
+    storageError: null,
+    gains: [
+      { icon: 'x', title: '累计记忆', big: '7', desc: '内核记忆主表条数', src: '内核账本·实时' },
+      { icon: 'x', title: '累计动作', big: '12', desc: '审计流水累计条数', src: '内核账本·实时' },
+      { icon: 'x', title: '近 1h 调用', big: '2', desc: '审计 ts ≥ now−60min', src: '内核账本·实时' },
+      { icon: 'x', title: '待裁决', big: '1', desc: '9.7 冲突队列', src: '内核账本·实时' },
+    ],
+    health: { status: 'ok' as const, detail: 'HTTP 200', checkedAt: 1 },
+    session: false,
+    billing: { status: 'unavailable' as const, detail: '需登录后查询（余额视图按会话鉴权）' },
+  })),
+}));
+
 import { Workspace } from '../Workspace.tsx';
 
 beforeEach(() => {
   localStorage.clear();
 });
 
+/** 渲染并等待概览异步加载落地（避免 act 警告，也确保断言发生在真实渲染之后） */
+async function renderShell() {
+  const r = render(<Workspace />);
+  await screen.findByText('累计记忆');
+  return r;
+}
+
 describe('工作台壳层', () => {
-  it('默认打开概览，中心区嵌入真实 index.html（iframe 而非假内容）', () => {
-    const { container } = render(<Workspace />);
+  it('默认打开概览，中心区嵌入真实 index.html（iframe 而非假内容）', async () => {
+    const { container } = await renderShell();
     expect(screen.getAllByRole('treeitem').length).toBeGreaterThan(0);
     const frames = container.querySelectorAll('iframe.page-frame');
     expect(frames.length).toBe(1);
     expect((frames[0] as HTMLIFrameElement).getAttribute('src')).toContain('/index.html');
   });
 
-  it('演示通览不进主导航', () => {
-    render(<Workspace />);
+  it('概览条显示内核真实读数，并给每个字段标注来源', async () => {
+    await renderShell();
+    expect(screen.getByText('7')).toBeInTheDocument();
+    expect(screen.getAllByText('内核账本·实时').length).toBe(4);
+    expect(screen.getByText(/内核 桌面 IPC/)).toBeInTheDocument();
+    expect(screen.getByText(/后端 可达/)).toBeInTheDocument();
+    // 未登录时成本查询如实不可用，不显示编造余额
+    expect(screen.getByText(/成本 不可用/)).toBeInTheDocument();
+    expect(screen.getByText(/成本 不可用/).getAttribute('title')).toContain('需登录');
+  });
+
+  it('演示通览不进主导航', async () => {
+    await renderShell();
     expect(screen.queryByText(/通览/)).toBeNull();
   });
 
-  it('个人记忆为不可用态：不出现 iframe，不显示任何计数，只给原因', () => {
-    const { container } = render(<Workspace />);
+  it('个人记忆为不可用态：不出现 iframe，不显示任何计数，只给原因', async () => {
+    const { container } = await renderShell();
     const node = screen.getByRole('treeitem', { name: /个人记忆/ });
     fireEvent.click(node);
     expect(screen.getAllByText(/个人记忆 · 不可用/).length).toBeGreaterThan(0);
@@ -33,28 +70,28 @@ describe('工作台壳层', () => {
     expect(empty?.textContent ?? '').not.toMatch(/\d/);
   });
 
-  it('工具栏不可用命令被禁用并给出原因，不伪造结果', () => {
-    render(<Workspace />);
+  it('工具栏不可用命令被禁用并给出原因，不伪造结果', async () => {
+    await renderShell();
     const help = screen.getByRole('button', { name: /快捷键/ });
     expect(help).toBeDisabled();
     expect(help.getAttribute('title')).toContain('未提供快捷键清单页');
   });
 
-  it('底部终端标签如实说明不可用', () => {
-    render(<Workspace />);
+  it('底部终端标签如实说明不可用', async () => {
+    await renderShell();
     fireEvent.click(screen.getByRole('button', { name: /终端/ }));
     expect(screen.getByText(/程序未提供终端命令通道/)).toBeInTheDocument();
   });
 
-  it('状态栏只写未接入，不用「—」冒充真实读数', () => {
-    const { container } = render(<Workspace />);
+  it('状态栏只写未接入，不用「—」冒充真实读数', async () => {
+    const { container } = await renderShell();
     const bar = container.querySelector('.statusbar');
     expect(bar?.textContent ?? '').not.toMatch(/—/);
     expect(bar?.textContent ?? '').toContain('未接入');
   });
 
-  it('主题切换会写到 html[data-theme]，并被状态栏按钮反映', () => {
-    render(<Workspace />);
+  it('主题切换会写到 html[data-theme]，并被状态栏按钮反映', async () => {
+    await renderShell();
     fireEvent.click(screen.getByRole('button', { name: '深色' }));
     expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
     expect(screen.getByRole('button', { name: '深色' })).toHaveAttribute('aria-pressed', 'true');
