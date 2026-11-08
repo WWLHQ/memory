@@ -64,6 +64,8 @@ export function SetupPage({ onNavigate }: { onNavigate?: (url: string) => void }
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  /** 定稿 3 页签：① 存储 / ② 模型 / ③ 安全 */
+  const [tab, setTab] = useState(0);
 
   const refresh = useCallback(async () => {
     if (!hostReady) return;
@@ -219,6 +221,18 @@ export function SetupPage({ onNavigate }: { onNavigate?: (url: string) => void }
       </p>
       {err && <div className="card" data-testid="setup-error" style={{ color: 'var(--warn)' }}>⚠️ {err}</div>}
 
+      <div className="p0-tabs" role="tablist" data-testid="setup-tabs">
+        {['① 存储', '② 模型', '③ 安全'].map((label, i) => (
+          <button
+            key={label} type="button" role="tab" aria-selected={tab === i}
+            className={`p0-tab${tab === i ? ' active' : ''}`}
+            data-testid={`setup-tab-${i}`} data-tab={i}
+            onClick={() => setTab(i)}
+          >{label}</button>
+        ))}
+      </div>
+
+      <div hidden={tab !== 0} data-testid="setup-panel-0">
       {/* ── ① 两个库的位置 ─────────────────────────────────────── */}
       <div className="card" data-testid="setup-step-dirs">
         <div className="row">
@@ -253,7 +267,29 @@ export function SetupPage({ onNavigate }: { onNavigate?: (url: string) => void }
           </button>
         </div>
       </div>
+      </div>
 
+      {/* ── ② 模型（定稿页签；程序首启向导无该步骤，如实说明） ───────── */}
+      <div hidden={tab !== 1} data-testid="setup-panel-1">
+        <div className="card" data-testid="setup-step-model">
+          <div className="row">
+            <span className="status">程序无该步骤</span>
+            <strong>模型引擎</strong>
+          </div>
+          <p className="note" data-testid="setup-model-note">
+            定稿把「至少一个引擎通过连通性测试」放在首启第②步，但本程序的首启 IPC 只有
+            <code> setup:state / setL0Password / regenCode / exportCard / reselectDirs / finish</code>，
+            <strong>没有 setup:model 这类通道</strong>；模型引擎由管理员登录后在「模型与成本」页通过
+            <code> llm:*</code> 接口配置与拨测（需要管理员会话，首启阶段未登录，故此处不伪造通过）。
+          </p>
+          <div className="note" data-testid="setup-model-deviation">
+            偏差如实列出：定稿 = 三步含模型测试；程序 = 存储 → L0 密码 → 恢复卡导出，模型配置在登录后。
+            这里不提供假的「测试通过」按钮，避免把未发生的连通性当成功。
+          </div>
+        </div>
+      </div>
+
+      <div hidden={tab !== 2} data-testid="setup-panel-2">
       {/* ── ② L0 管理密码 ─────────────────────────────────────── */}
       <div className="card" data-testid="setup-step-password">
         <div className="row">
@@ -334,6 +370,7 @@ export function SetupPage({ onNavigate }: { onNavigate?: (url: string) => void }
           </button>
           {!(step1Done && step2Done && step3Done) && <span className="dim" data-testid="setup-finish-hint">三步都完成后才可点</span>}
         </div>
+      </div>
       </div>
     </div>
   );
