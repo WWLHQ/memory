@@ -1,26 +1,45 @@
-/* 日志页补充样式 */
+/* 日志页补充样式（p0 亮暗令牌） */
 .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
 .dot.info { background:var(--accent); }
 .dot.warn { background:var(--warn); }
 .dot.error { background:var(--err); }
-tr.err-row { background:#2a1414; }
-tr.err-row td { color:#ffc9c9; }
-tr.err-row .note { color:#d8a0a0; }
-.modal-mask { position:fixed; inset:0; background:rgba(0,0,0,.55); display:flex; align-items:center; justify-content:center; z-index:100; }
-.modal { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:18px; width:min(560px, 92vw); }
+tr.err-row td { background: color-mix(in srgb, var(--err) 9%, var(--win)); }
+tr.err-row td:first-child { border-left: 2px solid var(--err); }
+tr.err-row .p0-note { color: var(--err); }
+.modal-mask { position:fixed; inset:0; background:rgba(0,0,0,.45); display:flex; align-items:center; justify-content:center; z-index:100; }
+.modal { background:var(--win); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:14px; width:min(640px, 92vw); box-shadow:var(--shadow); max-height:86vh; overflow:auto; }
 .mid { color:var(--accent); }
 a.mid { text-decoration:underline; text-underline-offset:2px; }
 
-/* 程序运行日志（批次17 建，批次19 迁入日志页，批次24 人话化 + 纵向滚动）：
-   正文区固定高度且常驻上下滚动条，一行一条，可回看窗口内全部日志 */
-.program-log { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:10px 12px; margin-bottom:14px; }
+/* 日志表 */
+.ltable { width:100%; border-collapse:collapse; font-size:11.5px; }
+.ltable th, .ltable td { padding:4px 7px; text-align:left; border-bottom:1px solid var(--line-2); vertical-align:middle; }
+.ltable th { color:var(--muted); font-weight:600; font-size:11px; background:var(--chip); border-bottom:1px solid var(--line); white-space:nowrap; }
+.ltable tbody tr:hover td { background:var(--sel); color:var(--sel-text); }
+
+/* 异常聚合 6 类 */
+.p0-aggr { display:grid; grid-template-columns:repeat(2, minmax(240px, 1fr)); gap:6px; }
+@media (max-width: 760px) { .p0-aggr { grid-template-columns:1fr; } }
+.p0-aggr-item {
+  display:flex; align-items:center; gap:2px; padding:6px 8px; min-width:0;
+  border:1px solid var(--line); border-radius:3px; background:var(--chip);
+  color:var(--text); text-decoration:none; font-size:11.5px; overflow:hidden;
+}
+a.p0-aggr-item:hover { border-color:var(--accent); }
+.p0-aggr-item b { font-family:var(--mono); white-space:nowrap; }
+.p0-aggr-item span { color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.p0-aggr-item.zero { opacity:.6; }
+.p0-aggr-item.clickable { cursor:pointer; }
+
+/* 程序运行日志（数据取真实 log:tail；正文区固定高度 + 常驻滚动条） */
+.program-log { background:var(--win); border:1px solid var(--line); border-radius:4px; padding:8px 10px; margin:0 0 10px; }
 .program-log-head { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
-.program-log-head h3 { font-size:12px; margin:0; color:var(--txt); }
+.program-log-head h3 { font-size:12.5px; margin:0; color:var(--text); }
 .pl-sub { font-weight:400; color:var(--muted); margin-left:6px; }
-.pl-actions { display:flex; align-items:center; gap:8px; }
-.pl-meta { font-size:10px; color:var(--dim); font-family:monospace; }
-.program-log .btn { padding:4px 10px; font-size:11px; }
-.pl-actions .btn.active { background:var(--accent); border-color:var(--accent); color:#081018; font-weight:700; }
+.pl-actions { display:flex; align-items:center; gap:6px; }
+.pl-meta { font-size:10px; color:var(--faint); font-family:var(--mono); }
+.program-log .btn { height:22px; padding:0 9px; font-size:11px; border:1px solid var(--line); border-radius:3px; background:var(--chip); color:var(--text); cursor:pointer; }
+.pl-actions .btn.active { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
 .pl-body {
   margin-top:8px; background:#0b1016; border:1px solid var(--line); border-radius:8px;
   padding:6px 9px; font-family:monospace; font-size:11px; line-height:1.75;

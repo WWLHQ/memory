@@ -74,10 +74,14 @@ describe('阶段5-B · 异常处置入口接真（A17）+ 顶栏原型文案清�
     expect(aggr.find((a) => a.kind === 'conflict_pending')?.target).toContain('P8');
   });
 
-  it('⑤ 无 error 日志 → 不渲染异常聚合卡', () => {
+  it('⑤ 无 error 日志 → 仍列 6 类（0×），并如实标样本范围', () => {
     expect(aggrErrors([])).toEqual([]);
     render(<ErrorAggr logs={[{ ...ALL_ERRORS[0], level: 'info' }]} />);
-    expect(screen.queryByTestId('error-aggr')).toBeNull();
+    const card = screen.getByTestId('error-aggr');
+    expect(card).toHaveTextContent('样本范围：当前筛选 1 行');
+    for (const k of ['breaker_open', 'sync_fail', 'quota_exceed', 'l0_decrypt_fail', 'vector_error', 'conflict_pending']) {
+      expect(screen.getByTestId(`aggr-${k}`)).toHaveTextContent('× 0');
+    }
   });
 
   it('⑥ 有处置页的分类渲染真 <a href>，无对应页的分类是不可点的 <span> 且无 href', () => {

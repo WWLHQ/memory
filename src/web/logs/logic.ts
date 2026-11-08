@@ -86,6 +86,27 @@ export function aggrErrors(list: LogEntry[]): ErrorAggrItem[] {
   }));
 }
 
+/** 定稿 6 类全量聚合：计数为 0 的分类也保留（页面标 0× 而不是隐藏），样本范围由调用方如实标注。 */
+export function aggrErrorsAll(list: LogEntry[]): ErrorAggrItem[] {
+  const map = new Map<ErrorKind, number>();
+  for (const l of list) {
+    const k = classifyError(l);
+    if (k) map.set(k, (map.get(k) ?? 0) + 1);
+  }
+  return (Object.keys(ERROR_TARGET) as ErrorKind[]).map((kind) => ({
+    kind,
+    count: map.get(kind) ?? 0,
+    target: ERROR_TARGET[kind],
+    href: ERROR_TARGET_ROUTE[kind].href,
+    note: ERROR_TARGET_ROUTE[kind].note,
+  }));
+}
+
+/** 当前样本里 level=error 但未归入 6 类的条数（如实标注，不硬塞进某一类） */
+export function unclassifiedErrors(list: LogEntry[]): number {
+  return list.filter((l) => l.level === 'error' && classifyError(l) === null).length;
+}
+
 /** R-LOG1 + §2.1：过滤六维 AND，error 恒置顶（不被时间窗过滤掉），同级 ts 倒序 */
 export function filterLogs(list: LogEntry[], f: LogFilter, now = Date.now()): LogEntry[] {
   const errors = list.filter((l) => l.level === 'error');
