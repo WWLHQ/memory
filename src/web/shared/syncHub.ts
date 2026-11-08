@@ -1,10 +1,14 @@
-// 渲染层同步中枢代理（批次42-B）：把内核 AnySyncHub 接口转发到主进程 PgSyncHub。
+﻿// 渲染层同步中枢代理（批次42-B）：把内核 AnySyncHub 接口转发到主进程 PgSyncHub。
 // 桌面壳内经 IPC；纯浏览器或宿主桥不可用 → kernel 不注入 hub，sync() 如实报 E_NOT_IMPLEMENTED。
 // 方法签名与 PgSyncHub 结构同构（引擎 syncUp/syncDown/reconcile 双兼容），IB 语义在中枢侧（§2）。
 import type { ErrorCode, Form, Memory } from '../../core/memagent/types.ts';
 import type { PushOutcome, SyncAudit, SyncConflict } from '../../core/memagent/sync.ts';
 import { MemAgentError } from '../../core/memagent/errors.ts';
 import { hostCall } from '../../desktop/hostBridge.ts';
+import { getStoredSessionId } from '../Home/crossTabAuth.ts';
+
+/** 主进程 handler 末尾统一校验会话（sync:* 全部 requireSession/requireAdmin） */
+const sid = () => getStoredSessionId();
 
 type IpcOk<T> = { ok: true } & T;
 type IpcFail = { ok: false; code?: string; error: string };
@@ -12,7 +16,9 @@ type IpcResult<T> = IpcOk<T> | IpcFail;
 
 function unwrap<T extends object>(res: IpcResult<T> | undefined, fallback: ErrorCode): T {
   if (!res || res.ok !== true) {
-    throw new MemAgentError((res?.code as ErrorCode) ?? fallback, res?.error ?? '同步中枢通道不可用（宿主桥未就绪）');
+    // 主进程回执里的 error 自带 [CODE] 前缀；去掉后由 MemAgentError 统一带 code，避免「[CODE] [CODE]」
+    const msg = String(res?.error ?? '同步中枢通道不可用（宿主桥未就绪）').replace(/^\[[A-Z0-9_]+\]\s*/, '');
+    throw new MemAgentError((res?.code as ErrorCode) ?? fallback, msg);
   }
   return res;
 }
@@ -27,42 +33,43 @@ type HostPushResult = PushOutcome;
  */
 export class HostSyncHub {
   async push(mem: Memory, form: Form): Promise<HostPushResult> {
-    const res = await hostCall<IpcResult<{ result: HostPushResult }>>('sync:push', [mem, form]);
+    const res = await hostCall<IpcResult<{ result: HostPushResult }>>('sync:push', [mem, form, sid()]);
     return unwrap(res, 'E_NOT_IMPLEMENTED').result;
   }
 
   async pull(scope: { team_id: string; user_id?: string }, since: number, form: Form = 'desktop'): Promise<{ items: Memory[]; cursor: number }> {
-    const res = unwrap(await hostCall<IpcResult<{ items: Memory[]; cursor: number }>>('sync:pull', [scope, since, form]), 'E_NOT_IMPLEMENTED');
+    const res = unwrap(await hostCall<IpcResult<{ items: Memory[]; cursor: number }>>('sync:pull', [scope, since, form, sid()]), 'E_NOT_IMPLEMENTED');
     return { items: res.items, cursor: res.cursor }; // 剔除 IPC 信封字段，返回形状与 PgSyncHub 严格一致
   }
 
   async reconcile(scope: { team_id: string }): Promise<{ items: Memory[]; losers: Memory[]; missing_local: string[] }> {
-    const res = unwrap(await hostCall<IpcResult<{ items: Memory[]; losers: Memory[]; missing_local: string[] }>>('sync:reconcile', [scope]), 'E_NOT_IMPLEMENTED');
+    const res = unwrap(await hostCall<IpcResult<{ items: Memory[]; losers: Memory[]; missing_local: string[] }>>('sync:reconcile', [scope, sid()]), 'E_NOT_IMPLEMENTED');
     return { items: res.items, losers: res.losers, missing_local: res.missing_local };
   }
 
   async listConflicts(team_id?: string): Promise<SyncConflict[]> {
-    const res = await hostCall<IpcResult<{ conflicts: SyncConflict[] }>>('sync:conflicts', [team_id]);
+    const res = await hostCall<IpcResult<{ conflicts: SyncConflict[] }>>('sync:conflicts', [team_id, sid()]);
     return unwrap(res, 'E_NOT_IMPLEMENTED').conflicts;
   }
 
   async resolve(conflict_id: string, winner: 'local' | 'remote'): Promise<void> {
-    const res = await hostCall<IpcResult<Record<string, never>>>('sync:resolve', [conflict_id, winner]);
+    const res = await hostCall<IpcResult<Record<string, never>>>('sync:resolve', [conflict_id, winner, sid()]);
     unwrap(res, 'E_NOT_IMPLEMENTED');
   }
 
   async getCursor(): Promise<number> {
-    const res = await hostCall<IpcResult<{ cursor: number }>>('sync:cursor', []);
+    const res = await hostCall<IpcResult<{ cursor: number }>>('sync:cursor', [sid()]);
     return unwrap(res, 'E_NOT_IMPLEMENTED').cursor;
   }
 
   async auditCount(): Promise<number> {
-    const res = await hostCall<IpcResult<{ count: number }>>('sync:auditCount', []);
+    const res = await hostCall<IpcResult<{ count: number }>>('sync:auditCount', [sid()]);
     return unwrap(res, 'E_NOT_IMPLEMENTED').count;
   }
 
   async auditsFrom(start: number, team_id?: string): Promise<SyncAudit[]> {
-    const res = await hostCall<IpcResult<{ audits: SyncAudit[] }>>('sync:auditsFrom', [start, team_id]);
+    const res = await hostCall<IpcResult<{ audits: SyncAudit[] }>>('sync:auditsFrom', [start, team_id, sid()]);
     return unwrap(res, 'E_NOT_IMPLEMENTED').audits;
   }
 }
+

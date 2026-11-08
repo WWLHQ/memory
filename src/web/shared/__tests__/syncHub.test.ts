@@ -40,9 +40,9 @@ describe('批次42-B HostSyncHub（主进程 PgSyncHub 代理）', () => {
       return { ok: false, error: 'unexpected' };
     });
     await expect(h.push(mem(), 'desktop')).resolves.toBe('applied');
-    expect(hostCall).toHaveBeenCalledWith('sync:push', [mem(), 'desktop']);
+    expect(hostCall).toHaveBeenCalledWith('sync:push', [mem(), 'desktop', null]);
     await expect(h.pull({ team_id: 't1', user_id: 'u1' }, 0, 'desktop')).resolves.toEqual({ items: [mem()], cursor: 7 });
-    expect(hostCall).toHaveBeenCalledWith('sync:pull', [{ team_id: 't1', user_id: 'u1' }, 0, 'desktop']);
+    expect(hostCall).toHaveBeenCalledWith('sync:pull', [{ team_id: 't1', user_id: 'u1' }, 0, 'desktop', null]);
     await expect(h.auditCount()).resolves.toBe(3);
     await expect(h.auditsFrom(2)).resolves.toEqual([]);
   });
@@ -60,7 +60,7 @@ describe('批次42-B HostSyncHub（主进程 PgSyncHub 代理）', () => {
     await expect(h.listConflicts('t1')).resolves.toEqual([]);
     await expect(h.resolve('cf_1', 'local')).resolves.toBeUndefined();
     await expect(h.getCursor()).resolves.toBe(42);
-    expect(hostCall).toHaveBeenNthCalledWith(3, 'sync:resolve', ['cf_1', 'local']);
+    expect(hostCall).toHaveBeenNthCalledWith(3, 'sync:resolve', ['cf_1', 'local', null]);
   });
 
   it('中枢侧 ok:false → 抛 MemAgentError（如实报错，不静默）', async () => {

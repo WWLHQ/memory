@@ -3,7 +3,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { SyncHub, sha256hex, stampForSync } from '../../../core/memagent/sync.ts';
-import { runSync, listSyncConflicts, resolveConflict, hubOverview } from '../coreSyncPage.ts';
+import { runSync, listSyncConflicts, resolveConflict, hubOverview, syncChannels } from '../coreSyncPage.ts';
 import type { Memory, SyncReport } from '../../../core/memagent/types.ts';
 import type { SyncConflict } from '../../../core/memagent/sync.ts';
 
@@ -34,15 +34,48 @@ describe('coreSyncPage（逻辑层）', () => {
     expect(r).toMatchObject({ ok: true, pushed: 2, pulled: 5, conflicts: 1, dedup: 1, behind: 1, lww: 1, l0_skipped: 3, cursor: 42, team_id: 't1' });
   });
 
-  it('runSync：agent 抛错 → ok:false + 真实错误信息（权限失败如实展示，不静默）', async () => {
+  it('runSync：agent 抛错 → ok:false + 真实错误码与阶段（权限失败如实展示，不静默）', async () => {
     const agent = {
       async sync(): Promise<SyncReport> {
-        throw new Error('[E_NOT_IMPLEMENTED] 同步中枢未就绪');
+        throw Object.assign(new Error('同步中枢未就绪'), { code: 'E_NOT_IMPLEMENTED' });
       },
     };
     const r = await runSync({ agent, team_id: 't1' });
     expect(r.ok).toBe(false);
-    expect(r.error).toContain('E_NOT_IMPLEMENTED');
+    expect(r.code).toBe('E_NOT_IMPLEMENTED');
+    expect(r.phase).toBe('push');
+    expect(r.pushed).toBe(0);
+    expect(r.error).toContain('同步中枢未就绪');
+  });
+
+  it('syncChannels：直读真实中枢游标/审计，上行下行状态来自真实 sync_up/sync_down 审计', async () => {
+    const hub = new SyncHub();
+    const local = { async listMemories() { return [mem({ mem_id: 'm_ch', content: 'channel row' })]; }, async putMemory() { /* noop */ } };
+    await (await import('../../../core/memagent/sync.ts')).syncUp(local, hub, 'desktop');
+    const v = await syncChannels({ hub, team_id: 't1' });
+    expect(v.ok).toBe(true);
+    expect(v.node.status).toBe('ok');
+    expect(v.audit_count).toBe(hub.auditCount());
+    expect(v.channels.find((c) => c.direction === '上行')?.status).toBe('ok');
+    expect(v.channels.some((c) => c.channel.includes('L0'))).toBe(true);
+    // 绝不出现演示节点 node-1/node-2
+    expect(JSON.stringify(v)).not.toMatch(/node-[12]/);
+  });
+
+  it('syncChannels：中枢不可达 → ok:false + 错误码（浏览器降级如实）', async () => {
+    const v = await syncChannels({
+      hub: {
+        listConflicts: async () => [],
+        resolve: async () => { /* noop */ },
+        reconcile: async () => ({ items: [], losers: [], missing_local: [] }),
+        getCursor: async () => { throw Object.assign(new Error('宿主桥未就绪'), { code: 'E_NOT_IMPLEMENTED' }); },
+      },
+      team_id: 't1',
+    });
+    expect(v.ok).toBe(false);
+    expect(v.code).toBe('E_NOT_IMPLEMENTED');
+    expect(v.node.status).toBe('fail');
+    expect(v.channels.every((c) => c.direction === '—' || c.status === 'fail')).toBe(true);
   });
 
   it('裁决链路：内存中枢构造真冲突 → listSyncConflicts 列 pending → resolve 后队列清空', async () => {
@@ -88,12 +121,17 @@ describe('SyncPage（组件层）', () => {
     listSyncConflicts?: typeof listSyncConflicts;
     resolveConflict?: typeof resolveConflict;
     hubOverview?: typeof hubOverview;
+    syncChannels?: typeof syncChannels;
   }): void {
     vi.doMock('../coreSyncPage.ts', () => ({
       runSync: impl.runSync ?? vi.fn(),
       listSyncConflicts: impl.listSyncConflicts ?? vi.fn(async () => []),
       resolveConflict: impl.resolveConflict ?? vi.fn(),
       hubOverview: impl.hubOverview ?? vi.fn(async () => ({ ok: true, mirror_rows: 0, losers: 0, integrity_issues: [], team_id: 't1' })),
+      syncChannels: impl.syncChannels ?? vi.fn(async () => ({
+        ok: true, node: { name: '本机同步中枢（PgSyncHub）', status: 'ok', detail: 'cursor=0' },
+        cursor: 0, audit_count: 0, channels: [],
+      })),
     }));
   }
 

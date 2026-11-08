@@ -47,8 +47,9 @@ describe('批次42-B kernel 同步中枢装配', () => {
     const r = await ma.sync({ direction: 'push', project_id: 'P1' });
     expect(r.pushed).toBe(1);
     // syncUp 引擎真跑过：经代理通道上行（auditCount + push 两次调用都发生；form = KERNEL_FORM 'web'）
-    expect(hostCall).toHaveBeenCalledWith('sync:push', [expect.anything(), 'web']);
-    expect(hostCall).toHaveBeenCalledWith('sync:auditCount', []);
+    // 末尾透传渲染层真实会话（此处 localStorage 已清空 → null，主进程会按 401 如实拒绝）
+    expect(hostCall).toHaveBeenCalledWith('sync:push', [expect.anything(), 'web', null]);
+    expect(hostCall).toHaveBeenCalledWith('sync:auditCount', [null]);
     // mock 中枢真实收到镜像（seed 行 ULID 归属，比对 content 更稳）
     const mirrored = hub.reconcile({ team_id: 't1' }).items;
     expect(mirrored).toHaveLength(1);
