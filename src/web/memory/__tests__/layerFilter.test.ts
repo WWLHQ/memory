@@ -1,6 +1,6 @@
 // 记忆层级管理页 · 每层过滤+分页纯逻辑单测
 import { describe, it, expect } from 'vitest';
-import { filterLayerPaged, LAYER_DEFAULT_FILTER, LAYER_DEFAULT_PAGE_SIZE, LAYER_PAGE_SIZES } from '../layerFilter.ts';
+import { filterLayerPaged, initialLayerSource, LAYER_DEFAULT_FILTER, LAYER_DEFAULT_PAGE_SIZE, LAYER_PAGE_SIZES } from '../layerFilter.ts';
 import { filterMemories } from '../memoryFilter.ts';
 import type { MemoryRecord } from '../types.ts';
 
@@ -139,5 +139,16 @@ describe('filterLayerPaged', () => {
     const r = filterMemories(withTime, { createdFrom: '2026-07-01' });
     expect(r.length).toBe(1);
     expect(r.map((x) => x.id)).toEqual(['t3']);
+  });
+});
+
+describe('D4 深链初值（层级页）', () => {
+  it('接受真实来源，未知来源回 all', () => {
+    expect(initialLayerSource('?source=manual')).toBe('manual');
+    expect(initialLayerSource('?source=collected')).toBe('collected');
+    expect(initialLayerSource('?source=webhook')).toBe('webhook');
+    expect(initialLayerSource('?source=mcp')).toBe('mcp');
+    expect(initialLayerSource('?source=bogus')).toBe('all');
+    expect(initialLayerSource('')).toBe('all');
   });
 });

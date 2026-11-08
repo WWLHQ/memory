@@ -27,19 +27,30 @@ interface OpenTab {
   id: string;
   label: string;
   page?: PageKey;
+  /** D4 页面初值：`?status=archived` / `#l0bar` */
+  href?: string;
   unavailable?: string;
 }
 
-/** 顶层 ?backend= / ?agentBackend= 透传给 iframe 内页面（与 Overview 的透传口径一致） */
-function pageUrl(key: PageKey): string {
+/**
+ * 顶层 ?backend= / ?agentBackend= 透传给 iframe 内页面（与 Overview 的透传口径一致）。
+ * href 只做两件事：追加查询参数（`?k=v`）或锚点（`#id`），由目标页自己解析成真实筛选/定位。
+ */
+function pageUrl(key: PageKey, href?: string): string {
   const params = new URLSearchParams(location.search);
   const q = new URLSearchParams();
   const backend = params.get('backend');
   const agentBackend = params.get('agentBackend');
   if (backend) q.set('backend', backend);
   if (agentBackend) q.set('agentBackend', agentBackend);
+  let hash = '';
+  if (href?.startsWith('?')) {
+    new URLSearchParams(href.slice(1)).forEach((v, k) => { if (v) q.set(k, v); });
+  } else if (href?.startsWith('#')) {
+    hash = href;
+  }
   const qs = q.toString();
-  return `/${PAGES[key].file}${qs ? `?${qs}` : ''}`;
+  return `/${PAGES[key].file}${qs ? `?${qs}` : ''}${hash}`;
 }
 
 function readStore(key: string, fallback: string): string {
@@ -180,7 +191,7 @@ export function Workspace() {
     setActiveId(item.id);
     setOpenTabs((tabs) => tabs.some((t) => t.id === item.id)
       ? tabs
-      : [...tabs, { id: item.id, label: item.label, page: item.page, unavailable: item.unavailable }]);
+      : [...tabs, { id: item.id, label: item.label, page: item.page, href: item.href, unavailable: item.unavailable }]);
     setMessage(`已切换到「${item.label}」。`);
   }, []);
 
@@ -236,10 +247,15 @@ export function Workspace() {
     if (item.unavailable) return;
     if (item.go) {
       const target = NAV.find((e): e is NavItem => e.kind === 'item' && (e.page === item.go || Boolean(e.children?.some((c) => c.page === item.go))));
-      const item2 = target?.page === item.go ? target : target?.children?.find((c) => c.page === item.go) ?? {
+      const base = target?.page === item.go ? target : target?.children?.find((c) => c.page === item.go) ?? {
         kind: 'item' as const, id: `page-${item.go}`, label: PAGES[item.go].label, icon: 'db' as IconName, page: item.go,
       };
-      openView(item2 as NavItem);
+      // 带 href 的命令要开新标签（例如「归档」与「全部记忆」是同一页面的不同初值），
+      // 否则会复用旧标签把 iframe 留在未筛选的地址上。
+      const withHref: NavItem = item.href
+        ? { ...base, id: `${base.id}${item.href}`, label: item.label, href: item.href }
+        : base;
+      openView(withHref);
       return;
     }
     if (item.action) runShellAction(item.action, item.label);
@@ -399,7 +415,7 @@ export function Workspace() {
                     ref={(el) => { frameRefs.current[t.id] = el; }}
                     className="page-frame"
                     title={`${t.label} · ${PAGES[t.page].file}`}
-                    src={pageUrl(t.page)}
+                    src={pageUrl(t.page, t.href)}
                   />
                 </div>
               );

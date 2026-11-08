@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { typeLabel, overdueDays, isOverdue, applyVerdict, auditPair, queueSort } from '../logic.ts';
+import { typeLabel, overdueDays, isOverdue, applyVerdict, auditPair, queueSort, initialConflictId } from '../logic.ts';
 import { SEED_CONFLICTS } from './fixtures.ts';
 import type { ConflictRecord } from '../types.ts';
 
@@ -93,5 +93,13 @@ describe('种子覆盖', () => {
   it('含超期>7d 与已替代样本', () => {
     expect(SEED_CONFLICTS.some((r) => r.overdue_days > 7)).toBe(true);
     expect(SEED_CONFLICTS.some((r) => r.replaced_by)).toBe(true);
+  });
+});
+
+describe('D4 深链初值（冲突页）', () => {
+  it('只取非空 id；空值/缺省返回 null（由页面回落真实队列第一条）', () => {
+    expect(initialConflictId('?id=c-123')).toBe('c-123');
+    expect(initialConflictId('?id=%20%20')).toBeNull();
+    expect(initialConflictId('')).toBeNull();
   });
 });

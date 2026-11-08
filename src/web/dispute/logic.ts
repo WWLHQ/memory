@@ -3,6 +3,15 @@
 import type { ConflictAudit, ConflictRecord, ConflictType, Verdict } from './types.ts';
 import { CONFIRM_TYPE_LABEL } from './labels.ts';
 
+/**
+ * D4：从 `?id=<conflict_id>` 取初始选中项。只作为「预设选中」，
+ * 目标不在真实队列里时由页面回落第一条（绝不凭空造一条冲突）。
+ */
+export function initialConflictId(search: string): string | null {
+  const id = new URLSearchParams(search).get('id')?.trim();
+  return id || null;
+}
+
 /** 冲突类型中文可读名（9.7 四类） */
 export function typeLabel(t: ConflictType | null): string {
   // 批次46-3：内核无检测引擎 → 不伪造类型，如实显示「未检测」

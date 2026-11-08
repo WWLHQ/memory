@@ -44,6 +44,8 @@ export interface NavItem {
   icon: IconName;
   /** 真实页面；缺省时必须给出 unavailable 原因 */
   page?: PageKey;
+  /** 页面初值（D4）：`?status=archived` 或 `#l0bar`，由目标页自行解析并真正筛选/定位 */
+  href?: string;
   /** 程序暂无该视图的诚实原因（不可用态：无计数、无回执） */
   unavailable?: string;
   /** 子项（缩进显示） */
@@ -69,7 +71,7 @@ export const NAV: NavEntry[] = [
       },
       { kind: 'item', id: 'ledger-layers', label: '分层 L1–L6', icon: 'layers', page: 'layered', child: true },
       { kind: 'item', id: 'ledger-conflict', label: '冲突待裁决', icon: 'warn', page: 'dispute', child: true },
-      { kind: 'item', id: 'ledger-l0', label: 'L0 密文（需解锁）', icon: 'lock', page: 'layered', child: true },
+      { kind: 'item', id: 'ledger-l0', label: 'L0 密文（需解锁）', icon: 'lock', page: 'layered', href: '#l0bar', child: true },
     ],
   },
   { kind: 'item', id: 'write', label: '写入', icon: 'receipt', page: 'write' },
@@ -118,6 +120,8 @@ export interface RibbonItem {
   icon: IconName;
   /** 跳转到真实页面 */
   go?: PageKey;
+  /** 页面初值（D4），与 go 同时使用 */
+  href?: string;
   /** 壳层内动作（由 Workspace 实现） */
   action?: ShellAction;
   big?: boolean;
@@ -151,9 +155,9 @@ export const RIBBON: RibbonTab[] = [
         label: '记忆', items: [
           { label: '新建记忆', icon: 'plus', go: 'write', big: true, kbd: 'Ctrl+N' },
           { label: '打开回执', icon: 'receipt', go: 'write', big: true },
-          { label: '归档（需登录）', icon: 'archive', go: 'memory' },
+          { label: '归档（需登录）', icon: 'archive', go: 'memory', href: '?status=archived' },
           { label: '锁定行（本地）', icon: 'lock', go: 'memory' },
-          { label: '解锁 L0', icon: 'key', go: 'layered' },
+          { label: '解锁 L0', icon: 'key', go: 'layered', href: '#l0bar' },
         ],
       },
       {
@@ -183,14 +187,14 @@ export const RIBBON: RibbonTab[] = [
       {
         label: '分层内容', items: [
           { label: '分层内容', icon: 'layers', go: 'layered', big: true },
-          { label: '解锁 L0', icon: 'key', go: 'layered', big: true },
+          { label: '解锁 L0', icon: 'key', go: 'layered', href: '#l0bar', big: true },
           { label: '查看 L1 注入', icon: 'eye', unavailable: '程序未提供 L1 注入明细视图' },
-          { label: 'L0 密文说明', icon: 'lock', go: 'layered' },
+          { label: 'L0 密文说明', icon: 'lock', go: 'layered', href: '#l0bar' },
         ],
       },
       {
         label: '生命周期', items: [
-          { label: '归档（需登录）', icon: 'archive', go: 'memory', big: true },
+          { label: '归档（需登录）', icon: 'archive', go: 'memory', href: '?status=archived', big: true },
           { label: '激活', icon: 'play', go: 'lifecycle' },
           { label: '转入休眠', icon: 'moon', go: 'lifecycle' },
         ],
@@ -310,7 +314,7 @@ export const RIBBON: RibbonTab[] = [
         label: '体检', items: [
           { label: '安全体检', icon: 'shield', go: 'security', big: true, kbd: 'F9' },
           { label: '会话守卫', icon: 'user', go: 'security' },
-          { label: 'L0 密钥', icon: 'key', go: 'layered' },
+          { label: 'L0 密钥', icon: 'key', go: 'layered', href: '#l0bar' },
         ],
       },
       {

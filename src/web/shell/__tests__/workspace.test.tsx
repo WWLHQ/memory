@@ -97,3 +97,36 @@ describe('工作台壳层', () => {
     expect(screen.getByRole('button', { name: '深色' })).toHaveAttribute('aria-pressed', 'true');
   });
 });
+
+describe('S3 深链接线（D4）：壳层把初值真的交给目标真实页面', () => {
+  function activeFrameSrc(container: HTMLElement): string | null {
+    const frame = container.querySelector('.page-pane.active iframe.page-frame');
+    return frame ? frame.getAttribute('src') : null;
+  }
+
+  it('Ribbon「归档（需登录）」开独立标签，iframe src 带 ?status=archived', async () => {
+    const { container } = await renderShell();
+    fireEvent.click(screen.getByRole('button', { name: /归档（需登录）/ }));
+    const src = activeFrameSrc(container);
+    expect(src).toContain('/memory.html');
+    expect(src).toContain('status=archived');
+    // 归档与「全部记忆」是同一页面不同初值 → 必须是独立标签，不能复用旧标签
+    expect(container.querySelector('.tabstrip')?.textContent ?? '').toContain('归档（需登录）');
+  });
+
+  it('导航「L0 密文（需解锁）」指向层级页并带 #l0bar 锚点', async () => {
+    const { container } = await renderShell();
+    fireEvent.click(screen.getByRole('treeitem', { name: /L0 密文（需解锁）/ }));
+    const src = activeFrameSrc(container);
+    expect(src).toContain('/memory-layered.html');
+    expect(src).toContain('#l0bar');
+  });
+
+  it('无 href 的命令仍复用原有标签，不凭空新增重复标签', async () => {
+    const { container } = await renderShell();
+    fireEvent.click(screen.getByRole('button', { name: /记忆列表/ }));
+    const src = activeFrameSrc(container);
+    expect(src).toContain('/memory.html');
+    expect(src).not.toContain('status=archived');
+  });
+});

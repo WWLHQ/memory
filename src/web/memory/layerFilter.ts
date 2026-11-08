@@ -30,6 +30,15 @@ export const LAYER_DEFAULT_FILTER: LayerFilterState = {
 };
 
 /**
+ * D4：从 `?source=manual|collected` 解析层级页初值。
+ * 其余值回 all（不强行套一个不存在的来源）。
+ */
+export function initialLayerSource(search: string): string {
+  const raw = new URLSearchParams(search).get('source') ?? 'all';
+  return ['manual', 'collected', 'webhook', 'mcp'].includes(raw) ? raw : 'all';
+}
+
+/**
  * 按过滤条件 + 「该层有内容」过滤，并分页（纯函数）。
  * @param list      全部记忆
  * @param f         过滤条件

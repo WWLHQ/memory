@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { actionLabel, filterEntries, chainByRequest, exportCsv, exportJson } from '../logic.ts';
+import { actionLabel, filterEntries, chainByRequest, exportCsv, exportJson, initialAuditFilter, initialAuditChain } from '../logic.ts';
 import { SEED_AUDIT } from './fixtures.ts';
 import type { AuditAction, AuditEntry, AuditFilter } from '../types.ts';
 
@@ -75,5 +75,18 @@ describe('导出', () => {
   it('exportJson 可解析回原数组', () => {
     const json = exportJson(SEED_AUDIT);
     expect(JSON.parse(json)).toHaveLength(SEED_AUDIT.length);
+  });
+});
+
+describe('D4 深链初值（审计页）', () => {
+  it('只解析白名单过滤字段，忽略未知参数', () => {
+    expect(initialAuditFilter('?user_id=u1&from=2026-01-01&nonsense=x')).toEqual({ user_id: 'u1', from: '2026-01-01' });
+    expect(initialAuditFilter('')).toEqual({});
+  });
+
+  it('chain 只取 request_id 非空值', () => {
+    expect(initialAuditChain('?chain=r-9')).toBe('r-9');
+    expect(initialAuditChain('?chain=%20')).toBeNull();
+    expect(initialAuditChain('')).toBeNull();
   });
 });

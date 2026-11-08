@@ -23,6 +23,23 @@ export interface MemoryFilter {
 /** 分页参数（批次24 起口径单一真源在 shared/paginate，此处转发导出保持既有引用不变） */
 export type { PageParams, Paged } from '../shared/paginate.ts';
 
+/** 六态机的合法值（D4 深链初值只接受这六个，其余一律回 all，避免伪筛选） */
+export const MEMORY_STATUS_VALUES = ['active', 'hibernating', 'archived', 'deprecated', 'stale', 'dormant'] as const;
+
+/**
+ * D4：从 `?status=archived&source=manual&q=xxx` 解析记忆页初值。
+ * 只接受已定义的状态/来源；无法识别的值按「不过滤」处理（诚实：不假装筛选成功）。
+ */
+export function initialMemoryFilter(search: string): Pick<MemoryFilter, 'search' | 'status' | 'source'> {
+  const p = new URLSearchParams(search);
+  const q = (p.get('q') ?? '').trim();
+  const statusRaw = p.get('status') ?? 'all';
+  const sourceRaw = p.get('source') ?? 'all';
+  const source = sourceRaw === 'manual' || sourceRaw === 'collected' ? sourceRaw : 'all';
+  const status = (MEMORY_STATUS_VALUES as readonly string[]).includes(statusRaw) ? statusRaw : 'all';
+  return { search: q, status, source };
+}
+
 /** 是否"采集来源"（source_agent 非空且非 manual）—— 与 MemoryLayeredPage.isCollected 同义 */
 export function isCollected(m: MemoryRecord): boolean {
   const src = m.source_agent ?? '';

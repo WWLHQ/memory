@@ -16,7 +16,7 @@ import { useSessionContext } from '../shared/session.ts';
 import { fmtLayerGen } from '../shared/layerTime.ts';
 import { LayerFilterBar, LayerPager } from './LayerFilterBar.tsx';
 import { LayerMemoryTable } from './LayerMemoryTable.tsx';
-import { filterLayerPaged, LAYER_DEFAULT_FILTER } from './layerFilter.ts';
+import { filterLayerPaged, initialLayerSource, LAYER_DEFAULT_FILTER } from './layerFilter.ts';
 import type { LayerFilterState } from './layerFilter.ts';
 
 export type LayerId = 'L6' | 'L5' | 'L4' | 'L3' | 'L2' | 'L1' | 'L0';
@@ -74,7 +74,8 @@ export function MemoryLayeredPage({ load = coreListMemories }: { load?: () => Pr
   const [selectedMemId, setSelectedMemId] = useState<string | null>(null);
   const [selectedLayer, setSelectedLayer] = useState<LayerId | null>(null);
   const [loc, setLoc] = useState<{ kind: string; path?: string; source: string } | null>(null);
-  const [filterSource, setFilterSource] = useState<string>('all'); // all / manual / webhook / mcp（全局来源快捷过滤）
+  // all / collected / manual / webhook / mcp（全局来源快捷过滤）；D4 深链 ?source= 在此生效
+  const [filterSource, setFilterSource] = useState<string>(() => initialLayerSource(location.search));
 
   // 每层独立的过滤 + 分页状态（默认每页 5 条）
   const [layerFilters, setLayerFilters] = useState<Record<LayerId, LayerFilterState>>({
@@ -225,7 +226,7 @@ export function MemoryLayeredPage({ load = coreListMemories }: { load?: () => Pr
 
   /** L0 授权框：管理员=管理密码；被授权账号=grant_id + 一次性密码；成员可就地申请（§4.4.2） */
   const l0Bar = (
-    <div className="l0bar" data-testid="l0-bar" style={{ flexWrap: 'wrap' }}>
+    <div className="l0bar" id="l0bar" data-testid="l0-bar" style={{ flexWrap: 'wrap' }}>
       <span style={{ fontSize: 16 }}>🔐</span>
       <label htmlFor="l0pwd">
         L0 原始层查阅授权（{role === 'admin' ? '管理员 · 管理密码' : role === 'member' ? '被授权账号 · grant_id + 一次性密码' : '未登录 · 登录后生效'}）

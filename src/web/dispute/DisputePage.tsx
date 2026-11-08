@@ -7,7 +7,7 @@
 // 无真实冲突 → 诚实空态并引导去写入页产生真实记忆。
 // ⚠ 内核读不到（批次25 P0-7）→ 三态加载：显示内核原因 + 重试，绝不渲染成「无待裁决冲突」。
 import { useEffect, useState } from 'react';
-import { queueSort, auditPair } from './logic.ts';
+import { queueSort, auditPair, initialConflictId } from './logic.ts';
 import { useDisputeMirror } from './useDisputeMirror.ts';
 import { coreConflicts, coreVerdict } from './coreDispute.ts';
 import { KernelLoadError, kernelErrorText, useKernelLoad } from '../shared/kernelLoad.tsx';
@@ -29,7 +29,8 @@ interface AuditEvt {
 const NO_CONFLICTS: ConflictRecord[] = [];
 
 export function DisputePage({ load = coreConflicts }: { load?: () => Promise<ConflictRecord[]> } = {}) {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // D4：壳层深链 ?id= 预设选中；队列里没有该 id 时由下方 effect 回落第一条
+  const [selectedId, setSelectedId] = useState<string | null>(() => initialConflictId(location.search));
   const [auditLog, setAuditLog] = useState<AuditEvt[]>([]);
   const { node: toast, show } = useToast();
   const mirror = useDisputeMirror();

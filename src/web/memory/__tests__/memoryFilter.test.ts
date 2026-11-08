@@ -1,6 +1,6 @@
 // 记忆管理页（REQ-006 / P8）· 过滤 + 分页纯逻辑单测
 import { describe, it, expect } from 'vitest';
-import { filterMemories, filterAndPaged, isCollected } from '../memoryFilter.ts';
+import { filterMemories, filterAndPaged, isCollected, initialMemoryFilter } from '../memoryFilter.ts';
 import type { MemoryRecord } from '../types.ts';
 
 const base: MemoryRecord = {
@@ -150,5 +150,18 @@ describe('filterAndPaged', () => {
     expect(r.total).toBe(1);
     expect(r.page).toBe(1);
     expect(r.items.map((r) => r.id)).toEqual(['p4']);
+  });
+});
+
+describe('D4 深链初值（记忆页）', () => {
+  it('识别合法 status/source/q', () => {
+    expect(initialMemoryFilter('?status=archived&source=manual&q=%E9%87%8D%E8%A6%81')).toEqual({
+      search: '重要', status: 'archived', source: 'manual',
+    });
+  });
+
+  it('未知 status/source 一律回 all，绝不假装筛选成功', () => {
+    expect(initialMemoryFilter('?status=deleted&source=foo')).toEqual({ search: '', status: 'all', source: 'all' });
+    expect(initialMemoryFilter('')).toEqual({ search: '', status: 'all', source: 'all' });
   });
 });

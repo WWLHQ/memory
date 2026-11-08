@@ -6,7 +6,7 @@ import { FilterBar } from './FilterBar.tsx';
 import { AuditTable } from './AuditTable.tsx';
 import { useToast } from './useToast.tsx';
 import { useAuditMirror } from './useAuditMirror.ts';
-import { chainByRequest, exportCsv, exportJson, filterEntries } from './logic.ts';
+import { chainByRequest, exportCsv, exportJson, filterEntries, initialAuditChain, initialAuditFilter } from './logic.ts';
 import { coreLoadAudit } from './coreAudit.ts';
 import { DEFAULT_PAGE_SIZE, paginate } from '../shared/paginate.ts';
 import { PageNav } from '../shared/PageNav.tsx';
@@ -14,9 +14,11 @@ import type { AuditFilter, AuditEntry } from './types.ts';
 
 export function AuditPage() {
   const [entries, setEntries] = useState<AuditEntry[]>([]);
-  const [filter, setFilter] = useState<AuditFilter>({});
-  const [applied, setApplied] = useState<AuditFilter>({});
-  const [chainId, setChainId] = useState<string | null>(null);
+  // D4：壳层深链初值（?user_id=... / ?chain=<request_id>）在页面侧真正生效
+  const initialFilter = initialAuditFilter(location.search);
+  const [filter, setFilter] = useState<AuditFilter>(initialFilter);
+  const [applied, setApplied] = useState<AuditFilter>(initialFilter);
+  const [chainId, setChainId] = useState<string | null>(() => initialAuditChain(location.search));
   const [pager, setPager] = useState({ page: 1, pageSize: DEFAULT_PAGE_SIZE });
   const toast = useToast();
   const mirror = useAuditMirror();

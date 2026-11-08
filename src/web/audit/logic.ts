@@ -41,6 +41,26 @@ export function actionLabel(a: AuditAction): string {
   return ACTION_LABEL[a] ?? a;
 }
 
+/** D4 深链支持的过滤字段（未列出的维度不解析，避免把未知参数当筛选） */
+const INITIAL_FILTER_KEYS = ['enterprise_id', 'user_id', 'ip_address', 'device_info', 'request_id', 'from', 'to'] as const;
+
+/** D4：从 `?user_id=xxx&request_id=yyy&from=...` 解析审计页初始过滤 */
+export function initialAuditFilter(search: string): AuditFilter {
+  const p = new URLSearchParams(search);
+  const out: Record<string, string> = {};
+  for (const k of INITIAL_FILTER_KEYS) {
+    const v = p.get(k);
+    if (v) out[k] = v;
+  }
+  return out as AuditFilter;
+}
+
+/** D4：从 `?chain=<request_id>` 直接进入 request_id 链路视图 */
+export function initialAuditChain(search: string): string | null {
+  const v = new URLSearchParams(search).get('chain')?.trim();
+  return v || null;
+}
+
 /** 过滤（§P11 过滤栏各维，全部 AND） */
 export function filterEntries(list: AuditEntry[], f: AuditFilter): AuditEntry[] {
   return list.filter((e) => {

@@ -12,6 +12,7 @@ import { MemoryDrawer } from './MemoryDrawer.tsx';
 import { useToast } from './useToast.tsx';
 import { useMemoryMirror } from './useMemoryMirror.ts';
 import { OP_TOAST } from './logic.ts';
+import { initialMemoryFilter } from './memoryFilter.ts';
 import { coreApplyOp, coreListMemories, coreUpdateContent, storageLocation, openMemoryFile } from './coreMemoryOps.ts';
 import { KernelLoadError, useKernelLoad } from '../shared/kernelLoad.tsx';
 import type { MemoryOp, MemoryRecord, MemoryStoreLocation } from './types.ts';
@@ -24,6 +25,8 @@ export function MemoryPage({ load = coreListMemories }: { load?: () => Promise<M
   const [filterState, setFilterState] = useState<MemoryTableFilterState>({
     search: '', type: 'all', status: 'all', source: 'all',
     createdFrom: '', createdTo: '', pageSize: 20, page: 1,
+    // D4：壳层深链（如「归档」→ ?status=archived）在页面侧真正生效
+    ...initialMemoryFilter(location.search),
   });
   const toast = useToast();
   const mirror = useMemoryMirror();
