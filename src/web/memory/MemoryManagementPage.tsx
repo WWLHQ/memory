@@ -750,7 +750,7 @@ export function MemoryManagementPage() {
                         >
                           <td title={`${row.id} ${row.name}`}><span className="lay-chip">{row.id}</span></td>
                           <td className="num">{row.count}</td>
-                          <td className="mm-share-num">{layerTotal > 0 ? `${(row.share * 100).toFixed(1)}%` : '—'}</td>
+                          <td className="mm-share-num">{layerTotal > 0 ? `${(row.share * 100).toFixed(1)}%` : '未取数'}</td>
                           <td>{row.halfLife}</td>
                           <td>{row.limit}</td>
                           <td title={row.lastWrite ?? ''}>{fmtWhen(row.lastWrite)}</td>

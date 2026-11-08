@@ -97,10 +97,10 @@ export function AuditTable({ entries, activeRequestId, onToggleChain, indexOffse
                       <span>{e.user_id}@{e.ip_address}</span>
                       {e.agent && <div className="p0-note">agent: {e.agent}</div>}
                     </td>
-                    <td className="dim src" title={e.source ?? undefined}>{e.source ?? '—'}</td>
-                    <td className="num">{e.duration_ms !== undefined ? `${e.duration_ms} ms` : '—'}</td>
+                    <td className="dim src" title={e.source ?? undefined}>{e.source ?? '无'}</td>
+                    <td className="num">{e.duration_ms !== undefined ? `${e.duration_ms} ms` : '未取数'}</td>
                     <td>
-                      <span className="dim" title={note || undefined}>{note || '—'}</span>
+                      <span className="dim" title={note || undefined}>{note || '无'}</span>
                       <a
                         href={retrievalContextHref(e.request_id)}
                         data-testid={`jump-${e.request_id}-${i}`}

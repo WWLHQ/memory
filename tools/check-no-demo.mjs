@@ -10,18 +10,24 @@
 //     是真实功能（种子管理员 + 首登提示），不是演示数据回流，故不列入判据；处置另案记录。
 //   · **不误伤合法用途**：`slice(0, 8)` 等 9 处分页截断/sha 短码、L2 占位符、脱敏占位符、
 //     明示 dry-run、`FakeLlmProvider` 零模型 stub 等 C 类真实语义均不列入判据。
-//   · **壳层新增判据（批次48 S1–S8）**：`scope` 仅把判据限定到工作台壳层目录，避免把
-//     其它模块合法的计数/类型声明误判；壳层内「写死计数、写死读数、『—』占位、编造读数措辞、
-//     随机数读数」一律零容忍（全站口径：不可用就写原因，不填任何假数）。
+//   · **全站页面判据（P1–P5，2026-11-09）**：判据从工作台壳层扩到**所有生产页面**（`src/web/`），
+//     覆盖「写死计数/读数、『—』冒充读数、编造读数措辞、随机数读数」四类；注释行（`//`、`/*`、
+//     文档注释）不作为 UI 读数，不参与 P 类判据，避免把「不伪造假数据」这类说明误判为编造措辞。
+//     `src/electron`、`src/core`、`src/home` 等非页面代码不在 P 类范围（如后端随机验证码、
+//     内核格式化函数不是渲染读数）；壳层与全部页面一律零容忍（口径：不可用就写原因，不填任何假数）。
+//   · **变异契约（判据自证）**：默认每次运行会先跑内置自测（临时目录注入四类假数 →
+//     必须逐条判红；干净样本 / 注释样本必须判绿）。自测不通过即退出码 1，证明判据本身没被削弱。
 //
 // 用法：
-//   node tools/check-no-demo.mjs                 # 扫描仓库；有命中退出码 1
-//   node tools/check-no-demo.mjs --json          # 机器可读结果（供 CI/Agent 消费）
+//   node tools/check-no-demo.mjs                 # 自测 + 扫描仓库；有命中退出码 1
+//   node tools/check-no-demo.mjs --json          # 机器可读结果（含 selfTest；供 CI/Agent 消费）
 //   node tools/check-no-demo.mjs --root=<dir>   # 覆盖扫描根（自测/复用，默认脚本所在仓库根）
+//   node tools/check-no-demo.mjs --self-test     # 只跑内置变异自测
 //   node tools/check-no-demo.mjs --help
 //
 // 接线：package.json `check:no-demo` → `verify:fast` → CI quality-gate / windows-gate 两个 job。
-import { readdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -64,12 +70,13 @@ const RULES = [
   { id: 'C01-safe-noop', re: /safe-noop|home server 暂无/, why: '阶段5-C 已清的伪 safe-noop 声明' },
   { id: 'C02-token-bill', re: /\/百万 token|真实 token 节省估算|账本无真实延迟采样|💰 本次 /, why: '阶段5-F 已清的旧金额/token 口径' },
   { id: 'C03-stale-doc', re: /耗时账本未采样/, why: '阶段5-F 已清的过时声明' },
-  // 批次48 S1–S8：壳层生产代码不得出现编造读数（scope 限定，避免误伤其它模块合法计数）。
-  { id: 'S01-shell-fake-count', scope: 'src/web/shell/', re: /\b(count|badge|ratio)\s*:\s*['"]?\d/, why: '壳层导航/命令不得携带写死的计数或徽标' },
-  { id: 'S02-shell-dash-readout', scope: 'src/web/shell/', re: /['"]—['"]/, why: '壳层不得用「—」冒充真实读数' },
-  { id: 'S03-shell-fixed-reading', scope: 'src/web/shell/', re: /\b(big|readout)\s*:\s*['"]\d/, why: '概览/状态读数不得写死数字' },
-  { id: 'S04-shell-fake-wording', scope: 'src/web/shell/', re: /示例读数|演示读数|假数据|伪造读数/, why: '壳层不得出现编造读数措辞' },
-  { id: 'S05-shell-random-readout', scope: 'src/web/shell/', re: /Math\.random\(/, why: '壳层真实读数不得用随机数生成' },
+  // 全站页面判据 P1–P5（2026-11-09）：范围 = `src/web/` 全部生产页面（含工作台壳层），
+  // 不只看壳层。注释行不作为 UI 读数（skipComments），其余一律零容忍。
+  { id: 'P01-page-fake-count', scope: 'src/web/', skipComments: true, re: /\b(count|badge|ratio|big|readout)\s*:\s*['"]?[1-9]/, why: '页面读数不得写死计数/徽标/比值（0 初始化累加器不算读数）' },
+  { id: 'P02-page-dash-readout', scope: 'src/web/', skipComments: true, re: /['"]—['"]/, why: '页面不得用「—」冒充真实读数；不可用就写原因' },
+  { id: 'P03-page-fixed-reading', scope: 'src/web/', skipComments: true, re: /\b(big|readout)\s*:\s*['"]\d/, why: '概览/状态读数不得写死数字' },
+  { id: 'P04-page-fake-wording', scope: 'src/web/', skipComments: true, re: /示例读数|演示读数|假数据|伪造读数/, why: '页面不得出现编造读数措辞' },
+  { id: 'P05-page-random-readout', scope: 'src/web/', skipComments: true, re: /Math\.random\(/, why: '页面真实读数不得用随机数生成' },
 ];
 
 function parseArgs(argv) {
@@ -77,9 +84,13 @@ function parseArgs(argv) {
   return {
     json: argv.includes('--json'),
     help: argv.includes('--help') || argv.includes('-h'),
+    selfTest: argv.includes('--self-test'),
     root: rootArg ? resolve(rootArg.slice('--root='.length)) : REPO_ROOT,
   };
 }
+
+/** 注释行：文档说明不作为 UI 读数参与 P 类判据（避免把「不伪造假数据」说明误判为假数据）。 */
+const COMMENT_LINE = /^\s*(?:\/\/|\/\*|\*|<!--|\{\/\*)/;
 
 function walk(dir, out = []) {
   let entries;
@@ -108,6 +119,7 @@ function scan(root) {
     for (let i = 0; i < lines.length; i += 1) {
       for (const rule of RULES) {
         if (rule.scope && !rel.startsWith(rule.scope)) continue;
+        if (rule.skipComments && COMMENT_LINE.test(lines[i])) continue;
         if (!rule.re.test(lines[i])) continue;
         hits.push({
           rule: rule.id,
@@ -122,11 +134,51 @@ function scan(root) {
   return { scanned: files.length, rules: RULES.length, allowlist: ALLOWLIST.length, hits };
 }
 
+/**
+ * 变异契约：在临时目录注入四类假数，逐条断言判据必须判红；再放入干净样本与注释样本，
+ * 断言不得误伤。判据被削弱（正则失效/范围漏配）时这里先红，而不是等真实假数回流才发现。
+ */
+function runSelfTest() {
+  const root = mkdtempSync(join(tmpdir(), 'mam-no-demo-mut-'));
+  const dir = join(root, 'src', 'web', 'fixture');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'FakePage.tsx'), [
+    "export const nav = { count: 12, badge: '7', ratio: 4 };",
+    "export const card = { big: '9' };",
+    "export const cell: string = '—';",
+    "export const note = '示例读数';",
+    "export const r = Math.random();",
+  ].join('\n'), 'utf8');
+  writeFileSync(join(dir, 'CleanPage.tsx'), [
+    "const acc = { count: 0 }; // 累加器 0 初始化，不是读数",
+    "export const cell = '未取数（账本为空）';",
+    "export const limit = Math.max(1, 2);",
+    "// 历史注释：旧占位符 '—' / '示例读数' 已清除",
+  ].join('\n'), 'utf8');
+  const result = scan(root);
+  const fakeRel = 'src/web/fixture/FakePage.tsx';
+  const cleanRel = 'src/web/fixture/CleanPage.tsx';
+  const expected = [
+    'P01-page-fake-count',
+    'P02-page-dash-readout',
+    'P03-page-fixed-reading',
+    'P04-page-fake-wording',
+    'P05-page-random-readout',
+  ];
+  const checks = expected.map((rule) => ({
+    rule,
+    fired: result.hits.some((h) => h.rule === rule && h.file === fakeRel),
+  }));
+  const cleanHits = result.hits.filter((h) => h.file === cleanRel).length;
+  rmSync(root, { recursive: true, force: true });
+  return { ok: checks.every((c) => c.fired) && cleanHits === 0, checks, cleanHits };
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
-    console.log('check-no-demo：扫描 src/ 生产代码，禁止已清除的演示/种子伪造标识回流。');
-    console.log('用法：node tools/check-no-demo.mjs [--json] [--root=<dir>] [--help]');
+    console.log('check-no-demo：扫描 src/ 生产代码，禁止演示/种子伪造标识回流；默认先跑变异自测。');
+    console.log('用法：node tools/check-no-demo.mjs [--json] [--root=<dir>] [--self-test] [--help]');
     return;
   }
   if (ALLOWLIST.length !== 0) {
@@ -134,11 +186,28 @@ function main() {
     process.exitCode = 1;
     return;
   }
+  const selfTest = runSelfTest();
+  if (args.selfTest) {
+    if (args.json) console.log(JSON.stringify({ selfTest }, null, 2));
+    else if (selfTest.ok) console.log('[check-no-demo] ✅ 变异自测通过：四类假数逐条判红，干净/注释样本判绿');
+    else for (const c of selfTest.checks) if (!c.fired) console.error(`[check-no-demo] ❌ 变异自测失败：${c.rule} 未判红`);
+    if (!selfTest.ok) process.exitCode = 1;
+    return;
+  }
+  if (!selfTest.ok) {
+    console.error('[check-no-demo] ❌ 变异自测失败：判据未能识别注入的假数，门禁视为失效。');
+    for (const c of selfTest.checks) if (!c.fired) console.error(`  - ${c.rule} 未判红`);
+    if (selfTest.cleanHits > 0) console.error(`  - 干净样本误伤 ${selfTest.cleanHits} 处`);
+    process.exitCode = 1;
+    return;
+  }
   const result = scan(args.root);
   result.ok = result.hits.length === 0;
+  result.selfTest = selfTest;
   if (args.json) {
     console.log(JSON.stringify(result, null, 2));
   } else if (result.ok) {
+    console.log('[check-no-demo] ✅ 变异自测通过：四类假数逐条判红，干净/注释样本判绿');
     console.log(
       `[check-no-demo] 扫描 ${SCAN_DIRS.join('/')} 生产代码 ${result.scanned} 文件 · ` +
       `判据 ${result.rules} 条 · 白名单 ${result.allowlist} 条`,

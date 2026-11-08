@@ -106,7 +106,7 @@ export async function coreWriteReceipts(limit = 10): Promise<WriteReceiptHistory
     .slice(0, limit)
     .map((a) => {
       const d = asRecord(a.detail);
-      const dedup = typeof d.dedup === 'string' ? d.dedup : '—';
+      const dedup = typeof d.dedup === 'string' ? d.dedup : '无';
       const sim = typeof d.score === 'number' ? d.score : null;
       const memId = typeof d.mem_id === 'string' ? d.mem_id : null;
       const layerKeys = typeof d.layers === 'object' && d.layers !== null ? Object.keys(d.layers) : [];
@@ -118,8 +118,8 @@ export async function coreWriteReceipts(limit = 10): Promise<WriteReceiptHistory
         dedup,
         sim,
         memory_id: memId,
-        layers: layerKeys.length > 0 ? layerKeys.join(' / ') : '—',
-        source: typeof d.source_agent === 'string' ? d.source_agent : (a.agent ?? '—'),
+        layers: layerKeys.length > 0 ? layerKeys.join(' / ') : '未取数',
+        source: typeof d.source_agent === 'string' ? d.source_agent : (a.agent ?? '无'),
       };
     });
 }

@@ -576,7 +576,7 @@ export function AgentOnboardPage() {
     onboard: '未配置',
   };
   const fmtTime = (ts?: number): string =>
-    ts ? new Date(ts).toLocaleString('zh-CN', { hour12: false }) : '—';
+    ts ? new Date(ts).toLocaleString('zh-CN', { hour12: false }) : '未取数';
 
   /** 探针结论只认真实样本：有失败原因 → 未通过；有样本且通过 → 通过；否则如实说无样本 */
   const probeOf = (a: UiAgentCard): { verdict: string; cls: string } => {
@@ -653,13 +653,13 @@ export function AgentOnboardPage() {
               <tbody>
                 {agents.map((a) => {
                   const s = statsForAgent(stats, a.name);
-                  const rate = s && s.tests > 0 ? `${Math.round((s.passed / s.tests) * 100)}%` : '—';
+                  const rate = s && s.tests > 0 ? `${Math.round((s.passed / s.tests) * 100)}%` : '未取数';
                   return (
                     <tr key={a.name} data-testid={`overview-row-${a.name}`}>
                       <td>{a.name}</td>
                       <td>{STATE_TEXT[a.state]}</td>
                       <td>{rate}{s && s.tests > 0 ? `（${s.passed}/${s.tests}）` : ''}</td>
-                      <td>{s?.avgRtt !== undefined ? `${s.avgRtt}ms` : '—'}</td>
+                      <td>{s?.avgRtt !== undefined ? `${s.avgRtt}ms` : '未取数'}</td>
                       <td className="mid">{fmtTime(s?.lastTestAt)}</td>
                       <td>{a.circuit}</td>
                       <td>{a.chan.webhook && a.chan.api ? 'webhook + API' : a.chan.webhook ? 'webhook' : a.chan.api ? 'API' : '全关'}</td>
@@ -714,9 +714,9 @@ export function AgentOnboardPage() {
                       <td>{a.name}</td>
                       <td><span className={`status ${p.cls === 'ok' ? 'active' : p.cls === 'err' ? 'deprecated' : ''}`}>{p.verdict}</span></td>
                       <td className="mid">{fmtTime(s?.lastTestAt)}</td>
-                      <td>{s?.lastRtt !== undefined ? `${s.lastRtt}ms` : '—'}</td>
-                      <td className="mid">{ev?.rid ?? '—'}</td>
-                      <td>{reason || '—'}</td>
+                      <td>{s?.lastRtt !== undefined ? `${s.lastRtt}ms` : '未取数'}</td>
+                      <td className="mid">{ev?.rid ?? '账本无链路'}</td>
+                      <td>{reason || '无'}</td>
                     </tr>
                   );
                 })}

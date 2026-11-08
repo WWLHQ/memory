@@ -56,7 +56,7 @@ export function LlmUsageTable({ usages, onChange }: Props) {
                     data-testid={`usage-${u}-endpoint`}
                     value={cfg.endpoint}
                     disabled={!cfg.net}
-                    placeholder={cfg.net ? 'https://…' : '—'}
+                    placeholder={cfg.net ? 'https://…' : '未配置'}
                     onChange={(e) => onChange(u, { endpoint: e.target.value })}
                     style={{ width: 200 }}
                   />

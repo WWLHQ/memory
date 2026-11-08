@@ -26,7 +26,7 @@ export function BudgetPanel({ data }: { data: BudgetData }) {
           {data.injected_tokens ?? data.payload_tokens} t{data.injected_count !== undefined ? ` · ${data.injected_count} 条` : ''}
         </span>
         <span className="p0-k">预算丢弃</span>
-        <span className="p0-v mono">{data.dropped_count !== undefined ? `${data.dropped_count} 条` : '—'}</span>
+        <span className="p0-v mono">{data.dropped_count !== undefined ? `${data.dropped_count} 条` : '未取数'}</span>
         <span className="p0-k">payload_tokens</span>
         <span className="p0-v mono">{data.payload_tokens} / 3000</span>
         <span className="p0-k">pipeline_llm</span>

@@ -137,14 +137,14 @@ describe('5-F / ② growth 检索耗时接真到 4-I 的真实审计', () => {
     expect(m.latency_samples).toBe(1);
   });
 
-  it('GrowthCards：有样本显示真值，无样本显示「—」且 note 指明真实审计字段', () => {
+  it('GrowthCards：有样本显示真值，无样本显示「未取数」且 note 指明真实审计字段', () => {
     const { unmount } = render(<GrowthCards m={metrics({ latency_ms: 218, latency_samples: 3 })} />);
     expect(screen.getByTestId('m-latency')).toHaveTextContent('218ms');
     expect(screen.getByTestId('growth-cards')).toHaveTextContent('detail.latency_ms');
     unmount();
 
     render(<GrowthCards m={metrics()} />);
-    expect(screen.getByTestId('m-latency')).toHaveTextContent('—');
+    expect(screen.getByTestId('m-latency')).toHaveTextContent('未取数');
   });
 
   it('源码声明杀手：旧「账本未采样」措辞不回流，样本字段在类型/页面/夹具齐备', () => {

@@ -14,7 +14,7 @@ const CONFIRM_WORD = 'RESET';
 
 function kv(by: Record<string, number>): string {
   const parts = Object.entries(by).sort().map(([k, n]) => `${k} × ${n}`);
-  return parts.length > 0 ? parts.join('、') : '—';
+  return parts.length > 0 ? parts.join('、') : '无';
 }
 
 interface CollectorStatus {

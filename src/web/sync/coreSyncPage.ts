@@ -135,7 +135,7 @@ export interface HubOverviewView {
 /** 通道与游标（真实中枢状态）：游标、审计游标、上行/下行最近一次动作；绝不出现演示节点 */
 export interface SyncChannelRow {
   channel: string;
-  direction: '上行' | '下行' | '—';
+  direction: '上行' | '下行' | '未接线';
   cursor: number | string | null;
   last_at: number | null;
   last_action: string | null;
@@ -172,7 +172,7 @@ export async function syncChannels(ctx: SyncPageCtx = {}): Promise<SyncChannelsV
       audit_count: count,
       channels: [
         {
-          channel: '本端 → 中枢（上行）', direction: '上行', cursor: '—',
+          channel: '本端 → 中枢（上行）', direction: '上行', cursor: '未接线',
           last_at: lastUp?.ts ?? null, last_action: lastUp?.action ?? (lastFail?.action ?? null),
           status: failNewer ? 'fail' : lastUp ? 'ok' : 'idle',
           detail: failNewer
@@ -186,7 +186,7 @@ export async function syncChannels(ctx: SyncPageCtx = {}): Promise<SyncChannelsV
           detail: lastDown ? `最近下行 ${lastDown.mem_ids.length} 条 · since=游标` : '尚无下行审计记录（since=当前游标）',
         },
         {
-          channel: 'L0 密文层', direction: '—', cursor: '—', last_at: null, last_action: null,
+          channel: 'L0 密文层', direction: '未接线', cursor: '未接线', last_at: null, last_action: null,
           status: 'info', detail: '内核同步引擎强制排除（42-A 红线）；条数不在未解锁页展示',
         },
       ],
@@ -203,9 +203,9 @@ export async function syncChannels(ctx: SyncPageCtx = {}): Promise<SyncChannelsV
       cursor: null,
       audit_count: null,
       channels: [
-        { channel: '本端 → 中枢（上行）', direction: '上行', cursor: '—', last_at: null, last_action: null, status: 'fail', detail },
+        { channel: '本端 → 中枢（上行）', direction: '上行', cursor: '未接线', last_at: null, last_action: null, status: 'fail', detail },
         { channel: '中枢 → 本端（下行）', direction: '下行', cursor: null, last_at: null, last_action: null, status: 'fail', detail },
-        { channel: 'L0 密文层', direction: '—', cursor: '—', last_at: null, last_action: null, status: 'info', detail: '内核同步引擎强制排除（42-A 红线）' },
+        { channel: 'L0 密文层', direction: '未接线', cursor: '未接线', last_at: null, last_action: null, status: 'info', detail: '内核同步引擎强制排除（42-A 红线）' },
       ],
       error: msg,
       code,

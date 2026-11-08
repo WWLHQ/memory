@@ -16,7 +16,7 @@ import { useSessionContext } from '../shared/session.ts';
 const POLL_MS = 20_000;
 
 const hhmmss8 = (ms: number | null): string =>
-  ms === null ? '—' : new Date(ms + 8 * 3600_000).toISOString().slice(11, 19);
+  ms === null ? '未取数' : new Date(ms + 8 * 3600_000).toISOString().slice(11, 19);
 
 export function RefineQueueCard() {
   const { role } = useSessionContext();

@@ -317,7 +317,7 @@ export function LifecyclePage() {
               </button>
             </div>
           </div>
-          <div className="note">合法迁移：{canMigrate('active', 'hibernating') ? 'active→hibernating 等' : '—'}；锁定（G4）与已处目标态的行自动跳过；0 条改动会如实显示「未生效」。</div>
+          <div className="note">合法迁移：{canMigrate('active', 'hibernating') ? 'active→hibernating 等' : '不适用'}；锁定（G4）与已处目标态的行自动跳过；0 条改动会如实显示「未生效」。</div>
           <div className="note" data-testid="batch-selection" style={{ marginTop: 8 }}>
             勾选在「六状态」页完成 · 当前已勾选 <b>{checked.size}</b> 条
             {checked.size > 0 ? `：${[...checked].join('、')}` : '（先去六状态页勾选要迁移的行）'}

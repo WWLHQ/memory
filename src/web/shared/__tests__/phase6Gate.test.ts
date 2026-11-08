@@ -46,7 +46,7 @@ describe('阶段6 / ① 零白名单与判据边界', () => {
     for (const id of [
       'A01-proxy-catalog', 'A02-fake-models', 'A03-demo-flags', 'A11-restored-user',
       'A12-demo-tenant', 'B01-demo-algo', 'C01-safe-noop', 'C02-token-bill',
-      'S01-shell-fake-count', 'S05-shell-random-readout',
+      'P01-page-fake-count', 'P05-page-random-readout',
     ]) {
       expect(s).toContain(`id: '${id}'`);
     }
@@ -171,15 +171,15 @@ describe('阶段6 / ④ 门禁实测（含变异红/绿切换）', () => {
     }
   });
 
-  it('壳层假数判据：临时根注入写死计数与「—」读数 → 退出 1；改用不可用原因 → 退出 0', () => {
+  it('全站页面假数判据：任意生产页面注入写死计数与「—」读数 → 退出 1；改用不可用原因 → 退出 0', () => {
     const t = tempRoot({ 'web/shell/evil.ts': "export const nav = { count: 12 };\nexport const cell = '—';\n" });
     try {
       const bad = gate([`--root=${t.root}`, '--json']);
       expect(bad.status).toBe(1);
       const j = JSON.parse(bad.stdout) as { hits: Array<{ rule: string }> };
       const ids = j.hits.map((h) => h.rule);
-      expect(ids).toContain('S01-shell-fake-count');
-      expect(ids).toContain('S02-shell-dash-readout');
+      expect(ids).toContain('P01-page-fake-count');
+      expect(ids).toContain('P02-page-dash-readout');
 
       writeFileSync(
         join(t.root, 'src', 'web', 'shell', 'evil.ts'),
@@ -194,13 +194,29 @@ describe('阶段6 / ④ 门禁实测（含变异红/绿切换）', () => {
     }
   });
 
-  it('壳层判据不外溢：同样的写法放在非壳层目录 → 仍退出 0', () => {
-    const t = tempRoot({ 'web/other/ok.ts': "export const nav = { count: 12 };\nexport const cell = '—';\n" });
+  it('全站覆盖不含糊：同样的假数放在非壳层页面 → 同样退出 1（不再只锁壳层）', () => {
+    const t = tempRoot({ 'web/other/evil.ts': "export const nav = { count: 12 };\nexport const cell = '—';\n" });
     try {
-      const r = gate([`--root=${t.root}`]);
-      expect(r.status).toBe(0);
+      const r = gate([`--root=${t.root}`, '--json']);
+      expect(r.status).toBe(1);
+      const j = JSON.parse(r.stdout) as { hits: Array<{ rule: string; file: string }> };
+      expect(j.hits.some((h) => h.rule === 'P01-page-fake-count' && h.file === 'src/web/other/evil.ts')).toBe(true);
+      expect(j.hits.some((h) => h.rule === 'P02-page-dash-readout' && h.file === 'src/web/other/evil.ts')).toBe(true);
     } finally {
       t.clean();
     }
+  });
+
+  it('变异契约：脚本默认先跑内置自测，四类假数必须逐条判红', () => {
+    const r = gate(['--self-test', '--json']);
+    expect(r.status).toBe(0);
+    const j = JSON.parse(r.stdout) as { selfTest: { ok: boolean; checks: Array<{ rule: string; fired: boolean }>; cleanHits: number } };
+    expect(j.selfTest.ok).toBe(true);
+    expect(j.selfTest.cleanHits).toBe(0);
+    expect(j.selfTest.checks.map((c) => c.rule)).toEqual([
+      'P01-page-fake-count', 'P02-page-dash-readout', 'P03-page-fixed-reading',
+      'P04-page-fake-wording', 'P05-page-random-readout',
+    ]);
+    expect(j.selfTest.checks.every((c) => c.fired)).toBe(true);
   });
 });

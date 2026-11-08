@@ -79,7 +79,7 @@ export function FeedbackPage() {
                   <td className="mid">{r.memory_id}</td>
                   <td>{r.action}</td>
                   <td>{r.rating > 0 ? `${r.rating}★` : '未评分'}</td>
-                  <td data-testid={`fb-comment-${i}`}>{r.comment || '—'}</td>
+                  <td data-testid={`fb-comment-${i}`}>{r.comment || '无评论'}</td>
                   <td>{r.trust_delta >= 0 ? `+${r.trust_delta}` : r.trust_delta}</td>
                   <td className="mid">{new Date(r.created_at).toLocaleString('zh-CN', { hour12: false })}</td>
                 </tr>

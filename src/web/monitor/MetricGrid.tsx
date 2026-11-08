@@ -16,7 +16,7 @@ export function MetricGrid({ cards }: { cards: MetricCard[] }) {
           </div>
           <div className="mgrid">
             {list.map((c) => {
-              const empty = c.value === '—';
+              const empty = c.value === '未取数';
               return (
                 <div key={c.metric} className={`p0-mcard ${c.level}${empty ? ' empty' : ''}`} data-testid={`metric-${c.metric}`}>
                   <div className="p0-mhead">

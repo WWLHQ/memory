@@ -227,13 +227,13 @@ describe('getHomeFeed（首页真实可算，内核账本聚合）', () => {
     expect(feed.effectGains[3].big).toContain('¥0.02');
   });
 
-  it('效果证据四卡：空账本全「—」，绝不伪造示例数字', async () => {
+  it('效果证据四卡：空账本全「未取数」，绝不伪造示例数字', async () => {
     const feed = await getHomeFeed(fakeStorage({}));
     expect(feed.effectGains).toHaveLength(4);
-    expect(feed.effectGains.every((g) => g.big === '—')).toBe(true);
+    expect(feed.effectGains.every((g) => g.big === '未取数')).toBe(true);
   });
 
-  it('storage 不可达 → 效果证据四卡安全降级为「—」占位', async () => {
+  it('storage 不可达 → 效果证据四卡安全降级为「未取数」', async () => {
     const broken: StorageBackend = {
       putMemory: async () => {}, getMemory: async () => null, listMemories: async () => { throw new Error('x'); },
       deleteMemory: async () => {}, appendAudit: async () => {}, queryAudit: async () => { throw new Error('x'); },
@@ -244,7 +244,7 @@ describe('getHomeFeed（首页真实可算，内核账本聚合）', () => {
     };
     const feed = await getHomeFeed(broken);
     expect(feed.effectGains).toHaveLength(4);
-    expect(feed.effectGains.every((g) => g.big === '—')).toBe(true);
+    expect(feed.effectGains.every((g) => g.big === '未取数')).toBe(true);
   });
 });
 

@@ -280,7 +280,7 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
                     <td className="mono">{s.id}</td>
                     <td>{s.name}</td>
                     <td className="num">{s.maxChars === null ? '不限' : `${s.maxChars} 字`}</td>
-                    <td className="num">{s.minChars === null ? '—' : `${s.minChars} 字`}</td>
+                    <td className="num">{s.minChars === null ? '未取数' : `${s.minChars} 字`}</td>
                   </tr>
                 ))}
               </tbody>

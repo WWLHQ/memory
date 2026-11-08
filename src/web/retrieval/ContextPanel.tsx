@@ -27,7 +27,7 @@ export function ContextPanel({ hit, query, onLifecycle, onAudit }: Props) {
         <div className="note" data-testid="ctx-highlight">命中片段：「…{kw}…」</div>
       )}
       <div className="row" style={{ marginTop: 8 }}>
-        <span className="dim">关联：{hit.merged_from?.length ? `合并自 ${hit.merged_from.join('、')}` : '—'}</span>
+        <span className="dim">关联：{hit.merged_from?.length ? `合并自 ${hit.merged_from.join('、')}` : '无'}</span>
       </div>
       <div className="row" data-testid="ctx-params">
         <span className="dim">半衰期 {hit.half_life_days}d · confidence {hit.confidence} · importance {hit.importance}（只读）</span>

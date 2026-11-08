@@ -93,24 +93,24 @@ export function metricsFromLedger(mems: Memory[], audits: AuditRecord[], now: nu
 
   return [
     // Agent 健康：账本无 Agent 探活采样（内核不做连通探测）→ 未采集
-    { group: 'Agent 健康', metric: '连通成功率(5min)', value: '—', threshold: '<95% ⚠️', level: 'ok', jump: 'P10', unit: '' },
-    { group: 'Agent 健康', metric: '熔断状态', value: '—', threshold: 'OPEN 🔴', level: 'ok', jump: 'P10' },
-    { group: 'Agent 健康', metric: '平均延迟', value: '—', unit: 's', threshold: '>5s ⚠️', level: 'ok', jump: 'P10' },
+    { group: 'Agent 健康', metric: '连通成功率(5min)', value: '未取数', threshold: '<95% ⚠️', level: 'ok', jump: 'P10', unit: '' },
+    { group: 'Agent 健康', metric: '熔断状态', value: '未取数', threshold: 'OPEN 🔴', level: 'ok', jump: 'P10' },
+    { group: 'Agent 健康', metric: '平均延迟', value: '未取数', unit: 's', threshold: '>5s ⚠️', level: 'ok', jump: 'P10' },
     // 队列 / 冷存储：账本无 RawArchive 队列与冷存储 IO 统计；sync_fail 只在 SyncHub 内部 → 未采集
-    { group: '队列', metric: 'RawArchive 堆积', value: '—', threshold: '>1000 ⚠️', level: 'ok', jump: 'P10(5.3)' },
-    { group: '队列', metric: '死信消息(24h)', value: syncFail24h > 0 ? syncFail24h : '—', threshold: '>0 ⚠️', level: levelOf(syncFail24h || null, (n) => n > 0, () => false), jump: '5.3' },
-    { group: '冷存储', metric: '写入成功率', value: '—', unit: '%', threshold: '<99.5% ⚠️', level: 'ok', jump: '5.4' },
-    { group: '冷存储', metric: '哈希校验失败(24h)', value: '—', threshold: '>0 🔴', level: 'ok', jump: '5.4' },
+    { group: '队列', metric: 'RawArchive 堆积', value: '未取数', threshold: '>1000 ⚠️', level: 'ok', jump: 'P10(5.3)' },
+    { group: '队列', metric: '死信消息(24h)', value: syncFail24h > 0 ? syncFail24h : '未取数', threshold: '>0 ⚠️', level: levelOf(syncFail24h || null, (n) => n > 0, () => false), jump: '5.3' },
+    { group: '冷存储', metric: '写入成功率', value: '未取数', unit: '%', threshold: '<99.5% ⚠️', level: 'ok', jump: '5.4' },
+    { group: '冷存储', metric: '哈希校验失败(24h)', value: '未取数', threshold: '>0 🔴', level: 'ok', jump: '5.4' },
     // 人工审核（真实账本实算）
-    { group: '人工审核', metric: '待裁决', value: pendingReview > 0 ? pendingReview : '—', threshold: '>20 ⚠️', level: levelOf(pendingReview || null, (n) => n > 20, (n) => n > 50), jump: 'P7' },
-    { group: '人工审核', metric: '超期 7d', value: overdue7d > 0 ? overdue7d : '—', threshold: '>0 ⚠️', level: levelOf(overdue7d || null, (n) => n > 0, () => false), jump: 'P7' },
+    { group: '人工审核', metric: '待裁决', value: pendingReview > 0 ? pendingReview : '未取数', threshold: '>20 ⚠️', level: levelOf(pendingReview || null, (n) => n > 20, (n) => n > 50), jump: 'P7' },
+    { group: '人工审核', metric: '超期 7d', value: overdue7d > 0 ? overdue7d : '未取数', threshold: '>0 ⚠️', level: levelOf(overdue7d || null, (n) => n > 0, () => false), jump: 'P7' },
     // 检索性能：1h / 1d 窗口真实过滤 + 真实 detail 字段分位数；无样本 → 「—」未采集
-    { group: '检索性能(1h)', metric: '命中率', value: hitRate ?? '—', unit: hitRate === null ? '' : '%', threshold: '<60% ⚠️', level: levelOf(hitRate, (n) => n < 60, () => false), jump: 'P1' },
-    { group: '检索性能(1h)', metric: 'payload_tokens p95', value: payloadP95 ?? '—', threshold: '>2000 ⚠️', level: levelOf(payloadP95, (n) => n > 2000, () => false), jump: '2.4.1' },
+    { group: '检索性能(1h)', metric: '命中率', value: hitRate ?? '未取数', unit: hitRate === null ? '' : '%', threshold: '<60% ⚠️', level: levelOf(hitRate, (n) => n < 60, () => false), jump: 'P1' },
+    { group: '检索性能(1h)', metric: 'payload_tokens p95', value: payloadP95 ?? '未取数', threshold: '>2000 ⚠️', level: levelOf(payloadP95, (n) => n > 2000, () => false), jump: '2.4.1' },
     // pipeline_llm_tokens 内核恒 0（召回管线不调 LLM、网关 usage 未接入）→ 不拿 0 算 p95，如实未采集
-    { group: '检索性能(1h)', metric: 'pipeline_llm_tokens p95', value: '—', threshold: '>3000', level: 'ok', jump: '—' },
-    { group: '检索性能(1h)', metric: '延迟 p99', value: latencyP99 ?? '—', unit: 's', threshold: '>2s ⚠️', level: levelOf(latencyP99, (n) => n > 2, () => false), jump: '—' },
-    { group: '检索性能(1h)', metric: '极简证据不足率(1d)', value: evidenceThinRate ?? '—', unit: evidenceThinRate === null ? '' : '%', threshold: '>20% ⚠️', level: levelOf(evidenceThinRate, (n) => n > 20, () => false), jump: '2.4.3' },
+    { group: '检索性能(1h)', metric: 'pipeline_llm_tokens p95', value: '未取数', threshold: '>3000', level: 'ok', jump: '' },
+    { group: '检索性能(1h)', metric: '延迟 p99', value: latencyP99 ?? '未取数', unit: 's', threshold: '>2s ⚠️', level: levelOf(latencyP99, (n) => n > 2, () => false), jump: '' },
+    { group: '检索性能(1h)', metric: '极简证据不足率(1d)', value: evidenceThinRate ?? '未取数', unit: evidenceThinRate === null ? '' : '%', threshold: '>20% ⚠️', level: levelOf(evidenceThinRate, (n) => n > 20, () => false), jump: '2.4.3' },
   ];
 }
 

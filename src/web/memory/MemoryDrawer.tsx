@@ -10,7 +10,7 @@ import { decayClass } from './logic.ts';
 import { openMemoryFile } from './coreMemoryOps.ts';
 
 // 时间一律转本地时区展示，账本里的 UTC ISO 不直接给用户看。
-const localTime = (iso?: string) => (iso ? new Date(iso).toLocaleString('zh-CN') : '—');
+const localTime = (iso?: string) => (iso ? new Date(iso).toLocaleString('zh-CN') : '未取数');
 
 function locLabel(loc: MemoryStoreLocation | null): string {
   if (!loc) return '加载中…';
@@ -80,11 +80,11 @@ export function MemoryDrawer({
         <b>温度 / 状态</b><span>{temp} / {rec.status}</span>
         <b>标记</b><span>
           {rec.pinned && '📌置顶 '}{rec.locked && '🔒锁定 '}{rec.archived && '🗄️归档 '}
-          {!rec.pinned && !rec.locked && !rec.archived && '—'}
+          {!rec.pinned && !rec.locked && !rec.archived && ''}
         </span>
-        <b>标签</b><span>{rec.tags.join(', ') || '—'}</span>
+        <b>标签</b><span>{rec.tags.join(', ') || '无'}</span>
         <b>访问 / 强化</b><span>{rec.access_count} / {rec.reinforce_count}</span>
-        <b>合并谱系</b><span>{rec.merged_from ? `合并自 ${rec.merged_from.join(', ')}` : '—'}</span>
+        <b>合并谱系</b><span>{rec.merged_from ? `合并自 ${rec.merged_from.join(', ')}` : '无'}</span>
         <b>创建 / 更新</b><span>{localTime(rec.created_at)} / {localTime(rec.updated_at)}</span>
         <b>层级生成</b><span data-testid="drawer-layer-gen-at">
           {rec.layers_generated_at ? localTime(rec.layers_generated_at) : '未记录（批次24 之前的历史行）'}

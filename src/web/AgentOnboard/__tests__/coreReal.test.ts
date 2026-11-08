@@ -18,11 +18,11 @@ function audit(action: AuditRecord['action'], detail: Record<string, unknown>, t
 }
 
 describe('getOnboardGains（效果证据四卡真实聚合）', () => {
-  test('空账本 → 全部「—」+ 诚实说明，绝不示例数字', async () => {
+  test('空账本 → 全部「未取数」+ 诚实说明，绝不示例数字', async () => {
     const g = await getOnboardGains(new InMemoryStorage());
     expect(g).toHaveLength(4);
     for (const card of g) {
-      expect(card.big).toBe('—');
+      expect(card.big).toBe('未取数');
       expect(card.desc).toContain('暂无');
     }
   });
@@ -30,7 +30,7 @@ describe('getOnboardGains（效果证据四卡真实聚合）', () => {
   test('emptyOnboardGains 占位与空账本口径一致', () => {
     const g = emptyOnboardGains();
     expect(g).toHaveLength(4);
-    expect(g.every((x) => x.big === '—')).toBe(true);
+    expect(g.every((x) => x.big === '未取数')).toBe(true);
   });
 
   test('Token 节省：recall payload_tokens vs 1500 预算 → 真实百分比', async () => {

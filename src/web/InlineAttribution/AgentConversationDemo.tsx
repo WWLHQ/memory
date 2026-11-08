@@ -298,7 +298,7 @@ function InlineInnerBody({
           {hasData ? (
             <>
               <div className="msg">
-                <div className="role">你</div>
+                <div className="role">你 · 示例提问（演示）</div>
                 <div className="bubble user">为什么当时选了 FastAPI 而不是 Django？</div>
               </div>
 
@@ -334,7 +334,7 @@ function InlineInnerBody({
                   onClick={() => setLevel('full')}
                   title="完整标识已关闭（19.7 降级）· 点此恢复"
                 >
-                  本次回答由记忆助手支撑：{injections.length} 条注入 · 省 {real.tokenSaving.saved} token · 1 条自动写入（点击恢复完整标识 ▸）
+                  本次回答由记忆助手支撑：{injections.length} 条注入 · 省 {real.tokenSaving.saved} token · {real.writeBack ? 1 : 0} 条自动写入（点击恢复完整标识 ▸）
                 </button>
               )}
             </>

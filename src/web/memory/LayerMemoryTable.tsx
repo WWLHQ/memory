@@ -25,7 +25,8 @@ const COLS = [
 ] as const;
 
 function sourceLabel(src: string | undefined): string {
-  if (!src || src === 'manual') return '—';
+  if (!src) return '无来源';
+  if (src === 'manual') return '✍️手动';
   if (src === 'webhook') return '⚡Webhook';
   if (src === 'mcp') return '🔌MCP';
   return `📡${src}`;
@@ -157,7 +158,7 @@ export function LayerMemoryTable({
               <td><span className={`ltemp ${temp}`}>{temp}</span></td>
               <td><span className="lstatus">{m.status}</span></td>
               <td style={{ fontSize: 11 }}>
-                {m.merged_from ? `合并自 ${m.merged_from.length} 条` : '—'}
+                {m.merged_from ? `合并自 ${m.merged_from.length} 条` : '无'}
               </td>
               <td className="ltime">
                 <div className="ldim">{fmtDate(m.created_at)}</div>

@@ -13,11 +13,11 @@ const errText = (e: unknown): string => String((e as Error)?.message ?? e);
 
 function kv(by: Record<string, number>): string {
   const parts = Object.entries(by).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} × ${n}`);
-  return parts.length > 0 ? parts.join('、') : '—';
+  return parts.length > 0 ? parts.join('、') : '无';
 }
 
 function codesOf(d: BackfillDecision): string {
-  return d.codes.length > 0 ? d.codes.join('/') : '—';
+  return d.codes.length > 0 ? d.codes.join('/') : '未取数';
 }
 
 /** 样本行的人话缺口：能补的说「缺 X」，补不了的由 reason 给出原因 */

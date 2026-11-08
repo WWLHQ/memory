@@ -11,7 +11,7 @@ import { currentSessionId } from '../shared/session.ts';
 
 const errText = (e: unknown): string => String((e as Error)?.message ?? e);
 /** 用户可见时间统一 UTC+08:00（密钥环存的是 epoch 毫秒） */
-const fmt8 = (ms: number): string => (ms > 0 ? new Date(ms + 8 * 3600_000).toISOString().slice(0, 19).replace('T', ' ') : '—');
+const fmt8 = (ms: number): string => (ms > 0 ? new Date(ms + 8 * 3600_000).toISOString().slice(0, 19).replace('T', ' ') : '未取数');
 
 interface RecoveryStatus {
   ok: boolean;
@@ -151,7 +151,7 @@ export function L0RecoveryCard({ enabled }: { enabled: boolean }) {
         <>
           <div className="note" data-testid="l0-recovery-status">
             {hasCard
-              ? <>已生成恢复卡 · 库指纹 <code data-testid="l0-recovery-fingerprint">{status?.fingerprint || '—'}</code>
+              ? <>已生成恢复卡 · 库指纹 <code data-testid="l0-recovery-fingerprint">{status?.fingerprint || '账本无链路'}</code>
                 · 生成时间 {fmt8(status?.created_at ?? 0)}（UTC+08:00）</>
               : <span data-testid="l0-recovery-no-card">本机还没有 L0 恢复码：忘记管理密码将无法找回原数据库。</span>}
           </div>

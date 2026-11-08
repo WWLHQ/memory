@@ -92,12 +92,12 @@ describe('监控指标时间窗口与真实字段（阶段4-I / B8 变异杀手�
     expect(cardOf(audits, '死信消息(24h)')?.value).toBe(1);
   });
 
-  it('空账本 → 14 卡全「—」，绝不出现假 100% / 0%', () => {
+  it('空账本 → 14 卡全「未取数」，绝不出现假 100% / 0%', () => {
     const cards = metricsFromLedger([], [], NOW);
     expect(cards).toHaveLength(14);
-    expect(cards.every((c) => c.value === '—')).toBe(true);
-    expect(cardOf([], '命中率')?.value).toBe('—');
-    expect(cardOf([], '极简证据不足率(1d)')?.value).toBe('—');
+    expect(cards.every((c) => c.value === '未取数')).toBe(true);
+    expect(cardOf([], '命中率')?.value).toBe('未取数');
+    expect(cardOf([], '极简证据不足率(1d)')?.value).toBe('未取数');
   });
 
   it('历史审计缺 detail 字段 → 不计入分母，不拿 0 冒充已采集', () => {
@@ -129,11 +129,11 @@ describe('监控指标时间窗口与真实字段（阶段4-I / B8 变异杀手�
     expect(cards.find((c) => c.metric === '延迟 p99')?.value).toBeTypeOf('number');
   });
 
-  it('pipeline_llm_tokens 恒 0（未接网关 usage）→ 仍「—」，不拿 0 算 p95 冒充已接通', () => {
+  it('pipeline_llm_tokens 恒 0（未接网关 usage）→ 仍「未取数」，不拿 0 算 p95 冒充已接通', () => {
     const cards = metricsFromLedger([], [
       audit({ detail: { hits: 1, payload_tokens: 100, latency_ms: 10, mode: 'auto', evidence_thin: false, pipeline_llm_tokens: 0 } }),
     ], NOW);
-    expect(cards.find((c) => c.metric === 'pipeline_llm_tokens p95')?.value).toBe('—');
+    expect(cards.find((c) => c.metric === 'pipeline_llm_tokens p95')?.value).toBe('未取数');
   });
 
   it('MetricGrid 空值卡值位标「未采集」、有值卡不标', () => {

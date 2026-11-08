@@ -16,7 +16,7 @@ const inputStyle = {
 } as const;
 
 const errText = (e: unknown): string => String((e as Error)?.message ?? e);
-const fmt = (ts?: number): string => (ts ? new Date(ts).toLocaleString() : '—');
+const fmt = (ts?: number): string => (ts ? new Date(ts).toLocaleString() : '未取数');
 
 interface IssuedGrant {
   grant_id: string;
@@ -244,8 +244,8 @@ export function L0AdminCard({ enabled }: { enabled: boolean }) {
             <tr key={r.request_id} data-testid={`l0-req-${r.request_id}`}>
               <td className="mid">{r.request_id}</td>
               <td className="mid">{r.user_id}</td>
-              <td className="mid">{r.project_ids.join('、') || '—'}</td>
-              <td>{r.reason || '—'}</td>
+              <td className="mid">{r.project_ids.join('、') || '无'}</td>
+              <td>{r.reason || '无'}</td>
               <td>{fmt(r.created_at)}</td>
               <td>
                 <button type="button" className="btn primary" data-testid={`l0-approve-${r.request_id}`}
@@ -288,7 +288,7 @@ export function L0AdminCard({ enabled }: { enabled: boolean }) {
             <tr key={g.grant_id} data-testid={`l0-grant-${g.grant_id}`}>
               <td className="mid">{g.grant_id}</td>
               <td className="mid">{g.grantee_user_id}</td>
-              <td className="mid">{g.scope_project_ids.join('、') || '—'}</td>
+              <td className="mid">{g.scope_project_ids.join('、') || '无'}</td>
               <td>
                 <span className={`status ${g.status === 'active' ? 'active' : 'deprecated'}`}>{g.status}</span>
               </td>

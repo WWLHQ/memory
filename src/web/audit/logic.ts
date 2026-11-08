@@ -130,31 +130,31 @@ export function chainStages(rows: AuditEntry[]): ChainStage[] {
   const first = rows[0];
   const quality = rows.filter((e) => e.action === 'graft' || e.action === 'merge');
   const mirror = rows.filter((e) => (e.source ?? '').includes('mirror') || (e.action as string) === 'mirror');
-  const clock = (iso?: string) => (iso && iso.length >= 19 ? iso.slice(11, 19) : '—');
+  const clock = (iso?: string) => (iso && iso.length >= 19 ? iso.slice(11, 19) : '未取数');
   return [
     {
       key: 'kernel', label: '① 内核调用',
-      value: first ? `${clock(first.created_at)} · ${first.action} · ${first.resource_type}/${first.resource_id}` : '—',
+      value: first ? `${clock(first.created_at)} · ${first.action} · ${first.resource_type}/${first.resource_id}` : '无',
       evidence: !!first,
     },
     {
       key: 'rid', label: '② request_id 签发',
-      value: first?.request_id || '—',
+      value: first?.request_id || '账本无链路',
       evidence: !!first?.request_id,
     },
     {
       key: 'quality', label: '③ qualityGate / 去重',
-      value: quality.length ? `${quality.length} 行 graft/merge 真实事件` : '—',
+      value: quality.length ? `${quality.length} 行 graft/merge 真实事件` : '未取数',
       evidence: quality.length > 0,
     },
     {
       key: 'mirror', label: '④ mirror 审计上抛',
-      value: mirror.length ? `${mirror.length} 行 source=mirror` : '—',
+      value: mirror.length ? `${mirror.length} 行 source=mirror` : '无',
       evidence: mirror.length > 0,
     },
     {
       key: 'disk', label: '⑤ 落盘（append-only）',
-      value: rows.length ? `已落盘 ${rows.length} 行` : '—',
+      value: rows.length ? `已落盘 ${rows.length} 行` : '未取数',
       evidence: rows.length > 0,
     },
   ];

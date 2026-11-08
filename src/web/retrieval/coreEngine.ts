@@ -207,9 +207,9 @@ export async function coreRecallHistory(limit = 10): Promise<RecallHistoryRow[]>
       return {
         request_id: a.request_id,
         ts: a.ts,
-        query: typeof d.query === 'string' ? d.query : '—',
-        scene: typeof d.scene === 'string' ? d.scene : '—',
-        mode: typeof d.mode === 'string' ? d.mode : '—',
+        query: typeof d.query === 'string' ? d.query : '无',
+        scene: typeof d.scene === 'string' ? d.scene : '无',
+        mode: typeof d.mode === 'string' ? d.mode : '无',
         hits: typeof d.hits === 'number' ? d.hits : 0,
         payload_tokens: typeof d.payload_tokens === 'number' ? d.payload_tokens : 0,
         latency_ms: typeof d.latency_ms === 'number' ? d.latency_ms : null,

@@ -14,7 +14,7 @@ const CONFIRM_WORD = 'REJUDGE';
 
 function kv(by: Record<string, number>): string {
   const parts = Object.entries(by).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} × ${n}`);
-  return parts.length > 0 ? parts.join('、') : '—';
+  return parts.length > 0 ? parts.join('、') : '无';
 }
 
 function clip(s: string, n = 42): string {
@@ -125,7 +125,7 @@ export function RulesRejudgeCard({ enabled }: { enabled: boolean }) {
               <ul style={{ margin: '4px 0 0 18px', padding: 0 }}>
                 {preview.sample.slice(0, 8).map((s: RejudgeDecision) => (
                   <li key={s.mem_id} className="dim">
-                    <code>{s.mem_id}</code> [{s.code ?? '—'} · {s.layer} · 行戳 v{s.row_gate_v}
+                    <code>{s.mem_id}</code> [{s.code ?? '账本无链路'} · {s.layer} · 行戳 v{s.row_gate_v}
                     {s.protected ? ' · 受保护' : ''}] {clip(s.reason ?? '')}
                   </li>
                 ))}

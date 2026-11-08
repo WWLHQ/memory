@@ -454,7 +454,7 @@ export function SecurityPage() {
                     <tr key={`${a.request_id}-${a.ts}`}>
                       <td>{fmtTime(a.ts)}</td>
                       <td>{L0_ACTION_TEXT[a.action] ?? a.action}</td>
-                      <td>{a.op || '—'}</td>
+                      <td>{a.op || '无'}</td>
                       <td className="mid">{a.request_id}</td>
                     </tr>
                   ))}

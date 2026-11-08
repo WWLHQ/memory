@@ -6,12 +6,12 @@ import type {
 
 export function GrowthCards({ m, empty }: { m: GrowthMetrics; empty?: boolean }) {
   const items: Array<[string, string, string, string]> = [
-    ['hit_rate', '检索命中率', m.hit_rate ? m.hit_rate.toFixed(2) : '—', 'm-hit-rate'],
+    ['hit_rate', '检索命中率', m.hit_rate ? m.hit_rate.toFixed(2) : '未取数', 'm-hit-rate'],
     ['confirmed', '确认数（+0.1）', String(m.confirmed), 'm-confirmed'],
     ['rejected', '拒绝数（−0.05）', String(m.rejected), 'm-rejected'],
     ['low_quality', '低质占比（cold/dormant/archived）', m.low_quality_ratio.toFixed(2), 'm-lowq'],
     ['level_L6', 'L6 层命中', m.level_stats_L6.toFixed(2), 'm-l6'],
-    ['latency', '检索耗时', m.latency_samples > 0 ? `${Math.round(m.latency_ms)}ms` : '—', 'm-latency'],
+    ['latency', '检索耗时', m.latency_samples > 0 ? `${Math.round(m.latency_ms)}ms` : '未取数', 'm-latency'],
   ];
   return (
     <div className="card" data-testid="growth-cards">
@@ -155,9 +155,9 @@ export function RegressionTable({ records }: { records: RegressionRecord[] }) {
                   <td className="mono" title={r.requestId}>{r.requestId}</td>
                   <td>{fmtTime(r.ts)}</td>
                   <td>{r.counts ? `${r.counts.total}（正 ${r.counts.positives} / 负 ${r.counts.negatives}）` : '未记录'}</td>
-                  <td>{r.before ? r.before.f1.toFixed(3) : '—'}</td>
-                  <td>{r.after ? r.after.f1.toFixed(3) : '—'}</td>
-                  <td>{precDelta === null ? '—' : signed(precDelta)}</td>
+                  <td>{r.before ? r.before.f1.toFixed(3) : '未取数'}</td>
+                  <td>{r.after ? r.after.f1.toFixed(3) : '未取数'}</td>
+                  <td>{precDelta === null ? '未取数' : signed(precDelta)}</td>
                   <td>{conclusion}</td>
                   <td>
                     <span className={`p0-tag ${verdict.cls}${verdict.cls ? '' : ''}`} data-testid={`regression-verdict-${r.requestId}`}>

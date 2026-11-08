@@ -36,7 +36,7 @@ export function WriteReceiptCard({ receipt }: { receipt: WriteReceipt }) {
 
       <div className="p0-kv">
         <span className="p0-k">request_id</span>
-        <span className="p0-v mono" data-testid="receipt-request-id">{receipt.request_id || '—'}</span>
+        <span className="p0-v mono" data-testid="receipt-request-id">{receipt.request_id || '账本无链路'}</span>
         <span className="p0-k">memory_id</span>
         <span className="p0-v mono" data-testid="receipt-id">{receipt.memory_id || '—（本次未入库）'}</span>
         <span className="p0-k">去重结果</span>
@@ -137,8 +137,8 @@ export function WriteReceiptTable({
                   <td className="mono">{fmtClock(new Date(r.ts).toISOString())}</td>
                   <td>{r.result}</td>
                   <td className="mono">{r.dedup}</td>
-                  <td className="num">{r.sim === null ? '—' : r.sim.toFixed(2)}</td>
-                  <td className="mono">{r.memory_id ?? '—'}</td>
+                  <td className="num">{r.sim === null ? '未取数' : r.sim.toFixed(2)}</td>
+                  <td className="mono">{r.memory_id ?? '账本无链路'}</td>
                   <td className="mono">{r.layers}</td>
                   <td>{r.source}</td>
                 </tr>

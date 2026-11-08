@@ -75,7 +75,7 @@ describe('coreSyncPage（逻辑层）', () => {
     expect(v.ok).toBe(false);
     expect(v.code).toBe('E_NOT_IMPLEMENTED');
     expect(v.node.status).toBe('fail');
-    expect(v.channels.every((c) => c.direction === '—' || c.status === 'fail')).toBe(true);
+    expect(v.channels.every((c) => c.direction === '未接线' || c.status === 'fail')).toBe(true);
   });
 
   it('裁决链路：内存中枢构造真冲突 → listSyncConflicts 列 pending → resolve 后队列清空', async () => {

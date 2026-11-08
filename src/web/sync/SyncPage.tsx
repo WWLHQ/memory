@@ -18,7 +18,7 @@ function errText(e: unknown): string {
 }
 
 const fmtTime = (ts: number | null): string =>
-  ts ? new Date(ts).toLocaleString('zh-CN', { hour12: false }) : '—';
+  ts ? new Date(ts).toLocaleString('zh-CN', { hour12: false }) : '未取数';
 
 const CH_STATUS: Record<string, { text: string; color: string }> = {
   ok: { text: '正常', color: 'var(--ok,#3ddc84)' },
@@ -152,8 +152,8 @@ export function SyncPage() {
                   上行 pushed：<b data-testid="pushed">{run.pushed}</b>
                   {!run.ok && run.phase === 'push' ? '（未完成，非成功计数）' : `（LWW 胜 ${run.lww} / 幂等跳过 ${run.dedup} / 中枢更新 ${run.behind}）`}
                 </div>
-                <div>下行 pulled：<b data-testid="pulled">{run.ok ? run.pulled : '—'}</b>（新游标 {run.ok ? (run.cursor ?? '-') : '未取得'}）</div>
-                <div>语义互斥冲突：<b data-testid="conflicts">{run.ok ? run.conflicts : '—'}</b>；L0 红线跳过：<b data-testid="l0skipped">{run.l0_skipped ?? '—'}</b></div>
+                <div>下行 pulled：<b data-testid="pulled">{run.ok ? run.pulled : '未取数'}</b>（新游标 {run.ok ? (run.cursor ?? '-') : '未取得'}）</div>
+                <div>语义互斥冲突：<b data-testid="conflicts">{run.ok ? run.conflicts : '未取数'}</b>；L0 红线跳过：<b data-testid="l0skipped">{run.l0_skipped ?? '未取数'}</b></div>
               </div>
             )}
           </div>
@@ -171,7 +171,7 @@ export function SyncPage() {
                       <td style={{ textAlign: 'left' }}>记忆行</td>
                       <td data-testid="localMemories">{overview.local_memories ?? '不可读'}</td>
                       <td data-testid="mirrorRows">{overview.mirror_rows}</td>
-                      <td>{overview.local_memories != null ? overview.mirror_rows - overview.local_memories : '—'}</td>
+                      <td>{overview.local_memories != null ? overview.mirror_rows - overview.local_memories : '未取数'}</td>
                     </tr>
                     <tr>
                       <td style={{ textAlign: 'left' }}>审计条目</td>
@@ -215,7 +215,7 @@ export function SyncPage() {
         <div className="p0-sec">
           <div className="p0-sec-hd">
             <h3>§9.7 冲突裁决队列</h3>
-            <span className="p0-tag">{conflictErr ? '读取失败' : `${conflicts?.length ?? '—'} 条待裁决`}</span>
+            <span className="p0-tag">{conflictErr ? '读取失败' : `${conflicts?.length ?? '未取数'} 条待裁决`}</span>
           </div>
           <div className="card">
             <b>冲突列表（真实中枢队列）</b>
@@ -287,8 +287,8 @@ export function SyncPage() {
                       <tr key={c.channel} data-testid={`channel-${c.direction}-${c.channel}`}>
                         <td style={{ textAlign: 'left' }}>{c.channel}</td>
                         <td>{c.direction}</td>
-                        <td>{c.cursor ?? '—'}</td>
-                        <td>{c.last_action ?? '—'}</td>
+                        <td>{c.cursor ?? '未取数'}</td>
+                        <td>{c.last_action ?? '未取数'}</td>
                         <td>{fmtTime(c.last_at)}</td>
                         <td style={{ color: CH_STATUS[c.status]?.color, fontWeight: 700 }}>{CH_STATUS[c.status]?.text ?? c.status}</td>
                         <td style={{ textAlign: 'left' }}>{c.detail}</td>

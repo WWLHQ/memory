@@ -53,7 +53,7 @@ export function AgentCard(props: AgentCardProps) {
     ? (tests > 0 ? Math.round(((st!.passed ?? 0) / tests) * 100) : null)
     : (a.conn > 0 ? a.conn : null);
   const connClass = connVal !== null && connVal < 95 ? 'warn' : '';
-  const connDisp = connVal === null ? '—' : `${connVal}%`;
+  const connDisp = connVal === null ? '未取数' : `${connVal}%`;
   const deg = a.state === 'degraded';
   const stTxt = a.state === 'connected' ? '已连通' : a.state === 'degraded' ? '降级（仅补偿）' : '未配置';
   const stDot = a.state === 'connected' ? 'connected' : a.state === 'degraded' ? 'degraded' : 'onboard';
@@ -62,8 +62,8 @@ export function AgentCard(props: AgentCardProps) {
   // 平均延迟（真实）：历史 test/auto_bind 探测耗时均值；无样本 → 最近一次；再无 → 「—」
   const rtt = hasStats ? (st!.avgRtt ?? st!.lastRtt) : undefined;
   const latencyDisp = hasStats
-    ? (rtt != null ? (rtt >= 1000 ? `${(rtt / 1000).toFixed(1)}s` : `${Math.round(rtt)}ms`) : '—')
-    : (a.latency > 0 ? `${a.latency}s` : '—');
+    ? (rtt != null ? (rtt >= 1000 ? `${(rtt / 1000).toFixed(1)}s` : `${Math.round(rtt)}ms`) : '未取数')
+    : (a.latency > 0 ? `${a.latency}s` : '未取数');
   const latencyWarn = hasStats ? rtt != null && rtt > 5000 : a.latency > 5;
   const latencyTitle = hasStats
     ? (st!.avgRtt != null ? `平均探测耗时（${tests} 次连通尝试）` : '最近一次探测耗时')

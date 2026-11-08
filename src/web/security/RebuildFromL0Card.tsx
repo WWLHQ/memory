@@ -17,7 +17,7 @@ const CONFIRM_WORD = 'REBUILD';
 
 function kv(by: Record<string, number>): string {
   const parts = Object.entries(by).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} × ${n}`);
-  return parts.length > 0 ? parts.join('、') : '—';
+  return parts.length > 0 ? parts.join('、') : '无';
 }
 
 function clip(s: string, n = 40): string {

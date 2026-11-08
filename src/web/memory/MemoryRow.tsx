@@ -66,7 +66,7 @@ export function MemoryRow({
       <td style={colWidths ? { width: colWidths[10], minWidth: colWidths[10] } : undefined}>
         {rec.merged_from && rec.merged_from.length > 0
           ? `合并自 ${rec.merged_from.length} 条`
-          : '—'}
+          : '未取数'}
       </td>
       <td style={colWidths ? { width: colWidths[11], minWidth: colWidths[11] } : undefined}>
         <div className="dim">{fmt(rec.created_at)}</div>

@@ -23,14 +23,14 @@ function getCtx(): AuditCtx {
 function toAuditEntry(a: AuditRecord): AuditEntry {
   const d = a.detail as Record<string, unknown>;
   const tenant = getTenant();
-  const rid = (d.mem_id ?? d.resource_id ?? d.id ?? '—') as string;
+  const rid = (d.mem_id ?? d.resource_id ?? d.id ?? '账本无链路') as string;
   const resultRaw = (d.result ?? d.status ?? d.outcome) as string | undefined;
   const noteRaw = (d.message ?? d.note ?? d.reason) as string | undefined;
   return {
     enterprise_id: (d.enterprise_id as string) ?? tenant.enterprise_id,
     user_id: a.user_id ?? (d.user_id as string) ?? tenant.user_id,
-    ip_address: (d.ip_address as string) ?? '—',
-    device_info: (d.device_info as string) ?? '—',
+    ip_address: (d.ip_address as string) ?? '无',
+    device_info: (d.device_info as string) ?? '无',
     action: (d.action as AuditEntry['action']) ?? (a.action as unknown as AuditEntry['action']),
     resource_type: (d.resource_type as string) ?? 'memory',
     resource_id: rid,

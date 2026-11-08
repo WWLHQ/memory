@@ -28,7 +28,7 @@ const LAYERS: { id: LayerId; name: string; color: string; desc: string; thr: str
   { id: 'L3', name: '得失分析', color: '#3ecf8e', thr: DEDUP_THRESHOLDS.L3.toFixed(2), desc: '总结得失 ≤200 字' },
   { id: 'L2', name: '会话摘要', color: '#4d9fff', thr: DEDUP_THRESHOLDS.L2.toFixed(2), desc: '情景摘要 ≤300 字' },
   { id: 'L1', name: '清洗脱敏', color: '#e0884f', thr: DEDUP_THRESHOLDS.L1.toFixed(2), desc: '唯一可进 prompt 的原始形态' },
-  { id: 'L0', name: '原始对话', color: '#8e6bd8', thr: '—', desc: 'AES-256 加密，仅授权+密码' },
+  { id: 'L0', name: '原始对话', color: '#8e6bd8', thr: '不适用', desc: 'AES-256 加密，仅授权+密码' },
 ];
 
 /** layerContent[layer][memId] = content string | null（null 表示该层暂无内容） */
@@ -598,8 +598,8 @@ function DetailPanel({
         <b>标记</b><span>{rec.pinned && '📌置顶 '}
           {rec.locked && '🔒锁定 '}
           {rec.archived && '🗄️归档 '}
-          {!rec.pinned && !rec.locked && !rec.archived && '—'}</span>
-        <b>标签</b><span>{rec.tags.join(', ') || '—'}</span>
+          {!rec.pinned && !rec.locked && !rec.archived && ''}</span>
+        <b>标签</b><span>{rec.tags.join(', ') || '无'}</span>
         <b>该层阈值</b><span style={{ fontFamily: 'monospace' }}>{layerInfo.thr}</span>
         <b>存储位置</b>
         <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--muted)', wordBreak: 'break-all' }} data-testid="store-location">
@@ -609,7 +609,7 @@ function DetailPanel({
              : '浏览器内存态（未落盘）') : '账本位置未知'}
         </span>
         <b>访问 / 强化</b><span>{rec.access_count} / {rec.reinforce_count}</span>
-        <b>合并谱系</b><span>{rec.merged_from ? `合并自 ${rec.merged_from.join(', ')}` : rec.merged_into ? `并入 ${rec.merged_into}` : '—'}</span>
+        <b>合并谱系</b><span>{rec.merged_from ? `合并自 ${rec.merged_from.join(', ')}` : rec.merged_into ? `并入 ${rec.merged_into}` : '无'}</span>
         <b>创建 / 更新</b><span>{new Date(rec.created_at).toLocaleString()} / {new Date(rec.updated_at).toLocaleString()}</span>
         <b>层级生成</b><span data-testid="layered-layer-gen-at">{fmtLayerGen(rec.layers_generated_at)}</span>
       </div>

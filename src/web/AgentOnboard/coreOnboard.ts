@@ -130,7 +130,7 @@ export function computeOnboardGains(audits: AuditRecord[], memories: Memory[]): 
           src: '内核账本·实时（2.4.1 预算）',
         };
       })()
-    : { icon: '🪙', title: 'Token 节省', big: '—', desc: '暂无召回账本 · 发起召回后自动累计', src: '内核账本·实时（2.4.1 预算）' };
+    : { icon: '🪙', title: 'Token 节省', big: '未取数', desc: '暂无召回账本 · 发起召回后自动累计', src: '内核账本·实时（2.4.1 预算）' };
 
   const g2: Gain = recalls.length > 0
     ? {
@@ -138,7 +138,7 @@ export function computeOnboardGains(audits: AuditRecord[], memories: Memory[]): 
         desc: `跨会话召回 <b>${recalls.length} 次</b> · 累计命中 <b>${hitsSum} 条</b>记忆（踩坑/决策免重复交代）`,
         src: '内核账本·实时（9.1 / 9.3 / 9.4）',
       }
-    : { icon: '⚡', title: '效率提升', big: '—', desc: '暂无召回账本 · 发起召回后自动累计', src: '内核账本·实时（9.1 / 9.3 / 9.4）' };
+    : { icon: '⚡', title: '效率提升', big: '未取数', desc: '暂无召回账本 · 发起召回后自动累计', src: '内核账本·实时（9.1 / 9.3 / 9.4）' };
 
   const g3: Gain = memories.length > 0
     ? {
@@ -146,7 +146,7 @@ export function computeOnboardGains(audits: AuditRecord[], memories: Memory[]): 
         desc: `project_id 共享域（19.4）：一次沉淀，多端命中 · 当前 <b>${projects} 个共享项目</b>`,
         src: '内核账本·实时（19.4）',
       }
-    : { icon: '🔁', title: '跨 Agent 复用', big: '—', desc: '暂无记忆账本 · 写入记忆后自动累计', src: '内核账本·实时（19.4）' };
+    : { icon: '🔁', title: '跨 Agent 复用', big: '未取数', desc: '暂无记忆账本 · 写入记忆后自动累计', src: '内核账本·实时（19.4）' };
 
   const g4: Gain = proxies.length > 0
     ? {
@@ -154,7 +154,7 @@ export function computeOnboardGains(audits: AuditRecord[], memories: Memory[]): 
         desc: '自动选择<b>先免费、后低价</b> · 次数与花费来自内核 llm_proxy/llm_fallback 审计（19.8）',
         src: '内核账本·实时（19.8 proxy_select_mode=auto）',
       }
-    : { icon: '💸', title: '模型成本节省（反代理 19.8）', big: '—', desc: '暂无代理调用账本 · 反代理调用后自动累计', src: '内核账本·实时（19.8 proxy_select_mode=auto）' };
+    : { icon: '💸', title: '模型成本节省（反代理 19.8）', big: '未取数', desc: '暂无代理调用账本 · 反代理调用后自动累计', src: '内核账本·实时（19.8 proxy_select_mode=auto）' };
 
   return [g1, g2, g3, g4];
 }
@@ -171,10 +171,10 @@ export async function getOnboardGains(storage: StorageBackend): Promise<Gain[]> 
 /** 未加载/账本不可达时的四卡占位（全「—」，真实语义：账本为空） */
 export function emptyOnboardGains(): Gain[] {
   return [
-    { icon: '🪙', title: 'Token 节省', big: '—', desc: '暂无召回账本 · 发起召回后自动累计', src: '内核账本·实时（2.4.1 预算）' },
-    { icon: '⚡', title: '效率提升', big: '—', desc: '暂无召回账本 · 发起召回后自动累计', src: '内核账本·实时（9.1 / 9.3 / 9.4）' },
-    { icon: '🔁', title: '跨 Agent 复用', big: '—', desc: '暂无记忆账本 · 写入记忆后自动累计', src: '内核账本·实时（19.4）' },
-    { icon: '💸', title: '模型成本节省（反代理 19.8）', big: '—', desc: '暂无代理调用账本 · 反代理调用后自动累计', src: '内核账本·实时（19.8 proxy_select_mode=auto）' },
+    { icon: '🪙', title: 'Token 节省', big: '未取数', desc: '暂无召回账本 · 发起召回后自动累计', src: '内核账本·实时（2.4.1 预算）' },
+    { icon: '⚡', title: '效率提升', big: '未取数', desc: '暂无召回账本 · 发起召回后自动累计', src: '内核账本·实时（9.1 / 9.3 / 9.4）' },
+    { icon: '🔁', title: '跨 Agent 复用', big: '未取数', desc: '暂无记忆账本 · 写入记忆后自动累计', src: '内核账本·实时（19.4）' },
+    { icon: '💸', title: '模型成本节省（反代理 19.8）', big: '未取数', desc: '暂无代理调用账本 · 反代理调用后自动累计', src: '内核账本·实时（19.8 proxy_select_mode=auto）' },
   ];
 }
 

@@ -11,7 +11,7 @@ const errText = (e: unknown): string => String((e as Error)?.message ?? e);
 
 function layerSummary(by: Record<string, number>): string {
   const parts = Object.entries(by).sort().map(([layer, n]) => `${layer} × ${n}`);
-  return parts.length > 0 ? parts.join('、') : '—';
+  return parts.length > 0 ? parts.join('、') : '无';
 }
 
 export function LegacyLedgerCard({ enabled }: { enabled: boolean }) {

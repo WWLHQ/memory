@@ -255,7 +255,7 @@ test('Gains：四张证据卡 + 大字指标（真实聚合口径）', () => {
   // 真实化后页面用 getOnboardGains/emptyOnboardGains；此处验证 Gains 组件渲染契约
   render(<Gains gains={emptyOnboardGains()} />);
   expect(document.querySelectorAll('.gain')).toHaveLength(4);
-  expect(screen.getAllByText('—').length).toBe(4);
+  expect(screen.getAllByText('未取数').length).toBe(4);
   // 标题含 emoji，文本被拆分 -> 用 matcher
   expect(screen.getByText(/Token 节省/)).toBeInTheDocument();
 });
