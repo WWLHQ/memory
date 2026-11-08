@@ -132,6 +132,7 @@ describe('个人记忆 HTTP 数据面（真实内核）', () => {
     expect(ops).toEqual(expect.arrayContaining(['quick_add', 'confirm', 'revoke', 'reject', 'delete']));
     expect(JSON.stringify(audits)).not.toContain('部署习惯：先跑全量测试');
     const confAudit = audits.find((a) => (a.detail as { op?: string }).op === 'confirm');
-    expect((confAudit?.detail as { confidence_delta?: number }).confidence_delta).toBe(0.1);
+    const confDetail = (confAudit?.detail ?? {}) as { confidence_delta?: number };
+    expect(confDetail.confidence_delta).toBe(0.1);
   });
 });

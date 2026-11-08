@@ -30,7 +30,7 @@ function p2(n: number): string {
 }
 
 function fmtWhen(ts: number | null): string {
-  if (!ts) return '—';
+  if (!ts) return '时间未记录';
   const d = new Date(ts);
   if (!Number.isFinite(d.getTime())) return '时间不可读';
   return `${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
