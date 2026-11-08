@@ -360,14 +360,16 @@ export function McpClientsPanel({ onInstalledCount }: { onInstalledCount?: (n: n
           </div>
         )}
 
-        <div className="note" data-testid="mcp-state-summary" style={{ margin: '6px 0' }}>
-          <b>七态总览（本机真扫）：</b>
-          {(Object.keys(STATE_LABEL) as McpWireState[]).map((s) => (
-            <span key={s} style={{ marginLeft: 8, whiteSpace: 'nowrap' }} data-testid={`mcp-state-${s}`}>
-              {STATE_LABEL[s].text} <b>{stateCounts[s]}</b>
-            </span>
-          ))}
-        </div>
+        {rows.length > 0 && (
+          <div className="note" data-testid="mcp-state-summary" style={{ margin: '6px 0' }}>
+            <b>七态总览（本机真扫）：</b>
+            {(Object.keys(STATE_LABEL) as McpWireState[]).map((s) => (
+              <span key={s} style={{ marginLeft: 8, whiteSpace: 'nowrap' }} data-testid={`mcp-state-${s}`}>
+                {STATE_LABEL[s].text} <b>{stateCounts[s]}</b>
+              </span>
+            ))}
+          </div>
+        )}
 
         <div id="mcp-client-rows">
           {rows.map((row) => {
