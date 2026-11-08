@@ -190,7 +190,6 @@ html[data-theme="dark"] .vtab.active .vcount { background: #163049; color: #8cc4
 html[data-theme="dark"] .mm-btn.primary { color: #eaf4ff; }
 .mm-btn.primary:hover { filter: brightness(1.06); }
 .mm-btn:disabled { color: var(--faint); background: transparent; border-color: var(--line-2); cursor: default; }
-.mm-layer-filter { color: var(--accent); border-color: #9dc4e6; background: var(--accent-weak); }
 
 /* 真相栏 / table-meta */
 .table-meta {
@@ -229,6 +228,8 @@ html[data-theme="dark"] .mm-btn.primary { color: #eaf4ff; }
 /* 表格 */
 .table-wrap { flex: 1 1 auto; min-height: 0; overflow: auto; background: var(--win); }
 .mm-table-wrap { border-top: 0; }
+/* 9 数据列 + 动作列按定稿列宽（84/200/52/82/64/54/96/206/82/52）撑开，窄窗前横向滚动，摘要不被压没 */
+table.mm-grid { min-width: 974px; }
 table.grid { border-collapse: collapse; width: 100%; table-layout: fixed; }
 table.grid thead th {
   position: sticky;
@@ -359,10 +360,10 @@ html[data-theme="dark"] table.grid td.idc { color: #aab4c0; }
 /* 分层策略 */
 .layer-pane { flex: 0 0 auto; background: var(--panel); border-bottom: 1px solid var(--line); }
 .mm-layerpane { padding: 6px 10px 0; max-height: 52vh; overflow: auto; }
-.mm-layer-head { display: flex; align-items: center; gap: 9px; padding: 2px 0 6px; }
-.mm-layer-head b { font-size: 12px; }
-.mm-layer-sub { color: var(--faint); font-size: 10.8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mm-layer-tools { display: flex; align-items: center; gap: 5px; }
+.mm-layer-head { display: flex; align-items: center; gap: 9px; padding: 2px 0 6px; flex-wrap: nowrap; }
+.mm-layer-head b { font-size: 12px; flex: 0 0 auto; white-space: nowrap; }
+.mm-layer-sub { color: var(--faint); font-size: 10.8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; min-width: 0; }
+.mm-layer-tools { display: flex; align-items: center; gap: 5px; flex: 0 0 auto; }
 table.lay-matrix {
   width: 100%;
   border-collapse: collapse;
@@ -425,10 +426,7 @@ table.lay-matrix tbody tr.zero td { color: var(--faint); }
   font-size: 10.5px;
   line-height: 15px;
 }
-.mm-layer-name { margin-left: 4px; }
-.lay-bar { height: 7px; width: 70px; border: 1px solid var(--line); background: var(--chip); display: inline-block; vertical-align: middle; }
-.lay-bar span { display: block; height: 100%; background: var(--accent); opacity: .75; }
-.mm-share-num { margin-left: 6px; font-size: 10.5px; color: var(--muted); }
+.mm-share-num { color: var(--muted); }
 .mm-policy-key { color: var(--faint); }
 .lay-foot {
   height: 25px;
@@ -444,6 +442,11 @@ table.lay-matrix tbody tr.zero td { color: var(--faint); }
 .lay-foot .lf-strong { color: var(--text); font-weight: 600; }
 .lay-foot .lf-sp { flex: 1 1 auto; }
 .lay-all { border: 1px solid var(--line); background: var(--chip); border-radius: 2px; height: 18px; padding: 0 6px; cursor: pointer; font-size: 10.5px; }
+/* 窄中心区（1024 组 iframe ≈451px）：与定稿窄窗口径一致，先收起策略键列，避免整表横向溢出 */
+@media (max-width: 560px) {
+  table.mm-layer-matrix .mm-policy-col { display: none; }
+  .mm-layer-tools .mm-btn { padding: 0 6px; }
+}
 html[data-theme="dark"] table.lay-matrix { background: #1a1e24; border-color: #333a44; }
 html[data-theme="dark"] table.lay-matrix thead th { background: #232a33; color: #cbd3dd; border-right-color: #2a3038; border-bottom-color: #2a3038; }
 html[data-theme="dark"] table.lay-matrix td { border-right-color: #20252d; border-bottom-color: #222831; color: #d6dce4; }

@@ -176,16 +176,16 @@ function MemoryGrid({
     <div className="table-wrap mm-table-wrap">
       <table className="grid mm-grid" data-testid="memory-table">
         <colgroup>
-          <col style={{ width: 96 }} />
-          <col />
-          <col style={{ width: 72 }} />
           <col style={{ width: 84 }} />
-          <col style={{ width: 66 }} />
-          <col style={{ width: 60 }} />
-          <col style={{ width: 78 }} />
+          <col style={{ width: 200 }} />
+          <col style={{ width: 52 }} />
+          <col style={{ width: 82 }} />
+          <col style={{ width: 64 }} />
+          <col style={{ width: 54 }} />
           <col style={{ width: 96 }} />
-          <col style={{ width: 90 }} />
-          <col style={{ width: 58 }} />
+          <col style={{ width: 206 }} />
+          <col style={{ width: 82 }} />
+          <col style={{ width: 52 }} />
         </colgroup>
         <thead>
           <tr>
@@ -612,7 +612,7 @@ export function MemoryManagementPage() {
         ))}
       </div>
 
-      {(tab === 'all' || tab === 'layers') ? (
+      {tab === 'all' ? (
         <div className="mm-filterbar" data-testid="mm-filter">
           <label className="mm-search">
             <Glyph name="search" />
@@ -651,11 +651,6 @@ export function MemoryManagementPage() {
             <option value="collected">采集通道</option>
             <option value="manual">手动写入</option>
           </select>
-          {tab === 'layers' && selectedLayer ? (
-            <button type="button" className="mm-btn mm-layer-filter" onClick={() => { setSelectedLayer(null); setPage(1); }}>
-              {selectedLayer} · 清除层筛选
-            </button>
-          ) : null}
           <span className="mm-spacer" />
           <span className="mm-filter-count">{paged.total} / {tableSource.length} 条</span>
           <label className="mm-size">
@@ -690,7 +685,7 @@ export function MemoryManagementPage() {
                     <button type="button" className="mm-btn" onClick={() => { memories.retry(); layerPolicy.retry(); }}><Glyph name="refresh" />刷新快照</button>
                     <button type="button" className="mm-btn" onClick={() => goView('params', 'params.html')}>查看参数</button>
                     <button type="button" className="mm-btn" disabled title="本组只读：批量归档需在生命周期页逐条执行">批量归档</button>
-                    <button type="button" className="mm-btn primary" onClick={() => goTab('l0')}><Glyph name="unlock" />解锁 L0（需授权）</button>
+                    <button type="button" className="mm-btn primary" onClick={() => goTab('l0')} title="L0 需管理员密码或成员 grant 解锁后查阅"><Glyph name="unlock" />解锁 L0</button>
                   </div>
                 </div>
                 {layerPolicy.phase === 'loading' ? (
@@ -704,15 +699,14 @@ export function MemoryManagementPage() {
                 ) : (
                   <table className="lay-matrix mm-layer-matrix" data-testid="mm-layer-matrix">
                     <colgroup>
-                      <col style={{ width: 158 }} />
+                      <col style={{ width: 44 }} />
+                      <col style={{ width: 42 }} />
                       <col style={{ width: 64 }} />
-                      <col style={{ width: 122 }} />
-                      <col style={{ width: 132 }} />
-                      <col style={{ width: 96 }} />
-                      <col style={{ width: 96 }} />
-                      <col style={{ width: 64 }} />
-                      <col />
+                      <col style={{ width: 104 }} />
                       <col style={{ width: 58 }} />
+                      <col style={{ width: 78 }} />
+                      <col style={{ width: 34 }} />
+                      <col />
                     </colgroup>
                     <thead>
                       <tr className="lay-groups">
@@ -720,19 +714,17 @@ export function MemoryManagementPage() {
                         <th colSpan={2}>规模</th>
                         <th colSpan={2}>策略</th>
                         <th colSpan={2}>时效</th>
-                        <th>策略键</th>
-                        <th />
+                        <th className="mm-policy-col">策略键</th>
                       </tr>
                       <tr>
-                        <th>层级 / 名称</th>
+                        <th title="层（悬停看中文名）">层</th>
                         <th className="num">条数</th>
                         <th>占比</th>
                         <th>半衰期</th>
                         <th>阈值上限</th>
                         <th>最近写入</th>
                         <th className="num">到龄</th>
-                        <th>策略键</th>
-                        <th className="ra">查看</th>
+                        <th className="mm-policy-col">策略键</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -743,30 +735,14 @@ export function MemoryManagementPage() {
                           onClick={() => { setSelectedLayer((prev) => (prev === row.id ? null : row.id)); setPage(1); }}
                           title="点击筛选下方表格；再次点击取消"
                         >
-                          <td><span className="lay-chip">{row.id}</span> <span className="mm-layer-name">{row.name}</span></td>
+                          <td title={`${row.id} ${row.name}`}><span className="lay-chip">{row.id}</span></td>
                           <td className="num">{row.count}</td>
-                          <td>
-                            <div className="lay-bar">
-                              <span style={{ width: `${Math.min(100, Math.round(row.share * 100))}%` }} />
-                            </div>
-                            <span className="mm-share-num">{layerTotal > 0 ? `${(row.share * 100).toFixed(1)}%` : '无分层记录'}</span>
-                          </td>
+                          <td className="mm-share-num">{layerTotal > 0 ? `${(row.share * 100).toFixed(1)}%` : '—'}</td>
                           <td>{row.halfLife}</td>
                           <td>{row.limit}</td>
                           <td title={row.lastWrite ?? ''}>{fmtWhen(row.lastWrite)}</td>
                           <td className="num">{row.aged}</td>
-                          <td className="mono mm-policy-key" title="单一真源：src/core/memagent/layerRules.ts LAYER_SPECS">{row.policyKey}</td>
-                          <td className="ra">
-                            <button
-                              type="button"
-                              className="mm-icon-btn"
-                              title="筛选/取消筛选该层"
-                              aria-label="筛选该层"
-                              onClick={(e) => { e.stopPropagation(); setSelectedLayer((prev) => (prev === row.id ? null : row.id)); setPage(1); }}
-                            >
-                              <Glyph name="chev" />
-                            </button>
-                          </td>
+                          <td className="mono mm-policy-key mm-policy-col" title="单一真源：src/core/memagent/layerRules.ts LAYER_SPECS">{row.policyKey}</td>
                         </tr>
                       ))}
                     </tbody>
