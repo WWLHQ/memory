@@ -59,3 +59,6 @@ e2e/.cde.json
 
 # DSH 本地插件包（cordis.patch.yml 含 MCP Bearer 令牌，绝不入库）
 /dsh-bundles/
+
+# Trae 会话导出的 HTML 分享包（一次性产物，与项目无关）
+/.trae-html-share-packages/
