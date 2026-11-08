@@ -8,6 +8,8 @@ import { createServer as createHomeServer } from '../src/home/server.ts';
 import type { HomeServer } from '../src/home/server.ts';
 import type { RunningServer } from '../src/agentOnboard/server.ts';
 import { InMemoryStorage } from '../src/core/memagent/storage.ts';
+import { InMemoryPersonalStore } from '../src/core/memagent/personalStore.ts';
+import type { PersonalMemoryStore } from '../src/core/memagent/personalStore.ts';
 import type { StorageBackend } from '../src/core/memagent/types.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -69,12 +71,15 @@ export async function startHomeBackend(opts: {
   dataFile: string;
   allowedOrigins?: string[];
   kernelStorage?: StorageBackend;
+  /** 第一轮个人记忆：缺省挂进程内独立存储（真实内核，非 mock）；用例可传共享实例做跨页断言 */
+  personalStore?: PersonalMemoryStore;
 }): Promise<{ server: http.Server; homeServer: HomeServer; port: number; stop: () => Promise<void> }> {
   const homeServer = createHomeServer({
     dataFile: opts.dataFile,
     allowedOrigins: opts.allowedOrigins,
     kernelStorage: opts.kernelStorage ?? new InMemoryStorage(),
     kernelInfo: { readonly: false, db_path: 'e2e-in-memory' },
+    personalStore: opts.personalStore ?? new InMemoryPersonalStore(),
   });
   await new Promise<void>((resolve, reject) => {
     homeServer.once('error', reject);

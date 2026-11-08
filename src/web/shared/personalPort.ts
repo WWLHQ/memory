@@ -1,0 +1,83 @@
+// 个人记忆数据面端口（第一轮本机闭环）：桌面壳 → 主进程 IPC；纯浏览器 → 登录后端 HTTP。
+//
+// 与 StorageBackend 数据面同构，但独立通道（personal:invoke / /api/personal/invoke）：
+// - owner 一律由主进程/后端按会话解析，页面不得自报归属；
+// - 无桌面壳且未登录时如实报「没有可用数据面」，绝不在页面里伪造一份本地账本；
+// - 返回快照/回执均为内核 personal.ts 的真实结构（PersonalSnapshot / PersonalReceipt）。
+import { hostCall, hostCapability } from '../../desktop/hostBridge.ts';
+import { homeBaseUrl } from '../backend.ts';
+import { currentSessionId } from './session.ts';
+import type { PersonalReceipt, PersonalSnapshot } from '../../core/memagent/personal.ts';
+
+export type PersonalOpName = 'list' | 'quick_add' | 'confirm' | 'reject' | 'revoke' | 'delete';
+
+export interface PersonalPort {
+  /** 实际走哪条数据面（页面可如实展示「桌面壳 / 登录后端」） */
+  readonly channel: 'host' | 'http';
+  invoke<T>(op: PersonalOpName, payload?: Record<string, unknown>): Promise<T>;
+}
+
+interface Envelope<T> { ok?: boolean; data?: T; result?: T; error?: string; code?: string; reason?: string }
+
+function unwrap<T>(body: Envelope<T> | null, status: number): T {
+  if (!body) throw new Error(`个人记忆数据面响应异常（HTTP ${status}）`);
+  if (body.ok === true) return (body.data ?? body.result) as T;
+  throw new Error(body.error ?? `个人记忆数据面调用失败（${body.reason ?? `HTTP ${status}`}）`);
+}
+
+export function createHostPersonalPort(): PersonalPort {
+  return {
+    channel: 'host',
+    invoke: async <T>(op: PersonalOpName, payload: Record<string, unknown> = {}) => {
+      const body = await hostCall<Envelope<T>>('personal:invoke', [op, payload, currentSessionId()]);
+      return unwrap<T>(body, 200);
+    },
+  };
+}
+
+export function createHttpPersonalPort(baseUrl = homeBaseUrl()): PersonalPort {
+  return {
+    channel: 'http',
+    invoke: async <T>(op: PersonalOpName, payload: Record<string, unknown> = {}) => {
+      const sid = currentSessionId();
+      if (!sid) throw new Error('尚未登录：个人记忆需要登录会话（登录后自动可写）');
+      let res: Response;
+      try {
+        res = await fetch(`${baseUrl}/api/personal/invoke`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-session-id': sid },
+          body: JSON.stringify({ op, payload }),
+        });
+      } catch (e) {
+        throw new Error(`登录后端不可达（${(e as Error)?.message ?? e}）`);
+      }
+      if (res.status === 401) throw new Error('登录会话已失效：请重新登录后再操作个人记忆');
+      if (res.status === 501) throw new Error('该后端未挂载个人记忆独立存储（personal_unavailable）');
+      const body = (await res.json().catch(() => null)) as Envelope<T> | null;
+      return unwrap<T>(body, res.status);
+    },
+  };
+}
+
+/** 按当前运行环境选唯一数据面；都没有 → 抛错（诚实不可用，不降级成假数据） */
+export function getPersonalPort(): PersonalPort {
+  if (hostCapability() !== 'none') return createHostPersonalPort();
+  if (currentSessionId()) return createHttpPersonalPort();
+  const unavailable: PersonalPort = {
+    channel: 'http',
+    invoke: async () => {
+      throw new Error('个人记忆需要桌面壳或登录会话；本端没有可用数据面（未在本机伪造账本）');
+    },
+  };
+  return unavailable;
+}
+
+/** 页面首次加载：读真实快照 */
+export function loadPersonalSnapshot(port: PersonalPort = getPersonalPort()): Promise<PersonalSnapshot> {
+  return port.invoke<PersonalSnapshot>('list');
+}
+
+/** 快速记一条 */
+export function quickAddPersonal(content: string, port: PersonalPort = getPersonalPort()): Promise<PersonalReceipt> {
+  return port.invoke<PersonalReceipt>('quick_add', { content });
+}

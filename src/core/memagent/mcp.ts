@@ -20,6 +20,7 @@ import { CATEGORIES, isCategory } from './types.ts';
 import { parseWriteKnobs } from './memories.ts';
 import { isL0LockedError } from './errors.ts';
 import { MemoryPendingStore, type PendingStore, type WriteKnobs } from './pendingWrites.ts';
+import type { PersonalMemoryStore } from './personalStore.ts';
 import { runGetMemoryTool, runListMemoriesTool } from './mcpReadTools.ts';
 import { deleteAllowed, runFeedbackTool, runManageMemoryTool } from './mcpManageTools.ts';
 import { runGcReportTool } from './mcpGcTools.ts';
@@ -67,7 +68,7 @@ class Session {
   ma: ReturnType<typeof createMemAgent>;
   readonly account: McpAccount;
   readonly storage: StorageBackend;
-  constructor(account: McpAccount, storage?: StorageBackend, l0?: L0Port, pending?: PendingStore) {
+  constructor(account: McpAccount, storage?: StorageBackend, l0?: L0Port, pending?: PendingStore, personal?: PersonalMemoryStore) {
     this.account = account;
     this.storage = storage ?? new InMemoryStorage();
     this.ma = createMemAgent({
@@ -80,6 +81,8 @@ class Session {
       l0,
       // 批次44-D4：跨 socket 共享同一 pending 队列，避免多连接各自暂存互不重放
       pending,
+      // 第一轮个人记忆召回准入：只读 owner 的 confirmed 条目（未注入 = 零改变）
+      personal,
     });
   }
 }
@@ -105,6 +108,8 @@ export interface McpOptions {
   pending?: PendingStore;
   /** 批次44-D5-2：是否放行 manage_memory(action=delete)；缺省读环境变量 MCP_ALLOW_DELETE=1 */
   allowDelete?: boolean;
+  /** 第一轮个人记忆：召回准入读同一独立存储（缺省 = 不追加个人条目，行为不变） */
+  personal?: PersonalMemoryStore;
 }
 
 export interface McpServerHandle {
@@ -145,7 +150,7 @@ export function runMcpServer(opts: McpOptions): McpServerHandle {
     const st = stateOf(socket);
     if (!st.session) {
       // D6-4：会话账户 = 鉴权时解析出的账户（st.account 已在鉴权点赋值，兜底引导账户防御）
-      st.session = new Session(st.account ?? account, opts.storage, opts.l0, sharedPending);
+      st.session = new Session(st.account ?? account, opts.storage, opts.l0, sharedPending, opts.personal);
     }
     return st.session;
   }

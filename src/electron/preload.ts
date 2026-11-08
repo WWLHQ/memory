@@ -36,6 +36,14 @@ const storage = {
   openMemoryFile: (memId: string) => ipcRenderer.invoke(IPC.storageOpenMemoryFile, memId) as Promise<{ ok: boolean; path?: string; error?: string }>,
 };
 
+// 个人记忆独立存储桥（第一轮本机闭环）：owner 由主进程按会话解析，渲染层只传动作与参数
+const personal = {
+  invoke: (op: string, payload?: unknown, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.personalInvoke, op, payload, sessionId ?? sidArg()) as Promise<{
+      ok: boolean; data?: unknown; error?: string; code?: string;
+    }>,
+};
+
 // 宿主真扫桥（discover 真实化）：渲染层调 hostScan.run() 拿主进程真实扫描结果（P1-2：需登录会话）
 const hostScan = {
   run: () => ipcRenderer.invoke(IPC.hostScanRun, sidArg()),
@@ -306,4 +314,4 @@ const shell = {
 };
 
 contextBridge.exposeInMainWorld('__ELECTRON__', true);
-contextBridge.exposeInMainWorld('api', { storage, hostScan, hostAgentDetect, tenant, mcpClients, floatAttribution, collector, backup, dataRoot, log, l0, setup, legacy, ledgerReset, rulesRejudge, ledgerFields, refineQueue, sync, llm, shell });
+contextBridge.exposeInMainWorld('api', { storage, personal, hostScan, hostAgentDetect, tenant, mcpClients, floatAttribution, collector, backup, dataRoot, log, l0, setup, legacy, ledgerReset, rulesRejudge, ledgerFields, refineQueue, sync, llm, shell });

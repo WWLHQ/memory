@@ -26,6 +26,7 @@ import { CATEGORIES, isCategory } from './types.ts';
 import { parseWriteKnobs } from './memories.ts';
 import { isL0LockedError } from './errors.ts';
 import { MemoryPendingStore, type PendingStore, type WriteKnobs } from './pendingWrites.ts';
+import type { PersonalMemoryStore } from './personalStore.ts';
 import { runGetMemoryTool, runListMemoriesTool } from './mcpReadTools.ts';
 import { deleteAllowed, runFeedbackTool, runManageMemoryTool } from './mcpManageTools.ts';
 import { runGcReportTool } from './mcpGcTools.ts';
@@ -153,6 +154,8 @@ export interface McpHttpOptions {
   pending?: PendingStore;
   /** 批次44-D5-2：是否放行 manage_memory(action=delete)；缺省读环境变量 MCP_ALLOW_DELETE=1 */
   allowDelete?: boolean;
+  /** 第一轮个人记忆：召回准入读同一独立存储（缺省 = 不追加个人条目，行为不变） */
+  personal?: PersonalMemoryStore;
 }
 
 export interface McpHttpHandle {
@@ -201,6 +204,8 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
     l0: opts.l0,
     // 批次44-D4：写入落盘兜底队列（缺省内存；桌面可注入文件实现持久化）
     pending: opts.pending ?? new MemoryPendingStore(),
+    // 第一轮个人记忆召回准入（缺省 = 不追加，行为不变）
+    personal: opts.personal,
   });
 
   /** 会话 → 调用方（批次15：initialize.clientInfo 自报）；客户端不维护会话时用 UA 兜底 */

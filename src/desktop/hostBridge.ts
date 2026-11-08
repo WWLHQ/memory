@@ -28,6 +28,8 @@ export type HostMethod =
   | 'hostAgentDetect:run'
   | 'hostAgentDetect:config'
   | 'tenant:get'
+  /** 第一轮个人记忆本机闭环：独立存储单一数据面（owner 由主进程按会话解析） */
+  | 'personal:invoke'
   | 'mcp:clients'
   | 'mcp:clientSnippet'
   | 'mcp:clientWire'
@@ -84,6 +86,7 @@ const CHANNEL_TO_NATIVE: Record<HostMethod, [string, string]> = {
   'hostAgentDetect:run': ['hostAgentDetect', 'run'],
   'hostAgentDetect:config': ['hostAgentDetect', 'config'],
   'tenant:get': ['tenant', 'get'],
+  'personal:invoke': ['personal', 'invoke'],
   'mcp:clients': ['mcpClients', 'list'],
   'mcp:clientSnippet': ['mcpClients', 'snippet'],
   'mcp:clientWire': ['mcpClients', 'wire'],

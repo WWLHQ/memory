@@ -13,6 +13,8 @@ process.on('unhandledRejection', (reason) => {
 import { createServer, type HomeServer } from '../home/server.ts';
 import { createServer as createAgentOnboardServer } from '../agentOnboard/server.ts';
 import { FileStorage } from '../core/memagent/fileStorage.ts';
+import { FilePersonalStore } from '../core/memagent/personalStoreFile.ts';
+import { createPersonalApi } from '../core/memagent/personal.ts';
 import { FileL0BlobStore } from '../core/memagent/l0Store.ts';
 import {
   BACKUP_PREFIX, kindOfBackupName, planBackupFiles, selectBackupsToDelete, sortBackupsNewestFirst,
@@ -159,6 +161,8 @@ let MAIN_LOG: string;
 let BACKUP_CFG_PATH: string;
 let COLLECTOR_CURSOR_FILE: string;
 let storage: FileStorage;
+/** 第一轮个人记忆：独立于记忆主库的文件存储（<数据根>/personal-memory.db.json） */
+let personalStoreRef: FilePersonalStore | null = null;
 /** 登录会话真源（批次7）：敏感 IPC 经此校验管理员身份；bootstrap 创建后赋值 */
 let homeServerRef: HomeServer | null = null;
 /** L0 密钥环（§4.4）：DEK 只在主进程内存；退出时清空写密钥缓存 */
@@ -913,6 +917,39 @@ function registerDataRootIpc(): void {
     const gate = requireAdmin(sessionId, IPC.dataRootRestoreDefault);
     if (!gate.ok) return { ok: false, error: gate.error };
     return scheduleDataRootChange('restore', gate.ctx.user_id);
+  });
+}
+
+// ── 第一轮个人记忆本机闭环 IPC（独立存储 personal-memory.db.json）──────────────
+// 单一数据面：op = list/quick_add/confirm/reject/revoke/delete；owner 由会话解析，渲染层不得自报。
+// 每个写动作经内核 personal.ts 落 personal_memory 审计并回执 request_id；失败如实返回 code/error。
+function registerPersonalIpc(): void {
+  handleIpc(IPC.personalInvoke, async (_e, op: unknown, payload?: unknown, sessionId?: string) => {
+    const gate = requireSession(sessionId, IPC.personalInvoke);
+    if (!gate.ok) return { ok: false, code: gate.code, error: gate.error };
+    const store = personalStoreRef;
+    if (!store) return { ok: false, code: 'E_NOT_IMPLEMENTED', error: '个人记忆存储尚未就绪（数据根未初始化）' };
+    const api = createPersonalApi({
+      store,
+      owner: gate.ctx.user_id,
+      form: 'desktop',
+      appendAudit: (a) => storage.appendAudit(a),
+    });
+    const p = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>;
+    const id = typeof p.id === 'string' ? p.id : '';
+    try {
+      switch (op) {
+        case 'list': return { ok: true, data: await api.list() };
+        case 'quick_add': return { ok: true, data: await api.quickAdd(String(p.content ?? '')) };
+        case 'confirm': return { ok: true, data: await api.confirm(id) };
+        case 'reject': return { ok: true, data: await api.reject(id) };
+        case 'revoke': return { ok: true, data: await api.revoke(id) };
+        case 'delete': return { ok: true, data: await api.remove(id, p.confirm === true) };
+        default: return { ok: false, code: 'E_NOT_IMPLEMENTED', error: `未知个人记忆动作：${String(op)}` };
+      }
+    } catch (e) {
+      return { ok: false, code: (e as { code?: string })?.code ?? 'E_PERSONAL', error: String((e as Error)?.message ?? e) };
+    }
   });
 }
 
@@ -2495,6 +2532,8 @@ async function bootstrap(): Promise<void> {
   FLOAT_LOG = join(USER_DATA, 'float.log');
   MAIN_LOG = join(USER_DATA, 'main.log');
   BACKUP_CFG_PATH = join(USER_DATA, 'backup-config.json');
+  // 第一轮个人记忆：独立文件，与 memories.db.json / 审计账本分开（不扩 Memory 主表）
+  personalStoreRef = new FilePersonalStore(join(USER_DATA, 'personal-memory.db.json'));
   // 动作日志（批次7）：先于迁移/服务启动初始化，保证启动期动作也有落盘
   initActionLog({ file: join(USER_DATA, 'actions.log') });
   actionLog('app', 'bootstrap:start', { root: USER_DATA });
@@ -2680,6 +2719,7 @@ async function bootstrap(): Promise<void> {
   registerShellIpc();
   registerBackupIpc();
   registerDataRootIpc();
+  registerPersonalIpc();
   void mlog('backup:scheduler-ready');
 
   // 账号只来自真实注册（POST /api/register 落盘）；不再预置演示账号
@@ -2727,6 +2767,8 @@ async function bootstrap(): Promise<void> {
     // 桌面端持有写锁（唯一写者），HTTP 数据面与 IPC 数据面共用同一账本实例。
     kernelStorage: storage,
     kernelInfo: { readonly: storage.readOnly, db_path: DB_PATH },
+    // 第一轮个人记忆：HTTP 数据面与 IPC 数据面共用同一独立存储实例
+    personalStore: personalStoreRef ?? undefined,
     // 批次45-B2：home 账号 → 内核 Member 单向同步（注册/角色/团队变更 + 启动对账）
     memberStore,
     onLog: (scope, action, detail) => { actionLog(scope, action, detail); },
@@ -2818,7 +2860,7 @@ async function bootstrap(): Promise<void> {
     ...tenantTriple, is_admin: true as const, scope_project_ids: ['*'],
   };
 
-  const mcp = runMcpServer({ storage, port: MCP_PORT, token: mcpToken, l0: l0Vault, tokenStore, memberStore, account: mcpBootstrapAccount, pending: mcpPendingStore });
+  const mcp = runMcpServer({ storage, port: MCP_PORT, token: mcpToken, l0: l0Vault, tokenStore, memberStore, account: mcpBootstrapAccount, pending: mcpPendingStore, personal: personalStoreRef ?? undefined });
   mcp.ready
     .then((p) => { void mlog('bootstrap:mcp-listening', { port: p }); })
     .catch((e) => { void mlog('bootstrap:mcp-listen-error', String((e as Error)?.message ?? e)); });
@@ -2828,6 +2870,7 @@ async function bootstrap(): Promise<void> {
   const mcpHttp = runMcpHttpServer({
     storage, port: MCP_HTTP_PORT, token: mcpToken, l0: l0Vault, tokenStore, memberStore, account: mcpBootstrapAccount,
     pending: mcpPendingStore,
+    personal: personalStoreRef ?? undefined,
     // 批次41-R：同一条也落 actions.log（批次34 对 llm:* 的同一口径）——日志页读的是 actions.log，
     // 只写 main.log 等于「明细页有没有被点开过」对用户不可见。值只有 ok/miss，无 id、无正文。
     onViewDetail: (outcome) => {

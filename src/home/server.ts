@@ -27,6 +27,8 @@ import {
 import type { Form } from '../types/agentOnboard.ts';
 import type { TenantContext, LoginAudit, AccountRole } from '../types/home.ts';
 import type { StorageBackend } from '../core/memagent/types.ts';
+import type { PersonalMemoryStore } from '../core/memagent/personalStore.ts';
+import { createPersonalApi } from '../core/memagent/personal.ts';
 
 // 端壳 mirror 上抛条目（G6）类型与链式签名实现统一放在 mirrorLedger.ts（批次48 A8）
 import {
@@ -69,6 +71,11 @@ export interface ServerOptions {
   kernelStorage?: StorageBackend;
   /** /api/kernel/info 用的静态描述（只读状态与账本路径）；未提供则不外泄 */
   kernelInfo?: { readonly: boolean; db_path: string };
+  /**
+   * 第一轮个人记忆本机闭环：独立存储端口（与 kernelStorage 分开）。
+   * 缺省 / 或审计账本不可用 → /api/personal/invoke 返回 501 personal_unavailable（诚实报错）。
+   */
+  personalStore?: PersonalMemoryStore;
 }
 
 /** home server 句柄：在 Server 上附加会话查询（主进程做管理员 IPC 校验用） */
@@ -622,6 +629,44 @@ export function createServer(opts: ServerOptions): HomeServer {
             send(res, 200, { ok: true, result });
           } catch (e) {
             // 只读镜像的写入拒绝（E_STORAGE_LOCKED 等）原样回传文案，前端如实提示
+            send(res, 200, { ok: false, error: e instanceof Error ? e.message : String(e) });
+          }
+          return;
+        }
+
+        // ── 第一轮个人记忆本机闭环：独立存储数据面（与 kernelStorage 分开）──────────────
+        // owner 一律取登录会话 user_id，请求体不得自报归属；每个写动作经内核落 personal_memory 审计。
+        if (req.method === 'POST' && path === '/api/personal/invoke') {
+          const s = getSession(sessionIdOf(req));
+          if (!s) { send(res, 401, { ok: false, reason: 'no_session' }); return; }
+          if (!opts.personalStore || !opts.kernelStorage) {
+            send(res, 501, { ok: false, reason: 'personal_unavailable' });
+            return;
+          }
+          const body = await readJsonBody(req, maxBodyBytes);
+          const op = typeof body.op === 'string' ? body.op : '';
+          const payload = (body.payload && typeof body.payload === 'object' ? body.payload : {}) as Record<string, unknown>;
+          const id = typeof payload.id === 'string' ? payload.id : '';
+          const api = createPersonalApi({
+            store: opts.personalStore,
+            owner: s.context.user_id,
+            form: 'web',
+            appendAudit: (a) => opts.kernelStorage!.appendAudit(a),
+          });
+          try {
+            switch (op) {
+              case 'list': send(res, 200, { ok: true, result: await api.list() }); return;
+              case 'quick_add': send(res, 200, { ok: true, result: await api.quickAdd(String(payload.content ?? '')) }); return;
+              case 'confirm': send(res, 200, { ok: true, result: await api.confirm(id) }); return;
+              case 'reject': send(res, 200, { ok: true, result: await api.reject(id) }); return;
+              case 'revoke': send(res, 200, { ok: true, result: await api.revoke(id) }); return;
+              case 'delete': send(res, 200, { ok: true, result: await api.remove(id, payload.confirm === true) }); return;
+              default:
+                send(res, 400, { ok: false, error: `不支持的个人记忆动作：${op || '(空)'}` });
+                return;
+            }
+          } catch (e) {
+            // 状态机拒绝 / 未注入等如实回传，不伪造成功
             send(res, 200, { ok: false, error: e instanceof Error ? e.message : String(e) });
           }
           return;

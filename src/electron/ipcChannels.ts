@@ -141,6 +141,11 @@ export const IPC = {
   syncAuditCount: 'sync:auditCount',
   syncAuditsFrom: 'sync:auditsFrom',
   /**
+   * 第一轮个人记忆本机闭环：独立存储（personal-memory.db.json）的单一数据面。
+   * 参数 (op, payload, sessionId)；owner 由主进程按会话解析，渲染层不得自报。
+   */
+  personalInvoke: 'personal:invoke',
+  /**
    * 顶部自绘标题栏（批次48 S10）：把壳层当前主题同步给主进程的窗口按钮覆盖层。
    * 只改系统绘制的三个窗口按钮的底色/符号色，不接管按钮行为（最小化/最大化/关闭仍由系统完成）。
    */
