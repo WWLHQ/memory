@@ -533,9 +533,12 @@ html[data-theme="dark"] .pm-empty { background: #1d222b; border-color: #333a44; 
 
 /* 个人记忆双窗（第一轮本机闭环） */
 .pm-scroll { padding-bottom: 20px; }
+/* 页头标题不参与收缩：1024 宽度下长副标题会把 h3 挤成逐字竖排 */
+.pm-scroll .p0-hd h3 { flex: 0 0 auto; white-space: nowrap; }
 .pm-wrap { height: clamp(380px, 58vh, 620px); }
 .pm-col { overflow: hidden; }
-.pm-head { height: auto; min-height: 48px; display: flex; flex-direction: column; gap: 6px; }
+/* 双窗定高时 head 作为 flex 子项会被压缩 → 快速记输入框溢出压住收件箱分区标题，故禁收缩 */
+.pm-head { height: auto; min-height: 48px; flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; }
 .pm-tools { display: flex; gap: 6px; align-items: center; }
 .pm-search { flex: 1 1 auto; min-width: 0; }
 .pm-search input, .pm-select {
@@ -560,7 +563,7 @@ html[data-theme="dark"] .pm-empty { background: #1d222b; border-color: #333a44; 
 .pm-msg.ok { border-left: 3px solid #2f9e5f; }
 .pm-msg.warn { border-left: 3px solid #d9a13b; }
 .pm-msg.err { border-left: 3px solid #d9534f; }
-.pm-body { display: flex; flex-direction: column; gap: 10px; }
+.pm-body { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
 .pm-sect { display: flex; flex-direction: column; gap: 6px; }
 .pm-sect h4 { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 11px; color: var(--muted); font-weight: 600; text-transform: none; }
 .pm-sect-n { font: 500 10px/1 var(--mono); border: 1px solid var(--line); border-radius: 2px; padding: 1px 4px; color: var(--faint); }
