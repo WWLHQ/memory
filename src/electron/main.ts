@@ -8,7 +8,7 @@ process.on('unhandledRejection', (reason) => {
 // Electron 主进程入口：
 // - bootstrap：静态服务 + 本机后端（home / agentOnboard / MCP / webhook）+ FileStorage（userData 持久化），
 //   失败统一走 handleBootFailure（日志 + 弹窗 + exit(1)，A3）；
-// - 窗口：主窗口加载 overview.html，webPreferences.preload 只注入主 frame；
+// - 窗口：主窗口加载 workspace.html（工作台壳层），webPreferences.preload 只注入主 frame；
 // - IPC：channel 常量统一在 ipcChannels.ts，启动时校验注册完整性（A2）。
 import { createServer, type HomeServer } from '../home/server.ts';
 import { createServer as createAgentOnboardServer } from '../agentOnboard/server.ts';
@@ -314,11 +314,11 @@ function isWizardIncomplete(): boolean {
   return wizardRequired(read);
 }
 
-/** 主窗口地址：向导没走完先进 setup.html，走完进 overview.html（带上两个后端端口） */
+/** 主窗口地址：向导没走完先进 setup.html，走完进 workspace.html（工作台壳层，带上两个后端端口） */
 function mainWindowUrl(staticPort: number, wizardFirst: boolean): string {
   const origin = `http://127.0.0.1:${staticPort}`;
   if (wizardFirst) return `${origin}/setup.html`;
-  return `${origin}/overview.html?backend=${origin}:${MIRROR_PORT}&agentBackend=${origin}:${AGENT_ONBOARD_PORT}`;
+  return `${origin}/workspace.html?backend=${origin}:${MIRROR_PORT}&agentBackend=${origin}:${AGENT_ONBOARD_PORT}`;
 }
 
 /**
@@ -1891,7 +1891,7 @@ function startStaticServer(): Promise<number> {
         res.end('bad request');
         return;
       }
-      if (urlPath === '/') urlPath = '/overview.html';
+      if (urlPath === '/') urlPath = '/workspace.html';
       const filePath = normalize(join(DIST, urlPath));
       // 前缀边界必须是「目录分隔符」而非字符串前缀：否则 dist-evil/ 也能通过 startsWith(DIST)
       if (filePath !== DIST && !filePath.startsWith(DIST + sep)) {
