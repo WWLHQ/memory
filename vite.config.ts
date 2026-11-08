@@ -14,6 +14,7 @@ export default defineConfig({
       input: {
         main: 'index.html',
         workspace: 'workspace.html',
+        login: 'login.html',
         agentonboard: 'agentonboard.html',
         overview: 'overview.html',
         inlineattribution: 'inlineattribution.html',
