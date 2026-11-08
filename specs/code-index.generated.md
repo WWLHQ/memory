@@ -281,7 +281,7 @@
 | [src/web/logs/useToast.tsx](src/web/logs/useToast.tsx) | 13 | — | useToast(fn) |
 | [src/web/main.tsx](src/web/main.tsx) | 19 | 概览页入口（index.html）：按定稿 .ovx 版式整页重做，替换旧首页（问候语 + emoji 大卡）。 | — |
 | [src/web/memory/LayerFilterBar.tsx](src/web/memory/LayerFilterBar.tsx) | 189 | 记忆层级管理页（19.11）· 每层 L0-L6 过滤栏 + 分页控件 | LayerFilterBar(fn), LayerPager(fn) |
-| [src/web/memory/LayerMemoryTable.tsx](src/web/memory/LayerMemoryTable.tsx) | 174 | 层级管理页每层内的记忆表格（带可拖拽表头列宽） | LayerMemoryTable(fn) |
+| [src/web/memory/LayerMemoryTable.tsx](src/web/memory/LayerMemoryTable.tsx) | 175 | 层级管理页每层内的记忆表格（带可拖拽表头列宽） | LayerMemoryTable(fn) |
 | [src/web/memory/MemoryActions.tsx](src/web/memory/MemoryActions.tsx) | 80 | 记忆管理页（REQ-006 / P8）操作区（T4） | MemoryActions(fn) |
 | [src/web/memory/MemoryDrawer.tsx](src/web/memory/MemoryDrawer.tsx) | 160 | 记忆管理页详情/编辑抽屉（T5） | MemoryDrawer(fn) |
 | [src/web/memory/MemoryLayeredPage.tsx](src/web/memory/MemoryLayeredPage.tsx) | 670 | 记忆层级管理页（REQ-006 / P8 · 19.11） | MemoryLayeredPage(fn), LayerId(type) |
@@ -537,8 +537,8 @@ src/shared/tenantDefaults.ts 881e1ff9c969
 src/types/agentOnboard.ts d4d887c55e8a
 src/types/home.ts 15302ed61695
 src/types/inlineAttribution.ts f4e6759adb6d
-src/web/AgentOnboard/AgentCard.tsx 2f157b7bf6d9
-src/web/AgentOnboard/AgentOnboardPage.tsx 6a96a8cea9d1
+src/web/AgentOnboard/AgentCard.tsx a3cca4273b0b
+src/web/AgentOnboard/AgentOnboardPage.tsx db8b15df9068
 src/web/AgentOnboard/ChannelConfig.tsx b32e6a426470
 src/web/AgentOnboard/FormBadge.tsx b2425eba179f
 src/web/AgentOnboard/Gains.tsx 5dd221d1770f
@@ -552,7 +552,7 @@ src/web/AgentOnboard/agentOnboardEntry.tsx 84134b804309
 src/web/AgentOnboard/autoDiscovery.ts c2fd3f26363d
 src/web/AgentOnboard/autoOnboard.ts 2e2bbfc5bec8
 src/web/AgentOnboard/cards.ts 3dc5d5885b15
-src/web/AgentOnboard/coreOnboard.ts e107daf27b9a
+src/web/AgentOnboard/coreOnboard.ts fefd268eb074
 src/web/AgentOnboard/ledger.ts ea78efccf395
 src/web/AgentOnboard/onboardState.ts 3b1368aac6d8
 src/web/AgentOnboard/store.ts 0e28d5609de5
@@ -571,7 +571,7 @@ src/web/Home/programLog.ts 4dd7748fe50e
 src/web/Home/programLogLabels.ts ffe479af3efc
 src/web/Home/tenantContext.tsx b156eb584b46
 src/web/Home/useLoginMirror.ts 117ba2379474
-src/web/InlineAttribution/AgentConversationDemo.tsx f41b0efdbab1
+src/web/InlineAttribution/AgentConversationDemo.tsx c58e7c42d1ac
 src/web/InlineAttribution/AgingWarnTag.tsx 4ccd1ca5a7bb
 src/web/InlineAttribution/AttributionConfig.tsx 3c9a93f13348
 src/web/InlineAttribution/AttributionSummary.tsx 488f8b567036
@@ -584,13 +584,13 @@ src/web/InlineAttribution/floatEntry.tsx fcfe57cd95fe
 src/web/InlineAttribution/inlineAttributionEntry.tsx 2b4292f07d56
 src/web/InlineAttribution/useInlineReal.ts c26fa3eaa091
 src/web/audit/AuditPage.tsx b83234d27571
-src/web/audit/AuditTable.tsx 1c2af1d1d36e
+src/web/audit/AuditTable.tsx d48ead17238b
 src/web/audit/ChainView.tsx 2e3cf25031ce
 src/web/audit/FilterBar.tsx 0d3a04459dec
 src/web/audit/auditEntry.tsx c6055389d0fa
 src/web/audit/auditLink.ts c202a89c574b
-src/web/audit/coreAudit.ts eac82c39efd2
-src/web/audit/logic.ts 0cac1c5b6f16
+src/web/audit/coreAudit.ts 5c331049fbe0
+src/web/audit/logic.ts 978410b52815
 src/web/audit/types.ts 71090ca7cf55
 src/web/audit/useAuditMirror.ts 34865de958b6
 src/web/audit/useToast.tsx 85cd09d2e1f5
@@ -606,7 +606,7 @@ src/web/dispute/types.ts 34294be31812
 src/web/dispute/useDisputeMirror.ts a2f4cf373f8e
 src/web/dispute/useToast.tsx c650d8662672
 src/web/feedback/FeedbackForm.tsx acd883ee4989
-src/web/feedback/FeedbackPage.tsx c3ca3fa334de
+src/web/feedback/FeedbackPage.tsx 40928f29119d
 src/web/feedback/StatCards.tsx 826d2fdad9f4
 src/web/feedback/coreFeedback.ts dbee04d2dde7
 src/web/feedback/feedbackEntry.tsx 8e909b081887
@@ -616,7 +616,7 @@ src/web/feedback/useFeedbackMirror.ts 6bd1d844d78c
 src/web/feedback/useToast.tsx 85cd09d2e1f5
 src/web/growth/DedupCards.tsx fff9e745c003
 src/web/growth/GrowthPage.tsx 4e6bfd836f1c
-src/web/growth/GrowthPanels.tsx 83181b07dc0a
+src/web/growth/GrowthPanels.tsx 0c6c2b2cb7dc
 src/web/growth/coreGrowth.ts 506517347a95
 src/web/growth/growthEntry.tsx 5b43a02238b6
 src/web/growth/logic.ts 53b37d83d095
@@ -629,7 +629,7 @@ src/web/hostLlm.ts 6b12c99be4b7
 src/web/httpStorage.ts d08876fec3ca
 src/web/kernel.ts 41e2a5d2c068
 src/web/lifecycle/LifecycleCard.tsx c115dc841539
-src/web/lifecycle/LifecyclePage.tsx be4124fe5207
+src/web/lifecycle/LifecyclePage.tsx 7ed40e319c05
 src/web/lifecycle/ParamPanel.tsx 5858a0c4c600
 src/web/lifecycle/constants.ts 4bbab102ec8b
 src/web/lifecycle/coreLifecycle.ts af3caad421f9
@@ -652,13 +652,13 @@ src/web/logs/types.ts c57557c7576e
 src/web/logs/useToast.tsx 85cd09d2e1f5
 src/web/main.tsx d194914b0d06
 src/web/memory/LayerFilterBar.tsx 5f8c2bea1169
-src/web/memory/LayerMemoryTable.tsx 6fd085b03ff4
+src/web/memory/LayerMemoryTable.tsx fa30ffc9c764
 src/web/memory/MemoryActions.tsx 9983e64102b0
-src/web/memory/MemoryDrawer.tsx 9f6b29b0d433
-src/web/memory/MemoryLayeredPage.tsx c88f822305e7
-src/web/memory/MemoryManagementPage.tsx edf743f590a3
+src/web/memory/MemoryDrawer.tsx 7c124fc0ce30
+src/web/memory/MemoryLayeredPage.tsx f79f7cd14573
+src/web/memory/MemoryManagementPage.tsx 0242fcb95ff9
 src/web/memory/MemoryPage.tsx f85d97504af7
-src/web/memory/MemoryRow.tsx 0be7881628bf
+src/web/memory/MemoryRow.tsx c9e3667cfed7
 src/web/memory/MemoryTable.tsx d0e26f9d929e
 src/web/memory/backup.ts e6e666400feb
 src/web/memory/coreMemoryOps.ts 436d993fda16
@@ -673,7 +673,7 @@ src/web/memory/useMemoryMirror.ts 50fcdb730ba3
 src/web/memory/useToast.tsx c650d8662672
 src/web/mirrorClient.ts f097d285d960
 src/web/models/BillingPanel.tsx 0653b59b0646
-src/web/models/LlmUsageTable.tsx 074fe4014d88
+src/web/models/LlmUsageTable.tsx 9002f88cf3f1
 src/web/models/ModelsPage.tsx a7e7367eeddb
 src/web/models/ProxyPanel.tsx 702e3e775f9b
 src/web/models/VectorCard.tsx f9951358d9c0
@@ -685,7 +685,7 @@ src/web/models/modelsEntry.tsx 3ddbadcf3a9e
 src/web/models/types.ts 973af42c99c1
 src/web/models/useToast.tsx 85cd09d2e1f5
 src/web/monitor/AlertTimeline.tsx 6fa33bdfb738
-src/web/monitor/MetricGrid.tsx e35c2c0298ac
+src/web/monitor/MetricGrid.tsx d3468c5dccf7
 src/web/monitor/MonitorPage.tsx 409b74c9717c
 src/web/monitor/coreMonitor.ts 6b0c29922b63
 src/web/monitor/logic.ts 047ec4b39ad1
@@ -693,7 +693,7 @@ src/web/monitor/monitorEntry.tsx 1cc2038c2ad6
 src/web/monitor/options.ts 59d853ad7cd4
 src/web/monitor/types.ts 31210fc87ca9
 src/web/monitor/useMonitorMirror.ts 9e87dd8cc071
-src/web/monitor/useMonitorReal.ts 62e7e61b2f57
+src/web/monitor/useMonitorReal.ts 24b6151c1bed
 src/web/monitor/useToast.tsx 85cd09d2e1f5
 src/web/overview/Overview.tsx b4303483348f
 src/web/overview/OverviewPage.tsx a99b31fa000e
@@ -705,7 +705,7 @@ src/web/params/KbPolicyTable.tsx c39b52ed1039
 src/web/params/LlmEngineCard.tsx 4c938ef647cb
 src/web/params/NormalConfigCard.tsx c9d2b664ee4f
 src/web/params/ParamsPage.tsx 3bc1e155e1a5
-src/web/params/RefineQueueCard.tsx 82f73cc8f0ad
+src/web/params/RefineQueueCard.tsx 704d8988fed9
 src/web/params/coreParams.ts 450ba203beb2
 src/web/params/defaults.ts 6dd5728ef0ec
 src/web/params/llmEngine.ts bd46b6e725ef
@@ -716,32 +716,32 @@ src/web/params/types.ts 9840a32c5e5d
 src/web/params/useParamsMirror.ts 5529b48cfccc
 src/web/params/useToast.tsx 85cd09d2e1f5
 src/web/retrieval/AuditTrailCard.tsx ec4eb45c6bad
-src/web/retrieval/BudgetPanel.tsx 8a99ac90d148
-src/web/retrieval/ContextPanel.tsx ced78de9c9db
+src/web/retrieval/BudgetPanel.tsx 3880106a3970
+src/web/retrieval/ContextPanel.tsx c0a110e5bc9f
 src/web/retrieval/ModeBanner.tsx 6fe6fc992fae
 src/web/retrieval/QueryBar.tsx 20856f75ecc7
 src/web/retrieval/ResultList.tsx 7601b8d14c2b
 src/web/retrieval/ResultRow.tsx 7a392df30391
 src/web/retrieval/RetrievalPage.tsx 80b2e46f6cf5
-src/web/retrieval/coreEngine.ts ea3caa5c9ba6
+src/web/retrieval/coreEngine.ts a963c447241f
 src/web/retrieval/logic.ts af47fabed86b
 src/web/retrieval/retrievalEntry.tsx a168eb39c7b8
 src/web/retrieval/types.ts 258fc8fef808
 src/web/retrieval/useRetrieval.ts 48cee0abfa58
 src/web/retrieval/useToast.tsx 85cd09d2e1f5
 src/web/security/AccountAdminCard.tsx 23692c9117df
-src/web/security/FieldBackfillCard.tsx e25b5b82223e
-src/web/security/L0AdminCard.tsx 37f2eabb3d64
+src/web/security/FieldBackfillCard.tsx 5a9866c937f0
+src/web/security/L0AdminCard.tsx c61190331ed6
 src/web/security/L0MigrateCard.tsx 5697922c5b40
-src/web/security/L0RecoveryCard.tsx 2e07e8479713
+src/web/security/L0RecoveryCard.tsx 8d4a97acc346
 src/web/security/L0SplitCard.tsx f563aab06852
-src/web/security/LedgerResetCard.tsx c7f6df571b88
-src/web/security/LegacyLedgerCard.tsx 728888b09019
+src/web/security/LedgerResetCard.tsx 543ef52f2326
+src/web/security/LegacyLedgerCard.tsx c1251636ef98
 src/web/security/PwdPolicyCard.tsx ad12fb5ffafb
-src/web/security/RebuildFromL0Card.tsx c29229b4b2ac
-src/web/security/RulesRejudgeCard.tsx 951b89aec73e
+src/web/security/RebuildFromL0Card.tsx d95cb49f94fb
+src/web/security/RulesRejudgeCard.tsx 0ba4f0f65075
 src/web/security/SecurityCards.tsx 30ab0c49a8a4
-src/web/security/SecurityPage.tsx 3a85001a2f52
+src/web/security/SecurityPage.tsx 101713d0753a
 src/web/security/accountsClient.ts 2e5a401e76ee
 src/web/security/coreSecurity.ts fa788e2f5250
 src/web/security/defaults.ts e5b4b56b9629
@@ -780,16 +780,16 @@ src/web/shell/statusbar.ts adb851ba53b2
 src/web/shell/taskpane.ts 39d5562ae71b
 src/web/shell/views.ts 306d8175648e
 src/web/shell/workspaceEntry.tsx d81475dafbfc
-src/web/sync/SyncPage.tsx 044c47e1d876
-src/web/sync/coreSyncPage.ts 2f31d1ce253b
+src/web/sync/SyncPage.tsx 4689f911164f
+src/web/sync/coreSyncPage.ts 0c3ed6cc14be
 src/web/sync/syncEntry.tsx 23e574e79aa4
 src/web/test-setup.ts 3a2ad06d2218
 src/web/vite-env.d.ts 191b7a12f3de
 src/web/write/DedupCard.tsx f606fcffe64a
 src/web/write/WriteForm.tsx aa69f524ec22
-src/web/write/WritePage.tsx 4ed658bcd7b8
-src/web/write/WriteReceiptCard.tsx b8f0a5a29685
-src/web/write/coreWrite.ts 4496b6e19427
+src/web/write/WritePage.tsx 172f46e0aecc
+src/web/write/WriteReceiptCard.tsx d49583bfe4c1
+src/web/write/coreWrite.ts 5b9e4dcabeef
 src/web/write/logic.ts ad3be491e5ba
 src/web/write/spec.ts e3be40666e69
 src/web/write/types.ts 37367e5fac58
