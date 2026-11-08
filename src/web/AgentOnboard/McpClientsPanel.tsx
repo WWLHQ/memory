@@ -126,7 +126,7 @@ function formatClock(ts: number): string {
   return `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
 }
 
-export function McpClientsPanel() {
+export function McpClientsPanel({ onInstalledCount }: { onInstalledCount?: (n: number) => void } = {}) {
   const session = useSessionContext();
   const capability = hostCapability();
   const [scan, setScan] = useState<ScanReply | null>(null);
@@ -165,6 +165,18 @@ export function McpClientsPanel() {
     () => (scan ? scan.clients.filter((r) => r.installed) : []),
     [scan],
   );
+
+  /** 页签计数 = 本机真实检出的已安装客户端数（未知/浏览器模式为 0，不冒充定稿的 6） */
+  useEffect(() => { onInstalledCount?.(rows.length); }, [rows.length, onInstalledCount]);
+
+  /** 七态总览：把 McpWireState 的七个真实状态全部列出（未出现的状态如实显示 0） */
+  const stateCounts = useMemo<Record<McpWireState, number>>(() => {
+    const init: Record<McpWireState, number> = {
+      wired: 0, missing_auth: 0, missing_entry: 0, conflict: 0, invalid: 0, no_config: 0, manual: 0,
+    };
+    for (const r of rows) init[r.state] += 1;
+    return init;
+  }, [rows]);
 
   const copySnippet = (id: string) => {
     if (!session.sid) { setMessage('请先登录后再复制（片段含令牌）'); return; }
@@ -347,6 +359,15 @@ export function McpClientsPanel() {
             普通成员只读；复制含令牌片段与一键写入需管理员（主进程按登录会话二次校验）。
           </div>
         )}
+
+        <div className="note" data-testid="mcp-state-summary" style={{ margin: '6px 0' }}>
+          <b>七态总览（本机真扫）：</b>
+          {(Object.keys(STATE_LABEL) as McpWireState[]).map((s) => (
+            <span key={s} style={{ marginLeft: 8, whiteSpace: 'nowrap' }} data-testid={`mcp-state-${s}`}>
+              {STATE_LABEL[s].text} <b>{stateCounts[s]}</b>
+            </span>
+          ))}
+        </div>
 
         <div id="mcp-client-rows">
           {rows.map((row) => {

@@ -146,6 +146,13 @@ export function AgentOnboardPage() {
     return '待扫描';
   });
   const [toastMsg, setToastMsg] = useState('');
+  /** 定稿 4 页签：接入概览 / MCP 客户端 / 探针结果 / 接入配置 */
+  const [tab, setTab] = useState(0);
+  /** MCP 客户端页签计数 = 主进程真扫出的已安装客户端数（未知时不显示，不拿定稿的 6 充数） */
+  const [mcpCount, setMcpCount] = useState<number | null>(null);
+  const onMcpCount = useCallback((n: number) => {
+    setMcpCount((prev) => (prev === n ? prev : n));
+  }, []);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const stageTimers = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   /** 指标刷新重试定时器（接入写入与审计读取有毫秒级竞态，幂等重拉两次） */
@@ -561,69 +568,197 @@ export function AgentOnboardPage() {
     </div>
   ) : null;
 
+  const STATE_TEXT: Record<UiAgentCard['state'], string> = {
+    connected: '已连通',
+    degraded: '降级（仅补偿）',
+    onboard: '未配置',
+  };
+  const fmtTime = (ts?: number): string =>
+    ts ? new Date(ts).toLocaleString('zh-CN', { hour12: false }) : '—';
+
+  /** 探针结论只认真实样本：有失败原因 → 未通过；有样本且通过 → 通过；否则如实说无样本 */
+  const probeOf = (a: UiAgentCard): { verdict: string; cls: string } => {
+    const s = statsForAgent(stats, a.name);
+    if (failureReasons[normalizeAgentKey(a.name)]) return { verdict: '未通过', cls: 'err' };
+    if (!s || s.tests === 0) return { verdict: '无探针样本', cls: 'muted' };
+    if (s.passed > 0) return { verdict: '通过', cls: 'ok' };
+    return { verdict: '未通过', cls: 'err' };
+  };
+
+  const tabs = [
+    '接入概览',
+    `MCP 客户端${mcpCount === null ? '' : ` ${mcpCount}`}`,
+    '探针结果',
+    '接入配置',
+  ];
+
   return (
-    <div className="wrap">
+    <div className="wrap" data-testid="agent-onboard-page">
       <h1>Agent 接入配置页 · 可交互原型</h1>
       <div className="sub">
         按《Agent 接入页字段级交互规格》实现 · MVP 两家起步（deepseek harness P0 + Claude Code P1）· 一键接入 · 双通道降级 · 隔离开关 · 密钥脱敏 · 效果证据
       </div>
 
-      <div className="section-title">⚡ 一键接入本机 Agent（19.9）· 自动发现 + 默认绑定，不用逐个设置</div>
-      {failureNode}
-      <OneClickOnboard
-        form={form}
-        discovered={discovered}
-        running={running}
-        stageIndex={stageIndex}
-        scanState={scanState}
-        onDiscover={onDiscover}
-        onUnbind={onUnbind}
-        onSignalChange={() => { /* 信号源仅影响发现范围，原型默认全开即全部展示 */ }}
-        autoOnboarded={autoOnboarded}
-        onRebindAll={onRebindAll}
-        installedAgents={installed}
-        installedProbes={installedProbes}
-        installedSource={installedSource}
-        installedReason={failure || undefined}
-        installedBusy={installedBusy}
-        onManualDetect={onManualDetect}
-        onAddCardForInstalled={onAddCardForInstalled}
-      />
-      {mcpText && (
-        <div className="note" data-testid="mcp-wire-summary" style={{ marginBottom: 10 }}>
-          🧠 MCP 接入（自动写入已连通 Agent）：{mcpText} · 端点 {mcpSummary?.endpoint}；
-          未列出的客户端在下方面板可查看真实状态与手工说明。
-        </div>
-      )}
-
-      <div className="section-title">宿主 Agent 接入卡片（19.2 / 19.3 / 5.2）</div>
-      <div className="note" data-testid="card-metric-note" style={{ margin: '0 0 8px' }}>
-        连通成功率与平均延时只统计真实拨测样本（登录自动接入的 auto_bind + 手动「测试接入」），
-        不需要逐张点击测试；手动测试用于复查与排障，不点不影响接入和指标。
-      </div>
-      <div id="cards">
-        {agents.map((a, i) => (
-          <AgentCard
-            key={a.name}
-            agent={a}
-            error={errors[a.name] ?? ''}
-            testDisabled={a.circuit === 'OPEN'}
-            saveDisabled={!!errors[a.name]}
-            injectVisible={!!injectShown[a.name]}
-            testEvidence={evidence[a.name]}
-            failureReason={failureReasons[normalizeAgentKey(a.name)]}
-            stats={statsForAgent(stats, a.name)}
-            tenantOverride={tenantLabel}
-            onToolChange={(t, c) => onToolChange(i, t, c)}
-            onIsoChange={(k, c) => onIsoChange(i, k, c)}
-            onChanChange={(ch, c) => onChanChange(i, ch, c)}
-            onAct={(act) => onAct(i, act)}
-            onRidClick={onRidClick}
-          />
+      <div className="p0-tabs" role="tablist" data-testid="agent-tabs">
+        {tabs.map((label, i) => (
+          <button
+            key={label} type="button" role="tab" aria-selected={tab === i}
+            className={`p0-tab${tab === i ? ' active' : ''}`}
+            data-testid={`agent-tab-${i}`} data-tab={i}
+            onClick={() => setTab(i)}
+          >{label}</button>
         ))}
       </div>
 
-      <McpClientsPanel />
+      {/* ── 1. 接入概览：一键接入 + 真实发现行 + 接入摘要 ── */}
+      <div hidden={tab !== 0} data-testid="agent-panel-0">
+        <div className="section-title">⚡ 一键接入本机 Agent（19.9）· 自动发现 + 默认绑定，不用逐个设置</div>
+        {failureNode}
+        <OneClickOnboard
+          form={form}
+          discovered={discovered}
+          running={running}
+          stageIndex={stageIndex}
+          scanState={scanState}
+          onDiscover={onDiscover}
+          onUnbind={onUnbind}
+          onSignalChange={() => { /* 信号源仅影响发现范围，原型默认全开即全部展示 */ }}
+          autoOnboarded={autoOnboarded}
+          onRebindAll={onRebindAll}
+          installedAgents={installed}
+          installedProbes={installedProbes}
+          installedSource={installedSource}
+          installedReason={failure || undefined}
+          installedBusy={installedBusy}
+          onManualDetect={onManualDetect}
+          onAddCardForInstalled={onAddCardForInstalled}
+        />
+
+        <div className="section-title">接入摘要 · 状态来自后端真实回填与内核账本</div>
+        {agents.length === 0 ? (
+          <div className="card" data-testid="overview-empty">
+            尚无接入卡片：点上方「自动发现并接入本机 Agent」真扫本机后建卡；空名单不伪造 Agent 行。
+          </div>
+        ) : (
+          <div className="card">
+            <table className="ltable" data-testid="overview-table">
+              <thead>
+                <tr>
+                  <th>Agent</th><th>状态</th><th>连通成功率</th><th>平均延时</th>
+                  <th>最近探针</th><th>熔断</th><th>双通道</th>
+                </tr>
+              </thead>
+              <tbody>
+                {agents.map((a) => {
+                  const s = statsForAgent(stats, a.name);
+                  const rate = s && s.tests > 0 ? `${Math.round((s.passed / s.tests) * 100)}%` : '—';
+                  return (
+                    <tr key={a.name} data-testid={`overview-row-${a.name}`}>
+                      <td>{a.name}</td>
+                      <td>{STATE_TEXT[a.state]}</td>
+                      <td>{rate}{s && s.tests > 0 ? `（${s.passed}/${s.tests}）` : ''}</td>
+                      <td>{s?.avgRtt !== undefined ? `${s.avgRtt}ms` : '—'}</td>
+                      <td className="mid">{fmtTime(s?.lastTestAt)}</td>
+                      <td>{a.circuit}</td>
+                      <td>{a.chan.webhook && a.chan.api ? 'webhook + API' : a.chan.webhook ? 'webhook' : a.chan.api ? 'API' : '全关'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* ── 2. MCP 客户端：七态 + 真实本机配置 ── */}
+      <div hidden={tab !== 1} data-testid="agent-panel-1">
+        {mcpText && (
+          <div className="note" data-testid="mcp-wire-summary" style={{ marginBottom: 10 }}>
+            🧠 MCP 接入（自动写入已连通 Agent）：{mcpText} · 端点 {mcpSummary?.endpoint}；
+            未列出的客户端在下方客户端列表可查看真实状态与手工说明。
+          </div>
+        )}
+        <McpClientsPanel onInstalledCount={onMcpCount} />
+      </div>
+
+      {/* ── 3. 探针结果：只展示真实拨测回执，无样本不显示 200 ── */}
+      <div hidden={tab !== 2} data-testid="agent-panel-2">
+        <div className="section-title">探针结果 · 真实请求与回执（200 / 401 / 超时按真实结果展示）</div>
+        <div className="note" data-testid="probe-note" style={{ margin: '0 0 8px' }}>
+          探针结论与耗时来自接入后端 /agents 的 lastTest 与 /audit 审计样本；后端不可达时显示「无探针样本」，
+          不把「未知」标成「通过」。
+        </div>
+        {agents.length === 0 ? (
+          <div className="card" data-testid="probe-empty">
+            暂无真实探针样本：先完成一键接入，或在「接入配置」页逐张点「测试接入」。
+          </div>
+        ) : (
+          <div className="card">
+            <table className="ltable" data-testid="probe-table">
+              <thead>
+                <tr>
+                  <th>Agent</th><th>探针结论</th><th>最近探针</th><th>延时</th>
+                  <th>request_id</th><th>失败原因 / 证据</th>
+                </tr>
+              </thead>
+              <tbody>
+                {agents.map((a) => {
+                  const s = statsForAgent(stats, a.name);
+                  const p = probeOf(a);
+                  const ev = evidence[a.name];
+                  const reason = failureReasons[normalizeAgentKey(a.name)] ?? ev?.reason ?? '';
+                  return (
+                    <tr key={a.name} data-testid={`probe-row-${a.name}`}>
+                      <td>{a.name}</td>
+                      <td><span className={`status ${p.cls === 'ok' ? 'active' : p.cls === 'err' ? 'deprecated' : ''}`}>{p.verdict}</span></td>
+                      <td className="mid">{fmtTime(s?.lastTestAt)}</td>
+                      <td>{s?.lastRtt !== undefined ? `${s.lastRtt}ms` : '—'}</td>
+                      <td className="mid">{ev?.rid ?? '—'}</td>
+                      <td>{reason || '—'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* ── 4. 接入配置：逐张卡片开关 + 密钥 + 通道 ── */}
+      <div hidden={tab !== 3} data-testid="agent-panel-3">
+        <div className="section-title">宿主 Agent 接入卡片（19.2 / 19.3 / 5.2）</div>
+        <div className="note" data-testid="card-metric-note" style={{ margin: '0 0 8px' }}>
+          连通成功率与平均延时只统计真实拨测样本（登录自动接入的 auto_bind + 手动「测试接入」），
+          不需要逐张点击测试；手动测试用于复查与排障，不点不影响接入和指标。
+        </div>
+        {agents.length === 0 ? (
+          <div className="card" data-testid="cards-empty">
+            当前没有接入卡片：先在「接入概览」完成一键接入；未接入的 Agent 不展示配置表单。
+          </div>
+        ) : (
+          <div id="cards">
+            {agents.map((a, i) => (
+              <AgentCard
+                key={a.name}
+                agent={a}
+                error={errors[a.name] ?? ''}
+                testDisabled={a.circuit === 'OPEN'}
+                saveDisabled={!!errors[a.name]}
+                injectVisible={!!injectShown[a.name]}
+                testEvidence={evidence[a.name]}
+                failureReason={failureReasons[normalizeAgentKey(a.name)]}
+                stats={statsForAgent(stats, a.name)}
+                tenantOverride={tenantLabel}
+                onToolChange={(t, c) => onToolChange(i, t, c)}
+                onIsoChange={(k, c) => onIsoChange(i, k, c)}
+                onChanChange={(ch, c) => onChanChange(i, ch, c)}
+                onAct={(act) => onAct(i, act)}
+                onRidClick={onRidClick}
+              />
+            ))}
+          </div>
+        )}
+      </div>
 
       <div className="toast" id="toast" style={toastMsg ? { display: 'block' } : { display: 'none' }}>
         {toastMsg}

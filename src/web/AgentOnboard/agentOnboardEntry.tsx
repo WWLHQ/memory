@@ -5,6 +5,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../shared/actionLog.ts';
 import { AgentOnboardPage } from './AgentOnboardPage.tsx';
+import '../shared/p0.css';
 import { TenantProvider } from '../Home/tenantContext.tsx';
 import { useLoginMirror } from '../Home/useLoginMirror.ts';
 import { homeBaseUrl } from '../backend.ts';
