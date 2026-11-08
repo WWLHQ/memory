@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const ROOT = process.cwd();
@@ -25,7 +25,9 @@ function tempRoot(files: Record<string, string>): { root: string; clean: () => v
   const root = mkdtempSync(join(tmpdir(), 'mam6-gate-'));
   mkdirSync(join(root, 'src'), { recursive: true });
   for (const [name, body] of Object.entries(files)) {
-    writeFileSync(join(root, 'src', name), body, 'utf8');
+    const full = join(root, 'src', name);
+    mkdirSync(dirname(full), { recursive: true });
+    writeFileSync(full, body, 'utf8');
   }
   return { root, clean: () => rmSync(root, { recursive: true, force: true }) };
 }
@@ -44,6 +46,7 @@ describe('阶段6 / ① 零白名单与判据边界', () => {
     for (const id of [
       'A01-proxy-catalog', 'A02-fake-models', 'A03-demo-flags', 'A11-restored-user',
       'A12-demo-tenant', 'B01-demo-algo', 'C01-safe-noop', 'C02-token-bill',
+      'S01-shell-fake-count', 'S05-shell-random-readout',
     ]) {
       expect(s).toContain(`id: '${id}'`);
     }
@@ -128,7 +131,7 @@ describe('阶段6 / ④ 门禁实测（含变异红/绿切换）', () => {
     expect(j.allowlist).toBe(0);
     expect(j.hits).toEqual([]);
     expect(j.scanned).toBeGreaterThan(300);
-    expect(j.rules).toBe(21);
+    expect(j.rules).toBe(26);
   });
 
   it('变异杀手：临时根注入旧值 → 退出 1 且报出判据 id；撤销 → 退出 0', () => {
@@ -163,6 +166,39 @@ describe('阶段6 / ④ 门禁实测（含变异红/绿切换）', () => {
       const r = gate([`--root=${t.root}`]);
       expect(r.status).toBe(0);
       expect(r.stdout).toContain('✅ 通过');
+    } finally {
+      t.clean();
+    }
+  });
+
+  it('壳层假数判据：临时根注入写死计数与「—」读数 → 退出 1；改用不可用原因 → 退出 0', () => {
+    const t = tempRoot({ 'web/shell/evil.ts': "export const nav = { count: 12 };\nexport const cell = '—';\n" });
+    try {
+      const bad = gate([`--root=${t.root}`, '--json']);
+      expect(bad.status).toBe(1);
+      const j = JSON.parse(bad.stdout) as { hits: Array<{ rule: string }> };
+      const ids = j.hits.map((h) => h.rule);
+      expect(ids).toContain('S01-shell-fake-count');
+      expect(ids).toContain('S02-shell-dash-readout');
+
+      writeFileSync(
+        join(t.root, 'src', 'web', 'shell', 'evil.ts'),
+        "export const nav = { unavailable: '程序暂无该数据模型' };\nexport const cell = '不可用';\n",
+        'utf8',
+      );
+      const good = gate([`--root=${t.root}`]);
+      expect(good.status).toBe(0);
+      expect(good.stdout).toContain('✅ 通过');
+    } finally {
+      t.clean();
+    }
+  });
+
+  it('壳层判据不外溢：同样的写法放在非壳层目录 → 仍退出 0', () => {
+    const t = tempRoot({ 'web/other/ok.ts': "export const nav = { count: 12 };\nexport const cell = '—';\n" });
+    try {
+      const r = gate([`--root=${t.root}`]);
+      expect(r.status).toBe(0);
     } finally {
       t.clean();
     }

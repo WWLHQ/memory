@@ -10,6 +10,9 @@
 //     是真实功能（种子管理员 + 首登提示），不是演示数据回流，故不列入判据；处置另案记录。
 //   · **不误伤合法用途**：`slice(0, 8)` 等 9 处分页截断/sha 短码、L2 占位符、脱敏占位符、
 //     明示 dry-run、`FakeLlmProvider` 零模型 stub 等 C 类真实语义均不列入判据。
+//   · **壳层新增判据（批次48 S1–S8）**：`scope` 仅把判据限定到工作台壳层目录，避免把
+//     其它模块合法的计数/类型声明误判；壳层内「写死计数、写死读数、『—』占位、编造读数措辞、
+//     随机数读数」一律零容忍（全站口径：不可用就写原因，不填任何假数）。
 //
 // 用法：
 //   node tools/check-no-demo.mjs                 # 扫描仓库；有命中退出码 1
@@ -61,6 +64,12 @@ const RULES = [
   { id: 'C01-safe-noop', re: /safe-noop|home server 暂无/, why: '阶段5-C 已清的伪 safe-noop 声明' },
   { id: 'C02-token-bill', re: /\/百万 token|真实 token 节省估算|账本无真实延迟采样|💰 本次 /, why: '阶段5-F 已清的旧金额/token 口径' },
   { id: 'C03-stale-doc', re: /耗时账本未采样/, why: '阶段5-F 已清的过时声明' },
+  // 批次48 S1–S8：壳层生产代码不得出现编造读数（scope 限定，避免误伤其它模块合法计数）。
+  { id: 'S01-shell-fake-count', scope: 'src/web/shell/', re: /\b(count|badge|ratio)\s*:\s*['"]?\d/, why: '壳层导航/命令不得携带写死的计数或徽标' },
+  { id: 'S02-shell-dash-readout', scope: 'src/web/shell/', re: /['"]—['"]/, why: '壳层不得用「—」冒充真实读数' },
+  { id: 'S03-shell-fixed-reading', scope: 'src/web/shell/', re: /\b(big|readout)\s*:\s*['"]\d/, why: '概览/状态读数不得写死数字' },
+  { id: 'S04-shell-fake-wording', scope: 'src/web/shell/', re: /示例读数|演示读数|假数据|伪造读数/, why: '壳层不得出现编造读数措辞' },
+  { id: 'S05-shell-random-readout', scope: 'src/web/shell/', re: /Math\.random\(/, why: '壳层真实读数不得用随机数生成' },
 ];
 
 function parseArgs(argv) {
@@ -94,14 +103,16 @@ function scan(root) {
   const files = SCAN_DIRS.flatMap((d) => walk(join(root, d)));
   const hits = [];
   for (const file of files) {
+    const rel = relative(root, file).split(sep).join('/');
     const lines = readFileSync(file, 'utf8').split('\n');
     for (let i = 0; i < lines.length; i += 1) {
       for (const rule of RULES) {
+        if (rule.scope && !rel.startsWith(rule.scope)) continue;
         if (!rule.re.test(lines[i])) continue;
         hits.push({
           rule: rule.id,
           why: rule.why,
-          file: relative(root, file).split(sep).join('/'),
+          file: rel,
           line: i + 1,
           text: lines[i].trim().slice(0, 160),
         });

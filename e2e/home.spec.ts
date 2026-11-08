@@ -138,20 +138,30 @@ test.describe('REQ-005 首页与登录卡片 · 点击级 E2E', () => {
   test('⑤ 数字可点溯源 request_id（弹审计 modal，真实 mirror 账本）', async ({ page }) => {
     const errors = collectErrors(page);
     await page.goto(APP);
-    // 先向 home server 镜像上抛一条真实 recall 审计（evidence_thin），作为可溯源真实条目
-    await page.evaluate(async (port) => {
-      await fetch(`http://localhost:${port}/api/mirror/audit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source: 'e2e', action: 'recall', request_id: 'e2e_real_1', payload: { query: 'e2e', evidence_thin: true } }),
-      });
-    }, BACKEND_PORT);
 
-    // 登录 → 触发真实 feed 聚合（含 mirror 兜底源）→ 异常区出现该 request_id 的 .rid
+    // 真实会话：mirror 账本绑定会话（匿名 POST 会如实 401），故先登录拿到权威 session_id
     await page.click('#btnOpenLogin');
     await page.fill('#acc', 'e2e_user');
     await page.fill('#pwd', PWD);
     await page.click('#btnLogin');
+    await expect(page.locator('#hiAuth')).toContainText('e2e_user');
+
+    const sid = await page.evaluate(() => localStorage.getItem('session:realpage'));
+    expect(sid).toBeTruthy();
+
+    // 以真实会话向 home server 镜像上抛一条真实 recall 审计（evidence_thin），作为可溯源真实条目
+    const posted = await page.evaluate(async ({ port, sessionId }) => {
+      const r = await fetch(`http://localhost:${port}/api/mirror/audit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-session-id': sessionId },
+        body: JSON.stringify({ source: 'e2e', action: 'recall', request_id: 'e2e_real_1', payload: { query: 'e2e', evidence_thin: true } }),
+      });
+      return r.status;
+    }, { port: BACKEND_PORT, sessionId: sid as string });
+    expect(posted).toBe(200);
+
+    // 重新进入应用（会话仍在）→ 触发真实 feed 聚合（含 mirror 兜底源）→ 异常区出现该 request_id 的 .rid
+    await page.goto(APP);
     await expect(page.locator('#hiAuth')).toContainText('e2e_user');
 
     // 点击异常区的 .rid → 弹审计 modal（显示真实 request_id）
