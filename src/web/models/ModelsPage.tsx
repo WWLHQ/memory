@@ -204,12 +204,16 @@ export function ModelsPage() {
   }
 
   return (
-    <div className="wrap" data-testid="models-page">
-      <h1>🧬 大模型配置页 <span className="badge p2">REQ-009 · P13</span></h1>
-      <div className="sub">向量模型 + LLM 四用途 + 反代理映射 · 配置落盘 localStorage（API Key 仅内存，R2）· 模拟为 dry-run · fallback_local 恒开（R3）</div>
+    <div className="p0-page" data-testid="models-page">
+      <div className="p0-hd">
+        <h2>🧬 模型与成本</h2>
+        <span className="p0-tag">REQ-009 · P13</span>
+        <span className="p0-tag info">cap 与内核路由同源</span>
+      </div>
+      <div className="sub">向量模型 + LLM 四用途（计费）+ 反代理映射（引擎）· 配置落盘 localStorage（API Key 仅内存，R2）· 模拟为 dry-run · fallback_local 恒开（R3）</div>
 
       {usageErrors.length > 0 && (
-        <div className="card" data-testid="usage-errors" style={{ borderColor: 'var(--danger,#ff5d5d)' }}>
+        <div className="p0-banner err" data-testid="usage-errors">
           ⚠ 校验未过：
           <ul style={{ margin: '6px 0 0', paddingLeft: 20 }}>
             {usageErrors.map((e) => <li key={e}>{e}</li>)}
@@ -217,71 +221,112 @@ export function ModelsPage() {
         </div>
       )}
 
-      <VectorCard
-        value={vectorKey}
-        onChange={setVectorKey}
-        count={vectorCount}
-        onToast={show}
-        onProbe={(apiKey) => coreVectorProbe(vectorKey, apiKey)}
-        saving={saving}
-      />
-      <LlmUsageTable usages={usages} onChange={patchUsage} />
-      <ProxyPanel
-        state={gatewayState}
-        sources={sources}
-        selected={selected}
-        selectMode={selectMode}
-        priceCap={priceCap}
-        costCap={costCap}
-        onToggleSource={(a) => setSelected((s) => (s.includes(a) ? s.filter((x) => x !== a) : [...s, a]))}
-        onSelectMode={setSelectMode}
-        onPriceCap={handlePriceCap}
-        onCostCap={handleCostCap}
-        onSimulate={handleSimulate}
-      />
-      <BillingPanel
-        views={billingViews}
-        ttlMs={billingTtl}
-        fetchedAt={billingAt}
-        loading={billingLoading}
-        error={billingError}
-        hostAvailable={hostLlmAvailable()}
-        onRefresh={() => { void loadBilling(true); }}
-        onSaveManual={(id, patch) => { void saveManualBilling(id, patch); }}
-        onSetKey={(id, value) => { void setBillingKey(id, value); }}
-      />
-
-      <div className="card models-audit" data-testid="audit-echo">
-        <b>审计回显（R10 / 4.3）</b>
-        <div className="note">保存 model_config 写 param_save 审计；真实代理调用写 llm_proxy/llm_fallback；「模拟」为 dry-run，不写账本。回显按账本真实事件类型，配置保存不冒充代理调用。</div>
-        {auditLog.length === 0 && <div className="dim" style={{ padding: '6px 0' }}>暂无本会话审计条目</div>}
-        {auditLog.map((e, i) => (
-          <div className="aentry" key={`${e.at}-${i}`} data-testid={`audit-entry-${i}`}>
-            {e.event === 'model_config' ? (
-              <>
-                <span className="aev">model_config</span>
-                <span className="adim">vector={e.vector ?? '未记录'}{e.dims === null ? '' : `（${e.dims} 维）`}</span>
-                <span className="adim">重嵌入 {e.reembedded ?? '未记录'} 条</span>
-                <span className="adim">{e.persisted === null ? '持久化：未记录' : e.persisted ? '已持久化' : '仅本次运行'}</span>
-              </>
-            ) : (
-              <>
-                <span className="aev">{e.llm_proxy_source === 'agent:local' ? 'local 回退' : 'llm_proxy'}</span>
-                <span className="adim">llm_proxy_source={e.llm_proxy_source}</span>
-                <span className="adim">cost={e.cost === null ? '未记录（usage/单价未设置）' : `¥${e.cost.toFixed(4)}（usage × 单价推算，非厂商账单）`}</span>
-                <span className="adim">mode={e.mode}</span>
-              </>
-            )}
+      <div className="p0-sec" data-testid="models-sec-engine">
+        <div className="p0-sec-hd">
+          <h3>一、引擎</h3>
+          <span className="p0-tag">向量模型 · 宿主网关真实引擎</span>
+        </div>
+        <VectorCard
+          value={vectorKey}
+          onChange={setVectorKey}
+          count={vectorCount}
+          onToast={show}
+          onProbe={(apiKey) => coreVectorProbe(vectorKey, apiKey)}
+          saving={saving}
+        />
+        <div className="card" data-testid="engine-summary">
+          <b>引擎概览（宿主网关真实快照）</b>
+          <div className="note">
+            引擎清单（名称/模型/单价/今日已用）在第三段「反向代理 · 来源映射」逐行呈现，避免同一组引擎在两段重复；
+            此处只给网关口径的汇总，全部来自真实快照与账本，未接入即空态。
           </div>
-        ))}
+          <div className="row" style={{ gap: 22, marginTop: 8 }}>
+            <span data-testid="engine-gateway-state">
+              网关：<b>{gatewayState === 'configured' ? '已配置可用' : gatewayState === 'degraded' ? '配置存在但不可用' : '未接入 / 未配置'}</b>
+            </span>
+            <span data-testid="engine-count">
+              可用引擎：<b>{sources.length}</b> 个
+            </span>
+            <span>
+              选择模式：<b>{selectMode === 'auto' ? 'auto 择优' : 'manual 手选'}</b>
+            </span>
+            <span>
+              成本上限：<b>{costCap === null ? '未设置' : `¥${costCap}`}</b> / 日
+            </span>
+          </div>
+        </div>
       </div>
 
-      <div className="card">
-        <b>保存</b>
-        <div className="row" style={{ marginTop: 8, alignItems: 'center', gap: 14 }}>
-          <button className="btn" data-testid="save-config" onClick={handleSave}>保存 model_config</button>
-          <span className="dim">price_cap 校验：{priceCap === null ? '未设置' : capCheck.ok ? '通过' : capCheck.msg}</span>
+      <div className="p0-sec" data-testid="models-sec-billing">
+        <div className="p0-sec-hd">
+          <h3>二、计费</h3>
+          <span className="p0-tag">四用途 · 余额 provenance · 手工单价/配额</span>
         </div>
+        <LlmUsageTable usages={usages} onChange={patchUsage} />
+        <BillingPanel
+          views={billingViews}
+          ttlMs={billingTtl}
+          fetchedAt={billingAt}
+          loading={billingLoading}
+          error={billingError}
+          hostAvailable={hostLlmAvailable()}
+          onRefresh={() => { void loadBilling(true); }}
+          onSaveManual={(id, patch) => { void saveManualBilling(id, patch); }}
+          onSetKey={(id, value) => { void setBillingKey(id, value); }}
+        />
+
+        <div className="card models-audit" data-testid="audit-echo">
+          <b>审计回显（R10 / 4.3）</b>
+          <div className="note">保存 model_config 写 param_save 审计；真实代理调用写 llm_proxy/llm_fallback；「模拟」为 dry-run，不写账本。回显按账本真实事件类型，配置保存不冒充代理调用。</div>
+          {auditLog.length === 0 && <div className="dim" style={{ padding: '6px 0' }}>暂无本会话审计条目</div>}
+          {auditLog.map((e, i) => (
+            <div className="aentry" key={`${e.at}-${i}`} data-testid={`audit-entry-${i}`}>
+              {e.event === 'model_config' ? (
+                <>
+                  <span className="aev">model_config</span>
+                  <span className="adim">vector={e.vector ?? '未记录'}{e.dims === null ? '' : `（${e.dims} 维）`}</span>
+                  <span className="adim">重嵌入 {e.reembedded ?? '未记录'} 条</span>
+                  <span className="adim">{e.persisted === null ? '持久化：未记录' : e.persisted ? '已持久化' : '仅本次运行'}</span>
+                </>
+              ) : (
+                <>
+                  <span className="aev">{e.llm_proxy_source === 'agent:local' ? 'local 回退' : 'llm_proxy'}</span>
+                  <span className="adim">llm_proxy_source={e.llm_proxy_source}</span>
+                  <span className="adim">cost={e.cost === null ? '未记录（usage/单价未设置）' : `¥${e.cost.toFixed(4)}（usage × 单价推算，非厂商账单）`}</span>
+                  <span className="adim">mode={e.mode}</span>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <div className="card">
+          <b>保存</b>
+          <div className="row" style={{ marginTop: 8, alignItems: 'center', gap: 14 }}>
+            <button className="btn" data-testid="save-config" onClick={handleSave}>保存 model_config</button>
+            <span className="dim">price_cap 校验：{priceCap === null ? '未设置' : capCheck.ok ? '通过' : capCheck.msg}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="p0-sec" data-testid="models-sec-proxy">
+        <div className="p0-sec-hd">
+          <h3>三、反向代理</h3>
+          <span className="p0-tag">来源映射 · price_cap / cost_cap（与内核路由同源）</span>
+        </div>
+        <ProxyPanel
+          state={gatewayState}
+          sources={sources}
+          selected={selected}
+          selectMode={selectMode}
+          priceCap={priceCap}
+          costCap={costCap}
+          onToggleSource={(a) => setSelected((s) => (s.includes(a) ? s.filter((x) => x !== a) : [...s, a]))}
+          onSelectMode={setSelectMode}
+          onPriceCap={handlePriceCap}
+          onCostCap={handleCostCap}
+          onSimulate={handleSimulate}
+        />
       </div>
       {toast}
     </div>

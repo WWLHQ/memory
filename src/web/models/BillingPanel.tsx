@@ -186,7 +186,7 @@ export function BillingPanel(p: Props) {
                 <td data-testid={`billing-balance-${v.id}`}>
                   <div>{billingAmountText(v.balance, v.currency)}</div>
                   <div className="dim" data-testid={`billing-prov-${v.id}`} style={{ fontSize: 12 }}>
-                    {billingProvenanceText({ provenance: v.provenance, asOf: v.asOf, scope: v.scope }, p.fetchedAt ?? Date.now())}
+                    {billingProvenanceText({ provenance: v.provenance, asOf: v.asOf, scope: v.scope })}
                   </div>
                   {v.lastError && (
                     <div className="dim" data-testid={`billing-reason-${v.id}`} style={{ fontSize: 12 }}>
