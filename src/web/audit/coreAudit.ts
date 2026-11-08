@@ -18,7 +18,7 @@ function getCtx(): AuditCtx {
 /**
  * 内核 AuditRecord → 页面 AuditEntry 映射。
  * 真实内核审计字段有限（无 ip_address/device_info/enterprise_id 细粒度来源），
- * 取不到时统一填'—'，不伪造。resource_id 取 detail.mem_id / detail.resource_id / detail.id。
+ * 取不到时统一写「无 / 未取数 / 账本无链路」这类原因文案，不伪造；resource_id 取 detail.mem_id / detail.resource_id / detail.id。
  */
 function toAuditEntry(a: AuditRecord): AuditEntry {
   const d = a.detail as Record<string, unknown>;
