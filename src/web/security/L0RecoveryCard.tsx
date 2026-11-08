@@ -151,7 +151,7 @@ export function L0RecoveryCard({ enabled }: { enabled: boolean }) {
         <>
           <div className="note" data-testid="l0-recovery-status">
             {hasCard
-              ? <>已生成恢复卡 · 库指纹 <code data-testid="l0-recovery-fingerprint">{status?.fingerprint || '账本无链路'}</code>
+              ? <>已生成恢复卡 · 库指纹 <code data-testid="l0-recovery-fingerprint">{status?.fingerprint || '未取数'}</code>
                 · 生成时间 {fmt8(status?.created_at ?? 0)}（UTC+08:00）</>
               : <span data-testid="l0-recovery-no-card">本机还没有 L0 恢复码：忘记管理密码将无法找回原数据库。</span>}
           </div>

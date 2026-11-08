@@ -125,7 +125,7 @@ export function RulesRejudgeCard({ enabled }: { enabled: boolean }) {
               <ul style={{ margin: '4px 0 0 18px', padding: 0 }}>
                 {preview.sample.slice(0, 8).map((s: RejudgeDecision) => (
                   <li key={s.mem_id} className="dim">
-                    <code>{s.mem_id}</code> [{s.code ?? '账本无链路'} · {s.layer} · 行戳 v{s.row_gate_v}
+                    <code>{s.mem_id}</code> [{s.code ?? '无'} · {s.layer} · 行戳 v{s.row_gate_v}
                     {s.protected ? ' · 受保护' : ''}] {clip(s.reason ?? '')}
                   </li>
                 ))}

@@ -138,7 +138,7 @@ export function WriteReceiptTable({
                   <td>{r.result}</td>
                   <td className="mono">{r.dedup}</td>
                   <td className="num">{r.sim === null ? '未取数' : r.sim.toFixed(2)}</td>
-                  <td className="mono">{r.memory_id ?? '账本无链路'}</td>
+                  <td className="mono">{r.memory_id ?? '未写入'}</td>
                   <td className="mono">{r.layers}</td>
                   <td>{r.source}</td>
                 </tr>
