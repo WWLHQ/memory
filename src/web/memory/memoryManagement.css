@@ -381,6 +381,21 @@ table.lay-matrix thead th {
   text-align: left;
   white-space: nowrap;
 }
+table.lay-matrix thead tr.lay-groups th {
+  height: 20px;
+  background: #eef2f7;
+  border-bottom: 1px solid #cfd7e0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-align: center;
+}
+html[data-theme="dark"] table.lay-matrix thead tr.lay-groups th {
+  background: #20262e;
+  border-bottom-color: #2a3038;
+  color: var(--muted);
+}
 table.lay-matrix thead th.num, table.lay-matrix td.num { text-align: right; }
 table.lay-matrix thead th.ra, table.lay-matrix td.ra { text-align: center; }
 table.lay-matrix td {

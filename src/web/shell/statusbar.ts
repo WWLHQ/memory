@@ -97,6 +97,9 @@ export function shortLocation(loc: StoragePlaceView): { text: string; title: str
     const name = loc.path.split(sep).filter(Boolean).slice(-1)[0] ?? loc.path;
     return { text: name, title: `账本文件：${loc.path}（${loc.source}）` };
   }
-  if (loc.kind === 'memory') return { text: '内存态', title: `无磁盘账本：${loc.source}` };
+  if (loc.kind === 'memory') {
+    if (loc.source === 'http-backend') return { text: '只读镜像', title: `经登录后端直读本机账本：${loc.path ?? ''}` };
+    return { text: '内存态', title: `无磁盘账本：${loc.source}` };
+  }
   return { text: '位置未知', title: `来源不可读：${loc.source}` };
 }

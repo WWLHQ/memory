@@ -6,6 +6,8 @@
 import type { Memory, MemOp as CoreOp, StorageBackend } from '../../core/memagent/types.ts';
 import type { MemAgent } from '../../core/memagent/types.ts';
 import { getKernel, getKernelStorage, newRequestId } from '../kernel.ts';
+import { currentSessionId } from '../shared/session.ts';
+import { homeBaseUrl } from '../backend.ts';
 import { policyFor } from '../../core/memagent/forgetting.ts';
 import { checkL0ToL1Quality, filteredAuditDetail, QUALITY_GATE_VERSION } from '../../core/memagent/qualityGate.ts';
 import { layerSpecOf, LAYER_SPECS } from '../../core/memagent/layerRules.ts';
@@ -122,7 +124,11 @@ export async function storageLocation(): Promise<{ kind: 'file' | 'memory' | 'un
       /* fallthrough to unknown */
     }
   }
-  // 浏览器内存态 / IPC 不可用：诚实标注，不伪造路径
+  // 浏览器内已登录：账本不在内存，而是经登录后端 /api/kernel/invoke 直读本机真实账本（桌面持锁时只读镜像）
+  if (cap === 'none' && currentSessionId()) {
+    return { kind: 'memory', path: `${homeBaseUrl()}/api/kernel/invoke`, source: 'http-backend' };
+  }
+  // 纯浏览器未登录：进程内空账本，诚实标注，不伪造路径
   if (cap === 'none') return { kind: 'memory', source: 'in-memory' };
   return { kind: 'unknown', source: 'ipc-unavailable' };
 }

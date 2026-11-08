@@ -604,7 +604,9 @@ function DetailPanel({
         <b>存储位置</b>
         <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--muted)', wordBreak: 'break-all' }} data-testid="store-location">
           {location?.kind === 'file' ? `本机账本 · ${location.path}` :
-           location?.kind === 'memory' ? '浏览器内存态（未落盘）' : '账本位置未知'}
+           location?.kind === 'memory' ? (location.source === 'http-backend'
+             ? `登录后端账本（只读镜像）· ${location.path ?? ''}`
+             : '浏览器内存态（未落盘）') : '账本位置未知'}
         </span>
         <b>访问 / 强化</b><span>{rec.access_count} / {rec.reinforce_count}</span>
         <b>合并谱系</b><span>{rec.merged_from ? `合并自 ${rec.merged_from.join(', ')}` : rec.merged_into ? `并入 ${rec.merged_into}` : '—'}</span>

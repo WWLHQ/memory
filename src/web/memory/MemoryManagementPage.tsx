@@ -109,7 +109,7 @@ function fmtWhen(value: string | null | undefined, withDate = true): string {
 
 function fmtImportance(v: number): string {
   const n = Math.round(v * 100) / 100;
-  return n === 0 ? '0' : String(n).replace(/^0/, '');
+  return n === 0 ? '0.00' : n.toFixed(2);
 }
 
 function statusView(m: MemoryRecord): { label: string; cls: string } {
@@ -528,7 +528,7 @@ export function MemoryManagementPage() {
     [conflictLoad.data, conflictId],
   );
 
-  useEffect(() => { setVerdictMode(null); setVerdictMsg(null); }, [conflictId]);
+  useEffect(() => { setVerdictMode(null); }, [conflictId]);
 
   async function runVerdict() {
     if (!selectedConflict || !verdictMode || verdictBusy) return;
@@ -549,12 +549,12 @@ export function MemoryManagementPage() {
         refreshError = kernelErrorText(e);
       }
       if (!out.ok) {
-        setVerdictMsg({ kind: 'err', text: `内核拒绝本次裁决：${out.reason ?? out.note}${requestId ? `（request_id ${requestId}）` : ''}` });
+        setVerdictMsg({ kind: 'err', text: `内核拒绝本次裁决（${mode}）：${out.reason ?? '内核未给出原因'}${requestId ? ` · request_id ${requestId}` : ''}` });
       } else if (out.resolved) {
-        setVerdictMsg({ kind: 'ok', text: `内核已落定：${out.note}${requestId ? ` · request_id ${requestId}` : ''}${refreshError ? ` · 队列重读失败：${refreshError}` : ''}` });
+        setVerdictMsg({ kind: 'ok', text: `内核已落定（${mode} → resolved:true，旧值已归档）${requestId ? ` · request_id ${requestId}` : ''}${refreshError ? ` · 队列重读失败：${refreshError}` : ''}` });
         setVerdictMode(null);
       } else {
-        setVerdictMsg({ kind: 'warn', text: `内核已记录裁决但未落定：${out.note}${requestId ? ` · request_id ${requestId}` : ''}${refreshError ? ` · 队列重读失败：${refreshError}` : ''}` });
+        setVerdictMsg({ kind: 'warn', text: `内核已记录 ${mode} 但未落定（内核保持待处理，不改记忆）${requestId ? ` · request_id ${requestId}` : ''}${refreshError ? ` · 队列重读失败：${refreshError}` : ''}` });
         setVerdictMode(null);
       }
     } catch (e: unknown) {
@@ -580,7 +580,9 @@ export function MemoryManagementPage() {
       : storage.data?.kind === 'file'
         ? `账本文件 ${storage.data.path ? storage.data.path.split(/[\\/]/).pop() : '（路径未返回）'}`
         : storage.data?.kind === 'memory'
-          ? '浏览器内存账本（无磁盘）'
+          ? (storage.data.source === 'http-backend'
+            ? `登录后端账本 ${storage.data.path ?? ''}（只读镜像）`
+            : '浏览器内存账本（无磁盘）')
           : '账本位置未知';
 
   const sessionText = session.loading ? '会话读取中' : session.role === 'admin' ? '管理员' : session.role === 'member' ? '普通成员' : '未登录';
@@ -688,7 +690,7 @@ export function MemoryManagementPage() {
                     <button type="button" className="mm-btn" onClick={() => { memories.retry(); layerPolicy.retry(); }}><Glyph name="refresh" />刷新快照</button>
                     <button type="button" className="mm-btn" onClick={() => goView('params', 'params.html')}>查看参数</button>
                     <button type="button" className="mm-btn" disabled title="本组只读：批量归档需在生命周期页逐条执行">批量归档</button>
-                    <button type="button" className="mm-btn primary" onClick={() => goTab('l0')}><Glyph name="unlock" />解锁 L0</button>
+                    <button type="button" className="mm-btn primary" onClick={() => goTab('l0')}><Glyph name="unlock" />解锁 L0（需授权）</button>
                   </div>
                 </div>
                 {layerPolicy.phase === 'loading' ? (
@@ -713,6 +715,14 @@ export function MemoryManagementPage() {
                       <col style={{ width: 58 }} />
                     </colgroup>
                     <thead>
+                      <tr className="lay-groups">
+                        <th />
+                        <th colSpan={2}>规模</th>
+                        <th colSpan={2}>策略</th>
+                        <th colSpan={2}>时效</th>
+                        <th>策略键</th>
+                        <th />
+                      </tr>
                       <tr>
                         <th>层级 / 名称</th>
                         <th className="num">条数</th>
@@ -1025,6 +1035,9 @@ export function MemoryManagementPage() {
                 <button type="button" className="mm-btn" onClick={conflictLoad.retry}><Glyph name="refresh" />重读队列</button>
               </span>
             </div>
+            {verdictMsg ? (
+              <div className={`p0-banner ${verdictMsg.kind}`} data-testid="mm-verdict-msg">{verdictMsg.text}</div>
+            ) : null}
             {conflictLoad.phase === 'loading' ? (
               <div className="p0-empty">正在读取冲突队列…</div>
             ) : conflictLoad.phase === 'error' ? (
@@ -1039,7 +1052,7 @@ export function MemoryManagementPage() {
                       key={c.id}
                       type="button"
                       className={`mm-conf-item ${conflictId === c.id ? 'sel' : ''}`}
-                      onClick={() => setConflictId(c.id)}
+                      onClick={() => { setConflictId(c.id); setVerdictMsg(null); }}
                     >
                       <span className="mm-conf-item-t">
                         <i className={`dot ${c.overdue_days >= 7 ? 'err' : c.overdue_days >= 2 ? 'warn' : 'neutral'}`} />
@@ -1116,9 +1129,6 @@ export function MemoryManagementPage() {
                             </button>
                             <span className="p0-note">动作只在点按后调用内核；不预置 request_id、不乐观置成功。user_confirm / hold 内核会记录但保持待处理。</span>
                           </div>
-                          {verdictMsg ? (
-                            <div className={`p0-banner ${verdictMsg.kind}`} data-testid="mm-verdict-msg">{verdictMsg.text}</div>
-                          ) : null}
                         </div>
                       </div>
                     </>
