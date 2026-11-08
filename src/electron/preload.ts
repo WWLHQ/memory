@@ -1,7 +1,7 @@
 // Electron preload：contextIsolation 开启下，经 contextBridge 向渲染进程暴露存储桥接面与运行标识。
 // channel 字符串一律取自 ipcChannels.ts（与主进程注册同一真源，避免声明了却没注册的死桥）。
 import { contextBridge, ipcRenderer } from 'electron';
-import { IPC } from './ipcChannels.ts';
+import { IPC, SHELL_SHORTCUT_CHANNEL, type ShellShortcut } from './ipcChannels.ts';
 import { SESSION_STORAGE_KEY } from '../shared/sessionKey.ts';
 import type { ActionLogTailResult } from '../shared/actionLog.ts';
 
@@ -287,5 +287,23 @@ const sync = {
     ipcRenderer.invoke(IPC.syncAuditsFrom, start, sessionId) as Promise<{ ok: boolean; audits?: unknown[]; error?: string }>,
 };
 
+/**
+ * 顶部自绘标题栏（批次48 S10）：把壳层当前主题同步给主进程的窗口按钮覆盖层。
+ * 只改系统绘制的三个按钮的底色/符号色；按钮行为（最小化/最大化/关闭）仍归系统。
+ */
+const shell = {
+  setTitleBarTheme: (theme: 'light' | 'dark') =>
+    ipcRenderer.invoke(IPC.shellTitleBarTheme, theme) as Promise<{ ok: boolean; error?: string }>,
+  /**
+   * 快捷键事件订阅（主进程 before-input-event 捕获后转发）。
+   * 返回取消订阅函数；壳层卸载时调用，避免重复注册。
+   */
+  onShortcut: (cb: (action: ShellShortcut) => void) => {
+    const listener = (_event: unknown, action: ShellShortcut) => cb(action);
+    ipcRenderer.on(SHELL_SHORTCUT_CHANNEL, listener);
+    return () => ipcRenderer.removeListener(SHELL_SHORTCUT_CHANNEL, listener);
+  },
+};
+
 contextBridge.exposeInMainWorld('__ELECTRON__', true);
-contextBridge.exposeInMainWorld('api', { storage, hostScan, hostAgentDetect, tenant, mcpClients, floatAttribution, collector, backup, dataRoot, log, l0, setup, legacy, ledgerReset, rulesRejudge, ledgerFields, refineQueue, sync, llm });
+contextBridge.exposeInMainWorld('api', { storage, hostScan, hostAgentDetect, tenant, mcpClients, floatAttribution, collector, backup, dataRoot, log, l0, setup, legacy, ledgerReset, rulesRejudge, ledgerFields, refineQueue, sync, llm, shell });

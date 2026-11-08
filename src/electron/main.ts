@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, powerMonitor, screen, session, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, nativeTheme, powerMonitor, screen, session, shell } from 'electron';
 process.on('uncaughtException', (err) => {
   console.error('[uncaught]', err?.message, err?.stack);
 });
@@ -20,7 +20,7 @@ import {
 } from './backupFiles.ts';
 import { validateAuditRecord as sharedValidateAuditRecord } from '../shared/auditShape.ts';
 import { scanHost } from './hostScan.ts';
-import { IPC, missingChannels, handleBootFailure } from './ipcChannels.ts';
+import { IPC, missingChannels, handleBootFailure, SHELL_SHORTCUT_CHANNEL, type ShellShortcut } from './ipcChannels.ts';
 import { createStorageReadWriteHandlers } from './storageIpc.ts';
 import { initActionLog, actionLog, actionLogError, tailActionLog } from './actionLog.ts';
 import type { TenantContext } from '../types/home.ts';
@@ -180,6 +180,14 @@ const MCP_HTTP_PORT = 8204;
 const WEBHOOK_PORT = 8203;
 /** 批次37-A：l0:blobs 单次回读上限（渲染层按 200 一批，留出余量；超限如实拒绝而不是静默截断） */
 const L0_BLOBS_MAX_IDS = 500;
+/**
+ * 批次48 S10：顶部只有一条自绘标题栏。
+ * titleBarStyle='hidden' 后系统不再画标题栏文字，只保留三个窗口按钮（最小化/最大化/关闭），
+ * 由 titleBarOverlay 覆盖在自绘标题栏右侧；高度必须与壳层 .ribbon-tabs 一致。
+ */
+const TITLEBAR_HEIGHT = 34;
+const TITLEBAR_LIGHT = { color: '#f6f7fa', symbolColor: '#1f2430' };
+const TITLEBAR_DARK = { color: '#1c2330', symbolColor: '#dde4f2' };
 
 // ── §2 数据根目录（批次6）───────────────────────────────────────────────────
 // 引导指针固定放在 %APPDATA%\MultiAgent Memory\data-root.json（不随 userData 漂移）；
@@ -2038,6 +2046,20 @@ function registerLogIpc(): void {
 }
 
 /**
+ * 顶部自绘标题栏（批次48 S10）：窗口按钮覆盖层跟随壳层主题换底色/符号色。
+ * 只接受 light|dark 两个值；按钮本身仍由系统绘制与响应，主进程不接管点击。
+ */
+function registerShellIpc(): void {
+  handleIpc(IPC.shellTitleBarTheme, (event, theme: unknown) => {
+    const w = BrowserWindow.fromWebContents(event.sender);
+    if (!w || w.isDestroyed()) return { ok: false, error: '找不到调用方窗口' };
+    const colors = theme === 'dark' ? TITLEBAR_DARK : TITLEBAR_LIGHT;
+    w.setTitleBarOverlay({ ...colors, height: TITLEBAR_HEIGHT });
+    return { ok: true };
+  });
+}
+
+/**
  * 批次26-B P1-2：数据面写通道会话闸门（删除/审计写/宿主真扫；读与 putMemory 保持开放）。
  * 拒绝时 throw（而非返回 {ok:false}）：调用方是内核 StorageBackend，约定以 Promise 拒绝表达失败，
  * 页面才能把「需要登录」如实透出，而不是把错误对象当成功吞掉。
@@ -2655,6 +2677,7 @@ async function bootstrap(): Promise<void> {
   void mlog('bootstrap:start');
   registerStorageIpc();
   registerLogIpc();
+  registerShellIpc();
   registerBackupIpc();
   registerDataRootIpc();
   void mlog('backup:scheduler-ready');
@@ -3676,12 +3699,23 @@ async function bootstrap(): Promise<void> {
   const missing = missingChannels(registeredIpcChannels);
   if (missing.length > 0) throw new Error(`IPC 注册缺失: ${missing.join(', ')}`);
 
+  // 首启向导页尚未纳入自绘标题栏（它自己就是独立页面，本轮不改它），因此只在工作台窗口上去掉系统标题栏。
+  const wizardFirst = isWizardIncomplete();
+  // 批次48 S10：顶部只有壳层自绘的一条标题栏；系统只保留三个窗口按钮覆盖在右侧
+  const shellChrome = {
+    titleBarStyle: 'hidden' as const,
+    titleBarOverlay: {
+      ...(nativeTheme.shouldUseDarkColors ? TITLEBAR_DARK : TITLEBAR_LIGHT),
+      height: TITLEBAR_HEIGHT,
+    },
+  };
   let win: BrowserWindow | null = null;
   try {
     win = new BrowserWindow({
       width: 1280,
       height: 860,
       title: '多Agent记忆助手',
+      ...(wizardFirst ? {} : shellChrome),
       webPreferences: {
         preload: join(__dirname, 'preload.cjs'),
         contextIsolation: true,
@@ -3725,10 +3759,26 @@ async function bootstrap(): Promise<void> {
     return { action: 'deny' };
   });
 
+  // 顶部默认菜单删除后：应用内快捷键由主进程统一捕获，再交给壳层渲染层执行动作。
+  // 这样焦点落在中心区 iframe 页面里时，F5/F9/F1/Ctrl+F/Ctrl+K 也不会因壳层收不到 keydown 而失效。
+  // 复制/粘贴/全选不在此拦截，仍由 Chromium 原生编辑命令处理。
+  win.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || input.alt || input.shift) return;
+    const key = input.key.toLowerCase();
+    let action: ShellShortcut | null = null;
+    if (key === 'f5') action = 'refresh';
+    else if (key === 'f9') action = 'security';
+    else if (key === 'f1') action = 'help';
+    else if ((input.control || input.meta) && (key === 'f' || key === 'k')) action = 'search';
+    if (!action) return;
+    event.preventDefault();
+    win?.webContents.send(SHELL_SHORTCUT_CHANNEL, action);
+  });
+
   // 显式传端口：?backend= 供 mirrorClient 走 home server，?agentBackend= 供 useBackendMirror 走 agentOnboard server
   // 批次37-B：首启向导没走完（两库位置 / L0 管理密码 / 恢复卡导出）就先进 setup.html。
   // 门禁判据在主进程（指针里的 setupDone），页面只是载体——绕过页面也进不了数据面，各条 IPC 各有闸门。
-  const wizardFirst = isWizardIncomplete();
+  // （wizardFirst 在创建窗口前已算好：决定是否启用自绘标题栏。）
   actionLog('dataRoot', wizardFirst ? 'setup:wizard-open' : 'setup:wizard-skipped', {
     ledgerDir: LIB_PATHS.ledgerDir, l0Dir: LIB_PATHS.l0Dir,
   });
@@ -3826,6 +3876,10 @@ if (app && gotSingleInstanceLock) {
 if (app?.whenReady && gotSingleInstanceLock) {
   // 单点失败出口：日志 + 弹窗 + 退出（旧实现双 catch 串联，第二层永远不可达 → 无窗口僵尸进程）
   app.whenReady().then(async () => {
+    // 批次48 S10：删除 Electron 默认应用菜单（File/Edit/View/Window 那条）。
+    // 不再自建中文菜单顶替：顶部只保留壳层自绘的一条标题栏与 Ribbon。
+    // 复制/粘贴/全选仍由 Chromium 原生编辑命令处理；F5/Ctrl+F/Ctrl+K/F1/F9 由壳层渲染层接管。
+    Menu.setApplicationMenu(null);
     // 锁屏/休眠立即清空 L0 查阅会话与写密钥并作废 active grants（§4.4.3；两者互不替代 §4.4.4）
     powerMonitor.on('lock-screen', () => { void l0VaultRef?.onSecurityLock('screen_lock').catch(() => undefined); });
     powerMonitor.on('suspend', () => { void l0VaultRef?.onSecurityLock('suspend').catch(() => undefined); });

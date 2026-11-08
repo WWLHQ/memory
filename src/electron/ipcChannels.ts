@@ -140,7 +140,20 @@ export const IPC = {
   syncCursor: 'sync:cursor',
   syncAuditCount: 'sync:auditCount',
   syncAuditsFrom: 'sync:auditsFrom',
+  /**
+   * 顶部自绘标题栏（批次48 S10）：把壳层当前主题同步给主进程的窗口按钮覆盖层。
+   * 只改系统绘制的三个窗口按钮的底色/符号色，不接管按钮行为（最小化/最大化/关闭仍由系统完成）。
+   */
+  shellTitleBarTheme: 'shell:titleBarTheme',
 } as const;
+
+/**
+ * 主进程 → 壳层的快捷键事件通道（批次48 S10）。
+ * 默认应用菜单删除后，快捷键可能在焦点位于 iframe 页面时按下，壳层 window 收不到 keydown；
+ * 因此由主进程 before-input-event 统一捕获，再交给壳层渲染层执行动作。
+ */
+export const SHELL_SHORTCUT_CHANNEL = 'shell:shortcut';
+export type ShellShortcut = 'refresh' | 'search' | 'help' | 'security';
 
 /** preload 实际暴露的全部 channel（自检基线） */
 export const PRELOAD_CHANNELS: readonly string[] = Object.values(IPC);

@@ -88,14 +88,67 @@ button:disabled { cursor: not-allowed; }
   user-select: none;
 }
 
+/* ── 顶部唯一标题栏（批次48 S10）：应用名/当前库与文档/标签条/查找/折叠同处一行 ── */
 .ribbon-tabs {
   display: flex;
   align-items: stretch;
-  height: 30px;
-  padding: 0 6px;
+  height: 34px;
+  padding: 0;
   gap: 2px;
   border-bottom: 1px solid var(--line2);
 }
+
+.tb-left {
+  flex: 0 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 10px 0 12px;
+}
+.app-mark {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  background: #0f6cbd;
+  color: #fff;
+}
+.app-name {
+  flex: none;
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.2px;
+  color: var(--tx);
+  white-space: nowrap;
+}
+.tb-sep { flex: none; width: 1px; height: 14px; margin: 0 2px; background: var(--line); }
+.tb-doc {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 260px;
+  font-size: 12px;
+  color: var(--tx2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tb-tag {
+  flex: none;
+  font-size: 10px;
+  line-height: 16px;
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  white-space: nowrap;
+}
+.tb-tag.ro { color: var(--amber); background: transparent; }
+
+.rib-tabs { flex: none; display: flex; align-items: stretch; gap: 2px; }
 
 .rib-tab {
   padding: 0 11px;
@@ -117,9 +170,10 @@ button:disabled { cursor: not-allowed; }
 .rib-search {
   display: inline-flex;
   align-items: center;
+  align-self: center;
   gap: 5px;
-  height: 22px;
-  margin: 4px 4px 0 0;
+  height: 24px;
+  margin: 0 4px 0 0;
   padding: 0 7px;
   border: 1px solid var(--line);
   border-radius: var(--r);
@@ -138,12 +192,43 @@ button:disabled { cursor: not-allowed; }
 .rib-fold {
   display: inline-flex;
   align-items: center;
+  align-self: center;
+  height: 24px;
   padding: 0 7px;
-  margin-top: 4px;
   border-radius: var(--r);
   color: var(--mu);
 }
 .rib-fold:hover { background: var(--panel2); color: var(--tx); }
+
+/* Electron：整条标题栏是窗口拖拽区；交互控件必须 no-drag 才能点击/输入。
+   右侧给系统三个窗口按钮留位（146px 按 100% 计，随壳层 zoom 换算成实际像素）。 */
+.shell.electron .ribbon-tabs {
+  -webkit-app-region: drag;
+  padding-right: calc(146px / var(--shell-zoom, 1));
+}
+.shell.electron .rib-tab,
+.shell.electron .rib-search,
+.shell.electron .rib-search input,
+.shell.electron .rib-fold {
+  -webkit-app-region: no-drag;
+}
+
+/* 窄窗口：保证标签条与查找框互不挤压（1280 / 1024 均验证） */
+@media (max-width: 1240px) {
+  .tb-doc { max-width: 160px; }
+  .rib-tab { padding: 0 9px; }
+  .rib-search input { width: 120px; }
+}
+@media (max-width: 1120px) {
+  .tb-doc, .tb-sep { display: none; }
+  .rib-tab { padding: 0 7px; }
+  .rib-search input { width: 96px; }
+}
+@media (max-width: 980px) {
+  .app-name { display: none; }
+  .tb-tag { display: none; }
+  .rib-search input { width: 74px; }
+}
 
 .ribbon-body {
   display: flex;

@@ -29,6 +29,17 @@ const STORE_THEME = 'memdesk.shell.theme.v1';
 const STORE_DENSITY = 'memdesk.shell.density.v1';
 const STORE_ZOOM = 'memdesk.shell.zoom.v1';
 
+/** Electron 壳（preload 暴露 __ELECTRON__）：只有桌面端才需要为系统窗口按钮预留右上角、才走拖拽区 */
+const IS_ELECTRON = typeof window !== 'undefined' && Boolean((window as unknown as { __ELECTRON__?: boolean }).__ELECTRON__);
+/** 窗口按钮覆盖层主题同步通道（浏览器模式无此桥） */
+interface ShellWindowBridge {
+  setTitleBarTheme?: (theme: 'light' | 'dark') => Promise<{ ok: boolean }>;
+  onShortcut?: (cb: (action: 'refresh' | 'search' | 'help' | 'security') => void) => () => void;
+}
+function shellWindowBridge(): ShellWindowBridge | undefined {
+  return (window as unknown as { api?: { shell?: ShellWindowBridge } }).api?.shell;
+}
+
 type ThemeMode = 'system' | 'light' | 'dark';
 type Density = 'comfortable' | 'compact';
 
@@ -155,6 +166,8 @@ export function Workspace() {
   const pendingBusyRef = useRef(false);
   const frameRefs = useRef<Record<string, HTMLIFrameElement | null>>({});
   const activePageRef = useRef<PageKey | undefined>(undefined);
+  /** 顶部自绘标题栏里的查找框（Ctrl+F / Ctrl+K / Ribbon「在库中查找」共用同一个焦点目标） */
+  const navSearchRef = useRef<HTMLInputElement | null>(null);
 
   const refreshOverview = useCallback(() => {
     setOverviewBusy(true);
@@ -250,6 +263,12 @@ export function Workspace() {
   useEffect(() => {
     if (typeof document === 'undefined') return;
     document.documentElement.setAttribute('data-theme', resolvedTheme);
+  }, [resolvedTheme]);
+
+  // 顶部自绘标题栏：系统绘制的窗口按钮覆盖层跟随壳层主题换底色/符号色（桌面端专用）
+  useEffect(() => {
+    if (!IS_ELECTRON) return;
+    void shellWindowBridge()?.setTitleBarTheme?.(resolvedTheme);
   }, [resolvedTheme]);
 
   // 系统主题跟随
@@ -377,7 +396,10 @@ export function Workspace() {
         setMessage('已刷新中心区真实页面与底部面板/状态栏读数。');
         break;
       case 'focusFilter':
-        setMessage(`「${label}」请在页面内使用各自的筛选框；壳层未提供跨页搜索，不会伪造查找结果。`);
+        // 顶部自绘标题栏的查找框只过滤左侧功能导航；它不跨页检索记忆，因此不产出任何伪造结果。
+        navSearchRef.current?.focus();
+        navSearchRef.current?.select();
+        setMessage(`已聚焦顶部查找框（${label}）：按名称过滤左侧功能导航。`);
         break;
       default:
         break;
@@ -401,6 +423,40 @@ export function Workspace() {
     }
     if (item.action) runShellAction(item.action, item.label);
   }, [openView, runShellAction]);
+
+  // 顶部默认应用菜单已删除：快捷键动作由壳层执行（复制/粘贴/全选仍走 Chromium 原生编辑命令）。
+  // 桌面端按键由主进程 before-input-event 捕获后发来（焦点在中心区 iframe 里也能生效）；
+  // 浏览器模式没有这道桥，则由壳层自己监听 keydown。两条路径互斥，避免同一按键执行两次。
+  const runShellShortcut = useCallback((action: 'refresh' | 'search' | 'help' | 'security') => {
+    if (action === 'refresh') { runShellAction('refresh', '刷新'); return; }
+    if (action === 'search') { navSearchRef.current?.focus(); navSearchRef.current?.select(); return; }
+    if (action === 'security') {
+      const sec = NAV.find((n): n is NavItem => n.kind === 'item' && n.id === 'security');
+      if (sec) openView(sec);
+      return;
+    }
+    setMessage('快捷键：F5 刷新 · F9 打开「安全与账号」· Ctrl+F / Ctrl+K 聚焦顶部查找框 · F1 本说明；复制/粘贴/全选由系统编辑命令处理。');
+  }, [openView, runShellAction, setMessage]);
+
+  useEffect(() => {
+    const off = shellWindowBridge()?.onShortcut?.(runShellShortcut);
+    return () => { off?.(); };
+  }, [runShellShortcut]);
+
+  useEffect(() => {
+    if (IS_ELECTRON || typeof window === 'undefined') return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.altKey || e.shiftKey) return;
+      const mod = e.ctrlKey || e.metaKey;
+      const key = e.key.toLowerCase();
+      if (key === 'f5') { e.preventDefault(); runShellShortcut('refresh'); return; }
+      if (key === 'f9') { e.preventDefault(); runShellShortcut('security'); return; }
+      if (key === 'f1') { e.preventDefault(); runShellShortcut('help'); return; }
+      if (mod && (key === 'f' || key === 'k')) { e.preventDefault(); runShellShortcut('search'); }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [runShellShortcut]);
 
   const navEntries = useMemo(() => filterEntries(NAV, navQuery.trim().toLowerCase()), [navQuery]);
 
@@ -438,9 +494,13 @@ export function Workspace() {
       ? `L0 保险库：活动会话 ${l0.view.active_sessions} · 有效授权 ${l0.view.active_grants} · 管理密钥${l0.view.has_admin_wrap ? '已设置' : '未设置'} · 写入锁${l0.view.write_unlocked ? '已解锁' : '锁定'}（只读，不含任何密钥材料）`
       : l0 ? l0.detail : '尚未读取';
 
+  // 顶部唯一标题栏的「当前库/文档」：库 = 真实账本文件（storage:location），文档 = 当前视图标签。
+  const docLabel = `${locView ? locView.text : (status ? '库位置未知' : '库读取中')} · ${active?.label ?? '未选择'}`;
+  const docTitle = `当前库：${locText}（${locTitle}） · 当前视图：${active?.label ?? '未选择'}`;
+
   return (
     <div
-      className="shell"
+      className={`shell${IS_ELECTRON ? ' electron' : ''}`}
       style={{
         '--nav-w': `${navCollapsed ? 0 : navWidth}px`,
         '--insp-w': `${inspCollapsed ? 0 : inspWidth}px`,
@@ -449,20 +509,37 @@ export function Workspace() {
       } as CSSProperties}
     >
       <div className="ribbon">
-        <div className="ribbon-tabs">
-          {RIBBON.map((tab) => (
-            <button
-              key={tab.id}
-              className={`rib-tab${tab.id === activeRibbon.id ? ' active' : ''}`}
-              onClick={() => setRibbonTab(tab.id)}
-              onDoubleClick={() => setRibbonFolded((v) => !v)}
-              type="button"
-            >{tab.label}</button>
-          ))}
+        {/* 顶部唯一一条自绘标题栏：应用名 / 当前库与文档 / Ribbon 标签 / 查找 / 功能区折叠。
+            右侧为系统窗口按钮（最小化/最大化/关闭）覆盖层，桌面端在 CSS 里预留宽度。 */}
+        <div className="ribbon-tabs" data-testid="shell-titlebar">
+          <div className="tb-left">
+            <span className="app-mark"><Icon name="layers" size={11} /></span>
+            <span className="app-name">MemoryDesk 记忆工作台</span>
+            <span className="tb-sep" />
+            <span className="tb-doc" title={docTitle}>{docLabel}</span>
+            <span
+              className={`tb-tag${sessionActive ? ' ok' : ' ro'}`}
+              title={sessionActive
+                ? '本机会话标记存在（localStorage）；只表示是否登录，不代表数据面权限'
+                : '未登录：数据面写操作会被主进程拒绝，界面按只读展示'}
+            >{sessionActive ? '已登录' : '只读会话'}</span>
+          </div>
+          <div className="rib-tabs">
+            {RIBBON.map((tab) => (
+              <button
+                key={tab.id}
+                className={`rib-tab${tab.id === activeRibbon.id ? ' active' : ''}`}
+                onClick={() => setRibbonTab(tab.id)}
+                onDoubleClick={() => setRibbonFolded((v) => !v)}
+                type="button"
+              >{tab.label}</button>
+            ))}
+          </div>
           <span className="rib-spring" />
-          <label className="rib-search" title="按名称过滤左侧功能导航">
+          <label className="rib-search" title="按名称过滤左侧功能导航（Ctrl+F / Ctrl+K）">
             <Icon name="search" size={11} />
             <input
+              ref={navSearchRef}
               value={navQuery}
               onChange={(e) => setNavQuery(e.target.value)}
               placeholder="查找功能（左侧导航）"
