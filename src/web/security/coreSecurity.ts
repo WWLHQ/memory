@@ -37,6 +37,26 @@ export async function coreLoadSecurityAudit(): Promise<{ request_id: string; op:
   }));
 }
 
+export interface L0AuditRow {
+  request_id: string;
+  action: string;
+  op: string;
+  ts: number;
+}
+
+/** L0 审计（真实内核账本）：l0_* 动作 + security_change 中 op 以 l0 开头的记录；最多 limit 条 */
+export async function coreLoadL0Audit(limit = 30): Promise<L0AuditRow[]> {
+  const { storage } = await getCtx();
+  const rows = (await storage.queryAudit({})).filter((a) => {
+    if (String(a.action).startsWith('l0')) return true;
+    return a.action === 'security_change' && String((a.detail as { op?: string })?.op ?? '').startsWith('l0');
+  });
+  return rows.slice(-limit).reverse().map((a) => ({
+    request_id: a.request_id, action: String(a.action),
+    op: String((a.detail as { op?: string })?.op ?? ''), ts: a.ts,
+  }));
+}
+
 // ─── L0 密钥环管理（§4.4；主进程 IPC 再做管理员校验，页面只做只读展示与禁用） ───
 
 export async function coreL0Status(): Promise<L0VaultStatus> {

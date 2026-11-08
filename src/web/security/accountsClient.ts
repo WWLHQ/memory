@@ -159,6 +159,43 @@ export async function revokeApiKey(keyId: string): Promise<ApiResult<{ record: A
   }
 }
 
+/** mirror 审计账本链式签名校验结果（GET /api/mirror/audit 的 integrity 字段，真实服务端计算） */
+export interface MirrorIntegrityView {
+  ok: boolean;
+  sealed: number;
+  legacy_unsealed: number;
+  reason?: string;
+  algorithm?: string;
+  total?: number;
+  error?: string;
+}
+
+export async function fetchMirrorIntegrity(): Promise<MirrorIntegrityView> {
+  const headers = sessionHeaders();
+  if (!headers) return { ok: false, sealed: 0, legacy_unsealed: 0, error: '未登录' };
+  try {
+    const res = await fetch(`${homeBaseUrl()}/api/mirror/audit?limit=1`, { headers });
+    const body = (await res.json().catch(() => ({}))) as {
+      total?: number;
+      integrity?: { ok?: boolean; sealed?: number; legacy_unsealed?: number; reason?: string; algorithm?: string };
+      error?: string;
+    };
+    if (!res.ok) return { ok: false, sealed: 0, legacy_unsealed: 0, error: failReason(res, body) };
+    const it = body.integrity;
+    if (!it) return { ok: false, sealed: 0, legacy_unsealed: 0, error: '服务端返回缺少 integrity' };
+    return {
+      ok: it.ok === true,
+      sealed: it.sealed ?? 0,
+      legacy_unsealed: it.legacy_unsealed ?? 0,
+      ...(it.reason ? { reason: it.reason } : {}),
+      ...(it.algorithm ? { algorithm: it.algorithm } : {}),
+      ...(typeof body.total === 'number' ? { total: body.total } : {}),
+    };
+  } catch {
+    return { ok: false, sealed: 0, legacy_unsealed: 0, error: '登录后端不可达' };
+  }
+}
+
 /** 读取已持久化的密码策略（任意登录会话；后端 home-policy.json） */
 export async function fetchPwdPolicy(): Promise<ApiResult<{ policy: PwdPolicy }>> {
   const headers = sessionHeaders();
