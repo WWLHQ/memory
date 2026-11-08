@@ -25,8 +25,8 @@ describe('FeedbackPage (P9-T4 编排)', () => {
     expect(screen.getByTestId('stat-cards')).toBeInTheDocument();
     expect(getTenant().user_id).toBe('user_001');
     expect(screen.getByTestId('ctx-user')).toHaveTextContent('user_001');
-    // rating 默认 3
-    expect(screen.getByText('3/5')).toBeInTheDocument();
+    // 评分默认未选（0 = 未评分），不再替用户预填 3 星
+    expect(screen.getByTestId('rating-text')).toHaveTextContent('未评分');
   });
 
   it('memory_id 必填拦截', () => {
@@ -35,11 +35,24 @@ describe('FeedbackPage (P9-T4 编排)', () => {
     expect(screen.getByTestId('toast')).toHaveTextContent('必填');
   });
 
+  it('不许默认 3 星、不许空评论：未选星与空原因都被拦截', async () => {
+    render(<FeedbackPage />);
+    await waitOption('mem_001');
+    fireEvent.change(screen.getByTestId('f-memory'), { target: { value: 'mem_001' } });
+    fireEvent.click(screen.getByTestId('fb-submit'));
+    expect(screen.getByTestId('toast')).toHaveTextContent(/选择 1–5 星/);
+    fireEvent.click(screen.getByTestId('star-2'));
+    fireEvent.click(screen.getByTestId('fb-submit'));
+    expect(screen.getByTestId('toast')).toHaveTextContent(/不允许空评论/);
+  });
+
   it('选中 memory_id 带出摘要 + confirm 提交 toast trust_delta（内核 17.4）', async () => {
     render(<FeedbackPage />);
     await waitOption('mem_001');
     fireEvent.change(screen.getByTestId('f-memory'), { target: { value: 'mem_001' } });
     expect(screen.getByTestId('memory-summary')).toHaveTextContent(/项目技术栈/);
+    fireEvent.click(screen.getByTestId('star-4'));
+    fireEvent.change(screen.getByTestId('f-comment'), { target: { value: '确认可用' } });
     fireEvent.click(screen.getByTestId('fb-submit'));
     await waitFor(() => expect(screen.getByTestId('toast')).toHaveTextContent('+0.1'));
   });
@@ -50,6 +63,8 @@ describe('FeedbackPage (P9-T4 编排)', () => {
     fireEvent.change(screen.getByTestId('f-memory'), { target: { value: 'mem_020' } });
     fireEvent.click(screen.getByTestId('action-disputed'));
     expect(screen.getByTestId('disputed-hint')).toHaveTextContent('P7');
+    fireEvent.click(screen.getByTestId('star-3'));
+    fireEvent.change(screen.getByTestId('f-comment'), { target: { value: '两份资料冲突待裁决' } });
     fireEvent.click(screen.getByTestId('fb-submit'));
     await waitFor(() => expect(screen.getByTestId('toast')).toHaveTextContent('P7'));
   });

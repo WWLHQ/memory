@@ -6,11 +6,20 @@ export function trustDelta(a: FeedbackAction): number {
   return a === 'confirm' ? 0.1 : a === 'reject' ? -0.05 : 0;
 }
 
-/** 表单校验：memory_id 必填；reject 建议填 comment（warning，不阻断） */
+/** 表单校验：memory_id / 评分 / 评论全必填（不允许默认 3 星、不允许空评论直达账本） */
 export function validateDraft(d: FeedbackDraft): { error: string | null; warning: string | null } {
   if (!d.memory_id) return { error: '请选择 memory_id（必填）', warning: null };
-  if (d.action === 'reject' && !d.comment.trim())
-    return { error: null, warning: 'reject 建议填写原因，便于自生长归因（7.2）' };
+  if (!(Number.isInteger(d.rating) && d.rating >= 1 && d.rating <= 5))
+    return {
+      error: '请先选择 1–5 星评分（系统不再替你默认 3 星）',
+      warning: d.action === 'reject' && !d.comment.trim()
+        ? 'reject 建议填写原因，便于自生长归因（7.2）' : null,
+    };
+  if (!d.comment.trim())
+    return {
+      error: '请填写反馈原因（不允许空评论）',
+      warning: d.action === 'reject' ? 'reject 建议填写原因，便于自生长归因（7.2）' : null,
+    };
   return { error: null, warning: null };
 }
 

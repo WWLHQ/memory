@@ -4,7 +4,7 @@ import { SEED_FEEDBACKS } from './fixtures.ts';
 import type { FeedbackDraft } from '../types.ts';
 
 const d = (over: Partial<FeedbackDraft>): FeedbackDraft => ({
-  memory_id: 'mem_001', action: 'confirm', rating: 3, comment: '', ...over,
+  memory_id: 'mem_001', action: 'confirm', rating: 5, comment: '可用', ...over,
 });
 
 describe('trustDelta（17.4）', () => {
@@ -19,12 +19,15 @@ describe('validateDraft（13.7）', () => {
   it('memory_id 必填', () => {
     expect(validateDraft(d({ memory_id: '' })).error).toContain('必填');
   });
-  it('reject 无原因 → warning 不阻断', () => {
-    const v = validateDraft(d({ action: 'reject' }));
-    expect(v.error).toBeNull();
+  it('未选评分（0）→ 拦截，不再默认 3 星', () => {
+    expect(validateDraft(d({ rating: 0 })).error).toContain('选择 1–5 星');
+  });
+  it('空评论 → 拦截（reject 同时保留自生长 warning）', () => {
+    const v = validateDraft(d({ action: 'reject', comment: '   ' }));
+    expect(v.error).toContain('不允许空评论');
     expect(v.warning).toContain('自生长');
   });
-  it('reject 有原因 → 全通过', () => {
+  it('reject 有评分有原因 → 全通过', () => {
     const v = validateDraft(d({ action: 'reject', comment: '过时' }));
     expect(v.error).toBeNull();
     expect(v.warning).toBeNull();

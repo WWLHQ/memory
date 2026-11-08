@@ -11,7 +11,8 @@ import { useToast } from './useToast.tsx';
 import type { FeedbackDraft, FeedbackRecord } from './types.ts';
 
 export function FeedbackPage() {
-  const [draft, setDraft] = useState<FeedbackDraft>({ memory_id: '', action: 'confirm', rating: 3, comment: '' });
+  // 评分默认 0 = 未评分：用户必须亲手选 1–5 星，避免「没点也提交成 3 星」的假口碑
+  const [draft, setDraft] = useState<FeedbackDraft>({ memory_id: '', action: 'confirm', rating: 0, comment: '' });
   const [records, setRecords] = useState<FeedbackRecord[]>([]);
   const { node: toast, show } = useToast();
   const mirror = useFeedbackMirror();
@@ -48,7 +49,7 @@ export function FeedbackPage() {
         ? '已转 P7 冲突裁决队列（disputed）'
         : `反馈已记录：trust_delta ${delta >= 0 ? '+' : ''}${delta}（17.4）`,
     );
-    setDraft({ memory_id: '', action: 'confirm', rating: 3, comment: '' });
+    setDraft({ memory_id: '', action: 'confirm', rating: 0, comment: '' });
   };
 
   return (

@@ -59,7 +59,7 @@ export function FeedbackForm({ draft, onChange, onSubmit }: Props) {
       </div>
 
       <div className="row">
-        <label style={{ width: 90 }}>评分</label>
+        <label style={{ width: 90 }}>评分 *</label>
         {[1, 2, 3, 4, 5].map((n) => (
           <span
             key={n}
@@ -71,16 +71,16 @@ export function FeedbackForm({ draft, onChange, onSubmit }: Props) {
             ★
           </span>
         ))}
-        <span className="dim">{draft.rating}/5</span>
+        <span className="dim" data-testid="rating-text">{draft.rating > 0 ? `${draft.rating}/5` : '未评分'}</span>
       </div>
 
       <div className="row">
-        <label style={{ width: 90, alignSelf: 'flex-start' }}>原因</label>
+        <label style={{ width: 90, alignSelf: 'flex-start' }}>原因 *</label>
         <textarea
           data-testid="f-comment"
           rows={2}
           value={draft.comment}
-          placeholder="reject 建议填写原因（喂 7.2 自生长）"
+          placeholder="必填：说明为什么这样判断（reject / disputed 写具体原因，喂 7.2 自生长）"
           style={{ flex: 1, background: 'var(--panel2)', color: 'var(--txt)', border: '1px solid var(--line)', borderRadius: 8, padding: 8 }}
           onChange={(e) => onChange({ ...draft, comment: e.target.value })}
         />
