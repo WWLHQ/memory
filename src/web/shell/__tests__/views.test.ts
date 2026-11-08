@@ -28,11 +28,12 @@ describe('壳层导航映射', () => {
     expect(pages.some((p) => PAGES[p].file === 'overview.html')).toBe(false);
   });
 
-  it('个人记忆按 D2 标为不可用：只有原因，没有页面与任何计数', () => {
+  it('个人记忆按 D2 在记忆管理内以不可用标签呈现：有页面与 tab 初值，但不带任何计数', () => {
     const personal = flattenNav().find((n) => n.id === 'ledger-personal');
     expect(personal).toBeTruthy();
-    expect(personal?.page).toBeUndefined();
-    expect(personal?.unavailable).toContain('程序暂无个人记忆数据模型');
+    expect(personal?.page).toBe('memory');
+    expect(personal?.href).toBe('?tab=personal');
+    expect(personal).not.toHaveProperty('unavailable');
     expect(personal).not.toHaveProperty('count');
     expect(personal).not.toHaveProperty('badge');
   });

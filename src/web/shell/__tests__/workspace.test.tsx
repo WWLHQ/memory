@@ -144,16 +144,16 @@ describe('工作台壳层', () => {
     expect(screen.queryByText(/通览/)).toBeNull();
   });
 
-  it('个人记忆为不可用态：不出现 iframe，不显示任何计数，只给原因', async () => {
+  it('个人记忆在记忆管理内以 tab 打开，不包装成独立空页', async () => {
     const { container } = await renderShell();
-    const node = screen.getByRole('treeitem', { name: /个人记忆/ });
-    fireEvent.click(node);
-    expect(screen.getAllByText(/个人记忆 · 不可用/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/程序暂无个人记忆数据模型/).length).toBeGreaterThan(0);
-    // 仍只有概览那个 iframe，个人记忆没有被包装成空壳页面
-    expect(container.querySelectorAll('iframe.page-frame').length).toBe(1);
-    const empty = container.querySelector('.shell-empty');
-    expect(empty?.textContent ?? '').not.toMatch(/\d/);
+    fireEvent.click(screen.getByRole('treeitem', { name: /个人记忆/ }));
+    const frame = container.querySelector('.page-pane.active iframe.page-frame');
+    const src = frame ? frame.getAttribute('src') : null;
+    expect(src).toContain('/memory.html');
+    expect(src).toContain('tab=personal');
+    expect(container.querySelectorAll('iframe.page-frame').length).toBeGreaterThan(1);
+    // 壳层不提供假计数：页签与导航项都不带数字徽标
+    expect(container.querySelector('.shell-empty')).toBeFalsy();
   });
 
   it('工具栏不可用命令被禁用并给出原因，不伪造结果', async () => {
@@ -234,14 +234,14 @@ describe('S3 深链接线（D4）：壳层把初值真的交给目标真实页�
     expect(archive.getAttribute('title')).toContain('未登录（会话 401）');
   });
 
-  it('导航「L0 密文（需解锁）」指向层级页并带 #l0bar 锚点', async () => {
+  it('导航「L0 密文（需解锁）」打开记忆管理的 L0 标签，不再依赖旧分层页锚点', async () => {
     const { container } = await renderShell();
     fireEvent.click(screen.getByRole('treeitem', { name: /L0 密文（需解锁）/ }));
     const src = activeFrameSrc(container);
-    expect(src).toContain('/memory-layered.html');
-    expect(src).toContain('#l0bar');
-    // 顺手等分层条真实读数落地，避免异步状态更新落在 act 之外
-    await screen.findByTestId('layer-strip');
+    expect(src).toContain('/memory.html');
+    expect(src).toContain('tab=l0');
+    expect(src).not.toContain('/memory-layered.html');
+    expect(src).not.toContain('#l0bar');
   });
 
   it('无 href 的命令仍复用原有标签，不凭空新增重复标签', async () => {
