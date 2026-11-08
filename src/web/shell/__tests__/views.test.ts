@@ -28,7 +28,7 @@ describe('壳层导航映射', () => {
     expect(pages.some((p) => PAGES[p].file === 'overview.html')).toBe(false);
   });
 
-  it('个人记忆按 D2 在记忆管理内以不可用标签呈现：有页面与 tab 初值，但不带任何计数', () => {
+  it('个人记忆在记忆管理内以标签打开：静态导航只带入口，计数由页面按真实内核回传', () => {
     const personal = flattenNav().find((n) => n.id === 'ledger-personal');
     expect(personal).toBeTruthy();
     expect(personal?.page).toBe('memory');

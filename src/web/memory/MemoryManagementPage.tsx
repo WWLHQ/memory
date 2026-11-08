@@ -25,6 +25,9 @@ import {
   type LayerPolicySnapshot,
 } from './coreMemoryOps.ts';
 import { filterAndPaged, initialMemoryFilter, type MemoryFilter } from './memoryFilter.ts';
+import { PersonalMemoryPane } from './PersonalMemoryPane.tsx';
+import { loadPersonalSnapshot } from '../shared/personalPort.ts';
+import type { PersonalSnapshot } from '../../core/memagent/personal.ts';
 import type { MemoryRecord } from './types.ts';
 
 type TabId = 'all' | 'personal' | 'layers' | 'conflict' | 'review' | 'l0';
@@ -304,6 +307,8 @@ export function MemoryManagementPage() {
   const conflictLoad = useKernelLoad('memory-management-conflicts', loadConflicts);
   const pending = useKernelLoad<PendingWritesResult>('memory-management-pending', loadPending);
   const storage = useKernelLoad('memory-management-storage', loadStorage);
+  /** 第一轮个人记忆：独立存储（数据面失败时如实错误态，不回退成空账本） */
+  const personalMem = useKernelLoad<PersonalSnapshot>('memory-management-personal', loadPersonalSnapshot);
   const session = useSessionContext();
   const mirror = useDisputeMirror();
 
@@ -584,6 +589,11 @@ export function MemoryManagementPage() {
     if (id === 'conflict') return conflictLoad.phase === 'ok' ? String(conflictLoad.data?.length ?? 0) : null;
     if (id === 'review') return pending.phase === 'ok' && pending.data?.status === 'ok' ? String(pending.data.view.count) : null;
     if (id === 'l0') return l0.session ? '已开' : '锁';
+    if (id === 'personal') {
+      // 真实待确认计数（来自独立存储）；读不到时不显示数字，不编造
+      const n = personalMem.phase === 'ok' ? personalMem.data?.counts.pending ?? 0 : 0;
+      return n > 0 ? String(n) : null;
+    }
     return null;
   };
 
@@ -818,47 +828,13 @@ export function MemoryManagementPage() {
         ) : null}
 
         {tab === 'personal' ? (
-          <div className="mm-scrollpane" data-testid="mm-personal-unavailable">
-            <div className="p0-banner warn">
-              <span><b>D2 · 个人记忆暂不可用：程序暂无该数据模型。</b> 这里保留记忆管理内的标签形态，但不显示任何条目、计数或确认动作。</span>
-            </div>
-            <div className="p0-hd">
-              <h3>个人记忆</h3>
-              <span className="p0-sub">个人/团队双窗与确认流在内核中尚无数据模型；不可用态如实展示，不做演示填充。</span>
-              <span className="p0-right">
-                <span className="p0-tag mono">personal=unavailable</span>
-              </span>
-            </div>
-            <div className="pm-wrap mm-pm">
-              <div className="pm-col pm-confirmed">
-                <div className="pm-head">
-                  <div className="pm-title"><Glyph name="user" />个人已确认<span className="n">无数据模型</span></div>
-                  <div className="pm-sub">没有个人侧已确认记忆表，也没有可展示计数。</div>
-                </div>
-                <div className="pm-body">
-                  <div className="pm-empty">
-                    <b>程序暂无个人记忆数据模型</b>
-                    <div>没有个人/团队双窗，也没有「已确认 / 待确认」流转；任何条目都会是编造，故不展示。</div>
-                    <div className="em-mono">src/core/memagent · no personal memory model</div>
-                  </div>
-                </div>
-              </div>
-              <div className="pm-div" />
-              <div className="pm-col pm-inbox">
-                <div className="pm-head">
-                  <div className="pm-title"><Glyph name="info" />个人收件箱<span className="n">未接入</span></div>
-                  <div className="pm-sub">无采集确认流、无来源标注、无计数。</div>
-                </div>
-                <div className="pm-body">
-                  <div className="pm-empty">
-                    <b>收件箱不可用</b>
-                    <div>个人记忆的采集确认流尚未实现；不使用假条目占位。</div>
-                    <div className="em-mono">unavailable · 0 actions</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+          <PersonalMemoryPane
+            phase={personalMem.phase}
+            data={personalMem.data}
+            error={personalMem.error}
+            onRetry={personalMem.retry}
+            onChanged={personalMem.replace}
+          />
         ) : null}
 
         {tab === 'review' ? (
