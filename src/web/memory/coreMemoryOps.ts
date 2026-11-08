@@ -8,7 +8,8 @@ import type { MemAgent } from '../../core/memagent/types.ts';
 import { getKernel, getKernelStorage, newRequestId } from '../kernel.ts';
 import { policyFor } from '../../core/memagent/forgetting.ts';
 import { checkL0ToL1Quality, filteredAuditDetail, QUALITY_GATE_VERSION } from '../../core/memagent/qualityGate.ts';
-import { layerSpecOf } from '../../core/memagent/layerRules.ts';
+import { layerSpecOf, LAYER_SPECS } from '../../core/memagent/layerRules.ts';
+import { forgettingPrefsFromSnapshot } from '../../core/memagent/paramsSnapshot.ts';
 import { embedSync } from '../../core/memagent/vector.ts';
 import { sha256hex } from '../../core/memagent/sync.ts';
 import { configuredVectorDim } from '../models/modelConfig.ts';
@@ -66,6 +67,10 @@ export function toRecord(m: Memory): MemoryRecord {
     refined_by: m.refined_by,
     layer: m.layer,
     layers_generated_at: m.layers_generated_at ? new Date(m.layers_generated_at).toISOString() : undefined,
+    decay_class: m.decay_class,
+    version: m.version,
+    pending_sync: m.pending_sync,
+    conflict_id: m.conflict_id,
   };
 }
 
@@ -81,6 +86,9 @@ function mergeBack(prev: MemoryRecord, m: Memory): MemoryRecord {
     archived: d === 'archived',
     status: d === 'archived' ? 'archived' : d === 'dormant' ? 'dormant' : prev.status,
     updated_at: new Date(m.updated_at ?? Date.now()).toISOString(),
+    version: m.version,
+    pending_sync: m.pending_sync,
+    conflict_id: m.conflict_id,
   };
 }
 
@@ -146,6 +154,38 @@ export async function coreListMemories(): Promise<MemoryRecord[]> {
   await getAgent();
   const mems = await getStorage().listMemories({});
   return mems.map(toRecord);
+}
+
+/** 分层 L1–L6 策略快照：层规格（字符/关键词上限）+ 遗忘参数（全局半衰期/归档阈值）。 */
+export interface LayerPolicySnapshot {
+  layer: 'L1' | 'L2' | 'L3' | 'L4' | 'L5' | 'L6';
+  name: string;
+  maxChars: number | null;
+  maxKeywords?: number;
+  /** 全局半衰期覆盖（天）；undefined = 按类别内核默认 */
+  halfLifeDays?: number;
+  /** 全局归档阈值（天）；undefined = 按类别内核默认 */
+  autoArchiveDays?: number;
+  /** auto_organize=false → 后台遗忘调度只记 skipped */
+  forgettingEnabled: boolean;
+  /** 读快照时的账本条数（真实账本，不是种子） */
+  ledgerRows: number;
+}
+
+export async function coreLayerPolicy(): Promise<LayerPolicySnapshot[]> {
+  await getAgent();
+  const mems = await getStorage().listMemories({});
+  const prefs = forgettingPrefsFromSnapshot(mems);
+  return LAYER_SPECS.map((s) => ({
+    layer: s.id,
+    name: s.name,
+    maxChars: s.maxChars,
+    maxKeywords: s.maxKeywords,
+    halfLifeDays: prefs.halfLifeDays,
+    autoArchiveDays: prefs.autoArchiveDays,
+    forgettingEnabled: prefs.enabled,
+    ledgerRows: mems.length,
+  }));
 }
 
 /** 编辑落在记录当前最深层：content 是主内容，对应 content_lN 同步改写（不留新旧两份） */

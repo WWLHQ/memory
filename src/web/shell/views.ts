@@ -7,7 +7,7 @@
 // - 个人记忆按 D2 标为不可用（程序无该数据模型），不显示任何计数。
 
 export type PageKey =
-  | 'home' | 'login' | 'memory' | 'layered' | 'dispute' | 'write' | 'retrieval'
+  | 'home' | 'login' | 'memory' | 'write' | 'retrieval'
   | 'lifecycle' | 'audit' | 'logs' | 'security' | 'growth' | 'models'
   | 'monitor' | 'sync' | 'params' | 'setup' | 'agent';
 
@@ -15,9 +15,7 @@ export type PageKey =
 export const PAGES: Record<PageKey, { file: string; label: string; source: string }> = {
   home: { file: 'index.html', label: '概览页', source: 'getHomeFeed（单次账本读取）+ /api/health + llm:billing' },
   login: { file: 'login.html', label: '登录与会话页', source: 'POST /api/login · /api/me · session:realpage' },
-  memory: { file: 'memory.html', label: '记忆库管理页', source: '账本清单 + 单条操作' },
-  layered: { file: 'memory-layered.html', label: '记忆层级管理页', source: 'L0–L6 分层查阅' },
-  dispute: { file: 'dispute.html', label: '冲突裁决页', source: '同步冲突队列 + 三模式裁决' },
+  memory: { file: 'memory.html', label: '记忆管理六标签页', source: '账本清单 + 分层策略 + L0 会话 + 冲突队列' },
   write: { file: 'write.html', label: '写入页', source: 'ma.write 表单与回执' },
   retrieval: { file: 'retrieval.html', label: '检索页', source: '透明化召回' },
   lifecycle: { file: 'lifecycle.html', label: '生命周期页', source: '六态机 + 调参' },
@@ -45,7 +43,7 @@ export interface NavItem {
   icon: IconName;
   /** 真实页面；缺省时必须给出 unavailable 原因 */
   page?: PageKey;
-  /** 页面初值（D4）：`?status=archived` 或 `#l0bar`，由目标页自行解析并真正筛选/定位 */
+  /** 页面初值（D4）：`?status=archived` 或 `?tab=conflict`，由目标页自行解析并真正筛选/定位 */
   href?: string;
   /** 程序暂无该视图的诚实原因（不可用态：无计数、无回执） */
   unavailable?: string;
@@ -66,14 +64,13 @@ export const NAV: NavEntry[] = [
   { kind: 'group', label: '记忆' },
   {
     kind: 'item', id: 'ledger', label: '记忆管理', icon: 'db', defaultOpen: true, children: [
-      { kind: 'item', id: 'ledger-all', label: '全部记忆', icon: 'table', page: 'memory', child: true },
+      { kind: 'item', id: 'ledger-all', label: '全部记忆', icon: 'table', page: 'memory', href: '?tab=all', child: true },
       {
-        kind: 'item', id: 'ledger-personal', label: '个人记忆', icon: 'user', child: true,
-        unavailable: '程序暂无个人记忆数据模型：没有个人/团队双窗，也没有确认流与计数，故不提供入口读数。',
+        kind: 'item', id: 'ledger-personal', label: '个人记忆', icon: 'user', page: 'memory', href: '?tab=personal', child: true,
       },
-      { kind: 'item', id: 'ledger-layers', label: '分层 L1–L6', icon: 'layers', page: 'layered', child: true },
-      { kind: 'item', id: 'ledger-conflict', label: '冲突待裁决', icon: 'warn', page: 'dispute', child: true },
-      { kind: 'item', id: 'ledger-l0', label: 'L0 密文（需解锁）', icon: 'lock', page: 'layered', href: '#l0bar', child: true },
+      { kind: 'item', id: 'ledger-layers', label: '分层 L1–L6', icon: 'layers', page: 'memory', href: '?tab=layers', child: true },
+      { kind: 'item', id: 'ledger-conflict', label: '冲突待裁决', icon: 'warn', page: 'memory', href: '?tab=conflict', child: true },
+      { kind: 'item', id: 'ledger-l0', label: 'L0 密文（需解锁）', icon: 'lock', page: 'memory', href: '?tab=l0', child: true },
     ],
   },
   { kind: 'item', id: 'write', label: '写入', icon: 'receipt', page: 'write' },
@@ -157,21 +154,21 @@ export const RIBBON: RibbonTab[] = [
         label: '记忆', items: [
           { label: '新建记忆', icon: 'plus', go: 'write', big: true, kbd: 'Ctrl+N' },
           { label: '打开回执', icon: 'receipt', go: 'write', big: true },
-          { label: '归档（需登录）', icon: 'archive', go: 'memory', href: '?status=archived' },
-          { label: '锁定行（本地）', icon: 'lock', go: 'memory' },
-          { label: '解锁 L0', icon: 'key', go: 'layered', href: '#l0bar' },
+          { label: '归档（需登录）', icon: 'archive', go: 'memory', href: '?tab=all&status=archived' },
+          { label: '锁定行（本地）', icon: 'lock', go: 'memory', href: '?tab=all' },
+          { label: '解锁 L0', icon: 'key', go: 'memory', href: '?tab=l0' },
         ],
       },
       {
         label: '筛选', items: [
-          { label: '仅冲突', icon: 'filter', go: 'dispute' },
+          { label: '仅冲突', icon: 'filter', go: 'memory', href: '?tab=conflict' },
           { label: '刷新', icon: 'refresh', action: 'refresh', kbd: 'F5' },
           { label: '在库中查找', icon: 'search', action: 'focusFilter', kbd: 'Ctrl+F' },
         ],
       },
       {
         label: '视图', items: [
-          { label: '记忆列表', icon: 'list', go: 'memory' },
+          { label: '记忆列表', icon: 'list', go: 'memory', href: '?tab=all' },
           { label: '任务窗格', icon: 'panel', action: 'toggleTaskPane' },
           { label: '折叠功能区', icon: 'fold', action: 'foldRibbon' },
         ],
@@ -188,15 +185,15 @@ export const RIBBON: RibbonTab[] = [
     id: 'memory', label: '记忆', groups: [
       {
         label: '分层内容', items: [
-          { label: '分层内容', icon: 'layers', go: 'layered', big: true },
-          { label: '解锁 L0', icon: 'key', go: 'layered', href: '#l0bar', big: true },
+          { label: '分层内容', icon: 'layers', go: 'memory', href: '?tab=layers', big: true },
+          { label: '解锁 L0', icon: 'key', go: 'memory', href: '?tab=l0', big: true },
           { label: '查看 L1 注入', icon: 'eye', unavailable: '程序未提供 L1 注入明细视图' },
-          { label: 'L0 密文说明', icon: 'lock', go: 'layered', href: '#l0bar' },
+          { label: 'L0 密文说明', icon: 'lock', go: 'memory', href: '?tab=l0' },
         ],
       },
       {
         label: '生命周期', items: [
-          { label: '归档（需登录）', icon: 'archive', go: 'memory', href: '?status=archived', big: true },
+          { label: '归档（需登录）', icon: 'archive', go: 'memory', href: '?tab=all&status=archived', big: true },
           { label: '激活', icon: 'play', go: 'lifecycle' },
           { label: '转入休眠', icon: 'moon', go: 'lifecycle' },
         ],
@@ -292,7 +289,7 @@ export const RIBBON: RibbonTab[] = [
         label: '节点', items: [
           { label: '立即同步', icon: 'sync', go: 'sync', big: true, kbd: 'F8' },
           { label: '同步检查', icon: 'play', go: 'sync' },
-          { label: '冲突裁决', icon: 'warn', go: 'dispute' },
+          { label: '冲突裁决', icon: 'warn', go: 'memory', href: '?tab=conflict' },
         ],
       },
       {
@@ -316,7 +313,7 @@ export const RIBBON: RibbonTab[] = [
         label: '体检', items: [
           { label: '安全体检', icon: 'shield', go: 'security', big: true, kbd: 'F9' },
           { label: '会话守卫', icon: 'user', go: 'security' },
-          { label: 'L0 密钥', icon: 'key', go: 'layered', href: '#l0bar' },
+          { label: 'L0 密钥', icon: 'key', go: 'memory', href: '?tab=l0' },
         ],
       },
       {

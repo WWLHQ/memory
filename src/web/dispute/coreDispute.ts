@@ -55,6 +55,13 @@ export async function coreConflicts(ctx: DisputeCtx = getCtx()): Promise<Conflic
 export interface VerdictOutcome {
   kernel_request_ids: string[];
   merged_mem_id?: string;
+  /** 内核是否接受本次裁决（对手缺失/作用域不符/locked 等会被拒绝） */
+  ok: boolean;
+  /** 是否真实落定（user_confirm/hold 与拒绝均为 false，不得当作已解决） */
+  resolved: boolean;
+  /** 内核拒绝/未落定的真实原因（原样展示，不编造成功） */
+  reason?: string;
+  note: string;
 }
 
 /** 单次裁决 = 一次内核原子调用；project_id 取两条记忆的真实归属，不硬编码 */
@@ -79,5 +86,9 @@ export async function coreVerdict(
   return {
     kernel_request_ids: [r.request_id],
     merged_mem_id: r.merged_mem_id,
+    ok: r.ok,
+    resolved: r.resolved,
+    reason: r.reason,
+    note: r.note,
   };
 }

@@ -58,6 +58,14 @@ export interface MemoryRecord {
   /** 该记忆在内存身的层级（内核 layer 字段）。层级页据此判定可编辑层：
    *  编辑只写主内容 + 这一层，其余层是派生视图（改它们会破坏 sha256/向量口径）。 */
   layer?: 'L0' | 'L1' | 'L2' | 'L3' | 'L4' | 'L5' | 'L6';
+  /** 内核温度（15.3）：hot/warm/cold/archived/dormant，页面只展示不推算 */
+  decay_class?: DecayClass;
+  /** 版本号（PgSyncHub 冲突/同步口径；本端账本真实字段） */
+  version?: number;
+  /** 待回传标记（内核真实字段，不等于「已同步」） */
+  pending_sync?: boolean;
+  /** 冲突 ID（存在即表示该行参与待裁决冲突；不等于任何同步结论） */
+  conflict_id?: string;
 }
 
 /** 17.3 操作类型 */
