@@ -24,6 +24,7 @@ import {
 import { loadStatusbar, shortLocation, type StatusSnapshot } from './statusbar.ts';
 import { loadLayerPanel, type LayerPanelView } from './layers.ts';
 import { SELECTION_MSG, parseSelection, type SelectionPayload } from '../shared/selectionChannel.ts';
+import { NAV_COUNT_MSG, parseNavCount } from '../shared/navCountChannel.ts';
 import { SHELL_GOTO_MSG } from '../shared/shellNavigate.ts';
 
 const STORE_THEME = 'memdesk.shell.theme.v1';
@@ -377,6 +378,25 @@ export function Workspace() {
     };
     window.addEventListener('message', onMsg);
     return () => window.removeEventListener('message', onMsg);
+  }, []);
+
+  // 第一轮个人记忆：中心区页面回传真实待确认计数 → 左侧导航角标（只接受本壳 iframe 的同源回传）
+  const [navCounts, setNavCounts] = useState<Record<string, number>>({});
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onCount = (e: MessageEvent) => {
+      if (e.origin !== window.location.origin) return;
+      const data = e.data as Record<string, unknown> | null;
+      if (!data || typeof data !== 'object' || !(NAV_COUNT_MSG in data)) return;
+      const fromOurs = Object.values(frameRefs.current)
+        .some((f) => f?.contentWindow === (e.source as unknown as Window | null));
+      if (!fromOurs) return;
+      const parsed = parseNavCount(data[NAV_COUNT_MSG]);
+      if (!parsed) return;
+      setNavCounts((prev) => (prev[parsed.id] === parsed.count ? prev : { ...prev, [parsed.id]: parsed.count }));
+    };
+    window.addEventListener('message', onCount);
+    return () => window.removeEventListener('message', onCount);
   }, []);
 
   // 缩放由 .shell 的 CSS zoom 统一承担（含 iframe），不再单独改写子页面文档，避免双重缩放
@@ -852,6 +872,7 @@ export function Workspace() {
                 item={entry}
                 activeId={activeId}
                 open={openParents[entry.id] ?? false}
+                counts={navCounts}
                 onToggle={() => setOpenParents((p) => ({ ...p, [entry.id]: !(p[entry.id] ?? false) }))}
                 onSelect={openView}
               />
@@ -1412,14 +1433,16 @@ function RibbonButton({ item, onItem }: { item: RibbonItem; onItem: (i: RibbonIt
   );
 }
 
-function NavTreeItem({ item, activeId, open, onToggle, onSelect }: {
+function NavTreeItem({ item, activeId, open, counts, onToggle, onSelect }: {
   item: NavItem;
   activeId: string;
   open: boolean;
+  counts: Record<string, number>;
   onToggle: () => void;
   onSelect: (i: NavItem) => void;
 }) {
   const hasKids = Boolean(item.children?.length);
+  const count = counts[item.id] ?? 0;
   return (
     <>
       <div
@@ -1436,9 +1459,10 @@ function NavTreeItem({ item, activeId, open, onToggle, onSelect }: {
         <span className="tico"><Icon name={item.icon} size={item.child ? 12 : 14} /></span>
         <span className="tlabel">{item.label}</span>
         {item.unavailable ? <span className="tcount">不可用</span> : null}
+        {count > 0 ? <span className="tcount" data-testid={`nav-count-${item.id}`}>{count}</span> : null}
       </div>
       {hasKids && open && item.children?.map((c) => (
-        <NavTreeItem key={c.id} item={c} activeId={activeId} open={false} onToggle={() => {}} onSelect={onSelect} />
+        <NavTreeItem key={c.id} item={c} activeId={activeId} open={false} counts={counts} onToggle={() => {}} onSelect={onSelect} />
       ))}
     </>
   );
