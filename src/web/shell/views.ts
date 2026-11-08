@@ -356,12 +356,15 @@ export interface BottomTab {
   unavailable?: string;
 }
 
-/** 底部五标签：与定稿一致；每页在 S1 先给诚实「未接入」说明，S6 再逐个接真实数据源 */
+/**
+ * 底部五标签（S6）：输出/问题/审计/任务接真实数据源（见 dock.ts），
+ * 终端仍为不可用（程序确实没有命令通道）。运行期不可用（如浏览器模式）由面板正文给原因，不预置假数字。
+ */
 export const BOTTOM_TABS: BottomTab[] = [
-  { id: 'output', label: '输出', icon: 'receipt', unavailable: '动作日志通道（主进程 log:tail）尚未接入本面板。' },
-  { id: 'problems', label: '问题', icon: 'warn', unavailable: '程序暂无统一的「问题」聚合数据源。' },
-  { id: 'audit', label: '审计', icon: 'book', unavailable: '审计请在「审计与日志」页查看；本面板尚未接入。' },
-  { id: 'tasks', label: '任务', icon: 'clock', unavailable: '程序暂无调度运行记录的持久化存储，无法列出任务。' },
+  { id: 'output', label: '输出', icon: 'receipt' },
+  { id: 'problems', label: '问题', icon: 'warn' },
+  { id: 'audit', label: '审计', icon: 'book' },
+  { id: 'tasks', label: '任务', icon: 'clock' },
   { id: 'term', label: '终端', icon: 'terminal', unavailable: '程序未提供终端命令通道，本标签不可用。' },
 ];
 

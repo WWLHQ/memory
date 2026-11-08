@@ -673,6 +673,62 @@ button:disabled { cursor: not-allowed; }
   color: var(--mu);
   font-size: 11.5px;
 }
+.bp-empty.err { color: var(--red); }
+
+/* S6：底部面板真实数据行 */
+.bp-tab .bn {
+  margin-left: 1px;
+  padding: 0 4px;
+  border-radius: 7px;
+  background: var(--line2);
+  color: var(--mu);
+  font-size: 9px;
+  line-height: 13px;
+}
+.bp-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--line2);
+  background: var(--panel2);
+  color: var(--tx2);
+  font-size: 10.5px;
+}
+.bp-note b { color: var(--tx); }
+.bp-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 10px;
+  border-bottom: 1px solid var(--line2);
+  font-family: ui-monospace, Consolas, 'Courier New', monospace;
+  font-size: 10.5px;
+}
+.bp-row.lv-warn { background: color-mix(in srgb, var(--amber) 8%, transparent); }
+.bp-row.lv-error { background: color-mix(in srgb, var(--red) 8%, transparent); }
+.bpr-time { flex: none; width: 74px; color: var(--mu); }
+.bpr-lv { flex: none; width: 46px; font-weight: 600; }
+.bpr-lv.warn { color: var(--amber); }
+.bpr-lv.error { color: var(--red); }
+.bpr-tag {
+  flex: none;
+  max-width: 30%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--accent);
+}
+.bpr-msg {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--tx2);
+}
+.bpr-id { flex: none; color: var(--mu); }
+.bp-foot { padding: 4px 10px 8px; color: var(--mu); font-size: 10px; }
 
 /* ── 状态栏 ───────────────────────────────────────────── */
 .statusbar {

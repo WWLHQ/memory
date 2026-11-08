@@ -25,7 +25,19 @@ vi.mock('../taskpane.ts', () => ({
   loadPendingWrites: vi.fn(),
 }));
 
+// 底部面板数据源走真实宿主/账本；渲染测试只验证契约，加载器可替换，派生函数保留真实实现。
+vi.mock('../dock.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../dock.ts')>();
+  return {
+    ...actual,
+    loadOutputLog: vi.fn(),
+    loadScheduleRuns: vi.fn(),
+    loadAuditForMemory: vi.fn(),
+  };
+});
+
 import { Workspace } from '../Workspace.tsx';
+import { loadAuditForMemory, loadOutputLog, loadScheduleRuns } from '../dock.ts';
 import { loadPendingWrites } from '../taskpane.ts';
 
 beforeEach(() => {
@@ -35,6 +47,18 @@ beforeEach(() => {
     status: 'unavailable',
     detail: '浏览器模式：没有主进程，读不到 MCP 写入兜底队列；请用桌面端查看。',
   });
+  vi.mocked(loadOutputLog).mockReset();
+  vi.mocked(loadOutputLog).mockResolvedValue({
+    status: 'unavailable',
+    detail: '浏览器模式：没有主进程，读不到本机 actions.log；请在桌面端查看。',
+  });
+  vi.mocked(loadScheduleRuns).mockReset();
+  vi.mocked(loadScheduleRuns).mockResolvedValue({
+    status: 'unavailable',
+    detail: '未登录：浏览器使用进程内内存账本，读不到主进程的调度运行记录；请在桌面端查看。',
+  });
+  vi.mocked(loadAuditForMemory).mockReset();
+  vi.mocked(loadAuditForMemory).mockResolvedValue({ status: 'ok', view: [] });
 });
 
 /** 渲染并等待概览异步加载落地（避免 act 警告，也确保断言发生在真实渲染之后） */
@@ -277,5 +301,153 @@ describe('S5 任务窗「待重放写入」：只读，不可用就说原因', (
     expect(screen.queryByTestId('pending-count')).toBeNull();
     const pane = document.querySelector('.taskpane') as HTMLElement;
     expect(within(pane).getByRole('button', { name: '刷新' })).toBeInTheDocument();
+  });
+});
+
+describe('S6 底部五标签：只渲染真实数据，不可用就给原因', () => {
+  const RUN = {
+    requestId: 'req_sched_1',
+    taskKey: 'decay',
+    label: '记忆衰减（遗忘曲线推进）',
+    trigger: 'cron',
+    status: 'ok',
+    startedAt: 1_790_000_000_000,
+    durationMs: 42,
+    nextDueAt: 1_790_030_000_000,
+    error: null,
+  };
+
+  function badge(container: HTMLElement, label: string): string | null {
+    const tab = Array.from(container.querySelectorAll('.bp-tab')).find((b) => (b.textContent ?? '').includes(label));
+    return tab?.querySelector('.bn')?.textContent ?? null;
+  }
+
+  /** 底部标签栏里的同名按钮（避免与 Ribbon 的「查看审计」等按钮撞名） */
+  function tabButton(container: HTMLElement, label: string): HTMLButtonElement {
+    const el = Array.from(container.querySelectorAll('.bp-head .bp-tab'))
+      .find((b) => (b.textContent ?? '').includes(label));
+    if (!el) throw new Error(`找不到底部标签：${label}`);
+    return el as HTMLButtonElement;
+  }
+
+  it('输出：浏览器模式如实不可用，且不显示任何角标数字', async () => {
+    const { container } = await renderShell();
+    const note = await screen.findByTestId('dock-log-unavailable');
+    expect(note.textContent).toContain('浏览器模式');
+    expect(container.querySelectorAll('.bp-tab .bn')).toHaveLength(0);
+  });
+
+  it('输出：真实尾读行按原样展示，问题标签只派生 warn/error 并带真实计数', async () => {
+    vi.mocked(loadOutputLog).mockResolvedValue({
+      status: 'ok',
+      view: {
+        path: 'C:\\Users\\x\\actions.log',
+        scanLines: 3,
+        capturedAt: 1_790_000_100_000,
+        lines: [
+          { raw: 'a', ts: '2026-11-08T01:00:00.000Z', level: 'info', scope: 'kernel', action: 'server:start', message: '已监听 8201' },
+          { raw: 'b', ts: '2026-11-08T01:00:01.000Z', level: 'warn', scope: 'sched', action: 'tick-slow', message: 'tick 超过 100ms' },
+          { raw: 'c', ts: '2026-11-08T01:00:02.000Z', level: 'error', scope: 'sync', action: 'pull:fail', message: '后端不可达' },
+        ],
+      },
+    });
+    const { container } = await renderShell();
+    const rows = await screen.findAllByTestId('dock-log-row');
+    expect(rows).toHaveLength(3);
+    expect(screen.getByText(/tick 超过 100ms/)).toBeInTheDocument();
+    expect(screen.getByText(/C:\\Users\\x\\actions.log/)).toBeInTheDocument();
+    expect(badge(container, '输出')).toBe('3');
+    // 问题标签 = 同一真实日志里的 warn/error（2 条），不是演示聚合
+    await act(async () => { fireEvent.click(tabButton(container, '问题')); });
+    expect((await screen.findAllByTestId('dock-problem-row')).length).toBe(2);
+    expect(badge(container, '问题')).toBe('2');
+    expect(screen.getByText(/由最近的动作日志派生（不是独立问题库）/)).toBeInTheDocument();
+  });
+
+  it('问题：真实日志没有 warn/error → 明确说没有，而不是不可用', async () => {
+    vi.mocked(loadOutputLog).mockResolvedValue({
+      status: 'ok',
+      view: { path: null, scanLines: 2, capturedAt: 1, lines: [
+        { raw: 'a', ts: null, level: 'info', scope: 'k', action: 'a', message: 'ok' },
+      ] },
+    });
+    const { container } = await renderShell();
+    await screen.findByTestId('dock-log-row');
+    await act(async () => { fireEvent.click(tabButton(container, '问题')); });
+    expect(await screen.findByTestId('dock-problems-empty')).toBeInTheDocument();
+    expect(badge(container, '问题')).toBe('0');
+  });
+
+  it('任务：真实 schedule_run 记录展示任务名/触发/耗时/下次到期', async () => {
+    vi.mocked(loadScheduleRuns).mockResolvedValue({ status: 'ok', view: [RUN] });
+    const { container } = await renderShell();
+    await act(async () => { fireEvent.click(tabButton(container, '任务')); });
+    const row = await screen.findByTestId('dock-task-row');
+    expect(row.textContent).toContain('记忆衰减（遗忘曲线推进）');
+    expect(row.textContent).toContain('触发 cron');
+    expect(row.textContent).toContain('耗时 42 ms');
+    expect(row.textContent).toContain('下次到期');
+    expect(badge(container, '任务')).toBe('1');
+  });
+
+  it('任务：真实空集 → 说明是空集，不补演示任务也不显示 0 冒充未接入', async () => {
+    vi.mocked(loadScheduleRuns).mockResolvedValue({ status: 'ok', view: [] });
+    const { container } = await renderShell();
+    await act(async () => { fireEvent.click(tabButton(container, '任务')); });
+    expect(await screen.findByTestId('dock-tasks-empty')).toBeInTheDocument();
+    expect(badge(container, '任务')).toBe('0');
+  });
+
+  it('任务：浏览器未登录 → 不可用原因，不查询、不显示 0', async () => {
+    const { container } = await renderShell();
+    await act(async () => { fireEvent.click(tabButton(container, '任务')); });
+    const note = await screen.findByTestId('dock-tasks-unavailable');
+    expect(note.textContent).toContain('读不到主进程的调度运行记录');
+    expect(badge(container, '任务')).toBeNull();
+  });
+
+  it('审计：未选中对象不查询也不显示计数', async () => {
+    const { container } = await renderShell();
+    await act(async () => { fireEvent.click(tabButton(container, '审计')); });
+    expect(await screen.findByTestId('dock-audit-no-selection')).toBeInTheDocument();
+    expect(loadAuditForMemory).not.toHaveBeenCalled();
+    expect(badge(container, '审计')).toBeNull();
+  });
+
+  it('审计：选中真实对象后按 ID 过滤真实审计行', async () => {
+    const PAYLOAD = {
+      v: 1 as const,
+      page: 'memory.html',
+      title: '记忆 mem_1',
+      subtitle: '真实账本记录',
+      fields: [{ k: 'ID', v: 'mem_1', mono: true }],
+    };
+    vi.mocked(loadAuditForMemory).mockResolvedValue({
+      status: 'ok',
+      view: [{ requestId: 'req_audit_1', action: 'memory_op', ts: 1_790_000_000_000, summary: '{"mem_id":"mem_1","op":"pin"}' }],
+    });
+    const { container } = await renderShell();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /记忆列表/ })); });
+    const frame = container.querySelector('.page-pane.active iframe.page-frame') as HTMLIFrameElement;
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent('message', {
+        data: { [SELECTION_MSG]: PAYLOAD },
+        origin: window.location.origin,
+        source: frame.contentWindow,
+      }));
+    });
+    await act(async () => { fireEvent.click(tabButton(container, '审计')); });
+    const row = await screen.findByTestId('dock-audit-row');
+    expect(row.textContent).toContain('memory_op');
+    expect(row.textContent).toContain('"op":"pin"');
+    expect(loadAuditForMemory).toHaveBeenCalledWith('mem_1');
+    expect(badge(container, '审计')).toBe('1');
+  });
+
+  it('终端仍为不可用（程序确实没有命令通道）', async () => {
+    const { container } = await renderShell();
+    await act(async () => { fireEvent.click(tabButton(container, '终端')); });
+    expect(await screen.findByTestId('dock-term-unavailable')).toBeInTheDocument();
+    expect(screen.getByText(/程序未提供终端命令通道/)).toBeInTheDocument();
   });
 });

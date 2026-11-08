@@ -7,6 +7,7 @@
 // - overview.html（演示通览）不进入主导航。
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import { formatLogClock } from '../Home/programLog.ts';
 import { hasActiveSession } from '../Home/crossTabAuth.ts';
 import { Icon } from './Icons.tsx';
 import { loadOverview, type OverviewSnapshot } from './overview.ts';
@@ -16,6 +17,10 @@ import {
   type BottomTabId, type IconName, type NavEntry, type NavItem, type PageKey,
   type RibbonItem, type ShellAction,
 } from './views.ts';
+import {
+  loadAuditForMemory, loadOutputLog, loadScheduleRuns, problemsFromLog,
+  type AuditRow, type DockResult, type OutputLogView, type ScheduleRun,
+} from './dock.ts';
 import { SELECTION_MSG, parseSelection, type SelectionPayload } from '../shared/selectionChannel.ts';
 
 const STORE_THEME = 'memdesk.shell.theme.v1';
@@ -134,6 +139,13 @@ export function Workspace() {
   /** S5：任务窗「待重放写入」只读视图（null = 尚未读取） */
   const [pending, setPending] = useState<PendingWritesResult | null>(null);
   const [pendingBusy, setPendingBusy] = useState(false);
+  /** S6：底部面板真实数据（null = 尚未读取） */
+  const [dockLog, setDockLog] = useState<DockResult<OutputLogView> | null>(null);
+  const [dockLogBusy, setDockLogBusy] = useState(false);
+  const [dockTasks, setDockTasks] = useState<DockResult<ScheduleRun[]> | null>(null);
+  const [dockTasksBusy, setDockTasksBusy] = useState(false);
+  const [dockAudit, setDockAudit] = useState<DockResult<AuditRow[]> | null>(null);
+  const [dockAuditBusy, setDockAuditBusy] = useState(false);
   const pendingBusyRef = useRef(false);
   const frameRefs = useRef<Record<string, HTMLIFrameElement | null>>({});
   const activePageRef = useRef<PageKey | undefined>(undefined);
@@ -167,6 +179,57 @@ export function Workspace() {
   }, []);
 
   useEffect(() => { if (taskOpen) void refreshPending(); }, [taskOpen, refreshPending, sessionActive]);
+
+  // S6：底部面板读取（只在对应标签可见时按需读一次；刷新按钮可重读）
+  const refreshDockLog = useCallback(async () => {
+    setDockLogBusy(true);
+    try {
+      setDockLog(await loadOutputLog());
+    } finally {
+      setDockLogBusy(false);
+    }
+  }, []);
+
+  const refreshDockTasks = useCallback(async () => {
+    setDockTasksBusy(true);
+    try {
+      setDockTasks(await loadScheduleRuns());
+    } finally {
+      setDockTasksBusy(false);
+    }
+  }, []);
+
+  const refreshDockAudit = useCallback(async (memId: string) => {
+    setDockAuditBusy(true);
+    try {
+      setDockAudit(await loadAuditForMemory(memId));
+    } finally {
+      setDockAuditBusy(false);
+    }
+  }, []);
+
+  /** 选中对象 id：只认中心页回传的 ID 字段，没有就不查审计 */
+  const selectionId = selection?.fields.find((f) => f.k === 'ID')?.v ?? null;
+
+  useEffect(() => {
+    if (!dockOpen || dockTab === 'term' || dockTab === 'tasks' || dockTab === 'audit') return;
+    if (dockLog) return;
+    void refreshDockLog();
+  }, [dockOpen, dockTab, dockLog, refreshDockLog]);
+
+  useEffect(() => {
+    if (!dockOpen || dockTab !== 'tasks' || dockTasks) return;
+    void refreshDockTasks();
+  }, [dockOpen, dockTab, dockTasks, refreshDockTasks]);
+
+  useEffect(() => {
+    if (!dockOpen || dockTab !== 'audit') return;
+    if (!selectionId) {
+      setDockAudit(null);
+      return;
+    }
+    void refreshDockAudit(selectionId);
+  }, [dockOpen, dockTab, selectionId, refreshDockAudit]);
 
   const resolvedTheme = theme === 'system' ? (darkSystem ? 'dark' : 'light') : theme;
 
@@ -287,7 +350,9 @@ export function Workspace() {
         break;
       case 'refresh':
         setReloadNonce((n) => n + 1);
-        setMessage('已刷新中心区真实页面。');
+        // 底部面板同样重读：清空缓存后由可见标签的 effect 重新拉真实数据
+        setDockLog(null); setDockTasks(null); setDockAudit(null);
+        setMessage('已刷新中心区真实页面与底部面板读数。');
         break;
       case 'focusFilter':
         setMessage(`「${label}」请在页面内使用各自的筛选框；壳层未提供跨页搜索，不会伪造查找结果。`);
@@ -318,6 +383,15 @@ export function Workspace() {
   const navEntries = useMemo(() => filterEntries(NAV, navQuery.trim().toLowerCase()), [navQuery]);
 
   const activeRibbon = RIBBON.find((r) => r.id === ribbonTab) ?? RIBBON[0];
+
+  /** 底部标签角标：只在真实读到数据后显示计数；未读/不可用一律不显示，绝不用 0 冒充 */
+  const dockCounts: Record<BottomTabId, number | null> = {
+    output: dockLog?.status === 'ok' ? dockLog.view.lines.length : null,
+    problems: dockLog?.status === 'ok' ? problemsFromLog(dockLog.view).length : null,
+    audit: selectionId && dockAudit?.status === 'ok' ? dockAudit.view.length : null,
+    tasks: dockTasks?.status === 'ok' ? dockTasks.view.length : null,
+    term: null,
+  };
 
   return (
     <div
@@ -624,6 +698,7 @@ export function Workspace() {
               type="button"
             >
               <Icon name={t.icon} size={12} />{t.label}
+              {dockCounts[t.id] != null && <span className="bn">{dockCounts[t.id]}</span>}
             </button>
           ))}
           <span className="bp-spring" />
@@ -632,12 +707,7 @@ export function Workspace() {
           </button>
         </div>
         {dockOpen && (
-          <div className="bp-body">
-            <div className="bp-empty">
-              <Icon name={BOTTOM_TABS.find((t) => t.id === dockTab)?.icon ?? 'receipt'} size={20} />
-              <div>{BOTTOM_TABS.find((t) => t.id === dockTab)?.unavailable}</div>
-            </div>
-          </div>
+          <div className="bp-body">{renderDockBody()}</div>
         )}
       </section>
 
@@ -675,6 +745,190 @@ export function Workspace() {
       )}
     </div>
   );
+
+  /** S6：底部面板正文（五标签，只渲染真实读取结果；不可用就说原因，不补数字） */
+  function renderDockBody() {
+    const tab = BOTTOM_TABS.find((t) => t.id === dockTab);
+    if (dockTab === 'term') {
+      return (
+        <div className="bp-empty" data-testid="dock-term-unavailable">
+          <Icon name="terminal" size={20} />
+          <div>{tab?.unavailable}</div>
+        </div>
+      );
+    }
+    if (dockTab === 'output' || dockTab === 'problems') return renderLogTab(dockTab === 'problems');
+    if (dockTab === 'tasks') return renderTasksTab();
+    return renderAuditTab();
+  }
+
+  function renderLogTab(isProblems: boolean) {
+    const data = dockLog;
+    return (
+      <>
+        <div className="bp-note">
+          <Icon name={isProblems ? 'warn' : 'receipt'} size={11} />
+          {isProblems
+            ? '校验与错误告警 · 由最近的动作日志派生（不是独立问题库）；0 条表示这段时间的日志里确实没有错误/警告'
+            : `程序动作日志 actions.log · 最近 ${data?.status === 'ok' ? data.view.scanLines : 50} 条 · 只读尾读`}
+          <span className="bp-spring" />
+          <button className="bp-tool" type="button" onClick={() => { void refreshDockLog(); }} disabled={dockLogBusy}>
+            <Icon name="refresh" size={11} />{dockLogBusy ? '读取中' : '刷新'}
+          </button>
+        </div>
+        {!data ? (
+          <div className="bp-empty">尚未读取：首次打开该标签时经宿主桥尾读一次真实日志。</div>
+        ) : data.status === 'unavailable' ? (
+          <div className="bp-empty" data-testid="dock-log-unavailable"><Icon name="broken" size={20} /><div>{data.detail}</div></div>
+        ) : data.status === 'error' ? (
+          <div className="bp-empty err" data-testid="dock-log-error"><Icon name="warn" size={20} /><div>读取失败：{data.detail}</div></div>
+        ) : isProblems ? renderProblems(data.view) : renderLogLines(data.view)}
+      </>
+    );
+  }
+
+  function renderProblems(view: OutputLogView) {
+    const rows = problemsFromLog(view);
+    if (rows.length === 0) {
+      return (
+        <div className="bp-empty" data-testid="dock-problems-empty">
+          <Icon name="check" size={20} />
+          <div>最近 {view.lines.length} 条程序日志里没有错误或警告（真实结果，不是隐藏）。</div>
+        </div>
+      );
+    }
+    return (
+      <>
+        {rows.map((r, i) => (
+          <div className={`bp-row lv-${r.level}`} data-testid="dock-problem-row" key={`${r.ts ?? i}-${i}`}>
+            <span className="bpr-time">{formatLogClock(r.ts)}</span>
+            <span className={`bpr-lv ${r.level}`}>{r.level === 'error' ? '错误' : '警告'}</span>
+            <span className="bpr-tag">{r.scope ? `${r.scope}:${r.action}` : '未解析行'}</span>
+            <span className="bpr-msg">{r.message}</span>
+          </div>
+        ))}
+        <div className="bp-foot">统计口径：最近 {view.lines.length} 条真实日志中的 warn/error 行；只展示，不提供批量忽略（程序无该动作）。</div>
+      </>
+    );
+  }
+
+  function renderLogLines(view: OutputLogView) {
+    if (view.lines.length === 0) {
+      return (
+        <div className="bp-empty" data-testid="dock-log-empty">
+          <Icon name="receipt" size={20} />
+          <div>日志为空：主进程尚无动作记录（有操作后自动留痕）。</div>
+        </div>
+      );
+    }
+    return (
+      <>
+        {view.lines.map((l, i) => (
+          <div className={`bp-row lv-${l.level}`} data-testid="dock-log-row" key={`${l.ts ?? i}-${i}`} title={l.raw}>
+            <span className="bpr-time">{formatLogClock(l.ts)}</span>
+            <span className={`bpr-lv ${l.level}`}>{l.level === 'unknown' ? 'LOG' : l.level.toUpperCase()}</span>
+            <span className="bpr-tag">{l.scope ? `${l.scope}:${l.action}` : '未解析行'}</span>
+            <span className="bpr-msg">{l.message}</span>
+          </div>
+        ))}
+        <div className="bp-foot">
+          日志文件：{view.path ?? '未初始化（主进程尚未写日志）'} · 读取于 {new Date(view.capturedAt).toLocaleTimeString('zh-CN')}
+        </div>
+      </>
+    );
+  }
+
+  function renderTasksTab() {
+    return (
+      <>
+        <div className="bp-note">
+          <Icon name="clock" size={11} />
+          调度与运行记录 · 账本 action=schedule_run · 最多 20 条 · 没有记录=尚未运行（不补演示任务）
+          <span className="bp-spring" />
+          <button className="bp-tool" type="button" onClick={() => { void refreshDockTasks(); }} disabled={dockTasksBusy}>
+            <Icon name="refresh" size={11} />{dockTasksBusy ? '读取中' : '刷新'}
+          </button>
+        </div>
+        {!dockTasks ? (
+          <div className="bp-empty">尚未读取。</div>
+        ) : dockTasks.status === 'unavailable' ? (
+          <div className="bp-empty" data-testid="dock-tasks-unavailable"><Icon name="broken" size={20} /><div>{dockTasks.detail}</div></div>
+        ) : dockTasks.status === 'error' ? (
+          <div className="bp-empty err" data-testid="dock-tasks-error"><Icon name="warn" size={20} /><div>读取失败：{dockTasks.detail}</div></div>
+        ) : dockTasks.view.length === 0 ? (
+          <div className="bp-empty" data-testid="dock-tasks-empty">
+            <Icon name="clock" size={20} />
+            <div>账本里暂无 schedule_run 记录（调度尚未触发或已在生长配置中停用）——这是真实空集。</div>
+          </div>
+        ) : (
+          <>
+            {dockTasks.view.map((r) => (
+              <div className={`bp-row${r.status === 'error' ? ' lv-error' : ''}`} data-testid="dock-task-row" key={r.requestId}>
+                <span className="bpr-time">{r.startedAt ? new Date(r.startedAt).toLocaleString('zh-CN') : '未记录时间'}</span>
+                <span className="bpr-tag">{r.label}</span>
+                <span className="bpr-msg">
+                  触发 {r.trigger} · 状态 {r.status}
+                  {r.durationMs != null ? ` · 耗时 ${r.durationMs} ms` : ' · 耗时未记录'}
+                  {r.nextDueAt != null ? ` · 下次到期 ${new Date(r.nextDueAt).toLocaleString('zh-CN')}` : ' · 下次到期未记录'}
+                  {r.error ? ` · 错误 ${r.error}` : ''}
+                </span>
+              </div>
+            ))}
+            <div className="bp-foot">来源：内核审计 action=schedule_run（主进程 cron 真实执行记录）。</div>
+          </>
+        )}
+      </>
+    );
+  }
+
+  function renderAuditTab() {
+    if (!selectionId) {
+      return (
+        <>
+          <div className="bp-note"><Icon name="book" size={11} />审计 = 当前选中对象的账本审计行 · 未选中对象</div>
+          <div className="bp-empty" data-testid="dock-audit-no-selection">
+            <Icon name="book" size={20} />
+            <div>在「全部记忆」或「分层 L1–L6」选中一条记录后，这里只显示提及该记忆 ID 的真实审计行；没有选中就不查询、不显示任何计数。</div>
+          </div>
+        </>
+      );
+    }
+    return (
+      <>
+        <div className="bp-note">
+          <Icon name="book" size={11} />当前对象 <b>{selectionId}</b> · 只显示提及该 ID 的审计行
+          <span className="bp-spring" />
+          <button className="bp-tool" type="button" onClick={() => { void refreshDockAudit(selectionId); }} disabled={dockAuditBusy}>
+            <Icon name="refresh" size={11} />{dockAuditBusy ? '读取中' : '刷新'}
+          </button>
+        </div>
+        {!dockAudit ? (
+          <div className="bp-empty">尚未读取。</div>
+        ) : dockAudit.status === 'unavailable' ? (
+          <div className="bp-empty" data-testid="dock-audit-unavailable"><Icon name="broken" size={20} /><div>{dockAudit.detail}</div></div>
+        ) : dockAudit.status === 'error' ? (
+          <div className="bp-empty err" data-testid="dock-audit-error"><Icon name="warn" size={20} /><div>读取失败：{dockAudit.detail}</div></div>
+        ) : dockAudit.view.length === 0 ? (
+          <div className="bp-empty" data-testid="dock-audit-empty">
+            <Icon name="list" size={20} />
+            <div>账本里没有提及 {selectionId} 的审计行（真实为空，不是捞不到）。</div>
+          </div>
+        ) : (
+          <>
+            {dockAudit.view.map((r) => (
+              <div className="bp-row" data-testid="dock-audit-row" key={r.requestId}>
+                <span className="bpr-time">{new Date(r.ts).toLocaleString('zh-CN')}</span>
+                <span className="bpr-tag">{r.action}</span>
+                <span className="bpr-msg">{r.summary}</span>
+                <span className="bpr-id">{r.requestId}</span>
+              </div>
+            ))}
+            <div className="bp-foot">来源：storage.queryAudit；浏览器未登录时为进程内内存账本，桌面端为本机账本。</div>
+          </>
+        )}
+      </>
+    );
+  }
 
   /** 分栏拖拽：只改壳层尺寸，不触碰页面数据 */
   function startDrag(kind: 'nav' | 'insp' | 'dock', ev: ReactPointerEvent<HTMLDivElement>) {
