@@ -304,6 +304,17 @@ describe('hostCall：顶层窗口走原生 preload', () => {
     expect(res).toHaveLength(1);
   });
 
+  test('S5 / D6：l0:pendingWrites 映射到 window.api.l0.pendingWrites 并透传会话', async () => {
+    const view = { ok: true, count: 0, items: [], truncated: false };
+    const pendingWrites = vi.fn().mockResolvedValue(view);
+    (window as unknown as { __ELECTRON__?: boolean }).__ELECTRON__ = true;
+    (window as unknown as { api: unknown }).api = { l0: { pendingWrites } };
+    const { hostCall } = await import('../hostBridge.ts');
+    const res = await hostCall<typeof view>('l0:pendingWrites', ['sid_1']);
+    expect(pendingWrites).toHaveBeenCalledWith('sid_1');
+    expect(res).toEqual(view);
+  });
+
   test('能力缺失 → 抛错（调用方诚实降级，不静默返回假数据）', async () => {
     (window as unknown as { __ELECTRON__?: boolean }).__ELECTRON__ = true;
     (window as unknown as { api: unknown }).api = { storage: {} }; // 缺 hostScan

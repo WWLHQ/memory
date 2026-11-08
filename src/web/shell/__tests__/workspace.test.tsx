@@ -1,5 +1,5 @@
 // 壳层渲染行为（批次48 S1）：导航、不可用态、状态栏诚实口径、底部标签。
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SELECTION_MSG } from '../../shared/selectionChannel.ts';
 
@@ -21,10 +21,20 @@ vi.mock('../overview.ts', () => ({
   })),
 }));
 
+vi.mock('../taskpane.ts', () => ({
+  loadPendingWrites: vi.fn(),
+}));
+
 import { Workspace } from '../Workspace.tsx';
+import { loadPendingWrites } from '../taskpane.ts';
 
 beforeEach(() => {
   localStorage.clear();
+  vi.mocked(loadPendingWrites).mockReset();
+  vi.mocked(loadPendingWrites).mockResolvedValue({
+    status: 'unavailable',
+    detail: '浏览器模式：没有主进程，读不到 MCP 写入兜底队列；请用桌面端查看。',
+  });
 });
 
 /** 渲染并等待概览异步加载落地（避免 act 警告，也确保断言发生在真实渲染之后） */
@@ -194,5 +204,78 @@ describe('S4 属性检查器：只显示真实页面回传的选中项', () => {
     fireEvent.click(screen.getByRole('button', { name: /记忆列表/ }));
     await dispatchTo(container, { v: 1, page: 'memory.html', title: 'x', fields: [] });
     expect(screen.queryByText('x')).toBeNull();
+  });
+});
+
+describe('S5 任务窗「待重放写入」：只读，不可用就说原因', () => {
+  async function openTaskPane() {
+    const r = await renderShell();
+    // 状态栏的任务窗开关（Ribbon 里也有同名 title，这里限定在状态栏内取）
+    const cell = r.container.querySelector('.statusbar [title="任务窗格"]') as HTMLElement | null;
+    expect(cell).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(cell!);
+      await Promise.resolve();
+    });
+    return r;
+  }
+
+  it('浏览器模式如实不可用，不显示 0 条冒充空队列', async () => {
+    await openTaskPane();
+    const note = await screen.findByTestId('pending-unavailable');
+    expect(note.textContent).toContain('浏览器模式');
+    expect(screen.queryByTestId('pending-count')).toBeNull();
+  });
+
+  it('主进程返回真实队列 → 显示计数与每条摘要，且不含正文', async () => {
+    vi.mocked(loadPendingWrites).mockResolvedValue({
+      status: 'ok',
+      view: {
+        ok: true,
+        count: 2,
+        items: [
+          { id: 'pend_2', created_at: 2000, project_id: 'P-1', source_agent: 'claude-code', category: 'fact', user_id: 'u1', session_id: null, content_chars: 12, tags: 1, importance: 0.6, confidence: null, half_life_days: null },
+          { id: 'pend_1', created_at: 1000, project_id: 'P-1', source_agent: null, category: 'fact', user_id: null, session_id: null, content_chars: 8, tags: 0, importance: null, confidence: null, half_life_days: null },
+        ],
+        truncated: false,
+        source: 'MCP 写入兜底队列（主进程内存 · 与 8202/8204 MCP 共用）',
+        note: '只读摘要，不含正文与密钥材料。',
+        captured_at: '2026-11-08T00:00:00.000Z',
+      },
+    });
+    await openTaskPane();
+    await screen.findByTestId('pending-count');
+    expect(screen.getByTestId('pending-count').textContent).toContain('2');
+    expect(screen.getAllByTestId('pending-item')).toHaveLength(2);
+    expect(screen.getByText('pend_2')).toBeInTheDocument();
+    // 无 source_agent 时说明缺失原因，而不是用「—」填充
+    expect(screen.getByText(/未标注（请求无 source_agent）/)).toBeInTheDocument();
+    expect(screen.getByText(/不含正文与密钥材料/)).toBeInTheDocument();
+  });
+
+  it('真实空队列 → 明确的空队列说明，而不是不可用', async () => {
+    vi.mocked(loadPendingWrites).mockResolvedValue({
+      status: 'ok',
+      view: {
+        ok: true, count: 0, items: [], truncated: false,
+        source: 'MCP 写入兜底队列（主进程内存）',
+        note: '进程重启即清空。',
+        captured_at: '2026-11-08T00:00:00.000Z',
+      },
+    });
+    await openTaskPane();
+    await screen.findByTestId('pending-count');
+    expect(screen.getByText(/队列为空：当前没有因 L0 写密钥未解锁而暂存的写入/)).toBeInTheDocument();
+    expect(screen.queryByTestId('pending-unavailable')).toBeNull();
+  });
+
+  it('读取失败 → 显示原因与刷新入口，不渲染任何队列数字', async () => {
+    vi.mocked(loadPendingWrites).mockResolvedValue({ status: 'error', detail: '宿主能力缺失: window.api.l0.pendingWrites' });
+    await openTaskPane();
+    const err = await screen.findByTestId('pending-error');
+    expect(err.textContent).toContain('宿主能力缺失');
+    expect(screen.queryByTestId('pending-count')).toBeNull();
+    const pane = document.querySelector('.taskpane') as HTMLElement;
+    expect(within(pane).getByRole('button', { name: '刷新' })).toBeInTheDocument();
   });
 });

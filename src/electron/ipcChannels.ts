@@ -62,6 +62,11 @@ export const IPC = {
   l0Migrate: 'l0:migrate',
   /** 批次37-A：L0 原数据库批量回读（拆库后行上只有 has_l0，查阅要在主进程取密文）——需登录会话 */
   l0Blobs: 'l0:blobs',
+  /**
+   * S5 / D6：MCP 写入兜底队列（L0 写密钥锁定期间暂存的 write_memory）只读摘要。
+   * 只回计数与可排查字段（id/时间/项目/来源/字数/评分），绝不含正文、密钥材料或整条请求；需登录会话。
+   */
+  l0PendingWrites: 'l0:pendingWrites',
   /** 批次37-C：存量拆分迁移（历史行的明文 content_orig / 遗留信封搬进 L0 原数据库）——只读预览 / 管理员执行（强制先双库备份 + 逐字口令 + 需 L0 写密钥） */
   l0SplitPreview: 'l0:splitPreview',
   l0SplitRun: 'l0:splitRun',

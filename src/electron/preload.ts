@@ -149,6 +149,9 @@ const l0 = {
     ipcRenderer.invoke(IPC.l0Blobs, memIds, sessionId) as Promise<
       { ok: true; envelopes: Record<string, string> } | { ok: false; error: string }
     >,
+  /** S5 / D6：MCP 写入兜底队列只读摘要（仅计数与摘要，不含正文与密钥材料；需登录会话） */
+  pendingWrites: (sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.l0PendingWrites, sessionId),
   /** 批次37-C：存量拆分迁移（历史行的明文/遗留信封搬进 L0 原数据库）——预览只读、执行需管理员 + 逐字口令 */
   splitPreview: (sessionId?: string | null) => ipcRenderer.invoke(IPC.l0SplitPreview, sessionId),
   splitRun: (confirmText?: string, sessionId?: string | null) =>

@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { hasActiveSession } from '../Home/crossTabAuth.ts';
 import { Icon } from './Icons.tsx';
 import { loadOverview, type OverviewSnapshot } from './overview.ts';
+import { loadPendingWrites, type PendingWritesResult } from './taskpane.ts';
 import {
   BOTTOM_TABS, NAV, PAGES, RIBBON, findNav,
   type BottomTabId, type IconName, type NavEntry, type NavItem, type PageKey,
@@ -130,6 +131,10 @@ export function Workspace() {
   const [overviewBusy, setOverviewBusy] = useState(false);
   /** S4：中心区真实页面回传的选中项（null = 未选中/无回传，绝不推测） */
   const [selection, setSelection] = useState<SelectionPayload | null>(null);
+  /** S5：任务窗「待重放写入」只读视图（null = 尚未读取） */
+  const [pending, setPending] = useState<PendingWritesResult | null>(null);
+  const [pendingBusy, setPendingBusy] = useState(false);
+  const pendingBusyRef = useRef(false);
   const frameRefs = useRef<Record<string, HTMLIFrameElement | null>>({});
   const activePageRef = useRef<PageKey | undefined>(undefined);
 
@@ -147,6 +152,21 @@ export function Workspace() {
 
   // 概览真实数据：挂载时读取一次；登录态变化后重读（成本/会话字段随真实会话变化）
   useEffect(() => { refreshOverview(); }, [refreshOverview, sessionActive]);
+
+  // S5：任务窗「待重放写入」只读读取（打开任务窗时读一次；也可手动点刷新）
+  const refreshPending = useCallback(async () => {
+    if (pendingBusyRef.current) return;
+    pendingBusyRef.current = true;
+    setPendingBusy(true);
+    try {
+      setPending(await loadPendingWrites());
+    } finally {
+      pendingBusyRef.current = false;
+      setPendingBusy(false);
+    }
+  }, []);
+
+  useEffect(() => { if (taskOpen) void refreshPending(); }, [taskOpen, refreshPending, sessionActive]);
 
   const resolvedTheme = theme === 'system' ? (darkSystem ? 'dark' : 'light') : theme;
 
@@ -476,10 +496,53 @@ export function Workspace() {
                 <button className="tp-x" onClick={() => setTaskOpen(false)} title="关闭任务窗格" type="button">✕</button>
               </div>
               <div className="tp-body">
-                <div className="shell-empty small">
-                  <Icon name="receipt" size={20} />
-                  <div className="se-title">任务窗格尚未接入</div>
-                  <div className="se-body">程序没有可在壳内编辑的写入草稿模型；新建记忆请在「写入」页完成（同一真实链路）。</div>
+                <div className="tp-sec">
+                  <div className="tp-sec-title">
+                    <b>待重放写入</b>
+                    <button className="tp-mini" onClick={() => { void refreshPending(); }} disabled={pendingBusy} type="button">
+                      {pendingBusy ? '读取中' : '刷新'}
+                    </button>
+                  </div>
+                  {!pending ? (
+                    <div className="tp-note">尚未读取：打开任务窗后经宿主桥读取一次主进程返回值（只读，不产生任何写入）。</div>
+                  ) : pending.status === 'unavailable' ? (
+                    <div className="tp-note" data-testid="pending-unavailable">{pending.detail}</div>
+                  ) : pending.status === 'error' ? (
+                    <div className="tp-note red" data-testid="pending-error">读取失败：{pending.detail}</div>
+                  ) : (
+                    <>
+                      <div className="tp-count" data-testid="pending-count">
+                        共 <b>{pending.view.count}</b> 条待重放
+                        {pending.view.truncated ? `（仅展示最近 ${pending.view.items.length} 条）` : ''}
+                      </div>
+                      {pending.view.count === 0 ? (
+                        <div className="tp-note">队列为空：当前没有因 L0 写密钥未解锁而暂存的写入。</div>
+                      ) : (
+                        <div className="tp-list">
+                          {pending.view.items.map((it) => (
+                            <div className="tp-item" key={it.id} data-testid="pending-item">
+                              <div className="tp-item-id">{it.id}</div>
+                              <div className="tp-item-meta">
+                                {new Date(it.created_at).toLocaleString('zh-CN')} · 项目 {it.project_id} · 来源 {it.source_agent ?? '未标注（请求无 source_agent）'} · {it.category}
+                              </div>
+                              <div className="tp-item-meta">
+                                正文 {it.content_chars} 字 · 标签 {it.tags} 个
+                                {it.importance != null ? ` · 重要度 ${it.importance}` : ''}
+                                {it.confidence != null ? ` · 置信度 ${it.confidence}` : ''}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div className="tp-note">
+                        {pending.view.source}；{pending.view.note}（读取于 {new Date(pending.view.captured_at).toLocaleString('zh-CN')}）
+                      </div>
+                    </>
+                  )}
+                </div>
+                <div className="tp-sec">
+                  <div className="tp-sec-title"><b>写入草稿</b></div>
+                  <div className="tp-note">程序没有可在壳内编辑的写入草稿模型；新建记忆请在「写入」页完成（同一真实链路）。</div>
                   <button className="btn" onClick={() => {
                     const write = findNav('write');
                     if (write) openView(write);

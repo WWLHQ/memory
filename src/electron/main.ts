@@ -43,6 +43,8 @@ import { UNSET_MANUAL_BILLING } from '../shared/billing.ts';
 import { createServer as httpCreateServer } from 'node:http';
 import { runMcpServer } from '../core/memagent/mcp.ts';
 import { runMcpHttpServer } from '../core/memagent/mcpHttp.ts';
+import { MemoryPendingStore, type PendingStore } from '../core/memagent/pendingWrites.ts';
+import { summarizePendingWrites } from '../shared/pendingWritesView.ts';
 import { ensureSharedProject } from '../core/memagent/mcpRecall.ts';
 import { FileTokenStore } from '../core/memagent/tokenStore.ts';
 import { FileMemberStore } from '../core/memagent/memberStore.ts';
@@ -1191,7 +1193,7 @@ function issueRecoveryCard(i: { recovery_code: string; fingerprint: string; crea
   };
 }
 
-function registerL0Ipc(vault: L0Vault, collectorVector: JsVectorBackend): void {
+function registerL0Ipc(vault: L0Vault, collectorVector: JsVectorBackend, pendingStore: PendingStore): void {
   /** 查阅会话必须属于当前登录账号（管理员也不能借用他人会话；直接查阅请用管理密码） */
   const assertOwner = async (l0SessionId: unknown, ctx: TenantContext, channel: string): Promise<string> => {
     const id = typeof l0SessionId === 'string' ? l0SessionId.trim() : '';
@@ -1378,6 +1380,29 @@ function registerL0Ipc(vault: L0Vault, collectorVector: JsVectorBackend): void {
     const found = await l0Store.getAll(ids);
     actionLog('ipc', 'l0:blobs', { asked: ids.length, found: found.size });
     return { ok: true, envelopes: Object.fromEntries(found) };
+  });
+
+  /**
+   * S5 / D6：MCP 写入兜底队列只读摘要。
+   * L0 写密钥锁定期间 write_memory 会进 pending 队列（解锁后由下一次写入自动重放）。
+   * 只回计数与可排查字段（id/时间/项目/来源/字数/评分），正文与密钥材料绝不出主进程；
+   * 日志只记条数。队列实现由 bootstrap 注入且与两个 MCP server 共用一个实例。
+   */
+  handleIpc(IPC.l0PendingWrites, async (_e, sessionId?: string) => {
+    const gate = requireSession(sessionId, IPC.l0PendingWrites);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    const all = await pendingStore.list();
+    const { items, truncated } = summarizePendingWrites(all);
+    actionLog('ipc', 'l0:pendingWrites', { count: all.length, shown: items.length });
+    return {
+      ok: true,
+      count: all.length,
+      items,
+      truncated,
+      source: 'MCP 写入兜底队列（主进程内存 · 与 8202/8204 MCP 共用）',
+      note: 'L0 写密钥锁定期间的 write_memory 暂存于此，解锁后由下一次写入自动重放；进程重启即清空。只读摘要，不含正文与密钥材料。',
+      captured_at: new Date().toISOString(),
+    };
   });
 
   /**
@@ -2702,7 +2727,10 @@ async function bootstrap(): Promise<void> {
   // 进程内向量索引提前建：清库/重判/按 L0 重建三条改写路径都要同步摘除或刷新向量，
   // 而它们注册在下面的 IPC 段里（采集器共用这一个索引，声明原先在采集区，随批次37-E 上移）。
   const collectorVector = new JsVectorBackend();
-  registerL0Ipc(l0Vault, collectorVector);
+  // S5 / D6：MCP 写入兜底队列（L0 写密钥锁定期间暂存）。两个 MCP 端口共用同一实例，
+  // 任务窗只读摘要；未注入文件实现 → 进程内队列，重启即清空（如实标注）。
+  const mcpPendingStore: PendingStore = new MemoryPendingStore();
+  registerL0Ipc(l0Vault, collectorVector, mcpPendingStore);
   // 批次37-B：首启向导通道（登录之前用，不带会话）
   registerSetupIpc(l0Vault, staticPort);
   registerLegacyIpc();
@@ -2767,7 +2795,7 @@ async function bootstrap(): Promise<void> {
     ...tenantTriple, is_admin: true as const, scope_project_ids: ['*'],
   };
 
-  const mcp = runMcpServer({ storage, port: MCP_PORT, token: mcpToken, l0: l0Vault, tokenStore, memberStore, account: mcpBootstrapAccount });
+  const mcp = runMcpServer({ storage, port: MCP_PORT, token: mcpToken, l0: l0Vault, tokenStore, memberStore, account: mcpBootstrapAccount, pending: mcpPendingStore });
   mcp.ready
     .then((p) => { void mlog('bootstrap:mcp-listening', { port: p }); })
     .catch((e) => { void mlog('bootstrap:mcp-listen-error', String((e as Error)?.message ?? e)); });
@@ -2776,6 +2804,7 @@ async function bootstrap(): Promise<void> {
   // 批次33-C：同一端口另开 GET /recall/<一次性 id> = 聊天里「展开明细」链接指向的本机明细页（真折叠），只记命中与否，不记 id 与正文。
   const mcpHttp = runMcpHttpServer({
     storage, port: MCP_HTTP_PORT, token: mcpToken, l0: l0Vault, tokenStore, memberStore, account: mcpBootstrapAccount,
+    pending: mcpPendingStore,
     // 批次41-R：同一条也落 actions.log（批次34 对 llm:* 的同一口径）——日志页读的是 actions.log，
     // 只写 main.log 等于「明细页有没有被点开过」对用户不可见。值只有 ok/miss，无 id、无正文。
     onViewDetail: (outcome) => {

@@ -3,7 +3,7 @@
 > 由 `npm run code:index` 生成，请勿手改；改代码后重跑即可。
 > 用法：先在本表定位文件与导出符号，再只读该文件的局部区间（省 token、少误改）。
 
-共 352 个源码文件。
+共 354 个源码文件。
 
 ## e2e
 
@@ -97,7 +97,7 @@
 
 | 文件 | 行数 | 摘要 | 导出 |
 |---|---|---|---|
-| [src/desktop/hostBridge.ts](src/desktop/hostBridge.ts) | 365 | 宿主桥（iframe 场景）：把 preload 能力透传给概览页 iframe 内的子页面。 | hostLog(fn), handleBridgeMessage(fn), isEmbedded(fn), installHostBridge(fn), hostCall(fn), hostCapability(fn), HostLogOptions(type), HostMethod(type) |
+| [src/desktop/hostBridge.ts](src/desktop/hostBridge.ts) | 368 | 宿主桥（iframe 场景）：把 preload 能力透传给概览页 iframe 内的子页面。 | hostLog(fn), handleBridgeMessage(fn), isEmbedded(fn), installHostBridge(fn), hostCall(fn), hostCapability(fn), HostLogOptions(type), HostMethod(type) |
 | [src/desktop/hostScan.ts](src/desktop/hostScan.ts) | 185 | 宿主真扫（discover 真实化）· 纯类型 + 纯匹配层（零 node 依赖，可安全打进浏览器包）。 | matchAgentsFromProcesses(fn), matchAgentsFromMcp(fn), matchAgentsFromConfigFiles(fn), mergeHostAgents(fn), AGENT_FINGERPRINTS(const), AgentFingerprint(type), HostAgentFound(type), HostScanResult(type), HostScanApi(type) |
 | [src/desktop/ipcStorage.ts](src/desktop/ipcStorage.ts) | 113 | 桌面端存储桥接（Electron 渲染进程侧）：把内核 StorageBackend 接口经 preload 暴露的 | IpcStorageBackend(class), StorageIpc(type) |
 
@@ -110,13 +110,13 @@
 | [src/electron/backupFiles.ts](src/electron/backupFiles.ts) | 104 | 批次37-D：双库备份的文件配方（纯函数，主进程与单测共用同一真源）。 | planBackupFiles(fn), kindOfBackupName(fn), tsOfBackupName(fn), isRecipeBackupName(fn), selectBackupsToDelete(fn), sortBackupsNewestFirst(fn), BACKUP_PREFIX(const), BACKUP_EXT(const), BACKUP_KINDS(const), BackupSourceFile(type), BackupKind(type) |
 | [src/electron/dataRoot.ts](src/electron/dataRoot.ts) | 442 | 数据根目录（批次6）：记忆库、采集游标、日志、MCP 令牌、备份配置等全部持久数据 | defaultDataRoot(fn), dataRootPointerPath(fn), readDataRootPointer(fn), writeDataRootPointer(fn), clearDataRootMigrateFrom(fn), resolveLibraryPaths(fn), isSetupComplete(fn), wizardRequired(fn), hasLibraryDirs(fn), libraryFileState(fn), validateDataRootPath(fn), samePath(fn), ensureDirWritable(fn), hasAnyData(fn), summarizeDataDir(fn), detectDataRoots(fn), migrateDataRoot(fn), adoptLibraryDirIntoPlace(fn), DATA_ROOT_DIR_NAME(const), DATA_ROOT_POINTER_NAME(const), DATA_ROOT_POINTER_VERSION(const), DATA_ROOT_MIGRATE_FILES(const), DATA_ROOT_MIGRATE_DIRS(const), LEDGER_FILE_NAME(const), L0_FILE_NAME(const), L0_KEYRING_FILE_NAME(const), DataRootPointer(type), DataRootSummary(type), DataRootMigration(type), LibraryPaths(type), DataRootPointerRead(type) |
 | [src/electron/hostScan.ts](src/electron/hostScan.ts) | 163 | 宿主真扫 · node IO 层（仅 Electron 主进程使用）： | parseTasklistCsv(fn), parseWmicJson(fn), listProcessNames(fn), detectMcpEntries(fn), detectConfigFiles(fn), scanHost(fn) |
-| [src/electron/ipcChannels.ts](src/electron/ipcChannels.ts) | 170 | preload 暴露的 IPC channel 清单（唯一真源）。 | missingChannels(fn), formatBootFailure(fn), handleBootFailure(fn), IPC(const), PRELOAD_CHANNELS(const), BootFailureDeps(type) |
+| [src/electron/ipcChannels.ts](src/electron/ipcChannels.ts) | 175 | preload 暴露的 IPC channel 清单（唯一真源）。 | missingChannels(fn), formatBootFailure(fn), handleBootFailure(fn), IPC(const), PRELOAD_CHANNELS(const), BootFailureDeps(type) |
 | [src/electron/l0KeyringStore.ts](src/electron/l0KeyringStore.ts) | 72 | L0 密钥环落盘适配（§4.4.8）：l0-keyring.json 原子写（temp → fsync → rename）， | writeFileAtomic(fn), createL0KeyringStore(fn), createHomeLockStore(fn), cleanupTempFiles(fn) |
 | [src/electron/llmBilling.ts](src/electron/llmBilling.ts) | 405 | 批次48 A31-b：厂商余额查询适配器（主进程唯一真源）。 | billingGetJson(fn), loadBillingCredentials(fn), saveBillingCredential(fn), BILLING_CREDS_FILE(const), BILLING_TTL_MS(const), NO_ENDPOINT_VENDORS(const), LOCAL_BILLING_VENDORS(const), deepseekBilling(const), kimiBilling(const), siliconflowBilling(const), openrouterBilling(const), BILLING_ADAPTERS(const), LlmBillingService(class), BillingBalance(type), BillingFetchOutcome(type), BillingAdapter(type), BillingServiceDeps(type), EngineBillingView(type) |
 | [src/electron/llmGateway.ts](src/electron/llmGateway.ts) | 574 | 批次32：LLM 精炼网关（主进程唯一真源）——通用 OpenAI 兼容**多引擎**，路由口径「哪个能用、哪个快用哪个」。 | defaultLlmConfig(fn), loadLlmConfig(fn), saveLlmConfig(fn), loadLlmKeys(fn), saveLlmKey(fn), keyExists(fn), buildLayerPrompt(fn), chatEndpoint(fn), applyProxyAccounting(fn), testEngine(fn), applyProbeResult(fn), loadLlmGateway(fn), llmEngineViews(fn), mergeLlmConfig(fn), LLM_CONFIG_FILE(const), LLM_KEYS_FILE(const), LEGACY_DEEPSEEK_KEY_FILE(const), LLM_PRESETS(const), LlmGatewayProvider(class), LlmEngineConfig(type), LlmGatewayConfig(type), LlmPreset(type), EngineTestResult(type), LlmGatewayView(type), LlmEnginePatch(type), LlmAddEngine(type), LlmConfigPatch(type), LlmEngineView(type) |
-| [src/electron/main.ts](src/electron/main.ts) | 3825 | Electron 主进程入口： | — |
+| [src/electron/main.ts](src/electron/main.ts) | 3854 | Electron 主进程入口： | — |
 | [src/electron/mcpClients.ts](src/electron/mcpClients.ts) | 303 | MCP 客户端配置读写 · node 层（批次15，仅 Electron 主进程使用）。 | expandHome(fn), applyRecallEvidence(fn), scanMcpClients(fn), snippetForClient(fn), wireMcpClient(fn), McpClientStatus(type), McpClientsScan(type), McpWireResult(type), McpRecallEvidence(type) |
-| [src/electron/preload.ts](src/electron/preload.ts) | 289 | Electron preload：contextIsolation 开启下，经 contextBridge 向渲染进程暴露存储桥接面与运行标识。 | — |
+| [src/electron/preload.ts](src/electron/preload.ts) | 292 | Electron preload：contextIsolation 开启下，经 contextBridge 向渲染进程暴露存储桥接面与运行标识。 | — |
 | [src/electron/storageIpc.ts](src/electron/storageIpc.ts) | 62 | 批次47 P0-3：存储数据面四条「读写/审计」通道统一走登录会话闸门。 | createStorageReadWriteHandlers(fn), StorageIpcDeps(type), StorageReadWriteHandlers(type) |
 | [src/electron/tenantSource.ts](src/electron/tenantSource.ts) | 44 | 批次45-A1 单一租户真源：数据根级 tenant.json（0600），类比 dataRoot 指针 / mcp-token.txt 的启动期指针文件。 | loadOrCreateTenant(fn), TENANT_FILE_NAME(const), TENANT_SCHEMA(const) |
 | [src/electron/webhookServer.ts](src/electron/webhookServer.ts) | 103 | Webhook HTTP 服务（批次26-A P0-4，从 main.ts 内联处理器抽出以便单测）： | createWebhookHttpServer(fn), WebhookServerOptions(type) |
@@ -149,6 +149,7 @@
 | [src/shared/memoryOwnership.ts](src/shared/memoryOwnership.ts) | 90 | 批次48 A7：putMemory 归属校验（浏览器 HTTP 数据面 + Electron IPC 数据面共用同一判据）。 | checkMemoryWriteOwnership(fn), findExistingMemoryRow(fn), SessionTenant(type), OwnershipVerdict(type) |
 | [src/shared/normalParams.ts](src/shared/normalParams.ts) | 27 | 批次48 A17：参数页「普通配置」折算表 —— Web 展示与内核遗忘调度共用这一份真源。 | halfLifeDaysOf(fn), autoArchiveDaysOf(fn), FORGET_SPEED_HALF_LIFE_DAYS(const), RETENTION_ARCHIVE_DAYS(const), ForgetSpeed(type), Retention(type) |
 | [src/shared/passwordPolicy.ts](src/shared/passwordPolicy.ts) | 57 | 批次48 A10：密码策略（4.2）的共享真源 —— 首页后端持久化 + 注册/改密校验 + 安全页展示同一份定义。 | normalizePwdPolicy(fn), validatePasswordAgainstPolicy(fn), DEFAULT_PWD_POLICY(const), PwdPolicy(type) |
+| [src/shared/pendingWritesView.ts](src/shared/pendingWritesView.ts) | 64 | 待重放写入队列的「只读摘要」口径（D6 / S5） | summarizePendingWrites(fn), PENDING_SUMMARY_LIMIT(const), PendingWriteSummary(type), PendingWritesView(type) |
 | [src/shared/proxyAccounting.ts](src/shared/proxyAccounting.ts) | 90 | 批次48 A16：反代理记账单价 / 日配额。 | normalizeAccountingPrice(fn), normalizeAccountingQuota(fn), proxyModelMeta(fn), remainingText(fn), normalizeProxyCap(fn), proxyCapsFromCfg(fn), proxyCostToday(fn), UNSET_PROXY_ACCOUNTING(const), UNSET_PROXY_CAPS(const), PROXY_COST_WINDOW_MS(const), ProxyAccounting(type), ProxyCaps(type) |
 | [src/shared/sessionKey.ts](src/shared/sessionKey.ts) | 6 | — | SESSION_STORAGE_KEY(const) |
 | [src/shared/tenantDefaults.ts](src/shared/tenantDefaults.ts) | 24 | 批次45-A1 单一租户真源：本机规范租户三元组的**缺省值**与**校验**。 | normalizeTenantTriple(fn), DEFAULT_TENANT(const), TenantTriple(type) |
@@ -392,8 +393,9 @@
 | [src/web/shared/useColWidths.tsx](src/web/shared/useColWidths.tsx) | 97 | 表头列宽拖拽与固化（批次24）：记忆库 / 日志记录 / 审计日志三张表共用同一实现。 | loadColWidths(fn), saveColWidths(fn), useColWidths(fn), ColResizeHandle(fn), MIN_COL_WIDTH(const), ColWidths(type) |
 | [src/web/shared/useL0Session.ts](src/web/shared/useL0Session.ts) | 155 | 渲染层 L0 连续查阅会话（§4.4.3，日志页 / 记忆层级页共用）： | useL0Session(fn), formatRemaining(fn), L0_HEARTBEAT_MS(const), L0SessionView(type), L0SessionApi(type), L0UnlockOutcome(type), L0RequestOutcome(type) |
 | [src/web/shell/Icons.tsx](src/web/shell/Icons.tsx) | 72 | 壳层图标：定稿里的线性图标集，按需内联渲染（不引入外部图标库、不依赖网络）。 | Icon(fn) |
-| [src/web/shell/Workspace.tsx](src/web/shell/Workspace.tsx) | 708 | 工作台壳层（批次48 S1）：Ribbon + 导航树 + 标签条 + 属性检查器 + 任务窗 + 底部五标签 + 状态栏。 | Workspace(fn) |
+| [src/web/shell/Workspace.tsx](src/web/shell/Workspace.tsx) | 771 | 工作台壳层（批次48 S1）：Ribbon + 导航树 + 标签条 + 属性检查器 + 任务窗 + 底部五标签 + 状态栏。 | Workspace(fn) |
 | [src/web/shell/overview.ts](src/web/shell/overview.ts) | 118 | 壳层「概览」数据条（批次48 S2）：只从真实链路取值，逐项标明来源与失败原因。 | loadOverview(fn), OverviewHealth(type), OverviewBilling(type), OverviewSnapshot(type) |
+| [src/web/shell/taskpane.ts](src/web/shell/taskpane.ts) | 40 | 任务窗「待重放写入」只读视图（S5 / D6）：经 hostBridge 读 l0:pendingWrites。 | loadPendingWrites(fn), PendingWritesResult(type) |
 | [src/web/shell/views.ts](src/web/shell/views.ts) | 374 | 工作台壳层的视图映射（批次48 S1）。 | flattenNav(fn), findNav(fn), navPages(fn), PAGES(const), NAV(const), RIBBON(const), BOTTOM_TABS(const), NavGroup(type), NavItem(type), RibbonItem(type), RibbonGroup(type), RibbonTab(type), BottomTab(type), PageKey(type), NavEntry(type), IconName(type), ShellAction(type), BottomTabId(type) |
 | [src/web/shell/workspaceEntry.tsx](src/web/shell/workspaceEntry.tsx) | 20 | 工作台壳层入口（批次48 S1）：Electron 主窗口加载 workspace.html。 | — |
 | [src/web/sync/SyncPage.tsx](src/web/sync/SyncPage.tsx) | 131 | 同步与裁决页（批次42-C）：「立即同步」（真实报告）+ 中枢对账视图 + §9.7 人工裁决队列。 | SyncPage(fn) |
@@ -484,7 +486,7 @@ src/core/memagent/types.ts 759da20e5b4e
 src/core/memagent/ulid.ts 634c99f1962a
 src/core/memagent/vector.ts 80221de2d059
 src/core/memagent/webhook.ts deae36bbc0ca
-src/desktop/hostBridge.ts c683a071fcb6
+src/desktop/hostBridge.ts bc4ca9789278
 src/desktop/hostScan.ts 0559ae3ef556
 src/desktop/ipcStorage.ts 07c7fd702be7
 src/electron/actionLog.ts 4f0d6d2ad7da
@@ -492,13 +494,13 @@ src/electron/agentDetect.ts 3c31af9a1ae7
 src/electron/backupFiles.ts d2da35b590ff
 src/electron/dataRoot.ts d6ae0727109b
 src/electron/hostScan.ts 694d58d7048c
-src/electron/ipcChannels.ts e32c31f2cf78
+src/electron/ipcChannels.ts 347d0da83eb6
 src/electron/l0KeyringStore.ts b900f5d523d5
 src/electron/llmBilling.ts 82ae5edccb1c
 src/electron/llmGateway.ts 5056e6447738
-src/electron/main.ts cbfe4e346935
+src/electron/main.ts 5e4b61b651a6
 src/electron/mcpClients.ts df9527333225
-src/electron/preload.ts 9722c0005cd9
+src/electron/preload.ts a2e89fb30b54
 src/electron/storageIpc.ts 9edb5f55187a
 src/electron/tenantSource.ts 8d493e4182d2
 src/electron/webhookServer.ts 62157c0b1e21
@@ -516,6 +518,7 @@ src/shared/localOrigin.ts 26f99e4f1928
 src/shared/memoryOwnership.ts b21d67b37ebd
 src/shared/normalParams.ts b76252aaf3e9
 src/shared/passwordPolicy.ts b1a87dd48d23
+src/shared/pendingWritesView.ts ae69b7effb0a
 src/shared/proxyAccounting.ts 5af6f44a262f
 src/shared/sessionKey.ts ab2fa7617802
 src/shared/tenantDefaults.ts 881e1ff9c969
@@ -749,8 +752,9 @@ src/web/shared/syncHub.ts 831b0d785108
 src/web/shared/useColWidths.tsx a6e14931a82b
 src/web/shared/useL0Session.ts c917a61c99d9
 src/web/shell/Icons.tsx 19cebaeba156
-src/web/shell/Workspace.tsx 8b669f4702a1
+src/web/shell/Workspace.tsx 893dcb5125d8
 src/web/shell/overview.ts 0765a086262d
+src/web/shell/taskpane.ts 39d5562ae71b
 src/web/shell/views.ts 679a99c2f98c
 src/web/shell/workspaceEntry.tsx d81475dafbfc
 src/web/sync/SyncPage.tsx 1282b8549322

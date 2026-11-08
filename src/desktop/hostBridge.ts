@@ -48,6 +48,8 @@ export type HostMethod =
   | 'l0:listRequests' | 'l0:listGrants' | 'l0:grant' | 'l0:deny' | 'l0:revoke'
   | 'l0:unlock' | 'l0:heartbeat' | 'l0:lock' | 'l0:writeUnlock' | 'l0:writeLock'
   | 'l0:seal' | 'l0:decrypt' | 'l0:sessionInfo' | 'l0:migrate' | 'l0:blobs'
+  /** S5 / D6：MCP 写入兜底队列只读摘要（不含正文与密钥材料） */
+  | 'l0:pendingWrites'
   | 'l0:splitPreview' | 'l0:splitRun'
   | 'l0:rebuildPreview' | 'l0:rebuildRun'
   | 'l0:recoveryStatus' | 'l0:recoveryInit' | 'l0:recoveryIssue' | 'l0:recover' | 'l0:recoveryExport'
@@ -117,6 +119,7 @@ const CHANNEL_TO_NATIVE: Record<HostMethod, [string, string]> = {
   'l0:sessionInfo': ['l0', 'sessionInfo'],
   'l0:migrate': ['l0', 'migrate'],
   'l0:blobs': ['l0', 'blobs'],
+  'l0:pendingWrites': ['l0', 'pendingWrites'],
   'l0:splitPreview': ['l0', 'splitPreview'],
   'l0:splitRun': ['l0', 'splitRun'],
   'l0:rebuildPreview': ['l0', 'rebuildPreview'],
