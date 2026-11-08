@@ -1,0 +1,55 @@
+/* 旧组件（.card/.ltable/.status/.panel 等）的浅色令牌覆盖。
+ * shared/theme.css 与各页 theme.css 仍是暗色 :root；此文件用 html[data-theme="light"]
+ * 更高优先级把同名令牌映射到 p0 浅色，保证 iframe 跟随壳层亮色时不再是黑底。
+ * 暗色走各自 :root，不受影响。表单控件在两种主题下都用令牌（修掉白底输入框）。 */
+html[data-theme="light"] {
+  --bg: #f8fafc;
+  --panel: #f2f4f7;
+  --panel2: #eef1f4;
+  --line: #d7dce2;
+  --txt: #27313b;
+  --muted: #6d7885;
+  --dim: #9aa4af;
+  --accent: #0f6cbd;
+  --ok: #2f7d32;
+  --warn: #a86b12;
+  --err: #b33b31;
+}
+
+input, select, textarea {
+  background: var(--panel2);
+  color: var(--txt);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font: inherit;
+}
+
+/* 亮色下把暗色硬编码的胶囊改成浅底深字（暗色仍用 theme.css 原值） */
+html[data-theme="light"] .status.active { background: #e5f5ea; color: #1c6b32; border-color: #b5dfc0; }
+html[data-theme="light"] .status.hibernating { background: #fdf3d9; color: #8a5a00; border-color: #ecd39a; }
+html[data-theme="light"] .status.archived { background: var(--panel2); color: var(--dim); }
+html[data-theme="light"] .status.deprecated { background: #fbe7e5; color: #a5322a; border-color: #e8b7b2; }
+html[data-theme="light"] .status.stale { background: #e6f1fb; color: #0f5c9a; border-color: #b9d7ee; }
+html[data-theme="light"] .status.dormant { background: #eceff2; color: #5b6675; border-color: #cfd6dd; }
+html[data-theme="light"] .temp.hot { background: #fbe7e5; color: #a5322a; border-color: #e8b7b2; }
+html[data-theme="light"] .temp.warm { background: #fdf3d9; color: #8a5a00; border-color: #ecd39a; }
+html[data-theme="light"] .temp.cold { background: #e6f1fb; color: #0f5c9a; border-color: #b9d7ee; }
+html[data-theme="light"] .temp.archived,
+html[data-theme="light"] .temp.dormant { background: var(--panel2); color: var(--dim); }
+html[data-theme="light"] .badge.p0 { background: #e6f1fb; color: #0f5c9a; }
+html[data-theme="light"] .badge.p1 { background: #e5f5ea; color: #1c6b32; }
+html[data-theme="light"] .badge.p2 { background: #fdf3d9; color: #8a5a00; }
+html[data-theme="light"] .badge.p3 { background: var(--panel2); color: var(--muted); }
+html[data-theme="light"] .card.degraded { border-color: #ecd39a; }
+html[data-theme="light"] .card.failed { border-color: #e8b7b2; }
+html[data-theme="light"] .btn.primary { color: #ffffff; }
+html[data-theme="light"] .toast { box-shadow: var(--shadow); }
+/* Agent 接入页的深色硬编码块（暗色仍用原值） */
+html[data-theme="light"] .stage.done { background: #e8f1fb; border-color: #b9d7ee; color: var(--txt); }
+html[data-theme="light"] .inject { background: #e8f1fb; border-color: #b9d7ee; color: #0f5c9a; }
+html[data-theme="light"] .warn { background: #fdf3d9; border-color: #ecd39a; color: #8a5a00; }
+html[data-theme="light"] .errbox { background: #fbe7e5; border-color: #e8b7b2; color: #a5322a; }
+html[data-theme="light"] .pill.red { background: #fbe7e5; border-color: #e8b7b2; color: #a5322a; }
+html[data-theme="light"] .pill.gold { background: #fdf3d9; border-color: #ecd39a; color: #8a5a00; }
+html[data-theme="light"] .pill.on { background: #e8f1fb; border-color: var(--accent); color: var(--txt); }

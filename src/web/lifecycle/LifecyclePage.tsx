@@ -11,9 +11,11 @@ import { canMigrate, freshnessPreview, importanceLevel } from './logic.ts';
 import { coreListLifecycle, coreLifeOp } from './coreLifecycle.ts';
 import { LIFECYCLE_DEFAULT_PAGE_SIZE, LIFECYCLE_PAGE_SIZES, pagedList } from './lifecycleFilter.ts';
 import { M_DAYS, N_DAYS } from './constants.ts';
+import { useHostTheme } from '../shared/hostTheme.ts';
 import type { LifeOp, LifecycleRecord, MemoryStatus } from './types.ts';
 
 export function LifecyclePage() {
+  useHostTheme();
   const [records, setRecords] = useState<LifecycleRecord[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [checked, setChecked] = useState<Set<string>>(new Set());
@@ -339,8 +341,8 @@ export function LifecyclePage() {
           </table>
         </div>
         <div className="card">
-          <b>本页真实记忆的衰减预览（{records.length} 条）</b>
-          {records.length === 0 ? (
+          <b>本页真实记忆的衰减预览（当前页 {paged.items.length} / 共 {records.length} 条）</b>
+          {paged.items.length === 0 ? (
             <div className="p0-empty dashed" data-testid="decay-empty">账本为空：无真实衰减数据，不伪造阈值样本。</div>
           ) : (
             <table className="ltable" data-testid="decay-table" style={{ marginTop: 8 }}>
@@ -348,7 +350,7 @@ export function LifecyclePage() {
                 <tr><th>ID</th><th>温度</th><th>状态</th><th>age（天）</th><th>半衰期</th><th>freshness</th></tr>
               </thead>
               <tbody>
-                {records.map((r) => (
+                {paged.items.map((r) => (
                   <tr key={r.id} data-testid={`decay-row-${r.id}`}>
                     <td className="mid">{r.id}</td>
                     <td><span className={`temp ${r.decay_class}`}>{r.decay_class}</span></td>

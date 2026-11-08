@@ -167,17 +167,17 @@
 | 文件 | 行数 | 摘要 | 导出 |
 |---|---|---|---|
 | [src/web/AgentOnboard/AgentCard.tsx](src/web/AgentOnboard/AgentCard.tsx) | 162 | 单家宿主 Agent 接入卡片（规格 T3 / 19.2 · 19.3 · 5.2） | AgentCard(fn), AgentCardProps(type) |
-| [src/web/AgentOnboard/AgentOnboardPage.tsx](src/web/AgentOnboard/AgentOnboardPage.tsx) | 636 | Agent 接入配置页容器（REQ-003 接原型） | detectForm(fn), AgentOnboardPage(fn) |
+| [src/web/AgentOnboard/AgentOnboardPage.tsx](src/web/AgentOnboard/AgentOnboardPage.tsx) | 773 | Agent 接入配置页容器（REQ-003 接原型） | detectForm(fn), AgentOnboardPage(fn) |
 | [src/web/AgentOnboard/ChannelConfig.tsx](src/web/AgentOnboard/ChannelConfig.tsx) | 36 | 采集通道配置行（规格 T6 / 19.3 · R4 双通道至少开一 + SHA-256 幂等不可关） | ChannelConfig(fn) |
 | [src/web/AgentOnboard/FormBadge.tsx](src/web/AgentOnboard/FormBadge.tsx) | 46 | 按端置灰徽标（规格 T10 / AC-003.10 / 19.10） | FormBadge(fn), GRAYED_BY_FORM(const) |
 | [src/web/AgentOnboard/Gains.tsx](src/web/AgentOnboard/Gains.tsx) | 25 | 效果证据 · 用户可感知的「省」与「快」（19.1 / 9.x / 2.4.x / 19.8 反代理） | Gains(fn) |
 | [src/web/AgentOnboard/IsolationConfig.tsx](src/web/AgentOnboard/IsolationConfig.tsx) | 34 | 隔离粒度配置行（规格 19.4 · R1 project_id 共享 / user_id 偏好跨项目） | IsolationConfig(fn) |
 | [src/web/AgentOnboard/KeyMgmt.tsx](src/web/AgentOnboard/KeyMgmt.tsx) | 21 | 密钥管理行（规格 T7 / §4 · R5 恒脱敏不回显 / R6 轮换宽限 24h / 超 90 天告警） | KeyMgmt(fn) |
-| [src/web/AgentOnboard/McpClientsPanel.tsx](src/web/AgentOnboard/McpClientsPanel.tsx) | 439 | MCP 客户端接入面板（批次15 建 / 批次21 交互收敛 / 批次23 一键适配全部 + 逐客户端接通指引）： | McpClientsPanel(fn) |
+| [src/web/AgentOnboard/McpClientsPanel.tsx](src/web/AgentOnboard/McpClientsPanel.tsx) | 462 | MCP 客户端接入面板（批次15 建 / 批次21 交互收敛 / 批次23 一键适配全部 + 逐客户端接通指引）： | McpClientsPanel(fn) |
 | [src/web/AgentOnboard/McpToolConfig.tsx](src/web/AgentOnboard/McpToolConfig.tsx) | 61 | MCP 工具配置行（规格 T5 / 19.5 · 须带 project_id） | toolRef(fn), McpToolConfig(fn) |
 | [src/web/AgentOnboard/OneClickOnboard.tsx](src/web/AgentOnboard/OneClickOnboard.tsx) | 248 | 一键接入本机 Agent（规格 T4 / AC-003.4 / 19.9 · 扫→分→绑→验 四段进度 + 自动绑定 + 可撤销） | OneClickOnboard(fn) |
 | [src/web/AgentOnboard/TestPanel.tsx](src/web/AgentOnboard/TestPanel.tsx) | 70 | 接入测试面板（规格 T8 / AC-003.8 · R7 必记 request_id · 注入预览） | TestPanel(fn), TestEvidence(type) |
-| [src/web/AgentOnboard/agentOnboardEntry.tsx](src/web/AgentOnboard/agentOnboardEntry.tsx) | 31 | REQ-003 接入页入口（原 index.html 默认页，因 REQ-005 首页路由决策迁至独立入口，保留 REQ-003 验证） | — |
+| [src/web/AgentOnboard/agentOnboardEntry.tsx](src/web/AgentOnboard/agentOnboardEntry.tsx) | 33 | REQ-003 接入页入口（原 index.html 默认页，因 REQ-005 首页路由决策迁至独立入口，保留 REQ-003 验证） | — |
 | [src/web/AgentOnboard/autoDiscovery.ts](src/web/AgentOnboard/autoDiscovery.ts) | 235 | 登录自动发现链路（批次16）：三路真实信号合并 + 对可写 JSON 客户端自动写入 MCP。 | scanLocalAgents(fn), mcpSpecForAgent(fn), autoWireMcpForAgents(fn), McpClientRow(type), HostInstallScan(type), LocalAgentScan(type) |
 | [src/web/AgentOnboard/autoOnboard.ts](src/web/AgentOnboard/autoOnboard.ts) | 268 | 登录/手动自动接入链路（批次16）： | readOnboardFailure(fn), clearOnboardFailure(fn), hasAutoScannedSession(fn), markAutoScannedSession(fn), clearAutoScannedSession(fn), runAutoOnboard(fn), runAutoOnboardOnLogin(fn), resetAutoOnboardState(fn), ONBOARD_FAILURE_KEY(const), ONBOARD_AUTOSCAN_KEY(const), OnboardFailure(type), RunAutoOnboardOptions(type), AutoOnboardOutcome(type) |
 | [src/web/AgentOnboard/cards.ts](src/web/AgentOnboard/cards.ts) | 106 | 接入卡片构造与恢复：只由「真实接入过」的 agent 名单生成卡片，无任何演示卡片。 | specOf(fn), makeCard(fn), restoreCards(fn), restoreDiscovered(fn), AGENT_SPECS(const), AgentSpec(type) |
@@ -235,11 +235,11 @@
 | [src/web/dispute/useDisputeMirror.ts](src/web/dispute/useDisputeMirror.ts) | 24 | 冲突裁决页后端镜像（阶段5-C 口径统一）：真接 home server POST /api/mirror/audit。 | useDisputeMirror(fn), DisputeMirror(type) |
 | [src/web/dispute/useToast.tsx](src/web/dispute/useToast.tsx) | 22 | 轻量 toast hook（T5）：返回展示节点与 show(msg) | useToast(fn) |
 | [src/web/feedback/FeedbackForm.tsx](src/web/feedback/FeedbackForm.tsx) | 102 | P9-T3 反馈表单（13.7） | FeedbackForm(fn) |
-| [src/web/feedback/FeedbackPage.tsx](src/web/feedback/FeedbackPage.tsx) | 65 | 用户反馈页（REQ-006 / P9）T4 编排 | FeedbackPage(fn) |
+| [src/web/feedback/FeedbackPage.tsx](src/web/feedback/FeedbackPage.tsx) | 68 | 用户反馈页（REQ-006 / P9）T4 编排 | FeedbackPage(fn) |
 | [src/web/feedback/StatCards.tsx](src/web/feedback/StatCards.tsx) | 36 | P9-T3 统计卡（7.1/7.2） | StatCards(fn) |
 | [src/web/feedback/coreFeedback.ts](src/web/feedback/coreFeedback.ts) | 73 | 用户反馈页（REQ-006 / P9）接真内核：提交走 ma._feedback（17.4 trust_delta 内核计算） | coreSubmitFeedback(fn), coreListMemoryOptions(fn), coreLoadFeedbackRecords(fn), FeedbackOutcome(type), MemoryOption(type) |
-| [src/web/feedback/feedbackEntry.tsx](src/web/feedback/feedbackEntry.tsx) | 10 | 用户反馈页（REQ-006 / P9）入口（T1 壳） | — |
-| [src/web/feedback/logic.ts](src/web/feedback/logic.ts) | 63 | 用户反馈页（REQ-006 / P9）纯逻辑层 | trustDelta(fn), validateDraft(fn), statShare(fn), composeRecord(fn), FeedbackStats(type) |
+| [src/web/feedback/feedbackEntry.tsx](src/web/feedback/feedbackEntry.tsx) | 12 | 用户反馈页（REQ-006 / P9）入口（T1 壳） | — |
+| [src/web/feedback/logic.ts](src/web/feedback/logic.ts) | 72 | 用户反馈页（REQ-006 / P9）纯逻辑层 | trustDelta(fn), validateDraft(fn), statShare(fn), composeRecord(fn), FeedbackStats(type) |
 | [src/web/feedback/types.ts](src/web/feedback/types.ts) | 28 | 用户反馈页（REQ-006 / P9）数据模型 | FeedbackDraft(type), InjectedContext(type), FeedbackRecord(type), FeedbackAction(type) |
 | [src/web/feedback/useFeedbackMirror.ts](src/web/feedback/useFeedbackMirror.ts) | 21 | 用户反馈页后端镜像（阶段5-C 口径统一）：真接 home server POST /api/mirror/audit。 | useFeedbackMirror(fn), FeedbackMirror(type) |
 | [src/web/feedback/useToast.tsx](src/web/feedback/useToast.tsx) | 13 | — | useToast(fn) |
@@ -258,11 +258,11 @@
 | [src/web/httpStorage.ts](src/web/httpStorage.ts) | 116 | 批次28-A：浏览器内核数据面 —— StorageBackend 的 HTTP 透传实现。 | fetchKernelInfo(fn), KernelUnavailableError(class), HttpStorageBackend(class), HttpStorageOptions(type), KernelInfo(type) |
 | [src/web/kernel.ts](src/web/kernel.ts) | 250 | 统一内核接入口：全部页面共用同一份账本（唯一真相源）。 | getTenant(fn), bindTenant(fn), syncTenantFromHost(fn), kernelAccount(fn), setKernelStorageForTests(fn), getKernelStorage(fn), rebuildKernelForDataPlane(fn), setKernelL0ForTests(fn), getKernelWithSeed(fn), getKernel(fn), createKernelOnSameStorage(fn), rebuildKernelFromModelConfig(fn), resetKernelForTests(fn), newRequestId(fn), KERNEL_FORM(const), KernelTenant(type), KernelOverrides(type) |
 | [src/web/lifecycle/LifecycleCard.tsx](src/web/lifecycle/LifecycleCard.tsx) | 51 | 生命周期页（REQ-006 / P4）状态查看器（T3） | LifecycleCard(fn) |
-| [src/web/lifecycle/LifecyclePage.tsx](src/web/lifecycle/LifecyclePage.tsx) | 300 | 生命周期页（REQ-006 / P4）· 完整编排（T5）· 真实数据接真版 | LifecyclePage(fn) |
+| [src/web/lifecycle/LifecyclePage.tsx](src/web/lifecycle/LifecyclePage.tsx) | 373 | 生命周期页（REQ-006 / P4）· 完整编排（T5）· 真实数据接真版 | LifecyclePage(fn) |
 | [src/web/lifecycle/ParamPanel.tsx](src/web/lifecycle/ParamPanel.tsx) | 75 | 生命周期页（REQ-006 / P4）调参面板（T4） | ParamPanel(fn) |
 | [src/web/lifecycle/constants.ts](src/web/lifecycle/constants.ts) | 4 | 生命周期阈值常量（9.10.1）。列表数据真相 = 内核账本，无演示记忆。 | N_DAYS(const), M_DAYS(const) |
 | [src/web/lifecycle/coreLifecycle.ts](src/web/lifecycle/coreLifecycle.ts) | 141 | 生命周期页（REQ-006 / P4）接真内核：迁移/调参/批量统一走 ma._memoryOp | toLifecycleRecord(fn), coreListLifecycle(fn), coreLifeOp(fn), DECAY_TO_STATUS(const), STATUS_TO_DECAY(const) |
-| [src/web/lifecycle/lifecycleEntry.tsx](src/web/lifecycle/lifecycleEntry.tsx) | 10 | 生命周期页（REQ-010 / P4）入口：挂载 LifecyclePage。 | — |
+| [src/web/lifecycle/lifecycleEntry.tsx](src/web/lifecycle/lifecycleEntry.tsx) | 12 | 生命周期页（REQ-010 / P4）入口：挂载 LifecyclePage。 | — |
 | [src/web/lifecycle/lifecycleFilter.ts](src/web/lifecycle/lifecycleFilter.ts) | 19 | 生命周期页（REQ-006 / P4）· 分页纯逻辑 | pagedList(fn), LIFECYCLE_DEFAULT_PAGE_SIZE(const), LIFECYCLE_PAGE_SIZES(const), LifecyclePageSize(type) |
 | [src/web/lifecycle/logic.ts](src/web/lifecycle/logic.ts) | 92 | 生命周期页（REQ-006 / P4）纯逻辑层 | freshnessPreview(fn), canMigrate(fn), importanceLevel(fn), staleCheck(fn), applyLifecycle(fn), STATUS_FLOW(const) |
 | [src/web/lifecycle/types.ts](src/web/lifecycle/types.ts) | 48 | 生命周期页（REQ-006 / P4）数据模型 | LifecycleRecord(type), OpResult(type), MemoryStatus(type), DecayClass(type), LifeOp(type) |
@@ -379,8 +379,8 @@
 | [src/web/security/types.ts](src/web/security/types.ts) | 24 | 账号与安全页（REQ-006 / P12）数据模型 | TeamMember(type), ApiKey(type), Scope(type) |
 | [src/web/security/useSecurityMirror.ts](src/web/security/useSecurityMirror.ts) | 16 | 账号与安全页后端镜像（阶段5-C 口径统一）：真接 home server POST /api/mirror/audit。 | useSecurityMirror(fn), SecurityMirror(type) |
 | [src/web/security/useToast.tsx](src/web/security/useToast.tsx) | 13 | — | useToast(fn) |
-| [src/web/setup/SetupPage.tsx](src/web/setup/SetupPage.tsx) | 341 | 首启向导（批次37-B）：把「两个库放在哪 + L0 管理密码 + 恢复卡导出」三件事一次性逼完，走完才放行主界面。 | SetupPage(fn) |
-| [src/web/setup/setupEntry.tsx](src/web/setup/setupEntry.tsx) | 10 | 首启向导入口（批次37-B） | — |
+| [src/web/setup/SetupPage.tsx](src/web/setup/SetupPage.tsx) | 381 | 首启向导（批次37-B）：把「两个库放在哪 + L0 管理密码 + 恢复卡导出」三件事一次性逼完，走完才放行主界面。 | SetupPage(fn) |
+| [src/web/setup/setupEntry.tsx](src/web/setup/setupEntry.tsx) | 12 | 首启向导入口（批次37-B） | — |
 | [src/web/shared/DemoBadge.tsx](src/web/shared/DemoBadge.tsx) | 51 | 批次48 A30：演示页强制标识。inline 演示页（inlineattribution.html）与悬浮覆盖层（floatattribution.html） | DemoBadge(fn), DemoBadgeProps(type) |
 | [src/web/shared/L0WriteUnlock.tsx](src/web/shared/L0WriteUnlock.tsx) | 97 | 批次41-W：L0 写密钥未解锁 → 就地提示 + 就地解锁入口。 | L0WriteUnlock(fn), L0WriteUnlockProps(type) |
 | [src/web/shared/PageNav.tsx](src/web/shared/PageNav.tsx) | 102 | 分页导航条（批次24）：首页/上一页/跳页输入/下一页/尾页 + 每页条数（默认 10）。 | PageNav(fn), PageNavProps(type) |
@@ -397,7 +397,7 @@
 | [src/web/shared/selectionChannel.ts](src/web/shared/selectionChannel.ts) | 71 | 选中项回传通道（S4）：中心区真实页面把「用户当前选中的一条真实记录」回传给壳层属性检查器。 | parseSelection(fn), publishSelection(fn), SELECTION_MSG(const), SelectionField(type), SelectionPayload(type) |
 | [src/web/shared/session.ts](src/web/shared/session.ts) | 57 | 当前会话（批次7）：跨 iframe 共享的 sessionId + home server /api/me 的真实上下文。 | currentSessionId(fn), fetchSessionContext(fn), useSessionContext(fn), SessionState(type), SessionRole(type) |
 | [src/web/shared/shellNavigate.ts](src/web/shared/shellNavigate.ts) | 12 | 中心区 iframe → 壳层导航（概览页快捷胶囊 / 洞察跳转用）。 | requestShellView(fn), SHELL_GOTO_MSG(const) |
-| [src/web/shared/syncHub.ts](src/web/shared/syncHub.ts) | 76 | 渲染层同步中枢代理（批次42-B）：把内核 AnySyncHub 接口转发到主进程 PgSyncHub。 | HostSyncHub(class) |
+| [src/web/shared/syncHub.ts](src/web/shared/syncHub.ts) | 77 | 渲染层同步中枢代理（批次42-B）：把内核 AnySyncHub 接口转发到主进程 PgSyncHub。 | HostSyncHub(class) |
 | [src/web/shared/useColWidths.tsx](src/web/shared/useColWidths.tsx) | 97 | 表头列宽拖拽与固化（批次24）：记忆库 / 日志记录 / 审计日志三张表共用同一实现。 | loadColWidths(fn), saveColWidths(fn), useColWidths(fn), ColResizeHandle(fn), MIN_COL_WIDTH(const), ColWidths(type) |
 | [src/web/shared/useL0Session.ts](src/web/shared/useL0Session.ts) | 155 | 渲染层 L0 连续查阅会话（§4.4.3，日志页 / 记忆层级页共用）： | useL0Session(fn), formatRemaining(fn), L0_HEARTBEAT_MS(const), L0SessionView(type), L0SessionApi(type), L0UnlockOutcome(type), L0RequestOutcome(type) |
 | [src/web/shell/Icons.tsx](src/web/shell/Icons.tsx) | 75 | 壳层图标：定稿里的线性图标集，按需内联渲染（不引入外部图标库、不依赖网络）。 | Icon(fn) |
@@ -510,7 +510,7 @@ src/electron/ipcChannels.ts b914010b7f6e
 src/electron/l0KeyringStore.ts b900f5d523d5
 src/electron/llmBilling.ts 82ae5edccb1c
 src/electron/llmGateway.ts 5056e6447738
-src/electron/main.ts 7e3699716e9f
+src/electron/main.ts 5732f173cd75
 src/electron/mcpClients.ts df9527333225
 src/electron/preload.ts 7b15f19e204b
 src/electron/storageIpc.ts 9edb5f55187a
@@ -538,17 +538,17 @@ src/types/agentOnboard.ts d4d887c55e8a
 src/types/home.ts 15302ed61695
 src/types/inlineAttribution.ts f4e6759adb6d
 src/web/AgentOnboard/AgentCard.tsx 2f157b7bf6d9
-src/web/AgentOnboard/AgentOnboardPage.tsx 6103580502f2
+src/web/AgentOnboard/AgentOnboardPage.tsx 6a96a8cea9d1
 src/web/AgentOnboard/ChannelConfig.tsx b32e6a426470
 src/web/AgentOnboard/FormBadge.tsx b2425eba179f
 src/web/AgentOnboard/Gains.tsx 5dd221d1770f
 src/web/AgentOnboard/IsolationConfig.tsx ae7060ad6cce
 src/web/AgentOnboard/KeyMgmt.tsx 1f40e96ae2f1
-src/web/AgentOnboard/McpClientsPanel.tsx b6493df2ca1d
+src/web/AgentOnboard/McpClientsPanel.tsx 3dbdcccf79b7
 src/web/AgentOnboard/McpToolConfig.tsx 5bb834b70576
 src/web/AgentOnboard/OneClickOnboard.tsx 6d27b6fefff5
 src/web/AgentOnboard/TestPanel.tsx 616d8c8aaa4f
-src/web/AgentOnboard/agentOnboardEntry.tsx fb35983bae60
+src/web/AgentOnboard/agentOnboardEntry.tsx 84134b804309
 src/web/AgentOnboard/autoDiscovery.ts c2fd3f26363d
 src/web/AgentOnboard/autoOnboard.ts 2e2bbfc5bec8
 src/web/AgentOnboard/cards.ts 3dc5d5885b15
@@ -605,12 +605,12 @@ src/web/dispute/logic.ts 922708539fd5
 src/web/dispute/types.ts 34294be31812
 src/web/dispute/useDisputeMirror.ts a2f4cf373f8e
 src/web/dispute/useToast.tsx c650d8662672
-src/web/feedback/FeedbackForm.tsx d2f31ef7ef80
-src/web/feedback/FeedbackPage.tsx 427540f4ec3c
+src/web/feedback/FeedbackForm.tsx acd883ee4989
+src/web/feedback/FeedbackPage.tsx d0cd757caa79
 src/web/feedback/StatCards.tsx 826d2fdad9f4
 src/web/feedback/coreFeedback.ts dbee04d2dde7
-src/web/feedback/feedbackEntry.tsx b9aad0d398bf
-src/web/feedback/logic.ts f8bb57756369
+src/web/feedback/feedbackEntry.tsx 8e909b081887
+src/web/feedback/logic.ts 176b33a17311
 src/web/feedback/types.ts 938ae560ed3e
 src/web/feedback/useFeedbackMirror.ts 6bd1d844d78c
 src/web/feedback/useToast.tsx 85cd09d2e1f5
@@ -629,11 +629,11 @@ src/web/hostLlm.ts 6b12c99be4b7
 src/web/httpStorage.ts d08876fec3ca
 src/web/kernel.ts 41e2a5d2c068
 src/web/lifecycle/LifecycleCard.tsx c115dc841539
-src/web/lifecycle/LifecyclePage.tsx d6f9d13b1deb
+src/web/lifecycle/LifecyclePage.tsx be4124fe5207
 src/web/lifecycle/ParamPanel.tsx 5858a0c4c600
 src/web/lifecycle/constants.ts 4bbab102ec8b
 src/web/lifecycle/coreLifecycle.ts af3caad421f9
-src/web/lifecycle/lifecycleEntry.tsx 265f2cf1ac2e
+src/web/lifecycle/lifecycleEntry.tsx 0ccca9e21d58
 src/web/lifecycle/lifecycleFilter.ts 1f8538e5fdb8
 src/web/lifecycle/logic.ts 7574f2b0fe12
 src/web/lifecycle/types.ts b96b0c4d96c0
@@ -750,8 +750,8 @@ src/web/security/securityEntry.tsx 2e5268781ae1
 src/web/security/types.ts 7a4d935eaa18
 src/web/security/useSecurityMirror.ts 26ac38844bbb
 src/web/security/useToast.tsx 85cd09d2e1f5
-src/web/setup/SetupPage.tsx d1c7c1911be4
-src/web/setup/setupEntry.tsx e1911c5ffb71
+src/web/setup/SetupPage.tsx 5b559983e2c3
+src/web/setup/setupEntry.tsx 4da0cba9fe95
 src/web/shared/DemoBadge.tsx 29e08265f189
 src/web/shared/L0WriteUnlock.tsx 83af39cb0ce1
 src/web/shared/PageNav.tsx fed5dc790db7
@@ -768,7 +768,7 @@ src/web/shared/paginate.ts 2d638d875228
 src/web/shared/selectionChannel.ts e826341f42e1
 src/web/shared/session.ts 2bc9578bb923
 src/web/shared/shellNavigate.ts b8b75188302d
-src/web/shared/syncHub.ts 8bf164b76e0d
+src/web/shared/syncHub.ts 764fcac009c7
 src/web/shared/useColWidths.tsx a6e14931a82b
 src/web/shared/useL0Session.ts c917a61c99d9
 src/web/shell/Icons.tsx 3a8fad33fa2d

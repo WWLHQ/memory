@@ -6,11 +6,13 @@ import { composeRecord, statShare, validateDraft } from './logic.ts';
 import { useFeedbackMirror } from './useFeedbackMirror.ts';
 import { coreSubmitFeedback, coreLoadFeedbackRecords } from './coreFeedback.ts';
 import { FeedbackForm } from './FeedbackForm.tsx';
+import { useHostTheme } from '../shared/hostTheme.ts';
 import { StatCards } from './StatCards.tsx';
 import { useToast } from './useToast.tsx';
 import type { FeedbackDraft, FeedbackRecord } from './types.ts';
 
 export function FeedbackPage() {
+  useHostTheme();
   // 评分默认 0 = 未评分：用户必须亲手选 1–5 星，避免「没点也提交成 3 星」的假口碑
   const [draft, setDraft] = useState<FeedbackDraft>({ memory_id: '', action: 'confirm', rating: 0, comment: '' });
   const [records, setRecords] = useState<FeedbackRecord[]>([]);

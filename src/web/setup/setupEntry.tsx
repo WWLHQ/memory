@@ -5,6 +5,7 @@ import '../shared/actionLog.ts';
 import { SetupPage } from './SetupPage.tsx';
 import '../shared/theme.css';
 import '../shared/p0.css';
+import '../shared/legacyLight.css';
 
 const el = document.getElementById('root');
 if (el) createRoot(el).render(<StrictMode><SetupPage /></StrictMode>);

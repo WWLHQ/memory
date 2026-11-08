@@ -5,6 +5,7 @@ import '../shared/actionLog.ts';
 import { LifecyclePage } from './LifecyclePage.tsx';
 import '../shared/theme.css';
 import '../shared/p0.css';
+import '../shared/legacyLight.css';
 
 const el = document.getElementById('root');
 if (el) createRoot(el).render(<StrictMode><LifecyclePage /></StrictMode>);

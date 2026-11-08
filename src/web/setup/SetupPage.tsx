@@ -7,6 +7,7 @@
 // 3) 管理密码 + 恢复码同时丢失 = L0 原文不可恢复，本应用没有后门——这句话必须让用户看见，不能塞进折叠区。
 import { useCallback, useEffect, useState } from 'react';
 import { hostCall, hostCapability } from '../../desktop/hostBridge.ts';
+import { useHostTheme } from '../shared/hostTheme.ts';
 
 const errText = (e: unknown): string => String((e as Error)?.message ?? e);
 const MIN_PW = 8;
@@ -55,6 +56,7 @@ interface FinishResult {
 }
 
 export function SetupPage({ onNavigate }: { onNavigate?: (url: string) => void }) {
+  useHostTheme();
   const hostReady = hostCapability() !== 'none';
   const [state, setState] = useState<SetupState | null>(null);
   const [issued, setIssued] = useState<Issued | null>(null);
@@ -212,12 +214,13 @@ export function SetupPage({ onNavigate }: { onNavigate?: (url: string) => void }
   const pwOk = pw.length >= MIN_PW && pw === pw2;
 
   return (
-    <div className="wrap">
+    <div className="wrap" data-testid="setup-page">
       <h2>首次启动设置</h2>
       <p className="sub" data-testid="setup-intro">
         这个应用把每条记忆的<strong>可检索正文（L1–L6 记忆库）</strong>和<strong>加密原文（L0 原数据库）</strong>
-        分在两个文件里存。下面三步走完才能进入应用：<strong>① 两个库放在哪 ② L0 管理密码 ③ 导出恢复卡</strong>。
-        中途取消就退出，不会带着半配置继续跑。
+        分在两个文件里存。<strong>① 存储</strong>选两个库的位置，<strong>③ 安全</strong>设 L0 管理密码并导出恢复卡，
+        这两步走完才能进入应用；<strong>② 模型</strong>按定稿列出，但程序首启没有该步骤（登录后用 <code>llm:*</code> 配置），
+        不把未发生的连通性当成功。中途取消就退出，不会带着半配置继续跑。
       </p>
       {err && <div className="card" data-testid="setup-error" style={{ color: 'var(--warn)' }}>⚠️ {err}</div>}
 

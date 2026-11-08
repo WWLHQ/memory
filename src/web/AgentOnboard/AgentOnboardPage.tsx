@@ -27,6 +27,7 @@ import {
   ONBOARD_FAILURE_KEY, hasAutoScannedSession, readOnboardFailure, resetAutoOnboardState, runAutoOnboard,
 } from './autoOnboard.ts';
 import { hostCapability } from '../../desktop/hostBridge.ts';
+import { useHostTheme } from '../shared/hostTheme.ts';
 import { useSessionContext } from '../shared/session.ts';
 import { McpClientsPanel } from './McpClientsPanel.tsx';
 import './theme.css';
@@ -76,6 +77,7 @@ function mergeRestored(prev: UiAgentCard[], restored: UiAgentCard[]): UiAgentCar
 }
 
 export function AgentOnboardPage() {
+  useHostTheme();
   const form = useMemo(detectForm, []);
   const session = useSessionContext();
   const tenantLabel = session.context
