@@ -1,8 +1,11 @@
 // E2E 测试：大模型配置页（REQ-009 / P13）自包含（系统分配端口）
 // 覆盖用例：C1 渲染 / C2 judge 温度锁 / C5 换维度重建提示+估时 / C6 重建中禁切换 / C7 auto 模拟(dry-run·无源回退本地) / C13 price_cap=0 仅免费可见
 // 注：静态构建无宿主 LLM 网关 → 页面走「未配置引擎」诚实空态；反代理路由深逻辑由单测（logic.test.ts / coreModels.test.ts）覆盖。
+// 现行结构：3 个页签（mtab-0 引擎 / mtab-1 计费 / mtab-2 反向代理），只渲染当前页签。
+//   向量卡在引擎页；四用途表 / 保存 / 审计回显在计费页；来源映射 / price_cap / 模拟在反向代理页。
 import { test, expect, disconnectBrowser, collectErrors } from './harness.ts';
 import { startStatic, type StaticServer } from './servers.ts';
+import type { Page } from 'playwright-core';
 
 let APP = '';
 let staticSrv: StaticServer | undefined;
@@ -17,17 +20,27 @@ test.afterAll(async () => {
   await disconnectBrowser();
 });
 
+/** 切到指定页签（0 引擎 / 1 计费 / 2 反向代理） */
+async function gotoTab(page: Page, i: 0 | 1 | 2): Promise<void> {
+  await page.locator(`[data-testid="mtab-${i}"]`).click();
+  await expect(page.locator(`[data-testid="mtab-${i}"]`)).toHaveAttribute('aria-selected', 'true');
+}
+
 test.describe('大模型配置页', () => {
   test('C1 页面渲染：向量卡 384 维 + 4 用途表 + 反代理诚实空态（未配置引擎）', async ({ page }) => {
     const errors = collectErrors(page);
     await page.goto(APP);
     await expect(page.locator('[data-testid="models-page"]')).toBeVisible();
+    // 引擎页：向量 384 维
     await expect(page.locator('[data-testid="vector-dims"]')).toContainText('384');
+    // 计费页：四用途表
+    await gotoTab(page, 1);
     await expect(page.locator('[data-testid="usage-write"]')).toBeVisible();
     await expect(page.locator('[data-testid="usage-judge"]')).toBeVisible();
     await expect(page.locator('[data-testid="usage-rerank"]')).toBeVisible();
     await expect(page.locator('[data-testid="usage-growth"]')).toBeVisible();
-    // 阶段3-B/3-C：无网关 → 诚实空态，绝不渲染假代理行（PROXY_CATALOG 已删）
+    // 反向代理页：无网关 → 诚实空态，绝不渲染假代理行（PROXY_CATALOG 已删）
+    await gotoTab(page, 2);
     await expect(page.locator('[data-testid="proxy-empty-state"]')).toContainText('未配置引擎');
     await expect(page.locator('[data-testid="proxy-rows"]')).toHaveCount(0);
     expect(errors).toEqual([]);
@@ -35,6 +48,7 @@ test.describe('大模型配置页', () => {
 
   test('C2/R4 judge 温度锁灰恒 0，其他用途可编辑', async ({ page }) => {
     await page.goto(APP);
+    await gotoTab(page, 1);
     await expect(page.locator('[data-testid="usage-judge-temp"]')).toBeDisabled();
     await expect(page.locator('[data-testid="usage-judge-temp"]')).toHaveValue('0');
     await expect(page.locator('[data-testid="usage-write-temp"]')).toBeEnabled();
@@ -47,12 +61,15 @@ test.describe('大模型配置页', () => {
       // 只读文案；accept 由 harness 全局容错接管（重复 accept 会报 already handled）
       dialogMsg = d.message();
     });
+    // 引擎页选模型 → 确认框含新维度与重嵌入估时
     await page.locator('[data-testid="vector-select"]').selectOption('bge-m3');
     expect(dialogMsg).toContain('1024');
     expect(dialogMsg).toContain('重嵌入');
     await expect(page.locator('[data-testid="vector-dims"]')).toContainText('1024');
     // 保存前不伪造重建进度：选择即可继续操作（R5 锁定仅在真实保存期间）
     await expect(page.locator('[data-testid="vector-select"]')).toBeEnabled();
+    // 保存在计费页
+    await gotoTab(page, 1);
     await page.locator('[data-testid="save-config"]').click();
     await expect(page.locator('[data-testid="toast"]')).toContainText('已持久化');
     await expect(page.locator('[data-testid="toast"]')).toContainText('1024 维');
@@ -64,6 +81,7 @@ test.describe('大模型配置页', () => {
 
   test('R2 Key 脱敏：勾网络通道并输入 Key → 展示为 [API_KEY:xx****]', async ({ page }) => {
     await page.goto(APP);
+    await gotoTab(page, 1);
     await page.locator('[data-testid="usage-write-net"]').check();
     await page.locator('[data-testid="usage-write-endpoint"]').fill('https://api.example.com/v1');
     await page.locator('[data-testid="usage-write-key"]').fill('sk-secret-123456');
@@ -73,14 +91,19 @@ test.describe('大模型配置页', () => {
 
   test('C7 auto 模拟（dry-run）：无可用源 → 回退本地，不写账本、不扣余量', async ({ page }) => {
     await page.goto(APP);
+    // 模拟按钮在反向代理页
+    await gotoTab(page, 2);
     await page.locator('[data-testid="proxy-simulate"]').click();
     await expect(page.locator('[data-testid="toast"]')).toContainText('dry-run（未写账本）');
     await expect(page.locator('[data-testid="toast"]')).toContainText('回退本地');
+    // 审计回显在计费页：模拟是 dry-run，不写账本
+    await gotoTab(page, 1);
     await expect(page.locator('[data-testid="audit-echo"]')).toContainText('暂无本会话审计条目');
   });
 
   test('C8/R7 manual：无可用源时模拟 → 回退本地（dry-run，不伪造代理）', async ({ page }) => {
     await page.goto(APP);
+    await gotoTab(page, 2);
     await page.locator('[data-testid="mode-manual"]').check();
     await page.locator('[data-testid="proxy-simulate"]').click();
     await expect(page.locator('[data-testid="toast"]')).toContainText('dry-run（未写账本）');
@@ -89,16 +112,19 @@ test.describe('大模型配置页', () => {
 
   test('C13 price_cap=0：仅免费提示可见；模拟 → 回退本地（无可用源）', async ({ page }) => {
     await page.goto(APP);
+    await gotoTab(page, 2);
     await page.locator('[data-testid="price-cap"]').fill('0');
     await expect(page.locator('[data-testid="free-only-hint"]')).toBeVisible();
     await page.locator('[data-testid="proxy-simulate"]').click();
     await expect(page.locator('[data-testid="toast"]')).toContainText('dry-run（未写账本）');
     await expect(page.locator('[data-testid="toast"]')).toContainText('回退本地');
+    await gotoTab(page, 1);
     await expect(page.locator('[data-testid="audit-echo"]')).toContainText('暂无本会话审计条目');
   });
 
   test('R1/C3 保存门禁：全不勾被拒；勾网络无端点被拒；合法保存写审计', async ({ page }) => {
     await page.goto(APP);
+    await gotoTab(page, 1);
     // C3：write 勾网络、清空本地、无端点 → 保存被拒
     await page.locator('[data-testid="usage-write-net"]').check();
     await page.locator('[data-testid="usage-write-endpoint"]').fill('https://api.example.com/v1');

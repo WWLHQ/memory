@@ -32,12 +32,16 @@ test.describe('检索页 · 真实账本', () => {
     await expect(page.locator('[data-testid="minimal-hint"]')).toBeVisible();
     await page.locator('[data-testid="q-submit"]').click();
     await expect(page.locator('[data-testid="empty-panel"]')).toContainText('没有可靠的记忆证据');
-    // 空账本无结果 → 不渲染 RESULT 专属区块（记住按钮/异常演示/预算面板）
+    // 空账本无结果 → 不渲染 RESULT 专属区块（记住按钮/异常演示/模式横幅）
     await expect(page.locator('[data-testid="mode-banner"]')).toHaveCount(0);
     await expect(page.locator('[data-testid^="hit-"]')).toHaveCount(0);
     await expect(page.locator('[data-testid="remember-0"]')).toHaveCount(0);
     await expect(page.locator('[data-testid="demo-breach"]')).toHaveCount(0);
-    await expect(page.locator('[data-testid="budget-panel"]')).toHaveCount(0);
+    // 预算面板挂的是本次真实检索的预算视图（空结果也有真实 0 注入），不是演示数据：
+    // 不伪造命中，但必须显示真实漏斗/丢弃口径。
+    await expect(page.locator('[data-testid="budget-panel"]')).toBeVisible();
+    await expect(page.locator('[data-testid="budget-panel"]')).toContainText('实际注入');
+    await expect(page.locator('[data-testid="funnel"]')).toContainText('stage1');
   });
 
   test('空态「切事实优先重试」→ 仍为空（真实账本无证据）', async ({ page }) => {

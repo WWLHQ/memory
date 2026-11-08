@@ -148,6 +148,12 @@ test.afterAll(async () => {
   await disconnectBrowser();
 });
 
+/** 切到指定页签（0 存储 / 1 模型 / 2 安全），面板以 hidden 挂载 */
+async function setupTab(page: import('playwright-core').Page, i: 0 | 1 | 2): Promise<void> {
+  await page.locator(`[data-testid="setup-tab-${i}"]`).click();
+  await expect(page.locator(`[data-testid="setup-tab-${i}"]`)).toHaveAttribute('aria-selected', 'true');
+}
+
 test.describe('首启向导 · 纯浏览器模式（没有主进程 = 不假装设置成功）', () => {
   test('setup.html 真产物：只给不可用说明，三步卡片一个都不渲染', async ({ page }) => {
     const errors = collectErrors(page);
@@ -181,10 +187,21 @@ test.describe('首启向导 · 首次设置（打桩主进程 §6e，跑 dist �
     const errors = collectErrors(page);
     await page.addInitScript(installSetupStub, FIRST_RUN);
     await page.goto(WIZARD);
-    await expect(page.locator('[data-testid="setup-intro"]')).toContainText('① 两个库放在哪 ② L0 管理密码 ③ 导出恢复卡');
+    // 现行 3 页签（① 存储 / ② 模型 / ③ 安全）：引言如实写明「② 模型」程序首启没有该步骤
+    await expect(page.locator('[data-testid="setup-intro"]')).toContainText('① 存储');
+    await expect(page.locator('[data-testid="setup-intro"]')).toContainText('③ 安全');
+    await expect(page.locator('[data-testid="setup-intro"]')).toContainText('程序首启没有该步骤');
+    // ① 存储
     await expect(page.locator('[data-testid="setup-step-dirs"]')).toContainText('① 已完成');
     await expect(page.locator('[data-testid="setup-step-dirs"]')).toContainText('memories.db.json');
     await expect(page.locator('[data-testid="setup-step-dirs"]')).toContainText('密钥环 l0-keyring.json 与原数据库同目录');
+    // ② 模型：程序无该步骤 → 断诚实态（不是演示「测试通过」）
+    await setupTab(page, 1);
+    await expect(page.locator('[data-testid="setup-step-model"]')).toContainText('程序无该步骤');
+    await expect(page.locator('[data-testid="setup-model-note"]')).toContainText('没有 setup:model 这类通道');
+    await expect(page.locator('[data-testid="setup-model-deviation"]')).toContainText('程序 = 存储 → L0 密码 → 恢复卡导出');
+    // ③ 安全：密码/恢复卡/完成门禁
+    await setupTab(page, 2);
     await expect(page.locator('[data-testid="setup-step-password"]')).toContainText('② 待完成');
     await expect(page.locator('[data-testid="setup-step-card"]')).toContainText('③ 待完成');
     await expect(page.locator('[data-testid="setup-card-none"]')).toBeVisible();
@@ -196,6 +213,7 @@ test.describe('首启向导 · 首次设置（打桩主进程 §6e，跑 dist �
   test('密码表单闸门：≥8 位且两次一致才可提交', async ({ page }) => {
     await page.addInitScript(installSetupStub, FIRST_RUN);
     await page.goto(WIZARD);
+    await setupTab(page, 2);
     const submit = page.locator('[data-testid="setup-pw-submit"]');
     const pw = page.locator('[data-testid="setup-pw"]');
     const pw2 = page.locator('[data-testid="setup-pw2"]');
@@ -214,6 +232,7 @@ test.describe('首启向导 · 首次设置（打桩主进程 §6e，跑 dist �
     const errors = collectErrors(page);
     await page.addInitScript(installSetupStub, { ...FIRST_RUN, nextUrl: AFTER_WIZARD });
     await page.goto(WIZARD);
+    await setupTab(page, 2);
     await page.locator('[data-testid="setup-pw"]').fill('E2ePass#2026');
     await page.locator('[data-testid="setup-pw2"]').fill('E2ePass#2026');
     await page.locator('[data-testid="setup-pw-submit"]').click();
@@ -254,6 +273,7 @@ test.describe('首启向导 · 首次设置（打桩主进程 §6e，跑 dist �
   test('导出时在原生对话框点取消：如实说「可以再点一次」，且不放开 finish', async ({ page }) => {
     await page.addInitScript(installSetupStub, { ...FIRST_RUN, exportCanceled: true });
     await page.goto(WIZARD);
+    await setupTab(page, 2);
     await page.locator('[data-testid="setup-pw"]').fill('E2ePass#2026');
     await page.locator('[data-testid="setup-pw2"]').fill('E2ePass#2026');
     await page.locator('[data-testid="setup-pw-submit"]').click();
@@ -269,6 +289,7 @@ test.describe('首启向导 · 本机已设过 L0 管理密码（升级 / 上一
     const errors = collectErrors(page);
     await page.addInitScript(installSetupStub, ALREADY_SET);
     await page.goto(WIZARD);
+    await setupTab(page, 2);
     await expect(page.locator('[data-testid="setup-step-password"]')).toContainText('② 已完成');
     await expect(page.locator('[data-testid="setup-pw-set"]')).toContainText('本机已设置 L0 管理密码');
     await expect(page.locator('[data-testid="setup-pw-set"]')).toContainText('旧码当场作废');
@@ -282,6 +303,7 @@ test.describe('首启向导 · 本机已设过 L0 管理密码（升级 / 上一
   test('重新发码 → 导出 → 进入应用', async ({ page }) => {
     await page.addInitScript(installSetupStub, { ...ALREADY_SET, nextUrl: AFTER_WIZARD });
     await page.goto(WIZARD);
+    await setupTab(page, 2);
     await expect(page.locator('[data-testid="setup-regen"]')).toBeDisabled();
     await page.locator('[data-testid="setup-regen-pw"]').fill('E2ePass#2026');
     await expect(page.locator('[data-testid="setup-regen"]')).toBeEnabled();
@@ -296,6 +318,7 @@ test.describe('首启向导 · 本机已设过 L0 管理密码（升级 / 上一
   test('密码错 → 主进程原因原样显示，不发码也不跳转', async ({ page }) => {
     await page.addInitScript(installSetupStub, { ...ALREADY_SET, regenWrongPassword: true });
     await page.goto(WIZARD);
+    await setupTab(page, 2);
     await page.locator('[data-testid="setup-regen-pw"]').fill('E2ePass#2026');
     await page.locator('[data-testid="setup-regen"]').click();
     await expect(page.locator('[data-testid="setup-error"]')).toContainText(ERR_BAD_WRITE_PASSWORD);
@@ -328,6 +351,7 @@ test.describe('首启向导 · 主进程拒绝即不放行（页面闸门不是�
   test('三步看起来都完成，但 setup:finish 被拒 → 停在向导页并摆出原因', async ({ page }) => {
     await page.addInitScript(installSetupStub, { ...FIRST_RUN, finishRejects: true });
     await page.goto(WIZARD);
+    await setupTab(page, 2);
     await page.locator('[data-testid="setup-pw"]').fill('E2ePass#2026');
     await page.locator('[data-testid="setup-pw2"]').fill('E2ePass#2026');
     await page.locator('[data-testid="setup-pw-submit"]').click();

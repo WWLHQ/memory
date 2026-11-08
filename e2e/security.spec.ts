@@ -1,6 +1,8 @@
 // E2E 测试：账号与安全页（REQ-006 / P12）——批次7 起接真登录后端做管理员门禁断言。
 // 管理员：策略可改 + 账号表/改密卡可用；普通成员/未登录：敏感区只读并提示「需管理员」。
 // 安全操作（策略变更）真写内核审计 security_change 并回执 request_id。
+// 现行结构：4 个页签（sec-tab-0 检查摘要 / sec-tab-1 危险操作卡 11 张 / sec-tab-2 账号与密钥 / sec-tab-3 L0 审计）；
+//   各面板用 hidden 挂载（DOM 常驻），断言前必须切到对应页签，否则元素存在但不可见。
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, expect, disconnectBrowser, collectErrors } from './harness.ts';
@@ -8,6 +10,7 @@ import { startStatic, startHomeBackend, closeServer, type StaticServer } from '.
 import { registerAccount } from '../src/home/server.ts';
 import { hashPassword } from '../src/auth/hash.ts';
 import { ADMIN_ACCOUNT, DEFAULT_ADMIN_PASSWORD } from '../src/auth/loginService.ts';
+import type { Page } from 'playwright-core';
 
 const SESSION_KEY = 'session:realpage';
 const MEMBER = 'e2e_member';
@@ -31,10 +34,16 @@ async function loginViaApi(account: string, password: string): Promise<string> {
 }
 
 /** 页面加载前写入登录会话（与首页登录后的 localStorage 键一致） */
-async function useSession(page: import('@playwright/test').Page, sid: string): Promise<void> {
+async function useSession(page: Page, sid: string): Promise<void> {
   await page.addInitScript(([key, value]) => {
     try { localStorage.setItem(key as string, value as string); } catch { /* about:blank */ }
   }, [SESSION_KEY, sid]);
+}
+
+/** 切到指定页签（0 检查摘要 / 1 危险操作卡 / 2 账号与密钥 / 3 L0 审计） */
+async function secTab(page: Page, i: 0 | 1 | 2 | 3): Promise<void> {
+  await page.locator(`[data-testid="sec-tab-${i}"]`).click();
+  await expect(page.locator(`[data-testid="sec-tab-${i}"]`)).toHaveAttribute('aria-selected', 'true');
 }
 
 test.beforeAll(async () => {
@@ -60,7 +69,13 @@ test.describe('账号与安全页 · 未登录（只读门禁）', () => {
     const errors = collectErrors(page);
     await page.goto(APP);
     await expect(page.locator('[data-testid="security-page"]')).toBeVisible();
+    // 检查摘要页：加密状态只读卡
     await expect(page.locator('[data-testid="encrypt-card"]')).toContainText('AES');
+    // 危险操作卡页：L0 密钥环未登录 → 只读提示，不渲染管理表单
+    await secTab(page, 1);
+    await expect(page.locator('[data-testid="l0-admin-required"]')).toBeVisible();
+    // 账号与密钥页：角色矩阵 + 成员/密钥空表
+    await secTab(page, 2);
     await expect(page.locator('[data-testid="role-matrix"]')).toBeVisible();
     // 无种子成员/密钥：仅表头行（不伪造 4 成员/2 密钥）
     await expect(page.locator('[data-testid="member-table"] tr')).toHaveCount(1);
@@ -68,13 +83,12 @@ test.describe('账号与安全页 · 未登录（只读门禁）', () => {
     // 前缀选择器会命中表容器本身（member-table/key-table），数据行改查 tbody
     await expect(page.locator('[data-testid="member-table"] tbody tr')).toHaveCount(0);
     await expect(page.locator('[data-testid="key-table"] tbody tr')).toHaveCount(0);
-    // L0 密钥环：未登录 → 只读提示，不渲染管理表单
-    await expect(page.locator('[data-testid="l0-admin-required"]')).toBeVisible();
     expect(errors).toEqual([]);
   });
 
   test('未登录：敏感区只读 + 「需管理员」提示 + 默认管理员账号提示', async ({ page }) => {
     await page.goto(APP);
+    await secTab(page, 1);
     await expect(page.locator('[data-testid="admin-required"]')).toBeVisible();
     await expect(page.locator('[data-testid="admin-required"]')).toContainText('未登录');
     await expect(page.locator('[data-testid="pwd-policy-admin-required"]')).toBeVisible();
@@ -88,10 +102,14 @@ test.describe('账号与安全页 · 未登录（只读门禁）', () => {
 
   test('空成员/密钥表无删除或吊销按钮', async ({ page }) => {
     await page.goto(APP);
-    await expect(page.locator('[data-testid="remove-user_002"]')).toHaveCount(0);
-    await expect(page.locator('[data-testid="shared-user_002"]')).toHaveCount(0);
-    await expect(page.locator('[data-testid="revoke-key_001"]')).toHaveCount(0);
-    await expect(page.locator('[data-testid="key-key_002"]')).toHaveCount(0);
+    await secTab(page, 2);
+    await expect(page.locator('[data-testid="member-table"] tbody tr')).toHaveCount(0);
+    await expect(page.locator('[data-testid="key-table"] tbody tr')).toHaveCount(0);
+    // 表内不存在任何成员删除/共享按钮或密钥轮换/吊销按钮
+    await expect(page.locator('[data-testid^="remove-"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid^="shared-"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid^="revoke-"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid^="rotate-"]')).toHaveCount(0);
   });
 });
 
@@ -99,10 +117,11 @@ test.describe('账号与安全页 · 普通成员（只读门禁）', () => {
   test('成员会话：策略禁改，账号卡显示「当前账号为普通成员」', async ({ page }) => {
     await useSession(page, MEMBER_SID);
     await page.goto(APP);
+    await secTab(page, 1);
     await expect(page.locator('[data-testid="admin-required"]')).toContainText('普通成员');
     await expect(page.locator('[data-testid="pwd-policy-admin-required"]')).toBeVisible();
     await expect(page.locator('[data-testid="pwd-upper"]')).toBeDisabled();
-    // 成员看不到账号表与改密卡（管理员专属数据）
+    // 成员看不到账号表（管理员专属数据）
     await expect(page.locator('[data-testid="admin-accounts-table"]')).toHaveCount(0);
   });
 });
@@ -112,6 +131,7 @@ test.describe('账号与安全页 · 管理员', () => {
     const errors = collectErrors(page);
     await useSession(page, ADMIN_SID);
     await page.goto(APP);
+    await secTab(page, 1);
 
     await expect(page.locator('[data-testid="acct-admin"]')).toBeVisible();
     await expect(page.locator('[data-testid="role-admin"]')).toHaveValue('admin');
@@ -124,6 +144,7 @@ test.describe('账号与安全页 · 管理员', () => {
   test('策略变更 → 真实审计 toast（security_change + req_ 回执）', async ({ page }) => {
     await useSession(page, ADMIN_SID);
     await page.goto(APP);
+    await secTab(page, 1);
     // 等身份确认完成（管理员策略区解除只读）
     await expect(page.locator('[data-testid="pwd-upper"]')).toBeEnabled();
 
@@ -136,6 +157,7 @@ test.describe('账号与安全页 · 管理员', () => {
   test('展开真实账号：成员出现在表中，团队可编辑并保存', async ({ page }) => {
     await useSession(page, ADMIN_SID);
     await page.goto(APP);
+    await secTab(page, 1);
     await expect(page.locator(`[data-testid="acct-${MEMBER}"]`)).toBeVisible();
     const team = page.locator(`[data-testid="team-${MEMBER}"]`);
     await team.fill('team_e2e_2');
@@ -146,6 +168,7 @@ test.describe('账号与安全页 · 管理员', () => {
   test('改密失败可见：旧密码错 → admin-err 明确提示', async ({ page }) => {
     await useSession(page, ADMIN_SID);
     await page.goto(APP);
+    await secTab(page, 1);
     await expect(page.locator('[data-testid="pwd-old"]')).toBeVisible();
     await page.locator('[data-testid="pwd-old"]').fill('definitely-wrong');
     await page.locator('[data-testid="pwd-new"]').fill('NewPass#2026');

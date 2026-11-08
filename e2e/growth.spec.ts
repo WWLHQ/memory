@@ -1,8 +1,11 @@
 // E2E 测试：自我净化与生长页（REQ-009 / P14）自包含（系统分配端口）
 // 数据真相 = 内核账本（浏览器空账本）：指标/判重/Δ 空态诚实展示；
 // 手动触发/调度开关 = 真实写 growth_op 审计（同页内可观察到账本变化）。
+// 现行结构：4 个页签（gtab-0 判重与嫁接 / gtab-1 回归评估 / gtab-2 调度 / gtab-3 红线自检），只渲染当前页签；
+//   「开发者模式」开关与校验错误横幅在页头，任何页签都可见。
 import { test, expect, disconnectBrowser, collectErrors } from './harness.ts';
 import { startStatic, type StaticServer } from './servers.ts';
+import type { Page } from 'playwright-core';
 
 let APP = '';
 let staticSrv: StaticServer | undefined;
@@ -17,16 +20,29 @@ test.afterAll(async () => {
   await disconnectBrowser();
 });
 
+/** 切到指定页签（0 判重与嫁接 / 1 回归评估 / 2 调度 / 3 红线自检） */
+async function gtab(page: Page, i: 0 | 1 | 2 | 3): Promise<void> {
+  await page.locator(`[data-testid="gtab-${i}"]`).click();
+  await expect(page.locator(`[data-testid="gtab-${i}"]`)).toHaveAttribute('aria-selected', 'true');
+}
+
 test.describe('自我净化与生长页 · 真实账本', () => {
   test('页面渲染：五维卡 + 短路嫁接 + 指标卡 + 优化表 + Δ 面板 + 调度', async ({ page }) => {
     const errors = collectErrors(page);
     await page.goto(APP);
     await expect(page.locator('[data-testid="growth-page"]')).toBeVisible();
+    // 判重与嫁接页
     await expect(page.locator('[data-testid="dedup-card"]')).toContainText('五维判重');
     await expect(page.locator('[data-testid="sc-flow"]')).toContainText('写入');
+    // 回归评估页
+    await gtab(page, 1);
     await expect(page.locator('[data-testid="growth-cards"]')).toContainText('检索命中率');
     await expect(page.locator('[data-testid="opt-rows"] tbody tr')).toHaveCount(5);
     await expect(page.locator('[data-testid="delta-panel"]')).toBeVisible();
+    // 批次48 A23.3：无回归记录 = 未到运行时间，不能显示「无变化」也不能伪造结论
+    await expect(page.locator('[data-testid="regression-status"]')).toContainText('未到运行时间');
+    // 调度页
+    await gtab(page, 2);
     await expect(page.locator('[data-testid="sched-decay"]')).toContainText('每日 02:00');
     await expect(page.locator('[data-testid="sched-decay"]')).toContainText('记忆衰减（遗忘曲线推进）（不可停）');
     // 批次48 A23.4：调度架构只能说明「调度由桌面端执行」，Web 端不呈现任何「已调度」状态；
@@ -38,25 +54,25 @@ test.describe('自我净化与生长页 · 真实账本', () => {
     await expect(page.locator('[data-testid="sched-next-self_growth"]')).toContainText('无记录');
     await expect(page.locator('[data-testid="sched-host-self_growth"]')).toContainText('Web 端不执行调度');
     await expect(page.locator('[data-testid="schedule-timeline"]')).not.toContainText('已调度');
-    // 批次48 A23.3：无回归记录 = 未到运行时间，不能显示「无变化」也不能伪造结论
-    await expect(page.locator('[data-testid="regression-status"]')).toContainText('未到运行时间');
     expect(errors).toEqual([]);
   });
 
-  test('空账本指标 → ①② 触发、③④⑤ 待命（诚实口径：hit_rate/L6 为 0）', async ({ page }) => {
+  test('空账本指标 → ①② 触发、③④⑤ 待命（诚实口径：hit_rate/L6 未取数）', async ({ page }) => {
     await page.goto(APP);
+    await gtab(page, 1);
     await expect(page.locator('[data-testid="opt-state-lower_threshold"]')).toHaveText('已触发');
     await expect(page.locator('[data-testid="opt-state-refine_keyword"]')).toHaveText('已触发');
     await expect(page.locator('[data-testid="opt-state-accelerate_decay"]')).toHaveText('待命');
     await expect(page.locator('[data-testid="opt-state-pre_index"]')).toHaveText('待命');
     await expect(page.locator('[data-testid="opt-state-regress_weights"]')).toHaveText('待命');
-    // 账本无数据 → 指标显示「—」/0，不伪造演示数字
-    await expect(page.locator('[data-testid="m-hit-rate"]')).toContainText('—');
+    // 账本无数据 → 命中率显示「未取数」（不写死 0 冒充读数），低质占比真实 0.00
+    await expect(page.locator('[data-testid="m-hit-rate"]')).toContainText('未取数');
     await expect(page.locator('[data-testid="m-lowq"]')).toContainText('0.00');
   });
 
   test('C4/R3：Δ 空态 + 无触发点（真实 7 日反馈为 0）', async ({ page }) => {
     await page.goto(APP);
+    await gtab(page, 1);
     await expect(page.locator('[data-testid="delta-value"]')).toContainText('+0.000');
     await expect(page.locator('[data-testid="delta-panel"]')).toContainText('取自真实 7 日反馈');
     await expect(page.locator('[data-testid="delta-empty"]')).toBeVisible();
@@ -67,6 +83,7 @@ test.describe('自我净化与生长页 · 真实账本', () => {
 
   test('C3/R4：手动触发自生长 → 冷启动如实 no-op（样本不足，不伪造 weight_tuned）', async ({ page }) => {
     await page.goto(APP);
+    await gtab(page, 1);
     await expect(page.locator('[data-testid="tuned-point"]')).toHaveCount(0);
     await expect(page.locator('[data-testid="regression-status"]')).toContainText('未到运行时间');
     await page.locator('[data-testid="manual-trigger"]').click();
@@ -92,6 +109,7 @@ test.describe('自我净化与生长页 · 真实账本', () => {
 
   test('R1：开发者模式改权重和≠1 → 报错；改阈值破坏单调 → 报错', async ({ page }) => {
     await page.goto(APP);
+    // 开发者模式开关在页头，调参面板在「判重与嫁接」页签
     await page.locator('[data-testid="dev-mode"]').check();
     await expect(page.locator('[data-testid="dev-tune-panel"]')).toBeVisible();
     await page.locator('[data-testid="w-semantic"]').fill('0.40');
@@ -106,9 +124,13 @@ test.describe('自我净化与生长页 · 真实账本', () => {
 
   test('C6/R5：停用衰减复选框被禁用；其余可停并写真实审计', async ({ page }) => {
     await page.goto(APP);
+    // 调度页签
+    await gtab(page, 2);
     await expect(page.locator('[data-testid="sched-check-decay"]')).toBeDisabled();
     await page.locator('[data-testid="sched-check-archive"]').uncheck();
     await expect(page.locator('[data-testid="toast"]')).toContainText('schedule_changed');
+    // 红线自检页签
+    await gtab(page, 3);
     await expect(page.locator('[data-testid="redline-status"]')).toContainText('合法 ✓');
   });
 });

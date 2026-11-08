@@ -51,13 +51,20 @@ test.describe('日志记录页 · 真实账本', () => {
     await expect(page.locator('[data-testid="l0-request"]')).toHaveCount(0);
   });
 
-  test('过滤与仅异常开关：空账本仍为空（无错误聚合）', async ({ page }) => {
+  test('过滤与仅异常开关：空账本仍为空（异常聚合各类计数为 0）', async ({ page }) => {
     await page.goto(APP);
     await page.locator('[data-testid="lf-form"]').selectOption('web');
     await expect(page.locator('[data-testid="log-count"]')).toContainText('命中 0 条');
     await page.locator('[data-testid="lf-abnormal"]').check();
     await expect(page.locator('[data-testid="log-empty"]')).toBeVisible();
-    await expect(page.locator('[data-testid="error-aggr"]')).toHaveCount(0);
+    // 现行设计：异常聚合卡常驻（有处置页跳转），空账本时各类计数必须为 0，不隐藏也不造假
+    await expect(page.locator('[data-testid="error-aggr"]')).toBeVisible();
+    await expect(page.locator('[data-testid="error-aggr"] .p0-aggr-item:not(.zero)')).toHaveCount(0);
+    const items = page.locator('[data-testid="error-aggr"] .p0-aggr-item');
+    expect(await items.count()).toBeGreaterThan(0);
+    for (let i = 0; i < await items.count(); i += 1) {
+      await expect(items.nth(i)).toContainText('× 0');
+    }
     await page.locator('[data-testid="lf-kw"]').fill('req_l03');
     await expect(page.locator('tr[data-testid^="log-"]')).toHaveCount(0);
   });

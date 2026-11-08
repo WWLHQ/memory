@@ -1,34 +1,48 @@
-// REQ-005 T12 端到端验收（真浏览器点击级，对齐 HOME-LOGIN.md T12 验收清单）
-// 覆盖：① 首屏未登录灰置不阻塞 ② ▶ 登录 弹卡 ③ 密码错 → 锁定 + 审计（断言打到真实后端）
-//       ④ 登录成功 → 顶栏变已登录 + 功劳 4 卡出数据 ⑤ .rid 溯源弹审计 modal ⑥ 登出回灰置 ⑦ 无脚本异常
-// 被测对象 = Vite 构建产物（dist/home.html），登录走 T11 后端镜像（useLoginMirror，?backend= 覆盖）。
-// 后端 = T10 home server（src/home/server.ts），E2E 进程内起服并预置测试账号。
+// REQ-005 首页与登录 · 端到端验收（真浏览器点击级）
+// 现行结构（旧首页 HomePage/LoginModal 已下线，首页换 OverviewPage、登录独立成 login.html）：
+//   ① 首屏不阻塞：index.html 直接渲染概览页（真实账本读数），无登录门控遮罩
+//   ② 登录入口：首页不再弹登录卡，登录在 login.html（无注册入口）
+//   ③ 密码错 → 后端真实 401；连续 6 次 → 423（直连真实后端）
+//   ④ 登录成功 → 会话落本机 + 概览页范围行「已登录」+ 4 张统计卡
+//   ⑤ request_id 溯源：旧 `.rid` 审计弹窗已迁至审计页链路视图（audit.html?chain=），未命中如实「账本无链路」
+//   ⑥ 登出 → 清本机会话 → 概览页回「未登录 · 只读」
+//   ⑦ L1–L6 关系图谱：旧首页 Dashboard 下线后无任何页面挂载该图谱 → 断诚实态（无图谱 DOM），
+//      真实分层界面改为 memory-layered.html 的 L6→L1 层卡片（空账本如实空态）
+// 后端 = home server（src/home/server.ts），E2E 进程内起服并预置测试账号。
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, expect, disconnectBrowser, collectErrors } from './harness.ts';
 import { startStatic, startHomeBackend, closeServer, type StaticServer } from './servers.ts';
+import { registerAccount } from '../src/home/server.ts';
 import { hashPassword } from '../src/auth/hash.ts';
+import type { Page } from 'playwright-core';
 
 const PWD = 'e2e_pwd';
 
 let staticSrv: StaticServer | undefined;
 let backend: Awaited<ReturnType<typeof startHomeBackend>> | undefined;
 let BACKEND_PORT = 0;
-let APP = '';
+let HOME = '';
+let LOGIN = '';
+let AUDIT = '';
+let LAYERED = '';
 
 test.beforeAll(async () => {
   staticSrv = await startStatic(0, 'dist'); // 端口 0：不与桌面服务/其它 spec 争用
 
   const dataFile = join(tmpdir(), `e2e-home-${Date.now()}.json`);
   // 预置测试账号（T3 registerAccount，团队只读 team_id 由"管理员"分配）
-  const { registerAccount } = await import('../src/home/server.ts');
   registerAccount('e2e_user', hashPassword(PWD), { enterprise_id: 'ent_001', team_id: 'team_001', perspective: 'team' });
   registerAccount('e2e_lock', hashPassword(PWD), { enterprise_id: 'ent_002', team_id: 'team_002', perspective: 'team' });
   registerAccount('e2e_lock2', hashPassword(PWD), { enterprise_id: 'ent_003', team_id: 'team_003', perspective: 'team' });
 
   backend = await startHomeBackend({ dataFile, allowedOrigins: [`http://localhost:${staticSrv.port}`] });
   BACKEND_PORT = backend.port;
-  APP = `http://localhost:${staticSrv.port}/index.html?backend=http://localhost:${BACKEND_PORT}`;
+  const q = `backend=http://localhost:${BACKEND_PORT}`;
+  HOME = `http://localhost:${staticSrv.port}/index.html?${q}`;
+  LOGIN = `http://localhost:${staticSrv.port}/login.html?${q}`;
+  AUDIT = `http://localhost:${staticSrv.port}/audit.html`;
+  LAYERED = `http://localhost:${staticSrv.port}/memory-layered.html`;
 });
 
 test.afterAll(async () => {
@@ -37,52 +51,61 @@ test.afterAll(async () => {
   await disconnectBrowser();
 });
 
-test.describe('REQ-005 首页与登录卡片 · 点击级 E2E', () => {
-  test('① 首屏进入不阻塞登录（未登录显示登录门控）', async ({ page }) => {
+async function login(page: Page, account = 'e2e_user', pwd = PWD): Promise<void> {
+  await page.goto(LOGIN);
+  await expect(page.locator('[data-testid="login-page"]')).toBeVisible();
+  await page.locator('#loginAccount').fill(account);
+  await page.locator('#loginPassword').fill(pwd);
+  await page.getByRole('button', { name: /^登录$/ }).click();
+}
+
+test.describe('REQ-005 首页与登录 · 点击级 E2E', () => {
+  test('① 首屏进入不阻塞登录（概览页直接出真实读数，无门控遮罩）', async ({ page }) => {
     const errors = collectErrors(page);
-    await page.goto(APP);
-    // 未登录：欢迎语 + ▶ 登录 可见；登录门控遮罩替代仪表盘
-    await expect(page.locator('#hiUnauth')).toBeVisible();
-    await expect(page.locator('#btnOpenLogin')).toBeVisible();
-    await expect(page.locator('#authGate')).toBeVisible();
-    // 已登录态元素不应出现（不阻塞、不预载）
-    await expect(page.locator('#hiAuth')).toHaveCount(0);
+    await page.goto(HOME);
+    await expect(page.locator('[data-testid="overview-page"]')).toBeVisible();
+    // 一句话结论 + 4 张统计卡（真实账本读取）
+    await expect(page.locator('.ovx-concl')).toBeVisible();
+    await expect(page.locator('.ovx-stats .ovx-stat')).toHaveCount(4);
+    await expect(page.locator('.ovx-scope')).toContainText('未登录');
+    // 未登录仍可读本地账本（诚实口径），并给出「去登录」快捷入口
+    await expect(page.getByRole('button', { name: '去登录' })).toBeVisible();
+    // 旧首页的门控遮罩 / 仪表盘 / 程序日志窗已随旧首页下线
+    await expect(page.locator('#authGate')).toHaveCount(0);
     await expect(page.locator('#dashGrid')).toHaveCount(0);
-    // 程序运行日志窗口已迁至日志记录页（批次19）：首页不再渲染
     await expect(page.locator('#programLog')).toHaveCount(0);
-    // 未登录启动会触发 mirror 查询 → 服务端如实 401；这是预期状态，不得弹「镜像上抛失败」全局提示
     await page.waitForLoadState('networkidle');
-    await expect(page.getByTestId('mirror-failure-notice')).toHaveCount(0);
     expect(errors).toEqual([]);
   });
 
-  test('② ▶ 登录 弹卡', async ({ page }) => {
+  test('② 登录入口：首页不再弹登录卡，登录走独立 login.html（且无注册入口）', async ({ page }) => {
     const errors = collectErrors(page);
-    await page.goto(APP);
-    await page.click('#btnOpenLogin');
-    await expect(page.locator('#loginModal.show')).toBeVisible();
-    await expect(page.locator('#acc')).toBeVisible();
-    await expect(page.locator('#pwd')).toBeVisible();
-    // 端形态 / 团队 只读（无输入控件，仅展示）
-    await expect(page.locator('#rowForm .pill')).toContainText('自动识别');
-    await expect(page.locator('#rowTeam .pill')).toContainText('只读');
+    await page.goto(HOME);
+    await expect(page.locator('#loginModal')).toHaveCount(0);
+    await expect(page.locator('#btnOpenLogin')).toHaveCount(0);
+
+    await page.goto(LOGIN);
+    await expect(page.locator('[data-testid="login-page"]')).toBeVisible();
+    await expect(page.locator('#loginAccount')).toBeVisible();
+    await expect(page.locator('#loginPassword')).toBeVisible();
+    await expect(page.getByRole('button', { name: /^登录$/ })).toBeVisible();
+    // 诚实态：注册表单随旧首页 LoginModal 下线（注册能力在 home 后端，见 register.spec）
+    await expect(page.locator('#btnRegister')).toHaveCount(0);
     expect(errors).toEqual([]);
   });
 
-  test('③ 密码错 → 锁定 + 审计（断言确实打到真实后端）', async ({ page }) => {
+  test('③ 密码错 → 后端真实 401；连续 6 次 → 423 锁定', async ({ page }) => {
     const errors = collectErrors(page);
     const calls: string[] = [];
     page.on('request', (r) => { if (r.url().includes(`:${BACKEND_PORT}`)) calls.push(`${r.method()} ${r.url()}`); });
 
-    await page.goto(APP);
-    await page.click('#btnOpenLogin');
-    await page.fill('#acc', 'e2e_lock');
-    await page.fill('#pwd', 'wrong-password');
-    await page.click('#btnLogin');
-
+    await login(page, 'e2e_lock', 'wrong-password');
     // 真实后端确实被调用（T11 镜像写审计 action=login_fail）
     await expect.poll(() => calls.length).toBeGreaterThan(0);
     expect(calls.some((c) => c.includes('/api/login'))).toBeTruthy();
+    // 登录页按后端真实原因提示（401 密码错误）
+    await expect(page.locator('[data-testid="login-error"]')).toContainText('HTTP 401');
+    await expect(page.locator('[data-testid="login-error"]')).toContainText('密码错误');
 
     // 后端锁定策略生效：连续 6 次错 → 第 6 次 423 Locked（e2e_lock2 独立账号，恰好 6 次）
     const sixth = await page.evaluate(async (port) => {
@@ -100,126 +123,82 @@ test.describe('REQ-005 首页与登录卡片 · 点击级 E2E', () => {
     expect(errors).toEqual([]);
   });
 
-  test('④ 登录成功 → 顶栏变已登录 + 四卡为内核账本实时指标（打到真实后端）', async ({ page }) => {
+  test('④ 登录成功 → 会话落本机 + 概览页「已登录」+ 四卡为真实账本指标', async ({ page }) => {
     const errors = collectErrors(page);
-    const calls: string[] = [];
-    page.on('request', (r) => { if (r.url().includes(`:${BACKEND_PORT}`)) calls.push(`${r.method()} ${r.url()}`); });
-
-    await page.goto(APP);
-    await page.click('#btnOpenLogin');
-    await page.fill('#acc', 'e2e_user');
-    await page.fill('#pwd', PWD);
-    await page.click('#btnLogin');
-
-    // 顶栏变已登录（后端 team_id 只读注入）
-    await expect(page.locator('#hiAuth')).toContainText('e2e_user');
-    await expect(page.locator('#hiAuth')).toContainText('team_001');
-    await expect(page.locator('#hiAuth')).toContainText('只读');
-    // 四卡为内核账本实时指标（累计记忆 / 累计动作 / 近 1h 调用 / 待裁决），无示例假文案
-    await expect(page.locator('#gains .gain')).toHaveCount(4);
-    await expect(page.locator('#gains')).toContainText('累计记忆');
-    await expect(page.locator('#gains')).toContainText('累计动作');
-    await expect(page.locator('#gains')).toContainText('内核账本');
-    await expect(page.locator('#gains')).not.toContainText('-58%');
-    // 批次23：效果证据四卡（Token 节省 / 效率提升 / 跨 Agent 复用 / 模型成本）在关系图谱上方
-    await expect(page.locator('#effectEvidence #effectGains > .gain')).toHaveCount(4);
-    await expect(page.locator('#effectEvidence')).toContainText('效果证据');
-    const effectBox = await page.locator('#effectEvidence').boundingBox();
-    const graphBox = await page.locator('#layerGraph').boundingBox();
-    expect(effectBox && graphBox && effectBox.y < graphBox.y).toBeTruthy();
-    // 灰置占位消失
-    await expect(page.locator('#offPlaceholder')).toHaveCount(0);
-    // 真实后端确实被调用（T11 镜像登录）
-    await expect.poll(() => calls.length).toBeGreaterThan(0);
-    expect(calls.some((c) => c.includes('/api/login'))).toBeTruthy();
-    expect(errors).toEqual([]);
-  });
-
-  test('⑤ 数字可点溯源 request_id（弹审计 modal，真实 mirror 账本）', async ({ page }) => {
-    const errors = collectErrors(page);
-    await page.goto(APP);
-
-    // 真实会话：mirror 账本绑定会话（匿名 POST 会如实 401），故先登录拿到权威 session_id
-    await page.click('#btnOpenLogin');
-    await page.fill('#acc', 'e2e_user');
-    await page.fill('#pwd', PWD);
-    await page.click('#btnLogin');
-    await expect(page.locator('#hiAuth')).toContainText('e2e_user');
+    await login(page);
+    await expect(page.locator('[data-testid="login-session-valid"]')).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('[data-testid="login-session-valid"]')).toContainText('e2e_user');
+    await expect(page.locator('[data-testid="login-session-valid"]')).toContainText('team_001');
 
     const sid = await page.evaluate(() => localStorage.getItem('session:realpage'));
     expect(sid).toBeTruthy();
 
-    // 以真实会话向 home server 镜像上抛一条真实 recall 审计（evidence_thin），作为可溯源真实条目
-    const posted = await page.evaluate(async ({ port, sessionId }) => {
-      const r = await fetch(`http://localhost:${port}/api/mirror/audit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-session-id': sessionId },
-        body: JSON.stringify({ source: 'e2e', action: 'recall', request_id: 'e2e_real_1', payload: { query: 'e2e', evidence_thin: true } }),
-      });
-      return r.status;
-    }, { port: BACKEND_PORT, sessionId: sid as string });
-    expect(posted).toBe(200);
-
-    // 重新进入应用（会话仍在）→ 触发真实 feed 聚合（含 mirror 兜底源）→ 异常区出现该 request_id 的 .rid
-    await page.goto(APP);
-    await expect(page.locator('#hiAuth')).toContainText('e2e_user');
-
-    // 点击异常区的 .rid → 弹审计 modal（显示真实 request_id）
-    await expect(page.locator('#dashGrid .rid').first()).toBeVisible();
-    await page.click('#dashGrid .rid');
-    await expect(page.locator('#auditModal')).toBeVisible();
-    await expect(page.locator('#auditRid')).toContainText('e2e_real_1');
+    // 概览页读同一份会话：范围行如实「已登录」，且不再显示「去登录」
+    await page.goto(HOME);
+    await expect(page.locator('.ovx-scope')).toContainText('已登录', { timeout: 10_000 });
+    await expect(page.getByRole('button', { name: '去登录' })).toHaveCount(0);
+    // 四卡为真实账本读数（空账本 = 0 条，不伪造演示数字）
+    await expect(page.locator('.ovx-stats .ovx-stat')).toHaveCount(4);
+    await expect(page.locator('.ovx-stats')).toContainText('记忆条目');
+    await expect(page.locator('.ovx-stats')).toContainText('今日写入');
+    await expect(page.locator('.ovx-stats')).toContainText('今日召回');
+    await expect(page.locator('.ovx-stats')).toContainText('今日成本');
+    await expect(page.locator('.ovx-stats .ovx-stat').first().locator('.v')).toContainText('0');
+    await expect(page.locator('.ovx-stats .ovx-stat').first().locator('.v')).toContainText('条');
+    await expect(page.locator('[data-testid="overview-page"]')).not.toContainText('-58%');
     expect(errors).toEqual([]);
   });
 
-  test('⑥ 登出 → 回灰置', async ({ page }) => {
+  test('⑤ request_id 溯源：审计页链路视图真查账本，未命中如实「账本无链路」', async ({ page }) => {
     const errors = collectErrors(page);
-    await page.goto(APP);
-    await page.click('#btnOpenLogin');
-    await page.fill('#acc', 'e2e_user');
-    await page.fill('#pwd', PWD);
-    await page.click('#btnLogin');
-    await expect(page.locator('#hiAuth')).toContainText('e2e_user');
+    // 旧首页的 `.rid` + 审计弹窗已下线（功能迁至审计页链路视图）；如实确认现行首页无该弹窗
+    await page.goto(HOME);
+    await expect(page.locator('#auditModal')).toHaveCount(0);
+    await expect(page.locator('#auditRid')).toHaveCount(0);
 
-    await page.click('#btnLogout');
-    // 回未登录门控态
-    await expect(page.locator('#hiUnauth')).toBeVisible();
-    await expect(page.locator('#authGate')).toBeVisible();
-    await expect(page.locator('#hiAuth')).toHaveCount(0);
+    // 审计页按 ?chain= 真查内核账本：该 id 不存在 → 5 段链路全为「账本无链路」，不补造证据
+    await page.goto(`${AUDIT}?chain=e2e_real_1`);
+    await expect(page.locator('[data-testid="audit-page"]')).toBeVisible();
+    await expect(page.locator('[data-testid="chain-view"]')).toBeVisible();
+    await expect(page.locator('[data-testid="chain-view"]')).toContainText('e2e_real_1');
+    await expect(page.locator('[data-testid="chain-view"]')).toContainText('共 0 行真实审计');
+    await expect(page.locator('[data-testid="chain-view"]')).toContainText('账本无链路');
+    await expect(page.locator('[data-testid="chain-view"]')).not.toContainText('模拟');
+    await expect(page.locator('tr[data-testid^="row-"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="clear-chain"]')).toBeVisible();
     expect(errors).toEqual([]);
   });
 
-  test('⑦ L1–L6 关系图谱：真实空态 + 六层筛选 + 缩放/复位', async ({ page }) => {
+  test('⑥ 登出 → 清本机会话 → 概览页回「未登录 · 只读」', async ({ page }) => {
     const errors = collectErrors(page);
-    await page.goto(APP);
-    await page.click('#btnOpenLogin');
-    await page.fill('#acc', 'e2e_user');
-    await page.fill('#pwd', PWD);
-    await page.click('#btnLogin');
-    await expect(page.locator('#hiAuth')).toContainText('e2e_user');
+    await login(page);
+    await expect(page.locator('[data-testid="login-session-valid"]')).toBeVisible({ timeout: 10_000 });
 
-    // 图谱卡片 + 六层锚点（E2E 浏览器账本为空 → 诚实空态，不出现演示节点）
-    const graph = page.locator('#layerGraph');
-    await expect(graph).toBeVisible();
-    await expect(graph).toContainText('L1–L6 关系图谱');
-    await expect(page.locator('[data-graph-hub]')).toHaveCount(6);
-    for (const layer of ['L1', 'L2', 'L3', 'L4', 'L5', 'L6']) {
-      await expect(page.locator(`#lgChip${layer}`)).toBeVisible();
-    }
-    await expect(page.locator('#lgEmpty')).toBeVisible();
-    await expect(graph).toContainText('无演示节点');
+    await page.getByRole('button', { name: /登出（清除本机会话）/ }).click();
+    await expect(page.locator('#loginAccount')).toBeVisible();
+    await expect(page.locator('[data-testid="login-session-valid"]')).toHaveCount(0);
+    expect(await page.evaluate(() => localStorage.getItem('session:realpage'))).toBeFalsy();
 
-    // 缩放/复位真实改变画布变换
-    await expect(page.locator('#lgZoomValue')).toHaveText('100%');
-    await page.click('#lgZoomIn');
-    await expect(page.locator('#lgZoomValue')).toHaveText('120%');
-    await expect(page.locator('#layerGraphSvg')).toHaveAttribute('data-zoom', '1.20');
-    await page.click('#lgZoomReset');
-    await expect(page.locator('#lgZoomValue')).toHaveText('100%');
+    await page.goto(HOME);
+    await expect(page.locator('.ovx-scope')).toContainText('未登录', { timeout: 10_000 });
+    await expect(page.getByRole('button', { name: '去登录' })).toBeVisible();
+    expect(errors).toEqual([]);
+  });
 
-    // 刷新：重新聚合真实账本后按钮恢复可用
-    await page.click('#lgRefresh');
-    await expect(page.locator('#lgRefresh')).toBeEnabled();
+  test('⑦ L1–L6 图谱：旧首页图谱未挂载（诚实态），真实分层界面在 memory-layered.html', async ({ page }) => {
+    const errors = collectErrors(page);
+    // 旧 `#layerGraph` 及其六层锚点/缩放控件随 Dashboard 下线，现行首页不渲染图谱 DOM
+    await page.goto(HOME);
+    await expect(page.locator('#layerGraph')).toHaveCount(0);
+    await expect(page.locator('[data-graph-hub]')).toHaveCount(0);
+    await expect(page.locator('#lgZoomValue')).toHaveCount(0);
+
+    // 真实分层界面：L6→L1 层卡片由账本派生；空账本如实空态（不展示 6 层卡片，不伪造节点）
+    await page.goto(LAYERED);
+    await expect(page.locator('[data-testid="layered-memory-page"]')).toBeVisible();
+    await expect(page.locator('[data-testid="memory-empty"]')).toContainText('记忆账本还是空的');
+    await expect(page.locator('[data-layer]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="layered-memory-page"]')).toContainText('L6→L1');
     expect(errors).toEqual([]);
   });
 });

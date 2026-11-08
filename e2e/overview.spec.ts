@@ -63,15 +63,19 @@ test.describe('REQ-003 + REQ-005 通览页 · 点击级 E2E', () => {
 
     await expect(page.locator('.top .logo')).toContainText('记忆助手');
 
-    // 默认视图：首页 + 登录卡片（REQ-005）
-    // 已注入 session → 首页直接进入已登录态（跨 iframe 登录态共享的正确行为）
+    // 默认视图：首页（REQ-005，现由 OverviewPage 承载，旧问候语大卡已下线）
     await expect(page.locator('#stage')).toHaveAttribute('src', /\/index\.html/);
-    await expect(page.frameLocator('#stage').locator('#btnLogout')).toBeVisible();
+    const home = page.frameLocator('#stage');
+    await expect(home.locator('[data-testid="overview-page"]')).toBeVisible();
+    await expect(home.locator('.ovx-title')).toContainText('今天');
 
-    // 切到接入配置页（REQ-003）：持久化名单恢复 3 张卡（未拨测 → 未配置）
+    // 切到接入配置页（REQ-003）：持久化名单恢复 3 张卡（未拨测 → 未配置）；卡片在「接入配置」页签
     await page.click('.nav .item:has-text("Agent 接入配置页")');
     await expect(page.locator('#stage')).toHaveAttribute('src', /\/agentonboard\.html/);
-    const cards = page.frameLocator('#stage').locator('#cards > .card');
+    const onboard = page.frameLocator('#stage');
+    await expect(onboard.locator('[data-testid="agent-onboard-page"]')).toBeVisible();
+    await onboard.locator('[data-testid="agent-tabs"] [role="tab"]').nth(3).click();
+    const cards = onboard.locator('#cards > .card');
     await expect(cards).toHaveCount(3);
     await expect(cards.nth(0)).toContainText('未配置');
 

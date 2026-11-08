@@ -50,6 +50,12 @@ test.afterAll(async () => {
   await disconnectBrowser();
 });
 
+/** 切到指定页签（0 接入概览 / 1 MCP 客户端 / 2 探针结果 / 3 接入配置），面板以 hidden 挂载 */
+async function atab(page: import('playwright-core').Page, i: 0 | 1 | 2 | 3): Promise<void> {
+  await page.locator(`[data-testid="agent-tab-${i}"]`).click();
+  await expect(page.locator(`[data-testid="agent-tab-${i}"]`)).toHaveAttribute('aria-selected', 'true');
+}
+
 test.describe('REQ-003 Agent 接入页 · 点击级 E2E', () => {
   // 登录门控（REQ-005）：AgentOnboardPage 未登录时显示 .auth-gate 拦截。
   // 这里预置真实 admin 会话（批次26 P0-5：写端点以 x-session-id 经 home server 校验；登录流程由 home/register/crossTabAuth spec 覆盖）。
@@ -96,14 +102,18 @@ test.describe('REQ-003 Agent 接入页 · 点击级 E2E', () => {
   test('首屏渲染：3 恢复卡片 + 3 已绑定发现项（效果证据四卡已迁首页），均未虚报连通', async ({ page }) => {
     const errors = collectErrors(page);
     await page.goto(APP);
+    // 接入配置页签：3 张恢复卡片
+    await atab(page, 3);
     await expect(page.locator('#cards > .card')).toHaveCount(3);
     // 批次23：效果证据四卡迁至首页关系图谱上方，接入页不再渲染
     await expect(page.locator('#gains')).toHaveCount(0);
     await expect(page.locator('#effectEvidence')).toHaveCount(0);
-    await expect(page.locator('#found > .found')).toHaveCount(3);
     // 持久化恢复的卡片未经真实拨测 → 如实显示「未配置」（不冒充已连通）
     await expect(page.locator('#cards > .card').nth(0)).toContainText('deepseek harness');
     await expect(page.locator('#cards > .card').nth(0)).toContainText('未配置');
+    // 接入概览页签：3 条已绑定发现项 + 端形态徽章
+    await atab(page, 0);
+    await expect(page.locator('#found > .found')).toHaveCount(3);
     await expect(page.locator('#formBadge')).toContainText('当前端');
     expect(errors).toEqual([]);
   });
@@ -120,16 +130,18 @@ test.describe('REQ-003 Agent 接入页 · 点击级 E2E', () => {
     await expect(page.locator('[data-testid="onboard-failure"]')).toContainText('手动检测');
     await expect(page.locator('[data-testid="manual-detect"]')).toBeVisible();
     await expect(page.locator('#toast')).toContainText('自动接入失败');
-    // 预置的 3 张持久化卡片保持原样（失败不删除既有接入，也不伪造新发现）
-    await expect(page.locator('#cards > .card')).toHaveCount(3);
     await expect(page.locator('#found > .found')).toHaveCount(3);
     await expect(page.locator('#btnDiscover')).toBeEnabled();
+    // 预置的 3 张持久化卡片保持原样（失败不删除既有接入，也不伪造新发现）
+    await atab(page, 3);
+    await expect(page.locator('#cards > .card')).toHaveCount(3);
     expect(errors).toEqual([]);
   });
 
   test('R4 双通道至少一：全关 → 报错且禁用保存，恢复即可用', async ({ page }) => {
     const errors = collectErrors(page);
     await page.goto(APP);
+    await atab(page, 3);
     const card = page.locator('#cards > .card').nth(0);
     await card.locator('input[data-chan="webhook"]').uncheck();
     await card.locator('input[data-chan="api"]').uncheck();
@@ -145,6 +157,7 @@ test.describe('REQ-003 Agent 接入页 · 点击级 E2E', () => {
   test('R3 回归：Codex tools.pref 为布尔 false，勾选不抛异常', async ({ page }) => {
     const errors = collectErrors(page);
     await page.goto(APP);
+    await atab(page, 3);
     const codex = page.locator('#cards > .card').nth(2); // Codex（pref:false）
     await expect(codex).toContainText('codex');
     const pref = codex.locator('input[data-tool="pref"]');
@@ -162,6 +175,7 @@ test.describe('REQ-003 Agent 接入页 · 点击级 E2E', () => {
     const backendPort = backend!.port;
     page.on('request', (r) => { if (r.url().includes(`:${backendPort}`)) calls.push(`${r.method()} ${r.url()}`); });
     await page.goto(APP);
+    await atab(page, 3);
     const card = page.locator('#cards > .card').nth(0);
 
     // 后端尚无该卡 → 真实拨测如实失败（no-card），UI 不得谎报连通
@@ -187,6 +201,7 @@ test.describe('REQ-003 Agent 接入页 · 点击级 E2E', () => {
   test('隔离开关：切换触发 toast（19.4）', async ({ page }) => {
     const errors = collectErrors(page);
     await page.goto(APP);
+    await atab(page, 3);
     const card = page.locator('#cards > .card').nth(0);
     await card.locator('input[data-iso="projShare"]').uncheck();
     await expect(page.locator('#toast')).toContainText('已关闭：该项目记忆不再跨 Agent 共享');
@@ -202,6 +217,7 @@ test.describe('REQ-003 Agent 接入页 · 点击级 E2E', () => {
     await expect(page.locator('#toast')).toContainText('已撤销');
     await expect(page.locator('#found > .found').first()).toContainText('未发现信号 · 需手填端点');
     await expect(page.locator('#found > .found').first()).toHaveClass(/unbound/);
+    await atab(page, 3);
     await expect(page.locator('#cards > .card').nth(0)).toContainText('未配置');
     expect(errors).toEqual([]);
   });

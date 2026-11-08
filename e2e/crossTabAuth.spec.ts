@@ -1,6 +1,7 @@
-// E2E 测试：登录态跨 iframe 共享（REQ-005 Bug #3 验证）
-// 自包含模式：静态服务 + home 后端（均系统分配端口），不依赖外部 dev 服务。
-// 走 harness（CDP 外部浏览器），避免 browser.close() 挂起问题。
+// E2E 测试：登录态跨页共享（REQ-005 Bug #3 验证）
+// 现行架构：login.html 独立登录页（登录成功后写 localStorage session:realpage），
+// index.html 由 OverviewPage 承载（读同一份 localStorage 会话，不再有旧首页的登录门控/登录弹窗）。
+// 自包含：静态服务 + home 后端（均系统分配端口），不依赖外部 dev 服务；走 harness（CDP 外部浏览器）。
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, expect, disconnectBrowser, collectErrors } from './harness.ts';
@@ -12,16 +13,19 @@ const PWD = 'test_password';
 
 let staticSrv: StaticServer | undefined;
 let backend: Awaited<ReturnType<typeof startHomeBackend>> | undefined;
-let APP = '';
+let LOGIN_APP = '';
 let HOME_APP = '';
+let ONBOARD_APP = '';
 
 test.beforeAll(async () => {
   staticSrv = await startStatic(0, 'dist'); // 端口 0：不与桌面服务/其它 spec 争用
   const dataFile = join(tmpdir(), `e2e-xtab-${Date.now()}.json`);
   registerAccount('test_user', hashPassword(PWD), { enterprise_id: 'ent_x', team_id: 'team_x', perspective: 'team' });
   backend = await startHomeBackend({ dataFile, allowedOrigins: [`http://localhost:${staticSrv.port}`] });
-  APP = `http://localhost:${staticSrv.port}/overview.html?backend=http://localhost:${backend.port}`;
-  HOME_APP = `http://localhost:${staticSrv.port}/index.html?backend=http://localhost:${backend.port}`;
+  const q = `backend=http://localhost:${backend.port}`;
+  LOGIN_APP = `http://localhost:${staticSrv.port}/login.html?${q}`;
+  HOME_APP = `http://localhost:${staticSrv.port}/index.html?${q}`;
+  ONBOARD_APP = `http://localhost:${staticSrv.port}/agentonboard.html?${q}`;
 });
 
 test.afterAll(async () => {
@@ -30,67 +34,55 @@ test.afterAll(async () => {
   await disconnectBrowser();
 });
 
-test.describe('登录态跨 iframe 共享', () => {
-  test('登录后切换页面不应重复登录', async ({ page }) => {
+async function login(page: import('playwright-core').Page) {
+  await page.goto(LOGIN_APP);
+  await expect(page.locator('[data-testid="login-page"]')).toBeVisible();
+  await page.locator('#loginAccount').fill('test_user');
+  await page.locator('#loginPassword').fill(PWD);
+  await page.getByRole('button', { name: /^登录$/ }).click();
+  await expect(page.locator('[data-testid="login-session-valid"]')).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('[data-testid="login-session-valid"]')).toContainText('test_user');
+}
+
+test.describe('登录态跨页共享', () => {
+  test('登录页登录后切到首页/接入页，不重复登录（同一 localStorage 会话）', async ({ page }) => {
     const errors = collectErrors(page);
-    // 打开通览页（顶层 ?backend= 透传给 iframe 内的首页）
-    await page.goto(APP);
+    await login(page);
 
-    // 初始在登录视图，iframe 内首页显示登录门控
-    const iframe = page.frameLocator('#stage');
-    await expect(iframe.locator('#authGate')).toBeVisible({ timeout: 10_000 });
+    // 会话已写入（跨页共享的载体）
+    const sid = await page.evaluate(() => localStorage.getItem('session:realpage'));
+    expect(sid).toBeTruthy();
 
-    // 从门控进入登录卡，登录（打到本 spec 的独立后端）
-    await iframe.locator('#btnOpenLoginFromGate').click();
-    await expect(iframe.locator('#loginModal')).toBeVisible();
-    await iframe.locator('#acc').fill('test_user');
-    await iframe.locator('#pwd').fill(PWD);
-    await iframe.locator('#btnLogin').click();
+    // 首页（OverviewPage）：读同一份会话 → 范围行如实显示「已登录」，且不出现登录门控
+    await page.goto(HOME_APP);
+    await expect(page.locator('[data-testid="overview-page"]')).toBeVisible();
+    await expect(page.locator('.ovx-scope')).toContainText('已登录', { timeout: 10_000 });
+    await expect(page.getByRole('button', { name: /去登录/ })).toHaveCount(0);
 
-    // 登录成功：门控消失、顶栏已登录
-    await expect(iframe.locator('#authGate')).not.toBeVisible({ timeout: 10_000 });
-    await expect(iframe.locator('#hiAuth')).toBeVisible({ timeout: 10_000 });
-    await expect(iframe.locator('#hiAuth')).toContainText('test_user');
-
-    // localStorage 已写入 session（跨 iframe 共享的载体）
-    const sessionId = await page.evaluate(() => localStorage.getItem('session:realpage'));
-    expect(sessionId).toBeTruthy();
-    expect(sessionId!.length).toBeGreaterThan(0);
-
-    // 切到 Agent 接入配置页：不应出现登录门控（session 共享生效）
-    await page.locator('#nav .item').nth(1).click();
-    const agentFrame = page.frameLocator('#stage');
-    await expect(page.locator('#stage')).toHaveAttribute('src', /\/agentonboard\.html/);
-    await expect(agentFrame.locator('.auth-gate')).toHaveCount(0, { timeout: 10_000 });
-
-    // 切回首页：仍保持登录（不重复登录）
-    await page.locator('#nav .item').nth(0).click();
-    const homeFrame = page.frameLocator('#stage');
-    await expect(homeFrame.locator('#hiAuth')).toBeVisible({ timeout: 10_000 });
-    await expect(homeFrame.locator('#authGate')).toHaveCount(0);
+    // 接入页：同样无登录门控（会话共享）
+    await page.goto(ONBOARD_APP);
+    await expect(page.locator('[data-testid="agent-onboard-page"]')).toBeVisible();
+    await expect(page.locator('.auth-gate')).toHaveCount(0);
 
     expect(errors).toEqual([]);
   });
 
-  test('localStorage 中 session 存在', async ({ page }) => {
+  test('未登录时 localStorage 无 session；登录后才写入', async ({ page }) => {
     const errors = collectErrors(page);
-    await page.goto(HOME_APP);
+    await page.goto(LOGIN_APP);
+    await expect(page.locator('[data-testid="login-page"]')).toBeVisible();
+    const before = await page.evaluate(() => localStorage.getItem('session:realpage'));
+    expect(before).toBeFalsy();
+    await expect(page.locator('[data-testid="login-session-valid"]')).toHaveCount(0);
 
-    // 未登录时应无 session
-    const beforeSession = await page.evaluate(() => localStorage.getItem('session:realpage'));
-    expect(beforeSession).toBeFalsy();
+    await page.locator('#loginAccount').fill('test_user');
+    await page.locator('#loginPassword').fill(PWD);
+    await page.getByRole('button', { name: /^登录$/ }).click();
+    await expect(page.locator('[data-testid="login-session-valid"]')).toBeVisible({ timeout: 10_000 });
 
-    // 登录
-    await page.locator('#btnOpenLogin').click();
-    await page.locator('#acc').fill('test_user');
-    await page.locator('#pwd').fill(PWD);
-    await page.locator('#btnLogin').click();
-    await expect(page.locator('#hiAuth')).toBeVisible({ timeout: 10_000 });
-
-    // session 已写入
-    const afterSession = await page.evaluate(() => localStorage.getItem('session:realpage'));
-    expect(afterSession).toBeTruthy();
-    expect(afterSession!.length).toBeGreaterThan(0);
+    const after = await page.evaluate(() => localStorage.getItem('session:realpage'));
+    expect(after).toBeTruthy();
+    expect(after!.length).toBeGreaterThan(0);
 
     expect(errors).toEqual([]);
   });
