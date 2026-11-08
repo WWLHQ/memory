@@ -14,7 +14,7 @@
 | [e2e/global-teardown.mjs](e2e/global-teardown.mjs) | 24 | 关闭 globalSetup 启动的 detached Chromium。taskkill/进程信号被安全策略拦截时静默失败： | — |
 | [e2e/harness.ts](e2e/harness.ts) | 86 | E2E 测试基座：覆盖 page fixture，改用「外部已启动的 Chromium（CDP 连接）」。 | disconnectBrowser(fn), collectErrors(fn), test(const) |
 | [e2e/run.mjs](e2e/run.mjs) | 26 | E2E 启动器：① 构建被测产物（vite build → dist/）② 以空 NODE_OPTIONS 拉起 Playwright。 | — |
-| [e2e/servers.ts](e2e/servers.ts) | 113 | E2E 用：进程内静态文件服务器 + 复用真实后端，避免 Playwright webServer 子进程在 Windows 上卡 teardown。 | startStatic(fn), startHomeBackend(fn), closeServer(fn), stopRunningServer(fn), StaticServer(type) |
+| [e2e/servers.ts](e2e/servers.ts) | 123 | E2E 用：进程内静态文件服务器 + 复用真实后端，避免 Playwright webServer 子进程在 Windows 上卡 teardown。 | startStatic(fn), startHomeBackend(fn), closeServer(fn), stopRunningServer(fn), StaticServer(type) |
 
 ## src/agentOnboard
 
@@ -566,7 +566,7 @@ e2e/global-setup.mjs ac6a4df65136
 e2e/global-teardown.mjs 517d14f4d985
 e2e/harness.ts 89419d99cd6f
 e2e/run.mjs 3a472110f3e2
-e2e/servers.ts c2ae5377306d
+e2e/servers.ts 06d4ac2dc3ec
 src/agentOnboard/client.ts 88721ad65301
 src/agentOnboard/formMatrix.ts e7dd02db5873
 src/agentOnboard/mcpClients.ts 602143f6236b
