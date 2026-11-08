@@ -61,6 +61,33 @@ export function FeedbackPage() {
       <FeedbackForm draft={draft} onChange={setDraft} onSubmit={handleSubmit} />
       {v.warning && <div className="note" data-testid="fb-warning">⚠ {v.warning}</div>}
       <StatCards stats={stats} />
+
+      <div className="card" data-testid="feedback-history-card" style={{ marginTop: 12 }}>
+        <b>最近反馈（内核审计读回，最多 10 条）</b>
+        {records.length === 0 ? (
+          <div className="p0-empty dashed" data-testid="feedback-history-empty">
+            账本里还没有反馈记录：提交后会从 memory_op 审计读回评分、原因与 trust_delta。
+          </div>
+        ) : (
+          <table className="ltable" data-testid="feedback-history" style={{ marginTop: 8 }}>
+            <thead>
+              <tr><th>记忆</th><th>动作</th><th>评分</th><th>原因（审计原文）</th><th>trust_delta</th><th>时间</th></tr>
+            </thead>
+            <tbody>
+              {records.slice(0, 10).map((r, i) => (
+                <tr key={`${r.id}-${i}`} data-testid={`fb-row-${i}`}>
+                  <td className="mid">{r.memory_id}</td>
+                  <td>{r.action}</td>
+                  <td>{r.rating > 0 ? `${r.rating}★` : '未评分'}</td>
+                  <td data-testid={`fb-comment-${i}`}>{r.comment || '—'}</td>
+                  <td>{r.trust_delta >= 0 ? `+${r.trust_delta}` : r.trust_delta}</td>
+                  <td className="mid">{new Date(r.created_at).toLocaleString('zh-CN', { hour12: false })}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
       {toast}
     </div>
   );

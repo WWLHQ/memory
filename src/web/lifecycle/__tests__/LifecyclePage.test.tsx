@@ -76,6 +76,21 @@ describe('LifecyclePage 集成（T5）', () => {
     await waitFor(() => expect(screen.getAllByText(/req_[0-9A-Z]/).length).toBeGreaterThanOrEqual(1));
   });
 
+  it('批量 0 条改动：内核 ok 但实际跳过 → 显示「未生效」，不报成功', async () => {
+    const mod = await import('../coreLifecycle.ts');
+    vi.spyOn(mod, 'coreLifeOp').mockResolvedValue({
+      ok: true, affected: [], audit: 'lifecycle_change', request_id: 'req_skip_001', message: '',
+    });
+    render(<LifecyclePage />);
+    await waitFor(() => expect(screen.getByTestId('lifecycle-table')).toBeInTheDocument());
+    fireEvent.change(screen.getByTestId('filter-pagesize'), { target: { value: '20' } });
+    await waitFor(() => expect(screen.getByTestId('chk-mem_015')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('chk-mem_015'));
+    fireEvent.click(screen.getByTestId('batch-run'));
+    await waitFor(() => expect(screen.getByTestId('toast')).toHaveTextContent('批量迁移未生效'));
+    expect(screen.getByTestId('toast')).not.toHaveTextContent('批量迁移 0 条');
+  });
+
   it('迁移失败：错误 toast 不被成功 toast 覆盖（批次48 A20）', async () => {
     const mod = await import('../coreLifecycle.ts');
     vi.spyOn(mod, 'coreLifeOp').mockResolvedValue({

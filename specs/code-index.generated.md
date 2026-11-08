@@ -235,7 +235,7 @@
 | [src/web/dispute/useDisputeMirror.ts](src/web/dispute/useDisputeMirror.ts) | 24 | 冲突裁决页后端镜像（阶段5-C 口径统一）：真接 home server POST /api/mirror/audit。 | useDisputeMirror(fn), DisputeMirror(type) |
 | [src/web/dispute/useToast.tsx](src/web/dispute/useToast.tsx) | 22 | 轻量 toast hook（T5）：返回展示节点与 show(msg) | useToast(fn) |
 | [src/web/feedback/FeedbackForm.tsx](src/web/feedback/FeedbackForm.tsx) | 102 | P9-T3 反馈表单（13.7） | FeedbackForm(fn) |
-| [src/web/feedback/FeedbackPage.tsx](src/web/feedback/FeedbackPage.tsx) | 68 | 用户反馈页（REQ-006 / P9）T4 编排 | FeedbackPage(fn) |
+| [src/web/feedback/FeedbackPage.tsx](src/web/feedback/FeedbackPage.tsx) | 95 | 用户反馈页（REQ-006 / P9）T4 编排 | FeedbackPage(fn) |
 | [src/web/feedback/StatCards.tsx](src/web/feedback/StatCards.tsx) | 36 | P9-T3 统计卡（7.1/7.2） | StatCards(fn) |
 | [src/web/feedback/coreFeedback.ts](src/web/feedback/coreFeedback.ts) | 73 | 用户反馈页（REQ-006 / P9）接真内核：提交走 ma._feedback（17.4 trust_delta 内核计算） | coreSubmitFeedback(fn), coreListMemoryOptions(fn), coreLoadFeedbackRecords(fn), FeedbackOutcome(type), MemoryOption(type) |
 | [src/web/feedback/feedbackEntry.tsx](src/web/feedback/feedbackEntry.tsx) | 12 | 用户反馈页（REQ-006 / P9）入口（T1 壳） | — |
@@ -606,7 +606,7 @@ src/web/dispute/types.ts 34294be31812
 src/web/dispute/useDisputeMirror.ts a2f4cf373f8e
 src/web/dispute/useToast.tsx c650d8662672
 src/web/feedback/FeedbackForm.tsx acd883ee4989
-src/web/feedback/FeedbackPage.tsx d0cd757caa79
+src/web/feedback/FeedbackPage.tsx c3ca3fa334de
 src/web/feedback/StatCards.tsx 826d2fdad9f4
 src/web/feedback/coreFeedback.ts dbee04d2dde7
 src/web/feedback/feedbackEntry.tsx 8e909b081887

@@ -100,6 +100,9 @@ describe('FeedbackPage (P9-T4 编排)', () => {
     // 统计卡读真实记录：4★×1（不是 3★×1）
     expect(screen.getByTestId('dist-4')).toHaveTextContent('4★×1');
     expect(screen.getByTestId('dist-3')).toHaveTextContent('3★×0');
+    // 提交后从审计读回原文：原因与星级都能在历史表看到
+    expect(screen.getByTestId('fb-comment-0')).toHaveTextContent('结论可直接复用');
+    expect(screen.getByTestId('fb-row-0')).toHaveTextContent('4★');
   });
 
   it('页面挂载读历史真实评分：账本里 rating=5 的记录直接出现在分布与均分（批次48 A13）', async () => {
@@ -111,5 +114,7 @@ describe('FeedbackPage (P9-T4 编排)', () => {
     await waitFor(() => expect(screen.getByTestId('dist-5')).toHaveTextContent('5★×1'));
     expect(screen.getByTestId('dist-3')).toHaveTextContent('3★×0'); // 不是默认 3 星
     expect(screen.getByTestId('stat-avg')).toHaveTextContent('均分 5');
+    // 历史记录读回：审计里的评论原文直接展示
+    expect(screen.getByTestId('fb-comment-0')).toHaveTextContent('真实历史评分');
   });
 });
