@@ -83,6 +83,31 @@ describe('getHomeFeed（首页真实可算，内核账本聚合）', () => {
     expect(feed.graph.hubs).toHaveLength(6);
     expect(feed.graph.hubs.find((h) => h.layer === 'L1')?.count).toBe(1);
     expect(feed.graph.nodes[0].memId).toBe('mem_a');
+    // 批次55：同一份账本派生七档刻度（memA 无 L0 原文、仅 L1 有内容）
+    expect(feed.strata).toEqual([
+      { layer: 'L0', count: 0 }, { layer: 'L1', count: 1 }, { layer: 'L2', count: 0 },
+      { layer: 'L3', count: 0 }, { layer: 'L4', count: 0 }, { layer: 'L5', count: 0 },
+      { layer: 'L6', count: 0 },
+    ]);
+  });
+
+  it('批次55：strata L0 按原文标记、L1–L6 按层内容计数，与 graph 同源', async () => {
+    const memories = [
+      { ...memA, mem_id: 'm1', has_l0: true, content: 'L1 正文' },
+      { ...memA, mem_id: 'm2', content_l0_enc: 'ENV:v2:seal', content: '', layer: 'L1' },
+      { ...memA, mem_id: 'm3', content_orig: '   ', content: 'L1 正文', content_l2: '会话摘要' },
+      { ...memA, mem_id: 'm4', content: '', layer: 'L2', content_l2: '另一份摘要' },
+    ] as unknown as Memory[];
+    const feed = await getHomeFeed(fakeStorage({ memories }));
+    expect(feed.strata).toEqual([
+      { layer: 'L0', count: 2 }, // m1 has_l0 + m2 行上信封；m3 空白不算、m4 无
+      { layer: 'L1', count: 2 }, // m1 / m3 有非空 L1 正文
+      { layer: 'L2', count: 2 }, // m3 / m4 有非空 content_l2
+      { layer: 'L3', count: 0 }, { layer: 'L4', count: 0 },
+      { layer: 'L5', count: 0 }, { layer: 'L6', count: 0 },
+    ]);
+    expect(feed.graph.hubs.find((h) => h.layer === 'L1')?.count).toBe(2);
+    expect(feed.graph.hubs.find((h) => h.layer === 'L2')?.count).toBe(2);
   });
 
   it('空账本 → 四卡全 0（真实语义：无数据）', async () => {
@@ -90,6 +115,7 @@ describe('getHomeFeed（首页真实可算，内核账本聚合）', () => {
     expect(feed.raw.gains!.every((g) => g.big === '0')).toBe(true);
     expect(feed.graph.nodes).toHaveLength(0);
     expect(feed.graph.hubs.every((h) => h.count === 0)).toBe(true);
+    expect(feed.strata?.every((s) => s.count === 0)).toBe(true);
   });
 
   it('llm_fallback 审计 → 真实异常速览（error 级，可溯源 request_id）', async () => {
@@ -173,9 +199,10 @@ describe('getHomeFeed（首页真实可算，内核账本聚合）', () => {
     expect(feed.sync.role).toBe('offline');
     expect(feed.sync.wired).toBe(false);
     expect(feed.sync.lastReconcileAt).toBe(0);
-    // 内核不可达：图谱不得伪造数据（保留六层结构 + 零节点）
+    // 内核不可达：图谱不得伪造数据（保留六层结构 + 零节点），刻度整块为 null
     expect(feed.graph.nodes).toHaveLength(0);
     expect(feed.graph.stats.total).toBe(0);
+    expect(feed.strata).toBeNull();
   });
 
   it('内核不可达 → storageError 带真实原因（绝不冒充空账本）', async () => {
@@ -191,6 +218,7 @@ describe('getHomeFeed（首页真实可算，内核账本聚合）', () => {
     };
     const feed = await getHomeFeed(broken);
     expect(feed.storageError).toContain('E_IPC_TIMEOUT');
+    expect(feed.strata).toBeNull();
   });
 
   it('账本可读 → storageError 为 null（真空账本也算「读到」）', async () => {

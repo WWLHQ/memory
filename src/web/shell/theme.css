@@ -381,19 +381,20 @@ html[data-theme='dark'] .qa { border-left-color: #39414c; }
   .tb-doc { max-width: 180px; }
   .rib-search { width: 140px; }
   .rgroup { padding: 0 3px; }
-  .rbig { width: 56px; }
-  .rsmall { min-width: 104px; padding: 0 5px; font-size: 10.5px; }
-  .rsmall .rsk { padding-left: 6px; font-size: 9px; }
+  .rbig { width: 52px; }
+  .rsmall { min-width: 100px; padding: 0 5px; font-size: 10px; }
+  .rsmall .rsk { padding-left: 5px; font-size: 8.5px; }
   .rgroup-label { font-size: 9px; }
-  .rgroup.ctx .rsmall { min-width: 96px; }
+  .rgroup.ctx .rsmall { min-width: 92px; }
 }
 
+/* 批次55：命令区由 3 行收成 2 行，整体高度 94px → 64px；大按钮同步变矮，不裁命令。 */
 .ribbon-body {
   display: flex;
   align-items: stretch;
   gap: 0;
-  padding: 3px 5px 0;
-  height: 94px;
+  padding: 2px 5px 0;
+  height: 64px;
   overflow-x: auto;
   overflow-y: hidden;
   background: var(--panel);
@@ -411,14 +412,14 @@ html[data-theme='dark'] .qa { border-left-color: #39414c; }
 .rgroup-main {
   display: flex;
   align-items: flex-start;
-  gap: 4px;
-  padding-top: 2px;
+  gap: 3px;
+  padding-top: 1px;
 }
 .rgroup-label {
   text-align: center;
-  font-size: 10px;
+  font-size: 9.5px;
   color: var(--mu);
-  padding-top: 3px;
+  padding-top: 2px;
 }
 .rcol { display: flex; flex-direction: column; gap: 1px; }
 
@@ -431,28 +432,29 @@ html[data-theme='dark'] .qa { border-left-color: #39414c; }
 }
 .rbig {
   flex-direction: column;
-  gap: 4px;
-  width: 62px;
-  height: 70px;
-  padding: 4px 2px;
-  font-size: 10.5px;
-  line-height: 1.25;
+  justify-content: center;
+  gap: 2px;
+  width: 56px;
+  height: 46px;
+  padding: 1px 2px;
+  font-size: 10px;
+  line-height: 1.15;
   text-align: center;
 }
 .rsmall {
   flex-direction: row;
-  gap: 5px;
-  height: 22px;
-  min-width: 122px;
-  padding: 0 7px;
-  font-size: 11px;
+  gap: 4px;
+  height: 20px;
+  min-width: 112px;
+  padding: 0 6px;
+  font-size: 10.5px;
   text-align: left;
 }
 .rbig:hover, .rsmall:hover { background: var(--accent-soft); color: var(--accent); }
 .rbig:disabled, .rsmall:disabled { opacity: 0.45; color: var(--mu); }
 .rsk {
   margin-left: auto;
-  font-size: 9.5px;
+  font-size: 9px;
   color: var(--mu);
 }
 

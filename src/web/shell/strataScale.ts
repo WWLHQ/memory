@@ -1,16 +1,15 @@
-// 功能导航栏底部的「层级刻度」（批次53）：L0–L6 七档的真实计数。
+// 功能导航栏底部的「层级刻度」（批次53 定义 / 批次55 改数据源）：L0–L6 七档的真实计数。
 //
-// 数据面与中心「分层 L1–L6」页同源：storage.listMemories + storage.browse(L1–L6)。
+// 批次55 口径变更：不再自己二次调用 storage.listMemories + storage.browse(L1–L6)，
+// 改为复用「概览页 getHomeFeed」同一次真实账本读取派生的 strata 计数。
+// 这样层级刻度与中心区四卡、导航角标看到的是同一份快照，避免会话/刷新时序造成
+// 一侧成功、另一侧报「需要登录操作」。读失败时整块如实报错，绝不拿 0 或演示数字代替。
+//
 // 口径：
 //   · L0 = 账本里有 L0 原文的记忆条数（has_l0 / 行上信封 / 行上明文三者并集，与 l0Split.decide 同源）；
-//     未拆库的老行原文还在行上，拆库后行只留 has_l0，两者都算，绝不重复计数。
-//   · L1–L6 = 该层「有非空内容」的去重记忆数；browse 失败返回 null，UI 显示「读取失败」而不是 0。
-//   · 浏览器内存态标注 kernelMode='browser'，避免把空账本误读成本机库为空。
-// 绝不注入演示数字：刻度上的每个数都来自真实账本读取。
+//   · L1–L6 = deriveLayerGraph 中「该层有非空内容」的去重记忆数；
+//   · 短名（密文/脱敏/摘要/要点/场景/边界/索引）按定稿图，内核正式层名保留在 fullName/title。
 
-import type { Layer, Memory } from '../../core/memagent/types.ts';
-import { coreBrowse, getStorage } from '../memory/coreMemoryOps.ts';
-import { hostCapability } from '../../desktop/hostBridge.ts';
 import type { DockResult } from './dock.ts';
 
 export type StrataLayerId = 'L0' | 'L1' | 'L2' | 'L3' | 'L4' | 'L5' | 'L6';
@@ -35,14 +34,12 @@ export const STRATA_LAYERS: readonly StrataLayerSpec[] = [
   { layer: 'L6', label: '索引', fullName: '投影索引（≤30 词 + relevance）', color: '#fbbf24' },
 ];
 
-const BROWSE_LAYERS = ['L1', 'L2', 'L3', 'L4', 'L5', 'L6'] as const;
-
 export interface StrataRowView {
   layer: StrataLayerId;
   label: string;
   fullName: string;
   color: string;
-  /** null = 该层读取失败（≠ 该层为 0） */
+  /** null = 该层计数缺失/非法（≠ 该层为 0） */
   count: number | null;
 }
 
@@ -53,51 +50,41 @@ export interface StrataScaleView {
   loadedAt: number;
 }
 
-const errText = (e: unknown): string => String((e as Error)?.message ?? e);
-const text = (s: unknown): string => typeof s === 'string' ? s.trim() : '';
-
-/** 一层内部：只要有非空内容就计入（与中心层级页 hasContent 口径一致） */
-function countWithContent(rows: { mem_id: string; content: string }[]): number {
-  const ids = new Set<string>();
-  for (const r of rows) if (text(r.content).length > 0) ids.add(r.mem_id);
-  return ids.size;
+/** 批次55：概览快照中层级刻度真正需要的字段（避免壳层反向依赖 Home 实现细节）。 */
+export interface StrataSnapshotLike {
+  strata: { layer: string; count: number }[] | null;
+  kernelMode: 'host' | 'browser';
+  loadedAt: number;
+  storageError: string | null;
 }
 
-/** 有 L0 原文的账本行数：拆库后 has_l0，未拆库时原文在行上 */
-function hasOriginal(m: Memory): boolean {
-  return !!m.has_l0 || text(m.content_l0_enc).length > 0 || text(m.content_orig).length > 0;
-}
-
-export async function loadStrataScale(): Promise<DockResult<StrataScaleView>> {
-  let memories: Memory[];
-  try {
-    // 必须读内核原始行：coreListMemories() 映射出的 MemoryRecord 不含 has_l0 / 行上信封字段
-    memories = await getStorage().listMemories({});
-  } catch (e) {
-    return { status: 'error', detail: `账本读取失败：${errText(e)}` };
+/**
+ * 由概览页同一次真实账本读取生成刻度视图。
+ * - storageError 或 strata=null → 整块 error，不渲染任何行；
+ * - 某层缺失 / 计数非法 → 该层显示「读取失败」而不是 0。
+ */
+export function strataViewFromOverview(snapshot: StrataSnapshotLike | null): DockResult<StrataScaleView> {
+  if (!snapshot) return { status: 'error', detail: '账本读取中…' };
+  if (snapshot.storageError || !snapshot.strata) {
+    return { status: 'error', detail: `账本读取失败：${snapshot.storageError ?? '未拿到分层计数'}` };
   }
-
-  const results = await Promise.allSettled(BROWSE_LAYERS.map((l) => coreBrowse(l as Layer)));
-  const counts = new Map<StrataLayerId, number | null>();
+  const counts = new Map<string, number>();
+  for (const s of snapshot.strata) {
+    if (typeof s.count === 'number' && Number.isFinite(s.count) && s.count >= 0) counts.set(s.layer, Math.floor(s.count));
+  }
   const failed: StrataLayerId[] = [];
-  results.forEach((r, i) => {
-    const layer = BROWSE_LAYERS[i];
-    if (r.status === 'rejected' || !r.value) {
-      counts.set(layer, null);
-      failed.push(layer);
-      return;
-    }
-    counts.set(layer, countWithContent(r.value.rows));
+  const rows: StrataRowView[] = STRATA_LAYERS.map((s) => {
+    const count = counts.get(s.layer) ?? null;
+    if (count === null) failed.push(s.layer);
+    return { ...s, count };
   });
-  counts.set('L0', memories.filter(hasOriginal).length);
-
   return {
     status: 'ok',
     view: {
-      rows: STRATA_LAYERS.map((s) => ({ ...s, count: counts.get(s.layer) ?? null })),
+      rows,
       failed,
-      kernelMode: hostCapability() === 'none' ? 'browser' : 'host',
-      loadedAt: Date.now(),
+      kernelMode: snapshot.kernelMode,
+      loadedAt: snapshot.loadedAt,
     },
   };
 }

@@ -27,7 +27,7 @@ import {
 } from './dock.ts';
 import { loadStatusbar, shortLocation, type StatusSnapshot } from './statusbar.ts';
 import { loadLayerPanel, type LayerPanelView } from './layers.ts';
-import { loadStrataScale, type StrataScaleView } from './strataScale.ts';
+import { strataViewFromOverview, type StrataScaleView } from './strataScale.ts';
 import { StrataScale } from './StrataScale.tsx';
 import { loadNavCounts, type NavCounts } from './navCounts.ts';
 import { SELECTION_MSG, parseSelection, type SelectionPayload } from '../shared/selectionChannel.ts';
@@ -212,8 +212,6 @@ export function Workspace() {
   const [status, setStatus] = useState<StatusSnapshot | null>(null);
   /** S7：分层 L1–L6 / L0 面板（仅在中心页为分层或 L0 时读取） */
   const [layerPanel, setLayerPanel] = useState<DockResult<LayerPanelView> | null>(null);
-  /** 批次53：功能导航栏底部层级刻度（常驻，随刷新重读真实账本） */
-  const [strataScale, setStrataScale] = useState<DockResult<StrataScaleView> | null>(null);
   const pendingBusyRef = useRef(false);
   const frameRefs = useRef<Record<string, HTMLIFrameElement | null>>({});
   /** 右键菜单位置换算用：读取当前 zoom，避免事件回调闭包拿到过期比例 */
@@ -235,6 +233,7 @@ export function Workspace() {
         raw: { gains: [], anomalies: [], activeMemories: [], todos: [] },
         pendingSync: 0,
         facts: null,
+        strata: null,
         health: { status: 'down', detail: '概览聚合异常', checkedAt: Date.now() },
         session: hasActiveSession(), billing: { status: 'unavailable', detail: '概览聚合异常' },
       }))
@@ -398,11 +397,11 @@ export function Workspace() {
     void (async () => setLayerPanel(await loadLayerPanel()))();
   }, [showLayerStrip, layerPanel]);
 
-  // 批次53：层级刻度常驻导航栏底部，只在首次进入 / 刷新后读一次真实账本
-  useEffect(() => {
-    if (strataScale) return;
-    void (async () => setStrataScale(await loadStrataScale()))();
-  }, [strataScale]);
+  // 批次55：层级刻度直接复用概览页同一次真实账本快照，不再独立读 storage / browse。
+  const strataScale = useMemo<DockResult<StrataScaleView> | null>(
+    () => overview ? strataViewFromOverview(overview) : null,
+    [overview],
+  );
 
   useEffect(() => { activePageRef.current = active?.page; }, [active?.page]);
   // 切换标签即清空选中项：绝不把上一页的选区挂到新页面上
@@ -539,11 +538,12 @@ export function Workspace() {
         break;
       case 'refresh':
         setReloadNonce((n) => n + 1);
-        // 底部面板、状态栏、层级刻度与导航角标同样重读：清空缓存后由可见部位重新拉真实数据
+        // 底部面板、状态栏、导航角标同样重读；层级刻度与概览页共用同一份真实账本快照
         setDockLog(null); setDockTasks(null); setDockAudit(null);
-        setStatus(null); setLayerPanel(null); setStrataScale(null);
+        setStatus(null); setLayerPanel(null);
+        refreshOverview();
         setRealNavCounts({}); setNavCountsSeq((n) => n + 1);
-        setMessage('已刷新中心区真实页面、底部面板/状态栏、层级刻度与导航角标读数。');
+        setMessage('已刷新中心区真实页面、概览账本/层级刻度、底部面板/状态栏与导航角标读数。');
         break;
       case 'focusFilter':
         // 顶部自绘标题栏的查找框只过滤左侧功能导航；它不跨页检索记忆，因此不产出任何伪造结果。
@@ -554,7 +554,7 @@ export function Workspace() {
       default:
         break;
     }
-  }, []);
+  }, [refreshOverview]);
 
   // ── 批次49：右键菜单（全域接管；四类专门区域 + 壳层其余任意位置）──
   // 任何可右键位置都必须给出非空菜单：要么真实动作，要么禁用并写原因；不漏出浏览器原生菜单。
@@ -1261,7 +1261,7 @@ export function Workspace() {
           </div>
           {/* 批次53：层级刻度固定在功能导航栏最下面，不随导航树滚动 */}
           {!navCollapsed && (
-            <StrataScale data={strataScale} onRefresh={() => setStrataScale(null)} />
+            <StrataScale data={strataScale} onRefresh={refreshOverview} />
           )}
           {!navCollapsed && (
             <div className="splitter" role="separator" aria-label="调整导航宽度" onPointerDown={(e) => startDrag('nav', e)} />
@@ -1804,8 +1804,9 @@ function Prop({ k, v, mono }: { k: string; v: string; mono?: boolean }) {
 function RibbonGroupView({ group, onItem }: { group: { label: string; items: RibbonItem[] }; onItem: (i: RibbonItem) => void }) {
   const bigs = group.items.filter((i) => i.big);
   const smalls = group.items.filter((i) => !i.big);
+  // 批次55：用户要求功能区命令由 3 行收成 2 行，单列最多 2 个小按钮；命令数量不变，只改排布。
   const chunks: RibbonItem[][] = [];
-  for (let i = 0; i < smalls.length; i += 3) chunks.push(smalls.slice(i, i + 3));
+  for (let i = 0; i < smalls.length; i += 2) chunks.push(smalls.slice(i, i + 2));
   return (
     <div className="rgroup">
       <div className="rgroup-main">
@@ -1831,7 +1832,7 @@ function RibbonButton({ item, onItem }: { item: RibbonItem; onItem: (i: RibbonIt
       title={tip}
       type="button"
     >
-      <Icon name={item.icon} size={item.big ? 24 : 13} />
+      <Icon name={item.icon} size={item.big ? 18 : 13} />
       <span>{item.label}</span>
       {!item.big && item.kbd ? <span className="rsk">{item.kbd}</span> : null}
     </button>

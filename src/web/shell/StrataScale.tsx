@@ -1,6 +1,7 @@
 // 功能导航栏底部的「层级刻度」（批次53）：L0–L6 七档真实计数。
 // 版式沿用导航树的 .tree-group / .tree-row 规格，不另起一套独立皮肤；
-// 数据只来自 loadStrataScale() 的真实账本读数，读取失败显式标注，绝不拿 0 或演示数字代替。
+// 批次55：数据来自概览页 getHomeFeed 同一次真实账本读取派生的 strata 计数；
+// 不再独立读 storage，读取失败显式标注，绝不拿 0 或演示数字代替。
 
 import { Icon } from './Icons.tsx';
 import type { DockResult } from './dock.ts';

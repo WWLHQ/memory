@@ -16,7 +16,7 @@ import { getKernelStorage } from '../kernel.ts';
 import { currentSessionId } from '../shared/session.ts';
 import { hostCall, hostCapability } from '../../desktop/hostBridge.ts';
 import type { Gain } from '../../types/agentOnboard.ts';
-import type { HomeFacts } from '../Home/coreHome.ts';
+import type { HomeFacts, HomeStrataCount } from '../Home/coreHome.ts';
 
 export interface OverviewHealth {
   status: 'ok' | 'down';
@@ -48,6 +48,8 @@ export interface OverviewSnapshot {
   billing: OverviewBilling;
   /** 同一次账本读取得到的数值快照；读不到时 null（概览页统计卡直接显示真实数字） */
   facts: HomeFacts | null;
+  /** 批次55：同一次账本读取派生的 L0–L6 计数，供层级刻度直接复用；读不到时 null */
+  strata: HomeStrataCount[] | null;
 }
 
 interface RawBillingEngine {
@@ -112,6 +114,7 @@ export async function loadOverview(): Promise<OverviewSnapshot> {
       effectGains: [],
       storageError: describeError(e),
       facts: null,
+      strata: null,
     })),
     probeHealth(),
     probeBilling(session),
@@ -127,5 +130,6 @@ export async function loadOverview(): Promise<OverviewSnapshot> {
     session,
     billing,
     facts: (feed as { facts?: HomeFacts | null }).facts ?? null,
+    strata: (feed as { strata?: HomeStrataCount[] | null }).strata ?? null,
   };
 }

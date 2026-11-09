@@ -234,15 +234,11 @@ function findConflictRequestId(memId: string, conflictId: string, audits: AuditR
  * storage 不可达时（如纯浏览器无内核）安全降级为空，并把真实原因放进 storageError 由 UI 明示
  * （批次25 P0-7：绝不把「内核读不到」渲染成「账本为空」）。
  */
-export interface HomeFeedResult {
-  raw: RawHomeFeed;
-  sync: SyncState;
-  graph: LayerGraph;
-  effectGains: Gain[];
-  /** 内核账本读取失败时的真实原因；null = 已读到（可能为空账本） */
-  storageError: string | null;
-  /** 真实数值快照；storage 读不到时为 null（不拿 0 冒充成功读数） */
-  facts: HomeFacts | null;
+/** 批次55：层级刻度七档，和首页四卡共用同一次 listMemories 结果，避免二次读账本。 */
+export type HomeStrataLayer = 'L0' | 'L1' | 'L2' | 'L3' | 'L4' | 'L5' | 'L6';
+export interface HomeStrataCount {
+  layer: HomeStrataLayer;
+  count: number;
 }
 
 /** 概览页用的数值快照（全部来自同一次账本读取，供统计卡直接显示真实数字） */
@@ -268,6 +264,15 @@ export interface HomeFeedResult {
   storageError: string | null;
   /** 真实数值快照；storage 读不到时为 null（不拿 0 冒充成功读数） */
   facts: HomeFacts | null;
+  /** L0–L6 真实计数；storage 读不到时为 null，调用方必须显示错误而非 0 */
+  strata: HomeStrataCount[] | null;
+}
+
+const ledgerText = (s: unknown): string => typeof s === 'string' ? s.trim() : '';
+
+/** L0 口径与 l0Split.decide 同源：拆库后 has_l0，未拆库老行原文在行上，三者并集且不重复。 */
+function hasOriginal(m: Memory): boolean {
+  return !!m.has_l0 || ledgerText(m.content_l0_enc).length > 0 || ledgerText(m.content_orig).length > 0;
 }
 
 export async function getHomeFeed(storage: StorageBackend, opts: GetHomeFeedOpts = {}): Promise<HomeFeedResult> {
@@ -352,13 +357,24 @@ export async function getHomeFeed(storage: StorageBackend, opts: GetHomeFeedOpts
       }
     : null;
 
+  const graph = storageOk ? deriveLayerGraph(memories) : emptyLayerGraph();
+  // 批次55：L0 用账本行原文标记，L1–L6 直接取同一份 deriveLayerGraph 的层节点计数；
+  // 不再让层级刻度自己二次调用 storage.listMemories / browse，避免会话或刷新时序造成一侧成功一侧失败。
+  const strata: HomeStrataCount[] | null = storageOk
+    ? [
+        { layer: 'L0' as const, count: memories.filter(hasOriginal).length },
+        ...graph.hubs.map((h) => ({ layer: h.layer as HomeStrataLayer, count: h.count })),
+      ]
+    : null;
+
   return {
     raw: { gains, anomalies: sorted, activeMemories, todos },
     sync,
-    graph: storageOk ? deriveLayerGraph(memories) : emptyLayerGraph(),
+    graph,
     effectGains: storageOk ? computeOnboardGains(audits, memories) : emptyOnboardGains(),
     storageError,
     facts,
+    strata,
   };
 }
 

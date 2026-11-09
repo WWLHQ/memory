@@ -6,8 +6,9 @@ import { PAGES } from '../views.ts';
 import { SELECTION_MSG } from '../../shared/selectionChannel.ts';
 
 // 概览条的数据加载走真实内核/网络；组件单测只验证渲染契约，故固定快照。
-vi.mock('../overview.ts', () => ({
-  loadOverview: vi.fn(async () => ({
+// 批次55：层级刻度与四卡共用这份快照里的 strata 计数，不再单独 mock 一个加载器。
+const m = vi.hoisted(() => ({
+  defaultOverview: {
     loadedAt: 1,
     kernelMode: 'host' as const,
     storageError: null,
@@ -20,7 +21,18 @@ vi.mock('../overview.ts', () => ({
     health: { status: 'ok' as const, detail: 'HTTP 200', checkedAt: 1 },
     session: false,
     billing: { status: 'unavailable' as const, detail: '需登录后查询（余额视图按会话鉴权）' },
-  })),
+    raw: { gains: [] as unknown[], anomalies: [] as unknown[], activeMemories: [] as unknown[], todos: [] as unknown[] },
+    pendingSync: 0,
+    facts: { memories: 7, audits: 12, writeToday: 0, recallToday: 2, conflicts: 1 },
+    strata: [
+      { layer: 'L0', count: 7 }, { layer: 'L1', count: 2 }, { layer: 'L2', count: 1 },
+      { layer: 'L3', count: 0 }, { layer: 'L4', count: 0 }, { layer: 'L5', count: 2 },
+      { layer: 'L6', count: 1 },
+    ],
+  },
+}));
+vi.mock('../overview.ts', () => ({
+  loadOverview: vi.fn(async () => m.defaultOverview),
 }));
 
 vi.mock('../taskpane.ts', () => ({
@@ -50,20 +62,16 @@ vi.mock('../layers.ts', () => ({
   loadLayerPanel: vi.fn(),
 }));
 
-vi.mock('../strataScale.ts', () => ({
-  loadStrataScale: vi.fn(),
-}));
-
 // 批次54：角标加载器读真账本 / 接入后端；组件单测只验证渲染契约，固定返回值。
 vi.mock('../navCounts.ts', () => ({
   loadNavCounts: vi.fn(),
 }));
 
 import { Workspace } from '../Workspace.tsx';
+import { loadOverview } from '../overview.ts';
 import { loadAuditForMemory, loadOutputLog, loadScheduleRuns } from '../dock.ts';
 import { loadStatusbar } from '../statusbar.ts';
 import { loadLayerPanel } from '../layers.ts';
-import { loadStrataScale } from '../strataScale.ts';
 import { loadNavCounts } from '../navCounts.ts';
 import { loadPendingWrites } from '../taskpane.ts';
 
@@ -111,24 +119,7 @@ beforeEach(() => {
       loadedAt: 1_790_000_000_000,
     },
   });
-  vi.mocked(loadStrataScale).mockReset();
-  vi.mocked(loadStrataScale).mockResolvedValue({
-    status: 'ok',
-    view: {
-      rows: [
-        { layer: 'L0', label: '密文', fullName: '原始对话', color: '#8fa3bc', count: 7 },
-        { layer: 'L1', label: '脱敏', fullName: '清洗脱敏', color: '#22d3ee', count: 2 },
-        { layer: 'L2', label: '摘要', fullName: '会话摘要', color: '#38bdf8', count: 1 },
-        { layer: 'L3', label: '要点', fullName: '得失分析', color: '#818cf8', count: null },
-        { layer: 'L4', label: '场景', fullName: '模式归纳', color: '#c084fc', count: 0 },
-        { layer: 'L5', label: '边界', fullName: '洞察提炼', color: '#f472b6', count: 2 },
-        { layer: 'L6', label: '索引', fullName: '投影索引', color: '#fbbf24', count: 1 },
-      ],
-      failed: ['L3'],
-      kernelMode: 'host',
-      loadedAt: 1_790_000_000_000,
-    },
-  });
+  vi.mocked(loadOverview).mockClear();
   vi.mocked(loadNavCounts).mockReset();
   vi.mocked(loadNavCounts).mockResolvedValue({});
 });
@@ -202,7 +193,16 @@ describe('工作台壳层', () => {
     expect(container.querySelectorAll('.rib-tab').length).toBe(8);
   });
 
-  it('功能导航栏底部层级刻度：标题无 STRATA，L0–L6 七档接真实账本，失败层不当 0', async () => {
+  it('批次55：功能区命令按 2 行排布，单列小按钮不超过 2 个且不丢命令', async () => {
+    const { container } = await renderShell();
+    const cols = [...container.querySelectorAll('.rgroup-main .rcol')];
+    expect(cols.length).toBeGreaterThan(0);
+    for (const col of cols) expect(col.querySelectorAll('.rsmall').length).toBeLessThanOrEqual(2);
+    const smalls = container.querySelectorAll('.rgroup-main .rsmall').length;
+    expect(cols.reduce((n, c) => n + c.querySelectorAll('.rsmall').length, 0)).toBe(smalls);
+  });
+
+  it('批次55：层级刻度复用概览页同一次账本快照，七档真实读数、标题无 STRATA', async () => {
     const { container } = await renderShell();
     const scale = screen.getByTestId('strata-scale');
     const nav = container.querySelector('.nav-pane') as HTMLElement;
@@ -219,18 +219,30 @@ describe('工作台壳层', () => {
     expect(rows.map((r) => r.getAttribute('data-layer'))).toEqual(['L0', 'L1', 'L2', 'L3', 'L4', 'L5', 'L6']);
     expect(rows.map((r) => r.querySelector('.strata-name')?.textContent))
       .toEqual(['密文', '脱敏', '摘要', '要点', '场景', '边界', '索引']);
-    // ④ 数字来自真实账本读数，不是演示数据；读取失败显式标注而非 0
-    expect(rows[0].querySelector('.strata-count')?.textContent).toBe('7');
-    expect(rows[1].querySelector('.strata-count')?.textContent).toBe('2');
-    expect(rows[3].querySelector('.strata-count')?.textContent).toBe('读取失败');
-    expect(rows[3].classList.contains('err')).toBe(true);
-    expect(rows[4].querySelector('.strata-count')?.textContent).toBe('0');
+    // ④ 数字来自概览页同一次真实账本读取，不是演示数据
+    expect(rows.map((r) => r.querySelector('.strata-count')?.textContent)).toEqual(['7', '2', '1', '0', '0', '2', '1']);
+    expect(scale.textContent).not.toContain('1467');
     // ⑤ 数据源标注，避免把浏览器内存账本读成本机库
     expect(scale.textContent).toContain('本机账本');
   });
 
+  it('批次55：概览快照缺某层 → 该层显示「读取失败」而非 0', async () => {
+    vi.mocked(loadOverview).mockResolvedValueOnce({
+      ...m.defaultOverview,
+      strata: m.defaultOverview.strata.filter((s) => s.layer !== 'L3'),
+    } as never);
+    const { container } = await renderShell();
+    const rows = [...container.querySelectorAll('.strata-row')];
+    expect(rows[3].querySelector('.strata-count')?.textContent).toBe('读取失败');
+    expect(rows[3].classList.contains('err')).toBe(true);
+  });
+
   it('层级刻度读取失败：如实报错，不渲染任何伪造计数', async () => {
-    vi.mocked(loadStrataScale).mockResolvedValue({ status: 'error', detail: '账本读取失败：E_LEDGER_LOCKED' });
+    vi.mocked(loadOverview).mockResolvedValueOnce({
+      ...m.defaultOverview,
+      storageError: 'E_LEDGER_LOCKED',
+      strata: null,
+    } as never);
     const { container } = await renderShell();
     const scale = screen.getByTestId('strata-scale');
     expect(scale.textContent).toContain('读取失败：账本读取失败：E_LEDGER_LOCKED');
