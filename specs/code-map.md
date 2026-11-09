@@ -1326,3 +1326,20 @@ status: draft
 
 
 
+
+### 批次51–53：工作台顶部布局校正 + 功能导航栏层级刻度（2026-11-09）
+
+> 口径：用户三轮反馈收敛为 ① 品牌块（图标 + 记忆工作台）在标题栏**居中**；② 快速访问工具条**紧跟**「文件/编辑/视图/工具/帮助」之后（不是推到最右）；③ Ribbon 8 选项卡行下移到功能区下方；④ 导航栏最下面新增 L0–L6 层级刻度，标题**去掉 STRATA 英文**，列位与导航树对齐。刻度数字**一律接真实账本**，禁止写入定稿图里的示例值。
+
+| 能力 | 代码落点 | 测试 |
+|---|---|---|
+| 顶部布局校正 | `src/web/shell/Workspace.tsx`（`.qa` 移到菜单项之后、`rib-spring`/`menu-scope` 后置、`.tb-left` 加 `data-brand-align="center"`、右键 `inQa` 判定保留）、`src/web/shell/theme.css`（`.titlebar` 居中、`.win-space` 绝对定位、下挂标签样式） | `src/web/shell/__tests__/workspace.test.tsx`「顶部布局：快捷按钮紧跟菜单项之后，品牌块在标题栏居中」 |
+| 层级刻度数据（L0–L6 真实计数） | `src/web/shell/strataScale.ts`（`STRATA_LAYERS` 七档定义、`loadStrataScale`、`hasOriginal`、`countWithContent`）；L0 口径 = `has_l0`/行上信封/行上明文三者并集，与 `l0Split.decide` 同源 | `src/web/shell/__tests__/strataScale.test.ts`（7 例：定义 / 账本读失败 / L0 计数 / C2 空账本 / C2 历史行 / C2 非法类型 / 失败层口径） |
+| 层级刻度渲染 | `src/web/shell/StrataScale.tsx`（失败层显式「读取失败」、数据源标注、重读按钮）、`src/web/shell/Workspace.tsx`（常驻加载 + 刷新复位 + 导航底部挂载）、`src/web/shell/theme.css`（`.strata-*` 列位对齐 `.tree-row`） | `workspace.test.tsx`「层级刻度：标题无 STRATA，L0–L6 七档接真实账本，失败层不当 0」「读取失败：如实报错，不渲染任何伪造计数」 |
+| 维护索引 | `specs/code-index.generated.md`（`npm run code:index -- --write`） | `npm run code:index:check` |
+
+> **批次51–53 三道闸门证据**：
+> **A·影响面回归**：影响面 = 壳层 `Workspace.tsx` / `theme.css` + 新增 3 文件；未改动内核公开契约、`types.ts` 接口、TCP 8202 / HTTP 8204、存储序列化、审计格式、MCP 12 工具、各 iframe 页面。**全量门禁 `npm run test:gate` = 225 文件 / 2624 例全绿**（4 片首跑通过、失败 0、重试 0；报告 `test-results/test-gate/20261109-161351/`）。受影响套件单跑：`workspace.test.tsx` 46/46、`strataScale.test.ts` 7/7。`npm run typecheck` 两工程 0 错；`oxlint` 652 文件 0 warnings / 0 errors；`check:no-demo` 370 文件 26 判据 0 命中；`code:index -- --write` + `code:index:check` 通过（376 源码 / 120 文档）。既有行为回归用例：既有的 `loadLayerPanel` 口径套件 `layers.test.ts` 2/2 全绿（分层条只在分层页出现、失败层显示「读取失败」、浏览器内存账本标注，均未变）；右键上下文菜单、Ribbon 折叠/展开、主题切换、标签切换用例均保持全绿。
+> **B·效果验证**：AC→用例映射：① 品牌居中 → `titlebar.dataset.brandAlign === 'center'` + 浏览器几何 `brandOffsetFromCenter=0`；② QAT 紧跟菜单项 → `qa.previousElementSibling === 最后一个 .menu-wrap`、`qaGapAfterMenu=7px`、`qaRightMargin=949px`（不再贴右）；③ 标签行下移 → `tabsAfterBody=true`、`tabCount=8`、折叠后标签行仍在；④ 层级刻度 → `inNav=true`、`afterTree=true`、七档 `L0..L6` 与层名逐项断言、标题 `层级刻度` 且 `hasStrataText=false`、列位 `strataMark=24=navIcon`、`strataLayer=44=navLabel`、分组缩进同为 `12px`。状态断言实测值：mock 账本下 `L0=7 / L1=2 / L3=读取失败 / L4=0`，浏览器内存账本下如实 `全 0` 并标注「浏览器内存账本（非本机库）」，重读按钮点击后 `rows=7` 恢复。端到端链路：`getStorage().listMemories({})` + `coreBrowse(L1–L6)` → `loadStrataScale()` → `StrataScale` → DOM；浏览器 `SCALE_CHECK PASS` / `ALIGN2_CHECK PASS` / `REFRESH_CHECK PASS`、浅深主题复验、`pageerrors=none`。诚实降级：账本读失败 → `status:'error'` 且不调 browse、不渲染任何行；某层 browse 返回 null / 抛错 → 该层 `count=null` 显示「读取失败」而非 0。
+> **C·变异验证**：C1 共 5 个关键判定注入缺陷，均**指定测试红灯 → 原样还原 → 哈希一致** → 全量 225/2624 复绿：M1 `hasOriginal` 改 `return true` → `expected 6 to be 4` 红；M2 标题加回 `· STRATA` → `expected '层级刻度 · STRATA' to be '层级刻度'` 红；M3 `count == null ? '读取失败'` 改 `count ?? 0` → `expected '0' to be '读取失败'` 红；M4 删 `data-brand-align` → `expected undefined to be 'center'` 红；M5 弹簧误置于 QAT 之前 → `expected <span class="rib-spring"> to be <div class="menu-wrap">` 红。`grep` 复查无变异残留。C2 输入/状态变异矩阵：空账本 → 七档全 0 且标内存账本；历史行缺 `has_l0`/信封 → L0 为 0（向后兼容不猜）；非法类型（content 为 null/数字/空白、L0 字段为数字/null/字符串）→ 不计入且不崩溃；账本读失败 → error 且不 browse；browse null / 抛错 → 失败层而非 0；重复 mem_id → 去重；空白内容 → 不算有内容；组件 `data=null` → 「读取中…」、`status=error` → 报错且零行。全部如实空态或明确报错，无静默成功、无伪造计数。
+> **已知边界**：浏览器直连静态服务时无主进程，刻度显示内存账本真实读数（本机当前为 0），不冒充本机持久库；桌面端接真库后显示真实条数。L0 计数按「账本里有原文的行」统计，不等于 L0 原数据库里密文信封的物理条数（拆库后两者一一对应，未拆库老行原文在行上），口径已写入 `title`。刻度的短名（密文/脱敏/摘要/要点/场景/边界/索引）按定稿图，内核正式层名保留在 `title` 与 `fullName` 字段，避免短名掩盖语义。

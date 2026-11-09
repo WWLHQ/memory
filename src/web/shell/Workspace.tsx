@@ -27,6 +27,8 @@ import {
 } from './dock.ts';
 import { loadStatusbar, shortLocation, type StatusSnapshot } from './statusbar.ts';
 import { loadLayerPanel, type LayerPanelView } from './layers.ts';
+import { loadStrataScale, type StrataScaleView } from './strataScale.ts';
+import { StrataScale } from './StrataScale.tsx';
 import { SELECTION_MSG, parseSelection, type SelectionPayload } from '../shared/selectionChannel.ts';
 import { NAV_COUNT_MSG, parseNavCount } from '../shared/navCountChannel.ts';
 import { SHELL_GOTO_MSG } from '../shared/shellNavigate.ts';
@@ -58,7 +60,7 @@ interface OpenTab {
   unavailable?: string;
 }
 
-/** 顶部第 1 段快速访问工具条（定稿 12 个位置；无对应能力的置灰并写明原因） */
+/** 菜单栏同行最右侧的快速访问工具条（定稿 12 个位置；无对应能力的置灰并写明原因） */
 interface QaSpec {
   id?: string;
   sep?: boolean;
@@ -209,6 +211,8 @@ export function Workspace() {
   const [status, setStatus] = useState<StatusSnapshot | null>(null);
   /** S7：分层 L1–L6 / L0 面板（仅在中心页为分层或 L0 时读取） */
   const [layerPanel, setLayerPanel] = useState<DockResult<LayerPanelView> | null>(null);
+  /** 批次53：功能导航栏底部层级刻度（常驻，随刷新重读真实账本） */
+  const [strataScale, setStrataScale] = useState<DockResult<StrataScaleView> | null>(null);
   const pendingBusyRef = useRef(false);
   const frameRefs = useRef<Record<string, HTMLIFrameElement | null>>({});
   /** 右键菜单位置换算用：读取当前 zoom，避免事件回调闭包拿到过期比例 */
@@ -384,6 +388,12 @@ export function Workspace() {
     void (async () => setLayerPanel(await loadLayerPanel()))();
   }, [showLayerStrip, layerPanel]);
 
+  // 批次53：层级刻度常驻导航栏底部，只在首次进入 / 刷新后读一次真实账本
+  useEffect(() => {
+    if (strataScale) return;
+    void (async () => setStrataScale(await loadStrataScale()))();
+  }, [strataScale]);
+
   useEffect(() => { activePageRef.current = active?.page; }, [active?.page]);
   // 切换标签即清空选中项：绝不把上一页的选区挂到新页面上
   useEffect(() => { setSelection(null); }, [activeId]);
@@ -501,7 +511,7 @@ export function Workspace() {
         setReloadNonce((n) => n + 1);
         // 底部面板与状态栏同样重读：清空缓存后由可见部位重新拉真实数据
         setDockLog(null); setDockTasks(null); setDockAudit(null);
-        setStatus(null); setLayerPanel(null);
+        setStatus(null); setLayerPanel(null); setStrataScale(null);
         setMessage('已刷新中心区真实页面与底部面板/状态栏读数。');
         break;
       case 'focusFilter':
@@ -640,9 +650,12 @@ export function Workspace() {
       : (window.getSelection()?.toString() ?? '');
     const selectedText = selected.trim();
     // 批次50：右键不补登录入口 —— 只有该区域本身已有登录入口才出现「登录 / 会话」
+    // 批次51：QAT 移进菜单栏后，不能让 QAT 空白区借 .menubar 白捡一个登录入口；
+    // 菜单项区域仍算自带「文件 → 登录 / 会话」，QAT 登录按钮与两处会话格按 testid 精确命中。
+    const inQa = !!target?.closest('.qa');
     const hasLoginEntry = !!target?.closest(
-      '.menubar, [data-testid="qa-login"], [data-testid="shell-session-btn"], [data-testid="sb-session"]',
-    );
+      '[data-testid="qa-login"], [data-testid="shell-session-btn"], [data-testid="sb-session"]',
+    ) || (!inQa && !!target?.closest('.menubar'));
     const items: ContextMenuItem[] = [
       { id: 'refresh', icon: 'refresh', label: '刷新中心区与底部/状态栏读数（F5）', run: () => runShellAction('refresh', '刷新') },
       {
@@ -902,7 +915,7 @@ export function Workspace() {
   const docLabel = locView ? locView.text : (status ? '库位置未知' : '库读取中');
   const docTitle = `当前库：${locText}（${locTitle}） · 当前视图：${active?.label ?? '未选择'}`;
 
-  // ── 第 1 段：快速访问工具条（12 个位置照定稿保留；无能力项置灰并写明原因）──
+  // ── 菜单栏右端：快速访问工具条（12 个位置照定稿保留；无能力项置灰并写明原因）──
   const themeIcon: IconName = theme === 'system' ? 'system' : theme === 'light' ? 'sun' : 'moon';
   const themeTip = theme === 'system'
     ? '主题：跟随系统（点击切到浅色）'
@@ -1043,28 +1056,12 @@ export function Workspace() {
       } as CSSProperties}
     >
       <div className="ribbon">
-        {/* 顶部四段（按定稿 final-01-workspace 实测）：
-            ① 32px 标题行（QA 工具条 / 品牌与真实库文档名 / 系统三按钮覆盖层）
-            ② 26px 自建中文菜单行（默认 Electron 菜单已删除）
-            ③ 31px Ribbon 标签行（8 标签 + 查找框 + 折叠）
-            ④ 94px 功能区（命令分组） */}
-        <div className="titlebar" data-testid="shell-titlebar">
-          <div className="qa" aria-label="快速访问工具条">
-            {qaSpecs.map((q, i) => q.sep ? (
-              <span className="qa-sep" key={`qa-sep-${i}`} aria-hidden="true" />
-            ) : (
-              <button
-                key={q.id}
-                className={`qa-btn${q.disabled ? ' off' : ''}${q.text ? ' labeled' : ''}`}
-                type="button"
-                data-testid={`qa-${q.id}`}
-                aria-label={q.title}
-                aria-disabled={q.disabled || undefined}
-                title={q.title}
-                onClick={q.disabled ? undefined : q.run}
-              ><Icon name={q.icon ?? 'dot'} size={15} />{q.text ? <span className="qa-label">{q.text}</span> : null}</button>
-            ))}
-          </div>
+        {/* 顶部四段（批次52 布局校正）：
+            ① 32px 标题行（品牌与真实库文档名 / 会话状态整组居中 / 系统三按钮覆盖层）
+            ② 26px 自建中文菜单行（菜单项 → 紧随其后的快速访问工具条 → 右端范围信息）
+            ③ 94px 功能区（命令分组）
+            ④ 31px Ribbon 标签行（8 标签 + 查找框 + 折叠，整行下移到功能区下方） */}
+        <div className="titlebar" data-testid="shell-titlebar" data-brand-align="center">
           <div className="tb-left">
             <span className="app-mark"><Icon name="layers" size={11} /></span>
             <span className="app-name">MemoryDesk 记忆工作台</span>
@@ -1128,9 +1125,45 @@ export function Workspace() {
               )}
             </div>
           ))}
+          {/* 批次52：快速访问工具条紧跟菜单项之后；右端范围信息由弹簧顶到最右 */}
+          <div className="qa" aria-label="快速访问工具条">
+            {qaSpecs.map((q, i) => q.sep ? (
+              <span className="qa-sep" key={`qa-sep-${i}`} aria-hidden="true" />
+            ) : (
+              <button
+                key={q.id}
+                className={`qa-btn${q.disabled ? ' off' : ''}${q.text ? ' labeled' : ''}`}
+                type="button"
+                data-testid={`qa-${q.id}`}
+                aria-label={q.title}
+                aria-disabled={q.disabled || undefined}
+                title={q.title}
+                onClick={q.disabled ? undefined : q.run}
+              ><Icon name={q.icon ?? 'dot'} size={15} />{q.text ? <span className="qa-label">{q.text}</span> : null}</button>
+            ))}
+          </div>
           <span className="rib-spring" />
           <span className="menu-scope" title={scopeTitle}>{scopeText}</span>
         </div>
+
+        {!ribbonFolded && (
+          <div className="ribbon-body">
+            {activeRibbon.groups.map((g) => (
+              <RibbonGroupView
+                key={g.label}
+                group={!sessionActive
+                  ? {
+                      ...g,
+                      items: g.items.map((it) => (it.label.includes('需登录')
+                        ? { ...it, unavailable: '未登录（会话 401）：该动作需要登录后才能执行' }
+                        : it)),
+                    }
+                  : g}
+                onItem={onRibbonItem}
+              />
+            ))}
+          </div>
+        )}
 
         <div className="ribbon-tabs">
           <div className="rib-tabs">
@@ -1160,24 +1193,6 @@ export function Workspace() {
             <Icon name="fold" size={12} />
           </button>
         </div>
-        {!ribbonFolded && (
-          <div className="ribbon-body">
-            {activeRibbon.groups.map((g) => (
-              <RibbonGroupView
-                key={g.label}
-                group={!sessionActive
-                  ? {
-                      ...g,
-                      items: g.items.map((it) => (it.label.includes('需登录')
-                        ? { ...it, unavailable: '未登录（会话 401）：该动作需要登录后才能执行' }
-                        : it)),
-                    }
-                  : g}
-                onItem={onRibbonItem}
-              />
-            ))}
-          </div>
-        )}
       </div>
 
       <div className={`workspace${dockOpen ? '' : ' dock-closed'}`}>
@@ -1208,6 +1223,10 @@ export function Workspace() {
             ))}
             {navEntries.length === 0 && <div className="tree-note">没有匹配的功能项。</div>}
           </div>
+          {/* 批次53：层级刻度固定在功能导航栏最下面，不随导航树滚动 */}
+          {!navCollapsed && (
+            <StrataScale data={strataScale} onRefresh={() => setStrataScale(null)} />
+          )}
           {!navCollapsed && (
             <div className="splitter" role="separator" aria-label="调整导航宽度" onPointerDown={(e) => startDrag('nav', e)} />
           )}

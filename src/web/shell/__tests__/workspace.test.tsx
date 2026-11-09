@@ -50,10 +50,15 @@ vi.mock('../layers.ts', () => ({
   loadLayerPanel: vi.fn(),
 }));
 
+vi.mock('../strataScale.ts', () => ({
+  loadStrataScale: vi.fn(),
+}));
+
 import { Workspace } from '../Workspace.tsx';
 import { loadAuditForMemory, loadOutputLog, loadScheduleRuns } from '../dock.ts';
 import { loadStatusbar } from '../statusbar.ts';
 import { loadLayerPanel } from '../layers.ts';
+import { loadStrataScale } from '../strataScale.ts';
 import { loadPendingWrites } from '../taskpane.ts';
 
 beforeEach(() => {
@@ -100,6 +105,24 @@ beforeEach(() => {
       loadedAt: 1_790_000_000_000,
     },
   });
+  vi.mocked(loadStrataScale).mockReset();
+  vi.mocked(loadStrataScale).mockResolvedValue({
+    status: 'ok',
+    view: {
+      rows: [
+        { layer: 'L0', label: '密文', fullName: '原始对话', color: '#8fa3bc', count: 7 },
+        { layer: 'L1', label: '脱敏', fullName: '清洗脱敏', color: '#22d3ee', count: 2 },
+        { layer: 'L2', label: '摘要', fullName: '会话摘要', color: '#38bdf8', count: 1 },
+        { layer: 'L3', label: '要点', fullName: '得失分析', color: '#818cf8', count: null },
+        { layer: 'L4', label: '场景', fullName: '模式归纳', color: '#c084fc', count: 0 },
+        { layer: 'L5', label: '边界', fullName: '洞察提炼', color: '#f472b6', count: 2 },
+        { layer: 'L6', label: '索引', fullName: '投影索引', color: '#fbbf24', count: 1 },
+      ],
+      failed: ['L3'],
+      kernelMode: 'host',
+      loadedAt: 1_790_000_000_000,
+    },
+  });
 });
 
 /** 渲染并等待概览异步加载落地（避免 act 警告，也确保断言发生在真实渲染之后） */
@@ -117,6 +140,73 @@ describe('工作台壳层', () => {
     const frames = container.querySelectorAll('iframe.page-frame');
     expect(frames.length).toBe(1);
     expect((frames[0] as HTMLIFrameElement).getAttribute('src')).toContain('/index.html');
+  });
+
+  it('顶部布局：快捷按钮紧跟菜单项之后，品牌块在标题栏居中', async () => {
+    const { container } = await renderShell();
+    const menubar = screen.getByTestId('shell-menubar');
+    const titlebar = screen.getByTestId('shell-titlebar');
+    const qa = container.querySelector('.qa') as HTMLElement | null;
+    expect(qa).not.toBeNull();
+    // ① 快捷按钮脱离标题栏，紧跟在「文件/编辑/视图/工具/帮助」之后（不是被弹簧推到最右）
+    expect(titlebar.contains(qa as Node)).toBe(false);
+    expect(menubar.contains(qa as Node)).toBe(true);
+    const wraps = menubar.querySelectorAll('.menu-wrap');
+    expect(wraps.length).toBe(5);
+    expect((qa as HTMLElement).previousElementSibling).toBe(wraps[wraps.length - 1]);
+    const spring = menubar.querySelector('.rib-spring') as HTMLElement | null;
+    expect(spring).not.toBeNull();
+    expect((qa as HTMLElement).compareDocumentPosition(spring as HTMLElement) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(menubar.lastElementChild?.classList.contains('menu-scope')).toBe(true);
+    // ② 品牌块（图标 + 记忆工作台）仍在标题栏，且标题栏声明居中布局
+    const brand = titlebar.querySelector('.tb-left') as HTMLElement | null;
+    expect(brand).not.toBeNull();
+    expect(brand?.querySelector('.app-mark')).not.toBeNull();
+    expect(brand?.querySelector('.app-name')?.textContent).toContain('记忆工作台');
+    expect(titlebar.dataset.brandAlign).toBe('center');
+    // ③ 8 个标签整行排在功能区之后（保留上一轮确认的下移）
+    const body = container.querySelector('.ribbon-body') as HTMLElement | null;
+    const tabs = container.querySelector('.ribbon-tabs') as HTMLElement | null;
+    expect(body).not.toBeNull();
+    expect(tabs).not.toBeNull();
+    expect((body as HTMLElement).compareDocumentPosition(tabs as HTMLElement) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(container.querySelectorAll('.rib-tab').length).toBe(8);
+  });
+
+  it('功能导航栏底部层级刻度：标题无 STRATA，L0–L6 七档接真实账本，失败层不当 0', async () => {
+    const { container } = await renderShell();
+    const scale = screen.getByTestId('strata-scale');
+    const nav = container.querySelector('.nav-pane') as HTMLElement;
+    // ① 位置在功能导航栏内，且排在导航树之后（最下面）
+    expect(nav.contains(scale)).toBe(true);
+    const tree = container.querySelector('.tree') as HTMLElement;
+    expect(tree.compareDocumentPosition(scale) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // ② 纯中文标题，STRATA 英文已取消
+    expect(scale.querySelector('.tree-group')?.textContent).toBe('层级刻度');
+    expect(scale.textContent).not.toContain('STRATA');
+    expect(scale.textContent?.toLowerCase()).not.toContain('strata');
+    // ③ L0–L6 共 7 行，顺序与定稿一致
+    const rows = [...scale.querySelectorAll('.strata-row')];
+    expect(rows.map((r) => r.getAttribute('data-layer'))).toEqual(['L0', 'L1', 'L2', 'L3', 'L4', 'L5', 'L6']);
+    expect(rows.map((r) => r.querySelector('.strata-name')?.textContent))
+      .toEqual(['密文', '脱敏', '摘要', '要点', '场景', '边界', '索引']);
+    // ④ 数字来自真实账本读数，不是演示数据；读取失败显式标注而非 0
+    expect(rows[0].querySelector('.strata-count')?.textContent).toBe('7');
+    expect(rows[1].querySelector('.strata-count')?.textContent).toBe('2');
+    expect(rows[3].querySelector('.strata-count')?.textContent).toBe('读取失败');
+    expect(rows[3].classList.contains('err')).toBe(true);
+    expect(rows[4].querySelector('.strata-count')?.textContent).toBe('0');
+    // ⑤ 数据源标注，避免把浏览器内存账本读成本机库
+    expect(scale.textContent).toContain('本机账本');
+  });
+
+  it('层级刻度读取失败：如实报错，不渲染任何伪造计数', async () => {
+    vi.mocked(loadStrataScale).mockResolvedValue({ status: 'error', detail: '账本读取失败：E_LEDGER_LOCKED' });
+    const { container } = await renderShell();
+    const scale = screen.getByTestId('strata-scale');
+    expect(scale.textContent).toContain('读取失败：账本读取失败：E_LEDGER_LOCKED');
+    expect(container.querySelector('.strata-row')).toBeNull();
+    expect(screen.queryByText('1467')).toBeNull();
   });
 
   it('概览页整页渲染在 iframe 内：壳层不再叠旧首页数据条，未登录显示只读条', async () => {

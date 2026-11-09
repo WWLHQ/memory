@@ -88,31 +88,33 @@ button:disabled { cursor: not-allowed; }
   user-select: none;
 }
 
-/* ── 顶部四段（批次48 S11，按定稿 final-01-workspace 实测值）─────────────
-   ① 32px 标题行：左快速访问工具条 / 居中品牌与库文档名 / 右端系统三按钮（覆盖层）
-   ② 26px 中文菜单行：自建菜单，不是 Electron 默认菜单
-   ③ 31px Ribbon 标签行：8 标签 + 右侧查找框与折叠
-   ④ 94px 功能区：命令分组（见下方 .ribbon-body） */
+/* ── 顶部四段（批次52 布局校正）─────────────
+   ① 32px 标题行：品牌块（图标 + 记忆工作台 + 库文档名 / 会话状态）整组水平居中，
+      右端 135px 留给系统三按钮覆盖层（绝对定位，不参与居中计算）
+   ② 26px 中文菜单行：自建菜单 → 紧随其后的快速访问工具条 → 弹簧 → 右端范围信息
+   ③ 94px 功能区：命令分组（见下方 .ribbon-body）
+   ④ 31px Ribbon 标签行：8 标签 + 右侧查找框与折叠，整行下移到功能区下方 */
 .titlebar {
+  position: relative;
   flex: none;
   display: flex;
   align-items: stretch;
-  justify-content: space-between;
+  justify-content: center;
   height: 32px;
   background: linear-gradient(#fbfbfc, #f1f2f4);
   border-bottom: 1px solid var(--line);
 }
 html[data-theme='dark'] .titlebar { background: linear-gradient(#232935, #1a1f28); }
 
-/* 快速访问工具条：12 个位置按定稿保留；无对应能力的按钮置灰并在 title 写原因 */
+/* 快速访问工具条：紧跟 5 个菜单项之后（不再推到最右）；无对应能力的按钮置灰并在 title 写原因 */
 .qa {
   flex: none;
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 0 5px 0 6px;
-  margin-right: 4px;
-  border-right: 1px solid var(--line);
+  padding: 0 4px 0 6px;
+  margin-left: 6px;
+  border-left: 1px solid var(--line);
 }
 .qa-btn {
   width: 26px;
@@ -146,7 +148,7 @@ html[data-theme='dark'] .titlebar { background: linear-gradient(#232935, #1a1f28
   text-overflow: ellipsis;
 }
 .qa-sep { width: 1px; height: 16px; margin: 0 3px; background: var(--line); flex: none; }
-html[data-theme='dark'] .qa { border-right-color: #39414c; }
+html[data-theme='dark'] .qa { border-left-color: #39414c; }
 
 /* 中文菜单行（自建；默认 Electron 菜单已删除） */
 .menubar {
@@ -226,17 +228,18 @@ html[data-theme='dark'] .qa { border-right-color: #39414c; }
 }
 .menu-sep { height: 1px; margin: 3px 6px; background: var(--line2); }
 
-/* 第 3 段：Ribbon 标签行 */
+/* 第 4 段：Ribbon 标签行（批次51 整行下移到功能区下方） */
 .ribbon-tabs {
   display: flex;
-  align-items: flex-end;
+  align-items: flex-start;
   gap: 1px;
   height: 31px;
   padding: 0 6px;
   background: var(--chrome);
-  border-bottom: 1px solid var(--line);
+  border-top: 1px solid var(--line);
 }
 
+/* 批次52：品牌块是标题栏唯一的 flex 子项，由 .titlebar 的 justify-content:center 居中 */
 .tb-left {
   flex: 0 1 auto;
   display: flex;
@@ -245,7 +248,15 @@ html[data-theme='dark'] .qa { border-right-color: #39414c; }
   min-width: 0;
   padding: 0 10px;
 }
-.win-space { flex: none; width: 135px; }
+/* 系统三按钮占位改绝对定位，不参与居中计算（否则品牌块会被挤偏 67px） */
+.win-space {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 135px;
+  pointer-events: none;
+}
 .app-mark {
   width: 17px;
   height: 17px;
@@ -288,14 +299,14 @@ html[data-theme='dark'] .qa { border-right-color: #39414c; }
 }
 .tb-tag.ro { color: var(--amber); background: transparent; }
 
-.rib-tabs { flex: none; display: flex; align-items: flex-end; gap: 1px; }
+.rib-tabs { flex: none; display: flex; align-items: flex-start; gap: 1px; }
 
 .rib-tab {
   height: 28px;
   padding: 0 12px;
   border: 1px solid transparent;
-  border-bottom: none;
-  border-radius: 4px 4px 0 0;
+  border-top: none;
+  border-radius: 0 0 4px 4px;
   color: var(--tx2);
   font-size: 11.5px;
   position: relative;
@@ -307,7 +318,7 @@ html[data-theme='dark'] .qa { border-right-color: #39414c; }
   border-color: var(--line);
   color: var(--accent);
   font-weight: 600;
-  box-shadow: inset 0 2px 0 var(--accent);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 .rib-spring, .sb-spring, .tp-spring, .bp-spring { flex: 1 1 auto; }
@@ -318,7 +329,7 @@ html[data-theme='dark'] .qa { border-right-color: #39414c; }
   gap: 5px;
   width: 186px;
   height: 23px;
-  margin: 0 4px 4px 0;
+  margin: 4px 4px 0 0;
   padding: 0 6px;
   border: 1px solid var(--line);
   border-radius: 3px;
@@ -341,7 +352,7 @@ html[data-theme='dark'] .qa { border-right-color: #39414c; }
   justify-content: center;
   width: 22px;
   height: 22px;
-  margin: 0 2px 4px 0;
+  margin: 4px 2px 0 0;
   padding: 0;
   border-radius: 3px;
   color: var(--mu);
@@ -353,7 +364,8 @@ html[data-theme='dark'] .qa { border-right-color: #39414c; }
 .shell.electron .titlebar {
   -webkit-app-region: drag;
 }
-.shell.electron .titlebar .qa-btn,
+.shell.electron .qa,
+.shell.electron .qa-btn,
 .shell.electron .menubar,
 .shell.electron .menu-item,
 .shell.electron .ribbon-tabs,
@@ -541,6 +553,73 @@ html[data-theme='dark'] .qa { border-right-color: #39414c; }
   line-height: 14px;
 }
 .tree-note { padding: 10px 12px; color: var(--mu); font-size: 11px; }
+
+/* ── 层级刻度（批次53）：固定在功能导航栏最下面 ──────────
+   版式沿用 .tree-group / .tree-row 的左缩进、行高、字号与主题变量，
+   不照搬定稿图的独立深色皮肤；L0–L6 色块按定稿色阶，浅/深主题都可读。 */
+.strata-scale {
+  flex: none;
+  border-top: 1px solid var(--line2);
+  padding: 2px 0 6px;
+  background: var(--panel2);
+  user-select: none;
+}
+.strata-scale .tree-group { padding: 7px 12px 3px; }
+/* 列位与导航树严格对齐：色块占「图标列」x=24..36，层号从「文字列」x=44 起
+   （.tree-row padding-left 6 + .tw 12 + gap 6 = 24；再 + 图标 12 + gap 8 = 44）。 */
+.strata-row {
+  display: grid;
+  grid-template-columns: 12px 20px 28px auto;
+  align-items: center;
+  gap: 8px;
+  height: 20px;
+  padding: 0 10px 0 24px;
+  color: var(--tx2);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.strata-mark {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  justify-self: start;
+}
+.strata-layer {
+  font-family: var(--mono, ui-monospace), monospace;
+  font-size: 10px;
+  color: var(--mu);
+}
+.strata-name { overflow: hidden; text-overflow: ellipsis; }
+.strata-count {
+  color: var(--mu);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.strata-row.err .strata-count { color: var(--red); font-size: 10px; }
+.strata-note { padding: 4px 12px; color: var(--mu); font-size: 11px; }
+.strata-note.err { color: var(--red); }
+.strata-foot {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px 0 12px;
+  color: var(--mu);
+  font-size: 10px;
+}
+.strata-refresh {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--mu);
+  font-size: 10px;
+  cursor: pointer;
+}
+.strata-refresh:hover { background: var(--accent-soft); color: var(--accent); }
 
 .splitter {
   flex: none;
