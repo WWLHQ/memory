@@ -20,9 +20,15 @@ describe('壳层导航映射', () => {
     }
   });
 
-  it('主导航覆盖全部真实页面，且不包含演示通览 overview.html', () => {
+  it('主导航覆盖全部真实页面（login.html 例外：仅作深链兜底、不进主导航），且不包含演示通览 overview.html', () => {
     const pages = navPages();
     for (const key of Object.keys(PAGES) as (keyof typeof PAGES)[]) {
+      // 第三轮口径：登录改为壳层弹窗，login.html 保留为可直达兜底页但不占主导航
+      if (key === 'login') {
+        expect(pages.includes(key), 'login.html 不应出现在主导航').toBe(false);
+        expect(PAGES.login.file).toBe('login.html');
+        continue;
+      }
       expect(pages.includes(key), `导航缺少 ${key}`).toBe(true);
     }
     expect(pages.some((p) => PAGES[p].file === 'overview.html')).toBe(false);

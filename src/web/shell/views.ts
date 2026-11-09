@@ -14,6 +14,7 @@ export type PageKey =
 /** 真实页面清单（文件名与 vite.config.ts 的 rollupOptions.input 对齐） */
 export const PAGES: Record<PageKey, { file: string; label: string; source: string }> = {
   home: { file: 'index.html', label: '概览页', source: 'getHomeFeed（单次账本读取）+ /api/health + llm:billing' },
+  // login.html 为可直达兜底页（不进主导航）；主流程入口是壳层登录弹窗
   login: { file: 'login.html', label: '登录与会话页', source: 'POST /api/login · /api/me · session:realpage' },
   memory: { file: 'memory.html', label: '记忆管理六标签页', source: '账本清单 + 分层策略 + L0 会话 + 冲突队列' },
   write: { file: 'write.html', label: '写入页', source: 'ma.write 表单与回执' },
@@ -60,7 +61,8 @@ export type NavEntry = NavGroup | NavItem;
 export const NAV: NavEntry[] = [
   { kind: 'group', label: '工作区' },
   { kind: 'item', id: 'home', label: '概览', icon: 'spark', page: 'home' },
-  { kind: 'item', id: 'login', label: '登录与会话', icon: 'user', page: 'login' },
+  // 登录不再占主导航：主流程走壳层登录弹窗（菜单栏 / QAT / 登录状态处三处入口）。
+  // login.html 仍保留为可直达的兜底页（深链与 E2E 不断裂），PAGES.login 映射保留。
   { kind: 'group', label: '记忆' },
   {
     kind: 'item', id: 'ledger', label: '记忆管理', icon: 'db', defaultOpen: true, children: [
