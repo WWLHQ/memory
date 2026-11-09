@@ -1,4 +1,4 @@
-// E2E：个人记忆双窗（第一轮本机闭环）——真实登录后端 + 真实独立存储，非 mock。
+// E2E：个人记忆双窗（第一轮本机闭环 + 第二轮跨端同步）——真实登录后端 + 真实独立存储 + 真实 PgSyncHub，非 mock。
 //
 // 覆盖：
 //   ① 未登录直开：诚实不可用（不是「没有记忆」，也不编造条目/计数）
@@ -8,6 +8,7 @@
 //   ⑤ 刷新后仍读回真实存储（独立文件/进程内实例，而非页面内存）
 //   ⑥ agent 投递条目（独立存储里真实存在）在「待 agent 确认」分区，带来源与时间戳
 //   ⑦ 壳层左侧导航角标 = 页面回传的真实待确认数
+//   ⑧ 第二轮：个人确认不提权 → 显式二次确认后上行到真实 PgSyncHub → 幂等 → 失败如实（阶段+错误码）
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, expect, disconnectBrowser, collectErrors } from './harness.ts';
@@ -15,7 +16,34 @@ import { startStatic, startHomeBackend, closeServer, type StaticServer } from '.
 import { registerAccount } from '../src/home/server.ts';
 import { hashPassword } from '../src/auth/hash.ts';
 import { InMemoryPersonalStore, personalContentHash } from '../src/core/memagent/personalStore.ts';
+import { PgSyncHub } from '../src/core/memagent/pgSyncHub.ts';
+import { sha256hex } from '../src/core/memagent/sync.ts';
 import type { Page } from 'playwright-core';
+
+/** 测试夹具：补齐第二轮同步字段（默认 local = 仅本机本人） */
+function entryFixture(fields: {
+  id: string; content: string; source: 'agent' | 'quick_note'; source_agent: string | null;
+  delivered_at: number; confirmed_at: number | null; state: 'pending' | 'confirmed';
+}): Parameters<InMemoryPersonalStore['put']>[0] {
+  const content = fields.content;
+  return {
+    ...fields,
+    owner: ACCOUNT,
+    rejected_at: null,
+    layer: 'L1',
+    content_hash: personalContentHash(content),
+    sha256: sha256hex(content),
+    vclock: { web: 1 },
+    sync_state: 'local',
+    sync_error: null,
+    sync_result: null,
+    team_shared: false,
+    team_id: null,
+    version: 1,
+    deleted: false,
+    deleted_at: null,
+  };
+}
 
 const ACCOUNT = 'pm_e2e';
 const PWD = 'e2e_pwd';
@@ -23,6 +51,8 @@ const PWD = 'e2e_pwd';
 let staticSrv: StaticServer | undefined;
 let backend: Awaited<ReturnType<typeof startHomeBackend>> | undefined;
 let store: InMemoryPersonalStore;
+/** 第二轮真实同步中枢：进程内 pglite（真 Postgres WASM 账本），非 mock */
+let hub: PgSyncHub;
 let BACKEND = '';
 let LOGIN = '';
 let MEMORY = '';
@@ -32,8 +62,12 @@ test.beforeAll(async () => {
   staticSrv = await startStatic(0, 'dist');
   registerAccount(ACCOUNT, hashPassword(PWD), { enterprise_id: 'ent_pm_e2e', team_id: 'team_pm_e2e', perspective: 'team' });
   store = new InMemoryPersonalStore();
+  hub = new PgSyncHub();
+  await hub.init();
   const dataFile = join(tmpdir(), `e2e-personal-${Date.now()}.json`);
-  backend = await startHomeBackend({ dataFile, allowedOrigins: [`http://localhost:${staticSrv.port}`], personalStore: store });
+  backend = await startHomeBackend({
+    dataFile, allowedOrigins: [`http://localhost:${staticSrv.port}`], personalStore: store, personalSyncHub: hub,
+  });
   BACKEND = `http://localhost:${backend.port}`;
   const q = `backend=${BACKEND}`;
   LOGIN = `http://localhost:${staticSrv.port}/login.html?${q}`;
@@ -43,6 +77,7 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   await closeServer(backend?.server);
+  await hub?.close();
   await staticSrv?.stop();
   await disconnectBrowser();
 });
@@ -117,11 +152,10 @@ test.describe('个人记忆双窗 · 本机闭环 E2E', () => {
     await login(page);
     await page.goto(MEMORY);
     const id = 'pm_e2e_delete';
-    await store.put({
-      id, owner: ACCOUNT, content: '待删除：临时测试条目', source: 'agent', source_agent: '客服工作台',
-      delivered_at: Date.now(), confirmed_at: Date.now(), state: 'confirmed', rejected_at: null,
-      layer: 'L1', content_hash: personalContentHash('待删除：临时测试条目'), version: 1, deleted: false, deleted_at: null,
-    });
+    await store.put(entryFixture({
+      id, content: '待删除：临时测试条目', source: 'agent', source_agent: '客服工作台',
+      delivered_at: Date.now(), confirmed_at: Date.now(), state: 'confirmed',
+    }));
     await page.reload();
     await expect(page.locator(`[data-testid="pm-confirmed-${id}"]`)).toBeVisible();
 
@@ -160,11 +194,10 @@ test.describe('个人记忆双窗 · 本机闭环 E2E', () => {
     await login(page);
     const id = 'pm_e2e_agent';
     const delivered = Date.now() - 60_000;
-    await store.put({
-      id, owner: ACCOUNT, content: '客户偏好：工单回复先给结论再给步骤', source: 'agent', source_agent: '客服工作台',
-      delivered_at: delivered, confirmed_at: null, state: 'pending', rejected_at: null,
-      layer: 'L1', content_hash: personalContentHash('客户偏好：工单回复先给结论再给步骤'), version: 1, deleted: false, deleted_at: null,
-    });
+    await store.put(entryFixture({
+      id, content: '客户偏好：工单回复先给结论再给步骤', source: 'agent', source_agent: '客服工作台',
+      delivered_at: delivered, confirmed_at: null, state: 'pending',
+    }));
     await page.goto(MEMORY);
     const item = page.locator(`[data-testid="pm-pending-${id}"]`);
     await expect(item).toBeVisible();
@@ -180,14 +213,91 @@ test.describe('个人记忆双窗 · 本机闭环 E2E', () => {
   test('壳层左侧导航角标 = 页面回传的真实待确认数', async ({ page }) => {
     await login(page);
     const id = 'pm_e2e_nav';
-    await store.put({
-      id, owner: ACCOUNT, content: '导航角标验证条目', source: 'agent', source_agent: '工作台',
-      delivered_at: Date.now(), confirmed_at: null, state: 'pending', rejected_at: null,
-      layer: 'L1', content_hash: personalContentHash('导航角标验证条目'), version: 1, deleted: false, deleted_at: null,
-    });
+    await store.put(entryFixture({
+      id, content: '导航角标验证条目', source: 'agent', source_agent: '工作台',
+      delivered_at: Date.now(), confirmed_at: null, state: 'pending',
+    }));
     await page.goto(SHELL);
     await page.getByRole('treeitem', { name: /个人记忆/ }).click();
     const badge = page.locator('[data-testid="nav-count-ledger-personal"]');
     await expect(badge).toHaveText('1', { timeout: 15_000 });
+  });
+
+  test('第二轮：确认不提权 → 二次确认显式授权 → 真实 PgSyncHub 已同步、幂等，不产生重复中枢条目', async ({ page }) => {
+    const errors = collectErrors(page);
+    await login(page);
+    await page.goto(MEMORY);
+    const text = '上行约定：发版前跑全量回归 + 失败即回滚';
+    await page.locator('[data-testid="pm-quick-input"]').fill(text);
+    await page.locator('[data-testid="pm-quick-input"]').press('Enter');
+    await expect(page.locator('[data-testid="pm-sect-quick"]')).toContainText(text);
+    await page.locator('.pm-item[data-testid^="pm-pending-"]').filter({ hasText: text })
+      .locator('[data-testid^="pm-confirm-"]').click();
+
+    const item = page.locator('.pm-item[data-testid^="pm-confirmed-"]').filter({ hasText: text });
+    await expect(item).toBeVisible();
+    // 确认不自动提权：同步徽标仍是「仅本机 · 本人」
+    await expect(item.locator('[data-testid^="pm-sync-badge-"]')).toContainText('仅本机');
+    await expect(page.locator('[data-testid="pm-owner-binding"]')).toBeVisible();
+
+    // 第一次点击只提示二次确认，条目仍未上行
+    await item.locator('[data-testid^="pm-uplink-"]').click();
+    await expect(page.locator('[data-testid="pm-msg"]')).toContainText('再次点击「确认上行」');
+    await expect(item.locator('[data-testid^="pm-sync-badge-"]')).toContainText('仅本机');
+
+    // 第二次点击 = 显式授权 → 真实中枢落账
+    await item.locator('[data-testid^="pm-uplink-confirm-"]').click();
+    await expect(page.locator('[data-testid="pm-msg"]')).toContainText('已上行到团队中枢', { timeout: 15_000 });
+    await expect(item.locator('[data-testid^="pm-sync-badge-"]')).toContainText('已同步（团队）');
+    await expect(page.locator('[data-testid="pm-sync-queue-count"]')).toHaveText('0');
+    // 真实中枢（PgSyncHub）里只有一条同内容条目（sha256 幂等口径）
+    const rec = await hub.reconcile({ team_id: 'team_pm_e2e' });
+    expect(rec.items.filter((m) => m.content === text)).toHaveLength(1);
+    expect(errors).toEqual([]);
+  });
+
+  test('第二轮：中枢未接线 → 上行如实显示「阶段 + 错误码」，绝不显示已同步；本机待上行段接真实数据', async ({ page }) => {
+    // 独立后端：没有接 PgSyncHub（模拟真实链路不可用），其余全部真实
+    const backend2 = await startHomeBackend({
+      dataFile: join(tmpdir(), `e2e-personal-nohub-${Date.now()}.json`),
+      allowedOrigins: [`http://localhost:${staticSrv!.port}`],
+      personalStore: new InMemoryPersonalStore(),
+    });
+    try {
+      const b2 = `http://localhost:${backend2.port}`;
+      const q2 = `backend=${b2}`;
+      await page.goto(`http://localhost:${staticSrv!.port}/login.html?${q2}`);
+      await expect(page.locator('[data-testid="login-page"]')).toBeVisible();
+      await page.locator('#loginAccount').fill(ACCOUNT);
+      await page.locator('#loginPassword').fill(PWD);
+      await page.getByRole('button', { name: /^登录$/ }).click();
+      await expect(page.getByText(/登录成功/)).toBeVisible({ timeout: 10_000 });
+      await page.goto(`http://localhost:${staticSrv!.port}/memory.html?tab=personal&${q2}`);
+
+      const text = '中枢不可用时的诚实失败条目';
+      await page.locator('[data-testid="pm-quick-input"]').fill(text);
+      await page.locator('[data-testid="pm-quick-input"]').press('Enter');
+      await page.locator('.pm-item[data-testid^="pm-pending-"]').filter({ hasText: text })
+        .locator('[data-testid^="pm-confirm-"]').click();
+      const item = page.locator('.pm-item[data-testid^="pm-confirmed-"]').filter({ hasText: text });
+      await item.locator('[data-testid^="pm-uplink-"]').click();
+      await item.locator('[data-testid^="pm-uplink-confirm-"]').click();
+
+      // 失败回执：阶段 + 错误码，明确「未送达团队」
+      await expect(page.locator('[data-testid="pm-msg"]')).toContainText('阶段 hub_init');
+      await expect(page.locator('[data-testid="pm-msg"]')).toContainText('E_SYNC_HUB_UNAVAILABLE');
+      await expect(page.locator('[data-testid="pm-msg"]')).toContainText('未送达团队');
+      // 条目徽标如实：同步失败（非「已同步」）
+      await expect(item.locator('[data-testid^="pm-sync-badge-"]')).toContainText('同步失败');
+      await expect(item.locator('[data-testid^="pm-sync-badge-"]')).not.toContainText('已同步');
+      // 收件箱「本机待上行」段接真实 pending_sync / failed 数据
+      await expect(page.locator('[data-testid="pm-sync-queue-count"]')).toHaveText('1');
+      await expect(page.locator('[data-testid="pm-sect-sync"]')).toContainText(text);
+      await expect(page.locator('[data-testid="pm-sect-sync"]')).toContainText('阶段 hub_init');
+      await expect(page.locator('[data-testid="pm-inbox-foot"]')).toContainText('同步失败 1');
+      await expect(page.locator('[data-testid="pm-counts"]')).toContainText('同步失败 1');
+    } finally {
+      await closeServer(backend2.server);
+    }
   });
 });

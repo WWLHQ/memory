@@ -11,7 +11,8 @@ import { importLockSnapshot } from '../src/auth/loginService.ts';
 import type { RunningServer } from '../src/agentOnboard/server.ts';
 import { InMemoryStorage } from '../src/core/memagent/storage.ts';
 import { InMemoryPersonalStore } from '../src/core/memagent/personalStore.ts';
-import type { PersonalMemoryStore } from '../src/core/memagent/personalStore.ts';
+import type { PersonalMemoryStore, PersonalOwnerBinding } from '../src/core/memagent/personalStore.ts';
+import type { AnySyncHub } from '../src/core/memagent/sync.ts';
 import type { StorageBackend } from '../src/core/memagent/types.ts';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -75,6 +76,11 @@ export async function startHomeBackend(opts: {
   kernelStorage?: StorageBackend;
   /** 第一轮个人记忆：缺省挂进程内独立存储（真实内核，非 mock）；用例可传共享实例做跨页断言 */
   personalStore?: PersonalMemoryStore;
+  /** 第二轮 owner 口径：内核 account.user_id 与登录账号显式绑定（缺省同名口径） */
+  personalKernelUserId?: string;
+  personalOwnerBindings?: PersonalOwnerBinding[];
+  /** 第二轮真实同步通道：同一 PgSyncHub（真实 pglite 中枢，非 mock）；缺省上行如实不可用 */
+  personalSyncHub?: AnySyncHub;
 }): Promise<{ server: http.Server; homeServer: HomeServer; port: number; stop: () => Promise<void> }> {
   // server.ts 把锁定表/账号表/镜像写在 dirname(dataFile) 下（home-locks.json 等）。
   // E2E 是同一进程串跑多份后端，若 dataFile 都直接落在 tmpdir 根，就会共用同一份锁定快照，
@@ -90,6 +96,9 @@ export async function startHomeBackend(opts: {
     kernelStorage: opts.kernelStorage ?? new InMemoryStorage(),
     kernelInfo: { readonly: false, db_path: 'e2e-in-memory' },
     personalStore: opts.personalStore ?? new InMemoryPersonalStore(),
+    personalKernelUserId: opts.personalKernelUserId,
+    personalOwnerBindings: opts.personalOwnerBindings,
+    personalSyncHub: opts.personalSyncHub,
   });
   await new Promise<void>((resolve, reject) => {
     homeServer.once('error', reject);
