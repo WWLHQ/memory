@@ -3,7 +3,7 @@
 > 由 `npm run code:index` 生成，请勿手改；改代码/文档后重跑即可。
 > 用法：先在本表定位文件与导出符号，再只读该文件的局部区间（省 token、少误改）。
 
-共 378 个源码文件、120 个文档。
+共 378 个源码文件、121 个文档。
 
 ## e2e
 
@@ -445,6 +445,7 @@
 | [README.md](README.md) | 188 | 本项目怎么用（使用入口） |
 | [specs/A31-BILLING-MATRIX.md](specs/A31-BILLING-MATRIX.md) | 63 | A31 厂商余额接口矩阵（spike 实测，2026-11-07） |
 | [specs/AUDIT-FULL-REVIEW-2026-10-31.md](specs/AUDIT-FULL-REVIEW-2026-10-31.md) | 213 | status: active |
+| [specs/MANUAL-TEST-BATCH-57B.md](specs/MANUAL-TEST-BATCH-57B.md) | 66 | status: pending-manual-acceptance |
 | [specs/MANUAL-TEST-BATCH.md](specs/MANUAL-TEST-BATCH.md) | 328 | status: archived |
 | [specs/MANUAL-TEST-FIX-BATCH-1.md](specs/MANUAL-TEST-FIX-BATCH-1.md) | 97 | status: done |
 | [specs/MANUAL-TEST-FIX-BATCH-10.md](specs/MANUAL-TEST-FIX-BATCH-10.md) | 160 | status: done |
@@ -948,6 +949,7 @@ src/web/write/writeEntry.tsx a1f5c6bd7227
 README.md aa2f62fda68e
 specs/A31-BILLING-MATRIX.md adf99c88971d
 specs/AUDIT-FULL-REVIEW-2026-10-31.md 9b268c1a3db7
+specs/MANUAL-TEST-BATCH-57B.md 5f53fa04493b
 specs/MANUAL-TEST-BATCH.md c5b9d5e11090
 specs/MANUAL-TEST-FIX-BATCH-1.md 3ca0e503a7c8
 specs/MANUAL-TEST-FIX-BATCH-10.md 732e0ba3e5ef
