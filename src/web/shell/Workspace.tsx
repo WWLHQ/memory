@@ -6,10 +6,14 @@
 //   绝不显示编造读数、假计数或「—」冒充真实值；
 // - overview.html（演示通览）不进入主导航。
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { formatLogClock } from '../Home/programLog.ts';
-import { hasActiveSession } from '../Home/crossTabAuth.ts';
+import { getStoredSessionId, hasActiveSession } from '../Home/crossTabAuth.ts';
+import { fetchSessionContext } from '../shared/session.ts';
+import type { TenantContext } from '../../types/home.ts';
 import { Icon } from './Icons.tsx';
+import { ContextMenu, type ContextMenuItem, type ContextMenuState } from './ContextMenu.tsx';
+import { ShellLoginDialog } from './ShellLoginDialog.tsx';
 import { loadOverview, type OverviewSnapshot } from './overview.ts';
 import { loadPendingWrites, type PendingWritesResult } from './taskpane.ts';
 import {
@@ -179,6 +183,12 @@ export function Workspace() {
   const [reloadNonce, setReloadNonce] = useState(0);
   const [message, setMessage] = useState('工作台已就绪：中心区为同源真实页面，壳层尚未接线的部位会明确标注原因。');
   const [sessionActive, setSessionActive] = useState(() => hasActiveSession());
+  /** 当前会话真实身份（/api/me 确认；null = 未确认，绝不按 localStorage 冒充身份） */
+  const [identity, setIdentity] = useState<TenantContext | null>(null);
+  /** 壳层登录弹窗（菜单栏 / QAT / 登录状态处三处入口共用同一实例） */
+  const [loginOpen, setLoginOpen] = useState(false);
+  /** 右键菜单（导航树 / 标签条 / 检查器 / 中心页表格行共用同一渲染器） */
+  const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null);
   const [overview, setOverview] = useState<OverviewSnapshot | null>(null);
   const [overviewBusy, setOverviewBusy] = useState(false);
   /** S4：中心区真实页面回传的选中项（null = 未选中/无回传，绝不推测） */
@@ -199,6 +209,11 @@ export function Workspace() {
   const [layerPanel, setLayerPanel] = useState<DockResult<LayerPanelView> | null>(null);
   const pendingBusyRef = useRef(false);
   const frameRefs = useRef<Record<string, HTMLIFrameElement | null>>({});
+  /** 右键菜单位置换算用：读取当前 zoom，避免事件回调闭包拿到过期比例 */
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+  /** 已挂右键监听的 iframe 文档（避免重复挂载） */
+  const bridgedDocs = useRef<WeakSet<Document>>(new WeakSet());
   const activePageRef = useRef<PageKey | undefined>(undefined);
   /** 顶部自绘标题栏里的查找框（Ctrl+F / Ctrl+K / Ribbon「在库中查找」共用同一个焦点目标） */
   const navSearchRef = useRef<HTMLInputElement | null>(null);
@@ -337,6 +352,23 @@ export function Workspace() {
     const onStore = () => setSessionActive(hasActiveSession());
     window.addEventListener('storage', onStore);
     return () => window.removeEventListener('storage', onStore);
+  }, []);
+
+  // 启动时用本机 sessionId 向 /api/me 核对真实身份：查不到就不写身份（状态栏只显示「已登录/未登录」）
+  useEffect(() => {
+    const sid = getStoredSessionId();
+    if (!sid) { setIdentity(null); return; }
+    let alive = true;
+    fetchSessionContext(sid)
+      .then((ctx) => { if (alive) setIdentity(ctx); })
+      .catch(() => { if (alive) setIdentity(null); });
+    return () => { alive = false; };
+  }, []);
+
+  /** 登录弹窗回传会话变化：更新身份与只读门禁；概览/状态栏随 sessionActive 自动重读真实数据 */
+  const onLoginSession = useCallback((ctx: TenantContext | null) => {
+    setIdentity(ctx);
+    setSessionActive(hasActiveSession());
   }, []);
 
   const active = useMemo(() => openTabs.find((t) => t.id === activeId) ?? openTabs[0], [activeId, openTabs]);
@@ -481,6 +513,169 @@ export function Workspace() {
     }
   }, []);
 
+  // ── 批次49：右键菜单（导航树 / 标签条 / 属性检查器 / 中心页表格行）──
+  // 每个区域都给出真实可执行项；壳层确实没有能力的项一律禁用并写原因，不渲染空菜单。
+  const copyText = useCallback((text: string, okMsg: string) => {
+    const write = navigator.clipboard?.writeText(text);
+    if (!write) { setMessage('复制失败：当前环境未提供剪贴板 API。'); return; }
+    write.then(() => setMessage(okMsg)).catch(() => setMessage('复制失败：剪贴板未授权。'));
+  }, []);
+
+  const openCtxMenu = useCallback((x: number, y: number, title: string, testId: string, items: ContextMenuItem[]) => {
+    const scale = zoomRef.current / 100;
+    setCtxMenu({ x: x / scale, y: y / scale, title, testId, items });
+    setMenuOpen(null);
+  }, []);
+
+  const openNavContext = useCallback((item: NavItem, e: ReactMouseEvent) => {
+    e.preventDefault();
+    const hasKids = Boolean(item.children?.length);
+    openCtxMenu(e.clientX, e.clientY, `导航：${item.label}`, 'navmenu', [
+      {
+        id: 'open', icon: 'chev', label: `打开「${item.label}」`,
+        disabled: Boolean(item.unavailable), reason: item.unavailable,
+        run: () => openView(item),
+      },
+      {
+        id: 'toggle', icon: hasKids ? (openParents[item.id] ? 'caret' : 'chev') : 'dot',
+        label: openParents[item.id] ? '折叠子项' : '展开子项',
+        disabled: !hasKids, reason: '该导航项没有子项',
+        run: () => setOpenParents((p) => ({ ...p, [item.id]: !(p[item.id] ?? false) })),
+      },
+      { id: 'sep1', sep: true },
+      { id: 'copy', icon: 'copy', label: '复制导航名称', run: () => copyText(item.label, `已复制导航名称：${item.label}`) },
+      {
+        id: 'source', icon: 'info', label: '查看页面来源',
+        disabled: !item.page, reason: '该导航项没有对应页面',
+        run: () => {
+          if (!item.page) return;
+          setMessage(`「${item.label}」页面 ${PAGES[item.page].file} · 数据来源：${PAGES[item.page].source}`);
+        },
+      },
+    ]);
+  }, [openCtxMenu, openParents, openView, copyText]);
+
+  const closeOthers = useCallback((keepId: string) => {
+    setOpenTabs((tabs) => {
+      const keep = tabs.find((t) => t.id === keepId);
+      if (!keep) return tabs;
+      setActiveId(keepId);
+      return [keep];
+    });
+  }, []);
+
+  const openTabContext = useCallback((t: OpenTab, e: ReactMouseEvent) => {
+    e.preventDefault();
+    const others = openTabs.filter((x) => x.id !== t.id);
+    openCtxMenu(e.clientX, e.clientY, `标签：${t.label}`, 'tabmenu', [
+      {
+        id: 'close', icon: 'x', label: '关闭此标签',
+        disabled: openTabs.length <= 1, reason: '至少保留一个标签（概览）',
+        run: () => closeTab(t.id),
+      },
+      {
+        id: 'closeOthers', icon: 'x', label: `关闭其它标签（${others.length}）`,
+        disabled: others.length === 0, reason: '没有其它标签',
+        run: () => closeOthers(t.id),
+      },
+      { id: 'sep1', sep: true },
+      { id: 'refresh', icon: 'refresh', label: '刷新中心区与底部读数（F5）', run: () => runShellAction('refresh', '刷新') },
+      {
+        id: 'copyUrl', icon: 'copy', label: '复制标签页地址',
+        disabled: !t.page, reason: t.unavailable ? `该标签不可用：${t.unavailable}` : '该标签没有页面地址',
+        run: () => { if (t.page) copyText(pageUrl(t.page, t.href), `已复制标签地址：${pageUrl(t.page, t.href)}`); },
+      },
+    ]);
+  }, [openTabs, closeTab, closeOthers, openCtxMenu, runShellAction, copyText]);
+
+  const openInspContext = useCallback((e: ReactMouseEvent) => {
+    e.preventDefault();
+    openCtxMenu(e.clientX, e.clientY, '属性检查器', 'inspmenu', [
+      {
+        id: 'copyId', icon: 'copy', label: '复制选中记忆 ID',
+        disabled: !selectionId, reason: '中心页未选中记忆',
+        run: () => { if (selectionId) copyText(selectionId, `已复制记忆 ID：${selectionId}`); },
+      },
+      {
+        id: 'copyAll', icon: 'copy', label: '复制选中项全部字段',
+        disabled: !selection, reason: '中心页尚未回传选中项',
+        run: () => {
+          if (!selection) return;
+          const lines = [`标题：${selection.title}`, `页面：${selection.page}`, ...selection.fields.map((f) => `${f.k}：${f.v}`)];
+          copyText(lines.join('\n'), `已复制选中项 ${lines.length} 行字段。`);
+        },
+      },
+      { id: 'sep1', sep: true },
+      {
+        id: 'copyFile', icon: 'db', label: '复制页面文件',
+        disabled: !active?.page, reason: '当前标签没有对应页面',
+        run: () => { if (active?.page) copyText(PAGES[active.page].file, `已复制页面文件：${PAGES[active.page].file}`); },
+      },
+      { id: 'collapse', icon: 'panel', label: '折叠属性检查器', run: () => setInspCollapsed(true) },
+    ]);
+  }, [openCtxMenu, selectionId, selection, active?.page, copyText]);
+
+  /** 中心页表格行右键：行必须是 `tr[data-testid^="row-"]`（真实账本行），否则交回浏览器原生菜单 */
+  const openRowContext = useCallback((frame: HTMLIFrameElement, row: HTMLElement, ev: MouseEvent) => {
+    const testId = row.getAttribute('data-testid') ?? '';
+    const rowId = testId.startsWith('row-') ? testId.slice(4) : '';
+    const text = (row.textContent ?? '').replace(/\s+/g, ' ').trim();
+    const rect = frame.getBoundingClientRect();
+    const scale = zoomRef.current / 100;
+    const items: ContextMenuItem[] = [
+      { id: 'select', icon: 'check', label: '选中该行（同步到属性检查器）', run: () => row.click() },
+      {
+        id: 'copyId', icon: 'copy', label: '复制记忆 ID',
+        disabled: !rowId, reason: '该行没有 data-testid 记忆 ID',
+        run: () => { if (rowId) copyText(rowId, `已复制记忆 ID：${rowId}`); },
+      },
+      {
+        id: 'audit', icon: 'book', label: '在审计面板查看该记忆',
+        disabled: !rowId, reason: '该行没有记忆 ID，无法查审计',
+        run: () => {
+          if (!rowId) return;
+          setDockOpen(true);
+          setDockTab('audit');
+          void refreshDockAudit(rowId);
+        },
+      },
+      {
+        id: 'copyRow', icon: 'copy', label: `复制该行文本（${text.length} 字）`,
+        disabled: !text, reason: '该行为空，没有可复制文本',
+        run: () => copyText(text, `已复制表格行文本（${text.length} 字）。`),
+      },
+      { id: 'sep1', sep: true },
+      { id: 'forget', icon: 'x', label: '删除此记忆', disabled: true, reason: '壳层不代行页面写操作；请在记忆管理页内删除（保留二次确认）' },
+    ];
+    setCtxMenu({
+      x: rect.left / scale + ev.clientX,
+      y: rect.top / scale + ev.clientY,
+      title: `表格行：${rowId || '未标注 ID'}`,
+      testId: 'rowmenu',
+      items,
+    });
+    setMenuOpen(null);
+  }, [copyText, refreshDockAudit]);
+
+  /** 给同源 iframe 文档挂一次 contextmenu：只拦真实账本表格行，其余位置保留原生菜单 */
+  const attachFrameContextMenu = useCallback((frame: HTMLIFrameElement) => {
+    let doc: Document | null = null;
+    try {
+      doc = frame.contentDocument;
+    } catch {
+      return;
+    }
+    if (!doc || bridgedDocs.current.has(doc)) return;
+    bridgedDocs.current.add(doc);
+    doc.addEventListener('contextmenu', (ev: Event) => {
+      const target = ev.target as HTMLElement | null;
+      const row = target?.closest?.('tr[data-testid^="row-"]') as HTMLElement | null;
+      if (!row) return;
+      ev.preventDefault();
+      openRowContext(frame, row, ev as MouseEvent);
+    });
+  }, [openRowContext]);
+
   const onRibbonItem = useCallback((item: RibbonItem) => {
     if (item.unavailable) return;
     if (item.go) {
@@ -607,6 +802,13 @@ export function Workspace() {
     { id: 'undo', icon: 'undo', title: '撤销（无历史）：壳层不保存编辑历史', disabled: true },
     { id: 'refresh', icon: 'refresh', title: '刷新中心区与底部/状态栏读数（F5）', run: () => runShellAction('refresh', '刷新') },
     { id: 'find', icon: 'search', title: '查找左侧功能导航（Ctrl+F / Ctrl+K）', run: () => runShellAction('focusFilter', '查找') },
+    {
+      id: 'login', icon: 'user',
+      title: sessionActive
+        ? '登录 / 会话：查看当前账号、团队、角色或登出（真实 /api/me）'
+        : '登录 / 会话：打开登录弹窗（真实 POST /api/login）',
+      run: () => setLoginOpen(true),
+    },
     { sep: true },
     { id: 'syncCheck', icon: 'sync', title: '同步检查：程序未提供独立指令；请在「同步」视图查看通道状态', disabled: true },
     { id: 'balance', icon: 'scale', title: '余额探测：程序未提供独立指令；请在「模型与成本」视图查看计费状态', disabled: true },
@@ -628,6 +830,7 @@ export function Workspace() {
         { label: '打开记忆库…', icon: 'folder', kbd: 'Ctrl+O', disabled: true, reason: '程序未提供库切换指令；数据根位置在「参数」页查看' },
         { head: '最近打开' },
         { label: `当前库：${locView ? locView.text : '未选择'}`, icon: 'db', disabled: true, reason: '仅展示当前账本文件；切换库需改数据根并重启' },
+        { label: '登录 / 会话…', icon: 'user', run: () => setLoginOpen(true) },
         { sep: true },
         { label: '打印回执…', icon: 'receipt', kbd: 'Ctrl+P', disabled: true, reason: '程序未提供打印通道' },
         { label: '关闭当前视图', icon: 'x', run: () => closeTab(activeId) },
@@ -735,6 +938,7 @@ export function Workspace() {
                 key={q.id}
                 className={`qa-btn${q.disabled ? ' off' : ''}`}
                 type="button"
+                data-testid={`qa-${q.id}`}
                 aria-label={q.title}
                 aria-disabled={q.disabled || undefined}
                 title={q.title}
@@ -747,12 +951,17 @@ export function Workspace() {
             <span className="app-name">MemoryDesk 记忆工作台</span>
             <span className="tb-sep" />
             <span className="tb-doc" title={docTitle}>{docLabel}</span>
-            <span
+            <button
+              type="button"
               className={`tb-tag${sessionActive ? ' ok' : ' ro'}`}
-              title={sessionActive
-                ? '本机会话标记存在（localStorage）；只表示是否登录，不代表数据面权限'
-                : '未登录：数据面写操作会被主进程拒绝，界面按只读展示'}
-            >{sessionActive ? '已登录' : '只读会话'}</span>
+              data-testid="shell-session-btn"
+              title={identity
+                ? `账号 ${identity.user_id} · 团队 ${identity.team_id} · 角色 ${identity.role === 'admin' ? '管理员' : '成员'}（点击查看 / 登出）`
+                : sessionActive
+                  ? '本机会话标记存在（localStorage），身份尚未经 /api/me 确认（点击打开登录 / 会话弹窗）'
+                  : '未登录：点击打开登录弹窗（真实 POST /api/login）'}
+              onClick={() => setLoginOpen(true)}
+            >{identity ? identity.user_id : (sessionActive ? '已登录' : '只读会话')}</button>
           </div>
           {/* 右端留给系统三按钮覆盖层：这里只占位，不重复造窗口按钮 */}
           <div className="win-space" aria-hidden="true" />
@@ -875,6 +1084,7 @@ export function Workspace() {
                 counts={navCounts}
                 onToggle={() => setOpenParents((p) => ({ ...p, [entry.id]: !(p[entry.id] ?? false) }))}
                 onSelect={openView}
+                onMenu={openNavContext}
               />
             ))}
             {navEntries.length === 0 && <div className="tree-note">没有匹配的功能项。</div>}
@@ -887,7 +1097,13 @@ export function Workspace() {
         <main className="center-pane" aria-label="工作区中心">
           <div className="tabstrip">
             {openTabs.map((t) => (
-              <div key={t.id} className={`vtab${t.id === activeId ? ' active' : ''}`} onClick={() => setActiveId(t.id)}>
+              <div
+                key={t.id}
+                className={`vtab${t.id === activeId ? ' active' : ''}`}
+                onClick={() => setActiveId(t.id)}
+                onContextMenu={(e) => openTabContext(t, e)}
+                data-testid={`shell-tab-${t.id}`}
+              >
                 {t.label}
                 <button
                   className="vtab-close"
@@ -905,7 +1121,7 @@ export function Workspace() {
               <span>
                 未登录 · 按程序实际能力只读：成本余额、同步、账号等需会话的后端接口不可用；本地账本仍可读。
               </span>
-              <button type="button" onClick={() => { const t = findNav('login'); if (t) openView(t); }}>去登录</button>
+              <button type="button" data-testid="auth-strip-login" onClick={() => setLoginOpen(true)}>去登录（打开登录弹窗）</button>
             </div>
           )}
 
@@ -974,6 +1190,7 @@ export function Workspace() {
                     className="page-frame"
                     title={`${t.label} · ${PAGES[t.page].file}`}
                     src={pageUrl(t.page, t.href)}
+                    onLoad={(e) => attachFrameContextMenu(e.currentTarget)}
                   />
                 </div>
               );
@@ -1055,7 +1272,7 @@ export function Workspace() {
               </div>
             </section>
           )}
-          <aside className={`inspector-pane${inspCollapsed ? ' collapsed' : ''}`} aria-label="属性检查器">
+          <aside className={`inspector-pane${inspCollapsed ? ' collapsed' : ''}`} aria-label="属性检查器" onContextMenu={openInspContext} data-testid="shell-inspector">
             <div className="pane-head">
               <span className="ph-ic"><Icon name="panel" /></span>
               属性检查器
@@ -1143,11 +1360,20 @@ export function Workspace() {
 
       {statusVisible && (
         <div className="statusbar">
-          <span className="sb-cell sb-accent">
+          <span
+            className="sb-cell sb-accent click"
+            data-testid="sb-session"
+            onClick={() => setLoginOpen(true)}
+            title={identity
+              ? `账号 ${identity.user_id} · 团队 ${identity.team_id} · 角色 ${identity.role === 'admin' ? '管理员' : '成员'}（点击查看 / 登出）`
+              : sessionActive
+                ? '本机会话标记存在；身份未经 /api/me 确认（点击打开登录 / 会话弹窗）'
+                : '未登录：点击打开登录弹窗（真实 POST /api/login）'}
+          >
             <span className={`dot ${sessionActive ? 'ok' : 'err'}`} />
-            会话 <b>{sessionActive ? '已登录' : '未登录'}</b>{sessionActive ? '' : ' · 只读'}
+            会话 <b>{identity ? `${identity.user_id} · ${identity.team_id}` : (sessionActive ? '已登录' : '未登录')}</b>{sessionActive ? '' : ' · 只读'}
           </span>
-          <span className="sb-cell sb-msg">{message}</span>
+          <span className="sb-cell sb-msg" data-testid="sb-msg">{message}</span>
           <span className="sb-cell" title={locTitle} data-testid="sb-storage">库 <b>{locText}</b></span>
           <span className="sb-cell click" onClick={refreshOverview}
             title={`重新读取真实账本/健康/成本${overview ? ` · 上次 ${new Date(overview.loadedAt).toLocaleTimeString('zh-CN')}` : ''}`}
@@ -1185,6 +1411,11 @@ export function Workspace() {
           </span>
         </div>
       )}
+
+      {/* 登录改弹窗：菜单栏 / QAT / 登录状态处三处入口共用这一个实例 */}
+      <ShellLoginDialog open={loginOpen} onClose={() => setLoginOpen(false)} onSession={onLoginSession} />
+      {/* 右键菜单：导航树 / 标签条 / 检查器 / 中心页表格行共用同一个渲染器 */}
+      <ContextMenu state={ctxMenu} onClose={() => setCtxMenu(null)} />
     </div>
   );
 
@@ -1433,13 +1664,14 @@ function RibbonButton({ item, onItem }: { item: RibbonItem; onItem: (i: RibbonIt
   );
 }
 
-function NavTreeItem({ item, activeId, open, counts, onToggle, onSelect }: {
+function NavTreeItem({ item, activeId, open, counts, onToggle, onSelect, onMenu }: {
   item: NavItem;
   activeId: string;
   open: boolean;
   counts: Record<string, number>;
   onToggle: () => void;
   onSelect: (i: NavItem) => void;
+  onMenu: (i: NavItem, e: ReactMouseEvent) => void;
 }) {
   const hasKids = Boolean(item.children?.length);
   const count = counts[item.id] ?? 0;
@@ -1448,6 +1680,7 @@ function NavTreeItem({ item, activeId, open, counts, onToggle, onSelect }: {
       <div
         className={`tree-row${item.id === activeId ? ' active' : ''}${item.child ? ' child' : ''}`}
         onClick={() => onSelect(item)}
+        onContextMenu={(e) => onMenu(item, e)}
         role="treeitem"
         aria-selected={item.id === activeId}
       >
@@ -1462,7 +1695,7 @@ function NavTreeItem({ item, activeId, open, counts, onToggle, onSelect }: {
         {count > 0 ? <span className="tcount" data-testid={`nav-count-${item.id}`}>{count}</span> : null}
       </div>
       {hasKids && open && item.children?.map((c) => (
-        <NavTreeItem key={c.id} item={c} activeId={activeId} open={false} counts={counts} onToggle={() => {}} onSelect={onSelect} />
+        <NavTreeItem key={c.id} item={c} activeId={activeId} open={false} counts={counts} onToggle={() => {}} onSelect={onSelect} onMenu={onMenu} />
       ))}
     </>
   );

@@ -2,6 +2,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { setTestOverride } from '../../Home/crossTabAuth.ts';
+import { PAGES } from '../views.ts';
 import { SELECTION_MSG } from '../../shared/selectionChannel.ts';
 
 // 概览条的数据加载走真实内核/网络；组件单测只验证渲染契约，故固定快照。
@@ -131,12 +132,131 @@ describe('工作台壳层', () => {
     expect(screen.getByTestId('sb-billing').getAttribute('title')).toContain('需登录');
   });
 
-  it('登录与会话是主导航里的真实页面 login.html', async () => {
+  it('登录不再占主导航：login.html 保留为可直达兜底页（PAGES 映射未删）', async () => {
     const { container } = await renderShell();
-    fireEvent.click(screen.getByRole('treeitem', { name: /登录与会话/ }));
-    const frames = container.querySelectorAll('iframe.page-frame');
-    expect(frames.length).toBe(2);
-    expect((frames[1] as HTMLIFrameElement).getAttribute('src')).toContain('/login.html');
+    // 主导航里不再出现「登录与会话」
+    expect(screen.queryByRole('treeitem', { name: /登录与会话/ })).toBeNull();
+    // 兜底页仍是真实页面映射：深链 /login.html 继续可直达
+    expect(PAGES.login.file).toBe('login.html');
+    expect(container.querySelectorAll('iframe.page-frame').length).toBe(1);
+  });
+
+  it('三处登录入口（菜单栏 / QAT / 登录状态处）打开同一个登录弹窗', async () => {
+    await renderShell();
+
+    // ① 菜单栏：文件 → 登录 / 会话…
+    fireEvent.click(screen.getByRole('button', { name: /^文件$/ }));
+    fireEvent.click(screen.getByRole('menuitem', { name: /登录 \/ 会话/ }));
+    expect(screen.getByTestId('shell-login-modal')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('slm-close'));
+    expect(screen.queryByTestId('shell-login-modal')).toBeNull();
+
+    // ② 快速访问工具条（QAT）
+    fireEvent.click(screen.getByTestId('qa-login'));
+    expect(screen.getByTestId('shell-login-modal')).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByTestId('shell-login-modal')).toBeNull();
+
+    // ③ 标题栏登录状态处（快捷按钮）
+    fireEvent.click(screen.getByTestId('shell-session-btn'));
+    const modal = screen.getByTestId('shell-login-modal');
+    expect(modal).toBeInTheDocument();
+    // 三处是同一实例：未登录时给出真实登录表单（真实 /api/login 由 E2E 覆盖）
+    expect(screen.getByTestId('slm-account')).toBeInTheDocument();
+    expect(screen.getByTestId('slm-password')).toBeInTheDocument();
+    expect(screen.getByTestId('slm-submit')).toBeEnabled();
+    // 状态栏会话格也是同一入口
+    fireEvent.click(screen.getByTestId('sb-session'));
+    expect(screen.getByTestId('shell-login-modal')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('slm-close'));
+  });
+
+  it('右键导航树：真实动作可用；无能力项禁用并写原因，不出现空菜单', async () => {
+    await renderShell();
+    fireEvent.contextMenu(screen.getByRole('treeitem', { name: /概览/ }));
+    const menu = screen.getByTestId('ctx-navmenu');
+    expect(menu).toBeInTheDocument();
+    expect(menu.querySelectorAll('[role="menuitem"]').length).toBeGreaterThan(0);
+    expect(screen.getByTestId('ctx-navmenu-open')).toBeEnabled();
+    const toggle = screen.getByTestId('ctx-navmenu-toggle');
+    expect(toggle).toBeDisabled();
+    expect(toggle.getAttribute('title')).toContain('该导航项没有子项');
+    // 真实动作：打开「概览」（已有标签则切换，不新增假页）
+    fireEvent.click(screen.getByTestId('ctx-navmenu-open'));
+    expect(screen.queryByTestId('ctx-navmenu')).toBeNull();
+  });
+
+  it('右键标签条：真实关闭标签；唯一标签时禁用并写原因', async () => {
+    const { container } = await renderShell();
+    const firstTab = container.querySelector('.vtab') as HTMLElement;
+    fireEvent.contextMenu(firstTab);
+    const close = screen.getByTestId('ctx-tabmenu-close');
+    expect(close).toBeDisabled();
+    expect(close.getAttribute('title')).toContain('至少保留一个标签');
+    expect(screen.getByTestId('ctx-tabmenu-closeOthers')).toBeDisabled();
+    expect(screen.getByTestId('ctx-tabmenu-refresh')).toBeEnabled();
+
+    fireEvent.click(screen.getByRole('treeitem', { name: /个人记忆/ }));
+    const tabs = container.querySelectorAll('.vtab');
+    expect(tabs.length).toBeGreaterThan(1);
+    fireEvent.contextMenu(tabs[tabs.length - 1] as HTMLElement);
+    fireEvent.click(screen.getByTestId('ctx-tabmenu-close'));
+    expect(container.querySelectorAll('.vtab').length).toBe(tabs.length - 1);
+  });
+
+  it('右键属性检查器：无选中时复制项禁用并写原因，折叠是真实动作', async () => {
+    const { container } = await renderShell();
+    fireEvent.contextMenu(screen.getByTestId('shell-inspector'));
+    expect(screen.getByTestId('ctx-inspmenu')).toBeInTheDocument();
+    const copyId = screen.getByTestId('ctx-inspmenu-copyId');
+    expect(copyId).toBeDisabled();
+    expect(copyId.getAttribute('title')).toContain('中心页未选中记忆');
+    expect(screen.getByTestId('ctx-inspmenu-copyFile')).toBeEnabled();
+    fireEvent.click(screen.getByTestId('ctx-inspmenu-collapse'));
+    expect((container.querySelector('.inspector-pane') as HTMLElement).className).toContain('collapsed');
+  });
+
+  it('中心页表格行右键：同源 iframe 的真实 DOM 行触发壳层菜单；复制 ID 是真实动作，写操作禁用并写原因', async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const { container } = await renderShell();
+    const frame = container.querySelector('iframe.page-frame') as HTMLIFrameElement;
+    // jsdom 不会真的加载 iframe：用同一实现造一个同源 Document，挂到 contentDocument 上
+    const doc = document.implementation.createHTMLDocument('frame');
+    Object.defineProperty(frame, 'contentDocument', { value: doc, configurable: true });
+    // 触发 onLoad：壳层给同源 iframe 文档挂 contextmenu 监听
+    fireEvent.load(frame);
+    const table = doc.createElement('table');
+    const tbody = doc.createElement('tbody');
+    const tr = doc.createElement('tr');
+    tr.setAttribute('data-testid', 'row-mem_fixture_1');
+    const td = doc.createElement('td');
+    td.textContent = '真实账本行夹具';
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    table.appendChild(tbody);
+    const host = doc.body ?? doc.documentElement;
+    host.appendChild(table);
+
+    // 直接用目标文档派发 contextmenu（createHTMLDocument 无 defaultView，RTL fireEvent 取不到 window）
+    const fireCtx = (node: Element, x: number, y: number) => {
+      const ev = doc.createEvent('MouseEvent');
+      ev.initMouseEvent('contextmenu', true, true, window, 0, x, y, x, y, false, false, false, false, 2, null);
+      act(() => { node.dispatchEvent(ev); });
+    };
+    fireCtx(tr, 100, 100);
+    expect(screen.getByTestId('ctx-rowmenu')).toBeInTheDocument();
+    expect(screen.getByTestId('ctx-rowmenu')).toHaveTextContent('表格行：mem_fixture_1');
+    const forget = screen.getByTestId('ctx-rowmenu-forget');
+    expect(forget).toBeDisabled();
+    expect(forget.getAttribute('title')).toContain('壳层不代行页面写操作');
+    // 真实动作：复制记忆 ID（写入剪贴板 + 状态栏如实回执）
+    fireEvent.click(screen.getByTestId('ctx-rowmenu-copyId'));
+    expect(writeText).toHaveBeenCalledWith('mem_fixture_1');
+    await waitFor(() => expect(screen.getByTestId('sb-msg')).toHaveTextContent('已复制记忆 ID：mem_fixture_1'));
+    // 非表格行不截获：保持浏览器原生菜单，不伪造空菜单
+    fireCtx(doc.documentElement, 10, 10);
+    expect(screen.queryByTestId('ctx-rowmenu')).toBeNull();
   });
 
   it('演示通览不进主导航', async () => {
