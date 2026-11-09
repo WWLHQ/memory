@@ -573,6 +573,21 @@ html[data-theme="dark"] .pm-empty { background: #1d222b; border-color: #333a44; 
 .pm-item-top { display: flex; align-items: baseline; gap: 8px; justify-content: space-between; }
 .pm-src { font-size: 10.5px; color: var(--muted); }
 .pm-time { font-size: 10px; color: var(--faint); white-space: nowrap; }
+.pm-badge {
+  font: 500 10px/1.4 var(--mono); border: 1px solid var(--line); border-radius: 2px;
+  padding: 1px 5px; white-space: nowrap; color: var(--muted); background: var(--chip);
+}
+.pm-badge.ok { border-color: #2f9e5f; color: #2f9e5f; }
+.pm-badge.warn { border-color: #d9a13b; color: #b07a1d; }
+.pm-badge.err { border-color: #d9534f; color: #d9534f; }
+.pm-badge.quiet { color: var(--faint); }
+.pm-syncerr { margin: -2px 0 6px; font-size: 10px; line-height: 1.5; color: #d9534f; word-break: break-word; }
+.pm-ownerbar {
+  margin: 8px 12px 0; padding: 5px 9px; border-radius: 3px; font-size: 10.5px; line-height: 1.5;
+  border: 1px solid var(--line); background: var(--chip); color: var(--muted);
+}
+.pm-ownerbar.ok { border-left: 3px solid #2f9e5f; }
+.pm-ownerbar.warn { border-left: 3px solid #d9a13b; color: #b07a1d; }
 .pm-item-body { margin: 5px 0 7px; font-size: 12px; line-height: 1.55; color: var(--text); word-break: break-word; white-space: pre-wrap; }
 .pm-item-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .pm-item-actions .mm-btn { height: 24px; }

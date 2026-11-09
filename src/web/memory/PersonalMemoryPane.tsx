@@ -1,15 +1,18 @@
-// 个人记忆双窗（第一轮本机闭环）：左「已确认」/ 右「收件箱」。
+// 个人记忆双窗（第一轮本机闭环 + 第二轮跨端同步）：左「已确认」/ 右「收件箱」。
 //
 // 数据口径（定稿 UI-Design-Proposals/final-01-workspace.html 个人记忆部分）：
 // - 只展示内核 personal.ts 返回的真实条目（PersonalSnapshot），无数据写空态，不编造计数；
 // - 每个动作都经真实数据面（桌面壳 IPC / 登录后端 HTTP）落 personal_memory 审计并回执 request_id；
 // - 「不是我的」只把条目移出本机视图（rejected，可撤销），不删账本；删除需二次确认并只写墓碑；
-// - 个人确认不会自动变成团队可见（跨端同步/团队上行留第二轮）；L0 原始内容不进收件箱。
+// - 个人确认不会自动变成团队可见；上行团队必须二次确认（explicit 授权）后走真实 PgSyncHub；
+// - 同步失败如实显示阶段 + 错误码，绝不显示「已同步」；L0 原始内容不进收件箱。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { kernelErrorText } from '../shared/kernelLoad.tsx';
-import { getPersonalPort, type PersonalPort } from '../shared/personalPort.ts';
+import {
+  getPersonalPort, pushPersonalToTeam, retryPersonalSync, type PersonalPort,
+} from '../shared/personalPort.ts';
 import type { PersonalEntry } from '../../core/memagent/personalStore.ts';
-import type { PersonalSnapshot } from '../../core/memagent/personal.ts';
+import type { PersonalSnapshot, PersonalSyncReceipt } from '../../core/memagent/personal.ts';
 import { publishNavCount } from '../shared/navCountChannel.ts';
 
 export interface PersonalPaneProps {
@@ -40,6 +43,28 @@ function sourceText(e: PersonalEntry): string {
   return e.source === 'agent' ? `来源 agent · ${e.source_agent ?? '未记名'}` : '来源 本机快速记';
 }
 
+/** 条目级同步状态文案（失败必带阶段 + 错误码；成功才允许出现「已同步」） */
+function syncBadge(e: PersonalEntry): { tone: 'ok' | 'warn' | 'err' | 'quiet'; text: string; title?: string } {
+  switch (e.sync_state) {
+    case 'synced':
+      return {
+        tone: 'ok',
+        text: `已同步（团队）· ${e.sync_result ?? 'applied'} · sha256 ${e.sha256.slice(0, 8)}`,
+        title: '已真实写入团队中枢（PgSyncHub），重复上行按 sha256 幂等',
+      };
+    case 'pending_sync':
+      return { tone: 'warn', text: '待上行（尚未送达团队中枢）', title: '已显式授权，等待写入团队中枢' };
+    case 'failed':
+      return {
+        tone: 'err',
+        text: `同步失败 · 阶段 ${e.sync_error?.stage ?? '未知'} · ${e.sync_error?.code ?? 'E_UNKNOWN'}`,
+        title: e.sync_error?.message ?? '上行失败，本机条目保留',
+      };
+    default:
+      return { tone: 'quiet', text: '仅本机 · 本人', title: '个人记忆默认仅本机+本人；上行到团队需显式授权' };
+  }
+}
+
 export function PersonalMemoryPane({ phase, data, error, onRetry, onChanged }: PersonalPaneProps) {
   const portRef = useRef<PersonalPort | null>(null);
   if (!portRef.current) portRef.current = getPersonalPort();
@@ -51,6 +76,7 @@ export function PersonalMemoryPane({ phase, data, error, onRetry, onChanged }: P
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'warn' | 'err'; text: string } | null>(null);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const [pendingUplink, setPendingUplink] = useState<string | null>(null);
 
   // 页签/左侧导航的真实待确认计数（未登录或读失败时清 0，不显示假数字）
   useEffect(() => {
@@ -80,6 +106,34 @@ export function PersonalMemoryPane({ phase, data, error, onRetry, onChanged }: P
       setPendingDelete(null);
     } catch (e: unknown) {
       setMsg({ kind: 'err', text: `动作未生效：${kernelErrorText(e)}` });
+    } finally {
+      setBusy(null);
+    }
+  }, [port, refresh]);
+
+  // 显式授权上行 / 重试：失败如实显示阶段 + 错误码，绝不显示「已同步」
+  const uplink = useCallback(async (entry: PersonalEntry, retry: boolean) => {
+    setBusy(entry.id);
+    setMsg(null);
+    try {
+      const receipt: PersonalSyncReceipt = retry
+        ? await retryPersonalSync(entry.id, port)
+        : await pushPersonalToTeam(entry.id, port);
+      await refresh();
+      if (receipt.sync.outcome === 'synced') {
+        setMsg({
+          kind: 'ok',
+          text: `已上行到团队中枢（${receipt.sync.result ?? 'applied'}）· sha256 ${entry.sha256.slice(0, 8)} · request_id ${receipt.request_id}`,
+        });
+      } else {
+        setMsg({
+          kind: 'err',
+          text: `上行失败：阶段 ${receipt.sync.stage ?? '未知'} · 错误码 ${receipt.sync.code ?? 'E_UNKNOWN'} · ${receipt.sync.message ?? '未送达团队'}（本机条目保留，未显示已同步）`,
+        });
+      }
+      setPendingUplink(null);
+    } catch (e: unknown) {
+      setMsg({ kind: 'err', text: `上行未生效：${kernelErrorText(e)}` });
     } finally {
       setBusy(null);
     }
@@ -119,6 +173,8 @@ export function PersonalMemoryPane({ phase, data, error, onRetry, onChanged }: P
   const pendingQuick = data?.pending.filter((e) => e.source === 'quick_note') ?? [];
   const pendingAgent = data?.pending.filter((e) => e.source === 'agent') ?? [];
   const rejected = data?.rejected ?? [];
+  const syncQueue = data?.sync_queue ?? [];
+  const binding = data?.owner_binding;
 
   if (phase === 'loading') {
     return (
@@ -145,9 +201,18 @@ export function PersonalMemoryPane({ phase, data, error, onRetry, onChanged }: P
         <h3>个人记忆</h3>
         <span className="p0-sub">左：已确认（进入召回）· 右：收件箱（待确认 / 已剔除）· 数据面：{port.channel === 'host' ? '桌面壳 IPC' : '登录后端 HTTP'}</span>
         <span className="p0-right">
-          <span className="p0-tag mono" data-testid="pm-counts">已确认 {data?.counts.confirmed ?? 0} · 待确认 {data?.counts.pending ?? 0} · 已剔除 {data?.counts.rejected ?? 0}</span>
+          <span className="p0-tag mono" data-testid="pm-counts">已确认 {data?.counts.confirmed ?? 0} · 待确认 {data?.counts.pending ?? 0} · 已剔除 {data?.counts.rejected ?? 0} · 待上行 {data?.counts.pending_sync ?? 0} · 同步失败 {data?.counts.sync_failed ?? 0}</span>
         </span>
       </div>
+
+      {binding ? (
+        <div className={`pm-ownerbar ${binding.bound ? 'ok' : 'warn'}`} data-testid="pm-owner-binding">
+          召回归属：内核账号 <b className="mono">{binding.kernel_user_id}</b> · 登录账号 <b className="mono">{binding.login_account}</b> ·{' '}
+          {binding.bound
+            ? (binding.via === 'same_name' ? '同名直通' : binding.via === 'binding' ? '已按显式绑定映射' : '无内核身份配置，按登录账号口径')
+            : '未绑定内核账号 → 本机可用，agent 暂不可召回（不会静默并号）'}
+        </div>
+      ) : null}
 
       {msg ? (
         <div className={`pm-msg ${msg.kind}`} data-testid="pm-msg">{msg.text}</div>
@@ -188,27 +253,49 @@ export function PersonalMemoryPane({ phase, data, error, onRetry, onChanged }: P
                 <b>{data?.counts.confirmed ? '当前筛选没有匹配条目' : '还没有已确认的个人记忆'}</b>
                 <div>{data?.counts.confirmed ? '清空搜索或切换时间范围；总数仍显示在窗口标题。' : '在右侧收件箱点「是我的」后，条目会进入这里并参与召回。'}</div>
               </div>
-            ) : confirmed.map((e) => (
-              <div className="pm-item" key={e.id} data-testid={`pm-confirmed-${e.id}`}>
-                <div className="pm-item-top">
-                  <span className="pm-src">{sourceText(e)}</span>
-                  <span className="pm-time mono">确认于 {fmtWhen(e.confirmed_at)}</span>
+            ) : confirmed.map((e) => {
+              const badge = syncBadge(e);
+              const retryable = e.sync_state === 'pending_sync' || e.sync_state === 'failed';
+              return (
+                <div className="pm-item" key={e.id} data-testid={`pm-confirmed-${e.id}`}>
+                  <div className="pm-item-top">
+                    <span className="pm-src">{sourceText(e)}</span>
+                    <span className={`pm-badge ${badge.tone}`} title={badge.title} data-testid={`pm-sync-badge-${e.id}`}>{badge.text}</span>
+                    <span className="pm-time mono">确认于 {fmtWhen(e.confirmed_at)}</span>
+                  </div>
+                  <div className="pm-item-body">{e.content}</div>
+                  <div className="pm-item-actions">
+                    <span className="pm-meta mono">v{e.version} · {e.layer} · sha256 {e.sha256.slice(0, 8)} · 时钟 {Object.entries(e.vclock).map(([k, v]) => `${k}:${v}`).join(' ')}</span>
+                    {e.sync_state === 'synced' ? null : pendingUplink === e.id ? (
+                      <>
+                        <button type="button" className="mm-btn danger" disabled={busy === e.id} data-testid={`pm-uplink-confirm-${e.id}`} onClick={() => void uplink(e, retryable)}>确认上行（团队可见）</button>
+                        <button type="button" className="mm-btn" onClick={() => setPendingUplink(null)}>取消</button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        className="mm-btn"
+                        disabled={busy === e.id}
+                        data-testid={`pm-uplink-${e.id}`}
+                        onClick={() => {
+                          setPendingUplink(e.id);
+                          setMsg({ kind: 'warn', text: '上行会让本条在团队中枢可见：需再次点击「确认上行」才算显式授权（个人确认不会自动提权）' });
+                        }}
+                      >{retryable ? '重试上行' : '上行到团队'}</button>
+                    )}
+                    <button type="button" className="mm-btn" disabled={busy === e.id} data-testid={`pm-unconfirm-${e.id}`} onClick={() => act('revoke', e)}>取消确认</button>
+                    {pendingDelete === e.id ? (
+                      <>
+                        <button type="button" className="mm-btn danger" disabled={busy === e.id} data-testid={`pm-delete-confirm-${e.id}`} onClick={() => act('delete', e)}>确认删除</button>
+                        <button type="button" className="mm-btn" onClick={() => setPendingDelete(null)}>取消</button>
+                      </>
+                    ) : (
+                      <button type="button" className="mm-btn" disabled={busy === e.id} data-testid={`pm-delete-${e.id}`} onClick={() => { setPendingDelete(e.id); setMsg({ kind: 'warn', text: '删除需二次确认：再次点击「确认删除」才会写墓碑（账本记录保留）' }); }}>删除</button>
+                    )}
+                  </div>
                 </div>
-                <div className="pm-item-body">{e.content}</div>
-                <div className="pm-item-actions">
-                  <span className="pm-meta mono">v{e.version} · {e.layer} · {e.content_hash.slice(0, 8)}</span>
-                  <button type="button" className="mm-btn" disabled={busy === e.id} data-testid={`pm-unconfirm-${e.id}`} onClick={() => act('revoke', e)}>取消确认</button>
-                  {pendingDelete === e.id ? (
-                    <>
-                      <button type="button" className="mm-btn danger" disabled={busy === e.id} data-testid={`pm-delete-confirm-${e.id}`} onClick={() => act('delete', e)}>确认删除</button>
-                      <button type="button" className="mm-btn" onClick={() => setPendingDelete(null)}>取消</button>
-                    </>
-                  ) : (
-                    <button type="button" className="mm-btn" disabled={busy === e.id} data-testid={`pm-delete-${e.id}`} onClick={() => { setPendingDelete(e.id); setMsg({ kind: 'warn', text: '删除需二次确认：再次点击「确认删除」才会写墓碑（账本记录保留）' }); }}>删除</button>
-                  )}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
           <div className="pm-foot" data-testid="pm-confirmed-foot">
             共 {data?.counts.confirmed ?? 0} 条 · 本窗显示 {confirmed.length} 条 · 来源 {new Set((data?.confirmed ?? []).map((e) => e.source_agent ?? e.source)).size} 类
@@ -242,13 +329,40 @@ export function PersonalMemoryPane({ phase, data, error, onRetry, onChanged }: P
             </div>
           </div>
           <div className="pm-body pm-scrollpane" data-testid="pm-inbox-list">
+            <section className="pm-sect" data-testid="pm-sect-sync">
+              <h4>本机待上行 <span className="pm-sect-n" data-testid="pm-sync-queue-count">{syncQueue.length}</span></h4>
+              {syncQueue.length === 0 ? <div className="pm-none">没有已授权但未送达团队中枢的条目</div> : syncQueue.map((e) => {
+                const badge = syncBadge(e);
+                return (
+                  <div className="pm-item" key={e.id} data-testid={`pm-sync-${e.id}`}>
+                    <div className="pm-item-top">
+                      <span className="pm-src">{sourceText(e)}</span>
+                      <span className={`pm-badge ${badge.tone}`} title={badge.title} data-testid={`pm-sync-state-${e.id}`}>{badge.text}</span>
+                      <span className="pm-time mono">目标团队 {e.team_id ?? '未记录'}</span>
+                    </div>
+                    <div className="pm-item-body">{e.content}</div>
+                    {e.sync_error ? (
+                      <div className="pm-syncerr mono" data-testid={`pm-sync-err-${e.id}`}>
+                        阶段 {e.sync_error.stage} · 错误码 {e.sync_error.code} · {e.sync_error.message}
+                      </div>
+                    ) : null}
+                    <div className="pm-item-actions">
+                      <span className="pm-meta mono">sha256 {e.sha256.slice(0, 8)} · 时钟 {Object.entries(e.vclock).map(([k, v]) => `${k}:${v}`).join(' ')}</span>
+                      <button type="button" className="mm-btn primary" disabled={busy === e.id} data-testid={`pm-retry-${e.id}`} onClick={() => void uplink(e, true)}>重试上行</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </section>
+
             <section className="pm-sect" data-testid="pm-sect-quick">
-              <h4>本机待上行 <span className="pm-sect-n">{pendingQuick.length}</span></h4>
+              <h4>本机待确认 · 不会自动上行 <span className="pm-sect-n">{pendingQuick.length}</span></h4>
               {pendingQuick.length === 0 ? <div className="pm-none">没有本机快速记录待确认</div> : pendingQuick.map((e) => (
                 <div className="pm-item" key={e.id} data-testid={`pm-pending-${e.id}`}>
                   <div className="pm-item-top">
                     <span className="pm-src">{sourceText(e)}</span>
                     <span className="pm-time mono">{fmtWhen(e.delivered_at)}</span>
+                    {e.team_shared ? <span className="pm-badge warn" data-testid={`pm-teamcopy-${e.id}`}>团队副本已存在（不回撤）</span> : null}
                   </div>
                   <div className="pm-item-body">{e.content}</div>
                   <div className="pm-item-actions">
@@ -266,6 +380,7 @@ export function PersonalMemoryPane({ phase, data, error, onRetry, onChanged }: P
                   <div className="pm-item-top">
                     <span className="pm-src">{sourceText(e)}</span>
                     <span className="pm-time mono">{fmtWhen(e.delivered_at)}</span>
+                    {e.team_shared ? <span className="pm-badge warn" data-testid={`pm-teamcopy-${e.id}`}>团队副本已存在（不回撤）</span> : null}
                   </div>
                   <div className="pm-item-body">{e.content}</div>
                   <div className="pm-item-actions">
@@ -283,6 +398,7 @@ export function PersonalMemoryPane({ phase, data, error, onRetry, onChanged }: P
                   <div className="pm-item-top">
                     <span className="pm-src">{sourceText(e)}</span>
                     <span className="pm-time mono">剔除于 {fmtWhen(e.rejected_at)}</span>
+                    {e.team_shared ? <span className="pm-badge warn" data-testid={`pm-teamcopy-${e.id}`}>团队副本已存在（不回撤）</span> : null}
                   </div>
                   <div className="pm-item-body">{e.content}</div>
                   <div className="pm-item-actions">
@@ -298,13 +414,16 @@ export function PersonalMemoryPane({ phase, data, error, onRetry, onChanged }: P
                 <li>只有「已确认」条目参与 agent 召回；待确认与已剔除不进召回。</li>
                 <li>「不是我的」只把条目移出本机视图，不删账本；撤销后回到待确认。</li>
                 <li>删除需二次确认，只写墓碑（记录保留），不复用记忆主表。</li>
-                <li>个人确认只属于本人；不会自动变成团队可见（跨端/团队上行留第二轮）。</li>
+                <li>个人确认只属于本人：默认仅本机+本人，确认不会自动提权为团队可见。</li>
+                <li>上行团队必须在条目上二次确认（显式授权），走真实 PgSyncHub；失败如实显示阶段+错误码，不写「已同步」。</li>
+                <li>取消确认 / 删除只影响本机账本，不回撤已写入的团队副本（本轮未实现撤回）。</li>
+                <li>内容指纹 sha256 相同视为同一内容：重复上行不会在团队中枢产生重复条目。</li>
                 <li>L0 原始密文不进收件箱：这里只处理已有可读内容（L1）。</li>
               </ul>
             </section>
           </div>
           <div className="pm-foot" data-testid="pm-inbox-foot">
-            待确认 {data?.counts.pending ?? 0} · 已剔除 {data?.counts.rejected ?? 0} · 本机待上行 {data?.counts.pending_quick ?? 0}
+            待确认 {data?.counts.pending ?? 0} · 已剔除 {data?.counts.rejected ?? 0} · 本机待确认 {data?.counts.pending_quick ?? 0} · 待上行 {data?.counts.pending_sync ?? 0} · 同步失败 {data?.counts.sync_failed ?? 0}
           </div>
         </div>
       </div>
