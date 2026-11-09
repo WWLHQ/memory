@@ -7,9 +7,12 @@
 import { hostCall, hostCapability } from '../../desktop/hostBridge.ts';
 import { homeBaseUrl } from '../backend.ts';
 import { currentSessionId } from './session.ts';
-import type { PersonalReceipt, PersonalSnapshot } from '../../core/memagent/personal.ts';
+import type { PersonalReceipt, PersonalSnapshot, PersonalSyncReceipt } from '../../core/memagent/personal.ts';
 
-export type PersonalOpName = 'list' | 'quick_add' | 'confirm' | 'reject' | 'revoke' | 'delete';
+export type PersonalOpName =
+  | 'list' | 'quick_add' | 'confirm' | 'reject' | 'revoke' | 'delete'
+  // 第二轮：显式授权团队上行 / 失败重试（真实 PgSyncHub 通道）
+  | 'push_team' | 'retry_sync';
 
 export interface PersonalPort {
   /** 实际走哪条数据面（页面可如实展示「桌面壳 / 登录后端」） */
@@ -22,7 +25,9 @@ interface Envelope<T> { ok?: boolean; data?: T; result?: T; error?: string; code
 function unwrap<T>(body: Envelope<T> | null, status: number): T {
   if (!body) throw new Error(`个人记忆数据面响应异常（HTTP ${status}）`);
   if (body.ok === true) return (body.data ?? body.result) as T;
-  throw new Error(body.error ?? `个人记忆数据面调用失败（${body.reason ?? `HTTP ${status}`}）`);
+  // 错误码随消息一起回传（权限/状态/中枢失败都要如实说明，不能只说「失败」）
+  const msg = body.error ?? `个人记忆数据面调用失败（${body.reason ?? `HTTP ${status}`}）`;
+  throw new Error(body.code ? `${msg}（${body.code}）` : msg);
 }
 
 export function createHostPersonalPort(): PersonalPort {
@@ -80,4 +85,17 @@ export function loadPersonalSnapshot(port: PersonalPort = getPersonalPort()): Pr
 /** 快速记一条 */
 export function quickAddPersonal(content: string, port: PersonalPort = getPersonalPort()): Promise<PersonalReceipt> {
   return port.invoke<PersonalReceipt>('quick_add', { content });
+}
+
+/** 显式授权上行到团队中枢（explicit=true 是页面上二次确认后的真实授权，不能缺省） */
+export function pushPersonalToTeam(
+  id: string,
+  port: PersonalPort = getPersonalPort(),
+): Promise<PersonalSyncReceipt> {
+  return port.invoke<PersonalSyncReceipt>('push_team', { id, explicit: true });
+}
+
+/** 重试上行（仅已授权且待上行/失败条目） */
+export function retryPersonalSync(id: string, port: PersonalPort = getPersonalPort()): Promise<PersonalSyncReceipt> {
+  return port.invoke<PersonalSyncReceipt>('retry_sync', { id });
 }

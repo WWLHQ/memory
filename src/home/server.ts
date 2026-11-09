@@ -27,7 +27,8 @@ import {
 import type { Form } from '../types/agentOnboard.ts';
 import type { TenantContext, LoginAudit, AccountRole } from '../types/home.ts';
 import type { StorageBackend } from '../core/memagent/types.ts';
-import type { PersonalMemoryStore } from '../core/memagent/personalStore.ts';
+import type { PersonalMemoryStore, PersonalOwnerBinding } from '../core/memagent/personalStore.ts';
+import type { AnySyncHub } from '../core/memagent/sync.ts';
 import { createPersonalApi } from '../core/memagent/personal.ts';
 
 // 端壳 mirror 上抛条目（G6）类型与链式签名实现统一放在 mirrorLedger.ts（批次48 A8）
@@ -76,6 +77,19 @@ export interface ServerOptions {
    * 缺省 / 或审计账本不可用 → /api/personal/invoke 返回 501 personal_unavailable（诚实报错）。
    */
   personalStore?: PersonalMemoryStore;
+  /**
+   * 第二轮 owner 口径：内核 account.user_id（召回真源，与桌面登录账号可能不同名）。
+   * 缺省 = 会话 user_id（同名口径，旧行为零变化）；不同名时必须由 personalOwnerBindings 显式绑定，
+   * 未绑定条目只在本机可见、agent 不召回（fail-closed，绝不静默并号）。
+   */
+  personalKernelUserId?: string;
+  /** 登录账号 → 内核账号显式绑定表（不同名时的唯一合法映射） */
+  personalOwnerBindings?: PersonalOwnerBinding[];
+  /**
+   * 第二轮真实同步通道：个人条目上行复用同一 PgSyncHub（与 sync:* 同一账本/审计）。
+   * 缺省未接线 → 上行如实返回 stage=hub_init / code=E_SYNC_HUB_UNAVAILABLE，不写「已同步」。
+   */
+  personalSyncHub?: AnySyncHub;
 }
 
 /** home server 句柄：在 Server 上附加会话查询（主进程做管理员 IPC 校验用） */
@@ -650,7 +664,13 @@ export function createServer(opts: ServerOptions): HomeServer {
           const api = createPersonalApi({
             store: opts.personalStore,
             owner: s.context.user_id,
+            kernelUserId: opts.personalKernelUserId,
+            ownerBindings: opts.personalOwnerBindings,
             form: 'web',
+            team_id: s.context.team_id,
+            enterprise_id: s.context.enterprise_id,
+            // 真实 PgSyncHub：与 sync:* 同一中枢账本；未接线时上行如实失败（不伪造已同步）
+            sync: opts.personalSyncHub ? { push: (m, f) => opts.personalSyncHub!.push(m, f) } : undefined,
             appendAudit: (a) => opts.kernelStorage!.appendAudit(a),
           });
           try {
@@ -661,13 +681,26 @@ export function createServer(opts: ServerOptions): HomeServer {
               case 'reject': send(res, 200, { ok: true, result: await api.reject(id) }); return;
               case 'revoke': send(res, 200, { ok: true, result: await api.revoke(id) }); return;
               case 'delete': send(res, 200, { ok: true, result: await api.remove(id, payload.confirm === true) }); return;
+              case 'push_team': send(res, 200, {
+                ok: true,
+                result: await api.pushToTeam(id, {
+                  explicit: payload.explicit === true,
+                  team_id: typeof payload.team_id === 'string' ? payload.team_id : undefined,
+                }),
+              }); return;
+              case 'retry_sync': send(res, 200, { ok: true, result: await api.retrySync(id) }); return;
               default:
                 send(res, 400, { ok: false, error: `不支持的个人记忆动作：${op || '(空)'}` });
                 return;
             }
           } catch (e) {
-            // 状态机拒绝 / 未注入等如实回传，不伪造成功
-            send(res, 200, { ok: false, error: e instanceof Error ? e.message : String(e) });
+            // 状态机拒绝 / 未注入等如实回传（带错误码），不伪造成功
+            const code = (e as { code?: unknown })?.code;
+            send(res, 200, {
+              ok: false,
+              error: e instanceof Error ? e.message : String(e),
+              ...(typeof code === 'string' ? { code } : {}),
+            });
           }
           return;
         }

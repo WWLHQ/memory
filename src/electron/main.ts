@@ -14,7 +14,8 @@ import { createServer, type HomeServer } from '../home/server.ts';
 import { createServer as createAgentOnboardServer } from '../agentOnboard/server.ts';
 import { FileStorage } from '../core/memagent/fileStorage.ts';
 import { FilePersonalStore } from '../core/memagent/personalStoreFile.ts';
-import { createPersonalApi } from '../core/memagent/personal.ts';
+import { parsePersonalOwnerBindings, type PersonalOwnerBinding } from '../core/memagent/personalStore.ts';
+import { createPersonalApi, type PersonalSyncPort } from '../core/memagent/personal.ts';
 import { FileL0BlobStore } from '../core/memagent/l0Store.ts';
 import {
   BACKUP_PREFIX, kindOfBackupName, planBackupFiles, selectBackupsToDelete, sortBackupsNewestFirst,
@@ -163,6 +164,11 @@ let COLLECTOR_CURSOR_FILE: string;
 let storage: FileStorage;
 /** 第一轮个人记忆：独立于记忆主库的文件存储（<数据根>/personal-memory.db.json） */
 let personalStoreRef: FilePersonalStore | null = null;
+/**
+ * 第二轮 owner 口径：登录账号 → 内核账号显式绑定（env MAM_PERSONAL_OWNER_BINDINGS）。
+ * 未配置 / 不同名不绑定 → 个人条目仅本机可见，agent 不召回（fail-closed，绝不静默并号）。
+ */
+let personalOwnerBindings: PersonalOwnerBinding[] = [];
 /** 登录会话真源（批次7）：敏感 IPC 经此校验管理员身份；bootstrap 创建后赋值 */
 let homeServerRef: HomeServer | null = null;
 /** L0 密钥环（§4.4）：DEK 只在主进程内存；退出时清空写密钥缓存 */
@@ -920,10 +926,15 @@ function registerDataRootIpc(): void {
   });
 }
 
-// ── 第一轮个人记忆本机闭环 IPC（独立存储 personal-memory.db.json）──────────────
-// 单一数据面：op = list/quick_add/confirm/reject/revoke/delete；owner 由会话解析，渲染层不得自报。
+// ── 个人记忆 IPC（独立存储 personal-memory.db.json；第二轮接真实 PgSyncHub）──────────
+// 单一数据面：op = list/quick_add/confirm/reject/revoke/delete/push_team/retry_sync；
+// owner 由会话解析，渲染层不得自报；个人确认不会自动提权为团队可见，上行必须显式授权。
 // 每个写动作经内核 personal.ts 落 personal_memory 审计并回执 request_id；失败如实返回 code/error。
-function registerPersonalIpc(): void {
+function registerPersonalIpc(opts: {
+  kernelUserId: string;
+  bindings: PersonalOwnerBinding[];
+  sync: PersonalSyncPort | undefined;
+}): void {
   handleIpc(IPC.personalInvoke, async (_e, op: unknown, payload?: unknown, sessionId?: string) => {
     const gate = requireSession(sessionId, IPC.personalInvoke);
     if (!gate.ok) return { ok: false, code: gate.code, error: gate.error };
@@ -932,7 +943,12 @@ function registerPersonalIpc(): void {
     const api = createPersonalApi({
       store,
       owner: gate.ctx.user_id,
+      kernelUserId: opts.kernelUserId,
+      ownerBindings: opts.bindings,
       form: 'desktop',
+      team_id: gate.ctx.team_id,
+      enterprise_id: gate.ctx.enterprise_id,
+      sync: opts.sync,
       appendAudit: (a) => storage.appendAudit(a),
     });
     const p = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>;
@@ -945,6 +961,14 @@ function registerPersonalIpc(): void {
         case 'reject': return { ok: true, data: await api.reject(id) };
         case 'revoke': return { ok: true, data: await api.revoke(id) };
         case 'delete': return { ok: true, data: await api.remove(id, p.confirm === true) };
+        case 'push_team': return {
+          ok: true,
+          data: await api.pushToTeam(id, {
+            explicit: p.explicit === true,
+            team_id: typeof p.team_id === 'string' ? p.team_id : undefined,
+          }),
+        };
+        case 'retry_sync': return { ok: true, data: await api.retrySync(id) };
         default: return { ok: false, code: 'E_NOT_IMPLEMENTED', error: `未知个人记忆动作：${String(op)}` };
       }
     } catch (e) {
@@ -2608,6 +2632,17 @@ async function bootstrap(): Promise<void> {
   const tenantTriple = loadOrCreateTenant(USER_DATA);
   void mlog('bootstrap:tenant-source', { file: join(USER_DATA, 'tenant.json'), ...tenantTriple });
   actionLog('app', 'bootstrap:tenant-source', { user_id: tenantTriple.user_id, team_id: tenantTriple.team_id, enterprise_id: tenantTriple.enterprise_id });
+  // 第二轮 owner 口径：登录账号 → 内核账号显式绑定（env 真源；损坏 = 明确告警 + 保持空表，
+  // 绝不猜映射：未绑定的个人条目仅本机可见，agent 不召回）。
+  try {
+    personalOwnerBindings = parsePersonalOwnerBindings(process.env.MAM_PERSONAL_OWNER_BINDINGS);
+    actionLog('app', 'bootstrap:personal-owner-bindings', { count: personalOwnerBindings.length, kernel_user_id: tenantTriple.user_id });
+  } catch (e) {
+    personalOwnerBindings = [];
+    const msg = String((e as Error)?.message ?? e);
+    void mlog('bootstrap:personal-owner-bindings-bad', { error: msg });
+    actionLog('app', 'bootstrap:personal-owner-bindings-bad', { error: msg }, { level: 'error' });
+  }
 
   // 批次42-B 云端同步中枢：主进程 pglite 落盘（数据根 sync-hub/，跨端同机中枢——桌面/Web/CLI 同源）。
   // 建表幂等；init 失败不阻断启动（同步是增量能力，ROADMAP 批次42 总边界），置 null + 日志，
@@ -2719,7 +2754,11 @@ async function bootstrap(): Promise<void> {
   registerShellIpc();
   registerBackupIpc();
   registerDataRootIpc();
-  registerPersonalIpc();
+  registerPersonalIpc({
+    kernelUserId: tenantTriple.user_id,
+    bindings: personalOwnerBindings,
+    sync: syncHub ? { push: (m, f) => syncHub!.push(m, f) } : undefined,
+  });
   void mlog('backup:scheduler-ready');
 
   // 账号只来自真实注册（POST /api/register 落盘）；不再预置演示账号
@@ -2769,6 +2808,10 @@ async function bootstrap(): Promise<void> {
     kernelInfo: { readonly: storage.readOnly, db_path: DB_PATH },
     // 第一轮个人记忆：HTTP 数据面与 IPC 数据面共用同一独立存储实例
     personalStore: personalStoreRef ?? undefined,
+    // 第二轮：owner 口径（内核 account.user_id + 显式绑定）+ 同一 PgSyncHub 真实同步通道
+    personalKernelUserId: tenantTriple.user_id,
+    personalOwnerBindings: personalOwnerBindings,
+    personalSyncHub: syncHub ?? undefined,
     // 批次45-B2：home 账号 → 内核 Member 单向同步（注册/角色/团队变更 + 启动对账）
     memberStore,
     onLog: (scope, action, detail) => { actionLog(scope, action, detail); },
