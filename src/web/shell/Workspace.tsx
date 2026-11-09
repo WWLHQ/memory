@@ -639,7 +639,11 @@ export function Workspace() {
       ? field.value.slice(field.selectionStart ?? 0, field.selectionEnd ?? 0)
       : (window.getSelection()?.toString() ?? '');
     const selectedText = selected.trim();
-    openCtxMenu(x, y, `右键：${zone}`, 'shellmenu', [
+    // 批次50：右键不补登录入口 —— 只有该区域本身已有登录入口才出现「登录 / 会话」
+    const hasLoginEntry = !!target?.closest(
+      '.menubar, [data-testid="qa-login"], [data-testid="shell-session-btn"], [data-testid="sb-session"]',
+    );
+    const items: ContextMenuItem[] = [
       { id: 'refresh', icon: 'refresh', label: '刷新中心区与底部/状态栏读数（F5）', run: () => runShellAction('refresh', '刷新') },
       {
         id: 'home', icon: 'spark', label: '回到概览',
@@ -662,8 +666,9 @@ export function Workspace() {
         id: 'theme', icon: 'sun', label: '切换主题（跟随系统 → 浅色 → 深色）',
         run: () => setTheme((t) => (t === 'system' ? 'light' : t === 'light' ? 'dark' : 'system')),
       },
-      { id: 'login', icon: 'user', label: '登录 / 会话…', run: () => setLoginOpen(true) },
-    ]);
+    ];
+    if (hasLoginEntry) items.push({ id: 'login', icon: 'user', label: '登录 / 会话…', run: () => setLoginOpen(true) });
+    openCtxMenu(x, y, `右键：${zone}`, 'shellmenu', items);
   }, [openCtxMenu, active?.page, copyText, runShellAction, openView]);
 
   /** 壳层根节点兜底监听：子区域已自行处理并 preventDefault 的直接放行，其余一律由壳层接管 */
@@ -686,6 +691,18 @@ export function Workspace() {
         id: 'copyId', icon: 'copy', label: '复制记忆 ID',
         disabled: !rowId, reason: '该行没有 data-testid 记忆 ID',
         run: () => { if (rowId) copyText(rowId, `已复制记忆 ID：${rowId}`); },
+      },
+      {
+        id: 'details', icon: 'info', label: '打开详情与回执',
+        disabled: true, reason: '详情与回执由记忆管理页渲染（双击行打开）；壳层不复制页面详情面板',
+      },
+      {
+        id: 'edit', icon: 'pen', label: '编辑正文',
+        disabled: true, reason: '正文写操作在记忆管理页执行（需未锁定并二次确认）；壳层不代行写操作',
+      },
+      {
+        id: 'layers', icon: 'layers', label: '查看分层内容',
+        disabled: true, reason: '分层 L1–L6 内容由记忆管理页的分层视图读取；壳层不代读页面数据',
       },
       {
         id: 'audit', icon: 'book', label: '在审计面板查看该记忆',
@@ -750,8 +767,6 @@ export function Workspace() {
           disabled: !page, reason: '当前标签没有对应页面',
           run: () => { if (page) setMessage(`页面 ${PAGES[page].file} · 数据来源：${PAGES[page].source}`); },
         },
-        { id: 'sep2', sep: true },
-        { id: 'login', icon: 'user', label: '登录 / 会话…', run: () => setLoginOpen(true) },
       ],
     });
     setMenuOpen(null);
