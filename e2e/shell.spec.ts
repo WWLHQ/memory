@@ -151,7 +151,7 @@ test.describe('壳层 · 登录弹窗与右键菜单（真实后端）', () => {
   test('右键导航树：真实动作可用；无能力项禁用并写原因', async ({ page }) => {
     const errors = collectErrors(page);
     await openShell(page);
-    await page.getByRole('treeitem', { name: /概览/ }).click({ button: 'right' });
+    await page.getByRole('treeitem', { name: /首页/ }).click({ button: 'right' });
     const menu = page.locator('[data-testid="ctx-navmenu"]');
     await expect(menu).toBeVisible();
     await expect(page.locator('[data-testid="ctx-navmenu"] [role="menuitem"]')).not.toHaveCount(0);
@@ -159,10 +159,10 @@ test.describe('壳层 · 登录弹窗与右键菜单（真实后端）', () => {
     await expect(toggle).toBeDisabled();
     await expect(toggle).toHaveAttribute('title', /该导航项没有子项/);
     await expect(toggle).toContainText('该导航项没有子项');
-    // 真实动作：打开个人记忆 → 中心区出现对应标签
-    await page.getByRole('treeitem', { name: /个人记忆/ }).click({ button: 'right' });
+    // 真实动作：打开记忆库 → 中心区出现对应标签（批次54 后为平铺入口）
+    await page.getByRole('treeitem', { name: /记忆库/ }).click({ button: 'right' });
     await page.locator('[data-testid="ctx-navmenu-open"]').click();
-    await expect(page.locator('[data-testid^="shell-tab-"]').filter({ hasText: '个人记忆' })).toBeVisible();
+    await expect(page.locator('[data-testid^="shell-tab-"]').filter({ hasText: '记忆库' })).toBeVisible();
     await expect(page.locator('[data-testid="ctx-navmenu"]')).toHaveCount(0);
     expect(errors).toEqual([]);
   });
@@ -179,7 +179,7 @@ test.describe('壳层 · 登录弹窗与右键菜单（真实后端）', () => {
     await expect(page.locator('[data-testid="ctx-tabmenu-refresh"]')).toBeEnabled();
 
     // 打开第二个标签后，右键真实关闭
-    await page.getByRole('treeitem', { name: /全部记忆/ }).click();
+    await page.getByRole('treeitem', { name: /记忆库/ }).click();
     await expect(tabs).toHaveCount(2);
     await tabs.last().click({ button: 'right' });
     await page.locator('[data-testid="ctx-tabmenu-close"]').click();
@@ -242,7 +242,9 @@ test.describe('壳层 · 登录弹窗与右键菜单（真实后端）', () => {
     await expect(page.locator('[data-testid="ctx-shellmenu-login"]')).toBeVisible();
     await page.locator('[data-testid="sb-session"]').click({ button: 'right' });
     await expect(page.locator('[data-testid="ctx-shellmenu-login"]')).toBeVisible();
-    await page.locator('.menubar').click({ button: 'right' });
+    // 批次52 后 QAT 紧跟菜单项，点 .menubar 几何中心可能落进 .qa（该处按设计不补登录入口）；
+    // 这里明确右键「文件」菜单项，验证菜单栏本身仍是登录入口。
+    await page.locator('.menubar .menu-wrap').first().click({ button: 'right' });
     await expect(page.locator('[data-testid="ctx-shellmenu-login"]')).toBeVisible();
   });
 
@@ -301,7 +303,7 @@ test.describe('壳层 · 登录弹窗与右键菜单（真实后端）', () => {
       }, true);
     });
     await openShell(page);
-    await page.getByRole('treeitem', { name: /全部记忆/ }).click();
+    await page.getByRole('treeitem', { name: /记忆库/ }).click();
     const frame = page.frameLocator('iframe.page-frame[title*="memory.html"]');
     await expect(frame.locator('body')).toBeVisible();
     await frame.locator('body').click({ button: 'right', position: { x: 20, y: 20 } });

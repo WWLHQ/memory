@@ -17,7 +17,7 @@ import { ShellLoginDialog } from './ShellLoginDialog.tsx';
 import { loadOverview, type OverviewSnapshot } from './overview.ts';
 import { loadPendingWrites, type PendingWritesResult } from './taskpane.ts';
 import {
-  BOTTOM_TABS, NAV, PAGES, RIBBON, findNav,
+  BOTTOM_TABS, NAV, PAGES, RIBBON, findNav, flattenNav,
   type BottomTabId, type IconName, type NavEntry, type NavItem, type PageKey,
   type RibbonItem, type ShellAction,
 } from './views.ts';
@@ -29,6 +29,7 @@ import { loadStatusbar, shortLocation, type StatusSnapshot } from './statusbar.t
 import { loadLayerPanel, type LayerPanelView } from './layers.ts';
 import { loadStrataScale, type StrataScaleView } from './strataScale.ts';
 import { StrataScale } from './StrataScale.tsx';
+import { loadNavCounts, type NavCounts } from './navCounts.ts';
 import { SELECTION_MSG, parseSelection, type SelectionPayload } from '../shared/selectionChannel.ts';
 import { NAV_COUNT_MSG, parseNavCount } from '../shared/navCountChannel.ts';
 import { SHELL_GOTO_MSG } from '../shared/shellNavigate.ts';
@@ -156,9 +157,9 @@ function filterEntries(entries: NavEntry[], q: string): NavEntry[] {
 export function Workspace() {
   const [activeId, setActiveId] = useState<string>('home');
   const [openTabs, setOpenTabs] = useState<OpenTab[]>([
-    { id: 'home', label: '概览', page: 'home' },
+    { id: 'home', label: '首页', page: 'home' },
   ]);
-  const [openParents, setOpenParents] = useState<Record<string, boolean>>({ ledger: true });
+  const [openParents, setOpenParents] = useState<Record<string, boolean>>({});
   const [navQuery, setNavQuery] = useState('');
   const [ribbonTab, setRibbonTab] = useState<string>('start');
   const [ribbonFolded, setRibbonFolded] = useState(false);
@@ -378,10 +379,19 @@ export function Workspace() {
   }, []);
 
   const active = useMemo(() => openTabs.find((t) => t.id === activeId) ?? openTabs[0], [activeId, openTabs]);
-  const activeNav = active ? findNav(active.id) : undefined;
+  /** Ribbon 深链会派生 id（如 memory-bank?tab=layers），按 page + href 兜底回查 NAV，属性检查器不丢标题。 */
+  const activeNav = useMemo(() => {
+    if (!active) return undefined;
+    const direct = findNav(active.id);
+    if (direct) return direct;
+    const all = flattenNav();
+    return all.find((n) => n.page === active.page && (n.href ?? '') === (active.href ?? ''))
+      ?? all.find((n) => n.page === active.page);
+  }, [active]);
 
-  /** S7：分层条只在中心页是「分层 L1–L6」或「L0 密文」时出现（数据与中心页同源） */
-  const showLayerStrip = active?.id === 'ledger-layers' || active?.id === 'ledger-l0';
+  /** S7：分层条只在「层级管理」页或记忆库的分层 / L0 标签时出现（数据与中心页同源）。 */
+  const showLayerStrip = active?.page === 'layered'
+    || (active?.page === 'memory' && (active.href?.includes('tab=layers') || active.href?.includes('tab=l0') || false));
 
   useEffect(() => {
     if (!showLayerStrip || layerPanel) return;
@@ -443,6 +453,26 @@ export function Workspace() {
     return () => window.removeEventListener('message', onCount);
   }, []);
 
+  // 批次54：三个角标只读真实账本 / 接入后端；刷新或登录态变化时重读，失败不显示角标。
+  const [realNavCounts, setRealNavCounts] = useState<NavCounts>({});
+  const [navCountsSeq, setNavCountsSeq] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      const next = await loadNavCounts();
+      if (alive) setRealNavCounts(next);
+    })();
+    return () => { alive = false; };
+  }, [navCountsSeq, sessionActive]);
+
+  /** 真账本预读 + 页面同源回传（如个人记忆待确认数）合并；页面回传优先，便于动作后即时刷新。 */
+  const mergedNavCounts = useMemo<Record<string, number>>(() => {
+    const out: Record<string, number> = {};
+    for (const [k, v] of Object.entries(realNavCounts)) if (typeof v === 'number') out[k] = v;
+    for (const [k, v] of Object.entries(navCounts)) out[k] = v;
+    return out;
+  }, [realNavCounts, navCounts]);
+
   // 缩放由 .shell 的 CSS zoom 统一承担（含 iframe），不再单独改写子页面文档，避免双重缩放
 
   const openView = useCallback((item: NavItem) => {
@@ -476,7 +506,7 @@ export function Workspace() {
       const idx = tabs.findIndex((t) => t.id === id);
       if (idx < 0) return tabs;
       const next = tabs.filter((t) => t.id !== id);
-      if (next.length === 0) return [{ id: 'home', label: '概览', page: 'home' }];
+      if (next.length === 0) return [{ id: 'home', label: '首页', page: 'home' }];
       if (id === activeId) setActiveId(next[Math.min(idx, next.length - 1)].id);
       return next;
     });
@@ -509,10 +539,11 @@ export function Workspace() {
         break;
       case 'refresh':
         setReloadNonce((n) => n + 1);
-        // 底部面板与状态栏同样重读：清空缓存后由可见部位重新拉真实数据
+        // 底部面板、状态栏、层级刻度与导航角标同样重读：清空缓存后由可见部位重新拉真实数据
         setDockLog(null); setDockTasks(null); setDockAudit(null);
         setStatus(null); setLayerPanel(null); setStrataScale(null);
-        setMessage('已刷新中心区真实页面与底部面板/状态栏读数。');
+        setRealNavCounts({}); setNavCountsSeq((n) => n + 1);
+        setMessage('已刷新中心区真实页面、底部面板/状态栏、层级刻度与导航角标读数。');
         break;
       case 'focusFilter':
         // 顶部自绘标题栏的查找框只过滤左侧功能导航；它不跨页检索记忆，因此不产出任何伪造结果。
@@ -659,7 +690,7 @@ export function Workspace() {
     const items: ContextMenuItem[] = [
       { id: 'refresh', icon: 'refresh', label: '刷新中心区与底部/状态栏读数（F5）', run: () => runShellAction('refresh', '刷新') },
       {
-        id: 'home', icon: 'spark', label: '回到概览',
+        id: 'home', icon: 'spark', label: '回到首页',
         run: () => { const home = findNav('home'); if (home) openView(home); },
       },
       { id: 'find', icon: 'search', label: '聚焦导航查找框（Ctrl+F）', run: () => runShellAction('focusFilter', '查找') },
@@ -761,7 +792,7 @@ export function Workspace() {
       items: [
         { id: 'refresh', icon: 'refresh', label: '刷新中心区（F5）', run: () => runShellAction('refresh', '刷新') },
         {
-          id: 'home', icon: 'spark', label: '回到概览',
+          id: 'home', icon: 'spark', label: '回到首页',
           run: () => { const home = findNav('home'); if (home) openView(home); },
         },
         { id: 'sep1', sep: true },
@@ -925,6 +956,11 @@ export function Workspace() {
     const target = findNav(id);
     if (target) openView(target);
   };
+  /** 批次54：L0 等不再占主导航的深链，仍从「记忆库」派生真实标签打开，不伪造独立页面。 */
+  const openMemoryTab = (href: string, label: string) => {
+    const base = findNav('memory-bank');
+    if (base) openView({ ...base, id: `memory-bank${href}`, href, label });
+  };
   const demoOnly = '定稿演示命令：本程序概览未提供该动作，不伪造执行结果';
   const qaSpecs: QaSpec[] = [
     { id: 'save', icon: 'save', title: '保存（只读）：本程序无文档编辑，保存不适用', disabled: true },
@@ -987,7 +1023,7 @@ export function Workspace() {
         { label: '全选', icon: 'check', kbd: 'Ctrl+A', disabled: true, reason: '请在输入框内使用 Ctrl+A（系统编辑命令）' },
         { sep: true },
         { label: '查找', icon: 'search', kbd: 'Ctrl+F', run: () => runShellAction('focusFilter', '查找') },
-        { label: '冲突待裁决', icon: 'warn', run: () => openNav('ledger-conflict') },
+        { label: '冲突裁决', icon: 'warn', run: () => openNav('dispute') },
         { label: '首选项…', icon: 'gear', run: () => openNav('params') },
       ],
     },
@@ -996,13 +1032,13 @@ export function Workspace() {
         { label: '任务窗格', icon: 'panel', checked: taskOpen, run: () => runShellAction('toggleTaskPane', '任务窗格') },
         { label: '折叠功能区', icon: 'fold', kbd: 'Ctrl+F1', checked: ribbonFolded, run: () => runShellAction('foldRibbon', '折叠功能区') },
         { label: '折叠详情面板', icon: 'panel', checked: inspCollapsed, run: () => setInspCollapsed((v) => !v) },
-        { label: '分层 L1–L6', icon: 'layers', run: () => openNav('ledger-layers') },
+        { label: '层级管理', icon: 'layers', run: () => openNav('layered') },
         { label: '折叠功能导航', icon: 'chev', kbd: 'Ctrl+B', checked: navCollapsed, run: () => setNavCollapsed((v) => !v) },
         { sep: true },
         { label: '重置布局', icon: 'refresh', run: () => runShellAction('resetLayout', '重置布局') },
         { label: '刷新', icon: 'refresh', kbd: 'F5', run: () => runShellAction('refresh', '刷新') },
         { sep: true },
-        { label: '显示 L0 密文', icon: 'lock', run: () => openNav('ledger-l0') },
+        { label: '显示 L0 密文', icon: 'lock', run: () => openMemoryTab('?tab=l0', 'L0 密文（需解锁）') },
         { label: '显示底部面板', icon: 'panel', checked: dockOpen, run: () => runShellAction('toggleDock', '底部面板') },
         { label: '显示状态栏', icon: 'info', checked: statusVisible, run: () => runShellAction('toggleStatus', '状态栏') },
         { label: '紧凑密度', icon: 'panel', checked: density === 'compact', run: () => runShellAction('density', '紧凑密度') },
@@ -1215,7 +1251,7 @@ export function Workspace() {
                 item={entry}
                 activeId={activeId}
                 open={openParents[entry.id] ?? false}
-                counts={navCounts}
+                counts={mergedNavCounts}
                 onToggle={() => setOpenParents((p) => ({ ...p, [entry.id]: !(p[entry.id] ?? false) }))}
                 onSelect={openView}
                 onMenu={openNavContext}
@@ -1802,6 +1838,13 @@ function RibbonButton({ item, onItem }: { item: RibbonItem; onItem: (i: RibbonIt
   );
 }
 
+/** 批次54：角标只显示真实读数，title 写清来源，避免被误认成参考图里的示例数字。 */
+const NAV_COUNT_TITLES: Record<string, string> = {
+  'memory-bank': '真实账本记忆条数（coreListMemories，非参考图示例数）',
+  dispute: '内核真实 pending 冲突队列长度（coreConflicts）',
+  agent: '接入后端真实 Agent 卡片数（GET /agents）',
+};
+
 function NavTreeItem({ item, activeId, open, counts, onToggle, onSelect, onMenu }: {
   item: NavItem;
   activeId: string;
@@ -1830,7 +1873,10 @@ function NavTreeItem({ item, activeId, open, counts, onToggle, onSelect, onMenu 
         <span className="tico"><Icon name={item.icon} size={item.child ? 12 : 14} /></span>
         <span className="tlabel">{item.label}</span>
         {item.unavailable ? <span className="tcount">不可用</span> : null}
-        {count > 0 ? <span className="tcount" data-testid={`nav-count-${item.id}`}>{count}</span> : null}
+        {count > 0 ? (
+          <span className="tcount" data-testid={`nav-count-${item.id}`}
+            title={NAV_COUNT_TITLES[item.id] ?? '页面同源回传的真实计数'}>{count}</span>
+        ) : null}
       </div>
       {hasKids && open && item.children?.map((c) => (
         <NavTreeItem key={c.id} item={c} activeId={activeId} open={false} counts={counts} onToggle={() => {}} onSelect={onSelect} onMenu={onMenu} />

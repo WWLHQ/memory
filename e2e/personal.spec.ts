@@ -7,7 +7,7 @@
 //   ④ 不是我的 → 已剔除 → 撤销剔除回到待确认
 //   ⑤ 刷新后仍读回真实存储（独立文件/进程内实例，而非页面内存）
 //   ⑥ agent 投递条目（独立存储里真实存在）在「待 agent 确认」分区，带来源与时间戳
-//   ⑦ 壳层左侧导航角标 = 页面回传的真实待确认数
+//   ⑦ 批次54：个人记忆不再占主导航；页面待确认数仍来自真实独立存储
 //   ⑧ 第二轮：个人确认不提权 → 显式二次确认后上行到真实 PgSyncHub → 幂等 → 失败如实（阶段+错误码）
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -210,7 +210,7 @@ test.describe('个人记忆双窗 · 本机闭环 E2E', () => {
     await expect(page.locator(`[data-testid="pm-confirmed-${id}"]`)).toBeVisible();
   });
 
-  test('壳层左侧导航角标 = 页面回传的真实待确认数', async ({ page }) => {
+  test('批次54：个人记忆不再占主导航；页面待确认数仍来自真实独立存储', async ({ page }) => {
     await login(page);
     const id = 'pm_e2e_nav';
     await store.put(entryFixture({
@@ -218,9 +218,9 @@ test.describe('个人记忆双窗 · 本机闭环 E2E', () => {
       delivered_at: Date.now(), confirmed_at: null, state: 'pending',
     }));
     await page.goto(SHELL);
-    await page.getByRole('treeitem', { name: /个人记忆/ }).click();
-    const badge = page.locator('[data-testid="nav-count-ledger-personal"]');
-    await expect(badge).toHaveText('1', { timeout: 15_000 });
+    await expect(page.getByRole('treeitem', { name: /个人记忆/ })).toHaveCount(0);
+    await page.goto(MEMORY);
+    await expect(page.getByTestId('pm-pending-count')).toHaveText('1', { timeout: 15_000 });
   });
 
   test('第二轮：确认不提权 → 二次确认显式授权 → 真实 PgSyncHub 已同步、幂等，不产生重复中枢条目', async ({ page }) => {

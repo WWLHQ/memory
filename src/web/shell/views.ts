@@ -9,7 +9,8 @@
 export type PageKey =
   | 'home' | 'login' | 'memory' | 'write' | 'retrieval'
   | 'lifecycle' | 'audit' | 'logs' | 'security' | 'growth' | 'models'
-  | 'monitor' | 'sync' | 'params' | 'setup' | 'agent';
+  | 'monitor' | 'sync' | 'params' | 'setup' | 'agent'
+  | 'layered' | 'dispute' | 'feedback';
 
 /** 真实页面清单（文件名与 vite.config.ts 的 rollupOptions.input 对齐） */
 export const PAGES: Record<PageKey, { file: string; label: string; source: string }> = {
@@ -30,6 +31,9 @@ export const PAGES: Record<PageKey, { file: string; label: string; source: strin
   params: { file: 'params.html', label: '全局参数页', source: '参数快照 + 记忆库管理' },
   setup: { file: 'setup.html', label: '首启设置页', source: 'setup:state / finish' },
   agent: { file: 'agentonboard.html', label: 'Agent 接入页', source: 'agentOnboard 接口' },
+  layered: { file: 'memory-layered.html', label: '记忆层级管理页', source: 'REQ-006 P8 · L0–L6 真实账本' },
+  dispute: { file: 'dispute.html', label: '冲突裁决页', source: 'REQ-006 P7 · 内核真实 pending 冲突队列' },
+  feedback: { file: 'feedback.html', label: '用户反馈页', source: 'REQ-006 P9 · 真实账本反馈' },
 };
 
 export interface NavGroup {
@@ -57,40 +61,33 @@ export interface NavItem {
 
 export type NavEntry = NavGroup | NavItem;
 
-/** 功能导航树：视觉与信息架构取自定稿，数据面一律以真实页面为准 */
+/** 功能导航树：批次54 按用户参考图重排为四组 17 项；每项映射到真实 HTML，角标一律动态读真账本，不写死示例数。
+ *  - 登录仍走壳层弹窗（login.html 只作深链兜底，不占主导航）；
+ *  - 首启设置由 Electron 向导直接打开（setup.html），不在主导航露面；
+ *  - 旧「记忆管理」可展开子树收敛为平铺入口，分层/冲突/反馈改指各自独立真实页面。
+ */
 export const NAV: NavEntry[] = [
-  { kind: 'group', label: '工作区' },
-  { kind: 'item', id: 'home', label: '概览', icon: 'spark', page: 'home' },
-  // 登录不再占主导航：主流程走壳层登录弹窗（菜单栏 / QAT / 登录状态处三处入口）。
-  // login.html 仍保留为可直达的兜底页（深链与 E2E 不断裂），PAGES.login 映射保留。
-  { kind: 'group', label: '记忆' },
-  {
-    kind: 'item', id: 'ledger', label: '记忆管理', icon: 'db', defaultOpen: true, children: [
-      { kind: 'item', id: 'ledger-all', label: '全部记忆', icon: 'table', page: 'memory', href: '?tab=all', child: true },
-      {
-        kind: 'item', id: 'ledger-personal', label: '个人记忆', icon: 'user', page: 'memory', href: '?tab=personal', child: true,
-      },
-      { kind: 'item', id: 'ledger-layers', label: '分层 L1–L6', icon: 'layers', page: 'memory', href: '?tab=layers', child: true },
-      { kind: 'item', id: 'ledger-conflict', label: '冲突待裁决', icon: 'warn', page: 'memory', href: '?tab=conflict', child: true },
-      { kind: 'item', id: 'ledger-l0', label: 'L0 密文（需解锁）', icon: 'lock', page: 'memory', href: '?tab=l0', child: true },
-    ],
-  },
+  { kind: 'group', label: '工作台' },
+  { kind: 'item', id: 'home', label: '首页', icon: 'spark', page: 'home' },
   { kind: 'item', id: 'write', label: '写入', icon: 'receipt', page: 'write' },
   { kind: 'item', id: 'retrieval', label: '检索', icon: 'search', page: 'retrieval' },
-  { kind: 'item', id: 'lifecycle', label: '生命周期', icon: 'clock', page: 'lifecycle' },
-  { kind: 'group', label: '治理' },
-  { kind: 'item', id: 'audit', label: '审计与日志', icon: 'book', page: 'audit' },
-  { kind: 'item', id: 'logs', label: '日志记录', icon: 'list', page: 'logs' },
-  { kind: 'item', id: 'security', label: '安全与账号', icon: 'shield', page: 'security' },
-  { kind: 'group', label: '智能' },
-  { kind: 'item', id: 'growth', label: '生长与自进化', icon: 'layers', page: 'growth' },
-  { kind: 'item', id: 'cost', label: '模型与成本', icon: 'chart', page: 'models' },
-  { kind: 'group', label: '运行' },
   { kind: 'item', id: 'monitor', label: '监控', icon: 'play', page: 'monitor' },
-  { kind: 'item', id: 'sync', label: '同步', icon: 'sync', page: 'sync' },
-  { kind: 'item', id: 'params', label: '参数', icon: 'gear', page: 'params' },
-  { kind: 'item', id: 'setup', label: '首启设置', icon: 'gear', page: 'setup' },
+  { kind: 'group', label: '记忆' },
+  { kind: 'item', id: 'memory-bank', label: '记忆库', icon: 'db', page: 'memory', href: '?tab=all' },
+  { kind: 'item', id: 'layered', label: '层级管理', icon: 'layers', page: 'layered' },
+  { kind: 'item', id: 'lifecycle', label: '生命周期', icon: 'clock', page: 'lifecycle' },
+  { kind: 'item', id: 'growth', label: '净化生长', icon: 'layers', page: 'growth' },
+  { kind: 'item', id: 'dispute', label: '冲突裁决', icon: 'warn', page: 'dispute' },
+  { kind: 'group', label: '连接' },
   { kind: 'item', id: 'agent', label: 'Agent 接入', icon: 'agent', page: 'agent' },
+  { kind: 'item', id: 'cost', label: '大模型配置', icon: 'chart', page: 'models' },
+  { kind: 'item', id: 'sync', label: '同步中枢', icon: 'sync', page: 'sync' },
+  { kind: 'group', label: '治理' },
+  { kind: 'item', id: 'params', label: '全局参数', icon: 'gear', page: 'params' },
+  { kind: 'item', id: 'security', label: '账号与安全', icon: 'shield', page: 'security' },
+  { kind: 'item', id: 'logs', label: '日志记录', icon: 'list', page: 'logs' },
+  { kind: 'item', id: 'audit', label: '审计日志', icon: 'book', page: 'audit' },
+  { kind: 'item', id: 'feedback', label: '用户反馈', icon: 'pen', page: 'feedback' },
 ];
 
 /** 扁平化（父项 + 子项），供按 id 查找 */

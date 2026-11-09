@@ -54,11 +54,17 @@ vi.mock('../strataScale.ts', () => ({
   loadStrataScale: vi.fn(),
 }));
 
+// 批次54：角标加载器读真账本 / 接入后端；组件单测只验证渲染契约，固定返回值。
+vi.mock('../navCounts.ts', () => ({
+  loadNavCounts: vi.fn(),
+}));
+
 import { Workspace } from '../Workspace.tsx';
 import { loadAuditForMemory, loadOutputLog, loadScheduleRuns } from '../dock.ts';
 import { loadStatusbar } from '../statusbar.ts';
 import { loadLayerPanel } from '../layers.ts';
 import { loadStrataScale } from '../strataScale.ts';
+import { loadNavCounts } from '../navCounts.ts';
 import { loadPendingWrites } from '../taskpane.ts';
 
 beforeEach(() => {
@@ -123,9 +129,11 @@ beforeEach(() => {
       loadedAt: 1_790_000_000_000,
     },
   });
+  vi.mocked(loadNavCounts).mockReset();
+  vi.mocked(loadNavCounts).mockResolvedValue({});
 });
 
-/** 渲染并等待概览异步加载落地（避免 act 警告，也确保断言发生在真实渲染之后） */
+/** 渲染并等待首页异步加载落地（避免 act 警告，也确保断言发生在真实渲染之后） */
 async function renderShell() {
   const r = render(<Workspace />);
   await screen.findByTestId('sb-overview-refresh');
@@ -134,12 +142,33 @@ async function renderShell() {
 }
 
 describe('工作台壳层', () => {
-  it('默认打开概览，中心区嵌入真实 index.html（iframe 而非假内容）', async () => {
+  it('默认打开首页，中心区嵌入真实 index.html（iframe 而非假内容）', async () => {
     const { container } = await renderShell();
     expect(screen.getAllByRole('treeitem').length).toBeGreaterThan(0);
     const frames = container.querySelectorAll('iframe.page-frame');
     expect(frames.length).toBe(1);
     expect((frames[0] as HTMLIFrameElement).getAttribute('src')).toContain('/index.html');
+  });
+
+  it('批次54：DOM 为四组 17 项，角标只显示真实读数，不出现参考图示例数', async () => {
+    vi.mocked(loadNavCounts).mockResolvedValue({ 'memory-bank': 7, dispute: 2, agent: 3 });
+    const { container } = await renderShell();
+    const groups = Array.from(container.querySelectorAll('.tree .tree-group')).map((e) => e.textContent);
+    expect(groups).toEqual(['工作台', '记忆', '连接', '治理']);
+    expect(container.querySelectorAll('.tree .tree-row')).toHaveLength(17);
+
+    expect((await screen.findByTestId('nav-count-memory-bank')).textContent).toBe('7');
+    expect(screen.getByTestId('nav-count-dispute').textContent).toBe('2');
+    expect(screen.getByTestId('nav-count-agent').textContent).toBe('3');
+    expect(screen.getByTestId('nav-count-memory-bank').getAttribute('title')).toContain('coreListMemories');
+    expect(container.textContent).not.toContain('1467');
+  });
+
+  it('批次54：角标读数为 0 或读不到时不渲染徽标', async () => {
+    vi.mocked(loadNavCounts).mockResolvedValue({ 'memory-bank': 0, dispute: 0, agent: 0 });
+    const { container } = await renderShell();
+    await act(async () => { await Promise.resolve(); });
+    expect(container.querySelector('[data-testid^="nav-count-"]')).toBeNull();
   });
 
   it('顶部布局：快捷按钮紧跟菜单项之后，品牌块在标题栏居中', async () => {
@@ -266,7 +295,7 @@ describe('工作台壳层', () => {
 
   it('右键导航树：真实动作可用；无能力项禁用并写原因，不出现空菜单', async () => {
     await renderShell();
-    fireEvent.contextMenu(screen.getByRole('treeitem', { name: /概览/ }));
+    fireEvent.contextMenu(screen.getByRole('treeitem', { name: /首页/ }));
     const menu = screen.getByTestId('ctx-navmenu');
     expect(menu).toBeInTheDocument();
     expect(menu.querySelectorAll('[role="menuitem"]').length).toBeGreaterThan(0);
@@ -274,7 +303,7 @@ describe('工作台壳层', () => {
     const toggle = screen.getByTestId('ctx-navmenu-toggle');
     expect(toggle).toBeDisabled();
     expect(toggle.getAttribute('title')).toContain('该导航项没有子项');
-    // 真实动作：打开「概览」（已有标签则切换，不新增假页）
+    // 真实动作：打开「首页」（已有标签则切换，不新增假页）
     fireEvent.click(screen.getByTestId('ctx-navmenu-open'));
     expect(screen.queryByTestId('ctx-navmenu')).toBeNull();
   });
@@ -289,7 +318,7 @@ describe('工作台壳层', () => {
     expect(screen.getByTestId('ctx-tabmenu-closeOthers')).toBeDisabled();
     expect(screen.getByTestId('ctx-tabmenu-refresh')).toBeEnabled();
 
-    fireEvent.click(screen.getByRole('treeitem', { name: /个人记忆/ }));
+    fireEvent.click(screen.getByRole('treeitem', { name: /记忆库/ }));
     const tabs = container.querySelectorAll('.vtab');
     expect(tabs.length).toBeGreaterThan(1);
     fireEvent.contextMenu(tabs[tabs.length - 1] as HTMLElement);
@@ -451,15 +480,16 @@ describe('工作台壳层', () => {
     expect(screen.queryByText(/通览/)).toBeNull();
   });
 
-  it('个人记忆在记忆管理内以 tab 打开，不包装成独立空页', async () => {
+  it('批次54：记忆库平铺入口打开 memory.html?tab=all；个人记忆深链仍可由菜单派生', async () => {
     const { container } = await renderShell();
-    fireEvent.click(screen.getByRole('treeitem', { name: /个人记忆/ }));
+    fireEvent.click(screen.getByRole('treeitem', { name: /记忆库/ }));
     const frame = container.querySelector('.page-pane.active iframe.page-frame');
     const src = frame ? frame.getAttribute('src') : null;
     expect(src).toContain('/memory.html');
-    expect(src).toContain('tab=personal');
+    expect(src).toContain('tab=all');
     expect(container.querySelectorAll('iframe.page-frame').length).toBeGreaterThan(1);
-    // 壳层不提供假计数：页签与导航项都不带数字徽标
+    // 主导航不再出现「个人记忆」独立项；壳层也不提供假计数
+    expect(screen.queryByRole('treeitem', { name: /个人记忆/ })).toBeNull();
     expect(container.querySelector('.shell-empty')).toBeFalsy();
   });
 
@@ -541,9 +571,13 @@ describe('S3 深链接线（D4）：壳层把初值真的交给目标真实页�
     expect(archive.getAttribute('title')).toContain('未登录（会话 401）');
   });
 
-  it('导航「L0 密文（需解锁）」打开记忆管理的 L0 标签，不再依赖旧分层页锚点', async () => {
+  it('批次54：L0 不再占主导航，Ribbon 深链仍打开 memory.html?tab=l0', async () => {
     const { container } = await renderShell();
-    fireEvent.click(screen.getByRole('treeitem', { name: /L0 密文（需解锁）/ }));
+    expect(screen.queryByRole('treeitem', { name: /L0 密文/ })).toBeNull();
+    await act(async () => {
+      fireEvent.click(screen.getAllByRole('button', { name: /解锁 L0/ })[0]);
+      await Promise.resolve();
+    });
     const src = activeFrameSrc(container);
     expect(src).toContain('/memory.html');
     expect(src).toContain('tab=l0');
@@ -612,7 +646,7 @@ describe('S4 属性检查器：只显示真实页面回传的选中项', () => {
 
   it('页面与当前激活标签不符的回传被丢弃（避免后台标签串数据）', async () => {
     const { container } = await renderShell();
-    // 当前激活仍是概览 index.html
+    // 当前激活仍是首页 index.html
     await dispatchTo(container, PAYLOAD);
     expect(screen.queryByText('mem_1')).toBeNull();
   });
@@ -863,11 +897,11 @@ describe('S6 底部五标签：只渲染真实数据，不可用就给原因', (
   });
 });
 
-describe('S7 分层 L1–L6 / L0 面板：只在分层页出现，数字全部来自真实 browse', () => {
+describe('S7 分层 L1–L6 / L0 面板：只在层级管理页或记忆库分层标签出现，数字全部来自真实 browse', () => {
   it('打开分层页才出现分层条；失败层显示读取失败而不是 0', async () => {
     await renderShell();
     expect(screen.queryByTestId('layer-strip')).toBeNull();
-    fireEvent.click(screen.getByText('分层 L1–L6'));
+    fireEvent.click(screen.getByRole('treeitem', { name: /层级管理/ }));
     const strip = await screen.findByTestId('layer-strip');
     await waitFor(() => expect(strip.textContent).toContain('账本 7 条'));
     expect(strip.textContent).toContain('L6 1');
@@ -880,7 +914,7 @@ describe('S7 分层 L1–L6 / L0 面板：只在分层页出现，数字全部�
   it('分层读取失败 → 给原因，不渲染任何数字', async () => {
     vi.mocked(loadLayerPanel).mockResolvedValue({ status: 'error', detail: '账本读取失败：E_LEDGER_LOCKED' });
     await renderShell();
-    fireEvent.click(screen.getByText('分层 L1–L6'));
+    fireEvent.click(screen.getByRole('treeitem', { name: /层级管理/ }));
     expect((await screen.findByTestId('layer-strip-error')).textContent).toContain('E_LEDGER_LOCKED');
     expect(screen.queryByText(/账本 7 条/)).toBeNull();
   });

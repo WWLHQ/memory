@@ -5,7 +5,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
-  BOTTOM_TABS, PAGES, RIBBON, flattenNav, navPages,
+  BOTTOM_TABS, NAV, PAGES, RIBBON, flattenNav, navPages,
 } from '../views.ts';
 
 const ROOT = process.cwd();
@@ -20,13 +20,13 @@ describe('壳层导航映射', () => {
     }
   });
 
-  it('主导航覆盖全部真实页面（login.html 例外：仅作深链兜底、不进主导航），且不包含演示通览 overview.html', () => {
+  it('主导航覆盖全部真实页面（login / setup 例外：深链兜底与首启向导不进主导航），且不包含演示通览 overview.html', () => {
     const pages = navPages();
     for (const key of Object.keys(PAGES) as (keyof typeof PAGES)[]) {
-      // 第三轮口径：登录改为壳层弹窗，login.html 保留为可直达兜底页但不占主导航
-      if (key === 'login') {
-        expect(pages.includes(key), 'login.html 不应出现在主导航').toBe(false);
-        expect(PAGES.login.file).toBe('login.html');
+      // 登录走壳层弹窗、首启设置由 Electron 向导直接打开：两者保留真实页面但不占主导航。
+      if (key === 'login' || key === 'setup') {
+        expect(pages.includes(key), `${key}.html 不应出现在主导航`).toBe(false);
+        expect(PAGES[key].file).toBe(`${key}.html`);
         continue;
       }
       expect(pages.includes(key), `导航缺少 ${key}`).toBe(true);
@@ -34,14 +34,36 @@ describe('壳层导航映射', () => {
     expect(pages.some((p) => PAGES[p].file === 'overview.html')).toBe(false);
   });
 
-  it('个人记忆在记忆管理内以标签打开：静态导航只带入口，计数由页面按真实内核回传', () => {
-    const personal = flattenNav().find((n) => n.id === 'ledger-personal');
-    expect(personal).toBeTruthy();
-    expect(personal?.page).toBe('memory');
-    expect(personal?.href).toBe('?tab=personal');
-    expect(personal).not.toHaveProperty('unavailable');
-    expect(personal).not.toHaveProperty('count');
-    expect(personal).not.toHaveProperty('badge');
+  it('批次54：功能导航严格按参考图四组 17 项，名称、顺序与真实页面一一对应', () => {
+    const groups = NAV.flatMap((e) => e.kind === 'group' ? [e.label] : []);
+    expect(groups).toEqual(['工作台', '记忆', '连接', '治理']);
+
+    const items = NAV.flatMap((e) => e.kind === 'item'
+      ? [{ id: e.id, label: e.label, page: e.page }] : []);
+    expect(items).toEqual([
+      { id: 'home', label: '首页', page: 'home' },
+      { id: 'write', label: '写入', page: 'write' },
+      { id: 'retrieval', label: '检索', page: 'retrieval' },
+      { id: 'monitor', label: '监控', page: 'monitor' },
+      { id: 'memory-bank', label: '记忆库', page: 'memory' },
+      { id: 'layered', label: '层级管理', page: 'layered' },
+      { id: 'lifecycle', label: '生命周期', page: 'lifecycle' },
+      { id: 'growth', label: '净化生长', page: 'growth' },
+      { id: 'dispute', label: '冲突裁决', page: 'dispute' },
+      { id: 'agent', label: 'Agent 接入', page: 'agent' },
+      { id: 'cost', label: '大模型配置', page: 'models' },
+      { id: 'sync', label: '同步中枢', page: 'sync' },
+      { id: 'params', label: '全局参数', page: 'params' },
+      { id: 'security', label: '账号与安全', page: 'security' },
+      { id: 'logs', label: '日志记录', page: 'logs' },
+      { id: 'audit', label: '审计日志', page: 'audit' },
+      { id: 'feedback', label: '用户反馈', page: 'feedback' },
+    ]);
+    expect(items).toHaveLength(17);
+    // 旧的可展开子树、演示通览与首启设置都不再出现在主导航里。
+    expect(flattenNav().some((n) => n.children?.length)).toBe(false);
+    expect(NAV.some((e) => e.kind === 'item' && e.id === 'setup')).toBe(false);
+    expect(navPages()).not.toContain('login');
   });
 
   it('导航项不得携带演示计数/徽标字段', () => {
