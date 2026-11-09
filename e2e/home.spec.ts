@@ -3,11 +3,11 @@
 //   ① 首屏不阻塞：index.html 直接渲染概览页（真实账本读数），无登录门控遮罩
 //   ② 登录入口：首页不再弹登录卡，登录在 login.html（无注册入口）
 //   ③ 密码错 → 后端真实 401；连续 6 次 → 423（直连真实后端）
-//   ④ 登录成功 → 会话落本机 + 概览页范围行「已登录」+ 4 张统计卡
+//   ④ 登录成功 → 会话落本机 + 概览页页脚「已登录」+ 效果证据四卡（真实账本聚合）
 //   ⑤ request_id 溯源：旧 `.rid` 审计弹窗已迁至审计页链路视图（audit.html?chain=），未命中如实「账本无链路」
 //   ⑥ 登出 → 清本机会话 → 概览页回「未登录 · 只读」
-//   ⑦ L1–L6 关系图谱：旧首页 Dashboard 下线后无任何页面挂载该图谱 → 断诚实态（无图谱 DOM），
-//      真实分层界面改为 memory-layered.html 的 L6→L1 层卡片（空账本如实空态）
+//   ⑦ L1–L6 层级图谱：批次57-B 首页改挂 Stratum A 图谱（.af-graph，六枢纽由真实账本派生，空账本计数 0），
+//      旧 Dashboard 的 #layerGraph/[data-graph-hub] DOM 不复活；真实分层界面仍在 memory-layered.html
 // 后端 = home server（src/home/server.ts），E2E 进程内起服并预置测试账号。
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -64,10 +64,10 @@ test.describe('REQ-005 首页与登录 · 点击级 E2E', () => {
     const errors = collectErrors(page);
     await page.goto(HOME);
     await expect(page.locator('[data-testid="overview-page"]')).toBeVisible();
-    // 一句话结论 + 4 张统计卡（真实账本读取）
-    await expect(page.locator('.ovx-concl')).toBeVisible();
-    await expect(page.locator('.ovx-stats .ovx-stat')).toHaveCount(4);
-    await expect(page.locator('.ovx-scope')).toContainText('未登录');
+    // 标题 + 效果证据四卡（真实账本聚合；浏览器空账本显示「未取数」，不伪造）
+    await expect(page.locator('.af-title h1')).toContainText('总览工作台');
+    await expect(page.locator('.af-g4 .af-stat')).toHaveCount(4);
+    await expect(page.locator('.af-foot')).toContainText('未登录');
     // 未登录仍可读本地账本（诚实口径），并给出「去登录」快捷入口
     await expect(page.getByRole('button', { name: '去登录' })).toBeVisible();
     // 旧首页的门控遮罩 / 仪表盘 / 程序日志窗已随旧首页下线
@@ -133,18 +133,18 @@ test.describe('REQ-005 首页与登录 · 点击级 E2E', () => {
     const sid = await page.evaluate(() => localStorage.getItem('session:realpage'));
     expect(sid).toBeTruthy();
 
-    // 概览页读同一份会话：范围行如实「已登录」，且不再显示「去登录」
+    // 概览页读同一份会话：页脚如实「已登录」，且不再显示「去登录」
     await page.goto(HOME);
-    await expect(page.locator('.ovx-scope')).toContainText('已登录', { timeout: 10_000 });
+    await expect(page.locator('.af-foot')).toContainText('已登录', { timeout: 10_000 });
     await expect(page.getByRole('button', { name: '去登录' })).toHaveCount(0);
-    // 四卡为真实账本读数（空账本 = 0 条，不伪造演示数字）
-    await expect(page.locator('.ovx-stats .ovx-stat')).toHaveCount(4);
-    await expect(page.locator('.ovx-stats')).toContainText('记忆条目');
-    await expect(page.locator('.ovx-stats')).toContainText('今日写入');
-    await expect(page.locator('.ovx-stats')).toContainText('今日召回');
-    await expect(page.locator('.ovx-stats')).toContainText('今日成本');
-    await expect(page.locator('.ovx-stats .ovx-stat').first().locator('.v')).toContainText('0');
-    await expect(page.locator('.ovx-stats .ovx-stat').first().locator('.v')).toContainText('条');
+    // 效果四卡为真实账本聚合（空账本 = 未取数，不伪造演示数字）；今日数字在「今日概览」面板
+    await expect(page.locator('.af-g4 .af-stat')).toHaveCount(4);
+    await expect(page.locator('[data-testid="home-today"]')).toContainText('记忆');
+    await expect(page.locator('[data-testid="home-today"]')).toContainText('今日写入');
+    await expect(page.locator('[data-testid="home-today"]')).toContainText('今日召回');
+    await expect(page.locator('[data-testid="home-today"]')).toContainText('成本');
+    // 空账本记忆数 = 0（真实读数，不拿演示数冒充）
+    await expect(page.locator('[data-testid="home-today"] .af-today > div').first().locator('b')).toContainText('0');
     await expect(page.locator('[data-testid="overview-page"]')).not.toContainText('-58%');
     expect(errors).toEqual([]);
   });
@@ -180,18 +180,22 @@ test.describe('REQ-005 首页与登录 · 点击级 E2E', () => {
     expect(await page.evaluate(() => localStorage.getItem('session:realpage'))).toBeFalsy();
 
     await page.goto(HOME);
-    await expect(page.locator('.ovx-scope')).toContainText('未登录', { timeout: 10_000 });
+    await expect(page.locator('.af-foot')).toContainText('未登录', { timeout: 10_000 });
     await expect(page.getByRole('button', { name: '去登录' })).toBeVisible();
     expect(errors).toEqual([]);
   });
 
-  test('⑦ L1–L6 图谱：旧首页图谱未挂载（诚实态），真实分层界面在 memory-layered.html', async ({ page }) => {
+  test('⑦ L1–L6 图谱：首页挂 Stratum A 图谱（真实派生），旧 Dashboard DOM 不复活；分层界面在 memory-layered.html', async ({ page }) => {
     const errors = collectErrors(page);
-    // 旧 `#layerGraph` 及其六层锚点/缩放控件随 Dashboard 下线，现行首页不渲染图谱 DOM
+    // 旧 `#layerGraph` 及其六层锚点/缩放控件随 Dashboard 下线，不复活
     await page.goto(HOME);
     await expect(page.locator('#layerGraph')).toHaveCount(0);
     await expect(page.locator('[data-graph-hub]')).toHaveCount(0);
     await expect(page.locator('#lgZoomValue')).toHaveCount(0);
+    // 批次57-B：首页新挂 A 版式图谱，六枢纽由真实账本派生（空账本计数 0，不伪造节点）
+    await expect(page.locator('.af-graph')).toBeVisible();
+    await expect(page.locator('.af-graph .af-hub')).toHaveCount(6);
+    await expect(page.locator('.af-graph .af-core-n')).toContainText('0');
 
     // 真实分层界面：L6→L1 层卡片由账本派生；空账本如实空态（不展示 6 层卡片，不伪造节点）
     await page.goto(LAYERED);

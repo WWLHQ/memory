@@ -282,7 +282,7 @@
 | [src/web/logs/logsEntry.tsx](src/web/logs/logsEntry.tsx) | 11 | 日志记录页（REQ-011 / P15）入口 | — |
 | [src/web/logs/types.ts](src/web/logs/types.ts) | 52 | 日志记录页（REQ-011 / P15）数据模型 | LogEntry(type), LogFilter(type), L0State(type), LogLevel(type), LogForm(type), LogAction(type), ErrorKind(type) |
 | [src/web/logs/useToast.tsx](src/web/logs/useToast.tsx) | 13 | — | useToast(fn) |
-| [src/web/main.tsx](src/web/main.tsx) | 19 | 概览页入口（index.html）：按定稿 .ovx 版式整页重做，替换旧首页（问候语 + emoji 大卡）。 | — |
+| [src/web/main.tsx](src/web/main.tsx) | 19 | 概览页入口（index.html）：批次57-B 按 Stratum A 版式整页重做（总览工作台），替换旧 .ovx 首页。 | — |
 | [src/web/memory/LayerFilterBar.tsx](src/web/memory/LayerFilterBar.tsx) | 189 | 记忆层级管理页（19.11）· 每层 L0-L6 过滤栏 + 分页控件 | LayerFilterBar(fn), LayerPager(fn) |
 | [src/web/memory/LayerMemoryTable.tsx](src/web/memory/LayerMemoryTable.tsx) | 175 | 层级管理页每层内的记忆表格（带可拖拽表头列宽） | LayerMemoryTable(fn) |
 | [src/web/memory/MemoryActions.tsx](src/web/memory/MemoryActions.tsx) | 80 | 记忆管理页（REQ-006 / P8）操作区（T4） | MemoryActions(fn) |
@@ -329,9 +329,9 @@
 | [src/web/monitor/useMonitorReal.ts](src/web/monitor/useMonitorReal.ts) | 160 | 监控仪表盘（REQ-006 / P6）· 真实数据接真层 | percentile(fn), metricsFromLedger(fn), realLoadAlerts(fn), loadRealMonitorData(fn), MONITOR_REAL_DATA_SOURCE(const), RealMonitor(type), RealStorage(type) |
 | [src/web/monitor/useToast.tsx](src/web/monitor/useToast.tsx) | 13 | — | useToast(fn) |
 | [src/web/overview/Overview.tsx](src/web/overview/Overview.tsx) | 160 | REQ-003 + REQ-005 配合展示（通览演示页） | Overview(fn) |
-| [src/web/overview/OverviewPage.tsx](src/web/overview/OverviewPage.tsx) | 165 | 概览页（定稿 .ovx 版式）：一句话结论 + 4 张统计卡 + 范围行 + 编号洞察 01–04 + 快捷胶囊。 | OverviewPage(fn) |
+| [src/web/overview/OverviewPage.tsx](src/web/overview/OverviewPage.tsx) | 418 | 首页总览工作台（批次57-B · Stratum A 版式）：效果证据四卡 + L1–L6 图谱/层级行 + 异常速览 + 最近审计 | deriveHomeView(fn), OverviewPage(fn), HomeDerived(type) |
 | [src/web/overview/overviewEntry.tsx](src/web/overview/overviewEntry.tsx) | 20 | REQ-003 + REQ-005 通览演示页入口 | — |
-| [src/web/overview/overviewPageData.ts](src/web/overview/overviewPageData.ts) | 374 | 概览页（定稿 .ovx 版式）的纯派生层：把真实快照翻译成「一句话结论 / 4 卡 / 范围行 / 洞察 / 胶囊」。 | deriveOverviewView(fn), answerOverviewQuestion(fn), OVERVIEW_SUGGESTIONS(const), OverviewStatView(type), OverviewInsightView(type), OverviewScopeView(type), OverviewView(type), OverviewAnswer(type), PillTone(type) |
+| [src/web/overview/overviewPageData.ts](src/web/overview/overviewPageData.ts) | 146 | 问账本（壳层「记忆助手」复用）：只转述真实账本快照能证实的内容，不编造模型回答。 | answerOverviewQuestion(fn), OVERVIEW_SUGGESTIONS(const), OverviewAnswer(type) |
 | [src/web/params/DevPanel.tsx](src/web/params/DevPanel.tsx) | 93 | P5-T3 开发者模式（折叠面板，暴露底层参数；2.4.3 / 2.4.1 / 15.3 / 9.10 / 15.1） | DevPanel(fn) |
 | [src/web/params/KbManagementCard.tsx](src/web/params/KbManagementCard.tsx) | 297 | 全局参数页（REQ-006 / P5）· 记忆库管理卡片 | KbManagementCard(fn) |
 | [src/web/params/KbPolicyTable.tsx](src/web/params/KbPolicyTable.tsx) | 40 | P5-T3 知识库策略表（17.6 六类）—— 阶段5-E / B9：内核 policyFor() 的只读镜像。 | KbPolicyTable(fn) |
@@ -411,11 +411,11 @@
 | [src/web/shell/MemoryAssistant.tsx](src/web/shell/MemoryAssistant.tsx) | 104 | 记忆助手：首页「问账本」问答框收进快捷栏（QAT），点击展开 / 再点收起。 | MemoryAssistant(fn), MemoryAssistantProps(type) |
 | [src/web/shell/ShellLoginDialog.tsx](src/web/shell/ShellLoginDialog.tsx) | 279 | 壳层登录弹窗（批次49）：菜单栏 / 快速访问工具条 / 登录状态处三处入口共用同一个实例。 | ShellLoginDialog(fn), ShellLoginDialogProps(type) |
 | [src/web/shell/StrataScale.tsx](src/web/shell/StrataScale.tsx) | 51 | 功能导航栏底部的「层级刻度」（批次53）：L0–L6 七档真实计数。 | StrataScale(fn) |
-| [src/web/shell/Workspace.tsx](src/web/shell/Workspace.tsx) | 1910 | 工作台壳层（批次48 S1）：Ribbon + 导航树 + 标签条 + 属性检查器 + 任务窗 + 底部五标签 + 状态栏。 | Workspace(fn) |
+| [src/web/shell/Workspace.tsx](src/web/shell/Workspace.tsx) | 1918 | 工作台壳层（批次48 S1）：Ribbon + 导航树 + 标签条 + 属性检查器 + 任务窗 + 底部五标签 + 状态栏。 | Workspace(fn) |
 | [src/web/shell/dock.ts](src/web/shell/dock.ts) | 170 | 底部面板真实数据源（S6）：输出=程序动作日志尾读；问题=该日志派生的错误/警告； | loadOutputLog(fn), problemsFromLog(fn), loadScheduleRuns(fn), auditMentions(fn), loadAuditForMemory(fn), OutputLogView(type), ProblemRow(type), ScheduleRun(type), AuditRow(type), DockResult(type) |
 | [src/web/shell/layers.ts](src/web/shell/layers.ts) | 75 | L1–L6 / L0 面板真实数据（S7）：只在中心页为「分层 L1–L6」或「L0 密文」时显示的壳层条。 | loadLayerPanel(fn), PANEL_LAYERS(const), LayerCount(type), LayerPanelView(type), PanelLayer(type) |
 | [src/web/shell/navCounts.ts](src/web/shell/navCounts.ts) | 45 | 批次54：功能导航角标的真实数据加载器。 | loadNavCounts(fn), NavCountId(type), NavCounts(type) |
-| [src/web/shell/overview.ts](src/web/shell/overview.ts) | 136 | 壳层「概览」数据条（批次48 S2）：只从真实链路取值，逐项标明来源与失败原因。 | loadOverview(fn), OverviewHealth(type), OverviewBilling(type), OverviewSnapshot(type) |
+| [src/web/shell/overview.ts](src/web/shell/overview.ts) | 381 | 壳层「概览」数据条（批次48 S2）：只从真实链路取值，逐项标明来源与失败原因。 | loadOverview(fn), OverviewHealth(type), OverviewBilling(type), OverviewAuditRow(type), OverviewRecentAudits(type), OverviewRefinePanel(type), OverviewMcpRow(type), OverviewMcpPanel(type), OverviewEngineRow(type), OverviewEnginePanel(type), OverviewDataRoot(type), OverviewSnapshot(type) |
 | [src/web/shell/statusbar.ts](src/web/shell/statusbar.ts) | 106 | 状态栏真实数据（S7）：账本位置 / L0 保险库状态 / 采集器后台状态。 | loadL0Status(fn), loadCollectorStatus(fn), loadStatusbar(fn), shortLocation(fn), StoragePlaceView(type), CollectorView(type), StatusSnapshot(type) |
 | [src/web/shell/strataScale.ts](src/web/shell/strataScale.ts) | 91 | 功能导航栏底部的「层级刻度」（批次53 定义 / 批次55 改数据源）：L0–L6 七档的真实计数。 | strataViewFromOverview(fn), STRATA_LAYERS(const), StrataLayerSpec(type), StrataRowView(type), StrataScaleView(type), StrataSnapshotLike(type), StrataLayerId(type) |
 | [src/web/shell/taskpane.ts](src/web/shell/taskpane.ts) | 40 | 任务窗「待重放写入」只读视图（S5 / D6）：经 hostBridge 读 l0:pendingWrites。 | loadPendingWrites(fn), PendingWritesResult(type) |
@@ -500,7 +500,7 @@
 | [specs/ROADMAP-批次45-租户归一与成员密钥域模型-方案.md](specs/ROADMAP-批次45-租户归一与成员密钥域模型-方案.md) | 44 | ROADMAP 批次45+ — 令牌与租户欠账立项（MCP 作用域收紧前置 = 账本租户归一）+ 成员/API 密钥域模型 |
 | [specs/ROADMAP-批次B类-远端PG与多机硬过滤-方案.md](specs/ROADMAP-批次B类-远端PG与多机硬过滤-方案.md) | 102 | 批次 B 类 · 远端 PG 中枢（B4）+ 多机硬过滤（B1）+ 真实精炼（B3）方案 |
 | [specs/acceptance.md](specs/acceptance.md) | 55 | title: 验收标准 |
-| [specs/code-map.md](specs/code-map.md) | 1419 | status: draft |
+| [specs/code-map.md](specs/code-map.md) | 1440 | status: draft |
 | [specs/demo-data-baseline.md](specs/demo-data-baseline.md) | 116 | 演示/种子数据基线清单（批次42 · 阶段0 冻结） |
 | [specs/requirements.md](specs/requirements.md) | 59 | title: 需求规格 |
 | [specs/tasks/AGENT-ONBOARD.md](specs/tasks/AGENT-ONBOARD.md) | 208 | 原子任务：Agent 接入配置页（REQ-003） |
@@ -790,7 +790,7 @@ src/web/logs/logic.ts 7ca2470ef6ff
 src/web/logs/logsEntry.tsx e9e70ec7c1d4
 src/web/logs/types.ts c57557c7576e
 src/web/logs/useToast.tsx 85cd09d2e1f5
-src/web/main.tsx d194914b0d06
+src/web/main.tsx c3a2e36cac32
 src/web/memory/LayerFilterBar.tsx 5f8c2bea1169
 src/web/memory/LayerMemoryTable.tsx fa30ffc9c764
 src/web/memory/MemoryActions.tsx 9983e64102b0
@@ -837,9 +837,9 @@ src/web/monitor/useMonitorMirror.ts 9e87dd8cc071
 src/web/monitor/useMonitorReal.ts 24b6151c1bed
 src/web/monitor/useToast.tsx 85cd09d2e1f5
 src/web/overview/Overview.tsx b4303483348f
-src/web/overview/OverviewPage.tsx f24c95b27b85
+src/web/overview/OverviewPage.tsx 7ef465b34016
 src/web/overview/overviewEntry.tsx 5f4488678cc7
-src/web/overview/overviewPageData.ts 4a6a7479dc7c
+src/web/overview/overviewPageData.ts 3ef40afe6bc5
 src/web/params/DevPanel.tsx adbe8f5c483f
 src/web/params/KbManagementCard.tsx 42c5a719d2f8
 src/web/params/KbPolicyTable.tsx c39b52ed1039
@@ -919,11 +919,11 @@ src/web/shell/Icons.tsx d33b2ab2156f
 src/web/shell/MemoryAssistant.tsx a6c06a6732ad
 src/web/shell/ShellLoginDialog.tsx 200a169aee11
 src/web/shell/StrataScale.tsx 4455d8f22378
-src/web/shell/Workspace.tsx b3ce42f1b47c
+src/web/shell/Workspace.tsx fdc00a7a25a4
 src/web/shell/dock.ts 029c48568f1d
 src/web/shell/layers.ts 8f18e012b258
 src/web/shell/navCounts.ts 29d436b7129f
-src/web/shell/overview.ts 57baa2c331f0
+src/web/shell/overview.ts 5cda6ab5fc6a
 src/web/shell/statusbar.ts adb851ba53b2
 src/web/shell/strataScale.ts 5d7103d2ad03
 src/web/shell/taskpane.ts 39d5562ae71b
@@ -1003,7 +1003,7 @@ specs/ROADMAP-批次42-未接线三件套-方案.md df1a6f9d6ed5
 specs/ROADMAP-批次45-租户归一与成员密钥域模型-方案.md 633abaaaad54
 specs/ROADMAP-批次B类-远端PG与多机硬过滤-方案.md 0c7857454a7d
 specs/acceptance.md 664f1bb0d8cf
-specs/code-map.md b4e61e8c4031
+specs/code-map.md afe46b44efd8
 specs/demo-data-baseline.md 1d9af215ac78
 specs/requirements.md 6e72739fe35b
 specs/tasks/AGENT-ONBOARD.md 900d19783798

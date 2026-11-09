@@ -29,6 +29,14 @@ const m = vi.hoisted(() => ({
       { layer: 'L3', count: 0 }, { layer: 'L4', count: 0 }, { layer: 'L5', count: 2 },
       { layer: 'L6', count: 1 },
     ],
+    // 批次57-B 新增面板字段：壳层本身不消费（仅概览页 iframe 用）， fixture 补齐为诚实空/不可用态
+    effectGains: [],
+    graph: { hubs: [], nodes: [], edges: [], stats: { total: 7, rendered: 0, truncated: 0, refined: 0, conflicts: 1, conflictMemories: 0, merges: 0, grafts: 0, masked: 0 } },
+    recentAudits: { ok: true, rows: [], total: 12, error: null },
+    refine: { ok: false, available: false, view: null, error: '组件单测：不探主进程' },
+    mcp: { ok: false, available: false, endpoint: null, clients: [], error: '组件单测：不探主进程' },
+    engines: { ok: false, available: false, engines: [], error: '组件单测：不探主进程' },
+    dataRoot: { available: false, root: null, error: '组件单测：不探主进程' },
   },
 }));
 vi.mock('../overview.ts', () => ({

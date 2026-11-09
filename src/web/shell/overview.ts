@@ -11,12 +11,18 @@
 import { homeBaseUrl } from '../backend.ts';
 import { hasActiveSession } from '../Home/crossTabAuth.ts';
 import { getHomeFeed, emptySync } from '../Home/coreHome.ts';
+import { emptyLayerGraph, type LayerGraph } from '../Home/layerGraph.ts';
 import type { RawHomeFeed } from '../../home/dashboard.ts';
 import { getKernelStorage } from '../kernel.ts';
 import { currentSessionId } from '../shared/session.ts';
 import { hostCall, hostCapability } from '../../desktop/hostBridge.ts';
 import type { Gain } from '../../types/agentOnboard.ts';
 import type { HomeFacts, HomeStrataCount } from '../Home/coreHome.ts';
+import type { AuditRecord } from '../../core/memagent/types.ts';
+import { refineQueueState, refineQueueAvailable, type RefineQueueView } from '../params/refineQueue.ts';
+import { hostLlmAvailable, type LlmEngineView } from '../hostLlm.ts';
+import { getDataRoot } from '../memory/dataRoot.ts';
+import type { McpWireState } from '../../agentOnboard/mcpClients.ts';
 
 export interface OverviewHealth {
   status: 'ok' | 'down';
@@ -31,6 +37,68 @@ export interface OverviewBilling {
   /** 视图中 vendor_live 的引擎数 / 总引擎数；仅 status=ok 时有值 */
   live?: number;
   total?: number;
+}
+
+/** 最近审计一行（UTC+08:00 时钟 + 动作 + 人话摘要，均来自内核审计账本） */
+export interface OverviewAuditRow {
+  t: string;
+  action: string;
+  memo: string;
+}
+
+export interface OverviewRecentAudits {
+  ok: boolean;
+  rows: OverviewAuditRow[];
+  /** 全量审计行数（提示「查看全部」口径）；读不到为 0 */
+  total: number;
+  error: string | null;
+}
+
+/** 补炼队列面板（主进程真队列；非桌面壳诚实不可用） */
+export interface OverviewRefinePanel {
+  ok: boolean;
+  /** 桌面壳内可探主进程（含「没加载/不可用」的网关实况）；浏览器 = false */
+  available: boolean;
+  view: RefineQueueView | null;
+  error: string | null;
+}
+
+/** MCP 客户端接入面板（主进程读本机配置；非桌面壳诚实不可用） */
+export interface OverviewMcpRow {
+  id: string;
+  name: string;
+  state: McpWireState;
+  label: string;
+  detail: string;
+}
+
+export interface OverviewMcpPanel {
+  ok: boolean;
+  available: boolean;
+  endpoint: string | null;
+  clients: OverviewMcpRow[];
+  error: string | null;
+}
+
+/** 引擎延迟排行（llm:config 引擎 lastLatencyMs；未拨测 = null，不编造） */
+export interface OverviewEngineRow {
+  name: string;
+  model: string;
+  latencyMs: number | null;
+}
+
+export interface OverviewEnginePanel {
+  ok: boolean;
+  available: boolean;
+  engines: OverviewEngineRow[];
+  error: string | null;
+}
+
+/** 数据根（dataRoot:get）；非桌面壳诚实不可用 */
+export interface OverviewDataRoot {
+  available: boolean;
+  root: string | null;
+  error: string | null;
 }
 
 export interface OverviewSnapshot {
@@ -50,15 +118,82 @@ export interface OverviewSnapshot {
   facts: HomeFacts | null;
   /** 批次55：同一次账本读取派生的 L0–L6 计数，供层级刻度直接复用；读不到时 null */
   strata: HomeStrataCount[] | null;
+  /** 批次57-B：层级图谱 / 效果证据四卡（来自 getHomeFeed，同一次账本读取） */
+  effectGains: Gain[];
+  graph: LayerGraph;
+  /** 批次57-B：以下面板各自独立取数，任一失败只影响自身面板 */
+  recentAudits: OverviewRecentAudits;
+  refine: OverviewRefinePanel;
+  mcp: OverviewMcpPanel;
+  engines: OverviewEnginePanel;
+  dataRoot: OverviewDataRoot;
 }
 
 interface RawBillingEngine {
   provenance?: string;
 }
 
+interface McpClientRaw {
+  id: string;
+  name: string;
+  state: McpWireState;
+  installed: boolean;
+  displayPath: string | null;
+}
+
+interface McpScanReply {
+  endpoint: string;
+  clients: McpClientRaw[];
+}
+
+const MCP_STATE_LABEL: Record<string, string> = {
+  wired: '已接入',
+  missing_auth: '缺令牌',
+  missing_entry: '未配置',
+  conflict: '冲突',
+  invalid: '无法解析',
+  no_config: '无配置',
+  manual: '需手工',
+};
+
 function describeError(e: unknown): string {
   const msg = (e as { message?: string })?.message;
   return msg && msg.trim() ? msg : String(e);
+}
+
+/** UTC+08:00 时钟（审计 ts 是 epoch；用户可见时间统一本地时区） */
+function fmtClock(ts: number): string {
+  const d = new Date(ts + 8 * 3600_000);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
+}
+
+function asRecord(detail: unknown): Record<string, unknown> {
+  return (detail && typeof detail === 'object' ? detail : {}) as Record<string, unknown>;
+}
+
+/** 把一条审计翻译成人话摘要（recall 命中数 / write 结果 / 其余取 detail 关键字段，绝不编造） */
+function auditMemo(a: AuditRecord): string {
+  const d = asRecord(a.detail);
+  switch (a.action) {
+    case 'recall': {
+      const hits = String(d.hits ?? 0);
+      const q = typeof d.query === 'string' && d.query ? ` · ${d.query.slice(0, 24)}` : '';
+      return `命中 ${hits}${q}`;
+    }
+    case 'write':
+      return typeof d.error === 'string' && d.error ? d.error : '入库成功';
+    case 'llm_fallback':
+      return `${String(d.reason ?? '?')}（${String(d.code ?? '?')}）`;
+    default: {
+      const parts: string[] = [];
+      for (const k of ['project_id', 'mem_id', 'model', 'engine', 'source']) {
+        const v = d[k];
+        if (typeof v === 'string' && v) parts.push(v);
+      }
+      return parts.length ? parts.slice(0, 2).join(' · ') : '账本无明细字段';
+    }
+  }
 }
 
 async function probeHealth(): Promise<OverviewHealth> {
@@ -103,33 +238,143 @@ async function probeBilling(session: boolean): Promise<OverviewBilling> {
   }
 }
 
+/** 最近审计：内核账本 queryAudit 取末尾 N 条（倒序），读不到给原因（不冒充空账本） */
+async function loadRecentAudits(limit: number): Promise<OverviewRecentAudits> {
+  try {
+    const audits = await getKernelStorage().queryAudit({});
+    const rows = audits.slice(-limit).reverse().map((a) => ({
+      t: typeof a.ts === 'number' ? fmtClock(a.ts) : '无时间戳',
+      action: a.action,
+      memo: auditMemo(a),
+    }));
+    return { ok: true, rows, total: audits.length, error: null };
+  } catch (e) {
+    return { ok: false, rows: [], total: 0, error: `账本读不到：${describeError(e)}` };
+  }
+}
+
+/** 补炼队列：主进程真队列（refine:state）；非桌面壳诚实不可用 */
+async function loadRefinePanel(): Promise<OverviewRefinePanel> {
+  if (!refineQueueAvailable()) {
+    return { ok: false, available: false, view: null, error: '非桌面壳：补炼队列由主进程维护，浏览器模式没有它' };
+  }
+  const r = await refineQueueState();
+  return { ok: r.ok, available: true, view: r.view, error: r.error };
+}
+
+/** MCP 接入：主进程读本机客户端配置（mcp:clients）；非桌面壳诚实不可用 */
+async function loadMcpPanel(sid: string | null): Promise<OverviewMcpPanel> {
+  if (hostCapability() === 'none') {
+    return { ok: false, available: false, endpoint: null, clients: [], error: '非桌面壳：无法读取本机 MCP 客户端配置' };
+  }
+  try {
+    const r = await hostCall<McpScanReply>('mcp:clients', [sid]);
+    const clients = (r.clients ?? [])
+      .filter((c) => c.installed !== false)
+      .map((c) => ({
+        id: c.id,
+        name: c.name,
+        state: c.state,
+        label: MCP_STATE_LABEL[c.state] ?? c.state,
+        detail: c.displayPath ?? '',
+      }));
+    return { ok: true, available: true, endpoint: r.endpoint ?? null, clients, error: null };
+  } catch (e) {
+    return { ok: false, available: true, endpoint: null, clients: [], error: `读取本机配置失败：${describeError(e)}` };
+  }
+}
+
+/** 引擎延迟排行：llm:config 各引擎 lastLatencyMs（未拨测 = null，不编造） */
+async function loadEnginePanel(sid: string | null): Promise<OverviewEnginePanel> {
+  if (!hostLlmAvailable()) {
+    return { ok: false, available: false, engines: [], error: '非桌面壳：无 llm:config 通道' };
+  }
+  try {
+    const r = await hostCall<{ ok: boolean; engines?: LlmEngineView[]; error?: string }>(
+      'llm:config',
+      [sid],
+    );
+    if (!r.ok || !Array.isArray(r.engines)) {
+      return { ok: false, available: true, engines: [], error: r.error ?? '主进程未返回引擎列表' };
+    }
+    const rows = r.engines.map((e) => ({
+      name: e.name || e.id,
+      model: e.model,
+      latencyMs: typeof e.lastLatencyMs === 'number' ? e.lastLatencyMs : null,
+    }));
+    return { ok: true, available: true, engines: rows, error: null };
+  } catch (e) {
+    return { ok: false, available: true, engines: [], error: describeError(e) };
+  }
+}
+
+/** 数据根：dataRoot:get 真目录；非桌面壳诚实不可用 */
+async function loadDataRoot(): Promise<OverviewDataRoot> {
+  if (hostCapability() === 'none') {
+    return { available: false, root: null, error: '非桌面壳：无数据根' };
+  }
+  const r = await getDataRoot();
+  return r.ok ? { available: true, root: r.info.root, error: null } : { available: true, root: null, error: r.error };
+}
+
 /** 真实加载：所有来源并行，任一失败都只影响自身字段，不影响其它读数 */
 export async function loadOverview(): Promise<OverviewSnapshot> {
   const session = hasActiveSession();
-  const [feed, health, billing] = await Promise.all([
+  const sid = currentSessionId();
+  const [
+    feed,
+    health,
+    billing,
+    recent,
+    refine,
+    mcp,
+    engines,
+    dataRoot,
+  ] = await Promise.all([
     getHomeFeed(getKernelStorage()).catch((e) => ({
       raw: { gains: [], anomalies: [], activeMemories: [], todos: [] } as RawHomeFeed,
       sync: emptySync(),
-      graph: null,
-      effectGains: [],
+      graph: emptyLayerGraph(),
+      effectGains: [] as Gain[],
       storageError: describeError(e),
-      facts: null,
-      strata: null,
+      facts: null as HomeFacts | null,
+      strata: null as HomeStrataCount[] | null,
     })),
     probeHealth(),
     probeBilling(session),
+    loadRecentAudits(8),
+    loadRefinePanel(),
+    loadMcpPanel(sid),
+    loadEnginePanel(sid),
+    loadDataRoot(),
   ]);
+
+  const f = feed as typeof feed & {
+    storageError?: string | null;
+    graph?: LayerGraph | null;
+    effectGains?: Gain[];
+    facts?: HomeFacts | null;
+    strata?: HomeStrataCount[] | null;
+    sync?: { pendingSync?: number };
+  };
   return {
     loadedAt: Date.now(),
     kernelMode: hostCapability() === 'none' ? 'browser' : 'host',
-    storageError: (feed as { storageError?: string | null }).storageError ?? null,
-    gains: (feed.raw.gains ?? []) as Gain[],
-    raw: feed.raw,
-    pendingSync: (feed as { sync?: { pendingSync?: number } }).sync?.pendingSync ?? 0,
+    storageError: f.storageError ?? null,
+    gains: (f.raw.gains ?? []) as Gain[],
+    effectGains: f.effectGains ?? [],
+    graph: f.graph ?? emptyLayerGraph(),
+    raw: f.raw,
+    pendingSync: f.sync?.pendingSync ?? 0,
     health,
     session,
     billing,
-    facts: (feed as { facts?: HomeFacts | null }).facts ?? null,
-    strata: (feed as { strata?: HomeStrataCount[] | null }).strata ?? null,
+    facts: f.facts ?? null,
+    strata: f.strata ?? null,
+    recentAudits: recent,
+    refine,
+    mcp,
+    engines,
+    dataRoot,
   };
 }

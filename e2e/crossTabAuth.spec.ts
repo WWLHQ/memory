@@ -53,10 +53,10 @@ test.describe('登录态跨页共享', () => {
     const sid = await page.evaluate(() => localStorage.getItem('session:realpage'));
     expect(sid).toBeTruthy();
 
-    // 首页（OverviewPage）：读同一份会话 → 范围行如实显示「已登录」，且不出现登录门控
+    // 首页（OverviewPage）：读同一份会话 → 页脚如实显示「已登录」，且不出现登录门控
     await page.goto(HOME_APP);
     await expect(page.locator('[data-testid="overview-page"]')).toBeVisible();
-    await expect(page.locator('.ovx-scope')).toContainText('已登录', { timeout: 10_000 });
+    await expect(page.locator('.af-foot')).toContainText('已登录', { timeout: 10_000 });
     await expect(page.getByRole('button', { name: /去登录/ })).toHaveCount(0);
 
     // 接入页：同样无登录门控（会话共享）

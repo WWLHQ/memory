@@ -16,6 +16,7 @@ import { ContextMenu, type ContextMenuItem, type ContextMenuState } from './Cont
 import { ShellLoginDialog } from './ShellLoginDialog.tsx';
 import { MemoryAssistant } from './MemoryAssistant.tsx';
 import { loadOverview, type OverviewSnapshot } from './overview.ts';
+import { emptyLayerGraph } from '../Home/layerGraph.ts';
 import { loadPendingWrites, type PendingWritesResult } from './taskpane.ts';
 import {
   BOTTOM_TABS, NAV, PAGES, RIBBON, findNav, flattenNav,
@@ -240,6 +241,13 @@ export function Workspace() {
         pendingSync: 0,
         facts: null,
         strata: null,
+        effectGains: [],
+        graph: emptyLayerGraph(),
+        recentAudits: { ok: false, rows: [], total: 0, error: '概览聚合异常' },
+        refine: { ok: false, available: false, view: null, error: '概览聚合异常' },
+        mcp: { ok: false, available: false, endpoint: null, clients: [], error: '概览聚合异常' },
+        engines: { ok: false, available: false, engines: [], error: '概览聚合异常' },
+        dataRoot: { available: false, root: null, error: '概览聚合异常' },
         health: { status: 'down', detail: '概览聚合异常', checkedAt: Date.now() },
         session: hasActiveSession(), billing: { status: 'unavailable', detail: '概览聚合异常' },
       }))

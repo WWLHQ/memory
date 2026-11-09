@@ -1416,3 +1416,24 @@ status: draft
 > **B·效果验证**：真浏览器（现有 5180 dev 服务 + Chromium，`verify-l1.cjs`）7 项断言全过：浅色 `.app-mark` 背景 = rgb(0,136,204)（A 电青）、body = rgb(243,245,248)（A 纸灰）、ribbon = rgb(237,241,246)（A surface2）；深色 `.app-mark` = rgb(34,211,238)（A 辉光青）、body = rgb(6,11,22)（A 深空）、ribbon = rgb(16,27,48)；页面无 `1467`、无 pageerror。端到端链路：`:root` A 源令牌 → 旧命名别名（var(--bg)/var(--ink) …）→ 既有组件 var() 引用 → 渲染色。截图 `l1-shell-light.png` / `l1-shell-light2.png`。
 > **C·变异验证**：C1 共 2 个令牌点注入缺陷，均**指定契约测试真实红灯 → 原样还原 → 全绿**：M1 `p0.css` 浅色 `--accent #0088CC→#0f6cbd` → `aTokens.test.ts`「p0.css 亮色令牌」红（`to match /--accent:\s*#0088CC/i` 失配）→ 还原复绿；M2 `theme.css` 浅色 `--accent #0088CC→#2f6fed`（旧壳层色）→「shell/theme.css 令牌 = A」红 → 还原复绿；`git diff` 确认无变异残留。C2 输入/状态矩阵：浅色 A 取值 / 深色 A 取值 / 旧命名别名仍解析到 A / `--r:8px` 生效 / 无演示数字。全部如实，无静默回退旧配色。
 > **已知边界**：本轮 L1 只覆盖用户点名的 `p0.css` 与壳层 `theme.css` 两份共享源；`src/web/shared/theme.css`（8 页暗色共用）与 `legacyLight.css` / `p0Legacy.css`（9 页明/暗叠加层）本轮**未动**，这些页在各自叠加层下仍走旧暗色令牌，后续批次按需对齐。首页（index.html）iframe 加载的是 `overviewPage.css` 自有令牌、非 p0.css——其 A 化随 57-B 首页改版一并完成。`color-mix` 依赖 Chromium ≥111，Electron 45 满足。
+
+
+### 批次57-B：L3 首页改版式（Stratum A）并全部接真实数据（2026-11-10）
+
+> 口径：用户下令「记忆库先暂停，只改首页」+「首页数据要接入真实数据」。本小节为 **L3 首页**：把 index.html 承载的 `OverviewPage` 版式对齐已认可的 A 预览 pg-home（效果四卡 + L1–L6 图谱/层级行 + 异常速览 + 最近审计 + 右侧遥测四面板 + 页脚），所有读数接 `loadOverview()` 单次真实取数（内核账本/审计 + 主进程 IPC refine:state·mcp:clients·llm:config·dataRoot:get + /api/health + billing）；读不到显示诚实空态/不可用并给原因，绝不用演示数或 0 冒充成功读数。记忆库本轮不动。
+
+| 能力 | 代码落点 | 测试 |
+|---|---|---|
+| 首页版式 A 化 | `src/web/overview/OverviewPage.tsx` 重写为 `.af-*` 版式（头部/四卡/图谱/层级行/异常/审计/右侧遥测/页脚）；`overviewPage.css` 内嵌 A 令牌（浅 `.ov-page` / 深 `html[data-theme="dark"] .ov-page`），组件全 `var()` 引用自动跟随主题 | `home.spec.ts` ①④⑦ / `overview.spec.ts` / `crossTabAuth.spec.ts` |
+| 真实数据面 | `src/web/shell/overview.ts` 新增 `loadRecentAudits/loadRefinePanel/loadMcpPanel/loadEnginePanel/loadDataRoot` + `OverviewSnapshot` 扩 `effectGains/graph/recentAudits/refine/mcp/engines/dataRoot`；`loadOverview` 并行取数、单源失败只影响自身字段 | `homeView.test.ts` + `workspace.test.tsx` |
+| 诚实降级 | 各面板 `!available / !ok / 空` 三分支；gains 空→「未取数」、strata null→「未取到」、审计空→「账本为空」、浏览器模式侧栏「非桌面壳不可用」；页脚真实 health/kernelMode/会话/读取时钟 | `homeView.test.ts` + e2e ①④（空账本 0/未取数、无 `-58%`） |
+| 派生纯函数（C 哨兵） | `OverviewPage.deriveHomeView` 导出：dateText 东八区 / dataRootText / sessionText / healthOk / l0Alert / gains·graph 原样透传 | `homeView.test.ts` 6 例 |
+| 旧派生清理 | `overviewPageData.ts` 删 `deriveOverviewView/OverviewView` 等旧类型与 buildInsights（保留 `answerOverviewQuestion`/`OVERVIEW_SUGGESTIONS` 供记忆助手复用） | typecheck + 既有 shell 测试 |
+| 壳层降级补字段 | `Workspace.tsx` refreshOverview catch 补新字段空值 + `emptyLayerGraph()` | `workspace.test.tsx` |
+| 维护索引 | `specs/code-index.generated.md`、`specs/code-map.md` | `code:index -- --write` + `code:index:check` |
+
+> **批次57-B 三道闸门证据**：
+> **A·影响面回归**：影响面 = 首页 `OverviewPage.tsx/overviewPage.css/overviewPageData.ts` + 壳层 `overview.ts/Workspace.tsx` + e2e 三 spec + `main.tsx` 注释 + `workspace.test.tsx` + 新增 `homeView.test.ts`；**未改内核公开契约 / 存储序列化 / 审计格式 / MCP 工具 / 端口 / 其余 iframe 页 / 记忆库**。静态四件全过：typecheck 两工程 0 错、oxlint 0/0、`code:index:check`（378 源码 / 120 文档）、`check:no-demo` 0 命中。全量回归走串行分片 `test:gate` **229 文件 / 2648 例 0 失败**（片4 原生崩溃 0xC0000409 按口径重试一次后绿；先前并行 `test:coverage` 的 4 例超时经单跑 41/41 绿证实为负载 flaky、非回归）。既有行为回归：去登录入口、登录门控下线、跨页会话共享、旧 Dashboard DOM 不复活均保持绿。
+> **B·效果验证**：AC→用例映射：① 版式 A 化 → e2e ① `.af-title h1` 总览工作台 + `.af-g4 .af-stat`=4 + `.af-foot` 未登录 + 去登录可见；④ 登录→`.af-foot` 已登录 + 4 卡 + `home-today` 含记忆/今日写入/今日召回/成本 + 首卡 `b`=0 + 无 `-58%`；⑦ `.af-graph` 可见 + `.af-hub`=6 + `.af-core-n`=0 + 旧 `#layerGraph/[data-graph-hub]/#lgZoomValue`=0；overview iframe 正确加载首页/接入页；crossTabAuth `.af-foot` 已登录。e2e 子集 **10/10 通过**（真 dist 产物 + 真 home 后端 + CDP Chromium）。纯派生 `homeView.test.ts` 6 例：东八区时钟 / 会话文案 / healthOk 仅 ok / 数据根真目录或原因 / l0Alert 仅 error 级 L0 / 四卡图谱透传。真浏览器浅/深截图目视：版式对齐 A、无溢出、令牌跟随主题（`home-light.png` / `home-dark.png`，临时 spec 截图后已删）。
+> **C·变异验证**：C1 变异点 = `deriveHomeView` 的 `healthOk: s.health.status === 'ok'` 注入 `=== 'down'` → `homeView.test.ts`「healthOk 只在后端真实可达（status=ok）时为真」**真实红灯**（expected false to be true）→ 原样还原 → 6/6 复绿，`git diff` 确认无变异残留。C2 输入/状态矩阵：session 有/无 → 已登录/未登录·只读；dataRoot 可用/不可用 → 真目录/原因；health ok/down → true/false；anomalies error 级 L0/写密钥/锁定 → l0Alert、warn 或无 → null；gains/graph 原样透传不重算不伪造。全部诚实空态或明确失败，无静默成功。
+> **已知边界**：浏览器直连（无主进程）时侧栏补炼/MCP/引擎与数据根如实「非桌面壳不可用」，今日数字读浏览器临时账本；桌面壳登录后才读主进程 IPC 真遥测。效果四卡空账本恒 4 张「未取数」（`computeOnboardGains`/`emptyOnboardGains` 同口径），图谱恒 6 枢纽 count 0（`GRAPH_LAYERS` 派生），不伪造节点。记忆库版式本轮未动（用户暂停）。

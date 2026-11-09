@@ -67,7 +67,7 @@ test.describe('REQ-003 + REQ-005 通览页 · 点击级 E2E', () => {
     await expect(page.locator('#stage')).toHaveAttribute('src', /\/index\.html/);
     const home = page.frameLocator('#stage');
     await expect(home.locator('[data-testid="overview-page"]')).toBeVisible();
-    await expect(home.locator('.ovx-title')).toContainText('今天');
+    await expect(home.locator('.af-title h1')).toContainText('总览工作台');
 
     // 切到接入配置页（REQ-003）：持久化名单恢复 3 张卡（未拨测 → 未配置）；卡片在「接入配置」页签
     await page.click('.nav .item:has-text("Agent 接入配置页")');
