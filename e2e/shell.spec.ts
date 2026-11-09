@@ -199,13 +199,84 @@ test.describe('壳层 · 登录弹窗与右键菜单（真实后端）', () => {
     await expect(page.locator('[data-testid="shell-inspector"]')).toHaveClass(/collapsed/);
   });
 
-  test('中心页表格行右键：壳层菜单在 iframe 同源文档内挂载（单测覆盖，见 workspace.test.tsx）', async ({ page }) => {
+  test('壳层全域右键：状态栏 / 功能区 / QAT 都有非空菜单，且阻止浏览器原生菜单', async ({ page }) => {
+    await page.addInitScript(() => {
+      // 记录 contextmenu 传播结束后的 defaultPrevented：true 表示原生菜单被壳层拦下
+      document.addEventListener('contextmenu', (e) => {
+        setTimeout(() => { (window as unknown as { __ctxPrevented?: boolean }).__ctxPrevented = e.defaultPrevented; }, 0);
+      }, true);
+    });
+    await openShell(page);
+    await expect(page.locator('[data-testid="qa-login"]')).toBeVisible();
+
+    await page.locator('.statusbar').click({ button: 'right' });
+    const menu = page.locator('[data-testid="ctx-shellmenu"]');
+    await expect(menu).toBeVisible();
+    await expect(menu).toContainText('右键：状态栏');
+    await expect(menu.locator('[role="menuitem"]')).not.toHaveCount(0);
+    const copySel = page.locator('[data-testid="ctx-shellmenu-copySel"]');
+    await expect(copySel).toBeDisabled();
+    await expect(copySel).toHaveAttribute('title', /当前页面上没有选中文本/);
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __ctxPrevented?: boolean }).__ctxPrevented)).toBe(true);
+    // 真实动作：刷新中心区与底部读数
+    await page.locator('[data-testid="ctx-shellmenu-refresh"]').click();
+    await expect(page.locator('[data-testid="sb-msg"]')).toHaveText(/已刷新中心区真实页面/);
+
+    await page.locator('.ribbon-body').click({ button: 'right' });
+    await expect(page.locator('[data-testid="ctx-shellmenu"]')).toContainText('右键：功能区');
+    await page.locator('[data-testid="ctx-shellmenu-login"]').click();
+    await expect(page.locator('[data-testid="shell-login-modal"]')).toBeVisible();
+    await page.locator('[data-testid="slm-close"]').click();
+
+    await page.locator('.qa').click({ button: 'right' });
+    await expect(page.locator('[data-testid="ctx-shellmenu"]')).toContainText('右键：快速访问工具条');
+  });
+
+  test('QAT 登录入口：1024 宽度与浅/深主题下都有可见文字、可点开真实登录弹窗', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await openShell(page);
+    const qaLogin = page.locator('[data-testid="qa-login"]');
+    await expect(qaLogin).toBeVisible();
+    await expect(qaLogin).toContainText('登录');
+    await expect(qaLogin).toBeEnabled();
+    // 浅色主题
+    await qaLogin.click();
+    await expect(page.locator('[data-testid="shell-login-modal"]')).toBeVisible();
+    await expect(page.locator('[data-testid="slm-account"]')).toBeVisible();
+    await page.locator('[data-testid="slm-close"]').click();
+    // 切到深色（跟随系统 → 浅色 → 深色）后再验一次可见可点
+    for (let i = 0; i < 3; i++) {
+      if (await page.locator('html').getAttribute('data-theme') === 'dark') break;
+      await page.locator('[data-testid="qa-theme"]').click();
+    }
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    await expect(qaLogin).toBeVisible();
+    await expect(qaLogin).toBeEnabled();
+    await qaLogin.click();
+    await expect(page.locator('[data-testid="shell-login-modal"]')).toBeVisible();
+  });
+
+  test('中心页 iframe 非表格行右键 → 壳层页面菜单，原生菜单同样被拦下（行菜单由单测覆盖）', async ({ page }) => {
     // 说明：浏览器模式下记忆页账本来自页面自身内存态（真实写入需 L0 密钥），E2E 不伪造账本行。
-    // 壳层对同源 iframe 的 contextmenu 监听与菜单真实动作由单测用真实 DOM 行覆盖。
+    // 因此这里验证「非行位置也被壳层接管」；真实 DOM 行的菜单动作见 workspace.test.tsx。
+    await page.addInitScript(() => {
+      document.addEventListener('contextmenu', (e) => {
+        setTimeout(() => { (window as unknown as { __ctxPrevented?: boolean }).__ctxPrevented = e.defaultPrevented; }, 0);
+      }, true);
+    });
     await openShell(page);
     await page.getByRole('treeitem', { name: /全部记忆/ }).click();
-    await expect(page.frameLocator('iframe.page-frame[title*="memory.html"]').locator('body')).toBeVisible();
-    // 未伪造行：空账本时页面如实显示空态，壳层不截获非表格行右键（保留原生菜单）
+    const frame = page.frameLocator('iframe.page-frame[title*="memory.html"]');
+    await expect(frame.locator('body')).toBeVisible();
+    await frame.locator('body').click({ button: 'right', position: { x: 20, y: 20 } });
+    const menu = page.locator('[data-testid="ctx-framemenu"]');
+    await expect(menu).toBeVisible();
+    await expect(menu).toContainText('中心页（iframe）');
+    const copySel = page.locator('[data-testid="ctx-framemenu-copySel"]');
+    await expect(copySel).toBeDisabled();
+    await expect(copySel).toHaveAttribute('title', /页面内没有选中文本/);
     await expect(page.locator('[data-testid="ctx-rowmenu"]')).toHaveCount(0);
+    const prevented = await frame.locator('body').evaluate(() => (window as unknown as { __ctxPrevented?: boolean }).__ctxPrevented);
+    expect(prevented).toBe(true);
   });
 });

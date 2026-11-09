@@ -151,8 +151,11 @@ describe('工作台壳层', () => {
     fireEvent.click(screen.getByTestId('slm-close'));
     expect(screen.queryByTestId('shell-login-modal')).toBeNull();
 
-    // ② 快速访问工具条（QAT）
-    fireEvent.click(screen.getByTestId('qa-login'));
+    // ② 快速访问工具条（QAT）：必须有可见文字，不只是同形图标
+    const qaLogin = screen.getByTestId('qa-login');
+    expect(qaLogin).toBeEnabled();
+    expect(qaLogin).toHaveTextContent('登录');
+    fireEvent.click(qaLogin);
     expect(screen.getByTestId('shell-login-modal')).toBeInTheDocument();
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.queryByTestId('shell-login-modal')).toBeNull();
@@ -243,6 +246,7 @@ describe('工作台壳层', () => {
       const ev = doc.createEvent('MouseEvent');
       ev.initMouseEvent('contextmenu', true, true, window, 0, x, y, x, y, false, false, false, false, 2, null);
       act(() => { node.dispatchEvent(ev); });
+      return ev;
     };
     fireCtx(tr, 100, 100);
     expect(screen.getByTestId('ctx-rowmenu')).toBeInTheDocument();
@@ -254,9 +258,39 @@ describe('工作台壳层', () => {
     fireEvent.click(screen.getByTestId('ctx-rowmenu-copyId'));
     expect(writeText).toHaveBeenCalledWith('mem_fixture_1');
     await waitFor(() => expect(screen.getByTestId('sb-msg')).toHaveTextContent('已复制记忆 ID：mem_fixture_1'));
-    // 非表格行不截获：保持浏览器原生菜单，不伪造空菜单
-    fireCtx(doc.documentElement, 10, 10);
+    // 非表格行同样被壳层接管：给页面级菜单（不是空菜单，也不放原生菜单过去）
+    const plainEv = fireCtx(doc.documentElement, 10, 10);
+    expect(plainEv.defaultPrevented).toBe(true);
     expect(screen.queryByTestId('ctx-rowmenu')).toBeNull();
+    expect(screen.getByTestId('ctx-framemenu')).toHaveTextContent('中心页（iframe）');
+    const pageCopySel = screen.getByTestId('ctx-framemenu-copySel');
+    expect(pageCopySel).toBeDisabled();
+    expect(pageCopySel.getAttribute('title')).toContain('页面内没有选中文本');
+    expect(screen.getByTestId('ctx-framemenu-refresh')).toBeEnabled();
+  });
+
+  it('壳层全域右键：标题栏/功能区/状态栏都有非空菜单，且阻止浏览器原生菜单', async () => {
+    const { container } = await renderShell();
+    // RTL fireEvent 返回 false 表示事件已被 preventDefault（原生菜单不会出现）
+    expect(fireEvent.contextMenu(container.querySelector('.statusbar') as HTMLElement)).toBe(false);
+    const menu = screen.getByTestId('ctx-shellmenu');
+    expect(menu).toHaveTextContent('右键：状态栏');
+    expect(menu.querySelectorAll('[role="menuitem"]').length).toBeGreaterThan(0);
+    const copySel = screen.getByTestId('ctx-shellmenu-copySel');
+    expect(copySel).toBeDisabled();
+    expect(copySel.getAttribute('title')).toContain('当前页面上没有选中文本');
+    // 真实动作：刷新中心区与底部读数
+    fireEvent.click(screen.getByTestId('ctx-shellmenu-refresh'));
+    await waitFor(() => expect(screen.getByTestId('sb-msg')).toHaveTextContent('已刷新中心区真实页面'));
+
+    expect(fireEvent.contextMenu(container.querySelector('.ribbon-body') as HTMLElement)).toBe(false);
+    expect(screen.getByTestId('ctx-shellmenu')).toHaveTextContent('右键：功能区');
+    fireEvent.click(screen.getByTestId('ctx-shellmenu-login'));
+    expect(screen.getByTestId('shell-login-modal')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('slm-close'));
+
+    expect(fireEvent.contextMenu(container.querySelector('.qa') as HTMLElement)).toBe(false);
+    expect(screen.getByTestId('ctx-shellmenu')).toHaveTextContent('右键：快速访问工具条');
   });
 
   it('演示通览不进主导航', async () => {
