@@ -14,6 +14,7 @@ import type { TenantContext } from '../../types/home.ts';
 import { Icon } from './Icons.tsx';
 import { ContextMenu, type ContextMenuItem, type ContextMenuState } from './ContextMenu.tsx';
 import { ShellLoginDialog } from './ShellLoginDialog.tsx';
+import { MemoryAssistant } from './MemoryAssistant.tsx';
 import { loadOverview, type OverviewSnapshot } from './overview.ts';
 import { loadPendingWrites, type PendingWritesResult } from './taskpane.ts';
 import {
@@ -69,6 +70,8 @@ interface QaSpec {
   title?: string;
   /** 可见文字标签：纯图标按钮在 15 个同形图标里不可辨认，登录态入口必须带字 */
   text?: string;
+  /** 开关态（记忆助手）：true 时按钮高亮并写 aria-pressed */
+  active?: boolean;
   disabled?: boolean;
   run?: () => void;
 }
@@ -192,6 +195,9 @@ export function Workspace() {
   const [identity, setIdentity] = useState<TenantContext | null>(null);
   /** 壳层登录弹窗（菜单栏 / QAT / 登录状态处三处入口共用同一实例） */
   const [loginOpen, setLoginOpen] = useState(false);
+  /** 记忆助手（问账本）：开闭状态挂在壳层，切换中心标签不重置；会话在面板组件内（常驻不卸载） */
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const closeAssistant = useCallback(() => setAssistantOpen(false), []);
   /** 右键菜单（导航树 / 标签条 / 检查器 / 中心页表格行共用同一渲染器） */
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null);
   const [overview, setOverview] = useState<OverviewSnapshot | null>(null);
@@ -982,7 +988,11 @@ export function Workspace() {
     { sep: true },
     { id: 'theme', icon: themeIcon, title: themeTip, run: cycleTheme },
     { sep: true },
-    { id: 'ask', icon: 'receipt', title: `问账本（概览）：${demoOnly}`, disabled: true },
+    {
+      id: 'assistant', icon: 'spark', text: '记忆助手', active: assistantOpen,
+      title: '记忆助手：问账本（成本/异常/冲突/同步/记忆条数）。点击展开/收起；切换中心标签不丢会话',
+      run: () => setAssistantOpen((v) => !v),
+    },
     { id: 'metrics', icon: 'chart', title: `指标明细（概览）：${demoOnly}`, disabled: true },
     { id: 'pending', icon: 'archive', title: '待处理（概览）：定稿演示命令；待重放写入请在「任务窗格」只读查看', disabled: true },
     { id: 'exportCsv', icon: 'export', title: `导出概览 CSV（概览）：${demoOnly}`, disabled: true },
@@ -1166,16 +1176,28 @@ export function Workspace() {
             {qaSpecs.map((q, i) => q.sep ? (
               <span className="qa-sep" key={`qa-sep-${i}`} aria-hidden="true" />
             ) : (
-              <button
-                key={q.id}
-                className={`qa-btn${q.disabled ? ' off' : ''}${q.text ? ' labeled' : ''}`}
-                type="button"
-                data-testid={`qa-${q.id}`}
-                aria-label={q.title}
-                aria-disabled={q.disabled || undefined}
-                title={q.title}
-                onClick={q.disabled ? undefined : q.run}
-              ><Icon name={q.icon ?? 'dot'} size={15} />{q.text ? <span className="qa-label">{q.text}</span> : null}</button>
+              <span className="qa-slot" key={q.id}>
+                <button
+                  className={`qa-btn${q.disabled ? ' off' : ''}${q.text ? ' labeled' : ''}${q.active ? ' on' : ''}`}
+                  type="button"
+                  data-testid={`qa-${q.id}`}
+                  aria-label={q.title}
+                  aria-pressed={q.active}
+                  aria-disabled={q.disabled || undefined}
+                  title={q.title}
+                  onClick={q.disabled ? undefined : q.run}
+                ><Icon name={q.icon ?? 'dot'} size={15} />{q.text ? <span className="qa-label">{q.text}</span> : null}</button>
+                {/* 记忆助手面板常驻壳层：收起只是不渲染，问答会话不随中心标签切换丢失 */}
+                {q.id === 'assistant' && (
+                  <MemoryAssistant
+                    open={assistantOpen}
+                    onClose={closeAssistant}
+                    overview={overview}
+                    overviewBusy={overviewBusy}
+                    onRefresh={refreshOverview}
+                  />
+                )}
+              </span>
             ))}
           </div>
           <span className="rib-spring" />

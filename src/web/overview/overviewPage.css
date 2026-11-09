@@ -3,7 +3,6 @@
 
 :root {
   --ov-accent: #0f6cbd;
-  --ov-accent-soft: rgba(15, 108, 189, 0.14);
   --ov-mono: Consolas, "Cascadia Mono", "SFMono-Regular", monospace;
 }
 
@@ -125,55 +124,7 @@ html[data-theme="dark"] .ovx-concl.error { color: #ff8b7e; }
 .ovx-pillbtn:hover { border-color: var(--ov-accent); color: #0b5a9e; background: #f8fbff; }
 .ovx-pillbtn svg { color: #7a828d; }
 
-.ovx-answers { display: flex; flex-direction: column; gap: 9px; margin-top: 12px; }
-.ovx-answer { background: #fff; border: 1px solid #e3e7ee; border-radius: 9px; padding: 11px 13px 12px; }
-.ovx-answer .aq { display: flex; align-items: center; gap: 5px; font-size: 10.5px; color: #666e7a; margin-bottom: 7px; }
-.ovx-answer .aq svg { color: #98a0aa; }
-.ovx-answer .lead { font-size: 17px; font-weight: 600; letter-spacing: -0.2px; color: #1b1f24; line-height: 1.4; }
-.ovx-answer .body { font-size: 11.5px; line-height: 1.65; color: #3f4650; margin-top: 7px; }
-.ovx-answer .state { display: flex; align-items: center; gap: 5px; margin-top: 8px; font-family: var(--ov-mono); font-size: 9.5px; color: #666e7a; }
-
 .ovx-wait { font-size: 11.5px; color: #666e7a; padding: 18px 2px; }
-
-.ov-ask { flex: none; padding: 8px 26px 10px; background: #f3f5f8; border-top: 1px solid #e1e5eb; }
-.ov-ask-box {
-  max-width: 1080px; margin: 0 auto; display: flex; align-items: flex-end; gap: 8px;
-  background: #fff; border: 1px solid #d9dfe7; border-radius: 11px;
-  padding: 7px 8px 7px 10px; box-shadow: 0 1px 3px rgba(16, 24, 40, 0.05);
-}
-.ov-ask-box:focus-within { border-color: var(--ov-accent); box-shadow: 0 0 0 3px var(--ov-accent-soft); }
-.ov-ask-box .ask-ic { color: #0f6cbd; display: flex; flex: none; padding-bottom: 5px; }
-.ov-ask-box textarea {
-  flex: 1; min-width: 0; border: 0; outline: 0; resize: none; background: transparent;
-  color: #22262c; font: inherit; font-size: 12px; line-height: 1.5; padding: 4px 0 5px; max-height: 90px;
-}
-.ov-ask-box textarea::placeholder { color: #98a0aa; }
-.ov-send {
-  width: 29px; height: 29px; border-radius: 50%; border: 1px solid var(--ov-accent);
-  background: var(--ov-accent); color: #fff; display: grid; place-items: center; flex: none; cursor: pointer;
-}
-.ov-send:hover { background: #0b5a9e; }
-.ov-send:disabled { opacity: 0.55; cursor: default; }
-.ov-sugg {
-  max-width: 1080px; margin: 0 auto 7px; display: flex; flex-wrap: nowrap; gap: 6px;
-  overflow-x: auto; scrollbar-width: none;
-  -webkit-mask-image: linear-gradient(to right, #000 92%, transparent);
-  mask-image: linear-gradient(to right, #000 92%, transparent);
-}
-.ov-sugg::-webkit-scrollbar { display: none; }
-.ov-sugg .sugg {
-  height: 24px; flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px;
-  border: 1px solid #dce1e8; background: #fff; border-radius: 12px; color: #3f4650;
-  font: inherit; font-size: 10.5px; padding: 0 10px; white-space: nowrap; cursor: pointer;
-}
-.ov-sugg .sugg:hover { border-color: var(--ov-accent); color: #0b5a9e; }
-.ov-sugg .sugg svg { color: #7a828d; }
-.ov-ask-foot {
-  max-width: 1080px; margin: 7px auto 0; display: flex; gap: 10px;
-  font-size: 9.5px; color: #666e7a;
-}
-.ov-ask-foot span { display: inline-flex; align-items: center; gap: 4px; }
-.ov-ask-foot span:last-child { margin-left: auto; }
 
 /* ── 深色（与定稿 800–845 行一致） ── */
 html[data-theme="dark"] .ovx-logo {
@@ -205,24 +156,10 @@ html[data-theme="dark"] .ovx-pill.mut { background: #232932; border-color: #333b
 html[data-theme="dark"] .ovx-pill.ok { background: #15251a; border-color: #2f5138; color: #7fd18b; }
 html[data-theme="dark"] .ovx-pillbtn { background: #1d2229; border-color: #333b45; color: #c3cbd6; }
 html[data-theme="dark"] .ovx-pillbtn:hover { background: #1a2b3c; border-color: #3d6d95; color: #79b9ff; }
-html[data-theme="dark"] .ovx-answer { background: #1d2229; border-color: #2a3038; }
-html[data-theme="dark"] .ovx-answer .aq { color: #8b95a2; }
-html[data-theme="dark"] .ovx-answer .lead { color: #eef1f5; }
-html[data-theme="dark"] .ovx-answer .body { color: #c3cbd6; }
-html[data-theme="dark"] .ovx-answer .state { color: #8b95a2; }
 html[data-theme="dark"] .ovx-wait { color: #8b95a2; }
-html[data-theme="dark"] .ov-ask { background: #15181d; border-top-color: #2a3038; }
-html[data-theme="dark"] .ov-ask-box { background: #1d2229; border-color: #333b45; box-shadow: none; }
-html[data-theme="dark"] .ov-ask-box textarea { color: #e5e9ef; }
-html[data-theme="dark"] .ov-ask-box textarea::placeholder { color: #7d8794; }
-html[data-theme="dark"] .ov-sugg .sugg { background: #1d2229; border-color: #333b45; color: #c3cbd6; }
-html[data-theme="dark"] .ov-sugg .sugg:hover { border-color: #3d6d95; color: #79b9ff; }
-html[data-theme="dark"] .ov-ask-foot { color: #8b95a2; }
-html[data-theme="dark"] .ov-ask-box .ask-ic { color: #79b9ff; }
 
 /* 定稿在窄容器同样保持 4 卡一行；只有真正接近手机宽度（壳层中心区 < 440）才切 2 列 */
 @media (max-width: 440px) {
   .ovx-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ovx { padding: 14px 16px 0; }
-  .ov-ask { padding: 8px 16px 10px; }
 }

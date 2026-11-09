@@ -931,3 +931,72 @@ describe('S7 分层 L1–L6 / L0 面板：只在层级管理页或记忆库分�
     expect(screen.queryByText(/账本 7 条/)).toBeNull();
   });
 });
+
+describe('记忆助手：问账本收进快捷栏，不随中心标签变换而变换', () => {
+  it('QAT「记忆助手」展开/收起；回答只转述真实账本快照，收起再展开会话仍在', async () => {
+    await renderShell();
+    const btn = screen.getByTestId('qa-assistant');
+    expect(btn.textContent).toContain('记忆助手');
+    expect(btn.getAttribute('aria-pressed')).toBe('false');
+    expect(screen.queryByTestId('memory-assistant')).toBeNull();
+
+    fireEvent.click(btn);
+    const panel = screen.getByTestId('memory-assistant');
+    expect(btn.getAttribute('aria-pressed')).toBe('true');
+    // 建议问题与概览页同源；回答里的条数来自快照 facts.memories=7 / audits=12
+    fireEvent.click(within(panel).getByRole('button', { name: '账本里有多少条记忆？' }));
+    const answer = within(panel).getByTestId('ma-answer');
+    expect(answer.textContent).toContain('账本里有 7 条记忆');
+    expect(answer.textContent).toContain('累计审计 12 条');
+
+    // 收起 → 面板消失但会话保留；再展开仍在
+    fireEvent.click(screen.getByTestId('ma-close'));
+    expect(screen.queryByTestId('memory-assistant')).toBeNull();
+    expect(btn.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(btn);
+    expect(screen.getByTestId('ma-answer').textContent).toContain('账本里有 7 条记忆');
+  });
+
+  it('切换中心标签：面板开闭状态与问答会话都不丢', async () => {
+    await renderShell();
+    fireEvent.click(screen.getByTestId('qa-assistant'));
+    const input = within(screen.getByTestId('memory-assistant')).getByRole('textbox', { name: '问账本' });
+    fireEvent.change(input, { target: { value: '审计里有什么异常？' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(screen.getByTestId('ma-answer').textContent).toContain('审计里没有异常');
+    // Enter 发送后输入框清空
+    expect(input).toHaveValue('');
+
+    // 切到记忆库（新标签）：面板仍开、会话仍在
+    fireEvent.click(screen.getByRole('treeitem', { name: /记忆库/ }));
+    expect(screen.getByTestId('memory-assistant')).toBeInTheDocument();
+    expect(screen.getByTestId('ma-answer').textContent).toContain('审计里没有异常');
+    // 切回首页标签：依旧
+    fireEvent.click(screen.getByTestId('shell-tab-home'));
+    expect(screen.getByTestId('memory-assistant')).toBeInTheDocument();
+    expect(screen.getByTestId('ma-answer').textContent).toContain('审计里没有异常');
+  });
+
+  it('Esc 收起面板；空输入不发送', async () => {
+    await renderShell();
+    fireEvent.click(screen.getByTestId('qa-assistant'));
+    const panel = screen.getByTestId('memory-assistant');
+    expect(within(panel).getByTestId('ma-send')).toBeDisabled();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByTestId('memory-assistant')).toBeNull();
+  });
+
+  it('账本读取失败时如实回答「没读到」，不拿 0 冒充', async () => {
+    vi.mocked(loadOverview).mockResolvedValueOnce({
+      ...m.defaultOverview,
+      storageError: 'E_LEDGER_LOCKED',
+      facts: null,
+    } as never);
+    await renderShell();
+    fireEvent.click(screen.getByTestId('qa-assistant'));
+    fireEvent.click(within(screen.getByTestId('memory-assistant')).getByRole('button', { name: '账本里有多少条记忆？' }));
+    const answer = screen.getByTestId('ma-answer');
+    expect(answer.textContent).toContain('账本没读到，无法回答');
+    expect(answer.textContent).toContain('E_LEDGER_LOCKED');
+  });
+});

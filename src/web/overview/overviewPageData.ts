@@ -1,4 +1,5 @@
-// 概览页（定稿 .ovx 版式）的纯派生层：把真实快照翻译成「一句话结论 / 4 卡 / 范围行 / 洞察 / 胶囊 / 建议」。
+// 概览页（定稿 .ovx 版式）的纯派生层：把真实快照翻译成「一句话结论 / 4 卡 / 范围行 / 洞察 / 胶囊」。
+// 问答（answerOverviewQuestion + 建议问题）由壳层「记忆助手」复用，不再挂在概览页底部。
 //
 // 口径：所有读数来自 OverviewSnapshot（同一次账本读取 + /api/health + llm:billing + 会话标记）。
 // 读不到就显示「读不到 / 未取数」并给出原因，绝不用「—」或 0 冒充成功读数。
@@ -39,10 +40,18 @@ export interface OverviewView {
   scope: OverviewScopeView[];
   insights: OverviewInsightView[];
   quick: Array<{ label: string; go: string }>;
-  suggest: string[];
   /** 真实空账本（读到了但确实没有数据） */
   emptyLedger: boolean;
 }
+
+/** 问账本的固定建议问题（壳层记忆助手复用同一份） */
+export const OVERVIEW_SUGGESTIONS = [
+  '最近成本花在哪？',
+  '审计里有什么异常？',
+  '最近记住了什么？',
+  '同步成功了吗？',
+  '账本里有多少条记忆？',
+];
 
 export interface OverviewAnswer {
   question: string;
@@ -220,14 +229,6 @@ export function deriveOverviewView(s: OverviewSnapshot): OverviewView {
     ...(s.session ? [] : [{ label: '去登录', go: 'login' }]),
   ];
 
-  const suggest = [
-    '最近成本花在哪？',
-    '审计里有什么异常？',
-    '最近记住了什么？',
-    '同步成功了吗？',
-    '账本里有多少条记忆？',
-  ];
-
   const pending = errors.length + conflicts;
   let conclusion: string;
   if (s.storageError) {
@@ -254,12 +255,11 @@ export function deriveOverviewView(s: OverviewSnapshot): OverviewView {
     scope,
     insights: buildInsights(s, timeText),
     quick,
-    suggest,
     emptyLedger: Boolean(facts && facts.memories === 0 && facts.audits === 0),
   };
 }
 
-/** 概览页问答：只回答账本快照能证实的问题，不编造模型回答 */
+/** 问账本（壳层记忆助手）：只回答账本快照能证实的问题，不编造模型回答 */
 export function answerOverviewQuestion(question: string, s: OverviewSnapshot): OverviewAnswer {
   const q = question.trim();
   const facts = s.facts;

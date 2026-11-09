@@ -1,15 +1,15 @@
-// 概览页（定稿 .ovx 版式）：一句话结论 + 4 张统计卡 + 范围行 + 编号洞察 01–04 + 快捷胶囊 + 建议 chips + 输入框。
+// 概览页（定稿 .ovx 版式）：一句话结论 + 4 张统计卡 + 范围行 + 编号洞察 01–04 + 快捷胶囊。
 // 数据全部来自真实账本与审计（loadOverview 单次读取）；读不到显示「读不到/未取数」+ 原因，不用「—」冒充。
-// 本页替换旧首页（index.html）：不再渲染问候语与 emoji 大卡。
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+// 问账本问答框已收进壳层快捷栏「记忆助手」（MemoryAssistant），本页不再渲染底部输入框。
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { loadOverview, type OverviewSnapshot } from '../shell/overview.ts';
-import { answerOverviewQuestion, deriveOverviewView, type OverviewAnswer } from './overviewPageData.ts';
+import { deriveOverviewView } from './overviewPageData.ts';
 import { useHostTheme } from '../shared/hostTheme.ts';
 import { requestShellView } from '../shared/shellNavigate.ts';
 import { rebuildKernelForDataPlane } from '../kernel.ts';
 import './overviewPage.css';
 
-function Ico({ name, size = 12 }: { name: 'spark' | 'db' | 'write' | 'recall' | 'cost' | 'alert' | 'check' | 'user' | 'arrow' | 'send' | 'logout'; size?: number }) {
+function Ico({ name, size = 12 }: { name: 'spark' | 'db' | 'write' | 'recall' | 'cost' | 'alert' | 'check' | 'arrow' | 'logout'; size?: number }) {
   const s = { width: size, height: size } as const;
   const common = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
   switch (name) {
@@ -27,12 +27,8 @@ function Ico({ name, size = 12 }: { name: 'spark' | 'db' | 'write' | 'recall' | 
       return <svg viewBox="0 0 24 24" style={s} {...common} aria-hidden="true"><path d="M12 3l9 16H3L12 3Z" /><path d="M12 9v5M12 17h.01" /></svg>;
     case 'check':
       return <svg viewBox="0 0 24 24" style={s} {...common} aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M8 12l3 3 5-6" /></svg>;
-    case 'user':
-      return <svg viewBox="0 0 24 24" style={s} {...common} aria-hidden="true"><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 3.6-6.5 8-6.5s8 2.5 8 6.5" /></svg>;
     case 'arrow':
       return <svg viewBox="0 0 24 24" style={s} {...common} aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>;
-    case 'send':
-      return <svg viewBox="0 0 24 24" style={s} {...common} aria-hidden="true"><path d="M4 20l16-8L4 4v6l10 2-10 2Z" /></svg>;
     case 'logout':
       return <svg viewBox="0 0 24 24" style={s} {...common} aria-hidden="true"><path d="M14 4h5v16h-5" /><path d="M3 12h11M10 8l4 4-4 4" /></svg>;
     default:
@@ -47,9 +43,6 @@ export function OverviewPage() {
   const [snap, setSnap] = useState<OverviewSnapshot | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
-  const [input, setInput] = useState('');
-  const [thread, setThread] = useState<OverviewAnswer[]>([]);
-  const threadRef = useRef<HTMLDivElement | null>(null);
 
   const reload = useCallback(async () => {
     setBusy(true);
@@ -76,15 +69,6 @@ export function OverviewPage() {
   }, [reload]);
 
   const view = useMemo(() => (snap ? deriveOverviewView(snap) : null), [snap]);
-
-  const ask = useCallback((question: string) => {
-    if (!snap) return;
-    const q = question.trim();
-    if (!q) return;
-    setThread((prev) => [answerOverviewQuestion(q, snap), ...prev]);
-    setInput('');
-    requestAnimationFrame(() => threadRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
-  }, [snap]);
 
   return (
     <div className="ov-page" data-testid="overview-page">
@@ -167,60 +151,12 @@ export function OverviewPage() {
                 ))}
               </div>
 
-              {thread.length > 0 && (
-                <div className="ovx-answers" ref={threadRef}>
-                  {thread.map((a, i) => (
-                    <div className="ovx-answer" key={`${a.question}-${i}`}>
-                      <div className="aq"><Ico name="user" size={12} />{a.question}</div>
-                      <div className="lead">{a.lead}</div>
-                      <div className="body">{a.body}</div>
-                      <div className="state"><Ico name="check" size={11} />{a.state}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
             </>
           )}
 
           {!view && !err && (
             <div className="ovx-wait">正在读取真实账本与会话状态…</div>
           )}
-        </div>
-      </div>
-
-      <div className="ov-ask">
-        {view && (
-          <div className="ov-sugg">
-            {view.suggest.map((q) => (
-              <button className="sugg" key={q} type="button" onClick={() => ask(q)}>
-                <Ico name="spark" size={11} />
-                {q}
-              </button>
-            ))}
-          </div>
-        )}
-        <div className="ov-ask-box">
-          <span className="ask-ic"><Ico name="spark" size={15} /></span>
-          <textarea
-            rows={1}
-            value={input}
-            placeholder="问账本：成本、异常、冲突、同步、记忆条数…（Enter 发送，Shift+Enter 换行）"
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                ask(input);
-              }
-            }}
-            aria-label="问账本"
-          />
-          <button className="ov-send" type="button" title="发送" onClick={() => ask(input)} disabled={!view}>
-            <Ico name="send" size={14} />
-          </button>
-        </div>
-        <div className="ov-ask-foot">
-          <span><Ico name="db" size={11} />读数来自本次真实账本读取，不含演示数据</span>
-          <span>Enter 发送 · Shift+Enter 换行</span>
         </div>
       </div>
     </div>

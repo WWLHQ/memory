@@ -150,6 +150,70 @@ html[data-theme='dark'] .titlebar { background: linear-gradient(#232935, #1a1f28
 .qa-sep { width: 1px; height: 16px; margin: 0 3px; background: var(--line); flex: none; }
 html[data-theme='dark'] .qa { border-left-color: #39414c; }
 
+/* 记忆助手：QAT 开关按钮 + 下拉面板（面板常驻壳层，切中心标签不丢会话） */
+.qa-slot { position: relative; display: inline-flex; flex: none; }
+.qa-btn.on { background: var(--accent-soft); color: var(--accent); }
+.ma-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 70;
+  width: 400px;
+  max-width: calc(100vw - 24px);
+  max-height: min(560px, calc(100vh - 96px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--line2);
+  border-radius: 8px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.36);
+}
+.ma-head { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--tx); }
+.ma-mark { display: inline-flex; color: var(--accent); }
+.ma-spring { flex: 1; }
+.ma-tool {
+  width: 22px; height: 22px; padding: 0; border: 0; border-radius: 3px;
+  background: transparent; color: var(--mu); display: grid; place-items: center; cursor: pointer;
+}
+.ma-tool:hover:not(:disabled) { background: var(--panel2); color: var(--tx); }
+.ma-tool:disabled { opacity: 0.55; cursor: default; }
+.ma-state { font-size: 10px; color: var(--mu); font-family: ui-monospace, Consolas, monospace; }
+.ma-body { flex: 1; min-height: 48px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.ma-empty { font-size: 11px; color: var(--mu); line-height: 1.6; padding: 10px 2px; }
+.ma-answer { border: 1px solid var(--line2); border-radius: 6px; padding: 8px 10px; background: var(--panel2); }
+.ma-q { display: flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--mu); margin-bottom: 5px; }
+.ma-lead { font-size: 13px; font-weight: 600; color: var(--tx); line-height: 1.4; }
+.ma-text { font-size: 11px; color: var(--tx2); line-height: 1.6; margin-top: 5px; }
+.ma-src {
+  display: flex; align-items: center; gap: 4px; margin-top: 6px;
+  font-size: 9.5px; color: var(--mu); font-family: ui-monospace, Consolas, monospace;
+}
+.ma-sugg { display: flex; flex-wrap: wrap; gap: 5px; }
+.ma-chip {
+  height: 22px; padding: 0 9px; font: inherit; font-size: 10.5px;
+  border: 1px solid var(--line2); border-radius: 11px;
+  background: var(--panel); color: var(--tx2); cursor: pointer;
+}
+.ma-chip:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.ma-chip:disabled { opacity: 0.55; cursor: default; }
+.ma-ask {
+  display: flex; align-items: flex-end; gap: 6px;
+  border: 1px solid var(--line2); border-radius: 6px; background: var(--panel2); padding: 6px 7px;
+}
+.ma-ask:focus-within { border-color: var(--accent); }
+.ma-ask textarea {
+  flex: 1; min-width: 0; border: 0; outline: 0; resize: none; background: transparent;
+  color: var(--tx); font: inherit; font-size: 11.5px; line-height: 1.5; max-height: 90px;
+}
+.ma-send {
+  width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--accent);
+  background: var(--accent); color: #fff; display: grid; place-items: center; cursor: pointer; flex: none;
+}
+.ma-send:disabled { opacity: 0.55; cursor: default; }
+.ma-foot { font-size: 9.5px; color: var(--mu); }
+
 /* 中文菜单行（自建；默认 Electron 菜单已删除） */
 .menubar {
   position: relative;
