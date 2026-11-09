@@ -269,7 +269,7 @@ describe('工作台壳层', () => {
     expect(screen.getByTestId('ctx-framemenu-refresh')).toBeEnabled();
   });
 
-  it('壳层全域右键：标题栏/功能区/状态栏都有非空菜单，且阻止浏览器原生菜单', async () => {
+  it('壳层全域右键：非登录区有非空菜单且不含登录项；登录入口处才出现「登录 / 会话」', async () => {
     const { container } = await renderShell();
     // RTL fireEvent 返回 false 表示事件已被 preventDefault（原生菜单不会出现）
     expect(fireEvent.contextMenu(container.querySelector('.statusbar') as HTMLElement)).toBe(false);
@@ -279,18 +279,81 @@ describe('工作台壳层', () => {
     const copySel = screen.getByTestId('ctx-shellmenu-copySel');
     expect(copySel).toBeDisabled();
     expect(copySel.getAttribute('title')).toContain('当前页面上没有选中文本');
+    // 批次50：状态栏空白处本身没有登录入口 → 右键不补「登录 / 会话」
+    expect(screen.queryByTestId('ctx-shellmenu-login')).toBeNull();
     // 真实动作：刷新中心区与底部读数
     fireEvent.click(screen.getByTestId('ctx-shellmenu-refresh'));
     await waitFor(() => expect(screen.getByTestId('sb-msg')).toHaveTextContent('已刷新中心区真实页面'));
 
     expect(fireEvent.contextMenu(container.querySelector('.ribbon-body') as HTMLElement)).toBe(false);
     expect(screen.getByTestId('ctx-shellmenu')).toHaveTextContent('右键：功能区');
+    expect(screen.queryByTestId('ctx-shellmenu-login')).toBeNull();
+
+    expect(fireEvent.contextMenu(container.querySelector('.qa') as HTMLElement)).toBe(false);
+    expect(screen.getByTestId('ctx-shellmenu')).toHaveTextContent('右键：快速访问工具条');
+    expect(screen.queryByTestId('ctx-shellmenu-login')).toBeNull();
+
+    // 真有登录入口的四个位置：QAT 登录按钮、标题栏会话按钮、状态栏会话格、菜单栏
+    expect(fireEvent.contextMenu(screen.getByTestId('qa-login'))).toBe(false);
+    expect(screen.getByTestId('ctx-shellmenu-login')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('ctx-shellmenu-login'));
     expect(screen.getByTestId('shell-login-modal')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('slm-close'));
 
-    expect(fireEvent.contextMenu(container.querySelector('.qa') as HTMLElement)).toBe(false);
-    expect(screen.getByTestId('ctx-shellmenu')).toHaveTextContent('右键：快速访问工具条');
+    expect(fireEvent.contextMenu(screen.getByTestId('shell-session-btn'))).toBe(false);
+    expect(screen.getByTestId('ctx-shellmenu-login')).toBeInTheDocument();
+    expect(fireEvent.contextMenu(screen.getByTestId('sb-session'))).toBe(false);
+    expect(screen.getByTestId('ctx-shellmenu-login')).toBeInTheDocument();
+    expect(fireEvent.contextMenu(container.querySelector('.menubar') as HTMLElement)).toBe(false);
+    expect(screen.getByTestId('ctx-shellmenu-login')).toBeInTheDocument();
+  });
+
+  it('登录弹窗密码默认为密文，显示/隐藏切换保留内容与焦点', async () => {
+    await renderShell();
+    fireEvent.click(screen.getByTestId('qa-login'));
+    const pw = screen.getByTestId('slm-password') as HTMLInputElement;
+    expect(pw.getAttribute('type')).toBe('password');
+    fireEvent.change(pw, { target: { value: 'S3cret-pass' } });
+    pw.focus();
+    const toggle = screen.getByTestId('slm-pw-toggle');
+    expect(toggle.getAttribute('aria-label')).toBe('显示密码');
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.mouseDown(toggle);
+    fireEvent.click(toggle);
+    // 只改 type：值不变、焦点仍在输入框
+    expect(pw.getAttribute('type')).toBe('text');
+    expect(pw.value).toBe('S3cret-pass');
+    expect(document.activeElement).toBe(pw);
+    expect(toggle.getAttribute('aria-label')).toBe('隐藏密码');
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(toggle);
+    expect(pw.getAttribute('type')).toBe('password');
+    expect(pw.value).toBe('S3cret-pass');
+    expect(document.activeElement).toBe(pw);
+    expect(toggle.getAttribute('aria-label')).toBe('显示密码');
+  });
+
+  it('中心页表格行菜单对齐定稿条目：详情/编辑/分层禁用并写原因', async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const { container } = await renderShell();
+    const frame = container.querySelector('iframe.page-frame') as HTMLIFrameElement;
+    const doc = document.implementation.createHTMLDocument('frame');
+    Object.defineProperty(frame, 'contentDocument', { value: doc, configurable: true });
+    fireEvent.load(frame);
+    const tr = doc.createElement('tr');
+    tr.setAttribute('data-testid', 'row-mem_fixture_2');
+    (doc.body ?? doc.documentElement).appendChild(tr);
+    const ev = doc.createEvent('MouseEvent');
+    ev.initMouseEvent('contextmenu', true, true, window, 0, 0, 0, 0, 0, false, false, false, false, 2, null);
+    act(() => { tr.dispatchEvent(ev); });
+    expect(screen.getByTestId('ctx-rowmenu-details')).toBeDisabled();
+    expect(screen.getByTestId('ctx-rowmenu-details').getAttribute('title')).toContain('记忆管理页');
+    expect(screen.getByTestId('ctx-rowmenu-edit')).toBeDisabled();
+    expect(screen.getByTestId('ctx-rowmenu-edit').getAttribute('title')).toContain('不代行写操作');
+    expect(screen.getByTestId('ctx-rowmenu-layers')).toBeDisabled();
+    expect(screen.getByTestId('ctx-rowmenu-layers').getAttribute('title')).toContain('不代读页面数据');
+    expect(screen.getByTestId('ctx-rowmenu-audit')).toBeEnabled();
   });
 
   it('演示通览不进主导航', async () => {

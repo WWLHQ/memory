@@ -199,7 +199,7 @@ test.describe('壳层 · 登录弹窗与右键菜单（真实后端）', () => {
     await expect(page.locator('[data-testid="shell-inspector"]')).toHaveClass(/collapsed/);
   });
 
-  test('壳层全域右键：状态栏 / 功能区 / QAT 都有非空菜单，且阻止浏览器原生菜单', async ({ page }) => {
+  test('壳层全域右键：非登录区有非空菜单且不含登录项，登录入口处才出现登录', async ({ page }) => {
     await page.addInitScript(() => {
       // 记录 contextmenu 传播结束后的 defaultPrevented：true 表示原生菜单被壳层拦下
       document.addEventListener('contextmenu', (e) => {
@@ -217,6 +217,8 @@ test.describe('壳层 · 登录弹窗与右键菜单（真实后端）', () => {
     const copySel = page.locator('[data-testid="ctx-shellmenu-copySel"]');
     await expect(copySel).toBeDisabled();
     await expect(copySel).toHaveAttribute('title', /当前页面上没有选中文本/);
+    // 批次50：状态栏空白处本身不是登录入口 → 右键不补「登录 / 会话」
+    await expect(page.locator('[data-testid="ctx-shellmenu-login"]')).toHaveCount(0);
     await expect.poll(() => page.evaluate(() => (window as unknown as { __ctxPrevented?: boolean }).__ctxPrevented)).toBe(true);
     // 真实动作：刷新中心区与底部读数
     await page.locator('[data-testid="ctx-shellmenu-refresh"]').click();
@@ -224,12 +226,46 @@ test.describe('壳层 · 登录弹窗与右键菜单（真实后端）', () => {
 
     await page.locator('.ribbon-body').click({ button: 'right' });
     await expect(page.locator('[data-testid="ctx-shellmenu"]')).toContainText('右键：功能区');
+    await expect(page.locator('[data-testid="ctx-shellmenu-login"]')).toHaveCount(0);
+
+    await page.locator('.qa').click({ button: 'right' });
+    await expect(page.locator('[data-testid="ctx-shellmenu"]')).toContainText('右键：快速访问工具条');
+    await expect(page.locator('[data-testid="ctx-shellmenu-login"]')).toHaveCount(0);
+
+    // 真有登录入口的位置：QAT 登录按钮 / 标题栏会话按钮 / 状态栏会话格 / 菜单栏
+    await page.locator('[data-testid="qa-login"]').click({ button: 'right' });
     await page.locator('[data-testid="ctx-shellmenu-login"]').click();
     await expect(page.locator('[data-testid="shell-login-modal"]')).toBeVisible();
     await page.locator('[data-testid="slm-close"]').click();
 
-    await page.locator('.qa').click({ button: 'right' });
-    await expect(page.locator('[data-testid="ctx-shellmenu"]')).toContainText('右键：快速访问工具条');
+    await page.locator('[data-testid="shell-session-btn"]').click({ button: 'right' });
+    await expect(page.locator('[data-testid="ctx-shellmenu-login"]')).toBeVisible();
+    await page.locator('[data-testid="sb-session"]').click({ button: 'right' });
+    await expect(page.locator('[data-testid="ctx-shellmenu-login"]')).toBeVisible();
+    await page.locator('.menubar').click({ button: 'right' });
+    await expect(page.locator('[data-testid="ctx-shellmenu-login"]')).toBeVisible();
+  });
+
+  test('登录弹窗密码默认为密文，显示/隐藏切换保留已输入内容与焦点', async ({ page }) => {
+    await openShell(page);
+    await page.locator('[data-testid="qa-login"]').click();
+    const pw = page.locator('[data-testid="slm-password"]');
+    await expect(pw).toHaveAttribute('type', 'password');
+    await pw.fill('S3cret-visible');
+    await pw.focus();
+    const toggle = page.locator('[data-testid="slm-pw-toggle"]');
+    await expect(toggle).toHaveAttribute('aria-label', '显示密码');
+    await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    await toggle.click();
+    await expect(pw).toHaveAttribute('type', 'text');
+    await expect(pw).toHaveValue('S3cret-visible');
+    await expect(pw).toBeFocused();
+    await expect(toggle).toHaveAttribute('aria-label', '隐藏密码');
+    await toggle.click();
+    await expect(pw).toHaveAttribute('type', 'password');
+    await expect(pw).toHaveValue('S3cret-visible');
+    await expect(pw).toBeFocused();
+    await expect(toggle).toHaveAttribute('aria-label', '显示密码');
   });
 
   test('QAT 登录入口：1024 宽度与浅/深主题下都有可见文字、可点开真实登录弹窗', async ({ page }) => {
