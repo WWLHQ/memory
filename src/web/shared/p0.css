@@ -1,54 +1,66 @@
 /* p0 基元：定稿 center-pane 的共用版式（写入 / 检索）。
-   亮/暗令牌与记忆管理页同源；同时把旧组件的 --bg/--txt 别名映射到同一套令牌。 */
+   令牌已换为 Stratum（方案A）：纸灰底 / 墨蓝字 / 电青强调，深空蓝 / 辉光青；
+   旧组件命名（--bg/--txt/--panel2…）全部别名到这组 A 令牌，组件 CSS 不变、只换值。 */
 
 :root {
-  --line: #d7dce2;
-  --line-2: #e5e9ee;
-  --text: #27313b;
-  --muted: #6d7885;
-  --faint: #9aa4af;
-  --panel: #f2f4f7;
-  --field: #eef1f4;
-  --accent: #0f6cbd;
-  --accent-weak: #e8f1fb;
-  --ok: #2f7d32;
-  --warn: #a86b12;
-  --err: #b33b31;
-  --chip: #f7f9fb;
-  --win: #f8fafc;
-  --sel: #dcecff;
-  --sel-text: #10375c;
-  --shadow: 0 10px 28px rgba(22, 34, 48, .18);
+  /* Stratum（方案A）页面令牌 —— 与 shell/theme.css 同源：纸灰底 / 墨蓝字 / 电青强调。 */
+  --bg: #F3F5F8;
+  --surface: #FFFFFF;
+  --surface2: #EDF1F6;
+  --ink: #0B1526;
+  --muted: #5A6B82;
+  --line: #DCE4EE;
+  --line2: #E7EDF4;
+  --accent: #0088CC;
+  --accent-ink: #FFFFFF;
+  --accent-soft: rgba(0, 136, 204, .10);
+  --ok: #0E9F6E;
+  --warn: #B45309;
+  --bad: #DC2626;
+  --ok-soft: rgba(14, 159, 110, .10);
+  --warn-soft: rgba(180, 83, 9, .10);
+  --bad-soft: rgba(220, 38, 38, .10);
+  --c-l0: #8FA3BC; --c-l1: #22D3EE; --c-l2: #38BDF8; --c-l3: #818CF8;
+  --c-l4: #C084FC; --c-l5: #F472B6; --c-l6: #FBBF24;
   --mono: ui-monospace, "Cascadia Mono", Consolas, "SF Mono", monospace;
+  --sans: "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+  /* 旧页面命名（shared/theme.css 命名）→ A 令牌，组件 CSS 不变、只换值 */
+  --line-2: var(--line2);
+  --text: var(--ink);
+  --faint: color-mix(in srgb, var(--muted) 60%, var(--bg));
+  --panel: var(--surface);
+  --field: var(--surface2);
+  --accent-weak: var(--accent-soft);
+  --err: var(--bad);
+  --chip: var(--surface2);
+  --win: var(--bg);
+  --sel: color-mix(in srgb, var(--accent) 14%, var(--bg));
+  --sel-text: var(--ink);
+  --shadow: 0 10px 28px rgba(4, 12, 28, .18);
   /* 旧组件别名（shared/theme.css 的命名） */
-  --bg: var(--win);
   --txt: var(--text);
   --dim: var(--faint);
   --panel2: var(--field);
 }
 
 html[data-theme="dark"] {
-  --line: #333a44;
-  --line-2: #222831;
-  --text: #d6dce4;
-  --muted: #929ba8;
-  --faint: #727c89;
-  --panel: #1a1e24;
-  --field: #232a33;
-  --accent: #79b9ff;
-  --accent-weak: #163049;
-  --ok: #5cc85c;
-  --warn: #e0a33a;
-  --err: #ff8a7d;
-  --chip: #262c35;
-  --win: #171b21;
-  --sel: #1c3a55;
-  --sel-text: #cfe8ff;
-  --shadow: 0 12px 34px rgba(0, 0, 0, .5);
-  --bg: var(--win);
-  --txt: var(--text);
-  --dim: var(--faint);
-  --panel2: var(--field);
+  --bg: #060B16;
+  --surface: #0C1424;
+  --surface2: #101B30;
+  --ink: #E4EDF8;
+  --muted: #8296B0;
+  --line: #1B2A45;
+  --line2: #16223A;
+  --accent: #22D3EE;
+  --accent-ink: #04222B;
+  --accent-soft: rgba(34, 211, 238, .12);
+  --ok: #34D399;
+  --warn: #FBBF24;
+  --bad: #F87171;
+  --ok-soft: rgba(52, 211, 153, .12);
+  --warn-soft: rgba(251, 191, 36, .12);
+  --bad-soft: rgba(248, 113, 113, .12);
+  --shadow: 0 12px 34px rgba(0, 0, 0, .50);
 }
 
 * { box-sizing: border-box; }
@@ -57,7 +69,7 @@ body {
   margin: 0;
   background: var(--win);
   color: var(--text);
-  font: 12px/1.5 -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font: 12px/1.5 var(--sans);
 }
 
 .p0-page {

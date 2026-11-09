@@ -1398,3 +1398,21 @@ status: draft
 > **B·效果验证**：AC→用例映射：① 可收缩图标 → `qa-assistant` 点击后面板出现、`aria-pressed=true`，再点/✕/Esc 收起；② 名称记忆助手 → QAT 按钮可见文字「记忆助手」；③ 不随标签变换 → 组件用例与真浏览器双重断言：切到记忆库再切回首页，面板仍开、2 条回答原样保留；④ 首页问答框移除 → iframe 内 `.ov-ask` 计数=0。真浏览器（dev server + Chromium）16 项断言全过：`homeAskBoxRemoved / qatLabel / initiallyClosed / opened / pressed / answerReal / answerCount=2 / inputCleared / survivesTabSwitch / survivesSwitchBack / escCloses / threadAfterReopen / darkTheme=dark / noOverflow / pageErrors=[]`；状态行实测「账本读取 21:17:47 · 只转述本次快照，不含演示数据」。端到端链路：`loadOverview()`（壳层单次真实读取）→ `MemoryAssistant` → `answerOverviewQuestion(q, snapshot)` → DOM；刷新按钮回到 `refreshOverview()`。诚实降级：快照 `storageError` → 回答「账本没读到，无法回答」并带真实原因；空输入发送钮禁用。浅/深截图：会话可视化目录 `assistant-open-light.png` / `assistant-open-dark.png`。
 > **C·变异验证**：C1 变异点 = 面板常驻判定 `{q.id === 'assistant' && (…)}` 注入 `active?.page === 'home' &&`（切标签即卸载）→ 指定用例「切换中心标签：面板开闭状态与问答会话都不丢」真实红灯（`getByTestId('memory-assistant')` 找不到，workspace.test.tsx:972）→ 原样还原 → 54/54 复绿，`git diff` 确认无变异残留。C2 输入/状态变异矩阵：空输入 → 发送禁用不假答；`storageError` → 如实「没读到」不拿 0 冒充；Esc → 收起；收起再展开 → 会话保留；切标签往返 → 开闭与会话保留；深色 → 面板令牌跟随。全部如实空态或明确失败，无静默成功。
 > **已知边界**：面板为 QAT 下拉浮层（与菜单弹层同模式），展开时覆盖功能区右部，收起即恢复；开闭状态存于壳层内存，刷新整页后回到收起（问答会话不跨进程重启持久化——本轮需求只要求不随标签切换丢失）。浏览器直连 dev 时无主进程，回答基于浏览器内存账本并如实标注；桌面端登录后读本机真实账本。
+
+
+### 批次57-A：L1 共享令牌换为 Stratum（方案A）· 纸灰底/墨蓝字/电青 + 深空/辉光青（2026-11-09）
+
+> 口径：用户认可 L1+L3 预览后下令「L1 改 p0.css / shell theme.css 令牌 + L3 逐页改版式，首页先行（记忆库暂停）」，并强调「首页数据要接入真实数据」。本小节为 **L1**：只换两份共享 CSS 的**令牌取值**（组件命名与版式一律不动），把旧蓝灰配色整体切到方案 A；旧组件命名全部别名到 A 令牌，保证下游组件零改动、只换色。L3 首页版式与真实数据接入在 57-B 单独成批。
+
+| 能力 | 代码落点 | 测试 |
+|---|---|---|
+| 共享页令牌换 A | `src/web/shared/p0.css` `:root` / `html[data-theme="dark"]` 整块重写为 A 源令牌（--bg/--surface/--surface2/--ink/--muted/--line/--line2/--accent/--accent-ink/--accent-soft/--ok/--warn/--bad + --c-l0..l6 + --mono/--sans），旧命名 --line-2/--text/--faint/--panel/--field/--accent-weak/--err/--chip/--win/--sel/--sel-text 全部别名到 A；body 字体改 `var(--sans)` | `aTokens.test.ts`「p0.css 亮色/暗色令牌 = A」 |
+| 壳层令牌换 A | `src/web/shell/theme.css` `:root` / dark 整块重写为同一套 A 源令牌，旧壳层命名 --win/--chrome/--panel/--panel2/--tx/--tx2/--mu/--red/--red-soft/--amber/--green 别名到 A；`--r` 6→8px；body 字体 `var(--sans)`；标题栏渐变 / `.qa` 深色分隔 / `.app-mark` 等硬编码色改到 A；`--accent` 上的 `color:#fff` 全部改 `var(--accent-ink)`（深色电青底白字对比不足） | `aTokens.test.ts`「shell/theme.css 令牌 = A / 暗色 = A」 |
+| 令牌契约测试（C 指定哨兵） | 新增 `src/web/shared/__tests__/aTokens.test.ts`：静态读取两份 CSS 断言 A 取值 + 旧命名别名链 | 4 例全绿；作为 C1 变异的红灯哨兵 |
+| 维护索引 | `specs/code-index.generated.md`、`specs/code-map.md` | `npm run code:index -- --write` + `code:index:check` |
+
+> **批次57-A 三道闸门证据**：
+> **A·影响面回归**：影响面 = `src/web/shared/p0.css` + `src/web/shell/theme.css` + 新增 `aTokens.test.ts` + 两份 specs；**只换令牌取值，不动任何组件版式 / TS / 内核 / 存储 / 审计 / MCP / 端口**。`npm run verify:fast` EXIT=0：typecheck 两工程 0 错；oxlint 0/0；`code:index:check` 通过；`check:no-demo` 生产文件 / 26 判据 0 命中；全量 vitest **228 文件 / 2642 例全绿**（原 227/2638 + 新契约 1 文件 4 例），覆盖率 Lines ≥82.7%。既有行为回归：壳层四段布局、四组 17 项导航、层级刻度、右键、主题切换、标签开关均不变（纯令牌换色，组件引用路径未变）。
+> **B·效果验证**：真浏览器（现有 5180 dev 服务 + Chromium，`verify-l1.cjs`）7 项断言全过：浅色 `.app-mark` 背景 = rgb(0,136,204)（A 电青）、body = rgb(243,245,248)（A 纸灰）、ribbon = rgb(237,241,246)（A surface2）；深色 `.app-mark` = rgb(34,211,238)（A 辉光青）、body = rgb(6,11,22)（A 深空）、ribbon = rgb(16,27,48)；页面无 `1467`、无 pageerror。端到端链路：`:root` A 源令牌 → 旧命名别名（var(--bg)/var(--ink) …）→ 既有组件 var() 引用 → 渲染色。截图 `l1-shell-light.png` / `l1-shell-light2.png`。
+> **C·变异验证**：C1 共 2 个令牌点注入缺陷，均**指定契约测试真实红灯 → 原样还原 → 全绿**：M1 `p0.css` 浅色 `--accent #0088CC→#0f6cbd` → `aTokens.test.ts`「p0.css 亮色令牌」红（`to match /--accent:\s*#0088CC/i` 失配）→ 还原复绿；M2 `theme.css` 浅色 `--accent #0088CC→#2f6fed`（旧壳层色）→「shell/theme.css 令牌 = A」红 → 还原复绿；`git diff` 确认无变异残留。C2 输入/状态矩阵：浅色 A 取值 / 深色 A 取值 / 旧命名别名仍解析到 A / `--r:8px` 生效 / 无演示数字。全部如实，无静默回退旧配色。
+> **已知边界**：本轮 L1 只覆盖用户点名的 `p0.css` 与壳层 `theme.css` 两份共享源；`src/web/shared/theme.css`（8 页暗色共用）与 `legacyLight.css` / `p0Legacy.css`（9 页明/暗叠加层）本轮**未动**，这些页在各自叠加层下仍走旧暗色令牌，后续批次按需对齐。首页（index.html）iframe 加载的是 `overviewPage.css` 自有令牌、非 p0.css——其 A 化随 57-B 首页改版一并完成。`color-mix` 依赖 Chromium ≥111，Electron 45 满足。

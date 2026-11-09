@@ -2,43 +2,64 @@
    仅作用域在壳内（.shell）；iframe 内 21 页的表现层本轮不改。 */
 
 :root {
-  --win: #eef0f4;
-  --chrome: #f6f7fa;
-  --panel: #ffffff;
-  --panel2: #fafbfd;
-  --line: #d8dce5;
-  --line2: #e6e9f0;
-  --tx: #1f2430;
-  --tx2: #4a5265;
-  --mu: #6b7488;
-  --accent: #2f6fed;
-  --accent-soft: #e6eefc;
-  --red: #c93c3c;
-  --red-soft: #fbecec;
-  --amber: #a86a00;
-  --green: #2f7d55;
-  --shadow: 0 6px 20px rgba(22, 30, 48, 0.08);
-  --r: 6px;
+  /* Stratum（方案A）令牌 —— 源真值：纸灰底 / 墨蓝字 / 电青强调；深色 = 深空蓝 / 辉光青。
+     旧壳层命名（--win/--chrome/--panel/--panel2/--tx/--tx2/--mu/--red/--amber/--green）
+     全部别名到这组 A 令牌，组件 CSS 不变、只换值。 */
+  --bg: #F3F5F8;
+  --surface: #FFFFFF;
+  --surface2: #EDF1F6;
+  --ink: #0B1526;
+  --muted: #5A6B82;
+  --line: #DCE4EE;
+  --line2: #E7EDF4;
+  --accent: #0088CC;
+  --accent-ink: #FFFFFF;
+  --accent-soft: rgba(0, 136, 204, .10);
+  --ok: #0E9F6E;
+  --warn: #B45309;
+  --bad: #DC2626;
+  --ok-soft: rgba(14, 159, 110, .10);
+  --warn-soft: rgba(180, 83, 9, .10);
+  --bad-soft: rgba(220, 38, 38, .10);
+  --c-l0: #8FA3BC; --c-l1: #22D3EE; --c-l2: #38BDF8; --c-l3: #818CF8;
+  --c-l4: #C084FC; --c-l5: #F472B6; --c-l6: #FBBF24;
+  --mono: ui-monospace, "Cascadia Mono", Consolas, "SF Mono", monospace;
+  --sans: "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+  /* 旧壳层命名 → A 令牌 */
+  --win: var(--bg);
+  --chrome: var(--surface2);
+  --panel: var(--surface);
+  --panel2: var(--surface2);
+  --tx: var(--ink);
+  --tx2: color-mix(in srgb, var(--ink) 62%, var(--muted));
+  --mu: var(--muted);
+  --red: var(--bad);
+  --red-soft: var(--bad-soft);
+  --amber: var(--warn);
+  --green: var(--ok);
+  --shadow: 0 6px 20px rgba(4, 12, 28, 0.10);
+  --r: 8px;
   --row-h: 26px;
 }
 
 html[data-theme='dark'] {
-  --win: #151a24;
-  --chrome: #1c2330;
-  --panel: #1f2734;
-  --panel2: #232c3b;
-  --line: #303a4c;
-  --line2: #28313f;
-  --tx: #dde4f2;
-  --tx2: #a9b4c9;
-  --mu: #8793a9;
-  --accent: #5b9bff;
-  --accent-soft: #23324c;
-  --red: #ff7b7b;
-  --red-soft: #3a2429;
-  --amber: #e0a95a;
-  --green: #69c79a;
-  --shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --bg: #060B16;
+  --surface: #0C1424;
+  --surface2: #101B30;
+  --ink: #E4EDF8;
+  --muted: #8296B0;
+  --line: #1B2A45;
+  --line2: #16223A;
+  --accent: #22D3EE;
+  --accent-ink: #04222B;
+  --accent-soft: rgba(34, 211, 238, .12);
+  --ok: #34D399;
+  --warn: #FBBF24;
+  --bad: #F87171;
+  --ok-soft: rgba(52, 211, 153, .12);
+  --warn-soft: rgba(251, 191, 36, .12);
+  --bad-soft: rgba(248, 113, 113, .12);
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.50);
 }
 
 html[data-density='compact'] {
@@ -56,7 +77,7 @@ body {
   overflow: hidden;
   background: var(--win);
   color: var(--tx);
-  font: 12px/1.45 'Segoe UI', 'Microsoft YaHei', system-ui, -apple-system, sans-serif;
+  font: 12px/1.45 var(--sans);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -101,10 +122,10 @@ button:disabled { cursor: not-allowed; }
   align-items: stretch;
   justify-content: center;
   height: 32px;
-  background: linear-gradient(#fbfbfc, #f1f2f4);
+  background: linear-gradient(var(--surface), var(--surface2));
   border-bottom: 1px solid var(--line);
 }
-html[data-theme='dark'] .titlebar { background: linear-gradient(#232935, #1a1f28); }
+html[data-theme='dark'] .titlebar { background: linear-gradient(var(--surface2), var(--surface)); }
 
 /* 快速访问工具条：紧跟 5 个菜单项之后（不再推到最右）；无对应能力的按钮置灰并在 title 写原因 */
 .qa {
@@ -148,7 +169,7 @@ html[data-theme='dark'] .titlebar { background: linear-gradient(#232935, #1a1f28
   text-overflow: ellipsis;
 }
 .qa-sep { width: 1px; height: 16px; margin: 0 3px; background: var(--line); flex: none; }
-html[data-theme='dark'] .qa { border-left-color: #39414c; }
+html[data-theme='dark'] .qa { border-left-color: var(--line); }
 
 /* 记忆助手：QAT 开关按钮 + 下拉面板（面板常驻壳层，切中心标签不丢会话） */
 .qa-slot { position: relative; display: inline-flex; flex: none; }
@@ -209,7 +230,7 @@ html[data-theme='dark'] .qa { border-left-color: #39414c; }
 }
 .ma-send {
   width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--accent);
-  background: var(--accent); color: #fff; display: grid; place-items: center; cursor: pointer; flex: none;
+  background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; cursor: pointer; flex: none;
 }
 .ma-send:disabled { opacity: 0.55; cursor: default; }
 .ma-foot { font-size: 9.5px; color: var(--mu); }
@@ -328,8 +349,8 @@ html[data-theme='dark'] .qa { border-left-color: #39414c; }
   display: grid;
   place-items: center;
   border-radius: 4px;
-  background: #0f6cbd;
-  color: #fff;
+  background: var(--accent);
+  color: var(--accent-ink);
 }
 .app-name {
   flex: none;
@@ -727,7 +748,7 @@ html[data-theme='dark'] .qa { border-left-color: #39414c; }
   font-size: 10.5px;
   cursor: pointer;
 }
-.auth-strip button:hover { background: var(--accent); color: #fff; }
+.auth-strip button:hover { background: var(--accent); color: var(--accent-ink); }
 
 .ov-error-strip {
   flex: none;
@@ -1324,7 +1345,7 @@ button.tb-tag { cursor: pointer; font-family: inherit; }
   border: 1px solid var(--accent);
   border-radius: 4px;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-ink);
   font-size: 12px;
   font-family: inherit;
   cursor: pointer;
