@@ -113,8 +113,8 @@ export type IconName =
   | 'search' | 'clock' | 'book' | 'list' | 'shield' | 'chart' | 'play' | 'sync'
   | 'gear' | 'agent' | 'plus' | 'refresh' | 'export' | 'filter' | 'panel' | 'fold'
   | 'copy' | 'archive' | 'key' | 'check' | 'scale' | 'play2' | 'info' | 'help'
-  | 'unlock' | 'eye' | 'broken' | 'ring' | 'system' | 'sun' | 'moon' | 'terminal'
-  | 'chev' | 'caret' | 'x' | 'folder' | 'link' | 'dot' | 'save' | 'undo' | 'more';
+  | 'unlock' | 'eye' | 'eye-off' | 'broken' | 'ring' | 'system' | 'sun' | 'moon' | 'terminal'
+  | 'chev' | 'caret' | 'x' | 'folder' | 'link' | 'dot' | 'save' | 'undo' | 'more' | 'pen';
 
 export interface RibbonItem {
   label: string;

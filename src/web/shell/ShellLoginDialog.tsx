@@ -10,6 +10,7 @@ import { useLoginMirror } from '../Home/useLoginMirror.ts';
 import { clearStoredSessionId, getStoredSessionId } from '../Home/crossTabAuth.ts';
 import { fetchSessionContext } from '../shared/session.ts';
 import { homeBaseUrl } from '../backend.ts';
+import { Icon } from './Icons.tsx';
 import type { Form } from '../../types/agentOnboard.ts';
 import type { TenantContext } from '../../types/home.ts';
 
@@ -45,10 +46,13 @@ export function ShellLoginDialog({ open, onClose, onSession }: ShellLoginDialogP
   const [context, setContext] = useState<TenantContext | null>(null);
   const [sid, setSid] = useState<string | null>(null);
   const [check, setCheck] = useState<'none' | 'loading' | 'valid' | 'invalid'>('none');
+  /** 密码显示切换：默认隐藏；切换只改 type，不改值也不抢焦点 */
+  const [showPw, setShowPw] = useState(false);
 
   // 每次打开都核对本机会话：有 sessionId 就向 /api/me 查真实身份，查不到即如实标为失效
   useEffect(() => {
     if (!open) return;
+    setShowPw(false);
     const current = getStoredSessionId();
     setSid(current);
     setErr(null);
@@ -225,15 +229,30 @@ export function ShellLoginDialog({ open, onClose, onSession }: ShellLoginDialogP
             </label>
             <label className="slm-field">
               <span>密码</span>
-              <input
-                type="password"
-                data-testid="slm-password"
-                placeholder="密码"
-                value={password}
-                autoComplete="current-password"
-                onChange={(e) => setPassword(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') void submit(); }}
-              />
+              <span className="slm-pw">
+                <input
+                  type={showPw ? 'text' : 'password'}
+                  data-testid="slm-password"
+                  placeholder="密码"
+                  value={password}
+                  autoComplete="current-password"
+                  onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') void submit(); }}
+                />
+                <button
+                  type="button"
+                  className="slm-pw-eye"
+                  data-testid="slm-pw-toggle"
+                  aria-label={showPw ? '隐藏密码' : '显示密码'}
+                  aria-pressed={showPw}
+                  title={showPw ? '隐藏密码' : '显示密码'}
+                  // 按下时不抢焦点，输入框保持光标位置；只切换 type，内容不变
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => setShowPw((v) => !v)}
+                >
+                  <Icon name={showPw ? 'eye' : 'eye-off'} size={13} />
+                </button>
+              </span>
             </label>
             <button className="slm-btn" type="button" data-testid="slm-submit" onClick={() => void submit()} disabled={busy}>
               {busy ? '登录中…' : '登录'}

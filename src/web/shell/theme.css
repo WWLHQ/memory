@@ -1140,7 +1140,7 @@ button.tb-tag { cursor: pointer; font-family: inherit; }
 }
 .slm-x:hover { color: var(--tx); }
 .slm-field { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--tx2); }
-.slm-field > span { width: 34px; flex: none; text-align: right; }
+.slm-field > span:first-child { width: 34px; flex: none; text-align: right; }
 .slm-field input {
   flex: 1;
   height: 28px;
@@ -1153,6 +1153,27 @@ button.tb-tag { cursor: pointer; font-family: inherit; }
   border-radius: 4px;
 }
 .slm-field input:focus { outline: 1px solid var(--accent); outline-offset: -1px; }
+/* 密码显示切换：按钮压在输入框右端，不参与 label 的 34px 标签列 */
+.slm-pw { position: relative; flex: 1; display: flex; align-items: center; }
+.slm-pw input { width: 100%; padding-right: 28px; }
+.slm-pw-eye {
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--mu);
+  cursor: pointer;
+}
+.slm-pw-eye:hover { color: var(--tx); background: var(--line2); }
+.slm-pw-eye[aria-pressed='true'] { color: var(--accent); }
 .slm-btn {
   height: 30px;
   border: 1px solid var(--accent);
