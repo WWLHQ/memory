@@ -59,6 +59,10 @@ export type ErrorCode =
   | 'E_BUDGET_FUSE'    // 召回预算硬熔断（3000t）
   | 'E_LLM_FALLBACK'   // 反代理超限，已回退本地
   | 'E_SYNC_CONFLICT'  // 版本冲突待裁决
+  | 'E_SYNC_NOT_AUTHORIZED' // 团队上行缺显式授权（个人记忆默认仅本机+本人）
+  | 'E_SYNC_STATE'     // 当前状态不允许该同步动作（未确认/已同步/墓碑）
+  | 'E_SYNC_NO_TEAM'   // 缺少上行目标团队（会话三元组无 team_id）
+  | 'E_SYNC_TEAM_MISMATCH' // 上行目标与会话团队不一致（拒绝跨团队）
   | 'E_NOT_IMPLEMENTED'// 能力尚未接线（诚实报错，禁止伪造成功）
   | 'E_FORM_DISABLED'  // 当前端能力不可用（19.9 R⑥）
   | 'E_QUOTA'          // 免费额度耗尽
