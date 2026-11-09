@@ -406,10 +406,10 @@
 | [src/web/shared/syncHub.ts](src/web/shared/syncHub.ts) | 77 | 渲染层同步中枢代理（批次42-B）：把内核 AnySyncHub 接口转发到主进程 PgSyncHub。 | HostSyncHub(class) |
 | [src/web/shared/useColWidths.tsx](src/web/shared/useColWidths.tsx) | 97 | 表头列宽拖拽与固化（批次24）：记忆库 / 日志记录 / 审计日志三张表共用同一实现。 | loadColWidths(fn), saveColWidths(fn), useColWidths(fn), ColResizeHandle(fn), MIN_COL_WIDTH(const), ColWidths(type) |
 | [src/web/shared/useL0Session.ts](src/web/shared/useL0Session.ts) | 155 | 渲染层 L0 连续查阅会话（§4.4.3，日志页 / 记忆层级页共用）： | useL0Session(fn), formatRemaining(fn), L0_HEARTBEAT_MS(const), L0SessionView(type), L0SessionApi(type), L0UnlockOutcome(type), L0RequestOutcome(type) |
-| [src/web/shell/ContextMenu.tsx](src/web/shell/ContextMenu.tsx) | 92 | 壳层右键菜单（批次49）：表格行 / 导航树 / 标签条 / 检查器共用同一个渲染器。 | ContextMenu(fn), ContextMenuItem(type), ContextMenuState(type) |
+| [src/web/shell/ContextMenu.tsx](src/web/shell/ContextMenu.tsx) | 117 | 壳层右键菜单（批次49）：表格行 / 导航树 / 标签条 / 检查器共用同一个渲染器。 | ContextMenu(fn), ContextMenuItem(type), ContextMenuState(type) |
 | [src/web/shell/Icons.tsx](src/web/shell/Icons.tsx) | 75 | 壳层图标：定稿里的线性图标集，按需内联渲染（不引入外部图标库、不依赖网络）。 | Icon(fn) |
 | [src/web/shell/ShellLoginDialog.tsx](src/web/shell/ShellLoginDialog.tsx) | 260 | 壳层登录弹窗（批次49）：菜单栏 / 快速访问工具条 / 登录状态处三处入口共用同一个实例。 | ShellLoginDialog(fn), ShellLoginDialogProps(type) |
-| [src/web/shell/Workspace.tsx](src/web/shell/Workspace.tsx) | 1703 | 工作台壳层（批次48 S1）：Ribbon + 导航树 + 标签条 + 属性检查器 + 任务窗 + 底部五标签 + 状态栏。 | Workspace(fn) |
+| [src/web/shell/Workspace.tsx](src/web/shell/Workspace.tsx) | 1807 | 工作台壳层（批次48 S1）：Ribbon + 导航树 + 标签条 + 属性检查器 + 任务窗 + 底部五标签 + 状态栏。 | Workspace(fn) |
 | [src/web/shell/dock.ts](src/web/shell/dock.ts) | 170 | 底部面板真实数据源（S6）：输出=程序动作日志尾读；问题=该日志派生的错误/警告； | loadOutputLog(fn), problemsFromLog(fn), loadScheduleRuns(fn), auditMentions(fn), loadAuditForMemory(fn), OutputLogView(type), ProblemRow(type), ScheduleRun(type), AuditRow(type), DockResult(type) |
 | [src/web/shell/layers.ts](src/web/shell/layers.ts) | 75 | L1–L6 / L0 面板真实数据（S7）：只在中心页为「分层 L1–L6」或「L0 密文」时显示的壳层条。 | loadLayerPanel(fn), PANEL_LAYERS(const), LayerCount(type), LayerPanelView(type), PanelLayer(type) |
 | [src/web/shell/overview.ts](src/web/shell/overview.ts) | 132 | 壳层「概览」数据条（批次48 S2）：只从真实链路取值，逐项标明来源与失败原因。 | loadOverview(fn), OverviewHealth(type), OverviewBilling(type), OverviewSnapshot(type) |
@@ -910,10 +910,10 @@ src/web/shared/shellNavigate.ts b8b75188302d
 src/web/shared/syncHub.ts 764fcac009c7
 src/web/shared/useColWidths.tsx a6e14931a82b
 src/web/shared/useL0Session.ts c917a61c99d9
-src/web/shell/ContextMenu.tsx d5190f66e93c
+src/web/shell/ContextMenu.tsx e2dcb1ea4ce9
 src/web/shell/Icons.tsx 3a8fad33fa2d
 src/web/shell/ShellLoginDialog.tsx 6971b7f00efa
-src/web/shell/Workspace.tsx e24f7b02702f
+src/web/shell/Workspace.tsx c672f2a9f154
 src/web/shell/dock.ts 029c48568f1d
 src/web/shell/layers.ts 8f18e012b258
 src/web/shell/overview.ts da3fd4e65972
