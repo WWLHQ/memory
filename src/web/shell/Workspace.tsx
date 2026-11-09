@@ -64,6 +64,8 @@ interface QaSpec {
   sep?: boolean;
   icon?: IconName;
   title?: string;
+  /** 可见文字标签：纯图标按钮在 15 个同形图标里不可辨认，登录态入口必须带字 */
+  text?: string;
   disabled?: boolean;
   run?: () => void;
 }
@@ -513,8 +515,8 @@ export function Workspace() {
     }
   }, []);
 
-  // ── 批次49：右键菜单（导航树 / 标签条 / 属性检查器 / 中心页表格行）──
-  // 每个区域都给出真实可执行项；壳层确实没有能力的项一律禁用并写原因，不渲染空菜单。
+  // ── 批次49：右键菜单（全域接管；四类专门区域 + 壳层其余任意位置）──
+  // 任何可右键位置都必须给出非空菜单：要么真实动作，要么禁用并写原因；不漏出浏览器原生菜单。
   const copyText = useCallback((text: string, okMsg: string) => {
     const write = navigator.clipboard?.writeText(text);
     if (!write) { setMessage('复制失败：当前环境未提供剪贴板 API。'); return; }
@@ -615,7 +617,63 @@ export function Workspace() {
     ]);
   }, [openCtxMenu, selectionId, selection, active?.page, copyText]);
 
-  /** 中心页表格行右键：行必须是 `tr[data-testid^="row-"]`（真实账本行），否则交回浏览器原生菜单 */
+  /**
+   * 全域右键兜底：标题栏 / 菜单栏 / QAT / Ribbon / 导航搜索框 / 状态栏 / 底部面板 / 中心空白
+   * 命中的区域决定标题，动作全部是壳层真实能力（刷新、回概览、聚焦查找、复制、切主题、登录会话）。
+   * 这样壳层可视范围内不存在「右键没反应」或漏原生菜单的位置。
+   */
+  const openDefaultContext = useCallback((x: number, y: number, target: HTMLElement | null) => {
+    const zone = target?.closest('.tree') ? '功能导航'
+      : target?.closest('.statusbar') ? '状态栏'
+        : target?.closest('.bottom-panel') ? '底部面板'
+          : target?.closest('.inspector-pane') ? '属性检查器'
+            : target?.closest('.center-pane') ? '中心区'
+              : target?.closest('.ribbon-body, .ribbon-tabs') ? '功能区'
+                : target?.closest('.qa') ? '快速访问工具条'
+                  : target?.closest('.menubar') ? '菜单栏'
+                    : target?.closest('.titlebar') ? '标题栏'
+                      : '工作台';
+    // 输入框的选区不走 DOM Selection，单独取 selectionStart/End
+    const field = target?.closest('input, textarea') as HTMLInputElement | HTMLTextAreaElement | null;
+    const selected = field && typeof field.selectionStart === 'number'
+      ? field.value.slice(field.selectionStart ?? 0, field.selectionEnd ?? 0)
+      : (window.getSelection()?.toString() ?? '');
+    const selectedText = selected.trim();
+    openCtxMenu(x, y, `右键：${zone}`, 'shellmenu', [
+      { id: 'refresh', icon: 'refresh', label: '刷新中心区与底部/状态栏读数（F5）', run: () => runShellAction('refresh', '刷新') },
+      {
+        id: 'home', icon: 'spark', label: '回到概览',
+        run: () => { const home = findNav('home'); if (home) openView(home); },
+      },
+      { id: 'find', icon: 'search', label: '聚焦导航查找框（Ctrl+F）', run: () => runShellAction('focusFilter', '查找') },
+      { id: 'sep1', sep: true },
+      {
+        id: 'copySel', icon: 'copy', label: `复制选中文本（${selectedText.length} 字）`,
+        disabled: !selectedText, reason: field ? '输入框内没有选中文本' : '当前页面上没有选中文本',
+        run: () => copyText(selected, `已复制选中文本（${selectedText.length} 字）。`),
+      },
+      {
+        id: 'copyFile', icon: 'db', label: '复制当前页面文件',
+        disabled: !active?.page, reason: '当前标签没有对应页面',
+        run: () => { if (active?.page) copyText(PAGES[active.page].file, `已复制页面文件：${PAGES[active.page].file}`); },
+      },
+      { id: 'sep2', sep: true },
+      {
+        id: 'theme', icon: 'sun', label: '切换主题（跟随系统 → 浅色 → 深色）',
+        run: () => setTheme((t) => (t === 'system' ? 'light' : t === 'light' ? 'dark' : 'system')),
+      },
+      { id: 'login', icon: 'user', label: '登录 / 会话…', run: () => setLoginOpen(true) },
+    ]);
+  }, [openCtxMenu, active?.page, copyText, runShellAction, openView]);
+
+  /** 壳层根节点兜底监听：子区域已自行处理并 preventDefault 的直接放行，其余一律由壳层接管 */
+  const onShellContextMenu = useCallback((e: ReactMouseEvent<HTMLDivElement>) => {
+    if (e.defaultPrevented) return;
+    e.preventDefault();
+    openDefaultContext(e.clientX, e.clientY, e.target as HTMLElement | null);
+  }, [openDefaultContext]);
+
+  /** 中心页表格行右键：行必须是 `tr[data-testid^="row-"]`（真实账本行）才有行菜单，其余位置给页面菜单 */
   const openRowContext = useCallback((frame: HTMLIFrameElement, row: HTMLElement, ev: MouseEvent) => {
     const testId = row.getAttribute('data-testid') ?? '';
     const rowId = testId.startsWith('row-') ? testId.slice(4) : '';
@@ -657,7 +715,49 @@ export function Workspace() {
     setMenuOpen(null);
   }, [copyText, refreshDockAudit]);
 
-  /** 给同源 iframe 文档挂一次 contextmenu：只拦真实账本表格行，其余位置保留原生菜单 */
+  /** 中心页 iframe 内的非表格行右键：同样由壳层接管，给页面级真实动作，不漏原生菜单 */
+  const openPageContext = useCallback((frame: HTMLIFrameElement, ev: MouseEvent) => {
+    const rect = frame.getBoundingClientRect();
+    const scale = zoomRef.current / 100;
+    let doc: Document | null = null;
+    try { doc = frame.contentDocument; } catch { doc = null; }
+    const sel = (doc?.getSelection()?.toString() ?? '').trim();
+    const page = active?.page;
+    setCtxMenu({
+      x: rect.left / scale + ev.clientX,
+      y: rect.top / scale + ev.clientY,
+      title: '中心页（iframe）',
+      testId: 'framemenu',
+      items: [
+        { id: 'refresh', icon: 'refresh', label: '刷新中心区（F5）', run: () => runShellAction('refresh', '刷新') },
+        {
+          id: 'home', icon: 'spark', label: '回到概览',
+          run: () => { const home = findNav('home'); if (home) openView(home); },
+        },
+        { id: 'sep1', sep: true },
+        {
+          id: 'copySel', icon: 'copy', label: `复制页内选中文本（${sel.length} 字）`,
+          disabled: !sel, reason: '页面内没有选中文本',
+          run: () => copyText(sel, `已复制页内选中文本（${sel.length} 字）。`),
+        },
+        {
+          id: 'copyFile', icon: 'db', label: '复制页面文件',
+          disabled: !page, reason: '当前标签没有对应页面',
+          run: () => { if (page) copyText(PAGES[page].file, `已复制页面文件：${PAGES[page].file}`); },
+        },
+        {
+          id: 'source', icon: 'info', label: '查看页面来源',
+          disabled: !page, reason: '当前标签没有对应页面',
+          run: () => { if (page) setMessage(`页面 ${PAGES[page].file} · 数据来源：${PAGES[page].source}`); },
+        },
+        { id: 'sep2', sep: true },
+        { id: 'login', icon: 'user', label: '登录 / 会话…', run: () => setLoginOpen(true) },
+      ],
+    });
+    setMenuOpen(null);
+  }, [active?.page, copyText, runShellAction, openView]);
+
+  /** 给同源 iframe 文档挂一次 contextmenu：全域接管（行→行菜单，其余→页面菜单），不留原生菜单 */
   const attachFrameContextMenu = useCallback((frame: HTMLIFrameElement) => {
     let doc: Document | null = null;
     try {
@@ -669,12 +769,13 @@ export function Workspace() {
     bridgedDocs.current.add(doc);
     doc.addEventListener('contextmenu', (ev: Event) => {
       const target = ev.target as HTMLElement | null;
-      const row = target?.closest?.('tr[data-testid^="row-"]') as HTMLElement | null;
-      if (!row) return;
+      // 先拦：iframe 内任何位置都不允许漏出原生菜单
       ev.preventDefault();
-      openRowContext(frame, row, ev as MouseEvent);
+      const row = target?.closest?.('tr[data-testid^="row-"]') as HTMLElement | null;
+      if (row) openRowContext(frame, row, ev as MouseEvent);
+      else openPageContext(frame, ev as MouseEvent);
     });
-  }, [openRowContext]);
+  }, [openRowContext, openPageContext]);
 
   const onRibbonItem = useCallback((item: RibbonItem) => {
     if (item.unavailable) return;
@@ -804,6 +905,8 @@ export function Workspace() {
     { id: 'find', icon: 'search', title: '查找左侧功能导航（Ctrl+F / Ctrl+K）', run: () => runShellAction('focusFilter', '查找') },
     {
       id: 'login', icon: 'user',
+      // 可见文字：未登录写「登录」，已确认会话写账号（纯图标用户找不到入口）
+      text: sessionActive && identity ? identity.user_id : '登录',
       title: sessionActive
         ? '登录 / 会话：查看当前账号、团队、角色或登出（真实 /api/me）'
         : '登录 / 会话：打开登录弹窗（真实 POST /api/login）',
@@ -916,6 +1019,7 @@ export function Workspace() {
   return (
     <div
       className={`shell${IS_ELECTRON ? ' electron' : ''}`}
+      onContextMenu={onShellContextMenu}
       style={{
         '--nav-w': `${navCollapsed ? 0 : navWidth}px`,
         '--insp-w': `${inspCollapsed ? 0 : inspWidth}px`,
@@ -936,14 +1040,14 @@ export function Workspace() {
             ) : (
               <button
                 key={q.id}
-                className={`qa-btn${q.disabled ? ' off' : ''}`}
+                className={`qa-btn${q.disabled ? ' off' : ''}${q.text ? ' labeled' : ''}`}
                 type="button"
                 data-testid={`qa-${q.id}`}
                 aria-label={q.title}
                 aria-disabled={q.disabled || undefined}
                 title={q.title}
                 onClick={q.disabled ? undefined : q.run}
-              ><Icon name={q.icon ?? 'dot'} size={15} /></button>
+              ><Icon name={q.icon ?? 'dot'} size={15} />{q.text ? <span className="qa-label">{q.text}</span> : null}</button>
             ))}
           </div>
           <div className="tb-left">
