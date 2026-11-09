@@ -6,6 +6,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { PersonalEntry, PersonalMemoryStore } from './personalStore.ts';
+import { normalizePersonalEntry } from './personalStore.ts';
 
 interface FileShape {
   schema: 1;
@@ -42,7 +43,8 @@ export class FilePersonalStore implements PersonalMemoryStore {
     try {
       const raw = JSON.parse(readFileSync(this.file, 'utf8')) as Partial<FileShape>;
       for (const e of Array.isArray(raw.entries) ? raw.entries : []) {
-        if (isEntry(e)) this.entries.set(this.key(e.owner, e.id), e);
+        // 第一轮条目缺 sha256/vclock/同步字段：只补元数据，不改正文与状态（旧值原样可读）
+        if (isEntry(e)) this.entries.set(this.key(e.owner, e.id), normalizePersonalEntry(e));
       }
     } catch {
       // 首次启动 / 文件不存在：空表（不创建文件，等第一次真实写入）
@@ -78,7 +80,7 @@ export class FilePersonalStore implements PersonalMemoryStore {
   async put(entry: PersonalEntry): Promise<void> {
     const run = this.queue.then(() => {
       this.ensureLoaded();
-      this.entries.set(this.key(entry.owner, entry.id), { ...entry });
+      this.entries.set(this.key(entry.owner, entry.id), normalizePersonalEntry({ ...entry }));
       this.save();
     });
     this.queue = run.catch(() => { /* 队列不因单次失败卡死；错误仍抛给本次调用方 */ });
