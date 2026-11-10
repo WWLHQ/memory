@@ -89,8 +89,8 @@ export async function coreHostDiscover(): Promise<{
 
 // ---------- 效果证据四卡（真实可算，来自内核账本） ----------
 
-/** 2.4.1 全量召回预算（token）：payload 相对该基线的节省比例 */
-const FULL_BUDGET = 1500;
+/** 2.4.1 全量召回预算（token）：payload 相对该基线的节省比例。导出供首页 TOKEN 节省率 sparkline 复用同一口径。 */
+export const FULL_BUDGET = 1500;
 
 function asRecord(detail: unknown): Record<string, unknown> {
   return (detail && typeof detail === 'object' ? detail : {}) as Record<string, unknown>;

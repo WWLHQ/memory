@@ -12,6 +12,7 @@ import { homeBaseUrl } from '../backend.ts';
 import { hasActiveSession } from '../Home/crossTabAuth.ts';
 import { getHomeFeed, emptySync } from '../Home/coreHome.ts';
 import { emptyLayerGraph, type LayerGraph } from '../Home/layerGraph.ts';
+import { FULL_BUDGET } from '../AgentOnboard/coreOnboard.ts';
 import type { RawHomeFeed } from '../../home/dashboard.ts';
 import { getKernelStorage } from '../kernel.ts';
 import { currentSessionId } from '../shared/session.ts';
@@ -51,6 +52,34 @@ export interface OverviewRecentAudits {
   rows: OverviewAuditRow[];
   /** 全量审计行数（提示「查看全部」口径）；读不到为 0 */
   total: number;
+  error: string | null;
+}
+
+/** 今日概览（UTC+08:00 今日起内核审计实算；四类真实计数，读不到给原因不冒充 0） */
+export interface OverviewTodayPanel {
+  ok: boolean;
+  /** 今日入库成功（write 且 dedup≠filtered） */
+  write: number;
+  /** 今日召回 */
+  recall: number;
+  /** 今日分支嫁接 */
+  graft: number;
+  /** 今日被质量门拦下（write 且 dedup=filtered） */
+  filtered: number;
+  error: string | null;
+}
+
+/** TOKEN 节省率（今日召回 payload 相对 2.4.1 全量预算 FULL_BUDGET；sparkline 取近 N 次 payload） */
+export interface OverviewTokenPanel {
+  ok: boolean;
+  /** 今日平均 payload 相对 FULL_BUDGET 的节省比例（0–100）；无今日召回为 null */
+  savedPct: number | null;
+  /** 今日召回次数 */
+  recallCount: number;
+  /** 今日累计相对 FULL_BUDGET 基线省下的 token */
+  savedTokens: number;
+  /** 近 N 次召回 payload_tokens 序列（倒序取末尾，供 sparkline 画真实曲线） */
+  series: number[];
   error: string | null;
 }
 
@@ -123,6 +152,9 @@ export interface OverviewSnapshot {
   graph: LayerGraph;
   /** 批次57-B：以下面板各自独立取数，任一失败只影响自身面板 */
   recentAudits: OverviewRecentAudits;
+  /** 批次57-C：今日概览 / TOKEN 节省率（同一份全量审计实算，与 recentAudits 同源一次读取） */
+  today: OverviewTodayPanel;
+  token: OverviewTokenPanel;
   refine: OverviewRefinePanel;
   mcp: OverviewMcpPanel;
   engines: OverviewEnginePanel;
@@ -238,18 +270,65 @@ async function probeBilling(session: boolean): Promise<OverviewBilling> {
   }
 }
 
-/** 最近审计：内核账本 queryAudit 取末尾 N 条（倒序），读不到给原因（不冒充空账本） */
-async function loadRecentAudits(limit: number): Promise<OverviewRecentAudits> {
+/** UTC+08:00 今日起点（epoch ms）：审计 ts 是 epoch，用户口径统一东八区 */
+function todayStartUtc8(): number {
+  const nowUtc8 = new Date(Date.now() + 8 * 3600_000);
+  return Date.UTC(nowUtc8.getUTCFullYear(), nowUtc8.getUTCMonth(), nowUtc8.getUTCDate()) - 8 * 3600_000;
+}
+
+/** 一次全量审计读取，同口径派生三块面板（最近审计 / 今日概览 / TOKEN 节省率），任一失败共用同一原因 */
+async function loadAuditPanels(recentLimit: number): Promise<{
+  recent: OverviewRecentAudits;
+  today: OverviewTodayPanel;
+  token: OverviewTokenPanel;
+}> {
+  const emptyRecent: OverviewRecentAudits = { ok: false, rows: [], total: 0, error: null };
+  const emptyToday: OverviewTodayPanel = { ok: false, write: 0, recall: 0, graft: 0, filtered: 0, error: null };
+  const emptyToken: OverviewTokenPanel = { ok: false, savedPct: null, recallCount: 0, savedTokens: 0, series: [], error: null };
   try {
     const audits = await getKernelStorage().queryAudit({});
-    const rows = audits.slice(-limit).reverse().map((a) => ({
+    const dayStart = todayStartUtc8();
+    const isToday = (a: AuditRecord) => typeof a.ts === 'number' && a.ts >= dayStart;
+    const recallToday = audits.filter((a) => a.action === 'recall' && isToday(a));
+    const writeRec = audits.filter((a) => a.action === 'write' && isToday(a));
+    // 质量门拦下的写入 detail.action='filtered_l0_to_l1'（qualityGate.filteredAuditDetail）；其余 write = 入库成功
+    const today: OverviewTodayPanel = {
+      ok: true,
+      write: writeRec.filter((a) => asRecord(a.detail).action !== 'filtered_l0_to_l1').length,
+      recall: recallToday.length,
+      graft: audits.filter((a) => a.action === 'graft' && isToday(a)).length,
+      filtered: writeRec.filter((a) => asRecord(a.detail).action === 'filtered_l0_to_l1').length,
+      error: null,
+    };
+    // TOKEN 节省率：今日召回 payload_tokens vs FULL_BUDGET（2.4.1）；sparkline 取今日召回倒序 payload
+    const payloads = recallToday
+      .map((a) => Number(asRecord(a.detail).payload_tokens))
+      .filter((n) => Number.isFinite(n) && n >= 0);
+    const series = [...payloads].reverse().slice(-12);
+    const avg = payloads.length ? payloads.reduce((s, n) => s + n, 0) / payloads.length : 0;
+    const savedPct = payloads.length > 0 ? Math.max(0, Math.round((1 - avg / FULL_BUDGET) * 100)) : null;
+    const savedTokens = payloads.reduce((s, n) => s + Math.max(0, FULL_BUDGET - n), 0);
+    const token: OverviewTokenPanel = {
+      ok: true,
+      savedPct,
+      recallCount: recallToday.length,
+      savedTokens,
+      series,
+      error: null,
+    };
+    const rows = audits.slice(-recentLimit).reverse().map((a) => ({
       t: typeof a.ts === 'number' ? fmtClock(a.ts) : '无时间戳',
       action: a.action,
       memo: auditMemo(a),
     }));
-    return { ok: true, rows, total: audits.length, error: null };
+    const recent: OverviewRecentAudits = { ok: true, rows, total: audits.length, error: null };
+    return { recent, today, token };
   } catch (e) {
-    return { ok: false, rows: [], total: 0, error: `账本读不到：${describeError(e)}` };
+    const reason = `账本读不到：${describeError(e)}`;
+    emptyRecent.error = reason;
+    emptyToday.error = reason;
+    emptyToken.error = reason;
+    return { recent: emptyRecent, today: emptyToday, token: emptyToken };
   }
 }
 
@@ -325,7 +404,7 @@ export async function loadOverview(): Promise<OverviewSnapshot> {
     feed,
     health,
     billing,
-    recent,
+    auditPanels,
     refine,
     mcp,
     engines,
@@ -342,7 +421,7 @@ export async function loadOverview(): Promise<OverviewSnapshot> {
     })),
     probeHealth(),
     probeBilling(session),
-    loadRecentAudits(8),
+    loadAuditPanels(8),
     loadRefinePanel(),
     loadMcpPanel(sid),
     loadEnginePanel(sid),
@@ -371,7 +450,9 @@ export async function loadOverview(): Promise<OverviewSnapshot> {
     billing,
     facts: f.facts ?? null,
     strata: f.strata ?? null,
-    recentAudits: recent,
+    recentAudits: auditPanels.recent,
+    today: auditPanels.today,
+    token: auditPanels.token,
     refine,
     mcp,
     engines,

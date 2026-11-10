@@ -244,6 +244,8 @@ export function Workspace() {
         effectGains: [],
         graph: emptyLayerGraph(),
         recentAudits: { ok: false, rows: [], total: 0, error: '概览聚合异常' },
+        today: { ok: false, write: 0, recall: 0, graft: 0, filtered: 0, error: '概览聚合异常' },
+        token: { ok: false, savedPct: null, recallCount: 0, savedTokens: 0, series: [], error: '概览聚合异常' },
         refine: { ok: false, available: false, view: null, error: '概览聚合异常' },
         mcp: { ok: false, available: false, endpoint: null, clients: [], error: '概览聚合异常' },
         engines: { ok: false, available: false, engines: [], error: '概览聚合异常' },

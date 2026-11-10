@@ -137,14 +137,14 @@ test.describe('REQ-005 首页与登录 · 点击级 E2E', () => {
     await page.goto(HOME);
     await expect(page.locator('.af-foot')).toContainText('已登录', { timeout: 10_000 });
     await expect(page.getByRole('button', { name: '去登录' })).toHaveCount(0);
-    // 效果四卡为真实账本聚合（空账本 = 未取数，不伪造演示数字）；今日数字在「今日概览」面板
+    // 效果四卡为真实账本聚合（空账本 = 未取数，不伪造演示数字）；今日数字在「今日概览」列表（批次57-C 定稿版式）
     await expect(page.locator('.af-g4 .af-stat')).toHaveCount(4);
-    await expect(page.locator('[data-testid="home-today"]')).toContainText('记忆');
-    await expect(page.locator('[data-testid="home-today"]')).toContainText('今日写入');
-    await expect(page.locator('[data-testid="home-today"]')).toContainText('今日召回');
-    await expect(page.locator('[data-testid="home-today"]')).toContainText('成本');
-    // 空账本记忆数 = 0（真实读数，不拿演示数冒充）
-    await expect(page.locator('[data-testid="home-today"] .af-today > div').first().locator('b')).toContainText('0');
+    await expect(page.locator('[data-testid="home-today"]')).toContainText('写入');
+    await expect(page.locator('[data-testid="home-today"]')).toContainText('召回');
+    await expect(page.locator('[data-testid="home-today"]')).toContainText('嫁接');
+    await expect(page.locator('[data-testid="home-today"]')).toContainText('过滤');
+    // 空账本今日写入 = 0（真实读数，不拿演示数冒充）
+    await expect(page.locator('[data-testid="home-today"] .af-li .rt').first()).toContainText('0');
     await expect(page.locator('[data-testid="overview-page"]')).not.toContainText('-58%');
     expect(errors).toEqual([]);
   });

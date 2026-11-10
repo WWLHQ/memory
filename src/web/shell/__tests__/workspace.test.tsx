@@ -33,6 +33,8 @@ const m = vi.hoisted(() => ({
     effectGains: [],
     graph: { hubs: [], nodes: [], edges: [], stats: { total: 7, rendered: 0, truncated: 0, refined: 0, conflicts: 1, conflictMemories: 0, merges: 0, grafts: 0, masked: 0 } },
     recentAudits: { ok: true, rows: [], total: 12, error: null },
+    today: { ok: true, write: 0, recall: 2, graft: 0, filtered: 0, error: null },
+    token: { ok: true, savedPct: null, recallCount: 2, savedTokens: 0, series: [], error: null },
     refine: { ok: false, available: false, view: null, error: '组件单测：不探主进程' },
     mcp: { ok: false, available: false, endpoint: null, clients: [], error: '组件单测：不探主进程' },
     engines: { ok: false, available: false, engines: [], error: '组件单测：不探主进程' },

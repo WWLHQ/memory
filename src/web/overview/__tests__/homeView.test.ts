@@ -23,6 +23,8 @@ function snap(over: Partial<OverviewSnapshot> = {}): OverviewSnapshot {
     effectGains: [{ icon: 'x', title: 'Token 节省', big: '-40%', desc: 'd', src: 's' }],
     graph: emptyLayerGraph(),
     recentAudits: { ok: true, rows: [], total: 12, error: null },
+    today: { ok: true, write: 1, recall: 2, graft: 0, filtered: 0, error: null },
+    token: { ok: true, savedPct: 40, recallCount: 2, savedTokens: 600, series: [900, 600], error: null },
     refine: { ok: false, available: false, view: null, error: '非桌面壳' },
     mcp: { ok: false, available: false, endpoint: null, clients: [], error: '非桌面壳' },
     engines: { ok: false, available: false, engines: [], error: '非桌面壳' },
