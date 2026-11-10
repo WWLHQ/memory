@@ -1455,3 +1455,19 @@ status: draft
 > **B·效果验证**：AC→用例映射：定稿图版式 → e2e ① `.af-title h1` + `.af-g4 .af-stat`=4 + `.af-foot` 未登录；④ 登录 → `.af-foot` 已登录 + `home-today` 含 写入/召回/嫁接/过滤 + 首 `.af-li .rt`=0 + 无 `-58%`；⑦ `.af-graph` + `.af-hub`=6 + `.af-core-n`=0。e2e 子集 **10/10 通过**（home/overview/crossTabAuth，真 dist + 真 home 后端）。token/today 真实性：`loadAuditPanels` 同一次 `queryAudit` 派生，无召回 → `savedPct=null` 显「未取数 + 今日暂无召回」，sparkline <2 样本不画，不伪造曲线。真浏览器浅/深截图目视：版式逐块对齐定稿图（图谱环轨/六格横排/右栏五卡/页脚端口行），令牌跟随主题（`%TEMP%/mam-57c/home-light.png`、`home-dark.png`，临时截图 spec 已删）。
 > **C·变异验证**：C1 变异点 = `deriveHomeView` 的 `healthOk: s.health.status === 'ok'` 注入 `!==` → 指定测试 `homeView.test.ts`「healthOk 只在后端真实可达（status=ok）时为真」**真实红灯**（1 failed / 6）→ 原样还原 → 6/6 复绿。C2 输入/状态矩阵：token 面板 ok 无召回 → 未取数+不画 sparkline；`!ok` → 给 `error` 原因；today 四类计数分别来自 write（剔除 `filtered_l0_to_l1`）/recall/graft/`filtered_l0_to_l1` 审计动作（qualityGate 同源口径）；series<2 不渲染 polyline；chip 过滤只调 `opacity` 不增删节点（`.af-hub` 恒 6，不伪造）。全部诚实降级，无静默成功。
 > **已知边界**：嫁接计数按顶层审计 action=`graft`（memories.ts 写入路径同源）；过滤计数按 `detail.action=filtered_l0_to_l1`（质量门拦下），与批次35 口径一致。TOKEN 节省率与效果四卡第 1 张同为 2.4.1 预算口径（`FULL_BUDGET` 已导出单一真源），前者按「今日」、后者按账本全周期。
+
+### 批次57-D：真机三问题修复——去登录无反应 / 壳层实宽双栏塌单栏 / 读取失败告警重复（2026-11-10）
+
+> 口径：用户真机反馈三点「① 点击去登录无反应；② 首页布局还是没有改过来；③ 将下面的账本读取失败取消，留最上面一个提示即可」。三条全部根因定位后修复，首页真实数据口径不变，记忆库仍暂停不动。
+
+| 问题 | 根因 | 修复落点 | 测试 |
+|---|---|---|---|
+| ① 去登录无反应 | `requestShellView('login')` 发到壳层后被 `findNav('login')` 静默丢弃——`login` 有意不占主导航（views.ts「登录走壳层弹窗」），NAV 表里没有该 id；e2e 只断言按钮可见从未点过 | `Workspace.tsx` onGoto 监听器特判 `id === 'login'` → `setLoginOpen(true)` 打开壳层登录弹窗（与 QAT/状态栏/菜单三入口同一弹窗实例） | `workspace.test.tsx` S3.5 新 2 例：goto login → `shell-login-modal` 开且不开 login.html 标签；goto audit → 照常开标签（回归口径） |
+| ② 双栏塌单栏 | 桌面壳默认 1280 窗 − 250 导航栏 − 318 检查器（默认开）− 10 分条 ≈ **702px** 中心 iframe 宽 < 900px 旧断点 → `af-cols` 塌成单栏、右栏遥测叠到图谱下方，用户看到「没改过来」 | `overviewPage.css`：塌栏断点 900→640px；新增 ≤1010px 中段右栏收窄 264px；图谱 `.af-graph` 固定 330px 高改 `aspect-ratio 760/352` 随宽缩放（宽栏 `max-height: 330px` 封顶对齐定稿图，窄栏不留巨幅空白） | e2e home ⑧ 新例：702px 视口断言 `af-cols` 计算列 = 2 列且右栏 ≈264px、图谱高度 ∈(120,330)；702px 浅/深全页截图目视（`%TEMP%/mam-57d/`） |
+| ③ 告警重复 | 壳层中心区顶部已有两条提示（`.auth-strip` 未登录只读条 + `.ov-error-strip` 账本读取失败条），`OverviewPage` 又渲染一条同文红告警，同一段错误在中心区出现两遍 | 删 `OverviewPage.tsx` 的 `snap.storageError` 红告警块，只留壳层顶部一条；页面保留各面板自身诚实失败原因（err 聚合失败告警与 L0 锁定提示不受影响） | `check:no-demo` 0 命中；全量回归既有诚实降级用例保持绿 |
+
+> **批次57-D 三道闸门证据**：
+> **A·影响面回归**：影响面 = `shell/Workspace.tsx`（onGoto 加 login 特判，+2 行）+ `overview/OverviewPage.tsx`（删重复告警块）+ `overview/overviewPage.css`（断点与图谱高度）+ `workspace.test.tsx`（S3.5 新 describe）+ `e2e/home.spec.ts`（新⑧）+ `specs/code-index.generated.md`；**未改内核公开契约 / 存储序列化 / 审计格式 / MCP 工具 / 端口 / 取数面 overview.ts / 记忆库**。静态门禁：typecheck 两工程 0 错、oxlint 0/0、`code:index:check` 通过（378 源码 / 122 文档）、`check:no-demo` 0 命中。全量回归串行 `test:gate` **229 文件 / 2650 例 0 失败、重试 0 次**（报告留档 `test-results/test-gate/20261110-104423/`）。
+> **B·效果验证**：AC→用例映射：① 去登录 → 单测 goto login 弹窗打开 + goto audit 照常开标签；e2e ①⑥ 去登录按钮可见性既有断言保持绿（点击行为由壳层单测覆盖）。② 版式 → e2e ⑧ 702px 双栏 2 列/右栏 264px/图谱高度按比例；既有 ①④⑦ 版式与真实数据断言全绿。③ 告警 → 页面不再渲染 `账本读取失败` 红告警（壳层 `overview-storage-error` 条保留），e2e 11/11 通过（home/overview/crossTabAuth，真 dist + 真 home 后端 + CDP Chromium）。真浏览器 702px 浅/深截图目视：双栏并排、图谱六枢纽/层级行/右栏五面板齐、令牌跟随主题、无红色读取失败横幅。
+> **C·变异验证**：C1 变异点 = `Workspace.tsx` onGoto 特判 `id === 'login'` 注入 `id === 'loginX'` → 指定测试 `workspace.test.tsx`「57-D：iframe 请求 login → 打开壳层登录弹窗」**真实红灯**（shell-login-modal 未出现）→ 原样还原 → 2/2 复绿，`git diff` 确认无变异残留。C2 输入/状态矩阵：goto 目标 ∈ {login（弹窗）/ NAV 内 id（开标签）/ 未知 id（忽略，findNav undefined）/ 非本壳 iframe 来源与异源 origin（fromOurs/origin 双守卫拒绝，login 特判在守卫之后不旁路）}；中心区宽度 ∈ {702（双栏 264 右栏）/ >1010（双栏 300 右栏）/ ≤640（单栏）/ ≤560（层级行三列）}；storageError ∈ {有（壳层条提示、页面不重复）/ null（无告警）}。全部诚实降级，无静默成功。
+> **已知边界**：浏览器直连（无壳层 parent）时「去登录」按钮仍是 no-op（`requestShellView` 无宿主可投递）——浏览器模式登录走 login.html 直达页，本轮未给 standalone 加回退；壳层 `ov-error-strip` 与 `.auth-strip` 为壳层既有设计，本轮只去页面级重复。检查器/导航栏折叠会改变中心区宽度，断点已按 640/1010 两档覆盖。

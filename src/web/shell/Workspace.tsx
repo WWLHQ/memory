@@ -509,6 +509,8 @@ export function Workspace() {
       const fromOurs = Object.values(frameRefs.current)
         .some((f) => f?.contentWindow === (e.source as unknown as Window | null));
       if (!fromOurs) return;
+      // login 不占主导航（views.ts），页面发来的登录请求打开壳层登录弹窗
+      if (id === 'login') { setLoginOpen(true); return; }
       const target = findNav(id);
       if (target) openView(target);
     };

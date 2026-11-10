@@ -104,8 +104,8 @@ html[data-theme="dark"] body { background: #060B16; color: #E4EDF8; }
 .af-cols { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 12px; align-items: start; }
 .af-cols > * { min-width: 0; }
 
-/* ── 层级图谱（SVG） ── */
-.af-graph { display: block; width: 100%; height: 330px; background: radial-gradient(circle at 50% 46%, var(--accent-soft), transparent 62%); }
+/* ── 层级图谱（SVG）：高度随宽度按 760/352 比例缩放，宽栏时封顶 330px（对齐定稿图） ── */
+.af-graph { display: block; width: 100%; aspect-ratio: 760 / 352; max-height: 330px; background: radial-gradient(circle at 50% 46%, var(--accent-soft), transparent 62%); }
 .af-core-n { fill: var(--accent-ink); font-size: 13px; font-weight: 600; font-family: var(--mono); }
 .af-core-l { fill: var(--accent-ink); font-size: 11px; }
 .af-chip {
@@ -176,12 +176,19 @@ html[data-theme="dark"] body { background: #060B16; color: #E4EDF8; }
 .af-foot .ok { color: var(--ok); }
 .af-foot .bad { color: var(--bad); }
 
-/* ── 响应式：中心区变窄时四卡→两卡、双栏→单栏、层级六格→三格 ── */
+/* ── 响应式：壳层中心区实宽 ≈ 702px（1280 窗 − 250 导航 − 318 检查器 − 10 分条），
+   双栏必须在该宽度保持并排（57-D：塌单栏断点从 900 降到 640，中段右栏收窄为 264）。
+   中心区变窄时四卡→两卡、双栏→单栏、层级六格→三格。 */
+@media (max-width: 1010px) {
+  .af-cols { grid-template-columns: minmax(0, 1fr) 264px; }
+}
 @media (max-width: 900px) {
   .af-g4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
   .af-cols { grid-template-columns: 1fr; }
 }
-@media (max-width: 700px) {
+@media (max-width: 560px) {
   .af-strata-row { grid-template-columns: repeat(3, 1fr); }
   .af-strata-cell { border-bottom: 1px solid var(--line); }
 }

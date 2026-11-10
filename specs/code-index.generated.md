@@ -3,7 +3,7 @@
 > 由 `npm run code:index` 生成，请勿手改；改代码/文档后重跑即可。
 > 用法：先在本表定位文件与导出符号，再只读该文件的局部区间（省 token、少误改）。
 
-共 378 个源码文件、121 个文档。
+共 378 个源码文件、123 个文档。
 
 ## e2e
 
@@ -329,7 +329,7 @@
 | [src/web/monitor/useMonitorReal.ts](src/web/monitor/useMonitorReal.ts) | 160 | 监控仪表盘（REQ-006 / P6）· 真实数据接真层 | percentile(fn), metricsFromLedger(fn), realLoadAlerts(fn), loadRealMonitorData(fn), MONITOR_REAL_DATA_SOURCE(const), RealMonitor(type), RealStorage(type) |
 | [src/web/monitor/useToast.tsx](src/web/monitor/useToast.tsx) | 13 | — | useToast(fn) |
 | [src/web/overview/Overview.tsx](src/web/overview/Overview.tsx) | 160 | REQ-003 + REQ-005 配合展示（通览演示页） | Overview(fn) |
-| [src/web/overview/OverviewPage.tsx](src/web/overview/OverviewPage.tsx) | 525 | 首页总览工作台（批次57-C · 版式对齐定稿图 stratum-l1l3-preview pg-home）： | deriveHomeView(fn), OverviewPage(fn), HomeDerived(type) |
+| [src/web/overview/OverviewPage.tsx](src/web/overview/OverviewPage.tsx) | 521 | 首页总览工作台（批次57-C · 版式对齐定稿图 stratum-l1l3-preview pg-home）： | deriveHomeView(fn), OverviewPage(fn), HomeDerived(type) |
 | [src/web/overview/overviewEntry.tsx](src/web/overview/overviewEntry.tsx) | 20 | REQ-003 + REQ-005 通览演示页入口 | — |
 | [src/web/overview/overviewPageData.ts](src/web/overview/overviewPageData.ts) | 146 | 问账本（壳层「记忆助手」复用）：只转述真实账本快照能证实的内容，不编造模型回答。 | answerOverviewQuestion(fn), OVERVIEW_SUGGESTIONS(const), OverviewAnswer(type) |
 | [src/web/params/DevPanel.tsx](src/web/params/DevPanel.tsx) | 93 | P5-T3 开发者模式（折叠面板，暴露底层参数；2.4.3 / 2.4.1 / 15.3 / 9.10 / 15.1） | DevPanel(fn) |
@@ -411,7 +411,7 @@
 | [src/web/shell/MemoryAssistant.tsx](src/web/shell/MemoryAssistant.tsx) | 104 | 记忆助手：首页「问账本」问答框收进快捷栏（QAT），点击展开 / 再点收起。 | MemoryAssistant(fn), MemoryAssistantProps(type) |
 | [src/web/shell/ShellLoginDialog.tsx](src/web/shell/ShellLoginDialog.tsx) | 279 | 壳层登录弹窗（批次49）：菜单栏 / 快速访问工具条 / 登录状态处三处入口共用同一个实例。 | ShellLoginDialog(fn), ShellLoginDialogProps(type) |
 | [src/web/shell/StrataScale.tsx](src/web/shell/StrataScale.tsx) | 51 | 功能导航栏底部的「层级刻度」（批次53）：L0–L6 七档真实计数。 | StrataScale(fn) |
-| [src/web/shell/Workspace.tsx](src/web/shell/Workspace.tsx) | 1920 | 工作台壳层（批次48 S1）：Ribbon + 导航树 + 标签条 + 属性检查器 + 任务窗 + 底部五标签 + 状态栏。 | Workspace(fn) |
+| [src/web/shell/Workspace.tsx](src/web/shell/Workspace.tsx) | 1922 | 工作台壳层（批次48 S1）：Ribbon + 导航树 + 标签条 + 属性检查器 + 任务窗 + 底部五标签 + 状态栏。 | Workspace(fn) |
 | [src/web/shell/dock.ts](src/web/shell/dock.ts) | 170 | 底部面板真实数据源（S6）：输出=程序动作日志尾读；问题=该日志派生的错误/警告； | loadOutputLog(fn), problemsFromLog(fn), loadScheduleRuns(fn), auditMentions(fn), loadAuditForMemory(fn), OutputLogView(type), ProblemRow(type), ScheduleRun(type), AuditRow(type), DockResult(type) |
 | [src/web/shell/layers.ts](src/web/shell/layers.ts) | 75 | L1–L6 / L0 面板真实数据（S7）：只在中心页为「分层 L1–L6」或「L0 密文」时显示的壳层条。 | loadLayerPanel(fn), PANEL_LAYERS(const), LayerCount(type), LayerPanelView(type), PanelLayer(type) |
 | [src/web/shell/navCounts.ts](src/web/shell/navCounts.ts) | 45 | 批次54：功能导航角标的真实数据加载器。 | loadNavCounts(fn), NavCountId(type), NavCounts(type) |
@@ -446,6 +446,8 @@
 | [specs/A31-BILLING-MATRIX.md](specs/A31-BILLING-MATRIX.md) | 63 | A31 厂商余额接口矩阵（spike 实测，2026-11-07） |
 | [specs/AUDIT-FULL-REVIEW-2026-10-31.md](specs/AUDIT-FULL-REVIEW-2026-10-31.md) | 213 | status: active |
 | [specs/MANUAL-TEST-BATCH-57B.md](specs/MANUAL-TEST-BATCH-57B.md) | 66 | status: pending-manual-acceptance |
+| [specs/MANUAL-TEST-BATCH-57C.md](specs/MANUAL-TEST-BATCH-57C.md) | 67 | status: pending-manual-acceptance |
+| [specs/MANUAL-TEST-BATCH-57D.md](specs/MANUAL-TEST-BATCH-57D.md) | 65 | status: pending-manual-acceptance |
 | [specs/MANUAL-TEST-BATCH.md](specs/MANUAL-TEST-BATCH.md) | 328 | status: archived |
 | [specs/MANUAL-TEST-FIX-BATCH-1.md](specs/MANUAL-TEST-FIX-BATCH-1.md) | 97 | status: done |
 | [specs/MANUAL-TEST-FIX-BATCH-10.md](specs/MANUAL-TEST-FIX-BATCH-10.md) | 160 | status: done |
@@ -501,7 +503,7 @@
 | [specs/ROADMAP-批次45-租户归一与成员密钥域模型-方案.md](specs/ROADMAP-批次45-租户归一与成员密钥域模型-方案.md) | 44 | ROADMAP 批次45+ — 令牌与租户欠账立项（MCP 作用域收紧前置 = 账本租户归一）+ 成员/API 密钥域模型 |
 | [specs/ROADMAP-批次B类-远端PG与多机硬过滤-方案.md](specs/ROADMAP-批次B类-远端PG与多机硬过滤-方案.md) | 102 | 批次 B 类 · 远端 PG 中枢（B4）+ 多机硬过滤（B1）+ 真实精炼（B3）方案 |
 | [specs/acceptance.md](specs/acceptance.md) | 55 | title: 验收标准 |
-| [specs/code-map.md](specs/code-map.md) | 1458 | status: draft |
+| [specs/code-map.md](specs/code-map.md) | 1474 | status: draft |
 | [specs/demo-data-baseline.md](specs/demo-data-baseline.md) | 116 | 演示/种子数据基线清单（批次42 · 阶段0 冻结） |
 | [specs/requirements.md](specs/requirements.md) | 59 | title: 需求规格 |
 | [specs/tasks/AGENT-ONBOARD.md](specs/tasks/AGENT-ONBOARD.md) | 208 | 原子任务：Agent 接入配置页（REQ-003） |
@@ -838,7 +840,7 @@ src/web/monitor/useMonitorMirror.ts 9e87dd8cc071
 src/web/monitor/useMonitorReal.ts 24b6151c1bed
 src/web/monitor/useToast.tsx 85cd09d2e1f5
 src/web/overview/Overview.tsx b4303483348f
-src/web/overview/OverviewPage.tsx 0c377877dd3c
+src/web/overview/OverviewPage.tsx c7adf90ac4f4
 src/web/overview/overviewEntry.tsx 5f4488678cc7
 src/web/overview/overviewPageData.ts 3ef40afe6bc5
 src/web/params/DevPanel.tsx adbe8f5c483f
@@ -920,7 +922,7 @@ src/web/shell/Icons.tsx d33b2ab2156f
 src/web/shell/MemoryAssistant.tsx a6c06a6732ad
 src/web/shell/ShellLoginDialog.tsx 200a169aee11
 src/web/shell/StrataScale.tsx 4455d8f22378
-src/web/shell/Workspace.tsx 1f28278f7db5
+src/web/shell/Workspace.tsx d41c9987ac20
 src/web/shell/dock.ts 029c48568f1d
 src/web/shell/layers.ts 8f18e012b258
 src/web/shell/navCounts.ts 29d436b7129f
@@ -950,6 +952,8 @@ README.md aa2f62fda68e
 specs/A31-BILLING-MATRIX.md adf99c88971d
 specs/AUDIT-FULL-REVIEW-2026-10-31.md 9b268c1a3db7
 specs/MANUAL-TEST-BATCH-57B.md 5f53fa04493b
+specs/MANUAL-TEST-BATCH-57C.md 6244ef645fb7
+specs/MANUAL-TEST-BATCH-57D.md 08bf8cc20b63
 specs/MANUAL-TEST-BATCH.md c5b9d5e11090
 specs/MANUAL-TEST-FIX-BATCH-1.md 3ca0e503a7c8
 specs/MANUAL-TEST-FIX-BATCH-10.md 732e0ba3e5ef
@@ -1005,7 +1009,7 @@ specs/ROADMAP-批次42-未接线三件套-方案.md df1a6f9d6ed5
 specs/ROADMAP-批次45-租户归一与成员密钥域模型-方案.md 633abaaaad54
 specs/ROADMAP-批次B类-远端PG与多机硬过滤-方案.md 0c7857454a7d
 specs/acceptance.md 664f1bb0d8cf
-specs/code-map.md 5e35e0845a7e
+specs/code-map.md 47cd50c872b5
 specs/demo-data-baseline.md 1d9af215ac78
 specs/requirements.md 6e72739fe35b
 specs/tasks/AGENT-ONBOARD.md 900d19783798

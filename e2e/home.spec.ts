@@ -205,4 +205,23 @@ test.describe('REQ-005 首页与登录 · 点击级 E2E', () => {
     await expect(page.locator('[data-testid="layered-memory-page"]')).toContainText('L6→L1');
     expect(errors).toEqual([]);
   });
+
+  test('⑧ 批次57-D：壳层中心区实宽（≈702px）下双栏保持并排，遥测右栏不再塌到图谱下方', async ({ page }) => {
+    const errors = collectErrors(page);
+    // 桌面壳默认 1280×860 窗 − 250 导航栏 − 318 检查器 − 10 分条 ≈ 702px 中心 iframe 宽
+    await page.setViewportSize({ width: 702, height: 860 });
+    await page.goto(HOME);
+    await expect(page.locator('.af-title h1')).toContainText('总览工作台');
+    // 双栏：1fr + 264px（中段收窄），不是塌成单列
+    const cols = await page.locator('.af-cols').evaluate((el) => getComputedStyle(el).gridTemplateColumns);
+    const parts = cols.split(' ').filter(Boolean);
+    expect(parts.length).toBe(2);
+    expect(Math.abs(Number.parseFloat(parts[1]) - 264)).toBeLessThan(2);
+    // 图谱高度随宽度按 760/352 比例缩放（窄栏不再出现固定 330px 下的巨幅空白）
+    const graph = await page.locator('.af-graph').boundingBox();
+    expect(graph).toBeTruthy();
+    expect(graph!.height).toBeLessThan(330);
+    expect(graph!.height).toBeGreaterThan(120);
+    expect(errors).toEqual([]);
+  });
 });

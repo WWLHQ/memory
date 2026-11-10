@@ -422,11 +422,7 @@ export function OverviewPage() {
                   概览聚合失败：{err}。这不是空数据；请确认内核与后端状态后点「重读」重试。
                 </div>
               )}
-              {snap?.storageError && (
-                <div className="af-alert bad" role="alert">
-                  账本读取失败：{snap.storageError}。下方读数按读取失败显示，不是 0。
-                </div>
-              )}
+              {/* 账本读取失败由壳层顶部 ov-error-strip 统一提示（57-D 去重），本页只保各自面板的诚实失败原因 */}
               {view.l0Alert && (
                 <div className="af-alert">
                   <span className="tag">L0</span>{view.l0Alert}

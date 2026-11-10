@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { setTestOverride } from '../../Home/crossTabAuth.ts';
 import { PAGES } from '../views.ts';
 import { SELECTION_MSG } from '../../shared/selectionChannel.ts';
+import { SHELL_GOTO_MSG } from '../../shared/shellNavigate.ts';
 
 // 概览条的数据加载走真实内核/网络；组件单测只验证渲染契约，故固定快照。
 // 批次55：层级刻度与四卡共用这份快照里的 strata 计数，不再单独 mock 一个加载器。
@@ -613,6 +614,36 @@ describe('S3 深链接线（D4）：壳层把初值真的交给目标真实页�
     const src = activeFrameSrc(container);
     expect(src).toContain('/memory.html');
     expect(src).not.toContain('status=archived');
+  });
+});
+
+describe('S3.5 中心区 iframe → 壳层导航（SHELL_GOTO_MSG）', () => {
+  async function dispatchGoto(container: HTMLElement, id: string) {
+    const frame = container.querySelector('.page-pane.active iframe.page-frame') as HTMLIFrameElement | null;
+    expect(frame?.contentWindow).toBeTruthy();
+    await act(async () => {
+      window.dispatchEvent(new MessageEvent('message', {
+        data: { [SHELL_GOTO_MSG]: id },
+        origin: window.location.origin,
+        source: frame!.contentWindow,
+      }));
+    });
+  }
+
+  it('57-D：iframe 请求 login → 打开壳层登录弹窗（login 不占主导航，不再被静默丢弃）', async () => {
+    const { container } = await renderShell();
+    expect(screen.queryByTestId('shell-login-modal')).toBeNull();
+    await dispatchGoto(container, 'login');
+    expect(screen.getByTestId('shell-login-modal')).toBeInTheDocument();
+    expect(screen.getByTestId('slm-account')).toBeInTheDocument();
+    // 不得把 login 当 NAV 项开成新标签
+    expect(container.querySelector('.tabstrip')?.textContent ?? '').not.toContain('login.html');
+  });
+
+  it('57-D：iframe 请求 NAV 内 id → 照常打开对应标签（回归口径）', async () => {
+    const { container } = await renderShell();
+    await dispatchGoto(container, 'audit');
+    expect(container.querySelector('.tabstrip')?.textContent ?? '').toContain('审计日志');
   });
 });
 
