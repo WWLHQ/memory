@@ -1,6 +1,6 @@
 // 批次10：手动编辑旁路收口——编辑内容与写入共用同一道 L0→L1 质量门（噪声/脱敏/指纹/向量）。
 import { beforeEach, describe, expect, it } from 'vitest';
-import { coreUpdateContent, getStorage, toRecord } from '../coreMemoryOps.ts';
+import { coreUpdateContent, getStorage, splitAgentIngest, toRecord } from '../coreMemoryOps.ts';
 import { resetKernelForTests } from '../../kernel.ts';
 import { sha256hex } from '../../../core/memagent/sync.ts';
 import type { Memory } from '../../../core/memagent/types.ts';
@@ -138,5 +138,51 @@ describe('layers_generated_at：内核字段 → 页面映射与改写刷新', (
     expect(saved.layers_generated_at).toBeGreaterThan(OLD);
     expect(saved.layers_generated_at).toBeGreaterThanOrEqual(NOW);
     expect(toRecord(saved).layers_generated_at).toBe(new Date(saved.layers_generated_at!).toISOString());
+  });
+});
+
+// 进库分流（用户 2026-11-10 定稿）：agent 的会话信息直接放行；agent 提取的记忆才进发件箱。
+describe('进库分流：会话信息直接放行 / agent 记忆进发件箱', () => {
+  it('带 session_id 的 agent 写入（会话信息）→ 直接放行，不进发件箱', async () => {
+    const storage = getStorage();
+    await storage.putMemory(mem({
+      mem_id: 's1', content: '本轮会话处理了 3 个工单', created_by_agent: '客服工作台', session_id: 'sess-abc',
+    }));
+
+    const split = await splitAgentIngest(new Set());
+    expect(split.sessionInfoCount).toBe(1);
+    // 会话信息不进候选（不打扰用户）
+    expect(split.candidates.map((c) => c.id)).not.toContain('s1');
+  });
+
+  it('不带 session_id 的 agent 写入（agent 提取的记忆）→ 进发件箱待判定', async () => {
+    const storage = getStorage();
+    await storage.putMemory(mem({
+      mem_id: 'a1', content: '用户偏好：所有工单先给结论再给步骤', created_by_agent: '客服工作台',
+    }));
+
+    const split = await splitAgentIngest(new Set());
+    expect(split.sessionInfoCount).toBe(0);
+    expect(split.candidates.map((c) => c.id)).toContain('a1');
+    const cand = split.candidates.find((c) => c.id === 'a1')!;
+    expect(cand.sourceAgent).toBe('客服工作台');
+    expect(cand.content).toContain('先给结论');
+  });
+
+  it('手动写入（无 created_by_agent）→ 既不放行也不进发件箱', async () => {
+    const storage = getStorage();
+    await storage.putMemory(mem({ mem_id: 'man1', content: '我手动记的一条内容' }));
+
+    const split = await splitAgentIngest(new Set());
+    expect(split.sessionInfoCount).toBe(0);
+    expect(split.candidates.map((c) => c.id)).not.toContain('man1');
+  });
+
+  it('已判定过的账本 ref（excludeRefIds）→ 不再重复进发件箱', async () => {
+    const storage = getStorage();
+    await storage.putMemory(mem({ mem_id: 'a2', content: '用户偏好：偏好深色主题', created_by_agent: 'cursor' }));
+
+    const split = await splitAgentIngest(new Set(['a2']));
+    expect(split.candidates.map((c) => c.id)).not.toContain('a2');
   });
 });

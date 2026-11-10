@@ -20,11 +20,11 @@ describe('壳层导航映射', () => {
     }
   });
 
-  it('主导航覆盖全部真实页面（login / setup 例外：深链兜底与首启向导不进主导航），且不包含演示通览 overview.html', () => {
+  it('主导航覆盖全部真实页面（login 例外：走壳层弹窗不进主导航；首启向导已纳入治理组），且不包含演示通览 overview.html', () => {
     const pages = navPages();
     for (const key of Object.keys(PAGES) as (keyof typeof PAGES)[]) {
-      // 登录走壳层弹窗、首启设置由 Electron 向导直接打开：两者保留真实页面但不占主导航。
-      if (key === 'login' || key === 'setup') {
+      // 登录走壳层弹窗：保留真实页面但不占主导航。
+      if (key === 'login') {
         expect(pages.includes(key), `${key}.html 不应出现在主导航`).toBe(false);
         expect(PAGES[key].file).toBe(`${key}.html`);
         continue;
@@ -34,9 +34,9 @@ describe('壳层导航映射', () => {
     expect(pages.some((p) => PAGES[p].file === 'overview.html')).toBe(false);
   });
 
-  it('批次54：功能导航严格按参考图四组 17 项，名称、顺序与真实页面一一对应', () => {
+  it('功能导航为五组 20 项，名称、顺序与真实页面一一对应（记忆助手已是独立整页 assistant.html）', () => {
     const groups = NAV.flatMap((e) => e.kind === 'group' ? [e.label] : []);
-    expect(groups).toEqual(['工作台', '记忆', '连接', '治理']);
+    expect(groups).toEqual(['工作台', '记忆管理', '连接', '治理', '智能']);
 
     const items = NAV.flatMap((e) => e.kind === 'item'
       ? [{ id: e.id, label: e.label, page: e.page }] : []);
@@ -46,6 +46,7 @@ describe('壳层导航映射', () => {
       { id: 'retrieval', label: '检索', page: 'retrieval' },
       { id: 'monitor', label: '监控', page: 'monitor' },
       { id: 'memory-bank', label: '记忆库', page: 'memory' },
+      { id: 'personal', label: '个人记忆', page: 'memory' },
       { id: 'layered', label: '层级管理', page: 'layered' },
       { id: 'lifecycle', label: '生命周期', page: 'lifecycle' },
       { id: 'growth', label: '净化生长', page: 'growth' },
@@ -58,12 +59,33 @@ describe('壳层导航映射', () => {
       { id: 'logs', label: '日志记录', page: 'logs' },
       { id: 'audit', label: '审计日志', page: 'audit' },
       { id: 'feedback', label: '用户反馈', page: 'feedback' },
+      { id: 'setup', label: '首启向导', page: 'setup' },
+      { id: 'assistant', label: '记忆助手', page: 'assistant' },
     ]);
-    expect(items).toHaveLength(17);
-    // 旧的可展开子树、演示通览与首启设置都不再出现在主导航里。
+    expect(items).toHaveLength(20);
+    // 旧的可展开子树、演示通览不再出现；首启向导已纳入治理组。
+    // 记忆助手已由壳层浮窗改为独立整页 assistant.html（不再是 panel 触发项）。
     expect(flattenNav().some((n) => n.children?.length)).toBe(false);
-    expect(NAV.some((e) => e.kind === 'item' && e.id === 'setup')).toBe(false);
     expect(navPages()).not.toContain('login');
+    // 记忆助手已由壳层浮窗改为独立整页 assistant.html：全站不再有 panel 型导航项
+    expect(flattenNav().every((n) => !('panel' in n))).toBe(true);
+  });
+
+  it('记忆助手是真实整页：assistant.html 已登记为 vite 构建入口且有独立页面组件', () => {
+    const vite = readFileSync(`${ROOT}/vite.config.ts`, 'utf8');
+    expect(vite.includes("'assistant.html'")).toBe(true);
+    expect(existsSync(`${ROOT}/assistant.html`)).toBe(true);
+    expect(existsSync(`${ROOT}/src/web/assistant/AssistantPage.tsx`)).toBe(true);
+    expect(PAGES.assistant.file).toBe('assistant.html');
+  });
+
+  it('「个人记忆」是记忆库全页的个人记忆 Tab（不是壳层面板），点击即打开该页', () => {
+    const personal = flattenNav().find((n) => n.id === 'personal');
+    expect(personal?.page).toBe('memory');
+    expect(personal?.href).toBe('?tab=personal');
+    // 记忆库全页确实支持 personal 这个真实 Tab（不是编造参数）
+    const memPage = readFileSync(`${ROOT}/src/web/memory/MemoryManagementPage.tsx`, 'utf8');
+    expect(memPage).toContain("'all' | 'personal' | 'layers' | 'conflict' | 'review' | 'l0'");
   });
 
   it('导航项不得携带演示计数/徽标字段', () => {

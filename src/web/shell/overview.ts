@@ -17,6 +17,7 @@ import type { RawHomeFeed } from '../../home/dashboard.ts';
 import { getKernelStorage } from '../kernel.ts';
 import { currentSessionId } from '../shared/session.ts';
 import { hostCall, hostCapability } from '../../desktop/hostBridge.ts';
+import { loadL0Status } from './statusbar.ts';
 import type { Gain } from '../../types/agentOnboard.ts';
 import type { HomeFacts, HomeStrataCount } from '../Home/coreHome.ts';
 import type { AuditRecord } from '../../core/memagent/types.ts';
@@ -130,11 +131,20 @@ export interface OverviewDataRoot {
   error: string | null;
 }
 
+/** L0 写密钥锁状态（只读，绝不解锁/持有密钥）。available=false = 读不到，页面不得猜成「已解锁」或「未解锁」。 */
+export interface OverviewL0Write {
+  available: boolean;
+  unlocked: boolean;
+  detail: string | null;
+}
+
 export interface OverviewSnapshot {
   loadedAt: number;
   /** host = 桌面壳经 IPC 读主进程账本；browser = 浏览器内存账本（非本机库） */
   kernelMode: 'host' | 'browser';
   storageError: string | null;
+  /** 首页常驻「写密钥未解锁」提示的真源：只要 available 且未解锁就显示，不依赖近 30 分钟是否有写入被拒 */
+  l0Write?: OverviewL0Write;
   gains: Gain[];
   /** 异常速览（真实账本派生；概览页编号洞察用） */
   raw: RawHomeFeed;
@@ -409,6 +419,7 @@ export async function loadOverview(): Promise<OverviewSnapshot> {
     mcp,
     engines,
     dataRoot,
+    l0WriteStatus,
   ] = await Promise.all([
     getHomeFeed(getKernelStorage()).catch((e) => ({
       raw: { gains: [], anomalies: [], activeMemories: [], todos: [] } as RawHomeFeed,
@@ -426,6 +437,7 @@ export async function loadOverview(): Promise<OverviewSnapshot> {
     loadMcpPanel(sid),
     loadEnginePanel(sid),
     loadDataRoot(),
+    loadL0Status(),
   ]);
 
   const f = feed as typeof feed & {
@@ -457,5 +469,8 @@ export async function loadOverview(): Promise<OverviewSnapshot> {
     mcp,
     engines,
     dataRoot,
+    l0Write: l0WriteStatus.status === 'ok'
+      ? { available: true, unlocked: l0WriteStatus.view.write_unlocked, detail: null }
+      : { available: false, unlocked: false, detail: 'detail' in l0WriteStatus ? l0WriteStatus.detail : null },
   };
 }

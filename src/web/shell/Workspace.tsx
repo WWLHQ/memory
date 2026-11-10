@@ -14,7 +14,7 @@ import type { TenantContext } from '../../types/home.ts';
 import { Icon } from './Icons.tsx';
 import { ContextMenu, type ContextMenuItem, type ContextMenuState } from './ContextMenu.tsx';
 import { ShellLoginDialog } from './ShellLoginDialog.tsx';
-import { MemoryAssistant } from './MemoryAssistant.tsx';
+import { PersonalMemoryPanel } from './PersonalMemoryPanel.tsx';
 import { loadOverview, type OverviewSnapshot } from './overview.ts';
 import { emptyLayerGraph } from '../Home/layerGraph.ts';
 import { loadPendingWrites, type PendingWritesResult } from './taskpane.ts';
@@ -35,6 +35,7 @@ import { loadNavCounts, type NavCounts } from './navCounts.ts';
 import { SELECTION_MSG, parseSelection, type SelectionPayload } from '../shared/selectionChannel.ts';
 import { NAV_COUNT_MSG, parseNavCount } from '../shared/navCountChannel.ts';
 import { SHELL_GOTO_MSG } from '../shared/shellNavigate.ts';
+import { onL0WriteLockChanged } from '../shared/l0WriteLockSignal.ts';
 
 const STORE_THEME = 'memdesk.shell.theme.v1';
 const STORE_DENSITY = 'memdesk.shell.density.v1';
@@ -42,6 +43,9 @@ const STORE_ZOOM = 'memdesk.shell.zoom.v1';
 
 /** Electron 壳（preload 暴露 __ELECTRON__）：只有桌面端才需要为系统窗口按钮预留右上角、才走拖拽区 */
 const IS_ELECTRON = typeof window !== 'undefined' && Boolean((window as unknown as { __ELECTRON__?: boolean }).__ELECTRON__);
+
+/** 功能导航折叠后的窄图标栏宽度（px）：只显示图标，悬停出名称 */
+const NAV_COLLAPSED_W = 44;
 /** 窗口按钮覆盖层主题同步通道（浏览器模式无此桥） */
 interface ShellWindowBridge {
   setTitleBarTheme?: (theme: 'light' | 'dark') => Promise<{ ok: boolean }>;
@@ -196,9 +200,9 @@ export function Workspace() {
   const [identity, setIdentity] = useState<TenantContext | null>(null);
   /** 壳层登录弹窗（菜单栏 / QAT / 登录状态处三处入口共用同一实例） */
   const [loginOpen, setLoginOpen] = useState(false);
-  /** 记忆助手（问账本）：开闭状态挂在壳层，切换中心标签不重置；会话在面板组件内（常驻不卸载） */
-  const [assistantOpen, setAssistantOpen] = useState(false);
-  const closeAssistant = useCallback(() => setAssistantOpen(false), []);
+  /** 个人记忆常驻面板（N8）：开闭状态同样挂在壳层，切换中心标签不丢状态；收起只是不渲染 */
+  const [personalOpen, setPersonalOpen] = useState(false);
+  const closePersonal = useCallback(() => setPersonalOpen(false), []);
   /** 右键菜单（导航树 / 标签条 / 检查器 / 中心页表格行共用同一渲染器） */
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null);
   const [overview, setOverview] = useState<OverviewSnapshot | null>(null);
@@ -375,6 +379,9 @@ export function Workspace() {
     window.addEventListener('storage', onStore);
     return () => window.removeEventListener('storage', onStore);
   }, []);
+
+  // 写锁（写密钥）状态变化 → 状态栏立刻重读真实 l0Status，避免解锁后仍显示旧值
+  useEffect(() => onL0WriteLockChanged(() => { void refreshStatus(); }), [refreshStatus]);
 
   // 启动时用本机 sessionId 向 /api/me 核对真实身份：查不到就不写身份（状态栏只显示「已登录/未登录」）
   useEffect(() => {
@@ -561,7 +568,7 @@ export function Workspace() {
         setStatus(null); setLayerPanel(null);
         refreshOverview();
         setRealNavCounts({}); setNavCountsSeq((n) => n + 1);
-        setMessage('已刷新中心区真实页面、概览账本/层级刻度、底部面板/状态栏与导航角标读数。');
+        setMessage('已刷新全部打开的真实页面（整页重挂）、概览账本/层级刻度、底部面板/状态栏与导航角标读数。');
         break;
       case 'focusFilter':
         // 顶部自绘标题栏的查找框只过滤左侧功能导航；它不跨页检索记忆，因此不产出任何伪造结果。
@@ -640,7 +647,7 @@ export function Workspace() {
         run: () => closeOthers(t.id),
       },
       { id: 'sep1', sep: true },
-      { id: 'refresh', icon: 'refresh', label: '刷新中心区与底部读数（F5）', run: () => runShellAction('refresh', '刷新') },
+      { id: 'refresh', icon: 'refresh', label: '刷新全部页面与底部读数（F5）', run: () => runShellAction('refresh', '刷新') },
       {
         id: 'copyUrl', icon: 'copy', label: '复制标签页地址',
         disabled: !t.page, reason: t.unavailable ? `该标签不可用：${t.unavailable}` : '该标签没有页面地址',
@@ -706,7 +713,7 @@ export function Workspace() {
       '[data-testid="qa-login"], [data-testid="shell-session-btn"], [data-testid="sb-session"]',
     ) || (!inQa && !!target?.closest('.menubar'));
     const items: ContextMenuItem[] = [
-      { id: 'refresh', icon: 'refresh', label: '刷新中心区与底部/状态栏读数（F5）', run: () => runShellAction('refresh', '刷新') },
+      { id: 'refresh', icon: 'refresh', label: '刷新全部页面与底部/状态栏读数（F5）', run: () => runShellAction('refresh', '刷新') },
       {
         id: 'home', icon: 'spark', label: '回到首页',
         run: () => { const home = findNav('home'); if (home) openView(home); },
@@ -808,7 +815,7 @@ export function Workspace() {
       title: '中心页（iframe）',
       testId: 'framemenu',
       items: [
-        { id: 'refresh', icon: 'refresh', label: '刷新中心区（F5）', run: () => runShellAction('refresh', '刷新') },
+        { id: 'refresh', icon: 'refresh', label: '刷新全部页面（F5）', run: () => runShellAction('refresh', '刷新') },
         {
           id: 'home', icon: 'spark', label: '回到首页',
           run: () => { const home = findNav('home'); if (home) openView(home); },
@@ -952,12 +959,16 @@ export function Workspace() {
       : collector ? collector.detail : '尚未读取';
 
   const l0 = status?.l0;
+  // L0 有两把独立的锁（§4.4.4，互不替代）：
+  //   写锁 write_unlocked（写密钥）· 查阅锁 active_sessions（解密查阅）。
+  // 旧实现用 active_sessions 推导「已锁定」，会在写密钥已解锁时仍显示锁定 —— 现两把锁都直读。
   const l0Text = !status ? '读取中'
-    : l0?.status === 'ok' ? (l0.view.active_sessions > 0 ? `${l0.view.active_sessions} 会话` : '已锁定')
-    : '不可用';
+    : l0?.status === 'ok'
+      ? `查阅${l0.view.active_sessions > 0 ? `${l0.view.active_sessions}会话` : '锁'} · 写${l0.view.write_unlocked ? '已解' : '锁'}`
+      : '不可用';
   const l0Title = !status ? '尚未读取'
     : l0?.status === 'ok'
-      ? `L0 保险库：活动会话 ${l0.view.active_sessions} · 有效授权 ${l0.view.active_grants} · 管理密钥${l0.view.has_admin_wrap ? '已设置' : '未设置'} · 写入锁${l0.view.write_unlocked ? '已解锁' : '锁定'}（只读，不含任何密钥材料）`
+      ? `L0 保险库：查阅锁（解密查阅会话）${l0.view.active_sessions > 0 ? `已开 ${l0.view.active_sessions} 个会话` : '锁定（无活跃查阅会话）'} · 写锁（写密钥）${l0.view.write_unlocked ? '已解锁' : '锁定'} · 有效授权 ${l0.view.active_grants} · 管理密钥${l0.view.has_admin_wrap ? '已设置' : '未设置'}（两把锁互不替代，只读，不含任何密钥材料）`
       : l0 ? l0.detail : '尚未读取';
 
   // 第 1 段「当前库/文档」：只放真实的账本文件名（定稿里的 mem-prod-cn — 记忆库.mem 是演示名）。
@@ -983,7 +994,7 @@ export function Workspace() {
   const qaSpecs: QaSpec[] = [
     { id: 'save', icon: 'save', title: '保存（只读）：本程序无文档编辑，保存不适用', disabled: true },
     { id: 'undo', icon: 'undo', title: '撤销（无历史）：壳层不保存编辑历史', disabled: true },
-    { id: 'refresh', icon: 'refresh', title: '刷新中心区与底部/状态栏读数（F5）', run: () => runShellAction('refresh', '刷新') },
+    { id: 'refresh', icon: 'refresh', title: '刷新全部打开的页面与底部/状态栏读数（F5）', run: () => runShellAction('refresh', '刷新') },
     { id: 'find', icon: 'search', title: '查找左侧功能导航（Ctrl+F / Ctrl+K）', run: () => runShellAction('focusFilter', '查找') },
     {
       id: 'login', icon: 'user',
@@ -1001,9 +1012,18 @@ export function Workspace() {
     { id: 'theme', icon: themeIcon, title: themeTip, run: cycleTheme },
     { sep: true },
     {
-      id: 'assistant', icon: 'spark', text: '记忆助手', active: assistantOpen,
-      title: '记忆助手：问账本（成本/异常/冲突/同步/记忆条数）。点击展开/收起；切换中心标签不丢会话',
-      run: () => setAssistantOpen((v) => !v),
+      id: 'assistant', icon: 'spark', text: '记忆助手', active: activeId === 'assistant',
+      title: '记忆助手（整页）：问账本（成本/异常/冲突/同步/记忆条数）。点击打开整页；页面内「重读」只重取数据，F5 刷新全站',
+      run: () => {
+        const target = findNav('assistant');
+        if (target) openView(target);
+      },
+    },
+    {
+      id: 'personal', icon: 'user', text: '个人记忆', active: personalOpen,
+      title: '个人记忆常驻面板：快速记一条 / 发件箱归并 agent 记忆（会话信息已直接放行）。'
+        + '点击展开/收起；切换中心标签不丢状态。完整管理请点左侧导航「记忆管理 / 个人记忆」',
+      run: () => setPersonalOpen((v) => !v),
     },
     { id: 'metrics', icon: 'chart', title: `指标明细（概览）：${demoOnly}`, disabled: true },
     { id: 'pending', icon: 'archive', title: '待处理（概览）：定稿演示命令；待重放写入请在「任务窗格」只读查看', disabled: true },
@@ -1107,7 +1127,9 @@ export function Workspace() {
       className={`shell${IS_ELECTRON ? ' electron' : ''}`}
       onContextMenu={onShellContextMenu}
       style={{
-        '--nav-w': `${navCollapsed ? 0 : navWidth}px`,
+        // 导航折叠后不再归零宽度，改为窄图标栏（--nav-collapsed-w），树项只显示图标、悬停显示名称
+        '--nav-w': `${navCollapsed ? NAV_COLLAPSED_W : navWidth}px`,
+        '--nav-collapsed-w': `${NAV_COLLAPSED_W}px`,
         '--insp-w': `${inspCollapsed ? 0 : inspWidth}px`,
         '--dock-h': `${dockHeight}px`,
         '--shell-zoom': String(zoom / 100),
@@ -1199,14 +1221,18 @@ export function Workspace() {
                   title={q.title}
                   onClick={q.disabled ? undefined : q.run}
                 ><Icon name={q.icon ?? 'dot'} size={15} />{q.text ? <span className="qa-label">{q.text}</span> : null}</button>
-                {/* 记忆助手面板常驻壳层：收起只是不渲染，问答会话不随中心标签切换丢失 */}
-                {q.id === 'assistant' && (
-                  <MemoryAssistant
-                    open={assistantOpen}
-                    onClose={closeAssistant}
-                    overview={overview}
-                    overviewBusy={overviewBusy}
-                    onRefresh={refreshOverview}
+                {/* 记忆助手已改为整页（assistant.html），不再在此渲染壳层浮层面板 */}
+                {/* 个人记忆常驻面板（N8）：收起只是不渲染，状态保留在壳层不丢。
+                    内嵌与记忆库全页共用的原双窗 Pane（自带样式）。 */}
+                {q.id === 'personal' && (
+                  <PersonalMemoryPanel
+                    open={personalOpen}
+                    onClose={closePersonal}
+                    onOpenFull={() => {
+                      const bank = findNav('memory-bank');
+                      if (bank) openView({ ...bank, id: 'personal', label: '个人记忆', href: '?tab=personal' });
+                      setPersonalOpen(false);
+                    }}
                   />
                 )}
               </span>
@@ -1271,14 +1297,17 @@ export function Workspace() {
             <span className="ph-ic"><Icon name="folder" /></span>
             功能导航
             <span className="ph-tools">
-              <button className="ph-btn" onClick={() => setNavCollapsed((v) => !v)} title="折叠导航窗格" type="button">
+              <button className="ph-btn" onClick={() => setNavCollapsed((v) => !v)} title="折叠导航窗格" type="button" data-testid="nav-collapse-toggle">
                 <Icon name="chev" size={12} />
               </button>
             </span>
           </div>
           <div className="tree">
             {navEntries.map((entry) => entry.kind === 'group' ? (
-              <div className="tree-group" key={`g-${entry.label}`}>{entry.label}</div>
+              // 折叠态：组标题退化为一条细分隔线（不占文字宽度），组内项靠图标区分
+              navCollapsed
+                ? <div className="tree-group collapsed" key={`g-${entry.label}`} title={entry.label} />
+                : <div className="tree-group" key={`g-${entry.label}`}>{entry.label}</div>
             ) : (
               <NavTreeItem
                 key={entry.id}
@@ -1286,6 +1315,7 @@ export function Workspace() {
                 activeId={activeId}
                 open={openParents[entry.id] ?? false}
                 counts={mergedNavCounts}
+                collapsed={navCollapsed}
                 onToggle={() => setOpenParents((p) => ({ ...p, [entry.id]: !(p[entry.id] ?? false) }))}
                 onSelect={openView}
                 onMenu={openNavContext}
@@ -1301,6 +1331,15 @@ export function Workspace() {
             <div className="splitter" role="separator" aria-label="调整导航宽度" onPointerDown={(e) => startDrag('nav', e)} />
           )}
         </aside>
+
+        {navCollapsed && (
+          <button
+            className="nav-reopen" type="button"
+            title="展开功能导航（Ctrl+B）" aria-label="展开功能导航"
+            data-testid="nav-reopen"
+            onClick={() => setNavCollapsed(false)}
+          ><Icon name="chev" size={14} /></button>
+        )}
 
         <main className="center-pane" aria-label="工作区中心">
           <div className="tabstrip">
@@ -1880,11 +1919,13 @@ const NAV_COUNT_TITLES: Record<string, string> = {
   agent: '接入后端真实 Agent 卡片数（GET /agents）',
 };
 
-function NavTreeItem({ item, activeId, open, counts, onToggle, onSelect, onMenu }: {
+function NavTreeItem({ item, activeId, open, counts, collapsed, onToggle, onSelect, onMenu }: {
   item: NavItem;
   activeId: string;
   open: boolean;
   counts: Record<string, number>;
+  /** 折叠态：只显示图标（名称走 title 提示），不显示文字与角标 */
+  collapsed?: boolean;
   onToggle: () => void;
   onSelect: (i: NavItem) => void;
   onMenu: (i: NavItem, e: ReactMouseEvent) => void;
@@ -1894,11 +1935,13 @@ function NavTreeItem({ item, activeId, open, counts, onToggle, onSelect, onMenu 
   return (
     <>
       <div
-        className={`tree-row${item.id === activeId ? ' active' : ''}${item.child ? ' child' : ''}`}
+        className={`tree-row${item.id === activeId ? ' active' : ''}${item.child ? ' child' : ''}${collapsed ? ' icon-only' : ''}`}
         onClick={() => onSelect(item)}
         onContextMenu={(e) => onMenu(item, e)}
         role="treeitem"
         aria-selected={item.id === activeId}
+        title={collapsed ? item.label : undefined}
+        data-testid={`nav-item-${item.id}`}
       >
         {hasKids ? (
           <span className="tw" onClick={(e) => { e.stopPropagation(); onToggle(); }}>
@@ -1914,7 +1957,7 @@ function NavTreeItem({ item, activeId, open, counts, onToggle, onSelect, onMenu 
         ) : null}
       </div>
       {hasKids && open && item.children?.map((c) => (
-        <NavTreeItem key={c.id} item={c} activeId={activeId} open={false} counts={counts} onToggle={() => {}} onSelect={onSelect} onMenu={onMenu} />
+        <NavTreeItem key={c.id} item={c} activeId={activeId} open={false} counts={counts} collapsed={collapsed} onToggle={() => {}} onSelect={onSelect} onMenu={onMenu} />
       ))}
     </>
   );

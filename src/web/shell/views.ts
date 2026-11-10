@@ -10,7 +10,7 @@ export type PageKey =
   | 'home' | 'login' | 'memory' | 'write' | 'retrieval'
   | 'lifecycle' | 'audit' | 'logs' | 'security' | 'growth' | 'models'
   | 'monitor' | 'sync' | 'params' | 'setup' | 'agent'
-  | 'layered' | 'dispute' | 'feedback';
+  | 'layered' | 'dispute' | 'feedback' | 'assistant';
 
 /** 真实页面清单（文件名与 vite.config.ts 的 rollupOptions.input 对齐） */
 export const PAGES: Record<PageKey, { file: string; label: string; source: string }> = {
@@ -34,6 +34,7 @@ export const PAGES: Record<PageKey, { file: string; label: string; source: strin
   layered: { file: 'memory-layered.html', label: '记忆层级管理页', source: 'REQ-006 P8 · L0–L6 真实账本' },
   dispute: { file: 'dispute.html', label: '冲突裁决页', source: 'REQ-006 P7 · 内核真实 pending 冲突队列' },
   feedback: { file: 'feedback.html', label: '用户反馈页', source: 'REQ-006 P9 · 真实账本反馈' },
+  assistant: { file: 'assistant.html', label: '记忆助手页', source: 'loadOverview 同源快照 · 问答只转述真实账本' },
 };
 
 export interface NavGroup {
@@ -72,8 +73,9 @@ export const NAV: NavEntry[] = [
   { kind: 'item', id: 'write', label: '写入', icon: 'receipt', page: 'write' },
   { kind: 'item', id: 'retrieval', label: '检索', icon: 'search', page: 'retrieval' },
   { kind: 'item', id: 'monitor', label: '监控', icon: 'play', page: 'monitor' },
-  { kind: 'group', label: '记忆' },
+  { kind: 'group', label: '记忆管理' },
   { kind: 'item', id: 'memory-bank', label: '记忆库', icon: 'db', page: 'memory', href: '?tab=all' },
+  { kind: 'item', id: 'personal', label: '个人记忆', icon: 'user', page: 'memory', href: '?tab=personal' },
   { kind: 'item', id: 'layered', label: '层级管理', icon: 'layers', page: 'layered' },
   { kind: 'item', id: 'lifecycle', label: '生命周期', icon: 'clock', page: 'lifecycle' },
   { kind: 'item', id: 'growth', label: '净化生长', icon: 'layers', page: 'growth' },
@@ -88,6 +90,9 @@ export const NAV: NavEntry[] = [
   { kind: 'item', id: 'logs', label: '日志记录', icon: 'list', page: 'logs' },
   { kind: 'item', id: 'audit', label: '审计日志', icon: 'book', page: 'audit' },
   { kind: 'item', id: 'feedback', label: '用户反馈', icon: 'pen', page: 'feedback' },
+  { kind: 'item', id: 'setup', label: '首启向导', icon: 'gear', page: 'setup' },
+  { kind: 'group', label: '智能' },
+  { kind: 'item', id: 'assistant', label: '记忆助手', icon: 'spark', page: 'assistant' },
 ];
 
 /** 扁平化（父项 + 子项），供按 id 查找 */

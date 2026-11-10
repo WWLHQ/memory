@@ -235,6 +235,81 @@ html[data-theme='dark'] .qa { border-left-color: var(--line); }
 .ma-send:disabled { opacity: 0.55; cursor: default; }
 .ma-foot { font-size: 9.5px; color: var(--mu); }
 
+/* 个人记忆常驻面板（N8 回退改良版）：头部 + Agent 记忆归并区 + 原双窗 Pane。
+   双窗样式由 PersonalMemoryPane.tsx 自带的 personalMemoryPane.css 提供，两处共用、改一次同时生效。
+   这里只负责壳层容器与归并区，自包含、不依赖 memoryManagement.css。 */
+.pm-shell-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 70;
+  width: 460px;
+  max-width: calc(100vw - 24px);
+  max-height: min(680px, calc(100vh - 96px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--line2);
+  border-radius: var(--r);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.36);
+}
+.pm-sp-head { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--tx); flex: none; }
+.pm-sp-mark { display: inline-flex; color: var(--accent); }
+.pm-sp-spring { flex: 1; }
+.pm-sp-tool {
+  width: 22px; height: 22px; padding: 0; border: 0; border-radius: 5px;
+  background: transparent; color: var(--mu); display: grid; place-items: center; cursor: pointer;
+}
+.pm-sp-tool:hover:not(:disabled) { background: var(--panel2); color: var(--accent); }
+.pm-sp-tool:disabled { opacity: 0.55; cursor: default; }
+.pm-sp-mini {
+  display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px;
+  font: inherit; font-size: 10.5px; border: 1px solid var(--line2); border-radius: 11px;
+  background: var(--panel); color: var(--tx2); cursor: pointer;
+}
+.pm-sp-mini:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.pm-sp-mini:disabled { opacity: 0.55; cursor: default; }
+/* 打开记忆库全页个人记忆 Tab（低频完整管理入口） */
+.pm-sp-openfull {
+  align-self: flex-start; padding: 3px 9px; font: inherit; font-size: 10.5px;
+  border: 1px solid var(--line2); border-radius: var(--r);
+  background: var(--panel2); color: var(--tx2); cursor: pointer; flex: none;
+}
+.pm-sp-openfull:hover { border-color: var(--accent); color: var(--accent); }
+.pm-sp-msg { font-size: 10.5px; padding: 6px 8px; border-radius: var(--r); border: 1px solid var(--line2); flex: none; }
+.pm-sp-msg.ok { color: var(--ok); border-color: var(--ok); background: var(--ok-soft); }
+.pm-sp-msg.warn { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+.pm-sp-msg.err { color: var(--bad); border-color: var(--bad); background: var(--bad-soft); }
+
+/* Agent 记忆归并区（壳层常驻面板特有；圆角与双窗统一 9–12px） */
+.pm-ingest {
+  border: 1px solid var(--line2); border-radius: var(--r); background: var(--panel2);
+  padding: 8px 9px; display: flex; flex-direction: column; gap: 6px;
+  max-height: 34%; overflow: auto; flex: none;
+}
+.pm-ingest-head { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--tx); }
+.pm-ingest-note { font-size: 9.5px; color: var(--mu); line-height: 1.5; }
+.pm-ingest-empty, .pm-ingest-err { font-size: 10.5px; color: var(--mu); padding: 6px 2px; }
+.pm-ingest-err { color: var(--bad); display: flex; align-items: center; gap: 8px; }
+.pm-ingest-list { display: flex; flex-direction: column; gap: 6px; }
+.pm-ingest-item {
+  border: 1px solid var(--line2); border-radius: var(--r);
+  padding: 7px 8px; background: var(--panel);
+}
+.pm-ingest-top { display: flex; align-items: center; gap: 6px; justify-content: space-between; }
+.pm-ingest-top .pm-src { font-size: 10px; color: var(--accent); }
+.pm-ingest-top .pm-time { font-size: 9.5px; color: var(--mu); }
+.pm-ingest-body { font-size: 11px; color: var(--tx); line-height: 1.5; margin: 5px 0 7px; max-height: 72px; overflow: auto; }
+.pm-ingest-actions { display: flex; gap: 6px; }
+.pm-ingest-actions .pmp-btn { font-size: 10.5px; padding: 3px 9px; }
+
+/* 原双窗 Pane 在窄面板里：只让 Pane 内部滚动，避免嵌套滚动条 */
+.pm-shell-body { flex: 1; min-height: 0; display: flex; overflow: hidden; }
+.pm-shell-body > .mm-personal-pane { flex: 1 1 auto; min-width: 0; }
+
+
 /* 中文菜单行（自建；默认 Electron 菜单已删除） */
 .menubar {
   position: relative;
@@ -547,6 +622,7 @@ html[data-theme='dark'] .qa { border-left-color: var(--line); }
 .workspace {
   flex: 1 1 auto;
   min-height: 0;
+  position: relative;
   display: flex;
   align-items: stretch;
   background: var(--win);
@@ -562,7 +638,47 @@ html[data-theme='dark'] .qa { border-left-color: var(--line); }
   border-right: 1px solid var(--line);
   overflow: hidden;
 }
-.nav-pane.collapsed { border-right: none; }
+/* 折叠态：保留窄图标栏（宽度由 --nav-w 给出），不是归零 */
+.nav-pane.collapsed { border-right: 1px solid var(--line); }
+
+/* 折叠态树项：只显示图标，文字/角标隐藏（名称走 title 提示） */
+.nav-pane.collapsed .tree-row.icon-only {
+  justify-content: center;
+  padding: 0;
+  gap: 0;
+}
+.nav-pane.collapsed .tree-row.icon-only .tw,
+.nav-pane.collapsed .tree-row.icon-only .tlabel,
+.nav-pane.collapsed .tree-row.icon-only .tcount { display: none; }
+.nav-pane.collapsed .tree-row.icon-only .tico { font-size: 15px; }
+.nav-pane.collapsed .tree-group.collapsed {
+  padding: 6px 8px 3px;
+  height: 1px;
+  background: var(--line2);
+  border-radius: 1px;
+  margin: 4px 10px;
+}
+/* 折叠态头部：只留折叠按钮 */
+.nav-pane.collapsed .pane-head { justify-content: center; padding: 0 4px; }
+.nav-pane.collapsed .pane-head > .ph-ic,
+.nav-pane.collapsed .pane-head > *:not(.ph-tools) { display: none; }
+.nav-pane.collapsed .pane-head .ph-tools { margin-left: 0; }
+
+/* 导航折叠后：栏体保留为窄图标栏，此常驻按钮贴栏体右缘，保证随时可重新展开 */
+.nav-reopen {
+  position: absolute;
+  left: calc(var(--nav-collapsed-w, 44px) - 13px); top: 10px;
+  z-index: 30;
+  width: 26px; height: 30px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-left: none;
+  border-radius: 0 6px 6px 0;
+  color: var(--mu);
+  cursor: pointer;
+}
+.nav-reopen:hover { background: var(--line2); color: var(--tx); }
 
 .pane-head {
   flex: none;

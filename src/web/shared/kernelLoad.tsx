@@ -1,6 +1,6 @@
 // 内核数据加载三态（批次25 P0-7）：loading / ok / error —— 「读不到」绝不渲染成「账本为空」。
 // 各页共用本件：错误态显示内核真实原因 + 重试按钮，并落一条 ui:error 动作日志（§7.3）。
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { uiLog } from './actionLog.ts';
 
 export type KernelLoadPhase = 'loading' | 'ok' | 'error';
@@ -60,6 +60,26 @@ export function useKernelLoad<T>(label: string, load: () => Promise<T>): KernelL
   );
 
   return { ...state, retry, replace };
+}
+
+/**
+ * 把一个页面的多个数据源合成「刷新整页」入口（2026-11-10 统一刷新逻辑）。
+ *
+ * 背景：记忆库页有 6 个独立数据源（列表/分层策略/冲突队列/待重放/库位置/个人记忆），
+ * 但页面上的「刷新」只调了其中 2 个的 retry，其余数据源仍显示旧值 —— 用户看到的是
+ * 「刷新了但没全变」。本 hook 让页面级「刷新」= 本页全部数据源一起重取。
+ *
+ * 语义分层（全站统一约定）：
+ * - 壳层 F5 → 全站刷新：iframe 重挂（页面重新挂载即重新取数）+ 状态栏/底部/导航角标重读；
+ * - 页面内「刷新/重读」→ 只重取本页数据，不重挂页面、不丢会话与已填内容；
+ * - 卡片级「刷新」→ 只重取该卡片自己的数据源。
+ */
+export function useRefreshAll(sources: Array<{ retry: () => void }>): () => void {
+  const ref = useRef(sources);
+  ref.current = sources;
+  return useCallback(() => {
+    for (const s of ref.current) s.retry();
+  }, []);
 }
 
 /** 统一的「内核数据没读到」回显：说清不是空账本，并给出原因与重试。 */

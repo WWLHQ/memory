@@ -107,6 +107,26 @@ test.describe('个人记忆双窗 · 本机闭环 E2E', () => {
     expect(errors).toEqual([]);
   });
 
+  test('个人记忆页头：说明行已删，计数与标题同一行（2026-11-10）', async ({ page }) => {
+    await login(page);
+    await page.goto(MEMORY);
+    await expect(page.locator('[data-testid="mm-personal-pane"]')).toBeVisible();
+
+    // 旧的「左：已确认（进入召回）· 右：收件箱…· 数据面…」说明行已删除
+    await expect(page.locator('[data-testid="mm-personal-pane"]')).not.toContainText('数据面：');
+    await expect(page.locator('[data-testid="mm-personal-pane"]')).not.toContainText('左：已确认');
+    await expect(page.locator('[data-testid="mm-personal-pane"]')).not.toContainText('右：收件箱');
+
+    // 计数徽标与「个人记忆」标题同行（同一行父容器内）
+    const inHeader = await page.evaluate(() => {
+      const tag = document.querySelector('[data-testid="pm-counts"]');
+      const h3 = document.querySelector('[data-testid="mm-personal-pane"] .pmp-hd h3');
+      if (!tag || !h3) return false;
+      return tag.parentElement === h3.parentElement;
+    });
+    expect(inHeader, '计数徽标未与标题同行').toBe(true);
+  });
+
   test('快速记一条 → 真实待确认计数 → 是我的进入左窗（搜索/时间范围）', async ({ page }) => {
     const errors = collectErrors(page);
     await login(page);
@@ -204,13 +224,13 @@ test.describe('个人记忆双窗 · 本机闭环 E2E', () => {
     await expect(item).toContainText('来源 agent · 客服工作台');
     await expect(item).toContainText('工单回复先给结论再给步骤');
     // 时间戳格式 MM-DD HH:mm
-    await expect(item.locator('.pm-time')).toHaveText(/\d{2}-\d{2} \d{2}:\d{2}/);
+    await expect(item.locator('.pmp-time')).toHaveText(/\d{2}-\d{2} \d{2}:\d{2}/);
 
     await item.locator('[data-testid^="pm-confirm-"]').click();
     await expect(page.locator(`[data-testid="pm-confirmed-${id}"]`)).toBeVisible();
   });
 
-  test('批次54：个人记忆不再占主导航；页面待确认数仍来自真实独立存储', async ({ page }) => {
+  test('个人记忆进主导航：点击打开记忆库全页的个人记忆 Tab；常驻面板走状态栏快捷按钮', async ({ page }) => {
     await login(page);
     const id = 'pm_e2e_nav';
     await store.put(entryFixture({
@@ -218,7 +238,25 @@ test.describe('个人记忆双窗 · 本机闭环 E2E', () => {
       delivered_at: Date.now(), confirmed_at: null, state: 'pending',
     }));
     await page.goto(SHELL);
-    await expect(page.getByRole('treeitem', { name: /个人记忆/ })).toHaveCount(0);
+    await expect(page.getByRole('treeitem', { name: /个人记忆/ })).toHaveCount(1);
+
+    // 点击导航「个人记忆」→ 打开记忆库全页的个人记忆 Tab（不再弹浮层面板）
+    await page.getByRole('treeitem', { name: /个人记忆/ }).click();
+    await expect(page.locator('iframe.page-frame[src*="tab=personal"]')).toHaveCount(1, { timeout: 15_000 });
+    await expect(page.getByTestId('personal-memory-panel')).toHaveCount(0);
+
+    // 常驻面板改由状态栏快捷按钮展开：原双窗界面 + 快速记一条置顶（与全页共用同一 Pane）
+    await page.getByRole('button', { name: /个人记忆/ }).first().click();
+    await expect(page.getByTestId('personal-memory-panel')).toBeVisible();
+    await expect(page.getByTestId('mm-personal-pane')).toBeVisible();
+    await expect(page.getByTestId('pm-quick-top')).toBeVisible();
+    await expect(page.getByTestId('pm-quick-input')).toBeVisible();
+    await expect(page.getByTestId('pm-confirmed')).toBeVisible();
+    await expect(page.getByTestId('pm-inbox')).toBeVisible();
+    await expect(page.getByTestId('pm-ingest-refresh')).toBeVisible();
+    // 进库分流口径明示：会话信息直接放行，agent 提取的记忆才进发件箱
+    await expect(page.getByTestId('pm-ingest-split')).toContainText('直接放行');
+
     await page.goto(MEMORY);
     await expect(page.getByTestId('pm-pending-count')).toHaveText('1', { timeout: 15_000 });
   });
@@ -231,10 +269,10 @@ test.describe('个人记忆双窗 · 本机闭环 E2E', () => {
     await page.locator('[data-testid="pm-quick-input"]').fill(text);
     await page.locator('[data-testid="pm-quick-input"]').press('Enter');
     await expect(page.locator('[data-testid="pm-sect-quick"]')).toContainText(text);
-    await page.locator('.pm-item[data-testid^="pm-pending-"]').filter({ hasText: text })
+    await page.locator('.pmp-item[data-testid^="pm-pending-"]').filter({ hasText: text })
       .locator('[data-testid^="pm-confirm-"]').click();
 
-    const item = page.locator('.pm-item[data-testid^="pm-confirmed-"]').filter({ hasText: text });
+    const item = page.locator('.pmp-item[data-testid^="pm-confirmed-"]').filter({ hasText: text });
     await expect(item).toBeVisible();
     // 确认不自动提权：同步徽标仍是「仅本机 · 本人」
     await expect(item.locator('[data-testid^="pm-sync-badge-"]')).toContainText('仅本机');
@@ -277,9 +315,9 @@ test.describe('个人记忆双窗 · 本机闭环 E2E', () => {
       const text = '中枢不可用时的诚实失败条目';
       await page.locator('[data-testid="pm-quick-input"]').fill(text);
       await page.locator('[data-testid="pm-quick-input"]').press('Enter');
-      await page.locator('.pm-item[data-testid^="pm-pending-"]').filter({ hasText: text })
+      await page.locator('.pmp-item[data-testid^="pm-pending-"]').filter({ hasText: text })
         .locator('[data-testid^="pm-confirm-"]').click();
-      const item = page.locator('.pm-item[data-testid^="pm-confirmed-"]').filter({ hasText: text });
+      const item = page.locator('.pmp-item[data-testid^="pm-confirmed-"]').filter({ hasText: text });
       await item.locator('[data-testid^="pm-uplink-"]').click();
       await item.locator('[data-testid^="pm-uplink-confirm-"]').click();
 

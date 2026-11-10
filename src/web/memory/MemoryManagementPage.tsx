@@ -13,7 +13,7 @@ import { VERDICTS } from '../dispute/DisputeVerdict.tsx';
 import type { ConflictRecord, Verdict } from '../dispute/types.ts';
 import { useDisputeMirror } from '../dispute/useDisputeMirror.ts';
 import { useHostTheme } from '../shared/hostTheme.ts';
-import { kernelErrorText, useKernelLoad } from '../shared/kernelLoad.tsx';
+import { kernelErrorText, useKernelLoad, useRefreshAll } from '../shared/kernelLoad.tsx';
 import { autoPageSize, MIN_AUTO_PAGE_SIZE } from '../shared/paginate.ts';
 import { publishSelection } from '../shared/selectionChannel.ts';
 import { useSessionContext } from '../shared/session.ts';
@@ -309,6 +309,11 @@ export function MemoryManagementPage() {
   const storage = useKernelLoad('memory-management-storage', loadStorage);
   /** 第一轮个人记忆：独立存储（数据面失败时如实错误态，不回退成空账本） */
   const personalMem = useKernelLoad<PersonalSnapshot>('memory-management-personal', loadPersonalSnapshot);
+  /**
+   * 页面级「刷新」= 本页全部数据源一起重取（2026-11-10 统一刷新逻辑）。
+   * 原先只刷列表与分层策略，冲突队列/待重放/库位置/个人记忆仍显示旧值。
+   */
+  const refreshAll = useRefreshAll([memories, layerPolicy, conflictLoad, pending, storage, personalMem]);
   const session = useSessionContext();
   const mirror = useDisputeMirror();
 
@@ -705,7 +710,7 @@ export function MemoryManagementPage() {
                   <span className="mm-layer-sub">条数 / 占比 / 最近写入 / 到龄来自当前账本快照；半衰期与阈值来自内核 LAYER_SPECS 与参数快照</span>
                   <span className="mm-spacer" />
                   <div className="mm-layer-tools">
-                    <button type="button" className="mm-btn" onClick={() => { memories.retry(); layerPolicy.retry(); }}><Glyph name="refresh" />刷新快照</button>
+                    <button type="button" className="mm-btn" onClick={refreshAll} title="重新读取本页全部数据（列表 / 分层策略 / 冲突队列 / 待重放 / 库位置 / 个人记忆）"><Glyph name="refresh" />刷新快照</button>
                     <button type="button" className="mm-btn" onClick={() => goView('params', 'params.html')}>查看参数</button>
                     <button type="button" className="mm-btn" disabled title="本组只读：批量归档需在生命周期页逐条执行">批量归档</button>
                     <button type="button" className="mm-btn primary" onClick={() => goTab('l0')} title="L0 需管理员密码或成员 grant 解锁后查阅"><Glyph name="unlock" />解锁 L0</button>
@@ -843,7 +848,7 @@ export function MemoryManagementPage() {
               <h3>待重放写入</h3>
               <span className="p0-sub">只读队列：MCP 写入兜底条目（不向渲染层返回正文、密钥材料或 token）。</span>
               <span className="p0-right">
-                <button type="button" className="mm-btn" onClick={pending.retry}><Glyph name="refresh" />刷新</button>
+                <button type="button" className="mm-btn" onClick={refreshAll} title="重新读取本页全部数据（列表 / 分层策略 / 冲突队列 / 待重放 / 库位置 / 个人记忆）"><Glyph name="refresh" />刷新</button>
               </span>
             </div>
             {pending.phase === 'loading' ? (
@@ -997,7 +1002,7 @@ export function MemoryManagementPage() {
               <h3>冲突裁决</h3>
               <span className="p0-sub">队列来自内核冲突配对；类型/分数内核未检测字段如实为空，不猜测。</span>
               <span className="p0-right">
-                <button type="button" className="mm-btn" onClick={conflictLoad.retry}><Glyph name="refresh" />重读队列</button>
+                <button type="button" className="mm-btn" onClick={refreshAll} title="重新读取本页全部数据（列表 / 分层策略 / 冲突队列 / 待重放 / 库位置 / 个人记忆）"><Glyph name="refresh" />重读队列</button>
               </span>
             </div>
             {verdictMsg ? (

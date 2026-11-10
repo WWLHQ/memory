@@ -7,10 +7,14 @@
 import { hostCall, hostCapability } from '../../desktop/hostBridge.ts';
 import { homeBaseUrl } from '../backend.ts';
 import { currentSessionId } from './session.ts';
-import type { PersonalReceipt, PersonalSnapshot, PersonalSyncReceipt } from '../../core/memagent/personal.ts';
+import type { PersonalImportInput, PersonalReceipt, PersonalSnapshot, PersonalSyncReceipt } from '../../core/memagent/personal.ts';
 
 export type PersonalOpName =
   | 'list' | 'quick_add' | 'confirm' | 'reject' | 'revoke' | 'delete'
+  // 从 agent 记忆归入个人（读取会话拉取 / agent 主动投递 / 手动拉取兜底）
+  | 'import_from_agent'
+  // 把 agent 记忆判定为「不是我的 / 进共享」：落 rejected 个人条目，共享账本记忆原样保留
+  | 'reject_from_agent'
   // 第二轮：显式授权团队上行 / 失败重试（真实 PgSyncHub 通道）
   | 'push_team' | 'retry_sync';
 
@@ -85,6 +89,52 @@ export function loadPersonalSnapshot(port: PersonalPort = getPersonalPort()): Pr
 /** 快速记一条 */
 export function quickAddPersonal(content: string, port: PersonalPort = getPersonalPort()): Promise<PersonalReceipt> {
   return port.invoke<PersonalReceipt>('quick_add', { content });
+}
+
+/** 收件箱条目判定「是我的」：pending → confirmed（进入私人池、参与召回） */
+export function confirmPersonal(id: string, port: PersonalPort = getPersonalPort()): Promise<PersonalReceipt> {
+  return port.invoke<PersonalReceipt>('confirm', { id });
+}
+
+/** 收件箱条目判定「不是我的」：pending → rejected（移出私人池，只写个人侧状态，不删账本） */
+export function rejectPersonal(id: string, port: PersonalPort = getPersonalPort()): Promise<PersonalReceipt> {
+  return port.invoke<PersonalReceipt>('reject', { id });
+}
+
+/** 撤销判定：confirmed / rejected → pending（回到待判定重新分派） */
+export function revokePersonal(id: string, port: PersonalPort = getPersonalPort()): Promise<PersonalReceipt> {
+  return port.invoke<PersonalReceipt>('revoke', { id });
+}
+
+/** 删除个人条目（二次确认由调用方保证；只写墓碑，账本记录保留） */
+export function removePersonal(id: string, port: PersonalPort = getPersonalPort()): Promise<PersonalReceipt> {
+  return port.invoke<PersonalReceipt>('delete', { id, confirm: true });
+}
+
+/** 从 agent 记忆归入个人（source=agent / source_agent / origin_ref_id；delivered_at 取原始创建时间） */
+export function importPersonalFromAgent(
+  input: PersonalImportInput,
+  port: PersonalPort = getPersonalPort(),
+): Promise<PersonalReceipt> {
+  return port.invoke<PersonalReceipt>('import_from_agent', {
+    content: input.content,
+    source_agent: input.sourceAgent,
+    source_ref_id: input.sourceRefId,
+    origin_ts: input.originTs,
+  });
+}
+
+/** 把 agent 记忆判定为「不是我的 / 进共享」：记录 rejected 个人条目（origin_ref_id），共享账本记忆不动 */
+export function rejectPersonalFromAgent(
+  input: PersonalImportInput,
+  port: PersonalPort = getPersonalPort(),
+): Promise<PersonalReceipt> {
+  return port.invoke<PersonalReceipt>('reject_from_agent', {
+    content: input.content,
+    source_agent: input.sourceAgent,
+    source_ref_id: input.sourceRefId,
+    origin_ts: input.originTs,
+  });
 }
 
 /** 显式授权上行到团队中枢（explicit=true 是页面上二次确认后的真实授权，不能缺省） */

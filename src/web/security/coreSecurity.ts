@@ -6,6 +6,7 @@ import type {
 } from '../../core/memagent/types.ts';
 import type { StorageBackend } from '../../core/memagent/types.ts';
 import { getKernel, getKernelStorage } from '../kernel.ts';
+import { signalL0WriteLockChanged } from '../shared/l0WriteLockSignal.ts';
 
 interface SecurityCtx {
   ma: MemAgent;
@@ -93,10 +94,13 @@ export async function coreL0Revoke(grantId: string, reason?: string): Promise<vo
 
 export async function coreL0UnlockWrite(password: string): Promise<void> {
   await getKernel().l0UnlockWrite(password);
+  // 解锁成功后广播信号：首页/状态栏立刻重读真实写锁状态（否则红条常驻不消失）
+  signalL0WriteLockChanged();
 }
 
 export async function coreL0LockWrite(): Promise<void> {
   await getKernel().l0LockWrite();
+  signalL0WriteLockChanged();
 }
 
 export async function coreL0Migrate(oldPassword?: string): Promise<L0MigrationResult> {

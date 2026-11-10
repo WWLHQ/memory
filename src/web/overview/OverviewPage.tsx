@@ -2,7 +2,7 @@
 // 头部 → L0 提示 → 效果四卡 → 双栏（左：图谱/异常/最近审计；右：TOKEN 节省率/补炼/MCP/引擎/今日概览）→ 页脚端口行。
 // 所有读数来自 loadOverview 单次真实取数：内核账本 / 审计 / 主进程 IPC（refine:state · mcp:clients · llm:config · dataRoot:get）/ /api/health。
 // 读不到就显示「读不到 / 未取数 / —」并给原因，绝不用演示数或 0 冒充成功读数。
-// 问账本问答框已收进壳层快捷栏「记忆助手」（MemoryAssistant），本页不再渲染底部输入框。
+// 问账本问答框已独立为整页（assistant.html · src/web/assistant/AssistantPage.tsx），本页不再渲染底部输入框。
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   loadOverview,
@@ -63,6 +63,11 @@ export interface HomeDerived {
   anomalies: RawAnomaly[];
   /** 真实 L0 写入锁定类阻断（仅当账本异常里确有该条才显示，绝不编造） */
   l0Alert: string | null;
+  /** 首页常驻提示：只要真实读到「写密钥未解锁」就为 true（不依赖是否有写入被拒） */
+  l0WriteLocked: boolean;
+  /** 写锁状态读不到（浏览器模式/IPC 失败）：不猜已解锁，也不误报未解锁 */
+  l0WriteUnknown: boolean;
+  l0WriteDetail: string | null;
 }
 
 /** 纯派生：把真实快照翻译成版式所需的字符串/列表（可单测、可做变异验证） */
@@ -80,6 +85,10 @@ export function deriveHomeView(s: OverviewSnapshot): HomeDerived {
     graph: s.graph,
     anomalies,
     l0Alert: l0 ? l0.title : null,
+    // 锁状态是唯一真源：available+unlocked=false → 常驻提示；读不到 → 绝不冒充「已解锁」
+    l0WriteLocked: s.l0Write?.available === true && s.l0Write.unlocked === false,
+    l0WriteUnknown: !s.l0Write || s.l0Write.available !== true,
+    l0WriteDetail: s.l0Write?.detail ?? null,
   };
 }
 
@@ -423,10 +432,29 @@ export function OverviewPage() {
                 </div>
               )}
               {/* 账本读取失败由壳层顶部 ov-error-strip 统一提示（57-D 去重），本页只保各自面板的诚实失败原因 */}
-              {view.l0Alert && (
+              {/* 常驻提示：只要 L0 写密钥锁没解就显示（真源 = l0Status.write_unlocked，不依赖近 30 分钟是否有写入被拒） */}
+              {view.l0WriteLocked && (
+                <div className="af-alert bad l0-lock-alert" role="alert" data-testid="home-l0-lock-alert">
+                  <span className="tag">L0</span>
+                  <span className="l0-lock-text">
+                    <b>写密钥未解锁</b>：新的写入会被挡下并暂存到 pending 队列，解锁后自动重放落库，绝不落明文。
+                    {view.l0Alert ? <span className="l0-lock-sub">近期已有写入因此被挡：{view.l0Alert}。</span> : null}
+                  </span>
+                  <button className="af-link" type="button" onClick={() => requestShellView('security')}>去安全页解锁 →</button>
+                </div>
+              )}
+              {/* 状态读不到时如实标注（不猜已解锁、也不误报未解锁）；已有真实被挡异常则照常显示 */}
+              {!view.l0WriteLocked && view.l0WriteUnknown && (
+                <div className="af-alert l0-lock-unknown" data-testid="home-l0-lock-unknown">
+                  <span className="tag">L0</span>
+                  <span className="l0-lock-text">写密钥锁状态未取到：{view.l0WriteDetail ?? '桌面壳未返回状态'}（不能据此判断已解锁）。</span>
+                  <button className="af-link" type="button" onClick={() => void reload()}>重读 →</button>
+                </div>
+              )}
+              {!view.l0WriteLocked && view.l0Alert && (
                 <div className="af-alert">
                   <span className="tag">L0</span>{view.l0Alert}
-                  <button className="af-link" type="button" onClick={() => requestShellView('memory-bank')}>就地解锁 →</button>
+                  <button className="af-link" type="button" onClick={() => requestShellView('security')}>去安全页解锁 →</button>
                 </div>
               )}
 

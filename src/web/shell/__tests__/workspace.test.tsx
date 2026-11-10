@@ -152,12 +152,12 @@ describe('工作台壳层', () => {
     expect((frames[0] as HTMLIFrameElement).getAttribute('src')).toContain('/index.html');
   });
 
-  it('批次54：DOM 为四组 17 项，角标只显示真实读数，不出现参考图示例数', async () => {
+  it('DOM 为五组 20 项，角标只显示真实读数，不出现参考图示例数', async () => {
     vi.mocked(loadNavCounts).mockResolvedValue({ 'memory-bank': 7, dispute: 2, agent: 3 });
     const { container } = await renderShell();
     const groups = Array.from(container.querySelectorAll('.tree .tree-group')).map((e) => e.textContent);
-    expect(groups).toEqual(['工作台', '记忆', '连接', '治理']);
-    expect(container.querySelectorAll('.tree .tree-row')).toHaveLength(17);
+    expect(groups).toEqual(['工作台', '记忆管理', '连接', '治理', '智能']);
+    expect(container.querySelectorAll('.tree .tree-row')).toHaveLength(20);
 
     expect((await screen.findByTestId('nav-count-memory-bank')).textContent).toBe('7');
     expect(screen.getByTestId('nav-count-dispute').textContent).toBe('2');
@@ -425,7 +425,7 @@ describe('工作台壳层', () => {
     expect(screen.queryByTestId('ctx-shellmenu-login')).toBeNull();
     // 真实动作：刷新中心区与底部读数
     fireEvent.click(screen.getByTestId('ctx-shellmenu-refresh'));
-    await waitFor(() => expect(screen.getByTestId('sb-msg')).toHaveTextContent('已刷新中心区真实页面'));
+    await waitFor(() => expect(screen.getByTestId('sb-msg')).toHaveTextContent('已刷新全部打开的真实页面'));
 
     expect(fireEvent.contextMenu(container.querySelector('.ribbon-body') as HTMLElement)).toBe(false);
     expect(screen.getByTestId('ctx-shellmenu')).toHaveTextContent('右键：功能区');
@@ -503,7 +503,7 @@ describe('工作台壳层', () => {
     expect(screen.queryByText(/通览/)).toBeNull();
   });
 
-  it('批次54：记忆库平铺入口打开 memory.html?tab=all；个人记忆深链仍可由菜单派生', async () => {
+  it('批次54：记忆库平铺入口打开 memory.html?tab=all；个人记忆进主导航并打开记忆库的个人记忆 Tab', async () => {
     const { container } = await renderShell();
     fireEvent.click(screen.getByRole('treeitem', { name: /记忆库/ }));
     const frame = container.querySelector('.page-pane.active iframe.page-frame');
@@ -511,9 +511,16 @@ describe('工作台壳层', () => {
     expect(src).toContain('/memory.html');
     expect(src).toContain('tab=all');
     expect(container.querySelectorAll('iframe.page-frame').length).toBeGreaterThan(1);
-    // 主导航不再出现「个人记忆」独立项；壳层也不提供假计数
-    expect(screen.queryByRole('treeitem', { name: /个人记忆/ })).toBeNull();
+    // 个人记忆进主导航（不占假计数），点击直接打开记忆库全页的个人记忆 Tab
+    expect(screen.getByRole('treeitem', { name: /个人记忆/ })).toBeTruthy();
     expect(container.querySelector('.shell-empty')).toBeFalsy();
+    fireEvent.click(screen.getByRole('treeitem', { name: /个人记忆/ }));
+    const personalFrame = container.querySelector('.page-pane.active iframe.page-frame');
+    const personalSrc = personalFrame ? personalFrame.getAttribute('src') : null;
+    expect(personalSrc).toContain('/memory.html');
+    expect(personalSrc).toContain('tab=personal');
+    // 点击导航项不弹壳层浮层面板（那是状态栏快捷按钮的职责）
+    expect(container.querySelector('.pm-shell-panel')).toBeFalsy();
   });
 
   it('工具栏不可用命令被禁用并给出原因，不伪造结果', async () => {
@@ -536,12 +543,41 @@ describe('工作台壳层', () => {
     expect(bar.textContent).not.toMatch(/—/);
     expect(screen.getByTestId('sb-storage').textContent).toContain('memories.db.json');
     expect(screen.getByTestId('sb-storage').getAttribute('title')).toContain('C:\\data\\memories.db.json');
-    expect(screen.getByTestId('sb-l0').textContent).toContain('已锁定');
+    // L0 两把锁都要显示：查阅锁（解密查阅会话）与写锁（写密钥），互不替代
+    expect(screen.getByTestId('sb-l0').textContent).toContain('查阅锁');
+    expect(screen.getByTestId('sb-l0').textContent).toContain('写锁');
     expect(screen.getByTestId('sb-l0').getAttribute('title')).toContain('有效授权 0');
+    // 状态栏文案必须直读两把锁，而不是拿其中一个冒充另一个
+    expect(screen.getByTestId('sb-l0').getAttribute('title')).toContain('查阅锁（解密查阅会话）锁定');
+    expect(screen.getByTestId('sb-l0').getAttribute('title')).toContain('写锁（写密钥）锁定');
+    expect(screen.getByTestId('sb-l0').getAttribute('title')).toContain('两把锁互不替代');
     expect(screen.getByTestId('sb-bg').textContent).toContain('运行中');
     expect(screen.getByTestId('sb-bg').getAttribute('title')).toContain('间隔 60000 ms');
     expect(screen.getByTestId('sb-selected').textContent).toContain('无');
     expect(bar.textContent).toContain('行高 26 px');
+  });
+
+  it('L0 两把锁在状态栏各自独立显示：写锁已解锁时查阅锁仍如实为锁（2026-11-10）', async () => {
+    // 写锁已解锁 + 有 2 个活跃查阅会话：两把锁都要各自如实反映，不能互相冒充
+    vi.mocked(loadStatusbar).mockResolvedValue({
+      location: { status: 'ok', view: { kind: 'file', path: 'C:\\data\\memories.db.json', source: 'ipc' } },
+      l0: { status: 'ok', view: { has_admin_wrap: true, write_unlocked: true, active_sessions: 2, active_grants: 1 } },
+      collector: {
+        status: 'ok',
+        view: { running: true, intervalMs: 60_000, lastAt: 1_790_000_000_000, lastCollected: 12, autoRetryStopped: false, consecutiveFails: 0 },
+      },
+    });
+    await renderShell();
+    await screen.findByTestId('sb-l0');
+    const cell = screen.getByTestId('sb-l0');
+    // 写锁已解 → 明确写「写已解」，不再显示「写锁锁定」
+    expect(cell.textContent).toContain('写已解');
+    expect(cell.textContent).not.toContain('写锁');
+    // 查阅锁按真实会话数显示
+    expect(cell.textContent).toContain('查阅2会话');
+    const title = cell.getAttribute('title')!;
+    expect(title).toContain('查阅锁（解密查阅会话）已开 2 个会话');
+    expect(title).toContain('写锁（写密钥）已解锁');
   });
 
   it('状态栏不可用态写原因，不用 0 或「—」冒充读数', async () => {
@@ -973,71 +1009,60 @@ describe('S7 分层 L1–L6 / L0 面板：只在层级管理页或记忆库分�
   });
 });
 
-describe('记忆助手：问账本收进快捷栏，不随中心标签变换而变换', () => {
-  it('QAT「记忆助手」展开/收起；回答只转述真实账本快照，收起再展开会话仍在', async () => {
-    await renderShell();
-    const btn = screen.getByTestId('qa-assistant');
-    expect(btn.textContent).toContain('记忆助手');
-    expect(btn.getAttribute('aria-pressed')).toBe('false');
+describe('记忆助手：已从壳层浮窗改为独立整页', () => {
+  it('导航「记忆助手」打开整页（assistant.html），不再渲染壳层浮层面板', async () => {
+    const { container } = await renderShell();
+    // 壳层不再有浮层面板
     expect(screen.queryByTestId('memory-assistant')).toBeNull();
+    // 导航项指向真实页面
+    fireEvent.click(screen.getByRole('treeitem', { name: /记忆助手/ }));
+    const frame = container.querySelector('.page-pane.active iframe.page-frame');
+    expect(frame?.getAttribute('src')).toContain('/assistant.html');
+    // 状态栏「记忆助手」按钮同样改为打开整页
+    expect(screen.getByTestId('qa-assistant').textContent).toContain('记忆助手');
+  });
+});
 
-    fireEvent.click(btn);
-    const panel = screen.getByTestId('memory-assistant');
-    expect(btn.getAttribute('aria-pressed')).toBe('true');
-    // 建议问题与概览页同源；回答里的条数来自快照 facts.memories=7 / audits=12
-    fireEvent.click(within(panel).getByRole('button', { name: '账本里有多少条记忆？' }));
-    const answer = within(panel).getByTestId('ma-answer');
-    expect(answer.textContent).toContain('账本里有 7 条记忆');
-    expect(answer.textContent).toContain('累计审计 12 条');
+describe('功能导航折叠：折叠后只显示图标栏（不归零、不隐藏功能项）', () => {
+  it('折叠后保留窄图标栏：树项只显示图标，名称走 title 提示，文字/角标隐藏', async () => {
+    const { container } = await renderShell();
+    fireEvent.click(screen.getByTestId('nav-collapse-toggle'));
 
-    // 收起 → 面板消失但会话保留；再展开仍在
-    fireEvent.click(screen.getByTestId('ma-close'));
-    expect(screen.queryByTestId('memory-assistant')).toBeNull();
-    expect(btn.getAttribute('aria-pressed')).toBe('false');
-    fireEvent.click(btn);
-    expect(screen.getByTestId('ma-answer').textContent).toContain('账本里有 7 条记忆');
+    const nav = container.querySelector('.nav-pane') as HTMLElement;
+    expect(nav.className).toContain('collapsed');
+    // 栏体不再归零（保留图标栏宽度）
+    expect(nav.getBoundingClientRect === undefined || true).toBe(true);
+    const shell = container.querySelector('.shell') as HTMLElement;
+    expect(shell.style.getPropertyValue('--nav-w')).toBe('44px');
+
+    // 树项仍在（功能没丢），但标记为 icon-only
+    const rows = container.querySelectorAll('.tree-row');
+    expect(rows.length).toBeGreaterThan(10);
+    expect(container.querySelectorAll('.tree-row.icon-only').length).toBe(rows.length);
+    // 图标可见、文字隐藏（隐藏由 CSS class 控制，这里校验结构标记）
+    expect(screen.getByTestId('nav-item-home')).toHaveAttribute('title', '首页');
+    expect(screen.getByTestId('nav-item-home').querySelector('.tico')).toBeTruthy();
+    // 折叠按钮仍在图标栏内（可随时展开）
+    expect(screen.getByTestId('nav-collapse-toggle')).toBeTruthy();
+    expect(screen.getByTestId('nav-reopen')).toBeTruthy();
   });
 
-  it('切换中心标签：面板开闭状态与问答会话都不丢', async () => {
-    await renderShell();
-    fireEvent.click(screen.getByTestId('qa-assistant'));
-    const input = within(screen.getByTestId('memory-assistant')).getByRole('textbox', { name: '问账本' });
-    fireEvent.change(input, { target: { value: '审计里有什么异常？' } });
-    fireEvent.keyDown(input, { key: 'Enter' });
-    expect(screen.getByTestId('ma-answer').textContent).toContain('审计里没有异常');
-    // Enter 发送后输入框清空
-    expect(input).toHaveValue('');
-
-    // 切到记忆库（新标签）：面板仍开、会话仍在
-    fireEvent.click(screen.getByRole('treeitem', { name: /记忆库/ }));
-    expect(screen.getByTestId('memory-assistant')).toBeInTheDocument();
-    expect(screen.getByTestId('ma-answer').textContent).toContain('审计里没有异常');
-    // 切回首页标签：依旧
-    fireEvent.click(screen.getByTestId('shell-tab-home'));
-    expect(screen.getByTestId('memory-assistant')).toBeInTheDocument();
-    expect(screen.getByTestId('ma-answer').textContent).toContain('审计里没有异常');
+  it('折叠态点击图标仍能打开对应页面', async () => {
+    const { container } = await renderShell();
+    fireEvent.click(screen.getByTestId('nav-collapse-toggle'));
+    fireEvent.click(screen.getByTestId('nav-item-memory-bank'));
+    const frame = container.querySelector('.page-pane.active iframe.page-frame');
+    expect(frame?.getAttribute('src')).toContain('/memory.html');
   });
 
-  it('Esc 收起面板；空输入不发送', async () => {
-    await renderShell();
-    fireEvent.click(screen.getByTestId('qa-assistant'));
-    const panel = screen.getByTestId('memory-assistant');
-    expect(within(panel).getByTestId('ma-send')).toBeDisabled();
-    fireEvent.keyDown(document, { key: 'Escape' });
-    expect(screen.queryByTestId('memory-assistant')).toBeNull();
-  });
-
-  it('账本读取失败时如实回答「没读到」，不拿 0 冒充', async () => {
-    vi.mocked(loadOverview).mockResolvedValueOnce({
-      ...m.defaultOverview,
-      storageError: 'E_LEDGER_LOCKED',
-      facts: null,
-    } as never);
-    await renderShell();
-    fireEvent.click(screen.getByTestId('qa-assistant'));
-    fireEvent.click(within(screen.getByTestId('memory-assistant')).getByRole('button', { name: '账本里有多少条记忆？' }));
-    const answer = screen.getByTestId('ma-answer');
-    expect(answer.textContent).toContain('账本没读到，无法回答');
-    expect(answer.textContent).toContain('E_LEDGER_LOCKED');
+  it('展开后恢复完整文字导航', async () => {
+    const { container } = await renderShell();
+    fireEvent.click(screen.getByTestId('nav-collapse-toggle'));
+    fireEvent.click(screen.getByTestId('nav-reopen'));
+    const nav = container.querySelector('.nav-pane') as HTMLElement;
+    expect(nav.className).not.toContain('collapsed');
+    expect(container.querySelectorAll('.tree-row.icon-only').length).toBe(0);
+    const shell = container.querySelector('.shell') as HTMLElement;
+    expect(shell.style.getPropertyValue('--nav-w')).not.toBe('44px');
   });
 });

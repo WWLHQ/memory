@@ -35,6 +35,7 @@ export default defineConfig({
         growth: 'growth.html',
         layered: 'memory-layered.html',
         setup: 'setup.html',
+        assistant: 'assistant.html',
       },
     },
   },

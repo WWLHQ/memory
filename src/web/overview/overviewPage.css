@@ -68,6 +68,21 @@ html[data-theme="dark"] body { background: #060B16; color: #E4EDF8; }
 }
 .af-alert.bad .tag { background: var(--bad); color: #fff; }
 .af-alert .af-link { margin-left: auto; }
+
+/* L0 写密钥未解锁：常驻醒目提示（用户 2026-11-10）。只要锁没解就一直显示，
+   真源是 l0Status.write_unlocked，不依赖近 30 分钟是否有写入被拒。 */
+.l0-lock-alert {
+  align-items: flex-start; flex-wrap: wrap;
+  border-left: 4px solid var(--bad); padding: 9px 12px; font-size: 12px;
+}
+.l0-lock-alert .tag { margin-top: 1px; }
+.l0-lock-alert .l0-lock-text { flex: 1 1 320px; }
+.l0-lock-alert .l0-lock-text b { font-weight: 600; }
+.l0-lock-alert .l0-lock-sub { display: block; margin-top: 3px; opacity: .85; font-size: 11px; }
+.l0-lock-alert .af-link { margin-left: auto; align-self: center; color: var(--bad); font-weight: 500; }
+.l0-lock-unknown { border-left: 3px solid var(--muted); color: var(--muted); background: var(--surface2); }
+.l0-lock-unknown .tag { background: var(--muted); color: var(--surface); }
+.l0-lock-unknown .l0-lock-text { flex: 1 1 320px; }
 .af-link {
   background: none; border: none; color: var(--accent); font: inherit; font-size: 10.5px;
   cursor: pointer; padding: 0; display: inline-flex; align-items: center; gap: 3px;

@@ -222,7 +222,7 @@ test.describe('壳层 · 登录弹窗与右键菜单（真实后端）', () => {
     await expect.poll(() => page.evaluate(() => (window as unknown as { __ctxPrevented?: boolean }).__ctxPrevented)).toBe(true);
     // 真实动作：刷新中心区与底部读数
     await page.locator('[data-testid="ctx-shellmenu-refresh"]').click();
-    await expect(page.locator('[data-testid="sb-msg"]')).toHaveText(/已刷新中心区真实页面/);
+    await expect(page.locator('[data-testid="sb-msg"]')).toHaveText(/已刷新全部打开的真实页面/);
 
     await page.locator('.ribbon-body').click({ button: 'right' });
     await expect(page.locator('[data-testid="ctx-shellmenu"]')).toContainText('右键：功能区');

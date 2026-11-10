@@ -957,6 +957,24 @@ function registerPersonalIpc(opts: {
       switch (op) {
         case 'list': return { ok: true, data: await api.list() };
         case 'quick_add': return { ok: true, data: await api.quickAdd(String(p.content ?? '')) };
+        case 'import_from_agent': return {
+          ok: true,
+          data: await api.importFromAgent({
+            content: String(p.content ?? ''),
+            sourceAgent: String(p.source_agent ?? ''),
+            sourceRefId: String(p.source_ref_id ?? ''),
+            originTs: typeof p.origin_ts === 'number' ? p.origin_ts : undefined,
+          }),
+        };
+        case 'reject_from_agent': return {
+          ok: true,
+          data: await api.rejectFromAgent({
+            content: String(p.content ?? ''),
+            sourceAgent: String(p.source_agent ?? ''),
+            sourceRefId: String(p.source_ref_id ?? ''),
+            originTs: typeof p.origin_ts === 'number' ? p.origin_ts : undefined,
+          }),
+        };
         case 'confirm': return { ok: true, data: await api.confirm(id) };
         case 'reject': return { ok: true, data: await api.reject(id) };
         case 'revoke': return { ok: true, data: await api.revoke(id) };

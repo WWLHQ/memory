@@ -67,6 +67,29 @@ describe('deriveHomeView（批次57-B 首页派生）', () => {
     expect(deriveHomeView(snap()).l0Alert).toBeNull();
   });
 
+  it('写密钥锁没解 → 常驻醒目提示，且不需要「近 30 分钟有写入被拒」', () => {
+    const locked = snap({ l0Write: { available: true, unlocked: false, detail: null } });
+    const v = deriveHomeView(locked);
+    expect(v.l0WriteLocked).toBe(true);
+    expect(v.l0WriteUnknown).toBe(false);
+    expect(v.l0Alert).toBeNull(); // 变异靶点：不能靠异常聚合才显示
+  });
+
+  it('写密钥已解锁 → 不显示常驻提示；状态读不到 → 如实标注 unknown，绝不猜已解锁', () => {
+    const unlocked = snap({ l0Write: { available: true, unlocked: true, detail: null } });
+    expect(deriveHomeView(unlocked).l0WriteLocked).toBe(false);
+    expect(deriveHomeView(unlocked).l0WriteUnknown).toBe(false);
+
+    const unknown = snap({ l0Write: { available: false, unlocked: false, detail: '浏览器模式：读不到' } });
+    const u = deriveHomeView(unknown);
+    expect(u.l0WriteLocked).toBe(false);
+    expect(u.l0WriteUnknown).toBe(true);
+    expect(u.l0WriteDetail).toBe('浏览器模式：读不到');
+
+    // 老快照没有该字段（向后兼容）→ 同样诚实标注读不到
+    expect(deriveHomeView(snap()).l0WriteUnknown).toBe(true);
+  });
+
   it('效果四卡与图谱原样透传真实账本聚合（不重算、不伪造）', () => {
     const s = snap();
     const v = deriveHomeView(s);

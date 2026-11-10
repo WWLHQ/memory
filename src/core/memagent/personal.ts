@@ -27,8 +27,20 @@ import {
 /** 与 coreFeedback（17.4）同一口径 */
 export const PERSONAL_CONFIDENCE_DELTA = { confirm: 0.1, reject: -0.05 } as const;
 
-export type PersonalOp = 'quick_add' | 'confirm' | 'reject' | 'revoke' | 'delete';
+export type PersonalOp = 'quick_add' | 'confirm' | 'reject' | 'revoke' | 'delete' | 'import_from_agent' | 'reject_from_agent';
 export type PersonalSyncOp = 'push_team' | 'retry_sync';
+
+/** 「从 agent 记忆归入个人」动作输入：来自真实账本某条 agent 记忆（coreListMemories） */
+export interface PersonalImportInput {
+  /** 记忆正文（已脱敏，可直接进个人收件箱） */
+  content: string;
+  /** 来源 agent 名（如 客服工作台），用于「来源」展示；缺省记「未知 agent」 */
+  sourceAgent: string;
+  /** 来源账本记忆 id（coreListMemories 的 mem_id），写入 origin_ref_id 用于去重，必填 */
+  sourceRefId: string;
+  /** 原始 agent 记忆创建时间（毫秒），用于「日期」展示；缺省取当前 */
+  originTs?: number;
+}
 
 /** 真实同步中枢端口（桌面/后端注入同一 PgSyncHub；缺省 = 上行如实不可用） */
 export interface PersonalSyncPort {
@@ -102,6 +114,14 @@ export interface PersonalApi {
   readonly ownerResolution: PersonalOwnerResolution;
   quickAdd(content: string): Promise<PersonalReceipt>;
   list(): Promise<PersonalSnapshot>;
+  /** 从 agent 记忆归入个人（source=agent、source_agent、origin_ref_id；delivered_at 取原始创建时间） */
+  importFromAgent(input: PersonalImportInput): Promise<PersonalReceipt>;
+  /**
+   * 把 agent 记忆判定为「不是我的」：落一条 state=rejected 的个人条目（origin_ref_id 指向共享账本记忆）。
+   * 共享账本记忆原样保留（它本就在共享池），仅个人侧记录该判定，使其不再作为个人候选出现。
+   * 等价于「进共享」：不归入私人池、不删账本，纯记录分流决策（见多用户三池隔离设计 D2/D3）。
+   */
+  rejectFromAgent(input: PersonalImportInput): Promise<PersonalReceipt>;
   confirm(id: string): Promise<PersonalReceipt>;
   reject(id: string): Promise<PersonalReceipt>;
   revoke(id: string): Promise<PersonalReceipt>;
@@ -266,6 +286,113 @@ export async function personalQuickAdd(
   await s.put(entry);
   await writeAudit(ctx, request_id, 'quick_add', entry, 'none', { confidence_delta: 0 });
   return { ok: true, request_id, action: 'quick_add', entry };
+}
+
+/**
+ * 从 agent 记忆归入个人（读取会话时拉取 / 接收 agent 投递 / 手动拉取三种来源的统一落账）：
+ * - source='agent'、source_agent 来自账本、origin_ref_id=账本 mem_id（去重真源）；
+ * - delivered_at 取原始 agent 记忆的创建时间（保留「日期」），落 personal_memory 审计；
+ * - 与 quick_add 同口径：state=pending（待用户确认是否为个人记忆）、sync_state='local'、不自动提权。
+ */
+export async function personalImportFromAgent(
+  ctx: PersonalApiContext,
+  input: PersonalImportInput,
+): Promise<PersonalReceipt> {
+  const s = requireStore(ctx.store);
+  const text = typeof input.content === 'string' ? input.content.trim() : '';
+  if (!text) throw new Error('内容为空：未归入（不会把空条目写进个人记忆）');
+  if (text.length > 4000) throw new Error('单条内容超过 4000 字：请拆分后再记');
+  const sourceAgent = (typeof input.sourceAgent === 'string' ? input.sourceAgent.trim() : '') || '未知 agent';
+  const refId = typeof input.sourceRefId === 'string' ? input.sourceRefId.trim() : '';
+  if (!refId) throw new Error('缺少来源账本记忆 id：无法归入个人（origin_ref_id 必填）');
+  const now = (ctx.now ?? Date.now)();
+  const originTs = typeof input.originTs === 'number' && Number.isFinite(input.originTs) ? input.originTs : now;
+  const request_id = newRequestId();
+  const entry: PersonalEntry = {
+    id: `pm_${ulid(now)}`,
+    owner: ctx.owner,
+    content: text,
+    source: 'agent',
+    source_agent: sourceAgent,
+    origin_ref_id: refId,
+    delivered_at: originTs,
+    confirmed_at: null,
+    state: 'pending',
+    rejected_at: null,
+    layer: 'L1',
+    content_hash: personalContentHash(text),
+    sha256: sha256hex(text),
+    vclock: vcTick(undefined, ctx.form),
+    sync_state: 'local',
+    sync_error: null,
+    sync_result: null,
+    team_shared: false,
+    team_id: null,
+    version: 1,
+    deleted: false,
+    deleted_at: null,
+  };
+  await s.put(entry);
+  await writeAudit(ctx, request_id, 'import_from_agent', entry, 'none', {
+    confidence_delta: 0,
+    source_agent: sourceAgent,
+    origin_ref_id: refId,
+  });
+  return { ok: true, request_id, action: 'import_from_agent', entry };
+}
+
+/**
+ * 把一条 agent 记忆判定为「不是我的 / 进共享」：与 importFromAgent 同口径落一条个人条目，
+ * 但 state='rejected'、rejected_at=now（等价于个人侧记录「已剔除」，不删共享账本记忆）。
+ * 共享账本记忆原样保留于共享池（团队仍可见），个人候选列表凭 origin_ref_id 去重不再出现。
+ * 这是「非个人 → 共享」的二分落账点：不归入私人池、不新增任何 scope 字段、靠 project_id 池 + 个人状态机隔离。
+ */
+export async function personalRejectFromAgent(
+  ctx: PersonalApiContext,
+  input: PersonalImportInput,
+): Promise<PersonalReceipt> {
+  const s = requireStore(ctx.store);
+  const text = typeof input.content === 'string' ? input.content.trim() : '';
+  if (!text) throw new Error('内容为空：未记录（不会把空条目写进个人记忆）');
+  if (text.length > 4000) throw new Error('单条内容超过 4000 字：请拆分后再记');
+  const sourceAgent = (typeof input.sourceAgent === 'string' ? input.sourceAgent.trim() : '') || '未知 agent';
+  const refId = typeof input.sourceRefId === 'string' ? input.sourceRefId.trim() : '';
+  if (!refId) throw new Error('缺少来源账本记忆 id：无法记录判定（origin_ref_id 必填）');
+  const now = (ctx.now ?? Date.now)();
+  const originTs = typeof input.originTs === 'number' && Number.isFinite(input.originTs) ? input.originTs : now;
+  const request_id = newRequestId();
+  const entry: PersonalEntry = {
+    id: `pm_${ulid(now)}`,
+    owner: ctx.owner,
+    content: text,
+    source: 'agent',
+    source_agent: sourceAgent,
+    origin_ref_id: refId,
+    delivered_at: originTs,
+    confirmed_at: null,
+    state: 'rejected',
+    rejected_at: now,
+    layer: 'L1',
+    content_hash: personalContentHash(text),
+    sha256: sha256hex(text),
+    vclock: vcTick(undefined, ctx.form),
+    sync_state: 'local',
+    sync_error: null,
+    sync_result: null,
+    team_shared: false,
+    team_id: null,
+    version: 1,
+    deleted: false,
+    deleted_at: null,
+  };
+  await s.put(entry);
+  await writeAudit(ctx, request_id, 'reject_from_agent', entry, 'none', {
+    confidence_delta: PERSONAL_CONFIDENCE_DELTA.reject,
+    ledger_kept: true,
+    source_agent: sourceAgent,
+    origin_ref_id: refId,
+  });
+  return { ok: true, request_id, action: 'reject_from_agent', entry };
 }
 
 async function transition(
@@ -508,6 +635,8 @@ export function createPersonalApi(ctx: PersonalApiContext): PersonalApi {
     ownerResolution: resolution,
     quickAdd: (content) => personalQuickAdd(scoped, content),
     list: () => personalList(scoped.store, resolution.owner, resolution),
+    importFromAgent: (input) => personalImportFromAgent(scoped, input),
+    rejectFromAgent: (input) => personalRejectFromAgent(scoped, input),
     confirm: (id) => personalConfirm(scoped, id),
     reject: (id) => personalReject(scoped, id),
     revoke: (id) => personalRevoke(scoped, id),

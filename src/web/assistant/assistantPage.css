@@ -1,0 +1,81 @@
+/* 记忆助手整页样式（自包含）。
+   配色用记忆库页同一套主题变量（--text/--muted/--panel/--field/--line/--accent/--win），
+   由 memoryManagement.css 提供浅色与 html[data-theme="dark"] 深色两套 → 与记忆库/壳层一致。
+   页面作为独立中心页使用整屏高度。 */
+
+.ma-page {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100vh;
+  padding: 14px 16px;
+  background: var(--win);
+  color: var(--text);
+  box-sizing: border-box;
+}
+
+.ma-page-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--text);
+  flex: none;
+}
+.ma-mark { display: inline-flex; color: var(--accent); }
+.ma-spring { flex: 1; }
+.ma-tool {
+  width: 24px; height: 24px; padding: 0; border: 0; border-radius: 5px;
+  background: transparent; color: var(--muted); display: grid; place-items: center; cursor: pointer;
+}
+.ma-tool:hover:not(:disabled) { background: var(--panel); color: var(--text); }
+.ma-tool:disabled { opacity: 0.55; cursor: default; }
+
+.ma-state {
+  font-size: 11px; color: var(--muted); font-family: ui-monospace, Consolas, monospace;
+  flex: none;
+}
+
+.ma-body {
+  flex: 1; min-height: 120px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 10px;
+  border: 1px solid var(--line); border-radius: 10px;
+  padding: 10px; background: var(--panel);
+}
+.ma-empty { font-size: 12px; color: var(--muted); line-height: 1.7; padding: 12px 4px; }
+
+.ma-answer {
+  border: 1px solid var(--line-2); border-radius: 10px;
+  padding: 10px 12px; background: var(--win);
+}
+.ma-q { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); margin-bottom: 6px; }
+.ma-lead { font-size: 12.5px; color: var(--text); margin-bottom: 5px; }
+.ma-text { font-size: 12px; color: var(--text); line-height: 1.7; }
+.ma-src { display: flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--faint); margin-top: 7px; }
+
+.ma-sugg { display: flex; flex-wrap: wrap; gap: 6px; flex: none; }
+.ma-chip {
+  padding: 4px 10px; font: inherit; font-size: 11px; cursor: pointer;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--chip); color: var(--text);
+}
+.ma-chip:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.ma-chip:disabled { opacity: 0.55; cursor: default; }
+
+.ma-ask {
+  display: flex; gap: 8px; align-items: flex-end; flex: none;
+}
+.ma-ask textarea {
+  flex: 1; resize: vertical; min-height: 44px;
+  padding: 8px 10px; font: inherit; font-size: 12.5px; line-height: 1.6;
+  border: 1px solid var(--line); border-radius: 10px;
+  background: var(--field); color: var(--text);
+}
+.ma-ask textarea:focus { outline: none; border-color: var(--accent); background: var(--win); }
+.ma-send {
+  width: 32px; height: 32px; flex: none; display: grid; place-items: center; cursor: pointer;
+  border: 1px solid var(--accent); border-radius: 10px;
+  background: var(--accent); color: #fff;
+}
+.ma-send:disabled { opacity: 0.55; cursor: default; }
+
+.ma-foot { font-size: 10.5px; color: var(--muted); line-height: 1.6; flex: none; }

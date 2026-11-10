@@ -162,6 +162,76 @@ export async function coreListMemories(): Promise<MemoryRecord[]> {
   return mems.map(toRecord);
 }
 
+/** 从 agent 记忆归入个人时的候选（不含正文脱敏之外字段，只给归并面板用） */
+export interface AgentMemoryCandidate {
+  /** 账本 mem_id（归入后写进个人条目的 origin_ref_id 用于去重） */
+  id: string;
+  content: string;
+  /** 来源 agent 名（coreListMemories 的 source_agent）；手动写入可能为 null */
+  sourceAgent: string | null;
+  /** 原始创建时间 ISO（用于「日期」展示） */
+  createdAt: string;
+  /** 可读层（如 L1） */
+  layer: string | null;
+  /** 页面六类（decision/pitfall/...） */
+  type: MemoryRecord['type'];
+}
+
+/**
+ * 进库分流结果（用户 2026-11-10 定稿）：
+ * - 「会话信息」= agent 写入时带 session_id 的行（内核 scope='session'，批次44-D5-4）：
+ *   属于会话过程流水，**直接放行**进共享池，不打扰用户、不进发件箱。
+ * - 「agent 记忆」= agent 提取出的知识行（无 session_id）：**提取到发件箱**，
+ *   等用户判定是否为个人（私人）记忆。
+ * 判据只认内核写入时落的 session_id，绝不靠正文关键字猜测。
+ */
+export interface AgentIngestSplit {
+  /** 直接放行的会话信息条数（已在共享池，无需用户判定） */
+  sessionInfoCount: number;
+  /** 需要用户判定的 agent 记忆候选（进发件箱） */
+  candidates: AgentMemoryCandidate[];
+}
+
+/**
+ * 读取会话时拉取的 agent 记忆候选：来自真实账本、由 agent 写入（source_agent 非空且非 manual）。
+ * excludeRefIds 为已归入个人 / 已被用户剔除的账本 mem_id 集合，避免重复出现。
+ * 无 agent 记忆 → 返回空数组（诚实空态，不编造）。
+ *
+ * 用户 2026-11-10 规则：进库即分流 —— 会话信息（带 session_id）直接放行；
+ * agent 提取的记忆（无 session_id）才提取到发件箱等用户判定。
+ */
+export async function loadAgentMemoryCandidates(excludeRefIds: Set<string>): Promise<AgentMemoryCandidate[]> {
+  const split = await splitAgentIngest(excludeRefIds);
+  return split.candidates;
+}
+
+/**
+ * 进库分流：把 agent 写入的行按「会话信息 / agent 记忆」分流。
+ * 只读内核原始行（core Memory）以拿到 session_id —— 页面层 MemoryRecord 不带该字段。
+ */
+export async function splitAgentIngest(excludeRefIds: Set<string>): Promise<AgentIngestSplit> {
+  await getAgent();
+  const mems = await getStorage().listMemories({});
+  let sessionInfoCount = 0;
+  const candidates: AgentMemoryCandidate[] = [];
+  for (const m of mems) {
+    if (!m.created_by_agent || m.created_by_agent === 'manual') continue;
+    if (excludeRefIds.has(m.mem_id)) continue;
+    // 会话信息（带 session_id）→ 直接放行，不进发件箱
+    if (m.session_id) { sessionInfoCount += 1; continue; }
+    const rec = toRecord(m);
+    candidates.push({
+      id: rec.id,
+      content: rec.content,
+      sourceAgent: rec.source_agent ?? null,
+      createdAt: rec.created_at,
+      layer: rec.layer ?? null,
+      type: rec.type,
+    });
+  }
+  return { sessionInfoCount, candidates };
+}
+
 /** 分层 L1–L6 策略快照：层规格（字符/关键词上限）+ 遗忘参数（全局半衰期/归档阈值）。 */
 export interface LayerPolicySnapshot {
   layer: 'L1' | 'L2' | 'L3' | 'L4' | 'L5' | 'L6';

@@ -34,6 +34,8 @@ export interface PersonalEntry {
   source: PersonalSource;
   /** source=agent 时的来源 agent 名（如 客服工作台）；quick_note 为 null */
   source_agent: string | null;
+  /** 来源账本记忆 id（仅从 agent 记忆归入个人时记录，用于去重，避免重复归入）；本机快速记 / agent 投递为 null */
+  origin_ref_id?: string | null;
   /** 投递/记录时间（毫秒） */
   delivered_at: number;
   /** 确认为「我的」的时间；未确认为 null */
@@ -97,6 +99,7 @@ export function normalizePersonalEntry(raw: PersonalEntry): PersonalEntry {
     vclock: raw.vclock && typeof raw.vclock === 'object' && !Array.isArray(raw.vclock)
       ? raw.vclock
       : { desktop: version },
+    origin_ref_id: typeof raw.origin_ref_id === 'string' ? raw.origin_ref_id : null,
     sync_state: syncState,
     sync_error: raw.sync_error && typeof raw.sync_error === 'object' ? raw.sync_error : null,
     sync_result: typeof raw.sync_result === 'string' ? raw.sync_result : null,

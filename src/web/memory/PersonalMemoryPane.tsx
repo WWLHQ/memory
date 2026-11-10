@@ -6,6 +6,13 @@
 // - 「不是我的」只把条目移出本机视图（rejected，可撤销），不删账本；删除需二次确认并只写墓碑；
 // - 个人确认不会自动变成团队可见；上行团队必须二次确认（explicit 授权）后走真实 PgSyncHub；
 // - 同步失败如实显示阶段 + 错误码，绝不显示「已同步」；L0 原始内容不进收件箱。
+//
+// N8 回退改良（用户 2026-11-10 确认，全页 + 壳层常驻面板共用本组件）：
+// - 样式自包含：本文件直接 import personalMemoryPane.css（pmp- 前缀变量，不覆盖宿主全局），
+//   因此记忆库全页与壳层常驻面板都自动带上样式，不再依赖宿主是否引入 memoryManagement.css；
+// - 改良 ① 「快速记一条 + 记一条」从右窗收件箱头部移到整个面板最上方通栏；
+// - 改良 ② 所有卡片 / 分区框 / 空态框 / 搜索框 / 下拉 / 按钮 / 徽标统一圆角（9–12px）。
+import './personalMemoryPane.css';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { kernelErrorText } from '../shared/kernelLoad.tsx';
 import {
@@ -22,6 +29,8 @@ export interface PersonalPaneProps {
   onRetry: () => void;
   /** 动作成功后把最新快照回写页面级加载态（页签/导航计数同源） */
   onChanged: (next: PersonalSnapshot) => void;
+  /** 窄容器（壳层常驻面板）：双窗改上下堆叠 */
+  narrow?: boolean;
 }
 
 type RangeKey = 'all' | '7d' | '30d';
@@ -65,7 +74,7 @@ function syncBadge(e: PersonalEntry): { tone: 'ok' | 'warn' | 'err' | 'quiet'; t
   }
 }
 
-export function PersonalMemoryPane({ phase, data, error, onRetry, onChanged }: PersonalPaneProps) {
+export function PersonalMemoryPane({ phase, data, error, onRetry, onChanged, narrow }: PersonalPaneProps) {
   const portRef = useRef<PersonalPort | null>(null);
   if (!portRef.current) portRef.current = getPersonalPort();
   const port = portRef.current;
@@ -176,37 +185,56 @@ export function PersonalMemoryPane({ phase, data, error, onRetry, onChanged }: P
   const syncQueue = data?.sync_queue ?? [];
   const binding = data?.owner_binding;
 
+  const rootClass = `mm-personal-pane${narrow ? ' pmp-narrow' : ''}`;
+
   if (phase === 'loading') {
     return (
-      <div className="mm-scrollpane" data-testid="mm-personal-pane">
-        <div className="pm-empty" data-testid="pm-loading"><b>个人记忆读取中</b><div>正在从本机独立存储读取已确认与收件箱条目…</div></div>
+      <div className={rootClass} data-testid="mm-personal-pane">
+        <div className="pmp-empty" data-testid="pm-loading"><b>个人记忆读取中</b><div>正在从本机独立存储读取已确认与收件箱条目…</div></div>
       </div>
     );
   }
 
   if (phase === 'error') {
     return (
-      <div className="mm-scrollpane" data-testid="mm-personal-pane">
-        <div className="p0-banner warn" data-testid="pm-error">
+      <div className={rootClass} data-testid="mm-personal-pane">
+        <div className="pmp-banner warn" data-testid="pm-error">
           <span><b>个人记忆没读到：</b>{error ?? '未知错误'}。这不是「没有个人记忆」，是数据面不可用；未显示任何编造条目。</span>
-          <button type="button" className="mm-btn" onClick={() => { setMsg(null); onRetry(); }} data-testid="pm-retry">重试</button>
+          <button type="button" className="pmp-btn" onClick={() => { setMsg(null); onRetry(); }} data-testid="pm-retry">重试</button>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="mm-scrollpane pm-scroll" data-testid="mm-personal-pane">
-      <div className="p0-hd">
+    <div className={rootClass} data-testid="mm-personal-pane">
+      <div className="pmp-hd">
         <h3>个人记忆</h3>
-        <span className="p0-sub">左：已确认（进入召回）· 右：收件箱（待确认 / 已剔除）· 数据面：{port.channel === 'host' ? '桌面壳 IPC' : '登录后端 HTTP'}</span>
-        <span className="p0-right">
-          <span className="p0-tag mono" data-testid="pm-counts">已确认 {data?.counts.confirmed ?? 0} · 待确认 {data?.counts.pending ?? 0} · 已剔除 {data?.counts.rejected ?? 0} · 待上行 {data?.counts.pending_sync ?? 0} · 同步失败 {data?.counts.sync_failed ?? 0}</span>
-        </span>
+        {/* 计数与标题同行（2026-11-10：删掉「左/右/数据面」说明行，计数并入标题行并调整宽度） */}
+        <span className="pmp-tag mono" data-testid="pm-counts">已确认 {data?.counts.confirmed ?? 0} · 待确认 {data?.counts.pending ?? 0} · 已剔除 {data?.counts.rejected ?? 0} · 待上行 {data?.counts.pending_sync ?? 0} · 同步失败 {data?.counts.sync_failed ?? 0}</span>
+      </div>
+
+      {/* 改良 ① 快速记一条：置顶通栏（原在右窗收件箱头部） */}
+      <div className="pmp-quick" data-testid="pm-quick-top">
+        <textarea
+          value={quickText}
+          onChange={(e) => setQuickText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submitQuick(); }
+          }}
+          placeholder="快速记一条：Enter 提交，Shift+Enter 换行"
+          aria-label="快速记一条个人记忆"
+          data-testid="pm-quick-input"
+          rows={2}
+          disabled={busy === '__quick__'}
+        />
+        <button type="button" className="pmp-btn primary" disabled={busy === '__quick__'} onClick={() => void submitQuick()} data-testid="pm-quick-submit">
+          {busy === '__quick__' ? '提交中…' : '记一条'}
+        </button>
       </div>
 
       {binding ? (
-        <div className={`pm-ownerbar ${binding.bound ? 'ok' : 'warn'}`} data-testid="pm-owner-binding">
+        <div className={`pmp-ownerbar ${binding.bound ? 'ok' : 'warn'}`} data-testid="pm-owner-binding">
           召回归属：内核账号 <b className="mono">{binding.kernel_user_id}</b> · 登录账号 <b className="mono">{binding.login_account}</b> ·{' '}
           {binding.bound
             ? (binding.via === 'same_name' ? '同名直通' : binding.via === 'binding' ? '已按显式绑定映射' : '无内核身份配置，按登录账号口径')
@@ -215,19 +243,19 @@ export function PersonalMemoryPane({ phase, data, error, onRetry, onChanged }: P
       ) : null}
 
       {msg ? (
-        <div className={`pm-msg ${msg.kind}`} data-testid="pm-msg">{msg.text}</div>
+        <div className={`pmp-msg ${msg.kind}`} data-testid="pm-msg">{msg.text}</div>
       ) : null}
 
-      <div className="pm-wrap mm-pm">
+      <div className="pmp-wrap">
         {/* ── 左：已确认显示窗 ─────────────────────────────────────────────── */}
-        <div className="pm-col pm-confirmed" data-testid="pm-confirmed">
-          <div className="pm-head">
-            <div className="pm-title">
+        <div className="pmp-col" data-testid="pm-confirmed">
+          <div className="pmp-head">
+            <div className="pmp-title">
               已确认显示窗<span className="n" data-testid="pm-confirmed-count">{data?.counts.confirmed ?? 0}</span>
-              <span className="pm-pin" title="已确认条目常驻本窗，不因搜索/时间范围被隐藏出账">pin · 常驻</span>
+              <span className="pmp-pin" title="已确认条目常驻本窗，不因搜索/时间范围被隐藏出账">pin · 常驻</span>
             </div>
-            <div className="pm-tools">
-              <label className="pm-search">
+            <div className="pmp-tools">
+              <label className="pmp-search">
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
@@ -237,7 +265,7 @@ export function PersonalMemoryPane({ phase, data, error, onRetry, onChanged }: P
                 />
               </label>
               <select
-                className="pm-select"
+                className="pmp-select"
                 value={range}
                 aria-label="确认时间范围"
                 data-testid="pm-range"
@@ -247,9 +275,9 @@ export function PersonalMemoryPane({ phase, data, error, onRetry, onChanged }: P
               </select>
             </div>
           </div>
-          <div className="pm-body pm-scrollpane" data-testid="pm-confirmed-list">
+          <div className="pmp-body" data-testid="pm-confirmed-list">
             {confirmed.length === 0 ? (
-              <div className="pm-empty" data-testid="pm-confirmed-empty">
+              <div className="pmp-empty" data-testid="pm-confirmed-empty">
                 <b>{data?.counts.confirmed ? '当前筛选没有匹配条目' : '还没有已确认的个人记忆'}</b>
                 <div>{data?.counts.confirmed ? '清空搜索或切换时间范围；总数仍显示在窗口标题。' : '在右侧收件箱点「是我的」后，条目会进入这里并参与召回。'}</div>
               </div>
@@ -257,24 +285,24 @@ export function PersonalMemoryPane({ phase, data, error, onRetry, onChanged }: P
               const badge = syncBadge(e);
               const retryable = e.sync_state === 'pending_sync' || e.sync_state === 'failed';
               return (
-                <div className="pm-item" key={e.id} data-testid={`pm-confirmed-${e.id}`}>
-                  <div className="pm-item-top">
-                    <span className="pm-src">{sourceText(e)}</span>
-                    <span className={`pm-badge ${badge.tone}`} title={badge.title} data-testid={`pm-sync-badge-${e.id}`}>{badge.text}</span>
-                    <span className="pm-time mono">确认于 {fmtWhen(e.confirmed_at)}</span>
+                <div className="pmp-item" key={e.id} data-testid={`pm-confirmed-${e.id}`}>
+                  <div className="pmp-item-top">
+                    <span className="pmp-src">{sourceText(e)}</span>
+                    <span className={`pmp-badge ${badge.tone}`} title={badge.title} data-testid={`pm-sync-badge-${e.id}`}>{badge.text}</span>
+                    <span className="pmp-time mono">确认于 {fmtWhen(e.confirmed_at)}</span>
                   </div>
-                  <div className="pm-item-body">{e.content}</div>
-                  <div className="pm-item-actions">
-                    <span className="pm-meta mono">v{e.version} · {e.layer} · sha256 {e.sha256.slice(0, 8)} · 时钟 {Object.entries(e.vclock).map(([k, v]) => `${k}:${v}`).join(' ')}</span>
+                  <div className="pmp-item-body">{e.content}</div>
+                  <div className="pmp-item-actions">
+                    <span className="pmp-meta">v{e.version} · {e.layer} · sha256 {e.sha256.slice(0, 8)} · 时钟 {Object.entries(e.vclock).map(([k, v]) => `${k}:${v}`).join(' ')}</span>
                     {e.sync_state === 'synced' ? null : pendingUplink === e.id ? (
                       <>
-                        <button type="button" className="mm-btn danger" disabled={busy === e.id} data-testid={`pm-uplink-confirm-${e.id}`} onClick={() => void uplink(e, retryable)}>确认上行（团队可见）</button>
-                        <button type="button" className="mm-btn" onClick={() => setPendingUplink(null)}>取消</button>
+                        <button type="button" className="pmp-btn danger" disabled={busy === e.id} data-testid={`pm-uplink-confirm-${e.id}`} onClick={() => void uplink(e, retryable)}>确认上行（团队可见）</button>
+                        <button type="button" className="pmp-btn" onClick={() => setPendingUplink(null)}>取消</button>
                       </>
                     ) : (
                       <button
                         type="button"
-                        className="mm-btn"
+                        className="pmp-btn"
                         disabled={busy === e.id}
                         data-testid={`pm-uplink-${e.id}`}
                         onClick={() => {
@@ -283,132 +311,115 @@ export function PersonalMemoryPane({ phase, data, error, onRetry, onChanged }: P
                         }}
                       >{retryable ? '重试上行' : '上行到团队'}</button>
                     )}
-                    <button type="button" className="mm-btn" disabled={busy === e.id} data-testid={`pm-unconfirm-${e.id}`} onClick={() => act('revoke', e)}>取消确认</button>
+                    <button type="button" className="pmp-btn" disabled={busy === e.id} data-testid={`pm-unconfirm-${e.id}`} onClick={() => act('revoke', e)}>取消确认</button>
                     {pendingDelete === e.id ? (
                       <>
-                        <button type="button" className="mm-btn danger" disabled={busy === e.id} data-testid={`pm-delete-confirm-${e.id}`} onClick={() => act('delete', e)}>确认删除</button>
-                        <button type="button" className="mm-btn" onClick={() => setPendingDelete(null)}>取消</button>
+                        <button type="button" className="pmp-btn danger" disabled={busy === e.id} data-testid={`pm-delete-confirm-${e.id}`} onClick={() => act('delete', e)}>确认删除</button>
+                        <button type="button" className="pmp-btn" onClick={() => setPendingDelete(null)}>取消</button>
                       </>
                     ) : (
-                      <button type="button" className="mm-btn" disabled={busy === e.id} data-testid={`pm-delete-${e.id}`} onClick={() => { setPendingDelete(e.id); setMsg({ kind: 'warn', text: '删除需二次确认：再次点击「确认删除」才会写墓碑（账本记录保留）' }); }}>删除</button>
+                      <button type="button" className="pmp-btn" disabled={busy === e.id} data-testid={`pm-delete-${e.id}`} onClick={() => { setPendingDelete(e.id); setMsg({ kind: 'warn', text: '删除需二次确认：再次点击「确认删除」才会写墓碑（账本记录保留）' }); }}>删除</button>
                     )}
                   </div>
                 </div>
               );
             })}
           </div>
-          <div className="pm-foot" data-testid="pm-confirmed-foot">
+          <div className="pmp-foot" data-testid="pm-confirmed-foot">
             共 {data?.counts.confirmed ?? 0} 条 · 本窗显示 {confirmed.length} 条 · 来源 {new Set((data?.confirmed ?? []).map((e) => e.source_agent ?? e.source)).size} 类
           </div>
         </div>
 
-        <div className="pm-div" />
+        <div className="pmp-div" />
 
-        {/* ── 右：收件箱 ─────────────────────────────────────────────────── */}
-        <div className="pm-col pm-inbox" data-testid="pm-inbox">
-          <div className="pm-head">
-            <div className="pm-title">
+        {/* ── 右：收件箱（快速记一条已移到顶部通栏） ─────────────────────── */}
+        <div className="pmp-col" data-testid="pm-inbox">
+          <div className="pmp-head">
+            <div className="pmp-title">
               收件箱<span className="n" data-testid="pm-pending-count">{data?.counts.pending ?? 0}</span>
             </div>
-            <div className="pm-quick">
-              <textarea
-                value={quickText}
-                onChange={(e) => setQuickText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submitQuick(); }
-                }}
-                placeholder="快速记一条：Enter 提交，Shift+Enter 换行"
-                aria-label="快速记一条个人记忆"
-                data-testid="pm-quick-input"
-                rows={2}
-                disabled={busy === '__quick__'}
-              />
-              <button type="button" className="mm-btn primary" disabled={busy === '__quick__'} onClick={() => void submitQuick()} data-testid="pm-quick-submit">
-                {busy === '__quick__' ? '提交中…' : '记一条'}
-              </button>
-            </div>
           </div>
-          <div className="pm-body pm-scrollpane" data-testid="pm-inbox-list">
-            <section className="pm-sect" data-testid="pm-sect-sync">
-              <h4>本机待上行 <span className="pm-sect-n" data-testid="pm-sync-queue-count">{syncQueue.length}</span></h4>
-              {syncQueue.length === 0 ? <div className="pm-none">没有已授权但未送达团队中枢的条目</div> : syncQueue.map((e) => {
+          <div className="pmp-body" data-testid="pm-inbox-list">
+            <section className="pmp-sect" data-testid="pm-sect-sync">
+              <h4>本机待上行 <span className="pmp-sect-n" data-testid="pm-sync-queue-count">{syncQueue.length}</span></h4>
+              {syncQueue.length === 0 ? <div className="pmp-none">没有已授权但未送达团队中枢的条目</div> : syncQueue.map((e) => {
                 const badge = syncBadge(e);
                 return (
-                  <div className="pm-item" key={e.id} data-testid={`pm-sync-${e.id}`}>
-                    <div className="pm-item-top">
-                      <span className="pm-src">{sourceText(e)}</span>
-                      <span className={`pm-badge ${badge.tone}`} title={badge.title} data-testid={`pm-sync-state-${e.id}`}>{badge.text}</span>
-                      <span className="pm-time mono">目标团队 {e.team_id ?? '未记录'}</span>
+                  <div className="pmp-item" key={e.id} data-testid={`pm-sync-${e.id}`}>
+                    <div className="pmp-item-top">
+                      <span className="pmp-src">{sourceText(e)}</span>
+                      <span className={`pmp-badge ${badge.tone}`} title={badge.title} data-testid={`pm-sync-state-${e.id}`}>{badge.text}</span>
+                      <span className="pmp-time mono">目标团队 {e.team_id ?? '未记录'}</span>
                     </div>
-                    <div className="pm-item-body">{e.content}</div>
+                    <div className="pmp-item-body">{e.content}</div>
                     {e.sync_error ? (
-                      <div className="pm-syncerr mono" data-testid={`pm-sync-err-${e.id}`}>
+                      <div className="pmp-syncerr mono" data-testid={`pm-sync-err-${e.id}`}>
                         阶段 {e.sync_error.stage} · 错误码 {e.sync_error.code} · {e.sync_error.message}
                       </div>
                     ) : null}
-                    <div className="pm-item-actions">
-                      <span className="pm-meta mono">sha256 {e.sha256.slice(0, 8)} · 时钟 {Object.entries(e.vclock).map(([k, v]) => `${k}:${v}`).join(' ')}</span>
-                      <button type="button" className="mm-btn primary" disabled={busy === e.id} data-testid={`pm-retry-${e.id}`} onClick={() => void uplink(e, true)}>重试上行</button>
+                    <div className="pmp-item-actions">
+                      <span className="pmp-meta">sha256 {e.sha256.slice(0, 8)} · 时钟 {Object.entries(e.vclock).map(([k, v]) => `${k}:${v}`).join(' ')}</span>
+                      <button type="button" className="pmp-btn primary" disabled={busy === e.id} data-testid={`pm-retry-${e.id}`} onClick={() => void uplink(e, true)}>重试上行</button>
                     </div>
                   </div>
                 );
               })}
             </section>
 
-            <section className="pm-sect" data-testid="pm-sect-quick">
-              <h4>本机待确认 · 不会自动上行 <span className="pm-sect-n">{pendingQuick.length}</span></h4>
-              {pendingQuick.length === 0 ? <div className="pm-none">没有本机快速记录待确认</div> : pendingQuick.map((e) => (
-                <div className="pm-item" key={e.id} data-testid={`pm-pending-${e.id}`}>
-                  <div className="pm-item-top">
-                    <span className="pm-src">{sourceText(e)}</span>
-                    <span className="pm-time mono">{fmtWhen(e.delivered_at)}</span>
-                    {e.team_shared ? <span className="pm-badge warn" data-testid={`pm-teamcopy-${e.id}`}>团队副本已存在（不回撤）</span> : null}
+            <section className="pmp-sect" data-testid="pm-sect-quick">
+              <h4>本机待确认 · 不会自动上行 <span className="pmp-sect-n">{pendingQuick.length}</span></h4>
+              {pendingQuick.length === 0 ? <div className="pmp-none">没有本机快速记录待确认</div> : pendingQuick.map((e) => (
+                <div className="pmp-item" key={e.id} data-testid={`pm-pending-${e.id}`}>
+                  <div className="pmp-item-top">
+                    <span className="pmp-src">{sourceText(e)}</span>
+                    <span className="pmp-time mono">{fmtWhen(e.delivered_at)}</span>
+                    {e.team_shared ? <span className="pmp-badge warn" data-testid={`pm-teamcopy-${e.id}`}>团队副本已存在（不回撤）</span> : null}
                   </div>
-                  <div className="pm-item-body">{e.content}</div>
-                  <div className="pm-item-actions">
-                    <button type="button" className="mm-btn primary" disabled={busy === e.id} data-testid={`pm-confirm-${e.id}`} onClick={() => act('confirm', e)}>是我的</button>
-                    <button type="button" className="mm-btn" disabled={busy === e.id} data-testid={`pm-reject-${e.id}`} onClick={() => act('reject', e)}>不是我的</button>
-                  </div>
-                </div>
-              ))}
-            </section>
-
-            <section className="pm-sect" data-testid="pm-sect-agent">
-              <h4>待 agent 确认 <span className="pm-sect-n">{pendingAgent.length}</span></h4>
-              {pendingAgent.length === 0 ? <div className="pm-none">没有 agent 投递待确认条目</div> : pendingAgent.map((e) => (
-                <div className="pm-item" key={e.id} data-testid={`pm-pending-${e.id}`}>
-                  <div className="pm-item-top">
-                    <span className="pm-src">{sourceText(e)}</span>
-                    <span className="pm-time mono">{fmtWhen(e.delivered_at)}</span>
-                    {e.team_shared ? <span className="pm-badge warn" data-testid={`pm-teamcopy-${e.id}`}>团队副本已存在（不回撤）</span> : null}
-                  </div>
-                  <div className="pm-item-body">{e.content}</div>
-                  <div className="pm-item-actions">
-                    <button type="button" className="mm-btn primary" disabled={busy === e.id} data-testid={`pm-confirm-${e.id}`} onClick={() => act('confirm', e)}>是我的</button>
-                    <button type="button" className="mm-btn" disabled={busy === e.id} data-testid={`pm-reject-${e.id}`} onClick={() => act('reject', e)}>不是我的</button>
+                  <div className="pmp-item-body">{e.content}</div>
+                  <div className="pmp-item-actions">
+                    <button type="button" className="pmp-btn primary" disabled={busy === e.id} data-testid={`pm-confirm-${e.id}`} onClick={() => act('confirm', e)}>是我的</button>
+                    <button type="button" className="pmp-btn" disabled={busy === e.id} data-testid={`pm-reject-${e.id}`} onClick={() => act('reject', e)}>不是我的</button>
                   </div>
                 </div>
               ))}
             </section>
 
-            <section className="pm-sect" data-testid="pm-sect-rejected">
-              <h4>已剔除 · 可撤销 <span className="pm-sect-n">{rejected.length}</span></h4>
-              {rejected.length === 0 ? <div className="pm-none">没有被剔除的条目</div> : rejected.map((e) => (
-                <div className="pm-item rejected" key={e.id} data-testid={`pm-rejected-${e.id}`}>
-                  <div className="pm-item-top">
-                    <span className="pm-src">{sourceText(e)}</span>
-                    <span className="pm-time mono">剔除于 {fmtWhen(e.rejected_at)}</span>
-                    {e.team_shared ? <span className="pm-badge warn" data-testid={`pm-teamcopy-${e.id}`}>团队副本已存在（不回撤）</span> : null}
+            <section className="pmp-sect" data-testid="pm-sect-agent">
+              <h4>待 agent 确认 <span className="pmp-sect-n">{pendingAgent.length}</span></h4>
+              {pendingAgent.length === 0 ? <div className="pmp-none">没有 agent 投递待确认条目</div> : pendingAgent.map((e) => (
+                <div className="pmp-item" key={e.id} data-testid={`pm-pending-${e.id}`}>
+                  <div className="pmp-item-top">
+                    <span className="pmp-src">{sourceText(e)}</span>
+                    <span className="pmp-time mono">{fmtWhen(e.delivered_at)}</span>
+                    {e.team_shared ? <span className="pmp-badge warn" data-testid={`pm-teamcopy-${e.id}`}>团队副本已存在（不回撤）</span> : null}
                   </div>
-                  <div className="pm-item-body">{e.content}</div>
-                  <div className="pm-item-actions">
-                    <button type="button" className="mm-btn" disabled={busy === e.id} data-testid={`pm-revoke-${e.id}`} onClick={() => act('revoke', e)}>撤销剔除</button>
+                  <div className="pmp-item-body">{e.content}</div>
+                  <div className="pmp-item-actions">
+                    <button type="button" className="pmp-btn primary" disabled={busy === e.id} data-testid={`pm-confirm-${e.id}`} onClick={() => act('confirm', e)}>是我的</button>
+                    <button type="button" className="pmp-btn" disabled={busy === e.id} data-testid={`pm-reject-${e.id}`} onClick={() => act('reject', e)}>不是我的</button>
                   </div>
                 </div>
               ))}
             </section>
 
-            <section className="pm-sect pm-rules" data-testid="pm-rules">
+            <section className="pmp-sect" data-testid="pm-sect-rejected">
+              <h4>已剔除 · 可撤销 <span className="pmp-sect-n">{rejected.length}</span></h4>
+              {rejected.length === 0 ? <div className="pmp-none">没有被剔除的条目</div> : rejected.map((e) => (
+                <div className="pmp-item rejected" key={e.id} data-testid={`pm-rejected-${e.id}`}>
+                  <div className="pmp-item-top">
+                    <span className="pmp-src">{sourceText(e)}</span>
+                    <span className="pmp-time mono">剔除于 {fmtWhen(e.rejected_at)}</span>
+                    {e.team_shared ? <span className="pmp-badge warn" data-testid={`pm-teamcopy-${e.id}`}>团队副本已存在（不回撤）</span> : null}
+                  </div>
+                  <div className="pmp-item-body">{e.content}</div>
+                  <div className="pmp-item-actions">
+                    <button type="button" className="pmp-btn" disabled={busy === e.id} data-testid={`pm-revoke-${e.id}`} onClick={() => act('revoke', e)}>撤销剔除</button>
+                  </div>
+                </div>
+              ))}
+            </section>
+
+            <section className="pmp-rules" data-testid="pm-rules">
               <h4>判定口径</h4>
               <ul>
                 <li>只有「已确认」条目参与 agent 召回；待确认与已剔除不进召回。</li>
@@ -422,7 +433,7 @@ export function PersonalMemoryPane({ phase, data, error, onRetry, onChanged }: P
               </ul>
             </section>
           </div>
-          <div className="pm-foot" data-testid="pm-inbox-foot">
+          <div className="pmp-foot" data-testid="pm-inbox-foot">
             待确认 {data?.counts.pending ?? 0} · 已剔除 {data?.counts.rejected ?? 0} · 本机待确认 {data?.counts.pending_quick ?? 0} · 待上行 {data?.counts.pending_sync ?? 0} · 同步失败 {data?.counts.sync_failed ?? 0}
           </div>
         </div>

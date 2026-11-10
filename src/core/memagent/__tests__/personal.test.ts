@@ -169,6 +169,73 @@ describe('个人记忆内核 API：状态机 + 审计 + 回执', () => {
   });
 });
 
+describe('从 agent 记忆归入 / 判定（import_from_agent / reject_from_agent）', () => {
+  it('import_from_agent：落 source=agent / pending 条目，origin_ref_id 指向账本记忆，delivered_at 取原始时间', async () => {
+    const { ctx, audits } = makeCtx();
+    const api = createPersonalApi(ctx);
+    const r = await api.importFromAgent({
+      content: 'agent 沉淀的部署约定：蓝绿发布 + 旧槽回滚',
+      sourceAgent: '客服工作台',
+      sourceRefId: 'mem_abc123',
+      originTs: 1_690_000_000_000,
+    });
+    expect(r.entry.source).toBe('agent');
+    expect(r.entry.source_agent).toBe('客服工作台');
+    expect(r.entry.origin_ref_id).toBe('mem_abc123');
+    expect(r.entry.state).toBe('pending');
+    expect(r.entry.delivered_at).toBe(1_690_000_000_000);
+    expect(r.entry.layer).toBe('L1');
+    const snap = await api.list();
+    expect(snap.pending).toHaveLength(1);
+    const auditList = audits as { detail: Record<string, unknown> }[];
+    expect(auditList.find((x) => x.detail.op === 'import_from_agent')?.detail.origin_ref_id).toBe('mem_abc123');
+  });
+
+  it('reject_from_agent：落 source=agent / rejected 条目（「不是我的 → 进共享」），账本记忆原样保留', async () => {
+    const { ctx, audits } = makeCtx();
+    const api = createPersonalApi(ctx);
+    const r = await api.rejectFromAgent({
+      content: '这条其实不是我的：某 agent 写入的团队约定',
+      sourceAgent: '未知 agent',
+      sourceRefId: 'mem_xyz789',
+      originTs: 1_690_000_000_000,
+    });
+    expect(r.entry.source).toBe('agent');
+    expect(r.entry.origin_ref_id).toBe('mem_xyz789');
+    expect(r.entry.state).toBe('rejected');
+    expect(r.entry.rejected_at).toBe(1_700_000_000_000);
+    expect(r.entry.confirmed_at).toBeNull();
+    const snap = await api.list();
+    expect(snap.rejected).toHaveLength(1);
+    expect(snap.rejected[0].origin_ref_id).toBe('mem_xyz789');
+    const auditList = audits as { detail: Record<string, unknown> }[];
+    const a = auditList.find((x) => x.detail.op === 'reject_from_agent');
+    expect(a?.detail.ledger_kept).toBe(true);
+    expect(a?.detail.confidence_delta).toBe(PERSONAL_CONFIDENCE_DELTA.reject);
+  });
+
+  it('同 origin_ref_id 去重：先 reject 后 import 都落账，候选排重时按 origin_ref_id 合并计数', async () => {
+    const { ctx } = makeCtx();
+    const api = createPersonalApi(ctx);
+    await api.rejectFromAgent({ content: 'A', sourceAgent: 'a', sourceRefId: 'mem_dup', originTs: 1 });
+    await api.importFromAgent({ content: 'A', sourceAgent: 'a', sourceRefId: 'mem_dup', originTs: 1 });
+    const snap = await api.list();
+    expect(snap.rejected).toHaveLength(1);
+    expect(snap.pending).toHaveLength(1);
+    const refs = [...snap.confirmed, ...snap.pending, ...snap.rejected].map((e) => e.origin_ref_id);
+    expect(refs.filter((x) => x === 'mem_dup')).toHaveLength(2);
+  });
+
+  it('缺少 source_ref_id 如实拒绝（origin_ref_id 必填）', async () => {
+    const { ctx } = makeCtx();
+    const api = createPersonalApi(ctx);
+    await expect(api.importFromAgent({ content: 'x', sourceAgent: 'a', sourceRefId: '', originTs: 1 }))
+      .rejects.toThrow(/origin_ref_id/);
+    await expect(api.rejectFromAgent({ content: 'x', sourceAgent: 'a', sourceRefId: '', originTs: 1 }))
+      .rejects.toThrow(/origin_ref_id/);
+  });
+});
+
 describe('召回准入：只有 confirmed 进召回', () => {
   function agentWith(store: InMemoryPersonalStore) {
     return createMemAgent({

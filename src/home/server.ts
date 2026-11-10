@@ -677,6 +677,24 @@ export function createServer(opts: ServerOptions): HomeServer {
             switch (op) {
               case 'list': send(res, 200, { ok: true, result: await api.list() }); return;
               case 'quick_add': send(res, 200, { ok: true, result: await api.quickAdd(String(payload.content ?? '')) }); return;
+              case 'import_from_agent': send(res, 200, {
+                ok: true,
+                result: await api.importFromAgent({
+                  content: String(payload.content ?? ''),
+                  sourceAgent: String(payload.source_agent ?? ''),
+                  sourceRefId: String(payload.source_ref_id ?? ''),
+                  originTs: typeof payload.origin_ts === 'number' ? payload.origin_ts : undefined,
+                }),
+              }); return;
+              case 'reject_from_agent': send(res, 200, {
+                ok: true,
+                result: await api.rejectFromAgent({
+                  content: String(payload.content ?? ''),
+                  sourceAgent: String(payload.source_agent ?? ''),
+                  sourceRefId: String(payload.source_ref_id ?? ''),
+                  originTs: typeof payload.origin_ts === 'number' ? payload.origin_ts : undefined,
+                }),
+              }); return;
               case 'confirm': send(res, 200, { ok: true, result: await api.confirm(id) }); return;
               case 'reject': send(res, 200, { ok: true, result: await api.reject(id) }); return;
               case 'revoke': send(res, 200, { ok: true, result: await api.revoke(id) }); return;

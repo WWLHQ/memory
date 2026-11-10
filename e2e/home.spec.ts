@@ -78,6 +78,52 @@ test.describe('REQ-005 首页与登录 · 点击级 E2E', () => {
     expect(errors).toEqual([]);
   });
 
+  test('①b 写密钥锁状态：浏览器无桌面壳时如实标注「状态未取到」，不冒充已解锁、也不误报未解锁', async ({ page }) => {
+    const errors = collectErrors(page);
+    await page.goto(HOME);
+    await expect(page.locator('[data-testid="overview-page"]')).toBeVisible();
+    // 常驻醒目条只在真实读到「未解锁」时出现；读不到时给诚实标注
+    await expect(page.locator('[data-testid="home-l0-lock-alert"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="home-l0-lock-unknown"]')).toBeVisible();
+    await expect(page.locator('[data-testid="home-l0-lock-unknown"]')).toContainText('不能据此判断已解锁');
+    expect(errors).toEqual([]);
+  });
+
+  test('①c 写锁变化信号：收到信号即重读真实锁状态（解锁后红条不再常驻）', async ({ page }) => {
+    const errors = collectErrors(page);
+    await page.goto(HOME);
+    await expect(page.locator('[data-testid="overview-page"]')).toBeVisible();
+
+    // 统计首页对真实后端的健康探测次数：首页每次 reload 都会重新取数，
+    // 因此「收到写锁信号 → 重新取数」可以用请求次数客观观测（不依赖 DOM 细节）。
+    let healthCalls = 0;
+    page.on('request', (r) => {
+      if (r.url().includes('/api/health')) healthCalls += 1;
+    });
+    const before = healthCalls;
+
+    // 模拟安全页解锁写密钥后广播的同源信号。
+    // ⚠️ storage 事件只在「其它」同源文档触发（同文档 setItem 不会收到事件），
+    //    因此这里用另一个标签页写入信号，模拟真实的跨页通知。
+    const other = await page.context().newPage();
+    await other.goto(HOME);
+    await other.evaluate(() => {
+      localStorage.setItem('memdesk.l0.writeLockSignal.v1', String(Date.now()));
+    });
+
+    // 首页应因信号自动重读（重读 → 重新取 l0Status → 红条随之消失/更新）
+    const deadline = Date.now() + 15_000;
+    while (healthCalls <= before && Date.now() < deadline) {
+      await page.waitForTimeout(200);
+    }
+    expect(healthCalls, '收到写锁信号后首页未自动重读真实状态').toBeGreaterThan(before);
+
+    // 重读后状态仍以真实读数为准：浏览器模式读不到锁状态 → 诚实标注，绝不误报已解锁
+    await expect(page.locator('[data-testid="home-l0-lock-unknown"]')).toBeVisible();
+    expect(errors).toEqual([]);
+    await other.close();
+  });
+
   test('② 登录入口：首页不再弹登录卡，登录走独立 login.html（且无注册入口）', async ({ page }) => {
     const errors = collectErrors(page);
     await page.goto(HOME);
