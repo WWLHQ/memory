@@ -491,7 +491,7 @@
 | [specs/acceptance.md](specs/acceptance.md) | 55 | title: 验收标准 |
 | [specs/code-map.md](specs/code-map.md) | 1577 | status: draft |
 | [specs/demo-data-baseline.md](specs/demo-data-baseline.md) | 116 | 演示/种子数据基线清单（批次42 · 阶段0 冻结） |
-| [specs/reports/RECALL-WEEK-PLAN.md](specs/reports/RECALL-WEEK-PLAN.md) | 110 | 召回 A 方案 · 一周真实数据观察计划（2026-11-12 ~ 2026-11-19） |
+| [specs/reports/RECALL-WEEK-PLAN.md](specs/reports/RECALL-WEEK-PLAN.md) | 120 | 召回 A 方案 · 一周真实数据观察计划（2026-11-12 ~ 2026-11-19） |
 | [specs/requirements.md](specs/requirements.md) | 59 | title: 需求规格 |
 | [specs/tasks/AGENT-ONBOARD.md](specs/tasks/AGENT-ONBOARD.md) | 208 | 原子任务：Agent 接入配置页（REQ-003） |
 | [specs/tasks/AUDIT-LOG.md](specs/tasks/AUDIT-LOG.md) | 87 | REQ-006 / P11 审计日志页 — 任务拆分（原子任务 · 供 Agent 执行） |
@@ -991,7 +991,7 @@ specs/ROADMAP-批次B类-远端PG与多机硬过滤-方案.md 0c7857454a7d
 specs/acceptance.md 664f1bb0d8cf
 specs/code-map.md 3bef972c1f5d
 specs/demo-data-baseline.md 1d9af215ac78
-specs/reports/RECALL-WEEK-PLAN.md 6a42c3cdbeab
+specs/reports/RECALL-WEEK-PLAN.md 9747f8a52112
 specs/requirements.md 6e72739fe35b
 specs/tasks/AGENT-ONBOARD.md 900d19783798
 specs/tasks/AUDIT-LOG.md b778c455d43d
