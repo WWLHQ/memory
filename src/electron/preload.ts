@@ -271,16 +271,6 @@ const llm = {
     }>,
 };
 
-// 悬浮覆盖层桥：渲染层调 detectClaude() 拿 Claude 窗口位置，setPosition() 移动悬浮窗
-const floatAttribution = {
-  detectClaude: () => ipcRenderer.invoke(IPC.floatDetectClaude),
-  setPosition: (x: number, y: number) => ipcRenderer.invoke(IPC.floatSetPosition, x, y),
-  open: () => ipcRenderer.invoke(IPC.floatOpen) as Promise<{ ok: boolean; error?: string }>,
-  close: () => ipcRenderer.invoke(IPC.floatClose) as Promise<{ ok: boolean; error?: string }>,
-  /** 渲染层日志回写主进程 float.log（离线排查挂件没出来的原因） */
-  log: (msg: string) => void ipcRenderer.send(IPC.floatLog, msg),
-};
-
 // 云端同步中枢（批次42-B）：渲染层代理主进程 PgSyncHub。上行/下行/对账需会话（sessionId 末参），
 // 人工裁决 resolve 需管理员（主进程 requireAdmin 二次校验，角色不由渲染层自报）。
 const sync = {
@@ -321,4 +311,4 @@ const shell = {
 };
 
 contextBridge.exposeInMainWorld('__ELECTRON__', true);
-contextBridge.exposeInMainWorld('api', { storage, personal, hostScan, hostAgentDetect, tenant, mcpClients, floatAttribution, collector, backup, dataRoot, log, l0, setup, legacy, ledgerReset, rulesRejudge, ledgerFields, refineQueue, sync, llm, shell });
+contextBridge.exposeInMainWorld('api', { storage, personal, hostScan, hostAgentDetect, tenant, mcpClients, collector, backup, dataRoot, log, l0, setup, legacy, ledgerReset, rulesRejudge, ledgerFields, refineQueue, sync, llm, shell });

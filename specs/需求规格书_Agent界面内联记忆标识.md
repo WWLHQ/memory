@@ -1,9 +1,15 @@
 ---
 title: 需求规格书_Agent界面内联记忆标识
-status: imported
+status: deprecated
 ---
 
 # Agent 界面内联记忆标识 — 设计规格（19.7）
+
+> **⚠️ 已于批次59 作废（2026-11-11，用户决定）**：不再做独立的「界面内联标识」UI，
+> 演示页 `inlineattribution.html`、悬浮层 `floatattribution.html` 与全部组件已删除。
+> 本文档仅作历史存档；其中 §2.1「命中片段定位」能力**改造为方案 C**，
+> 落到 `recall_memory` 的回显（`display.markdown` / 一次性明细页）里实现，
+> 见 [`tasks/RECALL-HIGHLIGHT.md`](tasks/RECALL-HIGHLIGHT.md)。**不得据本文档恢复旧 UI。**
 
 > 配套：《需求规格书》第 19 章、《需求规格书_UI页面设计》。
 > 目标：让**终端用户在 Agent 原界面里直接看到"这次回答/这次省 token 是记忆助手的功劳"**，把"外挂记忆层"从后台概念变成用户可见的功劳证明。

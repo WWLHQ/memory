@@ -17,8 +17,6 @@ export default defineConfig({
         login: 'login.html',
         agentonboard: 'agentonboard.html',
         overview: 'overview.html',
-        inlineattribution: 'inlineattribution.html',
-        floatattribution: 'floatattribution.html',
         memory: 'memory.html',
         write: 'write.html',
         audit: 'audit.html',

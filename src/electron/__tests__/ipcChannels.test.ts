@@ -38,7 +38,7 @@ describe('A2 IPC 清单单一真源', () => {
 
   it('missingChannels：全注册为空数组，缺失项如实报出', () => {
     expect(missingChannels(PRELOAD_CHANNELS)).toEqual([]);
-    expect(missingChannels(PRELOAD_CHANNELS.filter((c) => c !== IPC.floatOpen))).toEqual([IPC.floatOpen]);
+    expect(missingChannels(PRELOAD_CHANNELS.filter((c) => c !== IPC.dataRootGet))).toEqual([IPC.dataRootGet]);
     expect(missingChannels([])).toEqual([...PRELOAD_CHANNELS]);
   });
 });

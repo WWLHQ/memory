@@ -5,7 +5,7 @@
 //    未登录显示真门禁且不挂载数据层，已登录只显示 /api/me 的真实租户标识。
 // ③ 关账文档必须如实记录 5-D，不得回退成「演示占位/跳过门控」口径。
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { renderHook, act } from '@testing-library/react';
 import type { ReactNode } from 'react';
@@ -16,7 +16,6 @@ function src(rel: string): string {
 }
 
 const TENANT = 'src/web/Home/tenantContext.tsx';
-const DEMO = 'src/web/InlineAttribution/AgentConversationDemo.tsx';
 const HOME = 'src/web/Home/HomePage.tsx';
 const REPORT = 'specs/MANUAL-TEST-FIX-BATCH-42.md';
 const BASELINE = 'specs/demo-data-baseline.md';
@@ -68,7 +67,6 @@ describe('5-D / A14 租户上下文：未登录就是未登录', () => {
 
   it('暴露 useTenantRestoring，供 UI 区分「确认中」与「未登录」', () => {
     expect(src(TENANT)).toContain('export function useTenantRestoring(): boolean');
-    expect(src(DEMO)).toContain('useTenantRestoring()');
   });
 
   it('运行时：无 session → null + restoring=false，且零 /api/me 请求', () => {
@@ -112,56 +110,21 @@ describe('5-D / A14 租户上下文：未登录就是未登录', () => {
   });
 });
 
-describe('5-D / A13 内联标识演示页：接真登录门控', () => {
-  it('源码不再出现 project=P1 / U1 回落 / 演示占位 / 跳过门控', () => {
-    const s = src(DEMO);
-    expect(s).not.toContain('project=P1');
-    expect(s).not.toContain("?? 'U1'");
-    expect(s).not.toContain('（演示占位）');
-    expect(s).not.toContain('显式跳过门控');
-    expect(s).not.toContain('不要求登录');
+describe('5-D / A13 内联标识演示页已作废（批次59）', () => {
+  it('页面入口与组件目录已删除，不是「藏起来」而是真没了', () => {
+    const root = process.cwd();
+    expect(existsSync(resolve(root, 'src/web/InlineAttribution'))).toBe(false);
+    expect(existsSync(resolve(root, 'src/inlineAttribution'))).toBe(false);
+    expect(existsSync(resolve(root, 'inlineattribution.html'))).toBe(false);
+    expect(existsSync(resolve(root, 'floatattribution.html'))).toBe(false);
+    expect(existsSync(resolve(root, 'e2e/inlineAttribution.spec.ts'))).toBe(false);
   });
 
-  it('挂载 InlineGate：确认中 / 未登录 / 已登录三态分流，未登录不挂数据层', () => {
-    const s = src(DEMO);
-    expect(s).toContain('<InlineGate />');
-    expect(s).toContain('function InlineGate()');
-    expect(s).toContain('if (!ctx) return <InlineLoginGate />;');
-    expect(s).toContain('return <InlineInner ctx={ctx} />;');
-    expect(s).toContain('inline-tenant-restoring');
-    expect(s).toContain('inline-login-gate');
-  });
-
-  it('门禁是真跳登录页的按钮，且明写不渲染账本数据/身份占位', () => {
-    const s = src(DEMO);
-    expect(s).toContain('inline-goto-login');
-    expect(s).toContain("window.location.href = '/index.html'");
-    expect(s).toContain('不渲染账本数据');
-  });
-
-  it('user 标识直接取真实 ctx.user_id，无兜底假值', () => {
-    const s = src(DEMO);
-    expect(s).toContain('function InlineInner({ ctx }: { ctx: TenantContext })');
-    expect(s).toContain('const userId = ctx.user_id;');
-  });
-
-  it('头部只显示真实租户字段（enterprise_id / team_id），带 inline-tenant 测试锚点', () => {
-    const s = src(DEMO);
-    expect(s).toContain('data-testid="inline-tenant"');
-    expect(s).toContain('ctx.enterprise_id');
-    expect(s).toContain('ctx.team_id');
-  });
-
-  it('头注释写明「不再跳过登录门控」「不显示身份占位」', () => {
-    const s = src(DEMO);
-    expect(s).toContain('本页不再跳过登录门控');
-    expect(s).toContain('不显示身份占位');
-    expect(s).toContain('阶段5-D / A13·接真登录态');
-  });
-
-  it('HomePage 注释不再把内联标识演示页举为「跳过门控」的例子', () => {
-    expect(src(HOME)).not.toContain('false 时跳过门控（如内联标识演示页）');
-    expect(src(HOME)).toContain('阶段5-D：内联标识演示页已改为接真登录态');
+  it('HomePage 注释如实声明作废，不得回流成「已接真登录态」', () => {
+    const s = src(HOME);
+    expect(s).not.toContain('false 时跳过门控（如内联标识演示页）');
+    expect(s).not.toContain('阶段5-D：内联标识演示页已改为接真登录态');
+    expect(s).toContain('内联标识演示页与悬浮层已作废删除');
   });
 
   it('全仓生产代码 restored-user 零命中（排除 __tests__）', () => {
@@ -177,14 +140,6 @@ describe('5-D / A13 内联标识演示页：接真登录门控', () => {
     walk(resolve(process.cwd(), 'src/web'));
     const hits = files.filter((f) => readFileSync(f, 'utf8').includes('restored-user'));
     expect(hits).toEqual([]);
-  });
-
-  it('e2e 真登录 homeBackend + 未登录门禁用例齐备', () => {
-    const s = src('e2e/inlineAttribution.spec.ts');
-    expect(s).toContain('startHomeBackend');
-    expect(s).toContain('seedRealSession');
-    expect(s).toContain('inline-login-gate');
-    expect(s).not.toContain('project=P1 · user=');
   });
 });
 

@@ -44,5 +44,4 @@ http
     console.log(`[dev-server] dist/ → http://localhost:${PORT}/overview.html`);
     console.log(`[dev-server]   首页/REQ-005 : http://localhost:${PORT}/index.html`);
     console.log(`[dev-server]   接入页/REQ-003 : http://localhost:${PORT}/agentonboard.html`);
-    console.log(`[dev-server]   内联标识/REQ-004 : http://localhost:${PORT}/inlineattribution.html`);
   });

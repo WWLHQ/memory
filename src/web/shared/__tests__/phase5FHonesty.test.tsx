@@ -83,13 +83,6 @@ describe('5-F / ① 金额与预算单位口径（阶段4-D 遗留）', () => {
     expect(s).toContain('百万预算单位 t');
   });
 
-  it('useInlineReal 不再自称「真实 token 节省估算」', () => {
-    const s = src('src/web/InlineAttribution/useInlineReal.ts');
-    expect(s).not.toContain('真实 token 节省估算');
-    expect(s).toContain('本地预算单位 t 的节省估算');
-    expect(s).toContain('未接网关 usage');
-  });
-
   it('源码声明杀手：RecallMoney 注释 + estTokens 口径 + 精确断言同步不回流', () => {
     const insight = src('src/core/memagent/recallInsight.ts');
     expect(insight).toContain('金额是**估算**，不是账单');

@@ -19,7 +19,7 @@ status: draft
 - 服务层 `src/agentOnboard/service.ts`(`AgentOnboardService`：configure/testConnect/rotateKey/revokeKey/oneClickOnboard/revokeBind + 审计)
 - 页面装配 `src/web/AgentOnboard/AgentOnboardPage.tsx` + `src/web/main.tsx` + `index.html`（Vite 构建，`npm run dev/build`）
 - 测试 `src/**/__tests__/*.test.ts(x)`；命令 `npm run typecheck`（tsc strict）+ `npm run lint`（oxlint）+ `npm test`（vitest **149 文件 / 1754 例**，2026-11-04 41-T 轮实测；每批都变，以 `npm run verify:fast` 输出为准）+ `npm run test:e2e`（Playwright **22 个 spec / 106 例**，`ls e2e/*.spec.ts` 现查） |
-| REQ-004 | [需求规格书_Agent界面内联记忆标识.md](需求规格书_Agent界面内联记忆标识.md) | [Agent界面内联标识_原型.html](design/ui/Agent界面内联标识_原型.html) | 任务：[INLINE-ATTRIBUTION.md](tasks/INLINE-ATTRIBUTION.md)（T1–T12）、[INLINE-ATTRIBUTION-AC-TC.md](tasks/INLINE-ATTRIBUTION-AC-TC.md)（字段级 AC/TC）。**已落地（A30 口径：演示页保留、强制演示标识、不进主导航、生产构建可达）**：类型 `src/types/inlineAttribution.ts`；纯逻辑 `src/inlineAttribution/decay.ts`（`decayClassFromAge`/`agingHintText`/`isEvidenceThin`/`summarizeAttribution`）+ `feedback.ts`（`applyFeedback`/`LocalMockFeedbackPort`）；UI `src/web/InlineAttribution/`（`MemoryInjectionTag`/`TokenSavingBar`/`BackgroundChip`/`AgingWarnTag`/`AttributionSummary`/`AttributionConfig`/`AttributionToggle`/`AgentConversationDemo`）+ `coreInline.ts`/`useInlineReal.ts` + 入口 `inlineAttributionEntry.tsx`/`floatEntry.tsx`；入口页 `inlineattribution.html`/`floatattribution.html`（vite inputs）。测试：`marks.test.tsx`（11）、`AttributionConfig.test.tsx`（6）、`AgentConversationDemo.test.tsx`（9）、`floatEntry.test.tsx`（4）、`a30InlineDemoBadge.test.tsx`（2）、`useInlineReal.test.ts`（5）；E2E `e2e/inlineAttribution.spec.ts`（4）。 |
+| REQ-004 | [需求规格书_Agent界面内联记忆标识.md](需求规格书_Agent界面内联记忆标识.md)（**已作废**） | [Agent界面内联标识_原型.html](design/ui/Agent界面内联标识_原型.html)（历史原型，仅存档） | **已作废（批次59）**：用户决定不再做独立的「界面内联标识」UI，演示页与悬浮层整体删除——`src/web/InlineAttribution/`、`src/inlineAttribution/`、`src/types/inlineAttribution.ts`、`inlineattribution.html`、`floatattribution.html`、`e2e/inlineAttribution.spec.ts` 及 5 条 `floatAttribution:*` IPC（主进程/preload/ipcStorage/日志标签/Overview 悬浮层按钮）全部移除；`vite.config.ts` 同步删两个 input。原 §2.1「命中片段定位」能力**改造为方案 C**：由 `recall_memory` 回显承载（`src/core/memagent/hitHighlight.ts` 算 `matched_terms`/span，`recallInsight.ts` 在四段明细里高亮），见 [REQ-004 回显高亮](tasks/RECALL-HIGHLIGHT.md)。防回流：`phase5DHonesty.test.tsx` 断言目录/入口/按钮均已不存在。 |
 | REQ-005 | [需求规格书_UI页面设计.md](需求规格书_UI页面设计.md) | [登录与首页_原型.html](design/ui/登录与首页_原型.html) / [index.html](design/ui/index.html) | 已落地（T1–T12）：`src/auth/hash.ts`（scrypt+防时序）/ `src/auth/login.ts`（锁定）/ `src/home/server.ts`（登录/注册/captcha/镜像审计）/ `src/home/dashboard.ts`（聚合）/ `src/web/Home/*`（TenantProvider/TopBar/Dashboard/LoginModal/HomePage）/ `src/web/Home/coreHome.ts`（内核账本实时四卡、真实同步态）/ `src/web/Home/useLoginMirror.ts`（后端镜像） |
 | REQ-006 | [需求规格书_其余页面字段级交互规格.md](需求规格书_其余页面字段级交互规格.md) | [冲突裁决页_原型.html](design/ui/冲突裁决页_原型.html) | 已落地（P7 写入冲突裁决域，**与 42-C 的 sync §9.7 同步冲突裁决是不同域**）：`dispute.html`（vite input）→ `src/web/dispute/`（`DisputePage`/`DisputeQueue`/`DisputeVerdict` + `coreDispute.ts`(`DisputeCtx` 注入 + `getCtx()`)/`logic.ts`/`types.ts` + `useDisputeMirror`），消费内核 P7 写入冲突队列、选胜者、落 `conflict_resolve` 审计；测试 `src/web/dispute/__tests__/DisputePage.test.tsx`。 |
 | REQ-007 | [需求规格书_内核API契约.md](需求规格书_内核API契约.md) | - | 原子任务：[CORE-AGENT.md](tasks/CORE-AGENT.md)。桌面主进程实际注入 **[fileStorage.ts](../../src/core/memagent/fileStorage.ts) FileStorage**（原子写 + fsync + 损坏 `.corrupt` 备份），见 `src/electron/main.ts`；`sqliteStorage.ts`（node:sqlite）保留为同接口实现但当前未注入。 |
@@ -1293,6 +1293,11 @@ status: draft
 ### 批次48 A30：演示页与生产产物（2026-11-06，D3=b）
 
 > 口径（P3-3）：**保留** inline 演示页与悬浮覆盖层，但**强制演示标识**（页面显著位置标明为演示）、**不进入主导航**；生产构建可达但必须带标识。演示页数据仍取自本机真实账本，标识只声明「形态演示、非正式功能入口」，不谎称数据造假。
+>
+> **⚠️ 批次59（2026-11-11）已作废**：用户决定 REQ-004 整体作废，本节所述演示页与悬浮覆盖层**已删除**
+> （含 5 条 `floatAttribution:*` IPC 与 Overview 悬浮层按钮）。下表保留为**历史验收证据**，其中文件路径
+> 均已不存在；原 §2.1「命中片段定位」能力改由 `recall_memory` 回显承载，
+> 见 [tasks/RECALL-HIGHLIGHT.md](tasks/RECALL-HIGHLIGHT.md)。**请勿据本节恢复旧实现。**
 
 | 能力 | 代码落点 | 测试/证据 |
 |---|---|---|

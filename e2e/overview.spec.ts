@@ -79,15 +79,13 @@ test.describe('REQ-003 + REQ-005 通览页 · 点击级 E2E', () => {
     await expect(cards).toHaveCount(3);
     await expect(cards.nth(0)).toContainText('未配置');
 
-    // 批次48 A30：内联演示页不进入主导航（页面与浮层保留，直接 URL 仍可达）
+    // 批次59：REQ-004 内联标识（演示页 + 悬浮层）已作废删除——
+    // 主导航无该项是既有事实，这里再锁一条「按钮与页面都不再存在」，防止回流。
     await expect(page.locator('.nav .item:has-text("Agent 界面内联标识")')).toHaveCount(0);
-    await expect(page.getByRole('button', { name: /悬浮标识层（演示）/ })).toBeVisible();
-
-    // 演示页生产构建可达，但首屏必须带「演示」标识（不依赖登录态/账本加载）
-    // 同源静态服务 + 同一 backend 透传；inlineattribution 忽略 agentBackend 参数
+    await expect(page.getByRole('button', { name: /悬浮标识层（演示）/ })).toHaveCount(0);
+    // 直接访问旧入口：无论静态服务回 404 还是回退到首页，都不该再出现演示标识
     await page.goto(APP.replace('/overview.html', '/inlineattribution.html'));
-    await expect(page.locator('[data-testid="demo-badge"]')).toBeVisible();
-    await expect(page.locator('[data-testid="demo-badge"]')).toContainText('演示页（DEMO）');
+    await expect(page.locator('[data-testid="demo-badge"]')).toHaveCount(0);
 
     expect(errors).toEqual([]);
   });

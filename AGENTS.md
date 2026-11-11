@@ -18,7 +18,7 @@ C = **至少一次代码级变异**（临时把关键判定改错 → 指定测�
 
 ## 1. 项目是什么
 
-MultiAgent Memory：Electron 45 + React 19 + Vite 的本地优先「多 Agent 记忆」桌面应用（20 个 HTML 入口，含批次37-B 的首启强制向导 `setup.html`）。
+MultiAgent Memory：Electron 45 + React 19 + Vite 的本地优先「多 Agent 记忆」桌面应用（22 个 HTML 入口，含批次37-B 的首启强制向导 `setup.html`）。
 数据与审计全部落本机，无云依赖；未接线的能力会显式报错，绝不伪造数据。
 **批次37 起数据分两个库文件**：`memories.db.json`（L1–L6 可检索正文）与 `memories.l0.json`（L0 原文，只存 v2/v1 密文信封），密钥环 `l0-keyring.json` 与 L0 库同目录；两个目录由首启向导让用户各自选定（可同可不同）。**批次41-A 起内核审计另成第三份文件** `audit.jsonl`（追加式 JSONL，跟 `memories.db.json` 同目录，轮转出的旧档进同目录 `audit-archive/`）——审计不再参与整库序列化，记忆库体积不随审计增长。
 
@@ -27,7 +27,7 @@ MultiAgent Memory：Electron 45 + React 19 + Vite 的本地优先「多 Agent �
 | 记忆内核 | `src/core/memagent/` | 存储（FileStorage/PGlite）、L0 原数据库（`l0Store`）与拆分/重建/恢复（`l0Split`/`rebuild`/`l0Recovery`）、召回、合并、遗忘、审计、MCP、webhook、sync |
 | 桌面主进程 | `src/electron/` | bootstrap、静态服务、数据根与两库位置、双库备份、IPC、悬浮窗、动作日志 |
 | 本机后端 | `src/home/`、`src/agentOnboard/`、`src/auth/` | 登录/会话/账号角色/审计镜像、Agent 接入、密码哈希与锁定 |
-| 渲染页面 | `src/web/` | 20 个页面（Setup/Home/Overview/Memory/Write/Audit/…/Security/Params） |
+| 渲染页面 | `src/web/` | 22 个页面（Setup/Home/Overview/Memory/Write/Audit/…/Security/Params） |
 | 渲染基座 | `src/desktop/`、`src/shared/` | 宿主桥（iframe 代理）、IPC 存储适配、跨端日志格式 |
 | 端壳/验收 | `src/electron/`、`e2e/` | Playwright 点击级 E2E（真构建产物 + 真后端） |
 

@@ -89,15 +89,6 @@ declare global {
       hostScan?: { run: () => Promise<HostScanResult> };
       /** 租户身份（批次26-B P1-3）：主进程按会话下发三元组 */
       tenant?: { get: (sessionId?: string | null) => Promise<{ ok: boolean; tenant?: { user_id: string; team_id: string; enterprise_id: string }; error?: string }> };
-      /** 悬浮覆盖层：检测 Claude 窗口位置 + 移动/启动/关闭悬浮窗 */
-      floatAttribution?: {
-        detectClaude: () => Promise<{ x: number; y: number; width: number; height: number } | null>;
-        setPosition: (x: number, y: number) => void;
-        open: () => Promise<{ ok: boolean; error?: string }>;
-        close: () => Promise<{ ok: boolean; error?: string }>;
-        /** 渲染层日志回写主进程 float.log（离线排查用） */
-        log?: (msg: string) => void;
-      };
       /** 动作日志桥（批次7）：一行一条写入 <数据根>/actions.log */
       log?: {
         write: (

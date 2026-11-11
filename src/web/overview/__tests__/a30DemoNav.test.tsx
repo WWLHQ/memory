@@ -1,9 +1,10 @@
-// 批次48 A30：通览页主导航不得包含演示页；浮层入口须显式标注「演示」
+// 批次48 A30 → 批次59：通览页既不能导航到 REQ-004 演示页，也不能再开悬浮层入口
+// （REQ-004 整体作废，页面与浮层都已删除；本文件守住「不得回流」）
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { Overview } from '../Overview.tsx';
 
-describe('Overview 主导航（A30）', () => {
+describe('Overview 主导航（A30 → 批次59 作废）', () => {
   it('主导航不含「Agent 界面内联标识」演示页', () => {
     render(<Overview />);
     const items = document.querySelectorAll('.nav .item');
@@ -18,8 +19,9 @@ describe('Overview 主导航（A30）', () => {
     expect(screen.queryByText(/REQ-004 内联标识/)).toBeNull();
   });
 
-  it('悬浮标识层入口显式标注「演示」（保留可达但不伪装成正式功能）', () => {
+  it('悬浮标识层入口已随作废一并删除（不再有任何按钮可开浮层）', () => {
     render(<Overview />);
-    expect(screen.getByRole('button', { name: /悬浮标识层（演示）/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /悬浮标识层/ })).toBeNull();
+    expect(screen.queryByText(/悬浮标识层/)).toBeNull();
   });
 });

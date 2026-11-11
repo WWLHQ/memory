@@ -1,6 +1,6 @@
 // preload 暴露的 IPC channel 清单（唯一真源）。
 // main 启动完成后据此自检：preload 声明了但主进程未注册的 channel 必须让启动失败，
-// 否则渲染层拿到的是「永远 reject 的桥」（历史上的 floatAttribution:open / hostScan:run 即如此）。
+// 否则渲染层拿到的是「永远 reject 的桥」（历史上 hostScan:run 就踩过这个坑）。
 
 export const IPC = {
   storagePutMemory: 'storage:putMemory',
@@ -32,11 +32,6 @@ export const IPC = {
   dataRootOpen: 'dataRoot:open',
   dataRootChange: 'dataRoot:change',
   dataRootRestoreDefault: 'dataRoot:restoreDefault',
-  floatDetectClaude: 'floatAttribution:detectClaude',
-  floatSetPosition: 'floatAttribution:setPosition',
-  floatOpen: 'floatAttribution:open',
-  floatClose: 'floatAttribution:close',
-  floatLog: 'floatAttribution:log',
   /** 批次7：渲染层任何动作的统一留痕通道（单向，fire-and-forget） */
   logWrite: 'log:write',
   /** 批次17：程序运行日志窗口尾读 actions.log（只读，轮询不写日志；批次19 起由日志记录页使用） */

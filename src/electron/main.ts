@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, nativeTheme, powerMonitor, screen, session, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, nativeTheme, powerMonitor, session, shell } from 'electron';
 process.on('uncaughtException', (err) => {
   console.error('[uncaught]', err?.message, err?.stack);
 });
@@ -92,7 +92,6 @@ import { regressionRequestId, runGrowthRegression } from '../core/memagent/regre
 import { JsVectorBackend } from '../core/memagent/vector.ts';
 import { readFile, appendFile, mkdir, writeFile, copyFile, readdir, unlink, stat } from 'node:fs/promises';
 import { join, extname, normalize, sep, basename, dirname } from 'node:path';
-import { execSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { existsSync, readFileSync, writeFileSync, renameSync, copyFileSync, mkdirSync } from 'node:fs';
@@ -157,7 +156,6 @@ let syncHub: PgSyncHub | null = null;
 let LIB_PATHS: LibraryPaths;
 /** 密钥环与 L0 原数据库同目录：恢复 L0 需要的两件东西必须放在一起备份/搬走 */
 let L0_KEYRING_PATH: string;
-let FLOAT_LOG: string;
 let MAIN_LOG: string;
 let BACKUP_CFG_PATH: string;
 let COLLECTOR_CURSOR_FILE: string;
@@ -520,18 +518,8 @@ const COLLECTOR_MAX_CONSECUTIVE_FAILS = 6;
 const RECOLLECT_MAX_ROUNDS = 80;
 const RECOLLECT_ROUND_GAP_MS = 300;
 
-// storage / FLOAT_LOG / MAIN_LOG 改为 bootstrap 内赋值（DB_PATH/USER_DATA 在 app ready 后才可用）
-// ── §4 诊断日志（旧版 flog/mlog；批次7 起新代码一律用 actionLog）─────────────
-async function flog(tag: string, msg: string): Promise<void> {
-  try {
-    await mkdir(USER_DATA, { recursive: true });
-    const ts = new Date().toISOString();
-    await appendFile(FLOAT_LOG, `[${ts}] [${tag}] ${msg}\n`, 'utf8');
-  } catch {
-    //                               
-  }
-}
-
+// storage / MAIN_LOG 改为 bootstrap 内赋值（DB_PATH/USER_DATA 在 app ready 后才可用）
+// ── §4 诊断日志（旧版 mlog；批次7 起新代码一律用 actionLog）─────────────
 /**                                                    bootstrap         ?+ collector                                */
 async function mlog(step: string, detail?: unknown): Promise<void> {
   try {
@@ -2256,195 +2244,6 @@ async function registerStorageIpc(): Promise<void> {
   });
 }
 
-// 悬浮归因窗：贴靠 Claude Desktop 窗口显示（detectClaudeWindow 定位）
-// ── §9 悬浮窗（Claude 归因）─────────────────────────────────────────────────
-let floatWin: BrowserWindow | null = null;
-
-/** 探测 Claude Desktop 主窗口 bounds（无进程/无可见窗口时返回 null） */
-function detectClaudeWindow(): { x: number; y: number; width: number; height: number } | null {
-  // 通过 PowerShell P/Invoke（EnumWindows + GetWindowRect）枚举 claude.exe 的可见窗口，取面积最大者。
-  // 执行策略可能为 Restricted、且脚本含 here-string/JSON 引号，故统一走 -EncodedCommand（UTF-16LE base64），
-  // 不落 .ps1 文件，也不依赖 -Command 的转义规则。
-  const psScript = [
-    "$ErrorActionPreference = 'Stop'",
-    "$src = @'",
-    'using System;',
-    'using System.Runtime.InteropServices;',
-    'public class W {',
-    '  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }',
-    '  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc cb, IntPtr p);',
-    '  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, uint[] pid);',
-    '  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);',
-    '  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);',
-    '  public delegate bool EnumWindowsProc(IntPtr h, IntPtr p);',
-    '  public static string GetLargestRect(uint targetPid) {',
-    '    int bestW = 0, bestH = 0, bestL = 0, bestT = 0;',
-    '    EnumWindows((h, p) => {',
-    '      var pids = new uint[1]; GetWindowThreadProcessId(h, pids);',
-    '      if (pids[0] != targetPid || !IsWindowVisible(h)) return true;',
-    '      RECT r; GetWindowRect(h, out r);',
-    '      int w = r.Right - r.Left; int hh = r.Bottom - r.Top;',
-    '      if (w > 100 && hh > 100 && w * hh > bestW * bestH) { bestW = w; bestH = hh; bestL = r.Left; bestT = r.Top; }',
-    '      return true;',
-    '    }, IntPtr.Zero);',
-    '    if (bestW <= 0) return "";',
-    '    return bestL + "," + bestT + "," + bestW + "," + bestH;',
-    '  }',
-    '}',
-    "'@",
-    "Add-Type -TypeDefinition $src",
-    "$cpids = (Get-Process -Name 'claude' -ErrorAction SilentlyContinue).Id",
-    "if (-not $cpids) { exit 0 }",
-    '$best = ""; $bestArea = 0',
-    'foreach ($cpid in $cpids) {',
-    '  $line = [W]::GetLargestRect([uint32]$cpid)',
-    '  if (-not $line) { continue }',
-    "  $parts = $line -split ','",
-    '  if ($parts.Count -lt 4) { continue }',
-    '  $w = [int]$parts[2]; $h = [int]$parts[3]',
-    '  if ($w * $h -gt $bestArea) { $bestArea = $w * $h; $best = $line }',
-    '}',
-    'if ($best) { Write-Output $best }',
-  ].join('\n');
-  try {
-    const b64 = Buffer.from(psScript, 'utf16le').toString('base64');
-    const out = execSync(
-      `powershell -NoProfile -NonInteractive -EncodedCommand ${b64}`,
-      { encoding: 'utf8', timeout: 8000 },
-    ).trim();
-    if (!out) {
-      void flog('detectClaude', 'Claude process not found or no visible window -> null');
-      return null;
-    }
-    const parts = out.split(',');
-    if (parts.length < 4) {
-      void flog('detectClaude', `                  : "${out}"`);
-      return null;
-    }
-    const x = Number(parts[0]), y = Number(parts[1]), w = Number(parts[2]), h = Number(parts[3]);
-    if (Number.isNaN(x) || Number.isNaN(w) || w < 100 || h < 100) {
-      void flog('detectClaude', `            : ${out}`);
-      return null;
-    }
-    const best = { x, y, width: w, height: h };
-    void flog('detectClaude', `       pos(${x},${y}) ${w}x${h}`);
-    return best;
-  } catch (e) {
-    const msg = (e as { message?: string })?.message ?? String(e);
-    void flog('detectClaude', `      : ${msg.slice(0, 500)}`);
-    return null;
-  }
-}
-
-/** 打开（或聚焦）归因浮窗：优先贴在 Claude 窗口右侧，其次左侧，均不可用时屏幕居中 */
-function openFloatWindow(staticPort: number): void {
-  if (floatWin && !floatWin.isDestroyed()) {
-    floatWin.focus();
-    return;
-  }
-  const w = 280, h = 520;
-  // 跟随 Claude 窗口定位；未检测到则屏幕居中
-  const pos = detectClaudeWindow();
-  const sw = screen.getPrimaryDisplay().size.width;
-  const sh = screen.getPrimaryDisplay().size.height;
-  let x: number, y: number;
-  if (pos) {
-    // 默认放在 Claude 窗口右侧，间隔 8px
-    x = pos.x + pos.width + 8;
-    // 右侧放不下 → 改放左侧
-    if (x + w > sw) x = Math.max(0, pos.x - w - 8);
-    y = Math.max(0, pos.y + 40);
-    // 浮窗比 Claude 窗口矮时垂直居中
-    if (h < pos.height) y += Math.round((pos.height - h) / 2);
-  } else {
-    // 未检测到 Claude → 屏幕居中
-    x = Math.round(sw / 2 - w / 2);
-    y = Math.round(sh / 2 - h / 2);
-  }
-  floatWin = new BrowserWindow({
-    width: w, height: h,
-    x, y,
-    frame: false,
-    transparent: true,
-    alwaysOnTop: true,
-    resizable: true,
-    skipTaskbar: true,
-    show: false, // 等 did-finish-load 后再 showInactive，避免白屏闪一下
-    title: '归因浮窗',
-    webPreferences: {
-      preload: join(__dirname, 'preload.cjs'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false,
-      backgroundThrottling: false,
-    },
-  });
-  floatWin.setAlwaysOnTop(true, 'screen-saver');
-  console.log(`[float] open @(${x},${y}) ${w}x${h}`);
-  void flog('open', `浮窗打开 pos(${x},${y}) ${w}x${h} pos=${pos ? `claude(${pos.x},${pos.y})` : 'null'}`);
-  void floatWin.loadURL(`http://127.0.0.1:${staticPort}/floatattribution.html`)
-    .then(() => {
-      console.log('[float] loadURL ok');
-      void flog('loadURL', 'ok');
-    })
-    .catch((e) => {
-      console.error('[float] loadURL failed:', e);
-      void flog('loadURL', `failed: ${String(e)}`);
-    });
-  floatWin.webContents.on('did-finish-load', () => {
-    floatWin?.showInactive();
-    void flog('did-finish-load', 'showInactive');
-  });
-  floatWin.webContents.on('did-fail-load', (_e, code, desc, url) => {
-    console.error(`[float] did-fail-load code=${code} desc=${desc} url=${url}`);
-    void flog('did-fail-load', `code=${code} desc=${desc} url=${url}`);
-    // 加载失败也把窗口显示出来：让用户看到错误页，而不是静默什么都不出现
-    floatWin?.showInactive();
-  });
-  floatWin.on('closed', () => {
-    floatWin = null;
-    void flog('closed', 'float window closed');
-  });
-}
-
-// 浮窗 IPC：bootstrap 内、创建窗口前统一注册（含启动自检覆盖）
-function registerFloatIpc(staticPort: number): void {
-  // 探测 Claude 窗口位置（供渲染层定位归因浮窗）
-  handleIpc(IPC.floatDetectClaude, () => {
-    const pos = detectClaudeWindow();
-    return pos ? { x: pos.x, y: pos.y, width: pos.width, height: pos.height } : null;
-  });
-  //                               
-  handleIpc(IPC.floatSetPosition, (_e, x: number, y: number) => {
-    if (floatWin && !floatWin.isDestroyed()) {
-      floatWin.setPosition(Math.round(x), Math.round(y));
-    }
-  });
-  //                                                    
-  handleIpc(IPC.floatOpen, () => {
-    try {
-      void flog('open-request', `staticPort=${staticPort}`);
-      openFloatWindow(staticPort);
-      return { ok: true };
-    } catch (e) {
-      console.error('[float] open       :', e);
-      void flog('open-fail', String((e as { message?: string })?.message ?? e));
-      return { ok: false, error: String((e as { message?: string })?.message ?? e) };
-    }
-  });
-  //       
-  handleIpc(IPC.floatClose, () => {
-    void flog('close', 'request close float win');
-    if (floatWin && !floatWin.isDestroyed()) floatWin.close();
-    floatWin = null;
-    return { ok: true };
-  });
-  // 渲染层日志回写（单向 IPC，来源校验统一由 handleIpcEvent 完成）
-  handleIpcEvent(IPC.floatLog, (_e, msg: string) => {
-    void flog('render', String(msg ?? ''));
-  });
-}
-
 // ── §6e 首启向导 IPC（批次37-B）────────────────────────────────────────────
 // 向导跑在登录之前，所以这几条通道**不带会话**：门禁换成「本机此刻还没有需要保护的东西」——
 // 设 L0 管理密码只在密钥环尚无 admin_wrap 时放行（那时 L0 库里没有任何密文，设密码不是越权）；
@@ -2816,7 +2615,6 @@ async function bootstrap(): Promise<void> {
   AUDIT_PATH = LIB_PATHS.audit;
   L0_KEYRING_PATH = join(LIB_PATHS.l0Dir, L0_KEYRING_FILE_NAME);
   COLLECTOR_CURSOR_FILE = join(USER_DATA, 'collector-cursor.json');
-  FLOAT_LOG = join(USER_DATA, 'float.log');
   MAIN_LOG = join(USER_DATA, 'main.log');
   BACKUP_CFG_PATH = join(USER_DATA, 'backup-config.json');
   // 第一轮个人记忆：独立文件，与 memories.db.json / 审计账本分开（不扩 Memory 主表）
@@ -3045,7 +2843,6 @@ async function bootstrap(): Promise<void> {
   const uiOrigins = [`http://127.0.0.1:${staticPort}`, `http://localhost:${staticPort}`];
   for (const o of uiOrigins) trustedIpcOrigins.add(o);
   trustedFileRoot = DIST;
-  registerFloatIpc(staticPort);
 
   // preload 只在主 frame 执行（webPreferences.preload），overview.html 内嵌 <iframe> 拿不到
   // window.__ELECTRON__/window.api 属预期行为：子页面统一走 desktop/hostBridge.ts 的消息桥，
