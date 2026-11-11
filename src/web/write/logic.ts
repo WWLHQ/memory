@@ -33,6 +33,36 @@ function tokenize(s: string): string[] {
   return (s.match(/[一-鿿]|[a-zA-Z0-9]+/g) || []).map((x) => x.toLowerCase());
 }
 
+/** 标签联想停用词：纯功能词/通用域，不配当标签 */
+const TAG_STOPWORDS = new Set([
+  'the', 'and', 'for', 'with', 'this', 'that', 'from', 'are', 'was', 'were', 'not', 'you', 'your',
+  'can', 'could', 'should', 'would', 'all', 'any', 'when', 'then', 'than', 'will', 'have', 'has',
+  'had', 'into', 'onto', 'its', 'their', 'our', 'out', 'about', 'there', 'here', 'been', 'being',
+  'over', 'under', 'after', 'before', 'because', 'while', 'also', 'just', 'only', 'very',
+  'www', 'com', 'cn', 'http', 'https', 'localhost',
+]);
+
+/**
+ * 标签联想（修复轮2）：从写入内容本地提取候选标签——不预置词表、不经大模型。
+ * 规则：抽英文/技术 token（≥3 字符，含 .+#- 等技术记号），剥掉首尾连接符，
+ * 停用词过滤、大小写去重、排除已选标签，按出现顺序最多 max 个。
+ */
+export function suggestTagsFromContent(content: string, existing: readonly string[] = [], max = 8): string[] {
+  const tokens = content.match(/[A-Za-z][A-Za-z0-9_.+#/-]{2,}/g) || [];
+  const seen = new Set(existing.map((t) => t.toLowerCase()));
+  const out: string[] = [];
+  for (const raw of tokens) {
+    const t = raw.replace(/^[_.+#/-]+/, '').replace(/[_.+#/-]+$/, '');
+    if (t.length < 3) continue;
+    const key = t.toLowerCase();
+    if (TAG_STOPWORDS.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    out.push(t);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
 /** Jaccard 相似度（纯函数，便于测试） */
 export function jaccard(a: string, b: string): number {
   const A = new Set(tokenize(a));

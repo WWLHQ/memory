@@ -6,12 +6,6 @@ import { policyFor } from '../../core/memagent/forgetting.ts';
 import type { Category } from '../../core/memagent/types.ts';
 import type { LayerName, MemoryCategory } from './types.ts';
 
-/** 标签联想候选（规格常量，非演示记忆数据） */
-export const TAG_SUGGESTIONS: string[] = [
-  'tech-stack', 'constraint', 'pitfall', 'preference', 'workflow', 'git',
-  'db', 'compliance', 'project', 'feedback', 'decision', 'legacy',
-];
-
 /**
  * 批次48 A18：六类知识库 → 内核 17.6 策略预览。
  * 旧实现是手抄的一张表（fact 90 天 / decision 180 天 / preference 365 天），与内核 POLICIES

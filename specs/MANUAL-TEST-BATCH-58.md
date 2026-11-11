@@ -6,8 +6,8 @@ status: pending
 
 - 日期：2026-11-11
 - 分支：main（上一笔 `9bc2483`；本批 ahead 待查 `git status -sb`，**未 push，待授权**）
-- 正式安装包：`release/installer/MultiAgent Memory-0.1.0-setup.exe`（127,990,360 B = 122.06 MiB；**修复轮已重新打包，最新 SHA256 见 §6.3**）
-- SHA256：`14AC4A62D955648A3DA92DF48FB2929603DF82521C110BF07950F0B61D7133B3`
+- 正式安装包：`release/installer/MultiAgent Memory-0.1.0-setup.exe`（127,990,817 B；**修复轮2 已重新打包覆盖，最新 SHA256 见 §7.4**）
+- SHA256（初版批次58）：`14AC4A62D955648A3DA92DF48FB2929603DF82521C110BF07950F0B61D7133B3`；修复轮1 见 §6.3；修复轮2 见 §7.4
 - 数据目录：安装包版 `%APPDATA%\MultiAgent Memory`
 - 关联：`specs/code-map.md` 批次58 段落、上一轮 57-D（`92b4b4e`）、用户确认的写入页定稿效果图
 - 范围口径：用户确认「原写入页有 3 个卡片，本版式只改写入表单卡片（页），不要 3 个卡片全部改」——本批只重排「写入表单」tab；「最近回执」「查重与 L0 规则」两 tab 与页签条保持原样。底板不照抄效果图配色，全部走 Stratum A 令牌（亮/暗随壳层）。
@@ -94,3 +94,47 @@ status: pending
 - [ ] 解锁卡两态文字清晰：写密钥未解锁 = 红字浅红底；管理员解锁后 = 绿字浅绿底（**浅/深主题都检查**，此前深色下绿底配深绿字看不清）。
 - [ ] 主按钮「写入记忆」与标签选中 chip：浅色 = 白字电青底、深色 = 墨青字亮青底（与首页按钮一致）。
 - [ ] 整页观感与首页同源（纸灰底/白卡/电青强调/同一字体栈），无突兀色块。
+
+## 7. 修复轮2（2026-11-11 傍晚 · 用户真机反馈四项）
+
+用户二次反馈：①查重卡片与效果图不一样、登录后不自动刷新；②写密钥卡登录后仍显示「未登录」；③打开软件的界面与效果图不一样；④标签联想要从写入内容自动提取，不要预置词表。
+
+### 7.1 根因与修复
+
+| 反馈 | 根因 | 修复 |
+| --- | --- | --- |
+| ① 登录后不自动刷新 | 登录态在 localStorage `session:realpage`（壳层登录弹窗写入），但 `useSessionContext` 只在挂载时读一次；WritePage 三个数据源（查重候选/写密钥状态/最近写入）也只在挂载时载入——登录后 iframe 不刷新页面就停在未登录错误态 | `session.ts` useSessionContext 监听 `storage` 事件实时重读 sid + 重拉 `/api/me`；`WritePage.tsx` sid 真变化时整体重载三个数据源（prevSidRef 守卫，挂载不重复拉） |
+| ① 查重卡与效果图不一样 | 未登录时候选读取失败 → 右栏是共享 KernelLoadError（自绘红边框），不是效果图 DEDUP 卡样式 | 错误态并入 `wf-card wf-dedup` 框架（DEDUP 卡头 + 红色状态条 + 重试），kernel-error 系列 testid 保留；登录后自动转实算 DEDUP 卡 |
+| ② 登录后仍显示「未登录」 | 同①根因：role 来自挂载时一次性的 /api/me 拉取 | 同①修复：storage 事件 → 重拉 /api/me → role 实时更新 → 管理员免刷新出密码框 |
+| ③ 打开界面与效果图不一样 | 同根因：未登录错误态（截图即此状态）+ 不自动刷新 | 同①修复 + 错误态版式并入效果图框架；登录后页面即呈效果图样 |
+| ④ 标签预置词表 | `TAG_SUGGESTIONS` 12 个常量 chip 与内容无关 | 删预置词表；`suggestTagsFromContent` 纯函数本地提取技术 token（≥3 字符、停用词过滤、去重、按出现顺序最多 8 个）；空/纯中文给诚实说明 |
+
+### 7.2 修复轮2 自动化门禁
+
+| 门禁 | 结果 |
+| --- | --- |
+| typecheck + oxlint | 0 错误 / 0 警告 |
+| write 模块单测 | **6 文件 / 56 例全绿**（新增：页面级「登录态实时跟随（免刷新）」+ 表单标签提取 2 例 + 逻辑提取 4 例） |
+| 无演示标识 | check:no-demo 0 命中 |
+| 真浏览器 E2E | `write` 3/3 通过（真 dist + CDP Chromium） |
+| 全量回归（A） | `npm run test:gate` **通过：233 文件 / 2709 例 0 失败、重试 0 次**（报告留档 `test-results/test-gate/20261111-114924/`） |
+| 变异验证（C） | sid 变化 effect 内删掉三个重载调用 → 「登录态实时跟随」用例**真实红灯** → 原样还原 → 56/56 复绿 |
+| 浅/深截图（B） | 输入带技术名词内容截图：标签候选自动提取（PostgreSQL/replication/slot/Node/LTS）、查重卡实算态、深色按钮墨青字亮青底 |
+| 正式打包 | `npm run package` 退出码 0（SHA256 见 §7.4） |
+
+### 7.3 修复轮2 真机手测清单（待用户执行）
+
+- [ ] **不登录**打开软件进写入页：右栏 DEDUP 卡仍在（框架与效果图一致），卡内如实显示「候选读取失败：需要登录后操作」+ 重试按钮——不再是样式突兀的自绘红框。
+- [ ] **在壳层登录后不刷新页面**：右栏自动变回查重预览卡（空态或实算）；「未登录」说明消失——管理员出现密码框、普通成员显示非管理员说明；最近写入通栏自动出真实行（或真实 0 条空态）；全程不用点「重试」、不用刷新。
+- [ ] **登出**后同样免刷新回到未登录态（如实报错，不残留登录后的数据）。
+- [ ] 标签联想：输入含英文技术名词的内容 → 候选 chip 按出现顺序出现（最多 8 个），点击加入、再点移除；输入纯中文/清空 → 无候选 chip，显示「输入包含技术名词的内容后…」说明；tech-stack/pitfall 等预置 chip 不再出现。
+- [ ] 浅/深主题下以上各态样式一致、文字清晰。
+
+### 7.4 修复轮2 包内校验
+
+- 正式安装包：`release/installer/MultiAgent Memory-0.1.0-setup.exe`（重新打包覆盖，2026-11-11 11:51 产物）
+- SHA256：`47DDC3DE9CF719F4C39458F40297F95BD6B9E61244BFCD1F0B023AC38D05749F`（127,990,817 字节）
+- 包内标记检索（对 `release/installer/win-unpacked/resources/app.asar` 字节级搜索，app.asar 内容不压缩、字面量必中）：
+  - **全部命中**：`suggest-`（标签联想 chip testid）、`（随内容自动提取 · 不预置词表`（标签区文案）、`tags-empty`（标签空态）、`dedup-card-error`（查重错误态卡）、`等待输入`（查重空态）、`session:realpage`（会话存储键）、`addEventListener(\`storage\``（**登录态实时跟随监听**，minifier 把字符串转成反引号形式，故用反引号检索）。
+  - `suggestTagsFromContent` / `prevSidRef` 等变量名 MISS 属预期：esbuild 压缩会改名，只验字符串字面量。
+  - storage 监听不在 `write-*.js` chunk 而在共享 chunk（`session.ts`/`crossTabAuth.ts` 被 Vite 抽成公共依赖，`session:realpage` 命中 crossTabAuth/login/main/workspace 四个 chunk），对整包检索已证实进包。

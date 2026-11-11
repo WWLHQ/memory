@@ -36,15 +36,27 @@ export async function fetchSessionContext(sid: string | null = currentSessionId(
   }
 }
 
-/** React 侧：订阅当前登录会话（挂载时读取一次；跨 iframe 登录后刷新页面生效） */
+/** React 侧：订阅当前登录会话。壳层登录/登出写 localStorage（另一文档）→ 本 iframe 收到
+ *  storage 事件 → 实时重读 sid 并重拉 /api/me，不再要求「登录后刷新页面才生效」。 */
 export function useSessionContext(): SessionState {
-  const [sid] = useState<string | null>(() => currentSessionId());
+  const [sid, setSid] = useState<string | null>(() => currentSessionId());
   const [context, setContext] = useState<TenantContext | null>(null);
   const [loading, setLoading] = useState(!!sid);
 
   useEffect(() => {
-    if (!sid) return;
+    const sync = () => setSid(currentSessionId());
+    window.addEventListener('storage', sync);
+    return () => window.removeEventListener('storage', sync);
+  }, []);
+
+  useEffect(() => {
+    if (!sid) {
+      setContext(null);
+      setLoading(false);
+      return;
+    }
     let alive = true;
+    setLoading(true);
     fetchSessionContext(sid)
       .then((ctx) => { if (alive) setContext(ctx); })
       .finally(() => { if (alive) setLoading(false); });

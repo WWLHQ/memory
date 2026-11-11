@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   estimateTokens, needsRefine, validateDraft, scoreDedup, thresholdForLayer, composeReceipt, jaccard,
+  suggestTagsFromContent,
 } from '../logic.ts';
 import { DEDUP_THRESHOLDS } from '../../../core/memagent/layerRules.ts';
 import { policyFor } from '../../../core/memagent/forgetting.ts';
@@ -168,5 +169,28 @@ describe('批次48 A18：写入页策略预览取内核真源', () => {
     expect(CATEGORY_PREVIEW.fact.halfLifeDays).toBe(365);
     expect(CATEGORY_PREVIEW.decision.halfLifeDays).toBe(30);
     expect(CATEGORY_PREVIEW.preference.halfLifeDays).toBe(180);
+  });
+});
+
+describe('修复轮2：标签联想随内容本地提取（suggestTagsFromContent）', () => {
+  it('技术名词按出现顺序成候选；数字段不配', () => {
+    expect(suggestTagsFromContent('PostgreSQL 16 的逻辑复制槽，注意 replication slot 清理'))
+      .toEqual(['PostgreSQL', 'replication', 'slot']);
+  });
+
+  it('停用词过滤：功能词与通用域词不成候选，实词保留', () => {
+    expect(suggestTagsFromContent('The localhost and HTTPS proxy for Docker Desktop'))
+      .toEqual(['proxy', 'Docker', 'Desktop']);
+  });
+
+  it('排除已选标签；上限 max', () => {
+    const content = 'alpha beta gamma delta epsilon zeta eta theta iota kappa';
+    expect(suggestTagsFromContent(content, ['alpha'], 5)).toEqual(['beta', 'gamma', 'delta', 'epsilon', 'zeta']);
+    expect(suggestTagsFromContent(content, [], 3)).toEqual(['alpha', 'beta', 'gamma']);
+  });
+
+  it('空内容/纯中文 → 空候选', () => {
+    expect(suggestTagsFromContent('')).toEqual([]);
+    expect(suggestTagsFromContent('今天天气不错，心情很好')).toEqual([]);
   });
 });

@@ -1511,3 +1511,21 @@ status: draft
 > **B·效果验证**：新单测 2 例锁定常驻+空态；e2e write 3/3（真 dist + CDP Chromium）；1280px 浅/深全页截图目视（查重卡常驻、锁定态红字清晰）；注入 `.wf-status.ok` 真样式截图浅/深目视可读（深绿字/浅绿底 ↔ 亮绿字/深绿底）。
 > **C·变异验证**：变异点 = `WritePage.tsx` 摘掉 `hasContent={draft.content.trim().length > 0}`（退回空内容也画分）→ 新用例「查重卡常驻——空内容也渲染」**真实红灯**（1 failed）→ 原样还原 → write 模块 50/50 复绿，无变异残留。
 > **已知边界**：截图环境无真内核解锁态，ok 态对比度用 DOM 注入真样式验证（安装包真机以手测清单 §6.3 为准）；索引已本地刷新但不随本批提交（收尾会话统一）。
+
+### 批次58 修复轮2：登录态实时跟随 + 查重错误态版式 + 标签随内容提取（2026-11-11）
+
+> 口径：用户真机二次反馈 ①查重卡片与效果图不一样且登录后不自动刷新（截图：未登录时查重候选/最近写入全报「需要登录后操作」，登录后仍停留错误态）②解锁卡登录后仍显示「未登录」③打开软件的界面与效果图不一致（同根因：未登录错误态 + 不自动刷新）④标签联想要从写入内容提取，不要预置词表。
+
+| 问题 | 根因 | 修复 |
+|---|---|---|
+| ①②③ 登录后不刷新 / 仍显示未登录 | 登录态写在 localStorage `session:realpage`（壳层登录弹窗写入），但 `useSessionContext` 只在挂载时读一次（注释自述「跨 iframe 登录后刷新页面生效」）；WritePage 的查重候选 / 写密钥状态 / 最近写入三个数据源也只在挂载时载入——登录成功后 iframe 不刷新页面就永远停在未登录错误态 | `session.ts` `useSessionContext` 改实时：监听 `storage` 事件 → sid 变化时重读并重拉 `/api/me`（登出同样实时回落 null）；`WritePage.tsx` 以 `prevSidRef` 守卫 sid 变化（仅真变化、挂载不重复拉）→ `retryDedup()` + `loadL0Status()` + `loadHistory()` 整体重载 |
+| ① 查重卡与效果图不一样 | 未登录时查重候选读取失败 → 右栏渲染的是共享 `KernelLoadError`（自绘红边框卡，不是效果图 DEDUP 卡样式） | 错误态仍在 `wf-card wf-dedup` 框架内如实报错（DEDUP 卡头 + wf-status bad + kernel-error/kernel-error-reason/kernel-retry testid 原样保留），登录后 sid 变化自动转实算 DEDUP 卡 |
+| ④ 标签预置词表 | `spec.ts TAG_SUGGESTIONS` 12 个常量 chip（tech-stack/pitfall/…），与内容无关 | 删除预置词表；`logic.ts` 新增纯函数 `suggestTagsFromContent(content, existing, max=8)`：本地抽英文/技术 token（≥3 字符、含 .+#- 记号）、剥首尾连接符、停用词过滤、大小写去重、排除已选，按出现顺序最多 8 个；WriteForm 候选全部来自当前内容，空/纯中文 → `tags-empty` 诚实说明（本地提取 · 不经大模型 · 需点击确认） |
+
+测试面：`WritePage.test.tsx` 新增「登录态实时跟随（免刷新）」用例（真内核锁写密钥 + 模拟壳层登录写 localStorage + StorageEvent → 免刷新出管理员密码框 + 查重候选重载）；`WriteForm.test.tsx` 标签用例改内容提取（预置 chip 断言作废）；`logic.test.ts` 新增提取函数四态（技术名词/停用词/已选排除与 max/空内容）。
+
+> **修复轮2 三道闸门证据**：
+> **A·影响面回归**：影响面 = `src/web/shared/session.ts`（useSessionContext 一处，所有用它的页面同步受益/行为只增不减）+ `src/web/write/{WritePage.tsx, WriteForm.tsx, logic.ts, spec.ts}` + 三测试文件；未改内核/存储/审计/MCP/端口。typecheck 0 错、oxlint 0/0、check:no-demo 0 命中；全量 `test:gate` **233 文件 / 2709 例 0 失败、重试 0 次**（`test-results/test-gate/20261111-114924/`）。
+> **B·效果验证**：新单测 6 例（页面级登录实时跟随 1 + 表单标签 2 + 逻辑提取 4−共享）；e2e write 3/3；1280px 浅/深截图目视：标签候选自动来自输入内容（PostgreSQL/replication/slot/Node/LTS）、查重卡实算态、深色按钮墨青字亮青底。
+> **C·变异验证**：变异点 = `WritePage.tsx` sid 变化 effect 内删掉三个重载调用 → 用例「登录态实时跟随」**真实红灯** → 原样还原 → write 模块 56/56 复绿，无变异残留。
+> **已知边界**：storage 事件只在「另一文档写入」时触发——壳层登录弹窗（shell 文档）→ 页面 iframe 正是这一关系，成立；若未来某页面在自己文档内写 sessionId 则收不到事件（当前无此场景）。标签提取只覆盖 ASCII 技术 token，纯中文名词不产候选（诚实显示说明文案，不做伪分词）。

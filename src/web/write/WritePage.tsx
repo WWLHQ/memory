@@ -4,7 +4,7 @@
 // 表单 → Jaccard 查重预判 → 内核 ma.write → L1–L6 回执。
 // 回执必须是内核真实返回：被拒时只显示原因与内核 request_id（未签发就写未签发），不做乐观成功。
 // ⚠ 禁止注入演示/种子数据：查重候选与最近回执全部读真实账本（空库即无候选 / 无回执）。
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { WriteForm } from './WriteForm.tsx';
 import { DedupCard } from './DedupCard.tsx';
 import { WriteReceiptCard, WriteReceiptTable, WriteRecentWritesCard, WriteRefusalCard } from './WriteReceiptCard.tsx';
@@ -13,9 +13,10 @@ import { useToast } from './useToast.tsx';
 import { useWriteMirror } from './useWriteMirror.ts';
 import { composeReceipt, scoreDedup, validateDraft, L1_CHAR_LIMIT } from './logic.ts';
 import { coreWrite, coreListExisting, coreWriteStatus, coreWriteReceipts, requestIdOfError } from './coreWrite.ts';
-import { KernelLoadError, kernelErrorText, useKernelLoad } from '../shared/kernelLoad.tsx';
+import { kernelErrorText, useKernelLoad } from '../shared/kernelLoad.tsx';
 import { L0WriteUnlock } from '../shared/L0WriteUnlock.tsx';
 import { useHostTheme } from '../shared/hostTheme.ts';
+import { useSessionContext } from '../shared/session.ts';
 import { isL0LockedError } from '../../core/memagent/errors.ts';
 import { DEFAULT_PROJECT_ID, listProjectIds } from '../shared/kernelProjects.ts';
 import { newRequestId } from '../kernel.ts';
@@ -90,6 +91,20 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
 
   // 批次58：最近写入通栏挂载即载；写入成功后也总是刷新（form tab 直接可见）
   useEffect(loadHistory, []);
+
+  // 登录态实时跟随：壳层登录/登出写 localStorage（另一文档）→ 本 iframe 收到 storage 事件
+  // → useSessionContext 的 sid 变化 → 查重候选 / 写密钥状态 / 最近写入三个数据源整体重载，
+  // 不再要求「登录后刷新页面才生效」。
+  const { sid } = useSessionContext();
+  const prevSidRef = useRef(sid);
+  useEffect(() => {
+    if (prevSidRef.current === sid) return;
+    prevSidRef.current = sid;
+    retryDedup();
+    loadL0Status();
+    loadHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sid]);
 
   useEffect(() => {
     if (tab === 'receipts') loadHistory();
@@ -247,9 +262,25 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
             </div>
 
             <div className="wf-col wf-side">
-              {/* 修复轮：查重卡常驻（空内容给诚实空态）；内核不可达仍如实报错，不画预览分 */}
+              {/* 查重卡常驻；候选读取失败时仍在 DEDUP 卡框架内如实报错（不冒充「无候选」，不画预览分） */}
               {phase === 'error' ? (
-                <KernelLoadError what="读取查重候选（真实账本）" error={dedupError} onRetry={retryDedup} />
+                <div className="wf-card wf-dedup" data-testid="dedup-card-error">
+                  <div className="wf-hd">
+                    <span className="wf-code">DEDUP</span><span className="wf-zh">查重预览</span>
+                    <span className="wf-meta">候选读取失败</span>
+                  </div>
+                  <div className="wf-bd">
+                    <div className="wf-status bad" data-testid="kernel-error">
+                      <b data-testid="kernel-error-title">读取查重候选失败：内核数据没读到</b>
+                      <div data-testid="kernel-error-reason">原因：{dedupError ?? '未知错误'}</div>
+                      <div className="wf-note">
+                        这不是「账本为空」——真的没有候选时会明确写「空」。请确认桌面端正在运行
+                        （或主进程未繁忙/库未被锁），然后重试。
+                      </div>
+                      <button type="button" className="btn" data-testid="kernel-retry" onClick={retryDedup}>重试</button>
+                    </div>
+                  </div>
+                </div>
               ) : (
                 <DedupCard result={result} hasContent={draft.content.trim().length > 0} />
               )}

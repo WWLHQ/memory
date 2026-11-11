@@ -49,11 +49,26 @@ describe('WriteForm (T3)', () => {
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ category: 'decision' }));
   });
 
-  it('点击联想标签 → 加入 tags', () => {
+  it('标签联想随内容提取：技术名词成候选、点击加入 tags（不再预置词表）', () => {
     const onChange = vi.fn();
-    render(<WriteForm draft={base} onChange={onChange} onSubmit={vi.fn()} />);
-    fireEvent.click(screen.getByTestId('suggest-pitfall'));
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ tags: ['pitfall'] }));
+    const draft = {
+      ...base,
+      content: 'PostgreSQL 16 的逻辑复制槽在主库切换后会失效，注意 replication slot 清理',
+    };
+    render(<WriteForm draft={draft} onChange={onChange} onSubmit={vi.fn()} />);
+    // 预置词表已删除：tech-stack / pitfall 等常驻 chip 不再出现
+    expect(screen.queryByTestId('suggest-pitfall')).not.toBeInTheDocument();
+    // 候选来自内容：PostgreSQL / replication / slot（数字 16 不配）
+    expect(screen.getByTestId('suggest-PostgreSQL')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('suggest-PostgreSQL'));
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ tags: ['PostgreSQL'] }));
+  });
+
+  it('标签联想：无技术名词的纯中文内容 → 不出候选 chip，给诚实说明', () => {
+    const draft = { ...base, content: '今天天气不错，心情很好，随便写点日常感受记录一下' };
+    render(<WriteForm draft={draft} onChange={vi.fn()} onSubmit={vi.fn()} />);
+    expect(screen.getByTestId('tags-empty')).toHaveTextContent('输入包含技术名词的内容后');
+    expect(screen.queryByTestId(/^suggest-/)).not.toBeInTheDocument();
   });
 
   it('点击「写入记忆」→ 触发 onSubmit', () => {

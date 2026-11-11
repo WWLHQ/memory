@@ -3,8 +3,7 @@
 // session_id/project_id 只读行 → 写入按钮。字段语义与内核契约不变。
 // 提示行全部实算：estimateTokens + 内核 checkL0ToL1Quality（v3 单一真源），不抄效果图样值。
 import type { MemoryCategory, MemoryDraft, SourceKind } from './types.ts';
-import { TAG_SUGGESTIONS } from './spec.ts';
-import { estimateTokens, needsRefine, validateDraft } from './logic.ts';
+import { estimateTokens, needsRefine, suggestTagsFromContent, validateDraft } from './logic.ts';
 import { QUALITY_GATE_VERSION, checkL0ToL1Quality } from '../../core/memagent/qualityGate.ts';
 import { MIN_MEANINGFUL_WITHOUT_FACTS, meaningfulLength } from '../../core/memagent/layerRules.ts';
 
@@ -37,6 +36,7 @@ export function WriteForm({
     if (!draft.tags.includes(t)) onChange({ ...draft, tags: [...draft.tags, t] });
   };
   const removeTag = (t: string) => onChange({ ...draft, tags: draft.tags.filter((x) => x !== t) });
+  const suggestions = suggestTagsFromContent(draft.content, draft.tags);
 
   const gateHint = draft.content.trim().length === 0
     ? '等待输入 · 质量门预判随内容实算'
@@ -93,15 +93,20 @@ export function WriteForm({
             </select>
           </div>
           <div className="wf-tags">
-            <span className="wf-lbl">标签联想</span>
+            <span className="wf-lbl">标签联想（随内容自动提取 · 不预置词表 · 不经大模型）</span>
             <div className="wf-chips">
               {draft.tags.map((t) => (
                 <button type="button" className="wf-chip on" key={t} title="点击移除" onClick={() => removeTag(t)}>{t}</button>
               ))}
-              {TAG_SUGGESTIONS.filter((t) => !draft.tags.includes(t)).slice(0, 8).map((t) => (
+              {suggestions.map((t) => (
                 <button type="button" className="wf-chip" key={t} data-testid={`suggest-${t}`} onClick={() => addTag(t)}>{t}</button>
               ))}
             </div>
+            {suggestions.length === 0 && draft.tags.length === 0 && (
+              <div className="wf-note" data-testid="tags-empty">
+                输入包含技术名词的内容后，候选标签会按出现顺序出现在这里（本地提取 · 需点击确认）。
+              </div>
+            )}
           </div>
         </div>
 

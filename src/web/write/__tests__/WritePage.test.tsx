@@ -1,8 +1,9 @@
-import { beforeEach, describe, it, expect } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import { WritePage } from '../WritePage.tsx';
 import { resetKernelForTests, setKernelL0ForTests } from '../../kernel.ts';
-import { createTestVault } from '../../../core/memagent/__tests__/l0Kit.ts';
+import { createTestVault, TEST_ADMIN_ID } from '../../../core/memagent/__tests__/l0Kit.ts';
+import { SESSION_STORAGE_KEY } from '../../../shared/sessionKey.ts';
 
 describe('WritePage 集成（T5）', () => {
   // 写入必须先有 L0 写密钥（§4.4.4）：注入真 L0Vault（管理密码设置即解锁写密钥）
@@ -98,5 +99,34 @@ describe('WritePage 集成（T5）', () => {
     await waitFor(() => expect(screen.getByTestId('kernel-error')).toBeInTheDocument());
     expect(screen.getByTestId('kernel-error-reason')).toHaveTextContent('E_IPC_TIMEOUT');
     expect(screen.queryByTestId('dedup-card')).not.toBeInTheDocument();
+  });
+
+  it('修复轮2：登录态实时跟随（免刷新）——storage 事件后查重候选重载、解锁卡「未登录」转管理员密码框', async () => {
+    resetKernelForTests();
+    const { vault } = await createTestVault();
+    setKernelL0ForTests({ l0: vault, l0Admin: vault });
+    await vault.lockWrite({ admin_user_id: TEST_ADMIN_ID }); // 锁写密钥，解锁卡才走 need-admin/密码框分支
+    const load = vi.fn(async () => []);
+    render(<WritePage load={load} />);
+    await waitFor(() => expect(screen.getByTestId('l0-unlock-need-admin')).toHaveTextContent('未登录'));
+    const callsBefore = load.mock.calls.length;
+    // 模拟壳层登录：登录发生在壳层文档，写 localStorage + 本 iframe 收 storage 事件
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({
+        context: {
+          enterprise_id: 'e1', team_id: 't1', user_id: TEST_ADMIN_ID,
+          perspective: 'team', session_id: 'sid_e2e_admin', role: 'admin',
+        },
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    )));
+    localStorage.setItem(SESSION_STORAGE_KEY, 'sid_e2e_admin');
+    window.dispatchEvent(new StorageEvent('storage', { key: SESSION_STORAGE_KEY }));
+    // 免刷新：解锁卡直接转管理员分支（出密码框），不再停留在「未登录」
+    await waitFor(() => expect(screen.getByTestId('l0-unlock-password')).toBeInTheDocument());
+    // 三个数据源随 sid 变化整体重载（这里以查重候选的重新拉取为准）
+    await waitFor(() => expect(load.mock.calls.length).toBeGreaterThan(callsBefore));
+    vi.unstubAllGlobals();
+    localStorage.removeItem(SESSION_STORAGE_KEY);
   });
 });
