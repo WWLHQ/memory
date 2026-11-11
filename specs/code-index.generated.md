@@ -3,7 +3,7 @@
 > 由 `npm run code:index` 生成，请勿手改；改代码/文档后重跑即可。
 > 用法：先在本表定位文件与导出符号，再只读该文件的局部区间（省 token、少误改）。
 
-共 382 个源码文件、125 个文档。
+共 382 个源码文件、126 个文档。
 
 ## e2e
 
@@ -520,6 +520,7 @@
 | [specs/tasks/GLOBAL-PARAMS.md](specs/tasks/GLOBAL-PARAMS.md) | 32 | P5 全局参数页 任务拆分（REQ-006 / 17.6 / 2.4.3 / 2.4.4 / 15.1 / 15.3） |
 | [specs/tasks/GROWTH.md](specs/tasks/GROWTH.md) | 34 | P14 自我净化与生长页 任务拆分（REQ-009 / 6.1 / 6.2 / 7.1 / 7.2 / 13.3） |
 | [specs/tasks/HOME-LOGIN.md](specs/tasks/HOME-LOGIN.md) | 244 | 原子任务：首页与登录卡片（REQ-005） |
+| [specs/tasks/INLINE-ATTRIBUTION-AC-TC.md](specs/tasks/INLINE-ATTRIBUTION-AC-TC.md) | 119 | REQ-004 / Agent 界面内联记忆标识 — 字段级 AC / TC |
 | [specs/tasks/INLINE-ATTRIBUTION.md](specs/tasks/INLINE-ATTRIBUTION.md) | 173 | title: 原子任务 · REQ-004 Agent 界面内联记忆标识 |
 | [specs/tasks/LIFECYCLE.md](specs/tasks/LIFECYCLE.md) | 64 | REQ-006 / P4 生命周期页 — 任务拆分（原子任务 · 供 Agent 执行） |
 | [specs/tasks/LLM-CONFIG.md](specs/tasks/LLM-CONFIG.md) | 29 | P13 大模型配置页 任务拆分（REQ-009 / 13.2 / 19.8） |
@@ -1020,7 +1021,7 @@ specs/ROADMAP-批次42-未接线三件套-方案.md df1a6f9d6ed5
 specs/ROADMAP-批次45-租户归一与成员密钥域模型-方案.md 633abaaaad54
 specs/ROADMAP-批次B类-远端PG与多机硬过滤-方案.md 0c7857454a7d
 specs/acceptance.md 664f1bb0d8cf
-specs/code-map.md 84cb132cbf81
+specs/code-map.md 71d410c6c962
 specs/demo-data-baseline.md 1d9af215ac78
 specs/requirements.md 6e72739fe35b
 specs/tasks/AGENT-ONBOARD.md 900d19783798
@@ -1032,6 +1033,7 @@ specs/tasks/FORGETTING.md ffeae5ece068
 specs/tasks/GLOBAL-PARAMS.md edd78e0bf912
 specs/tasks/GROWTH.md 658ccf9fc2e8
 specs/tasks/HOME-LOGIN.md 835294c0f1ef
+specs/tasks/INLINE-ATTRIBUTION-AC-TC.md f49756c7b44f
 specs/tasks/INLINE-ATTRIBUTION.md 47bd9bd52db5
 specs/tasks/LIFECYCLE.md 9c03e85fc540
 specs/tasks/LLM-CONFIG.md 40b08d305f08

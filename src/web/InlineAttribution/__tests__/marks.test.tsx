@@ -51,6 +51,23 @@ describe('T3 MemoryInjectionTag', () => {
     expect(screen.getByTestId('mem-no-trace')).toHaveTextContent('账本无链路');
     expect(onOpenAudit).not.toHaveBeenCalled();
   });
+
+  it('请求有链路：request_id 可跳审计；忘记/标错各回调动作（§2.1 可干预）', () => {
+    const onOpenAudit = vi.fn();
+    const onFeedback = vi.fn();
+    render(
+      <AttributionConfigProvider>
+        <MemoryInjectionTag mark={inj()} onFeedback={onFeedback} onOpenAudit={onOpenAudit} />
+      </AttributionConfigProvider>,
+    );
+    fireEvent.click(screen.getByText('🧠'));
+    fireEvent.click(screen.getByText('req_017'));
+    expect(onOpenAudit).toHaveBeenCalledWith('req_017');
+    fireEvent.click(screen.getByText(/忘记/));
+    expect(onFeedback).toHaveBeenCalledWith('mem_005', 'reject');
+    fireEvent.click(screen.getByText(/这条记错了/));
+    expect(onFeedback).toHaveBeenCalledWith('mem_005', 'disputed');
+  });
 });
 
 describe('T4/T5/T8 普通标记', () => {
@@ -78,6 +95,29 @@ describe('T4/T5/T8 普通标记', () => {
     fireEvent.click(screen.getByText(/分解/));
     expect(screen.getByText(/极简/)).toBeTruthy();
   });
+
+  it('BackgroundChip 展开/收起条目（技术栈/决策 + id，§2.3）', () => {
+    render(<AttributionConfigProvider><BackgroundChip mark={bg} /></AttributionConfigProvider>);
+    expect(screen.getByText(/已带项目背景/)).toBeTruthy();
+    expect(screen.queryByText(/技术栈：FastAPI/)).toBeNull();
+    fireEvent.click(screen.getByText('展开'));
+    expect(screen.getByText(/技术栈：FastAPI（mem_002）/)).toBeTruthy();
+    expect(screen.getByText(/决策：选 FastAPI（mem_009）/)).toBeTruthy();
+    fireEvent.click(screen.getByText('收起'));
+    expect(screen.queryByText(/技术栈：FastAPI/)).toBeNull();
+  });
+
+  it('AttributionSummary 摘要行 + 💾 点击跳审计（§3）', () => {
+    const onOpenAudit = vi.fn();
+    render(
+      <AttributionConfigProvider>
+        <AttributionSummary injections={[inj()]} saving={saving} writeBack={wb} onOpenAudit={onOpenAudit} />
+      </AttributionConfigProvider>,
+    );
+    expect(screen.getByText('来自 1 条记忆 · 省 720 token · 新沉淀 1 条记忆')).toBeTruthy();
+    fireEvent.click(screen.getByText(/已自动 write_memory/));
+    expect(onOpenAudit).toHaveBeenCalledWith('req_018');
+  });
 });
 
 describe('T6 AgingWarnTag（诚实约束：恒显示）', () => {
@@ -94,5 +134,11 @@ describe('T6 AgingWarnTag（诚实约束：恒显示）', () => {
     expect(container.querySelector('.warn-tag[data-kind=evidence_thin]')).toBeTruthy();
     fireEvent.click(screen.getByText(/切事实优先重试/));
     expect(onSwitch).toHaveBeenCalledWith('req_017');
+  });
+  it('aging 可「确实过时」回调 reject −0.05（§2.4）', () => {
+    const onFeedback = vi.fn();
+    render(<AttributionConfigProvider value={lvl('off')}><AgingWarnTag mark={aging} onFeedback={onFeedback} /></AttributionConfigProvider>);
+    fireEvent.click(screen.getByText(/确实过时/));
+    expect(onFeedback).toHaveBeenCalledWith('req_017', 'reject');
   });
 });
