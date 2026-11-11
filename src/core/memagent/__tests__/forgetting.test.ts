@@ -4,6 +4,7 @@ import {
   archiveAgedMemories,
   buildSummary, classifyLayer, clusterSimilar, forgetOne, freshnessOf, hardFilter,
   policyFor, reinforceOne, restoreOne, runForgettingCycle, scoreMemory,
+  fuseRelevance, fusedRelevanceOf, tokenCoverage, RELEVANCE_FUSION_LAMBDA,
 } from '../forgetting.ts';
 import { InMemoryStorage } from '../storage.ts';
 import { DEFAULT_VECTOR_DIM, JsVectorBackend, cosine, embedSync } from '../vector.ts';
@@ -511,5 +512,50 @@ describe('archiveAgedMemories（独立归档趟）', () => {
     await storage.putMemory(mem({ mem_id: 'old2', decay_class: 'cold', created_at: NOW - 400 * DAY }));
     expect(await archiveAgedMemories(storage, NOW, { autoArchiveDays: 365, dryRun: true })).toBe(1);
     expect((await storage.getMemory('old2'))?.decay_class).toBe('cold');
+  });
+});
+
+describe('批次60（A 方案）：query 覆盖率融合，修长文被余弦稀释', () => {
+  it('tokenCoverage：全命中=1、部分命中按比例、无命中与空 query=0', () => {
+    const doc = new Set(['量子', '子纠', '纠缠']);
+    expect(tokenCoverage(['量子', '子纠', '纠缠'], doc)).toBe(1);
+    expect(tokenCoverage(['量子', '显卡'], doc)).toBe(0.5);
+    expect(tokenCoverage(['无关', '词'], doc)).toBe(0);
+    expect(tokenCoverage([], doc)).toBe(0);
+  });
+
+  it('λ=0 逐字返回余弦：这是一键回退旧口径的保证，不是巧合', () => {
+    for (const c of [0, 0.13, 0.42, 0.9, 1]) {
+      expect(fuseRelevance(c, 1, 0)).toBe(c);
+      expect(fuseRelevance(c, 0.3, 0)).toBe(c);
+    }
+  });
+
+  it('覆盖率=0 → 融合分=0：没有共有词不凭空得分（与回显「无命中词不高亮」同口径）', () => {
+    expect(fuseRelevance(0.9, 0)).toBe(0);
+    expect(fusedRelevanceOf('量子纠缠', '数据库连接池配置说明', 0.9)).toBe(0);
+  });
+
+  it('单调性：同一余弦下覆盖率越高分越高；覆盖率=1 时等于 cos^(1-λ)', () => {
+    const c = 0.5;
+    expect(fuseRelevance(c, 0.9)).toBeGreaterThan(fuseRelevance(c, 0.5));
+    expect(fuseRelevance(c, 0.5)).toBeGreaterThan(fuseRelevance(c, 0.2));
+    expect(fuseRelevance(c, 1)).toBeCloseTo(Math.pow(c, 1 - RELEVANCE_FUSION_LAMBDA), 10);
+  });
+
+  it('核心回归：同样内容只是加长，相关度差距必须被显著拉回', () => {
+    const q = '缓存 TTL 过期 超时重试 上限 延迟';
+    const core = '该服务 P99 延迟必须低于 200ms；超时重试上限 3 次；本地缓存 TTL 60s 过期。';
+    const padded = core + '无关填充内容。'.repeat(120);
+    const cosShort = cosine(embedSync(q), embedSync(core));
+    const cosLong = cosine(embedSync(q), embedSync(padded));
+    // 旧口径的病根：正文一变长，余弦直接掉到 30% 以下
+    const ratioCos = cosLong / cosShort;
+    expect(ratioCos).toBeLessThan(0.3);
+    // 新口径：覆盖率仍为 1，比值被拉回 50% 以上
+    const ratioFused = fusedRelevanceOf(q, padded, cosLong) / fusedRelevanceOf(q, core, cosShort);
+    expect(ratioFused).toBeGreaterThan(0.5);
+    // 坦率记录边界：A 方案是「缓解」不是「根治」——长文仍略低于短文，要根治得走 B/C
+    expect(ratioFused).toBeLessThan(1);
   });
 });

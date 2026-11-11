@@ -3,7 +3,7 @@
 import { ulid } from './ulid.ts';
 import { checkL0ToL1Quality, QUALITY_GATE_VERSION } from './qualityGate.ts';
 import { layerSpecOf } from './layerRules.ts';
-import { DEFAULT_VECTOR_DIM, cosine, embedSync } from './vector.ts';
+import { DEFAULT_VECTOR_DIM, cosine, embedSync, tokenize } from './vector.ts';
 import { sha256hex } from './sync.ts';
 import type {
   AuditAction, AuditRecord, Category, DecayClass, Filter, Memory, StorageBackend, VectorBackend,
@@ -63,9 +63,61 @@ export function scoreMemory(
   return Math.round(score * 1000) / 1000;
 }
 
+/**
+ * 批次60（A 方案）query 覆盖率：query 的 token 有多少比例在该条正文里出现过。
+ * 为什么需要它：纯余弦的分母含正文模长，长文被系统性稀释——在真实 2911 条账本上实测
+ * （`node tools/eval-recall.mjs`），长文（>1500 字）Recall@5 仅 1.6%、中位排名 986，
+ * 短文（<500 字）46.3%、中位排名 13。也就是「写得越详细，越搜不到自己」。
+ * 覆盖率与余弦互补：余弦看「整体像不像」，覆盖率看「提问里的概念被覆盖了多少」。
+ */
+export function tokenCoverage(queryTokens: Iterable<string>, docTokens: Set<string>): number {
+  let total = 0;
+  let hit = 0;
+  for (const t of queryTokens) {
+    total += 1;
+    if (docTokens.has(t)) hit += 1;
+  }
+  return total === 0 ? 0 : hit / total;
+}
+
+/**
+ * 默认融合强度（A 方案）。λ=0 退化为纯余弦（旧行为，可回退）；λ=1 退化为纯覆盖率。
+ * 取值依据见 specs/tasks/RECALL-SCORE-FIX.md：用 leave-one-out 评测扫 0.2–0.8，
+ * 但该评测天然偏袒覆盖率（query 取自本条目正文），故不取饱和值，留 40% 余弦语义权重。
+ */
+export const RELEVANCE_FUSION_LAMBDA = 0.6;
+
+/**
+ * 相关度融合：cos^(1-λ) × coverage^λ（几何平均，两项都在 [0,1] 内）。
+ * λ=0 时**逐字返回传入的 cosine**——保证一键回退到旧口径，也让既有测试可原样对照。
+ * 任一项为 0 则整体为 0：没有共有词就不该凭空得高分（与回显「无命中词不高亮」同一口径）。
+ */
+export function fuseRelevance(
+  cosineValue: number,
+  coverage: number,
+  lambda: number = RELEVANCE_FUSION_LAMBDA,
+): number {
+  if (lambda <= 0) return cosineValue;
+  const c = Math.max(0, Math.min(1, cosineValue));
+  const v = Math.max(0, Math.min(1, coverage));
+  if (c <= 0 || v <= 0) return 0;
+  return Math.pow(c, 1 - lambda) * Math.pow(v, lambda);
+}
+
+/** 便捷封装：直接用 query / 正文原文算融合相关度（tokenize 与召回打分同源）。 */
+export function fusedRelevanceOf(
+  query: string,
+  content: string,
+  cosineValue: number,
+  lambda: number = RELEVANCE_FUSION_LAMBDA,
+): number {
+  if (lambda <= 0) return cosineValue;
+  const qTokens = new Set(tokenize(query));
+  return fuseRelevance(cosineValue, tokenCoverage(qTokens, new Set(tokenize(content))), lambda);
+}
+
 /** pinned 免检：直接进候选集（17.8 第一层 / AC-03） */
-export function hardFilter(m: Memory): boolean {
-  if (m.pinned) return true;                          // 免检直进候选
+export function hardFilter(m: Memory): boolean {  if (m.pinned) return true;                          // 免检直进候选
   if (m.confidence !== undefined && m.confidence <= 0.05) return false;
   return m.decay_class === 'hot' || m.decay_class === 'warm'; // 默认只扫 Hot/Warm（AC-11）
 }

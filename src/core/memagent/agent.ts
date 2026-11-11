@@ -4,13 +4,15 @@ import { routeProxy } from './llm.ts';
 import { coreBrowse, coreFeedback, coreGc, coreGcFull, coreMemoryOp, coreWrite } from './memories.ts';
 import { syncDown, syncUp } from './sync.ts';
 import { MemoryPendingStore, PendingWrites, type WriteKnobs } from './pendingWrites.ts';
-import { hardFilter, scoreMemory } from './forgetting.ts';
+import {
+  fuseRelevance, hardFilter, scoreMemory, tokenCoverage, RELEVANCE_FUSION_LAMBDA,
+} from './forgetting.ts';
 import { findParamsSnapshot, proxyCapsFromSnapshot } from './paramsSnapshot.ts';
 import { proxyCostToday } from '../../shared/proxyAccounting.ts';
 import {
   BACKGROUND_MAX_TOKENS, computeRecallSavings, estTokens, normalizeUnitPrice, selectRecallBackground,
 } from './recallInsight.ts';
-import { cosine, embedSync, DEFAULT_VECTOR_DIM } from './vector.ts';
+import { cosine, embedSync, tokenize, DEFAULT_VECTOR_DIM } from './vector.ts';
 import { matchedTerms } from './hitHighlight.ts';
 import type { L0BlobStore } from './l0Store.ts';
 import { ulid } from './ulid.ts';
@@ -160,13 +162,20 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
     // 17.8 第一层：硬过滤（pinned 免检直进候选；默认只扫 Hot/Warm，AC-11）
     const candidates = all.filter((m) => hardFilter(m) && (!minimal || m.decay_class === 'hot' || m.decay_class === 'warm'));
 
-    // 17.8 第二层：轻量打分（relevance=cosine × 17.5 四分量，pinned +0.15）
+    // 17.8 第二层：轻量打分（relevance × 17.5 四分量，pinned +0.15）
+    // 批次60（A 方案）：relevance 由「纯余弦」改成「余弦 × query 覆盖率」几何融合。
+    // 原因（实测）：纯余弦的分母含正文长度，长文被系统性稀释——真实 2911 条账本上
+    // 长文（>1500 字）Recall@5 仅 1.6%、中位排名 986，短文 46.3%、中位排名 13。
+    // λ=0 时 fuseRelevance 逐字返回余弦，等于旧行为（见 forgetting.ts 注释与评测脚本）。
+    const qTokens = RELEVANCE_FUSION_LAMBDA > 0 ? new Set(tokenize(req.query)) : null;
     const scored = candidates
-      .map((m) => ({
-        m,
-        relevance: m.embedding ? cosine(qvec, m.embedding) : 0,
-      }))
-      .map(({ m, relevance }) => ({ m, relevance, score: scoreMemory(m, relevance, now) }))
+      .map((m) => {
+        const cos = m.embedding ? cosine(qvec, m.embedding) : 0;
+        const relevance = qTokens
+          ? fuseRelevance(cos, tokenCoverage(qTokens, new Set(tokenize(m.content))))
+          : cos;
+        return { m, relevance, score: scoreMemory(m, relevance, now) };
+      })
       .sort((a, b) => b.score - a.score)
       .slice(0, topK);
 

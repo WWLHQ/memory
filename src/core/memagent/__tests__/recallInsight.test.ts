@@ -663,3 +663,25 @@ describe('批次59 内核接线：recall 真的产出 matched_terms', () => {
     expect(r.hits[0].matched_terms).toBeUndefined();
   });
 });
+
+describe('批次60（A 方案）端到端：长文记忆不再被稀释到检索不到', () => {
+  it('同一条核心内容撑到 1500+ 字后仍能进 top3（纯余弦口径下会掉到几十名开外）', async () => {
+    const { ma } = makeAgent();
+    const core = '数据库连接池超时：把 maxWait 调整到 5000 毫秒并观察慢查询。';
+    const filler = '本段是无关的历史背景与会议记录，用来把正文撑长。';
+    const long = await ma._seedMemory({
+      content: core + filler.repeat(70),
+      category: 'fact', project_id: 'P1',
+    });
+    // 短干扰项：各含 query 的一部分词、正文很短 → 纯余弦口径下比长文更容易拿高分
+    await ma._seedMemory({ content: '连接池参数配置说明与常见默认值汇总', category: 'fact', project_id: 'P1' });
+    await ma._seedMemory({ content: '慢查询排查笔记：先看执行计划再看索引', category: 'fact', project_id: 'P1' });
+    await ma._seedMemory({ content: 'maxWait 与 connectionTimeout 的区别', category: 'fact', project_id: 'P1' });
+
+    const r = await ma.recall({ query: '连接池 超时 maxWait 调整 毫秒 慢查询', project_id: 'P1', top_k: 3 });
+    expect(r.hits.map((h) => h.mem_id)).toContain(long.mem_id);
+    // 两条链路不冲突：命中词还要照常产出（回显高亮依赖 matched_terms）
+    const hit = r.hits.find((h) => h.mem_id === long.mem_id);
+    expect((hit?.matched_terms ?? []).length).toBeGreaterThan(0);
+  });
+});
