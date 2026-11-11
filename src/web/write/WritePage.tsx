@@ -228,10 +228,6 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
             <div className="wf-col">
               <WriteForm draft={draft} onChange={setDraft} onSubmit={handleSubmit} />
 
-              {draft.content.trim().length > 0 && phase === 'error' && (
-                <KernelLoadError what="读取查重候选（真实账本）" error={dedupError} onRetry={retryDedup} />
-              )}
-
               {receipt && <WriteReceiptCard receipt={receipt} />}
               {refusal && <WriteRefusalCard refusal={refusal} source={draft.source} />}
               {!receipt && !refusal && (
@@ -251,7 +247,12 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
             </div>
 
             <div className="wf-col wf-side">
-              {draft.content.trim().length > 0 && phase !== 'error' && <DedupCard result={result} />}
+              {/* 修复轮：查重卡常驻（空内容给诚实空态）；内核不可达仍如实报错，不画预览分 */}
+              {phase === 'error' ? (
+                <KernelLoadError what="读取查重候选（真实账本）" error={dedupError} onRetry={retryDedup} />
+              ) : (
+                <DedupCard result={result} hasContent={draft.content.trim().length > 0} />
+              )}
               <WriteL0UnlockCard status={l0Status} triggered={l0Locked} onUnlocked={handleUnlocked} />
             </div>
           </div>

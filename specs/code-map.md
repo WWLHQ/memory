@@ -1493,3 +1493,21 @@ status: draft
 > **B·效果验证**：AC→用例映射：定稿版式 → e2e ① masthead WRITE/写入记忆/INGEST + RECENT WRITES 真实空态 + 右栏解锁卡可见 + f-project readonly；表单提交链 → 单测 48 例全绿（含 L0 锁定 → 原地解锁 → 自动重放 → 回执全链）+ e2e ③ 纯浏览器 E_L0_LOCKED 不落明文；质量门实算 → WriteForm 单测拦截码/豁免两态。e2e write 3/3 通过（真 dist + CDP Chromium）。真浏览器 1280px 浅/深全页截图目视：masthead/双栏/通栏与确认效果图逐块对齐，令牌跟随主题，无硬编码色残留。
 > **C·变异验证**：C1 变异点 = `DedupCard.tsx` 命中高亮条件 `is_duplicate ? ' hit' : ''` 注入恒 `' hit'` → 指定测试 `DedupCard.test.tsx`「未命中 → 不高亮」**真实红灯**（1 failed / 14）→ 原样还原 → write 模块 48/48 复绿，`git diff` 无变异残留。C2 输入/状态矩阵：质量门预判 ∈ {空（等待输入）/ <30 有硬事实或技术名词（豁免）/ <30 无（short_low_signal 拦截码）/ ≥30（过门）}；回执四态 create/graft/keep/filtered + 被拒 {锁定（待重放·可解锁）/ 非锁定（不可重放）}；解锁卡 {loading/读取失败/已解锁/未解锁+管理员/未解锁+普通成员/未登录}；最近写入 {loading/error/真实 0 条/filtered 行（filter_code+gate_version）/成功行（dedup+sim+source）}。全部诚实降级，无静默成功。
 > **已知边界**：RECENT WRITES 取最近 3 条成功+filtered 的 write 审计行（被拒请求不入账，如实无行）；masthead 仅 form tab 显示，其余两 tab 沿用旧页头与 showUnlock 解锁入口。注：工作区另有一会话未提交的「58-B」条目描述「无页签单页 / wr-testonly 隐藏钩子」，与本仓工作树代码不符（`wr-testonly` grep 零命中、无对应 stash/提交），待用户裁决后合并——本段以工作树实际代码为准。
+
+### 批次58 修复轮：真机反馈三项（查重卡常驻 · 解锁卡文字色 · 配色对齐首页）（2026-11-11）
+
+> 口径：用户安装版真机截图反馈 ①没有查重预览卡片 ②L0 解锁字体看不清（浅/深都糊）③和首页配色对齐。只动写入表单 tab 视图层，真实数据链路不变。
+
+| 反馈 | 根因 | 修复 |
+|---|---|---|
+| ① 查重卡缺失 | `DedupCard` 仅在正文非空时渲染，首次进页右栏只剩解锁卡 | 右栏常驻：空内容给诚实空态「等待输入 · 输入内容后按当前候选实算词面相似度」（不画 0.00 预览分冒充「查过无重复」，note 也不写阈值结论）；内核不可达仍如实报错不画卡（`WritePage.tsx` 错误态分支移到右栏 DEDUP 位） |
+| ② 解锁卡文字看不清 | `theme.css` 本地派生 `--ok-ink`（浅=白/暗=深绿）与 p0.css `--ok-soft` 淡彩底相反——浅色白字压浅绿底 | 删本地派生，`.wf-status.ok` 文字改 `var(--ok)`（亮 #0E9F6E / 暗 #34D399，p0.css 单一真源），与首页 `var(--ok)` 用法同源 |
+| ③ 配色对齐 | `.wf-btn`/`.wf-chip.on`/`.btn.primary` 写死 `color:#fff`，深色下白字压电青底，与首页 `af-btn.pri` 的 `var(--accent-ink)` 不一致；body 字体栈写死 | 三处文字色改 `var(--accent-ink)`；body 字体改 `var(--sans)`；圆角/底色/强调色本就同源不动 |
+
+测试面：`DedupCard.test.tsx` + `WritePage.test.tsx` 各新增 1 例（空态不画预览分/页面级常驻+空态→实算切换）。
+
+> **修复轮三道闸门证据**：
+> **A·影响面回归**：影响面 = `src/web/write/{WritePage.tsx, DedupCard.tsx, theme.css}` + 两测试文件；未改内核/存储/审计/MCP/端口/其余页面。静态门禁全绿（typecheck 0 错、oxlint 0/0、check:no-demo 0 命中）；全量 `test:gate` **233 文件 / 2703 例 0 失败、重试 0 次**（`test-results/test-gate/20261111-112333/`）。
+> **B·效果验证**：新单测 2 例锁定常驻+空态；e2e write 3/3（真 dist + CDP Chromium）；1280px 浅/深全页截图目视（查重卡常驻、锁定态红字清晰）；注入 `.wf-status.ok` 真样式截图浅/深目视可读（深绿字/浅绿底 ↔ 亮绿字/深绿底）。
+> **C·变异验证**：变异点 = `WritePage.tsx` 摘掉 `hasContent={draft.content.trim().length > 0}`（退回空内容也画分）→ 新用例「查重卡常驻——空内容也渲染」**真实红灯**（1 failed）→ 原样还原 → write 模块 50/50 复绿，无变异残留。
+> **已知边界**：截图环境无真内核解锁态，ok 态对比度用 DOM 注入真样式验证（安装包真机以手测清单 §6.3 为准）；索引已本地刷新但不随本批提交（收尾会话统一）。

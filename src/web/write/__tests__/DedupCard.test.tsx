@@ -58,4 +58,15 @@ describe('DedupCard（批次25 P0-3 诚实化）', () => {
       expect(screen.queryByTestId(id)).not.toBeInTheDocument();
     }
   });
+
+  it('修复轮：空内容 → 诚实空态（不画 0.00 预览分冒充「查过无重复」，note 不写阈值结论）', () => {
+    render(<DedupCard result={make({ is_duplicate: false, score: 0 })} hasContent={false} />);
+    expect(screen.getByTestId('dedup-empty')).toHaveTextContent('输入内容后按当前候选实算词面相似度');
+    expect(screen.queryByTestId('dedup-score')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('dedup-bar')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('dedup-verdict')).not.toBeInTheDocument();
+    expect(screen.getByTestId('dedup-card').className).toBe('wf-card wf-dedup');
+    expect(screen.getByTestId('dedup-note').textContent).not.toContain('低于阈值');
+    expect(screen.getByTestId('dedup-note')).toHaveTextContent('四维');
+  });
 });

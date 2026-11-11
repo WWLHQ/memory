@@ -65,6 +65,17 @@ describe('WritePage 集成（T5）', () => {
     }
   });
 
+  it('修复轮：查重卡常驻右栏——空内容也渲染（诚实空态，不画预览分）', () => {
+    render(<WritePage />);
+    expect(screen.getByTestId('dedup-card')).toBeInTheDocument();
+    expect(screen.getByTestId('dedup-empty')).toHaveTextContent('输入内容后按当前候选实算词面相似度');
+    expect(screen.queryByTestId('dedup-score')).not.toBeInTheDocument();
+    // 输入内容后同一张卡切换为实算预览
+    fireEvent.change(screen.getByTestId('f-content'), { target: { value: '修复轮常驻验证：写入前先看相似度' } });
+    expect(screen.getByTestId('dedup-score')).toBeInTheDocument();
+    expect(screen.queryByTestId('dedup-empty')).not.toBeInTheDocument();
+  });
+
   it('回执：L1 真实产出且仅审计展开；L2–L6 标「未精炼」（未接入 LLM）', async () => {
     render(<WritePage />);
     fireEvent.change(screen.getByTestId('f-content'), { target: { value: '部署脚本需固定 Node 22 LTS，避免 CI 版本漂移' } });

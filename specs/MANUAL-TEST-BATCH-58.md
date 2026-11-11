@@ -6,7 +6,7 @@ status: pending
 
 - 日期：2026-11-11
 - 分支：main（上一笔 `9bc2483`；本批 ahead 待查 `git status -sb`，**未 push，待授权**）
-- 正式安装包：`release/installer/MultiAgent Memory-0.1.0-setup.exe`（127,990,360 B = 122.06 MiB）
+- 正式安装包：`release/installer/MultiAgent Memory-0.1.0-setup.exe`（127,990,360 B = 122.06 MiB；**修复轮已重新打包，最新 SHA256 见 §6.3**）
 - SHA256：`14AC4A62D955648A3DA92DF48FB2929603DF82521C110BF07950F0B61D7133B3`
 - 数据目录：安装包版 `%APPDATA%\MultiAgent Memory`
 - 关联：`specs/code-map.md` 批次58 段落、上一轮 57-D（`92b4b4e`）、用户确认的写入页定稿效果图
@@ -59,3 +59,38 @@ status: pending
 - RECENT WRITES 取账本 action=write 最近 3 条（成功 + 质量门拦截行）；被拒请求不入账、如实无行。
 - masthead 仅「写入表单」tab 显示；其余两 tab 沿用旧页头（含写密钥状态 tag 与「解锁写密钥」按钮）。
 - **并发裁决待办**：工作区存在另一会话未提交的 code-map「58-B」条目，描述「无页签单页 / wr-testonly 隐藏钩子」实现，与本仓代码不符（`wr-testonly` 全仓 grep 零命中、无对应 stash/提交）；本批以工作树实际代码为准，条目取舍待用户裁决。
+
+## 6. 修复轮（2026-11-11 下午 · 用户真机反馈三项）
+
+用户安装版真机反馈：①「没有查询预览卡片」②「L0 解锁字体看不清楚，需要换下颜色，注意深色也是同一的问题」③「和首页的配色对齐」。
+
+### 6.1 改了什么
+
+| 反馈 | 根因 | 修复 | 文件 |
+| --- | --- | --- | --- |
+| ① 没有查重预览卡片 | `DedupCard` 只在正文非空时渲染——真机首次进页右栏只有解锁卡 | 查重卡常驻右栏：空内容给诚实空态「等待输入 · 输入内容后按当前候选实算词面相似度」，不画 0.00 预览分冒充「查过无重复」；内核不可达仍如实报错不画卡（既有契约不变） | `src/web/write/WritePage.tsx`、`src/web/write/DedupCard.tsx` |
+| ② L0 解锁卡文字看不清（浅/深都糊） | `theme.css` 本地派生 `--ok-ink`（浅=白字 / 深=深绿字）与 p0.css `--ok-soft` 淡彩底相反——浅色是白字压浅绿底 | 删除本地派生，`.wf-status.ok` 文字改 `var(--ok)`（p0.css 已按亮暗给浅底可读实色：亮 #0E9F6E / 暗 #34D399），与首页 `var(--ok)` 用法同源；`.wf-status.warn/.bad` 本来就走 `var(--warn)/var(--bad)` 不动 | `src/web/write/theme.css` |
+| ③ 配色与首页对齐 | wf 主按钮/chip 选中态写死 `color: #fff`，深色下是白字压电青底，与首页 `af-btn.pri` 的 `var(--accent-ink)`（深色=墨青字）不一致；body 字体栈写死未走 `var(--sans)` | `.wf-btn` / `.wf-chip.on` / `.btn.primary` 文字色改 `var(--accent-ink)`；body 字体改 `var(--sans)`；圆角/底色/强调色本来同源不动 | `src/web/write/theme.css` |
+
+### 6.2 修复轮自动化门禁
+
+| 门禁 | 结果 |
+| --- | --- |
+| typecheck + oxlint | 0 错误 / 0 警告 |
+| write 模块单测 | **6 文件 / 50 例全绿**（新增 2 例：页面级「空内容查重卡常驻 + 诚实空态」、组件级「空态不画预览分 / note 不写阈值结论」） |
+| 索引 + no-demo | 索引已刷新（382 源码 / 124 文档，**不随本批提交**，留给收尾会话）；check:no-demo 0 命中 |
+| 真浏览器 E2E | `write` 3/3 通过（真 dist + CDP Chromium） |
+| 全量回归（A） | `npm run test:gate` **通过：233 文件 / 2703 例 0 失败、重试 0 次**（报告留档 `test-results/test-gate/20261111-112333/`） |
+| 变异验证（C） | 把 `WritePage` 的 `hasContent={draft.content.trim().length > 0}` 摘掉（退回「空内容也当有内容画分」）→ 新用例「查重卡常驻——空内容也渲染」**真实红灯**（1 failed）→ 原样还原 → 50/50 复绿 |
+| 浅/深截图（B） | 全页两态：查重卡常驻（空态文案）、锁定态红字清晰；另注入 `.wf-status.ok` 真样式截图目视：浅=深绿字/浅绿底、深=亮绿字/深绿底，均可读（`%TEMP%\mam58-shots\ok-state-light.png` / `ok-state-dark.png`） |
+| 正式打包 | `npm run package` 退出码 0（SHA256 见 §6.3） |
+
+### 6.3 修复轮包内校验与真机手测清单（待用户执行）
+
+- 正式安装包：`release/installer/MultiAgent Memory-0.1.0-setup.exe`（重新打包覆盖，127,990,582 B = 122.06 MiB）
+- SHA256：`FC1AB1030D6527D1559FE9CE0B70412F5B2B1EFE3BA4118F23486B2150C64F02`
+- 包内校验：打包流水线新产物 `release/installer/win-unpacked/resources/app.asar`（11:26）内 `write-C7qeigrS.js` + `write-BfKlJE_b.css` 与磁盘 dist 哈希一致；字节级检索五标记全命中：`dedup-empty` / `hasContent`（查重卡常驻）、`等待输入`（诚实空态）、`wf-masthead`（版式骨架）、`解锁并自动重放`（L0 解锁卡）。注：`release/win-unpacked`（09:13 旧残留）被其他进程占用未删，不代表新包内容，以 `release/installer/win-unpacked` 为准。
+- [ ] 覆盖安装进「写入记忆」页：**未输入任何内容时右栏就有「DEDUP 查重预览」卡**，显示「等待输入」空态、无 0.00 分数条；输入内容后同一张卡变为实算相似度条。
+- [ ] 解锁卡两态文字清晰：写密钥未解锁 = 红字浅红底；管理员解锁后 = 绿字浅绿底（**浅/深主题都检查**，此前深色下绿底配深绿字看不清）。
+- [ ] 主按钮「写入记忆」与标签选中 chip：浅色 = 白字电青底、深色 = 墨青字亮青底（与首页按钮一致）。
+- [ ] 整页观感与首页同源（纸灰底/白卡/电青强调/同一字体栈），无突兀色块。
