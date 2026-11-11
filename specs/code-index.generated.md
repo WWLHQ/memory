@@ -520,7 +520,7 @@
 | [specs/tasks/GLOBAL-PARAMS.md](specs/tasks/GLOBAL-PARAMS.md) | 32 | P5 全局参数页 任务拆分（REQ-006 / 17.6 / 2.4.3 / 2.4.4 / 15.1 / 15.3） |
 | [specs/tasks/GROWTH.md](specs/tasks/GROWTH.md) | 34 | P14 自我净化与生长页 任务拆分（REQ-009 / 6.1 / 6.2 / 7.1 / 7.2 / 13.3） |
 | [specs/tasks/HOME-LOGIN.md](specs/tasks/HOME-LOGIN.md) | 244 | 原子任务：首页与登录卡片（REQ-005） |
-| [specs/tasks/INLINE-ATTRIBUTION-AC-TC.md](specs/tasks/INLINE-ATTRIBUTION-AC-TC.md) | 119 | REQ-004 / Agent 界面内联记忆标识 — 字段级 AC / TC |
+| [specs/tasks/INLINE-ATTRIBUTION-AC-TC.md](specs/tasks/INLINE-ATTRIBUTION-AC-TC.md) | 121 | REQ-004 / Agent 界面内联记忆标识 — 字段级 AC / TC |
 | [specs/tasks/INLINE-ATTRIBUTION.md](specs/tasks/INLINE-ATTRIBUTION.md) | 173 | title: 原子任务 · REQ-004 Agent 界面内联记忆标识 |
 | [specs/tasks/LIFECYCLE.md](specs/tasks/LIFECYCLE.md) | 64 | REQ-006 / P4 生命周期页 — 任务拆分（原子任务 · 供 Agent 执行） |
 | [specs/tasks/LLM-CONFIG.md](specs/tasks/LLM-CONFIG.md) | 29 | P13 大模型配置页 任务拆分（REQ-009 / 13.2 / 19.8） |
@@ -1033,7 +1033,7 @@ specs/tasks/FORGETTING.md ffeae5ece068
 specs/tasks/GLOBAL-PARAMS.md edd78e0bf912
 specs/tasks/GROWTH.md 658ccf9fc2e8
 specs/tasks/HOME-LOGIN.md 835294c0f1ef
-specs/tasks/INLINE-ATTRIBUTION-AC-TC.md f49756c7b44f
+specs/tasks/INLINE-ATTRIBUTION-AC-TC.md aea1ad440d59
 specs/tasks/INLINE-ATTRIBUTION.md 47bd9bd52db5
 specs/tasks/LIFECYCLE.md 9c03e85fc540
 specs/tasks/LLM-CONFIG.md 40b08d305f08

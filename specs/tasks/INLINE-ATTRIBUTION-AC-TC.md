@@ -24,10 +24,11 @@
 | AC | 判据（字段 / 行为） | TC | 测试落点 |
 |---|---|---|---|
 | AC-004-10 | 内联 `🧠` 按 `decay_class` 着色（hot/warm/cold/dormant 四色）；**仅 `full` 渲染**，`token_only`/`off` 不挂载 | TC-004-10 | `marks.test.tsx`「四档衰减着色 + 仅 full 渲染」 |
-| AC-004-11 | 弹层含 `memory_id` + `summaryL2` + `decay_class` + 老化提示（有则黄字） | TC-004-11 | `marks.test.tsx`「弹层字段 + 干预回调」 |
+| AC-004-11 | 弹层含 `memory_id` + `summaryL2` + `decay_class` + 老化提示（有则黄字）+ 证据不足分支 | TC-004-11 | `marks.test.tsx`「弹层字段 + 干预回调」「弹层展示 L2 摘要 / 衰减层 / 老化提示与证据不足分支」 |
 | AC-004-12 | `request_id` 非空 → 可点跳审计（`onOpenAudit(req)`） | TC-004-12 | `marks.test.tsx`「请求有链路：request_id 可跳审计；忘记/标错各回调动作」 |
 | AC-004-13 | `request_id` 空串（账本无链路）→ **不渲染假审计链接**，显示「账本无链路」 | TC-004-13 | `marks.test.tsx`「账本无链路：request_id 空串不渲染假审计链接（批次48 A14）」 |
 | AC-004-14 | 三干预按钮：记住→confirm、忘记→reject、这条记错了→disputed | TC-004-14 | `marks.test.tsx`「弹层字段 + 干预回调」+「请求有链路…忘记/标错各回调动作」 |
+| AC-004-15 | 命中片段定位：该条中与本次 query 相关的关键句高亮（§2.1） | — | **未实现（实现缺口，非 TC 缺口）**：`MemoryInjectionTag` 只渲染 L2 摘要，无 query 片段高亮；需产品决策是否补 |
 
 ---
 
@@ -35,7 +36,7 @@
 
 | AC | 判据（字段 / 行为） | TC | 测试落点 |
 |---|---|---|---|
-| AC-004-20 | 展示 `saved`（节省额）；`off` 级别不渲染 | TC-004-20 | `marks.test.tsx`「TokenSavingBar 展开分解」「off 级别不渲染」 |
+| AC-004-20 | 展示 `payload {actual_payload}/{full_baseline}` 与 `saved`；`off` 级别不渲染 | TC-004-20 | `marks.test.tsx`「TokenSavingBar 展开分解」「off 级别不渲染」 |
 | AC-004-21 | 点击可展开 `breakdown` 归因分解（极简 / L2 占位符 / 超支裁剪） | TC-004-21 | `marks.test.tsx`「TokenSavingBar 展开分解」 |
 | AC-004-22 | 基线计算：= 同批记忆全文 token（只算被注入的 memory_id）；无全文对照则 `saved=0`，**不虚构倍数** | TC-004-22 | `useInlineReal.test.ts`「基线 = 同批记忆全文 token」「无全文对照 → 基线 = 实际，saved 0」 |
 
@@ -45,7 +46,7 @@
 
 | AC | 判据（字段 / 行为） | TC | 测试落点 |
 |---|---|---|---|
-| AC-004-30 | 会话头 `📎 已带项目背景 N 条`；`off` 级别不渲染 | TC-004-30 | `marks.test.tsx`「off 级别不渲染」 |
+| AC-004-30 | 会话头 `📎 已带项目背景 N 条`（N = `mark.count`）；`off` 级别不渲染 | TC-004-30 | `marks.test.tsx`「off 级别不渲染」「BackgroundChip 展开/收起条目（技术栈/决策 + id）」 |
 | AC-004-31 | 点击「展开/收起」条目列表；每条含 `KIND_LABEL`（技术栈/约束/决策/踩坑）+ `text` + `id` | TC-004-31 | `marks.test.tsx`「BackgroundChip 展开/收起条目（技术栈/决策 + id）」 |
 
 ---
@@ -110,9 +111,10 @@
 ## 复核命令
 
 ```bash
-npx vitest run src/web/InlineAttribution src/inlineAttribution   # 37 例（marks 11 + config 6 + demo 9 + float 4 + badge 2 + useInlineReal 5）
+npx vitest run src/web/InlineAttribution src/inlineAttribution   # 38 例（marks 12 + config 6 + demo 9 + float 4 + badge 2 + useInlineReal 5）
 npx playwright test e2e/inlineAttribution.spec.ts                # 4 例（需真 dist 产物；本机带 CODEBUDDY_SAFE_DELETE_ENABLED=0）
 npm run typecheck && npm run lint                                # 静态门禁
 ```
 
-> 本轮新增 TC（此前字段已实现但无对应用例）：AC-004-12/14（request_id 跳转 + 忘记/标错）、AC-004-31（背景卡展开/收起）、AC-004-41（过时 reject）、AC-004-60/61（摘要行 + 💾 跳审计）。
+> 本轮新增 TC（此前字段已实现但无对应用例）：AC-004-12/14（request_id 跳转 + 忘记/标错）、AC-004-31（背景卡展开/收起）、AC-004-41（过时 reject）、AC-004-60/61（摘要行 + 💾 跳审计）、AC-004-11（弹层 L2 摘要 / 衰减层 / 老化提示 / 证据不足分支）、AC-004-20（`payload actual/full_baseline`）、AC-004-30（背景条数 `count`）。
+> 仍存在的实现缺口（非 TC）：AC-004-15「命中片段高亮」未实现，待产品决策。

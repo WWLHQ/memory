@@ -68,6 +68,19 @@ describe('T3 MemoryInjectionTag', () => {
     fireEvent.click(screen.getByText(/这条记错了/));
     expect(onFeedback).toHaveBeenCalledWith('mem_005', 'disputed');
   });
+
+  it('弹层展示 L2 摘要 / 衰减层 / 老化提示与证据不足分支（§2.1·§2.4）', () => {
+    render(
+      <AttributionConfigProvider>
+        <MemoryInjectionTag mark={inj({ aging_hint: '这条 45 天前记录，请校验', evidence_thin: true })} />
+      </AttributionConfigProvider>,
+    );
+    fireEvent.click(screen.getByText('🧠'));
+    expect(screen.getByText('约束 <200ms')).toBeTruthy();
+    expect(screen.getByText(/decay_class=cold/)).toBeTruthy();
+    expect(screen.getByText(/45 天前记录，请校验/)).toBeTruthy();
+    expect(screen.getByText(/证据不足，已补查 Cold 层/)).toBeTruthy();
+  });
 });
 
 describe('T4/T5/T8 普通标记', () => {
@@ -91,14 +104,16 @@ describe('T4/T5/T8 普通标记', () => {
 
   it('TokenSavingBar 展开分解', () => {
     render(<AttributionConfigProvider><TokenSavingBar saving={saving} /></AttributionConfigProvider>);
+    expect(screen.getByText(/780\/1500/)).toBeTruthy();
     expect(screen.getByText('720')).toBeTruthy();
     fireEvent.click(screen.getByText(/分解/));
     expect(screen.getByText(/极简/)).toBeTruthy();
   });
 
   it('BackgroundChip 展开/收起条目（技术栈/决策 + id，§2.3）', () => {
-    render(<AttributionConfigProvider><BackgroundChip mark={bg} /></AttributionConfigProvider>);
+    const { container } = render(<AttributionConfigProvider><BackgroundChip mark={bg} /></AttributionConfigProvider>);
     expect(screen.getByText(/已带项目背景/)).toBeTruthy();
+    expect(container.querySelector('.bgmark b')?.textContent).toBe('2');
     expect(screen.queryByText(/技术栈：FastAPI/)).toBeNull();
     fireEvent.click(screen.getByText('展开'));
     expect(screen.getByText(/技术栈：FastAPI（mem_002）/)).toBeTruthy();
