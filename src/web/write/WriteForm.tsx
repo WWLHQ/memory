@@ -93,7 +93,7 @@ export function WriteForm({
             </select>
           </div>
           <div className="wf-tags">
-            <span className="wf-lbl">标签联想（随内容自动提取 · 不预置词表 · 不经大模型）</span>
+            <span className="wf-lbl">标签联想</span>
             <div className="wf-chips">
               {draft.tags.map((t) => (
                 <button type="button" className="wf-chip on" key={t} title="点击移除" onClick={() => removeTag(t)}>{t}</button>

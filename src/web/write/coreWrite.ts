@@ -110,17 +110,23 @@ export async function coreWriteReceipts(limit = 10): Promise<WriteReceiptHistory
       const sim = typeof d.score === 'number' ? d.score : null;
       const memId = typeof d.mem_id === 'string' ? d.mem_id : null;
       const layerKeys = typeof d.layers === 'object' && d.layers !== null ? Object.keys(d.layers) : [];
+      const filterCode = typeof d.filter_code === 'string' ? d.filter_code : null;
       return {
         request_id: a.request_id,
         ts: a.ts,
         action: a.action,
-        result: dedup === 'filtered' ? '质量门拦截' : dedup === 'grafted' ? 'graft 嫁接' : dedup === 'new' ? 'create 新建' : dedup,
+        // 质量门拦截行不带 dedup 字段（filter_code 在才拦），结果列不得显示「无」冒充未知
+        result: dedup === 'filtered' ? '质量门拦截'
+          : dedup === 'grafted' ? 'graft 嫁接'
+            : dedup === 'new' ? 'create 新建'
+              : filterCode ? 'filtered · 质量门拦截'
+                : dedup,
         dedup,
         sim,
         memory_id: memId,
         layers: layerKeys.length > 0 ? layerKeys.join(' / ') : '未取数',
         source: typeof d.source_agent === 'string' ? d.source_agent : (a.agent ?? '无'),
-        filter_code: typeof d.filter_code === 'string' ? d.filter_code : null,
+        filter_code: filterCode,
         gate_version: typeof d.gate_version === 'number' ? d.gate_version : null,
       };
     });

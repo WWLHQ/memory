@@ -12,6 +12,7 @@ vi.mock('../../shared/session.ts', () => ({
 import { WritePage } from '../WritePage.tsx';
 import { resetKernelForTests, setKernelL0ForTests } from '../../kernel.ts';
 import { createTestVault, TEST_ADMIN_PW, TEST_ADMIN_ID } from '../../../core/memagent/__tests__/l0Kit.ts';
+import { L0_WRITE_LOCK_SIGNAL_KEY } from '../../shared/l0WriteLockSignal.ts';
 
 describe('WritePage · 批次41-W L0 写密钥锁定', () => {
   async function unlockedVault() {
@@ -48,6 +49,8 @@ describe('WritePage · 批次41-W L0 写密钥锁定', () => {
     await waitFor(() => expect(screen.getByTestId('receipt')).toBeInTheDocument());
     expect(screen.getByTestId('receipt-id')).toHaveTextContent(/^mem_/);
     expect(screen.getByTestId('l0-unlock-done')).toBeInTheDocument(); // 解锁成功后卡转已解锁态
+    // 修复轮4：解锁成功广播写锁变化信号 → 首页红条/壳层状态栏的 storage 监听会立刻重读真实锁状态
+    expect(localStorage.getItem(L0_WRITE_LOCK_SIGNAL_KEY)).toBeTruthy();
   });
 
   it('解锁失败（密码错）→ 原地报错、密码被清、不谎称解锁', async () => {

@@ -9,6 +9,7 @@ import { useState } from 'react';
 import { getKernel } from '../kernel.ts';
 import { useSessionContext } from './session.ts';
 import { kernelErrorText } from './kernelLoad.tsx';
+import { signalL0WriteLockChanged } from './l0WriteLockSignal.ts';
 
 export interface L0WriteUnlockProps {
   /** 失败来自哪条通道（「手动写入」/「后台采集」），出现在提示语里让用户知道是谁被挡住了 */
@@ -37,6 +38,8 @@ export function L0WriteUnlock({ scene, onUnlocked }: L0WriteUnlockProps) {
         await getKernel().l0UnlockWrite(password);
         setPassword('');
         setUnlocked(true);
+        // 广播写锁变化信号：首页红条与壳层状态栏监听 storage 后立刻重读真实锁状态
+        signalL0WriteLockChanged();
         onUnlocked?.();
       } catch (e) {
         // 失败原因原样显示（内核会给「密码不符/未播种」等真实文案），但密码本身不留任何痕迹

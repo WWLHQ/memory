@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { getKernel } from '../kernel.ts';
 import { useSessionContext } from '../shared/session.ts';
 import { kernelErrorText } from '../shared/kernelLoad.tsx';
+import { signalL0WriteLockChanged } from '../shared/l0WriteLockSignal.ts';
 
 export interface L0UnlockStatus {
   phase: 'loading' | 'ready' | 'error';
@@ -52,6 +53,8 @@ export function WriteL0UnlockCard({
         await getKernel().l0UnlockWrite(password);
         setPassword('');
         setUnlocked(true);
+        // 广播写锁变化信号：首页红条与壳层状态栏监听 storage 后立刻重读真实锁状态
+        signalL0WriteLockChanged();
         onUnlocked?.();
       } catch (e) {
         setPassword('');
@@ -65,7 +68,7 @@ export function WriteL0UnlockCard({
   return (
     <div className="wf-card wf-unlock">
       <div className="wf-hd">
-        <span className="wf-zh">写密钥解锁</span>
+        <span className="wf-zh">就地解锁</span>
         <span className="wf-meta">{meta}</span>
       </div>
       <div className="wf-bd">
@@ -92,23 +95,21 @@ export function WriteL0UnlockCard({
             {role === 'admin' ? (
               <>
                 <label className="wf-lbl" htmlFor="l0-unlock-password">L0 管理密码（仅管理员 · 成功失败都立刻清空）</label>
-                <div className="wf-unlock-row">
-                  <input
-                    id="l0-unlock-password"
-                    className="wf-in"
-                    type="password"
-                    data-testid="l0-unlock-password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
-                    placeholder="L0 管理密码"
-                    disabled={busy}
-                    autoComplete="off"
-                  />
-                  <button type="button" className="wf-btn" data-testid="l0-unlock-submit" disabled={busy} onClick={submit}>
-                    {busy ? '解锁中…' : '解锁并自动重放'}
-                  </button>
-                </div>
+                <input
+                  id="l0-unlock-password"
+                  className="wf-in"
+                  type="password"
+                  data-testid="l0-unlock-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
+                  placeholder="L0 管理密码"
+                  disabled={busy}
+                  autoComplete="off"
+                />
+                <button type="button" className="wf-btn" data-testid="l0-unlock-submit" disabled={busy} onClick={submit}>
+                  {busy ? '解锁中…' : '解锁并自动重放'}
+                </button>
                 <div className="wf-note">
                   解锁成功后自动重放被挡那条，无需再点写入 · 密码只用于本次解锁，不显示、不落盘、不进日志。
                 </div>

@@ -283,7 +283,9 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
           </div>
 
           <WriteRecentWritesCard
-            rows={history.rows.slice(0, 3)}
+            // 修复轮4 口径：最近写入只统计真实落库行（create/graft/keep）；
+            // 质量门拦截（filter_code 在）不是写入——mem_id 未写入、层未产生，不计入
+            rows={history.rows.filter((r) => r.filter_code === null).slice(0, 3)}
             phase={history.phase}
             error={history.error}
           />
@@ -300,23 +302,23 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
       )}
 
       {tab === 'rules' && (
-        <div className="p0-grid3">
-          <div className="p0-card">
-            <div className="p0-hd"><h3>四类回执</h3></div>
-            <div className="p0-kvlist">
+        <div className="wf-grid3">
+          <div className="wf-card">
+            <div className="wf-hd"><span className="wf-zh">四类回执</span><span className="wf-meta">结果由内核写路径自动裁决</span></div>
+            <div className="wf-bd">
               {RECEIPT_RULES.map((r) => (
-                <div className="p0-kvitem" key={r.k}>
-                  <b className="mono">{r.label}</b>
-                  <span>{r.body}</span>
+                <div className="wf-kv" key={r.k}>
+                  <span className="wf-k mono">{r.label}</span>
+                  <span className="wf-v">{r.body}</span>
                 </div>
               ))}
             </div>
-            <div className="p0-note">不提供用户可选的「合并/覆盖/保留」按钮：结果由内核写路径自动裁决。</div>
+            <div className="wf-note">不提供用户可选的「合并/覆盖/保留」按钮：结果由内核写路径自动裁决。</div>
           </div>
 
-          <div className="p0-card">
-            <div className="p0-hd"><h3>L1–L6 上限（内核 LAYER_SPECS）</h3></div>
-            <table className="p0-table">
+          <div className="wf-card">
+            <div className="wf-hd"><span className="wf-zh">L1–L6 上限（内核 LAYER_SPECS）</span></div>
+            <table className="wf-rt">
               <thead><tr><th>层</th><th>名称</th><th>上限</th><th>下限</th></tr></thead>
               <tbody>
                 {LAYER_SPECS.map((s) => (
@@ -329,18 +331,18 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
                 ))}
               </tbody>
             </table>
-            <div className="p0-note">正文计数按定稿 300 字提示；内核 L1 当前不限长，L2 摘要按 300 字生成。</div>
+            <div className="wf-note">正文计数按定稿 300 字提示；内核 L1 当前不限长，L2 摘要按 300 字生成。</div>
           </div>
 
-          <div className="p0-card">
-            <div className="p0-hd"><h3>失败与诚实态</h3></div>
-            <ul className="p0-bullets">
+          <div className="wf-card">
+            <div className="wf-hd"><span className="wf-zh">失败与诚实态</span></div>
+            <ul className="wf-bullets">
               <li>写密钥未解锁：原文无法封成密文 → 内核拒绝，界面显示拒绝原因与 request_id（未签发则如实写「未签发」），并把本条放入 pendingWrites 待重放。</li>
               <li>L0→L1 质量门拦截：不伪造 success，回执明确 filtered 且 memory_id 为空。</li>
               <li>内核不可达：查重候选读取失败如实报错，不冒充「无候选」，不画预览分。</li>
               <li>回执只读：不可编辑、不提供重放按钮；最近回执取账本 action=write 审计行。</li>
             </ul>
-            <div className="p0-note">正文上限提示 = {L1_CHAR_LIMIT} 字；超出不拦截，以内核真实写入为准。</div>
+            <div className="wf-note">正文上限提示 = {L1_CHAR_LIMIT} 字；超出不拦截，以内核真实写入为准。</div>
           </div>
         </div>
       )}

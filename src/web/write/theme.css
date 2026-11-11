@@ -94,10 +94,12 @@ textarea.wf-in, select.wf-in { width: 100%; }
 .wf-v { font-size: 12px; color: var(--ink); word-break: break-all; }
 .wf-v.mono { font-family: var(--mono); font-size: 11.5px; }
 
-.wf-lrow { border-top: 1px solid var(--line); padding-top: 6px; }
-.wf-lrow summary { font-size: 11.5px; color: var(--ink); cursor: pointer; }
-.wf-audit { color: var(--warn); font-size: 10.5px; margin-top: 4px; }
-.wf-layer-body { font-size: 11px; color: var(--muted); margin-top: 4px; white-space: pre-wrap; }
+/* 修复轮4：回执不再逐层展示 L1–L6（wf-lrow/wf-audit/wf-layer-body 已删） */
+
+/* 最近写入 / 最近回执的动作业徽标 */
+.wf-badge { font-size: 11px; font-weight: 700; }
+.wf-badge.ok { color: var(--ok); }
+.wf-badge.warn { color: var(--warn); }
 
 /* 查重预览卡 */
 .wf-dedup { border-left: 3px solid var(--accent); }
@@ -110,8 +112,8 @@ textarea.wf-in, select.wf-in { width: 100%; }
 .wf-verdict { font-size: 11px; color: var(--muted); }
 .wf-near { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--ink); }
 
-/* L0 解锁卡 */
-.wf-unlock .wf-unlock-row { display: flex; gap: 8px; }
+/* L0 解锁卡（修复轮4：标题「就地解锁」，密码框与按钮各占整行） */
+.wf-unlock .wf-btn { width: 100%; }
 
 /* masthead（修复轮3 上移到 tab 栏上方常驻）+ 双栏 + 最近写入通栏 */
 .wf-masthead { display: flex; align-items: baseline; gap: 12px; margin: 2px 0 14px; flex-wrap: wrap; }
@@ -130,9 +132,15 @@ textarea.wf-in, select.wf-in { width: 100%; }
 .wf-rt td { border-bottom: 1px solid var(--line); padding: 6px 8px; color: var(--ink); }
 .wf-rt tr:last-child td { border-bottom: none; }
 .wf-rt .mono { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.wf-rt .num { text-align: right; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+
+/* 修复轮4：查重与 L0 规则 tab（三卡）与最近回执 tab 同 wf 版式 */
+.wf-grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; align-items: start; }
+.wf-bullets { margin: 0; padding-left: 18px; font-size: 11.5px; color: var(--ink); display: grid; gap: 6px; line-height: 1.6; }
 
 @media (max-width: 900px) {
   .wf-cols { grid-template-columns: 1fr; }
   .wf-row3 { grid-template-columns: 1fr; }
   .wf-row2 { grid-template-columns: 1fr; }
+  .wf-grid3 { grid-template-columns: 1fr; }
 }

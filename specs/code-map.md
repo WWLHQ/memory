@@ -1546,3 +1546,24 @@ status: draft
 > **B·效果验证**：新单测 3 例锁定（project 可改 + 清空被拦 / masthead 在 tab 栏上方常驻且回执规则 tab 无旧头部行 / 英文缀标零残留）；e2e write 3/3（真 dist + CDP Chromium）；1280px 浅/深全页截图目视：masthead 无英文、写密钥状态在右侧、卡片标题全中文、project_id「必填 · 可修改」、标签候选仍随内容提取。
 > **C·变异验证**：变异点 = `WriteForm.tsx` project_id 输入加回 `readOnly` → 用例「project_id 用户可修改」**真实红灯**（1 failed）→ 原样还原 → write 模块 58/58 复绿，无变异残留。
 > **已知边界**：project_id 改为自由输入——账本已有项目列表仍作为默认值跟随（挂载时 effect），用户可输入任意新项目名（内核按 project_id 落账）；masthead 上移后写密钥状态三 tab 可见，解锁按钮在未解锁时才出现；打包 SHA256 与包内标记见 `specs/MANUAL-TEST-BATCH-58.md` §8.2。
+
+## 批次58 修复轮4：回执瘦身 + 效果图对齐审查 + 两 tab 版式 + 解锁信号 + 最近写入口径（2026-11-11）
+
+**用户反馈五项**：① 回执只显示当前这条，无需 L1–L6；② 布局仍与确认效果图（`mam58-write-preview.html`）不同，要求彻底审查；③ 最近回执/查重与 L0 规则两卡与写入表单配色格式对齐；④ 写入页已解锁但首页密钥锁仍「未解锁」；⑤ 最近没有写入为何还统计——统计逻辑是什么。
+
+**彻底审查结论（②）**：实现与效果图的三类偏差来源——(a) 前几轮叠加物：回执卡的 L1–L6 逐层列表（批次41-W 遗产）、被拒卡多出的「原因」行与自绘标题、标签联想长 label（修复轮2 措辞）；(b) 从未跟上的部分：解锁卡标题/按钮排布、最近写入 meta 文案与动作业徽标；(c) 修复轮3 用户拍板与效果图不同且**保留不改**：英文缀标已删、project_id 已可改——这两处按用户指令覆盖效果图。
+
+**改动**：
+- `src/web/write/WriteReceiptCard.tsx`：成功回执删 L1–L6 逐层列表（layer-* / wf-lrow 全撤），头 meta 改「request_id · 已落库」；被拒卡对齐效果图（标题「写入回执」、meta「req · 待解锁重放」、横幅「写入被 L0 锁定挡下（E_L0_LOCKED）· 解锁后自动重放并出示回执」、L0 场景撤冗余「原因」行）；最近写入卡 meta 改「写入只落 L0 密文 + 脱敏 L1 · 深层交后台补炼 · 审计为证」、动作业加 wf-badge 彩标；最近回执 tab 整卡改 wf 版式（wf-card/wf-rt/btn 刷新）。
+- `src/web/write/WriteL0UnlockCard.tsx`：标题改「就地解锁」；密码框/按钮各占整行；**解锁成功后广播 `signalL0WriteLockChanged()`**；`src/web/shared/L0WriteUnlock.tsx` 同样补发——④ 根因：信号此前只在安全页路径（coreSecurity）发，写入页两条解锁路径直接调 `l0UnlockWrite` 不发信号，首页（storage→reload）与壳层状态栏（onL0WriteLockChanged→refreshStatus）收不到重读通知。
+- `src/web/write/WriteForm.tsx`：标签联想 label 回归效果图短文案「标签联想」（空态说明保留诚实措辞）。
+- `src/web/write/coreWrite.ts`：`coreWriteReceipts` 结果列——质量门拦截行不带 dedup 字段时不再显示「无」，改「filtered · 质量门拦截」（⑤ 口径解释：统计源 = 账本审计 action=write，拦截也记账；但拦截不是写入）。
+- `src/web/write/WritePage.tsx`：最近写入通栏只喂 `filter_code === null` 的真实落库行；查重与 L0 规则 tab 三卡改 wf 版式（wf-grid3/wf-card/wf-rt/wf-bullets）。
+- `src/web/write/theme.css`：删 wf-lrow/wf-audit/wf-layer-body/wf-unlock-row；新增 wf-badge（ok/warn）、wf-grid3、wf-bullets、wf-rt .num、wf-unlock 按钮整行。
+- 测试：`WritePage.test.tsx` 层级用例改「不再逐层展示」+ 新增 filtered 不计入最近写入 + 两 tab wf 版式；`WritePage.l0locked.test.tsx` 解锁成功断言信号键已写。
+
+**三道闸门证据**：
+> **A·影响面回归**：影响面 = `src/web/write/{WriteReceiptCard,WriteL0UnlockCard,WriteForm,coreWrite,WritePage,theme.css}` + `src/web/shared/L0WriteUnlock.tsx` + `WritePage.test.tsx` + `WritePage.l0locked.test.tsx`；未改内核/存储/审计/MCP/端口/session.ts/e2e（修复轮3 的 e2e 断言本轮无需再改）。静态门禁全绿（typecheck 0 错、oxlint 0/0、check:no-demo 0 命中）；全量 test:gate **233 文件 / 2713 例 0 失败、重试 0 次**（`test-results/test-gate/20261111-144356/`）。
+> **B·效果验证**：write 模块单测 60/60（13+11+其余文件），关键锁定：回执无 L1–L6 逐层展示 + 含「界面不再逐层展示」文案；filtered 行不进最近写入通栏（recent-writes-empty 含「质量门拦截不是写入，不计入」）；两 tab 同版式（`.wf-card .wf-rt` / `.wf-grid3 > .wf-card`×3）；l0locked 解锁成功后 `memdesk.l0.writeLockSignal.v1` 信号键已写。e2e write 3/3（真 dist + CDP Chromium）；1280px 浅/深全页截图目视：回执瘦身版式、就地解锁标题与整行控件、最近写入 meta/徽标、查重卡对齐均与确认效果图一致。
+> **C·变异验证**：变异点 = `WritePage.tsx` 最近写入 feed 去掉 `filter_code === null` 过滤 → 用例「修复轮4：质量门拦截不是写入——最近写入通栏不统计 filtered 行」**真实红灯**（13 例中 1 failed，其余 12 过）→ 原样还原 → 13/13 复绿，无变异残留。
+> **已知边界**：最近回执 tab 仍含 filtered 行（回执契约：filtered 也出回执，与「最近写入」口径不同是设计而非不一致）；L0WriteUnlock 共享组件补发信号对其它使用页是行为增强（首页/状态栏更快跟随），无破坏性。

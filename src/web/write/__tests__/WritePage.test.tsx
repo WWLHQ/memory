@@ -1,5 +1,5 @@
 import { beforeEach, describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { WritePage } from '../WritePage.tsx';
 import { resetKernelForTests, setKernelL0ForTests } from '../../kernel.ts';
 import { createTestVault, TEST_ADMIN_ID } from '../../../core/memagent/__tests__/l0Kit.ts';
@@ -30,6 +30,29 @@ describe('WritePage 集成（T5）', () => {
     fireEvent.change(proj, { target: { value: '   ' } });
     expect(screen.getByTestId('submit')).toBeDisabled();
     expect(screen.getByTestId('form-errors').textContent).toContain('project_id 必填');
+  });
+
+  it('修复轮4：质量门拦截不是写入——最近写入通栏不统计 filtered 行（mem_id 未写入、层未产生）', async () => {
+    render(<WritePage />);
+    // 短且无硬事实 → 内核质量门拦截（filtered，出回执但不落库）
+    fireEvent.change(screen.getByTestId('f-content'), { target: { value: '嗯' } });
+    fireEvent.click(screen.getByTestId('submit'));
+    await waitFor(() => expect(screen.getByTestId('receipt')).toBeInTheDocument());
+    expect(screen.getByTestId('receipt').textContent).toContain('质量门拦截');
+    // 审计里有 filtered 行，但「最近写入」按真实落库口径 → 空
+    await waitFor(() => expect(screen.getByTestId('recent-writes-empty')).toBeInTheDocument());
+    expect(screen.getByTestId('recent-writes-empty').textContent).toContain('质量门拦截不是写入，不计入');
+  });
+
+  it('修复轮4：查重与 L0 规则 / 最近回执两 tab 与写入表单同版式（wf-card）', async () => {
+    render(<WritePage />);
+    fireEvent.change(screen.getByTestId('f-content'), { target: { value: '两 tab 版式对齐验证：写入一条真实记忆' } });
+    fireEvent.click(screen.getByTestId('submit'));
+    await waitFor(() => expect(screen.getByTestId('receipt')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('write-tab-receipts'));
+    await waitFor(() => expect(document.querySelector('.wf-card .wf-rt')).not.toBeNull());
+    fireEvent.click(screen.getByTestId('write-tab-rules'));
+    expect(document.querySelectorAll('.wf-grid3 > .wf-card').length).toBe(3);
   });
 
   it('修复轮3：masthead 在 tab 栏上方常驻；回执/规则 tab 不再出现「写入记忆 · ma.write」头部行', () => {
@@ -111,18 +134,18 @@ describe('WritePage 集成（T5）', () => {
     expect(screen.queryByTestId('dedup-empty')).not.toBeInTheDocument();
   });
 
-  it('回执：L1 真实产出且仅审计展开；L2–L6 标「未精炼」（未接入 LLM）', async () => {
+  it('修复轮4：回执不再逐层展示 L1–L6（只显示当前这条的回执字段）；精炼口径保留', async () => {
     render(<WritePage />);
     fireEvent.change(screen.getByTestId('f-content'), { target: { value: '部署脚本需固定 Node 22 LTS，避免 CI 版本漂移' } });
     fireEvent.click(screen.getByTestId('submit'));
     await waitFor(() => expect(screen.getByTestId('receipt')).toBeInTheDocument());
+    expect(screen.getByTestId('receipt-id')).toHaveTextContent(/^mem_/);
+    // 修复轮4 契约：界面不再渲染任何 layer-* 分层块
     for (const ln of ['L1', 'L2', 'L3', 'L4', 'L5', 'L6']) {
-      expect(screen.getByTestId(`layer-${ln}`)).toBeInTheDocument();
+      expect(screen.queryByTestId(`layer-${ln}`)).not.toBeInTheDocument();
     }
-    expect(within(screen.getByTestId('layer-L1')).getByText(/仅审计可展开原文/)).toBeInTheDocument();
-    for (const ln of ['L2', 'L3', 'L4', 'L5', 'L6']) {
-      expect(within(screen.getByTestId(`layer-${ln}`)).getByText(/未精炼（未接入 LLM）/)).toBeInTheDocument();
-    }
+    expect(screen.getByTestId('receipt').textContent).toContain('界面不再逐层展示');
+    expect(screen.getByTestId('receipt').textContent).toContain('未精炼（未接入 LLM）');
   });
 
   it('内核不可达 → 查重候选如实报错（不冒充「无候选」），错误态不画查重卡', async () => {
