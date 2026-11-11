@@ -595,7 +595,9 @@ export type AuditAction =
   | 'mode_dispatch' | 'sync_up' | 'sync_down' | 'sync_reconcile' | 'rerank_fallback'
   | 'team_assign' | 'audit_delete' | 'archive' | 'l0_auth_fail'
   // 第一轮个人记忆本机闭环：quick_add / confirm / reject / revoke / delete 各写一条
-  | 'personal_memory';
+  | 'personal_memory'
+  // 批次47（L3）：MCP(HTTP 8204) 每次工具调用写一条，供算「首调合规率」（本会话首个 tools/call 是否为 recall_memory）
+  | 'mcp_call';
 
 export interface AuditRef {
   request_id: string;

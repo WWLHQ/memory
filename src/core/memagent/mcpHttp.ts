@@ -16,12 +16,12 @@ import { ulid } from './ulid.ts';
 import { assertMcpToken, tokenFromHeaders, DEFAULT_MCP_ACCOUNT, projectInScope, type McpAccount } from './mcpAuth.ts';
 import { resolveAccountFor, type TokenStorePort } from './tokenStore.ts';
 import type { MemberStorePort } from './memberStore.ts';
-import { MCP_INSTRUCTIONS, MCP_TOOLS } from './mcpSchema.ts';
+import { MCP_INSTRUCTIONS, withRecallFirstNotes, RECALL_FIRST_REMINDER, RECALL_FIRST_GATE_MSG, RECALL_SOURCE_BOUNDARY } from './mcpSchema.ts';
 import { runListProjectsTool, runRecallTool, type RecallDisplayMode } from './mcpRecall.ts';
 import { RecallDetailTickets } from './recallDetailTickets.ts';
 import { buildRecallDetailExpiredPage } from './recallInsight.ts';
 import { rejectUntrustedHost } from '../../shared/localOrigin.ts';
-import type { StorageBackend, Pref, L0Port, MemReq, WriteResult } from './types.ts';
+import type { StorageBackend, Pref, L0Port, MemReq, WriteResult, AuditRecord } from './types.ts';
 import { CATEGORIES, isCategory } from './types.ts';
 import { parseWriteKnobs } from './memories.ts';
 import { isL0LockedError } from './errors.ts';
@@ -166,6 +166,12 @@ export interface McpHttpHandle {
 
 const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
 
+/** 批次47（L2）：受「首步召回」硬门禁约束的写入/治理类工具（读类与 recall 自身不在内）。
+ *  可靠会话（带 Mcp-Session-Id）尚未召回即调用它们 → 服务端硬拦；读类只软提醒，不硬拦。 */
+const WRITE_GATE_TOOLS = new Set([
+  'write_memory', 'manage_memory', 'feedback', 'gc_report', 'create_project', 'mint_token',
+]);
+
 /** 结果末块：模型未必读 initialize.instructions，这里再要求一次展示方式。
  *  文案按本次实际下发的档位（批次32-C），与 display.markdown 严格一致：
  *  HTML 折叠版（实测渲染过 <details> 的 Qoder）/ 纯 Markdown 四小节（detail=true 主动要明细）/
@@ -173,17 +179,17 @@ const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
 export function recallEchoNote(mode: RecallDisplayMode): string {
   const keep = '数字与金额不得改写、省略或补全。';
   if (mode === 'html-details') {
-    return '【展示要求】优先把上一条 display.markdown 整段（<details> 四段：项目背景/命中记忆/Token/省钱与费用，可逐段收起展开）原样输出到最终回答末尾；若客户端不渲染 HTML，则改为单独一行原样输出 display.line（以 🧠 Memory 开头的提示行）。两种方式都不得改写、省略或补全其中的 token 数与金额。';
+    return '【展示要求】优先把上一条 display.markdown 整段（<details> 四段：项目背景/命中记忆/Token/省钱与费用，可逐段收起展开）原样输出到最终回答末尾；若客户端不渲染 HTML，则改为单独一行原样输出 display.line（以 🧠 Memory 开头的提示行）。两种方式都不得改写、省略或补全其中的 token 数与金额。' + RECALL_SOURCE_BOUNDARY;
   }
   if (mode === 'markdown-full') {
-    return `【展示要求】本次是 detail=true 的明细返回：把上一条 display.markdown 整段（纯 Markdown 四个小节：项目背景/命中记忆/Token/省钱与费用）原样输出到最终回答末尾，不要给回答添加任何 HTML 标签。${keep}`;
+    return `【展示要求】本次是 detail=true 的明细返回：把上一条 display.markdown 整段（纯 Markdown 四个小节：项目背景/命中记忆/Token/省钱与费用）原样输出到最终回答末尾，不要给回答添加任何 HTML 标签。${keep}` + RECALL_SOURCE_BOUNDARY;
   }
   return '【展示要求】本次按「默认收起 + 点击展开」下发：把上一条 display.markdown 整段原样输出到最终回答末尾'
     + '（两行 🧠 Memory 摘要 + 一行「▶ 展开本次召回明细」的 Markdown 链接），链接的 URL 必须逐字保留——用户点它才在本机明细页里看四段明细。'
     + '禁止自行补写命中条目、项目背景、Token 或费用明细，禁止把链接改写成纯文本/HTML 标签或自己编造 URL，也禁止替用户预先展开（不要因为觉得『这样更完整』而调用 detail=true）。'
     + '只有用户在聊天里明确要看明细时，才用同一个 query 再调用 recall_memory 并置 detail=true，然后原样输出那次返回的 display.markdown。'
     + '若客户端连 Markdown 链接都渲染不了（链接只是纯文本），照原样输出即可，不要改写摘要。'
-    + `数字与金额不得改写、省略或补全。`;
+    + `数字与金额不得改写、省略或补全。` + RECALL_SOURCE_BOUNDARY;
 }
 
 /** 启动标准 MCP streamable-http 服务器 */
@@ -210,6 +216,17 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
 
   /** 会话 → 调用方（批次15：initialize.clientInfo 自报）；客户端不维护会话时用 UA 兜底 */
   const clientBySession = new Map<string, string>();
+  /**
+   * 批次47（L2）：会话 → 是否已在本次会话调用过 recall_memory。
+   * 只跟踪「带 Mcp-Session-Id 的可靠会话」——会话身份由服务端在 initialize 时签发并关联（协议级，不依赖客户端配置），
+   * 因此对标准 MCP 客户端身份可靠；不带会话头的 UA 兜底请求一律按「不可靠」处理（只软提醒、不硬拦，防 §9 串号误杀）。
+   */
+  const recalledBySession = new Map<string, boolean>();
+  /**
+   * 批次47（L3-b）：会话 → 是否已发生过任意 tools/call（用于算「首调合规率」）。
+   * 同样只跟踪可靠会话（带 sid）；不可靠会话按 UA 兜底无法可靠归因，session_id 记 'ua-fallback' 且仅作观察。
+   */
+  const calledBySession = new Map<string, boolean>();
   /** UA → 最近一次 initialize 的调用方（部分客户端每次请求不带 Mcp-Session-Id） */
   const clientByUa = new Map<string, string>();
   /**
@@ -343,8 +360,39 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
     }
   }
 
-  /** 处理一个 JSON-RPC 请求对象（MCP 单请求/单响应；不支持批量） */
-  async function handleRpc(req: Record<string, unknown>, client: string, acct: McpAccount): Promise<Record<string, unknown>> {
+  /**
+   * 批次47（L3-b）：合规审计。每次 tools/call 写一条 `mcp_call` 审计，记录会话首调是否命中 recall_memory，
+   * 供算「首调合规率」（可靠会话 = 带 Mcp-Session-Id；不可靠会话 session_id 记 'ua-fallback'，仅作观察）。
+   * 审计是 observability 而非关键路径：任何失败都吞掉，绝不阻断工具调用本身。
+   */
+  async function emitMcpCallAudit(
+    toolName: string, reliable: boolean, firstCall: boolean, recalledBefore: boolean, sid: string,
+    client: string, acct: McpAccount,
+  ): Promise<void> {
+    try {
+      const record: AuditRecord = {
+        request_id: ulid(),
+        action: 'mcp_call',
+        agent: client,
+        user_id: acct.user_id,
+        ts: Date.now(),
+        detail: {
+          session_id: reliable ? sid : 'ua-fallback',
+          reliable,
+          first_call: reliable ? firstCall : false,
+          recalled_before: reliable ? recalledBefore : false,
+          tool: toolName,
+        },
+      };
+      await storage.appendAudit(record);
+    } catch {
+      /* 审计失败吞掉，不影响主流程 */
+    }
+  }
+
+  /** 处理一个 JSON-RPC 请求对象（MCP 单请求/单响应；不支持批量）
+   *  @param incomingSid 本请求携带的 Mcp-Session-Id（空串 = 不带会话头，按 UA 兜底/不可靠处理） */
+  async function handleRpc(req: Record<string, unknown>, client: string, acct: McpAccount, incomingSid: string): Promise<Record<string, unknown>> {
     const method = String(req.method ?? '');
     const id = ('id' in req ? (req.id as number | string | null | undefined) : null) ?? null;
     const params = (req.params && typeof req.params === 'object' ? req.params : {}) as Record<string, unknown>;
@@ -367,10 +415,30 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
         // 通知无响应（JSON-RPC spec：notification 不回包）
         return { jsonrpc: '2.0', id: null, result: {} };
       case 'tools/list':
-        return { ...base, result: { tools: MCP_TOOLS } };
+        // 批次47（L1）：下发带「首步召回」前缀的工具清单，从工具元数据层把召回优先级顶到最高。
+        return { ...base, result: { tools: withRecallFirstNotes() } };
       case 'tools/call': {
         const name = String(params.name ?? '');
         const args = (params.arguments && typeof params.arguments === 'object' ? params.arguments : {}) as Record<string, unknown>;
+        // 批次47（L2）：会话门禁。可靠会话（带 Mcp-Session-Id，服务端 initialize 签发并关联）尚未召回即调用
+        // 写入/治理类工具 → 硬拦返回 MCP 错误；读类工具未召回只软提醒（追加提示、不拦截，保体验）；
+        // 不带会话头的 UA 兜底请求一律按「不可靠」处理——只软提醒、不硬拦，防 §9 跨客户端串号误杀。
+        const reliable = Boolean(incomingSid);
+        const recalled = reliable && Boolean(recalledBySession.get(incomingSid));
+        // 批次47（L3-b）：首调合规审计（在标记 called/recalled 之前取快照，确保 first_call / recalled_before 准确）。
+        const firstCall = reliable && !calledBySession.has(incomingSid);
+        await emitMcpCallAudit(name, reliable, firstCall, recalled, incomingSid, client, acct);
+        if (reliable) calledBySession.set(incomingSid, true);
+        if (reliable && !recalled && WRITE_GATE_TOOLS.has(name)) {
+          return {
+            ...base,
+            result: { content: [{ type: 'text', text: RECALL_FIRST_GATE_MSG }], isError: true },
+          };
+        }
+        // recall 调用即标记本会话已召回（仅可靠会话跟踪；不可靠会话无法可靠归因，按软提醒常驻处理）。
+        if (name === 'recall_memory' && reliable) {
+          recalledBySession.set(incomingSid, true);
+        }
         try {
           const out = await callTool(name, args, client, acct);
           // recall 首块 = 提示行（兼容纯文本客户端），随后完整 JSON、折叠明细（批次13）；同时给 structuredContent。
@@ -385,6 +453,11 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
                 { type: 'text', text: recallEchoNote(displayMode) },
               ]
             : [{ type: 'text', text: JSON.stringify(out.result, null, 2) }];
+          // 批次47（L2）：未召回（任意会话）且非 recall 自身 → 末块追加软提醒，不拦截，保体验。
+          // 可靠会话召回后 recalled 变 true 即不再提醒；不可靠会话无法确认召回，常驻软提醒（推动其带会话头）。
+          if (!recalled && name !== 'recall_memory') {
+            content.push({ type: 'text', text: RECALL_FIRST_REMINDER });
+          }
           return {
             ...base,
             result: {
@@ -511,7 +584,7 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
             ?? (ua && (isIdentifiableUserAgent(ua) || isTrustedClientSelfName(uaCached)) ? uaCached : undefined)
             ?? clientFromUserAgent(ua);
 
-          const rpcResp = await handleRpc(payload, client, reqAccount);
+          const rpcResp = await handleRpc(payload, client, reqAccount, incomingSid);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(rpcResp));
         } catch (e) {

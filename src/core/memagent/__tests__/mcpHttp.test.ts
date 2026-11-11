@@ -1027,7 +1027,7 @@ describe('批次44-D5-3：gc_report（HTTP）', () => {
     expect(d.report.decayed).toBe(1);
     expect(d.audit_written).toBe(false);
     expect((await storage.getMemory('mem_gc_http'))?.decay_class).toBe('hot');
-    expect(await storage.queryAudit({})).toHaveLength(0);
+    expect(await storage.queryAudit({ action: 'gc' })).toHaveLength(0);
 
     const real = await tool(1011, 'gc_report', { project_id: 'P1', dry_run: false });
     expect(real.result.isError).toBe(false);
@@ -1036,7 +1036,7 @@ describe('批次44-D5-3：gc_report（HTTP）', () => {
     expect(r.report.decayed).toBe(1);
     expect(r.audit_written).toBe(true);
     expect((await storage.getMemory('mem_gc_http'))?.decay_class).toBe('warm');
-    expect(await storage.queryAudit({})).toHaveLength(1);
+    expect(await storage.queryAudit({ action: 'gc' })).toHaveLength(1);
   });
 
   it('46-4 报告字段对齐 + note 分层说明，不伪造摘要类统计', async () => {
@@ -1063,7 +1063,7 @@ describe('批次44-D5-3：gc_report（HTTP）', () => {
       expect(out.result.isError).toBe(true);
     }
     expect((await storage.getMemory('mem_gc_http'))?.decay_class).toBe('warm');
-    expect(await storage.queryAudit({})).toHaveLength(1); // 失败请求未写审计
+    expect(await storage.queryAudit({ action: 'gc' })).toHaveLength(1); // 失败请求未写 gc 审计（此处 1 = 上一用例真实 gc 的留存）
   });
 
   // 批次46-4：HTTP 端到端完整链路（tools/call gc_report → 内核裁决 → 存储/审计）
@@ -1082,7 +1082,7 @@ describe('批次44-D5-3：gc_report（HTTP）', () => {
       ...base, mem_id: 'cf_http_new', content: '灰度发布必须先看错误率',
       confidence: 0.6, created_at: now - DAY,
     });
-    const beforeAudits = (await storage.queryAudit({})).length;
+    const beforeAudits = (await storage.queryAudit({ action: 'conflict_resolve' })).length;
 
     const out = await tool(1014, 'gc_report', {
       project_id: 'P1', dry_run: false, resolve_conflicts: true, verdict: 'auto_override',
@@ -1103,7 +1103,7 @@ describe('批次44-D5-3：gc_report（HTTP）', () => {
     expect(audits[0].detail).toMatchObject({
       old_id: 'cf_http_old', new_id: 'cf_http_new', verdict: 'auto_override', pending: false,
     });
-    expect((await storage.queryAudit({})).length).toBeGreaterThan(beforeAudits);
+    expect((await storage.queryAudit({ action: 'conflict_resolve' })).length).toBeGreaterThan(beforeAudits);
   });
 
   it('46-4 端到端：dry_run=true 带裁决 → 零写入、零审计、resolved=0', async () => {
@@ -1116,7 +1116,7 @@ describe('批次44-D5-3：gc_report（HTTP）', () => {
     await storage.putMemory({ ...base, mem_id: 'cf_http_dry_old', content: '另一条冲突旧文', created_at: now - 2 * DAY });
     await storage.putMemory({ ...base, mem_id: 'cf_http_dry_new', content: '另一条冲突新文', created_at: now - DAY });
     const before = (await storage.listMemories({})).map((m) => ({ ...m }));
-    const beforeAudits = (await storage.queryAudit({})).length;
+    const beforeAudits = (await storage.queryAudit({ action: 'conflict_resolve' })).length;
 
     const out = await tool(1015, 'gc_report', {
       project_id: 'P1', resolve_conflicts: true, verdict: 'auto_override',
@@ -1131,7 +1131,7 @@ describe('批次44-D5-3：gc_report（HTTP）', () => {
     expect(body.conflict_resolution).toEqual({ requested: true, verdict: 'auto_override', resolved: 0 });
     expect(body.audit_written).toBe(false);
     expect((await storage.listMemories({})).map((m) => ({ ...m }))).toEqual(before);
-    expect(await storage.queryAudit({})).toHaveLength(beforeAudits);
+    expect(await storage.queryAudit({ action: 'conflict_resolve' })).toHaveLength(beforeAudits);
   });
 });
 
@@ -1298,8 +1298,7 @@ describe('批次44-D5-4：recall_memory(scope=session)（HTTP 8204 端到端）'
 });
 
 // D6-5 端到端：create_project / mint_token（管理员门禁 + mint 后新令牌回连 scope 生效）
-describe('D6-5 管理工具端到端（HTTP）', () => {
-  let handle: McpHttpHandle;
+describe('D6-5 管理工具端到端（HTTP）', () => {  let handle: McpHttpHandle;
   let url = '';
   const storage = new InMemoryStorage();
 
@@ -1355,5 +1354,156 @@ describe('D6-5 管理工具端到端（HTTP）', () => {
     expect(writeOut.isError).toBe(true);
     const writeIn = await callTool('write_memory', { content: '范围内写入', project_id: 'httpapp', category: 'fact', source_agent: 'workbuddy' }, carolToken);
     expect(writeIn.isError).toBe(false);
+  });
+});
+
+// 批次47（L1+L2）：工具描述首步召回 + 服务端会话门禁（仅 HTTP 8204）
+// L1：tools/list 下发的 12 个工具描述统一带「首步召回」前缀（recall 用 🔴、其余 ⚠️）。
+// L2：可靠会话（带 Mcp-Session-Id，服务端 initialize 签发并关联）尚未召回即调写入/治理类工具 → 硬拦；
+//     读类未召回只软提醒（不拦截）；无会话头（UA 兜底）客户端一律只软提醒、不硬拦（防 §9 串号误杀）。
+describe('批次47：L1 工具描述首步召回 + L2 会话门禁（HTTP 8204）', () => {
+  let handle: McpHttpHandle;
+  let url = '';
+  let vault: L0Vault;
+  const storage = new InMemoryStorage();
+
+  async function init(name = 'TestAgent'): Promise<string> {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { clientInfo: { name, version: '1.0' } } }),
+    });
+    const sid = res.headers.get('mcp-session-id');
+    expect(sid, 'initialize 必须签发 Mcp-Session-Id').toBeTruthy();
+    return sid!;
+  }
+  async function tool(
+    name: string,
+    args: Record<string, unknown>,
+    headers: Record<string, string> = {},
+  ): Promise<{ result: { isError: boolean; content: Array<{ text: string }>; structuredContent?: Record<string, unknown> } }> {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}`, ...headers },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }),
+    });
+    return (await res.json()) as { result: { isError: boolean; content: Array<{ text: string }>; structuredContent?: Record<string, unknown> } };
+  }
+
+  beforeAll(async () => {
+    vault = (await createTestVault()).vault;
+    handle = runMcpHttpServer({ port: 0, token: TOKEN, storage, l0: vault });
+    url = `http://127.0.0.1:${await handle.ready}/mcp`;
+    // 准备一个真实项目 P1 供 recall 定位（无会话头 = 不可靠会话，门禁不硬拦，admin 令牌放行 create_project）。
+    await tool('create_project', { project_id: 'P1', kind: 'general', display_name: '测试项目' });
+  });
+  afterAll(() => { handle?.stop(); });
+
+  it('L1：tools/list 全部 12 工具描述带「首步召回」前缀（recall=🔴、其余=⚠️，且保留原描述）', async () => {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+    });
+    const tools = ((await res.json()) as { result: { tools: Array<{ name: string; description: string }> } }).result.tools;
+    expect(tools).toHaveLength(12);
+    const recall = tools.find((t) => t.name === 'recall_memory')!;
+    expect(recall.description).toContain('🔴【本会话第一步】');
+    expect(recall.description).toContain('优先使用本工具'); // 原描述保留
+    const other = tools.find((t) => t.name === 'write_memory')!;
+    expect(other.description).toContain('⚠️ 调用本工具前，本会话必须已先调用过 recall_memory');
+    expect(other.description).toContain('写入一条记忆'); // 原描述保留
+  });
+
+  it('L2：可靠会话未召回即写 → 硬拦（isError + ⛔ 门禁文案，且不执行写）', async () => {
+    const sid = await init();
+    const before = await storage.listMemories({});
+    const w = await tool('write_memory', { content: '门禁前应被拒', project_id: 'P1', category: 'fact', source_agent: 'workbuddy' }, { 'Mcp-Session-Id': sid });
+    expect(w.result.isError).toBe(true);
+    expect(w.result.content[0].text).toContain('⛔');
+    expect(w.result.content[0].text).toContain('尚未调用 recall_memory');
+    // 门禁在 callTool 之前返回，绝不应落库
+    expect(await storage.listMemories({})).toHaveLength(before.length);
+  });
+
+  it('L2：可靠会话先召回 → 写与治理类工具放行；召回后读类不再追加软提醒', async () => {
+    const sid = await init();
+    const rec = await tool('recall_memory', { project_id: 'P1', query: '任意关键词' }, { 'Mcp-Session-Id': sid });
+    expect(rec.result.isError).toBe(false);
+
+    const w = await tool('write_memory', { content: '批次47 门禁验证：可靠会话先调用 recall_memory 检索记忆库，随后写入一条足够长的记忆以确认写入与治理类工具在召回后正常放行且真实落库落审计', project_id: 'P1', category: 'fact', source_agent: 'workbuddy' }, { 'Mcp-Session-Id': sid });
+    expect(w.result.isError).toBe(false);
+    const memId = (w.result.structuredContent as { mem_id: string }).mem_id;
+    expect(memId).toMatch(/^mem_/); // 真实落库
+
+    const ls = await tool('list_projects', {}, { 'Mcp-Session-Id': sid });
+    expect(ls.result.isError).toBe(false);
+    const joined = ls.result.content.map((c) => c.text).join('\n');
+    expect(joined).not.toContain('⚠️ 本会话尚未调用 recall_memory'); // 已召回 → 无软提醒
+  });
+
+  it('L2：可靠会话未召回即读类 → 不拦截，只追加软提醒（保体验）', async () => {
+    const sid = await init();
+    const ls = await tool('list_projects', {}, { 'Mcp-Session-Id': sid });
+    expect(ls.result.isError).toBe(false);
+    const joined = ls.result.content.map((c) => c.text).join('\n');
+    expect(joined).toContain('⚠️ 本会话尚未调用 recall_memory');
+  });
+
+  it('L2：无会话头（UA 兜底）写 → 不硬拦（只软提醒），防 §9 跨客户端串号误杀', async () => {
+    const w = await tool('write_memory', { content: 'UA 兜底写入：无会话头不硬拦且会软提醒', project_id: 'P1', category: 'fact', source_agent: 'workbuddy' });
+    expect(w.result.isError).toBe(false); // 不可靠会话不硬拦
+    const joined = w.result.content.map((c) => c.text).join('\n');
+    expect(joined).not.toContain('⛔'); // 没有硬门禁文案
+    expect(joined).toContain('⚠️ 本会话尚未调用 recall_memory'); // 但会软提醒
+  });
+
+  it('L2：无会话头（UA 兜底）治理类工具（manage_memory）也不硬拦，只软提醒', async () => {
+    // 先以不可靠会话写一条（无会话头不硬拦），拿到真实 mem_id
+    const w = await tool('write_memory', { content: '批次47 门禁验证：以不带 Mcp-Session-Id 的不可靠会话方式写入一条足够长的记忆，随后调用 manage_memory 做 pin 操作，确认治理类工具在 UA 兜底路径下不会被硬拦、只会软提醒', project_id: 'P1', category: 'fact', source_agent: 'workbuddy' });
+    expect(w.result.isError).toBe(false);
+    const memId = (w.result.structuredContent as { mem_id: string }).mem_id;
+    expect(memId).toMatch(/^mem_/);
+    const m = await tool('manage_memory', { mem_id: memId, action: 'pin' });
+    expect(m.result.isError).toBe(false); // 不可靠会话不硬拦治理类
+    const joined = m.result.content.map((c) => c.text).join('\n');
+    expect(joined).not.toContain('⛔');
+  });
+
+  it('L3-a：recall 结果末块（展示要求）追加刚性「信息来源边界」', async () => {
+    const sid = await init();
+    const rec = await tool('recall_memory', { project_id: 'P1', query: '任意关键词' }, { 'Mcp-Session-Id': sid });
+    expect(rec.result.isError).toBe(false);
+    const echoNote = rec.result.content[rec.result.content.length - 1].text;
+    expect(echoNote).toContain('【信息来源边界】');
+    expect(echoNote).toContain('不要编造记忆内容或省量');
+  });
+
+  it('L3-b：每次 tools/call 写 mcp_call 审计，含首调合规字段（first_call / tool / reliable）', async () => {
+    const sid = await init();
+    // 首个调用即 recall → 合规
+    await tool('recall_memory', { project_id: 'P1', query: '合规' }, { 'Mcp-Session-Id': sid });
+    const afterRecall = (await storage.queryAudit({ action: 'mcp_call' })).filter(
+      (a) => (a.detail as { session_id?: string }).session_id === sid,
+    );
+    const first = afterRecall.find((a) => (a.detail as { first_call?: boolean }).first_call === true);
+    expect(first, '应有一条 first_call=true 的 mcp_call 审计').toBeTruthy();
+    const d = first!.detail as { session_id: string; reliable: boolean; tool: string; recalled_before: boolean };
+    expect(d.session_id).toBe(sid);
+    expect(d.reliable).toBe(true);
+    expect(d.tool).toBe('recall_memory');
+    expect(d.recalled_before).toBe(false); // 首个调用前确实未召回
+  });
+
+  it('L3-b：可靠会话首个调用是写（被门禁拦截）→ mcp_call 审计 first_call=true 且 tool=write_memory、recalled_before=false', async () => {
+    const sid = await init();
+    await tool('write_memory', { content: '批次47 合规审计：首个调用即写，门禁拦截但审计仍记录', project_id: 'P1', category: 'fact', source_agent: 'workbuddy' }, { 'Mcp-Session-Id': sid });
+    const rows = (await storage.queryAudit({ action: 'mcp_call' })).filter(
+      (a) => (a.detail as { session_id?: string }).session_id === sid,
+    );
+    const first = rows.find((a) => (a.detail as { first_call?: boolean }).first_call === true);
+    expect(first).toBeTruthy();
+    expect((first!.detail as { tool: string }).tool).toBe('write_memory');
+    expect((first!.detail as { recalled_before: boolean }).recalled_before).toBe(false);
   });
 });

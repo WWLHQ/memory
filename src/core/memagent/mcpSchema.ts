@@ -1,6 +1,36 @@
 // MCP 工具清单与初始化指令（批次11/12/13）：HTTP(8204) 与 TCP(8202) 共用同一份 schema/instructions，
 // 避免两套协议漂移。instructions 由 MCP 客户端注入 Agent，负责「关键词触发召回 + 回显提示」。
 // 批次12：客户端不保证注入 instructions（Qoder 实测未注入）→ 工具描述与结果末块同步加「先调用 + 回显」硬约束。
+// 批次47（L1）：在 tools/list 下发的每个工具描述前置「首步召回」刚性提示，从工具元数据层把召回优先级顶到最高，
+// 不依赖客户端是否注入 initialize.instructions。recall_memory 用更强口径，其余工具统一口径。
+
+/** recall_memory 自己的描述前缀：强调它是本会话第一个工具调用 */
+export const RECALL_FIRST_SELF_NOTE =
+  '🔴【本会话第一步】在回答任何问题或调用其它工具前，必须先调用本工具检索记忆库；未调用前不要回答、也不要调用其它工具。';
+/** 其余工具的描述前缀：调用前必须已先召回 */
+export const RECALL_FIRST_TOOL_NOTE =
+  '⚠️ 调用本工具前，本会话必须已先调用过 recall_memory（首步检索记忆库）；若尚未调用，请先调 recall_memory 再继续。';
+/** 读类工具在可靠会话未召回时追加的软提醒（不拦截，保体验） */
+export const RECALL_FIRST_REMINDER =
+  '⚠️ 本会话尚未调用 recall_memory：继续处理前请先调用它以检索记忆库（回答/写入前优先采信记忆库内容）。';
+/** L2 硬门禁提示：可靠会话（带 Mcp-Session-Id）尚未召回即调用写入/治理类工具的拒绝文案 */
+export const RECALL_FIRST_GATE_MSG =
+  '⛔ 本会话尚未调用 recall_memory（首步检索记忆库）。服务端已临时锁定写入与治理类工具：请先调用一次 recall_memory 检索记忆库，再继续本操作。';
+/** 批次47（L3-a）：recall 结果末块追加的刚性「信息来源边界」——要求 agent 基于真实账本作答、未命中明说、绝不编造 */
+export const RECALL_SOURCE_BOUNDARY =
+  '【信息来源边界】以下记忆来自本机真实账本；若本次 recall 命中数为 0（hits=0），请如实说明「未检索到相关记忆」，不要编造记忆内容或省量；回答的事实应优先采信命中记忆；工具不可用或网络失败时不得假装检索过记忆。';
+
+/**
+ * 给 tools/list 返回的工具清单统一加「首步召回」提示：recall_memory 用更强口径，其余工具统一口径。
+ * 返回新数组（不改动 MCP_TOOLS 原常量），避免两套协议漂移。
+ */
+export function withRecallFirstNotes(): Array<{ name: string; description: string; inputSchema: Record<string, unknown> }> {
+  return MCP_TOOLS.map((t) => ({
+    name: t.name,
+    description: (t.name === 'recall_memory' ? RECALL_FIRST_SELF_NOTE : RECALL_FIRST_TOOL_NOTE) + t.description,
+    inputSchema: t.inputSchema as Record<string, unknown>,
+  }));
+}
 // 批次13：回显物改为 display.markdown（四段 <details> 可收起/展开），不渲染 HTML 的客户端回退 display.line。
 // 批次14：触发措辞由「禁用本地检索」改为「优先用本库」——未命中/不可用时允许回退代码与本地笔记，
 //         避免客户端在工具未命中时无法继续；同时明示客户端自带 memory 文件不是本记忆库。
@@ -10,6 +40,7 @@
 export const MCP_INSTRUCTIONS = `你是接入了 MultiAgent Memory 的 Agent。记忆库数据全部来自本机真实账本，工具返回的数字不得改写或编造。
 
 必须遵守：
+0. 首步强制召回（批次47）：每次新会话或新任务，必须在回答或调用任何其它工具之前，先调用一次 recall_memory 检索记忆库；未召回前不要回答、也不要调用写/管理类工具（服务端会在本会话尚未召回时拒绝写入与治理类工具）。本规则从工具元数据与 initialize 指令双层下发，不依赖客户端是否真正注入指令。
 1. 触发（默认优先）：用户消息只要涉及本仓库/本项目的实现、架构、历史决策、踩坑、偏好、事实，或出现「记得 / 上次 / 之前 / 老规矩 / 继续上次」，就优先调用 recall_memory 再回答；本库未命中或工具不可用时，才回退到读代码、工作区笔记或客户端自带 memory 文件。客户端自带的 memory/笔记不是本记忆库，不能替代首选检索。project_id 可省略：账本只有一个项目时自动定位；有多个项目时先调用 list_projects 并向用户确认。用户问「本次会话 / 刚才 / 我们聊到哪」这类工作记忆时，改用 recall_memory(scope='session', session_id=<写入时同一个>) 取本会话近期记忆（不走语义检索）；没有 session_id 就不要猜、不要拿项目召回冒充会话历史，如实说明并请用户提供或用 project 范围检索。
 2. 回显（强制）：每次 recall_memory 成功返回后，把该次返回的 display.markdown 整段原样输出到最终回答末尾。服务端按你的客户端能力选档位：支持 HTML 折叠的客户端收到 <details> 四段（项目背景/命中记忆/Token/省钱与费用，可点开收起）；其余客户端默认收到「两行 🧠 Memory 摘要 + 展开入口」——HTTP 传输给一条指向本机一次性明细页的 Markdown 链接（用户点链接才看四段，URL 必须逐字保留、不得改写不得丢），TCP 等无链接场景给一行文字指引。任何档位都禁止自行补写或预先展开明细（明细只能来自本次或下一次工具返回），不得添加 HTML 标签；token 数字与金额必须原样保留。需要明细时，用同一个 query 再调用 recall_memory 并置 detail=true，然后原样输出那次返回的 display.markdown。若客户端连 Markdown 都渲染不了，改为单独一行原样输出 display.line。
 3. 金额：display.money 为 null 表示用户尚未设置单价（全局参数页），不得猜测或补全金额。

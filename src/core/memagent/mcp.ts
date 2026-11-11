@@ -13,7 +13,7 @@ import { FakeLlmProvider } from './llm.ts';
 import { assertMcpToken, DEFAULT_MCP_ACCOUNT, projectInScope, type McpAccount } from './mcpAuth.ts';
 import { resolveAccountFor, type TokenStorePort } from './tokenStore.ts';
 import type { MemberStorePort } from './memberStore.ts';
-import { MCP_INSTRUCTIONS, MCP_TOOLS } from './mcpSchema.ts';
+import { MCP_INSTRUCTIONS, withRecallFirstNotes } from './mcpSchema.ts';
 import { McpToolError, runListProjectsTool, runRecallTool } from './mcpRecall.ts';
 import type { StorageBackend, Pref, L0Port, MemReq, WriteResult } from './types.ts';
 import { CATEGORIES, isCategory } from './types.ts';
@@ -333,7 +333,9 @@ export function runMcpServer(opts: McpOptions): McpServerHandle {
           break;
 
         case 'tools/list':
-          send(socket, ok(req.id, { tools: MCP_TOOLS }));
+          // 批次47（L1）：与 HTTP 8204 共用 withRecallFirstNotes()，让 TCP 客户端工具描述也带「首步召回」前缀。
+          // 注意：L2 会话门禁仅落 HTTP 8204（TCP 每 socket 独立会话且既有契约允许「不召回就写」，加门禁会破坏既有用例）。
+          send(socket, ok(req.id, { tools: withRecallFirstNotes() }));
           break;
 
         case 'tools/call': {
