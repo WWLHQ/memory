@@ -10,21 +10,14 @@ body {
   font: 12px/1.5 -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
-/* 旧组件：L0 解锁卡 / 内核错误卡 */
+/* 旧组件：L0 解锁卡（共享 L0WriteUnlock，其他 tab 仍用）/ 内核错误卡 */
 .card { background: var(--win); border: 1px solid var(--line); border-radius: 4px; padding: 10px 12px; margin-bottom: 10px; }
-.field { margin: 8px 0; }
-.field > label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
-.field .hint { font-size: 10.5px; color: var(--faint); margin-left: 8px; }
-.row { display: flex; gap: 10px; flex-wrap: wrap; }
-.row > .field { flex: 1; min-width: 160px; }
-textarea, input[type=text], select {
+textarea, input[type=text], input[type=password], select {
   width: 100%; background: var(--field); color: var(--text);
   border: 1px solid var(--line); border-radius: 3px; padding: 5px 7px; font: inherit;
 }
 textarea { resize: vertical; min-height: 80px; }
-.readonly { background: var(--field) !important; color: var(--muted); cursor: not-allowed; }
 .err { font-size: 11px; color: var(--err); margin: 5px 0; }
-.actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 .btn {
   background: var(--chip); border: 1px solid var(--line); color: var(--text);
   border-radius: 3px; padding: 4px 10px; cursor: pointer; font-size: 11.5px;
@@ -33,30 +26,118 @@ textarea { resize: vertical; min-height: 80px; }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
 .note { font-size: 10.5px; color: var(--faint); margin-top: 8px; line-height: 1.6; }
 
-/* 标签联想 */
-.tags-input .pill { margin: 3px 4px 0 0; }
-.pill {
-  font-size: 10.5px; padding: 2px 8px; border-radius: 3px;
-  background: var(--chip); border: 1px solid var(--line); color: var(--muted); cursor: pointer;
-}
-.preview { font-size: 10.5px; color: var(--muted); margin-top: 4px; }
-
-/* 查重卡 */
-.dedup { border-left: 3px solid var(--accent); }
-.dedup.dup { border-left-color: var(--warn); }
-.dimrow { margin: 6px 0; }
-.dimrow .k { font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; }
-.bar { height: 5px; border-radius: 3px; background: var(--field); overflow: hidden; margin-top: 3px; }
-.bar > i { display: block; height: 100%; background: var(--accent); }
-.verdict { font-size: 12px; font-weight: 700; margin: 8px 0; }
-.verdict.dup { color: var(--warn); }
-
-/* 回执层 */
-.layer-body { font-size: 11px; color: var(--muted); margin-top: 4px; }
-.p0-lrow .audit { color: var(--warn); font-size: 10.5px; }
-
 .toast {
   position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
   background: var(--chip); border: 1px solid var(--line); border-radius: 4px;
   padding: 7px 14px; font-size: 12px; z-index: 80; color: var(--text);
+}
+
+/* ── 批次58：写入表单 tab 定稿版式（wf-*） ───────────────────────────────
+ * 底板不照抄效果图：全部走 p0.css A 令牌（亮/暗随壳层），不引入第二套色值。
+ * p0.css 没有 --ok-ink（ok 底色上的文字色），在这里本地派生：亮=白、暗=深绿。 */
+.wf-page { --ok-ink: #ffffff; }
+html[data-theme="dark"] .wf-page { --ok-ink: #052e22; }
+
+.wf-card {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: 8px; padding: 14px 16px; margin-bottom: 12px;
+}
+.wf-hd { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+.wf-code {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: .14em;
+  color: var(--accent); font-weight: 700; text-transform: uppercase;
+}
+.wf-code.dim { color: var(--muted); }
+.wf-zh { font-size: 15px; font-weight: 700; color: var(--ink); }
+.wf-meta { font-size: 11px; color: var(--muted); margin-left: auto; text-align: right; }
+.wf-bd { display: flex; flex-direction: column; gap: 8px; }
+
+.wf-lbl { display: block; font-size: 11.5px; color: var(--ink); font-weight: 600; margin-bottom: 4px; }
+.wf-in {
+  width: 100%; background: var(--surface2); color: var(--ink);
+  border: 1px solid var(--line2); border-radius: 6px; padding: 7px 9px; font: inherit;
+}
+.wf-in:focus { outline: none; border-color: var(--accent); }
+.wf-in[readonly] { color: var(--muted); cursor: not-allowed; }
+.wf-ta { min-height: 110px; resize: vertical; }
+textarea.wf-in, select.wf-in { width: 100%; }
+
+.wf-hint { font-size: 11px; color: var(--muted); }
+.wf-err { font-size: 11.5px; color: var(--bad); }
+.wf-note { font-size: 11px; color: var(--muted); line-height: 1.6; }
+.wf-empty { font-size: 11.5px; color: var(--muted); padding: 14px 8px; text-align: center; }
+.wf-empty.dashed { border: 1px dashed var(--line2); border-radius: 6px; }
+.wf-empty b { color: var(--ink); display: block; margin-bottom: 4px; }
+
+.wf-row3 { display: grid; grid-template-columns: 1fr 1fr 1.4fr; gap: 10px; }
+.wf-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.wf-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.wf-chip {
+  font-size: 11px; padding: 3px 10px; border-radius: 999px; cursor: pointer;
+  background: var(--surface2); border: 1px solid var(--line2); color: var(--muted);
+}
+.wf-chip.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+
+.wf-actions { display: flex; align-items: center; gap: 12px; margin-top: 6px; }
+.wf-btn {
+  background: var(--accent); color: #fff; border: 1px solid var(--accent);
+  border-radius: 6px; padding: 8px 18px; cursor: pointer; font-size: 12.5px; font-weight: 700;
+}
+.wf-btn:disabled { opacity: .45; cursor: not-allowed; }
+.wf-btn:hover:not(:disabled) { filter: brightness(1.08); }
+
+.wf-status {
+  font-size: 12px; padding: 8px 12px; border-radius: 6px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.wf-status.ok { background: var(--ok-soft); color: var(--ok-ink); }
+.wf-status.info { background: var(--surface2); color: var(--ink); border: 1px solid var(--line2); }
+.wf-status.warn { background: var(--warn-soft); color: var(--warn); }
+.wf-status.bad { background: var(--bad-soft); color: var(--bad); }
+
+.wf-kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; align-items: baseline; }
+.wf-k { font-size: 11px; color: var(--muted); font-family: var(--mono); }
+.wf-v { font-size: 12px; color: var(--ink); word-break: break-all; }
+.wf-v.mono { font-family: var(--mono); font-size: 11.5px; }
+
+.wf-lrow { border-top: 1px solid var(--line); padding-top: 6px; }
+.wf-lrow summary { font-size: 11.5px; color: var(--ink); cursor: pointer; }
+.wf-audit { color: var(--warn); font-size: 10.5px; margin-top: 4px; }
+.wf-layer-body { font-size: 11px; color: var(--muted); margin-top: 4px; white-space: pre-wrap; }
+
+/* 查重预览卡 */
+.wf-dedup { border-left: 3px solid var(--accent); }
+.wf-dedup.hit { border-left-color: var(--warn); }
+.wf-simrow { display: flex; justify-content: space-between; align-items: baseline; font-size: 12px; color: var(--ink); }
+.wf-simrow .wf-v { font-weight: 700; }
+.wf-bar { height: 6px; border-radius: 3px; background: var(--surface2); overflow: hidden; }
+.wf-bar > i { display: block; height: 100%; background: var(--accent); transition: width .2s ease; }
+.wf-dedup.hit .wf-bar > i { background: var(--warn); }
+.wf-verdict { font-size: 11px; color: var(--muted); }
+.wf-near { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--ink); }
+
+/* L0 解锁卡 */
+.wf-unlock .wf-unlock-row { display: flex; gap: 8px; }
+
+/* masthead + 双栏 + 最近写入通栏 */
+.wf-masthead { display: flex; align-items: baseline; gap: 12px; margin: 2px 0 14px; flex-wrap: wrap; }
+.wf-mast-title { font-size: 22px; margin: 0; color: var(--ink); letter-spacing: .02em; }
+.wf-mast-meta { font-size: 11.5px; color: var(--muted); margin-left: auto; }
+.wf-cols { display: grid; grid-template-columns: 1.5fr 1fr; gap: 14px; align-items: start; }
+.wf-side { display: flex; flex-direction: column; }
+.wf-side .wf-unlock { flex-grow: 1; }
+.wf-recent { margin-top: 14px; }
+.wf-rt { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+.wf-rt th {
+  text-align: left; font-family: var(--mono); font-size: 10.5px; letter-spacing: .08em;
+  color: var(--muted); border-bottom: 1px solid var(--line2); padding: 4px 8px; font-weight: 600;
+}
+.wf-rt td { border-bottom: 1px solid var(--line); padding: 6px 8px; color: var(--ink); }
+.wf-rt tr:last-child td { border-bottom: none; }
+.wf-rt .mono { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+
+@media (max-width: 900px) {
+  .wf-cols { grid-template-columns: 1fr; }
+  .wf-row3 { grid-template-columns: 1fr; }
+  .wf-row2 { grid-template-columns: 1fr; }
 }

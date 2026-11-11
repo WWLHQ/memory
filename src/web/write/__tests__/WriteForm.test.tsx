@@ -33,12 +33,13 @@ describe('WriteForm (T3)', () => {
     expect(screen.getByTestId('refine-hint')).toHaveTextContent('将清洗脱敏为 L1');
   });
 
-  it('类别预览随类别变化', () => {
+  it('质量门预判随内容实算：无硬事实短文 → 拦截码；带具体技术信息 → 豁免字数门槛', () => {
     const { rerender } = render(<WriteForm draft={base} onChange={vi.fn()} onSubmit={vi.fn()} />);
-    // 批次48 A18：预览取内核 17.6 真源（旧手抄表 fact 90 / decision 180 已纠正）
-    expect(screen.getByTestId('cat-preview')).toHaveTextContent('365 天'); // fact
-    rerender(<WriteForm draft={{ ...base, category: 'decision' }} onChange={vi.fn()} onSubmit={vi.fn()} />);
-    expect(screen.getByTestId('cat-preview')).toHaveTextContent('30 天'); // decision
+    // abc：有效字 <30 且无硬事实 → 实算出拦截码（short_low_signal），不抄演示值
+    expect(screen.getByTestId('write-form')).toHaveTextContent('将被质量门拦截');
+    // 批次40-B 豁免口径：有具体技术名词就放行
+    rerender(<WriteForm draft={{ ...base, content: 'PostgreSQL 16 的逻辑复制槽在主库切换后会失效' }} onChange={vi.fn()} onSubmit={vi.fn()} />);
+    expect(screen.getByTestId('write-form')).toHaveTextContent('豁免字数门槛');
   });
 
   it('切换类别 → 触发 onChange', () => {

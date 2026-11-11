@@ -21,14 +21,16 @@ describe('WritePage · 批次41-W L0 写密钥锁定', () => {
     return vault;
   }
 
-  it('锁定的写密钥 → 提交被挡并原地出解锁卡（不出回执、提示自动重放）', async () => {
+  it('锁定的写密钥 → 提交被挡且右栏解锁卡转「被挡」态（不出回执、提示自动重放）', async () => {
     const vault = await unlockedVault();
     await vault.lockWrite({ admin_user_id: TEST_ADMIN_ID });
     render(<WritePage />);
     fireEvent.change(screen.getByTestId('f-content'), { target: { value: '部署流水线构建失败：Node 版本需统一为 22 LTS' } });
     fireEvent.click(screen.getByTestId('submit'));
-    await waitFor(() => expect(screen.getByTestId('l0-write-unlock')).toBeInTheDocument());
-    expect(screen.getByTestId('l0-write-unlock').textContent).toContain('L0 写密钥未解锁');
+    // 批次58：解锁卡常驻右栏，被挡后从「将被挡」转「这条写入被挡（E_L0_LOCKED）」
+    await waitFor(() => expect(screen.getByTestId('l0-unlock-alert')).toBeInTheDocument());
+    expect(screen.getByTestId('l0-unlock-alert').textContent).toContain('写密钥未解锁');
+    expect(screen.getByTestId('l0-unlock-alert').textContent).toContain('被挡');
     expect(screen.getByTestId('l0-unlock-password')).toBeInTheDocument();
     expect(screen.queryByTestId('receipt')).toBeNull(); // 没写进去就别出回执
     expect(screen.getByTestId('toast').textContent).toContain('L0 写密钥未解锁');
@@ -45,7 +47,7 @@ describe('WritePage · 批次41-W L0 写密钥锁定', () => {
     fireEvent.click(screen.getByTestId('l0-unlock-submit'));
     await waitFor(() => expect(screen.getByTestId('receipt')).toBeInTheDocument());
     expect(screen.getByTestId('receipt-id')).toHaveTextContent(/^mem_/);
-    expect(screen.queryByTestId('l0-write-unlock')).toBeNull(); // 解锁成功后卡消失
+    expect(screen.getByTestId('l0-unlock-done')).toBeInTheDocument(); // 解锁成功后卡转已解锁态
   });
 
   it('解锁失败（密码错）→ 原地报错、密码被清、不谎称解锁', async () => {

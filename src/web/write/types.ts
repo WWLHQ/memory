@@ -89,6 +89,9 @@ export interface WriteReceiptHistoryRow {
   memory_id: string | null;
   layers: string;
   source: string;
+  /** filtered 行的拦截码与质量门版本（批次58 最近写入通栏如实展示；非 filtered 为 null） */
+  filter_code: string | null;
+  gate_version: number | null;
 }
 
 export interface ValidationResult {

@@ -27,16 +27,16 @@ describe('DedupCard（批次25 P0-3 诚实化）', () => {
     }
   });
 
-  it('命中 → dup 高亮 + 说明是预览而非入库判定', () => {
+  it('命中 → hit 高亮 + 说明是预览而非入库判定', () => {
     render(<DedupCard result={make({ is_duplicate: true })} />);
-    expect(screen.getByTestId('dedup-card').className).toContain('dup');
+    expect(screen.getByTestId('dedup-card').className).toContain('hit');
     expect(screen.getByTestId('dedup-verdict')).toHaveTextContent('词面 0.86 / 阈值 0.70');
     expect(screen.getByTestId('dedup-verdict')).toHaveTextContent('预览提示可能重复');
   });
 
   it('未命中 → 不高亮', () => {
     render(<DedupCard result={make({ is_duplicate: false, score: 0.2 })} />);
-    expect(screen.getByTestId('dedup-card').className).toBe('card dedup');
+    expect(screen.getByTestId('dedup-card').className).toBe('wf-card wf-dedup');
     expect(screen.getByTestId('dedup-verdict')).toHaveTextContent('预览未见重复');
   });
 

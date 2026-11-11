@@ -49,7 +49,7 @@ describe('WritePage 集成（T5）', () => {
     fireEvent.change(screen.getByTestId('f-content'), {
       target: { value: '项目技术栈约束：后端 Node 22 + React 19 strict' },
     });
-    expect(screen.getByTestId('dedup-card').className).toContain('dup');
+    expect(screen.getByTestId('dedup-card').className).toContain('hit');
     expect(screen.getByTestId('dedup-verdict')).toHaveTextContent('预览提示可能重复');
   });
 

@@ -1,11 +1,14 @@
 // 写入页（REQ-006 / P2）· 定稿三标签：写入表单 / 最近回执 / 查重与 L0 规则
+// 批次58：写入表单 tab 改定稿版式（masthead + 左栏 FORM/RECEIPT + 右栏 DEDUP/L0 UNLOCK + 底部 RECENT WRITES）；
+// 最近回执 / 查重与 L0 规则两 tab 保持 p0 版式不动。
 // 表单 → Jaccard 查重预判 → 内核 ma.write → L1–L6 回执。
 // 回执必须是内核真实返回：被拒时只显示原因与内核 request_id（未签发就写未签发），不做乐观成功。
 // ⚠ 禁止注入演示/种子数据：查重候选与最近回执全部读真实账本（空库即无候选 / 无回执）。
 import { useEffect, useState } from 'react';
 import { WriteForm } from './WriteForm.tsx';
 import { DedupCard } from './DedupCard.tsx';
-import { WriteReceiptCard, WriteReceiptTable, WriteRefusalCard } from './WriteReceiptCard.tsx';
+import { WriteReceiptCard, WriteReceiptTable, WriteRecentWritesCard, WriteRefusalCard } from './WriteReceiptCard.tsx';
+import { WriteL0UnlockCard, type L0UnlockStatus } from './WriteL0UnlockCard.tsx';
 import { useToast } from './useToast.tsx';
 import { useWriteMirror } from './useWriteMirror.ts';
 import { composeReceipt, scoreDedup, validateDraft, L1_CHAR_LIMIT } from './logic.ts';
@@ -49,7 +52,7 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
   // L0 写密钥锁定挡下的提交：原地给解锁入口，解锁后自动重放（不把用户赶去别的页面）
   const [l0Locked, setL0Locked] = useState(false);
   const [showUnlock, setShowUnlock] = useState(false);
-  const [status, setStatus] = useState<{ phase: 'loading' | 'ready' | 'error'; unlocked?: boolean; error?: string }>({ phase: 'loading' });
+  const [l0Status, setL0Status] = useState<L0UnlockStatus>({ phase: 'loading' });
   const [history, setHistory] = useState<{ phase: 'loading' | 'ready' | 'error'; rows: WriteReceiptHistoryRow[]; error?: string }>({
     phase: 'ready', rows: [],
   });
@@ -71,13 +74,12 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
   }, [existingData]);
 
   // 写密钥真实状态（内核 getWriteStatus；pending 条数不展示，定稿明确队列页不存在）
-  useEffect(() => {
-    let alive = true;
+  const loadL0Status = () => {
     coreWriteStatus()
-      .then((s) => { if (alive) setStatus({ phase: 'ready', unlocked: s.l0_unlocked }); })
-      .catch((e: unknown) => { if (alive) setStatus({ phase: 'error', error: kernelErrorText(e) }); });
-    return () => { alive = false; };
-  }, [receipt, refusal]);
+      .then((s) => setL0Status({ phase: 'ready', unlocked: s.l0_unlocked }))
+      .catch((e: unknown) => setL0Status({ phase: 'error', error: kernelErrorText(e) }));
+  };
+  useEffect(loadL0Status, [receipt, refusal]);
 
   const loadHistory = () => {
     setHistory((h) => ({ ...h, phase: 'loading' }));
@@ -85,6 +87,9 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
       .then((rows) => setHistory({ phase: 'ready', rows }))
       .catch((e: unknown) => setHistory({ phase: 'error', rows: [], error: kernelErrorText(e) }));
   };
+
+  // 批次58：最近写入通栏挂载即载；写入成功后也总是刷新（form tab 直接可见）
+  useEffect(loadHistory, []);
 
   useEffect(() => {
     if (tab === 'receipts') loadHistory();
@@ -125,7 +130,7 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
         }));
         // 账本已变 → 刷新查重候选（保留旧列表直到新列表返回，避免闪烁）
         void load().then((list) => replace(list)).catch(() => {});
-        if (tab === 'receipts') loadHistory();
+        loadHistory();
         mirror.audit(`memory_${cw.dedup_action}`);
         toast.show(
           // 内核写路径真实产出：create / graft / keep / filtered（keep 仅在 duplicated 时出现）
@@ -158,28 +163,36 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
     })();
   }
 
-  const statusText = status.phase === 'loading'
+  // 解锁成功：刷新写密钥状态；确实有被挡条目才自动重放（没挡过就不替用户提交）
+  const handleUnlocked = () => {
+    loadL0Status();
+    if (l0Locked) void doWrite();
+  };
+
+  const statusText = l0Status.phase === 'loading'
     ? '写密钥：读取中'
-    : status.phase === 'error'
-      ? `写密钥：状态不可读（${status.error}）`
-      : status.unlocked ? '写密钥：已解锁' : '写密钥：未解锁';
+    : l0Status.phase === 'error'
+      ? `写密钥：状态不可读（${l0Status.error}）`
+      : l0Status.unlocked ? '写密钥：已解锁' : '写密钥：未解锁';
 
   return (
     <div className="p0-page" data-testid="write-page">
-      <div className="p0-hd page-hd">
-        <h2>写入记忆 · ma.write</h2>
-        <span className="p0-sub">程序：单条表单 → Jaccard 查重预判 → 内核签发 request_id → L1–L6 压缩 → 回执</span>
-        <span className="p0-right">
-          <span className={`p0-tag ${status.unlocked ? 'ok' : status.phase === 'error' ? 'err' : 'warn'}`} data-testid="write-key-status">
-            {statusText}
+      {tab !== 'form' && (
+        <div className="p0-hd page-hd">
+          <h2>写入记忆 · ma.write</h2>
+          <span className="p0-sub">程序：单条表单 → Jaccard 查重预判 → 内核签发 request_id → L1–L6 压缩 → 回执</span>
+          <span className="p0-right">
+            <span className={`p0-tag ${l0Status.unlocked ? 'ok' : l0Status.phase === 'error' ? 'err' : 'warn'}`} data-testid="write-key-status">
+              {statusText}
+            </span>
+            {!l0Status.unlocked && (
+              <button type="button" className="p0-btn" data-testid="unlock-btn" onClick={() => setShowUnlock((v) => !v)}>
+                解锁写密钥
+              </button>
+            )}
           </span>
-          {!status.unlocked && (
-            <button type="button" className="p0-btn" data-testid="unlock-btn" onClick={() => setShowUnlock((v) => !v)}>
-              解锁写密钥
-            </button>
-          )}
-        </span>
-      </div>
+        </div>
+      )}
 
       <div className="p0-tabs" role="tablist" aria-label="写入页标签">
         {TABS.map((t) => (
@@ -203,46 +216,51 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
       )}
 
       {tab === 'form' && (
-        <div className="p0-grid2">
-          <div className="p0-col">
-            <WriteForm
-              draft={draft}
-              onChange={setDraft}
-              onSubmit={handleSubmit}
-              onReset={() => { setDraft((d) => ({ ...d, content: '', tags: [] })); setReceipt(null); setRefusal(null); }}
-            />
+        <div className="wf-page">
+          <div className="wf-masthead">
+            <span className="wf-code">WRITE</span>
+            <h2 className="wf-mast-title">写入记忆</h2>
+            <span className="wf-code dim">INGEST</span>
+            <span className="wf-mast-meta">写入只落 L0 密文 + 脱敏 L1 · 深层交后台补炼</span>
+          </div>
 
-            {draft.content.trim().length > 0 && phase === 'error' && (
-              <KernelLoadError what="读取查重候选（真实账本）" error={dedupError} onRetry={retryDedup} />
-            )}
+          <div className="wf-cols">
+            <div className="wf-col">
+              <WriteForm draft={draft} onChange={setDraft} onSubmit={handleSubmit} />
 
-            <div className="p0-card" data-testid="l0-pending-note">
-              <div className="p0-hd">
-                <h3>L0 写密钥与待重放</h3>
-                <span className={`p0-tag ${status.unlocked ? 'ok' : 'warn'}`}>{status.unlocked ? '已解锁' : '未解锁'}</span>
-              </div>
-              <div className="p0-note">
-                写密钥未解锁时，内核会把本条写入放进 pendingWrites，解锁后按 created_at 顺序重放；
-                程序没有该队列的页面，因此本界面不显示队列条数，也不伪造「已重放」。
-              </div>
-              {l0Locked && <L0WriteUnlock scene="这条手动写入" onUnlocked={doWrite} />}
+              {draft.content.trim().length > 0 && phase === 'error' && (
+                <KernelLoadError what="读取查重候选（真实账本）" error={dedupError} onRetry={retryDedup} />
+              )}
+
+              {receipt && <WriteReceiptCard receipt={receipt} />}
+              {refusal && <WriteRefusalCard refusal={refusal} source={draft.source} />}
+              {!receipt && !refusal && (
+                <div className="wf-card" data-testid="receipt-placeholder">
+                  <div className="wf-hd">
+                    <span className="wf-code">RECEIPT</span><span className="wf-zh">写入回执</span>
+                    <span className="wf-meta">等待真实提交</span>
+                  </div>
+                  <div className="wf-bd">
+                    <div className="wf-empty dashed">
+                      <b>等待真实提交</b>
+                      <div>提交后这里展示内核返回的 request_id / memory_id 与四类结果；被拒则展示拒绝原因，不会先显示成功。</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="wf-col wf-side">
+              {draft.content.trim().length > 0 && phase !== 'error' && <DedupCard result={result} />}
+              <WriteL0UnlockCard status={l0Status} triggered={l0Locked} onUnlocked={handleUnlocked} />
             </div>
           </div>
 
-          <div className="p0-col">
-            {draft.content.trim().length > 0 && phase !== 'error' && <DedupCard result={result} />}
-            {receipt && <WriteReceiptCard receipt={receipt} />}
-            {refusal && <WriteRefusalCard refusal={refusal} />}
-            {!receipt && !refusal && (
-              <div className="p0-card" data-testid="receipt-placeholder">
-                <div className="p0-hd"><h3>写入回执</h3></div>
-                <div className="p0-empty dashed">
-                  <b>等待真实提交</b>
-                  <div>提交后这里展示内核返回的 request_id / memory_id 与四类结果；被拒则展示拒绝原因，不会先显示成功。</div>
-                </div>
-              </div>
-            )}
-          </div>
+          <WriteRecentWritesCard
+            rows={history.rows.slice(0, 3)}
+            phase={history.phase}
+            error={history.error}
+          />
         </div>
       )}
 

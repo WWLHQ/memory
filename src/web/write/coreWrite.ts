@@ -120,6 +120,8 @@ export async function coreWriteReceipts(limit = 10): Promise<WriteReceiptHistory
         memory_id: memId,
         layers: layerKeys.length > 0 ? layerKeys.join(' / ') : '未取数',
         source: typeof d.source_agent === 'string' ? d.source_agent : (a.agent ?? '无'),
+        filter_code: typeof d.filter_code === 'string' ? d.filter_code : null,
+        gate_version: typeof d.gate_version === 'number' ? d.gate_version : null,
       };
     });
 }
