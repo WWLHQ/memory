@@ -489,7 +489,7 @@
 | [specs/ROADMAP-批次45-租户归一与成员密钥域模型-方案.md](specs/ROADMAP-批次45-租户归一与成员密钥域模型-方案.md) | 44 | ROADMAP 批次45+ — 令牌与租户欠账立项（MCP 作用域收紧前置 = 账本租户归一）+ 成员/API 密钥域模型 |
 | [specs/ROADMAP-批次B类-远端PG与多机硬过滤-方案.md](specs/ROADMAP-批次B类-远端PG与多机硬过滤-方案.md) | 102 | 批次 B 类 · 远端 PG 中枢（B4）+ 多机硬过滤（B1）+ 真实精炼（B3）方案 |
 | [specs/acceptance.md](specs/acceptance.md) | 55 | title: 验收标准 |
-| [specs/code-map.md](specs/code-map.md) | 1572 | status: draft |
+| [specs/code-map.md](specs/code-map.md) | 1577 | status: draft |
 | [specs/demo-data-baseline.md](specs/demo-data-baseline.md) | 116 | 演示/种子数据基线清单（批次42 · 阶段0 冻结） |
 | [specs/requirements.md](specs/requirements.md) | 59 | title: 需求规格 |
 | [specs/tasks/AGENT-ONBOARD.md](specs/tasks/AGENT-ONBOARD.md) | 208 | 原子任务：Agent 接入配置页（REQ-003） |
@@ -637,7 +637,7 @@ src/electron/agentDetect.ts 3c31af9a1ae7
 src/electron/backupFiles.ts edc4d8fb358f
 src/electron/dataRoot.ts 917293cd3730
 src/electron/hostScan.ts 694d58d7048c
-src/electron/ipcChannels.ts dce90984dcc6
+src/electron/ipcChannels.ts 3d26900d684b
 src/electron/l0KeyringStore.ts b900f5d523d5
 src/electron/llmBilling.ts 82ae5edccb1c
 src/electron/llmGateway.ts 5056e6447738
@@ -987,7 +987,7 @@ specs/ROADMAP-批次42-未接线三件套-方案.md df1a6f9d6ed5
 specs/ROADMAP-批次45-租户归一与成员密钥域模型-方案.md 633abaaaad54
 specs/ROADMAP-批次B类-远端PG与多机硬过滤-方案.md 0c7857454a7d
 specs/acceptance.md 664f1bb0d8cf
-specs/code-map.md 73e3c7b56860
+specs/code-map.md 3bef972c1f5d
 specs/demo-data-baseline.md 1d9af215ac78
 specs/requirements.md 6e72739fe35b
 specs/tasks/AGENT-ONBOARD.md 900d19783798
