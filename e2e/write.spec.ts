@@ -23,14 +23,16 @@ test.describe('写入页', () => {
     await page.goto(APP);
     await expect(page.locator('[data-testid="write-page"]')).toBeVisible();
     await expect(page.locator('[data-testid="write-form"]')).toBeVisible();
-    // 批次58 定稿版式：masthead + 右栏 L0 UNLOCK 常驻卡 + 底部 RECENT WRITES 真实空态
-    await expect(page.locator('.wf-masthead')).toContainText('WRITE');
-    await expect(page.locator('.wf-masthead')).toContainText('写入记忆');
-    await expect(page.locator('.wf-masthead')).toContainText('INGEST');
+    // 修复轮3 版式：masthead 在 tab 栏上方（无英文缀标，写密钥状态并入右侧）
+    const masthead = page.locator('.wf-masthead');
+    await expect(masthead).toContainText('写入记忆');
+    await expect(masthead).not.toContainText('WRITE');
+    await expect(masthead).not.toContainText('INGEST');
+    await expect(masthead.locator('[data-testid="write-key-status"]')).toBeVisible();
     await expect(page.locator('[data-testid="recent-writes-empty"]')).toContainText('真实 0 条');
     await expect(page.locator('.wf-unlock')).toBeVisible();
-    // project_id 只读必填（R2）
-    await expect(page.locator('[data-testid="f-project"]')).toHaveAttribute('readonly');
+    // 修复轮3：project_id 用户可修改（不再是 readonly）
+    await expect(page.locator('[data-testid="f-project"]')).not.toHaveAttribute('readonly');
     expect(errors).toEqual([]);
   });
 

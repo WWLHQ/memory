@@ -1,6 +1,6 @@
 // 写入页（REQ-006 / P2）表单 · 批次58 定稿版式（只改写入表单 tab）
 // 版式照用户确认的效果图：内容 → token/质量门提示 → 类别/来源 agent/标签联想 →
-// session_id/project_id 只读行 → 写入按钮。字段语义与内核契约不变。
+// session_id 只读（页面生成）；project_id 用户可修改（修复轮3），空值仍被校验拦下。字段语义与内核契约不变。
 // 提示行全部实算：estimateTokens + 内核 checkL0ToL1Quality（v3 单一真源），不抄效果图样值。
 import type { MemoryCategory, MemoryDraft, SourceKind } from './types.ts';
 import { estimateTokens, needsRefine, suggestTagsFromContent, validateDraft } from './logic.ts';
@@ -49,7 +49,7 @@ export function WriteForm({
   return (
     <div className="wf-card" data-testid="write-form">
       <div className="wf-hd">
-        <span className="wf-code">FORM</span><span className="wf-zh">写入表单</span>
+        <span className="wf-zh">写入表单</span>
         <span className="wf-meta">L0+L1 质量门 v{QUALITY_GATE_VERSION} · 有效字 &lt;{MIN_MEANINGFUL_WITHOUT_FACTS} 且无硬事实即拦</span>
       </div>
       <div className="wf-bd">
@@ -116,8 +116,15 @@ export function WriteForm({
             <input id="wf-session" className="wf-in" data-testid="f-session" value={draft.session_id} readOnly />
           </div>
           <div>
-            <label className="wf-lbl" htmlFor="wf-project">project_id (必填 · 只读)</label>
-            <input id="wf-project" className="wf-in" data-testid="f-project" value={draft.project_id} readOnly />
+            <label className="wf-lbl" htmlFor="wf-project">project_id (必填 · 可修改)</label>
+            <input
+              id="wf-project"
+              className="wf-in"
+              data-testid="f-project"
+              value={draft.project_id}
+              placeholder="如 P1"
+              onChange={(e) => onChange({ ...draft, project_id: e.target.value })}
+            />
           </div>
         </div>
 

@@ -10,7 +10,7 @@ export function DedupCard({ result, hasContent = true }: { result: DedupResult; 
   return (
     <div className={`wf-card wf-dedup${hasContent && is_duplicate ? ' hit' : ''}`} data-testid="dedup-card">
       <div className="wf-hd">
-        <span className="wf-code">DEDUP</span><span className="wf-zh">查重预览</span>
+        <span className="wf-zh">查重预览</span>
         <span className="wf-meta">本地词面相似度</span>
       </div>
       <div className="wf-bd">

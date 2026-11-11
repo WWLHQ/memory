@@ -38,7 +38,7 @@ export function WriteReceiptCard({ receipt }: { receipt: WriteReceipt }) {
   return (
     <div className="wf-card" data-testid="receipt">
       <div className="wf-hd">
-        <span className="wf-code">RECEIPT</span><span className="wf-zh">写入回执</span>
+        <span className="wf-zh">写入回执</span>
         <span className="wf-meta">字段全部来自内核本次返回 · 只读</span>
       </div>
       <div className="wf-bd">
@@ -84,7 +84,7 @@ export function WriteRefusalCard({ refusal, source }: { refusal: WriteRefusal; s
   return (
     <div className="wf-card" data-testid="receipt-rejected">
       <div className="wf-hd">
-        <span className="wf-code">RECEIPT</span><span className="wf-zh">写入被拒</span>
+        <span className="wf-zh">写入被拒</span>
         <span className="wf-meta">未落库 · 不乐观成功</span>
       </div>
       <div className="wf-bd">
@@ -135,7 +135,7 @@ export function WriteRecentWritesCard({
   return (
     <div className="wf-card wf-recent">
       <div className="wf-hd">
-        <span className="wf-code">RECENT WRITES</span><span className="wf-zh">最近写入</span>
+        <span className="wf-zh">最近写入</span>
         <span className="wf-meta">来源：账本审计 action=write · 最近 3 条</span>
       </div>
       <div className="wf-bd">

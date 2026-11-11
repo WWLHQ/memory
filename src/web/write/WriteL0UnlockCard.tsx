@@ -65,7 +65,7 @@ export function WriteL0UnlockCard({
   return (
     <div className="wf-card wf-unlock">
       <div className="wf-hd">
-        <span className="wf-code">L0 UNLOCK</span><span className="wf-zh">写密钥解锁</span>
+        <span className="wf-zh">写密钥解锁</span>
         <span className="wf-meta">{meta}</span>
       </div>
       <div className="wf-bd">

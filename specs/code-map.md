@@ -1529,3 +1529,20 @@ status: draft
 > **B·效果验证**：新单测 6 例（页面级登录实时跟随 1 + 表单标签 2 + 逻辑提取 4−共享）；e2e write 3/3；1280px 浅/深截图目视：标签候选自动来自输入内容（PostgreSQL/replication/slot/Node/LTS）、查重卡实算态、深色按钮墨青字亮青底。
 > **C·变异验证**：变异点 = `WritePage.tsx` sid 变化 effect 内删掉三个重载调用 → 用例「登录态实时跟随」**真实红灯** → 原样还原 → write 模块 56/56 复绿，无变异残留。
 > **已知边界**：storage 事件只在「另一文档写入」时触发——壳层登录弹窗（shell 文档）→ 页面 iframe 正是这一关系，成立；若未来某页面在自己文档内写 sessionId 则收不到事件（当前无此场景）。标签提取只覆盖 ASCII 技术 token，纯中文名词不产候选（诚实显示说明文案，不做伪分词）。
+
+## 批次58 修复轮3：去英文缀标 + project_id 可改 + 写入记忆行上移（2026-11-11，提交前）
+
+**用户反馈**：① 所有卡片前面的英文取消；② project_id 不是只读，是可改；③ 写入记忆行移到写入表单（tab 栏）上面，回执和规则上面的「写入记忆 · ma.write」取消。
+
+**改动**：
+- `src/web/write/WritePage.tsx`：masthead 从 form tab 内上移到 `p0-tabs` 上方常驻（三 tab 共用）；删除非 form tab 的 `p0-hd`「写入记忆 · ma.write」头部行，写密钥状态（write-key-status）与「解锁写密钥」按钮并入 masthead 右侧（wf-mast-right，各 tab 都可见）；masthead 与两处卡头的 WRITE/INGEST/RECEIPT/DEDUP 缀标删除。
+- `src/web/write/WriteForm.tsx`：FORM 缀标删除；project_id 输入框去 `readOnly`、label 改「必填 · 可修改」，空值仍被 validateDraft 拦（form-errors 提示不变）；session_id 保持只读。
+- `src/web/write/{DedupCard,WriteReceiptCard,WriteL0UnlockCard}.tsx`：DEDUP / RECEIPT×2 / RECENT WRITES / L0 UNLOCK 缀标删除。
+- `src/web/write/theme.css`：删 `.wf-code`/`.wf-code.dim`；`.wf-mast-meta` 去 margin-left:auto，新增 `.wf-mast-right`（margin-left:auto + flex）。
+- 测试：`WritePage.test.tsx` 旧「project_id 只读」用例改「用户可修改 + 清空被校验拦」；新增 masthead 在 tab 栏上方常驻 + 回执/规则 tab 无旧头部行 + 卡片英文缀标零残留 3 用例；`e2e/write.spec.ts` 断言同步改（masthead 无 WRITE/INGEST、f-project 无 readonly）。
+
+**三道闸门证据**：
+> **A·影响面回归**：影响面 = `src/web/write/{WritePage,WriteForm,DedupCard,WriteReceiptCard,WriteL0UnlockCard,theme.css}` + `WritePage.test.tsx` + `e2e/write.spec.ts`；未改内核/存储/审计/MCP/端口/session.ts。静态门禁全绿（typecheck 0 错、oxlint 0/0、check:no-demo 0 命中）；全量 test:gate **233 文件 / 2711 例 0 失败、重试 0 次**（`test-results/test-gate/20261111-121057/`；首跑满负载 flaky 3 例个人同步类单跑复绿后重跑取干净档）。
+> **B·效果验证**：新单测 3 例锁定（project 可改 + 清空被拦 / masthead 在 tab 栏上方常驻且回执规则 tab 无旧头部行 / 英文缀标零残留）；e2e write 3/3（真 dist + CDP Chromium）；1280px 浅/深全页截图目视：masthead 无英文、写密钥状态在右侧、卡片标题全中文、project_id「必填 · 可修改」、标签候选仍随内容提取。
+> **C·变异验证**：变异点 = `WriteForm.tsx` project_id 输入加回 `readOnly` → 用例「project_id 用户可修改」**真实红灯**（1 failed）→ 原样还原 → write 模块 58/58 复绿，无变异残留。
+> **已知边界**：project_id 改为自由输入——账本已有项目列表仍作为默认值跟随（挂载时 effect），用户可输入任意新项目名（内核按 project_id 落账）；masthead 上移后写密钥状态三 tab 可见，解锁按钮在未解锁时才出现；打包 SHA256 与包内标记见 `specs/MANUAL-TEST-BATCH-58.md` §8.2。

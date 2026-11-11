@@ -18,11 +18,45 @@ describe('WritePage 集成（T5）', () => {
     expect(screen.getByTestId('write-form')).toBeInTheDocument();
   });
 
-  it('project_id 只读必填（R2）', () => {
+  it('修复轮3：project_id 用户可修改（必填保留，清空仍被校验拦下）', () => {
     render(<WritePage />);
     const proj = screen.getByTestId('f-project') as HTMLInputElement;
-    expect(proj.readOnly).toBe(true);
+    expect(proj.readOnly).toBe(false);
     expect(proj.value).toBe('P1');
+    fireEvent.change(proj, { target: { value: 'P9-自定义项目' } });
+    expect((screen.getByTestId('f-project') as HTMLInputElement).value).toBe('P9-自定义项目');
+    fireEvent.change(screen.getByTestId('f-content'), { target: { value: 'project_id 可改后照常提交' } });
+    expect(screen.getByTestId('submit')).not.toBeDisabled();
+    fireEvent.change(proj, { target: { value: '   ' } });
+    expect(screen.getByTestId('submit')).toBeDisabled();
+    expect(screen.getByTestId('form-errors').textContent).toContain('project_id 必填');
+  });
+
+  it('修复轮3：masthead 在 tab 栏上方常驻；回执/规则 tab 不再出现「写入记忆 · ma.write」头部行', () => {
+    render(<WritePage />);
+    const page = screen.getByTestId('write-page');
+    const masthead = page.querySelector('.wf-masthead')!;
+    const tabs = page.querySelector('.p0-tabs')!;
+    expect(masthead.textContent).toContain('写入记忆');
+    // DOM 顺序：masthead 先于 tab 栏（写在 tab 栏前面）
+    expect(masthead.compareDocumentPosition(tabs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByTestId('write-key-status')).toBeInTheDocument();
+    // 切到最近回执 / 查重与 L0 规则：masthead 仍在，旧头部行取消
+    fireEvent.click(screen.getByTestId('write-tab-receipts'));
+    expect(page.querySelector('.wf-masthead')!.textContent).toContain('写入记忆');
+    expect(page.textContent).not.toContain('写入记忆 · ma.write');
+    fireEvent.click(screen.getByTestId('write-tab-rules'));
+    expect(page.textContent).not.toContain('写入记忆 · ma.write');
+  });
+
+  it('修复轮3：卡片英文缀标全部取消（WRITE/INGEST/FORM/RECEIPT/DEDUP/RECENT WRITES/L0 UNLOCK）', () => {
+    render(<WritePage />);
+    const text = screen.getByTestId('write-page').textContent;
+    for (const word of ['WRITE', 'INGEST', 'FORM', 'RECEIPT', 'RECENT WRITES', 'L0 UNLOCK']) {
+      expect(text).not.toContain(word);
+    }
+    fireEvent.change(screen.getByTestId('f-content'), { target: { value: '英文缀标取消验证：Node 22 LTS' } });
+    expect(screen.getByTestId('dedup-card').textContent).not.toContain('DEDUP');
   });
 
   it('空内容 → 提交按钮禁用；填内容后可提交并出回执', async () => {

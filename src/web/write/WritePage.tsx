@@ -1,5 +1,6 @@
 // 写入页（REQ-006 / P2）· 定稿三标签：写入表单 / 最近回执 / 查重与 L0 规则
-// 批次58：写入表单 tab 改定稿版式（masthead + 左栏 FORM/RECEIPT + 右栏 DEDUP/L0 UNLOCK + 底部 RECENT WRITES）；
+// 批次58：写入表单 tab 改定稿版式（masthead + 左栏 表单/回执 + 右栏 查重/L0 解锁 + 底部 最近写入）；
+// 修复轮3：masthead 上移到 tab 栏上方常驻、写密钥状态并入 masthead 右侧，卡片英文缀标全部取消。
 // 最近回执 / 查重与 L0 规则两 tab 保持 p0 版式不动。
 // 表单 → Jaccard 查重预判 → 内核 ma.write → L1–L6 回执。
 // 回执必须是内核真实返回：被拒时只显示原因与内核 request_id（未签发就写未签发），不做乐观成功。
@@ -192,22 +193,22 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
 
   return (
     <div className="p0-page" data-testid="write-page">
-      {tab !== 'form' && (
-        <div className="p0-hd page-hd">
-          <h2>写入记忆 · ma.write</h2>
-          <span className="p0-sub">程序：单条表单 → Jaccard 查重预判 → 内核签发 request_id → L1–L6 压缩 → 回执</span>
-          <span className="p0-right">
-            <span className={`p0-tag ${l0Status.unlocked ? 'ok' : l0Status.phase === 'error' ? 'err' : 'warn'}`} data-testid="write-key-status">
-              {statusText}
-            </span>
-            {!l0Status.unlocked && (
-              <button type="button" className="p0-btn" data-testid="unlock-btn" onClick={() => setShowUnlock((v) => !v)}>
-                解锁写密钥
-              </button>
-            )}
+      {/* 修复轮3：写入记忆行上移到 tab 栏上方常驻；非 form tab 的「写入记忆 · ma.write」头部行取消，
+          写密钥状态与解锁入口并入 masthead 右侧（各 tab 都可见）。 */}
+      <div className="wf-masthead">
+        <h2 className="wf-mast-title">写入记忆</h2>
+        <span className="wf-mast-meta">写入只落 L0 密文 + 脱敏 L1 · 深层交后台补炼</span>
+        <span className="wf-mast-right">
+          <span className={`p0-tag ${l0Status.unlocked ? 'ok' : l0Status.phase === 'error' ? 'err' : 'warn'}`} data-testid="write-key-status">
+            {statusText}
           </span>
-        </div>
-      )}
+          {!l0Status.unlocked && (
+            <button type="button" className="p0-btn" data-testid="unlock-btn" onClick={() => setShowUnlock((v) => !v)}>
+              解锁写密钥
+            </button>
+          )}
+        </span>
+      </div>
 
       <div className="p0-tabs" role="tablist" aria-label="写入页标签">
         {TABS.map((t) => (
@@ -232,13 +233,6 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
 
       {tab === 'form' && (
         <div className="wf-page">
-          <div className="wf-masthead">
-            <span className="wf-code">WRITE</span>
-            <h2 className="wf-mast-title">写入记忆</h2>
-            <span className="wf-code dim">INGEST</span>
-            <span className="wf-mast-meta">写入只落 L0 密文 + 脱敏 L1 · 深层交后台补炼</span>
-          </div>
-
           <div className="wf-cols">
             <div className="wf-col">
               <WriteForm draft={draft} onChange={setDraft} onSubmit={handleSubmit} />
@@ -248,7 +242,7 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
               {!receipt && !refusal && (
                 <div className="wf-card" data-testid="receipt-placeholder">
                   <div className="wf-hd">
-                    <span className="wf-code">RECEIPT</span><span className="wf-zh">写入回执</span>
+                    <span className="wf-zh">写入回执</span>
                     <span className="wf-meta">等待真实提交</span>
                   </div>
                   <div className="wf-bd">
@@ -266,7 +260,7 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
               {phase === 'error' ? (
                 <div className="wf-card wf-dedup" data-testid="dedup-card-error">
                   <div className="wf-hd">
-                    <span className="wf-code">DEDUP</span><span className="wf-zh">查重预览</span>
+                    <span className="wf-zh">查重预览</span>
                     <span className="wf-meta">候选读取失败</span>
                   </div>
                   <div className="wf-bd">

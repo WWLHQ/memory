@@ -6,8 +6,8 @@ status: pending
 
 - 日期：2026-11-11
 - 分支：main（上一笔 `9bc2483`；本批 ahead 待查 `git status -sb`，**未 push，待授权**）
-- 正式安装包：`release/installer/MultiAgent Memory-0.1.0-setup.exe`（127,990,817 B；**修复轮2 已重新打包覆盖，最新 SHA256 见 §7.4**）
-- SHA256（初版批次58）：`14AC4A62D955648A3DA92DF48FB2929603DF82521C110BF07950F0B61D7133B3`；修复轮1 见 §6.3；修复轮2 见 §7.4
+- 正式安装包：`release/installer/MultiAgent Memory-0.1.0-setup.exe`（127,990,701 B；**修复轮3 已重新打包覆盖，最新 SHA256 见 §8.2**）
+- SHA256（初版批次58）：`14AC4A62D955648A3DA92DF48FB2929603DF82521C110BF07950F0B61D7133B3`；修复轮1 见 §6.3；修复轮2 见 §7.4；修复轮3 见 §8.2
 - 数据目录：安装包版 `%APPDATA%\MultiAgent Memory`
 - 关联：`specs/code-map.md` 批次58 段落、上一轮 57-D（`92b4b4e`）、用户确认的写入页定稿效果图
 - 范围口径：用户确认「原写入页有 3 个卡片，本版式只改写入表单卡片（页），不要 3 个卡片全部改」——本批只重排「写入表单」tab；「最近回执」「查重与 L0 规则」两 tab 与页签条保持原样。底板不照抄效果图配色，全部走 Stratum A 令牌（亮/暗随壳层）。
@@ -138,3 +138,34 @@ status: pending
   - **全部命中**：`suggest-`（标签联想 chip testid）、`（随内容自动提取 · 不预置词表`（标签区文案）、`tags-empty`（标签空态）、`dedup-card-error`（查重错误态卡）、`等待输入`（查重空态）、`session:realpage`（会话存储键）、`addEventListener(\`storage\``（**登录态实时跟随监听**，minifier 把字符串转成反引号形式，故用反引号检索）。
   - `suggestTagsFromContent` / `prevSidRef` 等变量名 MISS 属预期：esbuild 压缩会改名，只验字符串字面量。
   - storage 监听不在 `write-*.js` chunk 而在共享 chunk（`session.ts`/`crossTabAuth.ts` 被 Vite 抽成公共依赖，`session:realpage` 命中 crossTabAuth/login/main/workspace 四个 chunk），对整包检索已证实进包。
+
+## 8. 修复轮3：去英文缀标 + project_id 可改 + 写入记忆行上移（2026-11-11）
+
+### 8.1 反馈与修复对照
+
+| # | 用户反馈 | 修复 |
+|---|---|---|
+| 1 | 所有卡片前面的英文取消 | WRITE/INGEST（masthead）、FORM（写入表单）、RECEIPT（回执/被拒/占位）、DEDUP（查重卡）、RECENT WRITES（最近写入）、L0 UNLOCK（解锁卡）全部删除；`.wf-code` 样式一并移除 |
+| 2 | project_id 不是只读，是可改 | 输入框去 readOnly，label 改「project_id (必填 · 可修改)」；默认仍跟随账本已有项目，用户可输入任意项目名；清空/全空格仍被校验拦下（「project_id 必填」红字）；session_id 保持只读 |
+| 3 | 写入记忆行移动到写入表单上面；回执和规则上面的写入记忆取消 | masthead（写入记忆行）上移到 tab 栏上方，三个 tab 共用常驻；「最近回执 / 查重与 L0 规则」两个 tab 的「写入记忆 · ma.write」头部行删除；写密钥状态标签与「解锁写密钥」按钮并入 masthead 右侧（未解锁才出按钮），各 tab 都能看到 |
+
+### 8.2 门禁
+
+| 门禁 | 结果 |
+|---|---|
+| write 模块单测 | **6 文件 / 58 例全绿**（project 可改 1 例重写 + masthead 位置/头部行取消 1 例 + 英文缀标零残留 1 例新增） |
+| 静态门禁 | typecheck 0 错 · oxlint 0/0 · check:no-demo 0 命中 |
+| 全量回归（A） | `npm run test:gate` **通过：233 文件 / 2711 例 0 失败、重试 0 次**（`test-results/test-gate/20261111-121057/`；首跑满负载 flaky 3 例个人同步类，单跑 31/31 复绿后重跑取干净档） |
+| 真浏览器 E2E | e2e write **3/3 通过**（真 dist + CDP Chromium；断言已更新为修复轮3 版式） |
+| 变异验证（C） | project_id 输入加回 `readOnly` → 「project_id 用户可修改」**真实红灯** → 原样还原 → 58/58 复绿 |
+| 截图目视（B） | 1280px 浅/深全页：masthead 无英文缀标、写密钥状态右侧、卡片标题全中文、project_id「必填 · 可修改」 |
+| 正式打包 | `npm run package` 退出码 0；SHA256 `25B37EB28AFB0992C68906D8A846598BA7E7A49C429F62AE93F59141E3828506`（127,990,701 B，2026-11-11 12:15）；asar 字节检索：「必填 · 可修改」「（随内容自动提取 · 不预置词表」「session:realpage」「addEventListener(\`storage\`」全命中，`>WRITE<`/`>INGEST<` 元素缀标零命中 |
+
+### 8.3 真机手测清单（待用户执行）
+
+- [ ] 打开写入页：顶部只有一行「写入记忆」（无 WRITE/INGEST 英文），下面是 写入表单 / 最近回执 / 查重与 L0 规则 三个 tab；右侧能看到写密钥状态。
+- [ ] 切到「最近回执」和「查重与 L0 规则」：顶部仍是同一行「写入记忆」，不再出现第二行「写入记忆 · ma.write」。
+- [ ] 写入表单卡头、回执卡、被拒卡、查重卡、最近写入、解锁卡的标题前都没有英文缀标。
+- [ ] project_id 输入框可以直接改：改成新项目名后提交 → 回执真实落账；清空 → 「project_id 必填」红字且写入按钮禁用。
+- [ ] 写密钥未解锁时 masthead 右侧出「解锁写密钥」按钮，点击原地下拉解锁面板；解锁后按钮消失。
+- [ ] 浅/深主题下以上各态文字清晰。
