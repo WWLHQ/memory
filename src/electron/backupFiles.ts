@@ -32,6 +32,55 @@ export interface BackupSourceFile {
 }
 
 /**
+ * 备份目的地分组（批次58，首启向导「两个备份路径」）：记忆库与审计账本同组，原数据库与密钥环同组。
+ * 分组的唯一理由：**原数据库是可以单独放到加密盘的**，把它和记忆库硬绑在同一个备份目录里，
+ * 就等于「要么两库一起异地、要么都不异地」。
+ */
+export type BackupGroup = 'ledger' | 'l0';
+
+export const BACKUP_GROUP: Record<BackupKind, BackupGroup> = {
+  ledger: 'ledger',
+  audit: 'ledger',
+  l0: 'l0',
+  keyring: 'l0',
+};
+
+export function groupOfKind(kind: BackupKind): BackupGroup {
+  return BACKUP_GROUP[kind];
+}
+
+/** 备份目录配置：分组目录优先，其次共用 dir（老配置只有它），最后默认目录 */
+export interface BackupDirConfig {
+  dir?: string;
+  ledgerDir?: string;
+  l0Dir?: string;
+}
+
+const nonEmpty = (v: unknown): string => (typeof v === 'string' && v.trim() ? v.trim() : '');
+
+/**
+ * 某一类备份该落到哪个目录：本组专用目录 → 共用 dir（批次37-D 的老字段，继续兼容）→ 默认目录。
+ * 三种都空是不可能的（fallback 恒有值），所以这个函数永远给出一处真实目录，不返回空串。
+ */
+export function backupTargetDir(kind: BackupKind, cfg: BackupDirConfig, fallback: string): string {
+  const own = groupOfKind(kind) === 'ledger' ? nonEmpty(cfg.ledgerDir) : nonEmpty(cfg.l0Dir);
+  return own || nonEmpty(cfg.dir) || nonEmpty(fallback) || fallback;
+}
+
+/**
+ * 一次备份实际会写到的目录清单（按组，同目录只出现一次）。
+ * 供调用方 mkdir / 记录回执；也供 UI 如实显示「这次到底备到哪两处」。
+ */
+export function backupTargetDirs(cfg: BackupDirConfig, fallback: string): { group: BackupGroup; dir: string }[] {
+  const out: { group: BackupGroup; dir: string }[] = [];
+  for (const group of ['ledger', 'l0'] as const) {
+    const dir = backupTargetDir(group === 'ledger' ? 'ledger' : 'l0', cfg, fallback);
+    if (!out.some((o) => o.dir === dir)) out.push({ group, dir });
+  }
+  return out;
+}
+
+/**
  * 生成一次备份要复制的文件清单：只收真实存在的源。
  * `exists` 由调用方注入（主进程 = fs.existsSync，单测 = 内存集合），本模块不碰文件系统。
  */

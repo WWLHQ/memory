@@ -18,7 +18,7 @@ import { parsePersonalOwnerBindings, type PersonalOwnerBinding } from '../core/m
 import { createPersonalApi, type PersonalSyncPort } from '../core/memagent/personal.ts';
 import { FileL0BlobStore } from '../core/memagent/l0Store.ts';
 import {
-  BACKUP_PREFIX, kindOfBackupName, planBackupFiles, selectBackupsToDelete, sortBackupsNewestFirst,
+  BACKUP_PREFIX, backupTargetDir, backupTargetDirs, kindOfBackupName, planBackupFiles, selectBackupsToDelete, sortBackupsNewestFirst,
   type BackupKind,
 } from './backupFiles.ts';
 import { validateAuditRecord as sharedValidateAuditRecord } from '../shared/auditShape.ts';
@@ -38,8 +38,8 @@ import { AUDIT_FILE_NAME } from '../core/memagent/auditLog.ts';
 import { detectLocalAgents, hostAgentConfig } from './agentDetect.ts';
 import { applyRecallEvidence, scanMcpClients, snippetForClient, wireMcpClient } from './mcpClients.ts';
 import {
-  applyProbeResult, applyProxyAccounting, llmEngineViews, loadLlmConfig, loadLlmGateway, loadLlmKeys, mergeLlmConfig,
-  saveLlmConfig, saveLlmKey, testEngine, type LlmConfigPatch, type LlmGatewayProvider,
+  applyProbeResult, applyProxyAccounting, LLM_PRESETS, llmEngineViews, loadLlmConfig, loadLlmGateway, loadLlmKeys, mergeLlmConfig,
+  saveLlmConfig, saveLlmKey, testEngine, type LlmConfigPatch, type LlmGatewayConfig, type LlmGatewayProvider,
 } from './llmGateway.ts';
 import { BILLING_TTL_MS, LlmBillingService } from './llmBilling.ts';
 import { UNSET_MANUAL_BILLING } from '../shared/billing.ts';
@@ -570,6 +570,12 @@ function loadOrCreateMcpToken(): string {
 interface BackupConfig {
   enabled: boolean;
   dir: string;            // 备份位置（用户选定目录）；空 = 未设置（自动备份不触发，手动立即备份仍可用，落到 userData 下）
+  /**
+   * 批次58（首启向导「两个备份路径」）：分组专用目录，空 = 回落到 dir / 默认目录。
+   * ledgerDir 收记忆库 + 审计账本，l0Dir 收原数据库 + 密钥环（密钥环必须跟原数据库一处，否则谁也解不开谁）。
+   */
+  ledgerDir?: string;
+  l0Dir?: string;
   hour: number;          // 自动备份时刻 0-23
   minute: number;        // 0-59
   keepCount: number;     // 保留份数（默认 7）
@@ -584,6 +590,8 @@ interface BackupFileReceipt {
   kind: BackupKind;
   name: string;
   size: number;
+  /** 批次58：这份落到了哪个目录（两个备份路径时逐文件如实回执，不再假装只有一个目录） */
+  dir?: string;
 }
 function defaultBackupConfig(): BackupConfig {
   return { enabled: false, dir: '', hour: 3, minute: 0, keepCount: 7 };
@@ -710,22 +718,25 @@ async function rotateBackups(backupDir: string, prefix: string, keepCount: numbe
  */
 async function runBackupOnce(
   trigger: 'manual' | 'auto',
-): Promise<{ ok: boolean; file?: string; files?: BackupFileReceipt[]; missing?: BackupKind[]; error?: string }> {
+): Promise<{ ok: boolean; file?: string; files?: BackupFileReceipt[]; missing?: BackupKind[]; dirs?: string[]; error?: string }> {
   const cfg = loadBackupConfig();
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
-  const backupDir = cfg.dir || join(USER_DATA, 'backups');
+  const fallbackDir = join(USER_DATA, 'backups');
+  const usedDirs = backupTargetDirs(cfg, fallbackDir).map((d) => d.dir);
   const files: BackupFileReceipt[] = [];
   try {
     const plan = planBackupFiles(ts, backupPaths(), (p) => existsSync(p));
     if (plan.files.length === 0) {
       return { ok: false, error: '记忆库、原数据库与审计账本都还不存在（尚未产生记忆）' };
     }
-    await mkdir(backupDir, { recursive: true });
     for (const f of plan.files) {
-      const target = join(backupDir, f.name);
+      // 批次58：逐文件选目录（记忆库组 / 原数据库组各自一处），不再假设「所有备份都进同一个 dir」
+      const dir = backupTargetDir(f.kind, cfg, fallbackDir);
+      await mkdir(dir, { recursive: true });
+      const target = join(dir, f.name);
       await copyFile(f.src, target);
-      files.push({ kind: f.kind, name: f.name, size: (await stat(target)).size });
-      await rotateBackups(backupDir, BACKUP_PREFIX[f.kind], cfg.keepCount);
+      files.push({ kind: f.kind, name: f.name, size: (await stat(target)).size, dir });
+      await rotateBackups(dir, BACKUP_PREFIX[f.kind], cfg.keepCount);
     }
     cfg.lastRun = new Date().toISOString();
     cfg.lastOk = true;
@@ -736,13 +747,13 @@ async function runBackupOnce(
       ts: Date.now(),
       project_id: 'P1',
       detail: {
-        op: 'auto_backup', trigger, dir: backupDir,
+        op: 'auto_backup', trigger, dir: usedDirs.join(' | '), dirs: usedDirs,
         files: files.map((f) => `${f.kind}:${f.name}`), missing: plan.missing, keep: cfg.keepCount,
         memories: Object.keys(storageSize()).length,
       },
     } as never);
-    void mlog(`backup:${trigger}-done`, { files, missing: plan.missing });
-    return { ok: true, file: files[0] ? join(backupDir, files[0].name) : undefined, files, missing: plan.missing };
+    void mlog(`backup:${trigger}-done`, { files, missing: plan.missing, dirs: usedDirs });
+    return { ok: true, file: files[0] ? join(files[0].dir ?? fallbackDir, files[0].name) : undefined, files, missing: plan.missing, dirs: usedDirs };
   } catch (e) {
     cfg.lastOk = false;
     void mlog(`backup:${trigger}-error`, String((e as Error)?.message ?? e));
@@ -761,24 +772,30 @@ function storageSize(): Record<string, unknown> {
   }
 }
 
-/** 备份历史（批次37-D：三类文件合并列表，最近 20 份倒序；kind 说明这份是哪个库） */
+/** 备份历史（批次37-D：三类文件合并列表，最近 20 份倒序；kind 说明这份是哪个库；批次58：跨两个目录合并） */
 async function listBackups(): Promise<{
   dir: string;
-  items: { name: string; time: string; size: number; kind: BackupKind }[];
+  dirs: string[];
+  items: { name: string; time: string; size: number; kind: BackupKind; dir: string }[];
 }> {
   const cfg = loadBackupConfig();
-  const backupDir = cfg.dir || join(USER_DATA, 'backups');
-  try {
-    if (!existsSync(backupDir)) return { dir: backupDir, items: [] };
-    const names = sortBackupsNewestFirst(await readdir(backupDir)).slice(0, 20);
-    const items = await Promise.all(names.map(async (n) => {
-      const s = await stat(join(backupDir, n));
-      return { name: n, time: s.mtime.toISOString(), size: s.size, kind: kindOfBackupName(n) ?? 'ledger' as const };
-    }));
-    return { dir: backupDir, items };
-  } catch {
-    return { dir: backupDir, items: [] };
+  const fallbackDir = join(USER_DATA, 'backups');
+  const dirs = backupTargetDirs(cfg, fallbackDir).map((d) => d.dir);
+  const items: { name: string; time: string; size: number; kind: BackupKind; dir: string }[] = [];
+  for (const dir of dirs) {
+    try {
+      if (!existsSync(dir)) continue;
+      for (const n of sortBackupsNewestFirst(await readdir(dir))) {
+        const s = await stat(join(dir, n));
+        items.push({ name: n, time: s.mtime.toISOString(), size: s.size, kind: kindOfBackupName(n) ?? 'ledger' as const, dir });
+      }
+    } catch {
+      // 某个目录读不动（权限/掉盘）：其余目录照常列，不因此把整个历史说成空
+      continue;
+    }
   }
+  items.sort((a, b) => (a.time < b.time ? 1 : a.time > b.time ? -1 : 0));
+  return { dir: dirs[0] ?? fallbackDir, dirs, items: items.slice(0, 20) };
 }
 
 let backupTicker: NodeJS.Timeout | null = null;
@@ -1200,7 +1217,10 @@ function requireSession(sessionId: unknown, channel: string): AdminGate {
  */
 async function backupBeforeKernelChange(dirPrefix: string, logAction: string): Promise<string> {
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
-  const base = loadBackupConfig().dir || join(USER_DATA, 'backups');
+  const cfg = loadBackupConfig();
+  // 批次58：这里是「一次性回滚快照」而不是滚动备份——四类源**故意放进同一个子目录**，
+  // 好在出事时整套回到同一时刻；目录位置取记忆库组（原数据库组可能被指到另一块盘，回滚快照分两处反而难用）。
+  const base = backupTargetDir('ledger', cfg, join(USER_DATA, 'backups'));
   const dir = join(base, `${dirPrefix}-${ts}`);
   await mkdir(dir, { recursive: true });
   // 批次37-D：批量改写账本前把三类落盘源一起备份 —— 只备记忆库会让 L0 原数据库成为唯一没有退路的那一份。
@@ -2430,6 +2450,67 @@ function registerFloatIpc(staticPort: number): void {
 // 设 L0 管理密码只在密钥环尚无 admin_wrap 时放行（那时 L0 库里没有任何密文，设密码不是越权）；
 // 一旦 admin_wrap 存在，改密码/换发码一律回到 l0:recovery* 的管理员口径，向导只剩「导出这一张卡」。
 // 恢复码只在发那一次返回；日志只记指纹（8 位散列）与目录，绝不记密码、绝不记码。
+//
+// 批次58：向导新增两个**可选**步骤（两个备份路径 / 精炼大模型）。它们同样没有会话，
+// 门禁统一用「向导还没走完」这条更硬的本机判据（指针 setupDone !== true）：
+// 走完之后 setup:setBackup / setup:llm* 一律拒绝，正规入口回到 backup:*（需管理员）与 llm:*（需管理员）。
+const trimStr = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+
+/** 向导是否还开着（= 本机首启设置尚未完成）；所有 setup:* 写通道共用这一条 */
+function wizardOpen(): boolean {
+  return !isSetupComplete(readSetupPointer());
+}
+
+/** 精炼引擎草稿：预设厂商（preset）或自定义 OpenAI 兼容端点（name + baseURL），外加模型名与密钥 */
+interface LlmSetupDraft {
+  preset?: string;
+  name?: string;
+  baseURL?: string;
+  model?: string;
+  apiKey?: string;
+}
+
+/**
+ * 把草稿折算成「如果现在保存，会得到什么配置」——**纯内存**，不落盘。
+ * 拨测与保存都走这一条：先测后存，两次算法同一真源，不会出现「测的是 A 存的是 B」。
+ * 自定义引擎按 baseURL 复用既有条目（重复点「测试」不会在配置里堆一串同地址副本）。
+ */
+function llmDraftInto(
+  cfg: LlmGatewayConfig,
+  draft: LlmSetupDraft,
+): { ok: true; cfg: LlmGatewayConfig; id: string; apiKey: string } | { ok: false; error: string } {
+  const model = trimStr(draft.model);
+  const apiKey = trimStr(draft.apiKey);
+  const preset = draft.preset ? LLM_PRESETS.find((p) => p.preset === draft.preset) ?? null : null;
+  let id = '';
+  let next = cfg;
+  if (preset) {
+    id = preset.preset;
+    if (!cfg.engines.some((e) => e.id === id)) next = mergeLlmConfig(cfg, { add: { preset: id } }).cfg;
+    if (!model) return { ok: false, error: '请填写模型名（精炼要指定具体模型，不能留空）' };
+  } else {
+    const name = trimStr(draft.name);
+    const baseURL = trimStr(draft.baseURL);
+    if (!name || !baseURL) return { ok: false, error: '自定义引擎请填写名称与 baseURL（OpenAI 兼容地址）' };
+    if (!model) return { ok: false, error: '请填写模型名（精炼要指定具体模型，不能留空）' };
+    const existing = cfg.engines.find((e) => e.baseURL === baseURL);
+    if (existing) {
+      id = existing.id;
+      next = mergeLlmConfig(cfg, { engines: [{ id, name }] }).cfg;
+    } else {
+      const before = new Set(cfg.engines.map((e) => e.id));
+      next = mergeLlmConfig(cfg, { add: { name, baseURL, model } }).cfg;
+      id = next.engines.find((e) => !before.has(e.id))?.id ?? '';
+    }
+    if (!id) return { ok: false, error: '无法登记自定义引擎：请检查 baseURL 是否合法' };
+  }
+  // 模型名与（预设时允许改的）地址：预设引擎的 baseURL 以预设为准，用户只改模型
+  next = mergeLlmConfig(next, { engines: [{ id, model }] }).cfg;
+  const eng = next.engines.find((e) => e.id === id);
+  if (eng?.needsKey && !apiKey) return { ok: false, error: '该厂商需要 API Key：请填写后再测试' };
+  return { ok: true, cfg: next, id, apiKey };
+}
+
 function registerSetupIpc(vault: L0Vault, staticPort: number): void {
   handleIpc(IPC.setupState, async () => {
     const pointer = readSetupPointer();
@@ -2437,6 +2518,8 @@ function registerSetupIpc(vault: L0Vault, staticPort: number): void {
     // 密钥环读不动（损坏）时按「没设过密码」如实回显，让向导给出真实下一步，而不是把用户卡死
     const vaultStatus = await vault.status().catch(() => null);
     const recovery = await vault.recoveryStatus().catch(() => null);
+    const backupCfg = loadBackupConfig();
+    const llmView = llmEngineViews(loadLlmConfig(USER_DATA), loadLlmKeys(USER_DATA));
     return {
       ok: true,
       setup_done: isSetupComplete(pointer),
@@ -2452,6 +2535,26 @@ function registerSetupIpc(vault: L0Vault, staticPort: number): void {
       card_pending: Boolean(pendingRecoveryCard),
       card_exported: recoveryCardExported,
       fingerprint: pendingRecoveryCard?.fingerprint ?? recovery?.fingerprint ?? '',
+      // ── 批次58 新增两步的回显（可选步骤也要如实回显，页面不能自己猜「做没做」）──
+      backup: {
+        ledger_dir: backupCfg.ledgerDir ?? '',
+        l0_dir: backupCfg.l0Dir ?? '',
+        shared_dir: backupCfg.dir ?? '',
+        default_dir: join(USER_DATA, 'backups'),
+        enabled: backupCfg.enabled,
+        hour: backupCfg.hour,
+        minute: backupCfg.minute,
+        keep_count: backupCfg.keepCount,
+      },
+      llm: {
+        usable: Boolean(llmGateway),
+        skipped: pointer?.llmSkipped === true,
+        engines: llmView.engines.map((e) => ({
+          id: e.id, name: e.name, model: e.model, enabled: e.enabled,
+          keySet: e.keySet, lastProbeOk: e.lastProbeOk, lastLatencyMs: e.lastLatencyMs,
+        })),
+        presets: llmView.presets,
+      },
     };
   });
 
@@ -2519,13 +2622,152 @@ function registerSetupIpc(vault: L0Vault, staticPort: number): void {
   handleIpc(IPC.setupExportCard, async () => exportPendingRecoveryCard('setup:first-run'));
 
   /**
-   * 走完向导：只有「密码已设 + 本次真导出过一张卡」才落 setupDone。
+   * 批次58 可选步骤①：为某一组备份挑目录（记忆库组 / 原数据库组）。
+   * 只回目录、不落配置——用户在页面上还可能改主意，真正落盘统一走 setup:setBackup。
+   * 校验用与数据根同一真源（绝对路径、拒 UNC/相对、可写探针），不另立一套判据。
+   */
+  handleIpc(IPC.setupChooseBackupDir, async (_e, group?: string) => {
+    if (!wizardOpen()) return { ok: false, error: '首启设置已完成：备份位置请到「记忆库」页修改' };
+    const g = group === 'l0' ? 'l0' : 'ledger';
+    const cfg = loadBackupConfig();
+    const current = (g === 'ledger' ? cfg.ledgerDir : cfg.l0Dir) || cfg.dir || join(USER_DATA, 'backups');
+    const pick = await dialog.showOpenDialog({
+      title: g === 'ledger' ? '选择记忆库备份目录' : '选择原数据库备份目录',
+      defaultPath: existsSync(current) ? current : undefined,
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    if (pick.canceled || !pick.filePaths[0]) return { ok: false, canceled: true, error: '未选择目录：保持原设置不变' };
+    const v = validateDataRootPath(pick.filePaths[0]);
+    if (!v.ok) return { ok: false, error: v.error };
+    const w = ensureDirWritable(v.root);
+    if (!w.ok) return { ok: false, error: `${v.root}\n${w.error}` };
+    return { ok: true, group: g, dir: v.root };
+  });
+
+  /**
+   * 批次58 可选步骤①落盘：两组备份目录 + 是否开启定时自动备份。
+   * 空字符串 = 清空该组（回落到共用 dir / 默认目录），不是一个「空路径」。
+   * 警告不阻断：备份目录与库同目录、或落在数据根里时如实提示「事故时会一起没」，但用户有权这么选。
+   */
+  handleIpc(IPC.setupSetBackup, async (_e, patch?: { ledgerDir?: unknown; l0Dir?: unknown; enabled?: unknown }) => {
+    if (!wizardOpen()) return { ok: false, error: '首启设置已完成：备份位置请到「记忆库」页修改' };
+    const cfg = loadBackupConfig();
+    const warnings: string[] = [];
+    const next = { ...cfg };
+    for (const key of ['ledgerDir', 'l0Dir'] as const) {
+      if (patch?.[key] === undefined) continue;
+      const raw = trimStr(patch[key]);
+      if (!raw) { delete next[key]; continue; }
+      const v = validateDataRootPath(raw);
+      if (!v.ok) return { ok: false, error: `${key === 'ledgerDir' ? '记忆库' : '原数据库'}备份目录不可用：${v.error}` };
+      const w = ensureDirWritable(v.root);
+      if (!w.ok) return { ok: false, error: `${key === 'ledgerDir' ? '记忆库' : '原数据库'}备份目录不可写：${w.error}` };
+      (next as Record<string, unknown>)[key] = v.root;
+      const libDir = key === 'ledgerDir' ? LIB_PATHS.ledgerDir : LIB_PATHS.l0Dir;
+      if (samePath(v.root, libDir)) warnings.push(`${key === 'ledgerDir' ? '记忆库' : '原数据库'}备份与库在同一目录：同一次事故里会一起没`);
+      else if (samePath(v.root, USER_DATA)) warnings.push('备份目录就是数据根：整个目录出问题时备份也跟着没');
+    }
+    if (typeof patch?.enabled === 'boolean') next.enabled = patch.enabled;
+    // 设了任一备份目录就默认把定时备份打开（否则「设了路径」等于没设，用户以为已在备份）
+    if ((next.ledgerDir || next.l0Dir) && typeof patch?.enabled !== 'boolean') next.enabled = true;
+    try {
+      saveBackupConfig(next);
+    } catch (e) {
+      return { ok: false, error: `备份设置没保存：${String((e as Error)?.message ?? e)}` };
+    }
+    actionLog('dataRoot', 'setup:backup-set', {
+      ledgerDir: next.ledgerDir ?? '', l0Dir: next.l0Dir ?? '', enabled: next.enabled,
+      hour: next.hour, minute: next.minute, keep: next.keepCount,
+    });
+    return {
+      ok: true,
+      warnings,
+      backup: {
+        ledger_dir: next.ledgerDir ?? '', l0_dir: next.l0Dir ?? '', shared_dir: next.dir ?? '',
+        enabled: next.enabled, hour: next.hour, minute: next.minute, keep_count: next.keepCount,
+      },
+    };
+  });
+
+  /**
+   * 批次58 可选步骤②拨测：**不落盘**，只回答「这个厂商 + 这个模型 + 这把密钥此刻连通吗」。
+   * 与参数页的 llm:test 同一条 testEngine，因此向导说「通」和页面说「通」是同一件事。
+   */
+  handleIpc(IPC.setupLlmTest, async (_e, draft?: LlmSetupDraft) => {
+    if (!wizardOpen()) return { ok: false, error: '首启设置已完成：模型请在参数页配置' };
+    const built = llmDraftInto(loadLlmConfig(USER_DATA), draft ?? {});
+    if (!built.ok) return { ok: false, error: built.error };
+    const r = await testEngine(built.cfg, { [built.id]: built.apiKey }, built.id);
+    const eng = built.cfg.engines.find((e) => e.id === built.id);
+    actionLog('llm', 'setup-test', { engine: built.id, model: r.model ?? '', ok: r.ok, latencyMs: r.latencyMs ?? 0, ...(r.error ? { error: r.error } : {}) });
+    return { ok: r.ok, model: r.model, latencyMs: r.latencyMs, error: r.error, engine: { id: built.id, name: eng?.name ?? '', model: eng?.model ?? '' } };
+  });
+
+  /**
+   * 批次58 可选步骤②保存：**先在主进程再拨测一次**，通过才落盘并启用。
+   * 为什么再测一次：页面上的「测试通过」只是几秒前的一次回执，不能当作写盘许可；
+   * 主进程自己测过才写，「拨测通过才算已添加」这条口径不靠渲染层自觉。
+   */
+  handleIpc(IPC.setupLlmSave, async (_e, draft?: LlmSetupDraft) => {
+    if (!wizardOpen()) return { ok: false, error: '首启设置已完成：模型请在参数页配置' };
+    const built = llmDraftInto(loadLlmConfig(USER_DATA), draft ?? {});
+    if (!built.ok) return { ok: false, error: built.error };
+    const probe = await testEngine(built.cfg, { [built.id]: built.apiKey }, built.id);
+    if (!probe.ok) {
+      actionLog('llm', 'setup-save-rejected', { engine: built.id, ok: false, ...(probe.error ? { error: probe.error } : {}) }, { level: 'warn' });
+      return { ok: false, error: `连通性测试未通过，未保存：${probe.error ?? '未知原因'}`, probe };
+    }
+    const enabledCfg = mergeLlmConfig(built.cfg, { engines: [{ id: built.id, enabled: true }] }).cfg;
+    const finalCfg = applyProbeResult(enabledCfg, built.id, probe);
+    try {
+      saveLlmConfig(USER_DATA, finalCfg);
+      if (built.apiKey) saveLlmKey(USER_DATA, built.id, built.apiKey); // 密钥本体不进日志
+    } catch (e) {
+      return { ok: false, error: `模型配置没保存：${String((e as Error)?.message ?? e)}` };
+    }
+    llmGateway = loadLlmGateway(USER_DATA);
+    const eng = finalCfg.engines.find((e) => e.id === built.id);
+    actionLog('llm', 'setup-config-saved', {
+      engine: built.id, name: eng?.name ?? '', model: eng?.model ?? '',
+      latencyMs: probe.latencyMs ?? 0, usable: Boolean(llmGateway),
+    });
+    return {
+      ok: true,
+      engine: { id: built.id, name: eng?.name ?? '', model: eng?.model ?? '' },
+      latencyMs: probe.latencyMs,
+      usable: Boolean(llmGateway),
+    };
+  });
+
+  /** 明确跳过精炼模型：只落一个标记（进度卡显示「已跳过」），门禁不变——这一步本来就是可选 */
+  handleIpc(IPC.setupSkipLlm, async () => {
+    if (!wizardOpen()) return { ok: false, error: '首启设置已完成' };
+    const pointer = readSetupPointer();
+    const next: DataRootPointer = {
+      ...(pointer ?? { version: DATA_ROOT_POINTER_VERSION, root: USER_DATA, updatedAt: '' }),
+      ...(LIB_PATHS.ledgerDir ? { ledgerDir: LIB_PATHS.ledgerDir } : {}),
+      ...(LIB_PATHS.l0Dir ? { l0Dir: LIB_PATHS.l0Dir } : {}),
+      llmSkipped: true,
+    };
+    if (!persistPointer(next)) return { ok: false, error: '无法写入数据位置指针：请检查该目录是否可写' };
+    actionLog('dataRoot', 'setup:llm-skipped', { usable: Boolean(llmGateway) }, { level: 'warn' });
+    return { ok: true, skipped: true };
+  });
+
+  /**
+   * 走完向导：只有「两库位置已定 + 备份位置至少一处 + 密码已设 + 本次真导出过一张卡」才落 setupDone。
+   * 备份是**必选**（用户 2026-11-10 拍板）：不设备份的机器上两库只有一份，坏一次就没了，
+   * 所以这条闸门放在主进程，页面把按钮点亮也没用。精炼模型仍可选，不在此列。
    * 落不了指针就如实报错——下次启动照样被向导拦住，绝不假装配置成功。
    */
   handleIpc(IPC.setupFinish, async () => {
     const pointer = readSetupPointer();
     const status = await vault.status().catch(() => null);
     if (!status?.has_admin_wrap) return { ok: false, error: '还没设置 L0 管理密码：这一步不能跳' };
+    const backupCfg = loadBackupConfig();
+    if (!trimStr(backupCfg.ledgerDir) && !trimStr(backupCfg.l0Dir)) {
+      return { ok: false, error: '备份位置还没设置：这一步不能跳（至少给记忆库或原数据库选一处备份目录）' };
+    }
     if (!recoveryCardExported || !pendingRecoveryCard) {
       return { ok: false, error: '恢复卡还没导出：没有这张卡，忘记管理密码时 L0 原文就找不回来' };
     }
@@ -2538,6 +2780,9 @@ function registerSetupIpc(vault: L0Vault, staticPort: number): void {
     if (!persistPointer(next)) return { ok: false, error: '无法写入数据位置指针（首启设置没保存）：请检查该目录是否可写后重试' };
     actionLog('dataRoot', 'setup:done', {
       ledgerDir: LIB_PATHS.ledgerDir, l0Dir: LIB_PATHS.l0Dir, fingerprint: pendingRecoveryCard.fingerprint,
+      // 批次58：精炼模型是可选项，走完时如实记下用户是「配了」「明确跳过」还是「压根没碰」
+      llm: llmGateway ? 'configured' : (pointer?.llmSkipped ? 'skipped' : 'untouched'),
+      backupEnabled: loadBackupConfig().enabled,
     });
     // 由主进程给下一步地址：端口参数只有它知道，页面自己拼会漏掉 backend/agentBackend
     return { ok: true, next_url: mainWindowUrl(staticPort, false) };

@@ -56,6 +56,8 @@ export type HostMethod =
   | 'l0:rebuildPreview' | 'l0:rebuildRun'
   | 'l0:recoveryStatus' | 'l0:recoveryInit' | 'l0:recoveryIssue' | 'l0:recover' | 'l0:recoveryExport'
   | 'setup:state' | 'setup:reselectDirs' | 'setup:setL0Password' | 'setup:regenCode' | 'setup:exportCard' | 'setup:finish'
+  /** 批次58：向导的两个可选步骤（备份路径 / 精炼大模型），门禁同 setup:*（向导未走完才放行） */
+  | 'setup:chooseBackupDir' | 'setup:setBackup' | 'setup:llmTest' | 'setup:llmSave' | 'setup:skipLlm'
   | 'legacy:scan' | 'legacy:demote'
   | 'ledger:resetPreview' | 'ledger:resetRecollect'
   | 'rules:rejudgePreview' | 'rules:rejudgeRun'
@@ -138,6 +140,11 @@ const CHANNEL_TO_NATIVE: Record<HostMethod, [string, string]> = {
   'setup:regenCode': ['setup', 'regenCode'],
   'setup:exportCard': ['setup', 'exportCard'],
   'setup:finish': ['setup', 'finish'],
+  'setup:chooseBackupDir': ['setup', 'chooseBackupDir'],
+  'setup:setBackup': ['setup', 'setBackup'],
+  'setup:llmTest': ['setup', 'llmTest'],
+  'setup:llmSave': ['setup', 'llmSave'],
+  'setup:skipLlm': ['setup', 'skipLlm'],
   'legacy:scan': ['legacy', 'scan'],
   'legacy:demote': ['legacy', 'demote'],
   'ledger:resetPreview': ['ledgerReset', 'preview'],

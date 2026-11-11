@@ -101,6 +101,16 @@ export const IPC = {
   setupRegenCode: 'setup:regenCode',
   setupExportCard: 'setup:exportCard',
   setupFinish: 'setup:finish',
+  /**
+   * 批次58：向导新增两个**可选**步骤，共用同一条「向导还没走完」的本机判据（指针 setupDone !== true）。
+   * 走完之后这些通道一律拒绝——备份与模型的正规入口回到备份卡（`backup:*` 需管理员）与参数页（`llm:*` 需管理员）。
+   */
+  setupChooseBackupDir: 'setup:chooseBackupDir',
+  setupSetBackup: 'setup:setBackup',
+  setupLlmTest: 'setup:llmTest',
+  setupLlmSave: 'setup:llmSave',
+  /** 明确「不加精炼模型」——落指针 llmSkipped，进度卡显示「已跳过」而不是「待完成」 */
+  setupSkipLlm: 'setup:skipLlm',
   /** 批次24：遗留账本清理（未接 LLM 却带 L2–L6 的历史行降级回 L1）——只读预览 / 管理员执行 */
   legacyScan: 'legacy:scan',
   legacyDemote: 'legacy:demote',

@@ -5,7 +5,10 @@ import { getStoredSessionId } from '../Home/crossTabAuth.ts';
 
 export interface BackupConfigView {
   enabled: boolean;
-  dir: string;      // 备份位置；空 = 默认 <数据根目录>/backups
+  dir: string;      // 共用备份位置；空 = 默认 <数据根目录>/backups
+  /** 批次58：首启向导里分组设的两个目录（记忆库组 / 原数据库组），空 = 回落到 dir */
+  ledgerDir?: string;
+  l0Dir?: string;
   hour: number;
   minute: number;
   keepCount: number;

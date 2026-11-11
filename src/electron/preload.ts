@@ -191,6 +191,13 @@ const setup = {
   regenCode: (password: string) => ipcRenderer.invoke(IPC.setupRegenCode, password),
   exportCard: () => ipcRenderer.invoke(IPC.setupExportCard),
   finish: () => ipcRenderer.invoke(IPC.setupFinish),
+  // 批次58：向导的两个可选步骤（备份路径 / 精炼大模型）——同样不带会话，门禁是「向导还没走完」
+  chooseBackupDir: (group: 'ledger' | 'l0') => ipcRenderer.invoke(IPC.setupChooseBackupDir, group),
+  setBackup: (patch: { ledgerDir?: string; l0Dir?: string; enabled?: boolean }) =>
+    ipcRenderer.invoke(IPC.setupSetBackup, patch),
+  llmTest: (draft: Record<string, unknown>) => ipcRenderer.invoke(IPC.setupLlmTest, draft),
+  llmSave: (draft: Record<string, unknown>) => ipcRenderer.invoke(IPC.setupLlmSave, draft),
+  skipLlm: () => ipcRenderer.invoke(IPC.setupSkipLlm),
 };
 
 // 遗留账本清理桥（批次24）：预览只读、执行需管理员；主进程执行前自动备份数据根。

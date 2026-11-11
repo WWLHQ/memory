@@ -1,4 +1,4 @@
-// E2E 测试：首启强制向导 setup.html（批次37-B；本规格补上它的点击级覆盖）。
+// E2E 测试：首启强制向导 setup.html（批次37-B 建；批次58 按定稿图重做版式并加两个步骤后重写）。
 //
 // 这套 E2E 跑在**真构建产物**上（run.mjs 先 `npx vite build`，此处 startStatic 直接服务 dist/），
 // 但**没有 Electron 主进程**：harness 用 CDP 连外部 Chromium，页面拿不到 preload 注入的 window.api。
@@ -7,41 +7,47 @@
 //      这是唯一能在浏览器里证明「纯浏览器模式不假装设置成功」的方式。
 //   ② 打桩 window.__ELECTRON__ / window.api.setup.*（见 installSetupStub）→ 真跑 dist 里的
 //      SetupPage + desktop/hostBridge 的 native 调用链：CHANNEL_TO_NATIVE 的
-//      setup.{state,reselectDirs,setL0Password,regenCode,exportCard,finish} 映射、参数透传、
-//      每步之后的 refresh 重拉、以及 setupEntry 未注入 onNavigate 时那次真导航，全部被执行。
+//      setup.{state,reselectDirs,setL0Password,regenCode,exportCard,finish,chooseBackupDir,setBackup,llmTest,llmSave,skipLlm}
+//      映射、参数透传、每步之后的 refresh 重拉、以及 setupEntry 未注入 onNavigate 时那次真导航，全部被执行。
 //      桩逐条镜像 main.ts §6e 的真返回（文案抄自源码，状态机 admin_wrap / pendingRecoveryCard /
-//      recoveryCardExported 与之一一对应）。
-//   **桩证明不了的部分（如实声明）**：真密钥环与 DEK 封装、真原生「另存为」对话框、
-//   setupDone 落盘与主窗口门禁、两个库文件真的被创建——分别由 dataRoot.test.ts、
-//   core/memagent 的 l0* 单测、SetupPage.test.tsx 与批次37 手测报告 §4 的实机走查负责。
+//      recoveryCardExported / 备份目录 / llmSkipped 与之一一对应）。
+//   **桩证明不了的部分（如实声明）**：真密钥环与 DEK 封装、真原生「另存为」/目录对话框、
+//   setupDone 落盘与主窗口门禁、两个库文件真的被创建、真 LLM 拨测出网——分别由 dataRoot.test.ts、
+//   core/memagent 的 l0* 单测、SetupPage.test.tsx、llmGateway.test.ts 与批次58 手测报告 §4 的实机走查负责。
 import { test, expect, disconnectBrowser, collectErrors } from './harness.ts';
 import { startStatic, type StaticServer } from './servers.ts';
 
-// 与 main.ts §6e 逐字一致的四条拒绝文案（源码改了这里会红，是故意的）
+// 与 main.ts §6e 逐字一致的拒绝文案（源码改了这里会红，是故意的）
 const ERR_ALREADY_SET_PASSWORD = '本机已设过 L0 管理密码：请在「安全」页用恢复码找回，向导不再改密码';
 // setup:regenCode 走 vault.unlockWrite，密码错的文案在 l0vault.ts:491（§4.4.4 口径）
 const ERR_BAD_WRITE_PASSWORD = '管理密码错误（§4.4.4）';
 const ERR_RESELECT_CANCELED = '未选择目录：保持原位置不变';
 const ERR_PERSIST_POINTER = '无法写入数据位置指针（首启设置没保存）：请检查该目录是否可写后重试';
+// 批次58：备份是必需项，主进程自己的拒绝文案
+const ERR_NO_BACKUP = '备份位置还没设置：这一步不能跳（至少给记忆库或原数据库选一处备份目录）';
 
 interface StubConfig {
   /** 指针里 ledgerDir + l0Dir 都已选定 */
   dirsSet: boolean;
   /** 密钥环已有 admin_wrap（= 本机此前设过 L0 管理密码） */
   hasAdminPassword: boolean;
+  /** 备份目录已设（批次58 起是必需项） */
+  backupSet?: boolean;
   /** setup:regenCode 交上去的密码不对：走 l0Fail(e)，返回真实错误文案 */
   regenWrongPassword?: boolean;
   /** setup:reselectDirs 在原生目录对话框点了取消 */
   reselectCanceled?: boolean;
   /** setup:exportCard 在原生另存为对话框点了取消 */
   exportCanceled?: boolean;
-  /** setup:finish 时 persistPointer 失败：三步看起来都完成，仍拒绝进入应用 */
+  /** setup:finish 时 persistPointer 失败：必需项看起来都完成，仍拒绝进入应用 */
   finishRejects?: boolean;
   nextUrl?: string;
 }
 
 const FIRST_RUN: StubConfig = { dirsSet: true, hasAdminPassword: false };
-const ALREADY_SET: StubConfig = { dirsSet: true, hasAdminPassword: true };
+const ALREADY_SET: StubConfig = { dirsSet: true, hasAdminPassword: true, backupSet: true };
+/** 目录与备份都已定、密码已设：用于「只差恢复卡」与可选步骤的用例 */
+const READY_TO_FINISH: StubConfig = { dirsSet: true, hasAdminPassword: true, backupSet: true };
 
 /**
  * 页面脚本之前安装 window.api.setup 桩。
@@ -62,6 +68,14 @@ function installSetupStub(cfg: StubConfig): void {
     pending: null as null | { grouped: string },
     /** = main.ts 的 recoveryCardExported */
     exported: false,
+    /** = backup-config.json 的两处分组目录（批次58） */
+    backup: {
+      ledger_dir: cfg.backupSet ? 'C:\\MultiAgentE2E\\backup\\ledger' : '',
+      l0_dir: cfg.backupSet ? 'C:\\MultiAgentE2E\\backup\\l0' : '',
+      shared_dir: '', default_dir: 'C:\\MultiAgentE2E\\backups',
+      enabled: Boolean(cfg.backupSet), hour: 3, minute: 0, keep_count: 7,
+    },
+    llm: { usable: false, skipped: false },
   };
   const state = () => ({
     ok: true,
@@ -78,6 +92,17 @@ function installSetupStub(cfg: StubConfig): void {
     card_pending: s.pending !== null && !s.exported,
     card_exported: s.exported,
     fingerprint: s.pending !== null || s.has_admin_password ? FINGERPRINT : '',
+    backup: s.backup,
+    llm: {
+      usable: s.llm.usable, skipped: s.llm.skipped,
+      engines: s.llm.usable
+        ? [{ id: 'deepseek', name: 'DeepSeek', model: 'deepseek-chat', enabled: true, keySet: true, lastProbeOk: true, lastLatencyMs: 120 }]
+        : [],
+      presets: [
+        { preset: 'deepseek', name: 'DeepSeek', baseURL: 'https://api.deepseek.com', model: 'deepseek-chat', needsKey: true },
+        { preset: 'ollama', name: 'Ollama（本地）', baseURL: 'http://127.0.0.1:11434', model: '', needsKey: false },
+      ],
+    },
   });
   /** = main.ts 的 issueRecoveryCard：发新码即作废上一次导出 */
   const issue = () => {
@@ -116,8 +141,41 @@ function installSetupStub(cfg: StubConfig): void {
       s.exported = true;
       return { ok: true, file_name: 'L0恢复卡-' + FINGERPRINT + '.txt', inside_data_root: false, fingerprint: FINGERPRINT };
     },
+    chooseBackupDir: async (group?: string) => ({
+      ok: true,
+      group: group === 'l0' ? 'l0' : 'ledger',
+      dir: group === 'l0' ? 'C:\\MultiAgentE2E\\backup\\l0' : 'C:\\MultiAgentE2E\\backup\\ledger',
+    }),
+    setBackup: async (patch?: { ledgerDir?: string; l0Dir?: string }) => {
+      s.backup = {
+        ...s.backup,
+        ledger_dir: typeof patch?.ledgerDir === 'string' ? patch.ledgerDir : s.backup.ledger_dir,
+        l0_dir: typeof patch?.l0Dir === 'string' ? patch.l0Dir : s.backup.l0_dir,
+      };
+      s.backup.enabled = Boolean(s.backup.ledger_dir || s.backup.l0_dir);
+      return { ok: true, warnings: [], backup: s.backup };
+    },
+    llmTest: async () => ({
+      ok: true, model: 'deepseek-chat', latencyMs: 120,
+      engine: { id: 'deepseek', name: 'DeepSeek', model: 'deepseek-chat' },
+    }),
+    llmSave: async () => {
+      s.llm.usable = true;
+      s.llm.skipped = false;
+      return {
+        ok: true, model: 'deepseek-chat', latencyMs: 118, usable: true,
+        engine: { id: 'deepseek', name: 'DeepSeek', model: 'deepseek-chat' },
+      };
+    },
+    skipLlm: async () => {
+      s.llm.skipped = true;
+      return { ok: true, skipped: true };
+    },
     finish: async () => {
       if (!s.has_admin_password) return { ok: false, error: '还没设置 L0 管理密码：这一步不能跳' };
+      if (!s.backup.ledger_dir && !s.backup.l0_dir) {
+        return { ok: false, error: '备份位置还没设置：这一步不能跳（至少给记忆库或原数据库选一处备份目录）' };
+      }
       if (!s.exported || s.pending === null) {
         return { ok: false, error: '恢复卡还没导出：没有这张卡，忘记管理密码时 L0 原文就找不回来' };
       }
@@ -148,22 +206,18 @@ test.afterAll(async () => {
   await disconnectBrowser();
 });
 
-/** 切到指定页签（0 存储 / 1 模型 / 2 安全），面板以 hidden 挂载 */
-async function setupTab(page: import('playwright-core').Page, i: 0 | 1 | 2): Promise<void> {
-  await page.locator(`[data-testid="setup-tab-${i}"]`).click();
-  await expect(page.locator(`[data-testid="setup-tab-${i}"]`)).toHaveAttribute('aria-selected', 'true');
-}
-
 test.describe('首启向导 · 纯浏览器模式（没有主进程 = 不假装设置成功）', () => {
-  test('setup.html 真产物：只给不可用说明，三步卡片一个都不渲染', async ({ page }) => {
+  test('setup.html 真产物：只给不可用说明，五步卡片一个都不渲染', async ({ page }) => {
     const errors = collectErrors(page);
     await page.goto(WIZARD);
     await expect(page.locator('[data-testid="setup-unavailable"]')).toBeVisible();
     await expect(page.locator('[data-testid="setup-unavailable"]')).toContainText('纯浏览器模式');
     // 红线：降级分支里不出现任何「已完成 / 可进入」的样子，也没有可点的假按钮
     await expect(page.locator('[data-testid="setup-step-dirs"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="setup-step-backup"]')).toHaveCount(0);
     await expect(page.locator('[data-testid="setup-step-password"]')).toHaveCount(0);
     await expect(page.locator('[data-testid="setup-step-card"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="setup-step-llm"]')).toHaveCount(0);
     await expect(page.locator('[data-testid="setup-finish"]')).toHaveCount(0);
     expect(errors).toEqual([]);
   });
@@ -187,33 +241,33 @@ test.describe('首启向导 · 首次设置（打桩主进程 §6e，跑 dist �
     const errors = collectErrors(page);
     await page.addInitScript(installSetupStub, FIRST_RUN);
     await page.goto(WIZARD);
-    // 现行 3 页签（① 存储 / ② 模型 / ③ 安全）：引言如实写明「② 模型」程序首启没有该步骤
-    await expect(page.locator('[data-testid="setup-intro"]')).toContainText('① 存储');
-    await expect(page.locator('[data-testid="setup-intro"]')).toContainText('③ 安全');
-    await expect(page.locator('[data-testid="setup-intro"]')).toContainText('程序首启没有该步骤');
-    // ① 存储
-    await expect(page.locator('[data-testid="setup-step-dirs"]')).toContainText('① 已完成');
-    await expect(page.locator('[data-testid="setup-step-dirs"]')).toContainText('memories.db.json');
+    // 定稿图逐字：三件事 + 门禁在主进程
+    await expect(page.locator('[data-testid="setup-intro"]')).toContainText('三件事全做完才放行数据面');
+    await expect(page.locator('[data-testid="setup-intro"]')).toContainText('门禁在主进程判定');
+    await expect(page.locator('[data-testid="setup-step-dirs"]')).toContainText('① 两个库的位置');
+    await expect(page.locator('[data-testid="setup-dir-files"]')).toContainText('memories.db.json');
     await expect(page.locator('[data-testid="setup-step-dirs"]')).toContainText('密钥环 l0-keyring.json 与原数据库同目录');
-    // ② 模型：程序无该步骤 → 断诚实态（不是演示「测试通过」）
-    await setupTab(page, 1);
-    await expect(page.locator('[data-testid="setup-step-model"]')).toContainText('程序无该步骤');
-    await expect(page.locator('[data-testid="setup-model-note"]')).toContainText('没有 setup:model 这类通道');
-    await expect(page.locator('[data-testid="setup-model-deviation"]')).toContainText('程序 = 存储 → L0 密码 → 恢复卡导出');
-    // ③ 安全：密码/恢复卡/完成门禁
-    await setupTab(page, 2);
-    await expect(page.locator('[data-testid="setup-step-password"]')).toContainText('② 待完成');
-    await expect(page.locator('[data-testid="setup-step-card"]')).toContainText('③ 待完成');
+    // ① 卡内第三行：两处备份目录（必选，沿用同款两列字段）
+    await expect(page.locator('[data-testid="setup-step-backup"]')).toContainText('记忆库备份目录');
+    await expect(page.locator('[data-testid="setup-step-backup"]')).toContainText('必选');
+    // ②③ 按图编号
+    await expect(page.locator('[data-testid="setup-step-password"]')).toContainText('② 设置 L0 管理密码');
+    await expect(page.locator('[data-testid="setup-step-card"]')).toContainText('③ 恢复卡预览');
     await expect(page.locator('[data-testid="setup-card-none"]')).toBeVisible();
+    // ④ 可选模型（同款白卡）
+    await expect(page.locator('[data-testid="setup-step-llm"]')).toContainText('④ 精炼大模型（可选');
+    await expect(page.locator('[data-testid="setup-llm-skip"]')).toBeVisible();
+    // 进度严格三格，标题逐字照图
+    await expect(page.locator('[data-testid="setup-progress"]')).toContainText('进度 · 三步全部完成才可进入应用');
+    await expect(page.locator('[data-testid="setup-chip-④"]')).toHaveCount(0);
     await expect(page.locator('[data-testid="setup-finish"]')).toBeDisabled();
-    await expect(page.locator('[data-testid="setup-finish-hint"]')).toContainText('三步都完成后才可点');
+    await expect(page.locator('[data-testid="setup-finish-hint"]')).toContainText('四项必需完成后才可点');
     expect(errors).toEqual([]);
   });
 
-  test('密码表单闸门：≥8 位且两次一致才可提交', async ({ page }) => {
+  test('密码表单闸门：≥12 位复杂度且两次一致才可提交', async ({ page }) => {
     await page.addInitScript(installSetupStub, FIRST_RUN);
     await page.goto(WIZARD);
-    await setupTab(page, 2);
     const submit = page.locator('[data-testid="setup-pw-submit"]');
     const pw = page.locator('[data-testid="setup-pw"]');
     const pw2 = page.locator('[data-testid="setup-pw2"]');
@@ -228,23 +282,37 @@ test.describe('首启向导 · 首次设置（打桩主进程 §6e，跑 dist �
     await expect(submit).toBeEnabled();
   });
 
+  test('备份：每列「选择目录」点完即落盘，回读后进度转绿（必选项）', async ({ page }) => {
+    const errors = collectErrors(page);
+    await page.addInitScript(installSetupStub, FIRST_RUN);
+    await page.goto(WIZARD);
+    await expect(page.locator('[data-testid="setup-backup-ledger"]')).toHaveValue('未设置');
+    await page.locator('[data-testid="setup-backup-choose-ledger"]').click();
+    await expect(page.locator('[data-testid="setup-backup-ledger"]')).toHaveValue(/MultiAgentE2E/);
+    await page.locator('[data-testid="setup-backup-choose-l0"]').click();
+    await expect(page.locator('[data-testid="setup-backup-l0"]')).toHaveValue(/MultiAgentE2E/);
+    // 点完就保存：不额外造「保存」按钮，回读后第一格应变绿
+    await expect(page.locator('[data-testid="setup-backup-msg"]')).toContainText('已保存');
+    await expect(page.locator('[data-testid="setup-chip-①"]')).toHaveClass(/ok/);
+    expect(errors).toEqual([]);
+  });
+
   test('设密码 → 恢复码只在这一屏出现一次 → 导出 → finish 真导航进应用', async ({ page }) => {
     const errors = collectErrors(page);
-    await page.addInitScript(installSetupStub, { ...FIRST_RUN, nextUrl: AFTER_WIZARD });
+    await page.addInitScript(installSetupStub, { ...READY_TO_FINISH, hasAdminPassword: false, nextUrl: AFTER_WIZARD });
     await page.goto(WIZARD);
-    await setupTab(page, 2);
     await page.locator('[data-testid="setup-pw"]').fill('E2ePass#2026');
     await page.locator('[data-testid="setup-pw2"]').fill('E2ePass#2026');
     await page.locator('[data-testid="setup-pw-submit"]').click();
 
-    // 第②步变「已完成」靠的是提交后重拉 setup:state，不是页面自己改口
-    await expect(page.locator('[data-testid="setup-step-password"]')).toContainText('② 已完成');
+    // 第③步变「已完成」靠的是提交后重拉 setup:state，不是页面自己改口
+    await expect(page.locator('[data-testid="setup-chip-②"]')).toHaveClass(/ok/);
     const code = page.locator('[data-testid="setup-code"]');
     await expect(code).toBeVisible();
     await expect(code).toContainText('M6b9 Q0xK');
     await expect(page.locator('[data-testid="setup-code-once"]')).toContainText('关掉本页就再也看不到');
     // 三条红线之一必须摆在明面，不能藏进折叠区
-    await expect(page.locator('[data-testid="setup-card-warning"]')).toContainText('管理密码和这张卡同时丢失，L0 原文就不可恢复');
+    await expect(page.locator('[data-testid="setup-card-warning"]')).toContainText('管理密码与恢复卡同时丢失 = L0 原数据库不可恢复');
     await expect(page.locator('[data-testid="setup-not-exported"]')).toBeVisible();
     await expect(page.locator('[data-testid="setup-finish"]')).toBeDisabled();
 
@@ -259,7 +327,7 @@ test.describe('首启向导 · 首次设置（打桩主进程 §6e，跑 dist �
     await page.locator('[data-testid="setup-export"]').click();
     await expect(page.locator('[data-testid="setup-export-result"]')).toContainText('已导出「L0恢复卡-a1b2c3d4.txt」');
     await expect(page.locator('[data-testid="setup-export-result"]')).toContainText('与这台电脑分开');
-    await expect(page.locator('[data-testid="setup-step-card"]')).toContainText('③ 已完成');
+    await expect(page.locator('[data-testid="setup-chip-③"]')).toHaveClass(/ok/);
     await expect(page.locator('[data-testid="setup-not-exported"]')).toHaveCount(0);
     expect(errors).toEqual([]);
 
@@ -271,26 +339,55 @@ test.describe('首启向导 · 首次设置（打桩主进程 §6e，跑 dist �
   });
 
   test('导出时在原生对话框点取消：如实说「可以再点一次」，且不放开 finish', async ({ page }) => {
-    await page.addInitScript(installSetupStub, { ...FIRST_RUN, exportCanceled: true });
+    await page.addInitScript(installSetupStub, { ...FIRST_RUN, backupSet: true, exportCanceled: true });
     await page.goto(WIZARD);
-    await setupTab(page, 2);
     await page.locator('[data-testid="setup-pw"]').fill('E2ePass#2026');
     await page.locator('[data-testid="setup-pw2"]').fill('E2ePass#2026');
     await page.locator('[data-testid="setup-pw-submit"]').click();
     await page.locator('[data-testid="setup-export"]').click();
     await expect(page.locator('[data-testid="setup-export-result"]')).toContainText('已取消保存：恢复码还在内存里，可以再点一次导出。');
-    await expect(page.locator('[data-testid="setup-step-card"]')).toContainText('③ 待完成');
+    await expect(page.locator('[data-testid="setup-chip-③"]')).not.toHaveClass(/ok/);
     await expect(page.locator('[data-testid="setup-finish"]')).toBeDisabled();
+  });
+
+  test('精炼大模型：拨测通过才允许「保存并启用」（未测时按钮禁用）', async ({ page }) => {
+    const errors = collectErrors(page);
+    await page.addInitScript(installSetupStub, READY_TO_FINISH);
+    await page.goto(WIZARD);
+    const save = page.locator('[data-testid="setup-llm-save"]');
+    await expect(save).toBeDisabled();
+    await page.locator('[data-testid="setup-llm-preset"]').selectOption('deepseek');
+    await page.locator('[data-testid="setup-llm-key"]').fill('sk-e2e');
+    await expect(save).toBeDisabled();
+    await page.locator('[data-testid="setup-llm-test"]').click();
+    await expect(page.locator('[data-testid="setup-llm-probe"]')).toContainText('连通');
+    await expect(save).toBeEnabled();
+    await save.click();
+    await expect(page.locator('[data-testid="setup-llm-msg"]')).toContainText('已保存并启用');
+    await expect(page.locator('[data-testid="setup-llm-existing"]')).toContainText('已有可用引擎');
+    expect(errors).toEqual([]);
+  });
+
+  test('精炼大模型：跳过必须先看见代价（L2–L5 生成不出来），点「否」只关窗', async ({ page }) => {
+    await page.addInitScript(installSetupStub, READY_TO_FINISH);
+    await page.goto(WIZARD);
+    await page.locator('[data-testid="setup-llm-skip"]').click();
+    const dialog = page.locator('[data-testid="setup-skip-dialog"]');
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('无法生成 L2–L5 精炼记忆层');
+    await expect(dialog).toContainText('L1 原文');
+    await page.locator('[data-testid="setup-skip-cancel"]').click();
+    await expect(dialog).toHaveCount(0);
+    await expect(page).toHaveURL(/setup\.html/);
   });
 });
 
 test.describe('首启向导 · 本机已设过 L0 管理密码（升级 / 上一轮中断的真实分支）', () => {
-  test('第②步只给「用密码重新发码」，不再出现设密码表单', async ({ page }) => {
+  test('第③步只给「用密码重新发码」，不再出现设密码表单', async ({ page }) => {
     const errors = collectErrors(page);
     await page.addInitScript(installSetupStub, ALREADY_SET);
     await page.goto(WIZARD);
-    await setupTab(page, 2);
-    await expect(page.locator('[data-testid="setup-step-password"]')).toContainText('② 已完成');
+    await expect(page.locator('[data-testid="setup-chip-②"]')).toHaveClass(/ok/);
     await expect(page.locator('[data-testid="setup-pw-set"]')).toContainText('本机已设置 L0 管理密码');
     await expect(page.locator('[data-testid="setup-pw-set"]')).toContainText('旧码当场作废');
     await expect(page.locator('[data-testid="setup-pw-form"]')).toHaveCount(0);
@@ -303,14 +400,13 @@ test.describe('首启向导 · 本机已设过 L0 管理密码（升级 / 上一
   test('重新发码 → 导出 → 进入应用', async ({ page }) => {
     await page.addInitScript(installSetupStub, { ...ALREADY_SET, nextUrl: AFTER_WIZARD });
     await page.goto(WIZARD);
-    await setupTab(page, 2);
     await expect(page.locator('[data-testid="setup-regen"]')).toBeDisabled();
     await page.locator('[data-testid="setup-regen-pw"]').fill('E2ePass#2026');
     await expect(page.locator('[data-testid="setup-regen"]')).toBeEnabled();
     await page.locator('[data-testid="setup-regen"]').click();
     await expect(page.locator('[data-testid="setup-card-body"]')).toBeVisible();
     await page.locator('[data-testid="setup-export"]').click();
-    await expect(page.locator('[data-testid="setup-step-card"]')).toContainText('③ 已完成');
+    await expect(page.locator('[data-testid="setup-chip-③"]')).toHaveClass(/ok/);
     await page.locator('[data-testid="setup-finish"]').click();
     await page.waitForURL(AFTER_WIZARD);
   });
@@ -318,7 +414,6 @@ test.describe('首启向导 · 本机已设过 L0 管理密码（升级 / 上一
   test('密码错 → 主进程原因原样显示，不发码也不跳转', async ({ page }) => {
     await page.addInitScript(installSetupStub, { ...ALREADY_SET, regenWrongPassword: true });
     await page.goto(WIZARD);
-    await setupTab(page, 2);
     await page.locator('[data-testid="setup-regen-pw"]').fill('E2ePass#2026');
     await page.locator('[data-testid="setup-regen"]').click();
     await expect(page.locator('[data-testid="setup-error"]')).toContainText(ERR_BAD_WRITE_PASSWORD);
@@ -345,13 +440,26 @@ test.describe('首启向导 · 主进程拒绝即不放行（页面闸门不是�
     await page.goto(WIZARD);
     await page.locator('[data-testid="setup-reselect-dirs"]').click();
     await expect(page.locator('[data-testid="setup-error"]')).toContainText(ERR_RESELECT_CANCELED);
-    await expect(page.locator('[data-testid="setup-step-dirs"]')).toContainText('① 已完成');
+    await expect(page.locator('[data-testid="setup-step-dirs"]')).toContainText('① 两个库的位置');
   });
 
-  test('三步看起来都完成，但 setup:finish 被拒 → 停在向导页并摆出原因', async ({ page }) => {
-    await page.addInitScript(installSetupStub, { ...FIRST_RUN, finishRejects: true });
+  test('备份没设时主进程也拒绝 finish（页面禁用之外的第二道闸）', async ({ page }) => {
+    await page.addInitScript(installSetupStub, { dirsSet: true, hasAdminPassword: true });
     await page.goto(WIZARD);
-    await setupTab(page, 2);
+    // 页面闸门：备份未设 → 进度第一格不是绿框 + 进入应用禁用
+    await expect(page.locator('[data-testid="setup-chip-①"]')).not.toHaveClass(/ok/);
+    await expect(page.locator('[data-testid="setup-finish"]')).toBeDisabled();
+    // 直接敲通道：主进程自己也不放行
+    const res = await page.evaluate(() => {
+      const api = (window as unknown as { api?: { setup?: { finish?: () => Promise<unknown> } } }).api;
+      return api?.setup?.finish ? api.setup.finish() : null;
+    });
+    expect(res).toEqual({ ok: false, error: ERR_NO_BACKUP });
+  });
+
+  test('必需项看起来都完成，但 setup:finish 被拒 → 停在向导页并摆出原因', async ({ page }) => {
+    await page.addInitScript(installSetupStub, { ...READY_TO_FINISH, hasAdminPassword: false, finishRejects: true });
+    await page.goto(WIZARD);
     await page.locator('[data-testid="setup-pw"]').fill('E2ePass#2026');
     await page.locator('[data-testid="setup-pw2"]').fill('E2ePass#2026');
     await page.locator('[data-testid="setup-pw-submit"]').click();

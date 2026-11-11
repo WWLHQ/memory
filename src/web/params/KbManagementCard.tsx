@@ -133,6 +133,11 @@ export function KbManagementCard() {
 
   const timeLabel = `${pad2(cfg.hour)}:${pad2(cfg.minute)}`;
   const backupDirLabel = cfg.dir || `默认（${rootInfo.root}/backups）`;
+  // 批次58：首启向导要求「备份必选」，常写的是分组目录（ledgerDir / l0Dir）。
+  // 这里必须如实显示它们，否则卡片会拿「默认」冒充真实备份位置。
+  const groupedHint = cfg.ledgerDir || cfg.l0Dir
+    ? `分组备份位置（首启向导设置）：记忆库 → ${cfg.ledgerDir || backupDirLabel}；原数据库 → ${cfg.l0Dir || backupDirLabel}`
+    : '';
 
   return (
     <div className="card" data-testid="kb-mgmt-card">
@@ -222,6 +227,11 @@ export function KbManagementCard() {
                 更改…
               </button>
             </div>
+            {groupedHint && (
+              <div className="note" data-testid="kb-backup-grouped" style={{ marginTop: 4 }}>
+                {groupedHint}（「更改…」改的是共用目录，不会覆盖分组目录）
+              </div>
+            )}
           </div>
 
           <div>

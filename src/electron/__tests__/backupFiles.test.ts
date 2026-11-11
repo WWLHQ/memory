@@ -6,7 +6,8 @@
 // 共享目录里外来的、恰好同前缀但中间不是时间戳的文件不再被删。
 import { describe, it, expect } from 'vitest';
 import {
-  BACKUP_EXT, BACKUP_PREFIX, isRecipeBackupName, kindOfBackupName, planBackupFiles, selectBackupsToDelete, sortBackupsNewestFirst,
+  BACKUP_EXT, BACKUP_PREFIX, backupTargetDir, backupTargetDirs, groupOfKind, isRecipeBackupName, kindOfBackupName,
+  planBackupFiles, selectBackupsToDelete, sortBackupsNewestFirst,
   type BackupKind,
 } from '../backupFiles.ts';
 
@@ -159,5 +160,48 @@ describe('历史列表排序与归属识别', () => {
   it('BACKUP_EXT：只有审计是 JSONL，其余仍是 .json（备份文件格式与源文件一致）', () => {
     expect(BACKUP_EXT.audit).toBe('.jsonl');
     expect([BACKUP_EXT.ledger, BACKUP_EXT.l0, BACKUP_EXT.keyring]).toEqual(['.json', '.json', '.json']);
+  });
+});
+
+// 批次58：首启向导的「两个备份路径」——记忆库与审计一处、原数据库与密钥环一处。
+// 关键不可破坏的口径：密钥环必须跟原数据库落同一处（谁替它换个目录就等于把人锁在门外）；
+// 老配置只有 dir 时行为与批次37-D 完全一致（两库都进 dir，不因新增字段而失去备份）。
+describe('批次58 backupFiles：分组备份目录（记忆库 / 原数据库各一处）', () => {
+  it('分组归属：ledger+audit 一组，l0+keyring 一组', () => {
+    expect(groupOfKind('ledger')).toBe('ledger');
+    expect(groupOfKind('audit')).toBe('ledger');
+    expect(groupOfKind('l0')).toBe('l0');
+    expect(groupOfKind('keyring')).toBe('l0');
+  });
+
+  it('分组目录优先：两处都配好时各进各的目录（密钥环跟原数据库）', () => {
+    const cfg = { ledgerDir: 'D:/bk/ledger', l0Dir: 'E:/secret/l0' };
+    expect(backupTargetDir('ledger', cfg, 'D:/fallback')).toBe('D:/bk/ledger');
+    expect(backupTargetDir('audit', cfg, 'D:/fallback')).toBe('D:/bk/ledger');
+    expect(backupTargetDir('l0', cfg, 'D:/fallback')).toBe('E:/secret/l0');
+    expect(backupTargetDir('keyring', cfg, 'D:/fallback')).toBe('E:/secret/l0');
+  });
+
+  it('老配置只有 dir：两类都回落到 dir（批次37-D 行为不变）', () => {
+    const cfg = { dir: 'D:/old-backups' };
+    for (const k of ['ledger', 'audit', 'l0', 'keyring'] as BackupKind[]) {
+      expect(backupTargetDir(k, cfg, 'D:/fallback')).toBe('D:/old-backups');
+    }
+  });
+
+  it('只配了一处：另一组回落到 dir → 再回落到默认目录（默认目录恒非空，不会写出空路径）', () => {
+    // 只配了原数据库组：记忆库组回落到 dir/默认目录，原数据库组用自己的
+    expect(backupTargetDir('ledger', { l0Dir: 'E:/l0' }, 'D:/fallback')).toBe('D:/fallback');
+    expect(backupTargetDir('l0', { l0Dir: 'E:/l0' }, 'D:/fallback')).toBe('E:/l0');
+    expect(backupTargetDir('ledger', { ledgerDir: '   ' }, 'D:/fallback')).toBe('D:/fallback');
+    expect(backupTargetDir('ledger', { dir: 'D:/old', ledgerDir: '' }, 'D:/fallback')).toBe('D:/old');
+  });
+
+  it('backupTargetDirs：同目录只出现一次，两处不同则两条', () => {
+    expect(backupTargetDirs({ ledgerDir: 'D:/a', l0Dir: 'D:/a' }, 'D:/fallback')).toEqual([{ group: 'ledger', dir: 'D:/a' }]);
+    expect(backupTargetDirs({ ledgerDir: 'D:/a', l0Dir: 'E:/b' }, 'D:/fallback')).toEqual([
+      { group: 'ledger', dir: 'D:/a' },
+      { group: 'l0', dir: 'E:/b' },
+    ]);
   });
 });

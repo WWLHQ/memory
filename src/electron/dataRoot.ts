@@ -62,6 +62,12 @@ export interface DataRootPointer {
   l0Dir?: string;
   /** 批次37-B：首启向导是否走完（两库位置 + L0 管理密码 + 恢复卡已导出）；未走完每次都重新拦 */
   setupDone?: boolean;
+  /**
+   * 批次58：用户在向导里明确选了「不加精炼大模型」。
+   * 只影响向导进度展示（「已跳过」而非「待完成」）与 finish 时的审计口径，**不改变**门禁——
+   * 没接 LLM 时 L2–L5 精炼层本来就只停在 L1，这是既有事实，不是这里放水。
+   */
+  llmSkipped?: boolean;
   updatedAt: string;
 }
 
@@ -118,6 +124,7 @@ export function readDataRootPointer(file: string): DataRootPointerRead {
         ...(dir(parsed.ledgerDir) ? { ledgerDir: dir(parsed.ledgerDir) } : {}),
         ...(dir(parsed.l0Dir) ? { l0Dir: dir(parsed.l0Dir) } : {}),
         ...(parsed.setupDone === true ? { setupDone: true } : {}),
+        ...(parsed.llmSkipped === true ? { llmSkipped: true } : {}),
         updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : '',
       },
     };
