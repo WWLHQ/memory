@@ -3,7 +3,7 @@
 > 由 `npm run code:index` 生成，请勿手改；改代码/文档后重跑即可。
 > 用法：先在本表定位文件与导出符号，再只读该文件的局部区间（省 token、少误改）。
 
-共 368 个源码文件、125 个文档。
+共 368 个源码文件、126 个文档。
 
 ## e2e
 
@@ -41,7 +41,7 @@
 
 | 文件 | 行数 | 摘要 | 导出 |
 |---|---|---|---|
-| [src/core/memagent/agent.ts](src/core/memagent/agent.ts) | 632 | createMemAgent（§1 入口）：内核装配 + 9 核心API + 全动作审计（§3.2） | createMemAgent(fn) |
+| [src/core/memagent/agent.ts](src/core/memagent/agent.ts) | 641 | createMemAgent（§1 入口）：内核装配 + 9 核心API + 全动作审计（§3.2） | createMemAgent(fn) |
 | [src/core/memagent/auditLog.ts](src/core/memagent/auditLog.ts) | 398 | 内核审计账本（批次41-A）：从 memories.db.json 里搬出来，独立成追加式 JSONL。 | AUDIT_FILE_NAME(const), AUDIT_ACTIVE_MAX_BYTES(const), AuditLogCorruptError(class), AuditLogLockedError(class), FileAuditLog(class), AuditFilter(type), AuditLogStats(type), FileAuditLogOptions(type) |
 | [src/core/memagent/collectDaemon.ts](src/core/memagent/collectDaemon.ts) | 161 | 批次44-A：独立采集守护（headless）——daemon 只做「扫描 + 指纹去重 + 暂存分片」，**永不碰账本**。 | runDaemonRound(fn), drainCollectPending(fn), DAEMON_DIR_NAME(const), PENDING_DIR_NAME(const), DaemonState(type), DaemonRoundReport(type), DrainReport(type) |
 | [src/core/memagent/conflict.ts](src/core/memagent/conflict.ts) | 256 | 批次46-3：内核冲突裁决原子 API（方案 §3 / §9.7 + P7 hold） | coreListConflicts(fn), coreResolveConflict(fn), CONFLICT_NOTE(const), CONFLICT_VERDICTS(const) |
@@ -50,7 +50,7 @@
 | [src/core/memagent/errors.ts](src/core/memagent/errors.ts) | 32 | memagent-core 错误码（§6，各端统一处理） | isL0LockedError(fn), isL0LockedText(fn), MemAgentError(class) |
 | [src/core/memagent/fieldBackfill.ts](src/core/memagent/fieldBackfill.ts) | 242 | 存量「补齐缺失的 sha256 与向量」（批次41-T）：批次41-B 之后新写的每一行都带这两个字段， | scanRowsForBackfill(fn), backfillMissingFields(fn), BackfillDecision(type), BackfillPreview(type), BackfillReport(type), BackfillCtx(type), BackfillSkipCode(type) |
 | [src/core/memagent/fileStorage.ts](src/core/memagent/fileStorage.ts) | 578 | FileStorage（§5.3）：桌面/CLI 本地库 = P0 主源（零依赖，纯文件系统，无 node:sqlite）。 | StorageCorruptError(class), StorageLockedError(class), FileStorage(class), CorruptionNotice(type), FileStorageOptions(type) |
-| [src/core/memagent/forgetting.ts](src/core/memagent/forgetting.ts) | 455 | REQ-010 遗忘机制后台任务（17.4–17.11）：新鲜度/打分/层迁移/合并摘要/周期任务 | policyFor(fn), freshnessOf(fn), scoreMemory(fn), hardFilter(fn), classifyLayer(fn), forgetOne(fn), restoreOne(fn), reinforceOne(fn), buildSummary(fn), clusterSimilar(fn), archiveAgedMemories(fn), runForgettingCycle(fn), SCORE_WEIGHTS(const), MERGE_SIM_THRESHOLD(const), ForgettingPolicy(type), ForgettingCycleReport(type), ForgettingOptions(type), ArchivePassOptions(type), SummaryBuildResult(type) |
+| [src/core/memagent/forgetting.ts](src/core/memagent/forgetting.ts) | 507 | REQ-010 遗忘机制后台任务（17.4–17.11）：新鲜度/打分/层迁移/合并摘要/周期任务 | policyFor(fn), freshnessOf(fn), scoreMemory(fn), tokenCoverage(fn), fuseRelevance(fn), fusedRelevanceOf(fn), hardFilter(fn), classifyLayer(fn), forgetOne(fn), restoreOne(fn), reinforceOne(fn), buildSummary(fn), clusterSimilar(fn), archiveAgedMemories(fn), runForgettingCycle(fn), SCORE_WEIGHTS(const), RELEVANCE_FUSION_LAMBDA(const), MERGE_SIM_THRESHOLD(const), ForgettingPolicy(type), ForgettingCycleReport(type), ForgettingOptions(type), ArchivePassOptions(type), SummaryBuildResult(type) |
 | [src/core/memagent/hitHighlight.ts](src/core/memagent/hitHighlight.ts) | 127 | 批次59：召回回显的「命中片段」计算（方案 C —— 后端定相关性、渲染层定偏移）。 | matchedTerms(fn), pickHitSpans(fn), displayTerms(fn), HitSpan(type) |
 | [src/core/memagent/l0Recovery.ts](src/core/memagent/l0Recovery.ts) | 123 | L0 恢复码（批次37-G）：管理密码忘了还能把 L0 原数据库捞回来的唯一通道。 | generateRecoveryCode(fn), formatRecoveryCode(fn), normalizeRecoveryCode(fn), wrapDekWithRecovery(fn), unwrapDekWithRecovery(fn), createKeyringSecrets(fn), keyringFingerprint(fn), buildRecoveryCard(fn), RECOVERY_CODE_BYTES(const), RECOVERY_BAD_CODE(const), RecoveryCardInput(type) |
 | [src/core/memagent/l0Split.ts](src/core/memagent/l0Split.ts) | 259 | 存量拆分迁移（批次37-C）：把「还躺在记忆库行上」的 L0 原文搬进独立的 L0 原数据库。 | scanLedgerForSplit(fn), splitLedger(fn), SplitDecision(type), SplitPreview(type), SplitReport(type), SplitCtx(type) |
@@ -507,6 +507,7 @@
 | [specs/tasks/MEMORY-MANAGE.md](specs/tasks/MEMORY-MANAGE.md) | 95 | REQ-006 / P8 记忆管理页 — 任务拆分（原子任务 · 供 Agent 执行） |
 | [specs/tasks/MONITOR.md](specs/tasks/MONITOR.md) | 26 | P6 监控仪表盘 任务拆分（REQ-006 / 12.1 / 12.2） |
 | [specs/tasks/RECALL-HIGHLIGHT.md](specs/tasks/RECALL-HIGHLIGHT.md) | 115 | REQ-004 → 回显命中片段高亮（方案 C）· AC/TC |
+| [specs/tasks/RECALL-SCORE-FIX.md](specs/tasks/RECALL-SCORE-FIX.md) | 141 | 召回打分修复（批次60）：长文本被余弦系统性稀释 |
 | [specs/tasks/RETRIEVAL.md](specs/tasks/RETRIEVAL.md) | 110 | REQ-012 检索页 — 任务拆分（原子任务 · 供 Agent 执行） |
 | [specs/tasks/SECURITY.md](specs/tasks/SECURITY.md) | 31 | P12 账号与安全页 任务拆分（REQ-006 / 4.1 / 4.2 / 3.2 / 18.2-A） |
 | [specs/tasks/SETUP.md](specs/tasks/SETUP.md) | 108 | REQ-005 / 首启强制向导（setup.html）— 字段级 AC / TC |
@@ -574,7 +575,7 @@ src/agentOnboard/validators.ts a7372fc705a7
 src/auth/hash.ts 3919b27befef
 src/auth/loginService.ts a0cc1ede21f9
 src/auth/memberSync.ts dd7d2d4ed60e
-src/core/memagent/agent.ts 5f4809270709
+src/core/memagent/agent.ts ce96f31a38d9
 src/core/memagent/auditLog.ts 041c6c71e76e
 src/core/memagent/collectDaemon.ts 1c66b6cd74c0
 src/core/memagent/conflict.ts e537b2588f67
@@ -583,7 +584,7 @@ src/core/memagent/dedup.ts ba546f64836b
 src/core/memagent/errors.ts 4f68fde40b23
 src/core/memagent/fieldBackfill.ts 23a377e0c190
 src/core/memagent/fileStorage.ts 43c4c05080fd
-src/core/memagent/forgetting.ts 934e2e1e6aca
+src/core/memagent/forgetting.ts 6acb580d0a51
 src/core/memagent/hitHighlight.ts cb393dd329f3
 src/core/memagent/l0Recovery.ts c76af3edf9b2
 src/core/memagent/l0Split.ts 741edeb20acf
@@ -1005,6 +1006,7 @@ specs/tasks/LOGS.md a6eaff19bc00
 specs/tasks/MEMORY-MANAGE.md a586bcf0d38c
 specs/tasks/MONITOR.md d37cef8d352e
 specs/tasks/RECALL-HIGHLIGHT.md ed83180a0849
+specs/tasks/RECALL-SCORE-FIX.md 60241239cf8f
 specs/tasks/RETRIEVAL.md c9a2b6c83a87
 specs/tasks/SECURITY.md 8a4a4441bc8f
 specs/tasks/SETUP.md 21f41f4ab238
