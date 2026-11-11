@@ -1471,3 +1471,25 @@ status: draft
 > **B·效果验证**：AC→用例映射：① 去登录 → 单测 goto login 弹窗打开 + goto audit 照常开标签；e2e ①⑥ 去登录按钮可见性既有断言保持绿（点击行为由壳层单测覆盖）。② 版式 → e2e ⑧ 702px 双栏 2 列/右栏 264px/图谱高度按比例；既有 ①④⑦ 版式与真实数据断言全绿。③ 告警 → 页面不再渲染 `账本读取失败` 红告警（壳层 `overview-storage-error` 条保留），e2e 11/11 通过（home/overview/crossTabAuth，真 dist + 真 home 后端 + CDP Chromium）。真浏览器 702px 浅/深截图目视：双栏并排、图谱六枢纽/层级行/右栏五面板齐、令牌跟随主题、无红色读取失败横幅。
 > **C·变异验证**：C1 变异点 = `Workspace.tsx` onGoto 特判 `id === 'login'` 注入 `id === 'loginX'` → 指定测试 `workspace.test.tsx`「57-D：iframe 请求 login → 打开壳层登录弹窗」**真实红灯**（shell-login-modal 未出现）→ 原样还原 → 2/2 复绿，`git diff` 确认无变异残留。C2 输入/状态矩阵：goto 目标 ∈ {login（弹窗）/ NAV 内 id（开标签）/ 未知 id（忽略，findNav undefined）/ 非本壳 iframe 来源与异源 origin（fromOurs/origin 双守卫拒绝，login 特判在守卫之后不旁路）}；中心区宽度 ∈ {702（双栏 264 右栏）/ >1010（双栏 300 右栏）/ ≤640（单栏）/ ≤560（层级行三列）}；storageError ∈ {有（壳层条提示、页面不重复）/ null（无告警）}。全部诚实降级，无静默成功。
 > **已知边界**：浏览器直连（无壳层 parent）时「去登录」按钮仍是 no-op（`requestShellView` 无宿主可投递）——浏览器模式登录走 login.html 直达页，本轮未给 standalone 加回退；壳层 `ov-error-strip` 与 `.auth-strip` 为壳层既有设计，本轮只去页面级重复。检查器/导航栏折叠会改变中心区宽度，断点已按 640/1010 两档覆盖。
+
+### 批次58：写入表单 tab 按确认效果图重排（Stratum A 令牌 · 真实数据不变）（2026-11-11）
+
+> 口径：用户贴写入页定稿图并确认「只改写入表单卡片（页），不要 3 个卡片全部改」——本批只动「写入表单」tab 的版式；「最近回执」「查重与 L0 规则」两 tab 与页签条保持 p0 原样。底板不照抄效果图配色，全部走 p0.css Stratum A 令牌（亮/暗随壳层）。图上的样值（阈值 0.78、假 token 数、「create · 待重放」）一律不抄：阈值/质量门版本/有效字门槛/token/查重分全部实算接真。
+
+| 改动 | 落点 | 说明 |
+|---|---|---|
+| 版式骨架 | `src/web/write/WritePage.tsx`（form tab） | masthead（WRITE / 写入记忆 / INGEST + 「写入只落 L0 密文 + 脱敏 L1 · 深层交后台补炼」）+ 双栏（左 FORM + RECEIPT / 右 DEDUP + L0 UNLOCK）+ 底部 RECENT WRITES 通栏（账本审计 action=write 最近 3 条）；最近写入挂载即载、写入成功后总是刷新 |
+| 写入表单卡 | `src/web/write/WriteForm.tsx` | 字段序照定稿：正文 → 类别/来源 agent/标签联想 chips（点击增删）→ session_id/project_id 只读；提示行实算 `estimateTokens` + 内核 `checkL0ToL1Quality`（质量门 v3 单一真源）：空=等待输入、过门=有效字 N、短且无硬事实=豁免字数门槛、将拦=`gate.code`；移除「清空」按钮与类别半衰期预览 |
+| 查重预览卡 | `src/web/write/DedupCard.tsx` | 一条真实词面分 + 内核 `DEDUP_THRESHOLDS.L1` 对照条；命中类 `wf-dedup hit`（基类含 'dup' 子串，命中类改名 'hit' 防测试假阳性）；阶段5-E 诚实 note 契约（四种真实结果/内核自动裁决/四维/未接入大模型只查 L1）原样保留 |
+| 回执/被拒/最近写入 | `src/web/write/WriteReceiptCard.tsx` | `WriteReceiptCard`/`WriteRefusalCard` 改 wf-kv 版式（被拒态：被挡请求 · fmtHMS 本地时分秒 · 来源；memory_id「未落库 · 重放成功后生成」；动作「待重放 · 重放后内核自动裁决」——非锁定拒绝如实写「不可重放 · 修正后重新提交」）；新增 `fmtHMS` 与 `WriteRecentWritesCard`（时间/mem_id/动作/层/说明五列，filtered 行以 `filter_code` 存在为准如实标「L0+L1 质量门 v{gate_version} · {filter_code}」，空库诚实空态「真实 0 条」）；`WriteReceiptTable`（最近回执 tab）不动 |
+| L0 解锁卡常驻 | **新文件** `src/web/write/WriteL0UnlockCard.tsx` | 右栏常驻「L0 UNLOCK」卡：真实读 `coreWriteStatus().l0_unlocked`；锁着时区分「写入将被挡」与「这条写入被挡（E_L0_LOCKED 触发）」；管理员就地解锁（密码只进 `l0UnlockWrite` 一次调用、成功失败立刻清空），解锁后仅当确实挡过条目才自动重放；非管理员如实说明，不给点了必失败的按钮。共享 `L0WriteUnlock.tsx` 其他页面在用，不动 |
+| 字段补真 | `types.ts` + `coreWrite.ts` | `WriteReceiptHistoryRow` 增 `filter_code`/`gate_version`（来源：filtered 写入审计行的 detail 来自 `filteredAuditDetail`，带这两个字段、不带 dedup；成功行反之——以 filter_code 是否存在区分，不猜 dedup 字面量） |
+| 样式 | `theme.css` | 新增 wf-* 全套（p0 A 令牌 + 本地派生 `--ok-ink` 亮 #fff/暗 #052e22）；删除已无组件使用的旧类（旧查重/标签联想/旧表单 .field/.row/.actions 等），保留共享 L0WriteUnlock 与内核错误卡仍在用的 .card/.btn/.note/.err/.toast |
+
+测试面：`WriteForm.test.tsx` 类别预览用例改为质量门预判实算用例（其余保留）；`DedupCard.test.tsx`/`WritePage.test.tsx` 命中断言 'dup'→'hit'；`WritePage.l0locked.test.tsx` 改断言常驻解锁卡「被挡」态与解锁后 `l0-unlock-done`（原共享卡消失断言作废）；`e2e/write.spec.ts` 渲染用例补 masthead/RECENT WRITES 真实空态/右栏解锁卡断言。
+
+> **批次58 三道闸门证据**：
+> **A·影响面回归**：影响面 = `src/web/write/` 7 文件 + 新文件 `WriteL0UnlockCard.tsx` + `e2e/write.spec.ts` + `specs/code-index.generated.md`；**未改内核公开契约 / 存储序列化 / 审计格式 / MCP 工具 / 端口 / 共享 L0WriteUnlock / 其余 19 页 / 记忆库**。静态门禁：typecheck 两工程 0 错、oxlint 0/0、`code:index:check` 通过（382 源码 / 123 文档）、`check:no-demo` 0 命中。全量回归：第 1 轮 6 例失败均为满负载 flaky（个人.test 同步中枢 5.8s 超时等，与本次改动无交集），单跑/复跑确认——第 2 轮全量 **233 文件 / 2701 例 0 失败**（符合「满负载 flaky 先重跑」既有口径）。
+> **B·效果验证**：AC→用例映射：定稿版式 → e2e ① masthead WRITE/写入记忆/INGEST + RECENT WRITES 真实空态 + 右栏解锁卡可见 + f-project readonly；表单提交链 → 单测 48 例全绿（含 L0 锁定 → 原地解锁 → 自动重放 → 回执全链）+ e2e ③ 纯浏览器 E_L0_LOCKED 不落明文；质量门实算 → WriteForm 单测拦截码/豁免两态。e2e write 3/3 通过（真 dist + CDP Chromium）。真浏览器 1280px 浅/深全页截图目视：masthead/双栏/通栏与确认效果图逐块对齐，令牌跟随主题，无硬编码色残留。
+> **C·变异验证**：C1 变异点 = `DedupCard.tsx` 命中高亮条件 `is_duplicate ? ' hit' : ''` 注入恒 `' hit'` → 指定测试 `DedupCard.test.tsx`「未命中 → 不高亮」**真实红灯**（1 failed / 14）→ 原样还原 → write 模块 48/48 复绿，`git diff` 无变异残留。C2 输入/状态矩阵：质量门预判 ∈ {空（等待输入）/ <30 有硬事实或技术名词（豁免）/ <30 无（short_low_signal 拦截码）/ ≥30（过门）}；回执四态 create/graft/keep/filtered + 被拒 {锁定（待重放·可解锁）/ 非锁定（不可重放）}；解锁卡 {loading/读取失败/已解锁/未解锁+管理员/未解锁+普通成员/未登录}；最近写入 {loading/error/真实 0 条/filtered 行（filter_code+gate_version）/成功行（dedup+sim+source）}。全部诚实降级，无静默成功。
+> **已知边界**：RECENT WRITES 取最近 3 条成功+filtered 的 write 审计行（被拒请求不入账，如实无行）；masthead 仅 form tab 显示，其余两 tab 沿用旧页头与 showUnlock 解锁入口。注：工作区另有一会话未提交的「58-B」条目描述「无页签单页 / wr-testonly 隐藏钩子」，与本仓工作树代码不符（`wr-testonly` grep 零命中、无对应 stash/提交），待用户裁决后合并——本段以工作树实际代码为准。
