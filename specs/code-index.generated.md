@@ -3,7 +3,7 @@
 > 由 `npm run code:index` 生成，请勿手改；改代码/文档后重跑即可。
 > 用法：先在本表定位文件与导出符号，再只读该文件的局部区间（省 token、少误改）。
 
-共 382 个源码文件、124 个文档。
+共 382 个源码文件、125 个文档。
 
 ## e2e
 
@@ -528,6 +528,7 @@
 | [specs/tasks/MONITOR.md](specs/tasks/MONITOR.md) | 26 | P6 监控仪表盘 任务拆分（REQ-006 / 12.1 / 12.2） |
 | [specs/tasks/RETRIEVAL.md](specs/tasks/RETRIEVAL.md) | 110 | REQ-012 检索页 — 任务拆分（原子任务 · 供 Agent 执行） |
 | [specs/tasks/SECURITY.md](specs/tasks/SECURITY.md) | 31 | P12 账号与安全页 任务拆分（REQ-006 / 4.1 / 4.2 / 3.2 / 18.2-A） |
+| [specs/tasks/SETUP.md](specs/tasks/SETUP.md) | 108 | REQ-005 / 首启强制向导（setup.html）— 字段级 AC / TC |
 | [specs/tasks/SYNC.md](specs/tasks/SYNC.md) | 28 | REQ-008 云同步 任务拆分（同步机制详细设计 §1–§8） |
 | [specs/tasks/USER-REGISTER.md](specs/tasks/USER-REGISTER.md) | 97 | 原子任务示例：用户注册（USER-REGISTER） |
 | [specs/tasks/WRITE-PAGE.md](specs/tasks/WRITE-PAGE.md) | 98 | REQ-006 / P2 写入页 — 任务拆分（原子任务 · 供 Agent 执行） |
@@ -1039,6 +1040,7 @@ specs/tasks/MEMORY-MANAGE.md a586bcf0d38c
 specs/tasks/MONITOR.md d37cef8d352e
 specs/tasks/RETRIEVAL.md c9a2b6c83a87
 specs/tasks/SECURITY.md 8a4a4441bc8f
+specs/tasks/SETUP.md 21f41f4ab238
 specs/tasks/SYNC.md 6271b8a85d1e
 specs/tasks/USER-REGISTER.md 2c4bdb921f96
 specs/tasks/WRITE-PAGE.md 0062573b1e9f
