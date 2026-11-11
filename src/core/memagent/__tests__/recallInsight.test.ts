@@ -558,3 +558,108 @@ describe('clientSupportsHtmlDetails（批次29 白名单 + 批次41-Q 扩 Qoder 
     expect(clientSupportsHtmlDetails(undefined)).toBe(false);
   });
 });
+
+/* 批次59（方案 C）：回显命中高亮——目标是让用户「一眼看出这条为什么被召回」，
+ * 所以三件套都要锁：片段高亮（哪句）、🎯 命中词（为什么）、读法说明（黄色是什么意思）。
+ * 反向同样重要：没有命中词就**一点都不许标**（宁可不标，不能拿最长句冒充）。 */
+describe('批次59 回显命中高亮（方案 C）', () => {
+  const noRollup = () => rollupRecalls([], Date.now());
+  const MEM = '该服务 P99 延迟必须 <200ms；超时重试上限 3 次；本地缓存 TTL 60s';
+  const QUERY = '接口超时怎么调';
+  const withTerms = (terms: string[], content = MEM): Hit => ({ ...hit('m1', content), matched_terms: terms });
+  const mk = (h: Hit | Hit[]) => recallResult({ hits: Array.isArray(h) ? h : [h] });
+
+  it('html-details 档：命中片段被 <mark> 包裹，相邻命中并成一片（哪一句被用上）', () => {
+    const r = mk(withTerms(['超时', '重试']));
+    const md = buildRecallMarkdown(r, buildRecallHint(r, noRollup(), null), null);
+    // 正文是「超时重试上限 3 次」：两个命中词相邻，合并成一片比切成两段更自然
+    expect(md).toContain('<mark>超时重试</mark>');
+  });
+
+  it('纯 Markdown 档：用 **「」** 包裹，且零 HTML 标签（客户端不渲染 HTML 也不露尖括号）', () => {
+    const r = mk(withTerms(['超时']));
+    const md = buildRecallMarkdown(r, buildRecallHint(r, noRollup(), null), null, { htmlDetails: false });
+    expect(md).toContain('**「超时」**');
+    expect(md).not.toContain('<mark>');
+  });
+
+  it('命中行尾给 🎯 命中词，按正文出现顺序（回答「为什么是它」）', () => {
+    const r = mk(withTerms(['重试', '超时']));
+    const md = buildRecallMarkdown(r, buildRecallHint(r, noRollup(), null), null);
+    expect(md).toContain('🎯 命中「超时」「重试」');
+  });
+
+  it('段标题给出读法说明（黄色 = 重合片段；🎯 = 命中词）', () => {
+    const r = mk(withTerms(['超时']));
+    const md = buildRecallMarkdown(r, buildRecallHint(r, noRollup(), null), null);
+    expect(md).toContain('🧠 命中记忆 1 条');
+    expect(md).toContain('黄色 = 与本次提问重合的片段；🎯 = 命中的词');
+  });
+
+  it('明细页：<mark> + legend 同时讲清「标黄」与「没标黄」两种含义', () => {
+    const r = mk([withTerms(['超时']), withTerms([], '另一条与提问无字面重合的记忆')]);
+    const issuedAt = Date.UTC(2026, 10, 1, 1, 33, 0);
+    const html = buildRecallDetailPage(r, buildRecallHint(r, noRollup(), null), null, {
+      project_id: 'P1', query: QUERY, issuedAt, expiresAt: issuedAt + 30 * 60 * 1000,
+    });
+    expect(html).toContain('<mark>超时</mark>');
+    expect(html).toContain('class="legend"');
+    expect(html).toContain('黄色片段 = 与本次提问');
+    expect(html).toContain('没标黄的条目 = 与本次提问没有字面重合');
+    expect(html).toContain('不代表「没用上」');
+  });
+
+  it('旧命中（无 matched_terms）：不高亮、不加 🎯、标题逐字不变（向后兼容）', () => {
+    const r = mk(hit('m1', MEM));
+    const md = buildRecallMarkdown(r, buildRecallHint(r, noRollup(), null), null);
+    expect(md).not.toContain('<mark>');
+    expect(md).not.toContain('🎯 命中');
+    expect(md).toContain('🧠 命中记忆 1 条（');
+  });
+
+  it('命中词被截断切掉时不硬标：正文里没有该词就不出现 <mark>', () => {
+    const r = mk(withTerms(['超时'], '这条正文里完全没提到那个词'));
+    const md = buildRecallMarkdown(r, buildRecallHint(r, noRollup(), null), null);
+    expect(md).not.toContain('<mark>');
+  });
+
+  it('跨句命中各自成片，不连成一整段黄', () => {
+    const r = mk(withTerms(['超时', '重试'], '超时。重试'));
+    const md = buildRecallMarkdown(r, buildRecallHint(r, noRollup(), null), null);
+    expect(md).toContain('<mark>超时</mark>。');
+    expect(md).toContain('<mark>重试</mark>');
+  });
+});
+
+describe('批次59 内核接线：recall 真的产出 matched_terms', () => {
+  const noRollup = () => rollupRecalls([], Date.now());
+
+  it('项目召回：命中条目带 matched_terms，且与 query 确有共词；回显据此能标出来', async () => {
+    const { ma } = makeAgent();
+    await ma._seedMemory({
+      content: '数据库连接池超时：把 maxWait 调整到 5000 毫秒并观察慢查询',
+      category: 'fact', project_id: 'P1',
+    });
+    const r = await ma.recall({ query: '连接池超时 maxWait 怎么调', project_id: 'P1', top_k: 1 });
+    expect(r.hits.length).toBeGreaterThan(0);
+    const terms = r.hits[0].matched_terms ?? [];
+    expect(terms.length).toBeGreaterThan(0);
+    expect(terms.join(',')).toMatch(/超时|连接|maxwait/i);
+    // 回显端到端：这条 hit 进 Markdown 后确实出现高亮
+    const md = buildRecallMarkdown(r, buildRecallHint(r, noRollup(), null), null, { htmlDetails: false });
+    expect(md).toContain('**「');
+    expect(md).toContain('🎯 命中');
+  });
+
+  it('会话视图（scope=session）不填 matched_terms：不把「最近 N 条」伪装成「相关命中」', async () => {
+    const { ma, storage } = makeAgent();
+    const seeded = await ma._seedMemory({
+      content: '本会话决定：回显高亮改走方案 C', category: 'decision', project_id: 'P1',
+    });
+    // _seedMemory 不写 session_id（只灌内容），会话视图靠 session_id 精确过滤 → 这里补上
+    await storage.putMemory({ ...seeded, session_id: 'sess_hl' });
+    const r = await ma.recall({ query: '无关', project_id: 'P1', scope: 'session', session_id: 'sess_hl' });
+    expect(r.hits.length).toBeGreaterThan(0);
+    expect(r.hits[0].matched_terms).toBeUndefined();
+  });
+});

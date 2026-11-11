@@ -11,6 +11,7 @@ import {
   BACKGROUND_MAX_TOKENS, computeRecallSavings, estTokens, normalizeUnitPrice, selectRecallBackground,
 } from './recallInsight.ts';
 import { cosine, embedSync, DEFAULT_VECTOR_DIM } from './vector.ts';
+import { matchedTerms } from './hitHighlight.ts';
 import type { L0BlobStore } from './l0Store.ts';
 import { ulid } from './ulid.ts';
 import { createPersonalApi, selectPersonalRecall } from './personal.ts';
@@ -173,6 +174,8 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
       mem_id: m.mem_id, content: m.content, layer: m.layer, decay_class: m.decay_class,
       pinned: m.pinned, locked: m.locked, score: Math.round(score * 1000) / 1000,
       evidence_ref: `l0:${m.mem_id}`,
+      // 批次59（方案 C）：这条「凭什么被召回」——回显据此高亮，审计据此追溯；无共有词时为空数组
+      matched_terms: matchedTerms(req.query, m.content),
     }));
     // 背景去重口径：topK + 冷回填已考虑过的记忆都不得再以「背景」身份注入（防止被裁命中借道回灌）
     const consideredIds = new Set(scored.map(({ m }) => m.mem_id));
@@ -213,6 +216,7 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
             mem_id: m.mem_id, content: m.content, layer: m.layer, decay_class: m.decay_class,
             pinned: m.pinned, locked: m.locked, score: Math.round(scoreMemory(m, sim, now) * 1000) / 1000,
             evidence_ref: `l0:${m.mem_id}`,
+            matched_terms: matchedTerms(req.query, m.content),
           });
           consideredIds.add(m.mem_id);
         }
@@ -235,6 +239,7 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
             mem_id: `pm:${entry.id}`, content: entry.content, layer: entry.layer,
             decay_class: 'hot', pinned: false, locked: false, score,
             evidence_ref: `personal:${entry.id}`,
+            matched_terms: matchedTerms(req.query, entry.content),
           });
         }
         preCapTokens += picks.reduce((a, { entry }) => a + estTokens(entry.content), 0);

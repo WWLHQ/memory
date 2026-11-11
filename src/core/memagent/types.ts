@@ -93,6 +93,12 @@ export interface Hit {
   locked: boolean;
   score: number;                  // 相关度 0–1
   evidence_ref: string;           // 证据链接（原始对话引用）
+  /**
+   * 批次59（方案 C）：本次 query 与正文的共有 token = 这条记忆「凭什么被召回」。
+   * 由 hitHighlight.matchedTerms 用**召回打分同一套 tokenize** 算出，供回显高亮与审计追溯。
+   * 可选：会话视图（scope=session，不走语义检索）不填——不把「最近 N 条」伪装成「相关命中」。
+   */
+  matched_terms?: string[];
 }
 
 export interface Budget {

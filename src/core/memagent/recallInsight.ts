@@ -4,6 +4,7 @@
 import type {
   AuditRecord, Category, Hit, Memory, RecallBackground, RecallBackgroundItem, RecallResult, RecallSavings,
 } from './types.ts';
+import { displayTerms, pickHitSpans } from './hitHighlight.ts';
 
 /**
  * 本地预算单位 t 的确定性换算：全链路同源 —— 召回硬熔断裁剪（agent.ts）、背景选入、
@@ -292,6 +293,43 @@ export interface RecallMarkdownOpts {
   htmlDetails?: boolean;
 }
 
+/* ---------- 批次59（方案 C）：回显里的「命中片段」高亮 ---------- */
+
+/**
+ * 高亮载体：html = `<mark>`（折叠档 / 明细页）；markdown = `**「」**`（纯 Markdown 档不引入 HTML 标签）；
+ * plain = 原样（不做任何装饰，供不需要高亮的调用方）。
+ */
+export type HitMarkup = 'html' | 'markdown' | 'plain';
+
+export interface RecallHitStyle {
+  markup: HitMarkup;
+  /**
+   * 段标题里的一句话读法说明（`🧠 命中记忆 3 条（120t）｜ 黄色 = …`）。
+   * **只在本次命中里真的存在 matched_terms 时追加**——没有命中词就不解释，
+   * 也保证旧账本（无 matched_terms）的回显逐字不变。
+   */
+  readingHint?: string;
+}
+
+/**
+ * 把命中词在给定文本里标出来（纯文本切片拼接，绝不用 innerHTML）。
+ * 未命中 / 无 terms / 词已被截断切掉 → 原样返回，**不硬标**（§0 诚实约束）。
+ */
+export function markHitFragments(text: string, terms: string[] | undefined, markup: HitMarkup): string {
+  if (markup === 'plain' || !terms || terms.length === 0) return text;
+  const spans = pickHitSpans(terms, text);
+  if (spans.length === 0) return text;
+  let out = '';
+  let cursor = 0;
+  for (const sp of spans) {
+    out += text.slice(cursor, sp.start);
+    const seg = text.slice(sp.start, sp.end);
+    out += markup === 'html' ? `<mark>${seg}</mark>` : `**「${seg}」**`;
+    cursor = sp.end;
+  }
+  return out + text.slice(cursor);
+}
+
 /** 四段明细的结构：标题 + 逐条正文（不含列表符号，由各自的渲染器补） */
 export interface RecallSection {
   title: string;
@@ -308,6 +346,7 @@ export function buildRecallSections(
   unitPriceCnyPerMTok: number | null,
   clip: (s: string, maxChars: number) => string,
   maxChars = 120,
+  hitStyle: RecallHitStyle = { markup: 'plain' },
 ): RecallSection[] {
   const t = result.savings;
   const bg = result.background;
@@ -319,8 +358,19 @@ export function buildRecallSections(
     ? bg.items.map((it) => `[${it.category}] ${clip(it.content, maxChars)}`)
     : ['无（minimal 模式或账本暂无可用背景）'];
 
+  // 批次59：本次是否真的有「命中依据」——没有就不高亮、不解释、不写 🎯 空标签
+  const hasTerms = result.hits.some((h) => (h.matched_terms?.length ?? 0) > 0);
   const hitLines = result.hits.length > 0
-    ? result.hits.map((h) => `[${h.layer}/${h.decay_class}] ${clip(h.content, maxChars)}（相关度 ${h.score.toFixed(2)}）`)
+    ? result.hits.map((h) => {
+        const clipped = clip(h.content, maxChars);
+        const body = markHitFragments(clipped, h.matched_terms, hitStyle.markup);
+        const terms = displayTerms(h.matched_terms, h.content, 3);
+        // 🎯 命中词 = 回答「为什么是它」；没有共有词时整段不出现
+        const why = terms.length > 0
+          ? ' 🎯 命中' + terms.map((x) => `「${clip(x, 20)}」`).join('')
+          : '';
+        return `[${h.layer}/${h.decay_class}] ${body}（相关度 ${h.score.toFixed(2)}）${why}`;
+      })
     : [`未命中（扫描 ${fmtInt(result.scanned_memories)} 条，未注入命中内容）`];
 
   const tokenLines = [
@@ -346,9 +396,14 @@ export function buildRecallSections(
     saveLines.push(`今日含 ${r.today_legacy_calls} 次旧记录（无省量字段，金额按载荷下限计）`);
   }
 
+  const hitTitle = `🧠 命中记忆 ${result.hits.length} 条（${fmtInt(t.payload_tokens)}t）`;
   return [
     { title: `📎 项目背景 ${bg.items.length} 条（${fmtInt(bg.tokens)}t）`, lines: bgLines },
-    { title: `🧠 命中记忆 ${result.hits.length} 条（${fmtInt(t.payload_tokens)}t）`, lines: hitLines },
+    {
+      // 读法说明只在真有命中词时追加：旧的/无语义的命中（matched_terms 为空）标题逐字不变
+      title: hasTerms && hitStyle.readingHint ? `${hitTitle}｜ ${hitStyle.readingHint}` : hitTitle,
+      lines: hitLines,
+    },
     { title: `⚡ Token 用量（本次注入 ${fmtInt(t.injected_tokens)}t）`, lines: tokenLines },
     { title: `💰 省钱与费用（本次省 ${fmtInt(t.saved_tokens)}t）`, lines: saveLines },
   ];
@@ -366,7 +421,10 @@ export function buildRecallMarkdown(
 ): string {
   const htmlDetails = opts.htmlDetails !== false;
   const clip = htmlDetails ? mdInline : plainClip;
-  const sections = buildRecallSections(result, hint, unitPriceCnyPerMTok, clip);
+  // 批次59：同一份四段口径带上各自的高亮载体——HTML 档用 <mark>，纯 Markdown 档用加粗引号
+  const sections = buildRecallSections(result, hint, unitPriceCnyPerMTok, clip, 120, htmlDetails
+    ? { markup: 'html', readingHint: '黄色 = 与本次提问重合的片段；🎯 = 命中的词' }
+    : { markup: 'markdown', readingHint: '加粗「」= 与本次提问重合的片段；🎯 = 命中的词' });
   const inner = sections
     .map((s) => {
       const body = s.lines.map((l) => `- ${l}`).join('\n');
@@ -428,7 +486,11 @@ export function buildRecallDetailPage(
   meta: RecallDetailPageMeta,
 ): string {
   const clipChars = meta.clipChars ?? 400;
-  const sections = buildRecallSections(result, hint, unitPriceCnyPerMTok, (s, n) => htmlEscape(plainClip(s, n)), clipChars);
+  const sections = buildRecallSections(
+    result, hint, unitPriceCnyPerMTok, (s, n) => htmlEscape(plainClip(s, n)), clipChars,
+    { markup: 'html', readingHint: '黄色 = 与本次提问重合的片段；🎯 = 命中的词' },
+  );
+  const hasTerms = result.hits.some((h) => (h.matched_terms?.length ?? 0) > 0);
   const detailBlocks = sections
     .map((s) => `<details>\n<summary>${htmlEscape(s.title)}</summary>\n<ul>${s.lines.map((l) => `<li>${l}</li>`).join('')}</ul>\n</details>`)
     .join('\n');
@@ -437,6 +499,11 @@ export function buildRecallDetailPage(
     .map((l) => `<p class="sum">${htmlEscape(l)}</p>`)
     .join('\n');
   const ttlMin = Math.max(1, Math.round((meta.expiresAt - meta.issuedAt) / 60_000));
+  // 批次59：把「黄色是什么意思」「没标黄是什么意思」一次说清——不解释等于让用户猜
+  const legend = hasTerms
+    ? `<p class="legend">🟨 黄色片段 = 与本次提问「${htmlEscape(plainClip(meta.query, 60))}」重合的部分（🎯 后是命中的词）。
+没标黄的条目 = 与本次提问没有字面重合，只能按相关度参考，不代表「没用上」。</p>\n`
+    : '';
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -464,6 +531,13 @@ ul { margin: 8px 0 12px; padding-left: 20px; }
 li { margin: 3px 0; word-break: break-word; }
 footer { color: var(--muted); font-size: 12px; margin-top: 18px; border-top: 1px solid var(--border); padding-top: 12px; }
 code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+mark { background: #ffe58f; color: #1f2328; padding: 0 1px; border-radius: 3px; }
+.legend { margin: 0 0 14px; padding: 8px 10px; border: 1px solid #f0e0a8; border-radius: 6px;
+  background: #fffbe6; color: #6b5b00; font-size: 12px; line-height: 1.6; }
+@media (prefers-color-scheme: dark) {
+  mark { background: #7a6320; color: #fff8d6; }
+  .legend { background: #2b2716; border-color: #4a431f; color: #e8d98a; }
+}
 </style>
 </head>
 <body>
@@ -472,7 +546,7 @@ code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
 ${summaryLines}
 <p class="meta">项目 <code>${htmlEscape(meta.project_id)}</code> ｜ 查询「${htmlEscape(plainClip(meta.query, 80))}」${meta.client ? ` ｜ 调用方 <code>${htmlEscape(meta.client)}</code>` : ''}
 <br>生成 ${localTimeLabel(meta.issuedAt)} ｜ 本链接 ${ttlMin} 分钟内有效（过期后请在聊天里让助手用 detail=true 再取一次）</p>
-<div class="ops">
+${legend}<div class="ops">
 <button type="button" onclick="document.querySelectorAll('details').forEach(function(d){d.open=true})">全部展开</button>
 <button type="button" onclick="document.querySelectorAll('details').forEach(function(d){d.open=false})">全部收起</button>
 </div>
