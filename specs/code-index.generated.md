@@ -3,7 +3,7 @@
 > 由 `npm run code:index` 生成，请勿手改；改代码/文档后重跑即可。
 > 用法：先在本表定位文件与导出符号，再只读该文件的局部区间（省 token、少误改）。
 
-共 368 个源码文件、129 个文档。
+共 368 个源码文件、131 个文档。
 
 ## e2e
 
@@ -534,12 +534,14 @@
 | [specs/召回模式SystemPrompt模板.md](specs/召回模式SystemPrompt模板.md) | 139 | 召回模式 System Prompt 记忆模板（含冲突约束） |
 | [specs/召回模式设计与实现方案.md](specs/召回模式设计与实现方案.md) | 130 | 召回模式设计与实现方案 |
 | [specs/多用户三池隔离设计_D1-D25.md](specs/多用户三池隔离设计_D1-D25.md) | 183 | 多用户三池隔离设计（D1–D25） |
+| [specs/已知边界台账.md](specs/已知边界台账.md) | 184 | title: 当前已知边界台账（AGENTS §9 迁出） |
 | [specs/开发纪律_三道闸门.md](specs/开发纪律_三道闸门.md) | 110 | 开发纪律：每个原子动作收尾必须过 3 道闸门 |
 | [specs/批次44-D5工具面落地子方案.md](specs/批次44-D5工具面落地子方案.md) | 163 | 批次44 · D5 工具面落地子方案（A2 补 12 工具 Agent 面） |
 | [specs/批次44-吸收项落地设计.md](specs/批次44-吸收项落地设计.md) | 90 | 批次44：吸收项落地设计（A1–A5 / M1 代码实现缺口） |
 | [specs/批次46-D6多用户三池与create_project子方案.md](specs/批次46-D6多用户三池与create_project子方案.md) | 108 | 批次46-D6 · 多用户三池 + create_project + 令牌代理受限令牌（需求/方案定稿） |
 | [specs/批次46-真正冲突裁决与摘要合并统计_落地方案.md](specs/批次46-真正冲突裁决与摘要合并统计_落地方案.md) | 206 | 批次46 · 真正冲突裁决 + 摘要合并统计 落地方案（需求定稿） |
 | [specs/接入Agent行为规范.md](specs/接入Agent行为规范.md) | 194 | 接入 Agent 行为规范 |
+| [specs/改哪里-任务到文件速查.md](specs/改哪里-任务到文件速查.md) | 47 | title: 改哪里：任务 → 文件（AGENTS §3 迁出） |
 | [specs/文档对齐确认需求稿.md](specs/文档对齐确认需求稿.md) | 124 | 文档对齐确认需求稿（批次43） |
 | [specs/记忆库写入分类与溯源规范.md](specs/记忆库写入分类与溯源规范.md) | 98 | 记忆库写入分类与溯源规范（草案） |
 | [specs/记忆库工具能力清单.md](specs/记忆库工具能力清单.md) | 126 | 记忆库工具能力清单（读 / 写 / 管理） |
@@ -1036,12 +1038,14 @@ specs/workspace-view-gap-2026-11-08.md 05e258838ea9
 specs/召回模式SystemPrompt模板.md f4a10a6f2d6c
 specs/召回模式设计与实现方案.md 1dbec206176b
 specs/多用户三池隔离设计_D1-D25.md d0fc00a9fade
+specs/已知边界台账.md bc2765a16edc
 specs/开发纪律_三道闸门.md d9f5ee298a8a
 specs/批次44-D5工具面落地子方案.md 01cc6b6cc89d
 specs/批次44-吸收项落地设计.md 2ced9348f942
 specs/批次46-D6多用户三池与create_project子方案.md 17236628021f
 specs/批次46-真正冲突裁决与摘要合并统计_落地方案.md 30403514d0a1
 specs/接入Agent行为规范.md f66474597609
+specs/改哪里-任务到文件速查.md 86efe439fccd
 specs/文档对齐确认需求稿.md 5da42259c355
 specs/记忆库写入分类与溯源规范.md 2fb0f14ebadc
 specs/记忆库工具能力清单.md 5da556d65280

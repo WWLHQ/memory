@@ -1,6 +1,5 @@
-> **本文件为精简索引。** 原文件共 109113 字符（2026-11-12 复核），超过 WorkBuddy 的 40,000 字符上限，会被整份跳过加载，导致规则一条都不生效。
-> 完整原文已原样保存在 [`AGENTS.full.md`](AGENTS.full.md)，查阅任何细节请打开该文件。
-> 回滚：把 `AGENTS.full.md` 复制回 `AGENTS.md` 即可。
+> **本文件是唯一真源。** 2026-11-12 起 `AGENTS.full.md` 已删除：原 §3 改哪里、§9 已知边界两块大部头（合计约 96k 字符）已拆到 `specs/` 随规格库维护，其余章节全部并入本文件。
+> **必须控制在 40,000 字符以内**（当前约 13k）——超过该上限会被 WorkBuddy 整份跳过加载，规则一条都不生效。新增内容优先写进 `specs/` 再在此留指针。
 
 # AGENTS.md — 协作与维护指南
 
@@ -81,17 +80,63 @@ npm run test:gate       # 全量测试门禁：4 分片串行，仅原生崩溃 
 
 ---
 
-## 完整章节索引（正文见 AGENTS.full.md）
+## 4. 动作日志（排查第一入口）
 
-- ## 0. 开发纪律：三道闸门（2026-11-05 起强制）
-- ## 1. 项目是什么
-- ## 2. 常用命令
-- ## 3. 改哪里（任务 → 文件）
-- ## 4. 动作日志（排查第一入口）
-- ## 5. 权限模型（批次7）
-- ## 6. 数据根（用户选定，默认 `%APPDATA%/MultiAgent Memory`）
-- ## 7. 编码约定（评审会按此检查）
-- ## 8. 门禁与交付
-- ## 9. 当前已知边界
+- **位置**：数据根下 `actions.log`（设置页「数据目录」卡片与 `dataRoot:get` 返回的 `actionsLogPath` 可查）。超过 5 MiB 轮转为 `actions.log.1` / `actions.log.2`（keep=3 → 当前文件 + 2 份历史，最旧的后移删除）。
+- **格式**（一行一个动作，可直接 grep）：
+  `[2026-10-30T08:00:00.000Z] [info] [ipc:storage:putMemory] [req_ab12] {"mem_id":"m1","ms":3}`
+- **scope**：`app`（启动/退出）、`ui`（点击/提交/页面进入/脚本错误）、`host`（宿主桥调用）、`ipc`（主进程通道）、`home`（登录后端 HTTP 与账号事件）、`onboarding`（接入服务 HTTP）、`backup`、`dataRoot`、`kernel`、`mcp`、`webhook`、`llm`（引擎配置保存 `llm:config-saved` 与连通拨测 `llm:test-engine`，批次34 起双写；此前只落 `main.log`）。
+- **写入路径**：页面入口 `import '../shared/actionLog.ts'`（自动安装全局捕获）→ `uiLog()` → `hostLog()` → preload `window.api.log.write`（`ipcRenderer.send`，不阻塞）→ 主进程 `registerLogIpc` → `actionLog()`；iframe 子页经宿主桥转发。HTTP 服务通过 `onLog` 回调写入同一文件。
+- **脱敏**：`src/shared/actionLog.ts` 对 key 命中 `password|secret|token|authorization|api_key|credential|cookie|session_id` 的字段整体写 `***`；字符串截断 500 字、数组 20 项、深度 4。**绝不记录输入框明文值**。
+- **其它日志**：`main.log`（启动/迁移诊断）、`float.log`（悬浮窗）、`home-audit.json`（登录/角色/改密审计）、`home-mirror.json`（页面动作上抛账本）、内核审计（批次41-A 起独立文件 `audit.jsonl`，跟记忆库同目录，轮转档在 `audit-archive/`；不再随 `memories.db.json` 整库序列化）。
+- **程序运行日志窗口（日志记录页，批次17 建 / 批次19 迁 / 批次24 人话化）**：日志记录页顶部常驻，一次取最近 **50** 条真实 `actions.log`（`tailActionLog` 尾读，跨 `.1..N` 轮转回退；`TAIL_MAX_LINES=50`，渲染层传更大值也被钳到 50），全部渲染在**固定高度、常驻上下滚动条**的正文区内可回看整段（用户滚上去看历史时不再被新日志拽回底部；重新滚回底部即恢复自动跟随，没有单独按钮）。默认**人话视图**：`scope:action` 与 IPC 通道翻译成中文标题 + 关键字段摘要（`src/web/Home/programLogLabels.ts`），原始 `scope:action` 同行保留可 grep；「原文」视图按原样显示。时间统一 UTC+08:00。窗口内出现 `[error]` 时提示「复制诊断信息反馈给维护者」。`log:tail` 与 `log:write` 一样**不写自身调用日志**，防止轮询观测把日志刷屏；纯浏览器如实显示不可用。
+- **排查示例**：`rg "req_ab12" actions.log`；`rg "\[error\]" actions.log`；`rg "\[home:login" actions.log`。
 
-> 需要上面任一章节的完整内容时，请读取 `AGENTS.full.md` 并定位对应标题。
+新增日志点：主进程用 `actionLog(scope, action, detail)`（`src/electron/actionLog.ts`），渲染层用 `uiLog(scope, action, detail)`（`src/web/shared/actionLog.ts`）。日志失败绝不影响业务。
+
+## 5. 权限模型（批次7）
+
+- 账号角色 `admin | member`，随登录会话下发（`TenantContext.role`）。
+- 内置管理员：`admin` / 初始密码 `Admin@123456`（首次启动播种，登录后请在「账号与安全」页立即修改；已有 admin 绝不被覆盖/重置）。
+- **仅管理员**：修改数据根/恢复默认、备份配置与立即备份、密码策略、成员/密钥管理、账号角色与团队分配。
+- **三层强制**（缺一不可）：
+  1. 后端：`src/home/server.ts` 对 `/api/accounts*`、`/api/password` 校验会话角色；
+  2. 主进程：`main.ts` §6 `requireAdmin` 用 `homeServerRef.getSessionContext(sid)` 校验（不信任渲染层自报）；
+  3. UI：`useSessionContext()` 只读展示 + 禁用控件并提示「需管理员」（`src/web/shared/session.ts`）。
+- 普通用户可用其余页面；未登录/无后端时敏感区一律只读，不伪造成功。
+
+## 6. 数据根（用户选定，默认 `%APPDATA%/MultiAgent Memory`）
+
+`memories.db.json`（L1–L6 正文；**批次41-A 起内核审计不再写在这里**，只有上次迁移没走完时才残留历史 `audit` 数组）、`memories.l0.json`（批次37-A：L0 原文库，只存 v2/v1 密文信封，0600）、`audit.jsonl`（批次41-A：内核审计账本，追加式 JSONL，一行一条，跟 `memories.db.json` **同目录**）、`audit-archive/`（同目录，轮转出的旧审计档，`audit-<UTC时间戳>-<序号>.jsonl`，**只增不删**）、`l0-keyring.json`（批次37：与 L0 库**同目录**，密钥环和它要保护的库不能分开放）、`actions.log`、`main.log`、`float.log`、`collector-cursor.json`、`backup-config.json`、`mcp-token.txt`、`home-audit.json`、`home-locks.json`、`home-accounts.json`、`home-mirror.json`、`agent-onboard.json`、`llm-config.json`（引擎启用/模型/地址/最近拨测延时，**绝不含密钥**）、`llm-keys.json`（0600，`{引擎id: 密钥}`，仅以 `Authorization: Bearer` 发给对应远端引擎，绝不进日志/审计；批次32 起替代单文件密钥）、`llm-deepseek-key.txt`（批次31 遗留单引擎密钥，仅作 `deepseek` 的只读兜底，不自动删除/改写）、`backups/`、`memories-export/`。
+切换数据根只复制白名单文件（`DATA_ROOT_MIGRATE_FILES` 已含两个库、密钥环与 `audit.jsonl`；`DATA_ROOT_MIGRATE_DIRS` 含 `backups`/`memories-export`/`audit-archive`），不覆盖、不删源；指针固定 `%APPDATA%/MultiAgent Memory/data-root.json`，批次37-B 起另带 `ledgerDir`/`l0Dir`（两个库各自选目录，缺省=root，属**兼容读取**）与 `setupDone`（首启向导三件事——两库位置、L0 管理密码、恢复卡导出——全做完才置真；没置真每次都进向导，升级的老指针同样强制）。
+`backups/` 里四类文件按前缀分：`memories-<UTC时间戳>.json`（记忆库）/`meml0-…`（L0 原库）/`l0key-…`（密钥环）/`memaudit-<UTC时间戳>.jsonl`（批次41-A 审计账本），各按 `keep` 份数滚动，滚动互不挤占（`backupFiles.ts`）——**只备记忆库会让审计账本成为唯一没有退路的那一份**。
+批次39 起 **L1–L6 所在目录（`ledgerDir`）另有一个 `refine-queue.json`**（0600，后台补炼队列：mem_id → 状态/原因码/时间，**正文与密文都不落这里**）。它**不在** `DATA_ROOT_MIGRATE_FILES` 白名单里——丢了也不丢数据：启动时 `startRefineQueue` 按「有 L1 但无任何深层」重新扫出存量并入队，等价于一次自动「把存量入队补炼」。
+批次42 起 **数据根另有一个 `sync-hub/` 目录**（云端同步中枢，主进程 pglite 进程内 Postgres 落盘——各端账本的上行镜像 + 裁决队列 + 中枢审计）。它与 `refine-queue.json` 同口径：**不在迁移白名单、不进备份四源配方**——中枢是**衍生可重建数据**（真源在各端本地账本；丢失恢复 = 任一端 `syncUp` 全量上行，sha256 幂等 + 向量时钟保证不丢不重），且热复制 pglite 落盘目录有一致性风险（备份需中枢 close/checkpoint，复杂度与收益不匹配）。应用退出经 `before-quit` **优雅关闭**（`PgSyncHub.close()`，pglite 显式 close 才保证 WASM 存储层完整刷盘）。换数据根后中枢在新根首启自动重建（空镜像），各端重新同步即恢复。
+
+## 7. 编码约定（评审会按此检查）
+
+1. **诚实化**：没有真实实现就报错/标注未实现（如 `sync()` 抛 `E_NOT_IMPLEMENTED`），严禁 seed 假数据、造假回执。
+2. **可定位**：新文件首行写职责；大文件用 `§` 区块（见 `src/electron/main.ts` 文件地图）；导出符号语义化。
+3. **有动作就有日志**：新增交互/IPC/HTTP/后台任务必须落一条动作日志，带 scope/action/关键参数/耗时（错误带 error）。
+4. **敏感信息零落盘**：密码、令牌、密钥不进日志/审计/URL；审计只记动作与目标。
+5. **审计成对**：成功的写操作要能在内核账本或 home 审计中查到（`request_id` 可回查）。
+6. **测试同步**：修 bug 先写失败用例；新能力至少覆盖正常/拒绝/边界三条路径；E2E 断言打到真实后端。
+7. **外科手术式修改**：只改必要文件，不动无关代码；不引入无需求的抽象/兼容层。
+
+## 8. 门禁与交付
+
+- 合入门槛：`npm run verify` 全绿（typecheck → oxlint → 索引新鲜度 → 覆盖率阈值 → Electron 构建 → E2E）。
+- **功能完成即建索引**：每完成一个功能/修复批次，先 `npm run code:index -- --write` 刷新 `specs/code-index.generated.md`，并同步 `specs/code-map.md`、`AGENTS.md` 的相关条目；索引过期视为功能未完成。`verify:fast` 内置 `code:index:check`（过期直接失败），`npm run package` 打包前自动刷新索引。
+- 每次用户可感知的改动：`npm run package` 重新打包，并在 `specs/MANUAL-TEST-FIX-BATCH-<n>.md` 写手动测试报告（安装包路径/大小/SHA256、改动清单、管理员与日志验证步骤）。
+- 未完成/已知限制必须写进报告与本节，不留给用户猜。
+
+---
+
+## 附录：细则去这两篇
+
+- **§3 改哪里（任务 → 文件）**：34 条「我要改 X → 先看 Y」定位表 → [`specs/改哪里-任务到文件速查.md`](specs/改哪里-任务到文件速查.md)
+- **§9 当前已知边界**：36 个批次的踩坑与边界台账 → [`specs/已知边界台账.md`](specs/已知边界台账.md)
+
+> 这两块分别约 22k / 74k 字符，塞进本文件会突破 40,000 字符上限，故拆到 `specs/` 随规格库一起维护。
+
+> **MCP 召回触发口径的同步集已从四处变三处**（2026-11-12 起）：`src/core/memagent/mcpSchema.ts`（`MCP_INSTRUCTIONS`）+ 本文件 §1.1 + `CLAUDE.md`。原第一处 `AGENTS.full.md` 已删除，改动时不必再找它；`specs/POSTMORTEM-2026-11-11-*.md` 里写的「四处同改」是该文成文时的口径，已过时。

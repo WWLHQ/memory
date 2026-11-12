@@ -16,6 +16,8 @@
 - 任务拆分（REQ-006/P4 生命周期页）：[specs/tasks/LIFECYCLE.md](specs/tasks/LIFECYCLE.md)
 - 任务拆分（REQ-006/P7 冲突裁决页）：[specs/tasks/CONFLICT.md](specs/tasks/CONFLICT.md)
 - 代码映射（可追溯）：[specs/code-map.md](specs/code-map.md)
+- 改哪里速查（原 AGENTS §3，按任务找文件）：[specs/改哪里-任务到文件速查.md](specs/改哪里-任务到文件速查.md)
+- 当前已知边界台账（原 AGENTS §9，踩坑与限制）：[specs/已知边界台账.md](specs/已知边界台账.md)
 - 项目需求规格（导入，待结构化）：
   - [需求规格书.md](specs/需求规格书.md)
   - [需求规格书_Agent接入页字段级交互规格.md](specs/需求规格书_Agent接入页字段级交互规格.md)
