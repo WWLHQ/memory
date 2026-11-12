@@ -3,10 +3,12 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
+// 会话角色可变（hoisted），便于同一 describe 内切换管理员 / 成员
+const h = vi.hoisted(() => ({ session: { role: 'admin' as 'admin' | 'member', user_id: 'admin' } }));
 vi.mock('../../shared/session.ts', () => ({
   currentSessionId: () => null,
   fetchSessionContext: async () => null,
-  useSessionContext: () => ({ sid: null, context: { role: 'admin' }, role: 'admin' as const, loading: false }),
+  useSessionContext: () => ({ sid: null, context: { role: h.session.role, user_id: h.session.user_id }, role: h.session.role, loading: false }),
 }));
 
 import { WritePage } from '../WritePage.tsx';
@@ -15,6 +17,11 @@ import { createTestVault, TEST_ADMIN_PW, TEST_ADMIN_ID } from '../../../core/mem
 import { L0_WRITE_LOCK_SIGNAL_KEY } from '../../shared/l0WriteLockSignal.ts';
 
 describe('WritePage · 批次41-W L0 写密钥锁定', () => {
+  beforeEach(() => {
+    h.session.role = 'admin';
+    h.session.user_id = 'admin';
+  });
+
   async function unlockedVault() {
     resetKernelForTests();
     const { vault } = await createTestVault();
@@ -64,6 +71,45 @@ describe('WritePage · 批次41-W L0 写密钥锁定', () => {
     fireEvent.click(screen.getByTestId('l0-unlock-submit'));
     await waitFor(() => expect(screen.getByTestId('l0-unlock-error')).toBeInTheDocument());
     expect((screen.getByTestId('l0-unlock-password') as HTMLInputElement).value).toBe('');
+    expect(screen.queryByTestId('receipt')).toBeNull();
+  });
+
+  it('§4.4.4-B 成员自解锁：管理员先发放写解锁口令 → 成员登录后锁态下用口令解锁 → 自动重放被挡那条 → 出回执', async () => {
+    h.session.role = 'member';
+    h.session.user_id = 'mem_1';
+    const MEM_PW = 'MemKeypass-1';
+    const vault = await unlockedVault(); // 此时 writeDek 在内存（解锁态）
+    // 管理员发放成员写解锁口令（需写密钥在内存，满足）
+    await vault.addMemberWriteWrap({ member_id: 'mem_1', passphrase: MEM_PW, admin_user_id: TEST_ADMIN_ID });
+    // 锁回，模拟成员登录后写密钥是锁着的
+    await vault.lockWrite({ admin_user_id: TEST_ADMIN_ID });
+    render(<WritePage />);
+    fireEvent.change(screen.getByTestId('f-content'), { target: { value: '部署流水线构建失败：Node 版本需统一为 22 LTS' } });
+    fireEvent.click(screen.getByTestId('submit'));
+    await waitFor(() => expect(screen.getByTestId('l0-unlock-password')).toBeInTheDocument());
+    // 成员分支：口令框占位为「你的写解锁口令」，且不被「请管理员解锁」挡住
+    expect(screen.queryByTestId('l0-unlock-need-admin')).toBeNull();
+    fireEvent.change(screen.getByTestId('l0-unlock-password'), { target: { value: MEM_PW } });
+    fireEvent.click(screen.getByTestId('l0-unlock-submit'));
+    await waitFor(() => expect(screen.getByTestId('receipt')).toBeInTheDocument());
+    expect(screen.getByTestId('receipt-id')).toHaveTextContent(/^mem_/);
+    expect(screen.getByTestId('l0-unlock-done')).toBeInTheDocument();
+    expect(localStorage.getItem(L0_WRITE_LOCK_SIGNAL_KEY)).toBeTruthy();
+  });
+
+  it('§4.4.4-B 成员无口令自解锁 → 解锁卡报错、不出回执（越权/未发放由内核拒）', async () => {
+    h.session.role = 'member';
+    h.session.user_id = 'mem_2';
+    const vault = await unlockedVault();
+    // 不给 mem_2 发放口令
+    await vault.lockWrite({ admin_user_id: TEST_ADMIN_ID });
+    render(<WritePage />);
+    fireEvent.change(screen.getByTestId('f-content'), { target: { value: '部署流水线构建失败：Node 版本需统一为 22 LTS' } });
+    fireEvent.click(screen.getByTestId('submit'));
+    await waitFor(() => expect(screen.getByTestId('l0-unlock-password')).toBeInTheDocument());
+    fireEvent.change(screen.getByTestId('l0-unlock-password'), { target: { value: 'whatever-1' } });
+    fireEvent.click(screen.getByTestId('l0-unlock-submit'));
+    await waitFor(() => expect(screen.getByTestId('l0-unlock-error')).toBeInTheDocument());
     expect(screen.queryByTestId('receipt')).toBeNull();
   });
 });

@@ -19,7 +19,7 @@ export interface L0WriteUnlockProps {
 }
 
 export function L0WriteUnlock({ scene, onUnlocked }: L0WriteUnlockProps) {
-  const { role } = useSessionContext();
+  const { role, context } = useSessionContext();
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,21 +28,26 @@ export function L0WriteUnlock({ scene, onUnlocked }: L0WriteUnlockProps) {
   function submit() {
     if (busy) return;
     if (!password) {
-      setError('请输入管理密码以解锁写密钥');
+      setError(role === 'member' ? '请输入你的写解锁口令' : '请输入管理密码以解锁写密钥');
       return;
     }
     setBusy(true);
     setError(null);
     void (async () => {
       try {
-        await getKernel().l0UnlockWrite(password);
+        if (role === 'member' && context?.user_id) {
+          // §4.4.4-B：成员用管理员发给自己的写解锁口令自解锁（与管理密码互不替代）
+          await getKernel().l0UnlockWriteForMember({ password, member_id: context.user_id });
+        } else {
+          await getKernel().l0UnlockWrite(password);
+        }
         setPassword('');
         setUnlocked(true);
         // 广播写锁变化信号：首页红条与壳层状态栏监听 storage 后立刻重读真实锁状态
         signalL0WriteLockChanged();
         onUnlocked?.();
       } catch (e) {
-        // 失败原因原样显示（内核会给「密码不符/未播种」等真实文案），但密码本身不留任何痕迹
+        // 失败原因原样显示（内核会给「密码不符/未播种/未发放」等真实文案），但密码本身不留任何痕迹
         setPassword('');
         setError(kernelErrorText(e));
       } finally {
@@ -68,31 +73,50 @@ export function L0WriteUnlock({ scene, onUnlocked }: L0WriteUnlockProps) {
         （应用重启或上次会话中断都会锁）。<b>输入 L0 管理密码解锁后即可继续</b>——这不是数据出错，也不是没内容可写。
       </div>
       {role === 'admin' ? (
-        <>
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-            <input
-              type="password"
-              data-testid="l0-unlock-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
-              placeholder="L0 管理密码"
-              disabled={busy}
-              autoComplete="off"
-            />
-            <button type="button" className="btn primary" data-testid="l0-unlock-submit" disabled={busy} onClick={submit}>
-              {busy ? '解锁中…' : '解锁写密钥'}
-            </button>
+          <>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+              <input
+                type="password"
+                data-testid="l0-unlock-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
+                placeholder="L0 管理密码"
+                disabled={busy}
+                autoComplete="off"
+              />
+              <button type="button" className="btn primary" data-testid="l0-unlock-submit" disabled={busy} onClick={submit}>
+                {busy ? '解锁中…' : '解锁写密钥'}
+              </button>
+            </div>
+            <div className="note">密码只用于本次解锁，不显示、不落盘、不进日志；改管理密码仍在安全页「L0 管理」卡。</div>
+          </>
+        ) : role === 'member' && context?.user_id ? (
+          <>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+              <input
+                type="password"
+                data-testid="l0-unlock-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
+                placeholder="你的写解锁口令"
+                disabled={busy}
+                autoComplete="off"
+              />
+              <button type="button" className="btn primary" data-testid="l0-unlock-submit" disabled={busy} onClick={submit}>
+                {busy ? '解锁中…' : '解锁写密钥'}
+              </button>
+            </div>
+            <div className="note">输入管理员发给你的写解锁口令解锁（与管理密码互不替代）。密码只用于本次解锁，不显示、不落盘、不进日志。</div>
+          </>
+        ) : (
+          <div className="note" data-testid="l0-unlock-need-admin">
+            {role === null
+              ? '未登录：解锁写密钥需要会话。请先登录后由管理员输入管理密码解锁，或成员用写解锁口令解锁。'
+              : '当前账号不是管理员：请管理员在「安全页 → L0 管理 → 写密钥」输入管理密码解锁后再试。'}
           </div>
-          <div className="note">密码只用于本次解锁，不显示、不落盘、不进日志；改管理密码仍在安全页「L0 管理」卡。</div>
-        </>
-      ) : (
-        <div className="note" data-testid="l0-unlock-need-admin">
-          {role === null
-            ? '未登录：解锁写密钥需要管理员会话。请先登录后由管理员输入管理密码解锁。'
-            : '当前账号不是管理员：请管理员在「安全页 → L0 管理 → 写密钥」输入管理密码解锁后再试。'}
-        </div>
-      )}
+        )}
       {error && <div className="err" data-testid="l0-unlock-error">解锁失败：{error}</div>}
     </div>
   );

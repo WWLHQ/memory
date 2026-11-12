@@ -22,7 +22,7 @@ export function WriteL0UnlockCard({
   triggered: boolean;
   onUnlocked?: () => void;
 }) {
-  const { role } = useSessionContext();
+  const { role, context } = useSessionContext();
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -43,14 +43,19 @@ export function WriteL0UnlockCard({
   function submit() {
     if (busy) return;
     if (!password) {
-      setError('请输入管理密码以解锁写密钥');
+      setError(role === 'member' ? '请输入你的写解锁口令' : '请输入管理密码以解锁写密钥');
       return;
     }
     setBusy(true);
     setError(null);
     void (async () => {
       try {
-        await getKernel().l0UnlockWrite(password);
+        if (role === 'member' && context?.user_id) {
+          // §4.4.4-B：成员用管理员发给自己的写解锁口令自解锁（与管理密码互不替代）
+          await getKernel().l0UnlockWriteForMember({ password, member_id: context.user_id });
+        } else {
+          await getKernel().l0UnlockWrite(password);
+        }
         setPassword('');
         setUnlocked(true);
         // 广播写锁变化信号：首页红条与壳层状态栏监听 storage 后立刻重读真实锁状态
@@ -114,10 +119,32 @@ export function WriteL0UnlockCard({
                   解锁成功后自动重放被挡那条，无需再点写入 · 密码只用于本次解锁，不显示、不落盘、不进日志。
                 </div>
               </>
+            ) : role === 'member' && context?.user_id ? (
+              <>
+                <label className="wf-lbl" htmlFor="l0-unlock-password">你的写解锁口令（§4.4.4-B · 与管理密码互不替代）</label>
+                <input
+                  id="l0-unlock-password"
+                  className="wf-in"
+                  type="password"
+                  data-testid="l0-unlock-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
+                  placeholder="你的写解锁口令"
+                  disabled={busy}
+                  autoComplete="off"
+                />
+                <button type="button" className="wf-btn" data-testid="l0-unlock-submit" disabled={busy} onClick={submit}>
+                  {busy ? '解锁中…' : '解锁并自动重放'}
+                </button>
+                <div className="wf-note">
+                  用管理员发给你的写解锁口令自解锁（与管理密码互不替代）· 解锁成功后自动重放被挡那条，无需再点写入 · 密码只用于本次解锁，不显示、不落盘、不进日志。
+                </div>
+              </>
             ) : (
               <div className="wf-note" data-testid="l0-unlock-need-admin">
                 {role === null
-                  ? '未登录：解锁写密钥需要管理员会话。请先登录后由管理员输入管理密码解锁。'
+                  ? '未登录：解锁写密钥需要会话。请先登录后由管理员输入管理密码解锁，或成员用写解锁口令解锁。'
                   : '当前账号不是管理员：不给点了必然失败的按钮，请管理员到「安全页 → L0 管理 → 写密钥」解锁后再试。'}
               </div>
             )}
