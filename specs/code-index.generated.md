@@ -3,7 +3,7 @@
 > 由 `npm run code:index` 生成，请勿手改；改代码/文档后重跑即可。
 > 用法：先在本表定位文件与导出符号，再只读该文件的局部区间（省 token、少误改）。
 
-共 368 个源码文件、133 个文档。
+共 368 个源码文件、134 个文档。
 
 ## e2e
 
@@ -494,6 +494,7 @@
 | [specs/acceptance.md](specs/acceptance.md) | 55 | title: 验收标准 |
 | [specs/code-map.md](specs/code-map.md) | 1597 | status: draft |
 | [specs/demo-data-baseline.md](specs/demo-data-baseline.md) | 116 | 演示/种子数据基线清单（批次42 · 阶段0 冻结） |
+| [specs/recall-echo-contract.md](specs/recall-echo-contract.md) | 271 | title: 回显（recall echo）逻辑与格式统计 |
 | [specs/reports/BATCH48-FIX-REPORT.md](specs/reports/BATCH48-FIX-REPORT.md) | 80 | 批次48 审计修复收尾报告 |
 | [specs/reports/RECALL-WEEK-PLAN.md](specs/reports/RECALL-WEEK-PLAN.md) | 120 | 召回 A 方案 · 一周真实数据观察计划（2026-11-12 ~ 2026-11-19） |
 | [specs/requirements.md](specs/requirements.md) | 59 | title: 需求规格 |
@@ -1000,6 +1001,7 @@ specs/ROADMAP-批次B类-远端PG与多机硬过滤-方案.md 0c7857454a7d
 specs/acceptance.md 664f1bb0d8cf
 specs/code-map.md c7a47e8a2e58
 specs/demo-data-baseline.md 1d9af215ac78
+specs/recall-echo-contract.md b2b50e6f72ef
 specs/reports/BATCH48-FIX-REPORT.md 7d62836888ad
 specs/reports/RECALL-WEEK-PLAN.md 9747f8a52112
 specs/requirements.md 6e72739fe35b

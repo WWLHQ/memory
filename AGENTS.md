@@ -76,6 +76,7 @@ MultiAgent Memory：Electron 45 + React 19 + Vite 的本地优先「多 Agent �
 - 桌面端未运行则 8204 不可达：如实说明，不编造记忆、不假装检索过。
 - Qoder 等客户端可能不注入 MCP `initialize.instructions`，本文件是其触发规则的兜底（新会话生效）；是否真的检索过，以数据根 `audit.jsonl` 的 `recall` 审计为准（批次41-A 起审计不再在 `memories.db.json` 里；批次15 起审计 `detail.client` 记录调用方，如 `Qoder/9.9.9`。**〔2026-11-04 批次41-S 校正〕这个 `detail.client` 不是每条都可证**：8204 对「不带 `Mcp-Session-Id` 的请求」按 **UA → 最近一次 initialize 的自报名** 归并，而 Node/Electron 客户端的默认 UA 都是字面量 `node`，实测两台设备串到同一条记录上——按客户端身份做结论前先读 §9 的批次41-S。**〔2026-11-05 批次41-X 起有新数据可用〕**一键接入现在往每份客户端配置写显式身份头 `X-Memagent-Client: <配方 id>`（如 `qoder-cn`），带该头的请求**每次自带身份、不再走 UA 归并**，这类 `detail.client` 就是可证的；**没补这个头的老配置仍按上面「不可证」口径处理**（面板上「补身份头」按钮就是这条升级路径）。）
 - **客户端接入推广（批次15）**：同一份提示/折叠明细对所有客户端生效（服务端返回），差异只在客户端注册与触发规则。Agent 接入配置页新增「MCP 客户端接入状态」面板：真实读取 `~/.qoder-cn/settings.json`、`~/.claude.json`、`~/.codex/config.toml`、`~/.cursor/mcp.json` 等，按内容判定「已接入 / 缺令牌 / 未配置 / 冲突 / 无配置 / 需手工」；含令牌片段与一键写入仅管理员，写入前备份原文件，冲突/无法解析一律拒绝。Claude Code 另有根目录 `CLAUDE.md`（`@AGENTS.md` + 本触发规则）。
+- **回显逻辑与格式统计表**：[`specs/recall-echo-contract.md`](specs/recall-echo-contract.md) —— 三档判档链、四段/四块模板、档位矩阵、Agent 侧禁止事项、影响面文件清单；改动回显前先读它，不必重读 7 个源码文件。
 
 ## 2. 常用命令
 

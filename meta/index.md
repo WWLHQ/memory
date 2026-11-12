@@ -20,6 +20,7 @@
 - 当前已知边界台账（原 AGENTS §9，踩坑与限制）：[specs/已知边界台账.md](specs/已知边界台账.md)
 - 事故复盘（POSTMORTEM，§1~§6 仍为有效基线）：[specs/POSTMORTEM-2026-11-11-静默失效与双通路自发现方案.md](specs/POSTMORTEM-2026-11-11-静默失效与双通路自发现方案.md)
 - 融合决策（按层收敛，取代 POSTMORTEM §7.2/§8/§9）：[specs/DECISION-2026-11-12-方案对比与融合自发现架构.md](specs/DECISION-2026-11-12-方案对比与融合自发现架构.md)
+- 回显逻辑与格式统计（三档判档 / 四段模板 / 档位矩阵）：[specs/recall-echo-contract.md](specs/recall-echo-contract.md)
 - 项目需求规格（导入，待结构化）：
   - [需求规格书.md](specs/需求规格书.md)
   - [需求规格书_Agent接入页字段级交互规格.md](specs/需求规格书_Agent接入页字段级交互规格.md)
