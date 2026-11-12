@@ -13,6 +13,7 @@ import { PwdPolicyCard } from './PwdPolicyCard.tsx';
 import { KeyTable, MemberTable, RoleMatrixCard } from './SecurityCards.tsx';
 import { AdminAccountCard } from './AccountAdminCard.tsx';
 import { L0AdminCard } from './L0AdminCard.tsx';
+import { MyWriteWrapCard } from './MyWriteWrapCard.tsx';
 import { LegacyLedgerCard } from './LegacyLedgerCard.tsx';
 import { LedgerResetCard } from './LedgerResetCard.tsx';
 import { RulesRejudgeCard } from './RulesRejudgeCard.tsx';
@@ -418,6 +419,7 @@ export function SecurityPage() {
             <span className="p0-tag">真实后端 /api/accounts · /api/keys</span>
           </div>
           <RoleMatrixCard />
+          <MyWriteWrapCard />
           <MemberTable accounts={accounts} error={accErr} />
           <KeyTable
             keys={rawKeys.map(toKeyView)}
