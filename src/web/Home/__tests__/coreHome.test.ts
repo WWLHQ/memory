@@ -309,4 +309,36 @@ describe('getHomeFeed · 批次41-W L0 写密钥未解锁异常', () => {
     const feed = await getHomeFeed(fakeStorage({ audits }));
     expect(feed.raw.anomalies ?? []).toHaveLength(0);
   });
+
+  // 2026-11-13 用户实测回归：解锁后首页仍挂着「写入被挡 → 去安全页解锁」
+  const unlock = (ts: number, member = true): AuditRecord => ({
+    request_id: `req_unlock_${ts}`, action: 'security_change', ts,
+    detail: { op: member ? 'l0_write_unlock_member' : 'l0_write_unlock', user_id: 'u1' },
+  });
+
+  it('解锁发生在被挡之后 → 那条历史不再报警（刚解完锁回首页不该继续催解锁）', async () => {
+    const now = Date.now();
+    const audits: AuditRecord[] = [
+      lock('req_l1', now - 120_000),
+      lock('req_l2', now - 100_000),
+      unlock(now - 60_000),
+    ];
+    const feed = await getHomeFeed(fakeStorage({ audits }));
+    expect(feed.raw.anomalies ?? []).toHaveLength(0);
+  });
+
+  it('解锁之后又被挡（重新锁上）→ 照常报警，只计解锁后的条数', async () => {
+    const now = Date.now();
+    const audits: AuditRecord[] = [
+      lock('req_before', now - 300_000),
+      unlock(now - 200_000),
+      lock('req_after', now - 50_000),
+    ];
+    const feed = await getHomeFeed(fakeStorage({ audits }));
+    const list = feed.raw.anomalies ?? [];
+    expect(list).toHaveLength(1);
+    expect(list[0].title).toContain('L0 写密钥未解锁');
+    expect(list[0].detail).toContain('1 条没入库');
+    expect(list[0].request_id).toBe('req_after');
+  });
 });

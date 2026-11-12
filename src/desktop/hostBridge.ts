@@ -52,6 +52,8 @@ export type HostMethod =
   | 'l0:addMemberWriteWrap' | 'l0:removeMemberWriteWrap'
   /** §4.4.4-B：查「本账号」有没有写解锁口令（需登录；只回布尔） */
   | 'l0:myWriteWrap'
+  /** 写密钥是否在内存（只回布尔，不需要登录） */
+  | 'l0:writeUnlocked'
   | 'l0:seal' | 'l0:decrypt' | 'l0:sessionInfo' | 'l0:migrate' | 'l0:blobs'
   /** S5 / D6：MCP 写入兜底队列只读摘要（不含正文与密钥材料） */
   | 'l0:pendingWrites'
@@ -125,6 +127,7 @@ const CHANNEL_TO_NATIVE: Record<HostMethod, [string, string]> = {
   'l0:addMemberWriteWrap': ['l0', 'addMemberWriteWrap'],
   'l0:removeMemberWriteWrap': ['l0', 'removeMemberWriteWrap'],
   'l0:myWriteWrap': ['l0', 'myWriteWrap'],
+  'l0:writeUnlocked': ['l0', 'writeUnlocked'],
   'l0:seal': ['l0', 'seal'],
   'l0:decrypt': ['l0', 'decrypt'],
   'l0:sessionInfo': ['l0', 'sessionInfo'],
@@ -268,18 +271,6 @@ export function handleBridgeMessage(e: MessageEvent): void {
     .catch((err) => source.postMessage({ [RES]: { id: req.id, ok: false, error: String((err as Error)?.message ?? err) } }, e.origin));
 }
 
-/** 父窗口是否具备原生 preload 能力（bridge 场景下检查父窗口） */
-function parentHasNativeApi(): boolean {
-  try {
-    const p = window.parent;
-    if (!p || p === window) return false;
-    return (p as unknown as { __ELECTRON__?: boolean }).__ELECTRON__ === true
-      && !!(p as unknown as { api?: unknown }).api;
-  } catch {
-    return false; // 跨源访问抛错 → 无能力
-  }
-}
-
 /** 是否运行在同源 iframe 中（有可代理的父窗口） */
 export function isEmbedded(): boolean {
   try {
@@ -371,11 +362,22 @@ export async function hostCall<T>(method: HostMethod, args: unknown[] = []): Pro
   }
 }
 
-/** 能力探测（供 UI 诚实标注：native / bridge / none）
- *  bridge 仅在父窗口确实具备原生 preload 时返回，否则降级 none。 */
+/**
+ * 能力探测（供 UI 诚实标注 + 内核端口注入 + LLM/租户/同步门禁：native / bridge / none）。
+ *
+ * bridge 判定与 hostCall 共用 isEmbedded() 口径：只要当前文档运行在同源 iframe 里
+ * （window.parent !== window），桥就可用 —— 因为父窗口（顶层壳）的 handleBridgeMessage
+ * 会用【父窗口自身】的 hasNativeApi() 兜底，callViaParent 还有超时降级，子 iframe
+ * 根本不需要（也不该）去读 window.parent.__ELECTRON__ / window.parent.api。
+ *
+ * 旧实现额外要求 parentHasNativeApi()（读 window.parent.__ELECTRON__）。但 Electron 下
+ * contextBridge.exposeInMainWorld 暴露的绑定在子 iframe 的主世界未必可读，于是真实首页
+ * iframe 被误判为 none → 内核不注入 l0 端口 → writeUnlocked() 恒返 false →
+ * 「安全页已解锁、首页仍报未解锁」的根因。现改为与 hostCall 一致，彻底消除该口径分裂。
+ */
 export function hostCapability(): 'native' | 'bridge' | 'none' {
   if (hasNativeApi()) return 'native';
-  if (isEmbedded() && parentHasNativeApi()) return 'bridge';
+  if (isEmbedded()) return 'bridge';
   return 'none';
 }
 

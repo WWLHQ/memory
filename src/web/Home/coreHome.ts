@@ -86,6 +86,27 @@ function asRecord(detail: unknown): Record<string, unknown> {
  */
 export const L0_LOCK_ANOMALY_WINDOW_MS = 30 * 60_000;
 
+/**
+ * 审计里**最后一次「写密钥解锁」**的时间戳（0 = 账本里还没有解锁记录）。
+ *
+ * 为什么需要它：被挡写入是历史事实，解锁动作已经把它们处理掉了（内核解锁后会重放 pending、
+ * 采集器下一轮会自动重采），所以「解锁之前的被挡」不该继续在首页报警。只按 30 分钟窗口过滤时，
+ * 用户刚在安全页/写入页解锁完回到首页，仍会看到「L0 写密钥未解锁：写入被挡 → 去安全页解锁」，
+ * 误以为没解开（2026-11-13 用户实测上报的就是这个）。真机 actions.log 可证：解锁后首页读到的
+ * `l0:writeUnlocked` 已是 true，红条不显示，剩下的就是这条按时间窗聚合的旧异常。
+ */
+function lastWriteUnlockTs(audits: AuditRecord[]): number {
+  let last = 0;
+  for (const a of audits) {
+    if (a.action !== 'security_change') continue;
+    const op = String(asRecord(a.detail).op ?? '');
+    if (op === 'l0_write_unlock' || op === 'l0_write_unlock_member') {
+      if (typeof a.ts === 'number' && a.ts > last) last = a.ts;
+    }
+  }
+  return last;
+}
+
 /** 异常速览（真实）：从内核审计派生——反代理降级 / 召回证据稀薄 / 召回零命中 / L0 写密钥锁定 */
 function deriveKernelAnomalies(
   audits: AuditRecord[],
@@ -97,6 +118,8 @@ function deriveKernelAnomalies(
   // 逐条推等于把真信号埋进刷屏里，所以聚合成一条 error（只报计数与最近一次可溯源 id，正文不进首页）。
   let l0LockedCount = 0;
   let l0LockedLastId = '';
+  // 解锁之前的被挡已被解锁动作消化：只统计「最后一次解锁之后」发生的被挡（仍然锁着才算数）
+  const unlockedAt = lastWriteUnlockTs(audits);
   for (const a of audits) {
     const d = asRecord(a.detail);
     if (a.action === 'llm_fallback') {
@@ -112,7 +135,7 @@ function deriveKernelAnomalies(
       } else if (Number(d.hits ?? -1) === 0) {
         out.push({ level: 'warn', title: '召回零命中', detail: `query=${String(d.query ?? '?')}`, request_id: a.request_id });
       }
-    } else if (a.action === 'write' && a.ts >= now - windowMs && isL0LockedText(String(d.error ?? ''))) {
+    } else if (a.action === 'write' && a.ts >= now - windowMs && a.ts > unlockedAt && isL0LockedText(String(d.error ?? ''))) {
       l0LockedCount++;
       l0LockedLastId = a.request_id;
     }

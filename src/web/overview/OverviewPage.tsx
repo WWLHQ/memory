@@ -67,6 +67,8 @@ export interface HomeDerived {
   l0WriteLocked: boolean;
   /** 写锁状态读不到（浏览器模式/IPC 失败）：不猜已解锁，也不误报未解锁 */
   l0WriteUnknown: boolean;
+  /** 写锁已确认解锁（内核真值）：历史被挡类提示不再挂在首页（解锁后不该继续催解锁） */
+  l0WriteResolved: boolean;
   l0WriteDetail: string | null;
 }
 
@@ -88,6 +90,8 @@ export function deriveHomeView(s: OverviewSnapshot): HomeDerived {
     // 锁状态是唯一真源：available+unlocked=false → 常驻提示；读不到 → 绝不冒充「已解锁」
     l0WriteLocked: s.l0Write?.available === true && s.l0Write.unlocked === false,
     l0WriteUnknown: !s.l0Write || s.l0Write.available !== true,
+    // 已解锁 → 历史被挡异常（近 30 分钟聚合）不再当待办提示：解锁动作已经处理，内核会重放/重采
+    l0WriteResolved: s.l0Write?.available === true && s.l0Write.unlocked === true,
     l0WriteDetail: s.l0Write?.detail ?? null,
   };
 }
@@ -392,7 +396,15 @@ export function OverviewPage() {
       if (e.key === null || /theme|session|realpage/.test(e.key) || e.key.startsWith('memdesk')) void reload();
     };
     window.addEventListener('storage', onStore);
-    return () => window.removeEventListener('storage', onStore);
+    // 切页/切窗口期间可能错过 storage 事件（后台 iframe 不保证收到）→ 回到前台补读一次
+    const onWake = () => { if (document.visibilityState !== 'hidden') void reload(); };
+    window.addEventListener('focus', onWake);
+    document.addEventListener('visibilitychange', onWake);
+    return () => {
+      window.removeEventListener('storage', onStore);
+      window.removeEventListener('focus', onWake);
+      document.removeEventListener('visibilitychange', onWake);
+    };
   }, [reload]);
 
   const view = useMemo(() => (snap ? deriveHomeView(snap) : null), [snap]);
@@ -451,7 +463,9 @@ export function OverviewPage() {
                   <button className="af-link" type="button" onClick={() => void reload()}>重读 →</button>
                 </div>
               )}
-              {!view.l0WriteLocked && view.l0Alert && (
+              {/* 历史被挡（近 30 分钟聚合）只在【当前仍锁】或【锁状态读不到】时给提示；
+                  已确认解锁则不再打扰——解锁动作已把被挡写入交给内核重放/重采 */}
+              {!view.l0WriteLocked && !view.l0WriteResolved && view.l0Alert && (
                 <div className="af-alert">
                   <span className="tag">L0</span>{view.l0Alert}
                   <button className="af-link" type="button" onClick={() => requestShellView('security')}>去安全页解锁 →</button>

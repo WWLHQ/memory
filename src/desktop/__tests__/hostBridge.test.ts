@@ -31,14 +31,15 @@ describe('hostCapability：bridge 仅在父窗口具备原生 preload 时返回'
     vi.restoreAllMocks();
   });
 
-  test('iframe 但父窗口无 preload → none（不误标「宿主真扫可用」）', async () => {
-    // jsdom 中 window.parent === window，isEmbedded() 返回 false
-    // 模拟 iframe：window.parent 指向无 preload 的窗口
+  test('iframe（父窗口读不到 __ELECTRON__）→ bridge：与 hostCall 一致，桥由父窗口自身兜底', async () => {
+    // 复现真实 Electron 怪象：子 iframe 主世界里 window.parent.__ELECTRON__ 未必可读
+    // （contextBridge 暴露的绑定跨 iframe 主世界不一定可见）。旧实现靠 parentHasNativeApi()
+    // 读它，于是首页 iframe 被误判 none → 内核不注入 l0 端口 → writeUnlocked 恒返 false。
+    // 修复后 hostCapability 与 hostCall 共用 isEmbedded() 口径：只要嵌在同源父窗口里就判 bridge。
     const fakeParent = {} as unknown as Window;
     Object.defineProperty(window, 'parent', { value: fakeParent, configurable: true, writable: true });
     const { hostCapability } = await import('../hostBridge.ts');
-    // 父窗口无 __ELECTRON__ / api → 降级 none
-    expect(hostCapability()).toBe('none');
+    expect(hostCapability()).toBe('bridge');
     Object.defineProperty(window, 'parent', { value: window, configurable: true, writable: true });
   });
 
@@ -258,14 +259,16 @@ describe('InMemoryStorage：iframe 仅在父窗口有原生 preload 时走宿主
     vi.resetModules();
   });
 
-  test('纯浏览器 iframe（父窗口无 preload）→ 进程内内存账本，不挂桥', async () => {
+  test('iframe（嵌在同源父窗口）→ 走宿主桥（与 hostCall 一致，非进程内内存账本）', async () => {
+    // 修复后 hostCapability 与 hostCall 共用 isEmbedded()：只要嵌在同源父窗口里就判 bridge，
+    // 于是 storage 走宿主桥（HostBridgeStorage）而非进程内内存账本——真实首页 iframe 正是如此，
+    // 经桥读主进程里的真实账本。旧实现靠 parentHasNativeApi() 读 window.parent.__ELECTRON__，
+    // 子 iframe 主世界读不到会被误判 none → 错误地退回内存账本。
     Object.defineProperty(window, 'parent', { value: {} as Window, configurable: true, writable: true });
     vi.resetModules();
     const { InMemoryStorage } = await import('../../core/memagent/storage.ts');
-    const storage = new InMemoryStorage();
-    expect(storage).toBeInstanceOf(InMemoryStorage);
-    await storage.putMemory({ mem_id: 'm1' } as never);
-    await expect(storage.listMemories({})).resolves.toHaveLength(1);
+    // 嵌在同源父窗口 → 走宿主桥实现（非内存实现）
+    expect(new InMemoryStorage()).not.toBeInstanceOf(InMemoryStorage);
   });
 
   test('父窗口有 preload → 走宿主桥（非内存实现）', async () => {

@@ -90,6 +90,17 @@ describe('deriveHomeView（批次57-B 首页派生）', () => {
     expect(deriveHomeView(snap()).l0WriteUnknown).toBe(true);
   });
 
+  it('写锁确认解锁 → l0WriteResolved 为真，历史「写入被挡」不再当待办提示（2026-11-13 实测回归）', () => {
+    const alert = { title: 'L0 写密钥未解锁：写入被挡', detail: '近 30 分钟 2 条没入库', level: 'error' as const };
+    const raw = { gains: [], activeMemories: [], todos: [], anomalies: [alert] };
+    const unlocked = deriveHomeView(snap({ raw, l0Write: { available: true, unlocked: true, detail: null } }));
+    expect(unlocked.l0WriteResolved).toBe(true);
+    expect(unlocked.l0WriteLocked).toBe(false);
+    // 仍锁着 / 读不到 → 不能冒充已解锁
+    expect(deriveHomeView(snap({ raw, l0Write: { available: true, unlocked: false, detail: null } })).l0WriteResolved).toBe(false);
+    expect(deriveHomeView(snap({ raw })).l0WriteResolved).toBe(false);
+  });
+
   it('效果四卡与图谱原样透传真实账本聚合（不重算、不伪造）', () => {
     const s = snap();
     const v = deriveHomeView(s);
