@@ -5,8 +5,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { L0GrantView, L0RequestView, L0VaultStatus } from '../../core/memagent/types.ts';
 import {
-  coreL0ChangeAdminPassword, coreL0Deny, coreL0Grant, coreL0ListGrants, coreL0ListRequests,
-  coreL0LockWrite, coreL0Revoke, coreL0SetupAdminPassword, coreL0Status, coreL0UnlockWrite,
+  coreL0AddMemberWriteWrap, coreL0ChangeAdminPassword, coreL0Deny, coreL0Grant, coreL0ListGrants,
+  coreL0ListRequests, coreL0LockWrite, coreL0RemoveMemberWriteWrap, coreL0Revoke,
+  coreL0SetupAdminPassword, coreL0Status, coreL0UnlockWrite,
 } from './coreSecurity.ts';
 
 const MIN_LEN = 8;
@@ -40,6 +41,8 @@ export function L0AdminCard({ enabled }: { enabled: boolean }) {
   const [scope, setScope] = useState('');
   const [grantPw, setGrantPw] = useState('');
   const [issued, setIssued] = useState<IssuedGrant | null>(null);
+  const [memberId, setMemberId] = useState('');
+  const [memberPw, setMemberPw] = useState('');
 
   const refresh = useCallback(async () => {
     try {
@@ -78,7 +81,8 @@ export function L0AdminCard({ enabled }: { enabled: boolean }) {
       <div className="card" data-testid="l0-admin-card">
         <b>🔐 L0 密钥环（§4.4）</b>
         <div className="note" data-testid="l0-admin-required">
-          需管理员权限：管理密码、写密钥与查阅授权仅管理员可操作（旧数据迁移见下方独立卡）。
+          下列动作仅管理员可操作：管理密码、写密钥解锁/锁定、发放/撤销成员写密钥、查阅授权、旧数据迁移（后者见下方独立卡）。
+          你本账号有没有拿到写解锁口令、以及在那里输入，见「账号与密钥」页签的「本账号写密钥」卡。
         </div>
       </div>
     );
@@ -166,6 +170,27 @@ export function L0AdminCard({ enabled }: { enabled: boolean }) {
     });
   };
 
+  const doIssueMemberWrap = () => {
+    const id = memberId.trim();
+    if (!id) { setErr('请输入成员账号（user_id）'); return; }
+    if (memberPw.length < MIN_LEN) { setErr(`写解锁口令至少 ${MIN_LEN} 位（§4.4.4-B）`); return; }
+    void run('发放成员写密钥', async () => {
+      await coreL0AddMemberWriteWrap(id, memberPw);
+      setMemberPw('');
+      setMsg(`已为 ${id} 发放写解锁口令：成员登录后用该口令自解锁写密钥（与管理密码互不替代）`);
+    });
+  };
+
+  /** 撤销：列表按行传 id，表单按输入框值；两者共用同一路径 */
+  const doRevokeMemberWrap = (idArg?: string) => {
+    const id = (idArg ?? memberId).trim();
+    if (!id) { setErr('请输入要撤销的成员账号（user_id）'); return; }
+    void run('撤销成员写密钥', async () => {
+      await coreL0RemoveMemberWriteWrap(id);
+      setMsg(`已撤销 ${id} 的写解锁口令：该成员此后无法自解锁写密钥`);
+    });
+  };
+
   const pending = requests.filter((r) => r.status === 'pending');
 
   return (
@@ -186,6 +211,7 @@ export function L0AdminCard({ enabled }: { enabled: boolean }) {
         </span>
         <span className="status stale" data-testid="l0-status-sessions">活跃查阅会话 {status?.active_sessions ?? 0}</span>
         <span className="status stale" data-testid="l0-status-grants">有效授权 {status?.active_grants ?? 0}</span>
+        <span className="status stale" data-testid="l0-status-member-wraps">成员写密钥 {status?.member_write_wraps ?? 0}</span>
       </div>
 
       {msg && <div className="note" data-testid="l0-msg">{msg}</div>}
@@ -236,6 +262,48 @@ export function L0AdminCard({ enabled }: { enabled: boolean }) {
         )}
       </div>
 
+      <div className="section-title">成员写密钥（§4.4.4-B：管理员发放 · 成员自解锁）</div>
+      <div className="note" data-testid="l0-member-wrap-note">
+        给成员发一把写解锁口令（≥{MIN_LEN} 位）：成员登录后用该口令就地解锁写密钥，与管理密码互不替代。
+        发放前请先解锁本账号写密钥（上方）；撤销后该成员将无法自解锁写密钥。未发放则不显示口令框（成员只能等管理员解锁）。
+      </div>
+      <div className="row" data-testid="l0-member-wrap-form">
+        <input type="text" data-testid="l0-member-id" value={memberId} placeholder="成员账号 user_id"
+          style={{ ...inputStyle, width: 170 }} onChange={(e) => setMemberId(e.target.value)} />
+        <input type="password" data-testid="l0-member-pw" value={memberPw} placeholder="写解锁口令"
+          style={{ ...inputStyle, width: 170 }} onChange={(e) => setMemberPw(e.target.value)} />
+        <button type="button" className="btn primary" data-testid="l0-member-issue" disabled={busy} onClick={doIssueMemberWrap}>
+          发放
+        </button>
+        <button type="button" className="btn danger" data-testid="l0-member-revoke" disabled={busy} onClick={() => doRevokeMemberWrap()}>
+          撤销
+        </button>
+      </div>
+
+      <div className="section-title">已发放写密钥（只能写入 · 不能查阅）</div>
+      <table className="ltable" data-testid="l0-member-wrap-table">
+        <thead><tr><th>成员账号</th><th>状态</th><th>操作</th></tr></thead>
+        <tbody>
+          {(status?.member_wrap_ids ?? []).map((id) => (
+            <tr key={id} data-testid={`l0-member-wrap-${id}`}>
+              <td className="mid">{id}</td>
+              <td><span className="status active" data-testid={`l0-member-wrap-state-${id}`}>已发放</span></td>
+              <td>
+                <button type="button" className="btn danger" data-testid={`l0-member-wrap-revoke-${id}`}
+                  disabled={busy} onClick={() => doRevokeMemberWrap(id)}>撤销</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {(status?.member_wrap_ids ?? []).length === 0 && (
+        <div className="note" data-testid="l0-member-wrap-empty">尚未为任何成员发放写解锁口令</div>
+      )}
+      <div className="note" data-testid="l0-member-wrap-scope-note">
+        口径：这里发的是<b>写</b>钥匙（解写密钥 → 能加密写入），<b>不会</b>出现在下方「查阅授权列表」——
+        那一条是解密查阅的一次性授权密码，两套互不替代。成员发没发到，看本表；成员自己也能在「本账号写密钥」里自证。
+      </div>
+
       <div className="section-title">查阅申请（非管理员提交 → 管理员批准/拒绝）</div>
       <table className="ltable" data-testid="l0-req-table">
         <thead><tr><th>request_id</th><th>账号</th><th>范围</th><th>理由</th><th>时间</th><th>操作</th></tr></thead>
@@ -280,7 +348,7 @@ export function L0AdminCard({ enabled }: { enabled: boolean }) {
         </div>
       )}
 
-      <div className="section-title">授权列表（过期/撤销/一次性消费后 wrapped DEK 立即删除）</div>
+      <div className="section-title">查阅授权列表（解密查阅用；写解锁口令不在本表）</div>
       <table className="ltable" data-testid="l0-grant-table">
         <thead><tr><th>grant_id</th><th>账号</th><th>范围</th><th>状态</th><th>最近查阅</th><th>操作</th></tr></thead>
         <tbody>
@@ -303,7 +371,11 @@ export function L0AdminCard({ enabled }: { enabled: boolean }) {
           ))}
         </tbody>
       </table>
-      {grants.length === 0 && <div className="note" data-testid="l0-grant-empty">暂无授权记录</div>}
+      {grants.length === 0 && (
+        <div className="note" data-testid="l0-grant-empty">
+          暂无查阅授权记录（写解锁口令在上方「已发放写密钥」表里，不在此表）
+        </div>
+      )}
 
       <div className="note">
         红线：管理密码/授权密码/DEK 不进日志、审计与 URL；审计只记 grant_id · 账号 · 动作 · 结果（§4.4.7）。
