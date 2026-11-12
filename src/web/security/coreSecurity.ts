@@ -98,6 +98,27 @@ export async function coreL0UnlockWrite(password: string): Promise<void> {
   signalL0WriteLockChanged();
 }
 
+/** §4.4.4-B：成员用自己口令自解锁写密钥（member_id 由调用方传入当前会话账号） */
+export async function coreL0UnlockWriteForMember(memberId: string, password: string): Promise<void> {
+  await getKernel().l0UnlockWriteForMember({ password, member_id: memberId });
+  signalL0WriteLockChanged();
+}
+
+/** §4.4.4-B：管理员为成员发放写解锁口令（需先解锁本账号写密钥） */
+export async function coreL0AddMemberWriteWrap(memberId: string, passphrase: string): Promise<void> {
+  await getKernel().l0AddMemberWriteWrap({ member_id: memberId, passphrase });
+}
+
+/** §4.4.4-B：撤销某成员的写解锁口令 */
+export async function coreL0RemoveMemberWriteWrap(memberId: string): Promise<void> {
+  await getKernel().l0RemoveMemberWriteWrap({ member_id: memberId });
+}
+
+/** §4.4.4-B：本账号有没有写解锁口令 + 写密钥是否已解锁（只回两个布尔；不暴露他人与密钥材料） */
+export async function coreL0MyWriteWrap(): Promise<{ has_wrap: boolean; write_unlocked: boolean }> {
+  return getKernel().l0MyWriteWrap();
+}
+
 export async function coreL0LockWrite(): Promise<void> {
   await getKernel().l0LockWrite();
   signalL0WriteLockChanged();

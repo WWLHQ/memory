@@ -506,6 +506,11 @@ export interface L0VaultStatus {
   active_grants: number;
   /** 已发放写解锁口令的成员数（§4.4.4-B） */
   member_write_wraps: number;
+  /**
+   * 已发放写解锁口令的成员账号列表（§4.4.4-B，仅管理员可见，按字典序）。
+   * 只回 member_id —— 绝不回 salt/iv/ct 等包裹材料；页面靠它显示「发给了谁」并可逐个撤销。
+   */
+  member_wrap_ids: string[];
 }
 
 /** 旧数据迁移报告（§4.4.6；内容为计数，绝不携带任何明文） */
@@ -548,6 +553,11 @@ export interface L0AdminPort {
   addMemberWriteWrap(req: { member_id: string; passphrase: string; admin_user_id: string }): Promise<void>;
   /** §4.4.4-B：撤销某成员的写解锁口令 */
   removeMemberWriteWrap(req: { member_id: string; admin_user_id: string }): Promise<void>;
+  /**
+   * §4.4.4-B：查某成员是否已有写解锁口令 + 写密钥当前是否已解锁（只回两个布尔，不回任何包裹材料）。
+   * 成员端靠它分清「有没有钥匙」与「现在是否已开锁」；主进程/端口负责把 member_id 换成会话账号，不由页面自报。
+   */
+  myWriteWrap(member_id: string): Promise<{ has_wrap: boolean; write_unlocked: boolean }>;
   /** 旧数据迁移（§4.4.6；桌面端迁移前自动备份） */
   migrate(req: { admin_user_id: string; oldPassword?: string }): Promise<L0MigrationResult>;
 }
@@ -938,6 +948,15 @@ export interface MemAgent {
   l0ChangeAdminPassword(oldPassword: string, newPassword: string): Promise<void>;
   /** 旧数据迁移（§4.4.6；桌面端迁移前自动备份） */
   l0Migrate(oldPassword?: string): Promise<L0MigrationResult>;
+  // ---- §4.4.4-B：成员写解锁口令（admin_user_id 取自当前会话，不暴露给页面） ----
+  /** 管理员为成员发放写解锁口令（需先解锁本账号写密钥） */
+  l0AddMemberWriteWrap(req: { member_id: string; passphrase: string }): Promise<void>;
+  /** 撤销某成员的写解锁口令 */
+  l0RemoveMemberWriteWrap(req: { member_id: string }): Promise<void>;
+  /** 成员用自己口令自解锁写密钥（member_id 必须等于当前会话账号，越权由内核/主进程拒绝） */
+  l0UnlockWriteForMember(req: { password: string; member_id: string }): Promise<void>;
+  /** §4.4.4-B：本账号是否已有写解锁口令 + 写密钥当前是否已解锁（只回两个布尔；成员端自证「有没有授权 / 现在能不能写」用） */
+  l0MyWriteWrap(): Promise<{ has_wrap: boolean; write_unlocked: boolean }>;
   // ---- 批次44-D4：写入落盘兜底（L0 锁定期间不丢，解锁后自动重放） ----
   /** 锁定时暂存一条写入，返回 pending_id */
   enqueuePending(req: MemReq & WriteKnobs): Promise<string>;

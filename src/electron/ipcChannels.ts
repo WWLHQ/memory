@@ -54,6 +54,8 @@ export const IPC = {
   /** §4.4.4-B：管理员为成员发放 / 撤销写解锁口令（需管理员 + 先解锁写密钥） */
   l0AddMemberWriteWrap: 'l0:addMemberWriteWrap',
   l0RemoveMemberWriteWrap: 'l0:removeMemberWriteWrap',
+  /** §4.4.4-B：查「本账号」是否已有写解锁口令（需登录；只回布尔，member_id 取会话账号，不由页面自报） */
+  l0MyWriteWrap: 'l0:myWriteWrap',
   l0Seal: 'l0:seal',
   l0Decrypt: 'l0:decrypt',
   l0SessionInfo: 'l0:sessionInfo',

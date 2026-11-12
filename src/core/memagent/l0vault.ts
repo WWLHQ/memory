@@ -555,6 +555,17 @@ export class L0Vault implements L0AdminPort {
     });
   }
 
+  /**
+   * §4.4.4-B：查某成员是否已有写解锁口令 + 写密钥当前是否已解锁（只回两个布尔）。
+   * 只读 keyring / 只看内存里有没有 DEK，不解锁、不校验口令、不返回任何包裹材料 ——
+   * 「有没有钥匙」与「现在是否已开锁」是两件事，成员端必须能分开看。
+   */
+  async myWriteWrap(member_id: string): Promise<{ has_wrap: boolean; write_unlocked: boolean }> {
+    if (!member_id) throw new MemAgentError('E_AUTH_L0', 'member_id 必填（§4.4.4）');
+    const k = await this.load();
+    return { has_wrap: Boolean(k.member_wraps?.[member_id]), write_unlocked: this.writeDek !== null };
+  }
+
   /** 手动锁定写密钥（查阅会话不受影响；两者互不替代，§4.4.4） */
   async lockWrite(req: { admin_user_id: string }): Promise<void> {
     if (!this.writeDek) return;
@@ -856,6 +867,8 @@ export class L0Vault implements L0AdminPort {
       active_sessions: this.sessions.size,
       active_grants: k.grants.filter((g) => g.status === 'active').length,
       member_write_wraps: Object.keys(k.member_wraps ?? {}).length,
+      // 只回 member_id（排序稳定，页面可直接渲染「发给了谁」）；包裹材料永不外泄
+      member_wrap_ids: Object.keys(k.member_wraps ?? {}).sort(),
     };
   }
 

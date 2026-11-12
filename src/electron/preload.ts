@@ -151,6 +151,8 @@ const l0 = {
   /** §4.4.4-B：撤销某成员的写解锁口令 */
   removeMemberWriteWrap: (memberId: string, sessionId?: string | null) =>
     ipcRenderer.invoke(IPC.l0RemoveMemberWriteWrap, memberId, sessionId),
+  /** §4.4.4-B：查「本账号」有没有写解锁口令（需登录；只回布尔） */
+  myWriteWrap: (sessionId?: string | null) => ipcRenderer.invoke(IPC.l0MyWriteWrap, sessionId),
   seal: (plain: string, sessionId?: string | null) =>
     ipcRenderer.invoke(IPC.l0Seal, plain, sessionId) as Promise<{ ok: boolean; sealed?: string; code?: string; error?: string }>,
   decrypt: (req: unknown, sessionId?: string | null) => ipcRenderer.invoke(IPC.l0Decrypt, req, sessionId),

@@ -39,4 +39,31 @@ describe('§4.4.4-B HostL0Admin 写解锁 / 成员写密钥端口透传', () => 
     await admin.removeMemberWriteWrap({ member_id: 'u-member', admin_user_id: 'admin' });
     expect(hostCall).toHaveBeenCalledWith('l0:removeMemberWriteWrap', ['u-member', 'sid_member']);
   });
+
+  it('status：member_wrap_ids 原样透出（页面靠它显示「发给了谁」），缺字段兜底空数组', async () => {
+    vi.mocked(hostCall).mockResolvedValue({
+      ok: true, has_admin_wrap: true, write_unlocked: true, active_sessions: 0, active_grants: 0,
+      member_write_wraps: 2, member_wrap_ids: ['13838528400', 'mem_2'],
+    });
+    const st = await admin.status();
+    expect(st.member_wrap_ids).toEqual(['13838528400', 'mem_2']);
+    expect(st.member_write_wraps).toBe(2);
+
+    // 老版本主进程没有该字段 → 空数组（页面出空态，不崩）
+    vi.mocked(hostCall).mockResolvedValue({
+      ok: true, has_admin_wrap: true, write_unlocked: true, active_sessions: 0, active_grants: 0, member_write_wraps: 1,
+    });
+    expect((await admin.status()).member_wrap_ids).toEqual([]);
+  });
+
+  it('myWriteWrap：只带 sessionId 走 l0:myWriteWrap，回「有没有钥匙 + 是否已解锁」两个布尔', async () => {
+    vi.mocked(hostCall).mockResolvedValue({ ok: true, has_wrap: true, write_unlocked: false, member_id: 'u-member' });
+    const r = await admin.myWriteWrap('u-member');
+    expect(r).toEqual({ has_wrap: true, write_unlocked: false });
+    // 主进程按会话取账号 → 页面不得把自己的 member_id 传上去（越权面为零）
+    expect(hostCall).toHaveBeenCalledWith('l0:myWriteWrap', ['sid_member']);
+    // 老主进程缺 write_unlocked → 保守按未解锁（页面会出输入框，不误报可写）
+    vi.mocked(hostCall).mockResolvedValue({ ok: true, has_wrap: true });
+    expect(await admin.myWriteWrap('u-member')).toEqual({ has_wrap: true, write_unlocked: false });
+  });
 });

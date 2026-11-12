@@ -50,6 +50,8 @@ export type HostMethod =
   | 'l0:listRequests' | 'l0:listGrants' | 'l0:grant' | 'l0:deny' | 'l0:revoke'
   | 'l0:unlock' | 'l0:heartbeat' | 'l0:lock' | 'l0:writeUnlock' | 'l0:writeLock'
   | 'l0:addMemberWriteWrap' | 'l0:removeMemberWriteWrap'
+  /** §4.4.4-B：查「本账号」有没有写解锁口令（需登录；只回布尔） */
+  | 'l0:myWriteWrap'
   | 'l0:seal' | 'l0:decrypt' | 'l0:sessionInfo' | 'l0:migrate' | 'l0:blobs'
   /** S5 / D6：MCP 写入兜底队列只读摘要（不含正文与密钥材料） */
   | 'l0:pendingWrites'
@@ -122,6 +124,7 @@ const CHANNEL_TO_NATIVE: Record<HostMethod, [string, string]> = {
   'l0:writeLock': ['l0', 'writeLock'],
   'l0:addMemberWriteWrap': ['l0', 'addMemberWriteWrap'],
   'l0:removeMemberWriteWrap': ['l0', 'removeMemberWriteWrap'],
+  'l0:myWriteWrap': ['l0', 'myWriteWrap'],
   'l0:seal': ['l0', 'seal'],
   'l0:decrypt': ['l0', 'decrypt'],
   'l0:sessionInfo': ['l0', 'sessionInfo'],

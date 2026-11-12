@@ -1,7 +1,11 @@
 // L0Vault 安全路径矩阵（§4.4）：管理密码/授权/一次性消费/5min 空闲/5 次锁定/重启锁屏/
 // 写密钥分离/scope/全有或全无/旧数据迁移/审计零秘密。全部用真 L0Vault + 可注入时钟。
 import { describe, expect, it } from 'vitest';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { encryptL0, parseL0EnvelopeV2 } from '../crypto.ts';
+import { FileStorage } from '../fileStorage.ts';
 import { InMemoryStorage } from '../storage.ts';
 import type { Memory } from '../types.ts';
 import {
@@ -397,6 +401,44 @@ describe('旧数据迁移（§4.4.6）', () => {
     expect(res.backup_dir).toBeUndefined();
     expect((await storage.getMemory('m_orig'))!.content_orig).toBeUndefined();
   });
+
+  // T4 不变量守卫（文件级）：本机真数据实测（2026-11-12）memories.db.json 里 content_orig=0、
+  // memories.l0.json 全 v2 密文。此例把该不变量锁在「落盘文件」层面——遗留明文 content_orig
+  // 经 migrateLegacy 封存后，raw 账本文件里既无 content_orig 键、也无原文串；且幂等重跑不新增明文。
+  // 防回归：阻止有人把明文原文副本重新写回行/文件（那是把 L0 加密原地废掉）。
+  it('T4 不变量守卫：存量 content_orig 明文迁移后，落盘文件里再无该明文与 content_orig 键', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 't4-invariant-'));
+    try {
+      const dbPath = join(dir, 'memories.db.json');
+      const storage = new FileStorage(dbPath);
+      const SENTINEL = `T4-plaintext-sentinel-${Math.random().toString(36).slice(2)}`;
+      // 遗留形态：行上带明文 content_orig（拆库前旧数据）——此时落盘文件确含明文
+      await storage.putMemory(mem('m_legacy', { content_orig: SENTINEL, content: 'L1 摘要占位' }));
+      const before = await readFile(dbPath, 'utf8');
+      expect(before).toContain('"content_orig"');
+      expect(before).toContain(SENTINEL);
+
+      // 迁移（写密钥已在内存）：content_orig → v2 密文，并清空行上明文
+      const t = await createTestVault();
+      const rep = await t.vault.migrateLegacy(storage, { admin_user_id: TEST_ADMIN_ID });
+      expect(rep.migrated_orig).toBe(1);
+
+      // 不变量：落盘文件既无 content_orig 键、也无原文串；原文只以 v2 密文留在行上
+      const after = await readFile(dbPath, 'utf8');
+      expect(after).not.toContain('"content_orig"');
+      expect(after).not.toContain(SENTINEL);
+      const row = (await storage.getMemory('m_legacy'))!;
+      expect(row.content_orig).toBeUndefined();
+      expect(parseL0EnvelopeV2(row.content_l0_enc ?? '')).not.toBeNull();
+
+      // 幂等重跑：不新增明文
+      const again = await t.vault.migrateLegacy(storage, { admin_user_id: TEST_ADMIN_ID });
+      expect(again.migrated_orig).toBe(0);
+      expect(await readFile(dbPath, 'utf8')).not.toContain(SENTINEL);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('审计零秘密（红线）', () => {
@@ -472,6 +514,41 @@ describe('成员写解锁口令（§4.4.4-B）', () => {
     expect((await t.vault.status()).member_write_wraps).toBe(0);
     await expect(t.vault.unlockWrite({ password: MEM_PW, admin_user_id: TEST_ADMIN_ID, member_id: MEMBER }))
       .rejects.toMatchObject({ code: 'E_L0_NO_GRANT' });
+  });
+
+  it('status.member_wrap_ids：列出发给了谁（排序、只回账号、不含任何包裹材料），撤销即消失', async () => {
+    const t = await createTestVault();
+    expect((await t.vault.status()).member_wrap_ids).toEqual([]);
+
+    await t.vault.addMemberWriteWrap({ member_id: 'mem_b', passphrase: MEM_PW, admin_user_id: TEST_ADMIN_ID });
+    await t.vault.addMemberWriteWrap({ member_id: MEMBER, passphrase: MEM_PW, admin_user_id: TEST_ADMIN_ID });
+    const st = await t.vault.status();
+    // 字典序稳定 → 页面渲染顺序不抖；数量与列表长度一致
+    expect(st.member_wrap_ids).toEqual([MEMBER, 'mem_b'].sort());
+    expect(st.member_write_wraps).toBe(st.member_wrap_ids.length);
+    // 只回账号：salt/iv/ct 一个都不许出现在 status 里
+    const wrap = t.keyring.value?.member_wraps?.[MEMBER];
+    const serialized = JSON.stringify(st);
+    expect(serialized).not.toContain(wrap!.ct);
+    expect(serialized).not.toContain(wrap!.iv);
+    expect(serialized).not.toContain(wrap!.salt);
+
+    await t.vault.removeMemberWriteWrap({ member_id: MEMBER, admin_user_id: TEST_ADMIN_ID });
+    expect((await t.vault.status()).member_wrap_ids).toEqual(['mem_b']);
+  });
+
+  it('myWriteWrap：分开回「有没有钥匙」与「现在是否已解锁」，不校验口令、不返回包裹', async () => {
+    const t = await createTestVault();
+    // 未发放 + 写密钥在内存（setup 后即解锁）
+    expect(await t.vault.myWriteWrap(MEMBER)).toEqual({ has_wrap: false, write_unlocked: true });
+    await t.vault.addMemberWriteWrap({ member_id: MEMBER, passphrase: MEM_PW, admin_user_id: TEST_ADMIN_ID });
+    const r = await t.vault.myWriteWrap(MEMBER);
+    expect(r).toEqual({ has_wrap: true, write_unlocked: true });
+    expect(Object.keys(r)).toEqual(['has_wrap', 'write_unlocked']);
+    // 锁定写密钥 → 钥匙还在（has_wrap 仍 true），但「已解锁」变 false：两件事必须分开
+    await t.vault.lockWrite({ admin_user_id: TEST_ADMIN_ID });
+    expect(await t.vault.myWriteWrap(MEMBER)).toEqual({ has_wrap: true, write_unlocked: false });
+    await expect(t.vault.myWriteWrap('')).rejects.toMatchObject({ code: 'E_AUTH_L0' });
   });
 
   it('成员解锁装的是同一把全局 DEK：写锁后成员自解锁可继续 seal，且与管理员封存密文互通', async () => {

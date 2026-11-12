@@ -622,12 +622,28 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
   async function l0Migrate(oldPassword?: string): Promise<L0MigrationResult> {
     return l0Admin().migrate({ admin_user_id: account.user_id, oldPassword });
   }
+  // §4.4.4-B：成员写解锁口令 —— admin_user_id 一律取当前会话账号（管理员发放时即操作者；成员自解锁时即本人）
+  async function l0AddMemberWriteWrap(req: { member_id: string; passphrase: string }): Promise<void> {
+    return l0Admin().addMemberWriteWrap({ ...req, admin_user_id: account.user_id });
+  }
+  async function l0RemoveMemberWriteWrap(req: { member_id: string }): Promise<void> {
+    return l0Admin().removeMemberWriteWrap({ ...req, admin_user_id: account.user_id });
+  }
+  async function l0UnlockWriteForMember(req: { password: string; member_id: string }): Promise<void> {
+    // 成员自解锁：用本人账号同时作为 admin_user_id（仅用于审计归属），member_id 必须与账号一致
+    return l0Admin().unlockWrite({ password: req.password, admin_user_id: req.member_id, member_id: req.member_id });
+  }
+  /** §4.4.4-B：本账号有没有写解锁口令 + 写密钥是否已解锁 —— member_id 一律取当前会话账号，页面不得自报他人 */
+  async function l0MyWriteWrap(): Promise<{ has_wrap: boolean; write_unlocked: boolean }> {
+    return l0Admin().myWriteWrap(account.user_id);
+  }
 
   return {
     recall, write, gc, gcFull, getPrefs, discover, sync, browse, logs, unbind,
     l0RequestAccess, l0ListRequests, l0ListGrants, l0GrantAccess, l0DenyRequest, l0RevokeGrant,
     l0Unlock, l0Heartbeat, l0Lock, l0UnlockWrite, l0LockWrite, l0Status,
     l0SetupAdminPassword, l0ChangeAdminPassword, l0Migrate,
+    l0AddMemberWriteWrap, l0RemoveMemberWriteWrap, l0UnlockWriteForMember, l0MyWriteWrap,
     // 批次44-D4：写入落盘兜底（L0 锁定不丢 / 解锁自动重放）
     enqueuePending, flushPending, countPending, getWriteStatus,
     // 批次44-D5-2：MCP 治理工具正式入口（与 core* 同源，非新实现）

@@ -1400,6 +1400,16 @@ function registerL0Ipc(vault: L0Vault, collectorVector: JsVectorBackend, pending
       return { ok: true };
     } catch (e) { return l0Fail(e); }
   });
+  /** §4.4.4-B：查「本账号」有没有写解锁口令——需登录即可（成员也要看得见），member_id 只取会话账号 */
+  handleIpc(IPC.l0MyWriteWrap, async (_e, sessionId?: string) => {
+    const sid = typeof sessionId === 'string' ? sessionId.trim() : '';
+    const ctx = sid ? homeServerRef?.getSessionContext(sid) ?? null : null;
+    if (!ctx) return { ok: false, code: 'E_AUTH_SESSION', error: '需要登录后操作（会话已过期或未登录）' };
+    try {
+      const { has_wrap, write_unlocked } = await vault.myWriteWrap(ctx.user_id);
+      return { ok: true, has_wrap, write_unlocked, member_id: ctx.user_id };
+    } catch (e) { return l0Fail(e); }
+  });
   /** §4.4.6：迁移前自动备份（记忆库 + 密钥环）；备份失败 → 拒绝迁移，绝不无备份改写 */
   handleIpc(IPC.l0Migrate, async (_e, opts: { oldPassword?: string } | undefined, sessionId?: string) => {
     const gate = requireAdmin(sessionId, IPC.l0Migrate);

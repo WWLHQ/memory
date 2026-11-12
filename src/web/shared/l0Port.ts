@@ -161,6 +161,18 @@ export class HostL0Admin implements L0AdminPort {
     unwrapVoid(res, 'E_AUTH_L0');
   }
 
+  /**
+   * §4.4.4-B：本账号有没有写解锁口令。
+   * member_id 只作签名占位 —— 主进程一律用会话账号，页面无从自报他人（越权面为零）。
+   */
+  async myWriteWrap(_member_id: string): Promise<{ has_wrap: boolean; write_unlocked: boolean }> {
+    const res = await hostCall<IpcResult<{ has_wrap: boolean; write_unlocked?: boolean; member_id?: string }>>(
+      'l0:myWriteWrap', [currentSessionId()],
+    );
+    const r = unwrap(res, 'E_AUTH_L0');
+    return { has_wrap: r.has_wrap === true, write_unlocked: r.write_unlocked === true };
+  }
+
   async status(): Promise<L0VaultStatus> {
     const res = await hostCall<IpcResult<L0VaultStatus>>('l0:status', [currentSessionId()]);
     const r = unwrap(res, 'E_AUTH_L0');
@@ -170,6 +182,7 @@ export class HostL0Admin implements L0AdminPort {
       active_sessions: r.active_sessions,
       active_grants: r.active_grants,
       member_write_wraps: r.member_write_wraps ?? 0,
+      member_wrap_ids: Array.isArray(r.member_wrap_ids) ? r.member_wrap_ids : [],
     };
   }
 
