@@ -3,7 +3,7 @@
 > 由 `npm run code:index` 生成，请勿手改；改代码/文档后重跑即可。
 > 用法：先在本表定位文件与导出符号，再只读该文件的局部区间（省 token、少误改）。
 
-共 368 个源码文件、128 个文档。
+共 368 个源码文件、129 个文档。
 
 ## e2e
 
@@ -485,6 +485,7 @@
 | [specs/MANUAL-TEST-PHASE-E.md](specs/MANUAL-TEST-PHASE-E.md) | 129 | status: done |
 | [specs/MANUAL-TEST.md](specs/MANUAL-TEST.md) | 342 | status: done |
 | [specs/MCP运维与多Agent写入规范.md](specs/MCP运维与多Agent写入规范.md) | 201 | MCP 运维与多 Agent 写入规范 |
+| [specs/POSTMORTEM-2026-11-11-静默失效与双通路自发现方案.md](specs/POSTMORTEM-2026-11-11-静默失效与双通路自发现方案.md) | 358 | title: 静默失效事故复盘与双通路自发现方案 |
 | [specs/ROADMAP-批次42-未接线三件套-方案.md](specs/ROADMAP-批次42-未接线三件套-方案.md) | 52 | ROADMAP 批次42+ — 未接线三件套（云端同步 / 每日全量补齐 / 独立采集守护进程）立项方案 |
 | [specs/ROADMAP-批次45-租户归一与成员密钥域模型-方案.md](specs/ROADMAP-批次45-租户归一与成员密钥域模型-方案.md) | 44 | ROADMAP 批次45+ — 令牌与租户欠账立项（MCP 作用域收紧前置 = 账本租户归一）+ 成员/API 密钥域模型 |
 | [specs/ROADMAP-批次B类-远端PG与多机硬过滤-方案.md](specs/ROADMAP-批次B类-远端PG与多机硬过滤-方案.md) | 102 | 批次 B 类 · 远端 PG 中枢（B4）+ 多机硬过滤（B1）+ 真实精炼（B3）方案 |
@@ -986,6 +987,7 @@ specs/MANUAL-TEST-PHASE-D.md 0393a1f055b1
 specs/MANUAL-TEST-PHASE-E.md b4da1f2f1a2e
 specs/MANUAL-TEST.md 4d755324cafe
 specs/MCP运维与多Agent写入规范.md 752368c085eb
+specs/POSTMORTEM-2026-11-11-静默失效与双通路自发现方案.md 2513a47034f4
 specs/ROADMAP-批次42-未接线三件套-方案.md df1a6f9d6ed5
 specs/ROADMAP-批次45-租户归一与成员密钥域模型-方案.md 633abaaaad54
 specs/ROADMAP-批次B类-远端PG与多机硬过滤-方案.md 0c7857454a7d
