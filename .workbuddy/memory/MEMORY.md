@@ -58,9 +58,12 @@
 - **页面配色变量有两套，别混用**：`shared/theme.css` 只有深色 `--bg/--txt/--muted`；**记忆库页那套（`memoryManagement.css`）才是标准**：`--text/--muted/--faint/--panel/--field/--line/--line-2/--accent/--chip/--win`，浅色默认 + `html[data-theme="dark"]` 深色。**新页面一律引 `memoryManagement.css` 并用这套变量名**，否则会退化成浏览器默认深色（记忆助手整页曾因此整页发黑）。
 - **状态栏 L0 格要同时显示两把锁**：`查阅锁`（解密查阅会话，`active_sessions`）+ `写锁`（写密钥，`write_unlocked`），格式 `查阅2会话 · 写已解`；hover 说明写明「两把锁互不替代」。浏览器模式读不到时如实显示「不可用」，不冒充任一状态。
 
-## 项目纯净度约定（用户 2026-10-10 明确）
+## 项目纯净度约定（用户 2026-10-10 明确；2026-11-12 升级为仓库纪律 AGENTS.md §0.1）
 - **验收/验证完成后，验证用的临时文件必须删除**（如 test-results/、失败截图、临时 html/log、一次性脚本）。
 - **项目文件夹保持纯净**：与项目无关的文件及时清理，不留在仓库根目录。
+- **2026-11-12 用户重申并要求"提前约定"** → 已落为 `AGENTS.md §0.1 纯净度纪律`（与三道闸门并列），判定标准一句话：**下一个任务不会再用的就是临时物**。临时物含一次性探针脚本、散落根目录的 `*-report.md`、测试产物目录、构建残留（根 `main.cjs`、历史 `release/installer-*`）、日志草稿；交付物含被 script/CI 引用的 `tools/*.mjs`、`specs/` 文档、用例源码、当前 `release/installer`。
+- **本机删除护栏的真实边界（2026-11-12 实测）**：Bash 工具的 `rm -rf` 被 `genie-trash` 安全删除守护接管，多文件目录会 `trash operation aborted` → **fail-closed 拒删**；`CODEBUDDY_SAFE_DELETE_ENABLED=0` 对 Bash 工具的 `rm` **不生效**（只对 `npm run package` 这类走 Node `fs.rm` 的脚本有效，Node 层不被接管）。空目录/单文件（如空文件夹、单文件 `main.cjs`）可以正常删。→ 遇到多文件目录删不掉，**如实告知用户并给出命令**，不要换 PowerShell/Node 绕过（等同穿透安全检查）。
+- **遗留未清**：`release/installer-*` 19 个历史目录（563MB / 2463 文件）因上述护栏未能删除；`release/` 已 gitignored，不影响交付，待用户手动清。
 - Windows 下避免产生 `nul` 垃圾文件（Git Bash 里 `> NUL` 会生成名为 nul 的实体文件，应使用 `> /dev/null`）。
 - 验收收尾时默认执行一轮垃圾清扫并汇报清理清单，再走 commit。
 - **入口 html / 产物文件名一律全小写**：Windows 文件系统大小写不敏感会掩盖 URL 与文件名的大小写错位，Linux CI 上直接 404（P13 时期 inlineAttribution.html 教训，5726a35 修复）。新增页面入口时命名前先确认。
