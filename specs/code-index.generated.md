@@ -474,7 +474,7 @@
 | [specs/MANUAL-TEST-FIX-BATCH-40.md](specs/MANUAL-TEST-FIX-BATCH-40.md) | 175 | 批次40 手动测试报告 · 短料在 L0→L1 就拦下 + L2–L6 精炼逻辑重新梳理 |
 | [specs/MANUAL-TEST-FIX-BATCH-41.md](specs/MANUAL-TEST-FIX-BATCH-41.md) | 421 | 批次41 手动测试报告 · 审计搬出记忆库 + 队列卫生 + 退避/退出/备份校验 + 删除如实告知（收口与首次真机执行） |
 | [specs/MANUAL-TEST-FIX-BATCH-42.md](specs/MANUAL-TEST-FIX-BATCH-42.md) | 663 | 批次42 阶段2 手测报告 · 删演示注入（2026-11-04） |
-| [specs/MANUAL-TEST-FIX-BATCH-43.md](specs/MANUAL-TEST-FIX-BATCH-43.md) | 90 | title: 批次43 P0 止血：WorkBuddy 新版会话日志采集恢复 |
+| [specs/MANUAL-TEST-FIX-BATCH-43.md](specs/MANUAL-TEST-FIX-BATCH-43.md) | 114 | title: 批次43 P0 止血：WorkBuddy 新版会话日志采集恢复 |
 | [specs/MANUAL-TEST-FIX-BATCH-5.md](specs/MANUAL-TEST-FIX-BATCH-5.md) | 98 | status: done |
 | [specs/MANUAL-TEST-FIX-BATCH-6.md](specs/MANUAL-TEST-FIX-BATCH-6.md) | 138 | status: done |
 | [specs/MANUAL-TEST-FIX-BATCH-7.md](specs/MANUAL-TEST-FIX-BATCH-7.md) | 159 | status: done |
@@ -980,7 +980,7 @@ specs/MANUAL-TEST-FIX-BATCH-4.md 1faff2c94003
 specs/MANUAL-TEST-FIX-BATCH-40.md 1112c8867cc2
 specs/MANUAL-TEST-FIX-BATCH-41.md c6f643fb39e4
 specs/MANUAL-TEST-FIX-BATCH-42.md a18f57451cf9
-specs/MANUAL-TEST-FIX-BATCH-43.md 92c38d08f8a4
+specs/MANUAL-TEST-FIX-BATCH-43.md 2dedbd589804
 specs/MANUAL-TEST-FIX-BATCH-5.md 7620dff494e4
 specs/MANUAL-TEST-FIX-BATCH-6.md c54de515c35c
 specs/MANUAL-TEST-FIX-BATCH-7.md ae151c45c321

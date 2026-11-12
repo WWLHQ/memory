@@ -2,12 +2,13 @@
 title: 批次43 P0 止血：WorkBuddy 新版会话日志采集恢复
 date: 2026-11-12
 status: partial
-scope: 采集器新源/parser、打包产物、待执行的真机重启回填
+blocked_by: l0_write_lock
+scope: 采集器新源/parser、打包产物、真机重启与新包运行态核对
 ---
 
 # 批次43 · P0 止血手测报告
 
-> **诚实声明**：本报告区分「已自动验证」与「待人工执行」两部分。**本次未重启桌面端**，因此真实记忆库尚未新增行；§4 的真机回填验证列为待执行，不冒充已测。代码、单测、门禁、打包产物均已验证完成。
+> **诚实声明**：2026-11-12 11:00~11:03 已按用户约定执行「关闭旧桌面端 → 重新打包 → 启动新包 → 核对运行态」，**重启成功且新源在新包内生效**（首轮 `collected=50`）。但真实入库仍为 **0 条**：重启后 L0 写密钥默认锁定（`get_write_status` → `l0_unlocked:false`），32 条写入全部 `failed_l0_locked`，游标按设计不推进并进入退避。故本报告仍为 `partial`，§4 记录已执行部分与唯一剩余阻塞，不冒充回填完成。
 
 ## 1. 事故与修复目标
 
@@ -59,31 +60,54 @@ scope: 采集器新源/parser、打包产物、待执行的真机重启回填
 >
 > **EBUSY 残留**：`release/` 下 21 个历史 `installer-*` 目录与固定路径 `release/win-unpacked/` 因句柄占用未能删除/收口（该目录现只剩 resources 等文件、无主程序 exe，属残缺旧包）。`release/` 已 gitignored，不影响交付；待重启桌面端释放句柄后可清理，`CODEBUDDY_SAFE_DELETE_ENABLED=0` 只对 Node 层 `fs.rm` 生效，Bash `rm -rf` 多文件目录会被安全护栏 fail-closed 拒删。
 
-## 4. 待人工执行：真机重启与回填验证（**尚未执行**）
+### 3.3 按约定关闭旧端后重新打包（2026-11-12 11:01）
 
-当前桌面端仍在运行（8200~8204 均 LISTENING），跑的是**旧包**。新代码只有在重启到新包后才会进入采集链路。步骤：
+用户约定「程序有优化后要将旧桌面端关闭并打包新程序，然后重启新桌面端」，已落为 `AGENTS.md` §0.2。重启前确认旧端已完全退出（进程 0、8200~8204 无监听、`main.log` 停在 10:41），因此本次打包不再受桌面端句柄占用。
 
-1. 关闭当前桌面端（4 个 `MultiAgent Memory.exe` 进程；会短暂中断 8204 MCP，重启后恢复）。
-2. 从新包启动，**必须清掉环境注入坑**：
-   ```bash
-   env -u ELECTRON_RUN_AS_NODE -u NODE_OPTIONS \
-       -u https_proxy -u HTTPS_PROXY -u http_proxy -u HTTP_PROXY \
-       "./release/installer/win-unpacked/MultiAgent Memory.exe"
-   ```
-   判据：`main.log` 出现 `bootstrap:done`，`netstat` 8202/8203/8204 LISTENING。
-3. 等首轮采集（`runOnStart:false` + 首扫延迟，或 5 分钟周期）。核对：
-   - `main.log` / stdout：`[collector] period done: collected=N written=M`，且**不再**只有 `collector:role-gate {"collected":0,...}`；
-   - `collector-cursor.json` 出现 `workbuddy-projects:` 前缀的游标；
-   - `memories.db.json` 按创建日出现 11-12 的新行（`N > 0` 即硬指标达成）；
-   - 抽查新行内容：应是真实用户提问，**不得**含 `system-reminder` / `cb_summary` / 续接模板。
-4. 全历史回填不是一次性灌入：`main.ts:3102` `maxItemsPerRun=50`、`maxMessagesPerFile` 缺省 500、5 分钟一轮 → 1280 条约需 26 轮（≈2h）。首轮 > 0 即达成硬指标。
-5. 若要复核 11-06~11-10 的历史输入确实回流，可在采集若干轮后用记忆库页按 `source_agent=collector:workbuddy-projects` 检索。
+| 项 | 值 |
+|---|---|
+| 安装包 | `release/installer/MultiAgent Memory-0.1.0-setup.exe`，127,985,743 B，SHA256 `a8ecc131ecd0edc6d090677ce9530dfebb74381834451d8e2ad2b593a2710cb2` |
+| 免安装版 | `release/installer/win-unpacked/MultiAgent Memory.exe`，249,934,848 B（11:01:26） |
+| 包内主进程 | `release/installer/win-unpacked/resources/app.asar.unpacked/dist-electron/main.cjs`，865,440 B，SHA256 `c96ce48e32431dcdd…`，**与构建源逐字节一致**，含 `workbuddy-jsonl`×4 / `workbuddy-projects`×1 |
+| `package.json` 副作用 | `git diff -- package.json` 为空，无需还原 |
+| 未收口 | `release/win-unpacked/` 仍为 11-11 的残缺旧包（主进程代码不含 P0 标记、无主程序 exe），21 个历史 `installer-*` 目录仍 EBUSY；`release/` 已 gitignored，不阻塞交付 |
 
-**重启前的诚实状态**：真实记忆库仍是 11-11 的 2911 条 + 11-11 那条 `params_` 记录，事故窗口数据**仍在本机 jsonl 里、一条没丢**，但尚未入库。
+> 与 10:47 那次的差异：那次旧桌面端仍在运行，`release/win-unpacked` 被占用导致固定路径未收口；本次固定安装包路径 `release/installer/` 已确认刷新为新代码，故启动该路径下的完整新包。
+
+## 4. 真机重启与运行态核对（**已执行 2026-11-12 11:00~11:03**）
+
+| 步 | 实测结果 |
+|---|---|
+| 1 关旧端 | 已确认退出：`tasklist` 无 `MultiAgent Memory.exe`、`netstat` 8200~8205 无监听、`main.log` 末条 `02:41:22Z collector:role-gate`（北京 10:41） |
+| 2 重打包 | `CODEBUDDY_SAFE_DELETE_ENABLED=0 npm run package` 退出码 0，产物见 §3.3 |
+| 3 启新包 | `env -u ELECTRON_RUN_AS_NODE -u NODE_OPTIONS -u https_proxy -u HTTPS_PROXY -u http_proxy -u HTTP_PROXY ./MultiAgent Memory.exe`（后台托管） |
+| 4 启动判据 | 3 个进程（主 49764 / 35776 / 45448）；8200/8201/8202/8203/8204 **全部 LISTENING**；`bootstrap:done`；静态服务 62732；`bootstrap:mcp-http-listening {"port":8204}` |
+| 5 MCP 复验 | `initialize` 200、`get_write_status` → `{"l0_unlocked":false,"writeDek_present":false,"pending_count":0}`；`recall_memory` 正常返回 |
+
+**新源在新包内确实生效**（这是本轮最重要的正面证据，`main.log` 03:02:57~03:03:03 UTC）：
+
+```
+collector:first-scan:start
+collector:role-gate {"roleSkipped":277,"collected":50,"deduped":3203}
+collector:cursor-hold {"failed":32,"failed_l0_locked":32,"collected":50,"reason":"l0_locked"}
+collector:backoff {"fails":1,"delayMs":600000,"reason":"采集异常: collector:round-not-advanced(l0_locked)","capMs":7200000}
+collector:first-scan:done {"collected":0,...}   ← 失败轮返回空结果，不是「没扫到」
+```
+
+即：P0 代码已进入采集链路并扫到 50 条（`maxItemsPerRun` 上限）、去重 3203、角色过滤 277；**但 32 条写入全部因 L0 写密钥未解锁失败**，`canAdvance=false` → 游标不推进、`seenHashes` 回滚、进入 10 分钟退避。这是 `main.ts:3170-3237` 与 `memories.ts:219-221` 的预期诚实降级，不是新缺陷。
+
+**唯一剩余阻塞**：L0 写密钥是内存态，每次重启默认 `write_unlocked:false`。需在桌面端「安全页 → L0 管理」用管理密码重新解锁写密钥，然后点手动重跑（或等退避轮次）。解锁后复核：
+
+1. `main.log` 出现 `[collector] period done: collected=N written=M` 且 `M > 0`，不再有 `cursor-hold(l0_locked)`；
+2. `collector-cursor.json` 出现 `workbuddy-projects:` 前缀游标（当前仍为 288 源、前缀 `claude-code:11 / workbuddy:262 / deepseek-harness:15`，新前缀 0）；
+3. `memories.db.json` 的 `memories` 字典从重启前基线 **2915 条**增加；抽查新行是真实用户提问，不得含 `system-reminder` / `cb_summary` / 续接模板；
+4. 全历史 1280 条按 `maxItemsPerRun=50`、5 分钟一轮约需 26 轮（≈2h），首轮 `written>0` 即达成硬指标；若干轮后可按 `source_agent=collector:workbuddy-projects` 复核 11-06~11-10 回流。
+
+事故窗口数据仍完整留在本机 121 个 jsonl 里，一条没丢；解锁后回填不丢数据。
 
 ## 5. 已知边界
 
 1. T8（Trae `ModularData/ai-agent/database.db` / Qoder `main.sqlite` 的 SQLite reader）仍未修，11-06 后这两路会话正文仍不回流；DSH / Codex / Claude Code 这几日本机无新会话落盘。P0 只止血 WorkBuddy 主路径。
 2. 本次只做止血，**不做防复发**（T1 埋点/轮次回执、T2 契约注册表、T3 失败审计与 `/health`、T4 canary、T5 二选一 spool 均未动）。下次 Agent 再换落盘路径仍会静默失效。
 3. 新源不受 `detectedAgentNames` 白名单过滤（与三主源同级），桌面端 `main.ts:3093` 与 `tools/collect-daemon.mjs:66` 两处都会扫它；daemon 只暂存、写入由桌面端 drain 交接，既有去重（seenHashes + coreWrite dedup）兜住重复。
-4. 手测报告状态 `partial`：待 §4 执行完成后改为 `done` 并补记实测入库条数。
+4. 手测报告状态仍为 `partial`（`blocked_by: l0_write_lock`）：§4 的关闭旧端 / 重打包 / 启新包 / 运行态核对均已执行并留证，但真实入库为 0 条，卡在重启后 L0 写密钥未解锁（安全设计，需用户输管理密码）。解锁并出现 `written>0` 后改为 `done` 并补记实测入库条数。不把「扫到 50 条」冒充「已入库」。

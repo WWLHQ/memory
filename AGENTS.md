@@ -38,6 +38,20 @@ C = **至少一次代码级变异**（临时把关键判定改错 → 指定测�
 3. 删不掉的**如实说**并给出可执行命令，**不得换 shell 工具或写脚本穿透安全检查**（本机 `rm -rf` 被 genie-trash 守护 fail-closed 拦截即属此类；`CODEBUDDY_SAFE_DELETE_ENABLED=0` 只对走 Node `fs.rm` 的打包脚本有效，对 Bash 的 `rm` 无效）。
 4. **报告归位**：一次性修复报告写进 `specs/reports/`；外部程序误写的垃圾（如显卡驱动日志 `NVIDIA Corporation/`）删掉并补 `.gitignore` 防复发。
 
+### 0.2 交付闭环纪律（用户 2026-11-12 约定，长期生效）
+
+**程序有优化（任何会进入运行时的改动）后，必须走完整闭环：关闭旧桌面端 → 重新打包 → 验证产物 → 启动新桌面端 → 核对运行态。** 只提交代码、只打包不重启、或只重启不重打包，都算未完成——旧进程仍跑旧口径，用户看到的行为与仓库不一致（批次60 观察计划里「常驻进程仍跑旧口径，必须重启桌面端」即此坑）。
+
+| 步 | 动作 | 判据 / 已知坑 |
+|---|---|---|
+| 1 | 关旧端 | `MultiAgent Memory.exe` 进程数 0、8200~8204 无 LISTENING；否则打包会 EBUSY，产物收口不到固定路径 |
+| 2 | 重打包 | `CODEBUDDY_SAFE_DELETE_ENABLED=0 npm run package`；随后 `git diff -- package.json` 必须为空，非空则 `git checkout -- package.json`（electron-builder 会清空 `scripts`/`devDependencies` 且不还原） |
+| 3 | 验产物 | 安装包 exe 非空 + SHA256；**主进程代码在 `resources/app.asar.unpacked/dist-electron/main.cjs` 而非 `app.asar` 内**，须与 `dist-electron/main.cjs` 逐字节一致且含本轮改动标记（NSIS 压缩包明文 grep 不到字符串属正常） |
+| 4 | 启新端 | `env -u ELECTRON_RUN_AS_NODE -u NODE_OPTIONS -u https_proxy -u HTTPS_PROXY -u http_proxy -u HTTP_PROXY "./MultiAgent Memory.exe"`，用后台托管；不清 `ELECTRON_RUN_AS_NODE` 会以纯 Node 模式启动、不起 Chromium |
+| 5 | 核运行态 | `main.log` 有 `bootstrap:done` + 8202/8203/8204 LISTENING + `get_write_status`；**重启后 L0 写密钥默认 `write_unlocked:false`**，须在安全页重新解锁，否则采集/写入诚实进 `cursor-hold(l0_locked)` 与退避，属预期安全行为不是代码缺陷 |
+
+**边界**：纯文档/规格改动沿用「重建索引 + 三道闸门 + 推送」，不触发重新打包（不改变运行时行为）；但只要本轮有源码改动，即使同时改了文档仍必须走本闭环。历史 `release/installer-*` 与 `release/win-unpacked` 因句柄占用删不掉时如实记录，`release/` 已 gitignored，不阻塞交付、不绕过安全护栏强删。
+
 ## 1. 项目是什么
 
 MultiAgent Memory：Electron 45 + React 19 + Vite 的本地优先「多 Agent 记忆」桌面应用（22 个 HTML 入口，含批次37-B 的首启强制向导 `setup.html`）。
