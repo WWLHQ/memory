@@ -142,9 +142,15 @@ const l0 = {
   heartbeat: (l0SessionId: string, sessionId?: string | null) =>
     ipcRenderer.invoke(IPC.l0Heartbeat, l0SessionId, sessionId),
   lock: (l0SessionId: string, sessionId?: string | null) => ipcRenderer.invoke(IPC.l0Lock, l0SessionId, sessionId),
-  writeUnlock: (password: string, sessionId?: string | null) =>
-    ipcRenderer.invoke(IPC.l0WriteUnlock, password, sessionId),
+  writeUnlock: (password: string, memberId?: string | null, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.l0WriteUnlock, password, memberId, sessionId),
   writeLock: (sessionId?: string | null) => ipcRenderer.invoke(IPC.l0WriteLock, sessionId),
+  /** §4.4.4-B：管理员为成员发放写解锁口令 */
+  addMemberWriteWrap: (memberId: string, passphrase: string, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.l0AddMemberWriteWrap, memberId, passphrase, sessionId),
+  /** §4.4.4-B：撤销某成员的写解锁口令 */
+  removeMemberWriteWrap: (memberId: string, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.l0RemoveMemberWriteWrap, memberId, sessionId),
   seal: (plain: string, sessionId?: string | null) =>
     ipcRenderer.invoke(IPC.l0Seal, plain, sessionId) as Promise<{ ok: boolean; sealed?: string; code?: string; error?: string }>,
   decrypt: (req: unknown, sessionId?: string | null) => ipcRenderer.invoke(IPC.l0Decrypt, req, sessionId),

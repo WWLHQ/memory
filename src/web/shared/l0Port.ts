@@ -135,13 +135,29 @@ export class HostL0Admin implements L0AdminPort {
     unwrapVoid(res, 'E_AUTH_L0');
   }
 
-  async unlockWrite(req: { password: string; admin_user_id: string }): Promise<void> {
-    const res = await hostCall<IpcResult<Record<string, never>>>('l0:writeUnlock', [req.password, currentSessionId()]);
+  async unlockWrite(req: { password: string; admin_user_id: string; member_id?: string }): Promise<void> {
+    const res = await hostCall<IpcResult<Record<string, never>>>('l0:writeUnlock', [req.password, req.member_id ?? null, currentSessionId()]);
     unwrapVoid(res, 'E_L0_LOCKED');
   }
 
   async lockWrite(_req: { admin_user_id: string }): Promise<void> {
     const res = await hostCall<IpcResult<Record<string, never>>>('l0:writeLock', [currentSessionId()]);
+    unwrapVoid(res, 'E_AUTH_L0');
+  }
+
+  /** §4.4.4-B：管理员为成员发放写解锁口令（主进程再校验管理员；需先解锁写密钥） */
+  async addMemberWriteWrap(req: { member_id: string; passphrase: string; admin_user_id: string }): Promise<void> {
+    const res = await hostCall<IpcResult<Record<string, never>>>(
+      'l0:addMemberWriteWrap', [req.member_id, req.passphrase, currentSessionId()],
+    );
+    unwrapVoid(res, 'E_L0_LOCKED');
+  }
+
+  /** §4.4.4-B：撤销某成员的写解锁口令（主进程再校验管理员） */
+  async removeMemberWriteWrap(req: { member_id: string; admin_user_id: string }): Promise<void> {
+    const res = await hostCall<IpcResult<Record<string, never>>>(
+      'l0:removeMemberWriteWrap', [req.member_id, currentSessionId()],
+    );
     unwrapVoid(res, 'E_AUTH_L0');
   }
 
@@ -153,6 +169,7 @@ export class HostL0Admin implements L0AdminPort {
       write_unlocked: r.write_unlocked,
       active_sessions: r.active_sessions,
       active_grants: r.active_grants,
+      member_write_wraps: r.member_write_wraps ?? 0,
     };
   }
 

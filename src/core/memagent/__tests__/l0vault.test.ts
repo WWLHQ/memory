@@ -420,3 +420,74 @@ describe('审计零秘密（红线）', () => {
     expect(t.audits.every((a) => a.action.startsWith('l0_auth') || a.action === 'security_change')).toBe(true);
   });
 });
+
+describe('成员写解锁口令（§4.4.4-B）', () => {
+  const MEMBER = 'u-member';
+  const MEM_PW = 'memberpass-1';
+
+  it('管理员发放后，成员可用自己的口令解锁写密钥（与管理密码互不替代）', async () => {
+    const t = await createTestVault();
+    expect((await t.vault.status()).member_write_wraps).toBe(0);
+
+    await t.vault.addMemberWriteWrap({ member_id: MEMBER, passphrase: MEM_PW, admin_user_id: TEST_ADMIN_ID });
+    expect((await t.vault.status()).member_write_wraps).toBe(1);
+    expect(t.keyring.value?.member_wraps?.[MEMBER]?.ct).toBeTruthy();
+    expect(JSON.stringify(t.keyring.value)).not.toContain(MEM_PW);
+
+    // 写密钥锁定后，成员用自己口令（≠管理密码）仍可解锁
+    await t.vault.lockWrite({ admin_user_id: TEST_ADMIN_ID });
+    expect((await t.vault.status()).write_unlocked).toBe(false);
+    await t.vault.unlockWrite({ password: MEM_PW, admin_user_id: TEST_ADMIN_ID, member_id: MEMBER });
+    expect((await t.vault.status()).write_unlocked).toBe(true);
+  });
+
+  it('未发放口令 → E_L0_NO_GRANT；口令错误 → E_AUTH_L0', async () => {
+    const t = await createTestVault();
+    await expect(t.vault.unlockWrite({ password: MEM_PW, admin_user_id: TEST_ADMIN_ID, member_id: MEMBER }))
+      .rejects.toMatchObject({ code: 'E_L0_NO_GRANT' });
+
+    await t.vault.addMemberWriteWrap({ member_id: MEMBER, passphrase: MEM_PW, admin_user_id: TEST_ADMIN_ID });
+    await expect(t.vault.unlockWrite({ password: 'wrong-pw-1', admin_user_id: TEST_ADMIN_ID, member_id: MEMBER }))
+      .rejects.toMatchObject({ code: 'E_AUTH_L0' });
+  });
+
+  it('发放口令需先解锁写密钥：写密钥锁定态下 → E_L0_LOCKED', async () => {
+    const t = await createTestVault();
+    await t.vault.lockWrite({ admin_user_id: TEST_ADMIN_ID });
+    await expect(t.vault.addMemberWriteWrap({ member_id: MEMBER, passphrase: MEM_PW, admin_user_id: TEST_ADMIN_ID }))
+      .rejects.toMatchObject({ code: 'E_L0_LOCKED' });
+    expect((await t.vault.status()).member_write_wraps).toBe(0);
+  });
+
+  it('口令 <8 位 → E_AUTH_L0', async () => {
+    const t = await createTestVault();
+    await expect(t.vault.addMemberWriteWrap({ member_id: MEMBER, passphrase: 'short', admin_user_id: TEST_ADMIN_ID }))
+      .rejects.toMatchObject({ code: 'E_AUTH_L0' });
+  });
+
+  it('撤销写解锁口令：计数归零且成员不再能解锁', async () => {
+    const t = await createTestVault();
+    await t.vault.addMemberWriteWrap({ member_id: MEMBER, passphrase: MEM_PW, admin_user_id: TEST_ADMIN_ID });
+    await t.vault.removeMemberWriteWrap({ member_id: MEMBER, admin_user_id: TEST_ADMIN_ID });
+    expect((await t.vault.status()).member_write_wraps).toBe(0);
+    await expect(t.vault.unlockWrite({ password: MEM_PW, admin_user_id: TEST_ADMIN_ID, member_id: MEMBER }))
+      .rejects.toMatchObject({ code: 'E_L0_NO_GRANT' });
+  });
+
+  it('成员解锁装的是同一把全局 DEK：写锁后成员自解锁可继续 seal，且与管理员封存密文互通', async () => {
+    const t = await createTestVault();
+    const envAdmin = await t.vault.seal('管理员封存原文');
+    await t.vault.addMemberWriteWrap({ member_id: MEMBER, passphrase: MEM_PW, admin_user_id: TEST_ADMIN_ID });
+    const g = await t.vault.grantAccess({ grantee_user_id: MEMBER, scope_project_ids: ['P1'], password: TEST_GRANT_PW, admin_user_id: TEST_ADMIN_ID });
+    const u = await t.vault.unlock({ grant_id: g.grant_id, password: TEST_GRANT_PW, user_id: MEMBER });
+
+    await t.vault.lockWrite({ admin_user_id: TEST_ADMIN_ID });
+    await t.vault.unlockWrite({ password: MEM_PW, admin_user_id: TEST_ADMIN_ID, member_id: MEMBER });
+
+    const envMember = await t.vault.seal('成员续写原文');
+    const p1 = await t.vault.decrypt({ l0_session_id: u.l0_session_id, project_id: 'P1', mem_id: 'm1', envelope: envAdmin });
+    const p2 = await t.vault.decrypt({ l0_session_id: u.l0_session_id, project_id: 'P1', mem_id: 'm2', envelope: envMember });
+    expect(p1).toBe('管理员封存原文');
+    expect(p2).toBe('成员续写原文');
+  });
+});

@@ -7,7 +7,7 @@ import { loadLayerPanel } from '../layers.ts';
 vi.mock('../../memory/coreMemoryOps.ts', () => ({ coreListMemories: vi.fn(), coreBrowse: vi.fn() }));
 vi.mock('../statusbar.ts', () => ({ loadL0Status: vi.fn() }));
 
-const L0 = { status: 'ok' as const, view: { has_admin_wrap: true, write_unlocked: false, active_sessions: 0, active_grants: 0 } };
+const L0 = { status: 'ok' as const, view: { has_admin_wrap: true, write_unlocked: false, active_sessions: 0, active_grants: 0, member_write_wraps: 0 } };
 
 function row(memId: string, content: string) {
   return { mem_id: memId, content } as never;

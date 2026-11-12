@@ -51,6 +51,9 @@ export const IPC = {
   l0Lock: 'l0:lock',
   l0WriteUnlock: 'l0:writeUnlock',
   l0WriteLock: 'l0:writeLock',
+  /** §4.4.4-B：管理员为成员发放 / 撤销写解锁口令（需管理员 + 先解锁写密钥） */
+  l0AddMemberWriteWrap: 'l0:addMemberWriteWrap',
+  l0RemoveMemberWriteWrap: 'l0:removeMemberWriteWrap',
   l0Seal: 'l0:seal',
   l0Decrypt: 'l0:decrypt',
   l0SessionInfo: 'l0:sessionInfo',

@@ -504,6 +504,8 @@ export interface L0VaultStatus {
   write_unlocked: boolean;
   active_sessions: number;
   active_grants: number;
+  /** 已发放写解锁口令的成员数（§4.4.4-B） */
+  member_write_wraps: number;
 }
 
 /** 旧数据迁移报告（§4.4.6；内容为计数，绝不携带任何明文） */
@@ -536,12 +538,16 @@ export interface L0AdminPort {
   unlock(req: L0UnlockReq & { user_id: string }): Promise<L0UnlockResult>;
   heartbeat(l0_session_id: string): Promise<L0HeartbeatResult>;
   lock(l0_session_id: string): Promise<void>;
-  unlockWrite(req: { password: string; admin_user_id: string }): Promise<void>;
+  unlockWrite(req: { password: string; admin_user_id: string; member_id?: string }): Promise<void>;
   lockWrite(req: { admin_user_id: string }): Promise<void>;
   status(): Promise<L0VaultStatus>;
   /** 首次设置 / 轮换管理密码（§4.4.1；主进程再校验管理员） */
   setupAdminPassword(password: string, admin_user_id: string): Promise<void>;
   changeAdminPassword(oldPassword: string, newPassword: string, admin_user_id: string): Promise<void>;
+  /** §4.4.4-B：管理员为成员发放写解锁口令（需先解锁写密钥） */
+  addMemberWriteWrap(req: { member_id: string; passphrase: string; admin_user_id: string }): Promise<void>;
+  /** §4.4.4-B：撤销某成员的写解锁口令 */
+  removeMemberWriteWrap(req: { member_id: string; admin_user_id: string }): Promise<void>;
   /** 旧数据迁移（§4.4.6；桌面端迁移前自动备份） */
   migrate(req: { admin_user_id: string; oldPassword?: string }): Promise<L0MigrationResult>;
 }

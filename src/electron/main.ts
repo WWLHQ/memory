@@ -1357,7 +1357,18 @@ function registerL0Ipc(vault: L0Vault, collectorVector: JsVectorBackend, pending
       return { ok: true };
     } catch (e) { return l0Fail(e); }
   });
-  handleIpc(IPC.l0WriteUnlock, async (_e, password: string, sessionId?: string) => {
+  handleIpc(IPC.l0WriteUnlock, async (_e, password: string, memberId?: string | null, sessionId?: string) => {
+    const sid = typeof sessionId === 'string' ? sessionId.trim() : '';
+    if (memberId) {
+      // §4.4.4-B：成员自解锁写密钥——需登录且会话用户就是该成员（防越权替他人解），不要求管理员
+      const ctx = sid ? homeServerRef?.getSessionContext(sid) ?? null : null;
+      if (!ctx) return { ok: false, code: 'E_AUTH_SESSION', error: '需要登录后操作（会话已过期或未登录）' };
+      if (ctx.user_id !== memberId) return { ok: false, code: 'E_AUTH_FORBIDDEN', error: '只能解锁自己的写密钥' };
+      try {
+        await vault.unlockWrite({ password, admin_user_id: memberId, member_id: memberId });
+        return { ok: true };
+      } catch (e) { return l0Fail(e); }
+    }
     const gate = requireAdmin(sessionId, IPC.l0WriteUnlock);
     if (!gate.ok) return { ok: false, error: gate.error };
     try {
@@ -1370,6 +1381,24 @@ function registerL0Ipc(vault: L0Vault, collectorVector: JsVectorBackend, pending
     if (!gate.ok) return { ok: false, error: gate.error };
     await vault.lockWrite({ admin_user_id: gate.ctx.user_id });
     return { ok: true };
+  });
+  /** §4.4.4-B：管理员为成员发放写解锁口令（需先解锁写密钥；vault 内部再校验 writeDek 在内存） */
+  handleIpc(IPC.l0AddMemberWriteWrap, async (_e, memberId: string, passphrase: string, sessionId?: string) => {
+    const gate = requireAdmin(sessionId, IPC.l0AddMemberWriteWrap);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    try {
+      await vault.addMemberWriteWrap({ member_id: memberId, passphrase, admin_user_id: gate.ctx.user_id });
+      return { ok: true };
+    } catch (e) { return l0Fail(e); }
+  });
+  /** §4.4.4-B：撤销某成员的写解锁口令 */
+  handleIpc(IPC.l0RemoveMemberWriteWrap, async (_e, memberId: string, sessionId?: string) => {
+    const gate = requireAdmin(sessionId, IPC.l0RemoveMemberWriteWrap);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    try {
+      await vault.removeMemberWriteWrap({ member_id: memberId, admin_user_id: gate.ctx.user_id });
+      return { ok: true };
+    } catch (e) { return l0Fail(e); }
   });
   /** §4.4.6：迁移前自动备份（记忆库 + 密钥环）；备份失败 → 拒绝迁移，绝不无备份改写 */
   handleIpc(IPC.l0Migrate, async (_e, opts: { oldPassword?: string } | undefined, sessionId?: string) => {

@@ -87,6 +87,8 @@ export interface L0Keyring {
   admin_wrap?: L0Wrap;
   /** 批次37-G：忘记管理密码时唯一的找回通道（一次性恢复码） */
   recovery?: L0RecoveryRecord;
+  /** §4.4.4-B：每成员一把写解锁口令包裹（同一 DEK；成员登录后可自行解锁全局写密钥，与管理员 admin_wrap 互不替代） */
+  member_wraps?: Record<string, L0Wrap>;
   grants: L0GrantRecord[];
   requests: L0RequestRecord[];
   updated_at: number;
@@ -196,6 +198,7 @@ export class L0Vault implements L0AdminPort {
       admin_wrap: k.admin_wrap,
       // 批次37-G：白名单式读取必须带上 recovery，否则每次 load 都把恢复码静默丢掉 → 用户以为设过却找不回
       recovery: k.recovery?.wrap?.salt && k.recovery?.wrap?.ct ? { ...k.recovery } : undefined,
+      member_wraps: k.member_wraps && typeof k.member_wraps === 'object' ? { ...k.member_wraps } : undefined,
       grants: Array.isArray(k.grants) ? k.grants : [],
       requests: Array.isArray(k.requests) ? k.requests : [],
       updated_at: k.updated_at ?? 0,
@@ -476,11 +479,32 @@ export class L0Vault implements L0AdminPort {
     return { recovery_code: newCode, fingerprint: keyringFingerprint(k.admin_wrap, next.wrap), created_at: next.created_at };
   }
 
-  /** 后台写入解锁：只缓存写密钥，不能用于查阅明文（§4.4.4） */
-  async unlockWrite(req: { password: string; admin_user_id: string }): Promise<void> {
+  /** 后台写入解锁：只缓存写密钥，不能用于查阅明文（§4.4.4）。
+   *  - 管理员（无 member_id）：用管理密码解 admin_wrap，装同一把 DEK。
+   *  - 成员（带 member_id）：用成员自己的写解锁口令解 member_wraps[member_id]，装同一把 DEK。
+   *    两者互不替代：成员能否写不依赖管理员是否在线，只依赖自己有没有口令且口令正确。 */
+  async unlockWrite(req: { password: string; admin_user_id: string; member_id?: string }): Promise<void> {
     const k = await this.load();
     if (!k.admin_wrap) {
       throw new MemAgentError('E_L0_NO_GRANT', '管理密码尚未设置：请先完成 L0 初始化（§4.4.1）');
+    }
+    if (req.member_id) {
+      const wrap = k.member_wraps?.[req.member_id];
+      if (!wrap) {
+        throw new MemAgentError('E_L0_NO_GRANT', `成员 ${req.member_id} 尚未设置写解锁口令（§4.4.4）`);
+      }
+      await this.assertNotLocked(req.member_id);
+      let dek: Uint8Array;
+      try {
+        dek = await unwrapSecret(wrap, await deriveKek(req.password, wrap.salt));
+      } catch {
+        await this.recordBadPassword(req.member_id);
+        throw new MemAgentError('E_AUTH_L0', '写解锁口令错误（§4.4.4）');
+      }
+      await this.clearFailures(req.member_id);
+      this.writeDek = dek;
+      await this.audit('security_change', { user_id: req.member_id, op: 'l0_write_unlock_member' });
+      return;
     }
     await this.assertNotLocked(req.admin_user_id);
     let dek: Uint8Array;
@@ -493,6 +517,42 @@ export class L0Vault implements L0AdminPort {
     await this.clearFailures(req.admin_user_id);
     this.writeDek = dek;
     await this.audit('security_change', { admin_user_id: req.admin_user_id, op: 'l0_write_unlock' });
+  }
+
+  /**
+   * §4.4.4-B：管理员为成员发放写解锁口令——用当前内存中的 DEK 以成员口令再包裹一份。
+   * 需先解锁写密钥（writeDek 在内存），否则等于给拿文件的人免密发口令——一律拒绝。
+   */
+  async addMemberWriteWrap(req: { member_id: string; passphrase: string; admin_user_id: string }): Promise<void> {
+    if (!req.member_id) throw new MemAgentError('E_AUTH_L0', 'member_id 必填（§4.4.4）');
+    if (typeof req.passphrase !== 'string' || req.passphrase.length < L0_MIN_SECRET_LEN) {
+      throw new MemAgentError('E_AUTH_L0', `写解锁口令须 ≥${L0_MIN_SECRET_LEN} 位（§4.4.4）`);
+    }
+    if (!this.writeDek) {
+      throw new MemAgentError('E_L0_LOCKED', '发放成员写解锁口令需先解锁 L0 写密钥（§4.4.4）');
+    }
+    const salt = newWrapSalt();
+    const wrap: L0Wrap = { salt, ...(await wrapSecret(this.writeDek, await deriveKek(req.passphrase, salt))) };
+    const k = await this.load();
+    k.member_wraps = { ...k.member_wraps, [req.member_id]: wrap };
+    await this.save(k);
+    await this.audit('security_change', {
+      admin_user_id: req.admin_user_id, op: 'l0_member_wrap_add', member_id: req.member_id,
+    });
+  }
+
+  /** §4.4.4-B：撤销某成员的写解锁口令——删其包裹；不影响其它成员与管理员 */
+  async removeMemberWriteWrap(req: { member_id: string; admin_user_id: string }): Promise<void> {
+    if (!req.member_id) throw new MemAgentError('E_AUTH_L0', 'member_id 必填（§4.4.4）');
+    const k = await this.load();
+    if (!k.member_wraps || !k.member_wraps[req.member_id]) return;
+    const next = { ...k.member_wraps };
+    delete next[req.member_id];
+    k.member_wraps = next;
+    await this.save(k);
+    await this.audit('security_change', {
+      admin_user_id: req.admin_user_id, op: 'l0_member_wrap_remove', member_id: req.member_id,
+    });
   }
 
   /** 手动锁定写密钥（查阅会话不受影响；两者互不替代，§4.4.4） */
@@ -795,6 +855,7 @@ export class L0Vault implements L0AdminPort {
       write_unlocked: this.writeDek !== null,
       active_sessions: this.sessions.size,
       active_grants: k.grants.filter((g) => g.status === 'active').length,
+      member_write_wraps: Object.keys(k.member_wraps ?? {}).length,
     };
   }
 

@@ -109,7 +109,7 @@ beforeEach(() => {
   vi.mocked(loadStatusbar).mockReset();
   vi.mocked(loadStatusbar).mockResolvedValue({
     location: { status: 'ok', view: { kind: 'file', path: 'C:\\data\\memories.db.json', source: 'ipc' } },
-    l0: { status: 'ok', view: { has_admin_wrap: true, write_unlocked: false, active_sessions: 0, active_grants: 0 } },
+    l0: { status: 'ok', view: { has_admin_wrap: true, write_unlocked: false, active_sessions: 0, active_grants: 0, member_write_wraps: 0 } },
     collector: {
       status: 'ok',
       view: { running: true, intervalMs: 60_000, lastAt: 1_790_000_000_000, lastCollected: 12, autoRetryStopped: false, consecutiveFails: 0 },
@@ -125,7 +125,7 @@ beforeEach(() => {
         { layer: 'L3', count: null }, { layer: 'L2', count: 1 }, { layer: 'L1', count: 2 },
       ],
       failed: ['L3'],
-      l0: { status: 'ok', view: { has_admin_wrap: true, write_unlocked: false, active_sessions: 0, active_grants: 0 } },
+      l0: { status: 'ok', view: { has_admin_wrap: true, write_unlocked: false, active_sessions: 0, active_grants: 0, member_write_wraps: 0 } },
       kernelMode: 'host',
       loadedAt: 1_790_000_000_000,
     },
@@ -561,7 +561,7 @@ describe('工作台壳层', () => {
     // 写锁已解锁 + 有 2 个活跃查阅会话：两把锁都要各自如实反映，不能互相冒充
     vi.mocked(loadStatusbar).mockResolvedValue({
       location: { status: 'ok', view: { kind: 'file', path: 'C:\\data\\memories.db.json', source: 'ipc' } },
-      l0: { status: 'ok', view: { has_admin_wrap: true, write_unlocked: true, active_sessions: 2, active_grants: 1 } },
+      l0: { status: 'ok', view: { has_admin_wrap: true, write_unlocked: true, active_sessions: 2, active_grants: 1, member_write_wraps: 0 } },
       collector: {
         status: 'ok',
         view: { running: true, intervalMs: 60_000, lastAt: 1_790_000_000_000, lastCollected: 12, autoRetryStopped: false, consecutiveFails: 0 },
