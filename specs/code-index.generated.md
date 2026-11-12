@@ -3,7 +3,7 @@
 > 由 `npm run code:index` 生成，请勿手改；改代码/文档后重跑即可。
 > 用法：先在本表定位文件与导出符号，再只读该文件的局部区间（省 token、少误改）。
 
-共 368 个源码文件、131 个文档。
+共 368 个源码文件、132 个文档。
 
 ## e2e
 
@@ -430,6 +430,7 @@
 | [README.md](README.md) | 188 | 本项目怎么用（使用入口） |
 | [specs/A31-BILLING-MATRIX.md](specs/A31-BILLING-MATRIX.md) | 63 | A31 厂商余额接口矩阵（spike 实测，2026-11-07） |
 | [specs/AUDIT-FULL-REVIEW-2026-10-31.md](specs/AUDIT-FULL-REVIEW-2026-10-31.md) | 213 | status: active |
+| [specs/DECISION-2026-11-12-方案对比与融合自发现架构.md](specs/DECISION-2026-11-12-方案对比与融合自发现架构.md) | 233 | title: 方案对比与融合决策：分层收敛，而非互斥取舍 |
 | [specs/MANUAL-TEST-BATCH-57B.md](specs/MANUAL-TEST-BATCH-57B.md) | 66 | status: pending-manual-acceptance |
 | [specs/MANUAL-TEST-BATCH-57C.md](specs/MANUAL-TEST-BATCH-57C.md) | 67 | status: pending-manual-acceptance |
 | [specs/MANUAL-TEST-BATCH-57D.md](specs/MANUAL-TEST-BATCH-57D.md) | 67 | status: accepted-manual |
@@ -485,7 +486,7 @@
 | [specs/MANUAL-TEST-PHASE-E.md](specs/MANUAL-TEST-PHASE-E.md) | 129 | status: done |
 | [specs/MANUAL-TEST.md](specs/MANUAL-TEST.md) | 342 | status: done |
 | [specs/MCP运维与多Agent写入规范.md](specs/MCP运维与多Agent写入规范.md) | 201 | MCP 运维与多 Agent 写入规范 |
-| [specs/POSTMORTEM-2026-11-11-静默失效与双通路自发现方案.md](specs/POSTMORTEM-2026-11-11-静默失效与双通路自发现方案.md) | 358 | title: 静默失效事故复盘与双通路自发现方案 |
+| [specs/POSTMORTEM-2026-11-11-静默失效与双通路自发现方案.md](specs/POSTMORTEM-2026-11-11-静默失效与双通路自发现方案.md) | 366 | title: 静默失效事故复盘与双通路自发现方案 |
 | [specs/ROADMAP-批次42-未接线三件套-方案.md](specs/ROADMAP-批次42-未接线三件套-方案.md) | 52 | ROADMAP 批次42+ — 未接线三件套（云端同步 / 每日全量补齐 / 独立采集守护进程）立项方案 |
 | [specs/ROADMAP-批次45-租户归一与成员密钥域模型-方案.md](specs/ROADMAP-批次45-租户归一与成员密钥域模型-方案.md) | 44 | ROADMAP 批次45+ — 令牌与租户欠账立项（MCP 作用域收紧前置 = 账本租户归一）+ 成员/API 密钥域模型 |
 | [specs/ROADMAP-批次B类-远端PG与多机硬过滤-方案.md](specs/ROADMAP-批次B类-远端PG与多机硬过滤-方案.md) | 102 | 批次 B 类 · 远端 PG 中枢（B4）+ 多机硬过滤（B1）+ 真实精炼（B3）方案 |
@@ -934,6 +935,7 @@ src/web/write/writeEntry.tsx a1f5c6bd7227
 README.md aa2f62fda68e
 specs/A31-BILLING-MATRIX.md adf99c88971d
 specs/AUDIT-FULL-REVIEW-2026-10-31.md 9b268c1a3db7
+specs/DECISION-2026-11-12-方案对比与融合自发现架构.md b768982d5383
 specs/MANUAL-TEST-BATCH-57B.md 5f53fa04493b
 specs/MANUAL-TEST-BATCH-57C.md 6244ef645fb7
 specs/MANUAL-TEST-BATCH-57D.md 99d361d7397f
@@ -989,7 +991,7 @@ specs/MANUAL-TEST-PHASE-D.md 0393a1f055b1
 specs/MANUAL-TEST-PHASE-E.md b4da1f2f1a2e
 specs/MANUAL-TEST.md 4d755324cafe
 specs/MCP运维与多Agent写入规范.md 752368c085eb
-specs/POSTMORTEM-2026-11-11-静默失效与双通路自发现方案.md 2513a47034f4
+specs/POSTMORTEM-2026-11-11-静默失效与双通路自发现方案.md 4578ad1a2c7a
 specs/ROADMAP-批次42-未接线三件套-方案.md df1a6f9d6ed5
 specs/ROADMAP-批次45-租户归一与成员密钥域模型-方案.md 633abaaaad54
 specs/ROADMAP-批次B类-远端PG与多机硬过滤-方案.md 0c7857454a7d
