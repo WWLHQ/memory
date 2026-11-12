@@ -12,6 +12,29 @@ B = 每条 AC 的正向端到端用例，断言状态/审计**真的变了**（�
 C = **至少一次代码级变异**（临时把关键判定改错 → 指定测试必须红灯 → 原样还原 → 必须绿灯）+ 输入/状态变异矩阵。
 收尾时按文档 §4 模板给出三栏证据，写入提交信息、`code-map.md` 与成果说明，并等待人工确认再进入下一原子任务。
 
+### 0.1 纯净度纪律（2026-11-12 起强制，与三道闸门并列）
+
+**验收即清扫**：验证通过后、`commit` 之前，清掉本次为「验证」而产生的一切东西。仓库与构建目录只留交付物。
+判定标准一句话：**下一个任务不会再用的，就是临时物。**
+
+| 必须删（临时物） | 必须留（交付物） |
+|---|---|
+| 一次性验证脚本与探针：`*-probe.mjs`、`tmp-*.js`、`verify-*.ps1` | `tools/` 下被 `package.json` script 或 CI 引用的脚本（如 `tools/recall-stats.mjs`） |
+| 散落在**仓库根目录**的 `*-report.md`、`*-fix-report.md` | `specs/` 规格、`specs/reports/` 正式报告 |
+| `test-results/`、`playwright-report/`、`coverage/`、失败截图 | `e2e/`、`__tests__/` 下的用例**源码** |
+| 构建残留：根目录 `main.cjs`（真入口是 `dist-electron/main.cjs`）、旧 `dist*` 副本、历史 `release/installer-*` | `dist/`、`dist-electron/`、`release/installer/`（当前交付产物） |
+| `*.log`、临时 html、`*.bak`、`nul` | 持续累积的数据文件（如 `specs/reports/recall-snapshots.jsonl`） |
+
+**收尾五步**（用户 2026-11-12 授权默认执行，不必每次再问）：
+跑验（三道闸门）→ 扫（列临时物路径+体积）→ 清（按路径逐项删，删不掉的单列）→ 核（`git status` 只剩待提交项，复扫 `test-results/`、`coverage/`、`*.log`）→ 报（复述删了什么/留了什么/为什么），然后才 `commit`。
+
+四条硬边界：
+
+1. **禁 `rm -rf` 扫根目录**，按具体路径逐项删。
+2. **`.gitignore` 不等于可留**——测试产物每次验证完都要删，忽略只是防止误入库。
+3. 删不掉的**如实说**并给出可执行命令，**不得换 shell 工具或写脚本穿透安全检查**（本机 `rm -rf` 被 genie-trash 守护 fail-closed 拦截即属此类；`CODEBUDDY_SAFE_DELETE_ENABLED=0` 只对走 Node `fs.rm` 的打包脚本有效，对 Bash 的 `rm` 无效）。
+4. **报告归位**：一次性修复报告写进 `specs/reports/`；外部程序误写的垃圾（如显卡驱动日志 `NVIDIA Corporation/`）删掉并补 `.gitignore` 防复发。
+
 ## 1. 项目是什么
 
 MultiAgent Memory：Electron 45 + React 19 + Vite 的本地优先「多 Agent 记忆」桌面应用（22 个 HTML 入口，含批次37-B 的首启强制向导 `setup.html`）。
