@@ -11,9 +11,10 @@
 //   · 周期：createReconciler(intervalMs) 驱动；预设 5min（300000ms，§5.1 短周期对账）
 //   · 游标持久化：saveCursor/loadCursor（主进程落 userData），重启断点续采
 //
-// 内置两种解析器（pluggable，按 source.parser 路由）：
-//   · claude    ：~/.claude/projects/*/*.jsonl（message.content 为字符串或 [{type:text|tool_result}]）
-//   · workbuddy ：~/workbuddy/*/.workbuddy/memory/*.md（UTF-8 Markdown，## 分块 + 列表项）
+// 内置解析器（pluggable，按 source.parser 路由）：
+//   · claude          ：~/.claude/projects/*/*.jsonl（message.content 为字符串或 [{type:text|tool_result}]）
+//   · workbuddy       ：~/workbuddy/*/.workbuddy/memory/*.md（UTF-8 Markdown，## 分块 + 列表项）
+//   · workbuddy-jsonl ：~/.workbuddy/projects/**/*.jsonl（P0 止血，顶层 role/content，见下方解析器注释）
 // 其它 Agent 可实现 parseLine/parseMarkdown 注入。
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -125,6 +126,115 @@ export function parseWorkbuddyMd(text: string, _sourceName?: string): ParsedMess
   return out;
 }
 
+// ─── WorkBuddy 新版会话 JSONL 解析器（P0 止血） ─────────────────────────────────
+//
+// 2026-11-06 起 WorkBuddy 客户端把会话正文从 `~/workbuddy/**/*.md` 换到
+// `~/.workbuddy/projects/**/*.jsonl`，采集器仍只配旧目录 → 11-06~11-10 连续 5 天
+// 0 入库且零报错（静默失效）。本解析器负责把新格式重新接回采集链路。
+//
+// 真实行结构（2026-11-12 本机 121 个 jsonl 只读实测）：
+//   {type:"message", role:"user"|"assistant", sessionId:"…", timestamp:<epoch ms>,
+//    content:[{type:"input_text"|"output_text", text:"<system-reminder …>…</system-reminder>
+//                                                    <user_query>真实输入</user_query>"}]}
+// 与 claude-jsonl 的关键差异：role/content 在**顶层**、timestamp 是 epoch 毫秒数字、
+// type 只有 "message" 才是对话正文（其余 session-meta / reasoning / function_call* /
+// file-history-snapshot / ai-title / model-usage 一律不采）。
+//
+// 诚实边界（比「能不能采到」更重要）：user 消息里 80% 以上不是用户说的话，而是宿主注入：
+//   · <system-reminder> 系统提示词 / 身份上下文 / compact-summary
+//   · <cb_summary>、<conversation_history_summary> 压缩摘要（**内部会重放历史 user_query**）
+//   · <task-notification>、<teammate-message>、<image_local_path>
+//   · "Please continue with the conversation based on the summarized context above…" 续接模板
+// 若直接把整条 content 入库，等于把系统提示词和 8~16 万字符的摘要当成用户记忆灌进去，
+// 比 0 入库更糟。所以口径是：**先剥宿主注入块 → 再提取 <user_query> → 只采剩下的真实输入**。
+// 没有 user_query 包裹的早期格式仍走纯文本兜底（不误杀老会话），但拒绝未闭合注入块、
+// 续接模板与超过上限的巨型文本。
+
+/** 宿主注入块标签：整块剥离（不是用户说的话）。用单一真源，禁止各处另写正则。 */
+const WB_HOST_TAGS = [
+  'system-reminder',
+  'cb_summary',
+  'conversation_history_summary',
+  'task-notification',
+  'previous_tool_call',
+  'previous_assistant_message',
+  'previous_user_message',
+  'teammate-message',
+  'image_local_path',
+  'user_info',
+  'identity_context',
+  'memory_and_skills_reminder',
+  'current-expert',
+  'craft_mode',
+  'additional_data',
+  'current_time',
+] as const;
+
+/** 成对闭合的注入块（反向引用保证开闭标签同名）；压缩摘要必须先于 user_query 提取被剥掉 */
+const WB_HOST_BLOCK_RE = new RegExp(
+  `<(${WB_HOST_TAGS.join('|')})\\b[^>]*>[\\s\\S]*?<\\/\\1>`,
+  'gi',
+);
+/** 剥完成对块后仍残留的未闭合注入开标签 → 整条拒采（不采半截提示词） */
+const WB_UNCLOSED_HOST_TAG_RE = new RegExp(`<(${WB_HOST_TAGS.join('|')})\\b`, 'i');
+/** 用户真正说的话 */
+const WB_USER_QUERY_RE = /<user_query\b[^>]*>([\s\S]*?)<\/user_query>/gi;
+/** 上下文续接模板（宿主自动生成，不是用户输入） */
+const WB_CONTINUATION_RE = /^\s*Please continue with the conversation based on the summarized context above\b/i;
+/** 单条内容上限：真实输入中位数约 155 字符；巨型压缩摘要（实测可达 165,902）一律不采 */
+const WB_MAX_CONTENT_CHARS = 20_000;
+
+/**
+ * 解析一行 WorkBuddy 新版会话 JSONL。
+ * 返回 null = 该行不是「用户/助手说的话」（注入块、工具行、坏行、超长摘要等），诚实跳过。
+ */
+export function parseWorkbuddyJsonl(line: string): ParsedMessage[] | null {
+  const t = line.trim();
+  if (!t) return null;
+  let o: Record<string, unknown>;
+  try { o = JSON.parse(t) as Record<string, unknown>; } catch { return null; }
+  if (o.type !== 'message') return null;
+  const role = o.role;
+  if (role !== 'user' && role !== 'assistant') return null;
+  const c = o.content;
+  if (!Array.isArray(c)) return null;
+  // 文本块类型不硬编码白名单：只要带 text 且不是图片引用即取（兼容未来 input_text 变体）
+  const parts = c
+    .map((b) => {
+      if (!b || typeof b !== 'object') return '';
+      const blk = b as { type?: unknown; text?: unknown };
+      if (typeof blk.text !== 'string' || blk.type === 'image_blob_ref') return '';
+      return blk.text;
+    })
+    .filter((s) => s !== '');
+  if (parts.length === 0) return null;
+
+  // ① 先剥宿主注入块：压缩摘要里重放的 <user_query> 随之消失，不会被重复采一遍
+  const stripped = parts.join('\n').replace(WB_HOST_BLOCK_RE, '');
+  // ② 再提取真实输入；无包裹的早期格式走纯文本兜底，半截 <user_query> 拒采
+  const queries: string[] = [];
+  let m: RegExpExecArray | null;
+  WB_USER_QUERY_RE.lastIndex = 0;
+  while ((m = WB_USER_QUERY_RE.exec(stripped)) !== null) queries.push(m[1]);
+  const texts = queries.length > 0
+    ? queries
+    : /<user_query\b/i.test(stripped) ? [] : [stripped];
+
+  const sid = typeof o.sessionId === 'string' ? o.sessionId : undefined;
+  // 时间只认 epoch 毫秒数字；ISO 字符串等格式漂移 → 诚实留空，绝不伪造时间
+  const ts = typeof o.timestamp === 'number' && Number.isFinite(o.timestamp) ? o.timestamp : undefined;
+  const out: ParsedMessage[] = [];
+  for (const raw of texts) {
+    const content = raw.replace(WB_HOST_BLOCK_RE, '').trim(); // 二次剥离：user_query 内嵌的注入块
+    if (!content) continue;
+    if (WB_UNCLOSED_HOST_TAG_RE.test(content)) continue;
+    if (WB_CONTINUATION_RE.test(content)) continue;
+    if (content.length > WB_MAX_CONTENT_CHARS) continue;
+    out.push({ role, content, ts, session_id: sid, seq: undefined });
+  }
+  return out.length > 0 ? out : null;
+}
+
 // ─── DSH session_projcache 解析器（完整会话记录：turnOutline 的 prompt/response 全文） ───
 
 /**
@@ -165,7 +275,7 @@ export interface SessionLogSource {
   /** 来源标识（source_agent，写进审计 + 记忆 created_by_agent） */
   name: string;
   /** 解析器类型 */
-  parser: 'claude-jsonl' | 'workbuddy-md' | 'jsonl' | 'markdown' | 'dsh-zstd-jsonl' | 'dsh-projcache';
+  parser: 'claude-jsonl' | 'workbuddy-md' | 'workbuddy-jsonl' | 'jsonl' | 'markdown' | 'dsh-zstd-jsonl' | 'dsh-projcache';
   /** 会话日志目录（缺失 → 诚实 skip） */
   dir: string;
   /** 文件名过滤（缺省按 parser 选：jsonl 类 *.jsonl，markdown 类 *.md，dsh-zstd-jsonl 类 *.jsonl.zstd） */
@@ -383,7 +493,11 @@ export async function scanSessionLogs(opts: ScanOptions): Promise<ScanResult> {
     );
     let files: string[];
     try {
-      files = await listFiles(src.dir, pattern, src.recursive ?? (src.parser === 'claude-jsonl'), src.maxDepth ?? 4);
+      files = await listFiles(
+        src.dir, pattern,
+        src.recursive ?? (src.parser === 'claude-jsonl' || src.parser === 'workbuddy-jsonl'),
+        src.maxDepth ?? 4,
+      );
     } catch (e) {
       skipped.push(`${src.name}: 目录枚举失败 ${String((e as Error)?.message ?? e)}`);
       continue;
@@ -424,12 +538,12 @@ export async function scanSessionLogs(opts: ScanOptions): Promise<ScanResult> {
         return '文件被重写（前缀指纹不一致）';
       };
 
-      if (src.parser === 'claude-jsonl' || src.parser === 'jsonl') {
+      if (src.parser === 'claude-jsonl' || src.parser === 'jsonl' || src.parser === 'workbuddy-jsonl') {
         // JSONL 增量（字节游标）：只处理完整 \n 结尾的行；未写完的尾行留到下周期
         const startOffset = prefixValid(prev?.offset ?? 0) ? (prev?.offset ?? 0) : 0;
         const why = startOffset === 0 ? resetReason(prev?.offset ?? 0) : null;
         if (why) skipped.push(`${key}: ${why}，重置全量采集`);
-        const parse = src.parseLine ?? parseClaudeJsonl;
+        const parse = src.parseLine ?? (src.parser === 'workbuddy-jsonl' ? parseWorkbuddyJsonl : parseClaudeJsonl);
         let lineStart = startOffset;
         let fileNew = 0;
         for (let i = startOffset; i < buf.byteLength; i++) {
@@ -791,7 +905,8 @@ export interface DefaultSourcesOpts {
 /**
  * 自动探测本机各 Agent 的真实会话日志位置（不造假：只返回确实存在的目录）。
  *  - Claude Code：home 下 .claude/projects（递归 *.jsonl）
- *  - workbuddy：workbuddy 根下各项目 .workbuddy/memory（*.md）
+ *  - workbuddy（旧）：workbuddy 根下各项目 .workbuddy/memory（*.md）
+ *  - workbuddy-projects（P0 止血）：home 下 .workbuddy/projects（递归 *.jsonl，新版会话正文）
  *  - 扩展 agent（Qoder CN / Trae Code CN / Zcode / Cursor / Gemini / Qwen 等）：
  *    按 agent 名映射到常见会话/记忆目录（*.jsonl 或 *.md），目录不存在则 skip。
  * 不存在的目录不会进列表（由 scanSessionLogs 诚实 skip 兜底）。
@@ -822,6 +937,19 @@ export function defaultAgentSources(o: DefaultSourcesOpts = {}): SessionLogSourc
     category: 'fact',
     filePattern: /\.md$/,
     roles: ['assistant'],
+  });
+  // WorkBuddy 新版会话日志（P0 止血，2026-11-12）：客户端 11-06 起把会话正文迁到
+  // ~/.workbuddy/projects/**/*.jsonl，旧 md 源随之停产 → 11-06~11-10 连续 5 天 0 入库。
+  // 源名必须独立（workbuddy-projects）：游标键是 `${name}:${rel}`，与旧 workbuddy md 源
+  // 同名会串游标。不声明 roles → 走批次35 缺省「只采 user」，宿主注入由 parser 剥除。
+  out.push({
+    name: 'workbuddy-projects',
+    parser: 'workbuddy-jsonl',
+    dir: join(home, '.workbuddy', 'projects'),
+    recursive: true,
+    maxDepth: 4,
+    category: 'context',
+    filePattern: /\.jsonl$/,
   });
   // DSH（自有 P0，DeepSeek Harness）：完整会话正文落盘在 session_projcache（turnOutline 逐 turn 的 prompt/response 全文）
   // 注：~/.dsh/sessions/**/session.v4.jsonl.zstd 只有 1 行会话壳元数据（无对话正文），不作为采集源

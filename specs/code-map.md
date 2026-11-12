@@ -1574,3 +1574,23 @@ status: draft
 > **B·效果验证**：write 模块单测 60/60（13+11+其余文件），关键锁定：回执无 L1–L6 逐层展示 + 含「界面不再逐层展示」文案；filtered 行不进最近写入通栏（recent-writes-empty 含「质量门拦截不是写入，不计入」）；两 tab 同版式（`.wf-card .wf-rt` / `.wf-grid3 > .wf-card`×3）；l0locked 解锁成功后 `memdesk.l0.writeLockSignal.v1` 信号键已写。e2e write 3/3（真 dist + CDP Chromium）；1280px 浅/深全页截图目视：回执瘦身版式、就地解锁标题与整行控件、最近写入 meta/徽标、查重卡对齐均与确认效果图一致。
 > **C·变异验证**：变异点 = `WritePage.tsx` 最近写入 feed 去掉 `filter_code === null` 过滤 → 用例「修复轮4：质量门拦截不是写入——最近写入通栏不统计 filtered 行」**真实红灯**（13 例中 1 failed，其余 12 过）→ 原样还原 → 13/13 复绿，无变异残留。
 > **已知边界**：最近回执 tab 仍含 filtered 行（回执契约：filtered 也出回执，与「最近写入」口径不同是设计而非不一致）；L0WriteUnlock 共享组件补发信号对其它使用页是行为增强（首页/状态栏更快跟随），无破坏性。
+
+## 批次59：P0 止血 —— WorkBuddy 新版会话日志采集恢复（2026-11-12）
+
+**事故**：11-06 起 WorkBuddy 客户端把会话正文从 `~/workbuddy/**/*.md` 迁到 `~/.workbuddy/projects/**/*.jsonl`，`defaultAgentSources()` 仍只配旧目录 → 11-06~11-10 连续 5 天 0 入库、零报错（静默失效）。详见 `specs/POSTMORTEM-2026-11-11-静默失效与双通路自发现方案.md` 与 `specs/DECISION-2026-11-12-方案对比与融合自发现架构.md` §6.1。
+
+| 任务→文件 | 实现 | 测试 |
+|---|---|---|
+| P0-1 新 parser | `src/core/memagent/sessionCollector.ts`：导出 `parseWorkbuddyJsonl()` + 单一真源常量 `WB_HOST_TAGS` / `WB_HOST_BLOCK_RE` / `WB_UNCLOSED_HOST_TAG_RE` / `WB_USER_QUERY_RE` / `WB_CONTINUATION_RE` / `WB_MAX_CONTENT_CHARS=20000` | `__tests__/workbuddyJsonlCollector.test.ts` 解析器 10 例 + C2 输入变异 9 例 |
+| P0-2 扫描接线 | 同文件：`SessionLogSource.parser` 加 `'workbuddy-jsonl'`；`scanSessionLogs` 的 JSONL 分支条件、`parse` 路由、`recursive` 缺省各加该 literal（否则新 parser 会静默落到 Markdown 整块解析分支） | 端到端 5 例（首次全量 / 增量 / 幂等 / 递归子目录 / 目录不存在诚实 skip） |
+| P0-3 新源注册 | 同文件 `defaultAgentSources()`：`name:'workbuddy-projects'`、`dir: join(home,'.workbuddy','projects')`、`recursive:true`、`maxDepth:4`、`filePattern:/\.jsonl$/`、**不声明 roles**（走批次35 缺省只采 user） | 源注册 2 例（含「名字不得与旧 workbuddy md 源冲突」断言） |
+| 自动生效 | `src/electron/main.ts:3093` `buildSources()` 与 `tools/collect-daemon.mjs:66` `defaultAgentSources()` 共用同一导出 → **两处装配代码均未改**；`agents` 白名单只过滤扩展源，不影响新 P0 源 | 源注册第 2 例覆盖 |
+
+**真实格式（本机 121 个 jsonl 只读实测，纠正成文时口径）**：`type:'message'` + **顶层** `role` / `content:[{type:'input_text'|'output_text',text}]` + `sessionId` + `timestamp`（**epoch 毫秒数字**）。`user` 消息里 80% 以上是宿主注入：`<system-reminder>`、`<cb_summary>`（**内部重放历史 `<user_query>`，实测 66 处**）、`<conversation_history_summary>`、`<task-notification>`、续接模板、`<image_local_path>`。故口径是「**先剥注入块 → 再提取 `<user_query>` → 只采真实输入**」；无包裹的早期格式走纯文本兜底，未闭合注入块 / 续接模板 / >20,000 字符巨型文本拒采。单条最长实测 5040 字符。
+
+**三道闸门证据**：
+> **A·影响面回归**：影响面 = `sessionCollector.ts` + 新增测试 1 文件 + `specs/` 3 份文档；未改内核写入链路 / 存储 / 审计 / MCP / 端口 / L0 / 质量门 / 100 个 IPC 通道。既有采集器三套件 `sessionCollector.test.ts`(38) + `dshZstdCollector.test.ts`(4) + `collectDaemon.test.ts`(5) **47/47 全绿**；typecheck 0 错、oxlint 0/0、`check:no-demo` / `validate_project.py` / `code:index:check` 全绿；全量 `test:gate` 见提交日志。
+> **B·效果验证**：离线真源只读扫描（121 文件、不写库）：事故窗口 `11-06=37 / 11-07=1 / 11-08=3 / 11-09=31 / 11-10=68`（合计 **140** 条），端到端 `collected=1280` / `deduped=250` / `roleSkipped=10637` / `skipped=0`，**注入污染 0 条**，样本全为真实用户提问。回填硬指标「11-06~11-10 产出 > 0 条」达成。
+> **C·变异验证**：C1 变异点 = 把 `parts.join('\n').replace(WB_HOST_BLOCK_RE,'')` 改成 `parts.join('\n')`（不剥宿主注入块）→ **3 条核心用例真实红灯**（摘要重放被采 2 条 / 整条注入未返回 null / 回填硬指标 6≠5）→ 原样还原（SHA256 `d52ab9e0…` 前后一致、无 `C1 变异` 残留）→ 25/25 复绿。C2 输入变异矩阵 9 例：无 content / content 非数组 / role 缺失 / Claude 嵌套 message 误入 / 未闭合 system-reminder / 纯续接模板 / 纯图片块 / 坏行 / ISO 时间漂移（内容仍采但 `ts` 诚实留空）全部如实拒绝或降级，外加合法输入反面 1 例防过滤过头。
+
+**已知边界**：① 离线 `collected=1280` 是不限流结果，真机 `maxItemsPerRun=50` / 5 分钟一轮，全历史回填约 26 轮（≈2h），首轮即 > 0 条；② 本次只落代码与打包产物，**未重启桌面端**，真实记忆库尚未新增行，重启后首轮采集自动入库；③ T8（Trae / Qoder SQLite reader）仍未修，11-06 后这两路正文仍不回流；④ 新源名必须与旧 `workbuddy` md 源不同，否则 `${name}:${rel}` 游标键串位；⑤ 打包 SHA256 与包内标记见 `specs/MANUAL-TEST-FIX-BATCH-43.md`。
