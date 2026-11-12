@@ -62,3 +62,6 @@ e2e/.cde.json
 
 # Trae 会话导出的 HTML 分享包（一次性产物，与项目无关）
 /.trae-html-share-packages/
+
+# 外部程序误写到仓库根目录的日志（如显卡驱动 umdlogs），非项目资产
+/NVIDIA Corporation/
