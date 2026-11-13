@@ -1,12 +1,13 @@
 // S7 分层面板口径：计数来自真实 storage.browse(Ln)；读不到显示「读取失败」，绝不当 0。
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { coreBrowse, coreListMemories } from '../../memory/coreMemoryOps.ts';
-import { loadL0Status } from '../statusbar.ts';
+import { loadL0Status, loadL0Write } from '../statusbar.ts';
 import { loadLayerPanel } from '../layers.ts';
 
 vi.mock('../../memory/coreMemoryOps.ts', () => ({ coreListMemories: vi.fn(), coreBrowse: vi.fn() }));
-vi.mock('../statusbar.ts', () => ({ loadL0Status: vi.fn() }));
+vi.mock('../statusbar.ts', () => ({ loadL0Status: vi.fn(), loadL0Write: vi.fn() }));
 
+const L0_WRITE = { status: 'ok' as const, view: { unlocked: false, pending: null } };
 const L0 = { status: 'ok' as const, view: { has_admin_wrap: true, write_unlocked: false, active_sessions: 0, active_grants: 0, member_write_wraps: 0, member_wrap_ids: [] } };
 
 function row(memId: string, content: string) {
@@ -18,6 +19,8 @@ beforeEach(() => {
   vi.mocked(coreBrowse).mockReset();
   vi.mocked(loadL0Status).mockReset();
   vi.mocked(loadL0Status).mockResolvedValue(L0);
+  vi.mocked(loadL0Write).mockReset();
+  vi.mocked(loadL0Write).mockResolvedValue(L0_WRITE);
 });
 
 describe('loadLayerPanel', () => {

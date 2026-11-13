@@ -1,6 +1,7 @@
 // coreMemoryOp 契约测试（17.3 / P4 调参迁移：G4 约束 + 钳制 + 版本 + 审计）
 import { describe, expect, it } from 'vitest';
 import { coreFeedback, coreMemoryOp } from '../memories.ts';
+import { coreListConflicts } from '../conflict.ts';
 import { InMemoryStorage } from '../storage.ts';
 import { JsVectorBackend, embedSync } from '../vector.ts';
 import type { Memory } from '../types.ts';
@@ -180,5 +181,130 @@ describe('coreFeedback（17.4 trust_delta）', () => {
     const bad = await coreFeedback('nope', 'confirm', { storage: s, request_id: 'req_fb6', now: 0 });
     expect(bad.ok).toBe(false);
     expect(bad.mem).toBeNull();
+  });
+});
+
+// 批次61 GAP-2（规格 B1/B2/B3）：反馈信号回灌净化因果链。
+// 红线：默认策略必须「不启用」，即升级后老账本行为与改造前逐字一致。
+const NOW2 = 1_800_000_000_000;
+
+/** 把 growth:v1 配置写进 P_SYSTEM 账本（与 product 路径同一前缀与载体） */
+async function seedGrowth(s: InMemoryStorage, policy: Record<string, unknown>): Promise<void> {
+  await s.putMemory(seed({
+    mem_id: 'growth_seed', project_id: 'P_SYSTEM', category: 'preference', user_id: 'system',
+    content: `growth:v1:${JSON.stringify({ feedback_policy: policy })}`,
+    decay_class: 'hot', pinned: true, created_at: NOW2 - 1000, updated_at: NOW2 - 1000,
+  }));
+}
+
+describe('GAP-2 反馈回灌（B1/B2/B3）', () => {
+  it('B1：policy 未启用（缺省）→ 连打 5 次 reject 也只降 confidence，不降档、不写 growth_op', async () => {
+    const s = new InMemoryStorage();
+    await s.putMemory(seed({ confidence: 0.9 }));
+    for (let i = 0; i < 5; i++) {
+      await coreFeedback('m1', 'reject', { storage: s, request_id: `req_b1_${i}`, now: NOW2 + i });
+    }
+    const m = await s.getMemory('m1');
+    expect(m?.confidence).toBeCloseTo(0.65);
+    expect(m?.decay_class).toBe('hot');                                  // 档位一字不动
+    expect(await s.queryAudit({ action: 'growth_op' })).toHaveLength(0); // 不产生回灌审计
+  });
+
+  it('B2：启用阈值（3 次）→ 第 3 次 reject 触发 hot→warm，并落可追溯 growth_op', async () => {
+    const s = new InMemoryStorage();
+    await seedGrowth(s, { enabled: true, window_days: 30, reject_downgrade_threshold: 3 });
+    await s.putMemory(seed({ confidence: 0.9 }));
+
+    await coreFeedback('m1', 'reject', { storage: s, request_id: 'req_b2_1', now: NOW2 });
+    await coreFeedback('m1', 'reject', { storage: s, request_id: 'req_b2_2', now: NOW2 + 1 });
+    expect((await s.getMemory('m1'))?.decay_class).toBe('hot'); // 差一次，不动
+    expect(await s.queryAudit({ action: 'growth_op' })).toHaveLength(0);
+
+    await coreFeedback('m1', 'reject', { storage: s, request_id: 'req_b2_3', now: NOW2 + 2 });
+    expect((await s.getMemory('m1'))?.decay_class).toBe('warm');
+
+    const ops = await s.queryAudit({ action: 'growth_op' });
+    expect(ops).toHaveLength(1);
+    const entry = (ops[0].detail as { entry: Record<string, unknown> }).entry;
+    expect(entry.event).toBe('reject_downgrade');
+    const payload = JSON.parse(String(entry.payload)) as Record<string, unknown>;
+    expect(payload).toMatchObject({ mem_id: 'm1', rejects: 3, threshold: 3, from: 'hot', to: 'warm', applied: true });
+  });
+
+  it('B2：窗口外的历史 reject 不计入（不会一启用就批量降档）', async () => {
+    const s = new InMemoryStorage();
+    // 阈值 4：窗口 7 天
+    await seedGrowth(s, { enabled: true, window_days: 7, reject_downgrade_threshold: 4 });
+    await s.putMemory(seed({ confidence: 0.95 }));
+    // 30 天前连打 3 次：当时各自累计最多 3 次，均未达阈
+    for (let i = 0; i < 3; i++) {
+      await coreFeedback('m1', 'reject', {
+        storage: s, request_id: `req_b2o_${i}`, now: NOW2 - 30 * 24 * 3600_000 - i,
+      });
+    }
+    expect((await s.getMemory('m1'))?.decay_class).toBe('hot');
+    // 今天再打第 4 次：若按「全历史」算就会达阈（3+1=4）；按 7 天窗算只有 1 次 → 不降档
+    await coreFeedback('m1', 'reject', { storage: s, request_id: 'req_b2o_now', now: NOW2 });
+    expect((await s.getMemory('m1'))?.decay_class).toBe('hot');
+    expect(await s.queryAudit({ action: 'growth_op' })).toHaveLength(0);
+  });
+
+  it('B2：已是 cold 时达阈不硬推 dormant，审计 applied:false 如实标注', async () => {
+    const s = new InMemoryStorage();
+    await seedGrowth(s, { enabled: true, window_days: 30, reject_downgrade_threshold: 1 });
+    await s.putMemory(seed({ confidence: 0.9, decay_class: 'cold' }));
+    await coreFeedback('m1', 'reject', { storage: s, request_id: 'req_b2c', now: NOW2 });
+    expect((await s.getMemory('m1'))?.decay_class).toBe('cold');
+    const ops = await s.queryAudit({ action: 'growth_op' });
+    const payload = JSON.parse(String((ops[0].detail as { entry: Record<string, unknown> }).entry.payload));
+    expect(payload).toMatchObject({ from: 'cold', to: null, applied: false });
+  });
+
+  it('B3：disputed 补齐对手 → conflict.ts 路径 1 真能列出这一对', async () => {
+    const s = new InMemoryStorage();
+    await s.putMemory(seed({ mem_id: 'm1', content: '部署环境是 k8s 集群', created_at: NOW2 - 2000 }));
+    await s.putMemory(seed({ mem_id: 'm2', content: '部署环境是 k8s 集群', created_at: NOW2 - 1000 }));
+
+    const r = await coreFeedback('m1', 'disputed', { storage: s, request_id: 'req_b3', now: NOW2 });
+    const cid = r.mem?.conflict_id;
+    expect(cid).toMatch(/^cf_/);
+    // 对手被挂上同一个 conflict_id，且只动 conflict_id + 版本钟
+    const m2 = await s.getMemory('m2');
+    expect(m2?.conflict_id).toBe(cid);
+    expect(m2?.content).toBe('部署环境是 k8s 集群');
+    expect(m2?.decay_class).toBe('hot');
+
+    const pairs = await coreListConflicts(s);
+    expect(pairs).toHaveLength(1);
+    expect(pairs[0].conflict_id).toBe(cid);
+    expect([pairs[0].old_id, pairs[0].new_id].sort()).toEqual(['m1', 'm2']);
+    // 分数与类型如实为 null（内核没有检测引擎）
+    expect(pairs[0].conflict_score).toBeNull();
+  });
+
+  it('B3：找不到对手 → 如实单条保留，审计写明原因（不伪造第二条）', async () => {
+    const s = new InMemoryStorage();
+    await s.putMemory(seed({ mem_id: 'm1', content: '部署环境是 k8s 集群' }));
+    await s.putMemory(seed({ mem_id: 'm2', content: '今晚吃番茄炒蛋' })); // 语义无关
+
+    const r = await coreFeedback('m1', 'disputed', { storage: s, request_id: 'req_b3n', now: NOW2 });
+    expect((await s.getMemory('m2'))?.conflict_id).toBeUndefined();
+    const audit = (await s.queryAudit({ action: 'memory_op' }))[0];
+    const pair = (audit.detail as { conflict_pair: { counterpart: unknown; reason?: string } }).conflict_pair;
+    expect(pair.counterpart).toBeNull();
+    expect(pair.reason).toBeTruthy();
+    expect(await coreListConflicts(s)).toHaveLength(0); // 单条不成对，队列如实为空
+    expect(r.mem?.conflict_id).toMatch(/^cf_/);
+  });
+
+  it('B3：重复 disputed 幂等——不会把第三条拉进同一冲突 id', async () => {
+    const s = new InMemoryStorage();
+    await s.putMemory(seed({ mem_id: 'm1', content: '部署环境是 k8s 集群', created_at: NOW2 - 3000 }));
+    await s.putMemory(seed({ mem_id: 'm2', content: '部署环境是 k8s 集群', created_at: NOW2 - 2000 }));
+    await s.putMemory(seed({ mem_id: 'm3', content: '部署环境是 k8s 集群', created_at: NOW2 - 1000 }));
+    await coreFeedback('m1', 'disputed', { storage: s, request_id: 'req_b3i1', now: NOW2 });
+    await coreFeedback('m1', 'disputed', { storage: s, request_id: 'req_b3i2', now: NOW2 + 1 });
+    expect((await s.getMemory('m3'))?.conflict_id).toBeUndefined();
+    expect(await coreListConflicts(s)).toHaveLength(1);
   });
 });

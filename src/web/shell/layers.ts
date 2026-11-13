@@ -7,7 +7,7 @@ import type { L0VaultStatus, Layer } from '../../core/memagent/types.ts';
 import { hostCapability } from '../../desktop/hostBridge.ts';
 import { coreBrowse, coreListMemories } from '../memory/coreMemoryOps.ts';
 import type { DockResult } from './dock.ts';
-import { loadL0Status } from './statusbar.ts';
+import { loadL0Status, loadL0Write, type L0WriteView } from './statusbar.ts';
 
 export const PANEL_LAYERS = ['L6', 'L5', 'L4', 'L3', 'L2', 'L1'] as const;
 export type PanelLayer = typeof PANEL_LAYERS[number];
@@ -24,6 +24,8 @@ export interface LayerPanelView {
   layers: LayerCount[];
   failed: PanelLayer[];
   l0: DockResult<L0VaultStatus>;
+  /** 写锁（能不能写）—— 成员可读；与上面的管理口径分开 */
+  l0Write: DockResult<L0WriteView>;
   /** host = 本机账本；browser = 进程内内存账本（非本机库），必须标明避免把 0 读成「全库没有」 */
   kernelMode: 'host' | 'browser';
   loadedAt: number;
@@ -67,6 +69,7 @@ export async function loadLayerPanel(): Promise<DockResult<LayerPanelView>> {
       layers,
       failed,
       l0: await loadL0Status(),
+      l0Write: await loadL0Write(),
       kernelMode: hostCapability() === 'none' ? 'browser' : 'host',
       loadedAt: Date.now(),
     },

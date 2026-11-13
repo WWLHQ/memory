@@ -24,7 +24,8 @@ function recallResult(): RecallResult {
     payload_tokens: 100,
     pipeline_llm_tokens: 0,
     budget: { soft: 1500, warn: 2000, hard: 3000, status: 'ok' },
-    mode: 'auto', request_id: 'req_f', scanned_memories: 1,
+    mode: 'auto', hit_keywords: [], secondary_mode_hint: null,
+    request_id: 'req_f', scanned_memories: 1,
     background: { items: [], tokens: 0, candidates: 0 },
     savings: {
       corpus_tokens: 10000, payload_tokens: 100, background_tokens: 0, injected_tokens: 102,

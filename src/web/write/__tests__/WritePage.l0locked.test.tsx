@@ -1,7 +1,7 @@
 // 批次41-W：写入页「L0 写密钥锁定」端到端——提交被挡 → 原地出解锁卡 → 管理员解锁后自动重放 → 出回执。
 // 用真内核（真 L0Vault 封存），只 mock 会话为管理员（解锁卡需要管理员分支才出按钮）。
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 
 // 会话角色可变（hoisted），便于同一 describe 内切换管理员 / 成员
 const h = vi.hoisted(() => ({ session: { role: 'admin' as 'admin' | 'member', user_id: 'admin' } }));
@@ -111,5 +111,22 @@ describe('WritePage · 批次41-W L0 写密钥锁定', () => {
     fireEvent.click(screen.getByTestId('l0-unlock-submit'));
     await waitFor(() => expect(screen.getByTestId('l0-unlock-error')).toBeInTheDocument());
     expect(screen.queryByTestId('receipt')).toBeNull();
+  });
+
+  // 2026-11-12 用户报障：「账号安全密钥锁已解锁，但是写入页密钥锁提示还未解锁」。
+  // 写入页原先把写密钥状态只在 receipt/refusal/sid 变化时重读，别的页面解锁后本页停在旧值。
+  it('在别处解锁写密钥（广播写锁信号）→ 本页 masthead 立刻重读成「已解锁」', async () => {
+    const vault = await unlockedVault();
+    await vault.lockWrite({ admin_user_id: TEST_ADMIN_ID });
+    render(<WritePage />);
+    // 初始：内核真实锁定 → 如实显示未解锁
+    await waitFor(() => expect(screen.getByTestId('write-key-status').textContent).toContain('未解锁'));
+    // 模拟「安全页 → 本账号写密钥」卡里解锁（不经过本页 UI），随后广播信号
+    await vault.unlockWrite({ password: TEST_ADMIN_PW, admin_user_id: TEST_ADMIN_ID });
+    await act(async () => {
+      window.dispatchEvent(new StorageEvent('storage', { key: L0_WRITE_LOCK_SIGNAL_KEY }));
+    });
+    await waitFor(() => expect(screen.getByTestId('write-key-status').textContent).toContain('已解锁'));
+    expect(screen.getByTestId('write-key-status').textContent).not.toContain('未解锁');
   });
 });

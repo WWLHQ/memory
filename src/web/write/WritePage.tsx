@@ -18,6 +18,7 @@ import { kernelErrorText, useKernelLoad } from '../shared/kernelLoad.tsx';
 import { L0WriteUnlock } from '../shared/L0WriteUnlock.tsx';
 import { useHostTheme } from '../shared/hostTheme.ts';
 import { useSessionContext } from '../shared/session.ts';
+import { onL0WriteLockChanged } from '../shared/l0WriteLockSignal.ts';
 import { isL0LockedError } from '../../core/memagent/errors.ts';
 import { DEFAULT_PROJECT_ID, listProjectIds } from '../shared/kernelProjects.ts';
 import { newRequestId } from '../kernel.ts';
@@ -106,6 +107,12 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
     loadHistory();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sid]);
+
+  // 写密钥在**别的页面/卡片**里被解锁或锁定（安全页「本账号写密钥」卡、壳层状态栏）时，
+  // 主进程 IPC 改了锁状态但不写 localStorage → 本页 masthead 会停在旧值，
+  // 表现为「安全页明明已解锁，写入页还说未解锁」。信号只提示「该重读了」，
+  // 真值仍由 coreWriteStatus() 从内核重取。
+  useEffect(() => onL0WriteLockChanged(() => loadL0Status()), []);
 
   useEffect(() => {
     if (tab === 'receipts') loadHistory();

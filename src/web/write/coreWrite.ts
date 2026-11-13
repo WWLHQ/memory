@@ -4,6 +4,7 @@
 import type { Category as CoreCategory } from '../../core/memagent/types.ts';
 import type { StorageBackend } from '../../core/memagent/types.ts';
 import { getKernel, getKernelStorage } from '../kernel.ts';
+import { readL0WriteState } from '../shared/l0WriteState.ts';
 import type { MemoryCategory, WriteReceiptHistoryRow } from './types.ts';
 import type { ExistingMemory } from './types.ts';
 
@@ -76,11 +77,16 @@ export async function coreListExisting(): Promise<ExistingMemory[]> {
     .map((m) => ({ id: m.mem_id, content: m.content }));
 }
 
-/** 写密钥状态（真实内核 getWriteStatus；pending 条数只用于内部判断，不在界面展示） */
+/**
+ * 写密钥状态。**不再自己拼通道**：统一走 shared/l0WriteState（内核 getWriteStatus），
+ * 与首页红条、壳层状态栏、层级面板同一个真源，避免同一事实在不同界面给出不同答案。
+ * pending 条数只用于内部判断，不在界面展示。
+ */
 export async function coreWriteStatus(): Promise<{ l0_unlocked: boolean; pending_count: number }> {
-  const ma = await getAgent();
-  const r = await ma.getWriteStatus();
-  return { l0_unlocked: r.l0_unlocked, pending_count: r.pending_count };
+  const st = await readL0WriteState();
+  // 读不到就如实抛错（写入页会显示「状态不可读」），绝不把「不知道」冒充成「未解锁」
+  if (st.source === 'unavailable' || st.unlocked === null) throw new Error(st.detail ?? '写锁状态读不到');
+  return { l0_unlocked: st.unlocked, pending_count: st.pending ?? 0 };
 }
 
 /** 从内核错误里取本次真实 request_id（未签发返回 null，界面不得补造） */

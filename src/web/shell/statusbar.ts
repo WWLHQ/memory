@@ -8,6 +8,7 @@
 import { hostCall, hostCapability } from '../../desktop/hostBridge.ts';
 import type { L0VaultStatus } from '../../core/memagent/types.ts';
 import { getKernel } from '../kernel.ts';
+import { readL0WriteState } from '../shared/l0WriteState.ts';
 import { storageLocation } from '../memory/coreMemoryOps.ts';
 import type { DockResult } from './dock.ts';
 
@@ -38,10 +39,31 @@ interface RawCollectorStatus {
 export interface StatusSnapshot {
   location: DockResult<StoragePlaceView>;
   l0: DockResult<L0VaultStatus>;
+  /** 写锁（能不能写）—— 成员也读得到，与上面的查阅锁/管理口径分开 */
+  l0Write: DockResult<L0WriteView>;
   collector: DockResult<CollectorView>;
 }
 
+/** 写锁视图：只有「能不能写」这一件事，不含任何管理字段与密钥材料 */
+export interface L0WriteView {
+  unlocked: boolean;
+  pending: number | null;
+}
+
 const errText = (e: unknown): string => String((e as Error)?.message ?? e);
+
+/**
+ * 写锁状态（唯一读法）：走 shared/l0WriteState → 内核 getWriteStatus。
+ * 与 loadL0Status 的区别：那个是 `l0:status`（requireAdmin，只给管理员看保险库全貌），
+ * 这个是**本账号能不能写**，成员也必须读得到 —— 否则状态栏会对成员谎报「不可用」。
+ */
+export async function loadL0Write(): Promise<DockResult<L0WriteView>> {
+  const st = await readL0WriteState();
+  if (st.source === 'unavailable' || st.unlocked === null) {
+    return { status: 'unavailable', detail: st.detail ?? '写锁状态读不到' };
+  }
+  return { status: 'ok', view: { unlocked: st.unlocked, pending: st.pending } };
+}
 
 /** L0 保险库只读状态：桌面壳经 IPC；浏览器模式如实说明读不到 */
 export async function loadL0Status(): Promise<DockResult<L0VaultStatus>> {
@@ -80,14 +102,15 @@ export async function loadCollectorStatus(): Promise<DockResult<CollectorView>> 
 }
 
 export async function loadStatusbar(): Promise<StatusSnapshot> {
-  const [location, l0, collector] = await Promise.all([
+  const [location, l0, l0Write, collector] = await Promise.all([
     storageLocation()
       .then((v): DockResult<StoragePlaceView> => ({ status: 'ok', view: v }))
       .catch((e): DockResult<StoragePlaceView> => ({ status: 'error', detail: errText(e) })),
     loadL0Status(),
+    loadL0Write(),
     loadCollectorStatus(),
   ]);
-  return { location, l0, collector };
+  return { location, l0, l0Write, collector };
 }
 
 /** 账本位置 → 状态栏紧凑文案 */

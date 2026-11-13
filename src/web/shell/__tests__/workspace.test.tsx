@@ -5,6 +5,7 @@ import { setTestOverride } from '../../Home/crossTabAuth.ts';
 import { PAGES } from '../views.ts';
 import { SELECTION_MSG } from '../../shared/selectionChannel.ts';
 import { SHELL_GOTO_MSG } from '../../shared/shellNavigate.ts';
+import { L0_WRITE_LOCK_SIGNAL_KEY } from '../../shared/l0WriteLockSignal.ts';
 
 // 概览条的数据加载走真实内核/网络；组件单测只验证渲染契约，故固定快照。
 // 批次55：层级刻度与四卡共用这份快照里的 strata 计数，不再单独 mock 一个加载器。
@@ -110,6 +111,7 @@ beforeEach(() => {
   vi.mocked(loadStatusbar).mockResolvedValue({
     location: { status: 'ok', view: { kind: 'file', path: 'C:\\data\\memories.db.json', source: 'ipc' } },
     l0: { status: 'ok', view: { has_admin_wrap: true, write_unlocked: false, active_sessions: 0, active_grants: 0, member_write_wraps: 0, member_wrap_ids: [] } },
+    l0Write: { status: 'ok', view: { unlocked: false, pending: null } },
     collector: {
       status: 'ok',
       view: { running: true, intervalMs: 60_000, lastAt: 1_790_000_000_000, lastCollected: 12, autoRetryStopped: false, consecutiveFails: 0 },
@@ -126,6 +128,7 @@ beforeEach(() => {
       ],
       failed: ['L3'],
       l0: { status: 'ok', view: { has_admin_wrap: true, write_unlocked: false, active_sessions: 0, active_grants: 0, member_write_wraps: 0, member_wrap_ids: [] } },
+      l0Write: { status: 'ok', view: { unlocked: false, pending: null } },
       kernelMode: 'host',
       loadedAt: 1_790_000_000_000,
     },
@@ -150,6 +153,43 @@ describe('工作台壳层', () => {
     const frames = container.querySelectorAll('iframe.page-frame');
     expect(frames.length).toBe(1);
     expect((frames[0] as HTMLIFrameElement).getAttribute('src')).toContain('/index.html');
+  });
+
+  it('写锁信号到达壳层 → 首页 iframe 被重挂（修复轮5：首页是后台 iframe，会错过 storage 事件，且 iframe 内 focus/visibilitychange 对「切换 shell 标签」无效，必须由壳层 native 顶层可靠驱动重挂）', async () => {
+    const { container } = await renderShell();
+    const before = container.querySelector('iframe.page-frame') as HTMLIFrameElement | null;
+    expect(before).toBeTruthy();
+    // 模拟「写入页解锁写密钥」后广播的写锁信号（跨文档 storage 事件到达壳层 native 顶层）
+    act(() => {
+      window.dispatchEvent(new StorageEvent('storage', { key: L0_WRITE_LOCK_SIGNAL_KEY, newValue: String(Date.now()) }));
+    });
+    // 壳层监听信号 → 递增 homeReloadNonce → 首页 iframe key 变化 → React 卸载旧 iframe 并挂载新节点
+    await waitFor(() => {
+      const after = container.querySelector('iframe.page-frame') as HTMLIFrameElement | null;
+      expect(after).not.toBe(before);
+    });
+    // 重挂后首页仍指向 index.html（只是重新加载，拿最新写锁真值）
+    expect((container.querySelector('iframe.page-frame') as HTMLIFrameElement).getAttribute('src')).toContain('/index.html');
+  });
+
+  it('轮6：从其它页切回首页 tab → 首页 iframe 被重挂（覆盖「安全页解锁写密钥后回首页」主路径，不依赖跨 iframe storage 信号）', async () => {
+    const { container } = await renderShell();
+    const before = container.querySelector('iframe.page-frame') as HTMLIFrameElement | null;
+    expect(before).toBeTruthy();
+    // 先打开「账号与安全」tab，离开首页（activeId 变为 security，本 effect 不触发重挂）
+    act(() => { fireEvent.click(screen.getByText('账号与安全')); });
+    // 切回首页 tab → 壳层按 activeId==='home' 强制重挂首页 iframe（key 变化 → React 替换节点）
+    const homeTab = Array.from(container.querySelectorAll('.vtab')).find(
+      (b) => (b.textContent ?? '').includes('首页'),
+    ) as HTMLElement | undefined;
+    expect(homeTab).toBeTruthy();
+    act(() => { fireEvent.click(homeTab as HTMLElement); });
+    await waitFor(() => {
+      const after = container.querySelector('iframe.page-frame') as HTMLIFrameElement | null;
+      expect(after).not.toBe(before);
+    });
+    // 重挂后首页仍指向 index.html（重新加载，拿最新写锁真值）
+    expect((container.querySelector('iframe.page-frame') as HTMLIFrameElement).getAttribute('src')).toContain('/index.html');
   });
 
   it('DOM 为五组 20 项，角标只显示真实读数，不出现参考图示例数', async () => {
@@ -562,6 +602,7 @@ describe('工作台壳层', () => {
     vi.mocked(loadStatusbar).mockResolvedValue({
       location: { status: 'ok', view: { kind: 'file', path: 'C:\\data\\memories.db.json', source: 'ipc' } },
       l0: { status: 'ok', view: { has_admin_wrap: true, write_unlocked: true, active_sessions: 2, active_grants: 1, member_write_wraps: 0, member_wrap_ids: [] } },
+      l0Write: { status: 'ok', view: { unlocked: true, pending: null } },
       collector: {
         status: 'ok',
         view: { running: true, intervalMs: 60_000, lastAt: 1_790_000_000_000, lastCollected: 12, autoRetryStopped: false, consecutiveFails: 0 },
@@ -580,10 +621,32 @@ describe('工作台壳层', () => {
     expect(title).toContain('写锁（写密钥）已解锁');
   });
 
+  it('成员口径：查阅锁读不到（requireAdmin）时，写锁仍按真实值显示（2026-11-12 报障回归）', async () => {
+    // 成员调 l0:status 必被拒（查阅锁/授权是管理员口径），但写锁走 getWriteStatus，
+    // 账号级通道是通的 —— 不能因为查阅锁读不到就把写锁也写成「不可用」。
+    vi.mocked(loadStatusbar).mockResolvedValue({
+      location: { status: 'ok', view: { kind: 'file', path: 'C:////data////memories.db.json', source: 'ipc' } },
+      l0: { status: 'error', detail: '需要管理员权限（§4.4.4）' },
+      l0Write: { status: 'ok', view: { unlocked: true, pending: 0 } },
+      collector: {
+        status: 'ok',
+        view: { running: true, intervalMs: 60_000, lastAt: 1_790_000_000_000, lastCollected: 12, autoRetryStopped: false, consecutiveFails: 0 },
+      },
+    });
+    await renderShell();
+    const cell = await screen.findByTestId('sb-l0');
+    expect(cell.textContent).toContain('查阅不可用');
+    expect(cell.textContent).toContain('写已解');
+    const title = cell.getAttribute('title')!;
+    expect(title).toContain('写锁（写密钥）已解锁');
+    expect(title).toContain('需要管理员权限');
+  });
+
   it('状态栏不可用态写原因，不用 0 或「—」冒充读数', async () => {
     vi.mocked(loadStatusbar).mockResolvedValue({
       location: { status: 'ok', view: { kind: 'memory', source: 'browser-memory' } },
       l0: { status: 'unavailable', detail: '浏览器模式：L0 会话由桌面主进程的 L0Vault 保管，浏览器读不到。' },
+      l0Write: { status: 'unavailable', detail: '浏览器模式：写密钥由桌面主进程的 L0Vault 保管，浏览器读不到。' },
       collector: { status: 'error', detail: '主进程未返回 ok（采集器状态不可读）' },
     });
     const { container } = await renderShell();

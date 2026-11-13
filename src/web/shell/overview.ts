@@ -17,7 +17,7 @@ import type { RawHomeFeed } from '../../home/dashboard.ts';
 import { getKernelStorage } from '../kernel.ts';
 import { currentSessionId } from '../shared/session.ts';
 import { hostCall, hostCapability } from '../../desktop/hostBridge.ts';
-import { loadL0Status } from './statusbar.ts';
+import { loadL0Write } from './statusbar.ts';
 import type { Gain } from '../../types/agentOnboard.ts';
 import type { HomeFacts, HomeStrataCount } from '../Home/coreHome.ts';
 import type { AuditRecord } from '../../core/memagent/types.ts';
@@ -419,7 +419,7 @@ export async function loadOverview(): Promise<OverviewSnapshot> {
     mcp,
     engines,
     dataRoot,
-    l0WriteStatus,
+    l0WriteGuard,
   ] = await Promise.all([
     getHomeFeed(getKernelStorage()).catch((e) => ({
       raw: { gains: [], anomalies: [], activeMemories: [], todos: [] } as RawHomeFeed,
@@ -437,7 +437,7 @@ export async function loadOverview(): Promise<OverviewSnapshot> {
     loadMcpPanel(sid),
     loadEnginePanel(sid),
     loadDataRoot(),
-    loadL0Status(),
+    loadL0Write(),
   ]);
 
   const f = feed as typeof feed & {
@@ -469,8 +469,10 @@ export async function loadOverview(): Promise<OverviewSnapshot> {
     mcp,
     engines,
     dataRoot,
-    l0Write: l0WriteStatus.status === 'ok'
-      ? { available: true, unlocked: l0WriteStatus.view.write_unlocked, detail: null }
-      : { available: false, unlocked: false, detail: 'detail' in l0WriteStatus ? l0WriteStatus.detail : null },
+    // 写锁只认 shared/l0WriteState（内核 getWriteStatus）—— 成员也读得到；
+    // 不再从 requireAdmin 的 l0Status 里取，否则成员会被误报「读不到写锁」。
+    l0Write: l0WriteGuard.status === 'ok'
+      ? { available: true, unlocked: l0WriteGuard.view.unlocked, detail: null }
+      : { available: false, unlocked: false, detail: 'detail' in l0WriteGuard ? l0WriteGuard.detail : null },
   };
 }

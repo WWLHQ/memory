@@ -70,6 +70,20 @@ export class HostL0Port implements L0Port {
       throw asError(e, 'E_AUTH_L0');
     }
   }
+
+  /**
+   * 写密钥是否已解锁（供内核 getWriteStatus / pending 自动重放判断）。
+   * 走登录态窄口子 `l0:myWriteWrap`：member_id 由主进程按会话取，**只需登录**。
+   * 不能用 `l0:status` —— 那是 requireAdmin，成员一调就抛；旧实现在这里缺方法，
+   * 内核只好退到 status()，结果成员恒判「未解锁」（安全页已解锁、写入页仍报未解锁）。
+   * 失败时抛出而不是吞成 false：让内核还能继续退到管理员 status()（老主进程兼容）。
+   */
+  async isWriteUnlocked(): Promise<boolean> {
+    // 走专用只读通道（不带 sessionId）：写锁是进程级事实，不该因为某个文档没拿到会话就判「未解锁」。
+    // 只回一个布尔，不含任何密钥材料。
+    const res = await hostCall<IpcResult<{ write_unlocked?: boolean }>>('l0:writeUnlocked', []);
+    return unwrap(res, 'E_AUTH_L0').write_unlocked === true;
+  }
 }
 
 /** 授权与会话管理端口：管理动作由主进程 requireAdmin 二次校验（角色不由渲染层自报） */

@@ -194,6 +194,13 @@ export function Workspace() {
   const [inspWidth, setInspWidth] = useState(318);
   const [dockHeight, setDockHeight] = useState(190);
   const [reloadNonce, setReloadNonce] = useState(0);
+  /**
+   * 首页（index.html）是中心区 iframe，不是顶层窗口。它在后台（用户停在写入/安全页解锁写密钥）
+   * 会错过 storage 事件，且 iframe 内的 focus/visibilitychange 对「切换 shell 标签」完全无效，
+   * 因此「解锁后首页红条不消失」靠首页自己监听不可靠。改由壳层（native 顶层，storage 事件可靠）
+   * 收到写锁信号后递增本 nonce，主动重挂首页 iframe，让它重新 loadOverview 拿真值。
+   */
+  const [homeReloadNonce, setHomeReloadNonce] = useState(0);
   const [message, setMessage] = useState('工作台已就绪：中心区为同源真实页面，壳层尚未接线的部位会明确标注原因。');
   const [sessionActive, setSessionActive] = useState(() => hasActiveSession());
   /** 当前会话真实身份（/api/me 确认；null = 未确认，绝不按 localStorage 冒充身份） */
@@ -380,8 +387,21 @@ export function Workspace() {
     return () => window.removeEventListener('storage', onStore);
   }, []);
 
-  // 写锁（写密钥）状态变化 → 状态栏立刻重读真实 l0Status，避免解锁后仍显示旧值
-  useEffect(() => onL0WriteLockChanged(() => { void refreshStatus(); }), [refreshStatus]);
+  // 写锁（写密钥）状态变化 → 状态栏立刻重读真实 l0Status；同时主动重挂首页 iframe
+  // （首页是中心区 iframe，对「切换 shell 标签」无效，必须由壳层 native 顶层可靠地驱动重挂）
+  useEffect(() => onL0WriteLockChanged(() => {
+    void refreshStatus();
+    setHomeReloadNonce((n) => n + 1);
+  }), [refreshStatus, setHomeReloadNonce]);
+
+  // 【轮6·真正兜底】每次切回「首页」tab，强制重挂首页 iframe（key 变化 → 重新加载 index.html
+  // → 重新 loadOverview 拿写锁真值）。前几轮（轮3/4/5）都依赖「跨 iframe 的 storage 信号」驱动
+  // 首页刷新，但 Electron 下该信号未必可靠到达壳层，导致「在安全/写入页解锁写密钥 → 回到首页，
+  // 红条仍在」。本 effect 用纯 React 状态（activeId）触发，100% 可靠，覆盖主路径。
+  // 注：activeId 初始即 'home'，首次挂载会多触发一次重挂（无害）。
+  useEffect(() => {
+    if (activeId === 'home') setHomeReloadNonce((n) => n + 1);
+  }, [activeId, setHomeReloadNonce]);
 
   // 启动时用本机 sessionId 向 /api/me 核对真实身份：查不到就不写身份（状态栏只显示「已登录/未登录」）
   useEffect(() => {
@@ -959,17 +979,21 @@ export function Workspace() {
       : collector ? collector.detail : '尚未读取';
 
   const l0 = status?.l0;
-  // L0 有两把独立的锁（§4.4.4，互不替代）：
-  //   写锁 write_unlocked（写密钥）· 查阅锁 active_sessions（解密查阅）。
-  // 旧实现用 active_sessions 推导「已锁定」，会在写密钥已解锁时仍显示锁定 —— 现两把锁都直读。
+  const l0w = status?.l0Write;
+  // L0 有两把独立的锁（§4.4.4，互不替代），且**读它们的通道不同**：
+  //   查阅锁 active_sessions（解密查阅会话）—— 走 l0:status，requireAdmin，成员读不到时如实写「不可用」；
+  //   写锁 write_unlocked（写密钥）—— 走 shared/l0WriteState → 内核 getWriteStatus，**成员也读得到**。
+  // 旧实现两把锁都从 l0:status 取 → 成员解锁后状态栏仍显示「不可用/锁」，与安全页打架。
   const l0Text = !status ? '读取中'
-    : l0?.status === 'ok'
-      ? `查阅${l0.view.active_sessions > 0 ? `${l0.view.active_sessions}会话` : '锁'} · 写${l0.view.write_unlocked ? '已解' : '锁'}`
-      : '不可用';
+    : `查阅${l0?.status === 'ok' ? (l0.view.active_sessions > 0 ? `${l0.view.active_sessions}会话` : '锁') : '不可用'} · 写${l0w?.status === 'ok' ? (l0w.view.unlocked ? '已解' : '锁') : '不可用'}`;
   const l0Title = !status ? '尚未读取'
-    : l0?.status === 'ok'
-      ? `L0 保险库：查阅锁（解密查阅会话）${l0.view.active_sessions > 0 ? `已开 ${l0.view.active_sessions} 个会话` : '锁定（无活跃查阅会话）'} · 写锁（写密钥）${l0.view.write_unlocked ? '已解锁' : '锁定'} · 有效授权 ${l0.view.active_grants} · 管理密钥${l0.view.has_admin_wrap ? '已设置' : '未设置'}（两把锁互不替代，只读，不含任何密钥材料）`
-      : l0 ? l0.detail : '尚未读取';
+    : `L0 保险库：查阅锁（解密查阅会话）${l0?.status === 'ok'
+      ? (l0.view.active_sessions > 0 ? `已开 ${l0.view.active_sessions} 个会话` : '锁定（无活跃查阅会话）')
+      : `读不到${l0 && 'detail' in l0 ? `（${l0.detail}）` : ''}`} · 写锁（写密钥）${l0w?.status === 'ok'
+      ? (l0w.view.unlocked ? '已解锁' : '锁定')
+      : `读不到${l0w && 'detail' in l0w ? `（${l0w.detail}）` : ''}`}${l0?.status === 'ok'
+      ? ` · 有效授权 ${l0.view.active_grants} · 管理密钥${l0.view.has_admin_wrap ? '已设置' : '未设置'}`
+      : ''}（两把锁互不替代，只读，不含任何密钥材料）`;
 
   // 第 1 段「当前库/文档」：只放真实的账本文件名（定稿里的 mem-prod-cn — 记忆库.mem 是演示名）。
   const docLabel = locView ? locView.text : (status ? '库位置未知' : '库读取中');
@@ -1399,7 +1423,7 @@ export function Workspace() {
                   <span className={`ls-cell${layerPanel.view.l0.status === 'ok' && layerPanel.view.l0.view.active_sessions > 0 ? ' ok' : ''}`}
                     data-testid="layer-strip-l0"
                     title={layerPanel.view.l0.status === 'ok'
-                      ? `L0 保险库：活动会话 ${layerPanel.view.l0.view.active_sessions} · 有效授权 ${layerPanel.view.l0.view.active_grants} · 写锁${layerPanel.view.l0.view.write_unlocked ? '已解锁' : '锁定'}`
+                      ? `L0 保险库：活动会话 ${layerPanel.view.l0.view.active_sessions} · 有效授权 ${layerPanel.view.l0.view.active_grants} · 写锁${layerPanel.view.l0Write.status === 'ok' ? (layerPanel.view.l0Write.view.unlocked ? '已解锁' : '锁定') : '读不到'}`
                       : layerPanel.view.l0.detail}>
                     L0 <b>{layerPanel.view.l0.status === 'ok'
                       ? (layerPanel.view.l0.view.active_sessions > 0 ? `${layerPanel.view.l0.view.active_sessions} 会话` : '已锁定')
@@ -1432,7 +1456,7 @@ export function Workspace() {
               return (
                 <div key={t.id} className={`page-pane${t.id === activeId ? ' active' : ''}`}>
                   <iframe
-                    key={`${t.id}-${reloadNonce}`}
+                    key={t.id === 'home' ? `${t.id}-${reloadNonce}-${homeReloadNonce}` : `${t.id}-${reloadNonce}`}
                     ref={(el) => { frameRefs.current[t.id] = el; }}
                     className="page-frame"
                     title={`${t.label} · ${PAGES[t.page].file}`}
