@@ -35,3 +35,9 @@
 ## 批次61 / 其他
 - GAP-1 召回权重真源 `shared/growthConfig.ts`（0.35/0.30/0.15/0.20），`forgetting.ts` 的 `SCORE_WEIGHTS` 仅转发；回归只出建议不写 `growth:v1`；`hardFilter` 先排 `deleted`/`merged_into`。
 - REQ-003 实际落地纯 ESM JS（`src/agentOnboard/*`），追溯以 `specs/code-map.md` 为准。
+
+## 召回模式（A1–A7 已上线，2026-11-13）
+- 分流真源 `core/memagent/recallModes.ts`（`RECALL_MODE_SPECS` 三张表 + `resolveMode`）；**Web 与回显都只读内核**，别再写第二套词表（`web/retrieval/logic.autoDispatch` 已删，有测试锁「别再长回来」）。
+- `RecallResult.dispatch` 与 `mode_dispatch` 审计**同一份对象**；回显 `⚙ 模式：…` 由 `recallInsight.buildRecallModeLine()` 出，落在 compact/full/html/明细页四处。
+- 手动模式才启用权重(A3)/分层(A4)/次模式(A5)；`auto` 档逐条不变。自动分流到极简仍是**只观测**（`mode='minimal'` / `applied_mode='auto'`），别当成已执行。
+- 会话视图（`scope=session`）`dispatch` 恒 `null`，不拿 auto 冒充已分流。
