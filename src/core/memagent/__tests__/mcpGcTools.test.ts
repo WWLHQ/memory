@@ -276,3 +276,83 @@ describe('批次46-4：MCP 裁决参数（D3/D8 二者都给才落定）', () =>
     }
   });
 });
+
+// 批次61 GAP-3（规格 C1/C2/C5）：gc_report 附只读 Agent 侧聚合。
+// 红线：dry_run 语义一字不变（零写入零审计）；聚合数字必须与审计逐条对得上。
+describe('GAP-3 gc_report × Agent 侧聚合', () => {
+  const NOW = 1_800_000_000_000;
+
+  it('C1：注入 storage 后 dry_run 仍零写入零审计，agent_usage 正常回读', async () => {
+    const { storage, ma } = fixture();
+    await seed(storage);
+    await storage.appendAudit({
+      request_id: 'r1', action: 'recall', form: 'desktop', project_id: 'P1', ts: NOW - 1000,
+      detail: { hits: 2, client: 'qoder', saved_tokens: 500, evidence_thin: false },
+    } as never);
+    const before = (await storage.queryAudit({})).length;
+
+    const r = await runGcReportTool(ma, { project_id: 'P1' }, FULL_ACCOUNT, { storage, now: NOW });
+    expect(r.dry_run).toBe(true);
+    expect(r.audit_written).toBe(false);
+    expect((await storage.queryAudit({})).length).toBe(before);            // 零审计
+    expect((await storage.getMemory('mem_old'))?.decay_class).toBe('hot'); // 零落库
+    expect(r.agent_usage.ok).toBe(true);
+    if (r.agent_usage.ok) {
+      // 窗口：now-1000 在 7 天内；seed 里没有别的 recall
+      expect(r.agent_usage.usage.totals).toMatchObject({ recalls: 1, saved_tokens: 500 });
+      expect(r.agent_usage.usage.agents[0]).toMatchObject({ client: 'qoder', recalls: 1 });
+    }
+  });
+
+  it('C2：聚合每个数字都能在审计里数出来（含未标识桶）', async () => {
+    const { storage, ma } = fixture();
+    await seed(storage);
+    const mk = (ts: number, detail: Record<string, unknown>) => ({
+      request_id: `r_${ts}`, action: 'recall', form: 'desktop', project_id: 'P1', ts, detail,
+    } as never);
+    await storage.appendAudit(mk(NOW - 1000, { hits: 1, client: 'qoder', saved_tokens: 100 }));
+    await storage.appendAudit(mk(NOW - 2000, { hits: 1, client: 'qoder', saved_tokens: 200, evidence_thin: true }));
+    await storage.appendAudit(mk(NOW - 3000, { hits: 1 }));                 // 无 client
+    await storage.appendAudit({ request_id: 'c1', action: 'mcp_call', agent: 'qoder', ts: NOW - 500,
+      detail: { reliable: true, first_call: true, recalled_before: true } } as never);
+
+    const r = await runGcReportTool(ma, { project_id: 'P1' }, FULL_ACCOUNT, { storage, now: NOW, windowDays: 7 });
+    if (!r.agent_usage.ok) throw new Error('agent_usage 应可读');
+    const u = r.agent_usage.usage;
+    expect(u.totals).toMatchObject({ recalls: 3, saved_tokens: 300, evidence_thin: 1, calls: 1 });
+    expect(u.agents.map((a) => a.client).sort()).toEqual(['qoder', '未标识']);
+    expect(u.agents.find((a) => a.client === '未标识')!.recalls).toBe(1);
+    expect(u.totals.first_call_compliance).toBe(1);
+  });
+
+  it('未注入 storage → agent_usage 如实 ok:false（向后兼容，报告主体照出）', async () => {
+    const { storage, ma } = fixture();
+    await seed(storage);
+    const r = await runGcReportTool(ma, { project_id: 'P1' }, FULL_ACCOUNT);
+    expect(r.ok).toBe(true);
+    expect(r.report.decayed).toBe(1);                 // 主体不因缺 storage 而失败
+    expect(r.agent_usage.ok).toBe(false);
+    if (!r.agent_usage.ok) expect(r.agent_usage.error).toContain('未注入');
+  });
+
+  it('审计不可读 → 报告仍出，agent_usage.ok=false 带原因（不阻断 gc_report）', async () => {
+    const { storage, ma } = fixture();
+    await seed(storage);
+    class BadAudit extends InMemoryStorage {
+      override async queryAudit(): Promise<never> {
+        throw new Error('audit unreadable');
+      }
+    }
+    const r = await runGcReportTool(ma, { project_id: 'P1' }, FULL_ACCOUNT, { storage: new BadAudit(), now: NOW });
+    expect(r.ok).toBe(true);
+    expect(r.agent_usage.ok).toBe(false);
+  });
+
+  it('C5：报告带互斥提示（gc 与 cron decay 双跑会双计）', async () => {
+    const { storage, ma } = fixture();
+    await seed(storage);
+    const r = await runGcReportTool(ma, { project_id: 'P1' }, FULL_ACCOUNT);
+    expect(r.concurrency_note).toContain('双计');
+    expect(r.note).toContain('agent_usage');
+  });
+});

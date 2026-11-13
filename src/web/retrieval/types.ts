@@ -1,5 +1,6 @@
 // 检索页（REQ-012）数据模型
 // 规格：§0 状态机 / §1 查询栏 / §2 横幅 / §3 结果行 / §4 上下文 / §5 预算 / §6 异常态。
+import type { RecallDispatchInfo } from '../../core/memagent/types.ts';
 
 export type Scene = 'default' | 'task_start' | 'history_query' | 'critical';
 export type Mode = 'top_insight' | 'fact_first' | 'event_replay' | 'pattern_reasoning' | 'minimal';
@@ -49,10 +50,15 @@ export interface SceneBudget {
 /** 横幅数据（§2） */
 export interface ModeBannerData {
   scene: Scene;
+  /** 实际生效模式（自动档 = 内核分流结论；applied 未套用建议时取建议值，见 dispatch） */
   mode: Mode;
   fallback: boolean;
+  /** 自动分流命中的特征词（来自内核 resolveMode.hitKeywords，不是 Web 自己的词表） */
   hit_keywords: string[];
-  secondary_mode_hint?: { mode: Mode; note: string } | null;
+  /** A5 次模式降级注入提示（内核真值；无次模式时 null，不再本地编一条「极简 200t」） */
+  secondary_mode_hint?: { mode: Mode; note: string; content?: string } | null;
+  /** A6：内核分流事实（来源/建议/实际/依据），与 MCP 回显、mode_dispatch 审计同一份 */
+  dispatch?: RecallDispatchInfo | null;
   request_id: string;
   evidence_thin?: 'none' | 'backfill_hit' | 'backfill_miss';
   cold_recall?: boolean;

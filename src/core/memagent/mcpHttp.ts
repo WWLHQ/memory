@@ -4,7 +4,7 @@
 // 复用 MemAgent 内核（storage 共享主进程 FileStorage），四个工具：
 //   recall_memory / write_memory / list_projects / get_preferences
 // 批次11/12/13：initialize 下发 MCP_INSTRUCTIONS（关键词触发召回 + 回显提示）；recall 结果末块加回显约束；
-//         结果块顺序 = [display.line, 完整 JSON, display.markdown（四段折叠）, 展示要求]；
+//         结果块顺序 = [display.line, 完整 JSON, display.markdown（RAG 统计汇总 + 编号依据 + 折叠明细）, 展示要求]；
 //         另附 structuredContent（含背景/省量/金额/折叠明细）。
 import { createServer as httpCreateServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -16,7 +16,10 @@ import { ulid } from './ulid.ts';
 import { assertMcpToken, tokenFromHeaders, DEFAULT_MCP_ACCOUNT, projectInScope, type McpAccount } from './mcpAuth.ts';
 import { resolveAccountFor, type TokenStorePort } from './tokenStore.ts';
 import type { MemberStorePort } from './memberStore.ts';
-import { MCP_INSTRUCTIONS, withRecallFirstNotes, RECALL_FIRST_REMINDER, RECALL_FIRST_GATE_MSG, RECALL_SOURCE_BOUNDARY } from './mcpSchema.ts';
+import {
+  mcpInstructions, withRecallFirstNotes, RECALL_FIRST_REMINDER,
+  RECALL_FIRST_GATE_MSG, RECALL_FIRST_STRICT_GATE_MSG, RECALL_SOURCE_BOUNDARY,
+} from './mcpSchema.ts';
 import { runListProjectsTool, runRecallTool, type RecallDisplayMode } from './mcpRecall.ts';
 import { RecallDetailTickets } from './recallDetailTickets.ts';
 import { buildRecallDetailExpiredPage } from './recallInsight.ts';
@@ -127,6 +130,35 @@ export function clientFromExplicitHeader(raw: string | string[] | undefined): st
   return label;
 }
 
+/** 2026-11-12（T8）能力声明头：客户端显式声明「我的气泡能渲染折叠」。
+ *  为什么需要它：白名单只能收**已实测**渲染 `<details>` 的客户端（DSH 两次实测把标签露成文本，
+ *  所以默认 fail-safe）；新客户端 / 自研 agent 不可能都等我们去实测一遍 →
+ *  由客户端或接入配置自己声明 `X-Memagent-Render: fold`，一次配置即吃到与 Qoder 相同的折叠档。
+ *  取值：fold / html / details / 1 / true（逗号分隔多值时任一命中即可），其余值忽略。 */
+export const MCP_RENDER_HEADER = 'x-memagent-render';
+
+export function clientDeclaresFold(raw: string | string[] | undefined): boolean {
+  const value = Array.isArray(raw) ? raw.join(',') : raw;
+  if (typeof value !== 'string' || !value.trim()) return false;
+  return value.split(',').some((part) => {
+    const s = part.trim().toLowerCase();
+    return s === 'fold' || s === 'html' || s === 'details' || s === '1' || s === 'true';
+  });
+}
+
+/** C 方案：严格首步召回门禁的显式声明头。
+ *  服务端 opts.strictRecallGate 为全局开关（主进程注入），此头让单个客户端/单次请求也能自证要求严格门禁。
+ *  取值 strict / 1 / true；其它值忽略（默认关闭，老客户端逐字不变）。 */
+export const MCP_STRICT_GATE_HEADER = 'x-memagent-recall-gate';
+
+export function clientDeclaresStrictGate(raw: string | string[] | undefined): boolean {
+  const value = Array.isArray(raw) ? raw.join(',') : raw;
+  if (typeof value !== 'string' || !value.trim()) return false;
+  return value.split(',').some((part) => {
+    const s = part.trim().toLowerCase();
+    return s === 'strict' || s === '1' || s === 'true';
+  });
+}
 
 export interface McpHttpOptions {
   storage?: StorageBackend;
@@ -156,6 +188,14 @@ export interface McpHttpOptions {
   allowDelete?: boolean;
   /** 第一轮个人记忆：召回准入读同一独立存储（缺省 = 不追加个人条目，行为不变） */
   personal?: PersonalMemoryStore;
+  /**
+   * C 方案：严格首步召回门禁全局开关。缺省 false = 批次47 原行为逐字不变
+   * （只硬拦写入/治理类工具，读类只软提醒）。开启后，可靠会话未召回时**所有**非 recall 工具都硬拦。
+   * 只影响带 Mcp-Session-Id 的可靠会话；无会话头一律不硬拦（防 §9 跨客户端串号误杀）。
+   * 批次62 UI 开关：可传**求值函数**，由主进程在每次请求时读当前 UI 设置，切换即时生效、无需重启；
+   * 传布尔值时行为与批次62 之前逐字一致（既有测试与老客户端零影响）。
+   */
+  strictRecallGate?: boolean | (() => boolean);
 }
 
 export interface McpHttpHandle {
@@ -173,23 +213,51 @@ const WRITE_GATE_TOOLS = new Set([
 ]);
 
 /** 结果末块：模型未必读 initialize.instructions，这里再要求一次展示方式。
- *  文案按本次实际下发的档位（批次32-C），与 display.markdown 严格一致：
- *  HTML 折叠版（实测渲染过 <details> 的 Qoder）/ 纯 Markdown 四小节（detail=true 主动要明细）/
- *  一行摘要 + 展开指引（其余客户端默认档，DSH 实测只渲染 Markdown 且 HTML 标签原样露出）。 */
+ *  批次 RAG：文案按本次实际下发的档位，与 display.markdown 的段名逐字一致：
+ *  html-details = 外层 <details> 短收 summary + 「📊 本次召回统计汇总」+「🎯 本次用上的依据」+ 四段二级折叠；
+ *  markdown-full = 两行加粗短摘要 + 同两段 + 四小节纯 Markdown；
+ *  markdown-compact = 两行加粗短摘要（含 [n] 编号依据词）+ 一条明细页链接。
+ *  三档统一要求正文就地标注 [n]、不得编造编号、不预展开；compact 档 URL 逐字保留。
+ *  **2026-11-12 用户拍板（WorkBuddy 禁用 HTML）**：富媒体客户端（WorkBuddy 等）恒走 compact 档——
+ *  文本通道**不得**出现 `<details>` 等 HTML 标签，折叠改由客户端「气泡内折叠卡片」承载；
+ *  服务端不新增档位、不改白名单，只在 compact 档文案里授权这条增强通道（做不到的客户端直接忽略）。
+ *  **2026-11-12（T8）**：Qoder 真机验证 ① 档折叠卡可用后，其他客户端可加请求头
+ *  `X-Memagent-Render: fold` 自证折叠能力，服务端即按 ① 档下发（渲染不了就别加，否则露裸标签）。 */
 export function recallEchoNote(mode: RecallDisplayMode): string {
   const keep = '数字与金额不得改写、省略或补全。';
+  const bubbleCard = '【气泡折叠档（富媒体宿主）】2026-11-12 用户已验收该形态（WorkBuddy 手机端/桌面端均可渲染）：'
+    + '若你的宿主能在消息气泡内渲染折叠卡片/折叠面板，**必须**为本次召回输出一张**默认收起**的折叠卡——'
+    + '卡片标题 = 首行摘要原文（「🧠 命中 N 条 · 依据 [n]… ｜ 省 … ｜ 本次 ¥…」）；'
+    + '**展开后必须能同时查到汇总与明细**：顶部放「📊 本次召回统计汇总」（四行，含 Token 与费用数字）；'
+    + '明细按用户指定的固定顺序 📎 项目背景（**逐条独立成行**，每条含类别与正文片段，不压缩成一整段）→ 🧠 命中记忆 → 🎯 本次用上的依据（每条含 [n]、层级/相关度、🎯 命中词、正文片段）→ ⚠ 证据不足（仅真有告警时出现，放在最后）；'
+    + '两行摘要与「▶ 展开本次召回明细」链接仍照常输出、URL 逐字保留；'
+    + '**文本里不要输出任何 HTML 标签**（折叠标签也不行）；卡内正文只能取自本次工具返回，不得编造、不得改写数字或吞掉链接。'
+    + '宿主没有卡片/折叠面板能力时忽略本条，按纯文本方式输出即可。';
+  const citeFull = '正文里采用某条命中记忆作为事实依据时，就地标注 [n]：编号必须与「🎯 本次用上的依据」段一一对应，不得编造编号，hits=0 时不得标注；';
+  const citeCompact = '正文里采用某条命中记忆作为事实依据时，就地标注 [n]：编号必须与首行「依据 [n]」一一对应（完整依据段点开明细页可见），不得编造编号，hits=0 时不得标注；';
   if (mode === 'html-details') {
-    return '【展示要求】优先把上一条 display.markdown 整段（<details> 四段：项目背景/命中记忆/Token/省钱与费用，可逐段收起展开）原样输出到最终回答末尾；若客户端不渲染 HTML，则改为单独一行原样输出 display.line（以 🧠 Memory 开头的提示行）。两种方式都不得改写、省略或补全其中的 token 数与金额。' + RECALL_SOURCE_BOUNDARY;
+    return '【展示要求】本次是可折叠档：把上一条 display.markdown 整段原样输出到最终回答末尾。'
+      + '外层 <details> 默认收起（summary 以「🧠 命中」开头、含「▶ 展开本次召回汇总」），点开依次是'
+      + '「📊 本次召回统计汇总」四行、「🎯 本次用上的依据」[n] 编号列表，以及项目背景 / Token 用量 / 省钱与费用的二级折叠（告警段仅在真有告警时出现）。'
+      + citeFull
+      + '不要替用户预先展开（不加 open 属性）、不要给回答添加额外 HTML 标签、不要自行补写命中条目或明细。'
+      + '若客户端不渲染 HTML，改为单独一行原样输出 display.line（以 🧠 Memory 开头的提示行）；两种情况均适用：' + keep
+      + RECALL_SOURCE_BOUNDARY;
   }
   if (mode === 'markdown-full') {
-    return `【展示要求】本次是 detail=true 的明细返回：把上一条 display.markdown 整段（纯 Markdown 四个小节：项目背景/命中记忆/Token/省钱与费用）原样输出到最终回答末尾，不要给回答添加任何 HTML 标签。${keep}` + RECALL_SOURCE_BOUNDARY;
+    return '【展示要求】本次是 detail=true 的明细返回：把上一条 display.markdown 整段原样输出到最终回答末尾，不要给回答添加任何 HTML 标签。'
+      + '结构是两行加粗短摘要 +「📊 本次召回统计汇总」四行 +「🎯 本次用上的依据」[n] 编号列表 + 项目背景 / 命中记忆 / Token 用量 / 省钱与费用四个加粗小节（告警行仅在真有告警时追加）。'
+      + citeFull + '禁止自行补写或预先展开明细。' + keep + RECALL_SOURCE_BOUNDARY;
   }
   return '【展示要求】本次按「默认收起 + 点击展开」下发：把上一条 display.markdown 整段原样输出到最终回答末尾'
-    + '（两行 🧠 Memory 摘要 + 一行「▶ 展开本次召回明细」的 Markdown 链接），链接的 URL 必须逐字保留——用户点它才在本机明细页里看四段明细。'
+    + '（两行加粗短摘要：首行「🧠 命中 N 条 · 依据 [n]… ｜ 省 …」、第二行「📊 汇总：…」；告警行仅在真有告警时追加；'
+    + '再加一行「▶ 展开本次召回明细」的 Markdown 链接），链接的 URL 必须逐字保留——用户点它才在本机明细页里看「统计汇总 / 命中依据 / Token / 费用」。'
+    + citeCompact
     + '禁止自行补写命中条目、项目背景、Token 或费用明细，禁止把链接改写成纯文本/HTML 标签或自己编造 URL，也禁止替用户预先展开（不要因为觉得『这样更完整』而调用 detail=true）。'
     + '只有用户在聊天里明确要看明细时，才用同一个 query 再调用 recall_memory 并置 detail=true，然后原样输出那次返回的 display.markdown。'
     + '若客户端连 Markdown 链接都渲染不了（链接只是纯文本），照原样输出即可，不要改写摘要。'
-    + `数字与金额不得改写、省略或补全。` + RECALL_SOURCE_BOUNDARY;
+    + bubbleCard
+    + keep + RECALL_SOURCE_BOUNDARY;
 }
 
 /** 启动标准 MCP streamable-http 服务器 */
@@ -248,11 +316,11 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
 
   /** 执行单个 MCP 工具调用（tools/call 的参数 name + arguments）；text = 供聊天窗口回显的提示行。
    *  D6-4：acct = 本请求令牌解析出的会话账户（引导令牌 → 引导账户；库令牌 → 各自账户）。 */
-  async function callTool(name: string, args: Record<string, unknown>, client: string, acct: McpAccount): Promise<{ result: unknown; text?: string }> {
+  async function callTool(name: string, args: Record<string, unknown>, client: string, acct: McpAccount, renderFold = false): Promise<{ result: unknown; text?: string }> {
     switch (name) {
       case 'recall_memory': {
         const out = await runRecallTool(ma, storage, args, undefined, client, acct, {
-          tickets: detailTickets, base: detailBase(),
+          tickets: detailTickets, base: detailBase(), renderFold,
         });
         return { result: out.payload, text: out.text };
       }
@@ -334,7 +402,8 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
       }
       case 'gc_report': {
         // 批次44-D5-3：遗忘周期报告（与 TCP 共用 runGcReportTool，默认 dry_run=true）
-        return { result: await runGcReportTool(ma, args, acct) };
+        // 批次61 GAP-3：同 TCP 端，附只读 Agent 侧聚合
+        return { result: await runGcReportTool(ma, args, acct, { storage }) };
       }
       case 'create_project': {
         // D6-5：受管创建项目（管理员专属，与 TCP 共用 runCreateProjectTool）
@@ -391,8 +460,9 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
   }
 
   /** 处理一个 JSON-RPC 请求对象（MCP 单请求/单响应；不支持批量）
-   *  @param incomingSid 本请求携带的 Mcp-Session-Id（空串 = 不带会话头，按 UA 兜底/不可靠处理） */
-  async function handleRpc(req: Record<string, unknown>, client: string, acct: McpAccount, incomingSid: string): Promise<Record<string, unknown>> {
+   *  @param incomingSid 本请求携带的 Mcp-Session-Id（空串 = 不带会话头，按 UA 兜底/不可靠处理）
+   *  @param renderFold 本请求是否声明了折叠渲染能力（`X-Memagent-Render: fold`，T8）；只影响 recall 档位 */
+  async function handleRpc(req: Record<string, unknown>, client: string, acct: McpAccount, incomingSid: string, renderFold = false, strictGate = false): Promise<Record<string, unknown>> {
     const method = String(req.method ?? '');
     const id = ('id' in req ? (req.id as number | string | null | undefined) : null) ?? null;
     const params = (req.params && typeof req.params === 'object' ? req.params : {}) as Record<string, unknown>;
@@ -407,7 +477,8 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
             capabilities: { tools: { listChanged: false } },
             serverInfo: { name: 'memagent-mcp', version: '1.0.0' },
             // 批次11：MCP 指令下发（关键词触发召回 + 原样回显 display.line + 不编造金额）
-            instructions: MCP_INSTRUCTIONS,
+            // C 方案：严格门禁开启时追加第 10 条声明；默认关闭 → 与原常量逐字相同。
+            instructions: mcpInstructions(strictGate),
           },
         };
       case 'notifications/initialized':
@@ -416,7 +487,8 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
         return { jsonrpc: '2.0', id: null, result: {} };
       case 'tools/list':
         // 批次47（L1）：下发带「首步召回」前缀的工具清单，从工具元数据层把召回优先级顶到最高。
-        return { ...base, result: { tools: withRecallFirstNotes() } };
+        // C 方案：严格门禁开启时，非 recall 工具描述追加「会被硬拦」声明；默认关闭 → 与原清单逐字相同。
+        return { ...base, result: { tools: withRecallFirstNotes(strictGate) } };
       case 'tools/call': {
         const name = String(params.name ?? '');
         const args = (params.arguments && typeof params.arguments === 'object' ? params.arguments : {}) as Record<string, unknown>;
@@ -429,10 +501,16 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
         const firstCall = reliable && !calledBySession.has(incomingSid);
         await emitMcpCallAudit(name, reliable, firstCall, recalled, incomingSid, client, acct);
         if (reliable) calledBySession.set(incomingSid, true);
-        if (reliable && !recalled && WRITE_GATE_TOOLS.has(name)) {
+        // C 方案：严格门禁开启时覆盖**所有**非 recall 工具（含原本只软提醒的读类）；
+        // recall_memory 自身永远放行，否则会话永远无法解锁（死锁）。默认关闭时判定与批次47 逐字相同。
+        if (reliable && !recalled && name !== 'recall_memory'
+          && (WRITE_GATE_TOOLS.has(name) || strictGate)) {
           return {
             ...base,
-            result: { content: [{ type: 'text', text: RECALL_FIRST_GATE_MSG }], isError: true },
+            result: {
+              content: [{ type: 'text', text: strictGate ? RECALL_FIRST_STRICT_GATE_MSG : RECALL_FIRST_GATE_MSG }],
+              isError: true,
+            },
           };
         }
         // recall 调用即标记本会话已召回（仅可靠会话跟踪；不可靠会话无法可靠归因，按软提醒常驻处理）。
@@ -440,7 +518,7 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
           recalledBySession.set(incomingSid, true);
         }
         try {
-          const out = await callTool(name, args, client, acct);
+          const out = await callTool(name, args, client, acct, renderFold);
           // recall 首块 = 提示行（兼容纯文本客户端），随后完整 JSON、折叠明细（批次13）；同时给 structuredContent。
           // 批次12：模型常忽略 initialize.instructions → 结果末块再给一次展示方式硬约束（Qoder 实测必需）。
           const markdown = (out.result as { display?: { markdown?: string } }).display?.markdown;
@@ -558,6 +636,17 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
           // 批次41-X（方案 C）：显式身份头优先——一键接入写进配置的 X-Memagent-Client 每次请求都带，
           // 不共用 UA/会话这类「别人也会命中」的键，从根上消除 41-S 的跨客户端串号。
           const declaredClient = clientFromExplicitHeader(req.headers[MCP_CLIENT_HEADER]);
+          // 2026-11-12（T8）能力声明头：与身份头分开解析、互不覆盖——身份决定「记在谁名下」，能力决定「给哪一档」。
+          // 缺省 false，未声明的客户端行为与历史完全一致。
+          const renderFold = clientDeclaresFold(req.headers[MCP_RENDER_HEADER]);
+          // C 方案：严格门禁 = 服务端全局开关 OR 本次请求显式声明；缺省两者都关，行为逐字不变。
+          // 批次62 UI 开关：全局开关支持求值函数，**每次请求**读当前值（切换无需重启）；
+          // 传布尔值时与批次62 之前完全等价。
+          const globalGate = typeof opts.strictRecallGate === 'function'
+            ? opts.strictRecallGate() === true
+            : opts.strictRecallGate === true;
+          const strictGate = globalGate
+            || clientDeclaresStrictGate(req.headers[MCP_STRICT_GATE_HEADER]);
           // 批次15：initialize 时登记调用方并以 Mcp-Session-Id 关联后续 tools/call；
           // 客户端不带会话头时退化为「同 UA 最近一次 initialize」，再退化到 UA 识别。
           if (method === 'initialize') {
@@ -584,7 +673,7 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
             ?? (ua && (isIdentifiableUserAgent(ua) || isTrustedClientSelfName(uaCached)) ? uaCached : undefined)
             ?? clientFromUserAgent(ua);
 
-          const rpcResp = await handleRpc(payload, client, reqAccount, incomingSid);
+          const rpcResp = await handleRpc(payload, client, reqAccount, incomingSid, renderFold, strictGate);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(rpcResp));
         } catch (e) {

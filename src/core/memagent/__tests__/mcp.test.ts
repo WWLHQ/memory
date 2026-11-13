@@ -339,7 +339,16 @@ describe('MCP Server（§19.5）', () => {
     expect(result.display.markdown).toContain('**🧠 命中记忆');
     expect(result.display.markdown).toContain('**⚡ Token 用量');
     expect(result.display.markdown).toContain('**💰 省钱与费用');
-    expect(result.display.markdown.startsWith(`**${result.display.line}**`)).toBe(true);
+    // 批次 RAG：markdown-full 档首行改成「命中依据前置」短摘要；完整长提示行仍是 display.line，数字同源
+    expect(result.display.markdown.startsWith('**🧠 命中 ')).toBe(true);
+    expect(result.display.markdown).toContain('**📊 本次召回统计汇总**');
+    expect(result.display.markdown).toContain('**🎯 本次用上的依据**');
+    const corpus = result.display.line.match(/全量约 ([\d,]+)t/)?.[1];
+    const saved = result.display.line.match(/本次省 ([\d,]+)t/)?.[1];
+    expect(corpus).toBeTruthy();
+    expect(saved).toBeTruthy();
+    expect(result.display.markdown).toContain(`基线 ${corpus}t`);
+    expect(result.display.markdown).toContain(`省量：${saved}t`);
   });
 
   it('recall detail 传非布尔 → 明确报参数错误（不静默按摘要处理）', async () => {

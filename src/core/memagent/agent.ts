@@ -7,13 +7,16 @@ import { MemoryPendingStore, PendingWrites, type WriteKnobs } from './pendingWri
 import {
   fuseRelevance, hardFilter, scoreMemory, tokenCoverage, RELEVANCE_FUSION_LAMBDA,
 } from './forgetting.ts';
-import { findParamsSnapshot, proxyCapsFromSnapshot } from './paramsSnapshot.ts';
+import { findParamsSnapshot, growthConfigFromLedger, proxyCapsFromSnapshot } from './paramsSnapshot.ts';
 import { proxyCostToday } from '../../shared/proxyAccounting.ts';
 import {
-  BACKGROUND_MAX_TOKENS, computeRecallSavings, estTokens, normalizeUnitPrice, selectRecallBackground,
+  BACKGROUND_MAX_TOKENS, CHARS_PER_BUDGET_UNIT, computeRecallSavings, estTokens, normalizeUnitPrice,
+  selectRecallBackground,
 } from './recallInsight.ts';
 import { cosine, embedSync, tokenize, DEFAULT_VECTOR_DIM } from './vector.ts';
 import { matchedTerms } from './hitHighlight.ts';
+import { isConcreteMode, modeSpec, modeWeights, resolveMode, type LayerKey } from './recallModes.ts';
+import type { RecallWeights } from '../../shared/growthConfig.ts';
 import type { L0BlobStore } from './l0Store.ts';
 import { ulid } from './ulid.ts';
 import { createPersonalApi, selectPersonalRecall } from './personal.ts';
@@ -24,7 +27,7 @@ import type {
   Hit, L0AccessRequest, L0AccessRequestResult, L0AdminPort, L0GrantReq, L0GrantResult, L0GrantView, L0HeartbeatResult,
   L0MigrationResult, L0RequestView, L0UnlockReq, L0UnlockResult, L0VaultStatus,
   LogItem, LogPage, LogReq, MemAgent, MemAgentOptions, MemAgentSeedHooks, MemOp, MemOpPatch, MemOpResult, MemReq, Memory, Pref, RecallReq,
-  RecallResult, SyncReq, SyncReport, WriteResult,
+  RecallResult, RecallDispatchInfo, RecallSecondaryHint, SyncReq, SyncReport, WriteResult,
 } from './types.ts';
 
 /** form 能力矩阵（19.9 R⑥ / 19.10）：proc 信号仅本地端可用 */
@@ -37,6 +40,9 @@ const SIGNAL_CAPABILITY: Record<DiscoverSignal, Form[]> = {
 
 /** 召回预算（2.4.1）：soft 1500 / warn 2000 / hard 3000 */
 const BUDGET = { soft: 1500, warn: 2000, hard: 3000 } as const;
+
+/** A5：次模式参考摘要上限（§2.4.3「次模式 ≤200t」） */
+const SECONDARY_MAX_TOKENS = 200;
 
 export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHooks {
   const { form, account, llm, vector, storage } = opts;
@@ -120,6 +126,11 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
       hits, payload_tokens, pipeline_llm_tokens: 0,
       budget: { ...BUDGET, status: budgetStatus },
       mode: 'auto',
+      // 会话视图不参与模式分流（恒 auto），但契约字段必须存在且为空
+      hit_keywords: [],
+      secondary_mode_hint: null,
+      // A6：会话视图没有分流动作，显式 null——不拿「auto」冒充「已分流到自动」
+      dispatch: null,
       request_id,
       scanned_memories: candidates.length,
       background,
@@ -149,18 +160,48 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
     if (req.scope === 'session') return sessionRecall(req, request_id, now);
     const topK = req.top_k ?? 5;
     if (topK < 1 || topK > 10) throw new MemAgentError('E_VECTOR', 'top_k 须在 1–10');
-    // 16.5：critical 禁 minimal（模式分流红线）
+    // A2（召回模式接线）：唯一裁决入口——手动（5 个具体模式）强制采用；auto/缺省按 scene × 关键词自动分流。
+    // 16.5「critical 禁极简」由 resolveMode 内部处理，这里不再手搓，避免两处口径各自漂移。
     const scene = req.scene ?? 'default';
-    let mode = req.mode ?? null;
-    if (scene === 'critical' && mode === 'minimal') {
-      mode = 'fact_first'; // 禁 minimal → 降为事实优先
+    if (req.mode !== undefined && req.mode !== null && req.mode !== 'auto' && !isConcreteMode(req.mode)) {
+      throw new MemAgentError('E_VECTOR', `非法的 mode：${String(req.mode)}（只能是 auto 或 5 个具体模式之一）`);
     }
+    const resolved = resolveMode({ query: req.query, scene, explicitMode: req.mode });
+    // A2 只做「分流观测」：自动分流到「极简」暂不生效。极简会关掉项目背景与冷层补查，
+    // 属 A4 分层改造范围；在分层取用接上之前强行生效，会让存量短查询召回静默变差（A 闸门：既有行为逐条不变）。
+    // 显式 minimal 不受影响——它一直是真执行的。分流建议与实际执行的差异，审计里用 mode / applied_mode 各记一份。
+    const autoMinimal = resolved.mode === 'minimal' && !isConcreteMode(req.mode);
+    const mode = autoMinimal ? 'auto' : resolved.mode;
     const [qvec] = await vector.embed([req.query]);
     const all = await storage.listMemories({ project_id: req.project_id });
     const minimal = mode === 'minimal';
+    // A4（召回模式接线）：分层取用只对手动模式生效——auto 档的候选集与裁剪顺序保持改造前口径。
+    // 模式一旦确定，就带着三张表：selectPriority（谁先被取用）/ trimOrder（超预算先删谁）/ disabledLayers（压根不取）。
+    const modeSpecNow = isConcreteMode(req.mode) ? modeSpec(resolved.mode) : null;
+    const disabledLayers = modeSpecNow?.disabledLayers ?? [];
+    // 批次61 GAP-1：召回打分权重来自 growth:v1（自生长可调），缺省 = 历史常量（逐字不变）。
+    // A3（召回模式接线）：手动模式改用该模式的权重向量；auto 档继续走 growth:v1——
+    // 默认档是绝大多数调用，不拿一次模式改动推翻自生长出来的召回参数。
+    // 字段名不同：recallModes 用 {f,i,c,a}，growthConfig 用 {w_f,w_i,w_c,w_a}，必须显式映射（展开会得 undefined）。
+    const manualMw = isConcreteMode(req.mode) ? modeWeights(resolved.mode) : null;
+    let recallWeights: RecallWeights;
+    let weightsSource: 'manual' | 'growth:v1';
+    if (manualMw) {
+      recallWeights = { w_f: manualMw.f, w_i: manualMw.i, w_c: manualMw.c, w_a: manualMw.a };
+      weightsSource = 'manual';
+    } else {
+      // 只读 P_SYSTEM 下的 preference 记录，不做全库扫描（recall 本身已在 p95 1.3s 量级）
+      recallWeights = growthConfigFromLedger(
+        await storage.listMemories({ project_id: 'P_SYSTEM' }),
+      ).recall_weights;
+      weightsSource = 'growth:v1';
+    }
 
     // 17.8 第一层：硬过滤（pinned 免检直进候选；默认只扫 Hot/Warm，AC-11）
-    const candidates = all.filter((m) => hardFilter(m) && (!minimal || m.decay_class === 'hot' || m.decay_class === 'warm'));
+    // A4：手动模式的 disabledLayers（如 minimal 禁 L2/L5）在这一层直接剔除，连候选都不进。
+    const candidates = all.filter((m) => hardFilter(m)
+      && (!minimal || m.decay_class === 'hot' || m.decay_class === 'warm')
+      && !disabledLayers.includes(m.layer as LayerKey));
 
     // 17.8 第二层：轻量打分（relevance × 17.5 四分量，pinned +0.15）
     // 批次60（A 方案）：relevance 由「纯余弦」改成「余弦 × query 覆盖率」几何融合。
@@ -174,7 +215,7 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
         const relevance = qTokens
           ? fuseRelevance(cos, tokenCoverage(qTokens, new Set(tokenize(m.content))))
           : cos;
-        return { m, relevance, score: scoreMemory(m, relevance, now) };
+        return { m, relevance, score: scoreMemory(m, relevance, now, recallWeights) };
       })
       .sort((a, b) => b.score - a.score)
       .slice(0, topK);
@@ -195,7 +236,15 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
       let payload = list.reduce((a, h) => a + estTokens(h.content), 0);
       if (payload <= BUDGET.hard) return { hits: list, payload };
       const drop = new Set<string>();
-      for (const h of [...list].sort((a, b) => a.score - b.score)) {
+      // A4：手动模式按 trimOrder 逐层丢（层内 score 升序）——低价值层先出局，高排位层最后才动；
+      // trimOrder 未列出的层（L1/L6）作兜底排在最后。auto 档沿用全局 score 升序，行为逐字不变。
+      const order: Hit[] = modeSpecNow
+        ? [
+          ...modeSpecNow.trimOrder.flatMap((layer) => list.filter((h) => h.layer === layer).sort((a, b) => a.score - b.score)),
+          ...list.filter((h) => !modeSpecNow.trimOrder.includes(h.layer as LayerKey)).sort((a, b) => a.score - b.score),
+        ]
+        : [...list].sort((a, b) => a.score - b.score);
+      for (const h of order) {
         if (payload <= BUDGET.hard) break;
         payload -= estTokens(h.content);
         drop.add(h.mem_id);
@@ -223,7 +272,7 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
         for (const { m, sim } of backfill) {
           hits.push({
             mem_id: m.mem_id, content: m.content, layer: m.layer, decay_class: m.decay_class,
-            pinned: m.pinned, locked: m.locked, score: Math.round(scoreMemory(m, sim, now) * 1000) / 1000,
+            pinned: m.pinned, locked: m.locked, score: Math.round(scoreMemory(m, sim, now, recallWeights) * 1000) / 1000,
             evidence_ref: `l0:${m.mem_id}`,
             matched_terms: matchedTerms(req.query, m.content),
           });
@@ -260,7 +309,11 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
     }
 
     // 批次11：项目背景与省量（背景走硬熔断余量，payload + background 永不超过 3000t）
-    const background = selectRecallBackground(all, consideredIds, {
+    // A4：被禁用的层也不得以「背景」身份回灌，否则 minimal 绕开候选过滤仍会看到 L2/L5
+    const backgroundPool = disabledLayers.length > 0
+      ? all.filter((m) => !disabledLayers.includes(m.layer as LayerKey))
+      : all;
+    const background = selectRecallBackground(backgroundPool, consideredIds, {
       minimal,
       maxTokens: Math.min(BACKGROUND_MAX_TOKENS, Math.max(0, BUDGET.hard - payload_tokens)),
     });
@@ -272,12 +325,53 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
       if (m) await storage.putMemory({ ...m, access_count: (m.access_count ?? 0) + 1, last_access_time: now });
     }
 
+    // A5（召回模式接线）：次模式降级注入——只作独立 hint 下发，不混进 hits、不计入 payload。
+    // 理由：若偷偷把 200t 塞进 payload，硬熔断与省量口径会同时失真；hint 是「还能参考什么」，不是「已经注入了什么」。
+    // 极简主模式无次模式（§2.4.3）；手动模式即定论，resolveMode 不会给 secondary。
+    let secondaryHint: RecallSecondaryHint | null = null;
+    if (resolved.secondary) {
+      const secondarySpec = modeSpec(resolved.secondary);
+      const pool = all.filter((m) => !consideredIds.has(m.mem_id)
+        && !disabledLayers.includes(m.layer as LayerKey)
+        && !m.deleted && !m.merged_into);
+      let picked: Memory | undefined;
+      for (const layer of secondarySpec.selectPriority) {
+        picked = pool.filter((m) => m.layer === layer)
+          .sort((a, b) => (b.confidence ?? 0.5) - (a.confidence ?? 0.5))[0];
+        if (picked) break;
+      }
+      if (picked) {
+        const maxChars = SECONDARY_MAX_TOKENS * CHARS_PER_BUDGET_UNIT;
+        const content = picked.content.length > maxChars
+          ? `${picked.content.slice(0, maxChars - 1)}…`   // 保留截断符也不越 200t
+          : picked.content;
+        secondaryHint = {
+          mode: resolved.secondary,
+          content,
+          note: `次模式「${secondarySpec.name}」参考摘要（≤${SECONDARY_MAX_TOKENS}t，未并入命中、不计入 payload）`,
+        };
+      }
+    }
+
     const budgetStatus = payload_tokens >= BUDGET.hard ? 'fused' : payload_tokens >= BUDGET.warn ? 'warn' : 'ok';
+    // A6（回显贯通）：分流事实只构造**一次**，同时喂给返回体和 mode_dispatch 审计。
+    // 两处各拼一份的后果是「回显说自动分流到事实优先，审计说手动指定」——事后无法判定谁对。
+    const dispatch: RecallDispatchInfo = {
+      source: isConcreteMode(req.mode) ? 'manual' : 'auto',
+      suggested: resolved.mode,
+      applied: mode,
+      secondary: resolved.secondary ?? null,
+      reason: resolved.reason,
+      weights_source: weightsSource,
+    };
     const result: RecallResult = {
       hits, payload_tokens, pipeline_llm_tokens: 0,
       budget: { ...BUDGET, status: budgetStatus },
       evidence_thin,
-      mode: mode ?? 'auto',
+      mode,
+      hit_keywords: resolved.hitKeywords,
+      secondary_mode_hint: secondaryHint,
+      dispatch,
       request_id,
       scanned_memories: all.length,
       background,
@@ -289,6 +383,20 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
     //  · pipeline_llm_tokens：RecallResult 的诚实值（当前恒 0 —— 召回管线不调用 LLM，网关真实 usage 未接入）；
     //    监控页不得拿这些 0 算 p95 冒充「已接通」，见 useMonitorReal.ts 的未采集说明。
     const latency_ms = Date.now() - now;
+    // A2：分流审计（§4.3）——与 recall 审计同 request_id，可按 request_id 关联出「为什么是这个模式」。
+    // 手动/自动都记，理由写在 reason 里；会话视图不分流，不写这条。
+    await audit(request_id, 'mode_dispatch', {
+      mode: dispatch.suggested,     // 分流结论（可能是「建议极简」）
+      applied_mode: dispatch.applied, // 实际执行模式（自动极简观测档会与 mode 不同）
+      secondary_mode: dispatch.secondary,
+      hit_keywords: resolved.hitKeywords,
+      reason: dispatch.reason,
+      scene,
+      weights_source: dispatch.weights_source,
+      weights: recallWeights,
+      via_fallback: resolved.viaFallback ?? false,
+      ...(req.client ? { client: req.client } : {}),
+    }, { project_id: req.project_id, user_id: req.user_id });
     await audit(request_id, 'recall', {
       query: req.query, hits: hits.length, payload_tokens, scene, mode: result.mode,
       evidence_thin: evidence_thin ?? false,
@@ -370,9 +478,28 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
 
   // ─── 批次44-D4：写入落盘兜底（L0 锁定不丢 / 解锁自动重放） ──────────────────
 
-  /** 写密钥是否已解锁：桌面 L0Vault 实现 isWriteUnlocked；无端口时 best-effort false（不据此阻断写入） */
+  /**
+   * 写密钥是否已解锁（三条来源依次退化，任一条都不猜）：
+   *   ① L0Port.isWriteUnlocked —— 桌面主进程是同步布尔；渲染层 HostL0Port 走登录态窄口子（异步）
+   *   ② l0Admin.myWriteWrap(当前账号) —— 只回布尔，**只需登录**，成员也能问
+   *   ③ l0Admin.status() —— 老口径，`requireAdmin`，成员一调就抛
+   *
+   * 为什么不能只留 ③：成员调 status() 必抛 E_AUTH_ADMIN → 恒判 false，于是
+   * 「安全页显示已解锁、写入页仍说未解锁」，且 getWriteStatus 里 `if (l0_unlocked) flush`
+   * 永不成立 → 成员的待重放写入永远不重放。
+   */
   async function writeUnlocked(): Promise<boolean> {
-    if (typeof opts.l0?.isWriteUnlocked === 'function') return opts.l0.isWriteUnlocked();
+    if (opts.l0 && typeof opts.l0.isWriteUnlocked === 'function') {
+      try {
+        const v = opts.l0.isWriteUnlocked();
+        const b = typeof v === 'boolean' ? v : await v;
+        // 端口说已解锁就直接采信；说未解锁时继续用账号级窄口子复核（老端口可能缺实现或缺会话）
+        if (b) return true;
+      } catch { /* 端口不可用 → 往下退，不据此断言「已锁」 */ }
+    }
+    if (opts.l0Admin && typeof opts.l0Admin.myWriteWrap === 'function') {
+      try { return (await opts.l0Admin.myWriteWrap(account.user_id)).write_unlocked; } catch { /* 老主进程无该通道 */ }
+    }
     if (opts.l0Admin) {
       try { return (await opts.l0Admin.status()).write_unlocked; } catch { return false; }
     }

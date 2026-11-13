@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   normalizeScene, normalizeMode, resolveSceneBudget, resolveModeLinkage,
-  isMinimalCandidate, autoDispatch, sortHits, freshness, decayClass,
+  isMinimalCandidate, sortHits, freshness, decayClass,
   budgetLevel, validateQuery, modeName, sceneName,
 } from '../logic.ts';
 import type { RetrievalHit } from '../types.ts';
@@ -64,17 +64,13 @@ describe('isMinimalCandidate（§7.2）', () => {
   });
 });
 
-describe('autoDispatch（§2.4.4）', () => {
-  it('验收用例1：P0 故障关键词 → fact_first + 事实命中', () => {
-    const r = autoDispatch('P0 故障,核对昨天发布三模块有没有报错', 'critical');
-    expect(r.mode).toBe('fact_first');
-    expect(r.hit_keywords).toContain('fact');
-  });
-  it('验收用例2：短查询 default → minimal', () => {
-    expect(autoDispatch('修一下这个空指针', 'default').mode).toBe('minimal');
-  });
-  it('无信号 → scene 默认模式', () => {
-    expect(autoDispatch('这是一条足够长的普通描述语句它不包含任何分流关键词只是平静地陈述了一个客观事实供系统兜底使用', 'task_start').mode).toBe('top_insight');
+describe('autoDispatch 已下线（A6）', () => {
+  // 第三套分流词表（本文件原 autoDispatch）已删除：分流真源是内核 recallModes.resolveMode，
+  // Web 侧改为读 RecallResult.dispatch/hit_keywords（见 __tests__/retrievalDispatch.test.ts）。
+  // 这里只锁「别再长回来」——从模块导出面拿不到 autoDispatch。
+  it('logic.ts 不再导出 autoDispatch', async () => {
+    const mod = await import('../logic.ts');
+    expect((mod as Record<string, unknown>).autoDispatch).toBeUndefined();
   });
 });
 

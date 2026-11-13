@@ -59,39 +59,17 @@ export function resolveModeLinkage(scene: Scene, mode: ModeSel): { mode: ModeSel
   return { mode, toast: null };
 }
 
-/** §7.2 语言长度：中文去标点 <30 字 / 英文 <12 词 → 极简候选信号 */
+/**
+ * §7.2 语言长度：中文去标点 <30 字 / 英文 <12 词 → 极简候选信号。
+ * **只是查询栏的输入提示**（validateQuery 的 minimalHint），不参与任何模式裁决——
+ * 分流真源在内核 `core/memagent/recallModes.ts:resolveMode`（A6 删除了本文件原有的第三套 autoDispatch 词表）。
+ */
 export function isMinimalCandidate(query: string): boolean {
   const q = query.trim();
   const zhChars = q.replace(/[，。！？、；：""''（）\s]/g, '').length;
   const hasCJK = /[\u4e00-\u9fff]/.test(q);
   if (hasCJK) return zhChars < 30;
   return q.split(/\s+/).filter(Boolean).length < 12;
-}
-
-/** §2.4.4 自动分流：极简信号 + 关键词命中 → mode + hit_keywords */
-export function autoDispatch(query: string, scene: Scene): { mode: Mode; hit_keywords: string[] } {
-  const table = SCENE_TABLE[scene];
-  const KEYWORDS: { kw: string[]; mode: Mode; label: string }[] = [
-    { kw: ['故障', '核对', '报错', '发布', 'p0'], mode: 'fact_first', label: 'fact' },
-    { kw: ['复盘', '回顾', '昨天', '上周', '历史'], mode: 'event_replay', label: 'event' },
-    { kw: ['总结', '要点', '洞察'], mode: 'top_insight', label: 'insight' },
-    { kw: ['规律', '模式', '为什么'], mode: 'pattern_reasoning', label: 'pattern' },
-  ];
-  const low = query.toLowerCase();
-  const hit_keywords: string[] = [];
-  let mode: Mode | null = null;
-  for (const k of KEYWORDS) {
-    const hit = k.kw.filter((w) => low.includes(w));
-    if (hit.length >= 2 || (hit.length >= 1 && scene === 'critical')) {
-      if (!mode) mode = k.mode;
-      hit_keywords.push(k.label);
-    }
-  }
-  // 候选过滤（2.4.4：scene 候选集内裁决；critical 禁极简）
-  if (mode && !table.modes.includes(mode)) mode = null;
-  if (!mode && isMinimalCandidate(query)) mode = table.modes.includes('minimal') ? 'minimal' : table.defaultMode;
-  if (!mode) mode = table.defaultMode;
-  return { mode, hit_keywords };
 }
 
 /** §3 排序：pinned 置顶（R3）→ score 降序 → confidence 次级降序 */

@@ -1,12 +1,17 @@
 // 内核记忆业务（§3 schema + 行为红线）：write 逐层生成/查重/分支嫁接 / browse L0 授权 / gc 衰减 / memoryOp 17.3 操作
 import { isCategory } from './types.ts';
 import type {
-  AuditRef, BrowseReq, BrowseResult, BrowseRow, Category, Form,
+  AuditRef, BrowseReq, BrowseResult, BrowseRow, Category, DecayClass, Form,
   FeedbackKind, FeedbackResult,
   GcFullReport, GcFullReq, GcReq, GcReport, L0Port, LayerDecision, LlmProvider,
   MemOp, MemOpPatch, MemOpResult, Memory,
   StorageBackend, VectorBackend, WriteResult,
 } from './types.ts';
+import {
+  downgradeClass, feedbackPolicyFromLedger, findConflictCounterpart, tallyRejects,
+  type ConflictPairing,
+} from './feedbackSignal.ts';
+import type { FeedbackPolicy } from '../../shared/growthConfig.ts';
 import { MemAgentError } from './errors.ts';
 import type { L0BlobStore } from './l0Store.ts';
 import { embedSync, DEFAULT_VECTOR_DIM } from './vector.ts';
@@ -836,6 +841,11 @@ export async function coreFeedback(
 
   let delta = 0;
   let next: Memory = m;
+  // 批次61 GAP-2：两条回灌结果（降档 / 冲突配对）先收集，审计统一追加在最后，保持
+  // 「先落记忆、再落审计」的既有顺序不变（历史审计序不得改变）。
+  let rejectOutcome: { policy: FeedbackPolicy; rejects: number; reached: boolean; from: DecayClass; to: DecayClass | null } | null = null;
+  let pairing: ConflictPairing | null = null;
+
   if (kind === 'confirm') {
     delta = 0.1;
     next = {
@@ -846,9 +856,30 @@ export async function coreFeedback(
   } else if (kind === 'reject') {
     delta = -0.05;
     next = { ...m, confidence: clamp((m.confidence ?? 0.5) + delta, CLAMP.confidence) };
+    // 默认 policy.enabled=false → 与改造前逐字一致（AC B1）；只有用户显式启用才可能降档
+    const policy = feedbackPolicyFromLedger(await storage.listMemories({ project_id: 'P_SYSTEM' }));
+    const tally = tallyRejects(await storage.queryAudit({ action: 'memory_op' }), mem_id, now, policy);
+    const to = tally.reached ? downgradeClass(next.decay_class) : null;
+    if (to) next = { ...next, decay_class: to };
+    if (tally.reached) {
+      rejectOutcome = { policy, rejects: tally.rejects, reached: true, from: m.decay_class, to };
+    }
   } else {
-    // disputed：转人工（P7 冲突裁决队列），trust 分不动
-    next = { ...m, conflict_id: m.conflict_id ?? `cf_${request_id.slice(-8)}` };
+    // disputed：转人工（P7 冲突裁决队列），trust 分不动。
+    // 批次61 GAP-2（AC B3）：单条挂 id 时 conflict.ts 路径 1「恰好两条」永远不成立 →
+    // 这里补一条真实对手（同项目、live、向量相似度 ≥ 0.75），找不到就如实保留单条。
+    const cid = m.conflict_id ?? `cf_${request_id.slice(-8)}`;
+    next = { ...m, conflict_id: cid };
+    const scope = await storage.listMemories({ project_id: m.project_id });
+    const found = findConflictCounterpart(m, scope, cid);
+    if (found.counterpart && !found.counterpart.existing) {
+      const mate = scope.find((x) => x.mem_id === found.counterpart!.mem_id);
+      if (mate) {
+        // 只改 conflict_id + 版本钟；正文/层级/分数一律不动——配对不是裁决，不能替用户下结论
+        await storage.putMemory({ ...mate, conflict_id: cid, version: mate.version + 1, updated_at: now });
+      }
+    }
+    pairing = { conflict_id: cid, counterpart: found.counterpart, ...(found.reason ? { reason: found.reason } : {}) };
   }
   next = { ...next, version: m.version + 1, updated_at: now };
   await storage.putMemory(next);
@@ -861,7 +892,31 @@ export async function coreFeedback(
       op: kind, trust_delta: delta, mem_id, confidence: next.confidence,
       ...(rated !== undefined ? { rating: rated } : {}),
       ...(note !== undefined ? { comment: note } : {}),
+      ...(pairing ? { conflict_pair: pairing } : {}),
     },
   });
+  // 降档单独落 growth_op：用户要能在生长页看到「为什么这条被降档」，混在 memory_op 里看不出来
+  if (rejectOutcome) {
+    await storage.appendAudit({
+      request_id: `${request_id}_reject`, action: 'growth_op', ts: now, project_id: 'P_SYSTEM',
+      detail: {
+        entry: {
+          event: 'reject_downgrade', action: 'feedback_reject_downgrade',
+          payload: JSON.stringify({
+            mem_id,
+            project_id: m.project_id,
+            rejects: rejectOutcome.rejects,
+            threshold: rejectOutcome.policy.reject_downgrade_threshold,
+            window_days: rejectOutcome.policy.window_days,
+            from: rejectOutcome.from,
+            to: rejectOutcome.to,
+            // to=null（已是 cold）时如实标未生效，不假装降过档
+            applied: rejectOutcome.to !== null,
+          }),
+          at: now,
+        },
+      },
+    });
+  }
   return { ok: true, mem: next, trust_delta: delta, request_id };
 }

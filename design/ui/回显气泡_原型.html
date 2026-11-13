@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>回显气泡原型 — RAG 引用锚点 + 气泡内折叠统计汇总</title>
+<style>
+  :root{--bg:#0f1419;--panel:#1a212b;--panel2:#202833;--line:#2b3441;
+    --txt:#e6edf3;--muted:#8b98a7;--dim:#5b6675;--accent:#4d9fff;
+    --mem:#9d6bff;--ok:#3ecf8e;--warn:#ffd166;--err:#ff5c5c;--mark:#6b5a1e}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+    font:14px/1.6 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1080px;margin:0 auto;padding:18px}
+  h1{font-size:17px;margin:0 0 2px}
+  .sub{color:var(--muted);font-size:12px;margin-bottom:12px;line-height:1.7}
+  .notice{background:#2a2416;border:1px solid #5a4420;color:#ffe6a8;border-radius:8px;
+    padding:8px 11px;font-size:12px;margin-bottom:14px}
+  .tabs{display:flex;gap:8px;margin-bottom:12px}
+  .tabs button{background:var(--panel2);border:1px solid var(--line);color:var(--muted);
+    border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer}
+  .tabs button.on{background:#12324a;border-color:#2a4a66;color:#8cc7ff}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:14px}
+  .agentframe{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  .agenthead{background:var(--panel2);padding:10px 14px;border-bottom:1px solid var(--line);
+    display:flex;gap:9px;align-items:center;font-size:12px}
+  .agenthead .logo{font-weight:700;color:var(--txt)}
+  .agenthead .who{color:var(--muted)}
+  .chat{padding:14px}
+  .role{font-size:11px;color:var(--dim);margin-bottom:4px}
+  .bubble{background:var(--panel2);border-radius:10px;padding:10px 13px;margin-bottom:12px}
+  .bubble.user{background:#20303d;margin-left:auto;max-width:80%}
+  .bubble .ans{margin:4px 0}
+  .cite{display:inline-block;font-size:11px;background:#2a1f3a;color:#c9a6ff;
+    border:1px solid #4a3566;border-radius:4px;padding:0 5px;margin:0 2px;cursor:pointer}
+  .echo{border:1px solid #3a3566;border-radius:9px;background:#1b1a2b;padding:0;margin:0}
+  .echo>summary{cursor:pointer;list-style:disclosure-closed;padding:9px 12px;font-size:12px;
+    font-weight:700;color:#c9a6ff}
+  .echo[open]>summary{border-bottom:1px solid #3a3566;list-style:disclosure-open}
+  .echobody{padding:10px 12px;font-size:12px;line-height:1.75}
+  .echobody h4{font-size:12px;margin:0 0 5px;color:var(--accent)}
+  .echobody ul{margin:0 0 12px;padding-left:16px}
+  .echobody li{margin:2px 0}
+  .echobody .k{color:var(--muted)}
+  .echobody .v{color:var(--txt);font-family:ui-monospace,Consolas,monospace}
+  .echobody .hit{background:var(--mark);color:#ffe9a8;border-radius:2px;padding:0 2px}
+  .echobody .num{color:var(--mem);font-weight:700;font-family:ui-monospace,Consolas,monospace}
+  .echobody details{border-top:1px solid var(--line);margin-top:8px;padding-top:6px}
+  .echobody details summary{cursor:pointer;color:var(--muted);font-size:11px}
+  .echobody details p{color:var(--dim);margin:4px 0 0;padding-left:12px;font-size:11px}
+  .plain{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:9px 12px;font-size:12px}
+  .plain .l1,.plain .l2{font-weight:700;color:var(--txt);line-height:1.7}
+  .plain a{color:#8cc7ff;display:inline-block;margin-top:6px;font-size:12px}
+  .plain .wn{color:var(--warn);font-size:11px;margin-top:4px}
+  .tagline{font-size:11px;color:var(--dim);margin-top:8px;line-height:1.6}
+  .tagline b{color:var(--muted)}
+  .section{margin-top:18px;background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+  .section .sh{background:var(--panel2);padding:9px 14px;border-bottom:1px solid var(--line);font-size:12px;font-weight:700}
+  .section .sb{padding:14px}
+  .statusbar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+  .chip{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:4px 9px;font-size:11px;color:var(--muted)}
+  .chip b{color:var(--ok);font-family:ui-monospace,Consolas,monospace}
+  table{width:100%;border-collapse:collapse;font-size:12px;margin-bottom:14px}
+  th,td{border:1px solid var(--line);padding:5px 9px;text-align:left}
+  th{background:var(--panel2);color:var(--muted);font-weight:700;width:130px}
+  td{font-family:ui-monospace,Consolas,monospace;color:var(--txt)}
+  .hitcard{background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--mem);
+    border-radius:8px;padding:9px 11px;margin-bottom:9px;font-size:12px}
+  .hitcard .hh{display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap}
+  .hitcard .n{color:var(--mem);font-weight:700;font-family:ui-monospace,Consolas,monospace}
+  .hitcard .badge{font-size:10px;border:1px solid var(--line);border-radius:4px;padding:0 5px;color:var(--muted)}
+  .hitcard .bar{color:var(--warn);font-family:ui-monospace,Consolas,monospace;letter-spacing:1px}
+  .hitcard p{margin:3px 0;color:var(--txt)}
+  .hitcard .why{color:var(--muted);font-size:11px}
+  .hitcard .acts{display:flex;gap:6px;margin-top:7px}
+  .hitcard button{background:var(--panel);border:1px solid var(--line);color:var(--muted);
+    border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer}
+  .hitcard button:hover{border-color:var(--accent);color:var(--accent)}
+  .legend{margin-top:14px;font-size:11px;color:var(--dim);line-height:1.8;border-top:1px solid var(--line);padding-top:10px}
+  .legend b{color:var(--muted)}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--panel2);
+    border:1px solid var(--accent);border-radius:8px;padding:8px 14px;font-size:12px;display:none;z-index:80}
+  .hidden{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>回显气泡 · 可交互原型</h1>
+  <div class="sub">
+    RAG 标准做法：正文就地引用 <b>[1][2][3]</b>，会话尾部放可折叠的<b>本次召回统计汇总</b>。<br>
+    关联规格：<code>specs/tasks/RECALL-ECHO-RAG.md</code> · 现状统计表：<code>specs/recall-echo-contract.md</code>
+  </div>
+  <div class="notice">
+    ⚠ 本页全部数字为<b>示意数据</b>（取自 2026-11-12 一次真实 recall 的模板示例），非运行时数据；
+    运行时数字一律来自 <code>buildRecallHint</code> / <code>buildRecallSections</code> 的真实账本。
+    本页只演示交互形态，不接后端、不发请求、不含令牌。
+  </div>
+
+  <div class="tabs">
+    <button id="tabBoth" class="on" onclick="showBoth()">两种客户端并排</button>
+    <button id="tabQoder" onclick="showOne('q')">只看 Qoder（气泡内折叠）</button>
+    <button id="tabOther" onclick="showOne('o')">只看其余客户端（compact）</button>
+  </div>
+
+  <div class="grid">
+    <div class="agentframe" id="frameQ">
+      <div class="agenthead">
+        <span class="logo">◆ Qoder</span>
+        <span class="who">白名单客户端 · html-details 档</span>
+        <span class="who" style="margin-left:auto">气泡内可折叠 ✅</span>
+      </div>
+      <div class="chat">
+        <div class="role">用户</div>
+        <div class="bubble user">回显格式要用可折叠式的，顺便统计一下本次召回明细</div>
+        <div class="role">Agent</div>
+        <div class="bubble">
+          <p class="ans">可以。折叠档目前只对 Qoder 白名单客户端下发
+            <span class="cite" onclick="jump(1)">[1]</span>，
+            其余客户端实测把 <code>&lt;details&gt;</code> 当纯文本吐出
+            <span class="cite" onclick="jump(2)">[2]</span>，
+            因此按「一套设计语言、两个载体」实现；命中片段高亮沿用批次 59 的三件套
+            <span class="cite" onclick="jump(3)">[3]</span>。</p>
+
+          <details class="echo">
+            <summary>🧠 命中 3 条 · 依据「回显」「折叠」「ui」 ｜ 省 99.8% ｜ ▶ 展开本次召回汇总</summary>
+            <div class="echobody">
+              <h4>📊 本次召回统计汇总</h4>
+              <ul>
+                <li><span class="k">命中：</span><span class="v">3 条（1,959t）</span> · <span class="k">背景</span> <span class="v">5 条（293t）</span> · <span class="k">扫描</span> <span class="v">3,434 条</span></li>
+                <li><span class="k">用量：</span>本次注入 <span class="v">2,252t</span> / 全量基线 <span class="v">1,757,064t</span> · 预算 <span class="v">ok</span>（软 1,500 / 警 2,000 / 硬 3,000t）</li>
+                <li><span class="k">省量：</span><span class="v">1,754,812t（99.8%）</span> · 估算 <span class="v">¥0.00045</span>（省 <span class="v">¥0.351</span>）</li>
+                <li><span class="k">累计：</span>今日 <span class="v">31 次（¥0.0124）</span> · 全部 <span class="v">161 次（¥0.0404）</span></li>
+              </ul>
+
+              <h4>🎯 本次用上的依据</h4>
+              <div><span class="num">[1]</span> <span class="hit">回显</span>逻辑与格式统计表…（L1·hot · 0.30 <span style="color:var(--warn)">▮▮▮▯▯</span>） 🎯 回显/明细</div>
+              <div><span class="num">[2]</span> 批次33-C 实测 <span class="hit">折叠</span>气泡内联做不到…（L1·warm · 0.22 <span style="color:var(--warn)">▮▮▯▯▯</span>） 🎯 气泡/内联</div>
+              <div><span class="num">[3]</span> 命中片段<span class="hit">高亮</span>迁到 recall 回显…（L1·hot · 0.18 <span style="color:var(--warn)">▮▮▯▯▯</span>） 🎯 高亮/片段</div>
+
+              <details><summary>📎 项目背景 5 条（293t）</summary>
+                <p>[decision] 改完源码需重打包，非重启…</p><p>[decision] 先实施 A 方案（query 覆盖率融合）…</p>
+              </details>
+              <details><summary>⚠ 状态 1 项（证据不足）</summary>
+                <p>⚠ 证据不足：未命中权威来源，建议事实优先重试</p>
+              </details>
+              <p style="color:var(--dim);font-size:11px;margin:10px 0 0">黄色 = 与本次提问重合的片段；🎯 = 命中的词 · 编号与正文引用一一对应</p>
+            </div>
+          </details>
+          <div class="tagline"><b>收起态 1 行</b> · 点 ▶ 直接看到统计汇总与依据 · 背景/状态二级折叠 · 告警仅异常时出现</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="agentframe" id="frameO">
+      <div class="agenthead">
+        <span class="logo">◆ WorkBuddy / DSH</span>
+        <span class="who">其余客户端 · markdown-compact 档</span>
+        <span class="who" style="margin-left:auto;color:var(--warn)">气泡内不可折叠 ⚠</span>
+      </div>
+      <div class="chat">
+        <div class="role">用户</div>
+        <div class="bubble user">回显格式要用可折叠式的，顺便统计一下本次召回明细</div>
+        <div class="role">Agent</div>
+        <div class="bubble">
+          <p class="ans">同一套统计口径会下发给两类客户端
+            <span class="cite" onclick="jump(1)">[1]</span>；
+            本客户端不渲染 HTML 折叠标签
+            <span class="cite" onclick="jump(2)">[2]</span>，
+            因此气泡内保持两行汇总，点链接到本机明细页看完整折叠内容。</p>
+
+          <div class="plain">
+            <div class="l1">🧠 命中 3 条 · 依据「回显」「折叠」「ui」 ｜ 省 99.8%（1,754,812t）｜ 估算 ¥0.00045</div>
+            <div class="l2">📊 汇总：注入 2,252t / 基线 1,757,064t · 背景 5 条（293t）· 今日 31 次 · 全部 161 次</div>
+            <div class="wn">⚠ 证据不足：未命中权威来源，建议事实优先重试</div>
+            <a href="#" onclick="toast('原型：真实运行时这里是 http://127.0.0.1:&lt;端口&gt;/recall/&lt;随机 id&gt;');return false">▶ 展开本次召回明细（统计汇总 / 命中依据 / Token / 费用）</a>
+          </div>
+          <div class="tagline">
+            <b>批次 29 / 32 / 33 三次实测</b>：此客户端把 <code>&lt;details&gt;</code> 当纯文本吐出，
+            连 ▶ 黑三角都没有 → 气泡内联折叠做不到。<b>不做硬切</b>，否则变成大段裸标签噪声；
+            折叠体验由本机明细页（下方）承担。
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="sh">本机明细页 /recall/&lt;id&gt; · 唯一能做真按钮的载体</div>
+    <div class="sb">
+      <div class="statusbar">
+        <span class="chip">命中 <b>3 条</b></span>
+        <span class="chip">省量 <b>99.8%</b></span>
+        <span class="chip">预算 <b>ok</b></span>
+        <span class="chip">30 分钟内有效</span>
+        <span class="chip">数字与聊天侧同源</span>
+      </div>
+      <table>
+        <tr><th>命中 / 背景</th><td>3 条（1,959t） / 5 条（293t） · 扫描 3,434 条</td></tr>
+        <tr><th>用量</th><td>本次注入 2,252t / 全量基线 1,757,064t · 预算 ok（1,500 / 2,000 / 3,000t）</td></tr>
+        <tr><th>省量</th><td>1,754,812t（99.8%） · 估算 ¥0.00045（省 ¥0.351）</td></tr>
+        <tr><th>累计</th><td>今日 31 次（¥0.0124） · 全部 161 次（¥0.0404）</td></tr>
+      </table>
+
+      <div class="hitcard" id="hit-1">
+        <div class="hh"><span class="n">[1]</span><span class="badge">L1 · hot</span><span class="bar">▮▮▮▯▯</span><span class="badge">相关度 0.30</span></div>
+        <p><span class="hit">回显</span>逻辑与格式统计表：三档判档、四段模板、档位矩阵…</p>
+        <p class="why">🎯 命中「回显」「明细」「内联」「召回」「正文」</p>
+        <div class="acts"><button onclick="toast('已复制引用：[1]')">复制引用 [1]</button><button onclick="toast('生成反馈指令：feedback(confirm, mem_id=…)')">这条有用</button><button onclick="toast('生成反馈指令：feedback(reject, mem_id=…)')">没用</button></div>
+      </div>
+      <div class="hitcard" id="hit-2">
+        <div class="hh"><span class="n">[2]</span><span class="badge">L1 · warm</span><span class="bar">▮▮▯▯▯</span><span class="badge">相关度 0.22</span></div>
+        <p>批次 33-C：DSH 实测仍把 <span class="hit">&lt;details&gt;</span> 当纯文本吐出，气泡内联折叠做不到…</p>
+        <p class="why">🎯 命中「折叠」「气泡」「内联」「明细」</p>
+        <div class="acts"><button onclick="toast('已复制引用：[2]')">复制引用 [2]</button><button onclick="toast('生成反馈指令：feedback(confirm, mem_id=…)')">这条有用</button><button onclick="toast('生成反馈指令：feedback(reject, mem_id=…)')">没用</button></div>
+      </div>
+      <div class="hitcard" id="hit-3">
+        <div class="hh"><span class="n">[3]</span><span class="badge">L1 · hot</span><span class="bar">▮▮▯▯▯</span><span class="badge">相关度 0.18</span></div>
+        <p>批次 59：命中片段<span class="hit">高亮</span>迁到 recall 回显，三处共用一份四段口径…</p>
+        <p class="why">🎯 命中「高亮」「片段」「回显」</p>
+        <div class="acts"><button onclick="toast('已复制引用：[3]')">复制引用 [3]</button><button onclick="toast('生成反馈指令：feedback(confirm, mem_id=…)')">这条有用</button><button onclick="toast('生成反馈指令：feedback(reject, mem_id=…)')">没用</button></div>
+      </div>
+
+      <div class="legend">
+        <b>真按钮只在这里</b>：MCP 文本通道是静态 Markdown/HTML 片段，无 JS、无回调、页面无令牌 →
+        气泡里做不出「上报折叠状态 / 就地调 feedback」的按钮；明细页按钮只做本地交互，
+        「这条有用/没用」生成可粘贴的 <code>feedback</code> 指令，<b>不冒充服务端状态已变更</b>。<br>
+        <b>安全约束不变</b>：动态内容全转义、CSP <code>default-src 'none'</code>、URL 与页面不含令牌、只监听 127.0.0.1、30 分钟票据。<br>
+        <b>零样式保守档</b>：气泡内只用已证实的 <code>&lt;details&gt;</code> / <code>&lt;mark&gt;</code> 与几何字符做层级；
+        内联 <code>style</code>、嵌套 <code>open</code>、<code>&lt;table&gt;</code> 在 Qoder 未证实，需真机验证后再开增强档。
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+<script>
+function showBoth(){document.getElementById('frameQ').classList.remove('hidden');document.getElementById('frameO').classList.remove('hidden');
+  document.getElementById('tabBoth').classList.add('on');document.getElementById('tabQoder').classList.remove('on');document.getElementById('tabOther').classList.remove('on');}
+function showOne(k){var q=k==='q';document.getElementById('frameQ').classList.toggle('hidden',!q);document.getElementById('frameO').classList.toggle('hidden',q);
+  document.getElementById('tabBoth').classList.remove('on');document.getElementById('tabQoder').classList.toggle('on',q);document.getElementById('tabOther').classList.toggle('on',!q);}
+function jump(n){var el=document.getElementById('hit-'+n);if(el){el.scrollIntoView({behavior:'smooth',block:'center'});
+  el.style.borderColor='#4d9fff';setTimeout(function(){el.style.borderColor='';},1200);toast('跳到依据 ['+n+']');}}
+function toast(msg){var t=document.getElementById('toast');t.textContent=msg;t.style.display='block';clearTimeout(window.__tt);
+  window.__tt=setTimeout(function(){t.style.display='none';},1800);}
+</script>
+</body>
+</html>

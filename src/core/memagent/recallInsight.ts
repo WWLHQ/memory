@@ -2,9 +2,11 @@
 // 批次13：追加折叠明细（<details> 四段），提示行仍是唯一摘要行；数字全部同源。
 // 约束：数字全部来自真实账本（记忆内容 + recall 审计），未配置单价时金额一律 null，绝不编造。
 import type {
-  AuditRecord, Category, Hit, Memory, RecallBackground, RecallBackgroundItem, RecallResult, RecallSavings,
+  AuditRecord, Category, Hit, Memory, RecallBackground, RecallBackgroundItem, RecallMode, RecallResult, RecallSavings,
 } from './types.ts';
 import { displayTerms, pickHitSpans } from './hitHighlight.ts';
+// A6：模式中文名的唯一真源就是调度层那张表，回显不另立一份文案
+import { RECALL_MODE_SPECS } from './recallModes.ts';
 
 /**
  * 本地预算单位 t 的确定性换算：全链路同源 —— 召回硬熔断裁剪（agent.ts）、背景选入、
@@ -133,6 +135,21 @@ export interface RecallMoney {
   all: RecallMoneyBlock;
 }
 
+/** 批次 RAG：短收摘要与统计汇总的唯一口径（三档模板共用；不写库、不进 display 契约） */
+export interface RecallEchoSummary {
+  /** 首行：命中数 + top3 编号依据词 + 省量比例 + 本次金额/金额未开 */
+  headline: string;
+  /** 第二行：注入 / 基线 / 背景 / 今日 / 全部 */
+  stats: string;
+  /** 只在真有告警时非空；正常轮次不产出常驻噪声 */
+  warnings: string[];
+  /**
+   * A6（回显贯通）：本次模式与分流依据（§3.4「让用户知道系统替你选了 X，因为命中了这些词」）。
+   * 会话视图（dispatch=null）为 null —— 没有分流动作就不编一行。
+   */
+  mode_line: string | null;
+}
+
 export interface RecallHint {
   /** 聊天窗口逐字回显的单行提示 */
   line: string;
@@ -145,6 +162,11 @@ export interface RecallHint {
   /** 未配置单价 → null（提示行明示，不编造金额） */
   money: RecallMoney | null;
   rollup: RecallRollup;
+  /**
+   * 批次 RAG：新版短收摘要（buildRecallEchoSummary 生成）。
+   * 可选 —— 老调用方手写 hint 时不至于类型失败；缺省时 compact 档退回 shortLine。
+   */
+  echo?: RecallEchoSummary;
 }
 
 /** 本地时区当日零点 */
@@ -219,9 +241,8 @@ export function buildRecallHint(
   const bgPart = `📎 背景 ${bg.items.length} 条（${fmtInt(bg.tokens)}t）`;
   const savePart = `⚡ 本次省 ${fmtInt(result.savings.saved_tokens)}t（全量约 ${fmtInt(result.savings.corpus_tokens)}t）`;
 
-  const warnings: string[] = [];
-  if (result.evidence_thin) warnings.push('⚠ 证据不足：未命中权威来源，建议事实优先重试');
-  if (result.budget.status === 'fused') warnings.push(`⚠ 预算熔断：已裁剪 ${fmtInt(result.savings.budget_trimmed_tokens)}t`);
+  // 批次 RAG：告警抽成唯一函数，提示行与三档模板共用同一份（正常轮次不产出常驻噪声）
+  const warnings = recallWarnings(result, rollup, unitPriceCnyPerMTok);
 
   const price = normalizeUnitPrice(unitPriceCnyPerMTok);
   let money: RecallMoney | null = null;
@@ -257,18 +278,176 @@ export function buildRecallHint(
       + ` ｜ 全部 ${rollup.all_calls} 次 ${formatCny(money.all.cost_cny)}（省 ${formatCny(money.all.saved_cny)}）`;
     moneyShort = `💰 估算 本次 ${formatCny(money.this_call.cost_cny)}（省 ${formatCny(money.this_call.saved_cny)}）`
       + ` ｜ 今日 ${rollup.today_calls} 次 ｜ 全部 ${rollup.all_calls} 次`;
-    if (rollup.today_legacy_calls > 0) {
-      warnings.push(`⚠ 今日含 ${rollup.today_legacy_calls} 次旧记录（无省量字段，金额按载荷下限计）`);
-    }
   }
 
   const line = [`🧠 Memory ｜ ${hitPart} ｜ ${bgPart} ｜ ${savePart} ｜ ${moneyPart}`, ...warnings].join(' ｜ ');
+  // A6：shortLine 是「无 echo 时的兜底摘要」，模式行同样带上（§3.4 透明），dispatch=null 时不加
+  const modeLine = buildRecallModeLine(result);
   const shortLine = [
     `🧠 Memory ｜ ${hitPart} ｜ ${bgPart} ｜ ${savePart}`,
     moneyShort,
+    ...(modeLine ? [modeLine] : []),
     ...warnings,
   ].join('\n');
-  return { line, shortLine, money, rollup };
+  const hint: RecallHint = { line, shortLine, money, rollup };
+  hint.echo = buildRecallEchoSummary(result, hint, unitPriceCnyPerMTok);
+  return hint;
+}
+
+/* ---------- 批次 RAG：短收摘要 / 统计汇总 / 编号依据 —— 三档模板共用的唯一口径 ---------- */
+
+/**
+ * 省量比例：本次唯一新增的**展示派生值**（saved_tokens / corpus_tokens）。
+ * 不写库、不进审计、不进 display 契约；分母为 0 或非法时输出「—」，绝不编造。
+ */
+export function recallSavingRatio(result: RecallResult): string {
+  const corpus = result.savings.corpus_tokens;
+  if (!Number.isFinite(corpus) || corpus <= 0) return '—';
+  return `${((Math.max(0, result.savings.saved_tokens) / corpus) * 100).toFixed(1)}%`;
+}
+
+/** 本次命中依据词：按 hits 返回顺序去重取前 max 个，与打分同源，不从正文猜 */
+export function recallHitTerms(result: RecallResult, max = 3): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const h of result.hits) {
+    for (const raw of h.matched_terms ?? []) {
+      const t = raw.trim();
+      if (!t || seen.has(t)) continue;
+      seen.add(t);
+      out.push(t);
+      if (out.length >= max) return out;
+    }
+  }
+  return out;
+}
+
+/** 告警与提示行完全同源（同一函数生成）：正常轮次为空，不做常驻噪声 */
+export function recallWarnings(
+  result: RecallResult, rollup: RecallRollup, unitPriceCnyPerMTok: number | null,
+): string[] {
+  const warnings: string[] = [];
+  if (result.evidence_thin) warnings.push('⚠ 证据不足：未命中权威来源，建议事实优先重试');
+  if (result.budget.status === 'fused') {
+    warnings.push(`⚠ 预算熔断：已裁剪 ${fmtInt(result.savings.budget_trimmed_tokens)}t`);
+  }
+  if (normalizeUnitPrice(unitPriceCnyPerMTok) !== null && rollup.today_legacy_calls > 0) {
+    warnings.push(`⚠ 今日含 ${rollup.today_legacy_calls} 次旧记录（无省量字段，金额按载荷下限计）`);
+  }
+  return warnings;
+}
+
+/**
+ * A6（回显贯通 §3.4）：本次生效模式 + 分流来源 + 命中特征词；会话视图（dispatch=null）返回 null。
+ * 只读 RecallResult.dispatch（与 mode_dispatch 审计同一份对象），不在这里重新判断模式——
+ * 回显一旦自己再算一遍，就又变成第三套口径。
+ */
+export function buildRecallModeLine(result: RecallResult): string | null {
+  const d = result.dispatch;
+  if (!d) return null;
+  const nameOf = (m: Exclude<RecallMode, null>): string =>
+    (m === 'auto' ? '自动' : RECALL_MODE_SPECS[m].name);
+  const kw = result.hit_keywords;
+  let body: string;
+  if (d.source === 'manual') {
+    body = `${nameOf(d.applied)}（用户指定）`;
+  } else if (d.applied === 'auto') {
+    // 自动分流建议了极简、本轮按默认口径执行（specs §2.6 A2 观测档）——如实说明，不冒充分流已落地
+    body = `自动（分流建议${nameOf(d.suggested)} · 本轮按默认口径执行）`;
+  } else {
+    const why = kw.length > 0 ? `命中${kw.map((k) => `「${k}」`).join('')}` : '零命中走 scene 默认';
+    body = `${nameOf(d.applied)}（自动分流 · ${plainClip(why, 60)}）`;
+  }
+  const sec = d.secondary ? ` · 次模式：${RECALL_MODE_SPECS[d.secondary].name}` : '';
+  return `⚙ 模式：${body}${sec}`;
+}
+
+/** 折叠档外层 summary：≤80 字，命中数 + top3 命中词 + 省量比例 + 展开提示 */
+export function buildRecallFoldSummary(result: RecallResult): string {
+  const terms = recallHitTerms(result, 3);
+  const termPart = terms.length > 0 ? ` · 依据${terms.map((t) => `「${plainClip(t, 12)}」`).join('')}` : '';
+  return `🧠 命中 ${result.hits.length} 条${termPart} ｜ 省 ${recallSavingRatio(result)} ｜ ▶ 展开本次召回汇总`;
+}
+
+/** 两行短收摘要：首行命中依据前置，第二行统计汇总；warnings 独立成行（异常驱动） */
+export function buildRecallEchoSummary(
+  result: RecallResult, hint: RecallHint, unitPriceCnyPerMTok: number | null,
+): RecallEchoSummary {
+  // 编号必须严格对应 hits[i]（RAG 契约）：取前 3 条命中的代表词，而不是 top3 命中词。
+  // 否则首行的 [3] 可能只是第 1 条命中的第 3 个词，与依据段 [n] 指代的条目错配。
+  const cited = result.hits.slice(0, 3)
+    .map((h, i) => ({ n: i + 1, term: h.matched_terms?.[0]?.trim() ?? '' }))
+    .filter((x) => x.term.length > 0);
+  const termPart = cited.length > 0
+    ? ' · 依据 ' + cited.map((x) => `[${x.n}]「${plainClip(x.term, 20)}」`).join('')
+    : '';
+  const moneyTag = hint.money === null ? '金额未开' : `估算 ${formatCny(hint.money.this_call.cost_cny)}`;
+  const headline = `🧠 命中 ${result.hits.length} 条${termPart} ｜ 省 ${recallSavingRatio(result)}`
+    + `（${fmtInt(result.savings.saved_tokens)}t）｜ ${moneyTag}`;
+  const stats = `📊 汇总：注入 ${fmtInt(result.savings.injected_tokens)}t / 基线 ${fmtInt(result.savings.corpus_tokens)}t`
+    + ` · 背景 ${result.background.items.length} 条（${fmtInt(result.background.tokens)}t）`
+    + ` · 今日 ${hint.rollup.today_calls} 次 · 全部 ${hint.rollup.all_calls} 次`;
+  return { headline, stats, warnings: recallWarnings(result, hint.rollup, unitPriceCnyPerMTok), mode_line: buildRecallModeLine(result) };
+}
+
+/** 统计汇总四行：字段全部来自 RecallResult / RecallHint，零新增计算（除展示派生比例） */
+export function buildRecallStatLines(result: RecallResult, hint: RecallHint): string[] {
+  const t = result.savings;
+  const bg = result.background;
+  const r = hint.rollup;
+  const money = hint.money;
+  return [
+    `命中：${result.hits.length} 条（${fmtInt(t.payload_tokens)}t） · 背景 ${bg.items.length} 条（${fmtInt(bg.tokens)}t） · 扫描 ${fmtInt(result.scanned_memories)} 条`,
+    `用量：本次注入 ${fmtInt(t.injected_tokens)}t / 全量基线 ${fmtInt(t.corpus_tokens)}t · 预算 ${result.budget.status}（软 ${fmtInt(result.budget.soft)} / 警 ${fmtInt(result.budget.warn)} / 硬 ${fmtInt(result.budget.hard)}t）`,
+    `省量：${fmtInt(t.saved_tokens)}t（${recallSavingRatio(result)}） · ` + (money === null
+      ? '金额未开'
+      : `估算 ${formatCny(money.this_call.cost_cny)}（省 ${formatCny(money.this_call.saved_cny)}）`),
+    money === null
+      ? `累计：今日 ${r.today_calls} 次 · 全部 ${r.all_calls} 次`
+      : `累计：今日 ${r.today_calls} 次（${formatCny(money.today.cost_cny)}） · 全部 ${r.all_calls} 次（${formatCny(money.all.cost_cny)}）`,
+  ];
+}
+
+/** 相关度 5 格字符条：零样式做层级，不赌客户端是否放行内联 style */
+function scoreBar(score: number): string {
+  const filled = Math.max(0, Math.min(5, Math.round(score * 5)));
+  return '▮'.repeat(filled) + '▯'.repeat(5 - filled);
+}
+
+/**
+ * RAG 编号依据：hits[i] → [i+1]，1-based，按返回顺序（与 score 降序一致）。
+ * hits=0 时不产出任何 [n]；无 matched_terms 时不写 🎯、不谎称语义命中。
+ */
+export function buildRecallCitationLines(
+  result: RecallResult,
+  markup: HitMarkup,
+  clip: (s: string, maxChars: number) => string,
+  maxChars = 120,
+): string[] {
+  return result.hits.map((h, i) => {
+    const clipped = clip(h.content, maxChars);
+    const body = markHitFragments(clipped, h.matched_terms, markup);
+    const terms = displayTerms(h.matched_terms, h.content, 3);
+    const why = terms.length > 0
+      ? ' 🎯 命中' + terms.map((x) => `「${clip(x, 20)}」`).join('')
+      : '';
+    const note = terms.length > 0 ? '' : ' · 无字面重合，仅按相关度参考';
+    return `[${i + 1}] ${body}（${h.layer}·${h.decay_class} · ${h.score.toFixed(2)} ${scoreBar(h.score)}）${why}${note}`;
+  });
+}
+
+/** 统计汇总 + 编号依据两段的正文（HTML / 纯 Markdown 两档共用，只有高亮载体不同） */
+function buildRecallEchoBody(
+  result: RecallResult,
+  hint: RecallHint,
+  markup: HitMarkup,
+  clip: (s: string, maxChars: number) => string,
+): string {
+  const stats = buildRecallStatLines(result, hint).map((l) => `- ${l}`).join('\n');
+  const citeBlock = result.hits.length > 0
+    ? `**🎯 本次用上的依据**\n\n${buildRecallCitationLines(result, markup, clip).map((l) => `- ${l}`).join('\n')}`
+    : '';
+  return `**📊 本次召回统计汇总**\n\n${stats}${citeBlock ? `\n\n${citeBlock}` : ''}`;
 }
 
 /* ---------- 聊天窗口明细（批次13 HTML 折叠 / 批次29 纯 Markdown）：四段；不支持 HTML 的客户端用纯 Markdown ---------- */
@@ -410,8 +589,9 @@ export function buildRecallSections(
 }
 
 /**
- * 组装聊天窗口明细：外层 = 提示行，内层四段（项目背景 / 命中记忆 / Token / 省钱与费用）。
- * htmlDetails=false 时同结构输出纯 Markdown（**加粗小节标题** + 列表，零 HTML 标签）。数字全部同源。
+ * 批次 RAG 组装聊天窗口明细：外层短收 summary（html 档）或两行短摘要（纯 Markdown 档）
+ * → 统计汇总四行 → `[n]` 编号依据（默认可见）→ 四段明细降级为二级折叠（html 档）/ 加粗小节（纯 Markdown 档）
+ * → 告警段仅在真有 warning 时生成。四段数字仍由 buildRecallSections 唯一口径提供，逐字不变。
  */
 export function buildRecallMarkdown(
   result: RecallResult,
@@ -421,34 +601,71 @@ export function buildRecallMarkdown(
 ): string {
   const htmlDetails = opts.htmlDetails !== false;
   const clip = htmlDetails ? mdInline : plainClip;
+  const markup: HitMarkup = htmlDetails ? 'html' : 'markdown';
   // 批次59：同一份四段口径带上各自的高亮载体——HTML 档用 <mark>，纯 Markdown 档用加粗引号
   const sections = buildRecallSections(result, hint, unitPriceCnyPerMTok, clip, 120, htmlDetails
     ? { markup: 'html', readingHint: '黄色 = 与本次提问重合的片段；🎯 = 命中的词' }
     : { markup: 'markdown', readingHint: '加粗「」= 与本次提问重合的片段；🎯 = 命中的词' });
-  const inner = sections
-    .map((s) => {
-      const body = s.lines.map((l) => `- ${l}`).join('\n');
-      return htmlDetails ? mdSection(s.title, body) : `**${s.title}**\n\n${body}`;
-    })
-    .join('\n\n');
+  const echo = hint.echo ?? buildRecallEchoSummary(result, hint, unitPriceCnyPerMTok);
+  const echoBody = buildRecallEchoBody(result, hint, markup, clip);
+  const warningBlock = echo.warnings.length > 0
+    ? (htmlDetails
+        ? `<details><summary>⚠ 状态 ${echo.warnings.length} 项</summary>\n\n`
+          + `${echo.warnings.map((w) => `- ${mdInline(w, 200)}`).join('\n')}\n</details>`
+        : echo.warnings.map((w) => `**${w}**`).join('\n\n'))
+    : '';
 
-  if (!htmlDetails) return `**${hint.line}**\n\n${inner}`;
-  return `<details>\n<summary>${mdInline(hint.line, 500)}</summary>\n\n${inner}\n</details>`;
+  if (!htmlDetails) {
+    const inner = sections
+      .map((s) => `**${s.title}**\n\n${s.lines.map((l) => `- ${l}`).join('\n')}`)
+      .join('\n\n');
+    // 2026-11-12（T9 同源缺陷）：markdown-full 档原来用单换行拼三行，同样会被客户端合并成一段。
+    // 与 compact 档保持同一口径：**空行分段**，段落数 = 2（摘要）+ warning 数。
+    // A6：模式行紧跟汇总（§3.4 透明），会话视图无分流时为 null，不产出空行。
+    const summary = [echo.headline, echo.stats, ...(echo.mode_line ? [echo.mode_line] : [])]
+      .map((l) => `**${l}**`).join('\n\n');
+    return summary
+      + (warningBlock ? `\n\n${warningBlock}` : '')
+      + `\n\n${echoBody}\n\n${inner}`;
+  }
+
+  const inner = sections
+    .map((s) => mdSection(mdInline(s.title, 240), s.lines.map((l) => `- ${l}`).join('\n')))
+    .join('\n\n');
+  return `<details>\n<summary>${mdInline(buildRecallFoldSummary(result), 160)}</summary>\n\n`
+    + `${echoBody}`
+    + (echo.mode_line ? `\n\n**${mdInline(echo.mode_line, 160)}**` : '')
+    + `\n\n${inner}`
+    + (warningBlock ? `\n\n${warningBlock}` : '')
+    + '\n</details>';
 }
 
 /**
- * 批次32-C / 33-C：不支持 HTML 折叠的客户端（DSH 实测只渲染 Markdown，`<details>` 原样露出）默认只给
+ * 批次32-C / 33-C：不支持 HTML 折叠的客户端（DSH 实测只渲染 Markdown，`<details>` 原样露出）只给
  * **两行短摘要 + 一个可点链接**，点开是本机明细页（真 `<details>` 折叠，数字同源）。
- * 为什么不再直接铺四小节：DSH 聊天窗口没有可点击的折叠控件，四段全文每次铺满页面（用户明确要求收起）。
+ * 批次 RAG：首行改为「命中数 + top3 编号依据词 + 省量比例 + 金额」，第二行改为统计汇总，
+ * 告警行只在真有 warning 时追加（异常驱动），链接文案加入「统计汇总 / 命中依据」以与实际内容一致。
  * detailUrl 缺失（TCP 8202 等无端口场景）时退回文字指引：明细用同 query + detail=true 再取。
+ * hint.echo 缺省（手写 hint 的老调用方）时退回 shortLine，不抛异常。
  */
 export function buildRecallCompactMarkdown(hint: RecallHint, detailUrl?: string): string {
-  const summary = `**${hint.shortLine}**`;
+  const echo = hint.echo;
+  // 2026-11-12（WorkBuddy 实测回填）：三行之间必须留**空行**。原先用单换行，Markdown 视作软换行，
+  // WorkBuddy 会把「🧠 摘要 / 📊 汇总 / ⚠ 告警」合并成一整段（截图实证），读者根本分不出层级。
+  // 空行 = 段落分隔，是所有客户端都认的硬分隔；末尾不追加空行，保持 rows 数为 2~3。
+  const summary = echo
+    ? [echo.headline, echo.stats, ...(echo.mode_line ? [echo.mode_line] : []), ...echo.warnings]
+      .map((l) => `**${l}**`).join('\n\n')
+    : `**${hint.shortLine}**`;
   if (detailUrl) {
-    return `${summary}\n\n▶ [展开本次召回明细（项目背景 / 命中记忆 / Token / 费用）](${detailUrl})`;
+    // 2026-11-12（用户回填）：WorkBuddy 桌面端与手机端点本机链接均无反应 —— 手机是 127.0.0.1 不可达，
+    // 桌面端是客户端不跳外链。链接保留（浏览器/别的客户端仍可用），但必须给一条不依赖链接的取明细路径，
+    // 否则用户永远看不到「统计汇总 / 命中依据」。这句是给用户看的，Agent 原样输出即可。
+    return `${summary}\n\n▶ [展开本次召回明细（统计汇总 / 命中依据 / Token / 费用）](${detailUrl})`
+      + '\n\n📌 链接点不开时（手机端 / 部分客户端），直接说「看明细」即可，我用同一个 query 取回明细铺开。';
   }
   return `${summary}\n\n`
-    + '📌 明细已收起（项目背景 / 命中记忆 / Token 用量 / 省钱与费用）。需要看时用同一个 query 再调用一次 recall_memory 并置 detail=true，'
+    + '📌 明细已收起（统计汇总 / 命中依据 / Token 用量 / 省钱与费用）。需要看时用同一个 query 再调用一次 recall_memory 并置 detail=true，'
     + '然后把返回的 display.markdown 原样输出；不需要就保持本行，不要自行编造明细。';
 }
 
@@ -476,7 +693,37 @@ function localTimeLabel(ms: number): string {
 }
 
 /**
- * 渲染一次性本机明细页：摘要两行 + 四段 `<details>`（默认收起，点标题展开）+「全部展开/收起」。
+ * 批次 RAG（T4）· 明细页单条命中卡：编号即正文引用 `[n]`，`id="hit-n"` 供 `/recall/<id>#hit-n` 直达。
+ * 相关度用字符条（零依赖）而非色块；「复制引用」「有用/没用」都是**本地交互**——
+ * 页面不含 MCP 令牌，反馈只生成可粘贴的 `feedback(...)` 指令文本，绝不冒充已生效。
+ */
+function hitCardHtml(h: Hit, index: number, maxChars: number): string {
+  const n = index + 1;
+  const body = markHitFragments(htmlEscape(plainClip(h.content, maxChars)), h.matched_terms, 'html');
+  const terms = displayTerms(h.matched_terms, h.content, 3);
+  const why = terms.length > 0
+    ? `<p class="why">🎯 命中${terms.map((x) => `「${htmlEscape(plainClip(x, 20))}」`).join('')}</p>`
+    : '<p class="why none">无字面重合，仅按相关度参考</p>';
+  // mem_id 只在「纯安全字符」时才写进 onclick，否则隐藏反馈按钮——绝不把未经校验的 id 拼进脚本
+  const safeId = /^[A-Za-z0-9_-]{1,64}$/.test(h.mem_id) ? h.mem_id : '';
+  const fb = safeId
+    ? `<div class="fb"><button type="button" class="mini" onclick="mmFeedback('${safeId}','confirm',this)">这条有用</button>`
+      + `<button type="button" class="mini" onclick="mmFeedback('${safeId}','reject',this)">这条没用</button>`
+      + '<pre class="fbtxt" hidden></pre></div>'
+    : '<p class="why none">该条 id 含非安全字符，已隐藏反馈按钮（不编造 id）。</p>';
+  return `<article class="hit" id="hit-${n}">
+<p class="hithead"><span class="badge num">[${n}]</span><span class="badge">${htmlEscape(h.layer)}</span><span class="badge">${htmlEscape(h.decay_class)}</span><span class="rel">相关度 ${h.score.toFixed(2)} <span class="bar">${scoreBar(h.score)}</span></span><button type="button" class="mini" onclick="mmCopy('[${n}]', this)">复制引用 [${n}]</button></p>
+<p class="hitbody">${body}</p>
+${why}
+${fb}
+</article>`;
+}
+
+/**
+ * 渲染一次性本机明细页（批次 RAG T4 重构）：
+ * 顶部状态条 → 统计汇总卡（四组字段，明细页可用真 `<table>`）→ `[n]` 编号命中卡（`id="hit-n"` 锚点、
+ * 相关度条、层/热度徽标、`<mark>` 高亮、🎯 命中词、复制引用、就地反馈）→ 背景/用量/费用三段折叠
+ * （折叠状态写 `localStorage`，同源仅本机）→ 页脚口径说明。
  * 纯字符串输出，不依赖模板引擎；所有动态内容走 htmlEscape；不含令牌、外部资源与远端脚本。
  */
 export function buildRecallDetailPage(
@@ -491,14 +738,36 @@ export function buildRecallDetailPage(
     { markup: 'html', readingHint: '黄色 = 与本次提问重合的片段；🎯 = 命中的词' },
   );
   const hasTerms = result.hits.some((h) => (h.matched_terms?.length ?? 0) > 0);
-  const detailBlocks = sections
-    .map((s) => `<details>\n<summary>${htmlEscape(s.title)}</summary>\n<ul>${s.lines.map((l) => `<li>${l}</li>`).join('')}</ul>\n</details>`)
-    .join('\n');
-  const summaryLines = hint.shortLine
-    .split('\n')
+  const echo = hint.echo ?? buildRecallEchoSummary(result, hint, unitPriceCnyPerMTok);
+  const summaryLines = [echo.headline, echo.stats, ...(echo.mode_line ? [echo.mode_line] : [])]
     .map((l) => `<p class="sum">${htmlEscape(l)}</p>`)
     .join('\n');
   const ttlMin = Math.max(1, Math.round((meta.expiresAt - meta.issuedAt) / 60_000));
+  // 顶部状态条：命中数 / 省量% / 预算 / 生成时间 / 有效期，一行可扫读（明细页的「我在看什么」）
+  const statusBar = `命中 ${result.hits.length} 条 · 省 ${recallSavingRatio(result)}（${fmtInt(result.savings.saved_tokens)}t）`
+    + ` · 预算 ${result.budget.status} · 生成 ${localTimeLabel(meta.issuedAt)} · 有效期 ${ttlMin} 分钟`;
+  // 统计汇总卡：与聊天侧 buildRecallStatLines 同一口径，按「键：值」拆成两列，不重算任何数字
+  const statRows = buildRecallStatLines(result, hint).map((line) => {
+    const at = line.indexOf('：');
+    return at > 0 ? { k: line.slice(0, at), v: line.slice(at + 1) } : { k: '汇总', v: line };
+  });
+  const statTable = `<table class="stats"><tbody>${statRows
+    .map((r) => `<tr><th scope="row">${htmlEscape(r.k)}</th><td>${htmlEscape(r.v)}</td></tr>`)
+    .join('')}</tbody></table>`;
+  const warnList = echo.warnings.length > 0
+    ? `<ul class="warn">${echo.warnings.map((w) => `<li>${htmlEscape(w)}</li>`).join('')}</ul>`
+    : '';
+  // 依据段标题沿用 buildRecallSections 的第 2 段（数字与聊天侧同源，含读法说明），正文换成编号卡
+  const citesTitle = sections[1]?.title ?? `🧠 命中记忆 ${result.hits.length} 条（${fmtInt(result.savings.payload_tokens)}t）`;
+  const citeCards = result.hits.length > 0
+    ? result.hits.map((h, i) => hitCardHtml(h, i, clipChars)).join('\n')
+    : `<p class="muted">未命中（扫描 ${fmtInt(result.scanned_memories)} 条）：本页不编造条目，也不出现任何 [n] 编号。</p>`;
+  const FOLD_KEYS = ['bg', 'token', 'money'];
+  const otherFolds = [sections[0], sections[2], sections[3]]
+    .filter((s): s is RecallSection => Boolean(s))
+    .map((s, i) => `<details data-fold="${FOLD_KEYS[i] ?? 'seg'}">\n<summary>${htmlEscape(s.title)}</summary>\n`
+      + `<ul>${s.lines.map((l) => `<li>${l}</li>`).join('')}</ul>\n</details>`)
+    .join('\n');
   // 批次59：把「黄色是什么意思」「没标黄是什么意思」一次说清——不解释等于让用户猜
   const legend = hasTerms
     ? `<p class="legend">🟨 黄色片段 = 与本次提问「${htmlEscape(plainClip(meta.query, 60))}」重合的部分（🎯 后是命中的词）。
@@ -519,6 +788,7 @@ body { margin: 0; padding: 24px 16px 40px; background: var(--bg); color: var(--f
   font: 14px/1.65 "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; }
 main { max-width: 880px; margin: 0 auto; }
 h1 { font-size: 17px; margin: 0 0 10px; }
+h2 { font-size: 14px; margin: 16px 0 8px; }
 .sum { margin: 2px 0; font-weight: 600; }
 .meta { color: var(--muted); font-size: 12px; margin: 8px 0 18px; }
 .ops { display: flex; gap: 8px; margin-bottom: 12px; }
@@ -529,6 +799,26 @@ summary { cursor: pointer; font-weight: 600; padding: 10px 0; list-style: disclo
 details[open] summary { list-style: disclosure-open; border-bottom: 1px solid var(--border); }
 ul { margin: 8px 0 12px; padding-left: 20px; }
 li { margin: 3px 0; word-break: break-word; }
+.statusbar { margin: 0 0 10px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--card); font-size: 12px; color: var(--muted); }
+table.stats { width: 100%; border-collapse: collapse; margin: 10px 0 14px; font-size: 12.5px; }
+table.stats th, table.stats td { border-bottom: 1px solid var(--border); padding: 6px 8px; text-align: left; vertical-align: top; }
+table.stats th { width: 56px; color: var(--muted); font-weight: 600; white-space: nowrap; }
+.hit { border: 1px solid var(--border); border-radius: 8px; background: var(--card); padding: 10px 12px; margin: 0 0 10px; }
+.hithead { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 6px; font-size: 12px; }
+.badge { border: 1px solid var(--border); border-radius: 999px; padding: 0 7px; color: var(--muted); font-size: 11.5px; }
+.badge.num { color: var(--fg); font-weight: 700; border-color: var(--fg); }
+.rel { color: var(--muted); }
+.bar { letter-spacing: 1px; color: var(--fg); }
+.hitbody { margin: 0; word-break: break-word; }
+.why { margin: 6px 0 0; font-size: 12px; }
+.why.none, .muted { color: var(--muted); }
+.fb { display: flex; gap: 6px; margin: 8px 0 0; }
+button.mini { font: inherit; font-size: 11.5px; padding: 2px 8px; border: 1px solid var(--border);
+  border-radius: 6px; background: var(--bg); color: var(--fg); cursor: pointer; }
+.fbtxt { margin: 6px 0 0; padding: 8px; background: var(--bg); border: 1px dashed var(--border);
+  border-radius: 6px; font-size: 11.5px; white-space: pre-wrap; word-break: break-all; }
+.warn { margin: 0 0 12px; padding-left: 20px; font-size: 12px; color: #8a6d00; }
 footer { color: var(--muted); font-size: 12px; margin-top: 18px; border-top: 1px solid var(--border); padding-top: 12px; }
 code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
 mark { background: #ffe58f; color: #1f2328; padding: 0 1px; border-radius: 3px; }
@@ -543,20 +833,67 @@ mark { background: #ffe58f; color: #1f2328; padding: 0 1px; border-radius: 3px; 
 <body>
 <main>
 <h1>🧠 本次召回明细</h1>
+<p class="statusbar">${htmlEscape(statusBar)}</p>
 ${summaryLines}
 <p class="meta">项目 <code>${htmlEscape(meta.project_id)}</code> ｜ 查询「${htmlEscape(plainClip(meta.query, 80))}」${meta.client ? ` ｜ 调用方 <code>${htmlEscape(meta.client)}</code>` : ''}
-<br>生成 ${localTimeLabel(meta.issuedAt)} ｜ 本链接 ${ttlMin} 分钟内有效（过期后请在聊天里让助手用 detail=true 再取一次）</p>
-${legend}<div class="ops">
-<button type="button" onclick="document.querySelectorAll('details').forEach(function(d){d.open=true})">全部展开</button>
-<button type="button" onclick="document.querySelectorAll('details').forEach(function(d){d.open=false})">全部收起</button>
+<br>本链接 ${ttlMin} 分钟内有效（过期后请在聊天里让助手用 detail=true 再取一次）</p>
+<h2>📊 本次召回统计汇总</h2>
+${statTable}
+${warnList}${legend}<div class="ops">
+<button type="button" onclick="mmAll(true)">全部展开</button>
+<button type="button" onclick="mmAll(false)">全部收起</button>
 </div>
-${detailBlocks}
+<details data-fold="cites" open>
+<summary>${htmlEscape(citesTitle)}</summary>
+${citeCards}
+</details>
+${otherFolds}
 <footer>
 本页与聊天里的摘要<b>数字同源</b>（同一次 recall 的真实账本计算，未重算、未估算）。
 命中与背景正文按 ${clipChars} 字截断，超出部分以「…」标示；金额按全局参数页单价换算，非厂商账单。
+编号 <code>[n]</code> 与聊天正文里的引用脚标一一对应，也可用 <code>/recall/&lt;id&gt;#hit-n</code> 直达单条依据。
+「这条有用 / 没用」只生成本机可粘贴的 <code>feedback</code> 指令文本，本页不含令牌，<b>不会自动生效</b>。
+折叠状态只写本机 <code>localStorage</code>，不上传、不落账本。
 链接由一次性随机 id 保护（30 分钟过期、不落盘），MCP 令牌不出现在 URL 与本页任何位置；服务只监听 127.0.0.1。
 </footer>
 </main>
+<script>
+(function () {
+  var KEY = 'mm.recall.detail.folds.v1';
+  var st = {};
+  try { st = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { st = {}; }
+  var boxes = [].slice.call(document.querySelectorAll('details[data-fold]'));
+  boxes.forEach(function (d) {
+    var k = d.getAttribute('data-fold');
+    if (Object.prototype.hasOwnProperty.call(st, k)) d.open = !!st[k];
+    d.addEventListener('toggle', function () {
+      st[k] = d.open;
+      try { localStorage.setItem(KEY, JSON.stringify(st)); } catch (e) {}
+    });
+  });
+  window.mmAll = function (v) { boxes.forEach(function (d) { d.open = v; }); };
+  window.mmCopy = function (text, btn) {
+    var done = function (ok) {
+      if (!btn) return;
+      var old = btn.getAttribute('data-label') || btn.textContent;
+      btn.setAttribute('data-label', old);
+      btn.textContent = ok ? '已复制' : '复制失败，请手选';
+      setTimeout(function () { btn.textContent = old; }, 1200);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); });
+    } else { done(false); }
+  };
+  window.mmFeedback = function (id, verdict, btn) {
+    var box = btn.parentNode.querySelector('.fbtxt');
+    if (!box) return;
+    var cmd = '请调用 MCP 工具 feedback：feedback(verdict="' + verdict + '", mem_id="' + id + '")';
+    box.hidden = false;
+    box.textContent = cmd + '（本页不含 MCP 令牌，不会自动生效；把这一行粘到聊天里让助手执行）';
+    window.mmCopy(cmd, btn);
+  };
+})();
+</script>
 </body>
 </html>
 `;

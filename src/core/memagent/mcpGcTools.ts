@@ -15,9 +15,12 @@
 //    conflicts_resolved 只数本周期经 coreResolveConflict() 真实落定的冲突对。
 // ⑤ project_id 显式必填且必须落在令牌作用域内，不猜项目、不越界演算。
 import { CONFLICT_VERDICTS } from './conflict.ts';
+import {
+  GC_CONCURRENCY_NOTE, readAgentUsage, type AgentUsageRead,
+} from './agentUsage.ts';
 import { projectInScope, type McpAccount } from './mcpAuth.ts';
 import { McpToolError } from './mcpRecall.ts';
-import type { ConflictVerdict, MemAgent } from './types.ts';
+import type { ConflictVerdict, MemAgent, StorageBackend } from './types.ts';
 
 export const GC_REPORT_NOTE =
   '批次46-4（D6 分层）：衰减段保留 decayed/merged/conflicts_resolved 三项既有字段；'
@@ -29,7 +32,9 @@ export const GC_REPORT_NOTE =
   + '冲突裁决段：conflicts_resolved 只数本周期真实落定的冲突对，'
   + '须 resolve_conflicts=true 与合法 verdict 同时给才落定，禁止自动 auto_override，未落定 / dry_run 诚实 0；'
   + 'dry_run 缺省 true 按账本快照演算、全程零写入零审计（audit_written=false），显式 false 才落库；'
-  + '本工具走 ma.gcFull()，与 ma.gc() 是两条独立路径，勿同时执行以免双计。';
+  + '本工具走 ma.gcFull()，与 ma.gc() 是两条独立路径，勿同时执行以免双计；'
+  + '批次61 GAP-3 新增 agent_usage：按 detail.client 聚合 recall 次数 / 省量 / 证据不足与 mcp_call 次数 / 首调合规，'
+  + 'verdict 分布只能到项目级（memory_op 审计无 client 字段，不可按 Agent 拆分）；该段只读审计、不写不演算。';
 
 export interface GcReportToolResult {
   ok: true;
@@ -58,14 +63,31 @@ export interface GcReportToolResult {
   request_id: string;
   /** dry_run=true 恒 false：演算未落审计，不伪造审计回执 */
   audit_written: boolean;
+  /**
+   * 批次61 GAP-3：Agent 侧使用画像（只读审计聚合）。
+   * 读不到时 ok:false 带原因 —— 报告照出，绝不拿空数组冒充「没有 Agent 在用」。
+   */
+  agent_usage: AgentUsageRead;
+  /** C5：gc 与桌面 cron decay 的互斥提示（不是统计量） */
+  concurrency_note: string;
   /** 分层口径说明（D6），不是统计量 */
   note: string;
+}
+
+export interface GcReportDeps {
+  /** 审计存储（读 Agent 侧聚合用）；缺省时 agent_usage 如实回 ok:false */
+  storage?: StorageBackend;
+  /** 注入时钟便于固定样本断言；缺省 Date.now() */
+  now?: number;
+  /** Agent 侧统计窗口（天），缺省 7 */
+  windowDays?: number;
 }
 
 export async function runGcReportTool(
   ma: MemAgent,
   args: Record<string, unknown>,
   account: McpAccount,
+  deps: GcReportDeps = {},
 ): Promise<GcReportToolResult> {
   const pid = args.project_id;
   if (typeof pid !== 'string' || !pid.trim()) {
@@ -116,6 +138,11 @@ export async function runGcReportTool(
     ...(requested ? { resolve_conflicts: true, verdict: verdict as ConflictVerdict } : {}),
   });
 
+  // GAP-3：只读聚合，放在 gcFull 之后 —— 聚合失败不影响报告主体（与「读审计不阻断净化」同一口径）
+  const agentUsage: AgentUsageRead = deps.storage
+    ? await readAgentUsage(deps.storage, deps.now ?? Date.now(), deps.windowDays ?? 7)
+    : { ok: false, error: '未注入审计存储：本入口无法读取 Agent 侧聚合' };
+
   return {
     ok: true,
     dry_run: dryRun,
@@ -141,6 +168,8 @@ export async function runGcReportTool(
     request_id: r.request_id,
     // 以内核真实回执判断，而不是按入参猜：dry_run 时 gcFull 回 audit=null
     audit_written: r.audit !== null,
+    agent_usage: agentUsage,
+    concurrency_note: GC_CONCURRENCY_NOTE,
     note: GC_REPORT_NOTE,
   };
 }

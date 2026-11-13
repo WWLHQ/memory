@@ -140,6 +140,34 @@ export interface RecallSavings {
   saved_tokens: number;
 }
 
+/** A1（召回模式接线）：次模式降级注入提示；content 为按次模式截取的摘要正文 */
+export interface RecallSecondaryHint {
+  mode: Exclude<RecallMode, null | 'auto'>;
+  content: string;
+  note?: string;
+}
+
+/**
+ * A6（回显贯通）：本次召回的模式分流事实。
+ * 与 `mode_dispatch` 审计**同一份对象**——回显里说的「为什么选这个模式」必须能按 request_id
+ * 在审计里一字不差地查回来，否则就是两套口径各自编故事。
+ * 会话视图（scope=session）不参与分流，`RecallResult.dispatch` 显式 null，不拿 auto 冒充。
+ */
+export interface RecallDispatchInfo {
+  /** manual = 调用方显式指定；auto = 按 scene × 关键词自动分流 */
+  source: 'manual' | 'auto';
+  /** 分流建议模式（manual 时等于 applied 的具体模式） */
+  suggested: Exclude<RecallMode, null | 'auto'>;
+  /** 实际执行模式；'auto' = 建议未套用（自动极简观测档，见 specs §2.6 A2） */
+  applied: Exclude<RecallMode, null | 'auto'> | 'auto';
+  /** 次模式（降级注入用）；无则 null（与 secondary_mode_hint.mode 恒一致） */
+  secondary: Exclude<RecallMode, null | 'auto'> | null;
+  /** 分流依据（人话，与审计 reason 同一份字符串） */
+  reason: string;
+  /** 本次打分用的权重来源 */
+  weights_source: 'manual' | 'growth:v1';
+}
+
 export interface RecallResult {
   hits: Hit[];
   payload_tokens: number;         // 返回宿主 Agent 的 token（2.4.1）
@@ -147,6 +175,12 @@ export interface RecallResult {
   budget: Budget;
   evidence_thin?: boolean;        // 逃生阀（2.4.3）
   mode: Exclude<RecallMode, null> | 'auto';
+  /** 本次自动分流命中的特征词；手动模式或零命中为空数组。恒在，不用 undefined 冒充「没有」 */
+  hit_keywords: string[];
+  /** 次模式降级注入提示；无次模式（含极简主模式）显式 null */
+  secondary_mode_hint: RecallSecondaryHint | null;
+  /** A6：模式分流事实（回显与审计同源）；会话视图恒 null（不分流，不冒充） */
+  dispatch: RecallDispatchInfo | null;
   request_id: string;
   /** 本次扫描的项目记忆总数（审计/提示口径） */
   scanned_memories: number;
@@ -428,9 +462,11 @@ export interface L0Port {
   }>;
   /**
    * 批次44-D4：写密钥当前是否在内存（用于 get_write_status 探锁）。
-   * 可选——未实现的桥接端（如 HostL0Port）缺省按 false 处理（best-effort，不影响 pending 重放逻辑）。
+   * 同步（主进程 L0Vault）或异步（渲染层 HostL0Port 走会话窄口子）都可；
+   * 未实现时内核退到 `l0Admin.myWriteWrap(当前账号)`，再退到 `status()`，
+   * 绝不因为「端口没实现」就把成员判成未解锁（否则安全页已解锁、写入页仍报未解锁）。
    */
-  isWriteUnlocked?(): boolean;
+  isWriteUnlocked?(): boolean | Promise<boolean>;
 }
 
 export interface L0AccessRequest {

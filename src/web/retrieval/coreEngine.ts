@@ -1,7 +1,7 @@
 // REQ-012 接真内核引擎（T7）：与 fakeEngine 同签名（async），内部走 memagent-core ma.recall
 // 数据源 = 内核 InMemoryStorage（禁止注入种子；空库即无命中，返回 EMPTY 态）；UI 类型/横幅/预算语义不变。
 import type { BudgetData, ModeBannerData, RetrievalHit, Scene, ModeSel, RecallHistoryRow } from './types.ts';
-import { autoDispatch, budgetLevel, resolveSceneBudget, sortHits, freshness, approxTokens } from './logic.ts';
+import { budgetLevel, resolveSceneBudget, sortHits, freshness, approxTokens } from './logic.ts';
 import type { Memory, RecallReq } from '../../core/memagent/types.ts';
 import type { MemAgent } from '../../core/memagent/types.ts';
 import { getKernel, getKernelStorage } from '../kernel.ts';
@@ -109,11 +109,11 @@ export async function coreEngine(
   const depth = opts.depth ?? 'L1';
   const ma = await getAgent();
   const table = resolveSceneBudget(scene);
-  const dispatch = modeSel ? { mode: modeSel, hit_keywords: [] as string[] } : autoDispatch(query, scene);
 
   // 内核 recall（17.5/17.8 打分 + pinned 免检 + 冷层补查 + critical 禁 minimal）
-  // 页面 Scene 含 history_query（演示扩展），内核场景三值 → 映射 default
-  const coreScene = scene === 'critical' ? 'critical' : scene === 'task_start' ? 'task_start' : 'default';
+  // A6：scene 原样下传——内核 Scene 已含 history_query（A1 补齐），不再把它降级成 default。
+  // 降级会让「历史查询」这个场景在内核侧根本不存在，分流必然落到 default 的候选集上。
+  const coreScene: Scene = scene;
   // 批次48 A26：项目范围。默认「全部项目」——逐个项目真实召回后合并，绝不静默丢弃其它项目命中；
   // 单项目场景下 all ≡ 该项目，行为与原先一致。空账本回落 DEFAULT_PROJECT_ID 占位（A10）。
   const projects = await listProjectIds();
@@ -161,12 +161,29 @@ export async function coreEngine(
     ? (ordered.length > 0 ? 'backfill_hit' : 'backfill_miss')
     : 'none';
 
+  // A6（消除第三套口径）：模式 / 命中词 / 次模式一律取内核 RecallResult，Web 不再自己算。
+  // 同一 query + scene 下 resolveMode 是纯函数，逐项目结论必然一致，故取第一条带 dispatch 的即可；
+  // 找不到时退回 modeSel（手动）或 scene 表默认（仅类型收敛，实际内核项目召回必带 dispatch）。
+  const primary = recalls.find((rr) => rr.dispatch !== null) ?? r;
+  const disp = primary?.dispatch ?? null;
+  const appliedMode: ModeBannerData['mode'] = disp
+    ? (disp.applied === 'auto' ? disp.suggested : disp.applied)
+    : (modeSel ?? table.defaultMode);
+
   const banner: ModeBannerData = {
     scene,
-    mode: dispatch.mode,
+    mode: appliedMode,
     fallback: !modeSel,
-    hit_keywords: dispatch.hit_keywords,
-    secondary_mode_hint: dispatch.mode === 'minimal' ? null : { mode: 'minimal', note: '≤200t 摘要注入（2.4.3 次模式）' },
+    hit_keywords: primary?.hit_keywords ?? [],
+    // A6：次模式提示来自内核真实产出（A5 的 secondary_mode_hint），不再写死「极简 200t」
+    secondary_mode_hint: primary?.secondary_mode_hint
+      ? {
+          mode: primary.secondary_mode_hint.mode,
+          note: primary.secondary_mode_hint.note ?? '次模式参考摘要（未并入命中、不计入 payload）',
+          content: primary.secondary_mode_hint.content,
+        }
+      : null,
+    dispatch: disp,
     request_id: r?.request_id ?? _requestId,
     evidence_thin,
     cold_recall: evidence_thin === 'backfill_hit',

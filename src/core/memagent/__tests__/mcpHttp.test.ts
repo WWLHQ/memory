@@ -3,14 +3,17 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { request } from 'node:http';
 import {
-  clientFromExplicitHeader, runMcpHttpServer, isIdentifiableUserAgent, isTrustedClientSelfName, type McpHttpHandle,
+  clientFromExplicitHeader, runMcpHttpServer, isIdentifiableUserAgent, isTrustedClientSelfName,
+  recallEchoNote, clientDeclaresFold, MCP_RENDER_HEADER, type McpHttpHandle,
 } from '../mcpHttp.ts';
+import { MCP_INSTRUCTIONS, MCP_TOOLS } from '../mcpSchema.ts';
+import { buildRecallCompactMarkdown, buildRecallHint, buildRecallMarkdown, rollupRecalls } from '../recallInsight.ts';
 import { InMemoryStorage } from '../storage.ts';
 import type { L0Vault } from '../l0vault.ts';
 import { createTestVault, TEST_ADMIN_PW, TEST_ADMIN_ID } from './l0Kit.ts';
 import { MemoryPendingStore } from '../pendingWrites.ts';
 import { InMemoryTokenStore } from '../tokenStore.ts';
-import type { Memory } from '../types.ts';
+import type { Memory, RecallResult } from '../types.ts';
 
 const TOKEN = 'mcp-http-token-0123456789abcdef0123456789abcdef';
 
@@ -295,6 +298,11 @@ describe('MCP HTTP（批次2 信任边界）', () => {
     expect(body.result.content[3].text).toContain('默认收起 + 点击展开');
     expect(body.result.content[3].text).toContain('URL 必须逐字保留');
     expect(body.result.content[3].text).toContain('禁止自行补写');
+    // 批次 RAG / C 组：compact 档展示要求必须带就地引用口径，且与实际下发的段名一致
+    expect(body.result.content[3].text).toContain('就地标注 [n]');
+    expect(body.result.content[3].text).toContain('依据 [n]');
+    expect(body.result.content[3].text).toContain('统计汇总 / 命中依据 / Token / 费用');
+    expect(body.result.content[2].text).toContain('📊 汇总：');
     expect(body.result.content[3].text).not.toContain('<details>');
   });
 
@@ -312,13 +320,17 @@ describe('MCP HTTP（批次2 信任边界）', () => {
     expect(page.headers.get('cache-control')).toBe('no-store');
     expect(page.headers.get('content-security-policy')).toContain("default-src 'none'");
     const html = await page.text();
-    // 页面 = 四段真折叠（客户端不渲染 HTML 也能点的那一份）
+    // 页面 = 四段真折叠（客户端不渲染 HTML 也能点的那一份）：依据段默认展开，其余三段 data-fold 收起
     expect(html).toContain('📎 项目背景');
     expect(html).toContain('🧠 命中记忆');
     expect(html).toContain('⚡ Token 用量');
     expect(html).toContain('💰 省钱与费用');
-    expect((html.match(/<details>/g) ?? []).length).toBe(4);
+    expect((html.match(/<details\b/g) ?? []).length).toBe(4);
     expect(html).toContain('30 分钟内有效');
+    // 批次 RAG T4：真页面上就有可直视的编号锚点与统计汇总，不需要再解析 Markdown
+    expect(html).toContain('📊 本次召回统计汇总');
+    expect((html.match(/id="hit-\d+"/g) ?? []).length).toBeGreaterThan(0);
+    expect(html).toContain('全部展开');
     // 令牌绝不出现在页面与 URL
     expect(html).not.toContain(TOKEN);
 
@@ -365,6 +377,12 @@ describe('MCP HTTP（批次2 信任边界）', () => {
     expect(body.result.structuredContent.display.markdown).toContain('**💰 省钱与费用');
     expect(body.result.structuredContent.display.markdown).not.toContain('<details>');
     expect(body.result.content[3].text).toContain('detail=true 的明细返回');
+    // 批次 RAG / C 组：full 档展示要求的段名逐字出现在真实 markdown 里
+    expect(body.result.content[3].text).toContain('📊 本次召回统计汇总');
+    expect(body.result.content[3].text).toContain('🎯 本次用上的依据');
+    expect(body.result.structuredContent.display.markdown).toContain('**📊 本次召回统计汇总**');
+    expect(body.result.structuredContent.display.markdown).toContain('**🎯 本次用上的依据**');
+    expect(body.result.content[3].text).toContain('就地标注 [n]');
   });
 
   it('配置单价后 recall → 金额可核算（¥/百万预算单位 t · 估算）', async () => {
@@ -462,7 +480,13 @@ describe('MCP HTTP（批次2 信任边界）', () => {
     };
     // 批次29：Qoder 会话 → 仍发 <details> 折叠版（白名单内唯一实测客户端）
     expect(recallBody.result.structuredContent.display.markdown).toContain('<details>');
-    expect(recallBody.result.content[3].text).toContain('<details> 四段');
+    // 批次 RAG / C 组：折叠档展示要求不再声称「四段」，段名与实际 markdown 逐字一致
+    expect(recallBody.result.content[3].text).toContain('📊 本次召回统计汇总');
+    expect(recallBody.result.content[3].text).toContain('🎯 本次用上的依据');
+    expect(recallBody.result.content[3].text).toContain('就地标注 [n]');
+    expect(recallBody.result.structuredContent.display.markdown).toContain('**📊 本次召回统计汇总**');
+    expect(recallBody.result.structuredContent.display.markdown).toContain('**🎯 本次用上的依据**');
+    expect(recallBody.result.content[3].text).not.toContain('<details> 四段');
 
     const bySession = (await storage.queryAudit({ action: 'recall' }))
       .filter((a) => (a.detail as { query?: string }).query === '批次15 归属测试-会话');
@@ -650,7 +674,41 @@ describe('MCP HTTP（批次2 信任边界）', () => {
     expect(clientFromExplicitHeader('emoji😀')).toBeUndefined();
   });
 
-  it('tools/call 非法 category → isError（不静默落 pitfall）', async () => {    const r = await call(
+  // ── 2026-11-12（T8）：能力声明头 X-Memagent-Render: fold ────────────────────
+  it('T8：不在白名单的客户端声明 X-Memagent-Render: fold 就拿到折叠档；不声明仍是 compact', async () => {
+    const base = { Authorization: `Bearer ${TOKEN}`, 'User-Agent': 'node', 'X-Memagent-Client': 'claude-code' };
+    const recall = (id: number) => ({
+      jsonrpc: '2.0', id, method: 'tools/call',
+      params: { name: 'recall_memory', arguments: { project_id: 'P1', query: 'T8 能力声明折叠' } },
+    });
+    const withFold = await call(recall(180), { ...base, [MCP_RENDER_HEADER]: 'fold' });
+    const bf = (await withFold.json()) as { result: { structuredContent: { display: { mode: string } } } };
+    // claude-code 本身不在白名单 → 唯一让它是 html-details 的原因就是那个头
+    expect(bf.result.structuredContent.display.mode).toBe('html-details');
+
+    const plain = await call(recall(181), base);
+    const bp = (await plain.json()) as { result: { structuredContent: { display: { mode: string } } } };
+    expect(bp.result.structuredContent.display.mode).toBe('markdown-compact');
+
+    // 能力头只管档位，不改身份审计：两次都记在 claude-code 名下
+    const rows = (await storage.queryAudit({ action: 'recall' }))
+      .filter((a) => (a.detail as { query?: string }).query === 'T8 能力声明折叠');
+    expect(rows).toHaveLength(2);
+    for (const a of rows) expect((a.detail as { client?: string }).client).toBe('claude-code');
+  });
+
+  it('T8：clientDeclaresFold 只认 fold/html/details/1/true（逗号多值任一命中），其余与缺省一律 false', () => {
+    for (const v of ['fold', 'HTML', ' details ', '1', 'true', 'markdown,fold']) {
+      expect(clientDeclaresFold(v)).toBe(true);
+    }
+    for (const v of [undefined, '', '  ', 'compact', 'markdown', '0', 'false', 'bubble']) {
+      expect(clientDeclaresFold(v)).toBe(false);
+    }
+    expect(clientDeclaresFold(['fold', 'x'])).toBe(true);
+  });
+
+  it('tools/call 非法 category → isError（不静默落 pitfall）', async () => {
+    const r = await call(
       {
         jsonrpc: '2.0', id: 10, method: 'tools/call',
         params: { name: 'write_memory', arguments: { content: '非法类别', project_id: 'P1', category: 'bug' } },
@@ -1505,5 +1563,147 @@ describe('批次47：L1 工具描述首步召回 + L2 会话门禁（HTTP 8204�
     expect(first).toBeTruthy();
     expect((first!.detail as { tool: string }).tool).toBe('write_memory');
     expect((first!.detail as { recalled_before: boolean }).recalled_before).toBe(false);
+  });
+});
+
+describe('批次 RAG · C 组：展示要求三处与实际 display.markdown 逐字一致', () => {
+  /** 与 T2 同源的真实最小样本：两命中（带 [n] 依据词）、无背景、未设单价 */
+  function fixtures() {
+    const r: RecallResult = {
+      hits: [
+        {
+          mem_id: 'm1', content: '回显格式与折叠气泡的口径', layer: 'L1', decay_class: 'hot',
+          pinned: false, locked: false, score: 0.9, evidence_ref: 'l0:m1',
+          matched_terms: ['回显', '折叠'],
+        },
+        {
+          mem_id: 'm2', content: 'ui 原型与白名单判档', layer: 'L1', decay_class: 'warm',
+          pinned: false, locked: false, score: 0.6, evidence_ref: 'l0:m2', matched_terms: ['ui'],
+        },
+      ],
+      payload_tokens: 100, pipeline_llm_tokens: 0,
+      budget: { soft: 1500, warn: 2000, hard: 3000, status: 'ok' },
+      mode: 'auto', hit_keywords: [], secondary_mode_hint: null, dispatch: null,
+      request_id: 'req_c_group', scanned_memories: 20, evidence_thin: false,
+      background: { items: [], tokens: 0, candidates: 0 },
+      savings: {
+        corpus_tokens: 10000, payload_tokens: 100, background_tokens: 0, injected_tokens: 100,
+        budget_trimmed_tokens: 0, saved_tokens: 9900,
+      },
+    };
+    const hint = buildRecallHint(r, rollupRecalls([], Date.now()), null);
+    return {
+      html: buildRecallMarkdown(r, hint, null),
+      full: buildRecallMarkdown(r, hint, null, { htmlDetails: false }),
+      compact: buildRecallCompactMarkdown(hint, 'http://127.0.0.1:8204/recall/abcdefghij0123456789AB'),
+    };
+  }
+
+  it('C1-a html-details：note 段名逐字出现在真实 markdown，旧「四段」措辞已清除', () => {
+    const { html } = fixtures();
+    const note = recallEchoNote('html-details');
+    for (const s of ['📊 本次召回统计汇总', '🎯 本次用上的依据', '▶ 展开本次召回汇总']) {
+      expect(note, `展示要求缺 ${s}`).toContain(s);
+      expect(html, `真实 markdown 缺 ${s}`).toContain(s);
+    }
+    expect(note).toContain('就地标注 [n]');
+    expect(note).toContain('不得编造编号');
+    expect(note).toContain('【信息来源边界】');
+    expect(note).not.toContain('<details> 四段');
+    expect(note).not.toContain('四段明细');
+  });
+
+  it('C1-b markdown-full：段名与纯 Markdown 正文逐字一致、零 HTML 标签', () => {
+    const { full } = fixtures();
+    const note = recallEchoNote('markdown-full');
+    expect(note).toContain('detail=true 的明细返回');
+    for (const s of ['📊 本次召回统计汇总', '🎯 本次用上的依据']) {
+      expect(note).toContain(s);
+      expect(full).toContain(s);
+    }
+    expect(note).toContain('就地标注 [n]');
+    expect(note).toContain('不得编造编号');
+    expect(note).toContain('不要给回答添加任何 HTML 标签');
+    expect(note).toContain('【信息来源边界】');
+    expect(note).not.toContain('<details>');
+    expect(note).not.toContain('四段明细');
+  });
+
+  it('C1-c markdown-compact：note 与两行短摘要/链接文案逐字一致，且不含 <details>', () => {
+    const { compact } = fixtures();
+    const note = recallEchoNote('markdown-compact');
+    expect(note).toContain('默认收起 + 点击展开');
+    expect(note).toContain('依据 [n]');
+    expect(note).toContain('📊 汇总：');
+    expect(note).toContain('统计汇总 / 命中依据 / Token / 费用');
+    expect(note).toContain('URL 必须逐字保留');
+    expect(note).toContain('就地标注 [n]');
+    expect(compact).toContain('[1]「回显」');
+    expect(compact).toContain('[2]「ui」');
+    expect(compact).toContain('📊 汇总：');
+    expect(compact).toContain('▶ [展开本次召回明细（统计汇总 / 命中依据 / Token / 费用）]');
+    expect(note).not.toContain('<details>');
+    expect(note).not.toContain('四段明细');
+  });
+
+  it('C2 instructions / 工具描述 / detail 参数三处同步 RAG 就地引用与新段名', () => {
+    expect(MCP_INSTRUCTIONS).toContain('就地标注 [n]');
+    expect(MCP_INSTRUCTIONS).toContain('不得编造编号');
+    expect(MCP_INSTRUCTIONS).toContain('📊 本次召回统计汇总');
+    expect(MCP_INSTRUCTIONS).toContain('🎯 本次用上的依据');
+    expect(MCP_INSTRUCTIONS).toContain('URL 必须逐字保留');
+    const tool = MCP_TOOLS.find((t) => t.name === 'recall_memory');
+    expect(tool).toBeTruthy();
+    expect(tool!.description).toContain('就地标注 [n]');
+    expect(tool!.description).toContain('不得编造');
+    expect(tool!.description).toContain('📊 本次召回统计汇总');
+    expect(tool!.description).toContain('🎯 本次用上的依据');
+    const props = tool!.inputSchema.properties as unknown as Record<string, { description?: string }>;
+    expect(props.detail.description).toContain('统计汇总');
+    expect(props.detail.description).toContain('[n]');
+  });
+
+  it('C3 三档 note 互不串档：仅 html 档提 <details>、仅 compact 档提链接，三档均带来源边界', () => {
+    const html = recallEchoNote('html-details');
+    const full = recallEchoNote('markdown-full');
+    const compact = recallEchoNote('markdown-compact');
+    expect(html).toContain('<details>');
+    expect(full).not.toContain('<details>');
+    expect(compact).not.toContain('<details>');
+    expect(html).not.toContain('URL 必须逐字保留');
+    expect(compact).toContain('URL 必须逐字保留');
+    for (const note of [html, full, compact]) {
+      expect(note).toContain('【信息来源边界】');
+      expect(note).toContain('不得编造编号');
+      expect(note).toContain('数字与金额不得改写、省略或补全。');
+    }
+  });
+
+  it('C4 富媒体客户端（WorkBuddy）禁用 HTML：折叠只走气泡内折叠卡，且仅 compact 档授权', () => {
+    const compact = recallEchoNote('markdown-compact');
+    expect(compact).toContain('气泡折叠档');
+    expect(compact).toContain('折叠卡');
+    expect(compact).toContain('默认收起');
+    expect(compact).toContain('不要输出任何 HTML 标签');
+    expect(compact).toContain('URL 逐字保留');
+    // 2026-11-12 用户验收该形态 → 从「能做就做」升级为「有卡片能力必须做」，并标注已验收
+    expect(compact).toContain('**必须**为本次召回输出一张');
+    expect(compact).toContain('已验收');
+    // 展开后要能查到「汇总 + 明细」，不只是汇总
+    expect(compact).toContain('展开后必须能同时查到汇总与明细');
+    expect(compact).toContain('正文片段');
+    // 2026-11-12 用户拍板：明细固定顺序 背景 → 命中 → 依据 → 证据不足（最后）
+    expect(compact).toMatch(/📎 项目背景[\s\S]*🧠 命中记忆[\s\S]*🎯 本次用上的依据[\s\S]*⚠ 证据不足/);
+    // 背景必须逐条独立成行，不得压成一整段
+    expect(compact).toContain('逐条独立成行');
+    // 反向：折叠档 / 明细档不得出现这条增强通道（它们本身就是 HTML / 四小节载体）
+    expect(recallEchoNote('html-details')).not.toContain('气泡折叠档');
+    expect(recallEchoNote('markdown-full')).not.toContain('气泡折叠档');
+    // 三处指令同步：WorkBuddy 恒定两行摘要档，折叠交给客户端气泡卡片，文本零 HTML
+    expect(MCP_INSTRUCTIONS).toContain('气泡内折叠卡片');
+    expect(MCP_INSTRUCTIONS).toContain('WorkBuddy');
+    const tool = MCP_TOOLS.find((t) => t.name === 'recall_memory');
+    expect(tool!.description).toContain('气泡内折叠卡片');
+    expect(tool!.description).toContain('不要在文本里写 HTML 标签');
   });
 });

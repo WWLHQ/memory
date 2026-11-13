@@ -24,13 +24,33 @@ export type RecallDisplayMode = 'html-details' | 'markdown-full' | 'markdown-com
  *  批次41-X 补 `qoder-cn`：显式身份头 `X-Memagent-Client` 的值取**配方 id**（Qoder 即 `qoder-cn`），
  *  与原先的自报名 `qoder-desktop-mcp-host` 是两个口径。不加进来就等于重演批次41-S 方案 A——
  *  为消除串号把 Qoder 宿主自己打回 `markdown-compact`，丢掉已实机证实的气泡折叠档
- *  （用户口径「能内联就内联，做不到才用 HTML 页兜底」）。 */
+ *  （用户口径「能内联就内联，做不到才用 HTML 页兜底」）。
+ *  2026-11-12（T8）Qoder 真机验证折叠档可用后，用户要求「其他 agent 也按这个折叠效果」：
+ *  ① 同厂商派生名按前缀放行（qoder-*）；② 运行时白名单 MEMAGENT_HTML_DETAILS_CLIENTS；
+ *  ③ 请求头 X-Memagent-Render: fold 自证能力（见 RecallToolDetailOpts.renderFold）。
+ *  仍**不**把未实测客户端硬塞进白名单——DSH 会把 `<details>` 露成文本，加了反而破坏效果。 */
 const HTML_DETAILS_CLIENT_IDS = new Set(['qoder', 'qoder-cn', 'qoder-desktop-mcp-host']);
+
+/** 2026-11-12（T8）同厂商派生名：`qoder-desktop` / `qoder-ide` / `qoder-cli` / `qoder-cn-xxx` 等
+ *  同一渲染栈的变体，按前缀放行，避免再出现「宿主换了个自报名就丢折叠档」的 41-Q 类事故。
+ *  **只放同厂商**——不按「看起来像 GUI」去赌未实测客户端（DSH 两次实测把 `<details>` 露成文本）。 */
+const HTML_DETAILS_CLIENT_PREFIXES = ['qoder-'];
+
+/** 2026-11-12（T8）运行时白名单：`MEMAGENT_HTML_DETAILS_CLIENTS="cursor,my-agent"`。
+ *  给「没法加请求头、也没被实测过」的客户端留的自助通道：用户自己在接入配置/环境变量里声明一次即可。
+ *  缺省空集 = 行为与历史完全一致（不额外放行，也不额外拦截）。 */
+export function extraHtmlDetailsClients(): Set<string> {
+  const raw = typeof process !== 'undefined' ? process.env.MEMAGENT_HTML_DETAILS_CLIENTS ?? '' : '';
+  return new Set(raw.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
+}
 
 export function clientSupportsHtmlDetails(client?: string): boolean {
   if (!client) return false;
   const name = client.split('/')[0].trim().toLowerCase();
-  return HTML_DETAILS_CLIENT_IDS.has(name);
+  if (!name) return false;
+  if (HTML_DETAILS_CLIENT_IDS.has(name)) return true;
+  if (HTML_DETAILS_CLIENT_PREFIXES.some((p) => name.startsWith(p))) return true;
+  return extraHtmlDetailsClients().has(name);
 }
 
 /** 参数快照专用项目（pinned preference，非用户项目；不参与项目定位/列表） */
@@ -127,6 +147,10 @@ export interface RecallToolDetailOpts {
   tickets: RecallDetailTicketsPort;
   /** 明细页基址（含协议与端口），如 http://127.0.0.1:8204 */
   base: string;
+  /** 2026-11-12（T8）能力声明通道：请求头 `X-Memagent-Render: fold` 显式声明「我的气泡能渲染折叠」。
+   *  与白名单**并列**而非替代——声明了就发折叠档（新客户端不必等我们去实测），
+   *  没声明仍按白名单 + fail-safe；TCP 8202 无 HTTP 头，恒 false。 */
+  renderFold?: boolean;
 }
 
 export interface RecallToolOutput {
@@ -205,7 +229,7 @@ export async function runRecallTool(
   const stamp = now ?? Date.now();
   const { price, rollup } = await readPricingAndRollup(storage, stamp);
   const hint = buildRecallHint(recall, rollup, price);
-  const mode = recallDisplayMode(client, detailRequested(args));
+  const mode = recallDisplayMode(client, detailRequested(args), detail?.renderFold === true);
   let detailUrl: string | null = null;
   let markdown: string;
   if (mode === 'html-details') {
@@ -251,9 +275,11 @@ function detailRequested(args: Record<string, unknown>): boolean {
  * 档位判定（批次32-C，用户拍板「DSH 里记忆库信息要折叠，点开才看明细」）：
  * 实测能渲染 <details> 的客户端仍给 HTML 折叠版（点开即看，无需二次调用）；
  * 其余客户端（DSH 只渲染 Markdown，没有可点击折叠控件）默认一行摘要，明细靠 detail=true 再取。
+ * 2026-11-12（T8）：`renderFold` = 客户端**自己声明**能渲染折叠（请求头 X-Memagent-Render: fold），
+ * 声明优先于名字判定 —— 「其他 agent 也按 Qoder 的折叠效果」靠这条通道落地，不必逐个实测/硬编码。
  */
-export function recallDisplayMode(client: string | undefined, detail: boolean): RecallDisplayMode {
-  if (clientSupportsHtmlDetails(client)) return 'html-details';
+export function recallDisplayMode(client: string | undefined, detail: boolean, renderFold = false): RecallDisplayMode {
+  if (renderFold || clientSupportsHtmlDetails(client)) return 'html-details';
   return detail ? 'markdown-full' : 'markdown-compact';
 }
 

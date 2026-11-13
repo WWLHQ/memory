@@ -308,7 +308,8 @@ export function runMcpServer(opts: McpOptions): McpServerHandle {
         }
         // ── gc_report（批次44-D5-3：遗忘周期报告，默认只演算） ──
         case 'gc_report': {
-          send(socket, ok(req.id, await runGcReportTool(s, p, acct)));
+          // 批次61 GAP-3：注入会话存储，供报告附只读 Agent 侧聚合（不改变 gc 本身的写入语义）
+          send(socket, ok(req.id, await runGcReportTool(s, p, acct, { storage: sessionStorage })));
           return;
         }
 

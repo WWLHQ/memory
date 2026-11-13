@@ -16,6 +16,21 @@ export const RECALL_FIRST_REMINDER =
 /** L2 硬门禁提示：可靠会话（带 Mcp-Session-Id）尚未召回即调用写入/治理类工具的拒绝文案 */
 export const RECALL_FIRST_GATE_MSG =
   '⛔ 本会话尚未调用 recall_memory（首步检索记忆库）。服务端已临时锁定写入与治理类工具：请先调用一次 recall_memory 检索记忆库，再继续本操作。';
+/** C 方案（严格门禁）：服务端显式开启后，未召回即调用**任意非 recall 工具**的拒绝文案。
+ *  默认关闭时本常量不参与任何返回，老客户端与既有测试逐字不变。 */
+export const RECALL_FIRST_STRICT_GATE_MSG =
+  '⛔ 本会话尚未调用 recall_memory（首步检索记忆库）。服务端已开启严格首步召回门禁，本会话除 recall_memory 外的所有工具均已锁定：请先调用一次 recall_memory，再继续本操作。';
+/** 严格门禁开启时追加到 initialize.instructions 的声明（默认不下发，保证老客户端逐字不变） */
+export const RECALL_GATE_STRICT_INSTRUCTIONS =
+  '\n10. 严格首步召回门禁（服务端已开启）：本会话调用 recall_memory 之前，除 recall_memory 自身外的**所有**工具都会被服务端硬拦并返回 isError；读类工具不再只是软提醒。不要试图绕过，先调用一次 recall_memory 即解锁。';
+/** 严格门禁开启时追加到 tools/list 非 recall 工具描述的后缀 */
+export const RECALL_GATE_STRICT_TOOL_NOTE =
+  '【严格门禁已开启】未先调用 recall_memory 时本工具会被服务端硬拦。';
+
+/** 按服务端是否开启严格门禁生成 initialize.instructions；默认与原常量逐字相同。 */
+export function mcpInstructions(strictGate = false): string {
+  return strictGate ? MCP_INSTRUCTIONS + RECALL_GATE_STRICT_INSTRUCTIONS : MCP_INSTRUCTIONS;
+}
 /** 批次47（L3-a）：recall 结果末块追加的刚性「信息来源边界」——要求 agent 基于真实账本作答、未命中明说、绝不编造 */
 export const RECALL_SOURCE_BOUNDARY =
   '【信息来源边界】以下记忆来自本机真实账本；若本次 recall 命中数为 0（hits=0），请如实说明「未检索到相关记忆」，不要编造记忆内容或省量；回答的事实应优先采信命中记忆；工具不可用或网络失败时不得假装检索过记忆。';
@@ -24,25 +39,31 @@ export const RECALL_SOURCE_BOUNDARY =
  * 给 tools/list 返回的工具清单统一加「首步召回」提示：recall_memory 用更强口径，其余工具统一口径。
  * 返回新数组（不改动 MCP_TOOLS 原常量），避免两套协议漂移。
  */
-export function withRecallFirstNotes(): Array<{ name: string; description: string; inputSchema: Record<string, unknown> }> {
+export function withRecallFirstNotes(strictGate = false): Array<{ name: string; description: string; inputSchema: Record<string, unknown> }> {
   return MCP_TOOLS.map((t) => ({
     name: t.name,
-    description: (t.name === 'recall_memory' ? RECALL_FIRST_SELF_NOTE : RECALL_FIRST_TOOL_NOTE) + t.description,
+    description: (t.name === 'recall_memory' ? RECALL_FIRST_SELF_NOTE : RECALL_FIRST_TOOL_NOTE)
+      + (strictGate && t.name !== 'recall_memory' ? RECALL_GATE_STRICT_TOOL_NOTE : '')
+      + t.description,
     inputSchema: t.inputSchema as Record<string, unknown>,
   }));
 }
-// 批次13：回显物改为 display.markdown（四段 <details> 可收起/展开），不渲染 HTML 的客户端回退 display.line。
+// 批次13：回显物为 display.markdown（<details> 可收起/展开），不渲染 HTML 的客户端回退 display.line。
+// 批次 RAG：改为「短收 summary + 📊 本次召回统计汇总 + 🎯 本次用上的依据 [n] + 四段二级折叠」，
+//         并要求回答正文就地标注 [n]（编号与依据段一致、不得编造）；三档与明细页段名逐字一致。
 // 批次14：触发措辞由「禁用本地检索」改为「优先用本库」——未命中/不可用时允许回退代码与本地笔记，
 //         避免客户端在工具未命中时无法继续；同时明示客户端自带 memory 文件不是本记忆库。
 // 批次32-C：不支持 HTML 折叠的客户端（DSH 实测只渲染 Markdown）默认只给一行摘要，明细改由 recall_memory 的 detail=true 按需取。
 // 批次33-C：默认收起档再收口为「两行摘要 + 一个可点的本机明细页链接」——DSH 里没有可点击的折叠控件，
 //           但 Markdown 链接能点开我们自己的真 HTML 页（四段 <details> 折叠）；无链接场景（TCP 8202）退回 detail=true 文字指引。
+// 2026-11-12（T8）：Qoder 真机验证折叠档可用 → 新增「任何客户端都可自证折叠能力」通道
+//           （请求头 X-Memagent-Render: fold），并扩 Qoder 派生名 + 运行时白名单；WorkBuddy 仍禁 HTML 走气泡卡片。
 export const MCP_INSTRUCTIONS = `你是接入了 MultiAgent Memory 的 Agent。记忆库数据全部来自本机真实账本，工具返回的数字不得改写或编造。
 
 必须遵守：
 0. 首步强制召回（批次47）：每次新会话或新任务，必须在回答或调用任何其它工具之前，先调用一次 recall_memory 检索记忆库；未召回前不要回答、也不要调用写/管理类工具（服务端会在本会话尚未召回时拒绝写入与治理类工具）。本规则从工具元数据与 initialize 指令双层下发，不依赖客户端是否真正注入指令。
 1. 触发（默认优先）：用户消息只要涉及本仓库/本项目的实现、架构、历史决策、踩坑、偏好、事实，或出现「记得 / 上次 / 之前 / 老规矩 / 继续上次」，就优先调用 recall_memory 再回答；本库未命中或工具不可用时，才回退到读代码、工作区笔记或客户端自带 memory 文件。客户端自带的 memory/笔记不是本记忆库，不能替代首选检索。project_id 可省略：账本只有一个项目时自动定位；有多个项目时先调用 list_projects 并向用户确认。用户问「本次会话 / 刚才 / 我们聊到哪」这类工作记忆时，改用 recall_memory(scope='session', session_id=<写入时同一个>) 取本会话近期记忆（不走语义检索）；没有 session_id 就不要猜、不要拿项目召回冒充会话历史，如实说明并请用户提供或用 project 范围检索。
-2. 回显（强制）：每次 recall_memory 成功返回后，把该次返回的 display.markdown 整段原样输出到最终回答末尾。服务端按你的客户端能力选档位：支持 HTML 折叠的客户端收到 <details> 四段（项目背景/命中记忆/Token/省钱与费用，可点开收起）；其余客户端默认收到「两行 🧠 Memory 摘要 + 展开入口」——HTTP 传输给一条指向本机一次性明细页的 Markdown 链接（用户点链接才看四段，URL 必须逐字保留、不得改写不得丢），TCP 等无链接场景给一行文字指引。任何档位都禁止自行补写或预先展开明细（明细只能来自本次或下一次工具返回），不得添加 HTML 标签；token 数字与金额必须原样保留。需要明细时，用同一个 query 再调用 recall_memory 并置 detail=true，然后原样输出那次返回的 display.markdown。若客户端连 Markdown 都渲染不了，改为单独一行原样输出 display.line。
+2. 回显（强制）：每次 recall_memory 成功返回后，把该次返回的 display.markdown 整段原样输出到最终回答末尾，不得改写、省略或补全其中的 token 数与金额，不得自行补写或预先展开明细（明细只能来自本次或下一次工具返回），不得添加 HTML 标签。服务端按你的客户端能力选档位：① html-details——支持 HTML 折叠的客户端收到外层 <details> 默认收起（summary 以「🧠 命中」开头、含「▶ 展开本次召回汇总」），点开是「📊 本次召回统计汇总」四行 +「🎯 本次用上的依据」[n] 编号列表 + 项目背景 / Token 用量 / 省钱与费用的二级折叠；② markdown-compact——其余客户端默认收到两行加粗短摘要（首行「🧠 命中 N 条 · 依据 [n]…」、第二行「📊 汇总：…」）+ 一条「▶ 展开本次召回明细」指向本机明细页的 Markdown 链接（HTTP 传输，URL 必须逐字保留、不得改写不得丢；用户点它才看统计汇总 / 命中依据 / Token / 费用），TCP 等无链接场景给一行文字指引；③ markdown-full——用户明确要看明细时，用同一个 query 再调用一次并置 detail=true，返回纯 Markdown 的两行短摘要 +「📊 本次召回统计汇总」+「🎯 本次用上的依据」+ 四小节，原样输出。告警行 / 告警段只在真有告警时出现，正常轮次不要自己补 ⚠。RAG 就地引用：回答里采用某条命中记忆作为事实依据时，就地标注 [n]；编号必须与本次「🎯 本次用上的依据」段（紧凑档为首行「依据 [n]」）一一对应，不得编造编号；hits=0 或未采用任何命中时不得标注。若客户端连 Markdown 都渲染不了，改为单独一行原样输出 display.line。**任何客户端都可自证折叠能力**：在接入配置里加一行请求头 X-Memagent-Render: fold（也可写 html / details / 1）即按 ① 档下发，效果与 Qoder 相同；前提是你的气泡真能渲染折叠，渲染不了就不要加，否则标签会露成文本。**富媒体宿主（如 WorkBuddy、CodeBuddy 桌面端）恒走 ② 且必须输出折叠卡**（2026-11-12 用户已验收该形态）：文本里**不要写任何 HTML 标签（含折叠标签）**，折叠改由客户端「气泡内折叠卡片」承载——卡片默认收起、标题用首行原文，**展开后必须能同时查到汇总与明细**：顶部「📊 本次召回统计汇总」（含 Token 与费用数字），明细按固定顺序 📎 项目背景（逐条独立成行、含类别与正文片段）→ 🧠 命中记忆 → 🎯 本次用上的依据（每条含 [n]·相关度·命中词·正文片段）→ ⚠ 证据不足（仅真有告警时出，放最后），全部取自本次工具返回；两行摘要与「▶ 展开本次召回明细」链接照常输出、URL 逐字保留；宿主没有卡片能力时忽略这条，按纯文本输出即可。
 3. 金额：display.money 为 null 表示用户尚未设置单价（全局参数页），不得猜测或补全金额。
 4. 沉淀：会话中形成新的决策、踩坑、事实、偏好或洞察时，调用 write_memory 落库（category 选最贴近的一类）；写入前如不确定项目，先 list_projects；不确定 L0 写密钥是否解锁时先调用 get_write_status 探锁。若 write_memory 返回 status=pending，表示本次内容已暂存、解锁后会自动重放落库——这不是写入成功，必须如实告知用户，不得伪造 mem_id 或声称已落库。
 5. 边界：不要向用户展示 MCP 认证令牌（Authorization 头 / mcp-token.txt 内容）；不要伪造记忆内容、省量或审计回执。工具不可用时（未启动/未授权/连接失败）如实说明并继续回答，不得假装检索过记忆。
@@ -55,7 +76,7 @@ export const MCP_INSTRUCTIONS = `你是接入了 MultiAgent Memory 的 Agent。�
 export const MCP_TOOLS = [
   {
     name: 'recall_memory',
-    description: '检索项目记忆库（关键词 / 历史决策 / 踩坑 / 偏好 / 事实）。优先使用本工具：回答本项目相关问题（实现、架构、历史决定、踩过的坑、用户偏好）前先调用；未命中或工具不可用时再回退读代码或客户端本地笔记（本地 memory 文件不是本记忆库）。返回命中、项目背景、token 省量与本次/今日/全部金额；project_id 可省略（唯一项目自动定位）。调用后须在回答末尾原样输出 display.markdown：服务端按客户端能力选档——支持 HTML 的客户端给 <details> 四段（项目背景/命中记忆/Token/省钱与费用）；其余默认给两行摘要 + 一条「▶ 展开本次召回明细」的本机明细页链接（链接 URL 逐字保留，用户点开才看四段）；不得自行补写或预先展开明细、不得添加 HTML 标签、数字/金额不得改写；用户明确要明细时再用同一 query 调用一次并置 detail=true。',
+    description: '检索项目记忆库（关键词 / 历史决策 / 踩坑 / 偏好 / 事实）。优先使用本工具：回答本项目相关问题（实现、架构、历史决定、踩过的坑、用户偏好）前先调用；未命中或工具不可用时再回退读代码或客户端本地笔记（本地 memory 文件不是本记忆库）。返回命中、项目背景、token 省量与本次/今日/全部金额；project_id 可省略（唯一项目自动定位）。调用后须在回答末尾原样输出 display.markdown：服务端按客户端能力选档——支持 HTML 折叠的客户端给外层 <details> 默认收起的「📊 本次召回统计汇总」+「🎯 本次用上的依据」[n] 编号列表 + 四段二级折叠；其余默认给两行加粗短摘要（含 [n] 编号依据词）+ 一条「▶ 展开本次召回明细」的本机明细页链接（URL 逐字保留）；detail=true 给纯 Markdown 同结构 + 四小节。回答采用某条命中作为事实依据时就地标注 [n]（编号必须与依据段一致，不得编造，hits=0 不标注）；不得自行补写或预先展开明细、不得添加 HTML 标签、数字/金额不得改写；用户明确要明细时再用同一 query 调用一次并置 detail=true。任何客户端都可加请求头 X-Memagent-Render: fold 自证折叠能力、按 HTML 折叠档下发（渲染不了时不要加）。富媒体宿主（如 WorkBuddy）恒走两行摘要档且**必须输出折叠卡**（用户已验收该形态）：**不要在文本里写 HTML 标签**，折叠改用客户端「气泡内折叠卡片」承载——默认收起、标题用首行原文，展开后能查到汇总与明细：顶部统计汇总（含 Token 与费用），明细按 📎 项目背景（逐条独立成行）→ 🧠 命中记忆 → 🎯 依据（含 [n] 与正文片段）→ ⚠ 证据不足（放最后、仅真有告警时出）固定顺序，均取自本次返回；摘要与链接仍照原样输出。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -63,8 +84,8 @@ export const MCP_TOOLS = [
         query: { type: 'string', description: '检索词（用户问题/关键词，必填且非空）' },
         top_k: { type: 'integer', description: '返回条数，1-10，默认 5' },
         scene: { type: 'string', enum: ['default', 'critical', 'task_start', 'history_query'], description: '场景；critical 禁 minimal 模式' },
-        mode: { type: 'string', enum: ['auto', 'top_insight', 'fact_first', 'event_replay', 'pattern_reasoning', 'minimal'], description: '召回模式开关：auto=自动（Agent 按场景+关键词自动分配，默认）；其余 5 个为手动具体模式（用户/宿主显式指定，强制采用）。手动必须给出具体模式，未指定具体模式按自动处理' },
-        detail: { type: 'boolean', description: '是否要四段明细（批次32-C/33-C）。省略/false = 只给两行摘要（不支持 HTML 折叠的客户端默认收起，HTTP 档附一条可点本机明细页链接）；true = 直接返回项目背景/命中记忆/Token/省钱与费用四小节纯 Markdown。只在用户明确要看明细时置 true，query 与本次保持一致；不要因为「这样更完整」自行置 true' },
+        mode: { type: 'string', enum: ['auto', 'top_insight', 'fact_first', 'event_replay', 'pattern_reasoning', 'minimal'], description: '召回模式开关：auto 或省略 = 自动（按 scene × 关键词自动分流，默认档）；5 个具体值为手动（强制采用该模式并改用该模式的打分权重，不做自动分流）。枚举外的值一律按参数错误拒绝，不静默降级。' },
+        detail: { type: 'boolean', description: '是否要完整明细（批次32-C/33-C，批次 RAG 更新）。省略/false = 只给两行加粗短摘要（含 [n] 编号依据词；HTTP 档附一条可点本机明细页链接，页面含「统计汇总 / 命中依据 / Token / 费用」）；true = 直接返回纯 Markdown 的两行短摘要 +「📊 本次召回统计汇总」+「🎯 本次用上的依据」[n] 编号列表 + 项目背景/命中记忆/Token/省钱与费用四小节。只在用户明确要看明细时置 true，query 与本次保持一致；不要因为「这样更完整」自行置 true' },
         scope: { type: 'string', enum: ['project', 'session'], description: "检索范围，默认 project（项目内语义检索）。session = 本会话工作记忆：只取写入时用同一 session_id 标记的近期记忆，按时间倒序取最近 N 条，不走向量语义检索，也不注入项目背景。适用于「上次我们聊到哪 / 本次会话已确定了什么」；一般问答仍用 project" },
         session_id: { type: 'string', description: "scope='session' 时必填：会话 ID（与 write_memory 写入时同一个）。scope='project' 时可省略；历史记忆没有该字段，不会出现在会话视图里" },
       },

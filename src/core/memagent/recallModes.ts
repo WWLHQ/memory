@@ -204,9 +204,18 @@ function scoreMode(mode: ConcreteMode, query: string, cfg: ModeDispatchConfig): 
   return { score, hits };
 }
 
-/** 判断显式模式是否为「手动」具体模式（而非 auto/null） */
+/** 判断显式模式是否为「手动」具体模式（而非 auto/null）；只判别「非自动」，不做枚举收窄 */
 export function isManualMode(m: RecallMode | undefined): m is ConcreteMode {
   return m !== undefined && m !== null && m !== 'auto';
+}
+
+/**
+ * 严格枚举校验：是否为 5 个具体模式之一。
+ * `isManualMode('manual')` 会返回 true（它只排除 auto/null），但 'manual' 不是合法模式——
+ * 拿它去查 RECALL_MODE_SPECS 会拿到 undefined。API 边界必须用本函数，非法值明确报错而不是静默降级。
+ */
+export function isConcreteMode(m: unknown): m is ConcreteMode {
+  return typeof m === 'string' && Object.prototype.hasOwnProperty.call(RECALL_MODE_SPECS, m);
 }
 
 /**
@@ -218,8 +227,8 @@ export function resolveMode(input: ResolveModeInput): ResolvedMode {
   const scene: Scene = input.scene ?? 'default';
   const plan = SCENE_PLAN[scene];
 
-  // 1) 手动优先（用户指定 > 自动分流）
-  if (isManualMode(input.explicitMode)) {
+  // 1) 手动优先（用户指定 > 自动分流）；用严格枚举校验，非法值不当作手动模式
+  if (isConcreteMode(input.explicitMode)) {
     const mode = input.explicitMode;
     // 16.5 硬规则：critical 禁极简
     if (scene === 'critical' && mode === 'minimal') {
