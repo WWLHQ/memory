@@ -14,6 +14,7 @@ import { KbPolicyTable } from './KbPolicyTable.tsx';
 import { KbManagementCard } from './KbManagementCard.tsx';
 import { LlmEngineCard } from './LlmEngineCard.tsx';
 import { RefineQueueCard } from './RefineQueueCard.tsx';
+import { RecallHardCard } from './RecallHardCard.tsx';
 import { DevPanel } from './DevPanel.tsx';
 import { useToast } from './useToast.tsx';
 import type { DevParams, NormalConfig } from './types.ts';
@@ -72,7 +73,7 @@ export function ParamsPage({ load = coreLoadParams }: { load?: () => Promise<Par
       </div>
       <div className="sub">
         17.6 文案化配置（G7 不暴露参数名）· 内核 preference 快照为真相 ·
-        卡片：普通配置 / 知识库策略（内核真值只读）/ 知识库管理 / 引擎 / 提炼队列 / 开发者（仅记录）
+        卡片：普通配置 / 知识库策略（内核真值只读）/ 知识库管理 / 引擎 / 提炼队列 / 硬前置召回（A/B/C 三层开关）/ 开发者（仅记录）
       </div>
 
       {phase === 'loading' && <div className="note" data-testid="params-loading">正在从内核读取已保存参数…</div>}
@@ -92,6 +93,7 @@ export function ParamsPage({ load = coreLoadParams }: { load?: () => Promise<Par
       <KbManagementCard />
       <LlmEngineCard />
       <RefineQueueCard />
+      <RecallHardCard />
       <DevPanel
         dev={dev}
         onChange={(next, label) => { setDev(next); track(label); }}

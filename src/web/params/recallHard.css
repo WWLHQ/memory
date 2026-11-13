@@ -1,0 +1,54 @@
+/* 批次62 · 参数页「硬前置召回 A/B/C」卡片。
+   结构与 class 严格对齐 design/ui/硬前置召回开关_原型.html（.rh-layer / .rh-head / .rh-pick / .rh-choice …），
+   颜色改用本页 p0 令牌（浅色默认 + html[data-theme="dark"] 自动跟随），不引 shared/theme.css 的深色专套。 */
+
+.rh-card .rh-h {
+  font-size: 13px; font-weight: 600; margin: 0 0 6px;
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+}
+.rh-card .rh-h .rh-ref { font-size: 10px; color: var(--faint); font-weight: 400; }
+
+.rh-layer {
+  background: var(--surface2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+.rh-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.rh-name { font-size: 12px; font-weight: 600; color: var(--text); }
+.rh-st { font-size: 10px; padding: 1px 7px; border-radius: 4px; }
+.rh-st.on { background: var(--ok-soft); color: var(--ok); }
+.rh-st.idle { background: var(--surface); color: var(--faint); border: 1px solid var(--line); }
+.rh-desc { font-size: 11px; color: var(--muted); margin-top: 4px; line-height: 1.55; }
+
+.rh-foot { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+.rh-pick { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.rh-choice {
+  background: var(--surface); border: 0; border-right: 1px solid var(--line);
+  color: var(--muted); padding: 5px 14px; font-size: 12px; cursor: pointer;
+  font-family: inherit;
+}
+.rh-choice:last-child { border-right: 0; }
+.rh-choice.active { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.rh-choice:hover:not(.active):not(:disabled) { color: var(--text); }
+.rh-choice:disabled { opacity: .4; cursor: not-allowed; }
+.rh-state { font-size: 11px; color: var(--faint); }
+
+.rh-extra { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+.rh-extra.off { opacity: .5; }
+.rh-extra .row { margin: 6px 0; }
+.rh-upstream {
+  background: var(--surface); border: 1px solid var(--line); color: var(--text);
+  border-radius: 7px; padding: 5px 9px; font-size: 12px; width: 320px; font-family: inherit;
+}
+.rh-upstream:disabled { opacity: .5; }
+
+.rh-epi {
+  font-family: var(--mono); font-size: 11px; background: var(--surface);
+  border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; color: var(--muted);
+}
+
+.rh-line { font-size: 11px; color: var(--faint); margin-top: 8px; line-height: 1.6; }
+.rh-warn { font-size: 11px; color: var(--warn); margin-top: 6px; line-height: 1.55; }
+.rh-err { font-size: 11px; color: var(--bad); margin-top: 6px; line-height: 1.55; }

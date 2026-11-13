@@ -153,6 +153,8 @@ const l0 = {
     ipcRenderer.invoke(IPC.l0RemoveMemberWriteWrap, memberId, sessionId),
   /** §4.4.4-B：查「本账号」有没有写解锁口令（需登录；只回布尔） */
   myWriteWrap: (sessionId?: string | null) => ipcRenderer.invoke(IPC.l0MyWriteWrap, sessionId),
+  /** 写密钥是否在内存（只读布尔，不需要登录） */
+  writeUnlocked: () => ipcRenderer.invoke(IPC.l0WriteUnlocked),
   seal: (plain: string, sessionId?: string | null) =>
     ipcRenderer.invoke(IPC.l0Seal, plain, sessionId) as Promise<{ ok: boolean; sealed?: string; code?: string; error?: string }>,
   decrypt: (req: unknown, sessionId?: string | null) => ipcRenderer.invoke(IPC.l0Decrypt, req, sessionId),
@@ -300,6 +302,14 @@ const sync = {
     ipcRenderer.invoke(IPC.syncAuditsFrom, start, sessionId) as Promise<{ ok: boolean; audits?: unknown[]; error?: string }>,
 };
 
+// 批次62：硬前置召回 A/B/C 三层开关。state 读真值（需会话）；set 会改宿主配置 / 起停网关 / 切门禁（仅管理员）。
+// 上游地址只在入参与回执里出现，令牌与客户端 Authorization 一律不经过渲染层。
+const recallHard = {
+  state: (sessionId?: string | null) => ipcRenderer.invoke(IPC.recallHardState, sessionId),
+  set: (patch: unknown, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.recallHardSet, patch, sessionId),
+};
+
 /**
  * 顶部自绘标题栏（批次48 S10）：把壳层当前主题同步给主进程的窗口按钮覆盖层。
  * 只改系统绘制的三个按钮的底色/符号色；按钮行为（最小化/最大化/关闭）仍归系统。
@@ -319,4 +329,4 @@ const shell = {
 };
 
 contextBridge.exposeInMainWorld('__ELECTRON__', true);
-contextBridge.exposeInMainWorld('api', { storage, personal, hostScan, hostAgentDetect, tenant, mcpClients, collector, backup, dataRoot, log, l0, setup, legacy, ledgerReset, rulesRejudge, ledgerFields, refineQueue, sync, llm, shell });
+contextBridge.exposeInMainWorld('api', { storage, personal, hostScan, hostAgentDetect, tenant, mcpClients, collector, backup, dataRoot, log, l0, setup, legacy, ledgerReset, rulesRejudge, ledgerFields, refineQueue, sync, llm, recallHard, shell });

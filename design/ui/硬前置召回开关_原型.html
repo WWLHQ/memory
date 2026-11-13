@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>硬前置召回 A / B / C 启用选择 — 多 Agent 记忆助手</title>
+<style>
+  :root{--bg:#0f1419;--panel:#1a212b;--panel2:#202833;--line:#2b3441;
+    --txt:#e6edf3;--muted:#8b98a7;--dim:#5b6675;--accent:#4d9fff;
+    --ok:#3ecf8e;--warn:#ffd166;--err:#ff5c5c;--mem:#9d6bff}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.55 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1180px;margin:0 auto;padding:18px}
+  h1{font-size:17px;margin:0 0 2px}
+  .sub{color:var(--muted);font-size:12px;margin-bottom:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+  .h{font-size:13px;font-weight:600;margin:0 0 10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .h .ref{font-size:10px;color:var(--dim);font-weight:400}
+  .note{font-size:11px;color:var(--dim);margin-top:10px;line-height:1.6}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0;font-size:13px}
+  .dim{color:var(--dim);font-size:11px}
+  .btn{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:7px 12px;cursor:pointer;font-size:12px}
+  .btn.primary{background:var(--accent);color:#04121f;border-color:var(--accent);font-weight:600}
+  .btn:hover{border-color:var(--accent)}
+  .btn:disabled{opacity:.4;cursor:not-allowed}
+  input[type=text]{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:7px;padding:6px 9px;font-size:12px;width:320px}
+  .epi{font-family:monospace;font-size:11px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:4px 8px;color:var(--muted)}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--accent);border-radius:8px;padding:9px 16px;font-size:13px;z-index:80;display:none}
+
+  /* 硬前置召回：三层结构 */
+  .rh-layer{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px}
+  .rh-head{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .rh-name{font-size:12px;font-weight:600;color:var(--txt)}
+  .rh-st{font-size:10px;padding:1px 7px;border-radius:4px}
+  .rh-st.on{background:#1a3320;color:#7fe0a0}
+  .rh-st.idle{background:var(--panel);color:var(--dim);border:1px solid var(--line)}
+  .rh-desc{font-size:11px;color:var(--muted);margin-top:4px;line-height:1.55}
+  .rh-foot{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px}
+  .rh-pick{display:inline-flex;gap:0;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .rh-choice{background:var(--panel);border:0;border-right:1px solid var(--line);color:var(--muted);padding:6px 14px;font-size:12px;cursor:pointer}
+  .rh-choice:last-child{border-right:0}
+  .rh-choice.active{background:var(--accent);color:#04121f;font-weight:600}
+  .rh-choice:hover:not(.active){color:var(--txt)}
+  .rh-choice:disabled{opacity:.4;cursor:not-allowed}
+  .rh-state{font-size:11px;color:var(--dim)}
+  .rh-extra{margin-top:10px;padding-top:10px;border-top:1px solid var(--line)}
+  .rh-extra.off{opacity:.5}
+  .rh-line{font-size:11px;color:var(--dim);margin-top:8px;line-height:1.6}
+  code{font-family:monospace}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>硬前置召回 · A / B / C 启用选择 — 可交互原型</h1>
+  <div class="sub">批次62 · 每轮用户输入 → 强制召回 → 拼进上下文 → 再推理 · 三层各一组「启用 / 不启用」二选一按钮，切换即时生效</div>
+
+  <div class="card" id="rh-card">
+    <div class="h">硬前置召回<span class="ref">A 宿主钩子 / B LLM 网关 / C MCP 内核门禁 · 互不替代</span></div>
+    <div class="note">A 保证每轮必召回；B 真正把记忆拼进 system 最前面；C 保证没召回就不许调别的工具。三层可单独启用或停用，设置写本机配置并记审计；C 只约束「调了工具但没先召回」，模型一个工具都不调直接回答需靠 A / B 兜住。</div>
+
+    <div class="rh-layer" id="rh-a">
+      <div class="rh-head"><span class="rh-name">A · 宿主钩子</span><span class="rh-st on" id="rh-a-st">已启用</span></div>
+      <div class="rh-desc">宿主在模型处理前同步执行 UserPromptSubmit 强制召回，注入 additionalContext。桌面端需重启宿主并在 hooks 面板审核后生效。</div>
+      <div class="rh-foot">
+        <span class="rh-pick" role="radiogroup" aria-label="A 宿主钩子">
+          <button type="button" class="rh-choice active" data-value="on">启用</button>
+          <button type="button" class="rh-choice" data-value="off">不启用</button>
+        </span>
+        <span class="rh-state" id="rh-a-state">宿主钩子已写入配置 · 路径 C:\Users\LHQ\.workbuddy\settings.json</span>
+      </div>
+    </div>
+
+    <div class="rh-layer" id="rh-b">
+      <div class="rh-head"><span class="rh-name">B · LLM 网关</span><span class="rh-st idle" id="rh-b-st">未启用</span></div>
+      <div class="rh-desc">应用内置反向代理，把召回记忆置顶拼进 system，再转发上游。启用后把客户端 base_url 指向下方接入地址。</div>
+      <div class="rh-foot">
+        <span class="rh-pick" role="radiogroup" aria-label="B LLM 网关">
+          <button type="button" class="rh-choice" data-value="on">启用</button>
+          <button type="button" class="rh-choice active" data-value="off">不启用</button>
+        </span>
+        <span class="rh-state" id="rh-b-state">网关未运行 · 监听端口 8300</span>
+      </div>
+      <div class="rh-extra off" id="rh-b-extra">
+        <div class="row"><label>上游地址</label><input type="text" id="rh-upstream" placeholder="https://api.example.com" /><span class="dim">启用前必填；客户端自己的密钥原样透传、不落盘</span></div>
+        <div class="row"><label>接入地址</label><code class="epi" id="rh-baseurl">http://127.0.0.1:8300/v1</code><button type="button" class="btn" id="rh-copy">复制</button><span class="dim">把客户端 base_url 指向这里</span></div>
+      </div>
+    </div>
+
+    <div class="rh-layer" id="rh-c">
+      <div class="rh-head"><span class="rh-name">C · MCP 内核门禁</span><span class="rh-st on" id="rh-c-st">已启用</span></div>
+      <div class="rh-desc">可靠会话未先调用 recall_memory 时，除 recall_memory 自身外的所有工具都被硬拦。切换后无需重启，下一次 tools/call 立即按新口径判定。</div>
+      <div class="rh-foot">
+        <span class="rh-pick" role="radiogroup" aria-label="C MCP 内核门禁">
+          <button type="button" class="rh-choice active" data-value="on">启用</button>
+          <button type="button" class="rh-choice" data-value="off">不启用</button>
+        </span>
+        <span class="rh-state" id="rh-c-state">严格门禁生效中 · 未召回即硬拦全部非 recall 工具</span>
+      </div>
+    </div>
+
+    <div class="row" style="justify-content:space-between;margin-top:14px">
+      <span class="dim" id="rh-summary">已启用 2 / 3 层 · 三层都依赖本机 8204 记忆服务在线；服务没起时只是不注入，不影响对话</span>
+      <button type="button" class="btn primary" id="rh-save">保存并生效</button>
+    </div>
+    <div class="rh-line">状态来自本机真实配置，不是页面猜测值：A 读宿主 settings.json，B 读网关端口监听状态，C 读服务端严格门禁当前值。选择「不启用」不会删除其它层，也不会删掉宿主里已有的其它钩子。</div>
+  </div>
+</div>
+<div class="toast" id="rh-toast"></div>
+
+<script>
+(function(){
+  var cfg={a:true,b:false,c:true,upstream:'',port:8300};
+  var toast=document.getElementById('rh-toast'),timer=null;
+  function say(t){toast.textContent=t;toast.style.display='block';clearTimeout(timer);timer=setTimeout(function(){toast.style.display='none';},1800);}
+  function st(el,on,txt){el.className='rh-st '+(on?'on':'idle');el.textContent=on?'已启用':'未启用';if(txt!==undefined)el.title=txt;}
+  function paint(){
+    ['a','b','c'].forEach(function(k){
+      var layer=document.getElementById('rh-'+k);
+      layer.querySelectorAll('.rh-choice').forEach(function(btn){
+        btn.classList.toggle('active',(btn.dataset.value==='on')===cfg[k]);
+      });
+      st(document.getElementById('rh-'+k+'-st'),cfg[k]);
+    });
+    document.getElementById('rh-a-state').textContent=cfg.a?'宿主钩子已写入配置 · 路径 C:\\Users\\LHQ\\.workbuddy\\settings.json':'宿主钩子已摘除 · 其它钩子保留';
+    document.getElementById('rh-b-state').textContent=cfg.b?'网关运行中 · 监听端口 '+cfg.port:'网关未运行 · 监听端口 '+cfg.port;
+    document.getElementById('rh-c-state').textContent=cfg.c?'严格门禁生效中 · 未召回即硬拦全部非 recall 工具':'退回旧行为 · 只硬拦写入/治理类工具';
+    document.getElementById('rh-b-extra').classList.toggle('off',!cfg.b);
+    document.getElementById('rh-upstream').disabled=!cfg.b;
+    document.getElementById('rh-copy').disabled=!cfg.b;
+    document.getElementById('rh-baseurl').textContent='http://127.0.0.1:'+cfg.port+'/v1';
+    document.getElementById('rh-summary').textContent='已启用 '+(['a','b','c'].filter(function(k){return cfg[k];}).length)+' / 3 层 · 三层都依赖本机 8204 记忆服务在线；服务没起时只是不注入，不影响对话';
+  }
+  ['a','b','c'].forEach(function(k){
+    document.getElementById('rh-'+k).querySelectorAll('.rh-choice').forEach(function(btn){
+      btn.addEventListener('click',function(){
+        var on=btn.dataset.value==='on';
+        if(on&&k==='b'&&!document.getElementById('rh-upstream').value.trim()){
+          say('请先填写上游地址再启用 B');return;
+        }
+        cfg[k]=on;paint();say((k.toUpperCase())+' · '+(on?'启用':'不启用'));
+      });
+    });
+  });
+  document.getElementById('rh-upstream').addEventListener('input',function(e){cfg.upstream=e.target.value.trim();});
+  document.getElementById('rh-copy').addEventListener('click',function(){
+    var t=document.getElementById('rh-baseurl').textContent;
+    if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(function(){say('已复制接入地址');},function(){say('复制失败，请手动选中');});}
+    else say('接入地址：'+t);
+  });
+  document.getElementById('rh-save').addEventListener('click',function(){
+    if(cfg.b&&!cfg.upstream){say('请先填写上游地址');return;}
+    say('已保存并生效 · A='+(cfg.a?'启用':'不启用')+' B='+(cfg.b?'启用':'不启用')+' C='+(cfg.c?'启用':'不启用'));
+  });
+  paint();
+})();
+</script>
+</body>
+</html>

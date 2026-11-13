@@ -55,3 +55,20 @@ buildSync({
   logLevel: 'warning',
 });
 console.log('preload.cjs built OK');
+
+/**
+ * 批次62 A 方案：硬前置召回宿主钩子的**打包态产物**。
+ * 宿主用系统 node 执行它，拿不到仓库源码、也不能指望原生 TS 剥离 → 必须自包含单文件（ESM）。
+ * 入口 recallHookCli.ts 只是 IO 壳，逻辑复用 src/core/memagent/recallHook.ts 与 recallPrelude.ts，
+ * 与开发态 `.codebuddy/hooks/force_recall.mjs` 共用同一份实现，避免两份注入逻辑漂移。
+ */
+buildSync({
+  entryPoints: [path.join(root, 'src/core/memagent/recallHookCli.ts')],
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  target: 'node18',
+  outfile: path.join(root, 'dist-electron/recall-hard/force_recall.mjs'),
+  logLevel: 'warning',
+});
+console.log('recall-hard/force_recall.mjs built OK（自包含 ESM，宿主直接 node 执行）');

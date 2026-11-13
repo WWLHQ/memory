@@ -74,7 +74,9 @@ export type HostMethod =
   | 'sync:cursor' | 'sync:auditCount' | 'sync:auditsFrom'
   | 'llm:config' | 'llm:configSet' | 'llm:test' | 'llm:refine'
   /** 批次48 A31：厂商余额视图（需会话）/ 独立 billing 凭据（仅管理员） */
-  | 'llm:billing' | 'llm:billingKey';
+  | 'llm:billing' | 'llm:billingKey'
+  /** 批次62：硬前置召回 A/B/C 三层开关（状态需会话 / 保存仅管理员） */
+  | 'recallHard:state' | 'recallHard:set';
 
 /** 扁平 channel → preload 暴露的嵌套对象方法（window.api[ns][fn]） */
 const CHANNEL_TO_NATIVE: Record<HostMethod, [string, string]> = {
@@ -181,6 +183,8 @@ const CHANNEL_TO_NATIVE: Record<HostMethod, [string, string]> = {
   'llm:refine': ['llm', 'refine'],
   'llm:billing': ['llm', 'billing'],
   'llm:billingKey': ['llm', 'setBillingKey'],
+  'recallHard:state': ['recallHard', 'state'],
+  'recallHard:set': ['recallHard', 'set'],
 };
 
 /** 顶层窗口是否具备原生 preload 能力 */

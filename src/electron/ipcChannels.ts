@@ -56,6 +56,9 @@ export const IPC = {
   l0RemoveMemberWriteWrap: 'l0:removeMemberWriteWrap',
   /** §4.4.4-B：查「本账号」是否已有写解锁口令（需登录；只回布尔，member_id 取会话账号，不由页面自报） */
   l0MyWriteWrap: 'l0:myWriteWrap',
+  /** 写密钥是否在内存（**只回一个布尔、不需要登录**）：写锁是进程级全局事实，
+   *  任何页面（含未登录的首页文档）都该读到真值，不能因为没会话就判「未解锁」 */
+  l0WriteUnlocked: 'l0:writeUnlocked',
   l0Seal: 'l0:seal',
   l0Decrypt: 'l0:decrypt',
   l0SessionInfo: 'l0:sessionInfo',
@@ -134,6 +137,9 @@ export const IPC = {
   llmBilling: 'llm:billing',
   /** 批次48 A31：独立 billing 凭据写入/清除（仅管理员；返回值只含 keySet 布尔，绝不含凭据明文） */
   llmBillingKey: 'llm:billingKey',
+  /** 批次62：硬前置召回 A/B/C 三层开关 —— 状态需会话（读真值）；保存仅管理员（会改宿主配置 / 起停网关 / 切门禁） */
+  recallHardState: 'recallHard:state',
+  recallHardSet: 'recallHard:set',
   /** 批次39：L2–L6 后台补炼队列 —— 状态（需会话）/ 开关与补炼与重试失败行（仅管理员） */
   refineState: 'refine:state',
   refineSetEnabled: 'refine:setEnabled',

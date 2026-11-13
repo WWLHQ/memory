@@ -46,6 +46,8 @@ import { UNSET_MANUAL_BILLING } from '../shared/billing.ts';
 import { createServer as httpCreateServer } from 'node:http';
 import { runMcpServer } from '../core/memagent/mcp.ts';
 import { runMcpHttpServer } from '../core/memagent/mcpHttp.ts';
+import { RecallHardController } from './recallHard.ts';
+import { parseRecallHardPatch } from '../shared/recallHardConfig.ts';
 import { MemoryPendingStore, type PendingStore } from '../core/memagent/pendingWrites.ts';
 import { summarizePendingWrites } from '../shared/pendingWritesView.ts';
 import { ensureSharedProject } from '../core/memagent/mcpRecall.ts';
@@ -130,6 +132,21 @@ function resolveDistDir(): string {
 // 顶层不再直接调用 app.getPath（避免 require('electron') 在打包环境中解析到 shim 导致崩溃）
 // USER_DATA / DB_PATH 等在 bootstrap() 内部延迟初始化
 const DIST = resolveDistDir();
+
+/**
+ * 批次62 A 方案：强制召回钩子脚本的真实路径。
+ * 打包态 = dist-electron/recall-hard/force_recall.mjs（build:electron 生成的**自包含**产物，
+ * 宿主用系统 node 直接执行，不依赖仓库源码与 TS 剥离）；
+ * 开发态回退仓库 `.codebuddy/hooks/force_recall.mjs`（薄壳 import 同一份 recallHook.ts）。
+ * 两者都不存在时不猜，返回打包态路径 —— 由 RecallHardController 在 UI 上如实报「脚本不存在」。
+ */
+function resolveRecallHookScript(): string {
+  const packed = join(__dirname, 'recall-hard', 'force_recall.mjs');
+  if (existsSync(packed)) return packed;
+  const dev = join(__dirname, '..', '..', '.codebuddy', 'hooks', 'force_recall.mjs');
+  if (existsSync(dev)) return dev;
+  return packed;
+}
 // USER_DATA / DB_PATH 等移至 bootstrap 内部（顶层 let 声明，bootstrap 内赋值；
 // flog/mlog 等顶层函数闭包依赖这些变量，必须在顶层声明而非 const 初始化）
 let USER_DATA: string;
@@ -181,6 +198,12 @@ let pendingRecoveryCard: { fingerprint: string; text: string } | null = null;
  * 只在内存里记账（换发新卡即清零），所以「没导出过就重启」不会留下一个可以糊弄过去的持久标记。
  */
 let recoveryCardExported = false;
+/**
+ * 批次62 UI 开关：A 宿主钩子 / B 内置 LLM 网关 / C 严格首步召回门禁 的主进程控制器。
+ * bootstrap 内创建（依赖 USER_DATA 与 mcpToken）；C 的门禁 getter 直接传给 runMcpHttpServer，
+ * 因此 UI 切换即时生效、无需重启；A/B 由它按配置 reconcile 到真值。
+ */
+let recallHard: RecallHardController | null = null;
 const MIRROR_PORT = 8201;
 const AGENT_ONBOARD_PORT = 8200;
 const MCP_PORT = 8202;
@@ -1376,6 +1399,11 @@ function registerL0Ipc(vault: L0Vault, collectorVector: JsVectorBackend, pending
       return { ok: true };
     } catch (e) { return l0Fail(e); }
   });
+  /** 写密钥是否在内存：**不需要登录**，只回一个布尔。
+   *  写锁是进程级全局事实（DEK 在不在内存），不属于任何账号的私密信息；
+   *  如果这里也要会话，未登录/会话未传到的那份文档（如首页 index.html）就永远读不到真值，
+   *  只能退到管理员通道得到 false —— 这正是「写入页解锁了、首页还报未解锁」的根因。 */
+  handleIpc(IPC.l0WriteUnlocked, async () => ({ ok: true, write_unlocked: vault.isWriteUnlocked() }));
   handleIpc(IPC.l0WriteLock, async (_e, sessionId?: string) => {
     const gate = requireAdmin(sessionId, IPC.l0WriteLock);
     if (!gate.ok) return { ok: false, error: gate.error };
@@ -1973,8 +2001,38 @@ function registerRefineIpc(): void {
   });
 }
 
-async function scheduleDataRootChange(mode: 'change' | 'restore', actor?: string): Promise<{
-  ok: boolean; root?: string; restartRequired?: boolean; canceled?: boolean; error?: string;
+/**
+ * 批次62 UI 开关：A / B / C 三层状态读取与切换。
+ * 读状态需要登录会话（返回的是本机真值：宿主 settings 里是否真装了钩子、网关端口是否真在跑、门禁当前值）；
+ * 保存需要管理员（会改写宿主配置 / 起停本机端口 / 改变所有 Agent 的首步门禁强度）。
+ */
+function registerRecallHardIpc(): void {
+  handleIpc(IPC.recallHardState, async (_e, sessionId?: string) => {
+    const gate = requireSession(sessionId, IPC.recallHardState);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    if (!recallHard) return { ok: false, error: '硬前置召回还没就绪（主进程启动中或数据根不可写）' };
+    return recallHard.state();
+  });
+  handleIpc(IPC.recallHardSet, async (_e, patch: unknown, sessionId?: string) => {
+    const gate = requireAdmin(sessionId, IPC.recallHardSet);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    if (!recallHard) return { ok: false, error: '硬前置召回还没就绪（主进程启动中或数据根不可写）' };
+    const parsed = parseRecallHardPatch(patch);
+    if (!parsed.ok) return { ok: false, error: parsed.error };
+    try {
+      const next = await recallHard.apply(parsed.patch);
+      // 只记「改了哪几个字段」与三层真值，不记上游地址（可能带租户标识甚至密钥）
+      actionLog('kernel', 'recall-hard:set', {
+        user: gate.ctx.user_id,
+        fields: Object.keys(parsed.patch),
+        a_installed: next.a.installed, b_running: next.b.running, c_effective: next.c.effective,
+      });
+      return next;
+    } catch (e) { return l0Fail(e); }
+  });
+}
+
+async function scheduleDataRootChange(mode: 'change' | 'restore', actor?: string): Promise<{  ok: boolean; root?: string; restartRequired?: boolean; canceled?: boolean; error?: string;
 }> {
   if (!DATA_ROOT_POINTER || !DEFAULT_DATA_ROOT) return { ok: false, error: '无法确定数据目录指针位置' };
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
@@ -2979,6 +3037,25 @@ async function bootstrap(): Promise<void> {
   actionLog('app', 'bootstrap:mcp-token-ready', { file: mcpTokenFile });
   // 客户端接入面板（批次15）：令牌就绪后才能生成片段/一键写入
   registerMcpClientsIpc(mcpToken);
+  // 批次62 UI 开关：A 宿主钩子 / B 内置 LLM 网关 / C 严格首步召回门禁。
+  // 必须在 mcpToken 就绪后创建（B 的网关要拿令牌去 8204 召回），
+  // 且必须在 runMcpHttpServer 之前完成 init（C 的初始门禁值从这里来）。
+  recallHard = new RecallHardController({
+    dataDir: USER_DATA,
+    hookScript: resolveRecallHookScript(),
+    mcpToken,
+    mcpUrl: `http://127.0.0.1:${MCP_HTTP_PORT}/mcp`,
+    log: (action, detail) => {
+      void mlog(action, detail);
+      actionLog('kernel', action, detail);
+    },
+  });
+  // 初始化失败不阻断启动：三层各自 fail-closed/独立，UI 会如实显示哪一层没起来
+  await recallHard.init().catch((e) => {
+    void mlog('bootstrap:recall-hard-init-error', String((e as Error)?.message ?? e));
+    actionLog('kernel', 'recall-hard:init-error', { error: String((e as Error)?.message ?? e).slice(0, 160) }, { level: 'error' });
+  });
+  registerRecallHardIpc();
   // LLM 精炼网关（批次31）：配置/密钥就绪后内核写路径才能产出 L2–L6；未配置时保持 stub 口径
   llmGateway = loadLlmGateway(USER_DATA);
   await refreshProxyAccounting();
@@ -3009,10 +3086,17 @@ async function bootstrap(): Promise<void> {
 
   // 标准 MCP streamable-http（DSH dsh-mcp-client 走这条路连记忆库；POST /mcp → initialize/tools/list/tools/call）
   // 批次33-C：同一端口另开 GET /recall/<一次性 id> = 聊天里「展开明细」链接指向的本机明细页（真折叠），只记命中与否，不记 id 与正文。
+  // C 方案：严格首步召回门禁由界面开关控制（运行时 getter，每次 tools/call 求值，切换即时生效、无需重启）；
+  // 只影响带 Mcp-Session-Id 的可靠会话，无会话头的 UA 兜底客户端不硬拦。
+  // 逃生开关 MAM_STRICT_RECALL_GATE=0：仅在**还没有配置文件**时把默认值压成关闭（之后界面可再开）。
+  const strictRecallGate = recallHard
+    ? recallHard.cStrict
+    : () => process.env.MAM_STRICT_RECALL_GATE !== '0';
   const mcpHttp = runMcpHttpServer({
     storage, port: MCP_HTTP_PORT, token: mcpToken, l0: l0Vault, tokenStore, memberStore, account: mcpBootstrapAccount,
     pending: mcpPendingStore,
     personal: personalStoreRef ?? undefined,
+    strictRecallGate,
     // 批次41-R：同一条也落 actions.log（批次34 对 llm:* 的同一口径）——日志页读的是 actions.log，
     // 只写 main.log 等于「明细页有没有被点开过」对用户不可见。值只有 ok/miss，无 id、无正文。
     onViewDetail: (outcome) => {
@@ -4008,6 +4092,7 @@ async function bootstrap(): Promise<void> {
     home.close();
     homeServerRef = null;
     void agentOnboard.stop();
+    void recallHard?.stop(); // B 内置网关若在跑，退出时必须放掉 8300 端口
     mcp.stop();
     mcpHttp.stop();
     webhookSrv.close();

@@ -30,8 +30,9 @@ export function DevPanel({ dev, onChange }: Props) {
         <b>开发者模式（底层参数）</b> <span className="dim">— 普通用户无需展开（G7）</span>
       </summary>
       <div className="p0-banner warn" data-testid="dev-not-effective" style={{ marginTop: 8 }}>
-        仅记录、不生效：以下底层参数保存只写 params:v1 preference 快照并记 param_save 审计；
-        内核检索/遗忘/短路当前使用固定常量（见 core/memagent），不会读取这些值 —— 页面不谎称「已折算到底层策略」。
+        仅记录、不生效：以下底层参数保存只写 params:v1 preference 快照并记 param_save 审计，内核不会读取这些值。
+        判重五维权重 / 阈值 / 调度 / 召回权重 / 反馈策略统一由「净化生长」页写入 growth:v1 驱动（见 core/memagent），
+        本面板不参与折算，也不谎称「已生效」。
       </div>
 
       <div className="row" style={{ marginTop: 10 }}>
