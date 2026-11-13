@@ -8,14 +8,20 @@ import { sha256hex } from './sync.ts';
 import type {
   AuditAction, AuditRecord, Category, DecayClass, Filter, Memory, StorageBackend, VectorBackend,
 } from './types.ts';
+import { DEFAULT_RECALL_WEIGHTS, type RecallWeights } from '../../shared/growthConfig.ts';
+import { readFeedbackSignals, type FeedbackSignalRead } from './feedbackSignal.ts';
 
 const DAY = 24 * 3600 * 1000;
 
 /** 下限钳制（17.5） */
 const CLAMP = { freshness: 0.05, importance: 0.1, confidence: 0.05 } as const;
 
-/** 默认打分权重（17.5 顶层洞察优先基准；其他模式按 2.4.3 权重向量） */
-export const SCORE_WEIGHTS = { w_f: 0.35, w_i: 0.30, w_c: 0.15, w_a: 0.20 } as const;
+/**
+ * 默认打分权重（17.5 顶层洞察优先基准；其他模式按 2.4.3 权重向量）。
+ * 批次61 GAP-1：真源移到 `shared/growthConfig.ts:DEFAULT_RECALL_WEIGHTS`（growth:v1 可配置），
+ * 此处保留同名导出供既有调用方与测试使用，避免两处常量漂移。
+ */
+export const SCORE_WEIGHTS: RecallWeights = { ...DEFAULT_RECALL_WEIGHTS };
 
 /** 17.6 不同知识库默认策略 */
 export interface ForgettingPolicy {
@@ -52,7 +58,7 @@ export function freshnessOf(m: Memory, now: number, halfLifeOverride?: number): 
  */
 export function scoreMemory(
   m: Memory, relevance: number, now: number,
-  w: typeof SCORE_WEIGHTS = SCORE_WEIGHTS,
+  w: RecallWeights = SCORE_WEIGHTS,
 ): number {
   const f = freshnessOf(m, now);
   const imp = Math.max(CLAMP.importance, m.importance ?? 0.5);
@@ -117,7 +123,12 @@ export function fusedRelevanceOf(
 }
 
 /** pinned 免检：直接进候选集（17.8 第一层 / AC-03） */
-export function hardFilter(m: Memory): boolean {  if (m.pinned) return true;                          // 免检直进候选
+export function hardFilter(m: Memory): boolean {
+  // 批次61 GAP-1（规格 A4）：墓碑与合并影子必须在最前排除，且优先于 pinned 免检——
+  // 否则「已删除」或「已并入摘要」的原始行仍会作为命中出现（与摘要行重复，且让用户看到已删内容）。
+  if (m.deleted) return false;
+  if (m.merged_into) return false;
+  if (m.pinned) return true;                          // 免检直进候选
   if (m.confidence !== undefined && m.confidence <= 0.05) return false;
   return m.decay_class === 'hot' || m.decay_class === 'warm'; // 默认只扫 Hot/Warm（AC-11）
 }
@@ -270,6 +281,12 @@ export interface ForgettingCycleReport {
   compressed: number;
   /** 批次48 A17：参数页「保留时长」全局阈值触发、真实归档的行数（无该配置时为 0） */
   archived: number;
+  /**
+   * 批次61 GAP-2（AC B4）：窗口内的 recall / verdict 只读聚合。
+   * 只作观测与告警：**不参与打分、不参与层迁移**（写入路径不变）。
+   * 读取失败时 ok:false + error 如实上报，净化照常跑完——读审计失败不得阻断遗忘。
+   */
+  signal_summary?: FeedbackSignalRead;
   request_id: string;
 }
 
@@ -488,6 +505,9 @@ export async function runForgettingCycle(
   }
 
   if (dryRun) return report; // 零审计：演算未落审计，不伪造回执（沿用 D5-3 口径）
+  // 批次61 GAP-2（AC B4）：只读聚合 recall / verdict 审计，写进 gc 审计供生长页观测。
+  // 读失败不阻断（readFeedbackSignals 内已兜住异常）；本段不参与打分与迁移，写入路径不变。
+  report.signal_summary = await readFeedbackSignals(storage, now);
   await auditWrite(storage, request_id, 'gc', {
     ...report, task: 'forgetting_cycle', weeklyCompress: opts.weeklyCompress === true,
     ...(filterReasons.length > 0 ? { summary_filter_reasons: filterReasons.slice(0, 10) } : {}),

@@ -13,9 +13,11 @@ import { getKernelStorage } from '../kernel.ts';
 import type {
   DedupSample, DeltaPoint, DimKey, DimWeights, GrowthMetrics, LayerThresholds,
   ScheduleItem, GrowthAuditEntry, ScheduleRunInfo, RegressionOutcome, RegressionRecord,
+  RecallSuggestionView, FeedbackSignalView,
 } from './types.ts';
 import { DEFAULT_SCHEDULE, DEFAULT_THRESHOLDS, DEFAULT_WEIGHTS } from './spec.ts';
-import { SCHEDULE_KEYS, type ScheduleKey } from '../../shared/growthConfig.ts';
+import { SCHEDULE_KEYS, validRecallWeights, type ScheduleKey } from '../../shared/growthConfig.ts';
+import { summarizeAgentUsage, type AgentUsageSummary } from '../../core/memagent/agentUsage.ts';
 
 export type RealStorage = Pick<StorageBackend, 'listMemories' | 'queryAudit'>;
 
@@ -276,6 +278,79 @@ export function regressionRecordsFromLedger(audits: AuditRecord[]): RegressionRe
   return out.sort((x, y) => y.ts - x.ts);
 }
 
+/**
+ * 批次61 GAP-1：「召回权重建议」审计 → 页面视图（无建议 → null）。
+ * 只认 `growth_op` 里 event='recall_weight_suggested' 的 entry.payload；
+ * payload 解析失败 / suggestion 缺失 / 结构不合法一律跳过，不拿半截数据冒充建议。
+ * 多条时取 `at` 最新的一条（同 at 取先出现者，保证确定性）。
+ */
+export function recallSuggestionFromLedger(audits: AuditRecord[]): RecallSuggestionView | null {
+  let best: RecallSuggestionView | null = null;
+  for (const a of audits) {
+    if (a.action !== 'growth_op') continue;
+    const entry = (a.detail as { entry?: GrowthAuditEntry } | undefined)?.entry;
+    if (!entry || entry.event !== 'recall_weight_suggested') continue;
+    let parsed: { suggestion?: unknown } | null = null;
+    try {
+      parsed = JSON.parse(entry.payload) as { suggestion?: unknown };
+    } catch {
+      continue;
+    }
+    const s = parsed?.suggestion as
+      | { from?: unknown; to?: unknown; reason?: unknown; metrics?: { recalls?: unknown } }
+      | null | undefined;
+    // 结构校验：坏权重（缺键/越界/和≠1）整条跳过，不让页面在渲染时崩在 toFixed 上
+    if (!s || !validRecallWeights(s.from) || !validRecallWeights(s.to)) continue;
+    const at = typeof entry.at === 'number' ? entry.at : a.ts;
+    if (best && at <= best.at) continue;
+    best = {
+      at,
+      requestId: a.request_id,
+      from: s.from,
+      to: s.to,
+      reason: typeof s.reason === 'string' ? s.reason : '',
+      recalls: typeof s.metrics?.recalls === 'number' ? s.metrics.recalls : 0,
+    };
+  }
+  return best;
+}
+
+/**
+ * 批次61 GAP-2：最新一条带 `signal_summary` 的 `gc` 审计 → 页面视图（无记录 → null）。
+ * 只认 ok=true 且 summary 里有 window_days/recalls 的记录；读失败的 gc（ok=false）不算「有数据」，
+ * 避免把「审计读不到」画成「没有反馈」。
+ */
+export function feedbackSignalFromLedger(audits: AuditRecord[]): FeedbackSignalView | null {
+  let best: FeedbackSignalView | null = null;
+  for (const a of audits) {
+    if (a.action !== 'gc') continue;
+    const sig = (a.detail as { signal_summary?: unknown } | undefined)?.signal_summary as
+      | { ok?: unknown; summary?: unknown } | undefined;
+    if (!sig || sig.ok !== true) continue;
+    const s = sig.summary as Partial<{
+      window_days: number; recalls: number; evidence_thin: number;
+      verdicts: { confirm?: number; reject?: number; disputed?: number };
+      reject_ratio: number; rejected_mem_ids: number;
+    }> | undefined;
+    if (!s || typeof s.recalls !== 'number' || typeof s.window_days !== 'number') continue;
+    if (best && a.ts <= best.at) continue;
+    best = {
+      at: a.ts,
+      window_days: s.window_days,
+      recalls: s.recalls,
+      evidence_thin: typeof s.evidence_thin === 'number' ? s.evidence_thin : 0,
+      verdicts: {
+        confirm: typeof s.verdicts?.confirm === 'number' ? s.verdicts.confirm : 0,
+        reject: typeof s.verdicts?.reject === 'number' ? s.verdicts.reject : 0,
+        disputed: typeof s.verdicts?.disputed === 'number' ? s.verdicts.disputed : 0,
+      },
+      reject_ratio: typeof s.reject_ratio === 'number' ? s.reject_ratio : 0,
+      rejected_mem_ids: typeof s.rejected_mem_ids === 'number' ? s.rejected_mem_ids : 0,
+    };
+  }
+  return best;
+}
+
 const SCHEDULE_KEY_SET = new Set<string>(SCHEDULE_KEYS);
 
 /**
@@ -333,6 +408,15 @@ export interface RealGrowth {
   regression: RegressionOutcome;
   /** 每次真实回归的逐条记录（最新在前；无记录 = 空数组） */
   regressionRecords: RegressionRecord[];
+  /**
+   * 批次61 GAP-3：Agent 侧使用画像（同一批审计实算，7 天窗）。
+   * 只读聚合：不写审计、不改记忆；verdict 分布只能到项目级（memory_op 审计无 client 字段）。
+   */
+  agentUsage: AgentUsageSummary;
+  /** 批次61 GAP-1：最新召回权重建议（无建议 → null，页面显「暂无建议」） */
+  recallSuggestion: RecallSuggestionView | null;
+  /** 批次61 GAP-2：最新净化周期的反馈信号画像（无 gc 记录 → null，页面显「暂无数据」） */
+  feedbackSignal: FeedbackSignalView | null;
 }
 
 // 真实账本实算标记（供构建产物核验）
@@ -361,6 +445,10 @@ export async function loadRealGrowthData(): Promise<RealGrowth> {
     scheduleRuns: scheduleRunsFromLedger(audits),
     regression: regressionOutcomeFromLedger(audits),
     regressionRecords: regressionRecordsFromLedger(audits),
+    // 与其它指标读同一份审计快照，保证页面上「Agent 侧」与「反馈指标」不会各说一套
+    agentUsage: summarizeAgentUsage(audits, Date.now(), 7),
+    recallSuggestion: recallSuggestionFromLedger(audits),
+    feedbackSignal: feedbackSignalFromLedger(audits),
   };
 }
 

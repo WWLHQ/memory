@@ -3,9 +3,10 @@ import { describe, expect, it } from 'vitest';
 import {
   archiveAgedMemories,
   buildSummary, classifyLayer, clusterSimilar, forgetOne, freshnessOf, hardFilter,
-  policyFor, reinforceOne, restoreOne, runForgettingCycle, scoreMemory,
+  policyFor, reinforceOne, restoreOne, runForgettingCycle,   scoreMemory, SCORE_WEIGHTS,
   fuseRelevance, fusedRelevanceOf, tokenCoverage, RELEVANCE_FUSION_LAMBDA,
 } from '../forgetting.ts';
+import { DEFAULT_RECALL_WEIGHTS } from '../../../shared/growthConfig.ts';
 import { InMemoryStorage } from '../storage.ts';
 import { DEFAULT_VECTOR_DIM, JsVectorBackend, cosine, embedSync } from '../vector.ts';
 import { sha256hex } from '../sync.ts';
@@ -57,6 +58,44 @@ describe('17.5 新鲜度与打分', () => {
     const m = mem({ importance: 0, confidence: 0 });
     const s = scoreMemory(m, 1, NOW);
     expect(s).toBeGreaterThan(0);
+  });
+});
+
+// 批次61 GAP-1（规格 A1/A2/A4）：召回打分权重从「写死常量」变为「growth:v1 可配置」。
+// 红线：缺省入参必须与历史常量逐字一致 —— 未保存过配置的库，召回排序结果不得有任何变化。
+describe('GAP-1 召回权重接线（A1/A2/A4）', () => {
+  it('A1：SCORE_WEIGHTS 与 shared 真源逐字一致；缺省入参 ≡ 显式传默认值', () => {
+    expect(SCORE_WEIGHTS).toEqual(DEFAULT_RECALL_WEIGHTS);
+    const m = mem({ importance: 0.6, confidence: 0.7, access_count: 5, created_at: NOW - 5 * DAY });
+    expect(scoreMemory(m, 0.9, NOW)).toBe(scoreMemory(m, 0.9, NOW, DEFAULT_RECALL_WEIGHTS));
+  });
+
+  it('A2：换权重会改变排序（默认偏向重要度，调高新鲜度后新行反超）', () => {
+    // 新但轻：刚创建、重要度/置信度都低、无访问
+    const freshThin = mem({
+      created_at: NOW - 60 * 1000, importance: 0.1, confidence: 0.1, access_count: 0,
+    });
+    // 旧但重：创建很久（新鲜度触底 0.05）、重要度/置信度满、访问 10 次（boost 满）
+    const staleHeavy = mem({
+      created_at: NOW - 1000 * DAY, half_life_days: 1, importance: 1, confidence: 1, access_count: 10,
+    });
+    // 默认权重（f .35 / i .30 / c .15 / a .20）：旧但重的行在前
+    expect(scoreMemory(staleHeavy, 0.9, NOW)).toBeGreaterThan(scoreMemory(freshThin, 0.9, NOW));
+    // 自生长把新鲜度权重顶上去（仍是合法配置，和 = 1）：排序反转 —— 证明权重真的参与打分
+    const freshHeavy = { w_f: 0.70, w_i: 0.10, w_c: 0.10, w_a: 0.10 };
+    expect(scoreMemory(freshThin, 0.9, NOW, freshHeavy))
+      .toBeGreaterThan(scoreMemory(staleHeavy, 0.9, NOW, freshHeavy));
+  });
+
+  it('A4：墓碑（deleted）与合并影子（merged_into）不进候选，且优先于 pinned 免检', () => {
+    expect(hardFilter(mem({ decay_class: 'hot', deleted: true }))).toBe(false);
+    expect(hardFilter(mem({ decay_class: 'hot', merged_into: 'sum_x' }))).toBe(false);
+    // pinned 免检不能救回墓碑/影子 —— 否则用户会看到「已删除」或与摘要重复的原文
+    expect(hardFilter(mem({ decay_class: 'hot', pinned: true, deleted: true }))).toBe(false);
+    expect(hardFilter(mem({ decay_class: 'hot', pinned: true, merged_into: 'sum_x' }))).toBe(false);
+    // 未标记的行不受影响（回归锚点）
+    expect(hardFilter(mem({ decay_class: 'hot' }))).toBe(true);
+    expect(hardFilter(mem({ decay_class: 'cold', pinned: true }))).toBe(true);
   });
 });
 
@@ -557,5 +596,66 @@ describe('批次60（A 方案）：query 覆盖率融合，修长文被余弦稀
     expect(ratioFused).toBeGreaterThan(0.5);
     // 坦率记录边界：A 方案是「缓解」不是「根治」——长文仍略低于短文，要根治得走 B/C
     expect(ratioFused).toBeLessThan(1);
+  });
+});
+
+// 批次61 GAP-2（规格 B4）：净化周期只读聚合 recall / verdict 审计。
+// 红线：读审计失败不得阻断遗忘；dry_run 仍零写入（连读都不多做一趟）。
+describe('GAP-2 净化侧只读聚合（B4）', () => {
+  function audit(action: 'recall' | 'memory_op', ts: number, detail: Record<string, unknown>) {
+    return { request_id: `req_${action}_${ts}`, action, form: 'desktop', ts, detail } as never;
+  }
+
+  it('gc 审计带 signal_summary，且每个数字都能与审计逐条对上（不估算）', async () => {
+    const s = new InMemoryStorage();
+    await s.putMemory(mem({ mem_id: 'a1', decay_class: 'hot', created_at: NOW - 5 * DAY }));
+    await s.appendAudit(audit('recall', NOW - 3000, { hits: 2, evidence_thin: true }));
+    await s.appendAudit(audit('recall', NOW - 2000, { hits: 1, evidence_thin: false }));
+    await s.appendAudit(audit('memory_op', NOW - 1000, { op: 'reject', mem_id: 'a1' }));
+    await s.appendAudit(audit('memory_op', NOW - 900, { op: 'confirm', mem_id: 'a1' }));
+
+    const report = await runForgettingCycle(s, NOW);
+    expect(report.migrated).toBe(1);                        // 迁移照常
+    expect(report.signal_summary?.ok).toBe(true);
+    if (report.signal_summary?.ok) {
+      expect(report.signal_summary.summary).toMatchObject({
+        recalls: 2, evidence_thin: 1,
+        verdicts: { confirm: 1, reject: 1, disputed: 0 },
+        reject_ratio: 0.5, rejected_mem_ids: 1,
+      });
+    }
+    const gc = (await s.queryAudit({ action: 'gc' })).at(-1)!;
+    const detail = gc.detail as { signal_summary?: { ok: boolean } };
+    expect(detail.signal_summary?.ok).toBe(true);           // 审计与返回值同源
+  });
+
+  it('审计读不到 → 净化照常跑完（不阻断），signal_summary.ok=false 如实上报', async () => {
+    class NoAuditStorage extends InMemoryStorage {
+      override async queryAudit(): Promise<never> {
+        throw new Error('audit unreadable');
+      }
+    }
+    const s = new NoAuditStorage();
+    await s.putMemory(mem({ mem_id: 'a1', decay_class: 'hot', created_at: NOW - 5 * DAY }));
+    await s.putMemory(mem({ mem_id: 'a2', decay_class: 'warm', created_at: NOW - 40 * DAY }));
+
+    const report = await runForgettingCycle(s, NOW);
+    expect(report.migrated).toBe(2);                        // 衰减没有被审计故障拖死
+    expect(report.signal_summary?.ok).toBe(false);
+    if (report.signal_summary && !report.signal_summary.ok) {
+      expect(report.signal_summary.error).toContain('unreadable');
+    }
+    expect((await s.getMemory('a1'))?.decay_class).toBe('warm'); // 真实落库
+  });
+
+  it('dry_run 仍零写入，且不多跑一趟审计读（report.signal_summary 缺省）', async () => {
+    const s = new InMemoryStorage();
+    await s.putMemory(mem({ mem_id: 'a1', decay_class: 'hot', created_at: NOW - 5 * DAY }));
+    const before = (await s.queryAudit({})).length;
+    const report = await runForgettingCycle(s, NOW, { dryRun: true });
+    expect(report.migrated).toBe(1);                        // 演算计数照常诚实
+    expect(report.signal_summary).toBeUndefined();
+    expect((await s.queryAudit({})).length).toBe(before);    // 零审计
+    expect((await s.getMemory('a1'))?.decay_class).toBe('hot'); // 零落库
   });
 });

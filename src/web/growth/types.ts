@@ -1,7 +1,9 @@
 // P14 自我净化与生长页（REQ-009 6.1/6.2/7.1/7.2/13.3）数据模型
 // 权重/阈值/层号类型单一真源在 shared/growthConfig.ts（内核与页面共用，避免两套定义漂移）
-import type { DimKey, DimWeights, Layer, LayerThresholds } from '../../shared/growthConfig.ts';
-export type { DimKey, DimWeights, Layer, LayerThresholds };
+import type {
+  DimKey, DimWeights, Layer, LayerThresholds, RecallWeights, FeedbackPolicy,
+} from '../../shared/growthConfig.ts';
+export type { DimKey, DimWeights, Layer, LayerThresholds, RecallWeights, FeedbackPolicy };
 
 /** 判重样本：五维得分 + 目标写入层。null = 内核/账本无该维的可信测量，绝不拿中性值冒充 */
 export interface DedupSample {
@@ -123,6 +125,36 @@ export interface DeltaPoint {
   delta: number;
   /** 是否 weight_tuned 触发点（每周日 03:00） */
   is_tuned: boolean;
+}
+
+/**
+ * 召回权重建议（页面视图，批次61 GAP-1 补「采纳」闭环）。
+ * 只来自 `growth_op` 审计里 event='recall_weight_suggested' 的 payload；
+ * 无建议 → null（不猜、不显示 0 冒充「已评估」）。建议本身 `applied:false`，必须用户点采纳才落配置。
+ */
+export interface RecallSuggestionView {
+  at: number;
+  /** 建议来源批次（审计 request_id） */
+  requestId: string;
+  from: RecallWeights;
+  to: RecallWeights;
+  reason: string;
+  /** 窗口内真实召回样本数（<30 不产建议；用于页面解释「为什么给这条建议」） */
+  recalls: number;
+}
+
+/**
+ * 反馈信号画像（页面视图，批次61 GAP-2 补「可观测」）。
+ * 来自最新一条 `gc` 审计的 `detail.signal_summary`（ok=true 时）；无记录 → null。
+ */
+export interface FeedbackSignalView {
+  at: number;
+  window_days: number;
+  recalls: number;
+  evidence_thin: number;
+  verdicts: { confirm: number; reject: number; disputed: number };
+  reject_ratio: number;
+  rejected_mem_ids: number;
 }
 
 /** 审计条目（R2 / G6 / 4.3） */

@@ -14,8 +14,9 @@
 // 该限制在审计里以 `note` 如实标注。
 
 import {
-  LAYERS, validThresholds, validWeights,
+  LAYERS, validRecallWeights, validThresholds, validWeights,
   type DimWeights, type GrowthConfig, type Layer, type LayerThresholds,
+  type RecallKey, type RecallWeights,
 } from '../../shared/growthConfig.ts';
 import { DEDUP_EVAL_SCHEMA_V, weightedDedupScore, type DimensionScores } from './dedup.ts';
 import { growthConfigFromLedger, saveGrowthConfigToLedger } from './paramsSnapshot.ts';
@@ -32,6 +33,123 @@ export const THRESHOLD_MIN = 0.50;
 export const THRESHOLD_MAX = 0.95;
 
 const DAY = 24 * 3600_000;
+
+/** 召回权重建议的观测窗口与最小样本（批次61 GAP-1 §2.2 方案 2） */
+export const RECALL_SUGGEST_WINDOW_DAYS = 7;
+export const RECALL_SUGGEST_MIN_RECALLS = 30;
+
+export interface RecallSuggestionMetrics {
+  window_days: number;
+  recalls: number;
+  evidence_thin: number;
+  evidence_thin_ratio: number;
+  avg_hits: number;
+  verdicts: { confirm: number; reject: number; disputed: number };
+  reject_ratio: number;
+}
+
+export interface RecallSuggestion {
+  from: RecallWeights;
+  to: RecallWeights;
+  reason: string;
+  metrics: RecallSuggestionMetrics;
+}
+
+const round2 = (v: number): number => Math.round(v * 100) / 100;
+
+/**
+ * 批次61 GAP-1（规格 §2.2 方案 2）：从真实 recall / memory_op 审计算出**召回权重调整建议**。
+ * 红线：
+ *  · 只产出建议，**绝不自动写 growth:v1**——应用必须由用户确认（applied:false 落审计）；
+ *  · 样本 < 30 次召回 → 返回 null，不猜；
+ *  · 单维调整 ≤ 0.05，扣减先动 w_f 再动 w_a，扣到下限 0.05 仍不够 → 不建议，不硬凑；
+ *  · 规则写死、可复算，不做语义或 LLM 推断。
+ */
+export function suggestRecallWeights(
+  audits: AuditRecord[],
+  current: RecallWeights,
+  now: number,
+  windowDays = RECALL_SUGGEST_WINDOW_DAYS,
+): { suggestion: RecallSuggestion | null; metrics: RecallSuggestionMetrics } {
+  const since = now - windowDays * DAY;
+  const recalls = audits.filter((a) => a.action === 'recall' && a.ts >= since);
+  const ops = audits.filter((a) => a.action === 'memory_op' && a.ts >= since);
+  const verdicts = { confirm: 0, reject: 0, disputed: 0 };
+  for (const a of ops) {
+    const op = (a.detail as { op?: unknown }).op;
+    if (op === 'confirm' || op === 'reject' || op === 'disputed') verdicts[op] += 1;
+  }
+  let thin = 0;
+  let hitsSum = 0;
+  for (const a of recalls) {
+    const d = a.detail as { evidence_thin?: unknown; hits?: unknown };
+    if (d.evidence_thin === true) thin += 1;
+    if (typeof d.hits === 'number') hitsSum += d.hits;
+  }
+  const totalVerdicts = verdicts.confirm + verdicts.reject + verdicts.disputed;
+  const metrics: RecallSuggestionMetrics = {
+    window_days: windowDays,
+    recalls: recalls.length,
+    evidence_thin: thin,
+    evidence_thin_ratio: recalls.length ? Math.round((thin / recalls.length) * 1000) / 1000 : 0,
+    avg_hits: recalls.length ? Math.round((hitsSum / recalls.length) * 100) / 100 : 0,
+    verdicts,
+    reject_ratio: totalVerdicts ? Math.round((verdicts.reject / totalVerdicts) * 1000) / 1000 : 0,
+  };
+  if (recalls.length < RECALL_SUGGEST_MIN_RECALLS) return { suggestion: null, metrics };
+
+  const bump: Partial<Record<RecallKey, number>> = {};
+  const reasons: string[] = [];
+  if (metrics.reject_ratio > 0.3) {
+    bump.w_c = 0.05;
+    reasons.push(`reject 占比 ${(metrics.reject_ratio * 100).toFixed(1)}% > 30% → w_c +0.05`);
+  }
+  if (metrics.evidence_thin_ratio > 0.35) {
+    bump.w_i = 0.05;
+    reasons.push(`证据不足占比 ${(metrics.evidence_thin_ratio * 100).toFixed(1)}% > 35% → w_i +0.05`);
+  }
+  const keys = Object.keys(bump) as RecallKey[];
+  if (keys.length === 0) return { suggestion: null, metrics };
+
+  const to: RecallWeights = { ...current };
+  let need = 0;
+  for (const k of keys) { to[k] = round2(to[k] + (bump[k] ?? 0)); need += bump[k] ?? 0; }
+  for (const k of ['w_f', 'w_a'] as RecallKey[]) {
+    if (need <= 0) break;
+    const cut = Math.min(need, round2(Math.max(0, to[k] - 0.05)));
+    to[k] = round2(to[k] - cut);
+    need = round2(need - cut);
+  }
+  if (need > 0 || !validRecallWeights(to)) return { suggestion: null, metrics };
+  return { suggestion: { from: { ...current }, to, reason: reasons.join('；'), metrics }, metrics };
+}
+
+/** 建议只落 growth_op 审计（event 区分「有建议」/「样本不足」），不写配置、不改任何记忆 */
+async function appendRecallSuggestionAudit(
+  storage: StorageBackend,
+  audits: AuditRecord[],
+  current: RecallWeights,
+  opts: RegressionRunOptions,
+  now: number,
+): Promise<void> {
+  const { suggestion, metrics } = suggestRecallWeights(audits, current, now);
+  // 窗口内一次召回都没有 → 不写这条建议审计。
+  // 理由：零观测的「没有建议」是噪音，会污染生长页的 Δ/审计回放区（E2E 契约：冷启动 no-op 不产生 growth 审计）；
+  // 只有真的看到了召回数据（不管够不够 30 条）才写，保证「有观测但无建议」这一情形不被静默跳过。
+  if (metrics.recalls === 0) return;
+  await storage.appendAudit({
+    request_id: `${opts.requestId}_recall`, action: 'growth_op', form: opts.form,
+    project_id: 'P_SYSTEM', ts: now,
+    detail: {
+      entry: {
+        event: suggestion ? 'recall_weight_suggested' : 'recall_weight_no_suggestion',
+        action: 'suggest_recall_weights',
+        payload: JSON.stringify({ suggestion, metrics, applied: false }),
+        at: now,
+      },
+    },
+  });
+}
 
 export interface DedupSample {
   mem_id: string;
@@ -279,6 +397,10 @@ export function evaluateRegression(
     weights: bestWeights,
     thresholds: bestThresholds,
     schedule: current.schedule,
+    // 批次61 GAP-1：查重回归只调「写入」权阈，召回打分权重原样继承——两条链路互不覆盖。
+    recall_weights: current.recall_weights,
+    // 批次61 GAP-2：反馈回灌策略同理原样继承，判重回归不得顺手清掉用户已启用的策略。
+    feedback_policy: current.feedback_policy,
   };
   const after = {
     train: classify(train, bestWeights, bestThresholds),
@@ -323,8 +445,15 @@ export async function runGrowthRegression(
   const samples = collectDedupSamples(audits, now, opts.windowDays ?? REGRESSION_WINDOW_DAYS);
   const current = growthConfigFromLedger(await storage.listMemories({}));
   const result = evaluateRegression(samples, current, { now, windowDays: opts.windowDays });
+  // GAP-1：召回权重建议在每个分支都落一条审计（不改配置）；失败不阻断判重回归本身。
+  const auditSuggestion = async (): Promise<void> => {
+    try {
+      await appendRecallSuggestionAudit(storage, audits, current.recall_weights, opts, now);
+    } catch { /* 建议审计不可写时只放弃建议，不影响回归结论 */ }
+  };
 
   if (result.status === 'insufficient_samples') {
+    await auditSuggestion();
     await storage.appendAudit({
       request_id: opts.requestId, action: 'insufficient_samples', form: opts.form,
       project_id: 'P_SYSTEM', ts: now,
@@ -334,6 +463,7 @@ export async function runGrowthRegression(
   }
 
   if (result.status === 'not_adopted') {
+    await auditSuggestion();
     await storage.appendAudit({
       request_id: opts.requestId, action: 'weight_regression', form: opts.form,
       project_id: 'P_SYSTEM', ts: now,
@@ -346,6 +476,7 @@ export async function runGrowthRegression(
     return result;
   }
 
+  await auditSuggestion();
   await saveGrowthConfigToLedger(storage, result.config, {
     requestId: opts.requestId, form: opts.form,
     enterpriseId: opts.enterpriseId, teamId: opts.teamId,

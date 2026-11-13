@@ -1,8 +1,12 @@
 // P14-T3 自生长侧组件：指标卡 + 五项优化 + Δ 收益曲线 + 调度时间轴（7.1/7.2/13.3）
+import { useEffect, useState } from 'react';
 import type {
   DeltaPoint, GrowthAuditEntry, GrowthMetrics, GrowthReceipt, OptimizationItem, RegressionOutcome,
-  RegressionRecord, ScheduleItem, ScheduleRunInfo,
+  RegressionRecord, ScheduleItem, ScheduleRunInfo, RecallSuggestionView, FeedbackSignalView,
+  RecallWeights, FeedbackPolicy,
 } from './types.ts';
+import { GC_CONCURRENCY_NOTE, type AgentUsageSummary } from '../../core/memagent/agentUsage.ts';
+import { RECALL_KEYS } from '../../shared/growthConfig.ts';
 
 export function GrowthCards({ m, empty }: { m: GrowthMetrics; empty?: boolean }) {
   const items: Array<[string, string, string, string]> = [
@@ -344,3 +348,223 @@ export function ScheduleTimeline({
 }
 
 
+
+/**
+ * 批次61 GAP-3：Agent 侧使用卡（审计实算 · 非实时）。
+ * 红线：
+ *  · 空审计显示「暂无数据」，不显示 0 制造「已采集」假象（AC C4）；
+ *  · verdict 分布只能到项目级 —— memory_op 审计没有 client 字段，界面上必须写明不可拆分；
+ *  · 缺 client 的调用以「未标识」原样呈现，不猜成某个 Agent（AC C3）。
+ */
+export function AgentUsageCard({ usage }: { usage: AgentUsageSummary }) {
+  const { totals, agents, verdicts } = usage;
+  const pct = (v: number) => `${Math.round(v * 100)}%`;
+  return (
+    <div className="card" data-testid="agent-usage">
+      <b>Agent 侧使用（{usage.window_days} 天窗 · 审计实算 · 非实时）</b>
+      <div className="note" data-testid="agent-usage-note">{usage.note}</div>
+      {agents.length === 0 ? (
+        <div className="note" data-testid="agent-usage-empty">
+          暂无数据：窗口内没有任何 recall / mcp_call 审计。此处不显示 0，避免被误读成「已采集但都是 0」。
+        </div>
+      ) : (
+        <table className="ltable" data-testid="agent-usage-rows" style={{ marginTop: 8 }}>
+          <thead>
+            <tr>
+              <th style={{ textAlign: 'left' }}>Agent（detail.client / mcp_call.agent）</th>
+              <th>召回次数</th>
+              <th>省下 tokens</th>
+              <th>证据不足</th>
+              <th>工具调用</th>
+              <th>首调合规</th>
+            </tr>
+          </thead>
+          <tbody>
+            {agents.map((a) => (
+              <tr key={a.client} data-testid={`agent-row-${a.client}`}>
+                <td style={{ textAlign: 'left' }}>{a.client}</td>
+                <td>{a.recalls}</td>
+                <td>{a.saved_tokens}</td>
+                <td>{a.evidence_thin}</td>
+                <td>{a.calls}</td>
+                <td>
+                  {a.reliable_first_calls > 0
+                    ? `${a.first_call_recall}/${a.reliable_first_calls}`
+                    : '无可靠会话'}
+                </td>
+              </tr>
+            ))}
+            <tr data-testid="agent-row-total" style={{ fontWeight: 700 }}>
+              <td style={{ textAlign: 'left' }}>合计</td>
+              <td>{totals.recalls}</td>
+              <td>{totals.saved_tokens}</td>
+              <td>{totals.evidence_thin}</td>
+              <td>{totals.calls}</td>
+              <td>
+                {totals.first_call_compliance === null
+                  ? '无可靠会话'
+                  : pct(totals.first_call_compliance)}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      )}
+      <div className="note" data-testid="agent-usage-verdicts" style={{ marginTop: 8 }}>
+        反馈裁决（项目级，<b>不可按 Agent 拆分</b>：memory_op 审计无 client 字段）：
+        确认 {verdicts.confirm} · 拒绝 {verdicts.reject} · 待裁决 {verdicts.disputed}
+      </div>
+      <div className="note" data-testid="agent-usage-concurrency">{GC_CONCURRENCY_NOTE}</div>
+    </div>
+  );
+}
+
+function fmtWeights(w: RecallWeights): string {
+  return RECALL_KEYS.map((k) => `${k}=${w[k].toFixed(2)}`).join(' · ');
+}
+
+/**
+ * 批次61 GAP-1（补齐「用户确认 → 应用」闭环）：召回权重卡。
+ * 红线：
+ *  · 自生长只**产建议**（applied:false），此处不自动应用；只有用户点「采纳建议」才写 growth:v1.recall_weights；
+ *  · 无建议时显「暂无建议」，不显示 0 冒充「已评估」；
+ *  · 当前权重已等于建议值时按钮置灰（幂等，不重复写账本）。
+ */
+export function RecallWeightCard({
+  current, suggestion, onApply,
+}: {
+  current: RecallWeights;
+  suggestion: RecallSuggestionView | null;
+  onApply: (to: RecallWeights) => void;
+}) {
+  const applied = suggestion
+    ? RECALL_KEYS.every((k) => Math.abs(current[k] - suggestion.to[k]) < 1e-9)
+    : false;
+  return (
+    <div className="card" data-testid="recall-weight-card">
+      <b>召回权重（GAP-1 · 读出自 growth:v1）</b>
+      <div className="note">
+        决定召回排序的四分量权重；缺省与历史常量一致。自生长只产建议，
+        必须点「采纳」才写入账本，不自动改权重。
+      </div>
+      <div className="note" data-testid="recall-weight-current" style={{ marginTop: 6 }}>
+        当前：{fmtWeights(current)}
+      </div>
+      {suggestion ? (
+        <div className="note" data-testid="recall-weight-suggestion" style={{ marginTop: 6 }}>
+          <div>
+            最新建议（{fmtTime(suggestion.at)} · 窗口内 {suggestion.recalls} 次召回）：
+            <b> {fmtWeights(suggestion.from)} → {fmtWeights(suggestion.to)}</b>
+          </div>
+          <div className="dim">理由：{suggestion.reason || '未给出理由'}</div>
+          <button
+            className="btn" data-testid="recall-weight-apply"
+            disabled={applied}
+            onClick={() => onApply(suggestion.to)}
+          >
+            {applied ? '已采纳（当前 = 建议值）' : '采纳建议（写入 growth:v1）'}
+          </button>
+        </div>
+      ) : (
+        <div className="note" data-testid="recall-weight-empty" style={{ marginTop: 6 }}>
+          暂无建议：窗口内召回样本不足 30 次，或当前权重已无调整空间。此处不显示 0，避免被误读成「已评估」。
+        </div>
+      )}
+    </div>
+  );
+}
+
+const POLICY_WINDOW_MIN = 1;
+const POLICY_WINDOW_MAX = 365;
+const POLICY_THRESHOLD_MIN = 1;
+const POLICY_THRESHOLD_MAX = 50;
+
+/**
+ * 批次61 GAP-2（补齐「策略 → 启用」闭环 + signal_summary 可观测）：反馈闭环卡。
+ * 红线：
+ *  · 缺省关闭（与改造前逐字一致）；开启后窗口内累计 reject 达阈才降档（hot→warm→cold，不推 dormant）；
+ *  · 保存才写 growth:v1.feedback_policy，未改动时按钮置灰；
+ *  · 无 signal_summary 审计时显「暂无数据」，不显示 0 冒充「没有反馈」。
+ */
+export function FeedbackLoopCard({
+  policy, signal, onSave,
+}: {
+  policy: FeedbackPolicy;
+  signal: FeedbackSignalView | null;
+  onSave: (next: FeedbackPolicy) => void;
+}) {
+  const [draft, setDraft] = useState<FeedbackPolicy>(policy);
+  // 保存后重载 → 外部策略变化，草稿跟随（避免页面状态与账本分叉）
+  useEffect(() => { setDraft(policy); }, [policy]);
+
+  const dirty = draft.enabled !== policy.enabled
+    || draft.window_days !== policy.window_days
+    || draft.reject_downgrade_threshold !== policy.reject_downgrade_threshold;
+  const valid = Number.isInteger(draft.window_days)
+    && draft.window_days >= POLICY_WINDOW_MIN && draft.window_days <= POLICY_WINDOW_MAX
+    && Number.isInteger(draft.reject_downgrade_threshold)
+    && draft.reject_downgrade_threshold >= POLICY_THRESHOLD_MIN
+    && draft.reject_downgrade_threshold <= POLICY_THRESHOLD_MAX;
+
+  return (
+    <div className="card" data-testid="feedback-loop-card">
+      <b>反馈闭环（GAP-2 · reject 累计 → 降档）</b>
+      <div className="note">
+        默认关闭 = 只改 confidence，与改造前逐字一致。开启后窗口内累计 reject 达阈才降档
+        （hot→warm→cold，不推 dormant）。策略写入 growth:v1.feedback_policy。
+      </div>
+      <div className="row" style={{ gap: 16, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <label style={{ fontSize: 13 }}>
+          <input
+            type="checkbox" data-testid="feedback-enabled"
+            checked={draft.enabled}
+            onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })}
+          /> 启用 reject 降档
+        </label>
+        <label style={{ fontSize: 13 }}>
+          窗口
+          <input
+            type="number" min={POLICY_WINDOW_MIN} max={POLICY_WINDOW_MAX} data-testid="feedback-window"
+            value={draft.window_days} style={{ width: 64 }}
+            onChange={(e) => setDraft({ ...draft, window_days: Number(e.target.value) })}
+          /> 天
+        </label>
+        <label style={{ fontSize: 13 }}>
+          阈值
+          <input
+            type="number" min={POLICY_THRESHOLD_MIN} max={POLICY_THRESHOLD_MAX} data-testid="feedback-threshold"
+            value={draft.reject_downgrade_threshold} style={{ width: 64 }}
+            onChange={(e) => setDraft({ ...draft, reject_downgrade_threshold: Number(e.target.value) })}
+          /> 次
+        </label>
+        <button
+          className="btn" data-testid="feedback-save"
+          disabled={!dirty || !valid}
+          onClick={() => onSave(draft)}
+        >保存策略</button>
+        {!valid && (
+          <span className="status deprecated" data-testid="feedback-invalid">
+            窗口需 1–365 天 · 阈值需 1–50 次
+          </span>
+        )}
+      </div>
+      <div className="note" data-testid="feedback-policy-state" style={{ marginTop: 6 }}>
+        当前策略：{policy.enabled ? '已启用' : '未启用（默认，行为与改造前一致）'} ·
+        窗口 {policy.window_days} 天 · 阈值 {policy.reject_downgrade_threshold} 次
+      </div>
+      <div className="note" data-testid="feedback-signal" style={{ marginTop: 8 }}>
+        {signal ? (
+          <>
+            <b>最近一次净化周期信号（{fmtTime(signal.at)} · 窗口 {signal.window_days} 天）：</b>{' '}
+            召回 {signal.recalls} 次 · 证据不足 {signal.evidence_thin} 次 ·
+            裁决 确认 {signal.verdicts.confirm} / 拒绝 {signal.verdicts.reject} / 待裁决 {signal.verdicts.disputed} ·
+            拒绝占比 {Math.round(signal.reject_ratio * 100)}% · 被拒记忆 {signal.rejected_mem_ids} 条
+          </>
+        ) : (
+          <span data-testid="feedback-signal-empty">
+            暂无数据：账本还没有带 signal_summary 的净化周期审计（runForgettingCycle 尚未跑过）。
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}

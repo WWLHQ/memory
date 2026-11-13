@@ -1,10 +1,13 @@
 // 批次48 A23.3：回归算法与审计落账的可复现验证
 import { describe, expect, it } from 'vitest';
 import type { AuditRecord } from '../types.ts';
-import { DEFAULT_SCHEDULE_FLAGS, type GrowthConfig } from '../../../shared/growthConfig.ts';
+import {
+  DEFAULT_FEEDBACK_POLICY, DEFAULT_RECALL_WEIGHTS, DEFAULT_SCHEDULE_FLAGS, type GrowthConfig,
+} from '../../../shared/growthConfig.ts';
 import { InMemoryStorage } from '../storage.ts';
 import {
   collectDedupSamples, classify, evaluateRegression, runGrowthRegression, splitSamples,
+  suggestRecallWeights,
 } from '../regression.ts';
 import { growthConfigFromLedger } from '../paramsSnapshot.ts';
 
@@ -36,6 +39,8 @@ const currentConfig = (l1: number): GrowthConfig => ({
   weights: { semantic: 0.25, keyword: 0.25, entity: 0.25, structure: 0.25, llm_judge: 0 },
   thresholds: { L1: l1, L2: 0.6, L3: 0.65, L4: 0.7, L5: 0.75, L6: 0.8 },
   schedule: { ...DEFAULT_SCHEDULE_FLAGS },
+  recall_weights: { w_f: 0.35, w_i: 0.30, w_c: 0.15, w_a: 0.20 },
+  feedback_policy: { ...DEFAULT_FEEDBACK_POLICY },
 });
 
 /** 50 条（25 正 / 25 负）；分数 0.55 / 0.45，阈值 0.5 可分 */
@@ -163,5 +168,160 @@ describe('runGrowthRegression（真实审计落账）', () => {
 
     const after = growthConfigFromLedger(await storage.listMemories({}));
     expect(after.thresholds.L1).toBeLessThan(0.9);
+  });
+});
+
+// 批次61 GAP-1（规格 A6）：召回权重「回归建议」——只读真实 recall / memory_op 审计，
+// 只产出建议、只落 growth_op 审计（applied:false），绝不自动写 growth:v1。
+function recallAudit(ts: number, o: { thin?: boolean; hits?: number } = {}): AuditRecord {
+  return {
+    request_id: `req_r_${ts}`, action: 'recall', form: 'desktop', project_id: 'P1', ts,
+    detail: { hits: o.hits ?? 3, evidence_thin: o.thin === true },
+  } as AuditRecord;
+}
+
+function opAudit(ts: number, op: 'confirm' | 'reject' | 'disputed'): AuditRecord {
+  return {
+    request_id: `req_o_${ts}`, action: 'memory_op', form: 'desktop', project_id: 'P1', ts,
+    detail: { op },
+  } as AuditRecord;
+}
+
+/** n 次窗口内召回（thinEvery>0 时每第 thinEvery 条标证据不足）*/
+function recalls(n: number, thinEvery = 0): AuditRecord[] {
+  return Array.from({ length: n }, (_, i) => recallAudit(NOW - i * 60_000, {
+    thin: thinEvery > 0 && i % thinEvery === 0,
+  }));
+}
+
+describe('suggestRecallWeights（GAP-1 回归建议算法）', () => {
+  it('召回样本 < 30 → 不给建议（不猜），即使异常信号已超阈；metrics 如实计数', () => {
+    const audits = [
+      ...recalls(29, 2),                                                        // 证据不足 15/29 ≈ 51.7%
+      ...Array.from({ length: 10 }, (_, i) => opAudit(NOW - i * 1000, 'reject')), // reject 100%
+    ];
+    const { suggestion, metrics } = suggestRecallWeights(audits, DEFAULT_RECALL_WEIGHTS, NOW);
+    // 信号都超阈了，拦住它的是「样本量不足」这道守卫，不是算法没看见问题
+    expect(metrics.evidence_thin_ratio).toBeGreaterThan(0.35);
+    expect(metrics.reject_ratio).toBe(1);
+    expect(metrics.recalls).toBe(29);
+    expect(suggestion).toBeNull();
+  });
+
+  it('样本量刚好到 30 且信号超阈 → 才给建议（边界另一侧）', () => {
+    const audits = [
+      ...recalls(30, 2),
+      ...Array.from({ length: 10 }, (_, i) => opAudit(NOW - i * 1000, 'reject')),
+    ];
+    expect(suggestRecallWeights(audits, DEFAULT_RECALL_WEIGHTS, NOW).suggestion).not.toBeNull();
+  });
+
+  it('窗口外的召回不计入（7 天窗）', () => {
+    const old = Array.from({ length: 40 }, (_, i) => recallAudit(NOW - (10 + i) * DAY));
+    const { suggestion, metrics } = suggestRecallWeights(old, DEFAULT_RECALL_WEIGHTS, NOW);
+    expect(metrics.recalls).toBe(0);
+    expect(suggestion).toBeNull();
+  });
+
+  it('reject 占比 > 30% → w_c +0.05，缺口从 w_f 扣（和仍 = 1）', () => {
+    const audits = [...recalls(40), ...Array.from({ length: 10 }, (_, i) => opAudit(NOW - i * 1000, 'reject'))];
+    const { suggestion, metrics } = suggestRecallWeights(audits, DEFAULT_RECALL_WEIGHTS, NOW);
+    expect(metrics.reject_ratio).toBe(1);
+    expect(suggestion).not.toBeNull();
+    expect(suggestion!.to).toEqual({ w_f: 0.30, w_i: 0.30, w_c: 0.20, w_a: 0.20 });
+    expect(suggestion!.from).toEqual(DEFAULT_RECALL_WEIGHTS); // from 是当前值快照，不被就地改写
+    expect(suggestion!.reason).toContain('w_c +0.05');
+  });
+
+  it('证据不足占比 > 35% → w_i +0.05，缺口从 w_f 扣', () => {
+    const { suggestion, metrics } = suggestRecallWeights(recalls(40, 2), DEFAULT_RECALL_WEIGHTS, NOW);
+    expect(metrics.evidence_thin_ratio).toBe(0.5);
+    expect(suggestion!.to).toEqual({ w_f: 0.30, w_i: 0.35, w_c: 0.15, w_a: 0.20 });
+    expect(suggestion!.reason).toContain('w_i +0.05');
+  });
+
+  it('两条规则同时触发 → 共 +0.10，先扣 w_f（够扣就不动 w_a）', () => {
+    const audits = [
+      ...recalls(40, 2),
+      ...Array.from({ length: 10 }, (_, i) => opAudit(NOW - i * 1000, 'reject')),
+    ];
+    const { suggestion } = suggestRecallWeights(audits, DEFAULT_RECALL_WEIGHTS, NOW);
+    expect(suggestion!.to).toEqual({ w_f: 0.25, w_i: 0.35, w_c: 0.20, w_a: 0.20 });
+  });
+
+  it('w_f 不够扣时继续扣 w_a（两级扣减按序）', () => {
+    // w_f 只剩 0.05 的上方空间（0.10−0.05），两条规则共需 0.10 → 余 0.05 从 w_a 扣
+    const near = { w_f: 0.10, w_i: 0.50, w_c: 0.20, w_a: 0.20 };
+    const audits = [
+      ...recalls(40, 2),
+      ...Array.from({ length: 10 }, (_, i) => opAudit(NOW - i * 1000, 'reject')),
+    ];
+    const { suggestion } = suggestRecallWeights(audits, near, NOW);
+    expect(suggestion!.to).toEqual({ w_f: 0.05, w_i: 0.55, w_c: 0.25, w_a: 0.15 });
+  });
+
+  it('扣减守 0.05 下限：w_f/w_a 已触底仍不够 → 不建议，不硬凑', () => {
+    const pinned = { w_f: 0.05, w_i: 0.60, w_c: 0.30, w_a: 0.05 };
+    const audits = [
+      ...recalls(40, 2),
+      ...Array.from({ length: 10 }, (_, i) => opAudit(NOW - i * 1000, 'reject')),
+    ];
+    const { suggestion, metrics } = suggestRecallWeights(audits, pinned, NOW);
+    expect(metrics.recalls).toBe(40);
+    expect(suggestion).toBeNull();
+  });
+
+  it('无任何异常信号 → 不建议（不为了“有输出”硬给）', () => {
+    const audits = [...recalls(40), ...Array.from({ length: 10 }, (_, i) => opAudit(NOW - i * 1000, 'confirm'))];
+    expect(suggestRecallWeights(audits, DEFAULT_RECALL_WEIGHTS, NOW).suggestion).toBeNull();
+  });
+
+  it('建议 never 自动生效：跑完回归后账本 recall_weights 一字不变（applied:false 落审计）', async () => {
+    const storage = new InMemoryStorage();
+    const cfg = currentConfig(0.5); // 判重侧已最优 → 走 not_adopted 分支，但召回建议仍要落审计
+    await storage.putMemory({
+      mem_id: 'growth_seed', project_id: 'P_SYSTEM', user_id: 'system', enterprise_id: '', team_id: '',
+      category: 'preference', layer: 'L2', content: `growth:v1:${JSON.stringify(cfg)}`,
+      decay_class: 'hot', pinned: true, locked: false, version: 1, created_at: NOW - DAY, updated_at: NOW - DAY,
+    });
+    for (const a of Array.from({ length: 50 }, (_, i) => writeAudit(`mem_${i}`, i % 2 === 0, NOW - i * 60_000))) {
+      await storage.appendAudit(a);
+    }
+    for (const a of [...recalls(40, 2), ...Array.from({ length: 10 }, (_, i) => opAudit(NOW - i * 1000, 'reject'))]) {
+      await storage.appendAudit(a);
+    }
+
+    await runGrowthRegression(storage, { requestId: 'req_t3', form: 'desktop', now: NOW });
+
+    const growthOps = await storage.queryAudit({ action: 'growth_op' });
+    const entry = (growthOps[0]?.detail as { entry?: Record<string, unknown> } | undefined)?.entry ?? {};
+    expect(entry.event).toBe('recall_weight_suggested');
+    expect(entry.action).toBe('suggest_recall_weights');
+    const payload = JSON.parse(String(entry.payload)) as {
+      applied: boolean; suggestion: { to: Record<string, number> };
+    };
+    expect(payload.applied).toBe(false);
+    expect(payload.suggestion.to.w_i).toBe(0.35);
+
+    // 账本未被改写：仍是 seed 里的默认召回权重
+    expect(growthConfigFromLedger(await storage.listMemories({})).recall_weights).toEqual(DEFAULT_RECALL_WEIGHTS);
+  });
+
+  it('有召回观测但样本 < 30 → 落一条 no_suggestion 审计（不静默跳过）', async () => {
+    const storage = new InMemoryStorage();
+    for (const a of recalls(5)) await storage.appendAudit(a);
+    await runGrowthRegression(storage, { requestId: 'req_t4', form: 'desktop', now: NOW });
+    const growthOps = await storage.queryAudit({ action: 'growth_op' });
+    expect(growthOps).toHaveLength(1);
+    const entry = (growthOps[0]?.detail as { entry?: Record<string, unknown> } | undefined)?.entry ?? {};
+    expect(entry.event).toBe('recall_weight_no_suggestion');
+  });
+
+  it('窗口内零召回 → 不写建议审计（零观测不产生噪音，保护冷启动 no-op 契约）', async () => {
+    const storage = new InMemoryStorage();
+    await runGrowthRegression(storage, { requestId: 'req_t5', form: 'desktop', now: NOW });
+    expect(await storage.queryAudit({ action: 'growth_op' })).toHaveLength(0);
+    // 但 dedup 侧的样本不足审计照常写（回归本身不静默）
+    expect(await storage.queryAudit({ action: 'insufficient_samples' })).toHaveLength(1);
   });
 });

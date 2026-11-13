@@ -55,11 +55,21 @@ export async function coreLoadGrowthConfig(): Promise<GrowthConfig> {
  * 写 growth:v1: preference 记录（旧记录 delete + 新记录 put，pinned 豁免 gc）+ param_save 审计。
  */
 export async function coreSaveGrowthConfig(
-  cfg: GrowthConfig, requestId: string,
+  cfg: Omit<GrowthConfig, 'recall_weights' | 'feedback_policy'>
+    & Partial<Pick<GrowthConfig, 'recall_weights' | 'feedback_policy'>>,
+  requestId: string,
 ): Promise<{ request_id: string; mem_id: string; version: number }> {
   const { storage } = await getCtx();
   const tenant = getTenant();
-  const saved = await saveGrowthConfigToLedger(storage, cfg, {
+  // 批次61 GAP-1/GAP-2：页面保存判重参数时不传这两块 → 一律继承账本现值。
+  // 否则「改判重权重」会顺手把召回权重清回默认、还能把用户已启用的反馈策略悄悄关掉。
+  const ledger = growthConfigFromLedger(await storage.listMemories({}));
+  const merged: GrowthConfig = {
+    ...cfg,
+    recall_weights: cfg.recall_weights ?? ledger.recall_weights,
+    feedback_policy: cfg.feedback_policy ?? ledger.feedback_policy,
+  };
+  const saved = await saveGrowthConfigToLedger(storage, merged, {
     requestId, form: 'web', enterpriseId: tenant.enterprise_id, teamId: tenant.team_id,
   });
   return { request_id: requestId, mem_id: saved.mem_id, version: saved.version };

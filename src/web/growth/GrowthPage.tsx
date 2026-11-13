@@ -23,13 +23,20 @@ import {
 import {
   coreGrowthAudit, coreLoadGrowthConfig, coreRunGrowthRegression, coreSaveGrowthConfig,
 } from './coreGrowth.ts';
-import { DEFAULT_SCHEDULE_FLAGS, type ScheduleFlags } from '../../shared/growthConfig.ts';
+import {
+  DEFAULT_FEEDBACK_POLICY, DEFAULT_RECALL_WEIGHTS, DEFAULT_SCHEDULE_FLAGS,
+  type FeedbackPolicy, type RecallWeights, type ScheduleFlags,
+} from '../../shared/growthConfig.ts';
 import { useGrowthMirror } from './useGrowthMirror.ts';
 import { newRequestId } from '../kernel.ts';
 import { hostCapability } from '../../desktop/hostBridge.ts';
 import { loadRealGrowthData } from './useGrowthReal.ts';
+import { summarizeAgentUsage, type AgentUsageSummary } from '../../core/memagent/agentUsage.ts';
 import { DedupCard, DevTunePanel, ShortCircuitFlow } from './DedupCards.tsx';
-import { DeltaPanel, GrowthCards, OptimizationList, RegressionTable, ScheduleTimeline } from './GrowthPanels.tsx';
+import {
+  AgentUsageCard, DeltaPanel, FeedbackLoopCard, GrowthCards, OptimizationList, RecallWeightCard,
+  RegressionTable, ScheduleTimeline,
+} from './GrowthPanels.tsx';
 import { useToast } from './useToast.tsx';
 
 const EMPTY_METRICS: GrowthMetrics = {
@@ -39,6 +46,9 @@ const EMPTY_METRICS: GrowthMetrics = {
 export function GrowthPage() {
   const [weights, setWeights] = useState<DimWeights>({ ...DEFAULT_WEIGHTS });
   const [thresholds, setThresholds] = useState<LayerThresholds>({ ...DEFAULT_THRESHOLDS });
+  // 批次61 GAP-1/GAP-2：召回权重与反馈策略也从 growth:v1 读写（默认值 = 历史常量 / 策略关闭）
+  const [recallWeights, setRecallWeights] = useState<RecallWeights>({ ...DEFAULT_RECALL_WEIGHTS });
+  const [feedbackPolicy, setFeedbackPolicy] = useState<FeedbackPolicy>({ ...DEFAULT_FEEDBACK_POLICY });
   const [devMode, setDevMode] = useState(false);
   // 结构照定稿：4 个页签（判重与嫁接 / 回归评估 / 调度 / 红线自检），只渲染当前页签
   const [tab, setTab] = useState(0);
@@ -62,6 +72,8 @@ export function GrowthPage() {
         setAudit(r.growthAudit.slice().reverse());
         setWeights(cfg.weights);
         setThresholds(cfg.thresholds);
+        setRecallWeights(cfg.recall_weights);
+        setFeedbackPolicy(cfg.feedback_policy);
         setSchedule(DEFAULT_SCHEDULE.map((s) => ({
           ...s,
           enabled: s.key === 'decay' ? true : cfg.schedule[s.key],
@@ -75,6 +87,11 @@ export function GrowthPage() {
   }, []);
 
   const metrics = useMemo<GrowthMetrics>(() => real?.metrics ?? EMPTY_METRICS, [real]);
+  // GAP-3：未加载/空账本时给一份「全空」画像 —— 卡片据此显示「暂无数据」，而不是 0
+  const agentUsage = useMemo<AgentUsageSummary>(
+    () => real?.agentUsage ?? summarizeAgentUsage([], Date.now(), 7),
+    [real],
+  );
   const dedupStats = real?.dedupStats ?? { short_circuit_hits: 0, merged: 0, avg_cost_ms: 0, avg_cost_samples: 0 };
   const samples = real?.samples ?? [];
   const series: DeltaPoint[] = real?.deltaSeries ?? [];
@@ -131,6 +148,60 @@ export function GrowthPage() {
       show('判重参数已写入内核 preference 账本（真实审计 param_save）· 下次写入即按新配置查重');
     } catch {
       show('保存失败：内核暂不可达');
+    }
+  }
+
+  /**
+   * 批次61 GAP-1：采纳召回权重建议 —— 用户显式确认后才写 growth:v1.recall_weights。
+   * 其余配置（判重五维 / 阈值 / 调度 / 反馈策略）一并带上现值，避免被页面旧状态覆盖。
+   */
+  async function handleApplyRecallWeights(to: RecallWeights) {
+    const requestId = newRequestId('req');
+    const at = Date.now();
+    try {
+      await coreSaveGrowthConfig(
+        { weights, thresholds, schedule: flagsOf(schedule), recall_weights: to },
+        requestId,
+      );
+      const entry: GrowthAuditEntry = {
+        event: 'recall_weight_applied', action: 'apply_recall_weights',
+        payload: JSON.stringify({ from: recallWeights, to, at }), at,
+      };
+      await coreGrowthAudit(entry, requestId);
+      reportMirror('recall_weight_applied', requestId, entry);
+      const [fresh, cfg] = await Promise.all([loadRealGrowthData(), coreLoadGrowthConfig()]);
+      setReal(fresh);
+      setRecallWeights(cfg.recall_weights);
+      setAudit(fresh.growthAudit.slice().reverse());
+      show('已采纳召回权重建议：写入 growth:v1，下次召回按新权重排序');
+    } catch {
+      show('采纳失败：内核暂不可达');
+    }
+  }
+
+  /**
+   * 批次61 GAP-2：保存反馈策略（含启用开关）—— 写 growth:v1.feedback_policy。
+   * 关闭 = 与改造前逐字一致；开启后 coreFeedback 才按窗口/阈值触发降档。
+   */
+  async function handleSaveFeedbackPolicy(next: FeedbackPolicy) {
+    const requestId = newRequestId('req');
+    const at = Date.now();
+    try {
+      await coreSaveGrowthConfig(
+        { weights, thresholds, schedule: flagsOf(schedule), feedback_policy: next },
+        requestId,
+      );
+      const entry: GrowthAuditEntry = {
+        event: 'feedback_policy_changed',
+        action: next.enabled ? 'enable_feedback_downgrade' : 'disable_feedback_downgrade',
+        payload: JSON.stringify(next), at,
+      };
+      await coreGrowthAudit(entry, requestId);
+      reportMirror('feedback_policy_changed', requestId, entry);
+      setFeedbackPolicy(next);
+      show(`反馈策略已${next.enabled ? '启用' : '停用'}：写入 growth:v1.feedback_policy`);
+    } catch {
+      show('反馈策略保存失败：内核暂不可达');
     }
   }
 
@@ -253,6 +324,19 @@ export function GrowthPage() {
         </div>
         <GrowthCards m={metrics} empty={empty} />
         <OptimizationList opts={opts} />
+        {/* 批次61 GAP-3：Agent 侧使用（与上面指标读同一份审计快照，口径见卡片 note） */}
+        <AgentUsageCard usage={agentUsage} />
+        {/* 批次61 GAP-1/GAP-2：把「建议→采纳」「策略→启用」两个落地开关接上，并展示反馈信号 */}
+        <RecallWeightCard
+          current={recallWeights}
+          suggestion={real?.recallSuggestion ?? null}
+          onApply={handleApplyRecallWeights}
+        />
+        <FeedbackLoopCard
+          policy={feedbackPolicy}
+          signal={real?.feedbackSignal ?? null}
+          onSave={handleSaveFeedbackPolicy}
+        />
         <RegressionTable records={real?.regressionRecords ?? []} />
         <DeltaPanel
           series={series} delta={delta} audit={audit} onManualTrigger={handleManualTrigger}
