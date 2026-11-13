@@ -5,6 +5,65 @@
 ## 一句话定位
 本工作区 = **工作法体系** + 真实项目「**多 Agent 记忆助手**」（需求规格与原型已结构化并跑通首个功能）。
 
+## 当前状态（2026-11-13 19:50 压缩快照 · 优先于下方历史段落）
+
+### 召回模式接线 A1–A6（2026-11-13 22:50 · 最新）
+
+- 规格与落地口径全在 `specs/召回模式设计与实现方案.md` §2.4/§2.6，这里只留「接手要看什么」。
+- **A1 契约**：`RecallResult` 的 `hit_keywords`（必填）/ `secondary_mode_hint` / `dispatch`（A6，显式 `null`）。缺字段 = `typecheck` 报错，`recallContract.test.ts` 用 `@ts-expect-error` 锁住。
+- **A2 分流**：`agent.recall()` 顶部唯一裁决入口 `resolveMode`；非法 `mode` 抛 `MemAgentError`；`mode_dispatch` 审计记 `mode`（建议）与 `applied_mode`（实际）。**自动分流到极简仍只是观测**：`mode='minimal'`、`applied_mode='auto'`，回显如实报「分流建议极简 · 本轮按默认口径执行」。
+- **A3 权重 / A4 分层 / A5 次模式**：只对手动模式生效（auto 档逐条不变，这是既有回归全绿的原因）；三张表 `selectPriority`/`trimOrder`/`disabledLayers` 从零引用变成有消费方；次模式 ≤200t 只作 hint，不并入 hits、不计 payload。
+- **A6 回显贯通**：`dispatch` 与审计**同一份对象**→ `buildRecallModeLine()` 在 compact / full / html / 明细页四处输出 `⚙ 模式：…`；Web 检索页删掉第三套词表 `autoDispatch`，改读内核，`history_query` 不再降级，次模式提示不再硬编码。
+- **闸门**：`test:gate` 252 文件 3009 例 0 失败；typecheck / oxlint(688 文件 0 错) / code:index / validate / generate --check 全绿。变异 3 次（`dispatch:null` → 11 红；`history_query→default` → 2 红；次模式恢复硬编码 → 1 红），均还原复绿。
+- **未做**：`preload`（依赖会话态，本项目 MCP 是无状态调用，暂缓）；**「自动极简真执行」仍留着**——一旦执行会关掉项目背景与冷层补查，须单独评估。
+
+### 批次62 续：A/B/C 三层 UI 开关（本轮）
+- 参数页新增卡片「硬前置召回」：三层各一组**「启用 / 不启用」二选一按钮**（不是 checkbox）；原型 `design/ui/硬前置召回开关_原型.html` 为唯一事实来源，已注册进 `design/ui/index.html`（10 个原型）。
+- **配置真源** `src/shared/recallHardConfig.ts` → `<数据根>/recall-hard-config.json`。**运行态不拿配置冒充**：A 读宿主 `settings.json` 里是否真有钩子、B 读网关 handle 是否在跑、C 读服务端当前求值值；卡片徽标显示真值，按钮高亮显示草稿，不一致时明写「有未保存改动」。
+- **主进程** `src/electron/recallHard.ts`（`RecallHardController`：落盘 / A 合并摘除+`.bak` / B 启停 / C getter）+ `src/electron/recallGateway.ts`（内置 8300 反代，复用 `recallPrelude.ts`）。`main.ts` 在 mcpToken 就绪后建控制器并 `init()`，`runMcpHttpServer({ strictRecallGate: controller.cStrict })`（**运行时 getter，切换即时生效**），退出 `recallHard.stop()` 释放端口。
+- **IPC**：`recallHard:state`（任意会话）/ `recallHard:set`（仅管理员，审计只记字段名与三层布尔，不记上游地址）；`preload.ts` + `hostBridge.ts` 已接。
+- **A 的打包态**：`build-electron.cjs` 新增 esbuild 步骤 → `dist-electron/recall-hard/force_recall.mjs`（自包含 ESM，宿主用系统 node 直接跑，不依赖仓库源码/TS 剥离）；业务逻辑抽到 `src/core/memagent/recallHook.ts`，`recallHookCli.ts` 与 `.codebuddy/hooks/force_recall.mjs` 都只是 IO 壳。自检从 10 例变 **`SELFTEST_OK 13/13`**（条数由断言数决定，不写死），两条入口输出一致。
+- **闸门**：`npm test` 245 文件 **2971 例全绿**；typecheck（web+electron）与 oxlint（681 文件）0 错；B 真 HTTP 探针（system 首位置顶 / 原规则不丢 / 无命中逐字透传 / 幂等）；C getter 关→开→关即时生效；新增 38 例。**变异 2 次**：卡片 active 判定反转 → 1 例精确红；`mergeHostHooks` 的 `if (enabled)` 改 `if (true)` → 3 例红；两次还原后 SHA256 与变异前一致且复绿。
+- **打包（19:49 完成）**：`release/installer/MultiAgent Memory-0.1.0-setup.exe` 128,012,825B（SHA256 前缀 `9344F1AF36959A03`）、`app.asar` 前缀 `8A506D6022C003BF`；包内 `dist-electron/recall-hard/force_recall.mjs` 9,974B，`node --self-test` = `SELFTEST_OK 13/13`；`main.cjs` 含 `recall-hard` / `recallHard:state` / `force_recall.mjs` / `recall-hard-config.json`；`app.asar` 含「硬前置召回」「rh-layer」「保存并生效」「请先填写上游地址再启用 B」「recallHard:state/set」。打包后 `package.json` 无改动。**【停·等用户实测】→【停·等用户明确确认】才 commit/push。**
+
+## 历史快照（2026-11-13 08:45 · 批次62 内核三件套）
+- **批次62「硬前置召回」A/B/C 全部落地**（规格 `specs/RECALL-HARD-PREFIX.md`）。目标链路：用户输入 → 强制召回 → 拼进上下文 → 再推理。
+  - **能力边界（先记牢）**：宿主 hooks 只给 `additionalContext`，**没有任何改写/替换 system prompt 的字段**；`systemMessage` 是给用户看的、不传给 Agent。所以「拼进 system 最前面」只有 B 能做到；C 拦不住「一个工具都不调直接回答」。
+  - **单一真源** `src/core/memagent/recallPrelude.ts`：纯函数零 IO，Node 22.18+ 原生 TS 剥离可被 `.mjs` 脚本与 vitest 共用。只注入 `hits[].content`，绝不注入 `display.markdown`/回显话术；`[RECALL_PRELUDE_V1]` 开闭标记保证幂等。
+  - **A** `.codebuddy/settings.json` + `.codebuddy/hooks/force_recall.mjs` + `tools/install-force-recall.mjs`（默认 dry-run，`--apply` 才写、留 `.bak`、双宿主须 `--host`）。全链路 fail-open；令牌只读本机文件且只发 loopback。自检 `--self-test` 10/10；真实 8204 注入 1378 字符不含回显话术；死端口回 `{continue:true}`。
+  - **B** `tools/recall-gateway.mjs`：OpenAI-compatible 反代，改写 `messages[0].system` 真正置顶；流式 pipe、上游 Authorization 透传不打印、MCP 故障原样转发。自检 `--self-test` 11/11（自带 mock 上游+MCP+临时令牌，CI 可复现）。启动需 `MEMAGENT_GW_UPSTREAM`。
+  - **C** `mcpHttp.ts`/`mcpSchema.ts`/`main.ts`：严格门禁开启后可靠会话未召回时**所有非 recall 工具**硬拦，`recall_memory` 自身永远放行（防死锁）；`initialize.instructions` 加第 10 条、`tools/list` 加后缀。**三层开关的准确口径**：① 库级 `runMcpHttpServer({strictRecallGate})` 缺省 **false**（`opts` 不给 = 批次47 逐字不变，既有测试/老客户端不受影响）；② `src/electron/main.ts` 桌面运行时**默认显式传 true**，`MAM_STRICT_RECALL_GATE=0` 才退回旧行为；③ 单次请求头 `x-memagent-recall-gate: strict` 可独立声明严格门禁。无 `Mcp-Session-Id` 的请求一律不硬拦（防 §9 跨客户端串号误杀）。
+  - **三道闸门**：A 默认关闭 4 例钉住旧行为；B 18 例纯函数 + 网关 11 例端到端 + C 13 例；变异 3 次（hookEventName 改坏 / 拼最前改拼末尾 / `|| strictGate` 改坏）均精确红灯后还原复绿。
+  - **门禁**：typecheck / lint(0 warn) / no-demo / code:index / validate / generate --check 全绿；`test:gate --shards=1` **241 文件 2933 例 0 失败**。索引已重建（373 源码 / 139 文档），规格已补 frontmatter + `meta/index.md` 引用。
+  - **宿主差异**：CLI 读 `~/.codebuddy/settings.json`；WorkBuddy 桌面端社区实测读 `~/.workbuddy/settings.json`，官方未承诺读同一套 hooks，**桌面端需实测**。hooks 不热加载，改完须重启 + `/hooks` 面板审核。
+  - **【停·等用户实测】→【停·等确认】才 commit/push**。本轮**未打包**（上一轮批次61 产物仍在 `release/`）；工作区仍混有批次61 在途改动，禁 `git add .`。
+
+## 历史快照（2026-11-13 01:05 · 批次61）
+- **批次61 补丁（2026-11-13）：排查确认「接真读侧全绿、接反馈动作侧已通」，补齐三处闭环缺口**：
+  - **A 召回权重建议可采纳**：生长页「回归评估」新增 `RecallWeightCard`（当前权重 + 最新建议 from→to + 采纳按钮）；采纳写 `growth:v1.recall_weights` 并落 `growth_op:recall_weight_applied`（已采纳置灰，不自动应用）。
+  - **B 反馈策略可启用**：新增 `FeedbackLoopCard`（enabled/窗口/阈值）；保存写 `growth:v1.feedback_policy` 并落 `growth_op:feedback_policy_changed`（缺省仍关闭 = 与改造前逐字一致）。
+  - **C signal_summary 可观测**：`useGrowthReal.feedbackSignalFromLedger` 取最新 `gc` 审计，卡片展示（召回/证据不足/裁决/拒绝占比/被拒记忆），空态「暂无数据」。
+  - **D** `DevPanel` 过时文案已改为「判重/阈值/调度/召回权重/反馈策略统一由净化生长页写 growth:v1 驱动」。
+  - 新测试 `src/web/growth/__tests__/growthLoop.test.tsx` 16 例（抽取器 + 两卡 + 页面端到端）。
+  - 门禁：typecheck / lint / no-demo / code:index / validate / generate --check 全绿；`test:gate` **239 文件 2902 例 0 失败**；变异 3 次精确红灯后还原复绿。
+  - 打包：installer `30aae8a30da4bf31` / win-unpacked 主程序 `0f33df5759131444`，两处 asar/main.cjs 一致；包内标记已验。**【停·等用户实测】→【停·等确认】才提交。**
+- **批次61「净化生长 × Agent 侧进化」GAP-1/2/3 全部实施完成**（规格 `specs/tasks/GROWTH-AGENT-EVOLUTION.md`，已补 §7 实施落点对照）。
+  - GAP-1：`shared/growthConfig.ts:RECALL_KEYS/DEFAULT_RECALL_WEIGHTS` 为真源，`forgetting.ts:SCORE_WEIGHTS` 仅转发；`scoreMemory` 接权重入参，`agent.ts` 召回入口读 `growth:v1` 后传两处；`hardFilter` 最前排除 `deleted`/`merged_into`；`regression.ts:suggestRecallWeights` 只产建议落 `growth_op`（`applied:false`），**不自动改权重**。
+  - GAP-2：`FeedbackPolicy`（缺省 `enabled:false`）进 `growth:v1`；`coreFeedback` reject 达阈降档（`hot→warm→cold`，不推 dormant）并写 `growth_op:reject_downgrade`；`disputed` 用 `findConflictCounterpart` 补齐同项目 live 对手（cos ≥ 0.75），使 `conflict.ts` 路径 1 真能成对；`runForgettingCycle` 追加只读 `signal_summary`，审计读不到不阻断。
+  - GAP-3：新模块 `agentUsage.ts` 按 `detail.client` / `mcp_call.agent` 聚合召回/省量/证据不足/首调合规；`gc_report` 新增 `agent_usage` + `concurrency_note`（dry_run 语义未变）；生长页「回归评估」新增「Agent 侧使用」卡，空审计显「暂无数据」；verdict 只能到项目级并已标注「不可按 Agent 拆分」。
+- **门禁（批次61）**：typecheck / lint / no-demo（曾因页面用「—」被判红，已改文字原因）/ code:index / validate / generate --check 全绿；`test:gate --shards=1` **238 文件 2882 例 0 失败**。
+- **三道闸门（含变异验证）**：GAP-1 变异 3 次（忽略入参权重 / 去 `deleted` 过滤 / 去最小样本守卫）、GAP-2 变异 3 次（去 enabled 开关 / 去冲突对守卫 / 去 try-catch）、GAP-3 变异 3 次（缺 client 冒充 / 合规分母不过滤 / 空态画 0），每次均精确红灯后原样还原复绿。
+
+---
+
+## 历史快照（2026-11-12 23:05）
+- **回显重设计 T1–T13 全部实施**。最新 T13 = 折叠卡「📎 项目背景逐条独立成行」（`mcpHttp.ts:bubbleCard` + `mcpSchema.ts` 两处 + `mcpHttp.test.ts` C4）。规格 `specs/tasks/RECALL-ECHO-RAG.md`，契约 `specs/recall-echo-contract.md` §7.1。
+- **判档**：Qoder 系 / `X-Memagent-Render: fold` → `html-details`；`detail=true` → `markdown-full`；其余（含 WorkBuddy）恒 `markdown-compact`。WorkBuddy 双端实测文本 `<details>` **无折叠交互** → 禁 HTML，折叠只能走 Agent 富媒体卡片或本机明细页；链接点不开时说「看明细」（同 query + `detail=true`）。
+- **产物**：22:50 打包由并行 L0 会话执行、T13 搭车进包；安装包 SHA256 `da4c8968…`，两处 `app.asar` / `main.cjs` 逐字节一致，包内含 T13 文案 3 处。坑：`main.cjs` 在 `app.asar.unpacked/`（asar 内标 `unpacked:true`），且 esbuild 中文转**大写** `\uXXXX`。
+- **门禁**：typecheck / lint / validate / generate --check / no-demo / code:index 全绿；`test:gate` 2815 例里 1 例既有 flaky（`fileStorage` mtime 同毫秒，文件=HEAD）；E2E 133/135 里 2 例 L0 在途失配（`OverviewPage` vs `home.spec.ts`）——均与本轮无关。
+- **纪律**：打包已完成 → **等用户实测** → **等用户明确确认** → 才 commit/push。工作区混有 L0 在途改动，**不得 `git add .`**；`specs/code-index.generated.md` 含 L0 指纹，提交前须 stash L0 重生成或两批一并提交。
+- **待办**：`mcpClients.ts` 一键接入默认带折叠头（独立 UI 任务）；`GROWTH-AGENT-EVOLUTION.md` GAP-1/2/3 未开工。
+
 ## 核心规则（压缩）
 1. 常驻只 `meta/index.md` + `meta/charter.md`
 2. 按需加载、外科编辑（不整篇重写）

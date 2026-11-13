@@ -1,76 +1,37 @@
 # 项目长期记忆（MEMORY.md）
 
-## 仓库与 CI
-- 远端：`https://github.com/WWLHQ/memory`（公开仓，默认分支 `main`），GitHub Actions 跑 CI。
-- CI 门禁三道（`.github/workflows/ci.yml`）：`npm test` → `python tools/validate_project.py` → `python tools/generate.py --check`。
-- **关键约定**：`build/` 是 SSOT 产物、**gitignored 不入库**。CI 必须**先 `python tools/generate.py` 重建 build/，再 `generate.py --check`**，否则全新 checkout 下 `--check` 必红（build/ 不存在）。
-- 本地零依赖：`node --test`（Node 22 内置），无需 `npm install`；`npm test` 跑全部 45 例。
+## 仓库 / CI
+- 远端 github.com/WWLHQ/memory（main）。CI：`npm test` → `validate_project.py` → `generate.py --check`；`build/` gitignored，CI 须先 generate 再 check。推含 `.github/workflows` 的提交 PAT 需 `workflow` 作用域。
 
-## Git / 推送习惯
-- 本机无 `gh` CLI、Bash 工具非交互；推 GitHub 用 classic PAT。
-- **推送含 `.github/workflows/*.yml` 的提交，PAT 必须带 `workflow` 作用域**（仅 `repo`/`public_repo` 不够）。
-- 推完立即 `git remote set-url origin <干净URL>` 去除 token，并建议在 GitHub 删除该 PAT。
-- 任务提交粒度：每原子任务（T1/T2…）单 commit；CICD 配置修复走 PR 验证双触发。
+## 提交 / 打包纪律（最高优先）
+- **打包 → 等实测 → 等明确确认 → 才 commit/push**；门禁全绿也不算自动提交理由。
+- 顺序：全门禁 → `CODEBUDDY_SAFE_DELETE_ENABLED=0 npm run package` → 验产物 → 停·等测试 → 停·等确认 → push（产物 `release/installer/`、`release/win-unpacked/`）。
+- 打包改写根 `package.json`（清空 scripts/devDependencies）不还原 → 打包后 `git checkout -- package.json`。
+- 提交前展示改动清单 + 门禁输出 + 拟用信息；在途改动单列，禁 `git add .`；conventional commit + `Co-Authored-By: CodeBuddy Code`。
+- 每个原子任务先展示成果等确认再下一步。
 
-## 当前进度
-- REQ-003（Agent 接入页）代码全量落盘（T1–T12），T1/T2 已分别 commit；T3–T12 此前写入但未逐任务提交。
-- 下一步候选：补 T3–T12 逐任务 commit；或推进 REQ-004~REQ-012（补字段级 AC/TC + 跑通一个功能）。
+## 日志定位真因（不必跑起应用）
+- 工具会话起不了 Electron（退出 0、1s 结束、main.log 零新增、端口不监听；三组对照已排除产品缺陷）→ 启新端须用户双击，不得断言崩了。
+- 事实源：`%APPDATA%/MultiAgent Memory/` 的 `actions.log`（`[host:通道]{via,ms}` / `[ipc:通道]`）、`audit.jsonl`（解锁等业务事实）、`main.log`（bootstrap）。判读锁：看 `host:l0:writeUnlocked` 后有没有紧跟 `l0:myWriteWrap` 回退——有=端口返 false，无=返 true。
 
-## 提交约定
-- **每次提交必须写提交日志**（conventional commit 风格）：`type(scope): 简述`（首行 ≤72 字），空行，正文写 Why/What/影响范围，结尾 `Co-Authored-By: CodeBuddy Code <noreply@codebuddy.ai>`。2026-10-07 起生效，CodeBuddy 每次 commit 遵守。
-- 原子任务理想每任务一 commit；但 REQ-003 全量代码已在 initial commit `04cb27b` 打包（未逐任务拆）。决策：不重写已推送历史，改为在 `specs/code-map.md` 写任务→文件/函数归属以保证可追溯。
+## L0 写锁（两把锁互不替代）
+- 写锁 `write_unlocked`（能不能写）· 查阅锁 `active_sessions`（能不能查）。读口走无鉴权 `l0:writeUnlocked`；渲染层唯一读取口 `shared/l0WriteState.ts`，读不到回 null 不冒充 false。
+- **首页「解锁后仍报未解锁」真因（2026-11-13 日志铁证）**：红条 `l0WriteLocked` 一直是对的（解锁后 home 读到的已是 true）；用户看到的是另一条蓝条 —— `coreHome.deriveKernelAnomalies` 把「近 30 分钟有 write 因 E_L0_LOCKED 失败」聚合成 error，解不解锁都挂，还带「去安全页解锁 →」，首页 `l0Alert` 分支无条件渲染。
+- **修复**：① 只统计最后一次 `l0_write_unlock(_member)` 之后的被挡；② `deriveHomeView` 加 `l0WriteResolved`（available && unlocked），已解锁不再渲染该历史提示。
+- 轮3–6 改刷新机制全无效（读锁链路本就正确）；轮7 统一 `hostCapability`/`hostCall`（删 `parentHasNativeApi`）只是加固，日志已证 home iframe 一直走 bridge。
+- 跨文档刷新：信号键 `memdesk.l0.writeLockSignal.v1`（只带时间戳）+ focus/visibilitychange 补读。进库分流只认 `session_id`（有=放行，无=发件箱待判）。
 
-## 执行流程约定（用户 2026-10-07 明确）
-- **每完成一个原子任务（一步），先展示成果（测试/门禁输出 + 改动清单），等人工确认后再继续下一步。** 不擅自连跑多步。
-- 接真实后端按 T13→T14→T15 原子推进，沿用 TDD + 每任务一 commit + 门禁（npm test / validate / generate --check）。
+## 壳层 / 页面
+- 刷新三层：F5=全站重挂；页面内 `useRefreshAll` 只重取本页；卡片刷新只重取该卡。
+- 配色用 `memoryManagement.css` 变量那套（浅色默认 + dark），别用 `shared/theme.css` 深色专套。导航折叠=44px 图标栏。记忆助手=`assistant.html`；个人记忆 → `memory.html?tab=personal`。入口 html 全小写。
 
-## 打包 → 验证 → 推送流程（用户 2026-11-10 明确，长期生效）
-- **每次改完代码都要重新打包来验证；验证 OK 后才允许推送。** 不得跳过打包直接 push，也不得打包未验证就 push。
-- 顺序：全门禁（typecheck/lint/test:gate/check:no-demo/code:index + E2E + validate + generate --check）→ `CODEBUDDY_SAFE_DELETE_ENABLED=0 npm run package` → 验证打包产物 → commit + push。
-- 打包路径固定不改（N7 约定）：安装包 `release/installer/`、免安装版 `release/win-unpacked/`；`CODEBUDDY_SAFE_DELETE_ENABLED=0` 用于绕过批量删除护栏（dist/assets 文件数常 >50）。
-- 验证产物至少核对：安装包 exe 存在且非空、win-unpacked 内主程序 exe/资源齐全、包内前端产物含本轮改动的类名/特性、SHA256 记录。
-- 推送沿用「Git / 推送习惯」：remote 当前为 SSH `git@github.com:WWLHQ/memory.git`；若改用 HTTPS+PAT，PAT 需 `workflow` 作用域，推完立即 `git remote set-url` 去 token。
-- **打包副作用（2026-11-10 发现）**：`npm run package` 会让 electron-builder 改写根 `package.json`（清空 `scripts` 与 `devDependencies`）且**不还原** → 打包后必须 `git checkout -- package.json` 还原，否则后续 `npm test`/`npm run typecheck` 全部失效。提交前用 `git status` 确认，别把它当成代码改动提交进去。
-- **本机启动打包产物的坑**：PowerShell `Start-Process` 会因环境里存在**大小写重复的代理变量**（`HTTP_PROXY`/`http_proxy`/`HTTPS_PROXY`/`https_proxy`）直接抛「已添加项。字典中的关键字」异常，应用根本没启动 —— 这是**环境问题不是应用缺陷**。
-- **启动打包产物必须同时清 `ELECTRON_RUN_AS_NODE`**（2026-11-10 定位，最隐蔽的一个坑）：WorkBuddy 自身环境注入 `ELECTRON_RUN_AS_NODE=1` 与 `NODE_OPTIONS=--require=...node-language-shim.cjs`。有 `ELECTRON_RUN_AS_NODE=1` 时 Electron **以纯 Node 模式运行**（不起 Chromium、不触发 `app.whenReady`）→ 表现为「进程活着但只有 1 个、无子进程、8202/8203/8204 全不监听、命令行参数报 `bad option: --xxx`」，极易误判成产品缺陷。正确启动命令：
-  `env -u ELECTRON_RUN_AS_NODE -u NODE_OPTIONS -u https_proxy -u HTTPS_PROXY -u http_proxy -u HTTP_PROXY "./MultiAgent Memory.exe"`
-  （Bash 后台 `&` 起的进程会随 Bash 工具会话结束被回收，验证要用 `run_in_background` 托管，或前台 `timeout N` 跑并看退出码 124=仍存活。）
-- 启动成功的判据别只看 `tasklist`（exe 名含空格易漏）：看 `netstat` 的 8202/8203/8204 是否 LISTENING + `main.log`/stdout 有 `bootstrap:done`。静态服务端口从 `main.log` 的 `bootstrap:static-server {"port":NNNNN}` 取。
-- `release/` 下历史 `installer-*` 旧目录常因系统句柄占用删不掉（EBUSY），属跨天残留；`release/` 已 gitignored，不入库、不影响交付，不必强删。
+## 纯净度（AGENTS.md §0.1）
+- 判定：下一个任务不会再用的就是临时物。收尾五步默认执行：跑验→扫→清→核→报。
+- Bash `rm -rf` 被 genie-trash 接管、多文件目录拒删；`CODEBUDDY_SAFE_DELETE_ENABLED=0` 只对 Node `fs.rm` 有效。删不掉如实告知+给命令。
 
-## 实现与规格的差异（REQ-003）
-- `specs/tasks/AGENT-ONBOARD.md` 按 TS+React 拆 `src/web/AgentOnboard/*.tsx` 单组件；**实际落地为纯 ESM JS**（零依赖、Node 内置 `node:test`），UI 合并进 `src/agentOnboard/render.js`、集成进 `service.js`、端矩阵进 `formMatrix.js`、`validators.js` 承载 R1–R10、`e2e.test.js` 承载 T12。可追溯映射以实际 JS 为准（见 `specs/code-map.md` REQ-003 任务级表）。
+## 回显通道
+- 判档：自证头 `X-Memagent-Render: fold` > qoder 白名单 > detail。`workbuddy` 恒 `markdown-compact`（`<details>` 无折叠交互）；compact 只接 hint 不接 result。
 
-## 个人记忆 / L0 关键口径（2026-11-10 确认，长期有效）
-- **L0 是两把独立的锁**（§4.4.4，互不替代）：写锁 `write_unlocked`（`unlockWrite`/`lockWrite`，管「能不能写」）· 查阅锁 `active_sessions`（`unlock`/`lock(session_id)`，管「能不能解密查阅」）。状态栏曾用 `active_sessions` 推导「已锁定」→ 写锁已解锁时仍显示锁定（误导 bug），已改为直读写锁。
-- **进库分流**：agent 写入的账本行按 `session_id` 分流 —— 有 `session_id` = **会话信息 → 直接放行**（留共享池，不打扰用户）；无 `session_id` = **agent 提取的记忆 → 进发件箱**等用户判定（是我的→私人池 / 不是我的→进共享）。判据只认内核写入时落的 `session_id`，绝不靠正文关键字猜。
-- **个人记忆入口**：主导航「个人记忆」→ 打开**记忆库全页的个人记忆 Tab**（`memory.html?tab=personal`）；壳层常驻面板改由**状态栏快捷按钮**进入（460px 浮层装不下 2910 条候选，双窗会被挤没）。两处共用 `PersonalMemoryPane` + `personalMemoryPane.css`（组件自带样式，不依赖 `memoryManagement.css`）。
-- **跨页状态刷新**：写锁解锁走主进程 IPC、不写 localStorage → 首页/状态栏原本不刷新（红条常驻不消失）。已加 `src/web/shared/l0WriteLockSignal.ts`：写锁变化时写 `memdesk.l0.writeLockSignal.v1` 信号键，同源其它文档经 storage 事件重读真实 `l0Status()`。**信号只带时间戳、不携带状态值**（真值永远来自内核）。注意：storage 事件只在「其它」同源文档触发，同文档 setItem 收不到 → 测试须用另一标签页/iframe 写入。
-
-## 壳层页面形态与刷新口径（2026-11-10 用户要求，长期有效）
-- **记忆助手已是独立整页**：`assistant.html` + `src/web/assistant/AssistantPage.tsx`（自带 `assistantPage.css`），页面自己调 `loadOverview()` 取快照（原壳层浮窗 `shell/MemoryAssistant.tsx` 已删除）。`NavItem.panel` 机制**已整体移除**（全站再无面板型导航项）。
-- **功能导航折叠 = 窄图标栏，不是归零**：`navCollapsed` 时 `--nav-w` 取 `NAV_COLLAPSED_W=44`（原来取 0 → 栏体消失、功能全没了）。折叠态树项加 `.icon-only`：只显示 `.tico` 图标，`.tlabel`/`.tcount`/`.tw` 隐藏，名称走 `title`；组标题退化为细分隔线；点击图标仍打开对应页面。
-- **刷新三层语义（统一约定）**：
-  1. **F5 = 全站刷新**：`reloadNonce` 递增 → 全部打开的 iframe 重挂（页面重新挂载即重取数）+ 状态栏/底部面板/导航角标/概览快照一并重读。壳层文案统一为「刷新全部页面」。
-  2. **页面内「刷新/重读」= 只重取本页数据**，不重挂页面、不丢会话与已填内容。用 `useRefreshAll`（`src/web/shared/kernelLoad.tsx`）把本页多个 `useKernelLoad` 数据源合成一个入口。
-  3. **卡片级「刷新」= 只重取该卡片自己的数据源**（安全页各卡片等）。
-- **修掉的真实缺陷**：记忆库页有 6 个数据源（列表/分层策略/冲突队列/待重放/库位置/个人记忆），原「刷新」只调了其中 2 个的 retry，其余仍显示旧值 → 已全部走 `refreshAll`。
-- **页面配色变量有两套，别混用**：`shared/theme.css` 只有深色 `--bg/--txt/--muted`；**记忆库页那套（`memoryManagement.css`）才是标准**：`--text/--muted/--faint/--panel/--field/--line/--line-2/--accent/--chip/--win`，浅色默认 + `html[data-theme="dark"]` 深色。**新页面一律引 `memoryManagement.css` 并用这套变量名**，否则会退化成浏览器默认深色（记忆助手整页曾因此整页发黑）。
-- **状态栏 L0 格要同时显示两把锁**：`查阅锁`（解密查阅会话，`active_sessions`）+ `写锁`（写密钥，`write_unlocked`），格式 `查阅2会话 · 写已解`；hover 说明写明「两把锁互不替代」。浏览器模式读不到时如实显示「不可用」，不冒充任一状态。
-
-## 项目纯净度约定（用户 2026-10-10 明确；2026-11-12 升级为仓库纪律 AGENTS.md §0.1）
-- **验收/验证完成后，验证用的临时文件必须删除**（如 test-results/、失败截图、临时 html/log、一次性脚本）。
-- **项目文件夹保持纯净**：与项目无关的文件及时清理，不留在仓库根目录。
-- **2026-11-12 用户重申并要求"提前约定"** → 已落为 `AGENTS.md §0.1 纯净度纪律`（与三道闸门并列），判定标准一句话：**下一个任务不会再用的就是临时物**。临时物含一次性探针脚本、散落根目录的 `*-report.md`、测试产物目录、构建残留（根 `main.cjs`、历史 `release/installer-*`）、日志草稿；交付物含被 script/CI 引用的 `tools/*.mjs`、`specs/` 文档、用例源码、当前 `release/installer`。
-- **本机删除护栏的真实边界（2026-11-12 实测）**：Bash 工具的 `rm -rf` 被 `genie-trash` 安全删除守护接管，多文件目录会 `trash operation aborted` → **fail-closed 拒删**；`CODEBUDDY_SAFE_DELETE_ENABLED=0` 对 Bash 工具的 `rm` **不生效**（只对 `npm run package` 这类走 Node `fs.rm` 的脚本有效，Node 层不被接管）。空目录/单文件（如空文件夹、单文件 `main.cjs`）可以正常删。→ 遇到多文件目录删不掉，**如实告知用户并给出命令**，不要换 PowerShell/Node 绕过（等同穿透安全检查）。
-- **2026-11-12 用户第三次确认并授权长期执行**：「往后按照你的建议执行」→ 收尾五步（跑验 → 扫 → 清 → 核 → 报）**默认执行，不必每次再问**；只在"删什么算临时物"有歧义或涉及非构建产物时才确认。
-- **遗留未清**：`release/installer-*` 19 个历史目录（563MB / 2463 文件）因上述护栏未能删除；`release/` 已 gitignored，不影响交付，待用户手动清。
-- Windows 下避免产生 `nul` 垃圾文件（Git Bash 里 `> NUL` 会生成名为 nul 的实体文件，应使用 `> /dev/null`）。
-- 验收收尾时默认执行一轮垃圾清扫并汇报清理清单，再走 commit。
-- **入口 html / 产物文件名一律全小写**：Windows 文件系统大小写不敏感会掩盖 URL 与文件名的大小写错位，Linux CI 上直接 404（P13 时期 inlineAttribution.html 教训，5726a35 修复）。新增页面入口时命名前先确认。
-- 跨平台排查 CI 失败：本地 WSL Ubuntu clone 到 ~/ 本地盘（勿在 /mnt 挂载盘 npm ci，会 EIO 损坏 Windows node_modules）跑 CI 同款命令（--workers=1）即可复刻；node_modules 损坏用 npm install 增量修复。
-
-## WSL Linux 复刻环境（2026-10-10 建立）
-- WSL2 Ubuntu 26.04.1，node v20.20.2（⚠️ 无 node:sqlite，22.13+ 才有——sqliteStorage 测试跳过或升 node 22）；用户 lhq，sudo 需密码（不能 playwright install --with-deps 自动化）
-- E2E 复刻工作区：~/memory-wsl（git clone 自 Windows 仓库，勿共用 node_modules）；playwright chromium 系统库 Ubuntu 26.04 已齐，headless 直启 OK
-- 基线：npm run test:e2e 85/85（27.4s）全绿；pglite/pgSyncHub 6/6 Linux 全绿
+## 批次61 / 其他
+- GAP-1 召回权重真源 `shared/growthConfig.ts`（0.35/0.30/0.15/0.20），`forgetting.ts` 的 `SCORE_WEIGHTS` 仅转发；回归只出建议不写 `growth:v1`；`hardFilter` 先排 `deleted`/`merged_into`。
+- REQ-003 实际落地纯 ESM JS（`src/agentOnboard/*`），追溯以 `specs/code-map.md` 为准。

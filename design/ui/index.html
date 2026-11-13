@@ -39,7 +39,7 @@
   <div class="top">
     <span class="logo">🧠 多 Agent 记忆助手 · UI 原型通览</span>
     <span class="tag">按规格书 19.x + UI 页面设计</span>
-    <span class="right">9 个可交互原型 · 9 个视图 · iframe 隔离</span>
+    <span class="right">10 个可交互原型 · 10 个视图 · iframe 隔离</span>
   </div>
   <div class="body">
     <div class="nav" id="nav">
@@ -71,6 +71,10 @@
       <div class="item" data-view="purify">
         <span class="ic">🧹</span>
         <span class="lbl">自我净化·生长·大模型<span class="desc">查重嫁接 / 自生长 / LLM 配置</span></span>
+      </div>
+      <div class="item" data-view="recallhard">
+        <span class="ic">🔒</span>
+        <span class="lbl">硬前置召回开关<span class="desc">A 钩子 / B 网关 / C 门禁 · 启用·不启用</span></span>
       </div>
       <div class="item" data-view="conflict">
         <span class="ic">⚖️</span>
@@ -118,6 +122,8 @@ const VIEWS={
     legend:"故事线：任务开始→召回注入→沉淀写入→跨 Agent 召回→看板收口，一键连续播放，直观展示三根线（project_id/session_id/request_id）串起多 Agent 记忆闭环。"},
   purify:{title:"自我净化·生长·大模型配置",file:"净化生长与大模型_原型.html",
     legend:"自我净化与生长（6.1/6.2/7.1/7.2/13.3）+ 大模型配置（13.2/6.1/2.4.3/7.2）：五维查重+短路嫁接 · 自生长五项优化+收益曲线 · 向量模型与本地/网络 LLM 按用途配置。"},
+  recallhard:{title:"硬前置召回 A / B / C 启用选择",file:"硬前置召回开关_原型.html",
+    legend:"批次62 硬前置召回：A 宿主钩子 / B LLM 网关 / C MCP 内核门禁，三层各一组「启用 · 不启用」二选一按钮，状态来自本机真实配置（宿主 settings.json / 网关端口监听 / 服务端门禁当前值）。B 启用后给上游地址与可复制的 base_url；C 切换即时生效无需重启。对应《specs/RECALL-HARD-PREFIX.md》。"},
   logs:{title:"日志记录页（P15）原型",file:"日志记录页_原型.html",
     legend:"P15 日志记录页：全软件所有动作的记录（非只异常）· 异常置顶 6 分类（熔断/同步失败/额度超限/L0 解密/向量报错/冲突挂起）· 审计日志点才弹出 modal（非常驻）· 日志/审计同目录独立文件 · 审计 append-only 禁简单删除需 Admin 权限 + 二次确认 + 写审计 audit_delete。对应《日志记录页字段级交互规格》。"},
   conflict:{title:"冲突裁决（P8）原型",file:"冲突裁决页_原型.html",
@@ -137,6 +143,7 @@ const LEGEND={
   mech:"机制演示（4 项）：① 生命周期衰减状态机 ② 冲突裁决左右分栏 ③ 双通道采集降级动效 ④ 效果看板（命中质量/token/效率/复用可量化）。",
   story:"故事线：任务开始→召回注入→沉淀写入→跨 Agent 召回→看板收口，一键连续播放，展示三根线串起多 Agent 记忆闭环。",
   purify:"自我净化与生长 + 大模型配置：五维查重/短路嫁接 · 自生长五项优化+收益曲线（调权重前后 Δ）· 向量模型与本地/网络 LLM 按用途配置（含回退）。",
+  recallhard:"硬前置召回 A/B/C：A 宿主钩子保证每轮必召回 · B LLM 网关把记忆置顶拼进 system · C 内核门禁保证没召回不许调别的工具。三层各一组「启用 · 不启用」二选一按钮，状态读本机真值；B 含上游地址与可复制 base_url。",
   logs:"P15 日志记录页：全动作日志 + 异常置顶 + 审计弹出 modal（非常驻）+ 审计 append-only 禁简单删除需 Admin 权限。",
   conflict:"P8 冲突裁决：9.7 自动 LWW + 仅语义冲突人工 · dispute_flag 待决队列 · 裁决写审计 dispute_resolve。",
   timeline:"19.6 全链路：同一 project_id=P1 记忆空间被 Claude Code 与 Codex 先后读写。三根线：project_id 贯穿共享域、session_id 串会话、request_id 各记审计。",
@@ -230,7 +237,7 @@ sequenceDiagram
   view.innerHTML=`
     <div style="padding:24px;color:#1a212b;font-family:system-ui;max-width:760px;margin:auto">
       <h3 style="color:#111">演示说明与文档索引</h3>
-      <p style="color:#5b6675;font-size:13px">本壳把 9 份可交互原型 + 3 个规格/说明视图合在一处通览。iframe 隔离，互不干扰。</p>
+      <p style="color:#5b6675;font-size:13px">本壳把 10 份可交互原型 + 3 个规格/说明视图合在一处通览。iframe 隔离，互不干扰。</p>
       <h4 style="font-size:13px;margin:14px 0 6px">配套文档（工作区内）</h4>
       <ul style="color:#1a212b;font-size:13px;line-height:1.9;padding-left:20px">
         <li>需求规格书.md（含第 19 章 Agent 接入：19.1–19.11，含 19.6 时序 / 19.7 内联标识 / 19.8 反代理 / 19.9 一键接入 / 19.10 端谱 / 19.11 技术架构）</li>
@@ -244,7 +251,7 @@ sequenceDiagram
         <li><b>需求规格书_同步机制详细设计.md</b>（全端同账号云同步：主源/镜像/离线回传/冲突裁决/对账，19.10/19.11）</li>
         <li><b>需求规格书_日志记录页字段级交互规格.md</b>（P15 全动作日志+异常+审计弹出+审计禁简删需权限）</li>
         <li><b>需求规格书_冲突裁决页字段级交互规格.md</b>（P8 9.7 LWW+人工队列 + dispute_flag + 裁决审计）</li>
-        <li>可交互原型：检索页 / Agent 接入配置页 / Agent 界面内联标识 / 机制演示 / 故事线 / 净化生长与大模型 / 日志记录页 P15 / 审计日志页 P11 / 冲突裁决 P8（9 份 HTML）</li>
+        <li>可交互原型：检索页 / Agent 接入配置页 / Agent 界面内联标识 / 机制演示 / 故事线 / 净化生长与大模型 / 硬前置召回开关 / 日志记录页 P15 / 审计日志页 P11 / 冲突裁决 P8（10 份 HTML）</li>
       </ul>
       <h4 style="font-size:13px;margin:14px 0 6px">红线速记</h4>
       <ul style="color:#1a212b;font-size:13px;line-height:1.9;padding-left:20px">

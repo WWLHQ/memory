@@ -1642,3 +1642,71 @@ status: draft
 > **已知边界**：① `write_unlocked` 是**进程内存态**，只能说明本进程当前能不能写，不落盘、不跨进程；② 成员端仍看不到口令本身，也不显示 `salt/iv/ct`；③ 撤销写口令不会清掉同进程内已解出的 `writeDek`（下次锁定/重启生效），与 R1 边界一致；④ 管理员发放时若自身写密钥已解锁，成员此时 `write_unlocked` 仍可能是 false —— 这正是本轮要讲清的点，**发放 ≠ 已解锁**。
 
 
+### 批次60 修复轮3：写锁状态读取通道收敛（2026-11-12）
+
+**用户报障**：「账号安全密钥锁已解锁，但是写入页密钥锁提示还未解锁」，并要求「审查其它位置/通道，把这个功能封装起来，需要的地方直接对接」。
+
+**定性（两个缺陷，都不是文案）**：
+1. **通道错**：写入页 `coreWriteStatus()` → 内核 `writeUnlocked()` 只有两条路 —— `L0Port.isWriteUnlocked()`（渲染层 `HostL0Port` **没实现**）与 `l0Admin.status()`（IPC `l0:status`，**requireAdmin**）。成员一调就抛 → catch 成 `false` → **恒判未解锁**；连带 `getWriteStatus()` 里 `if (l0_unlocked) pending.flush()` 永不成立，**成员的待重放写入永远不重放**。
+2. **不刷新**：写解锁走主进程 IPC、不写 localStorage；写入页只在 receipt/refusal/sid 变化时重读 → 在安全页解锁后本页停在旧值（管理员也会中）。
+
+**同源受害面（一并审查出的）**：首页红条（`shell/overview.ts` 的 `l0Write`）、壳层状态栏写锁格、层级条 L0 标题 —— 全部从 `l0:status` 取 `write_unlocked`，成员一律读不到（红条误报/状态栏误报「不可用」）。
+
+| 任务→文件 | 实现 | 测试 |
+|---|---|---|
+| R6 内核三级退化 | `types.ts` `isWriteUnlocked?(): boolean \| Promise<boolean>`；`agent.ts` `writeUnlocked()`：端口（同步/异步，**说 true 直接采信**；说 false 继续复核）→ `l0Admin.myWriteWrap(当前账号)`（只需登录）→ 老 `status()` → false | `writeStatusAuthority.test.ts` **7 例**（成员 status 抛 E_AUTH_ADMIN 仍读到已解锁 / 同步端口不再多问 / 异步端口 / 端口 false 复核 / 真锁着如实 false / 老主进程退化 / 无端口不冒充） |
+| R7 端口补实现 | `l0Port.ts` `HostL0Port.isWriteUnlocked()` 走 `l0:myWriteWrap`（不新增 IPC）；失败抛出以便内核继续退化 | `hostL0AdminWriteUnlock.test.ts` 既有通道断言覆盖 |
+| R8 统一读取口（封装） | **新增 `src/web/shared/l0WriteState.ts`**：`readL0WriteState(): {unlocked:boolean\|null, pending, source:'kernel'\|'unavailable', detail}` + `onL0WriteStateChanged`。读不到回 `null` 并带真实 detail，**绝不冒充 false** | `shared/__tests__/l0WriteState.test.ts` **3 例**（已解锁/锁定/**内核报错→null+detail**） |
+| R9 消费方全部对接 | `shell/statusbar.ts` 新增 `loadL0Write()` 与 `StatusSnapshot.l0Write`；`shell/overview.ts` 首页 `l0Write` 改用它（删掉对 `loadL0Status` 的依赖）；`shell/layers.ts` 视图加 `l0Write`；`Workspace.tsx` 状态栏与层级条**写锁读 `l0Write`、查阅锁仍读 `l0`**（两把锁本就走不同通道，标题里分别写「读不到（需管理员）」与「读不到（原因）」）；`write/coreWrite.ts` `coreWriteStatus` 改为委托 `readL0WriteState`（读不到抛错，页面显示「状态不可读」）；`WritePage` 订阅 `onL0WriteLockChanged` → 别处解锁后立即重读 | `shell/__tests__/statusbarL0Write.test.ts` **3 例**（ok true / ok false / 读不到带原因）；`workspace.test.tsx` 增 1 例「成员查阅锁读不到但写锁仍按真值显示」；`WritePage.l0locked.test.tsx` 增 1 例「别处解锁 + 广播信号 → masthead 变已解锁」；`layers.test.ts` 补 mock |
+
+> **三道闸门证据**：**A** typecheck 0（双 tsc）、oxlint **0/0**（655 文件）、`src/web` 全量 **129 文件 / 1287 例**、`test:gate` 串行 **232 文件 / 2805 例 / 0 失败 / 0 重试**、`check:no-demo` ✅（364 文件）、`code:index` 370 源码/138 文档；**B** 三条通道各自钉住映射（内核三级退化、读取口 null 语义、状态栏 ok/unavailable），UI 层用「成员查阅锁读不到 + 写锁可读」的真实分裂态断言并列显示；**C** 变异三处：① `readL0WriteState` 读不到时改回 `unlocked:false` → 1 例红；② `loadL0Write` 恒 `unavailable` → 3 例红；③ 早前 `agent.writeUnlocked` 去掉 `myWriteWrap` 兜底 → 2 例红；均原样还原复绿。
+> **已知边界**：① `unlocked` 仍是**进程内存态**，不落盘、不跨进程；② 查阅锁/授权/管理字段仍只有管理员读得到（`l0:status` 的门禁没有放松，只是不再拿它当写锁的唯一来源）；③ `readL0WriteState` 不缓存，每次调用一次 IPC（状态栏/首页都是按需重读，未做定时轮询）；④ 尚未覆盖 `L0SplitCard` / `L0MigrateCard` 直连的 `l0:status` —— 它们是管理员专属危险操作卡，成员根本进不去，保持原样。
+
+### 批次60 修复轮4：首页写锁提示不消失（2026-11-12）
+
+**用户报障**：「写入页解锁后首页还提示 L0 写密钥未解锁」。
+
+**定性（两层，均非文案）**：
+1. **读不到真值**：修复轮3 让写锁改走 `l0:myWriteWrap`，但那条通道**要会话**（`currentSessionId()` 按登录态派生）。首页 `index.html` 是独立文档、壳层 iframe 里会话未传到 / 未登录时为 `null` → 窄口子被拒 → 内核继续退化到 `l0Admin.status()`（**requireAdmin**）→ 成员抛错 / 退到底部 → `false` → 红条常驻。**根因是把「进程级全局事实」挂在了「账号私有查询」上。**
+2. **不重读**：首页只监听 `storage`，而 `storage` 事件**只在其它同源文档触发**、后台 iframe 不保证收到；`WritePage` 升级后会上写 `memdesk.l0.writeLockSignal.v1`，但首页在后台错过该事件就永远停在旧快照。
+
+| 任务→文件 | 实现 | 测试 |
+|---|---|---|
+| R10 新增无鉴权只读布尔通道 | `ipcChannels.ts` 加 `l0WriteUnlocked: 'l0:writeUnlocked'`（注释写明「只回一个布尔、不需要登录」）；`preload.ts` `writeUnlocked: () => ipcRenderer.invoke(IPC.l0WriteUnlocked)`；`hostBridge.ts` `HostMethod` 联合 + `CHANNEL_TO_NATIVE` 两处登记；`main.ts` `handleIpc(IPC.l0WriteUnlocked, async () => ({ ok: true, write_unlocked: vault.isWriteUnlocked() }))`（放在 `l0WriteLock` 之前，不取会话、不取管理员） | `electron/__tests__/ipcChannels.test.ts` 既有静态断言自动覆盖「每个 channel 都真注册、preload 不硬编码字符串」 |
+| R11 端口改走该通道 | `l0Port.ts` `HostL0Port.isWriteUnlocked()` 改为 `hostCall('l0:writeUnlocked', [])`——**空参数数组**，不再带 `currentSessionId()`；失败仍抛出，内核还能继续退化（老主进程兼容） | 新增 `shared/__tests__/hostL0WriteUnlocked.test.ts` **4 例**（走对通道且参数为空数组 / 不落到 `l0:myWriteWrap`·`l0:status` / true·false·缺字段三态 / 通道失败要抛不吞成 false） |
+| R12 首页回前台补读 | `overview/OverviewPage.tsx`：`storage` 监听之外加 `onWake = () => { if (document.visibilityState !== 'hidden') void reload(); }`，挂 `window.focus` + `document.visibilitychange`，卸载时一并移除（hidden 时**不**白跑一次取数） | 新增 `overview/__tests__/overviewPageWake.test.tsx` **3 例**（focus → 重读且红条消失 / visibilitychange 可见 → 重读 / hidden → 不重读） |
+
+> **三道闸门证据**：**A** typecheck 0（双 tsc 含 electron 工程）、oxlint **0/0**（656 文件）、定向 `overview/shell/write/shared + writeStatusAuthority + ipcChannels` **41 文件 / 358 例全绿**、全量见提交日志；**B** 通道层用「参数必须是空数组」钉死「不再依赖会话」这一根因，页面层用真 React 渲染 + 假快照切换（锁定 → 已解锁）断言红条真实消失，hidden 分支断言**不**触发取数（避免白跑）；**C** 变异两处：① `HostL0Port.isWriteUnlocked` 改回 `l0:myWriteWrap + currentSessionId()` → 新单测 **2 例真实红灯**；② `onWake` 条件改成恒不等（永不重读）→ 唤醒用例 **2 例真实红灯**（hidden 例本就该绿）；均原样还原复绿。
+> **已知边界**：① `l0:writeUnlocked` 只回一个布尔，**不含**任何密钥材料、也不含 pending 计数（pending 仍走内核 `getWriteStatus`）；② 该通道不做鉴权 → 同机任意渲染层文档都能知道「写密钥在不在内存」，这本身不是秘密（写不写得进去一试即知），但**它不授予任何写入能力**；③ `focus/visibilitychange` 是「补读」而非「实时推送」，多显示器且两窗都可见时以 storage 信号为主导路径；④ 首页 `hidden` 期间错过的事件仍可能漏一次，回前台必补 —— 这是刻意的成本取舍（不做轮询）。
+
+### 批次60 修复轮5：首页（iframe）解锁后红条不消失的真正根因（2026-11-12 深夜）
+
+**用户实测**：轮3（只读通道）+ 轮4（首页 onWake/storage 补读）后仍报「写入页解锁后首页还提示 L0 写密钥未解锁」。前两轮都在「首页能重新取数」的假设上修，但首页在真实架构下根本不重新取数 —— 这才是没生效的根因。
+
+**架构真相（前两轮漏看）**：首页 `index.html` **不是顶层窗口**，而是壳层 `Workspace.tsx` 中心区用 `<iframe key={t.id-reloadNonce} src=/index.html>` 嵌入的（`workspace.test.tsx` 断言「中心区嵌入真实 index.html（iframe）」）。这导致：
+1. 首页 iframe 在用户停在写入/安全页时处于**后台（display:none）**，**会错过 `storage` 事件**（`l0WriteLockSignal.ts` 自己的注释也写「后台 iframe 不保证收到」）；
+2. 首页 iframe 内的 `onWake`（`focus`/`visibilitychange`）对**「切换 shell 标签」完全无效** —— iframe 始终 `visible`（只 CSS 显隐）、壳层窗口级焦点不冒泡进 iframe；
+3. 切换标签时首页 iframe 只是 CSS 显隐、`key` 不变 → **不重挂**，停在解锁前快照。
+⇒ 轮3/轮4 的「改通道 + onWake + storage」全部建立在错误前提上，所以无效。
+
+| 任务→文件 | 实现 | 测试 |
+|---|---|---|
+| R13 壳层驱动重挂首页 | `Workspace.tsx`：新增 `homeReloadNonce` state；写锁信号监听 `onL0WriteLockChanged(() => { refreshStatus(); setHomeReloadNonce(n=>n+1); })`（壳层是 native 顶层，`storage` 事件可靠，且首页 iframe 后台不丢）；首页 iframe `key` 由 `home-${reloadNonce}-${homeReloadNonce}` 构成，nonce 递增即重挂 → 重新 `loadOverview` 拿写锁真值。**专用 nonce 只重挂 home，不打断其它中心页**。 | 新增 `shell/__tests__/workspace.test.tsx` 用例 **1 例**：渲染壳层 → dispatch 写锁信号 → 断言首页 iframe **DOM 节点被替换**（=重挂），且 src 仍指向 `/index.html` |
+
+> **三道闸门证据**：**A** typecheck 0（双 tsc）、oxlint **0/0**（658 文件）、定向 `shell+overview+write+shared` **39 文件 / 344 例全绿**（含新增 1 例）、全量见下；**B** 用例断言「iframe 节点引用变化」而非依赖不可见的 React `key`，真实钉住「重挂」；**C** 变异：去掉首页 iframe `key` 里的 `homeReloadNonce`（失去重挂能力）→ 新用例**真实红灯**（超时，`before===after`）；原样还原复绿。
+> **已知边界**：① 只重挂 home（唯一显示写锁红条的中心页）；写入页自身用 `onL0WriteLockChanged` 重读、状态栏用 `refreshStatus`，均已覆盖；② 若用户在 home 激活时由别处触发信号（罕见），重挂 home 也无害；③ 仍保留轮4 的 `onWake` 作为「最小化窗口再恢复」的补充（对切换标签无效，但无害）。
+
+### 批次60 修复轮6：轮5 依赖的跨 iframe storage 信号在真机不可靠 → 改由「切回首页 tab」强制重挂（2026-11-12 深夜，用户实测轮5 仍失败）
+
+**用户实测**：轮5 打包后用户实测仍报「首页红条不消失」。核验新包 `app.asar`（`workspace-BAocNhUh.js`）首页 iframe `key` 确已为三段式 `home-${reloadNonce}-${homeReloadNonce}`，证明轮5 代码进了构建产物；但真机仍无效 → 根因不在「是否重挂」，而在**轮5 依赖的「跨 iframe 的 storage 信号」在 Electron 下未必可靠到达壳层**：用户在安全/写入页解锁写密钥 → `signalL0WriteLockChanged()` 写 localStorage → 期望壳层收到 `storage` 事件触发重挂，但该信号可能根本没到壳层 → 壳层 `homeReloadNonce` 不递增 → 首页不重挂。
+
+**修复（双保险，不再依赖 storage 信号）**：`Workspace.tsx` 新增 effect —— 每次 `activeId` 变为 `'home'`（用户切回首页 tab），**无条件** `setHomeReloadNonce(n=>n+1)` → 首页 iframe `key` 变化 → 重挂 → 重新 `loadOverview` 拿写锁真值。纯 React 状态触发，100% 可靠，覆盖「在其它页解锁后切回首页」这一主路径。轮5 信号监听保留（负责首页在前台时即时刷新），二者互补。
+
+| 任务→文件 | 实现 | 测试 |
+|---|---|---|
+| R14 切回首页强制重挂 | `Workspace.tsx`：新增 effect `useEffect(() => { if (activeId === 'home') setHomeReloadNonce(n=>n+1); }, [activeId, setHomeReloadNonce])`；轮5 信号监听保留。 | 新增 `shell/__tests__/workspace.test.tsx` 轮6 用例 **1 例**：渲染壳层 → 打开「账号与安全」tab（离开首页）→ 切回首页 tab → 断言首页 iframe **DOM 节点被替换**（=重挂）且 src 仍 `/index.html` |
+
+> **三道闸门证据**：**A** typecheck 0（双 tsc）、oxlint **0/0**（658 文件）、code:index **370·138** 且 `--check` 最新；**B** 轮6 用例断言「切回首页 → iframe 节点引用变化」，真实钉住「重挂」（轮5 信号用例仍绿，共 60 例 shell 测试全绿）；**C** 变异：把轮6 effect 的 `if (activeId === 'home')` 改成 `if (false)` → 轮6 用例**真实红灯**（切回首页不再重挂、`before===after`）；原样还原复绿。
+> **已知边界**：① 切回首页一律重挂（重新 loadOverview），会重取数、丢失首页滚动位置，但保证写锁等状态为最新；② 仅 home 受影响（唯一显示写锁红条的中心页）；③ 轮5 信号监听 + 轮6 切回 tab 双触发，互不冲突（重复重挂幂等）。
+
+**待办（用户约定：自测完等实测+确认才提交）**：重打包验证产物含新逻辑 → 【停·等用户实测】→【停·等确认】→ 提交轮5+轮6 文件（`Workspace.tsx` / `workspace.test.tsx` / `code-map.md` 台账）+ 排除 recall-echo 在途改动（`mcpHttp.ts`/`recallInsight.ts` 等）。
