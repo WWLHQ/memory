@@ -123,3 +123,43 @@ describe('FilePendingStore（落盘 + 重启可恢复）', () => {
     expect(await new PendingWrites(empty).flush(async () => ({}))).toEqual({ flushed: 0, failed: 0 });
   });
 });
+
+describe('REQ-013 / C2 内容级幂等去重', () => {
+  it('同 content 重复 enqueue → 返回同一 pending_id，不入队第二条', async () => {
+    const store = new MemoryPendingStore();
+    const q = new PendingWrites(store);
+    const id1 = await q.enqueue(req('重复内容'));
+    const id2 = await q.enqueue(req('重复内容'));
+    expect(id2).toBe(id1); // 幂等：返回已有 id
+    expect(await q.count()).toBe(1); // 不重复入队
+    const items = await store.list();
+    expect(items[0].content_hash).toBeDefined();
+  });
+
+  it('不同 content → 各自入队，互不影响', async () => {
+    const q = new PendingWrites(new MemoryPendingStore());
+    const a = await q.enqueue(req('内容A'));
+    const b = await q.enqueue(req('内容B'));
+    expect(a).not.toBe(b);
+    expect(await q.count()).toBe(2);
+  });
+
+  it('flush 成功后 pending 清除；重发同 content 可再次入队（非永久屏蔽）', async () => {
+    const store = new MemoryPendingStore();
+    const q = new PendingWrites(store);
+    const id1 = await q.enqueue(req('被消费'));
+    await q.flush(async () => ({}));
+    expect(await q.count()).toBe(0);
+    const id2 = await q.enqueue(req('被消费'));
+    expect(id2).not.toBe(id1); // 已清空，重新入队
+    expect(await q.count()).toBe(1);
+  });
+
+  it('pending 语义不变：flush 失败时仍保留，不谎报成功', async () => {
+    const q = new PendingWrites(new MemoryPendingStore());
+    await q.enqueue(req('待解锁'));
+    const failed = await q.flush(async () => { throw new Error('E_L0_LOCKED'); });
+    expect(failed.flushed).toBe(0);
+    expect(await q.count()).toBe(1); // 保留，绝不丢
+  });
+});

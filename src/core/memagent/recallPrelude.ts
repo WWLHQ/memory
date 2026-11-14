@@ -6,6 +6,10 @@
 export const RECALL_PRELUDE_MARKER = '【自建记忆库 · 本轮强制召回】';
 export const RECALL_PRELUDE_OPEN = '[RECALL_PRELUDE_V1]';
 export const RECALL_PRELUDE_CLOSE = '[/RECALL_PRELUDE_V1]';
+/** REQ-013 / C4：注入块携带的可识别标记行——若未来开启「自动把记忆注入 agent 会话」(plugin 回灌)，
+ *  被注入内容会进入 agent 会话日志被本采集器重新采集 → 回灌循环。该标记供采集侧剥离识别。
+ *  当前未开启自动回灌，属买保险；落点在 system prelude，绝不进 display.markdown（守回显铁律）。 */
+export const PLUGIN_INJECTION_MARKER = 'source.kind=plugin:memagent';
 
 /** 单条命中正文上限（防一条超长记忆吃光上下文）与本轮注入总上限 */
 export const MAX_HIT_CHARS = 1200;
@@ -73,6 +77,7 @@ export function buildRecallPrelude(hits: RecallHit[]): string | null {
   const block = [
     RECALL_PRELUDE_OPEN,
     `${RECALL_PRELUDE_MARKER} 优先采信；与记忆冲突时以记忆为准，记忆库没有的再用通用知识。`,
+    PLUGIN_INJECTION_MARKER,
     ...lines,
     RECALL_PRELUDE_CLOSE,
   ].join('\n');

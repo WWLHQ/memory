@@ -14,6 +14,8 @@ import {
   type CollectorCursor,
   type SessionLogSource,
   type ReconcileOptions,
+  stripPluginInjection,
+  isPluginInjected,
 } from '../sessionCollector.ts';
 import { MemAgentError } from '../errors.ts';
 
@@ -543,7 +545,7 @@ describe('createReconciler 失败退避（批次41-D）', () => {
     h.fail();
     await h.r.runOnce(); // 手动首跑失败
     expect(h.fails).toHaveLength(1);
-    expect(h.fails[0].delayMs).toBe(600_000); // 300000·2^1
+    expect(Math.abs(h.fails[0].delayMs - 600_000)).toBeLessThanOrEqual(600_000 * 0.2); // 含 ±20% 抖动
     expect(h.r.consecutiveFails).toBe(1);
 
     h.tick();
@@ -560,7 +562,7 @@ describe('createReconciler 失败退避（批次41-D）', () => {
     await h.flush();
     expect(h.getAttempts()).toBe(2);
     expect(h.r.consecutiveFails).toBe(2);
-    expect(h.fails[1].delayMs).toBe(1_200_000); // 300000·2^2
+    expect(Math.abs(h.fails[1].delayMs - 1_200_000)).toBeLessThanOrEqual(1_200_000 * 0.2); // 含 ±20% 抖动
     h.r.stop();
   });
 
@@ -571,8 +573,11 @@ describe('createReconciler 失败退避（批次41-D）', () => {
       await h.r.runOnce();
       h.advance(h.fails[i].delayMs + 1);
     }
-    // 第 1/2/3/4 次依次 600k/1.2M/2.4M→1.2M/4.8M→1.2M，第 5 次也 1.2M（封顶）
-    expect(h.fails.map((f) => f.delayMs)).toEqual([600_000, 1_200_000, 1_200_000, 1_200_000, 1_200_000]);
+    // 第 1/2/3/4 次依次 600k/1.2M/2.4M→1.2M/4.8M→1.2M，第 5 次也 1.2M（封顶）；±20% 抖动容差
+    const expected = [600_000, 1_200_000, 1_200_000, 1_200_000, 1_200_000];
+    for (let i = 0; i < expected.length; i++) {
+      expect(Math.abs(h.fails[i].delayMs - expected[i])).toBeLessThanOrEqual(expected[i] * 0.2);
+    }
     expect(h.r.consecutiveFails).toBe(5);
     h.r.stop();
   });
@@ -730,6 +735,24 @@ describe('applyScanToStore · 批次41-W L0 写密钥锁定', () => {
       write: async () => ({ mem_id: 'm1', dedup: { action: 'new' as const } }),
     });
     expect(r.failed_l0_locked).toBe(0);
+  });
+});
+
+describe('REQ-013 / C4 采集侧剥离插件回灌注入', () => {
+  it('stripPluginInjection 剥离 <memory-context> 块', () => {
+    const raw = '普通内容\n<memory-context>旧注入</memory-context>\n更多内容';
+    expect(stripPluginInjection(raw)).toBe('普通内容\n\n更多内容');
+  });
+
+  it('stripPluginInjection 剥离注入标记行', () => {
+    const raw = `一行\nsource.kind=plugin:memagent\n另一行`;
+    expect(stripPluginInjection(raw)).toBe('一行\n另一行');
+  });
+
+  it('isPluginInjected 判毒', () => {
+    expect(isPluginInjected('x <memory-context> y')).toBe(true);
+    expect(isPluginInjected('source.kind=plugin:memagent')).toBe(true);
+    expect(isPluginInjected('正常文本')).toBe(false);
   });
 });
 

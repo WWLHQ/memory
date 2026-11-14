@@ -22,6 +22,7 @@ import { stat, readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { zstdDecompressSync } from 'node:zlib';
 import { isL0LockedError } from './errors.ts';
+import { PLUGIN_INJECTION_MARKER } from './recallPrelude.ts';
 
 /** 让出事件循环（避免大文件批量处理时阻塞 Electron 主进程 → 窗口"未响应"） */
 const yieldToEventLoop = (): Promise<void> => new Promise((res) => setImmediate(res));
@@ -41,6 +42,24 @@ export type LineParser = (line: string) => ParsedMessage[] | ParsedMessage | nul
 
 /** 整块（Markdown）解析器（workbuddy 等）：全文 → 消息列表 */
 export type BlockParser = (text: string, sourceName: string) => ParsedMessage[];
+
+// ─── REQ-013 / C4 防御性：剥离插件回灌注入 ─────────────────────────────────────
+// 若未来开启「自动把记忆注入 agent 会话」(plugin 回灌)，被注入内容会进入 agent 会话日志，
+// 被本采集器重新采集 → 回灌循环。采集口剥离 <memory-context> 块与本插件注入标记行（对照 dsh-hindsight §2 防回灌三处切断）。
+// 当前未开启自动回灌，属买保险；纯函数供单测，不依赖 Node。
+const MEMORY_CONTEXT_RE = /<memory-context>[\s\S]*?<\/memory-context>/gi;
+
+/** 剥离一段文本里的「插件自动注入」残留：<memory-context> 块 + 注入标记行。 */
+export function stripPluginInjection(text: string): string {
+  if (!text) return text;
+  const noBlock = text.replace(MEMORY_CONTEXT_RE, '');
+  return noBlock.split('\n').filter((l) => !l.includes(PLUGIN_INJECTION_MARKER)).join('\n');
+}
+
+/** 判断一段文本是否包含「插件自动注入」残留（供采集口快速判毒）。 */
+export function isPluginInjected(text: string): boolean {
+  return /<memory-context>/i.test(text) || text.includes(PLUGIN_INJECTION_MARKER);
+}
 
 // ─── Claude Code JSONL 解析器 ─────────────────────────────────────────────────
 
@@ -572,7 +591,7 @@ export async function scanSessionLogs(opts: ScanOptions): Promise<ScanResult> {
             collected++;
             fileNew++;
             items.push({
-              key, agent: src.name, role: m.role, content: m.content,
+              key, agent: src.name, role: m.role, content: stripPluginInjection(m.content),
               hash, seq: m.seq ?? items.length, category: src.category,
             });
             markProcessed(); // 只有新采消息占限流名额
@@ -636,7 +655,7 @@ export async function scanSessionLogs(opts: ScanOptions): Promise<ScanResult> {
               collected++;
               fileNew++;
               items.push({
-                key, agent: src.name, role: m.role, content: m.content,
+                key, agent: src.name, role: m.role, content: stripPluginInjection(m.content),
                 hash, seq: m.seq ?? items.length, category: src.category,
               });
               markProcessed();
@@ -700,7 +719,7 @@ export async function scanSessionLogs(opts: ScanOptions): Promise<ScanResult> {
           collected++;
           fileNew++;
           items.push({
-            key, agent: src.name, role: m.role, content: m.content,
+            key, agent: src.name, role: m.role, content: stripPluginInjection(m.content),
             hash, seq: m.seq ?? idx, category: src.category,
           });
           markProcessed();
@@ -821,7 +840,10 @@ export function createReconciler(opts: ReconcileOptions): Reconciler {
     if (failed) {
       consecutiveFails++;
       // 指数退避，封顶 capMs：第 N 次失败后等 min(cap, intervalMs·factor^N)
-      const delayMs = Math.min(backoffCapMs, intervalMs * Math.pow(backoffFactor, consecutiveFails));
+      // REQ-013 / C2：加 ±20% 抖动，避免多源采集器在同一时刻集体重试（惊群 / 429 雪崩）。
+      const base = intervalMs * Math.pow(backoffFactor, consecutiveFails);
+      const jitter = base * 0.2 * (Math.random() * 2 - 1);
+      const delayMs = Math.min(backoffCapMs, Math.max(0, base + jitter));
       nextEligibleAt = now() + delayMs;
       opts.onRoundFail?.({ fails: consecutiveFails, delayMs, reason: roundFailReason() });
       if (!stopped && consecutiveFails >= maxConsecutiveFails && !autoStopped) {

@@ -3,6 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   RECALL_PRELUDE_OPEN, RECALL_PRELUDE_CLOSE, RECALL_PRELUDE_MARKER,
+  PLUGIN_INJECTION_MARKER,
   buildRecallPrelude, extractRecallHits, parseMcpRpcBody, lastUserQuery,
   stripRecallPrelude, injectSystemPrelude, buildHookOutput,
 } from '../recallPrelude.ts';
@@ -148,5 +149,12 @@ describe('lastUserQuery：召回用最后一条 user 文本', () => {
     expect(lastUserQuery([{ role: 'user', content: 'x'.repeat(1000) }])).toHaveLength(600);
     expect(lastUserQuery([{ role: 'assistant', content: 'x' }])).toBe('');
     expect(lastUserQuery(null)).toBe('');
+  });
+});
+
+describe('REQ-013 / C4 注入头携带 source 标记（供采集侧剥离识别）', () => {
+  it('buildRecallPrelude 输出携带 PLUGIN_INJECTION_MARKER（不进 display.markdown，守回显铁律）', () => {
+    const block = buildRecallPrelude([{ content: '某条记忆正文' }])!;
+    expect(block).toContain(PLUGIN_INJECTION_MARKER);
   });
 });

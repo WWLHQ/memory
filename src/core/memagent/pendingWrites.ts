@@ -10,6 +10,13 @@
 import { ulid } from './ulid.ts';
 import type { MemReq } from './types.ts';
 
+/** 内容指纹（纯 JS，浏览器端也可用）：用于 pending 内容级去重，非加密强度。 */
+function contentFingerprint(s: string): string {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = (((h << 5) + h) + s.charCodeAt(i)) >>> 0;
+  return `fp${h.toString(16)}`;
+}
+
 /** write_memory 的扩展打分旋钮（与 memories.ts parseWriteKnobs 的返回形态一致） */
 export type WriteKnobs = Pick<
   { importance?: number; confidence?: number; half_life_days?: number; tags?: string[] },
@@ -21,6 +28,8 @@ export interface PendingWrite extends MemReq, WriteKnobs {
   id: string;
   status: 'pending';
   created_at: number;
+  /** REQ-013 / C2：内容指纹，enqueue 时用于内容级幂等去重（同 content 不重复入队） */
+  content_hash?: string;
 }
 
 /** 待重放队列的存储端口（内存 / 文件 两种实现） */
@@ -57,11 +66,18 @@ export class PendingWrites {
 
   /** 入队一条写入；返回 pending_id（供回执与重放排障） */
   async enqueue(req: MemReq & WriteKnobs): Promise<string> {
+    const contentHash = contentFingerprint(req.content ?? '');
+    // REQ-013 / C2：内容级幂等——同 content 已 pending 则不重复入队（断点续传 / 重发不重复落库）。
+    // 不破坏「pending ≠ 成功」语义：去重只是不入队，写入仍须经 flush 解锁重放才算成功。
+    const existing = await this.store.list();
+    const dup = existing.find((i) => i.status === 'pending' && i.content_hash === contentHash);
+    if (dup) return dup.id;
     const item: PendingWrite = {
       ...req,
       id: `pend_${ulid()}`,
       status: 'pending',
       created_at: Date.now(),
+      content_hash: contentHash,
     };
     await this.store.enqueue(item);
     return item.id;
