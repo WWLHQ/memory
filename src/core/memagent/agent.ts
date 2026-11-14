@@ -5,7 +5,7 @@ import { coreBrowse, coreFeedback, coreGc, coreGcFull, coreMemoryOp, coreWrite }
 import { syncDown, syncUp } from './sync.ts';
 import { MemoryPendingStore, PendingWrites, type WriteKnobs } from './pendingWrites.ts';
 import {
-  fuseRelevance, hardFilter, scoreMemory, tokenCoverage, tokenCoverageWeighted, RELEVANCE_FUSION_LAMBDA,
+  fuseRelevance, hardFilter, scoreMemory, tokenCoverageWeighted, RELEVANCE_FUSION_LAMBDA,
 } from './forgetting.ts';
 import { findParamsSnapshot, growthConfigFromLedger, proxyCapsFromSnapshot } from './paramsSnapshot.ts';
 import { proxyCostToday } from '../../shared/proxyAccounting.ts';

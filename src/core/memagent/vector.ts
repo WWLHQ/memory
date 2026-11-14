@@ -39,7 +39,7 @@ export function tokenize(text: string): string[] {
 export function isIdentifierToken(tok: string): boolean {
   if (!tok || tok.length < 3) return false;
   // 含路径/命名空间/扩展名/锚点/调用等符号分隔符
-  if (/[\/.#:()]/.test(tok)) return true;
+  if (/[/.#:()]/.test(tok)) return true;
   // 显式 ID 前缀
   if (/^(mem_|id_|uuid|sha|did:|cid:|0x)/i.test(tok)) return true;
   // camelCase（小写后接大写，如 getUserById / MyClass）
