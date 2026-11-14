@@ -3,7 +3,7 @@
 import { ulid } from './ulid.ts';
 import { checkL0ToL1Quality, QUALITY_GATE_VERSION } from './qualityGate.ts';
 import { layerSpecOf } from './layerRules.ts';
-import { DEFAULT_VECTOR_DIM, cosine, embedSync, tokenize } from './vector.ts';
+import { DEFAULT_VECTOR_DIM, cosine, embedSync, tokenize, isIdentifierToken } from './vector.ts';
 import { sha256hex } from './sync.ts';
 import type {
   AuditAction, AuditRecord, Category, DecayClass, Filter, Memory, StorageBackend, VectorBackend,
@@ -82,6 +82,22 @@ export function tokenCoverage(queryTokens: Iterable<string>, docTokens: Set<stri
   for (const t of queryTokens) {
     total += 1;
     if (docTokens.has(t)) hit += 1;
+  }
+  return total === 0 ? 0 : hit / total;
+}
+
+/**
+ * REQ-013 / C3：加权覆盖率——标识符（路径/符号/ID）权重 3、普通词权重 1（借鉴 Hindsight 精确词加权）。
+ * 无标识符时与 tokenCoverage 逐字一致（普通词权重恒 1），保证既有行为不变；含标识符时才拉开差距。
+ * 与 fuseRelevance 组合使用（λ 不变），只作打分修正项，不新增召回模式（recallModes.ts 单一真源不动）。
+ */
+export function tokenCoverageWeighted(queryTokens: Iterable<string>, docTokens: Set<string>): number {
+  let total = 0;
+  let hit = 0;
+  for (const t of queryTokens) {
+    const w = isIdentifierToken(t) ? 3 : 1;
+    total += w;
+    if (docTokens.has(t)) hit += w;
   }
   return total === 0 ? 0 : hit / total;
 }

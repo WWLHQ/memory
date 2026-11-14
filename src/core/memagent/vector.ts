@@ -31,6 +31,22 @@ export function tokenize(text: string): string[] {
   return tokens;
 }
 
+/**
+ * REQ-013 / C3：识别「标识符 token」——路径 / 命名空间 / 文件扩展名 / 锚点 / 调用 / camelCase / ID 前缀。
+ * 借鉴 Hindsight 对标识符给权重 3（精确词加权）。仅做形态启发式，不做 NLP 消歧。
+ * 约束：不引入外部模型；普通词（权重 1）一律返回 false，避免误伤日常文本。
+ */
+export function isIdentifierToken(tok: string): boolean {
+  if (!tok || tok.length < 3) return false;
+  // 含路径/命名空间/扩展名/锚点/调用等符号分隔符
+  if (/[\/.#:()]/.test(tok)) return true;
+  // 显式 ID 前缀
+  if (/^(mem_|id_|uuid|sha|did:|cid:|0x)/i.test(tok)) return true;
+  // camelCase（小写后接大写，如 getUserById / MyClass）
+  if (/[a-z][A-Z]/.test(tok)) return true;
+  return false;
+}
+
 export function embedSync(text: string, dim: number = DEFAULT_VECTOR_DIM): number[] {
   if (!Number.isInteger(dim) || dim <= 0) throw new MemAgentError('E_VECTOR', `非法向量维度：${dim}`);
   // oxlint-disable-next-line unicorn/no-new-array -- 定长零向量属热路径，Array.from 会多一层回调开销
