@@ -3,7 +3,7 @@
 > 由 `npm run code:index` 生成，请勿手改；改代码/文档后重跑即可。
 > 用法：先在本表定位文件与导出符号，再只读该文件的局部区间（省 token、少误改）。
 
-共 380 个源码文件、139 个文档。
+共 381 个源码文件、144 个文档。
 
 ## e2e
 
@@ -41,7 +41,7 @@
 
 | 文件 | 行数 | 摘要 | 导出 |
 |---|---|---|---|
-| [src/core/memagent/agent.ts](src/core/memagent/agent.ts) | 784 | createMemAgent（§1 入口）：内核装配 + 9 核心API + 全动作审计（§3.2） | createMemAgent(fn) |
+| [src/core/memagent/agent.ts](src/core/memagent/agent.ts) | 810 | createMemAgent（§1 入口）：内核装配 + 9 核心API + 全动作审计（§3.2） | createMemAgent(fn) |
 | [src/core/memagent/agentUsage.ts](src/core/memagent/agentUsage.ts) | 167 | 批次61 GAP-3：Agent 侧 × 桌面侧双向可观测。 | summarizeAgentUsage(fn), readAgentUsage(fn), CLIENT_UNKNOWN(const), AGENT_USAGE_NOTE(const), GC_CONCURRENCY_NOTE(const), AgentUsageRow(type), AgentUsageSummary(type), AgentUsageRead(type) |
 | [src/core/memagent/auditLog.ts](src/core/memagent/auditLog.ts) | 398 | 内核审计账本（批次41-A）：从 memories.db.json 里搬出来，独立成追加式 JSONL。 | AUDIT_FILE_NAME(const), AUDIT_ACTIVE_MAX_BYTES(const), AuditLogCorruptError(class), AuditLogLockedError(class), FileAuditLog(class), AuditFilter(type), AuditLogStats(type), FileAuditLogOptions(type) |
 | [src/core/memagent/collectDaemon.ts](src/core/memagent/collectDaemon.ts) | 161 | 批次44-A：独立采集守护（headless）——daemon 只做「扫描 + 指纹去重 + 暂存分片」，**永不碰账本**。 | runDaemonRound(fn), drainCollectPending(fn), DAEMON_DIR_NAME(const), PENDING_DIR_NAME(const), DaemonState(type), DaemonRoundReport(type), DrainReport(type) |
@@ -52,7 +52,7 @@
 | [src/core/memagent/feedbackSignal.ts](src/core/memagent/feedbackSignal.ts) | 203 | 批次61 GAP-2：反馈信号回灌净化因果链。 | isLiveForConflict(fn), downgradeClass(fn), feedbackPolicyFromLedger(fn), countRejects(fn), tallyRejects(fn), findConflictCounterpart(fn), summarizeFeedbackSignals(fn), readFeedbackSignals(fn), CONFLICT_PAIR_MIN_SIM(const), RejectTally(type), ConflictCounterpart(type), ConflictPairing(type), FeedbackSignalSummary(type), FeedbackSignalRead(type) |
 | [src/core/memagent/fieldBackfill.ts](src/core/memagent/fieldBackfill.ts) | 242 | 存量「补齐缺失的 sha256 与向量」（批次41-T）：批次41-B 之后新写的每一行都带这两个字段， | scanRowsForBackfill(fn), backfillMissingFields(fn), BackfillDecision(type), BackfillPreview(type), BackfillReport(type), BackfillCtx(type), BackfillSkipCode(type) |
 | [src/core/memagent/fileStorage.ts](src/core/memagent/fileStorage.ts) | 578 | FileStorage（§5.3）：桌面/CLI 本地库 = P0 主源（零依赖，纯文件系统，无 node:sqlite）。 | StorageCorruptError(class), StorageLockedError(class), FileStorage(class), CorruptionNotice(type), FileStorageOptions(type) |
-| [src/core/memagent/forgetting.ts](src/core/memagent/forgetting.ts) | 527 | REQ-010 遗忘机制后台任务（17.4–17.11）：新鲜度/打分/层迁移/合并摘要/周期任务 | policyFor(fn), freshnessOf(fn), scoreMemory(fn), tokenCoverage(fn), fuseRelevance(fn), fusedRelevanceOf(fn), hardFilter(fn), classifyLayer(fn), forgetOne(fn), restoreOne(fn), reinforceOne(fn), buildSummary(fn), clusterSimilar(fn), archiveAgedMemories(fn), runForgettingCycle(fn), SCORE_WEIGHTS(const), RELEVANCE_FUSION_LAMBDA(const), MERGE_SIM_THRESHOLD(const), ForgettingPolicy(type), ForgettingCycleReport(type), ForgettingOptions(type), ArchivePassOptions(type), SummaryBuildResult(type) |
+| [src/core/memagent/forgetting.ts](src/core/memagent/forgetting.ts) | 543 | REQ-010 遗忘机制后台任务（17.4–17.11）：新鲜度/打分/层迁移/合并摘要/周期任务 | policyFor(fn), freshnessOf(fn), scoreMemory(fn), tokenCoverage(fn), tokenCoverageWeighted(fn), fuseRelevance(fn), fusedRelevanceOf(fn), hardFilter(fn), classifyLayer(fn), forgetOne(fn), restoreOne(fn), reinforceOne(fn), buildSummary(fn), clusterSimilar(fn), archiveAgedMemories(fn), runForgettingCycle(fn), SCORE_WEIGHTS(const), RELEVANCE_FUSION_LAMBDA(const), MERGE_SIM_THRESHOLD(const), ForgettingPolicy(type), ForgettingCycleReport(type), ForgettingOptions(type), ArchivePassOptions(type), SummaryBuildResult(type) |
 | [src/core/memagent/hitHighlight.ts](src/core/memagent/hitHighlight.ts) | 127 | 批次59：召回回显的「命中片段」计算（方案 C —— 后端定相关性、渲染层定偏移）。 | matchedTerms(fn), pickHitSpans(fn), displayTerms(fn), HitSpan(type) |
 | [src/core/memagent/l0Recovery.ts](src/core/memagent/l0Recovery.ts) | 123 | L0 恢复码（批次37-G）：管理密码忘了还能把 L0 原数据库捞回来的唯一通道。 | generateRecoveryCode(fn), formatRecoveryCode(fn), normalizeRecoveryCode(fn), wrapDekWithRecovery(fn), unwrapDekWithRecovery(fn), createKeyringSecrets(fn), keyringFingerprint(fn), buildRecoveryCard(fn), RECOVERY_CODE_BYTES(const), RECOVERY_BAD_CODE(const), RecoveryCardInput(type) |
 | [src/core/memagent/l0Split.ts](src/core/memagent/l0Split.ts) | 259 | 存量拆分迁移（批次37-C）：把「还躺在记忆库行上」的 L0 原文搬进独立的 L0 原数据库。 | scanLedgerForSplit(fn), splitLedger(fn), SplitDecision(type), SplitPreview(type), SplitReport(type), SplitCtx(type) |
@@ -65,7 +65,7 @@
 | [src/core/memagent/mcp.ts](src/core/memagent/mcp.ts) | 414 | MCP Server（§19.5）：JSON-RPC 2.0 over TCP，暴露记忆工具，供 Agent 调用记忆助手。 | runMcpServer(fn), McpOptions(type), McpServerHandle(type) |
 | [src/core/memagent/mcpAuth.ts](src/core/memagent/mcpAuth.ts) | 113 | MCP 鉴权：MCP 端口只对持有本机令牌的 Agent 开放。 | isAdmin(fn), scopeHasWildcard(fn), classifyProject(fn), projectInScope(fn), tokenEquals(fn), tokenFromHeaders(fn), assertMcpToken(fn), MCP_TOKEN_HEADER(const), DEFAULT_MCP_ACCOUNT(const), McpAccount(type), ScopeAccount(type), ProjectPool(type) |
 | [src/core/memagent/mcpGcTools.ts](src/core/memagent/mcpGcTools.ts) | 176 | MCP 遗忘引擎报告编排（批次44-D5-3 → 批次46-4）：gc_report。 | runGcReportTool(fn), GC_REPORT_NOTE(const), GcReportToolResult(type), GcReportDeps(type) |
-| [src/core/memagent/mcpHttp.ts](src/core/memagent/mcpHttp.ts) | 708 | 标准 MCP（Model Context Protocol）streamable-http 服务器 | normalizeClientLabel(fn), clientFromInitialize(fn), clientFromUserAgent(fn), isIdentifiableUserAgent(fn), isTrustedClientSelfName(fn), clientFromExplicitHeader(fn), clientDeclaresFold(fn), clientDeclaresStrictGate(fn), recallEchoNote(fn), runMcpHttpServer(fn), MCP_CLIENT_HEADER(const), MCP_RENDER_HEADER(const), MCP_STRICT_GATE_HEADER(const), McpHttpOptions(type), McpHttpHandle(type) |
+| [src/core/memagent/mcpHttp.ts](src/core/memagent/mcpHttp.ts) | 712 | 标准 MCP（Model Context Protocol）streamable-http 服务器 | normalizeClientLabel(fn), clientFromInitialize(fn), clientFromUserAgent(fn), isIdentifiableUserAgent(fn), isTrustedClientSelfName(fn), clientFromExplicitHeader(fn), clientDeclaresFold(fn), clientDeclaresStrictGate(fn), recallEchoNote(fn), runMcpHttpServer(fn), MCP_CLIENT_HEADER(const), MCP_RENDER_HEADER(const), MCP_STRICT_GATE_HEADER(const), McpHttpOptions(type), McpHttpHandle(type) |
 | [src/core/memagent/mcpManageTools.ts](src/core/memagent/mcpManageTools.ts) | 178 | MCP 治理工具编排（批次44-D5-2）：feedback / manage_memory。 | deleteAllowed(fn), runFeedbackTool(fn), runManageMemoryTool(fn), ManageToolOpts(type), FeedbackToolResult(type), ManageToolResult(type) |
 | [src/core/memagent/mcpProjectTools.ts](src/core/memagent/mcpProjectTools.ts) | 166 | MCP 管理工具编排（D6-5 / 子方案 §3.3）：create_project / mint_token。 | runCreateProjectTool(fn), runMintTokenTool(fn), CreateProjectToolResult(type), MintTokenToolResult(type) |
 | [src/core/memagent/mcpReadTools.ts](src/core/memagent/mcpReadTools.ts) | 160 | MCP 读工具编排（批次44-D5-1）：list_memories / get_memory。 | toMemoryView(fn), runListMemoriesTool(fn), runGetMemoryTool(fn), MemoryView(type), ListMemoriesResult(type), GetMemoryResult(type) |
@@ -75,7 +75,7 @@
 | [src/core/memagent/memories.ts](src/core/memagent/memories.ts) | 923 | 内核记忆业务（§3 schema + 行为红线）：write 逐层生成/查重/分支嫁接 / browse L0 授权 / gc 衰减 / memoryOp 17.3 操作 | layerSpecsFrom(fn), buildL6Input(fn), makeLayerGenerator(fn), parseWriteKnobs(fn), coreWrite(fn), coreBrowse(fn), coreGc(fn), coreGcFull(fn), coreMemoryOp(fn), coreFeedback(fn), GC_FULL_NOTE(const), WriteInput(type), WriteCtx(type) |
 | [src/core/memagent/paramsSnapshot.ts](src/core/memagent/paramsSnapshot.ts) | 210 | 全局参数快照（params:v1: preference 记忆）的共享读取口。 | parseParamsSnapshot(fn), findParamsSnapshot(fn), autoOrganizeEnabled(fn), forgettingPrefsFromSnapshot(fn), proxyAccountingFromSnapshot(fn), proxyCapsFromSnapshot(fn), saveProxyCapsToLedger(fn), findGrowthMemory(fn), growthConfigFromLedger(fn), saveGrowthConfigToLedger(fn), PARAMS_PREF_PREFIX(const), GROWTH_PREF_PREFIX(const), ParamsSnapshot(type), ForgettingPrefs(type), ProxyCapsSaveOptions(type), GrowthConfigSaveOptions(type) |
 | [src/core/memagent/pendingStoreFile.ts](src/core/memagent/pendingStoreFile.ts) | 57 | 文件落盘实现（node-only）：pending 队列持久化到 <dir>/pending-<id>.json。 | FilePendingStore(class) |
-| [src/core/memagent/pendingWrites.ts](src/core/memagent/pendingWrites.ts) | 96 | 落盘兜底队列（A3 §4.4.4 / 批次44-D4） | MemoryPendingStore(class), PendingWrites(class), PendingWrite(type), PendingStore(type), WriteKnobs(type) |
+| [src/core/memagent/pendingWrites.ts](src/core/memagent/pendingWrites.ts) | 112 | 落盘兜底队列（A3 §4.4.4 / 批次44-D4） | MemoryPendingStore(class), PendingWrites(class), PendingWrite(type), PendingStore(type), WriteKnobs(type) |
 | [src/core/memagent/personal.ts](src/core/memagent/personal.ts) | 690 | 个人记忆内核 API（第一轮本机闭环 + 第二轮跨端同步）：quick_add / confirm / reject / revoke / delete | personalList(fn), personalQuickAdd(fn), personalImportFromAgent(fn), personalRejectFromAgent(fn), personalConfirm(fn), personalReject(fn), personalRevoke(fn), personalDelete(fn), personalPushToTeam(fn), personalRetrySync(fn), createPersonalApi(fn), personalRecallScore(fn), selectPersonalRecall(fn), PERSONAL_CONFIDENCE_DELTA(const), PersonalImportInput(type), PersonalSyncPort(type), PersonalReceipt(type), PersonalSyncOutcome(type), PersonalSyncReceipt(type), PersonalSnapshot(type), PersonalApi(type), PersonalApiContext(type), PersonalOp(type), PersonalSyncOp(type) |
 | [src/core/memagent/personalStore.ts](src/core/memagent/personalStore.ts) | 209 | 个人记忆独立存储（第一轮本机闭环 + 第二轮跨端同步）。 | personalContentHash(fn), normalizePersonalEntry(fn), resolvePersonalOwner(fn), parsePersonalOwnerBindings(fn), InMemoryPersonalStore(class), PersonalSyncError(type), PersonalEntry(type), PersonalMemoryStore(type), PersonalOwnerBinding(type), PersonalOwnerResolution(type), PersonalState(type), PersonalSource(type), PersonalSyncState(type), PersonalSyncStage(type) |
 | [src/core/memagent/personalStoreFile.ts](src/core/memagent/personalStoreFile.ts) | 90 | 个人记忆独立文件存储（桌面主进程）：<dataRoot>/personal-memory.db.json。 | FilePersonalStore(class) |
@@ -85,13 +85,13 @@
 | [src/core/memagent/recallDetailTickets.ts](src/core/memagent/recallDetailTickets.ts) | 65 | 批次33-C：召回明细页的一次性访问票据（id → 已渲染的明细 HTML）。 | RECALL_DETAIL_TTL_MS(const), RECALL_DETAIL_MAX_TICKETS(const), RecallDetailTickets(class), RecallDetailTicket(type) |
 | [src/core/memagent/recallHook.ts](src/core/memagent/recallHook.ts) | 146 | 硬前置召回 A 方案 · 钩子主体逻辑（单一真源）。 | hookIsLoopback(fn), runHook(fn), hookSelfTest(fn), DEFAULT_MCP_URL(const), HOOK_TIMEOUT_MS(const), HOOK_SELFTEST_PREFIX(const) |
 | [src/core/memagent/recallHookCli.ts](src/core/memagent/recallHookCli.ts) | 21 | 硬前置召回 A 方案 · CLI 壳（打包态入口）。 | — |
-| [src/core/memagent/recallInsight.ts](src/core/memagent/recallInsight.ts) | 921 | 召回洞察（批次11/13）：项目背景筛选 / 省量核算 / 聊天窗口提示行与累计金额的唯一纯函数真源。 | selectRecallBackground(fn), corpusTokens(fn), computeRecallSavings(fn), localDayStart(fn), rollupRecalls(fn), formatCny(fn), normalizeUnitPrice(fn), buildRecallHint(fn), recallSavingRatio(fn), recallHitTerms(fn), recallWarnings(fn), buildRecallModeLine(fn), buildRecallFoldSummary(fn), buildRecallEchoSummary(fn), buildRecallStatLines(fn), buildRecallCitationLines(fn), markHitFragments(fn), buildRecallSections(fn), buildRecallMarkdown(fn), buildRecallCompactMarkdown(fn), htmlEscape(fn), buildRecallDetailPage(fn), buildRecallDetailExpiredPage(fn), CHARS_PER_BUDGET_UNIT(const), estTokens(const), BACKGROUND_MAX_ITEMS(const), BACKGROUND_ITEM_CHARS(const), BACKGROUND_MAX_TOKENS(const), RecallRollup(type), RecallMoneyBlock(type), RecallMoney(type), RecallEchoSummary(type), RecallHint(type), RecallMarkdownOpts(type), RecallHitStyle(type), RecallSection(type), RecallDetailPageMeta(type), HitMarkup(type) |
-| [src/core/memagent/recallModes.ts](src/core/memagent/recallModes.ts) | 287 | recallModes.ts — 召回模式调度层（§2.4.3 模式定义 + §2.4.4 自动分流，直译单一真源） | isManualMode(fn), isConcreteMode(fn), resolveMode(fn), modeWeights(fn), modeSpec(fn), RECALL_MODE_SPECS(const), COMMON_INVARIANTS(const), DEFAULT_DISPATCH_CONFIG(const), MODE_FEATURE_WORDS(const), ModeWeights(type), RecallModeSpec(type), ModeDispatchConfig(type), ResolveModeInput(type), ResolvedMode(type), LayerKey(type), ConcreteMode(type) |
-| [src/core/memagent/recallPrelude.ts](src/core/memagent/recallPrelude.ts) | 162 | 硬前置召回的「拼装规则」单一真源（A 宿主钩子 / B LLM Gateway / C 内核门禁 共用）。 | parseMcpRpcBody(fn), extractRecallHits(fn), buildRecallPrelude(fn), lastUserQuery(fn), stripRecallPrelude(fn), injectSystemPrelude(fn), buildHookOutput(fn), RECALL_PRELUDE_MARKER(const), RECALL_PRELUDE_OPEN(const), RECALL_PRELUDE_CLOSE(const), MAX_HIT_CHARS(const), MAX_PRELUDE_CHARS(const), MAX_QUERY_CHARS(const), RecallHit(type), ChatMessage(type) |
+| [src/core/memagent/recallInsight.ts](src/core/memagent/recallInsight.ts) | 937 | 召回洞察（批次11/13）：项目背景筛选 / 省量核算 / 聊天窗口提示行与累计金额的唯一纯函数真源。 | selectRecallBackground(fn), corpusTokens(fn), computeRecallSavings(fn), localDayStart(fn), rollupRecalls(fn), formatCny(fn), normalizeUnitPrice(fn), buildRecallHint(fn), recallSavingRatio(fn), recallHitTerms(fn), recallWarnings(fn), buildRecallModeLine(fn), buildRecallFoldSummary(fn), buildRecallEchoSummary(fn), buildRecallStatLines(fn), buildRecallCitationLines(fn), markHitFragments(fn), buildRecallSections(fn), buildRecallMarkdown(fn), buildRecallCompactMarkdown(fn), htmlEscape(fn), buildRecallDetailPage(fn), buildRecallDetailExpiredPage(fn), CHARS_PER_BUDGET_UNIT(const), estTokens(const), BACKGROUND_MAX_ITEMS(const), BACKGROUND_ITEM_CHARS(const), BACKGROUND_MAX_TOKENS(const), RecallRollup(type), RecallMoneyBlock(type), RecallMoney(type), RecallEchoSummary(type), RecallHint(type), RecallMarkdownOpts(type), RecallHitStyle(type), RecallSection(type), RecallDetailPageMeta(type), HitMarkup(type) |
+| [src/core/memagent/recallModes.ts](src/core/memagent/recallModes.ts) | 318 | recallModes.ts — 召回模式调度层（§2.4.3 模式定义 + §2.4.4 自动分流，直译单一真源） | normalizeScene(fn), isManualMode(fn), isConcreteMode(fn), resolveMode(fn), modeWeights(fn), modeSpec(fn), RECALL_MODE_SPECS(const), COMMON_INVARIANTS(const), DEFAULT_DISPATCH_CONFIG(const), MODE_FEATURE_WORDS(const), ModeWeights(type), RecallModeSpec(type), ModeDispatchConfig(type), ResolveModeInput(type), ResolvedMode(type), LayerKey(type), ConcreteMode(type) |
+| [src/core/memagent/recallPrelude.ts](src/core/memagent/recallPrelude.ts) | 167 | 硬前置召回的「拼装规则」单一真源（A 宿主钩子 / B LLM Gateway / C 内核门禁 共用）。 | parseMcpRpcBody(fn), extractRecallHits(fn), buildRecallPrelude(fn), lastUserQuery(fn), stripRecallPrelude(fn), injectSystemPrelude(fn), buildHookOutput(fn), RECALL_PRELUDE_MARKER(const), RECALL_PRELUDE_OPEN(const), RECALL_PRELUDE_CLOSE(const), PLUGIN_INJECTION_MARKER(const), MAX_HIT_CHARS(const), MAX_PRELUDE_CHARS(const), MAX_QUERY_CHARS(const), RecallHit(type), ChatMessage(type) |
 | [src/core/memagent/refineQueue.ts](src/core/memagent/refineQueue.ts) | 563 | 批次39：L2–L6 后台补炼队列（纯函数 + 落盘状态 + 单行补炼）。 | dayKey(fn), emptyRefineQueue(fn), clampRefineQueue(fn), loadRefineQueue(fn), saveRefineQueue(fn), hasAnyDeepLayer(fn), isRefinable(fn), enqueueRows(fn), effectiveCap(fn), dailyBudgetLeft(fn), setRefineCap(fn), nextPending(fn), retryFailed(fn), removeRefineRows(fn), reconcileRefineQueue(fn), reconcileAndPersistRefineQueue(fn), removeRefineQueueRowAndPersist(fn), summarizeRefineQueue(fn), settleRowOutcome(fn), refineRowLayers(fn), REFINE_QUEUE_FILE(const), REFINE_MAX_ENGINES_PER_CALL(const), REFINE_MAX_ROWS_PER_DAY(const), LAYER_STOP_CODES(const), markRefined(const), markRefineFailed(const), markRefineSkipped(const), RefineQueueItem(type), RefineQueueState(type), EnqueueReport(type), RefineQueueSummary(type), RefineRowCtx(type), RefineRowResult(type), RefineItemState(type), RefineStopCode(type) |
 | [src/core/memagent/regression.ts](src/core/memagent/regression.ts) | 507 | 批次48 A23.3：写入期判重决策的离线回归（用户已定 6 条定义，原方案落地）。 | suggestRecallWeights(fn), collectDedupSamples(fn), countSamples(fn), classify(fn), splitSamples(fn), evaluateRegression(fn), runGrowthRegression(fn), regressionRequestId(fn), REGRESSION_WINDOW_DAYS(const), MIN_SAMPLES(const), MIN_NEGATIVES(const), MIN_F1_GAIN(const), MAX_PRECISION_DROP(const), THRESHOLD_MIN(const), THRESHOLD_MAX(const), RECALL_SUGGEST_WINDOW_DAYS(const), RECALL_SUGGEST_MIN_RECALLS(const), RecallSuggestionMetrics(type), RecallSuggestion(type), DedupSample(type), SampleCounts(type), ClassificationMetrics(type), MetricsBundle(type), RegressionOptions(type), RegressionRunOptions(type), RegressionRunResult(type) |
 | [src/core/memagent/rejudge.ts](src/core/memagent/rejudge.ts) | 222 | 存量「按当前规则重判」（批次36-C）：规则收紧后，已落库的行不会自己变干净——本模块把 | scanRowsForRejudge(fn), rejudgeRows(fn), RejudgeDecision(type), RejudgePreview(type), RejudgeReport(type), RejudgeCtx(type) |
-| [src/core/memagent/sessionCollector.ts](src/core/memagent/sessionCollector.ts) | 1079 | 自有 Agent 会话自动采集器（§5.1 双链路补偿 · P0 自有形态，可调周期对账，预设 5min） | parseClaudeJsonl(fn), parseWorkbuddyMd(fn), parseWorkbuddyJsonl(fn), parseDshProjcache(fn), scanSessionLogs(fn), createReconciler(fn), defaultAgentSources(fn), applyScanToStore(fn), ParsedMessage(type), SessionLogSource(type), FileCursor(type), CollectorCursor(type), CollectedItem(type), ScanResult(type), ScanOptions(type), ReconcileOptions(type), Reconciler(type), DefaultSourcesOpts(type), CollectorBridgeOpts(type), ApplyScanResult(type), LineParser(type), BlockParser(type) |
+| [src/core/memagent/sessionCollector.ts](src/core/memagent/sessionCollector.ts) | 1101 | 自有 Agent 会话自动采集器（§5.1 双链路补偿 · P0 自有形态，可调周期对账，预设 5min） | stripPluginInjection(fn), isPluginInjected(fn), parseClaudeJsonl(fn), parseWorkbuddyMd(fn), parseWorkbuddyJsonl(fn), parseDshProjcache(fn), scanSessionLogs(fn), createReconciler(fn), defaultAgentSources(fn), applyScanToStore(fn), ParsedMessage(type), SessionLogSource(type), FileCursor(type), CollectorCursor(type), CollectedItem(type), ScanResult(type), ScanOptions(type), ReconcileOptions(type), Reconciler(type), DefaultSourcesOpts(type), CollectorBridgeOpts(type), ApplyScanResult(type), LineParser(type), BlockParser(type) |
 | [src/core/memagent/sqliteStorage.ts](src/core/memagent/sqliteStorage.ts) | 192 | SqliteStorage（§5.3）：桌面/CLI 本地库 = P0 主源（需求规格书 §2 端壳注入、§5.3 存储端点表）。 | SqliteStorage(class) |
 | [src/core/memagent/storage.ts](src/core/memagent/storage.ts) | 126 | StorageBackend 接口实现（§5.3）：InMemoryStorage 用于测试/演示； | InMemoryStorage(class) |
 | [src/core/memagent/sync.ts](src/core/memagent/sync.ts) | 389 | REQ-008 云同步（同步机制详细设计 §1–§8）：sha256 幂等 + 向量时钟 LWW + SyncHub 中枢 + 三端引擎 | sha256hex(fn), vcCompare(fn), vcTick(fn), stampForSync(fn), syncUp(fn), syncDown(fn), reconcile(fn), filterSyncAudits(fn), SyncHub(class), SyncConflict(type), SyncAudit(type), SyncUpReport(type), SyncHubLike(type), VClock(type), PushOutcome(type), AnySyncHub(type) |
@@ -99,7 +99,7 @@
 | [src/core/memagent/tokenStore.ts](src/core/memagent/tokenStore.ts) | 230 | 令牌代理（D6-4，方案 A1 / 子方案 §3.2）：文件化令牌库 mcp-tokens.json（0600） | resolveAccountFor(fn), InMemoryTokenStore(class), FileTokenStore(class), TokenRecord(type), MintTokenInput(type), MintedToken(type), TokenStorePort(type) |
 | [src/core/memagent/types.ts](src/core/memagent/types.ts) | 1031 | memagent-core 契约类型（REQ-007 §1/§2/§3/§5/§6 直译，19.10/19.11） | isCategory(fn), CATEGORIES(const), Account(type), RefinedLayers(type), RecallReq(type), Hit(type), Budget(type), RecallBackgroundItem(type), RecallBackground(type), RecallSavings(type), RecallSecondaryHint(type), RecallDispatchInfo(type), RecallResult(type), MemReq(type), WriteResult(type), LayerDecision(type), GcReq(type), GcReport(type), GcFullReq(type), GcFullReport(type), ConflictPair(type), ConflictResolveReq(type), ConflictResolveResult(type), Pref(type), DiscoverReq(type), DiscoveredAgent(type), DiscoverResult(type), SyncReq(type), SyncReport(type), BrowseReq(type), BrowseRow(type), BrowseResult(type), L0Port(type), L0AccessRequest(type), L0AccessRequestResult(type), L0GrantReq(type), L0GrantView(type), L0GrantResult(type), L0RequestView(type), L0UnlockReq(type), L0UnlockResult(type), L0HeartbeatResult(type), L0VaultStatus(type), L0MigrationReport(type), L0MigrationResult(type), L0AdminPort(type), LogReq(type), LogItem(type), LogPage(type), AuditRef(type), AuditRecord(type), Memory(type), MemOpPatch(type), MemOpResult(type), FeedbackResult(type), ModelInfo(type), LlmCallCtx(type), LlmResp(type), LlmProvider(type), Filter(type), Scored(type), VectorBackend(type), ProjectRecord(type), CreateProjectInput(type), ListProjectsFilter(type), StorageBackend(type), MemAgentOptions(type), MemAgent(type), MemAgentSeedHooks(type), Form(type), Layer(type), DecayClass(type), Category(type), RecallMode(type), Scene(type), ErrorCode(type), ConflictVerdict(type), DiscoverSignal(type), L0GrantStatus(type), AuditAction(type), MemOp(type), FeedbackKind(type), ProjectKind(type) |
 | [src/core/memagent/ulid.ts](src/core/memagent/ulid.ts) | 47 | 简易 ULID：48bit 时间戳 + 80bit 随机（crypto 级），同毫秒内单调递增（契约 §3.1） | ulid(fn) |
-| [src/core/memagent/vector.ts](src/core/memagent/vector.ts) | 92 | VectorBackend（§5.2）当前唯一生产实现：JsVectorBackend（hash bag-of-words + cosine）。 | tokenize(fn), embedSync(fn), cosine(fn), DEFAULT_VECTOR_DIM(const), JsVectorBackend(class) |
+| [src/core/memagent/vector.ts](src/core/memagent/vector.ts) | 108 | VectorBackend（§5.2）当前唯一生产实现：JsVectorBackend（hash bag-of-words + cosine）。 | tokenize(fn), isIdentifierToken(fn), embedSync(fn), cosine(fn), DEFAULT_VECTOR_DIM(const), JsVectorBackend(class) |
 | [src/core/memagent/webhook.ts](src/core/memagent/webhook.ts) | 202 | Webhook 接收端（§19.3 主通道 / §5.4 SHA-256 幂等保真） | createWebhook(fn), HashIndex(class), IngestEvent(type), IngestResult(type), WebhookOptions(type), WebhookServer(type) |
 
 ## src/desktop
@@ -127,7 +127,7 @@
 | [src/electron/mcpClients.ts](src/electron/mcpClients.ts) | 303 | MCP 客户端配置读写 · node 层（批次15，仅 Electron 主进程使用）。 | expandHome(fn), applyRecallEvidence(fn), scanMcpClients(fn), snippetForClient(fn), wireMcpClient(fn), McpClientStatus(type), McpClientsScan(type), McpWireResult(type), McpRecallEvidence(type) |
 | [src/electron/preload.ts](src/electron/preload.ts) | 333 | Electron preload：contextIsolation 开启下，经 contextBridge 向渲染进程暴露存储桥接面与运行标识。 | — |
 | [src/electron/recallGateway.ts](src/electron/recallGateway.ts) | 188 | 批次62 UI 开关 · B：应用内置 LLM 网关（OpenAI-compatible 反向代理）。 | isLoopback(fn), rewriteRequest(fn), fetchPrelude(fn), startRecallGateway(fn), RecallGatewayOptions(type), RecallGatewayHandle(type) |
-| [src/electron/recallHard.ts](src/electron/recallHard.ts) | 253 | 批次62 UI 开关 · 主进程控制器：A 宿主钩子 / B 内置网关 / C 严格门禁 三层统一编排。 | mergeHostHooks(fn), hostHookInstalled(fn), RECALL_HARD_HOOK_TAG(const), RecallHardController(class), RecallHardControllerOptions(type), RecallHardState(type) |
+| [src/electron/recallHard.ts](src/electron/recallHard.ts) | 315 | 批次62 UI 开关 · 主进程控制器：A 宿主钩子 / B 内置网关 / C 严格门禁 三层统一编排。 | mergeHostHooks(fn), hostHookInstalled(fn), findInstalledHookPath(fn), RECALL_HARD_HOOK_TAG(const), RecallHardController(class), RecallHardControllerOptions(type), RecallHardState(type) |
 | [src/electron/storageIpc.ts](src/electron/storageIpc.ts) | 62 | 批次47 P0-3：存储数据面四条「读写/审计」通道统一走登录会话闸门。 | createStorageReadWriteHandlers(fn), StorageIpcDeps(type), StorageReadWriteHandlers(type) |
 | [src/electron/tenantSource.ts](src/electron/tenantSource.ts) | 44 | 批次45-A1 单一租户真源：数据根级 tenant.json（0600），类比 dataRoot 指针 / mcp-token.txt 的启动期指针文件。 | loadOrCreateTenant(fn), TENANT_FILE_NAME(const), TENANT_SCHEMA(const) |
 | [src/electron/webhookServer.ts](src/electron/webhookServer.ts) | 103 | Webhook HTTP 服务（批次26-A P0-4，从 main.ts 内联处理器抽出以便单测）： | createWebhookHttpServer(fn), WebhookServerOptions(type) |
@@ -158,6 +158,7 @@
 | [src/shared/recallHardConfig.ts](src/shared/recallHardConfig.ts) | 93 | 硬前置召回 A/B/C 三层开关的**配置单一真源**（批次62 UI 开关）。 | validRecallHardPort(fn), validRecallUpstream(fn), recallHardBaseUrl(fn), normalizeRecallHardConfig(fn), parseRecallHardPatch(fn), RECALL_HARD_CONFIG_FILE(const), DEFAULT_RECALL_HARD_CONFIG(const), RECALL_HARD_DEFAULT_PORT(const), RECALL_HARD_MIN_PORT(const), RECALL_HARD_MAX_PORT(const), RecallHardConfig(type) |
 | [src/shared/sessionKey.ts](src/shared/sessionKey.ts) | 6 | — | SESSION_STORAGE_KEY(const) |
 | [src/shared/tenantDefaults.ts](src/shared/tenantDefaults.ts) | 24 | 批次45-A1 单一租户真源：本机规范租户三元组的**缺省值**与**校验**。 | normalizeTenantTriple(fn), DEFAULT_TENANT(const), TenantTriple(type) |
+| [src/shared/timeWindow.ts](src/shared/timeWindow.ts) | 143 | REQ-013 / C1：本地时区相对时间解析与「时间窗命中」判定（纯函数，零依赖）。 | parseRelativeTime(fn), extractQueryTimestamp(fn), hitTimeWindow(fn), DAY_MS(const), TIME_WINDOW_MARGIN_MS(const), TIME_WINDOW_BONUS(const), TimeIntent(type) |
 
 ## src/types
 
@@ -329,14 +330,14 @@
 | [src/web/params/LlmEngineCard.tsx](src/web/params/LlmEngineCard.tsx) | 312 | 全局参数页 · LLM 精炼引擎卡片（批次31 建 / 批次32 多引擎化）：任意多家 OpenAI 兼容引擎（预设快选或自定义）， | LlmEngineCard(fn) |
 | [src/web/params/NormalConfigCard.tsx](src/web/params/NormalConfigCard.tsx) | 117 | P5-T3 普通配置卡（17.6 文案化，G7 不暴露参数名） | NormalConfigCard(fn) |
 | [src/web/params/ParamsPage.tsx](src/web/params/ParamsPage.tsx) | 118 | 全局参数页（REQ-006 / P5）T4 编排 | ParamsPage(fn) |
-| [src/web/params/RecallHardCard.tsx](src/web/params/RecallHardCard.tsx) | 293 | 批次62 · 参数页「硬前置召回」卡片：A 宿主钩子 / B 内置 LLM 网关 / C MCP 内核门禁。 | RecallHardCard(fn) |
+| [src/web/params/RecallHardCard.tsx](src/web/params/RecallHardCard.tsx) | 304 | 批次62 · 参数页「硬前置召回」卡片：A 宿主钩子 / B 内置 LLM 网关 / C MCP 内核门禁。 | RecallHardCard(fn) |
 | [src/web/params/RefineQueueCard.tsx](src/web/params/RefineQueueCard.tsx) | 230 | 参数页 · L2–L6 后台补炼队列卡（批次39）。 | RefineQueueCard(fn) |
 | [src/web/params/coreParams.ts](src/web/params/coreParams.ts) | 86 | 全局参数页（REQ-006 / P5）接真内核：参数快照存内核 preference 记忆（params:v1: JSON， | coreLoadParams(fn), coreSaveParams(fn) |
 | [src/web/params/defaults.ts](src/web/params/defaults.ts) | 77 | 全局参数页默认值与展示标签（规格常量；用户保存后以内核 preference 快照为真相）。 | kernelKbPolicies(fn), DEFAULT_CONFIG(const), SPEED_LABEL(const), RETENTION_LABEL(const), IMPORTANCE_LABEL(const), CATEGORY_LABEL(const), DEFAULT_KB_POLICIES(const), DEFAULT_DEV(const), LEVEL_MAPPING(const) |
 | [src/web/params/llmEngine.ts](src/web/params/llmEngine.ts) | 83 | 全局参数页 · LLM 精炼引擎桥（批次31 建 / 批次32 多引擎化）：渲染层经宿主桥走 llm:* IPC 调主进程网关。 | llmEngineAvailable(fn), llmGetConfig(fn), llmSaveConfig(fn), llmTestEngine(fn), LlmEnginePatch(type), LlmConfigPatch(type), LlmTestResult(type) |
 | [src/web/params/logic.ts](src/web/params/logic.ts) | 89 | 全局参数页（REQ-006 / P5）纯逻辑层 | speedToHalfLife(fn), retentionToArchive(fn), validateWeights(fn), payloadOrdered(fn), validateKbRow(fn), validateNM(fn), validateUnitPrice(fn), validateProxyQuota(fn), validateAll(fn), auditParams(fn) |
 | [src/web/params/paramsEntry.tsx](src/web/params/paramsEntry.tsx) | 11 | 全局参数页（REQ-006 / P5）入口 | — |
-| [src/web/params/recallHard.ts](src/web/params/recallHard.ts) | 75 | 批次62 · 硬前置召回 A/B/C 三层开关的渲染层桥。 | recallHardAvailable(fn), recallHardState(const), recallHardSet(const), RecallHardStateView(type), RecallHardResult(type) |
+| [src/web/params/recallHard.ts](src/web/params/recallHard.ts) | 77 | 批次62 · 硬前置召回 A/B/C 三层开关的渲染层桥。 | recallHardAvailable(fn), recallHardState(const), recallHardSet(const), RecallHardStateView(type), RecallHardResult(type) |
 | [src/web/params/refineQueue.ts](src/web/params/refineQueue.ts) | 147 | 批次39 · L2–L6 后台补炼队列的渲染层桥：状态读（需会话）/ 开关与补炼与重试失败行（仅管理员）。 | refineStopRows(fn), refineQueueAvailable(fn), REFINE_STOP_LABELS(const), refineStopLabel(const), refineQueueState(const), refineQueueSetEnabled(const), refineQueueBackfill(const), refineQueueRetryFailed(const), refineQueueSetCap(const), RefineQueueSummary(type), RefineQueueView(type), RefineEnqueueReport(type), RefineResult(type) |
 | [src/web/params/types.ts](src/web/params/types.ts) | 45 | 全局参数页（REQ-006 / P5）数据模型 | NormalConfig(type), KbPolicyRow(type), DevParams(type), ForgetSpeed(type), Retention(type), ImportanceLevel(type) |
 | [src/web/params/useParamsMirror.ts](src/web/params/useParamsMirror.ts) | 19 | 全局参数页后端镜像（阶段5-C 口径统一）：真接 home server POST /api/mirror/audit。 | useParamsMirror(fn), ParamsMirror(type) |
@@ -344,7 +345,7 @@
 | [src/web/retrieval/AuditTrailCard.tsx](src/web/retrieval/AuditTrailCard.tsx) | 54 | 检索页「审计链路上下文」卡（阶段5-A / A15 接线）。 | AuditTrailCard(fn) |
 | [src/web/retrieval/BudgetPanel.tsx](src/web/retrieval/BudgetPanel.tsx) | 56 | REQ-012 T5 预算面板（定稿）：场景预算 / 实际注入 / 丢弃条数 + R9 三档 + 漏斗与重排闸门 | BudgetPanel(fn) |
 | [src/web/retrieval/ContextPanel.tsx](src/web/retrieval/ContextPanel.tsx) | 42 | REQ-012 T5 上下文面板（§4）：全文（cold 仅 L2 + 审计展开）/ 关联 / 参数只读 / 跳转 | ContextPanel(fn) |
-| [src/web/retrieval/ModeBanner.tsx](src/web/retrieval/ModeBanner.tsx) | 63 | REQ-012 T5 生效模式横幅（§2） | ModeBanner(fn) |
+| [src/web/retrieval/ModeBanner.tsx](src/web/retrieval/ModeBanner.tsx) | 70 | REQ-012 T5 生效模式横幅（§2） | ModeBanner(fn) |
 | [src/web/retrieval/QueryBar.tsx](src/web/retrieval/QueryBar.tsx) | 164 | REQ-012 T3 查询条（定稿 6 项）：查询 / 场景 / 项目 / 模式 / 预算 / 注入深度 + 联动校验 | QueryBar(fn), DEPTH_OPTIONS(const), QueryBarValue(type) |
 | [src/web/retrieval/ResultList.tsx](src/web/retrieval/ResultList.tsx) | 62 | REQ-012 T4 结果列表（定稿结果行）：分数 + 正文/元信息 + 行内操作；Top 5 默认，加载更多至 10。 | ResultList(fn) |
 | [src/web/retrieval/ResultRow.tsx](src/web/retrieval/ResultRow.tsx) | 54 | REQ-012 T4 结果行（定稿）：score / 正文 / 元信息（id · 层 · 重要度 · 来源项目 · 温度） / 操作 | ResultRow(fn) |
@@ -504,15 +505,18 @@
 | [specs/ROADMAP-批次42-未接线三件套-方案.md](specs/ROADMAP-批次42-未接线三件套-方案.md) | 52 | ROADMAP 批次42+ — 未接线三件套（云端同步 / 每日全量补齐 / 独立采集守护进程）立项方案 |
 | [specs/ROADMAP-批次45-租户归一与成员密钥域模型-方案.md](specs/ROADMAP-批次45-租户归一与成员密钥域模型-方案.md) | 44 | ROADMAP 批次45+ — 令牌与租户欠账立项（MCP 作用域收紧前置 = 账本租户归一）+ 成员/API 密钥域模型 |
 | [specs/ROADMAP-批次B类-远端PG与多机硬过滤-方案.md](specs/ROADMAP-批次B类-远端PG与多机硬过滤-方案.md) | 102 | 批次 B 类 · 远端 PG 中枢（B4）+ 多机硬过滤（B1）+ 真实精炼（B3）方案 |
-| [specs/acceptance.md](specs/acceptance.md) | 55 | title: 验收标准 |
+| [specs/acceptance.md](specs/acceptance.md) | 71 | title: 验收标准 |
 | [specs/code-map.md](specs/code-map.md) | 1713 | status: draft |
 | [specs/demo-data-baseline.md](specs/demo-data-baseline.md) | 116 | 演示/种子数据基线清单（批次42 · 阶段0 冻结） |
-| [specs/recall-echo-contract.md](specs/recall-echo-contract.md) | 379 | title: 回显（recall echo）逻辑与格式统计 |
+| [specs/recall-echo-contract.md](specs/recall-echo-contract.md) | 393 | title: 回显（recall echo）逻辑与格式统计 |
 | [specs/reports/BATCH48-FIX-REPORT.md](specs/reports/BATCH48-FIX-REPORT.md) | 80 | 批次48 审计修复收尾报告 |
 | [specs/reports/RECALL-WEEK-PLAN.md](specs/reports/RECALL-WEEK-PLAN.md) | 120 | 召回 A 方案 · 一周真实数据观察计划（2026-11-12 ~ 2026-11-19） |
 | [specs/reports/T4-存量明文盘点-2026-11-12.md](specs/reports/T4-存量明文盘点-2026-11-12.md) | 51 | title: T4 存量明文盘点与不变量守卫 |
+| [specs/reports/dsh-hindsight-local-对比与借鉴-2026-11-14.md](specs/reports/dsh-hindsight-local-对比与借鉴-2026-11-14.md) | 115 | dsh-hindsight-local 与 MultiAgent Memory 对比与借鉴建议 |
+| [specs/reports/dsh-hindsight-local-调研报告-2026-11-14.md](specs/reports/dsh-hindsight-local-调研报告-2026-11-14.md) | 266 | dsh-hindsight-local 仓库调研报告 |
+| [specs/reports/召回模式全程序审查报告-2026-11-13.md](specs/reports/召回模式全程序审查报告-2026-11-13.md) | 160 | title: 召回模式全程序审查报告 |
 | [specs/reports/审查-Agent侧记忆库与净化生长打通-2026-11-12.md](specs/reports/审查-Agent侧记忆库与净化生长打通-2026-11-12.md) | 111 | title: 审查报告 — Agent 侧记忆库使用与净化生长数据是否打通 |
-| [specs/requirements.md](specs/requirements.md) | 59 | title: 需求规格 |
+| [specs/requirements.md](specs/requirements.md) | 75 | title: 需求规格 |
 | [specs/tasks/AGENT-ONBOARD.md](specs/tasks/AGENT-ONBOARD.md) | 208 | 原子任务：Agent 接入配置页（REQ-003） |
 | [specs/tasks/AUDIT-LOG.md](specs/tasks/AUDIT-LOG.md) | 87 | REQ-006 / P11 审计日志页 — 任务拆分（原子任务 · 供 Agent 执行） |
 | [specs/tasks/CONFLICT.md](specs/tasks/CONFLICT.md) | 61 | REQ-006 / P7 冲突裁决页 — 任务拆分（原子任务 · 供 Agent 执行） |
@@ -531,13 +535,15 @@
 | [specs/tasks/RECALL-ECHO-RAG.md](specs/tasks/RECALL-ECHO-RAG.md) | 321 | title: 回显重设计 — RAG 引用锚点 + 气泡内折叠统计汇总 |
 | [specs/tasks/RECALL-HIGHLIGHT.md](specs/tasks/RECALL-HIGHLIGHT.md) | 115 | REQ-004 → 回显命中片段高亮（方案 C）· AC/TC |
 | [specs/tasks/RECALL-SCORE-FIX.md](specs/tasks/RECALL-SCORE-FIX.md) | 141 | 召回打分修复（批次60）：长文本被余弦系统性稀释 |
+| [specs/tasks/RECALL-SHAPING-P1.md](specs/tasks/RECALL-SHAPING-P1.md) | 213 | title: P1 客户端整形改造（借鉴 dsh-hindsight 第 6/7/8 项） |
+| [specs/tasks/RECALL-SHAPING.md](specs/tasks/RECALL-SHAPING.md) | 141 | title: 召回质量增强（借鉴 Hindsight 客户端整形层） |
 | [specs/tasks/RETRIEVAL.md](specs/tasks/RETRIEVAL.md) | 110 | REQ-012 检索页 — 任务拆分（原子任务 · 供 Agent 执行） |
 | [specs/tasks/SECURITY.md](specs/tasks/SECURITY.md) | 31 | P12 账号与安全页 任务拆分（REQ-006 / 4.1 / 4.2 / 3.2 / 18.2-A） |
 | [specs/tasks/SETUP.md](specs/tasks/SETUP.md) | 108 | REQ-005 / 首启强制向导（setup.html）— 字段级 AC / TC |
 | [specs/tasks/SYNC.md](specs/tasks/SYNC.md) | 28 | REQ-008 云同步 任务拆分（同步机制详细设计 §1–§8） |
 | [specs/tasks/USER-REGISTER.md](specs/tasks/USER-REGISTER.md) | 97 | 原子任务示例：用户注册（USER-REGISTER） |
 | [specs/tasks/WRITE-PAGE.md](specs/tasks/WRITE-PAGE.md) | 98 | REQ-006 / P2 写入页 — 任务拆分（原子任务 · 供 Agent 执行） |
-| [specs/test-plan.md](specs/test-plan.md) | 138 | title: 测试标准 |
+| [specs/test-plan.md](specs/test-plan.md) | 152 | title: 测试标准 |
 | [specs/topbar-consolidation-2026-11-08.md](specs/topbar-consolidation-2026-11-08.md) | 57 | 顶部三层并一条 + 删默认菜单（2026-11-08） |
 | [specs/topbar-restore-compare-2026-11-08.md](specs/topbar-restore-compare-2026-11-08.md) | 96 | 顶部区逐元素比对（定稿 vs 当前实现）· 待确认 |
 | [specs/working-set/agent-memory-sop.md](specs/working-set/agent-memory-sop.md) | 562 | 多 Agent 记忆读写 SOP（标准作业程序） |
@@ -600,7 +606,7 @@ src/agentOnboard/validators.ts a7372fc705a7
 src/auth/hash.ts 3919b27befef
 src/auth/loginService.ts a0cc1ede21f9
 src/auth/memberSync.ts dd7d2d4ed60e
-src/core/memagent/agent.ts 6f66e3400720
+src/core/memagent/agent.ts d78464f3cdc8
 src/core/memagent/agentUsage.ts e6913ee6c9ac
 src/core/memagent/auditLog.ts 041c6c71e76e
 src/core/memagent/collectDaemon.ts 1c66b6cd74c0
@@ -611,7 +617,7 @@ src/core/memagent/errors.ts 4f68fde40b23
 src/core/memagent/feedbackSignal.ts 17a4faceba0a
 src/core/memagent/fieldBackfill.ts 23a377e0c190
 src/core/memagent/fileStorage.ts 43c4c05080fd
-src/core/memagent/forgetting.ts 57fd1a93da33
+src/core/memagent/forgetting.ts 3a1bb2f13a1b
 src/core/memagent/hitHighlight.ts cb393dd329f3
 src/core/memagent/l0Recovery.ts c76af3edf9b2
 src/core/memagent/l0Split.ts 741edeb20acf
@@ -624,17 +630,17 @@ src/core/memagent/llm.ts 89651995229a
 src/core/memagent/mcp.ts 9bb221719296
 src/core/memagent/mcpAuth.ts c916f8e72e4a
 src/core/memagent/mcpGcTools.ts ee67d3c47c47
-src/core/memagent/mcpHttp.ts d2168abb243e
+src/core/memagent/mcpHttp.ts 1a81fce87809
 src/core/memagent/mcpManageTools.ts a1cfb45dcd98
 src/core/memagent/mcpProjectTools.ts 465a286c11df
 src/core/memagent/mcpReadTools.ts 43f033b6dacc
 src/core/memagent/mcpRecall.ts 006d18427665
-src/core/memagent/mcpSchema.ts 9a6312352664
+src/core/memagent/mcpSchema.ts 713960ab1ee3
 src/core/memagent/memberStore.ts 7e32317d359b
 src/core/memagent/memories.ts a1df4e9f3132
 src/core/memagent/paramsSnapshot.ts 8024d1fa8006
 src/core/memagent/pendingStoreFile.ts 67a02b1b7648
-src/core/memagent/pendingWrites.ts c961e240a28b
+src/core/memagent/pendingWrites.ts ac57f2d79ffb
 src/core/memagent/personal.ts bc9c480c0708
 src/core/memagent/personalStore.ts 97caf77bf9a2
 src/core/memagent/personalStoreFile.ts 776412fdd9d6
@@ -644,13 +650,13 @@ src/core/memagent/rebuild.ts 0157d9372c16
 src/core/memagent/recallDetailTickets.ts d7553f2a2f3a
 src/core/memagent/recallHook.ts 3dbf1c5f50c2
 src/core/memagent/recallHookCli.ts b81496ec718c
-src/core/memagent/recallInsight.ts 8676b507fd57
-src/core/memagent/recallModes.ts 148d524e7271
-src/core/memagent/recallPrelude.ts 2eaf72e887a3
+src/core/memagent/recallInsight.ts bf2d6a5e0da3
+src/core/memagent/recallModes.ts 2dafafc2fa84
+src/core/memagent/recallPrelude.ts 29ed77108ff5
 src/core/memagent/refineQueue.ts 8a4b9204d51d
 src/core/memagent/regression.ts 0c6ee9381826
 src/core/memagent/rejudge.ts fbbb37ee97b1
-src/core/memagent/sessionCollector.ts d52ab9e02e47
+src/core/memagent/sessionCollector.ts 88e8fd97ce41
 src/core/memagent/sqliteStorage.ts a39293991388
 src/core/memagent/storage.ts eec1bee4ec33
 src/core/memagent/sync.ts 137bbd6b4a46
@@ -658,7 +664,7 @@ src/core/memagent/tenantNormalize.ts 3cbf77699400
 src/core/memagent/tokenStore.ts f91acfd671b5
 src/core/memagent/types.ts 88a37f29bee0
 src/core/memagent/ulid.ts 634c99f1962a
-src/core/memagent/vector.ts 80221de2d059
+src/core/memagent/vector.ts fac22ffc234b
 src/core/memagent/webhook.ts deae36bbc0ca
 src/desktop/hostBridge.ts 718f50443040
 src/desktop/hostScan.ts 0559ae3ef556
@@ -676,7 +682,7 @@ src/electron/main.ts b4b6be658408
 src/electron/mcpClients.ts df9527333225
 src/electron/preload.ts a680c1f82df2
 src/electron/recallGateway.ts f06028e2c9c5
-src/electron/recallHard.ts b7e5c0733ca1
+src/electron/recallHard.ts 54969098f869
 src/electron/storageIpc.ts 9edb5f55187a
 src/electron/tenantSource.ts 8d493e4182d2
 src/electron/webhookServer.ts 62157c0b1e21
@@ -697,6 +703,7 @@ src/shared/proxyAccounting.ts 5af6f44a262f
 src/shared/recallHardConfig.ts e63beeda3a00
 src/shared/sessionKey.ts ab2fa7617802
 src/shared/tenantDefaults.ts 881e1ff9c969
+src/shared/timeWindow.ts a3da99f12d96
 src/types/agentOnboard.ts d4d887c55e8a
 src/types/home.ts 15302ed61695
 src/web/AgentOnboard/AgentCard.tsx a3cca4273b0b
@@ -858,14 +865,14 @@ src/web/params/KbPolicyTable.tsx c39b52ed1039
 src/web/params/LlmEngineCard.tsx 4c938ef647cb
 src/web/params/NormalConfigCard.tsx c9d2b664ee4f
 src/web/params/ParamsPage.tsx 95f1b5290565
-src/web/params/RecallHardCard.tsx 6b3cba90295e
+src/web/params/RecallHardCard.tsx 7251f39e65b1
 src/web/params/RefineQueueCard.tsx 704d8988fed9
 src/web/params/coreParams.ts 450ba203beb2
 src/web/params/defaults.ts 6dd5728ef0ec
 src/web/params/llmEngine.ts bd46b6e725ef
 src/web/params/logic.ts 1e5af0361e3b
 src/web/params/paramsEntry.tsx b515fd3e8d65
-src/web/params/recallHard.ts 8369201ae813
+src/web/params/recallHard.ts f45e9aac471f
 src/web/params/refineQueue.ts 00f06b45c16c
 src/web/params/types.ts 9840a32c5e5d
 src/web/params/useParamsMirror.ts 5529b48cfccc
@@ -873,7 +880,7 @@ src/web/params/useToast.tsx 85cd09d2e1f5
 src/web/retrieval/AuditTrailCard.tsx ec4eb45c6bad
 src/web/retrieval/BudgetPanel.tsx 3880106a3970
 src/web/retrieval/ContextPanel.tsx c0a110e5bc9f
-src/web/retrieval/ModeBanner.tsx 97bb9b17e82e
+src/web/retrieval/ModeBanner.tsx ae14682fdf35
 src/web/retrieval/QueryBar.tsx 20856f75ecc7
 src/web/retrieval/ResultList.tsx 7601b8d14c2b
 src/web/retrieval/ResultRow.tsx 7a392df30391
@@ -1028,15 +1035,18 @@ specs/RECALL-HARD-PREFIX.md 1bb2a36797a6
 specs/ROADMAP-批次42-未接线三件套-方案.md df1a6f9d6ed5
 specs/ROADMAP-批次45-租户归一与成员密钥域模型-方案.md 633abaaaad54
 specs/ROADMAP-批次B类-远端PG与多机硬过滤-方案.md 0c7857454a7d
-specs/acceptance.md 664f1bb0d8cf
+specs/acceptance.md abfa162cb802
 specs/code-map.md 6c880a29cbc6
 specs/demo-data-baseline.md 1d9af215ac78
-specs/recall-echo-contract.md 7de932f2bf11
+specs/recall-echo-contract.md 092d2eadd30f
 specs/reports/BATCH48-FIX-REPORT.md 7d62836888ad
 specs/reports/RECALL-WEEK-PLAN.md 9747f8a52112
 specs/reports/T4-存量明文盘点-2026-11-12.md 6dbc307b0320
+specs/reports/dsh-hindsight-local-对比与借鉴-2026-11-14.md 505ceb6e31e6
+specs/reports/dsh-hindsight-local-调研报告-2026-11-14.md 6a90063ae5da
+specs/reports/召回模式全程序审查报告-2026-11-13.md e91202c37a63
 specs/reports/审查-Agent侧记忆库与净化生长打通-2026-11-12.md ab5e7d6e7390
-specs/requirements.md 6e72739fe35b
+specs/requirements.md 7265c17371df
 specs/tasks/AGENT-ONBOARD.md 900d19783798
 specs/tasks/AUDIT-LOG.md b778c455d43d
 specs/tasks/CONFLICT.md c894269434e1
@@ -1055,13 +1065,15 @@ specs/tasks/MONITOR.md d37cef8d352e
 specs/tasks/RECALL-ECHO-RAG.md 1dfd636c66d8
 specs/tasks/RECALL-HIGHLIGHT.md ed83180a0849
 specs/tasks/RECALL-SCORE-FIX.md 60241239cf8f
+specs/tasks/RECALL-SHAPING-P1.md 161389e0027c
+specs/tasks/RECALL-SHAPING.md ea503c66775f
 specs/tasks/RETRIEVAL.md c9a2b6c83a87
 specs/tasks/SECURITY.md 8a4a4441bc8f
 specs/tasks/SETUP.md 21f41f4ab238
 specs/tasks/SYNC.md 6271b8a85d1e
 specs/tasks/USER-REGISTER.md 2c4bdb921f96
 specs/tasks/WRITE-PAGE.md 0062573b1e9f
-specs/test-plan.md e8aa9228cb1a
+specs/test-plan.md 6b25c648001f
 specs/topbar-consolidation-2026-11-08.md 3765d20edef7
 specs/topbar-restore-compare-2026-11-08.md 65bdc9089a21
 specs/working-set/agent-memory-sop.md a321ec2970eb

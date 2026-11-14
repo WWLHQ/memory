@@ -5,9 +5,34 @@
 ## 一句话定位
 本工作区 = **工作法体系** + 真实项目「**多 Agent 记忆助手**」（需求规格与原型已结构化并跑通首个功能）。
 
-## 当前状态（2026-11-13 19:50 压缩快照 · 优先于下方历史段落）
+## 当前状态（2026-11-14 08:05 压缩快照 · 优先于下方历史段落）
 
-### 召回模式接线 A1–A6（2026-11-13 22:50 · 最新）
+### A9 / A10 / A11 纯内核收口（2026-11-14 08:05 · **最新** · 未打包 / 未提交 / 未 push）
+
+- **范围**（详见 `specs/reports/召回模式全程序审查报告-2026-11-13.md` §5.1 / §5.2）：
+  - A9：`buildRecallModeLine()` 消费 `dispatch.reason`（16.5 降级不再伪称「用户指定」）；观测档 banner 写「自动」与回显同口径（不新增原型外 UI 行）；`mode_dispatch` 审计落 `source`。
+  - A10：`normalizeScene()` 内核唯一真源（非法/空 scene 回落 default + reason 如实标注）；`scoreMode()` 大小写归一化；`default.candidates` 扩到 5 套；`viaFallback` 真实化；`top_k` 整数校验；`dispatch.secondary` 与 `secondary_mode_hint.mode` 恒一致。
+  - A11（纯内核子集）：A5 取材池复用 `hardFilter`；次模式块前移，hint 优先取材、`backgroundExcludeIds` 让位，杜绝重复注入。
+- **三处报告误判已纠正并写入报告 §5.1**：① 原型 `syncSceneMode()` 本就有「critical 禁极简→改回自动+toast」，**不删 QueryBar 改写**（删了反而偏离原型）；② 中文名「顶层洞察」vs「顶层洞察优先」不动，待补原型/批准；③ `pattern_reasoning.weights` 0.90 是**规格书 §2.4.3 自身矛盾**（方案第 30 行），`specs/` 才是 SSOT，**不改代码**。
+- **闸门**：TDD 先红 11 条（逐条精确）→ 四件套 64/64 绿；`test:gate` **252 文件 / 3028 例 / 0 失败 / 0 重试**；typecheck / oxlint(688 文件 0 错) / check:no-demo / validate(0 失败) / generate --check 全绿；索引重建 380 源码 / 142 文档后 check 通过。变异 6 处精确打红 6 条，二进制还原后四文件 SHA256 一致、复绿。
+- **关键结论**：`default.candidates` 扩到 5 套**不改变 auto 档打分**（A3 权重透传只对手动生效，auto 继续 `growth:v1`），故既有回归零打红。
+- **未做（下一批）**：次模式内容进回显（要再动 A8 契约）、`conflictRule` / 热更词表 / `config` 接线、`critical` 最低深度、方案 §3 全套 UI（原型无对应控件，须先补原型或显式批准）、中文名统一、规格书权重和修订。
+- **运行态**：8204 仍跑并行会话 23:49 的包；真机取证 `display.markdown` 有 `⚙ 模式`、`display.line`/`content[3]` 无 → **不含 A8 及之后任何改动**。重新打包会覆盖该包，须用户拍板。
+- **在途改动**：`recallHard.ts` / `recallHard.test.ts` / `RecallHardCard.tsx` / `params/recallHard.ts` 属并行会话，未碰 / 未还原 / 未提交；`specs/code-index.generated.md` 为本轮索引重建产物；另有并行会话新产生的未跟踪 `specs/reports/dsh-hindsight-local-调研报告-2026-11-14.md`。**禁 `git add .`**。
+- **纪律**：【停·等用户实测】→【停·等用户明确确认】→ 才 commit / push。
+
+### A8 回显契约补齐（2026-11-14 00:17 · 未打包 / 未提交）
+
+- **审查报告落盘**：`specs/reports/召回模式全程序审查报告-2026-11-13.md` —— 5 条只读实证探针 + 8204 真机取证（`display.markdown` 有 `⚙ 模式`、`display.line`/`content[0]` 没有、`content[3]` 仍写「两行加粗短摘要」）+ BUG 清单 + A8–A11 排序。
+- **A8 真因**：A6 的模式行在代码里已生效，失效点是「服务端下发的展示要求 + 单行兜底字段」。改 `mcpSchema.ts`（instructions / 工具描述 / detail 描述）、`mcpHttp.ts`（`recallEchoNote` 三档 + 气泡卡文案 + 兜底说明）、`recallInsight.ts`（`hint.line` 单行末尾追加 `⚙ 模式` 段）、`specs/recall-echo-contract.md`（全模板同步）。会话视图 `dispatch=null` 仍不编模式行。
+- **测试**：C 组夹具改真实 `dispatch`；新增四档载体断言、单行兜底断言、契约四处同口径断言、B6 的「真实 dispatch」对偶用例。TDD 先红 7 例 → 改完 87/87 绿。
+- **门禁**：typecheck / oxlint(688 文件 0 错) / no-demo / code:index(380 源码·140 文档) / validate / `tools/generate.py --check` 全绿；`test:gate` **252 文件 3016 例 0 失败**。一次既有 flaky（`fileStorage.reloadOnMtime` mtime 同毫秒）单跑复绿、重跑全量复绿，与本轮无关。
+- **变异 3 次**：去 `line` 模式段 → 3 红；`mcpSchema` 去 `⚙ 模式` 标记 → 1 红；`mcpHttp` 去 `⚙ 模式` 标记 → 6 红；三次还原后三文件 SHA256 与变异前一致并复绿。
+- **未打包**：当前 8204 跑的是并行会话 23:49 的包（含批次62 A3 修复，**不含 A8**）。打包会覆盖该包 → 须用户先定；真机验 A8 需新包。
+- **在途改动**：`recallHard.ts` / `recallHard.test.ts` / `RecallHardCard.tsx` / `params/recallHard.ts` 属并行会话，未碰 / 未还原 / 未提交；`specs/code-index.generated.md` 为本轮索引重建产物。**禁 `git add .`**。
+- **纪律**：【停·等用户实测】→【停·等用户明确确认】→ 才 commit / push。后续 A9/A10/A11 见审查报告 §5。
+
+### 召回模式接线 A1–A6（2026-11-13 22:50）
 
 - 规格与落地口径全在 `specs/召回模式设计与实现方案.md` §2.4/§2.6，这里只留「接手要看什么」。
 - **A1 契约**：`RecallResult` 的 `hit_keywords`（必填）/ `secondary_mode_hint` / `dispatch`（A6，显式 `null`）。缺字段 = `typecheck` 报错，`recallContract.test.ts` 用 `@ts-expect-error` 锁住。
