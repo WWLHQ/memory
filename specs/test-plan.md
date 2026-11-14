@@ -77,7 +77,7 @@ status: active
 
 ## TC-015 召回质量增强测试（REQ-013）
 对应 AC-013：五项能力均有单测 / 集成用例覆盖，且与现有架构零冲突。
-- 单元：`src/shared/__tests__/timeWindow.test.ts`（相对时间解析 + 东八区边界 + 时间窗命中加权）；`src/core/memagent/__tests__/pendingWrites.test.ts`（sha1 去重 / 游标不推进 / 断点续传 / pending 语义）；`src/core/memagent/__tests__/vector.test.ts` 或 `forgetting.test.ts`（标识符权重 3 生效）；`src/core/memagent/__tests__/recallPrelude.test.ts`（source 标记 + 三处采集过滤）；监控/审计状态轮询（409 语义）。
+- 单元：`src/shared/__tests__/timeWindow.test.ts`（相对时间解析 + 东八区边界 + 时间窗命中加权）；`src/core/memagent/__tests__/pendingWrites.test.ts`（sha1 去重 / 游标不推进 / 断点续传 / pending 语义）；`src/core/memagent/__tests__/vector.test.ts` 或 `forgetting.test.ts`（标识符权重 3 生效）；`src/core/memagent/__tests__/recallPrelude.test.ts`（source 标记 + 三处采集过滤）；`src/web/monitor/__tests__/operationState.test.ts`（409 语义 + 状态机 + **多来源审计映射**：schedule_run/memory_op/graft/gc/auto_bind 的 succeeded/failed 判定与「不臆造 queued」）；`src/web/monitor/__tests__/MonitorPage.test.tsx`（有真实操作审计 → 渲染汇总与最近明细；无 → 整块不渲染）。
 - 回归：`src/core/memagent/__tests__/recallModes.test.ts` 断言档位数与 `resolveMode` 不变；现有测试文件全绿。
 - 门禁：`npm run verify:fast`（typecheck + lint + 覆盖率单测）+ `python tools/validate_project.py`（AC-013→REQ-013、TC-015→AC-013 引用完整）。
 

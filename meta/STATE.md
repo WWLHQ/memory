@@ -5,9 +5,23 @@
 ## 一句话定位
 本工作区 = **工作法体系** + 真实项目「**多 Agent 记忆助手**」（需求规格与原型已结构化并跑通首个功能）。
 
-## 当前状态（2026-11-14 08:05 压缩快照 · 优先于下方历史段落）
+## 当前状态（2026-11-14 11:50 压缩快照 · 优先于下方历史段落）
 
-### A9 / A10 / A11 纯内核收口（2026-11-14 08:05 · **最新** · 未打包 / 未提交 / 未 push）
+### P0 召回质量增强收口（2026-11-14 11:50 · **最新** · 未打包 / 未提交 / 未 push）
+
+- **REQ-013 / AC-013 / TC-015 + 任务文件 `specs/tasks/RECALL-SHAPING.md`（T1–T7）**：借鉴 dsh-hindsight 客户端整形层，纯逻辑补强，零外部模型 / 零出网。
+- **T1 时间窗**：`src/shared/timeWindow.ts` 相对时间→本地时区戳 + `query_timestamp` + 时间窗命中；东八区边界（早上 7 点不落前一天）。
+- **T2 打分修正**：`agent.ts` 仅 `detected=true` 时对命中时间窗记忆 `score ×1.3`（不新增第 6 模式、`recallModes.ts` 单一真源不变）。
+- **T3 幂等写入**：`pendingWrites.ts` 内容指纹去重（同 content 不重复入队，不破 pending≠成功）；`sessionCollector.ts` 退避 ±20% 抖动。
+- **T4 标识符加权**：`vector.ts` `isIdentifierToken` + `forgetting.ts` `tokenCoverageWeighted`（路径/符号/ID 权重 3、普通词 1；无标识符时与旧口径逐字一致）；`agent.ts` 用它替换 `tokenCoverage`。
+- **T5 source 标记 + 采集过滤**：`recallPrelude.ts` `PLUGIN_INJECTION_MARKER`（进 system prelude 不进回显）；`sessionCollector.ts` `stripPluginInjection`/`isPluginInjected` + 三处采集口剥离（防回灌）。
+- **T6 真实状态 UI**：`src/web/monitor/operationState.ts` 状态机（**409=排队中不算失败**、终态/继续轮询/指数退避、从 audit.jsonl 聚合 sync 状态、可注入轮询）；`useMonitorReal.ts` 加 `operations`；`MonitorPage.tsx` 加「异步操作状态」区块（空账本仍 14 卡，不破断言）。
+- **门禁（T7 收口）**：`npm run verify:fast` 全绿（typecheck + oxlint + code:index:check + no-demo + **test:coverage 255 文件 3070 测试 0 失败**，覆盖 80.33%/72.15%/76.25%/83.66%）；`validate_project.py` **0 失败**（WARN 均既有遗留孤儿文件）；`code-index` 已重建（382 源码 / 144 文档）并 check 通过。
+- **变异验证**：T6 临时把 409 改判 failed → 3 例红灯 → 还原复绿；T2/T4 边界以「无时间词 / 无标识符时行为逐字不变」断言锁。
+- **边界守**：未动 `auditLog.ts` 落盘、未改回显铁律、未引入外部模型、未破 pending≠成功。
+- **纪律**：【停·等用户实测】→【停·等用户明确确认】→ 才 commit / push / 打包（§0.2 两道等待）。**未 commit / 未 push / 未打包**。
+
+### A9 / A10 / A11 纯内核收口（2026-11-14 08:05 · 历史 · 未打包 / 未提交 / 未 push）
 
 - **范围**（详见 `specs/reports/召回模式全程序审查报告-2026-11-13.md` §5.1 / §5.2）：
   - A9：`buildRecallModeLine()` 消费 `dispatch.reason`（16.5 降级不再伪称「用户指定」）；观测档 banner 写「自动」与回显同口径（不新增原型外 UI 行）；`mode_dispatch` 审计落 `source`。

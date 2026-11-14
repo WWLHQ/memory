@@ -63,7 +63,7 @@ P13 大模型配置（向量/LLM 模型）、P14 自我净化与生长页字段�
 - **C2 确定性幂等写入**：`document_id=<session>:tN` + 内容 sha1 去重 + **失败绝不推进游标** + 429 指数退避抖动；补强 `pendingWrites.ts` / `sessionCollector.ts`，给 `WriteResult` 加 `cursor` / `content_hash`，实现断点续传，且不破坏现有「pending ≠ 成功」语义。
 - **C3 标识符逐字保真与精确词加权**：路径/符号/ID 等标识符权重 3，CJK 二元组/英文词权重 1；在 `vector.ts` `tokenCoverage` 或 `forgetting.ts` 打分处叠加（本就词袋检索，成本极低）。
 - **C4 注入内容 source 标记与采集侧过滤**：若启用自动注入，`recallPrelude.ts` 注入头带 source 标记；`sessionCollector.ts` 采集时三处过滤（跳过 `plugin:` / `source.kind`、剥离 `<memory-context>`）；当前不自动注入，先买保险。
-- **C5 异步真实状态驱动 UI**：监控/审计页按 operation id 轮询真实状态、409「排队中」不算失败、定期对账，复用现有 `audit.jsonl` 事实源。
+- **C5 异步真实状态驱动 UI**：监控/审计页按 operation id 轮询真实状态、409「排队中」不算失败、定期对账，复用现有 `audit.jsonl` 事实源。**数据源为多来源只读审计**（`sync_*` / `schedule_run` / `memory_op` / `graft` / `gc` / `auto_bind`），按 `request_id` 取最新一条派生状态；**只读派生、不新增任何审计写入**；完成记录类审计只会判出「已完成/失败」，不从审计里凭空造「排队中」；无相关审计时整块不渲染（诚实空态）。
 详情：任务拆分见 [`specs/tasks/RECALL-SHAPING.md`](../tasks/RECALL-SHAPING.md)；论证见 [`specs/reports/dsh-hindsight-local-对比与借鉴-2026-11-14.md`](../reports/dsh-hindsight-local-对比与借鉴-2026-11-14.md)。
 
 ## REQ-014 召回质量增强（P1 · 客户端整形改造项）

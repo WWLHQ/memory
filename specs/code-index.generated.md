@@ -3,7 +3,7 @@
 > 由 `npm run code:index` 生成，请勿手改；改代码/文档后重跑即可。
 > 用法：先在本表定位文件与导出符号，再只读该文件的局部区间（省 token、少误改）。
 
-共 381 个源码文件、144 个文档。
+共 382 个源码文件、144 个文档。
 
 ## e2e
 
@@ -311,14 +311,15 @@
 | [src/web/models/useToast.tsx](src/web/models/useToast.tsx) | 13 | — | useToast(fn) |
 | [src/web/monitor/AlertTimeline.tsx](src/web/monitor/AlertTimeline.tsx) | 74 | P6-T3 告警时间线（12.2） | AlertTimeline(fn) |
 | [src/web/monitor/MetricGrid.tsx](src/web/monitor/MetricGrid.tsx) | 46 | P6-T3 指标卡网格（12.1：5 组 14 卡） | MetricGrid(fn) |
-| [src/web/monitor/MonitorPage.tsx](src/web/monitor/MonitorPage.tsx) | 116 | 监控仪表盘（REQ-006 / P6）· 14 卡分 5 组 + 告警时间轴（左轴级别色）+ 三档过滤 | MonitorPage(fn) |
+| [src/web/monitor/MonitorPage.tsx](src/web/monitor/MonitorPage.tsx) | 143 | 监控仪表盘（REQ-006 / P6）· 14 卡分 5 组 + 告警时间轴（左轴级别色）+ 三档过滤 | MonitorPage(fn) |
 | [src/web/monitor/coreMonitor.ts](src/web/monitor/coreMonitor.ts) | 39 | 监控仪表盘（REQ-006 / P6）接真内核：告警时间线读真实账本（action='monitor_alert'，只读回放，不再灌种子）。 | coreLoadAlerts(fn), coreRaiseAlert(fn) |
 | [src/web/monitor/logic.ts](src/web/monitor/logic.ts) | 47 | 监控仪表盘（REQ-006 / P6）纯逻辑层 | evalLevel(fn), inWindow(fn), filterAlerts(fn), groupMetrics(fn), percentile(fn), levelBadge(fn) |
 | [src/web/monitor/monitorEntry.tsx](src/web/monitor/monitorEntry.tsx) | 11 | 监控仪表盘（REQ-006 / P6）入口（T1 壳） | — |
+| [src/web/monitor/operationState.ts](src/web/monitor/operationState.ts) | 171 | REQ-013 / C5：异步操作真实状态机（借鉴 dsh-hindsight 的 operation 状态语义）。 | classifyOperationOutcome(fn), isTerminal(fn), shouldKeepPolling(fn), nextPollDelay(fn), operationLabel(fn), summarizeOperations(fn), operationEntriesFromAudits(fn), operationStatusFromAudits(fn), pollOperationUntilTerminal(fn), OPERATION_ACTION_SPECS(const), OperationEntry(type), OperationStatus(type) |
 | [src/web/monitor/options.ts](src/web/monitor/options.ts) | 28 | 监控页宿主 Agent 筛选选项（批次48 A25：只由真实账本派生，不内置占位 agent 名）。 | agentOptionsFromLedger(fn), ALL_AGENTS_OPTION(const) |
 | [src/web/monitor/types.ts](src/web/monitor/types.ts) | 36 | 监控仪表盘（REQ-006 / P6）数据模型 | MetricCard(type), AlertItem(type), MonitorFilter(type), AlertLevel(type) |
 | [src/web/monitor/useMonitorMirror.ts](src/web/monitor/useMonitorMirror.ts) | 13 | 监控仪表盘后端镜像：挂载视图上抛（G6 fire-and-forget，monitor_view）。 | useMonitorMirror(fn) |
-| [src/web/monitor/useMonitorReal.ts](src/web/monitor/useMonitorReal.ts) | 160 | 监控仪表盘（REQ-006 / P6）· 真实数据接真层 | percentile(fn), metricsFromLedger(fn), realLoadAlerts(fn), loadRealMonitorData(fn), MONITOR_REAL_DATA_SOURCE(const), RealMonitor(type), RealStorage(type) |
+| [src/web/monitor/useMonitorReal.ts](src/web/monitor/useMonitorReal.ts) | 168 | 监控仪表盘（REQ-006 / P6）· 真实数据接真层 | percentile(fn), metricsFromLedger(fn), realLoadAlerts(fn), loadRealMonitorData(fn), MONITOR_REAL_DATA_SOURCE(const), RealMonitor(type), RealStorage(type) |
 | [src/web/monitor/useToast.tsx](src/web/monitor/useToast.tsx) | 13 | — | useToast(fn) |
 | [src/web/overview/Overview.tsx](src/web/overview/Overview.tsx) | 136 | REQ-003 + REQ-005 配合展示（通览演示页） | Overview(fn) |
 | [src/web/overview/OverviewPage.tsx](src/web/overview/OverviewPage.tsx) | 563 | 首页总览工作台（批次57-C · 版式对齐定稿图 stratum-l1l3-preview pg-home）： | deriveHomeView(fn), OverviewPage(fn), HomeDerived(type) |
@@ -505,7 +506,7 @@
 | [specs/ROADMAP-批次42-未接线三件套-方案.md](specs/ROADMAP-批次42-未接线三件套-方案.md) | 52 | ROADMAP 批次42+ — 未接线三件套（云端同步 / 每日全量补齐 / 独立采集守护进程）立项方案 |
 | [specs/ROADMAP-批次45-租户归一与成员密钥域模型-方案.md](specs/ROADMAP-批次45-租户归一与成员密钥域模型-方案.md) | 44 | ROADMAP 批次45+ — 令牌与租户欠账立项（MCP 作用域收紧前置 = 账本租户归一）+ 成员/API 密钥域模型 |
 | [specs/ROADMAP-批次B类-远端PG与多机硬过滤-方案.md](specs/ROADMAP-批次B类-远端PG与多机硬过滤-方案.md) | 102 | 批次 B 类 · 远端 PG 中枢（B4）+ 多机硬过滤（B1）+ 真实精炼（B3）方案 |
-| [specs/acceptance.md](specs/acceptance.md) | 71 | title: 验收标准 |
+| [specs/acceptance.md](specs/acceptance.md) | 72 | title: 验收标准 |
 | [specs/code-map.md](specs/code-map.md) | 1713 | status: draft |
 | [specs/demo-data-baseline.md](specs/demo-data-baseline.md) | 116 | 演示/种子数据基线清单（批次42 · 阶段0 冻结） |
 | [specs/recall-echo-contract.md](specs/recall-echo-contract.md) | 393 | title: 回显（recall echo）逻辑与格式统计 |
@@ -846,14 +847,15 @@ src/web/models/types.ts 973af42c99c1
 src/web/models/useToast.tsx 85cd09d2e1f5
 src/web/monitor/AlertTimeline.tsx 6fa33bdfb738
 src/web/monitor/MetricGrid.tsx d3468c5dccf7
-src/web/monitor/MonitorPage.tsx 409b74c9717c
+src/web/monitor/MonitorPage.tsx a26bb1c53369
 src/web/monitor/coreMonitor.ts 6b0c29922b63
 src/web/monitor/logic.ts 047ec4b39ad1
 src/web/monitor/monitorEntry.tsx 1cc2038c2ad6
+src/web/monitor/operationState.ts e7185e07928b
 src/web/monitor/options.ts 59d853ad7cd4
 src/web/monitor/types.ts 31210fc87ca9
 src/web/monitor/useMonitorMirror.ts 9e87dd8cc071
-src/web/monitor/useMonitorReal.ts 24b6151c1bed
+src/web/monitor/useMonitorReal.ts 254eeaaea42b
 src/web/monitor/useToast.tsx 85cd09d2e1f5
 src/web/overview/Overview.tsx c6badb469e6a
 src/web/overview/OverviewPage.tsx e6cd7ea2708e
@@ -1035,7 +1037,7 @@ specs/RECALL-HARD-PREFIX.md 1bb2a36797a6
 specs/ROADMAP-批次42-未接线三件套-方案.md df1a6f9d6ed5
 specs/ROADMAP-批次45-租户归一与成员密钥域模型-方案.md 633abaaaad54
 specs/ROADMAP-批次B类-远端PG与多机硬过滤-方案.md 0c7857454a7d
-specs/acceptance.md abfa162cb802
+specs/acceptance.md 1ba5daa8a2f4
 specs/code-map.md 6c880a29cbc6
 specs/demo-data-baseline.md 1d9af215ac78
 specs/recall-echo-contract.md 092d2eadd30f
@@ -1046,7 +1048,7 @@ specs/reports/dsh-hindsight-local-对比与借鉴-2026-11-14.md 505ceb6e31e6
 specs/reports/dsh-hindsight-local-调研报告-2026-11-14.md 6a90063ae5da
 specs/reports/召回模式全程序审查报告-2026-11-13.md e91202c37a63
 specs/reports/审查-Agent侧记忆库与净化生长打通-2026-11-12.md ab5e7d6e7390
-specs/requirements.md 7265c17371df
+specs/requirements.md eb73455f8151
 specs/tasks/AGENT-ONBOARD.md 900d19783798
 specs/tasks/AUDIT-LOG.md b778c455d43d
 specs/tasks/CONFLICT.md c894269434e1
@@ -1073,7 +1075,7 @@ specs/tasks/SETUP.md 21f41f4ab238
 specs/tasks/SYNC.md 6271b8a85d1e
 specs/tasks/USER-REGISTER.md 2c4bdb921f96
 specs/tasks/WRITE-PAGE.md 0062573b1e9f
-specs/test-plan.md 6b25c648001f
+specs/test-plan.md d478bcfa10a3
 specs/topbar-consolidation-2026-11-08.md 3765d20edef7
 specs/topbar-restore-compare-2026-11-08.md 65bdc9089a21
 specs/working-set/agent-memory-sop.md a321ec2970eb
