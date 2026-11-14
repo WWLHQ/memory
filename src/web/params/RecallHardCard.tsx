@@ -192,6 +192,17 @@ export function RecallHardCard() {
                 钩子脚本不存在，启用会被拒绝：<code>{state.a.hookScript}</code>
               </div>
             )}
+            {state.a.installed && state.a.installedPath && (
+              <div className="rh-line" data-testid="rh-a-path">
+                宿主钩子实际指向：<code>{state.a.installedPath}</code>
+              </div>
+            )}
+            {state.a.installed && state.a.installedPath
+              && state.a.installedPath.replace(/\\/g, '/').toLowerCase() !== state.a.hookScript.replace(/\\/g, '/').toLowerCase() && (
+              <div className="rh-warn" data-testid="rh-a-path-mismatch">
+                该路径与当前宿主脚本不符（开发态→打包态过渡常见）：点「保存并生效」会重写为 <code>{state.a.hookScript}</code>，再重启宿主即恢复每轮召回。
+              </div>
+            )}
             {state.a.needsRestart && (
               <div className="rh-warn" data-testid="rh-a-restart">
                 A 的改动已写入宿主配置，但 hooks 不热加载：请重启宿主（或到 hooks 面板审核新钩子）后才会真正每轮召回。

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import {
-  RECALL_HARD_HOOK_TAG, RecallHardController, hostHookInstalled, mergeHostHooks,
+  RECALL_HARD_HOOK_TAG, RecallHardController, findInstalledHookPath, hostHookInstalled, mergeHostHooks,
 } from '../recallHard.ts';
 
 describe('批次62 · A 宿主钩子合并规则（纯函数）', () => {
@@ -100,6 +100,36 @@ describe('批次62 · RecallHardController', () => {
     await c2.init();
     const second = JSON.parse(await readFile(hostPath, 'utf8')) as Record<string, unknown>;
     expect(second.extra).toBe(1); // 外部加进来的键没被启动流程抹掉
+  });
+
+  test('init：A 已装但宿主钩子指向旧路径 → 重写为当前 hookScript（A3 修复）', async () => {
+    // 模拟开发态遗留：settings 里指向一个已不存在的旧路径
+    const oldPath = join(dir, 'old-force_recall.mjs');
+    await writeFile(hostPath, JSON.stringify({
+      hooks: { UserPromptSubmit: [{ hooks: [{ type: 'command', command: `node "${oldPath}"`, timeout: 5 }] }] },
+    }), 'utf8');
+    const c = make();
+    await c.init();
+    const after = JSON.parse(await readFile(hostPath, 'utf8')) as Record<string, unknown>;
+    const installedPath = findInstalledHookPath(after);
+    expect(installedPath).not.toBeNull();
+    expect(installedPath!.replace(/\\/g, '/').toLowerCase()).toBe(hookScript.replace(/\\/g, '/').toLowerCase());
+    // 同时暴露在 state，供卡片显示实际指向路径
+    const st = await c.state();
+    expect(st.a.installed).toBe(true);
+    expect(st.a.installedPath).not.toBeNull();
+    expect(st.a.needsRestart).toBe(true); // 配置被改写了，需重启宿主
+  });
+
+  test('init：A 已装且路径已正确 → 不重写（保留外部改动，也不标需重启）', async () => {
+    await writeFile(hostPath, JSON.stringify({
+      hooks: { UserPromptSubmit: [{ hooks: [{ type: 'command', command: `node "${hookScript}"`, timeout: 5 }] }] },
+    }), 'utf8');
+    const c = make();
+    await c.init();
+    const st = await c.state();
+    expect(st.a.installed).toBe(true);
+    expect(st.a.needsRestart).toBe(false);
   });
 
   test('apply({a_hook:false}) → 摘钩子 + 落配置 + state 读真值', async () => {

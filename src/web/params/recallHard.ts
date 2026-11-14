@@ -15,6 +15,8 @@ export interface RecallHardStateView {
     installed: boolean;
     hostPath: string;
     hookScript: string;
+    /** 宿主钩子实际指向的脚本路径（可能和 hookScript 不一致，开发态→打包态过渡时尤其） */
+    installedPath: string | null;
     /** 钩子脚本文件是否真的存在 */
     scriptExists: boolean;
     note: string;

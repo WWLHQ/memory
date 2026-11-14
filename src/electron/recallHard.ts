@@ -35,6 +35,8 @@ export interface RecallHardState {
   config: RecallHardConfig;
   a: {
     enabled: boolean; installed: boolean; hostPath: string; hookScript: string;
+    /** 宿主钩子实际指向的脚本路径（从 settings.json 解析，可能与当前 hookScript 不一致）。 */
+    installedPath: string | null;
     /** 钩子脚本文件是否真的存在：不存在时「已启用」是假的，必须让用户看见。 */
     scriptExists: boolean;
     note: string; needsRestart: boolean;
@@ -79,6 +81,26 @@ export function hostHookInstalled(current: Record<string, unknown> | null): bool
   return ups.some((entry) => JSON.stringify(entry).includes(RECALL_HARD_HOOK_TAG));
 }
 
+/** 路径归一：反斜杠统一成斜杠并小写，便于「开发态 D:\…\x.mjs」与「打包态 …/x.mjs」等同比较。 */
+function toComparePath(p: string): string {
+  return p.replace(/\\/g, '/').toLowerCase();
+}
+
+/** 真值：宿主配置里本钩子实际指向的脚本路径（可能和当前 this.opts.hookScript 不一致）。 */
+export function findInstalledHookPath(current: Record<string, unknown> | null): string | null {
+  if (!current) return null;
+  const hooks = current.hooks as Record<string, unknown> | undefined;
+  const ups = hooks && Array.isArray(hooks.UserPromptSubmit) ? hooks.UserPromptSubmit : [];
+  for (const entry of ups) {
+    const s = JSON.stringify(entry ?? {});
+    if (!s.includes(RECALL_HARD_HOOK_TAG)) continue;
+    // 取含 force_recall.mjs 的 token（可带引号）："D:/repo/.../force_recall.mjs" 或 D:/repo/.../force_recall.mjs
+    const m = s.match(/["']?([^"'\s,}]*force_recall\.mjs)["']?/i);
+    if (m) return m[1].replace(/\\\\/g, '\\').replace(/\\/g, '/'); // 先消 JSON 二次转义的双反斜杠
+  }
+  return null;
+}
+
 export class RecallHardController {
   private readonly opts: RecallHardControllerOptions;
   private readonly configPath: string;
@@ -120,10 +142,31 @@ export class RecallHardController {
     await writeFile(this.configPath, JSON.stringify(cfg, null, 2) + '\n', 'utf8');
   }
 
-  private async setHostHook(enabled: boolean): Promise<{ installed: boolean; note: string }> {
+  /**
+   * 把宿主钩子对齐到意图：
+   * - 停用：有条目才摘，不碰别的钩子/顶层键。
+   * - 启用：脚本必须真的存在才写；若已装但指向路径≠当前 hookScript（开发态→打包态过渡常见），重写到正确路径。
+   *   若路径已经正确，则不重写、保留宿主外部改动。
+   * 返回 rewrote=true 表示宿主配置被改写（需要重启宿主才生效）。
+   */
+  private async reconcileA(enabled: boolean): Promise<{ installed: boolean; note: string; rewrote: boolean }> {
     const current = await readJsonFile(this.hostPath);
     if (current === null && existsSync(this.hostPath)) {
-      return { installed: false, note: '宿主配置不是合法 JSON，拒绝改写' };
+      return { installed: false, note: '宿主配置不是合法 JSON，拒绝改写', rewrote: false };
+    }
+    if (!enabled) {
+      if (!hostHookInstalled(current)) {
+        return { installed: false, note: '宿主钩子已摘除 · 其它钩子保留', rewrote: false };
+      }
+    } else {
+      if (!this.scriptExists()) {
+        return { installed: false, note: `钩子脚本不存在：${this.opts.hookScript}`, rewrote: false };
+      }
+      const existingPath = findInstalledHookPath(current);
+      if (existingPath !== null && toComparePath(existingPath) === toComparePath(this.opts.hookScript)) {
+        // 已装且路径正确：留着，不覆盖外部改动
+        return { installed: true, note: `宿主钩子已写入配置 · 路径 ${this.hostPath}`, rewrote: false };
+      }
     }
     const merged = mergeHostHooks(current ?? {}, enabled, this.hookCommand());
     const output = JSON.stringify(merged, null, 2) + '\n';
@@ -133,14 +176,24 @@ export class RecallHardController {
       }
       await writeFile(this.hostPath, output, 'utf8');
     } catch (e) {
-      return { installed: hostHookInstalled(current), note: `宿主配置写入失败：${String((e as Error)?.message ?? e).slice(0, 120)}` };
+      return {
+        installed: hostHookInstalled(current),
+        note: `宿主配置写入失败：${String((e as Error)?.message ?? e).slice(0, 120)}`,
+        rewrote: false,
+      };
     }
     this.opts.log?.('recall-hard:a-hook', { enabled, host: this.hostPath });
+    if (!enabled) {
+      return { installed: false, note: '宿主钩子已摘除 · 其它钩子保留', rewrote: true };
+    }
+    const existingPath = findInstalledHookPath(current);
+    const pathFixed = existingPath !== null && toComparePath(existingPath) !== toComparePath(this.opts.hookScript);
     return {
-      installed: enabled,
-      note: enabled
-        ? `宿主钩子已写入配置 · 路径 ${this.hostPath}`
-        : '宿主钩子已摘除 · 其它钩子保留',
+      installed: true,
+      rewrote: true,
+      note: pathFixed
+        ? `宿主钩子路径已从 ${existingPath} 重写为 ${this.opts.hookScript}`
+        : `宿主钩子已写入配置 · 路径 ${this.hostPath}`,
     };
   }
 
@@ -176,22 +229,25 @@ export class RecallHardController {
   async init(): Promise<void> {
     this.config = await this.loadConfig();
     this.cEffective = this.config.c_strict_gate;
-    // A 只在「意图与真值不一致」时才写宿主配置，避免每次启动都重写并覆盖外部改动。
+    // A：意图为启用时，确保宿主钩子真的指向当前 hookScript（开发态→打包态过渡时路径会变）。
     // 脚本不存在时绝不写死配置（写了宿主每轮都会执行失败）——保持现状并留日志，由 UI 如实显示。
-    if (this.config.a_hook && !this.scriptExists()) {
-      this.opts.log?.('recall-hard:a-hook-script-missing', { script: this.opts.hookScript });
-    } else {
-      const current = await readJsonFile(this.hostPath);
-      if (hostHookInstalled(current) !== this.config.a_hook) {
-        await this.setHostHook(this.config.a_hook);
+    if (this.config.a_hook) {
+      const r = await this.reconcileA(true);
+      if (r.rewrote) this.aTouchedSinceBoot = true; // 配置变了，hooks 不热加载，需重启宿主
+      if (!r.installed && !this.scriptExists()) {
+        this.opts.log?.('recall-hard:a-hook-script-missing', { script: this.opts.hookScript });
       }
     }
     await this.syncGateway(this.config.b_gateway);
   }
 
   async state(): Promise<RecallHardState> {
-    const installed = hostHookInstalled(await readJsonFile(this.hostPath));
+    const host = await readJsonFile(this.hostPath);
+    const installed = hostHookInstalled(host);
+    const installedPath = findInstalledHookPath(host);
     const scriptExists = this.scriptExists();
+    const pathMismatch = installed && installedPath !== null
+      && toComparePath(installedPath) !== toComparePath(this.opts.hookScript);
     return {
       ok: true,
       config: { ...this.config },
@@ -200,11 +256,14 @@ export class RecallHardController {
         installed,
         hostPath: this.hostPath,
         hookScript: this.opts.hookScript,
+        installedPath,
         scriptExists,
         note: !scriptExists
           ? `钩子脚本不存在：${this.opts.hookScript}`
           : installed
-            ? `宿主钩子已写入配置 · 路径 ${this.hostPath}`
+            ? (pathMismatch
+                ? `宿主钩子指向路径与当前不符：${installedPath}（应为 ${this.opts.hookScript}）。保存或重启后会自动修正。`
+                : `宿主钩子已写入配置 · 路径 ${this.hostPath}`)
             : '宿主钩子已摘除 · 其它钩子保留',
         needsRestart: this.aTouchedSinceBoot, // hooks 不热加载：本次运行内改过 A 才需重启宿主
       },
@@ -236,7 +295,10 @@ export class RecallHardController {
     this.config = next;
     await this.saveConfig(next);
 
-    if (aChanged) { await this.setHostHook(next.a_hook); this.aTouchedSinceBoot = true; }
+    if (aChanged) {
+      const r = await this.reconcileA(next.a_hook);
+      if (r.rewrote) this.aTouchedSinceBoot = true;
+    }
     if (bChanged) await this.syncGateway(next.b_gateway);
     else if (next.b_gateway && this.gatewayError) await this.syncGateway(true);
     if (cChanged) {
