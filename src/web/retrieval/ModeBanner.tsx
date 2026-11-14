@@ -9,21 +9,28 @@ interface Props {
 }
 
 export function ModeBanner({ data, onRequestId, onFactRetry }: Props) {
-  // A6：来源与「建议 vs 实际」全部读内核 dispatch，不在这里重新判断
-  const sourceTag = data.dispatch?.source === 'manual'
-    ? '（用户指定）'
-    : data.fallback
-      ? '（自动分流）'
-      : '';
-  const notApplied = data.dispatch?.applied === 'auto'
+  // A6：来源与「建议 vs 实际」全部读内核 dispatch，不在这里重新判断。
+  // A9：自动极简观测档（applied='auto'）下，原先显示「极简轻量（自动分流）（分流建议极简轻量
+  // · 本轮按默认口径执行）」——既说极简已生效又说没执行，与内核回显「⚙ 模式：自动（…）」矛盾。
+  // 改为与回显逐字同口径：主标签写「自动」，建议模式只出现在括号里。不新增 UI 行/控件。
+  const observedAuto = data.dispatch?.applied === 'auto';
+  const sourceTag = observedAuto
+    ? ''
+    : data.dispatch?.source === 'manual'
+      ? '（用户指定）'
+      : data.fallback
+        ? '（自动分流）'
+        : '';
+  const notApplied = observedAuto && data.dispatch
     ? `（分流建议${modeName(data.dispatch.suggested)} · 本轮按默认口径执行）`
     : '';
+  const shownMode = observedAuto ? '自动' : modeName(data.mode);
   return (
     <div className="card banner" data-testid="mode-banner">
       <div className="row">
         <span className="status stale" data-testid="banner-scene">场景: {sceneName(data.scene)}</span>
         <span className="status stale" data-testid="banner-mode">
-          模式: {modeName(data.mode)}{sourceTag}{notApplied}
+          模式: {shownMode}{sourceTag}{notApplied}
         </span>
         {data.cold_recall && <span className="status stale" data-testid="banner-cold">已补查 Cold/dormant 层</span>}
         {data.hit_keywords.length > 0

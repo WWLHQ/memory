@@ -137,11 +137,25 @@ export const MODE_FEATURE_WORDS: Record<ConcreteMode, FeatureWords> = {
 
 /** 每个 scene 的候选模式 + 零命中默认模式 + 是否允许极简（极简只能由短查询触发） */
 const SCENE_PLAN: Record<Scene, { candidates: ConcreteMode[]; default: ConcreteMode; allowMinimal: boolean }> = {
-  default:         { candidates: ['minimal', 'fact_first'], default: 'minimal', allowMinimal: true },
+  // A10：default 原先只有 [minimal, fact_first]，另外 3 套模式的词表在缺省场景永远选不出来。
+  // 扩到 5 套后由「命中分数 + MODE_PRECEDENCE」裁决，零命中/短查询的极简兜底逻辑不变。
+  default:         { candidates: ['top_insight', 'pattern_reasoning', 'event_replay', 'fact_first', 'minimal'], default: 'minimal', allowMinimal: true },
   task_start:      { candidates: ['top_insight', 'pattern_reasoning', 'fact_first'], default: 'top_insight', allowMinimal: true },
   history_query:   { candidates: ['event_replay', 'fact_first'], default: 'event_replay', allowMinimal: false },
   critical:        { candidates: ['pattern_reasoning', 'top_insight', 'fact_first'], default: 'fact_first', allowMinimal: false },
 };
+
+/**
+ * A10：scene 归一化的内核唯一真源（Web 侧 logic.normalizeScene 是另一层的输入回落，不参与内核裁决）。
+ * 非法/空值一律回落 default；`undefined` 是合法缺省，不算非法。
+ * agent.ts 与 resolveMode 共用它，避免 API 边界与纯函数各写一套判定。
+ */
+export function normalizeScene(s: unknown): { scene: Scene; invalid: boolean } {
+  if (s === undefined || (typeof s === 'string' && Object.prototype.hasOwnProperty.call(SCENE_PLAN, s))) {
+    return { scene: (s ?? 'default') as Scene, invalid: false };
+  }
+  return { scene: 'default', invalid: true };
+}
 
 /** 候选集内多模式命中时的优先级（数值大者胜，用于裁决次模式与同分） */
 const MODE_PRECEDENCE: Record<ConcreteMode, number> = {
@@ -193,13 +207,16 @@ function measureQuery(query: string, cfg: ModeDispatchConfig): QueryLen {
 
 function scoreMode(mode: ConcreteMode, query: string, cfg: ModeDispatchConfig): { score: number; hits: string[] } {
   const fw = MODE_FEATURE_WORDS[mode];
+  // A10：英文日志类查询（Exception / TRACE）原先因大小写不匹配全部漏命中。
+  // 词表本身是小写基线，统一把 query 与特征词都归一化到小写再比较；中文不受影响。
+  const q = query.toLowerCase();
   const hits: string[] = [];
   let score = 0;
   for (const w of fw.words) {
-    if (query.includes(w)) { score += 1; hits.push(w); }
+    if (q.includes(w.toLowerCase())) { score += 1; hits.push(w); }
   }
   for (const w of fw.highConf) {
-    if (query.includes(w)) { score += cfg.hitThreshold; hits.push(w); } // 高置信单字：命中 1 即算命中（计满阈值分）
+    if (q.includes(w.toLowerCase())) { score += cfg.hitThreshold; hits.push(w); } // 高置信单字：命中 1 即算命中（计满阈值分）
   }
   return { score, hits };
 }
@@ -224,17 +241,31 @@ export function isConcreteMode(m: unknown): m is ConcreteMode {
  */
 export function resolveMode(input: ResolveModeInput): ResolvedMode {
   const cfg = input.config ?? DEFAULT_DISPATCH_CONFIG;
-  const scene: Scene = input.scene ?? 'default';
+  // A10：非法 scene（含空串）原先让 SCENE_PLAN[scene] 变成 undefined，抛原生 TypeError。
+  // 统一走 normalizeScene 回落 default，并在 reason 里如实标注，不静默吞掉。
+  const { scene, invalid: sceneInvalid } = normalizeScene(input.scene);
   const plan = SCENE_PLAN[scene];
+  // A10：非法 scene 的回落必须在**所有**返回路径（含零命中/短查询）里如实可见，
+  // 因此统一在出口包装，而不是只给手动分支加标注。
+  const finish = (r: ResolvedMode): ResolvedMode => ({
+    ...r,
+    reason: sceneInvalid ? `非法 scene「${String(input.scene)}」已回落 default · ${r.reason}` : r.reason,
+    ...(r.viaFallback || sceneInvalid ? { viaFallback: true } : {}),
+  });
 
   // 1) 手动优先（用户指定 > 自动分流）；用严格枚举校验，非法值不当作手动模式
   if (isConcreteMode(input.explicitMode)) {
     const mode = input.explicitMode;
-    // 16.5 硬规则：critical 禁极简
+    // 16.5 硬规则：critical 禁极简。降级本身是内核裁决（viaFallback=true），
+    // 回显必须据此说明，不能把降级结果写成「用户指定」。
     if (scene === 'critical' && mode === 'minimal') {
-      return { mode: 'fact_first', hitKeywords: [], reason: '手动选极简但 critical scene 禁用（16.5 硬规则）→ 降为事实优先', viaFallback: false };
+      return finish({
+        mode: 'fact_first', hitKeywords: [],
+        reason: '手动选极简但 critical scene 禁用（16.5 硬规则）→ 降为事实优先',
+        viaFallback: true,
+      });
     }
-    return { mode, hitKeywords: [], reason: `手动指定 ${RECALL_MODE_SPECS[mode].name}` };
+    return finish({ mode, hitKeywords: [], reason: `手动指定 ${RECALL_MODE_SPECS[mode].name}` });
   }
 
   // 2) 自动分流：只在候选集内计分词
@@ -253,13 +284,13 @@ export function resolveMode(input: ResolveModeInput): ResolvedMode {
   if (scored.length === 0) {
     if (minimalTriggered) {
       const unit = len.cjk > 0 ? `${len.cjk} 中文字` : `${len.latinWords} 词`;
-      return {
+      return finish({
         mode: 'minimal',
         hitKeywords: [],
         reason: `自动分流：${scene} 零命中 + 短查询（${unit}）<${cfg.minLenZh}/${cfg.minLenEn} 触发极简`,
-      };
+      });
     }
-    return { mode: plan.default, hitKeywords: [], reason: `自动分流：${scene} 零命中 → 默认 ${RECALL_MODE_SPECS[plan.default].name}` };
+    return finish({ mode: plan.default, hitKeywords: [], reason: `自动分流：${scene} 零命中 → 默认 ${RECALL_MODE_SPECS[plan.default].name}` });
   }
 
   // 取最高分；同分按 MODE_PRECEDENCE（高者胜）
@@ -267,12 +298,12 @@ export function resolveMode(input: ResolveModeInput): ResolvedMode {
   const top = scored[0];
   const runnerUp = scored[1];
   const secondary = runnerUp && !RECALL_MODE_SPECS[top.mode].isMinimal ? runnerUp.mode : undefined;
-  return {
+  return finish({
     mode: top.mode,
     secondary,
     hitKeywords: top.hits,
     reason: `自动分流：${scene} 命中 ${RECALL_MODE_SPECS[top.mode].name}${top.hits.length ? `（${top.hits.join('、')}）` : ''}${secondary ? `，次模式 ${RECALL_MODE_SPECS[secondary].name} 降级注入` : ''}`,
-  };
+  });
 }
 
 /** 取某模式的权重向量（用于 17.8 打分接入，wiring 阶段透传给 scoreMemory） */

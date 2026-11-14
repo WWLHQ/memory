@@ -5,17 +5,18 @@ import { coreBrowse, coreFeedback, coreGc, coreGcFull, coreMemoryOp, coreWrite }
 import { syncDown, syncUp } from './sync.ts';
 import { MemoryPendingStore, PendingWrites, type WriteKnobs } from './pendingWrites.ts';
 import {
-  fuseRelevance, hardFilter, scoreMemory, tokenCoverage, RELEVANCE_FUSION_LAMBDA,
+  fuseRelevance, hardFilter, scoreMemory, tokenCoverage, tokenCoverageWeighted, RELEVANCE_FUSION_LAMBDA,
 } from './forgetting.ts';
 import { findParamsSnapshot, growthConfigFromLedger, proxyCapsFromSnapshot } from './paramsSnapshot.ts';
 import { proxyCostToday } from '../../shared/proxyAccounting.ts';
+import { extractQueryTimestamp, hitTimeWindow, TIME_WINDOW_MARGIN_MS, TIME_WINDOW_BONUS } from '../../shared/timeWindow.ts';
 import {
   BACKGROUND_MAX_TOKENS, CHARS_PER_BUDGET_UNIT, computeRecallSavings, estTokens, normalizeUnitPrice,
   selectRecallBackground,
 } from './recallInsight.ts';
 import { cosine, embedSync, tokenize, DEFAULT_VECTOR_DIM } from './vector.ts';
 import { matchedTerms } from './hitHighlight.ts';
-import { isConcreteMode, modeSpec, modeWeights, resolveMode, type LayerKey } from './recallModes.ts';
+import { isConcreteMode, modeSpec, modeWeights, normalizeScene, resolveMode, type LayerKey } from './recallModes.ts';
 import type { RecallWeights } from '../../shared/growthConfig.ts';
 import type { L0BlobStore } from './l0Store.ts';
 import { ulid } from './ulid.ts';
@@ -159,10 +160,15 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
     // 批次44-D5-4：会话视图走独立非向量分支，项目召回路径一行不改
     if (req.scope === 'session') return sessionRecall(req, request_id, now);
     const topK = req.top_k ?? 5;
-    if (topK < 1 || topK > 10) throw new MemAgentError('E_VECTOR', 'top_k 须在 1–10');
+    // A10：与 sessionRecall 分支同口径，非整数/越界都明确报错，不靠 slice 静默取整。
+    if (!Number.isInteger(topK) || topK < 1 || topK > 10) {
+      throw new MemAgentError('E_VECTOR', 'top_k 须为 1–10 的整数');
+    }
     // A2（召回模式接线）：唯一裁决入口——手动（5 个具体模式）强制采用；auto/缺省按 scene × 关键词自动分流。
     // 16.5「critical 禁极简」由 resolveMode 内部处理，这里不再手搓，避免两处口径各自漂移。
-    const scene = req.scene ?? 'default';
+    // A10：scene 归一化走内核真源 normalizeScene（与 resolveMode 同一份判定），
+    // 审计/回显里也只出现合法 scene，不把空串等脏值落进账本。
+    const { scene } = normalizeScene(req.scene);
     if (req.mode !== undefined && req.mode !== null && req.mode !== 'auto' && !isConcreteMode(req.mode)) {
       throw new MemAgentError('E_VECTOR', `非法的 mode：${String(req.mode)}（只能是 auto 或 5 个具体模式之一）`);
     }
@@ -197,6 +203,10 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
       weightsSource = 'growth:v1';
     }
 
+    // REQ-013 / C1：从 query 提取本地时区 query_timestamp（零命中回退到「现在」），仅当检测到时间意图时
+    // 才对命中时间窗的记忆做温和加权（不打断既有排序；recallModes.ts 单一真源不变）。
+    const { ts: queryTs, detected: timeDetected } = extractQueryTimestamp(req.query, new Date(now));
+
     // 17.8 第一层：硬过滤（pinned 免检直进候选；默认只扫 Hot/Warm，AC-11）
     // A4：手动模式的 disabledLayers（如 minimal 禁 L2/L5）在这一层直接剔除，连候选都不进。
     const candidates = all.filter((m) => hardFilter(m)
@@ -212,10 +222,14 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
     const scored = candidates
       .map((m) => {
         const cos = m.embedding ? cosine(qvec, m.embedding) : 0;
+        // REQ-013 / C3：覆盖率用加权版（标识符权重 3、普通词 1）；无标识符时与 tokenCoverage 逐字一致。
         const relevance = qTokens
-          ? fuseRelevance(cos, tokenCoverage(qTokens, new Set(tokenize(m.content))))
+          ? fuseRelevance(cos, tokenCoverageWeighted(qTokens, new Set(tokenize(m.content))), RELEVANCE_FUSION_LAMBDA)
           : cos;
-        return { m, relevance, score: scoreMemory(m, relevance, now, recallWeights) };
+        let score = scoreMemory(m, relevance, now, recallWeights);
+        // REQ-013 / C1：仅当 query 检测到时间意图且记忆命中时间窗时温和加权（乘性，不破坏排序单调性）。
+        if (timeDetected && hitTimeWindow(queryTs, m.created_at, TIME_WINDOW_MARGIN_MS)) score *= TIME_WINDOW_BONUS;
+        return { m, relevance, score };
       })
       .sort((a, b) => b.score - a.score)
       .slice(0, topK);
@@ -308,32 +322,20 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
       }
     }
 
-    // 批次11：项目背景与省量（背景走硬熔断余量，payload + background 永不超过 3000t）
-    // A4：被禁用的层也不得以「背景」身份回灌，否则 minimal 绕开候选过滤仍会看到 L2/L5
-    const backgroundPool = disabledLayers.length > 0
-      ? all.filter((m) => !disabledLayers.includes(m.layer as LayerKey))
-      : all;
-    const background = selectRecallBackground(backgroundPool, consideredIds, {
-      minimal,
-      maxTokens: Math.min(BACKGROUND_MAX_TOKENS, Math.max(0, BUDGET.hard - payload_tokens)),
-    });
-    const savings = computeRecallSavings({ memories: all, hits, background, preCapTokens });
-
-    // 17.4：召回命中计数（不含 confirm/reinforce）
-    for (const h of hits) {
-      const m = await storage.getMemory(h.mem_id);
-      if (m) await storage.putMemory({ ...m, access_count: (m.access_count ?? 0) + 1, last_access_time: now });
-    }
-
     // A5（召回模式接线）：次模式降级注入——只作独立 hint 下发，不混进 hits、不计入 payload。
     // 理由：若偷偷把 200t 塞进 payload，硬熔断与省量口径会同时失真；hint 是「还能参考什么」，不是「已经注入了什么」。
     // 极简主模式无次模式（§2.4.3）；手动模式即定论，resolveMode 不会给 secondary。
+    // A11：本块前移到项目背景之前——模式专属 hint 优先取材，background 随后让位（见下方 backgroundExcludeIds），
+    // 保证同一条记忆不会在两处重复注入，同时不会把次模式的取材池饿死。
     let secondaryHint: RecallSecondaryHint | null = null;
+    let secondaryMemId: string | null = null;
     if (resolved.secondary) {
       const secondarySpec = modeSpec(resolved.secondary);
-      const pool = all.filter((m) => !consideredIds.has(m.mem_id)
-        && !disabledLayers.includes(m.layer as LayerKey)
-        && !m.deleted && !m.merged_into);
+      // A11：取材池复用主链路硬过滤（deleted / merged_into / 低置信 / 非 hot-warm），
+      // 冷层或已淘汰的记忆不得借「次模式参考」绕开准入重新下发。
+      const pool = all.filter((m) => hardFilter(m)
+        && !consideredIds.has(m.mem_id)
+        && !disabledLayers.includes(m.layer as LayerKey));
       let picked: Memory | undefined;
       for (const layer of secondarySpec.selectPriority) {
         picked = pool.filter((m) => m.layer === layer)
@@ -350,7 +352,28 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
           content,
           note: `次模式「${secondarySpec.name}」参考摘要（≤${SECONDARY_MAX_TOKENS}t，未并入命中、不计入 payload）`,
         };
+        secondaryMemId = picked.mem_id;
       }
+    }
+
+    // 批次11：项目背景与省量（背景走硬熔断余量，payload + background 永不超过 3000t）
+    // A4：被禁用的层也不得以「背景」身份回灌，否则 minimal 绕开候选过滤仍会看到 L2/L5
+    // A11：已作为次模式 hint 下发的条目不再重复进背景。
+    const backgroundPool = disabledLayers.length > 0
+      ? all.filter((m) => !disabledLayers.includes(m.layer as LayerKey))
+      : all;
+    const backgroundExcludeIds = new Set(consideredIds);
+    if (secondaryMemId) backgroundExcludeIds.add(secondaryMemId);
+    const background = selectRecallBackground(backgroundPool, backgroundExcludeIds, {
+      minimal,
+      maxTokens: Math.min(BACKGROUND_MAX_TOKENS, Math.max(0, BUDGET.hard - payload_tokens)),
+    });
+    const savings = computeRecallSavings({ memories: all, hits, background, preCapTokens });
+
+    // 17.4：召回命中计数（不含 confirm/reinforce）
+    for (const h of hits) {
+      const m = await storage.getMemory(h.mem_id);
+      if (m) await storage.putMemory({ ...m, access_count: (m.access_count ?? 0) + 1, last_access_time: now });
     }
 
     const budgetStatus = payload_tokens >= BUDGET.hard ? 'fused' : payload_tokens >= BUDGET.warn ? 'warn' : 'ok';
@@ -360,7 +383,8 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
       source: isConcreteMode(req.mode) ? 'manual' : 'auto',
       suggested: resolved.mode,
       applied: mode,
-      secondary: resolved.secondary ?? null,
+      // A10：与 secondary_mode_hint.mode 恒一致（types.ts 契约注释）；A5 池子为空时不虚报次模式。
+      secondary: secondaryHint?.mode ?? null,
       reason: resolved.reason,
       weights_source: weightsSource,
     };
@@ -388,12 +412,14 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
     await audit(request_id, 'mode_dispatch', {
       mode: dispatch.suggested,     // 分流结论（可能是「建议极简」）
       applied_mode: dispatch.applied, // 实际执行模式（自动极简观测档会与 mode 不同）
+      source: dispatch.source,       // A9：手动/自动可按 request_id 查回，不再只能从 mode 反推
       secondary_mode: dispatch.secondary,
       hit_keywords: resolved.hitKeywords,
       reason: dispatch.reason,
       scene,
       weights_source: dispatch.weights_source,
       weights: recallWeights,
+      // A10：曾是恒 false 的死字段；现在真实反映 16.5 降级 / 非法 scene 回落。
       via_fallback: resolved.viaFallback ?? false,
       ...(req.client ? { client: req.client } : {}),
     }, { project_id: req.project_id, user_id: req.user_id });

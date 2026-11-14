@@ -18,6 +18,8 @@ scope: recall_memory 回显 / 三档判档 / 四段模板 / 明细页 / Agent �
 
 **回显 = `recall_memory` 成功返回后，接入 Agent 把该次返回的 `display.markdown` 整段原样输出到最终回答末尾。**
 `display.line` 是「客户端连 Markdown 都渲染不了」时的单行兜底，不参与三档判档。
+> **A6/A8 后的固定第三行**：`display.markdown` 在两行加粗摘要之后还有一行 `⚙ 模式：…`（由 `buildRecallModeLine(result)` 从 `RecallResult.dispatch` 生成）。`dispatch=null`（会话视图 / 无分流动作）时不产出该行。
+> **A8 铁律**：展示要求一律写「两行摘要 + 一行 ⚙ 模式」，并明确要求**整段原样输出 `display.markdown`**、不得按摘要行数重建；`display.line` / `text` / HTTP `content[0]` 末尾也带同一段 `⚙ 模式`，避免纯文本兜底静默丢掉模式信息。
 
 - 服务端下发规则三处叠加：`MCP_INSTRUCTIONS`（initialize 指令，§2 回显强制）、工具 `description`（tools/list）、`recallEchoNote(mode)`（tools/call 结果末块）。
 - `AGENTS.md` / `CLAUDE.md` 是客户端不注入指令时的兜底触发规则。
@@ -33,6 +35,7 @@ scope: recall_memory 回显 / 三档判档 / 四段模板 / 明细页 / Agent �
 | HTTP 结果块 | **4 + 1** | `content[0..3]` + `structuredContent`（TCP 只有裸 payload） |
 | 明细固定段 | **4** | 项目背景 / 命中记忆 / Token 用量 / 省钱与费用 |
 | 统计汇总行 | **4** | 命中 / 用量 / 省量 / 累计（`buildRecallStatLines`，数字全部同源） |
+| 摘要行 | **2 + 1** | 两行加粗摘要（headline / stats）+ 一行 `⚙ 模式`（`dispatch=null` 时退回 2 行）；三档与明细页同源 |
 | 编号依据 | **N = `hits.length`** | `hits[i] → [i+1]`，1-based；`hits=0` 时全文无 `[n]`；明细页锚点 `id="hit-n"` |
 | 明细页区块 | **5** | 状态条 / 统计汇总表 / `[n]` 命中卡 / 三段折叠（背景·用量·费用）/ 页脚 |
 | `display` 字段 | **6** | `line` / `money` / `rollup` / `markdown` / `mode` / `detail_url` |
@@ -105,9 +108,9 @@ scope: recall_memory 回显 / 三档判档 / 四段模板 / 明细页 / Agent �
 ### 3.1 `display.line` — 三档共有，单行，也是 HTTP `content[0]`
 
 ```
-🧠 Memory ｜ {hitPart} ｜ 📎 背景 {N} 条（{N}t） ｜ ⚡ 本次省 {N}t（全量约 {N}t） ｜ {moneyPart}
+🧠 Memory ｜ {hitPart} ｜ 📎 背景 {N} 条（{N}t） ｜ ⚡ 本次省 {N}t（全量约 {N}t） ｜ {moneyPart} ｜ ⚙ 模式：…
 ```
-- 各段与所有 `warnings` 用 ` ｜ ` 连接成**一行**。
+- 各段与所有 `warnings` 用 ` ｜ ` 连接成**一行**；**A8 起末尾追加 `⚙ 模式` 段**（与 `display.markdown` 的 `mode_line` 逐字相同，`dispatch=null` 时省略），仍是单行、不含 `\n`。
 - `hitPart`：有命中 = `命中 {N} 条（{payload}t）`；无命中 = `未命中（扫描 {N} 条，未注入命中内容）`。
 - `moneyPart`（已设单价）：`💰 金额估算（本地预算单位 t × 单价）：本次 ¥x（省 ¥y） ｜ 今日 N 次 ¥x（省 ¥y） ｜ 全部 N 次 ¥x（省 ¥y）`。
 - `moneyPart`（未设单价）：`💰 金额未开：未设置单价（全局参数页可设 ¥/百万预算单位 t；金额按本地预算单位估算）`。
@@ -117,8 +120,10 @@ scope: recall_memory 回显 / 三档判档 / 四段模板 / 明细页 / Agent �
 ```
 🧠 Memory ｜ {hitPart} ｜ 📎 背景 {N} 条（{N}t） ｜ ⚡ 本次省 {N}t（全量约 {N}t）
 💰 估算 本次 ¥x（省 ¥y） ｜ 今日 N 次 ｜ 全部 N 次
+⚙ 模式：…
 {warnings…}
 ```
+> A6 起 `shortLine` 也带 `⚙ 模式` 行（夹在金额行与告警行之间）；A8 让 `line` 与它同口径。
 未设单价时第 2 行 = `💰 金额未开（参数页可设 ¥/百万预算单位 t） ｜ 今日 N 次 ｜ 全部 N 次`。
 今日/全部的**金额明细不在聊天侧**，挪到本机明细页，仍与 `line` 同源。
 
@@ -171,7 +176,8 @@ scope: recall_memory 回显 / 三档判档 / 四段模板 / 明细页 / Agent �
 - 依据行 = `buildRecallCitationLines`：`[i+1] 正文（layer·decay · score ▮▮▮▯▯） 🎯 命中「词」`；无字面重合时改后缀「· 无字面重合，仅按相关度参考」，**不写空 🎯**。
 - 正文 `clip = mdInline`：压缩空白 → 截断 **120 字**加 `…` → 转义 `& < >`；高亮 `<mark>`。
 - 告警段**只在 `echo.warnings` 非空时生成**（`evidence_thin` / `budget=fused` / 今日旧账），正常轮次不出现。
-- 客户端不渲染 HTML 时按服务端指示退回单独一行 `display.line`。
+- 客户端不渲染 HTML 时按服务端指示退回单独一行 `display.line`（A8 起该行末尾带 `⚙ 模式` 段，不丢模式信息）。
+- **A8 已知偏差**：`⚙ 模式` 行在本档被 `buildRecallMarkdown` 插在 `echoBody`（统计汇总 + `[n]` 依据）**之后**、四段二级折叠之前；compact / full 档则在「汇总」之后。位置统一留 A9。
 
 ### 3.4 ② `markdown-full`（`detail=true`，零 HTML 标签）
 
@@ -179,6 +185,8 @@ scope: recall_memory 回显 / 三档判档 / 四段模板 / 明细页 / Agent �
 **🧠 命中 N 条 · 依据 [1]「词」[2]「词」 ｜ 省 99.8%（N t）｜ 估算 ¥x**
 
 **📊 汇总：注入 Xt / 基线 Xt · 背景 M 条（Xt） · 今日 N 次 · 全部 N 次**
+
+**⚙ 模式：…**
 
 **⚠ 证据不足：…**（仅在真有告警时）
 
@@ -196,7 +204,7 @@ scope: recall_memory 回显 / 三档判档 / 四段模板 / 明细页 / Agent �
 
 **🧠 命中记忆 N 条（Xt）** … **⚡ Token 用量 …** … **💰 省钱与费用 …**
 ```
-- 两行加粗摘要与 compact 档**逐字相同**（同一个 `hint.echo`），只是不使用 `<details>`。
+- 两行加粗摘要 + `⚙ 模式` 行与 compact 档**逐字相同**（同一个 `hint.echo`），只是不使用 `<details>`。
 - **摘要行之间同样必须空行**（2026-11-12 与 compact 同源缺陷）：单换行会被客户端合并成一段，`markdown-full` 与 compact 两档共用同一口径。
 - 摘要后紧跟「统计汇总 + `[n]` 依据」，再是四段明细改成的**加粗小节**（不再折叠）。
 - `clip = plainClip`（压缩空白 + 120 字截断，**不转义**）；命中片段用 `**「…」**`，读法说明为 `｜ 加粗「」= 与本次提问重合的片段；🎯 = 命中的词`。
@@ -204,11 +212,13 @@ scope: recall_memory 回显 / 三档判档 / 四段模板 / 明细页 / Agent �
 
 ### 3.5 ③ `markdown-compact`（默认档，其余客户端）
 
-有明细页票据时（注意三行之间是**空行**，见下方说明）：
+有明细页票据时（注意各行之间是**空行**，见下方说明）：
 ```
 **🧠 命中 N 条 · 依据 [1]「词」[2]「词」 ｜ 省 99.8%（N t）｜ 估算 ¥x**
 
 **📊 汇总：注入 Xt / 基线 Xt · 背景 M 条（Xt） · 今日 N 次 · 全部 N 次**
+
+**⚙ 模式：…**
 
 **⚠ …**（仅在真有告警时追加）
 
@@ -220,7 +230,7 @@ scope: recall_memory 回显 / 三档判档 / 四段模板 / 明细页 / Agent �
 - **兜底行的由来（2026-11-12 实测）**：WorkBuddy 桌面端与手机端点本机链接均无反应（手机是 `127.0.0.1` 不可达，桌面端是客户端不跳外链）。链接仍保留（浏览器与其它客户端可用），但必须给一条不依赖链接的取明细路径，否则用户永远看不到明细。
 - **票据失效口径**：票据存内存，桌面端重启即全部作废；另有 30 分钟 TTL。重启后点旧链接必然 404，属预期行为，不是页面坏了。
 - 首行 `[n]` **严格对应 `hits[i]`**：取前 3 条命中、每条只取一个代表词（`matched_terms[0]`），因此 `[1][2][3]` 与依据段编号一一对应；**不是**「top3 命中词逐个编号」（否则同一 `[3]` 会指代不同条目）。
-- **三行之间必须是空行（2026-11-12 WorkBuddy 实测回填）**：单换行是 Markdown 软换行，客户端会把「🧠 摘要 / 📊 汇总 / ⚠ 告警」合并成一整段（截图实证），读者分不出层级。空行 = 段落硬分隔，所有客户端都认；用例 `B5`/`B6` 用 `not.toMatch(/\*\*\n\*\*/)` 反向锁住，退回单换行必红。
+- **各行之间必须是空行（2026-11-12 WorkBuddy 实测回填；A8 起含 `⚙ 模式` 行）**：单换行是 Markdown 软换行，客户端会把「🧠 摘要 / 📊 汇总 / ⚙ 模式 / ⚠ 告警」合并成一整段（截图实证），读者分不出层级。空行 = 段落硬分隔，所有客户端都认；用例 `B5`/`B6` 用 `not.toMatch(/\*\*\n\*\*/)` 反向锁住，退回单换行必红。
 - 第 4 条及以后的命中在 compact 档**没有** `[n]`（首行只放 3 条）——正文引用只能落在 `[1][2][3]`，需要更多依据须走 `detail=true` 或明细页。
 - `display.money === null` 时首行末段为「金额未开」，**不出现 `¥`**；第二行永远不带金额。
 - 无票据（TCP 8202 / 无端口场景）时，链接块换成固定文字指引：
@@ -236,7 +246,7 @@ scope: recall_memory 回显 / 三档判档 / 四段模板 / 明细页 / Agent �
 | URL | `http://127.0.0.1:<servedPort>/recall/<id>`，`id` = `randomBytes(16).toString('base64url')`（22 字符） |
 | 有效期 | `RECALL_DETAIL_TTL_MS = 30 分钟`；容量上限 200 条，先清过期再淘汰最早 |
 | 存储 | 进程内 `Map`，**不落盘**；过期随内存释放；`take()` 只读、不销毁 → 30 分钟内同一链接可重复打开（注释里的「一次性」指不可枚举 + 短期有效，不是读一次即焚） |
-| 结构 | `<h1>` → 状态条 `<p class="statusbar">`（命中数 · 省量% · 预算状态 · 生成时间 · 有效期）→ 摘要两行 `<p class="sum">`（`echo.headline` / `echo.stats`）→ meta（项目 / 查询 / 调用方 / 有效期）→ `<h2>📊 本次召回统计汇总</h2>` 真 `<table>`（4 行按键值拆两列）→ 告警 `<ul class="warn">`（仅有告警时）→ legend（有命中词才出）→ 「全部展开 / 全部收起」（`mmAll`）→ 依据段 `<details data-fold="cites" open>`（**默认展开**，标题沿用 `buildRecallSections[1].title`）内为 `[n]` 命中卡 → 背景 / 用量 / 费用三段 `<details data-fold="bg|token|money">` → footer |
+| 结构 | `<h1>` → 状态条 `<p class="statusbar">`（命中数 · 省量% · 预算状态 · 生成时间 · 有效期）→ 摘要三行 `<p class="sum">`（`echo.headline` / `echo.stats` / `echo.mode_line`，后者为 null 时退回两行）→ meta（项目 / 查询 / 调用方 / 有效期）→ `<h2>📊 本次召回统计汇总</h2>` 真 `<table>`（4 行按键值拆两列）→ 告警 `<ul class="warn">`（仅有告警时）→ legend（有命中词才出）→ 「全部展开 / 全部收起」（`mmAll`）→ 依据段 `<details data-fold="cites" open>`（**默认展开**，标题沿用 `buildRecallSections[1].title`）内为 `[n]` 命中卡 → 背景 / 用量 / 费用三段 `<details data-fold="bg|token|money">` → footer |
 | 命中卡 | `<article class="hit" id="hit-n">`：`[n]` 编号徽标 + 层/热度徽标 + 相关度 `0.30 ▮▮▮▯▯` + `复制引用 [n]`（`mmCopy`）+ `<mark>` 高亮正文 + `🎯 命中「词」`（无则「无字面重合，仅按相关度参考」）+ `这条有用 / 这条没用`（`mmFeedback`，只生成可粘贴的 `feedback(...)` 指令文本）；`mem_id` 不过 `/^[A-Za-z0-9_-]{1,64}$/` 时**隐藏反馈按钮**、不拼进 onclick |
 | 折叠记忆 | `localStorage` 键 `mm.recall.detail.folds.v1`（`{foldKey: boolean}`），同源、仅本机、不上传不落账本 |
 | 锚点 | `/recall/<id>#hit-n` 直达单条依据；`hits=0` 时页面无任何 `[n]`、只给「未命中（扫描 N 条）」 |
@@ -286,9 +296,10 @@ scope: recall_memory 回显 / 三档判档 / 四段模板 / 明细页 / Agent �
 | `content[3]` | `recallEchoNote(displayMode)` | 按档不同的展示要求 + `RECALL_SOURCE_BOUNDARY` |
 | — | `structuredContent` = `payload` | 标准 MCP 结构化结果 |
 
-`recallEchoNote` 三份文案分别要求：HTML 档整段输出外层 `<details>`（summary 以「🧠 命中」开头、含「▶ 展开本次召回汇总」，展开依次是统计汇总四行 → `[n]` 依据 → 四段二级折叠；不加 `open`、不加额外标签；不渲染 HTML 则退回 `display.line`）；
-`markdown-full` 档整段输出两行摘要 + 统计汇总 + `[n]` 依据 + 四小节、不添加 HTML 标签；
-compact 档整段输出两行摘要 + 链接、URL 逐字保留、禁止预展开。
+`recallEchoNote` 三份文案分别要求：HTML 档整段输出外层 `<details>`（summary 以「🧠 命中」开头、含「▶ 展开本次召回汇总」，展开依次是统计汇总四行 → `[n]` 依据 → 四段二级折叠 + 一行 `⚙ 模式`；不加 `open`、不加额外标签；不渲染 HTML 则退回 `display.line`，该行同样带 `⚙ 模式` 段）；
+`markdown-full` 档整段输出两行摘要 + 一行 `⚙ 模式` + 统计汇总 + `[n]` 依据 + 四小节、不添加 HTML 标签；
+compact 档整段输出两行摘要 + 一行 `⚙ 模式` + 链接、URL 逐字保留、禁止预展开。
+**A8 三档共用一条铁律**：不得按「两行摘要」的行数自行重建 `display.markdown`，`⚙ 模式` 行必须随整段原样输出、不得省略。
 三档共用同一条 `[n]` 就地引用要求（HTML / full 对应「🎯 本次用上的依据」段，compact 对应首行「依据 [n]」，编号不得编造、`hits=0` 不标注）。
 末块统一附 `RECALL_SOURCE_BOUNDARY`：`hits=0` 须如实说「未检索到相关记忆」、事实优先采信命中记忆、工具不可用不得假装检索过。
 
@@ -304,10 +315,10 @@ compact 档整段输出两行摘要 + 链接、URL 逐字保留、禁止预展�
 |---|---|---|---|---|---|
 | HTTP 8204 | 白名单（Qoder 系 + `qoder-*` 派生名 + `MEMAGENT_HTML_DETAILS_CLIENTS`） | 任意 | `html-details` | `null` | `<details>` 一行收起（summary 含命中数/依据词/省量%），点开是统计汇总四行 + `[n]` 依据（默认可见）+ 四段二级折叠（各可再收起） |
 | HTTP 8204 | 任意客户端且带 `X-Memagent-Render: fold` | 任意 | `html-details` | `null` | 同上——**能力自证通道**（T8），不必等实测白名单 |
-| HTTP 8204 | 其余 | `true` | `markdown-full` | `null` | 两行加粗摘要 + 统计汇总四行 + `[n]` 依据 + 四段加粗小节（纯 Markdown） |
-| HTTP 8204 | 其余 | 缺省/false | `markdown-compact` | 有（30 分钟） | 两行加粗摘要（首行含 `[1][2][3]`）+ 「▶ 展开本次召回明细」本机链接 |
-| TCP 8202 | 无 client | 任意 | `markdown-compact` | `null` | 两行加粗摘要 + 文字指引（`detail=true` 时升 `markdown-full`）；裸 TCP 无 HTTP 头，能力声明通道不适用 |
-| 任一 | 连 Markdown 都渲染不了 | — | — | — | 单独一行原样输出 `display.line` |
+| HTTP 8204 | 其余 | `true` | `markdown-full` | `null` | 两行加粗摘要 + 一行 `⚙ 模式` + 统计汇总四行 + `[n]` 依据 + 四段加粗小节（纯 Markdown） |
+| HTTP 8204 | 其余 | 缺省/false | `markdown-compact` | 有（30 分钟） | 两行加粗摘要（首行含 `[1][2][3]`）+ 一行 `⚙ 模式` + 「▶ 展开本次召回明细」本机链接 |
+| TCP 8202 | 无 client | 任意 | `markdown-compact` | `null` | 两行加粗摘要 + 一行 `⚙ 模式` + 文字指引（`detail=true` 时升 `markdown-full`）；裸 TCP 无 HTTP 头，能力声明通道不适用 |
+| 任一 | 连 Markdown 都渲染不了 | — | — | — | 单独一行原样输出 `display.line`（A8 起含 `⚙ 模式` 段） |
 
 判档优先级（`recallDisplayMode(client, detail, renderFold)`）：**自证头 `renderFold` > 白名单 > detail**。
 `renderFold` 只改「这一档怎么呈现」，不进 `display` 字段、不改审计里的 `client`、不改入参 schema。
@@ -319,11 +330,11 @@ compact 档整段输出两行摘要 + 链接、URL 逐字保留、禁止预展�
 | 项 | 口径 |
 |---|---|
 | 判档 | 不变——`workbuddy` 仍不在白名单，恒 `markdown-compact`（**不新增档位、不改 `display` 6 字段、不改白名单**） |
-| 文本通道 | **零 HTML 标签**：不出现 `<details>`/`<summary>`/`<mark>`；只用两行加粗摘要 + 一条 Markdown 链接 |
+| 文本通道 | **零 HTML 标签**：不出现 `<details>`/`<summary>`/`<mark>`；只用两行加粗摘要 + 一行 `⚙ 模式` + 一条 Markdown 链接 |
 | 折叠载体 | 客户端气泡内折叠卡。**2026-11-12 用户已验收该形态**（截图确认：默认收起、标题即首行摘要、点开看汇总与依据）→ 服务端措辞从「能做就做」升级为「**有卡片能力就必须做**」：默认收起、卡片标题用首行原文、卡内依次放「📊 汇总」四行与「🎯 依据 [n]」 |
 | **展开分区顺序（用户 2026-11-12 22:39 拍板）** | 顶部「📊 本次召回统计汇总」（四行，含 Token 与费用数字）→ 明细分段固定为 **📎 项目背景 → 🧠 命中记忆 → 🎯 本次用上的依据**（每条含 [n]、层级/相关度、🎯 命中词、正文片段）→ **⚠ 证据不足**（仅真有告警时出现，**放最后**）。其余保持原样：标题、默认收起、两行摘要、明细链接、禁 HTML、卡内正文只取自本次返回。`mcpHttp.test.ts` C4 用正则锁住该顺序 |
 | **项目背景逐条独立（T13，用户 2026-11-12 22:45 回填截图）** | 用户要求「按照这个可折叠显示，命中前面增加项目背景」；截图里 `📎 项目背景 5 条（293t）` 虽已排在 `🧠 命中记忆` 之前，但被压成一整段、读起来像没展开 → 口径细化为「**逐条独立成行**：每条单独一行/一张卡，含类别（`[decision]` / `[fact]` …）与正文片段，**不压缩成一整段**」。`bubbleCard`、`MCP_INSTRUCTIONS` §2、`recall_memory` description 三处同步；`mcpHttp.test.ts` C4 加 `toContain('逐条独立成行')` 断言 |
-| 不变项 | 两行摘要照常输出、URL 逐字保留、卡内不得补写明细或改写数字；做不到富媒体的客户端忽略该条 |
+| 不变项 | 两行摘要、`⚙ 模式` 行照常输出、URL 逐字保留、卡内不得补写明细或改写数字；做不到富媒体的客户端忽略该条 |
 | 反向断言 | `mcpHttp.test.ts` C4：compact note 含「气泡折叠档 / 折叠卡 / 默认收起 / 不要输出任何 HTML 标签 / 逐条独立成行」，并用正则锁住「项目背景→命中记忆→依据→证据不足」顺序；html/full 两档**不得**含「气泡折叠档」 |
 | **实测结论（2026-11-12 用户手机端 + 桌面端双端回填）** | 文本通道写 `<details><summary>` 时，WorkBuddy **解析掉了标签（不露裸文本）但也不提供折叠交互**：summary 与内容直接平铺展开、没有可点的三角。→ 若把 `workbuddy` 加进白名单，得到的不是折叠卡而是「明细默认全铺」，比两行摘要更差。**故 `workbuddy` 恒 `markdown-compact` 是实证结论，不是保守猜测**；折叠只在两处成立：① 两行摘要上的明细页链接（点开是本机真 HTML 页，页内真折叠）；② Agent 主动用富媒体卡片承载（宿主能力，非 MCP 文本通道） |
 
@@ -354,6 +365,7 @@ compact 档整段输出两行摘要 + 链接、URL 逐字保留、禁止预展�
 5. `hits=0` 如实说「未检索到相关记忆」；工具不可用 / 网络失败 / 桌面端未启动不得假装检索过。
 6. 不得向用户展示 MCP 令牌；`mint_token` 明文令牌只原样转交一次。
 7. **富媒体客户端（WorkBuddy 等）禁用 HTML 档**：文本里不得输出 `<details>` 等标签（会让客户端露出裸标签），折叠一律交给客户端气泡折叠卡；服务端不因此改判档、不加白名单。
+8. **（A8）不得按「两行摘要」的行数重建回显**：`⚙ 模式：…` 是本次 `display.markdown` 的固定组成部分，必须随整段原样输出；纯文本兜底改输出 `display.line` 时也不得丢掉末尾的 `⚙ 模式` 段。
 
 ## 9. 复核命令
 
@@ -375,4 +387,6 @@ npm run code:index:check                                           # 索引一�
 | §3.5 compact 首行 | 「依据 [1][2][3]」 | 只覆盖**前 3 条命中**（每条一个代表词）；第 4 条及以后在 compact 档没有编号，正文也就不能引用，须走 `detail=true` / 明细页 |
 | 明细页「这条有用 / 没用」 | footer 写「不会自动生效」 | 页面无 MCP 令牌，只生成一行可粘贴的 `feedback(...)` 指令文本并尝试复制；**必须由用户在聊天里让 Agent 执行**才进账本 |
 
-以上三处均为口径说明差异，不是缺陷；改动影响的只有文档，不改运行时。
+| A6 之前 §3 的「两行摘要」模板 | 只有 headline + stats | A6 起还有第三行 `⚙ 模式`；A8 已把三档模板、档位矩阵、展示要求与 `display.line` 全部同步（会话视图 `dispatch=null` 时仍为两行） |
+
+以上均为口径说明差异，不是缺陷；改动影响的只有文档，不改运行时。

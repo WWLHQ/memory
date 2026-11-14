@@ -3,6 +3,7 @@ import {
   RECALL_MODE_SPECS, resolveMode, isManualMode, modeWeights, modeSpec,
   DEFAULT_DISPATCH_CONFIG,
 } from '../recallModes.ts';
+import type { Scene } from '../types.ts';
 
 describe('recallModes — 模式配置表（§2.4.3）', () => {
   it('5 种具体模式齐全', () => {
@@ -80,7 +81,7 @@ describe('resolveMode — 自动分流（§2.4.4 裁决走查）', () => {
 
   it('高置信单字词「故障」命中即算（1 即命中）', () => {
     const r = resolveMode({ query: '线上故障', scene: 'default' });
-    // default 候选为 [minimal, fact_first]；「故障」高置信 → fact_first 命中
+    // default 候选 A10 起覆盖全部 5 套；「故障」是 fact_first 的高置信词 → 命中即裁决
     expect(r.mode).toBe('fact_first');
     expect(r.hitKeywords).toContain('故障');
   });
@@ -126,5 +127,28 @@ describe('resolveMode — 多模式命中裁决次模式', () => {
     const r = resolveMode({ query: '修空指针', scene: 'default' });
     expect(r.mode).toBe('minimal');
     expect(r.secondary).toBeUndefined();
+  });
+});
+
+// A10（内核边界与设计遗漏）：以下三条是 TDD 红灯——探针① / ② / ⑤ 的真实复现。
+describe('A10 · 内核边界与设计遗漏', () => {
+  it('非法 scene 不再抛原生 TypeError，回落 default 且在 reason 里如实标注', () => {
+    const r = resolveMode({ query: '修一下这个空指针', scene: '' as Scene });
+    expect(r.mode).toBe('minimal');
+    expect(r.reason).toContain('非法 scene');
+    expect(r.viaFallback).toBe(true);
+  });
+
+  it('英文大写日志查询不漏命中（scoreMode 大小写归一化）', () => {
+    const r = resolveMode({ query: 'Exception NullPointerException Stack Trace', scene: 'history_query' });
+    expect(r.hitKeywords).toContain('trace');
+    expect(r.hitKeywords).toContain('exception');
+    expect(r.mode).toBe('fact_first');
+  });
+
+  it('default 场景候选集覆盖 5 套模式：架构 / 复盘 / 归纳各自能分流出来', () => {
+    expect(resolveMode({ query: '架构选型 规范原则', scene: 'default' }).mode).toBe('top_insight');
+    expect(resolveMode({ query: '复盘经过 步骤还原', scene: 'default' }).mode).toBe('event_replay');
+    expect(resolveMode({ query: '归纳同类 批量套路', scene: 'default' }).mode).toBe('pattern_reasoning');
   });
 });

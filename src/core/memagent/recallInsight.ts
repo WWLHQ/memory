@@ -151,7 +151,11 @@ export interface RecallEchoSummary {
 }
 
 export interface RecallHint {
-  /** 聊天窗口逐字回显的单行提示 */
+  /**
+   * 聊天窗口逐字回显的单行提示。
+   * A8：末尾带一行内的 `⚙ 模式：…` 段（dispatch=null 时省略），与 display.markdown 同口径——
+   * 「客户端连 Markdown 都渲染不了 → 只输出 display.line」的兜底路径不能再把模式信息静默丢掉。
+   */
   line: string;
   /**
    * 批次33-C：折叠档专用短摘要（最多两行 + 告警行，与 line 数字同源）。
@@ -280,9 +284,15 @@ export function buildRecallHint(
       + ` ｜ 今日 ${rollup.today_calls} 次 ｜ 全部 ${rollup.all_calls} 次`;
   }
 
-  const line = [`🧠 Memory ｜ ${hitPart} ｜ ${bgPart} ｜ ${savePart} ｜ ${moneyPart}`, ...warnings].join(' ｜ ');
-  // A6：shortLine 是「无 echo 时的兜底摘要」，模式行同样带上（§3.4 透明），dispatch=null 时不加
+  // A6/A8：模式行是「本次生效模式」的唯一口径。line 保持单行，但必须带上它——
+  // display.line / text / HTTP content[0] 是纯文本客户端的兜底，缺了这段就等于 A6 没生效。
   const modeLine = buildRecallModeLine(result);
+  const line = [
+    `🧠 Memory ｜ ${hitPart} ｜ ${bgPart} ｜ ${savePart} ｜ ${moneyPart}`,
+    ...warnings,
+    ...(modeLine ? [modeLine] : []),
+  ].join(' ｜ ');
+  // A6：shortLine 是「无 echo 时的兜底摘要」，模式行同样带上（§3.4 透明），dispatch=null 时不加
   const shortLine = [
     `🧠 Memory ｜ ${hitPart} ｜ ${bgPart} ｜ ${savePart}`,
     moneyShort,
@@ -350,7 +360,13 @@ export function buildRecallModeLine(result: RecallResult): string | null {
   const kw = result.hit_keywords;
   let body: string;
   if (d.source === 'manual') {
-    body = `${nameOf(d.applied)}（用户指定）`;
+    // A9：只有「用户指定什么就执行什么」才配写「用户指定」。
+    // 内核做过裁决（16.5 降级 / 非法 scene 回落）时 dispatch.reason 会与标准手动文案不同，
+    // 此时如实展示内核依据，绝不把裁决结果伪装成用户意图。
+    const plainManual = `手动指定 ${nameOf(d.applied)}`;
+    body = d.reason === plainManual
+      ? `${nameOf(d.applied)}（用户指定）`
+      : `${nameOf(d.applied)}（内核裁决 · ${plainClip(d.reason, 60)}）`;
   } else if (d.applied === 'auto') {
     // 自动分流建议了极简、本轮按默认口径执行（specs §2.6 A2 观测档）——如实说明，不冒充分流已落地
     body = `自动（分流建议${nameOf(d.suggested)} · 本轮按默认口径执行）`;

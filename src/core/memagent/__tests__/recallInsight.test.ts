@@ -780,6 +780,30 @@ describe('批次 RAG T2：A 引用锚点 / B 折叠统计汇总 / D 不变项', 
     expect(noUrl).not.toContain('/recall/');
   });
 
+  // A8：B6 用的是 dispatch:null 夹具（本文件默认夹具，诚实但不产生模式行），
+  // 只靠它「两行 + 链接」的断言会假绿。这里补真实分流下的对偶用例。
+  it('A8 · 真实 dispatch 下 compact 档是「两行摘要 + 一行 ⚙ 模式 + 链接」，单行 line 同口径', () => {
+    const r = recallResult({
+      hits: [withTerms(['回显'])],
+      dispatch: {
+        source: 'manual', suggested: 'fact_first', applied: 'fact_first', secondary: null,
+        reason: '手动指定 事实优先', weights_source: 'manual',
+      },
+    });
+    const hint = buildRecallHint(r, none(), null);
+    expect(hint.line).toContain('⚙ 模式：事实优先（用户指定）');
+    expect(hint.line).not.toContain('\n'); // 单行兜底不能被改成多行
+    expect(hint.shortLine).toContain('⚙ 模式：事实优先（用户指定）');
+    const md = buildRecallCompactMarkdown(hint, URL);
+    const rows = md.split('\n\n').filter(Boolean);
+    expect(rows).toHaveLength(5); // 摘要 2 + 模式 1 + 链接 1 + 「点不开就说看明细」1
+    expect(rows[0]).toBe(`**${hint.echo!.headline}**`);
+    expect(rows[1]).toBe(`**${hint.echo!.stats}**`);
+    expect(rows[2]).toBe('**⚙ 模式：事实优先（用户指定）**');
+    expect(rows[3]).toContain(URL);
+    expect(rows[4]).toContain('看明细');
+  });
+
   it('B7 未设单价时 compact 全档输出「金额未开」且无 ¥', () => {
     const r = recallResult();
     const hint = buildRecallHint(r, none(), null);

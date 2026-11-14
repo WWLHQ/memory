@@ -94,6 +94,40 @@ describe('A5 · 次模式降级注入', () => {
   });
 });
 
+// A11：次模式取材池必须复用主链路的硬过滤，且不得与项目背景重复注入同一条记忆。
+describe('A11 · 次模式池与 hardFilter / 背景去重', () => {
+  async function seedTwo(ma: ReturnType<typeof makeAgent>['ma'], storage: InMemoryStorage, mark: string, extra: Record<string, unknown> = {}) {
+    const primary = await ma._seedMemory({
+      content: `${QUERY} 主命中原则记录`, category: 'decision', project_id: 'P1', layer: 'L3',
+    });
+    await storage.putMemory({ ...primary, confidence: 0.9 });
+    const spare = await ma._seedMemory({
+      content: `${mark} 这条记忆的取材资格待测`, category: 'decision', project_id: 'P1', layer: 'L3', ...extra,
+    } as Parameters<typeof ma._seedMemory>[0]);
+    await storage.putMemory({ ...spare, confidence: 0.95 });
+    return spare;
+  }
+
+  it('次模式池子要过 hardFilter：冷层记忆不得作为参考摘要下发', async () => {
+    const { ma, storage } = makeAgent();
+    await seedTwo(ma, storage, 'COLD_SECONDARY_MARK', { decay_class: 'cold' });
+    const r = await ma.recall({ query: QUERY, project_id: 'P1', scene: 'task_start', top_k: 1 });
+    expect(r.dispatch?.reason).toContain('次模式'); // 分流确实给出了次模式，用例没空转
+    expect(r.secondary_mode_hint?.content ?? '').not.toContain('COLD_SECONDARY_MARK');
+  });
+
+  it('同一条记忆不得在次模式摘要与项目背景里重复注入', async () => {
+    const { ma, storage } = makeAgent();
+    await seedTwo(ma, storage, 'SHARED_MARK');
+    const r = await ma.recall({ query: QUERY, project_id: 'P1', scene: 'task_start', top_k: 1 });
+    const inHint = (r.secondary_mode_hint?.content ?? '').includes('SHARED_MARK');
+    const inBackground = r.background.items.some((b) => b.content.includes('SHARED_MARK'));
+    // 至少要出现一次（否则用例空转），但绝不能两处都出现
+    expect(inHint || inBackground).toBe(true);
+    expect(inHint && inBackground).toBe(false);
+  });
+});
+
 function hitsTokens(hits: { content: string }[]): number {
   return hits.reduce((a, h) => a + estTokens(h.content), 0);
 }

@@ -285,6 +285,11 @@ describe('MCP HTTP（批次2 信任边界）', () => {
     expect(body.result.structuredContent.display.line).toContain('未设置单价');
     expect(body.result.content).toHaveLength(4); // 提示行 + 完整 JSON + 明细 + 展示要求
     expect(body.result.content[0].text).toBe(body.result.structuredContent.display.line);
+    // A8：单行兜底 / 明细 / 展示要求四块都必须认识本次 ⚙ 模式行，不能只有 display.markdown 带
+    expect(body.result.structuredContent.display.line).toContain('⚙ 模式');
+    expect(body.result.content[0].text).toContain('⚙ 模式');
+    expect(body.result.content[2].text).toContain('⚙ 模式');
+    expect(body.result.content[3].text).toContain('⚙ 模式');
     expect(body.result.content[1].text).toContain('"saved_tokens"');
     // 批次32-C/33-C：无会话（非 Qoder）→ 默认档「两行摘要 + 可点明细链接」，四段明细不在聊天里铺开
     expect(body.result.structuredContent.display.mode).toBe('markdown-compact');
@@ -1583,7 +1588,13 @@ describe('批次 RAG · C 组：展示要求三处与实际 display.markdown 逐
       ],
       payload_tokens: 100, pipeline_llm_tokens: 0,
       budget: { soft: 1500, warn: 2000, hard: 3000, status: 'ok' },
-      mode: 'auto', hit_keywords: [], secondary_mode_hint: null, dispatch: null,
+      // A8：C 组是「note 与真实 markdown 逐字一致」的夹具，dispatch 必须是真值，
+      // 否则模式行根本不生成，旧「两行摘要」断言会假绿。
+      mode: 'fact_first', hit_keywords: [], secondary_mode_hint: null,
+      dispatch: {
+        source: 'manual', suggested: 'fact_first', applied: 'fact_first', secondary: null,
+        reason: '手动指定 事实优先', weights_source: 'manual',
+      },
       request_id: 'req_c_group', scanned_memories: 20, evidence_thin: false,
       background: { items: [], tokens: 0, candidates: 0 },
       savings: {
@@ -1611,6 +1622,9 @@ describe('批次 RAG · C 组：展示要求三处与实际 display.markdown 逐
     expect(note).toContain('【信息来源边界】');
     expect(note).not.toContain('<details> 四段');
     expect(note).not.toContain('四段明细');
+    // A8：html 档展示要求也必须认识 ⚙ 模式行，且真实 markdown 里有
+    expect(note).toContain('⚙ 模式');
+    expect(html).toContain('⚙ 模式');
   });
 
   it('C1-b markdown-full：段名与纯 Markdown 正文逐字一致、零 HTML 标签', () => {
@@ -1627,6 +1641,9 @@ describe('批次 RAG · C 组：展示要求三处与实际 display.markdown 逐
     expect(note).toContain('【信息来源边界】');
     expect(note).not.toContain('<details>');
     expect(note).not.toContain('四段明细');
+    // A8：full 档展示要求也必须认识 ⚙ 模式行
+    expect(note).toContain('⚙ 模式');
+    expect(full).toContain('⚙ 模式');
   });
 
   it('C1-c markdown-compact：note 与两行短摘要/链接文案逐字一致，且不含 <details>', () => {
@@ -1644,6 +1661,35 @@ describe('批次 RAG · C 组：展示要求三处与实际 display.markdown 逐
     expect(compact).toContain('▶ [展开本次召回明细（统计汇总 / 命中依据 / Token / 费用）]');
     expect(note).not.toContain('<details>');
     expect(note).not.toContain('四段明细');
+    // A8：compact 档展示要求与真实 markdown 都带 ⚙ 模式行（夹具 dispatch 已是真值）
+    expect(note).toContain('⚙ 模式');
+    expect(compact).toContain('⚙ 模式');
+  });
+
+  it('C1-d A8 展示要求四处同口径：两行摘要 + 一行 ⚙ 模式，且必须原样输出 display.markdown', () => {
+    const tool = MCP_TOOLS.find((t) => t.name === 'recall_memory')!;
+    const props = tool.inputSchema.properties as unknown as Record<string, { description?: string }>;
+    const targets: Array<[string, string]> = [
+      ['initialize.instructions', MCP_INSTRUCTIONS],
+      ['recall_memory.description', tool.description],
+      ['detail 参数描述', props.detail.description ?? ''],
+      ['recallEchoNote(html-details)', recallEchoNote('html-details')],
+      ['recallEchoNote(markdown-full)', recallEchoNote('markdown-full')],
+      ['recallEchoNote(markdown-compact)', recallEchoNote('markdown-compact')],
+    ];
+    for (const [label, text] of targets) {
+      expect(text, `${label} 不认识 ⚙ 模式行`).toContain('⚙ 模式');
+      expect(text, `${label} 仍用旧的「两行加粗短摘要」口径`).not.toContain('两行加粗短摘要');
+    }
+    for (const mode of ['html-details', 'markdown-full', 'markdown-compact'] as const) {
+      const note = recallEchoNote(mode);
+      expect(note, `${mode} 未要求原样输出 display.markdown`).toContain('display.markdown');
+      expect(note, `${mode} 未要求原样输出`).toContain('原样输出');
+    }
+    // 兜底：不渲染 HTML 时退回 display.line，该行已带 ⚙ 模式段，不能把模式信息丢掉
+    const htmlNote = recallEchoNote('html-details');
+    expect(htmlNote).toContain('display.line');
+    expect(htmlNote).toContain('⚙ 模式');
   });
 
   it('C2 instructions / 工具描述 / detail 参数三处同步 RAG 就地引用与新段名', () => {
@@ -1686,6 +1732,8 @@ describe('批次 RAG · C 组：展示要求三处与实际 display.markdown 逐
     expect(compact).toContain('默认收起');
     expect(compact).toContain('不要输出任何 HTML 标签');
     expect(compact).toContain('URL 逐字保留');
+    // A8：气泡折叠卡文案也要带上第三行 ⚙ 模式，不能让卡片标题/摘要口径与 markdown 分叉
+    expect(compact).toContain('⚙ 模式');
     // 2026-11-12 用户验收该形态 → 从「能做就做」升级为「有卡片能力必须做」，并标注已验收
     expect(compact).toContain('**必须**为本次召回输出一张');
     expect(compact).toContain('已验收');

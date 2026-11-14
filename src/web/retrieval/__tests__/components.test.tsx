@@ -100,6 +100,23 @@ describe('ModeBanner (T5)', () => {
     expect(screen.getByTestId('evidence-thin')).toHaveTextContent('已追加 1 条 Cold');
     expect(screen.getByTestId('fact-retry')).toBeInTheDocument();
   });
+  // A9：自动极简观测档（applied='auto'）下，横幅不能一边显示「极简轻量」一边说「本轮按默认口径执行」。
+  it('A9 · 自动极简观测档：横幅写「自动」并与内核回显同口径，不冒充极简已生效', () => {
+    const observed: ModeBannerData = {
+      ...banner,
+      mode: 'minimal', fallback: true,
+      dispatch: {
+        source: 'auto', suggested: 'minimal', applied: 'auto', secondary: null,
+        reason: '自动分流：default 零命中 + 短查询触发极简', weights_source: 'growth:v1',
+      },
+    };
+    render(<ModeBanner data={observed} onRequestId={() => {}} onFactRetry={() => {}} />);
+    const chip = screen.getByTestId('banner-mode').textContent ?? '';
+    expect(chip).toContain('自动');
+    expect(chip).toContain('分流建议极简轻量');
+    expect(chip).toContain('本轮按默认口径执行');
+    expect(chip).not.toMatch(/^模式: 极简轻量/);
+  });
 });
 
 const budget: BudgetData = {
