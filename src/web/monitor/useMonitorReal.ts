@@ -18,6 +18,7 @@ import type { StorageBackend } from '../../core/memagent/types.ts';
 import { getKernelStorage } from '../kernel.ts';
 import type { AlertItem, MetricCard } from './types.ts';
 import { agentOptionsFromLedger } from './options.ts';
+import { operationEntriesFromAudits, operationStatusFromAudits, type OperationEntry, type OperationStatus } from './operationState.ts';
 
 export type RealStorage = Pick<StorageBackend, 'listMemories' | 'queryAudit'>;
 
@@ -135,6 +136,10 @@ export interface RealMonitor {
   alerts: AlertItem[];
   /** 批次48 A25：宿主 Agent 筛选选项（账本 agent 字段 + created_by_agent 派生；空账本 = ['all']） */
   agentOptions?: string[];
+  /** REQ-013 / C5：后台操作真实状态（从 audit.jsonl 聚合；空账本 = 空数组诚实态） */
+  operations?: OperationStatus[];
+  /** REQ-013 / C5（T6-A）：同上但带 action/标签/时间，供页面列明细（同一份派生） */
+  operationEntries?: OperationEntry[];
 }
 
 // 真实账本实算标记（供构建产物核验）
@@ -155,5 +160,8 @@ export async function loadRealMonitorData(): Promise<RealMonitor> {
     alerts,
     // 批次48 A25：选项只来自真实账本，空账本只留「全部」
     agentOptions: agentOptionsFromLedger(alerts, mems.map((m) => m.created_by_agent)),
+    // REQ-013 / C5：从真实审计聚合后台操作状态（只读，不改落盘）；无相关审计 = 空数组诚实态
+    operations: operationStatusFromAudits(audits),
+    operationEntries: operationEntriesFromAudits(audits),
   };
 }

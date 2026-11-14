@@ -41,6 +41,28 @@ describe('MonitorPage (P6-T5 编排·真实账本接真版)', () => {
     await waitFor(() => expect(screen.getAllByTestId(/^alert-\d+$/)).toHaveLength(1));
   });
 
+  it('REQ-013 / C5（T6-A）：有真实后台操作审计 → 渲染汇总 + 最近明细；无则整块不渲染', async () => {
+    const now = Date.now();
+    const entries = [
+      { request_id: 'a', action: 'schedule_run', label: '定时任务', status: 'succeeded' as const, ts: now - 1000 },
+      { request_id: 'b', action: 'gc', label: '遗忘周期', status: 'failed' as const, ts: now - 2000 },
+    ];
+    const spy = vi.spyOn(await import('../useMonitorReal.ts'), 'loadRealMonitorData')
+      .mockResolvedValue({ available: true, memCount: 0, auditCount: 2, metrics: [], alerts: [], operations: entries.map((e) => e.status), operationEntries: entries });
+    const first = render(<MonitorPage />);
+    await waitFor(() => expect(screen.getByTestId('operations-status')).toBeInTheDocument());
+    expect(screen.getByTestId('operations-summary')).toHaveTextContent('已完成 1');
+    expect(screen.getByTestId('operations-summary')).toHaveTextContent('失败 1');
+    expect(screen.getByTestId('operations-list')).toHaveTextContent('定时任务·已完成');
+    expect(screen.getByTestId('operations-list')).toHaveTextContent('遗忘周期·失败');
+    first.unmount();
+    // 无相关审计 → 整块不渲染（诚实空态，不显示全 0 假卡）
+    spy.mockResolvedValue({ available: true, memCount: 0, auditCount: 0, metrics: [], alerts: [], operations: [], operationEntries: [] });
+    render(<MonitorPage />);
+    await waitFor(() => expect(screen.getByTestId('monitor-page')).toBeInTheDocument());
+    expect(screen.queryByTestId('operations-status')).toBeNull();
+  });
+
   it('待裁决 = 当前冲突记忆数；历史 conflict_resolve 审计不冒充待办（批次48 A15）', async () => {
     const { metricsFromLedger } = await import('../useMonitorReal.ts');
     const mkMem = (id: string, conflict?: string) => ({

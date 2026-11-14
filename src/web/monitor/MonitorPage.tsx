@@ -5,6 +5,7 @@
 import { useState } from 'react';
 import { ALL_AGENTS_OPTION } from './options.ts';
 import { filterAlerts } from './logic.ts';
+import { operationLabel, summarizeOperations } from './operationState.ts';
 import { loadRealMonitorData, type RealMonitor } from './useMonitorReal.ts';
 import { useMonitorMirror } from './useMonitorMirror.ts';
 import { KernelLoadError, useKernelLoad } from '../shared/kernelLoad.tsx';
@@ -98,6 +99,32 @@ export function MonitorPage({ load = loadRealMonitorData }: { load?: () => Promi
           </div>
         </div>
       )}
+
+      {real?.operations && real.operations.length > 0 ? (
+        <div className="p0-card" data-testid="operations-status">
+          <div className="p0-hd">
+            <h3>后台操作状态</h3>
+            <span className="p0-sub">真实审计只读派生（定时任务 / 记忆精炼 / 合并 / 遗忘周期 / 同步 / 接入）；409 = 排队中，不算失败</span>
+          </div>
+          {(() => {
+            const s = summarizeOperations(real.operations!);
+            return (
+              <div className="p0-note" data-testid="operations-summary">
+                排队中 {s.queued} · 进行中 {s.running} · 已完成 {s.succeeded} · 失败 {s.failed}
+              </div>
+            );
+          })()}
+          {real.operationEntries && real.operationEntries.length > 0 ? (
+            <div className="p0-note" data-testid="operations-list">
+              最近：
+              {real.operationEntries
+                .slice(0, 6)
+                .map((op) => `${op.label}·${operationLabel(op.status)}·${new Date(op.ts).toLocaleTimeString('zh-CN', { hour12: false })}`)
+                .join(' ｜ ')}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       {alertsAll.length === 0 ? (
         <div className="p0-card" data-testid="alerts-empty">
