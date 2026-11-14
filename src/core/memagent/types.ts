@@ -99,6 +99,21 @@ export interface Hit {
    * 可选：会话视图（scope=session，不走语义检索）不填——不把「最近 N 条」伪装成「相关命中」。
    */
   matched_terms?: string[];
+  /**
+   * REQ-014 / T1（C6-A）：本条是「合并后的最新版」。
+   * 由 recallSupersede 的影子探测补带时置 true（命中行本就被直接命中、且有 merged_from 时也会置 true）；
+   * 值为 undefined 表示与既有口径完全一致，回显不额外标注。
+   */
+  superseded?: boolean;
+  /** 触发本次补带的合并影子 id（只做溯源，不注入影子正文） */
+  superseded_from?: string[];
+  /** 本条吸收了多少条旧记录（merged_from 长度，供标注显示；无合并历史时缺省） */
+  merged_from_count?: number;
+  /**
+   * REQ-014 / T3（C6-B）：脱敏原文摘录（≤200 字），与 content（可能是 L2 摘要）配对下发，
+   * 让 Agent 同时拿到「摘要」与「原文片段」。L0 密文永不进入此字段。
+   */
+  source_excerpt?: string;
 }
 
 export interface Budget {
@@ -736,6 +751,13 @@ export interface Memory {
   tags?: string[];                // 标签集合
   merged_from?: string[];         // 被哪些原始记忆合并（17.9）
   merged_into?: string;           // 是否被合并到某条摘要
+  /**
+   * REQ-014 / T3（C6-B）：脱敏后的关键原文摘录（≤200 字），写入侧填充。
+   * 用途：召回命中是 L2 摘要时，prelude 可附「原文片段」实现「摘要 + 原文」双保真。
+   * 安全：只取明文正文的 sanitizeL1 结果，**L0 密文（content_l0_enc）永不进入**；
+   * 无明文 / 摘录与摘要同文 / 空内容时缺省（不写空串，避免「有字段但没料」的假保真）。
+   */
+  source_excerpt?: string;
   /** 17.10 冷压缩：本行在向量索引中的副本被清除的时间（每周幂等；行上 embedding 始终保留） */
   compressed_at?: number;
   // ---- 分支嫁接（§6.2，2026-10-30） ----

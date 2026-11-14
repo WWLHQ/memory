@@ -14,6 +14,12 @@ export const PLUGIN_INJECTION_MARKER = 'source.kind=plugin:memagent';
 /** 单条命中正文上限（防一条超长记忆吃光上下文）与本轮注入总上限 */
 export const MAX_HIT_CHARS = 1200;
 export const MAX_PRELUDE_CHARS = 6000;
+/**
+ * REQ-014 / T3（C6-B）：随命中附带的原文摘录上限（与写入侧 `SOURCE_EXCERPT_MAX_CHARS` 同口径）。
+ * 摘录进 prelude 是为了「摘要 + 原文片段」双保真，因此**只读命中字段、绝不自行截取 L0 密文**
+ * ——L0 密文不在 hits 里，也不可能在这里被拼进来。
+ */
+export const MAX_EXCERPT_CHARS = 200;
 /** 召回 query 取用户最后一条消息，超长截断 */
 export const MAX_QUERY_CHARS = 600;
 
@@ -71,7 +77,15 @@ export function buildRecallPrelude(hits: RecallHit[]): string | null {
     if (typeof hit.content !== 'string') continue;
     const body = hit.content.trim().slice(0, MAX_HIT_CHARS);
     if (!body) continue;
-    lines.push(`[${lines.length + 1}] ${body}`);
+    // REQ-014 / T3（C6-B）：命中内容是摘要时附上脱敏原文摘录，实现「摘要 + 原文片段」双保真。
+    // 摘录缺失、或与正文逐字相同 → 不追加（否则只是把同一段话印两遍）。
+    const excerpt = typeof hit.source_excerpt === 'string'
+      ? hit.source_excerpt.trim().slice(0, MAX_EXCERPT_CHARS)
+      : '';
+    const n = lines.length + 1;
+    lines.push(excerpt && excerpt !== body
+      ? `[${n}] ${body}\n    原文摘录：${excerpt}`
+      : `[${n}] ${body}`);
   }
   if (lines.length === 0) return null;
   const block = [

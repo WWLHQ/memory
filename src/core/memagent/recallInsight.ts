@@ -7,6 +7,8 @@ import type {
 import { displayTerms, pickHitSpans } from './hitHighlight.ts';
 // A6：模式中文名的唯一真源就是调度层那张表，回显不另立一份文案
 import { RECALL_MODE_SPECS } from './recallModes.ts';
+// REQ-014 / T2：「以最新为准」标注文案的唯一真源（回显/明细页共用，各写一份必然漂移）
+import { supersedeNote } from './recallSupersede.ts';
 
 /**
  * 本地预算单位 t 的确定性换算：全链路同源 —— 召回硬熔断裁剪（agent.ts）、背景选入、
@@ -564,7 +566,10 @@ export function buildRecallSections(
         const why = terms.length > 0
           ? ' 🎯 命中' + terms.map((x) => `「${clip(x, 20)}」`).join('')
           : '';
-        return `[${h.layer}/${h.decay_class}] ${body}（相关度 ${h.score.toFixed(2)}）${why}`;
+        // REQ-014 / T2：合并后的最新版才追加中性标注——正文（clipped）与数字一字不动，
+        // 标注只是附在行尾的元信息；非 superseded 命中输出逐字不变（守恒）。
+        const note = supersedeNote(h);
+        return `[${h.layer}/${h.decay_class}] ${body}（相关度 ${h.score.toFixed(2)}）${why}${note ? ` ${note}` : ''}`;
       })
     : [`未命中（扫描 ${fmtInt(result.scanned_memories)} 条，未注入命中内容）`];
 
@@ -722,15 +727,20 @@ function hitCardHtml(h: Hit, index: number, maxChars: number): string {
     : '<p class="why none">无字面重合，仅按相关度参考</p>';
   // mem_id 只在「纯安全字符」时才写进 onclick，否则隐藏反馈按钮——绝不把未经校验的 id 拼进脚本
   const safeId = /^[A-Za-z0-9_-]{1,64}$/.test(h.mem_id) ? h.mem_id : '';
+  // REQ-014 / T2：合并后的最新版加一个中性徽标 + 一行说明；正文不动、编号不改
+  const note = supersedeNote(h);
+  const supBadge = note ? '<span class="badge sup">最新版</span>' : '';
+  const supLine = note ? `<p class="supnote">${htmlEscape(note)}</p>` : '';
   const fb = safeId
     ? `<div class="fb"><button type="button" class="mini" onclick="mmFeedback('${safeId}','confirm',this)">这条有用</button>`
       + `<button type="button" class="mini" onclick="mmFeedback('${safeId}','reject',this)">这条没用</button>`
       + '<pre class="fbtxt" hidden></pre></div>'
     : '<p class="why none">该条 id 含非安全字符，已隐藏反馈按钮（不编造 id）。</p>';
   return `<article class="hit" id="hit-${n}">
-<p class="hithead"><span class="badge num">[${n}]</span><span class="badge">${htmlEscape(h.layer)}</span><span class="badge">${htmlEscape(h.decay_class)}</span><span class="rel">相关度 ${h.score.toFixed(2)} <span class="bar">${scoreBar(h.score)}</span></span><button type="button" class="mini" onclick="mmCopy('[${n}]', this)">复制引用 [${n}]</button></p>
+<p class="hithead"><span class="badge num">[${n}]</span><span class="badge">${htmlEscape(h.layer)}</span><span class="badge">${htmlEscape(h.decay_class)}</span>${supBadge}<span class="rel">相关度 ${h.score.toFixed(2)} <span class="bar">${scoreBar(h.score)}</span></span><button type="button" class="mini" onclick="mmCopy('[${n}]', this)">复制引用 [${n}]</button></p>
 <p class="hitbody">${body}</p>
 ${why}
+${supLine}
 ${fb}
 </article>`;
 }
@@ -829,6 +839,9 @@ table.stats th { width: 56px; color: var(--muted); font-weight: 600; white-space
 .hitbody { margin: 0; word-break: break-word; }
 .why { margin: 6px 0 0; font-size: 12px; }
 .why.none, .muted { color: var(--muted); }
+.badge.sup { border-color: #b8860b; color: #8a6d00; }
+.supnote { margin: 6px 0 0; padding: 6px 8px; border-left: 3px solid #b8860b; background: #fffbe6;
+  color: #6b5b00; font-size: 12px; }
 .fb { display: flex; gap: 6px; margin: 8px 0 0; }
 button.mini { font: inherit; font-size: 11.5px; padding: 2px 8px; border: 1px solid var(--border);
   border-radius: 6px; background: var(--bg); color: var(--fg); cursor: pointer; }
@@ -843,6 +856,8 @@ mark { background: #ffe58f; color: #1f2328; padding: 0 1px; border-radius: 3px; 
 @media (prefers-color-scheme: dark) {
   mark { background: #7a6320; color: #fff8d6; }
   .legend { background: #2b2716; border-color: #4a431f; color: #e8d98a; }
+  .supnote { background: #2b2716; border-left-color: #b8860b; color: #e8d98a; }
+  .badge.sup { border-color: #b8860b; color: #e8d98a; }
 }
 </style>
 </head>
@@ -866,7 +881,9 @@ ${citeCards}
 ${otherFolds}
 <footer>
 本页与聊天里的摘要<b>数字同源</b>（同一次 recall 的真实账本计算，未重算、未估算）。
-命中与背景正文按 ${clipChars} 字截断，超出部分以「…」标示；金额按全局参数页单价换算，非厂商账单。
+<b>保真口径</b>：命中与背景正文按 ${clipChars} 字截断（超出以「…」标示），不补写、不推测、不合并改写；URL / 数字 / 金额一律照录记忆原文，引用时请以原文为准。
+<b>以最新为准</b>：标有「最新版」的条目是同一事项合并后的当前口径；同一事项出现多个版本时，以「最新版」或创建时间更晚的一条为准。
+金额按全局参数页单价换算，非厂商账单。
 编号 <code>[n]</code> 与聊天正文里的引用脚标一一对应，也可用 <code>/recall/&lt;id&gt;#hit-n</code> 直达单条依据。
 「这条有用 / 没用」只生成本机可粘贴的 <code>feedback</code> 指令文本，本页不含令牌，<b>不会自动生效</b>。
 折叠状态只写本机 <code>localStorage</code>，不上传、不落账本。

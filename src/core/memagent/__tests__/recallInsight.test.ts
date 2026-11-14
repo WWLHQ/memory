@@ -1039,3 +1039,88 @@ describe('批次60（A 方案）端到端：长文记忆不再被稀释到检索
     expect((hit?.matched_terms ?? []).length).toBeGreaterThan(0);
   });
 });
+
+// REQ-014 / T2：合并后的最新版只加中性标注，正文/数字一字不动（回显铁律 [1]）
+describe('REQ-014 T2 · 「以最新为准」标注', () => {
+  const issuedAt = 1_800_000_000_000;
+  const supHit = (): Hit => ({
+    ...hit('m_new', '部署端口是 8204（最新口径）'),
+    superseded: true,
+    superseded_from: ['m_old_shadow'],
+    merged_from_count: 2,
+  });
+  const meta = (p: Record<string, unknown> = {}) => ({
+    project_id: 'P1', query: '部署端口多少', issuedAt,
+    expiresAt: issuedAt + 30 * 60 * 1000, ...p,
+  });
+
+  it('四段明细：标注追加在行尾，正文与相关度数字原样', () => {
+    const r = recallResult({ hits: [supHit()] });
+    const hint = buildRecallHint(r, rollupRecalls([], issuedAt), null);
+    const sections = buildRecallSections(r, hint, null, (s) => s, 120, { markup: 'plain' });
+    const line = sections[1].lines[0];
+    expect(line).toContain('部署端口是 8204（最新口径）');  // 正文逐字
+    expect(line).toContain('相关度 0.90');                   // 数字未被改写
+    expect(line).toContain('以本条为准');                    // 标注
+    expect(line).toContain('2 条旧记录');
+  });
+
+  it('非 superseded 命中：明细行不含任何标注（守恒反向断言）', () => {
+    const r = recallResult();
+    const hint = buildRecallHint(r, rollupRecalls([], issuedAt), null);
+    const sections = buildRecallSections(r, hint, null, (s) => s, 120, { markup: 'plain' });
+    for (const line of sections[1].lines) {
+      expect(line).not.toContain('以本条为准');
+      expect(line).not.toContain('最新版');
+    }
+  });
+
+  it('明细页：加「最新版」徽标 + 说明行；正文原文照旧、编号仍是 [1]', () => {
+    const r = recallResult({ hits: [supHit()] });
+    const hint = buildRecallHint(r, rollupRecalls([], issuedAt), null);
+    const html = buildRecallDetailPage(r, hint, null, meta() as never);
+    expect(html).toContain('<span class="badge sup">最新版</span>');
+    expect(html).toContain('<p class="supnote">');
+    expect(html).toContain('部署端口是 8204（最新口径）');
+    expect(html).toContain('<span class="badge num">[1]</span>');
+  });
+
+  it('明细页：非 superseded 命中不出现徽标与说明行', () => {
+    const r = recallResult();
+    const hint = buildRecallHint(r, rollupRecalls([], issuedAt), null);
+    const html = buildRecallDetailPage(r, hint, null, meta() as never);
+    // 样式表里必然有 .supnote / .badge.sup 定义，这里断言的是「没有渲染出的元素」
+    expect(html).not.toContain('<span class="badge sup">');
+    expect(html).not.toContain('<p class="supnote">');
+    expect(html).not.toContain('以本条为准');
+  });
+});
+
+// REQ-014 / T4（C7）：保真声明只落明细页 footer，**绝不进注入头、不进 display.markdown**
+describe('REQ-014 T4 · 明细页 footer 保真声明', () => {
+  const issuedAt = 1_800_000_000_000;
+  const meta = (p: Record<string, unknown> = {}) => ({
+    project_id: 'P1', query: '部署端口多少', issuedAt,
+    expiresAt: issuedAt + 30 * 60 * 1000, ...p,
+  });
+
+  it('明细页含四条保真口径（数字同源 / 保真不补写 / 以最新为准 / 不含令牌）', () => {
+    const r = recallResult();
+    const hint = buildRecallHint(r, rollupRecalls([], issuedAt), null);
+    const html = buildRecallDetailPage(r, hint, null, meta() as never);
+    expect(html).toContain('数字同源');
+    expect(html).toContain('保真口径');
+    expect(html).toContain('不补写、不推测、不合并改写');
+    expect(html).toContain('以最新为准');
+    expect(html).toContain('本页不含令牌');
+  });
+
+  it('回显 display.markdown 不含任何免责/保真声明（铁律：不替用户改写输出）', () => {
+    const r = recallResult();
+    const hint = buildRecallHint(r, rollupRecalls([], issuedAt), null);
+    const md = buildRecallMarkdown(r, hint, null);
+    expect(md).not.toContain('保真口径');
+    expect(md).not.toContain('以最新为准');
+    expect(md).not.toContain('不补写、不推测');
+  });
+});

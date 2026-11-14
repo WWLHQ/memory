@@ -29,6 +29,7 @@ import { ulid } from './ulid.ts';
 import { sha256hex } from './sync.ts';
 import { classifyLayer, runForgettingCycle } from './forgetting.ts';
 import { CONFLICT_VERDICTS, coreListConflicts, coreResolveConflict } from './conflict.ts';
+import { sanitizeL1 } from './layerRules.ts';
 
 export {
   LAYER_SPECS, checkLayerSpec, checkLayerSpecDetailed, sanitizeL1, layerSpecOf, meaningfulLength,
@@ -39,6 +40,30 @@ export type { LayerSpec, LayerViolation, LayerViolationCode, RefineLayer } from 
 /** 17.4 钳制：importance 下限 0.1 / confidence 下限 0.05（2.4.2 规则4） */
 const CLAMP = { importance: [0.1, 1] as const, confidence: [0.05, 1] as const };
 const clamp = (v: number, [lo, hi]: readonly [number, number]) => Math.max(lo, Math.min(hi, v));
+
+/** REQ-014 / T3（C6-B）：原文摘录上限，与任务规格一致（≤200 字） */
+export const SOURCE_EXCERPT_MAX_CHARS = 200;
+
+/**
+ * 生成「脱敏后的原文摘录」——召回时与摘要配对下发，实现摘要 + 原文双保真。
+ *
+ * 安全边界（硬约束）：
+ * - 只从**明文正文**取，`content_l0_enc`（L0 密文信封）永不参与；
+ * - 复用 `sanitizeL1` 同一套脱敏规则（URL / Authorization / Cookie / curl -u / 私钥…），
+ *   不另立一套"轻量脱敏"，否则两套口径必然漂移；
+ * - 空内容 → undefined，不写空串。
+ *
+ * 为什么**不**在「摘录 == 摘要」时返回 undefined：无 LLM 时 L1 = 清洗后的原文，
+ * 摘录与摘要天然同文；此时若丢掉摘录，将来补上 L2 摘要就没有原文可配，
+ * 而"同一段话印两遍"的问题由 `recallPrelude` 在拼装时去重解决（那里能同时看到两者）。
+ */
+export function buildSourceExcerpt(raw: string): string | undefined {
+  const clean = sanitizeL1(raw ?? '').trim();
+  if (!clean) return undefined;
+  return clean.length > SOURCE_EXCERPT_MAX_CHARS
+    ? `${clean.slice(0, SOURCE_EXCERPT_MAX_CHARS - 1)}…`
+    : clean;
+}
 
 /** 向量后端维度（未声明 → JS 起步实现默认维度） */
 function dimOf(vector: { readonly dim?: number }): number {
@@ -345,6 +370,11 @@ export async function coreWrite(input: WriteInput, ctx: WriteCtx): Promise<Write
     content_l0_enc,
     // §4.4.6：v2 只存密文，content_orig 永不写入（旧数据走 l0MigrateLegacy）
     content: mainContent,
+    // REQ-014 / T3：原文摘录（脱敏后 ≤200 字）；与摘要同文时仍保留，拼装侧负责去重
+    ...(() => {
+      const excerpt = buildSourceExcerpt(input.content);
+      return excerpt ? { source_excerpt: excerpt } : {};
+    })(),
     content_l1: contentL1,
     content_l2: generated.L2,
     content_l3: generated.L3,

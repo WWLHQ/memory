@@ -16,6 +16,7 @@ import {
 } from './recallInsight.ts';
 import { cosine, embedSync, tokenize, DEFAULT_VECTOR_DIM } from './vector.ts';
 import { matchedTerms } from './hitHighlight.ts';
+import { buildSupersedeHit, mergeSupersededHits, probeSupersededTargets } from './recallSupersede.ts';
 import { isConcreteMode, modeSpec, modeWeights, normalizeScene, resolveMode, type LayerKey } from './recallModes.ts';
 import type { RecallWeights } from '../../shared/growthConfig.ts';
 import type { L0BlobStore } from './l0Store.ts';
@@ -240,9 +241,48 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
       evidence_ref: `l0:${m.mem_id}`,
       // 批次59（方案 C）：这条「凭什么被召回」——回显据此高亮，审计据此追溯；无共有词时为空数组
       matched_terms: matchedTerms(req.query, m.content),
+      // REQ-014 / T3（C6-B）：摘要 + 原文摘录双保真；无摘录时不带该字段（与改造前逐字一致）
+      ...(m.source_excerpt ? { source_excerpt: m.source_excerpt } : {}),
     }));
     // 背景去重口径：topK + 冷回填已考虑过的记忆都不得再以「背景」身份注入（防止被裁命中借道回灌）
     const consideredIds = new Set(scored.map(({ m }) => m.mem_id));
+
+    // REQ-014 / T1（C6-A）：合并影子探测补带。
+    // 影子本身仍不进候选、不进注入（hardFilter / 背景 / 次模式池口径一行不改），只用它的向量
+    // 判断「用户问的是不是这件旧事」；强信号（sim ≥ 0.85）时把 merged_into 目标（合并后的
+    // 最新版）补进命中并打 superseded 标，让 Agent 拿到「以最新为准」的那条。
+    // 极简模式不探测：它本就关背景与冷层，不额外增加注入。
+    if (!minimal) {
+      const probes = probeSupersededTargets({
+        queryVec: qvec,
+        memories: all,
+        cosine,
+        // 目标若已在命中里也照样探测：那种情况由 mergeSupersededHits 打 superseded 标，
+        // 不重复追加也不改正文。这里只排除「绝对不该再出现」的 id（当前为空）。
+        excludeIds: new Set<string>(),
+        disabledLayers,
+      });
+      if (probes.length > 0) {
+        const byId = new Map(all.map((m) => [m.mem_id, m] as const));
+        const extras: Hit[] = [];
+        for (const p of probes) {
+          const target = byId.get(p.target_id);
+          if (!target) continue;
+          extras.push(buildSupersedeHit({
+            target,
+            probe: p,
+            // 口径不另立：目标分数仍走同一套 scoreMemory，relevance 取影子的相似度
+            score: scoreMemory(target, p.sim, now, recallWeights),
+            matched_terms: matchedTerms(req.query, target.content),
+          }));
+        }
+        if (extras.length > 0) {
+          const merged = mergeSupersededHits(hits, extras);
+          hits = merged.hits;
+          for (const extra of extras) consideredIds.add(extra.mem_id);
+        }
+      }
+    }
 
     // 2.4.1/R9：超硬熔断 3000t → 按分数从低到高丢弃直到预算内。
     // 初始命中与冷回填后都必须走同一裁剪，payload_tokens 必须按最终 hits 重算。
@@ -289,6 +329,7 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
             pinned: m.pinned, locked: m.locked, score: Math.round(scoreMemory(m, sim, now, recallWeights) * 1000) / 1000,
             evidence_ref: `l0:${m.mem_id}`,
             matched_terms: matchedTerms(req.query, m.content),
+            ...(m.source_excerpt ? { source_excerpt: m.source_excerpt } : {}),
           });
           consideredIds.add(m.mem_id);
         }

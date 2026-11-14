@@ -1,7 +1,7 @@
 ---
 title: P1 客户端整形改造（借鉴 dsh-hindsight 第 6/7/8 项）
 date: 2026-11-14
-status: planned
+status: implemented（T1–T4 / T6–T8 已落地，T5 按决策不做，待真机实测确认）
 scope: REQ-014 / 回拼原文与新旧覆盖 / 保真声明强化 / 侧栏真实状态卡
 ---
 
@@ -111,6 +111,7 @@ Hindsight 用 25s 长轮询把真实 operation 状态（部署中/运行中/失�
 - 边界：仅新增 `recallSupersede.ts` 与对应测试 + `agent.ts` 补带调用；**不动** `recallModes.ts` / `growthConfig.ts`。
 - 依赖：前置 无；被 T2 依赖。
 - 提交：一个 commit，message 含 `T1`/`REQ-014`。
+- **〔落地修正 2026-11-14〕语义改判为「影子探测式补带」**：字面版「命中影子 → 补带」在现有治理下是**死代码**——`forgetting.ts` 的 `hardFilter` 在 pinned 免检之前就把 `merged_into` / `deleted` 排掉，且四条取数路径（主候选 `agent.ts:212`、次模式池 `agent.ts:336`、背景 `recallInsight.ts:58`、会话视图 `agent.ts:106`）全覆盖，影子**永远不会**出现在 hits。落地口径（用户拍板 A）：用**影子向量**探测旧事——影子与查询 `sim ≥ 0.85`（`SUPERSEDE_PROBE_MIN_SIM`，与 2.4.3 冷回填逃生阀同口径）时，把其 `merged_into` 目标补进命中并打 `superseded` 标（至多 `SUPERSEDE_MAX_EXTRA_HITS = 2` 条，同目标取最高 sim）；目标**已在命中里**时只补标注、不改正文/分数/顺序；`minimal` 档不探测；**无影子命中时行为逐字不变**（有守恒断言）。
 
 ### T2 命中卡「以最新为准」标注
 - 目标：命中卡（回显 + 明细页 + RAG 四段）对 `superseded` 项加中性标注「⮕ 该事项已合并入 `[mem_x]`，以最新版为准」，只加标注不改写正文。
@@ -159,6 +160,7 @@ Hindsight 用 25s 长轮询把真实 operation 状态（部署中/运行中/失�
 - 边界：仅改侧栏展示；**不引入**长轮询、**不实现**部署向导。
 - 依赖：前置 T6。
 - 提交：含 `T7`/`REQ-014`。
+- **〔落地修正 2026-11-14〕`sync:*` 不接入**：查 `ipcChannels.ts:151-158` + `hostBridge.ts:73-74` 确认 `sync:push/pull/reconcile/conflicts/resolve/cursor/auditCount/auditsFrom` **全为主动触发或需会话**的通道，**没有**被动读「是否在同步 / 上次是否失败」的通道；轮询 `push`/`pull` 会真跑同步，绝不能拿来当状态探测。故状态卡只接三个真实可读源（`collector:status` / `l0:pendingWrites` / `refine:state`），`NavStatusSource.sync` 保留为契约预留位（未接源即不产出条目）。**宁可少一行状态，也不伪造「同步中」。**
 
 ### T8 固化「部署向导不做」
 - 目标：在 `specs/已知边界台账.md` 固化「一键部署向导明确不做」（Electron 自带服务、与纯净度 §0.1/打包纪律冲突）。
@@ -208,5 +210,15 @@ T1/T3/T4/T6 为纯函数/文档/通道（无 UI 大改）→ B/C 以单测覆盖
 ## 9. 交付与状态
 
 - 本文件已折入 SSOT：REQ-014 + AC-014 + TC-016，并登记 `meta/index.md`（第 25 行后）。
-- 状态 = **planned（待实现）**；**未改动任何运行时源码、未 commit / push / 打包 / CI**。
-- 工作区既有在途改动（18+ 个）与既有未跟踪报告均未触碰。
+- 状态 = **implemented（2026-11-14 落地，待真机实测确认）**。T1–T4、T6、T7、T8 已实现；**T5 按 §0 决策不做**。
+- **落地文件**：
+  - 新增 `src/core/memagent/recallSupersede.ts`（T1）+ `__tests__/recallSupersede.test.ts`（14 例）
+  - 新增 `src/core/memagent/__tests__/sourceExcerpt.test.ts`（T3，12 例）
+  - 新增 `src/web/shared/navStatusChannel.ts`（T6）+ `__tests__/navStatusChannel.test.ts`（12 例）
+  - 新增 `src/web/shell/shellStatus.ts` + `ShellStatusCard.tsx`（T7）+ `__tests__/shellStatus.test.ts`（5 例）
+  - 改 `agent.ts` / `types.ts` / `memories.ts` / `recallPrelude.ts` / `recallInsight.ts`（T1–T4）
+  - 改 `src/web/shell/Workspace.tsx` / `theme.css`（T7 挂载与样式）
+  - 改 `specs/已知边界台账.md`（T8：固化「一键部署向导不做 / 25s 长轮询不做 / T5 不做」）
+- **门禁（2026-11-14 实测）**：`tsc --noEmit` 退出 0（renderer + electron 两侧）→ oxlint **0 warnings / 0 errors** → vitest **260 文件 / 3152 例全过**（退出码 0）→ `validate_project.py` 通过（0 失败 / 139 既有警告）→ `code-index --check` 最新（387 源文件 / 45 文档）→ `check-no-demo` 通过。
+- **变异验证（第三道闸门）**：T1 去掉 sim 门控 → 2 例红；T2 让非 superseded 也出标注 → 4 例红；T3 去掉 `sanitizeL1` → 2 例红（漏出内网 IP 与 `sk-` 密钥）；T4 往回显塞免责话术 → 1 例红；T6 空态拿 0 冒充读数 → 1 例红；T7 让不可读源也进快照 → 1 例红。全部还原并复绿。
+- **未做**：**未 commit / push / 打包**——按纪律等用户实测 + 明确确认。工作区另有并行任务线（自我进化 M0）的在途文件，本批不 `git add .`，不把对方改动带入提交。

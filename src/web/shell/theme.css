@@ -767,6 +767,28 @@ html[data-theme='dark'] .qa { border-left-color: var(--line); }
   background: var(--panel2);
   user-select: none;
 }
+/* REQ-014 / T7：侧栏真实状态卡（只在真有进行中/需关注状态时出现，空闲整块不渲染） */
+.shell-status {
+  flex: none;
+  border-top: 1px solid var(--line2);
+  padding: 2px 0 6px;
+  background: var(--panel2);
+  user-select: none;
+}
+.shell-status .tree-group { padding: 7px 12px 3px; }
+.shell-status-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 20px;
+  padding: 0 10px 0 24px;
+  color: var(--tx2);
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.shell-status-item .ss-label { overflow: hidden; text-overflow: ellipsis; }
+.shell-status-item.warn { color: var(--warn, #b8860b); }
 .strata-scale .tree-group { padding: 7px 12px 3px; }
 /* 列位与导航树严格对齐：色块占「图标列」x=24..36，层号从「文字列」x=44 起
    （.tree-row padding-left 6 + .tw 12 + gap 6 = 24；再 + 图标 12 + gap 8 = 44）。 */

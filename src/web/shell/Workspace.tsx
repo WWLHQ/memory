@@ -31,6 +31,7 @@ import { loadStatusbar, shortLocation, type StatusSnapshot } from './statusbar.t
 import { loadLayerPanel, type LayerPanelView } from './layers.ts';
 import { strataViewFromOverview, type StrataScaleView } from './strataScale.ts';
 import { StrataScale } from './StrataScale.tsx';
+import { ShellStatusCard } from './ShellStatusCard.tsx';
 import { loadNavCounts, type NavCounts } from './navCounts.ts';
 import { SELECTION_MSG, parseSelection, type SelectionPayload } from '../shared/selectionChannel.ts';
 import { NAV_COUNT_MSG, parseNavCount } from '../shared/navCountChannel.ts';
@@ -1348,6 +1349,10 @@ export function Workspace() {
             {navEntries.length === 0 && <div className="tree-note">没有匹配的功能项。</div>}
           </div>
           {/* 批次53：层级刻度固定在功能导航栏最下面，不随导航树滚动 */}
+          {/* REQ-014 / T7：真实状态卡（写入兜底 / 补炼队列 / 采集），空闲时整块不渲染 */}
+          {!navCollapsed && (
+            <ShellStatusCard />
+          )}
           {!navCollapsed && (
             <StrataScale data={strataScale} onRefresh={refreshOverview} />
           )}

@@ -64,8 +64,8 @@ status: review
 
 ## AC-014 P1 客户端整形改造可用
 对应 REQ-014：回拼原文与新旧覆盖、保真声明强化、侧栏真实状态卡三项能力按规格落地，且互不破坏现有架构（召回模式单一真源、回显铁律、纯本地零出网、L0 密文不进）。
-- A1 `recallSupersede.ts` 纯函数：命中 `merged_into` 时把目标记忆作为派生必带项强制进入 hits/background，打 `superseded` 标记，不重复带入；单测覆盖补带 + 去重。
-- A2 命中卡（回显 + 明细页 + RAG 四段）对 `superseded` 项加中性标注「以最新版为准」，只加标注不改写正文（`display.markdown` 逐字不变，反向断言）。
-- A3 `source_excerpt` 可选字段（≤200 字、L0 密文不进）：写入侧（conflict/merge/精炼）填充，召回拼装时摘要+原文片段双保真；单测覆盖填充与拼装 + L0 不进断言。
-- A4 明细页 footer（`recallInsight.ts:868-874`）保真声明强化（数字同源 / 以最新为准 / 不含令牌 / 不编造）；不进 `display.markdown`、不进注入头；`display.markdown` 逐字不变（反向断言）。
-- A5 侧栏状态卡经 `hostCall` 拉取 `collector:status` / `l0:pendingWrites` / `refine:state` / `sync:*` 真实状态，轻量轮询（10–15s）展示；`navStatusChannel.ts` 一次性回传状态摘要；明确不实现长轮询与一键部署向导。
+- A1 `recallSupersede.ts` 纯函数：用**影子向量探测**（`sim ≥ 0.85`）反查 `merged_into` 目标并把最新版补进 hits，打 `superseded` 标记，不重复带入；目标已在命中时只打标不改正文；无影子命中时行为不变（守恒断言）。单测覆盖探测 + 去重 + 守恒。
+- A2 命中卡（明细页 + RAG 四段标注行尾）对 `superseded` 项加中性标注「以最新版为准」，只加标注不改写正文（`display.markdown` 逐字不变，反向断言）。
+- A3 `source_excerpt` 可选字段（≤200 字、L0 密文不进）：写入侧填充，召回拼装时摘要+原文片段双保真（同文不重复）；单测覆盖填充、脱敏与拼装一致性。
+- A4 明细页 footer（`recallInsight.ts` 的 `buildRecallDetailHtml`）保真声明强化（数字同源 / 以最新为准 / 不含令牌 / 不编造）；不进 `display.markdown`、不进注入头；`display.markdown` 逐字不变（反向断言）。
+- A5 侧栏状态卡经 `hostCall` 拉取**真实可读**通道——`collector:status` / `l0:pendingWrites` / `refine:state`——轻量轮询（`SHELL_STATUS_POLL_MS = 12_000`，落在 10–15s）展示；`navStatusChannel.ts` 一次性回传状态摘要，与 `navCountChannel` 角标互不覆盖；读不到/失败/未知**不产出条目**（不拿 0 或「空闲」冒充）。**同步面例外并如实声明**：`sync:*` 全为主动触发/需会话的通道（`push`/`pull`/`reconcile`/`conflicts`…），**没有**被动读「是否在同步 / 上次是否失败」的通道，故状态卡**不展示**同步状态（`NavStatusSource.sync` 只作契约预留，未接源即不产出条目）。明确不实现长轮询与一键部署向导。
