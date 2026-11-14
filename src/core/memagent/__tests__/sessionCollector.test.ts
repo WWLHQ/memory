@@ -552,7 +552,7 @@ describe('createReconciler 失败退避（批次41-D）', () => {
     await h.flush();
     expect(h.getAttempts()).toBe(1); // 窗口内没再跑
 
-    h.advance(600_000 - 1);
+    h.advance(h.fails[0].delayMs - 1);
     h.tick();
     await h.flush();
     expect(h.getAttempts()).toBe(1); // 还差 1ms 没跨窗口
