@@ -56,3 +56,19 @@ P13 大模型配置（向量/LLM 模型）、P14 自我净化与生长页字段�
 ## REQ-012 检索页
 查询栏状态机、scene 联动、字段级交互。
 详情：[需求规格书_检索页字段级交互规格.md](需求规格书_检索页字段级交互规格.md)。
+
+## REQ-013 召回质量增强（借鉴 dsh-hindsight 客户端整形层）
+借鉴外部 dsh-hindsight-local 插件的「客户端整形」能力，在**不引入外部模型/密钥/出网、不破坏召回模式单一真源（`core/memagent/recallModes.ts`）、不破坏回显铁律（原样输出 `display.markdown`）**的前提下，补强纯逻辑层面的召回质量。覆盖 5 项能力（C1–C5），来源与论证见 [`specs/reports/dsh-hindsight-local-对比与借鉴-2026-11-14.md`](reports/dsh-hindsight-local-对比与借鉴-2026-11-14.md) §4（P0 可直接吸收）。
+- **C1 时间表达式解析与时间窗加权**：新增 `src/shared/timeWindow.ts`（纯函数 + 单测），解析「昨天下午 / 3 天前 / 7am」等相对时间 → 本地时区时间戳 + `query_timestamp`；在 `agent.ts` 打分处作为**修正项**叠加（命中时间窗的记忆加权），**不新增第 6 个召回模式**；零命中时仍注入当前本地时间以诚实回答。
+- **C2 确定性幂等写入**：`document_id=<session>:tN` + 内容 sha1 去重 + **失败绝不推进游标** + 429 指数退避抖动；补强 `pendingWrites.ts` / `sessionCollector.ts`，给 `WriteResult` 加 `cursor` / `content_hash`，实现断点续传，且不破坏现有「pending ≠ 成功」语义。
+- **C3 标识符逐字保真与精确词加权**：路径/符号/ID 等标识符权重 3，CJK 二元组/英文词权重 1；在 `vector.ts` `tokenCoverage` 或 `forgetting.ts` 打分处叠加（本就词袋检索，成本极低）。
+- **C4 注入内容 source 标记与采集侧过滤**：若启用自动注入，`recallPrelude.ts` 注入头带 source 标记；`sessionCollector.ts` 采集时三处过滤（跳过 `plugin:` / `source.kind`、剥离 `<memory-context>`）；当前不自动注入，先买保险。
+- **C5 异步真实状态驱动 UI**：监控/审计页按 operation id 轮询真实状态、409「排队中」不算失败、定期对账，复用现有 `audit.jsonl` 事实源。
+详情：任务拆分见 [`specs/tasks/RECALL-SHAPING.md`](../tasks/RECALL-SHAPING.md)；论证见 [`specs/reports/dsh-hindsight-local-对比与借鉴-2026-11-14.md`](../reports/dsh-hindsight-local-对比与借鉴-2026-11-14.md)。
+
+## REQ-014 召回质量增强（P1 · 客户端整形改造项）
+承接 REQ-013（P0 5 项）后，继续借鉴 dsh-hindsight-local 插件的客户端整形层，把其 P1 三项改造（原文回拼+新旧覆盖 / 保真声明强化 / 侧栏真实状态卡）折入本仓库，**遵守全部铁律红线**（不破坏召回模式单一真源、不破坏回显铁律、纯本地零出网、L0 密文不进检索/注入/摘录）。用户 2026-11-14 决策：T3（`source_excerpt` 原文摘录）做；T5（prelude 中性提示扩展）不做（不偏离 `recallPrelude.ts:4`）。覆盖 3 项能力（C6–C8）。
+- **C6 召回结果「以最新为准」明示（回拼原文 + 新旧覆盖）**：命中 `merged_into` 时把目标记忆作为派生必带项强制进入 hits/background（零新字段，复用既有墓碑）；并加可选 `source_excerpt`（脱敏 ≤200 字，**L0 密文不进**），写入侧填充、召回拼装时摘要+原文片段双保真；命中卡对 superseded 项加中性标注「以最新版为准」，只加标注不改写正文。
+- **C7 保真/免责声明强化（仅明细页 footer）**：把本机明细页 footer（`recallInsight.ts:868-874`）强化为完整保真声明（数字同源 / 以最新为准 / 不含令牌 / 不编造）。**明确不做** system prelude 中性提示扩展（不偏离 `recallPrelude.ts:4`「绝不注入话术」），聊天回显不加任何免责话术。
+- **C8 侧栏真实状态卡（事件驱动 + 轻量轮询）**：复用既有 `hostCall` 通道拉取 `collector:status` / `l0:pendingWrites` / `refine:state` / `sync:*` 真实状态，侧栏组件轻量轮询（10–15s）展示「采集进行中 / 写入兜底 N 条 / 精炼队列 M 条 / 同步进行」。**不做** 25s 长轮询、**不做** 一键部署向导（Electron 自带服务，与 `AGENTS.md §0.1` 纯净度、打包纪律冲突）。
+详情：任务拆分见 [`specs/tasks/RECALL-SHAPING-P1.md`](../tasks/RECALL-SHAPING-P1.md)；论证见 [`specs/reports/dsh-hindsight-local-对比与借鉴-2026-11-14.md`](../reports/dsh-hindsight-local-对比与借鉴-2026-11-14.md)。

@@ -52,3 +52,19 @@ status: review
 
 ## AC-012 检索页可用
 对应 REQ-012：检索页状态机与 scene 联动符合规格。
+
+## AC-013 召回质量增强可用
+对应 REQ-013：时间窗解析与加权、幂等写入、标识符加权、source 标记过滤、真实状态驱动 UI 五项能力按规格落地，且互不破坏现有架构（召回模式单一真源、回显铁律、纯本地零出网）。
+- A1 `src/shared/timeWindow.ts` 纯函数解析相对时间（昨天下午 / 3 天前 / 7am / 今天早上）产出本地时区时间戳与 `query_timestamp`，单测覆盖东八区边界（早上 7 点不落到前一天）。
+- A2 `agent.ts` 打分接入时间窗修正项，命中时间窗的记忆加权；`recallModes.ts` 档位数与 `resolveMode` 行为不变（反向断言）。
+- A3 `pendingWrites` / `sessionCollector` 内容级 sha1 去重 + 游标不推进；同内容重发幂等、断点续传，且与「pending ≠ 成功」语义共存。
+- A4 `vector` / `forgetting` 标识符精确词加权生效（标识符权重 3），词袋检索命中率提升可量化。
+- A5 采集侧对注入标记 / `plugin` 来源 / `<memory-context>` 三处过滤；真实状态轮询把 409 视为「排队中」而非失败。
+
+## AC-014 P1 客户端整形改造可用
+对应 REQ-014：回拼原文与新旧覆盖、保真声明强化、侧栏真实状态卡三项能力按规格落地，且互不破坏现有架构（召回模式单一真源、回显铁律、纯本地零出网、L0 密文不进）。
+- A1 `recallSupersede.ts` 纯函数：命中 `merged_into` 时把目标记忆作为派生必带项强制进入 hits/background，打 `superseded` 标记，不重复带入；单测覆盖补带 + 去重。
+- A2 命中卡（回显 + 明细页 + RAG 四段）对 `superseded` 项加中性标注「以最新版为准」，只加标注不改写正文（`display.markdown` 逐字不变，反向断言）。
+- A3 `source_excerpt` 可选字段（≤200 字、L0 密文不进）：写入侧（conflict/merge/精炼）填充，召回拼装时摘要+原文片段双保真；单测覆盖填充与拼装 + L0 不进断言。
+- A4 明细页 footer（`recallInsight.ts:868-874`）保真声明强化（数字同源 / 以最新为准 / 不含令牌 / 不编造）；不进 `display.markdown`、不进注入头；`display.markdown` 逐字不变（反向断言）。
+- A5 侧栏状态卡经 `hostCall` 拉取 `collector:status` / `l0:pendingWrites` / `refine:state` / `sync:*` 真实状态，轻量轮询（10–15s）展示；`navStatusChannel.ts` 一次性回传状态摘要；明确不实现长轮询与一键部署向导。

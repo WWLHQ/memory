@@ -75,6 +75,20 @@ status: active
 - E2E：`e2e/security.spec.ts`（未登录/成员/管理员三态 + 真实后端账号表 + 改密失败提示 + 策略变更审计）。
 - 手测：见 `specs/MANUAL-TEST-FIX-BATCH-7.md`。
 
+## TC-015 召回质量增强测试（REQ-013）
+对应 AC-013：五项能力均有单测 / 集成用例覆盖，且与现有架构零冲突。
+- 单元：`src/shared/__tests__/timeWindow.test.ts`（相对时间解析 + 东八区边界 + 时间窗命中加权）；`src/core/memagent/__tests__/pendingWrites.test.ts`（sha1 去重 / 游标不推进 / 断点续传 / pending 语义）；`src/core/memagent/__tests__/vector.test.ts` 或 `forgetting.test.ts`（标识符权重 3 生效）；`src/core/memagent/__tests__/recallPrelude.test.ts`（source 标记 + 三处采集过滤）；监控/审计状态轮询（409 语义）。
+- 回归：`src/core/memagent/__tests__/recallModes.test.ts` 断言档位数与 `resolveMode` 不变；现有测试文件全绿。
+- 门禁：`npm run verify:fast`（typecheck + lint + 覆盖率单测）+ `python tools/validate_project.py`（AC-013→REQ-013、TC-015→AC-013 引用完整）。
+
+---
+
+## TC-016 P1 客户端整形增强测试（REQ-014）
+对应 AC-014：三项能力均有单测 / 组件用例覆盖，且与现有架构零冲突。
+- 单元：`src/core/memagent/__tests__/recallSupersede.test.ts`（merged_into 补带 + 去重 + 不碰 `recallModes.ts` 单一真源）；`src/core/memagent/__tests__/recallInsight.test.ts` 补 `superseded` 标注用例 + `display.markdown` 逐字不变反向断言；`src/core/memagent/__tests__/recallPrelude.test.ts` 补 `source_excerpt` 拼装 + 注入头不含免责话术（反向：prelude 扩展未做）；`src/web/shared/__tests__/navStatusChannel.test.ts`（解析 / 回传）；侧栏状态卡组件测试（真实状态展示 + 轻量轮询 + 不实现长轮询）。
+- 回归：`src/core/memagent/__tests__/recallModes.test.ts` 档位数与 `resolveMode` 不变；现有 `recallPrelude` 测试断言注入头仍只含 `hits[].content`、无免责话术。
+- 门禁：`npm run verify:fast`（typecheck + lint + 覆盖率单测）+ `python tools/validate_project.py`（AC-014→REQ-014、TC-016→AC-014 引用完整）。
+
 ---
 
 ## 自我净化与生长页 · 判重权重回归（批次48 A23.3）
