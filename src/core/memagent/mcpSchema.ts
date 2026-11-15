@@ -169,6 +169,7 @@ export const MCP_TOOLS = [
       properties: {
         mem_id: { type: 'string', description: '记忆 ID（来自 recall_memory 的 hits[].mem_id 或 list_memories 的 items[].mem_id）' },
         verdict: { type: 'string', enum: ['confirm', 'reject', 'disputed'], description: '反馈类型（用户表态后才提交）' },
+        recall_id: { type: 'string', description: '可选：产生这条记忆的召回 request_id（recall_memory 回执里的 request_id），把反馈归因到具体召回；缺省则按「最近一次含该 mem_id 的召回」自动关联；关联不到只做信任分更新，不伪造标签' },
       },
       required: ['mem_id', 'verdict'],
     },

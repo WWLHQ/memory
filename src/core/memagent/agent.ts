@@ -5,7 +5,7 @@ import { coreBrowse, coreFeedback, coreGc, coreGcFull, coreMemoryOp, coreWrite }
 import { syncDown, syncUp } from './sync.ts';
 import { MemoryPendingStore, PendingWrites, type WriteKnobs } from './pendingWrites.ts';
 import {
-  fuseRelevance, hardFilter, scoreMemory, tokenCoverageWeighted, RELEVANCE_FUSION_LAMBDA,
+  buildMemsDetail, fuseRelevance, hardFilter, scoreMemory, tokenCoverageWeighted, RELEVANCE_FUSION_LAMBDA,
 } from './forgetting.ts';
 import { findParamsSnapshot, growthConfigFromLedger, proxyCapsFromSnapshot } from './paramsSnapshot.ts';
 import { proxyCostToday } from '../../shared/proxyAccounting.ts';
@@ -193,16 +193,19 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
     const manualMw = isConcreteMode(req.mode) ? modeWeights(resolved.mode) : null;
     let recallWeights: RecallWeights;
     let weightsSource: 'manual' | 'growth:v1';
+    // M1-2：同一份增长配置——既取召回权重（auto 档），也取 evolution.sample_top_n 用于 per-hit 埋点截断。
+    // 只读 P_SYSTEM 下的 preference 记录，不做全库扫描（recall 本身已在 p95 1.3s 量级）。
+    const growthCfg = growthConfigFromLedger(
+      await storage.listMemories({ project_id: 'P_SYSTEM' }),
+    );
     if (manualMw) {
       recallWeights = { w_f: manualMw.f, w_i: manualMw.i, w_c: manualMw.c, w_a: manualMw.a };
       weightsSource = 'manual';
     } else {
-      // 只读 P_SYSTEM 下的 preference 记录，不做全库扫描（recall 本身已在 p95 1.3s 量级）
-      recallWeights = growthConfigFromLedger(
-        await storage.listMemories({ project_id: 'P_SYSTEM' }),
-      ).recall_weights;
+      recallWeights = growthCfg.recall_weights;
       weightsSource = 'growth:v1';
     }
+    const sampleTopN = growthCfg.evolution.sample_top_n;
 
     // REQ-013 / C1：从 query 提取本地时区 query_timestamp（零命中回退到「现在」），仅当检测到时间意图时
     // 才对命中时间窗的记忆做温和加权（不打断既有排序；recallModes.ts 单一真源不变）。
@@ -234,6 +237,12 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
       })
       .sort((a, b) => b.score - a.score)
       .slice(0, topK);
+
+    // M1-2：per-hit 分量埋点。把 topK 候选的 [mem_id, relevance, f, imp, conf, boost] 落审计，
+    // 让 M2 的离线 NDCG 重算能复用「同一批召回的同一组分量」（禁止重跑向量检索）。
+    // 按 evolution.sample_top_n 与 topK 二者取小截断（构建逻辑见 buildMemsDetail）；
+    // 旧审计无此字段时评估侧如实跳过（M1-5）。
+    const memsDetail = buildMemsDetail(scored, now, Math.min(topK, sampleTopN));
 
     let hits: Hit[] = scored.map(({ m, score }) => ({
       mem_id: m.mem_id, content: m.content, layer: m.layer, decay_class: m.decay_class,
@@ -472,6 +481,8 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
       // 批次15：区分是哪个 Agent 真的调用了召回（未识别时不写，避免伪归属）
       ...(req.client ? { client: req.client } : {}),
       mems: hits.map((h) => h.mem_id),
+      // M1-2：per-hit 四分量（紧凑数组，供 M2 离线重算；空候选时为空数组）
+      mems_detail: memsDetail,
       ...(personalHits.length ? { personal_mems: personalHits } : {}),
       scanned_memories: all.length,
       background_tokens: background.tokens,

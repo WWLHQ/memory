@@ -43,6 +43,8 @@ export interface FeedbackToolResult {
   mem: MemoryView | null;
   trust_delta: number;
   request_id: string;
+  /** M1-3：反馈→召回归因结果（linked=false 时不写 recall_feedback 审计，绝不把猜测当标签） */
+  recall_link: { linked: boolean; recall_id: string | null };
 }
 
 export interface ManageToolResult {
@@ -135,14 +137,63 @@ export async function runFeedbackTool(
   if (typeof verdict !== 'string' || !VERDICTS.includes(verdict as FeedbackKind)) {
     throw new McpToolError(`feedback.verdict 非法：${String(verdict)}（允许：${VERDICTS.join('/')}）`);
   }
+  // M1-3：可选 recall_id（产生该记忆的召回 request_id）；显式给了就必须是合法非空串
+  const rawRecallId = args.recall_id;
+  if (rawRecallId !== undefined && (typeof rawRecallId !== 'string' || !rawRecallId.trim())) {
+    throw new McpToolError('feedback.recall_id 非法：须为非空字符串（recall_memory 回执里的 request_id）');
+  }
   await assertInScope(storage, memId, account);
+  // 内核行为一行不改：trust_delta 仍由 coreFeedback 计算（M1-3 只新增归因审计）
   const r = await ma.feedback(memId, verdict as FeedbackKind);
+  // M1-3 归因：显式 recall_id 优先，否则按「最近一次含该 mem_id 的召回」自动关联；
+  // 关联不到只回 linked:false，不写 recall_feedback，绝不把猜测当标签（M1-4）。
+  const recallLink = await resolveRecallLink(
+    storage, memId, typeof rawRecallId === 'string' ? rawRecallId.trim() : undefined, r.mem?.project_id,
+  );
+  if (recallLink.linked && recallLink.recall_id) {
+    const ts = Date.now();
+    await storage.appendAudit({
+      request_id: r.request_id, action: 'recall_feedback', ts,
+      project_id: r.mem?.project_id, user_id: account.user_id,
+      detail: { recall_id: recallLink.recall_id, mem_id: memId, verdict, ts },
+    });
+  }
   return {
     ok: r.ok,
     mem: r.mem ? toMemoryView(r.mem) : null,
     trust_delta: r.trust_delta,
     request_id: r.request_id,
+    recall_link: recallLink,
   };
+}
+
+/**
+ * M1-3：把一次反馈归因到具体召回。
+ * - 显式 recallId：必须真实存在且其 `detail.mems` 含该 mem_id 才算 linked（否则如实 linked:false）；
+ * - 未显式给：在同项目、`detail.mems` 含该 mem_id 的召回里取 ts 最新一条；
+ * - 关联不到 → `{ linked:false, recall_id:null }`，调用方据此**不写** recall_feedback 审计（M1-4）。
+ */
+async function resolveRecallLink(
+  storage: StorageBackend,
+  memId: string,
+  explicitRecallId: string | undefined,
+  projectId: string | undefined,
+): Promise<{ linked: boolean; recall_id: string | null }> {
+  const recalls = await storage.queryAudit({ action: 'recall' });
+  const hasMem = (a: (typeof recalls)[number]): boolean => {
+    const mems = a.detail.mems;
+    return Array.isArray(mems) && mems.includes(memId);
+  };
+  if (explicitRecallId) {
+    const hit = recalls.find((a) => a.request_id === explicitRecallId && hasMem(a));
+    return hit ? { linked: true, recall_id: explicitRecallId } : { linked: false, recall_id: null };
+  }
+  const pool = recalls.filter(
+    (a) => hasMem(a) && (!projectId || a.project_id === undefined || a.project_id === projectId),
+  );
+  if (pool.length === 0) return { linked: false, recall_id: null };
+  pool.sort((a, b) => b.ts - a.ts);
+  return { linked: true, recall_id: pool[0].request_id };
 }
 
 /** 单条生命周期变更：11 个 op 全量转发 coreMemoryOp，locked / 版本 / 审计语义原样保留 */

@@ -112,6 +112,88 @@ describe('批次44-D5-2：feedback（内核 trust_delta + MCP 红线）', () => 
   });
 });
 
+describe('M1-3 / M1-4：feedback ↔ recall 归因', () => {
+  let storage: InMemoryStorage;
+  let ma: MemAgent;
+
+  const recallAudit = (request_id: string, ts: number, mems: string[]) => ({
+    request_id, action: 'recall' as const, ts, project_id: 'P1',
+    detail: { mems, hits: mems.length },
+  });
+
+  beforeEach(async () => {
+    storage = new InMemoryStorage();
+    ma = createMemAgent({
+      form: 'desktop', account: ACCOUNT,
+      llm: new FakeLlmProvider(), vector: new JsVectorBackend(), storage,
+    });
+    await storage.putMemory(mem({ mem_id: 'mem_1' }));
+  });
+
+  it('M1-3：带 recall_id 且该召回确含此 mem → 落 recall_feedback（字段齐全）', async () => {
+    await storage.appendAudit(recallAudit('req_recall_A', 5000, ['mem_1', 'mem_2']));
+    const r = await runFeedbackTool(
+      ma, storage, { mem_id: 'mem_1', verdict: 'confirm', recall_id: 'req_recall_A' }, FULL_ACCOUNT,
+    );
+    expect(r.trust_delta).toBe(0.1);
+    expect(r.recall_link).toEqual({ linked: true, recall_id: 'req_recall_A' });
+
+    const rows = await storage.queryAudit({ action: 'recall_feedback' });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].request_id).toBe(r.request_id); // 与本次反馈同 request_id 便于对账
+    expect(rows[0].detail).toMatchObject({ recall_id: 'req_recall_A', mem_id: 'mem_1', verdict: 'confirm' });
+    expect(typeof rows[0].detail.ts).toBe('number');
+  });
+
+  it('M1-3：不带 recall_id 且无历史召回 → 不落 recall_feedback，只改信任分（与改造前一致）', async () => {
+    const r = await runFeedbackTool(ma, storage, { mem_id: 'mem_1', verdict: 'confirm' }, FULL_ACCOUNT);
+    expect(r.recall_link).toEqual({ linked: false, recall_id: null });
+    expect(r.trust_delta).toBe(0.1);
+    expect(r.mem?.confidence).toBeCloseTo(0.6);
+    expect(await storage.queryAudit({ action: 'recall_feedback' })).toHaveLength(0);
+  });
+
+  it('M1-3：不带 recall_id → 自动关联「最近一次含该 mem 的召回」', async () => {
+    await storage.appendAudit(recallAudit('req_old', 1000, ['mem_1']));
+    await storage.appendAudit(recallAudit('req_new', 2000, ['mem_1']));
+    await storage.appendAudit(recallAudit('req_other', 3000, ['mem_9'])); // 更新但不含 mem_1 → 不选它
+    const r = await runFeedbackTool(ma, storage, { mem_id: 'mem_1', verdict: 'confirm' }, FULL_ACCOUNT);
+    expect(r.recall_link).toEqual({ linked: true, recall_id: 'req_new' });
+    const rows = await storage.queryAudit({ action: 'recall_feedback' });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].detail).toMatchObject({ recall_id: 'req_new', mem_id: 'mem_1' });
+  });
+
+  it('M1-4：陈年 mem_id 关联不到 → 不写 recall_feedback，只回 linked:false，信任分照常降', async () => {
+    await storage.appendAudit(recallAudit('req_unrelated', 1000, ['mem_x']));
+    const r = await runFeedbackTool(ma, storage, { mem_id: 'mem_1', verdict: 'reject' }, FULL_ACCOUNT);
+    expect(r.trust_delta).toBe(-0.05);
+    expect(r.recall_link).toEqual({ linked: false, recall_id: null });
+    expect(await storage.queryAudit({ action: 'recall_feedback' })).toHaveLength(0);
+  });
+
+  it('M1-4：显式 recall_id 不存在 / 不含该 mem → linked:false 且不写（不伪造）', async () => {
+    await storage.appendAudit(recallAudit('req_real', 1000, ['mem_other']));
+    const a = await runFeedbackTool(
+      ma, storage, { mem_id: 'mem_1', verdict: 'confirm', recall_id: 'req_real' }, FULL_ACCOUNT,
+    );
+    const b = await runFeedbackTool(
+      ma, storage, { mem_id: 'mem_1', verdict: 'confirm', recall_id: 'req_ghost' }, FULL_ACCOUNT,
+    );
+    expect(a.recall_link).toEqual({ linked: false, recall_id: null });
+    expect(b.recall_link).toEqual({ linked: false, recall_id: null });
+    expect(await storage.queryAudit({ action: 'recall_feedback' })).toHaveLength(0);
+  });
+
+  it('M1-3：recall_id 非法（空串 / 非字符串）→ McpToolError，不静默忽略', async () => {
+    for (const bad of ['', '   ', 123, {}]) {
+      await expect(
+        runFeedbackTool(ma, storage, { mem_id: 'mem_1', verdict: 'confirm', recall_id: bad }, FULL_ACCOUNT),
+      ).rejects.toBeInstanceOf(McpToolError);
+    }
+  });
+});
+
 describe('批次44-D5-2：manage_memory（11 操作 + G4 + delete 门禁）', () => {
   let storage: InMemoryStorage;
   let ma: MemAgent;

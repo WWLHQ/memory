@@ -19,6 +19,12 @@ export const PARAMS_PREF_PREFIX = 'params:v1:';
  */
 export const GROWTH_PREF_PREFIX = 'growth:v1:';
 
+/**
+ * M3 版本化：采纳前把上一版配置存成 `growth:v1:history:<ulid>` 的独立 preference 记录。
+ * 关键：它比 GROWTH_PREF_PREFIX 更长，若不显式排除，`findGrowthMemory` 会把历史记录误当现行配置。
+ */
+export const GROWTH_HISTORY_PREFIX = 'growth:v1:history:';
+
 export interface ParamsSnapshot {
   cfg: {
     auto_organize?: boolean;
@@ -156,7 +162,9 @@ export async function saveProxyCapsToLedger(
 /** 生长页只认自己的 preference 记录（preference / system / growth:v1: 前缀） */
 export function findGrowthMemory(mems: Memory[]): Memory | null {
   return mems.find(
-    (m) => m.category === 'preference' && m.user_id === 'system' && m.content.startsWith(GROWTH_PREF_PREFIX),
+    (m) => m.category === 'preference' && m.user_id === 'system'
+      && m.content.startsWith(GROWTH_PREF_PREFIX)
+      && !m.content.startsWith(GROWTH_HISTORY_PREFIX), // 历史版本不是现行配置
   ) ?? null;
 }
 

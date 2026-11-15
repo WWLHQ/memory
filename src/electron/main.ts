@@ -87,10 +87,11 @@ import {
   forgettingPrefsFromSnapshot, growthConfigFromLedger, PARAMS_PREF_PREFIX, proxyAccountingFromSnapshot,
 } from '../core/memagent/paramsSnapshot.ts';
 import { UNSET_PROXY_ACCOUNTING } from '../shared/proxyAccounting.ts';
-import { nextDue } from '../shared/cron.ts';
-import { SCHEDULE_TASKS, type ScheduleKey, type ScheduleTaskSpec } from '../shared/growthConfig.ts';
+import { SCHEDULE_TASKS, resolveScheduleExpr, type ScheduleKey, type ScheduleTaskSpec } from '../shared/growthConfig.ts';
+import { advanceNextDue, planNextDue } from '../shared/growthSchedule.ts';
 import { ulid } from '../core/memagent/ulid.ts';
 import { regressionRequestId, runGrowthRegression } from '../core/memagent/regression.ts';
+import { runDedupRollbackCheck, runEvolutionRound, runRollbackCheck } from '../core/memagent/evolution/loop.ts';
 import { JsVectorBackend } from '../core/memagent/vector.ts';
 import { readFile, appendFile, mkdir, writeFile, copyFile, readdir, unlink, stat } from 'node:fs/promises';
 import { join, extname, normalize, sep, basename, dirname } from 'node:path';
@@ -3782,10 +3783,31 @@ async function bootstrap(): Promise<void> {
       now, requestId: regressionRequestId(now), form: 'desktop',
       enterpriseId: tenantTriple.enterprise_id, teamId: tenantTriple.team_id,
     });
+    // M3：读取期进化轮（recall_weights / feedback_policy）+ 到期回诊回滚。
+    // 与判重回归相互独立：进化轮抛错只放弃本轮，绝不改变写入期闭环的既有结论。
+    let evolution: Record<string, unknown> | undefined;
+    try {
+      const round = await runEvolutionRound(storage, {
+        now, requestId: `req_evo_${ulid(now)}`, form: 'desktop',
+        enterpriseId: tenantTriple.enterprise_id, teamId: tenantTriple.team_id,
+      });
+      const rollback = await runRollbackCheck(storage, {
+        now, requestId: `req_evorb_${ulid(now)}`, form: 'desktop',
+        enterpriseId: tenantTriple.enterprise_id, teamId: tenantTriple.team_id,
+      });
+      // M5-4：判重族的回诊（同一套 due_at / max_drop 口径，指标换成测试集 F1）
+      const dedupRollback = await runDedupRollbackCheck(storage, {
+        now, requestId: `req_evodrb_${ulid(now)}`, form: 'desktop',
+        enterpriseId: tenantTriple.enterprise_id, teamId: tenantTriple.team_id,
+      });
+      evolution = { round, rollback, dedupRollback };
+    } catch (e) {
+      evolution = { error: String(e) };
+    }
     if (result.status === 'insufficient_samples') {
       return {
         status: 'skipped',
-        result: { reason: 'insufficient_samples', counts: result.counts, accumulating: true },
+        result: { reason: 'insufficient_samples', counts: result.counts, accumulating: true, evolution },
       };
     }
     if (result.status === 'not_adopted') {
@@ -3793,7 +3815,7 @@ async function bootstrap(): Promise<void> {
         status: 'skipped',
         result: {
           reason: result.reason, not_adopted: true, counts: result.counts,
-          before_f1: result.before.test.f1, after_f1: result.after.test.f1,
+          before_f1: result.before.test.f1, after_f1: result.after.test.f1, evolution,
         },
       };
     }
@@ -3801,7 +3823,7 @@ async function bootstrap(): Promise<void> {
       status: 'ok',
       result: {
         adopted: true, counts: result.counts,
-        before_f1: result.before.test.f1, after_f1: result.after.test.f1,
+        before_f1: result.before.test.f1, after_f1: result.after.test.f1, evolution,
       },
     };
   };
@@ -3821,19 +3843,34 @@ async function bootstrap(): Promise<void> {
   let tickBusy = false;
 
   const bootstrapScheduleState = async (): Promise<void> => {
+    // M0：先取当前调度表达式（读失败 → null，resolveScheduleExpr 会回退各任务默认）。
+    // 单独 try 是刻意的：配置读不到不应该让「从审计恢复调度态」也一起失败。
+    let exprs: Awaited<ReturnType<typeof growthConfigFromLedger>>['schedule_exprs'] | null = null;
+    try {
+      exprs = growthConfigFromLedger(await storage.listMemories({})).schedule_exprs;
+    } catch (e) {
+      void mlog('schedule:bootstrap-config-error', { error: String((e as Error)?.message ?? e) });
+    }
     try {
       const rows = await storage.queryAudit({ action: 'schedule_run' });
       for (const row of rows) {
-        const d = row.detail as { task?: unknown; next_due_at?: unknown };
+        const d = row.detail as { task?: unknown; expr?: unknown; next_due_at?: unknown };
         if (typeof d?.task !== 'string') continue;
         const task = SCHEDULE_TASKS.find((t) => t.key === d.task);
         if (!task) continue;
         if (row.ts <= (lastRunByTask.get(task.key) ?? 0)) continue;
         lastRunByTask.set(task.key, row.ts);
-        const next = typeof d.next_due_at === 'number' && Number.isFinite(d.next_due_at)
-          ? d.next_due_at
-          : (nextDue(task.expr, row.ts, SCHEDULE_TZ_OFFSET_MIN) ?? row.ts + 24 * 3600_000);
-        nextDueByTask.set(task.key, next);
+        // M0：表达式以**当前配置**为准；历史审计里的 expr 只用来判断它的 next_due 是否还可信。
+        // 不一致 → 旧 next_due 作废，按新表达式重算（否则重启后「改了频率却不生效」）。
+        nextDueByTask.set(task.key, planNextDue({
+          key: task.key,
+          expr: resolveScheduleExpr(task.key, exprs),
+          audit_expr: typeof d.expr === 'string' ? d.expr : null,
+          audit_next_due: typeof d.next_due_at === 'number' && Number.isFinite(d.next_due_at)
+            ? d.next_due_at : null,
+          last_run_ts: row.ts,
+          tz_offset_min: SCHEDULE_TZ_OFFSET_MIN,
+        }));
       }
     } catch (e) {
       void mlog('schedule:bootstrap-error', { error: String((e as Error)?.message ?? e) });
@@ -3843,7 +3880,9 @@ async function bootstrap(): Promise<void> {
   };
   const ensureScheduleReady = (): Promise<void> => (scheduleReady ??= bootstrapScheduleState());
 
-  const runScheduledTask = async (task: ScheduleTaskSpec, trigger: 'first' | 'cron' | 'catch_up'): Promise<void> => {
+  const runScheduledTask = async (
+    task: ScheduleTaskSpec, trigger: 'first' | 'cron' | 'catch_up', expr: string,
+  ): Promise<void> => {
     const startedAt = Date.now();
     let outcome: TaskOutcome;
     try {
@@ -3852,11 +3891,12 @@ async function bootstrap(): Promise<void> {
       outcome = { status: 'error', error: String((e as Error)?.message ?? e) };
     }
     const finishedAt = Date.now();
-    const next = nextDue(task.expr, finishedAt, SCHEDULE_TZ_OFFSET_MIN) ?? finishedAt + 24 * 3600_000;
+    // M0：推进用**本次实际执行的表达式**（= 当前配置），不是 SCHEDULE_TASKS 里的静态值
+    const next = advanceNextDue(expr, finishedAt, SCHEDULE_TZ_OFFSET_MIN);
     lastRunByTask.set(task.key, finishedAt);
     nextDueByTask.set(task.key, next);
     const detail = {
-      task: task.key, host: SCHEDULE_HOST, expr: task.expr, tz_offset_min: SCHEDULE_TZ_OFFSET_MIN,
+      task: task.key, host: SCHEDULE_HOST, expr, tz_offset_min: SCHEDULE_TZ_OFFSET_MIN,
       trigger, started_at: startedAt, duration_ms: finishedAt - startedAt,
       status: outcome.status, result: outcome.result ?? {}, error: outcome.error ?? null,
       next_due_at: next,
@@ -3889,14 +3929,16 @@ async function bootstrap(): Promise<void> {
       // 只有真有到期任务时才读一次 growth:v1 快照（避免每 60s 全库扫描）
       const cfg = growthConfigFromLedger(await storage.listMemories({}));
       for (const task of due) {
+        // M0：每个任务的实际表达式只在这里解析一次（配置 → 脏值/缺字段回退该任务默认）
+        const expr = resolveScheduleExpr(task.key, cfg.schedule_exprs);
         // 旧环境变量语义：只停遗忘相关两项；其余任务照常
         if (FORGETTING_DISABLED && (task.key === 'decay' || task.key === 'archive')) {
-          nextDueByTask.set(task.key, nextDue(task.expr, now, SCHEDULE_TZ_OFFSET_MIN) ?? now + 24 * 3600_000);
+          nextDueByTask.set(task.key, advanceNextDue(expr, now, SCHEDULE_TZ_OFFSET_MIN));
           continue;
         }
         // 用户停用（decay 恒开）：只推进下次到期，不写运行审计（页面显示「未运行」而非伪造）
         if (task.key !== 'decay' && !cfg.schedule[task.key]) {
-          nextDueByTask.set(task.key, nextDue(task.expr, now, SCHEDULE_TZ_OFFSET_MIN) ?? now + 24 * 3600_000);
+          nextDueByTask.set(task.key, advanceNextDue(expr, now, SCHEDULE_TZ_OFFSET_MIN));
           void mlog('schedule:task-disabled', { task: task.key, next_due_at: nextDueByTask.get(task.key) });
           continue;
         }
@@ -3904,7 +3946,7 @@ async function bootstrap(): Promise<void> {
         const hasRun = lastRunByTask.has(task.key);
         const trigger: 'first' | 'cron' | 'catch_up' = !hasRun ? 'first'
           : (now - scheduledAt >= 10 * 60_000 ? 'catch_up' : 'cron');
-        await runScheduledTask(task, trigger);
+        await runScheduledTask(task, trigger, expr);
       }
     } catch (e) {
       const err = String((e as Error)?.message ?? e);
