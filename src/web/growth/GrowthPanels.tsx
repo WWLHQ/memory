@@ -1,12 +1,13 @@
 // P14-T3 自生长侧组件：指标卡 + 五项优化 + Δ 收益曲线 + 调度时间轴（7.1/7.2/13.3）
 import { useEffect, useState } from 'react';
 import type {
-  DeltaPoint, GrowthAuditEntry, GrowthMetrics, GrowthReceipt, OptimizationItem, RegressionOutcome,
+  DeltaMetric, DeltaPoint, GrowthAuditEntry, GrowthMetrics, GrowthReceipt, OptimizationItem, RegressionOutcome,
   RegressionRecord, ScheduleItem, ScheduleRunInfo, RecallSuggestionView, FeedbackSignalView,
-  RecallWeights, FeedbackPolicy,
+  RecallWeights, FeedbackPolicy, DimKey, Layer,
 } from './types.ts';
 import { GC_CONCURRENCY_NOTE, type AgentUsageSummary } from '../../core/memagent/agentUsage.ts';
 import { RECALL_KEYS } from '../../shared/growthConfig.ts';
+import { RECALL_KEY_LABEL, fmtRecallWeights } from './recallLabels.ts';
 
 export function GrowthCards({ m, empty }: { m: GrowthMetrics; empty?: boolean }) {
   const items: Array<[string, string, string, string]> = [
@@ -179,11 +180,110 @@ export function RegressionTable({ records }: { records: RegressionRecord[] }) {
   );
 }
 
+interface SuggestionAuditView {
+  from: RecallWeights;
+  to: RecallWeights;
+  reason: string;
+  windowDays?: number;
+  recalls?: number;
+  thin?: number;
+  thinRatio?: number;
+}
+
+/**
+ * 把一条「召回权重建议」审计的 payload 还原成人话；解析不出结构就返回 null，
+ * 调用方退回「事件名 + 原始字段」的兜底渲染（绝不因为格式变化而显示空白）。
+ */
+function suggestionAuditOf(payload: string): SuggestionAuditView | null {
+  let raw: unknown;
+  try { raw = JSON.parse(payload); } catch { return null; }
+  const o = raw as {
+    suggestion?: { from?: unknown; to?: unknown; reason?: unknown };
+    metrics?: Record<string, unknown>;
+  } | null;
+  const s = o?.suggestion;
+  // 四维必须都是数字，否则 weightChangeRows 的 toFixed 会抛错把整张卡带崩 ——
+  // 结构不全就如实退回兜底渲染，不猜、不补默认值。
+  const isWeights = (w: unknown): w is RecallWeights =>
+    !!w && typeof w === 'object'
+    && RECALL_KEYS.every((k) => typeof (w as Record<string, unknown>)[k] === 'number');
+  const from = s?.from;
+  const to = s?.to;
+  if (!isWeights(from) || !isWeights(to)) return null;
+  const m = o?.metrics ?? {};
+  const num = (v: unknown): number | undefined =>
+    (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+  return {
+    from,
+    to,
+    reason: typeof s?.reason === 'string' ? s.reason : '',
+    windowDays: num(m.window_days),
+    recalls: num(m.recalls),
+    thin: num(m.evidence_thin),
+    thinRatio: num(m.evidence_thin_ratio),
+  };
+}
+
+/** 真的变了的维度 → 人话；没变的单独列，避免用户以为「全都改了」 */
+function weightChangeRows(
+  from: RecallWeights, to: RecallWeights,
+): { changed: string[]; unchanged: string[] } {
+  const changed: string[] = [];
+  const unchanged: string[] = [];
+  for (const k of RECALL_KEYS) {
+    const d = to[k] - from[k];
+    if (Math.abs(d) < 1e-9) { unchanged.push(RECALL_KEY_LABEL[k]); continue; }
+    changed.push(`${RECALL_KEY_LABEL[k]} ${from[k].toFixed(2)} → ${to[k].toFixed(2)}（${d > 0 ? '+' : ''}${d.toFixed(2)}）`);
+  }
+  return { changed, unchanged };
+}
+
+/**
+ * 把建议审计翻成一句人话（2026-11-14 用户诉求：红框里那坨 JSON 看不懂）。
+ * 纪律：只翻译**账本真写过**的字段，缺的写「未记录」，不猜、不补零、不美化。
+ */
+function suggestionText(v: SuggestionAuditView, event: string): string {
+  const head = event.includes('suggest')
+    ? '召回权重建议（仅建议，未改动配置）：'
+    : '召回权重变更：';
+  const scope = v.windowDays !== undefined ? `最近 ${v.windowDays} 天` : '评估窗口未记进审计';
+  const recalls = v.recalls !== undefined ? `${v.recalls} 次召回` : '召回次数未记进审计';
+  const thin = v.thin !== undefined && v.thinRatio !== undefined
+    ? `里有 ${v.thin} 次（${(v.thinRatio * 100).toFixed(1)}%）证据不足`
+    : '的证据不足比例未记进审计';
+  const { changed, unchanged } = weightChangeRows(v.from, v.to);
+  const body = changed.length > 0 ? changed.join('、') : '四个维度权重都没变';
+  const keep = unchanged.length > 0 ? `；${unchanged.join('、')}不变` : '';
+  return `${head}${scope} ${recalls}${thin} → ${body}${keep}。`;
+}
+
+/**
+ * 账本事件名 → 人话（2026-11-14 用户硬性要求：整页人话，不出现英文事件名/原始 JSON）。
+ * 词表没有的事件如实写「未登记的审计事件」，绝不把原名当正文糊上去。
+ */
+const GROWTH_EVENT_LABEL: Record<string, string> = {
+  recall_weight_suggested: '召回权重建议',
+  recall_weight_no_suggestion: '召回权重无需调整',
+  recall_weight_applied: '召回权重已采纳',
+  feedback_policy_changed: '反馈策略已更新',
+  schedule_changed: '调度开关已更新',
+  evolution_settings_changed: '进化设置已保存',
+  weight_tuned: '权重调优已采纳',
+  keyword_refined: '关键词提取已精炼',
+  阈值变更: '判重阈值已变更',
+  衰减变更: '遗忘衰减已变更',
+  索引构建: '预索引已构建',
+};
+
 export function DeltaPanel({
-  series, delta, audit, onManualTrigger, regression, receipt,
+  series, delta, deltaMetric, currentHitRate, audit, onManualTrigger, regression, receipt,
 }: {
   series: DeltaPoint[];
   delta: number;
+  /** Δ 口径来源：决定副标题文案与用户如何解读这个数字；`none` = 没有基线（不存在改善量） */
+  deltaMetric?: DeltaMetric;
+  /** 无基线时用来说明「这是现状、不是改善量」的真实命中率（原样展示，不美化） */
+  currentHitRate?: number;
   audit: GrowthAuditEntry[];
   onManualTrigger: () => void;
   /** 真实回归最近一次结果（四态；无记录 = 未到运行时间） */
@@ -191,6 +291,34 @@ export function DeltaPanel({
   /** 手动触发的真实审计回执（request_id / action / 账本累计条数） */
   receipt: GrowthReceipt | null;
 }) {
+  // M0-3：方向判定（带浮点噪声阈值，避免 -0.0001 误判为「变差」）。
+  // 语义：ok/danger 表达「效果好/坏」，不套股市红涨绿跌。
+  // 2026-11-14：新增 none = 无基线（从未调过参数）——此时 Δ 不存在，不得把当前值当改善量。
+  type DeltaDir = 'good' | 'bad' | 'flat' | 'none';
+  const noBaseline = deltaMetric === 'none';
+  const dirOf = (v: number): DeltaDir =>
+    v > 0.0005 ? 'good' : v < -0.0005 ? 'bad' : 'flat';
+  const colorOf = (dir: DeltaDir): string =>
+    dir === 'good' ? 'var(--ok,#5dd39e)'
+      : dir === 'bad' ? 'var(--danger,#ff5d5d)'
+      : 'var(--muted,#a9b6c4)';
+  const deltaDir: DeltaDir = noBaseline ? 'none' : dirOf(delta);
+  const metricLabel = noBaseline
+    ? (typeof currentHitRate === 'number' && Number.isFinite(currentHitRate)
+      ? `当前命中率 ${(currentHitRate * 100).toFixed(1)}% 是现状，不是改善量`
+      : '还没有可比的基线，不显示改善量')
+    : deltaMetric === 'f1_gain'
+      ? '测试集 F1 提升（判重回归采纳，同一确定性划分 + 同一 30 天窗）'
+      : '调权重前后命中率差（手动 / 历史优化）';
+  const verdictLabel = noBaseline
+    ? '无对比基线：还没有过一次真实调参（weight_tuned），谈不上改善'
+    : deltaDir === 'good' ? '本次自生长改善了效果'
+      : deltaDir === 'bad' ? '本次自生长使效果变差'
+        : '本次前后效果持平';
+  // 无基线 → 不印数字（印任何数字都会被读成"改善量"）
+  const deltaText = noBaseline
+    ? 'Δ 无基线'
+    : `Δ ${delta > 0 ? '+' : delta < 0 ? '-' : ''}${Math.abs(delta).toFixed(3)}`;
   const max = Math.max(0.06, ...series.map((p) => Math.abs(p.delta)));
   const W = 560, H = 120, PAD = 28;
   const step = (W - PAD * 2) / Math.max(1, series.length - 1);
@@ -203,10 +331,17 @@ export function DeltaPanel({
         曲线数据 = 真实 weight_tuned 审计事件（回归采纳 + 历史 growth_op）按日聚合，无记录则显示空态（不伪造数值）。
       </div>
       <div className="row" style={{ alignItems: 'baseline', gap: 16, marginTop: 8 }}>
-        <span data-testid="delta-value" style={{ fontSize: 26, fontWeight: 800, color: 'var(--ok,#5dd39e)' }}>
-          Δ +{delta.toFixed(3)}
+        <span
+          data-testid="delta-value" data-dir={deltaDir}
+          style={{ fontSize: 26, fontWeight: 800, color: colorOf(deltaDir) }}
+        >
+          {deltaText}
         </span>
-        <span className="dim">调权重后命中率 − 调权重前命中率（真实反馈差值）</span>
+        {/* 文字 + 颜色双编码：方向不仅靠颜色，还用明确结论文字，色盲可辨 */}
+        <span data-testid="delta-verdict" data-dir={deltaDir} style={{ color: colorOf(deltaDir), fontWeight: 600 }}>
+          {verdictLabel}
+        </span>
+        <span className="dim">{metricLabel}</span>
         <button className="btn" data-testid="manual-trigger" onClick={onManualTrigger}>⚡ 手动触发一次自生长</button>
       </div>
       {series.length === 0 ? (
@@ -222,7 +357,7 @@ export function DeltaPanel({
               <circle
                 cx={PAD + i * step} cy={H - PAD - (p.delta / max) * (H - PAD * 1.6)}
                 r={p.is_tuned ? 5 : 3}
-                fill={p.is_tuned ? 'var(--danger,#ff5d5d)' : 'var(--accent,#4f8cff)'}
+                fill={colorOf(dirOf(p.delta))}
                 data-testid={p.is_tuned ? 'tuned-point' : undefined}
               />
               <text x={PAD + i * step} y={H - 8} fontSize="10" fill="var(--muted,#a9b6c4)" textAnchor="middle">{p.day}</text>
@@ -230,7 +365,11 @@ export function DeltaPanel({
           ))}
         </svg>
       )}
-      <div className="note">🔴 = weight_tuned 触发点 · 真实账本审计：{audit.length} 条（R2）</div>
+      <div className="note">
+        大点 = weight_tuned 触发点（周日 03:00）· 颜色：<span style={{ color: 'var(--ok,#5dd39e)' }}>绿=变好</span> /
+        <span style={{ color: 'var(--danger,#ff5d5d)' }}>红=变坏</span> /
+        <span style={{ color: 'var(--muted,#a9b6c4)' }}>灰=持平</span> · 真实账本审计：{audit.length} 条（R2）
+      </div>
       <div className="note" data-testid="regression-status" style={{ marginTop: 4 }}>
         自生长回归状态：{regressionStatusText(regression)}
       </div>
@@ -242,9 +381,154 @@ export function DeltaPanel({
       )}
       {audit.length > 0 && (
         <div className="note" data-testid="growth-audit" style={{ marginTop: 6 }}>
-          {audit.slice(0, 3).map((a, i) => (
-            <div key={i}>· <b>{a.event}</b> {a.action} {a.payload}</div>
-          ))}
+          <div className="dim" style={{ marginBottom: 2 }}>
+            账本最近 {Math.min(3, audit.length)} 条（人话版）
+          </div>
+          {audit.slice(0, 3).map((a, i) => {
+            const view = suggestionAuditOf(a.payload);
+            const label = GROWTH_EVENT_LABEL[a.event];
+            return (
+              <div key={`${a.event}-${a.at}-${i}`} data-testid="audit-entry" style={{ marginTop: 4 }}>
+                <div data-testid="audit-human">
+                  {view
+                    ? suggestionText(view, a.event)
+                    : `${label ?? '未登记的审计事件'}：这条审计没有可翻译的明细，只记录发生时间。`}
+                </div>
+                {/* 只留人读得懂的元信息：审计 ID + 时间。原始 payload 与英文事件名一律不上屏 */}
+                <div className="dim" data-testid="audit-meta" style={{ fontSize: 11 }}>
+                  审计 ID {a.requestId ?? '账本未带'} · {fmtTime(a.at)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * M0-4：自生长效果结论卡 + 参数差异表（用户要能感知「好了还是坏了」）。
+ * 结论卡四态（M0 阶段判重回归不会「恶化」——adopted 必然 F1 提升≥0.02）：
+ *   改善 / 已评估未达门槛未改动 / 样本积累中 / 未到运行时间。
+ * 参数差异表：五维权重 + 六层阈值 前→后对照，未变项也列出并标注原因（llm_judge 固定保留）。
+ */
+const DIM_LABEL: Record<DimKey, string> = {
+  semantic: '语义', keyword: '关键词', entity: '实体', structure: '结构', llm_judge: 'LLM 裁决',
+};
+
+export function EvolutionEffectCard({ records }: { records: RegressionRecord[] }) {
+  // regressionRecordsFromLedger 已按 ts 倒序；最新一条决定结论卡主态
+  const latest = records[0];
+  const adopted = records.find((r) => r.kind === 'adopted' && r.weightsBefore && r.weightsAfter);
+
+  // M0 阶段判重回归不会「恶化」（adopted 门槛保证 F1 提升）；恶化判定在 M2/M3 召回权重回滚时启用。
+  let verdictDir: 'good' | 'flat' | 'empty';
+  let verdictText: string;
+  let verdictSub: string;
+  if (!latest) {
+    verdictDir = 'empty';
+    verdictText = '未到运行时间（每周日 03:00）或账本暂无回归记录';
+    verdictSub = '可在下方「手动触发」跑一次真实回归；无记录不编造效果。';
+  } else if (latest.kind === 'insufficient_samples') {
+    const total = latest.counts?.total ?? 0;
+    const neg = latest.counts?.negatives ?? 0;
+    verdictDir = 'empty';
+    verdictText = `样本积累中：累计 ${total}/40 · 负例 ${neg}/10（未达门槛，非故障）`;
+    verdictSub = '判重回归需要 ≥40 条样本且负例 ≥10 才能评估，继续积累即可。';
+  } else if (latest.kind === 'not_adopted') {
+    verdictDir = 'flat';
+    verdictText = `已评估但未达采纳门槛（${REASON_TEXT[latest.reason ?? ''] ?? latest.reason ?? '未给出原因'}），未改动任何配置`;
+    verdictSub = '本轮评估认为改动不会让判重更准，账本保持原配置。';
+  } else if (adopted && adopted.before && adopted.after) {
+    const gain = adopted.after.f1 - adopted.before.f1;
+    verdictDir = 'good';
+    verdictText = `本次自生长改善了判重：测试集 F1 ${signed(gain)}（同一确定性划分 + 同一 30 天窗）`;
+    verdictSub = `基线 F1 ${adopted.before.f1.toFixed(3)} → 新 F1 ${adopted.after.f1.toFixed(3)}。`;
+  } else {
+    verdictDir = 'flat';
+    verdictText = '最近一次为已采纳记录，但审计未携带参数前后对照（历史记录）';
+    verdictSub = '新版本已落参数前后对照，后续采纳可见详细差异。';
+  }
+
+  const vColor = verdictDir === 'good' ? 'var(--ok,#5dd39e)'
+    : verdictDir === 'flat' ? 'var(--accent,#4f8cff)'
+    : 'var(--muted,#a9b6c4)';
+
+  const bw = adopted?.weightsBefore;
+  const aw = adopted?.weightsAfter;
+  const tb = adopted?.thresholdsBefore;
+  const ta = adopted?.thresholdsAfter;
+  const dimRows = bw && aw ? (Object.keys(bw) as DimKey[]).map((k) => {
+    const before = bw[k];
+    const after = aw[k];
+    const delta = after - before;
+    return { k, before, after, delta, fixed: k === 'llm_judge', changed: Math.abs(delta) > 1e-9 };
+  }) : [];
+  const layerRows = tb && ta ? (Object.keys(tb) as Layer[]).map((l) => {
+    const before = tb[l];
+    const after = ta[l];
+    const delta = after - before;
+    return { l, before, after, delta, changed: Math.abs(delta) > 1e-9 };
+  }) : [];
+
+  return (
+    <div className="card" data-testid="evolution-effect-card">
+      <b>自生长效果结论（M0 · 真实账本）</b>
+      <div
+        data-testid="evolution-verdict" data-dir={verdictDir}
+        style={{ marginTop: 8, padding: '10px 12px', borderRadius: 8, border: `1px solid ${vColor}`, color: vColor, fontWeight: 600 }}
+      >
+        {verdictText}
+        <div className="note" style={{ color: vColor, fontWeight: 400, marginTop: 4 }}>{verdictSub}</div>
+      </div>
+
+      {adopted && bw && aw ? (
+        <>
+          <div className="note" style={{ marginTop: 10 }}>
+            参数差异表（{fmtTime(adopted.ts)} 采纳）：未变化项也列出，便于判断「改了什么、值不值」。
+          </div>
+          <table className="ltable" data-testid="param-diff-table" style={{ marginTop: 6 }}>
+            <thead>
+              <tr><th>五维判重权重</th><th>进化前</th><th>进化后</th><th>Δ</th><th>状态</th></tr>
+            </thead>
+            <tbody>
+              {dimRows.map((r) => (
+                <tr key={r.k} data-testid={`dim-row-${r.k}`}>
+                  <td>{DIM_LABEL[r.k]}<span className="mono">（{r.k}）</span></td>
+                  <td>{r.before.toFixed(2)}</td>
+                  <td>{r.after.toFixed(2)}</td>
+                  <td style={{ color: r.changed ? 'var(--accent,#4f8cff)' : 'var(--muted,#a9b6c4)' }}>{signed(r.delta, 2)}</td>
+                  <td data-testid={`dim-status-${r.k}`}>
+                    {r.fixed ? '固定保留（不参与调优）' : r.changed ? '已调整' : '未变化'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <table className="ltable" data-testid="threshold-diff-table" style={{ marginTop: 8 }}>
+            <thead>
+              <tr><th>六层判重阈值</th><th>进化前</th><th>进化后</th><th>Δ</th><th>状态</th></tr>
+            </thead>
+            <tbody>
+              {layerRows.map((r) => (
+                <tr key={r.l} data-testid={`layer-row-${r.l}`}>
+                  <td>{r.l}</td>
+                  <td>{r.before.toFixed(2)}</td>
+                  <td>{r.after.toFixed(2)}</td>
+                  <td style={{ color: r.changed ? 'var(--accent,#4f8cff)' : 'var(--muted,#a9b6c4)' }}>{signed(r.delta, 2)}</td>
+                  <td data-testid={`layer-status-${r.l}`}>{r.changed ? '已调整' : '未变化'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="note" style={{ marginTop: 6 }}>
+            回滚：M0 阶段版本化未上线，恶化时将在回滚功能上线后可一键回滚（不做假按钮）。
+          </div>
+        </>
+      ) : (
+        <div className="note" data-testid="param-diff-empty" style={{ marginTop: 8 }}>
+          尚无已采纳且携带参数前后对照的记录 —— 未到运行时间或样本不足，参数差异表暂不展示。
         </div>
       )}
     </div>
@@ -419,7 +703,8 @@ export function AgentUsageCard({ usage }: { usage: AgentUsageSummary }) {
 }
 
 function fmtWeights(w: RecallWeights): string {
-  return RECALL_KEYS.map((k) => `${k}=${w[k].toFixed(2)}`).join(' · ');
+  // 2026-11-14：UI 不出 w_f/w_i 这类字段名（用户要求整页人话），统一走唯一一份中文名映射
+  return fmtRecallWeights(w);
 }
 
 /**

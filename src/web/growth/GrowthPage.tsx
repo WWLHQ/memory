@@ -9,7 +9,7 @@
 //   · 调度 / 权重 / 阈值 = 真实配置（非演示数据）
 import { useEffect, useMemo, useState } from 'react';
 import type {
-  DeltaPoint, DimKey, DimWeights, GrowthAuditEntry, GrowthMetrics, GrowthReceipt,
+  DeltaMetric, DeltaPoint, DimKey, DimWeights, GrowthAuditEntry, GrowthMetrics, GrowthReceipt,
   Layer, LayerThresholds, ScheduleItem,
 } from './types.ts';
 import type { RealGrowth } from './useGrowthReal.ts';
@@ -21,11 +21,13 @@ import {
   shortCircuitPath, validateSchedule, validateThresholds, validateWeights,
 } from './logic.ts';
 import {
-  coreGrowthAudit, coreLoadGrowthConfig, coreRunGrowthRegression, coreSaveGrowthConfig,
+  coreGrowthAudit, coreLoadGrowthConfig, coreRunEvolution, coreRunGrowthRegression, coreSaveGrowthConfig,
 } from './coreGrowth.ts';
 import {
-  DEFAULT_FEEDBACK_POLICY, DEFAULT_RECALL_WEIGHTS, DEFAULT_SCHEDULE_FLAGS,
-  type FeedbackPolicy, type RecallWeights, type ScheduleFlags,
+  DEFAULT_EVOLUTION, DEFAULT_FEEDBACK_POLICY, DEFAULT_RECALL_WEIGHTS,
+  DEFAULT_SCHEDULE_EXPRS, DEFAULT_SCHEDULE_FLAGS,
+  type EvolutionConfig, type FeedbackPolicy, type RecallWeights,
+  type ScheduleExprs, type ScheduleFlags,
 } from '../../shared/growthConfig.ts';
 import { useGrowthMirror } from './useGrowthMirror.ts';
 import { newRequestId } from '../kernel.ts';
@@ -34,14 +36,22 @@ import { loadRealGrowthData } from './useGrowthReal.ts';
 import { summarizeAgentUsage, type AgentUsageSummary } from '../../core/memagent/agentUsage.ts';
 import { DedupCard, DevTunePanel, ShortCircuitFlow } from './DedupCards.tsx';
 import {
-  AgentUsageCard, DeltaPanel, FeedbackLoopCard, GrowthCards, OptimizationList, RecallWeightCard,
-  RegressionTable, ScheduleTimeline,
+  AgentUsageCard, DeltaPanel, FeedbackLoopCard, GrowthCards, OptimizationList,   RecallWeightCard,
+  RegressionTable, ScheduleTimeline, EvolutionEffectCard,
 } from './GrowthPanels.tsx';
+import { EvolutionSettingsCard } from './EvolutionSettingsCard.tsx';
+import { EvolutionTimelineCard } from './EvolutionTimelineCard.tsx';
 import { useToast } from './useToast.tsx';
 
 const EMPTY_METRICS: GrowthMetrics = {
   hit_rate: 0, confirmed: 0, rejected: 0, low_quality_ratio: 0, level_stats_L6: 0, latency_ms: 0, latency_samples: 0,
 };
+
+/**
+ * 把底层异常还原成可读原因。进化轮属于「必须能自我诊断」的链路：
+ * 只写「内核暂不可达」会把真因（如 2026-11-14 的 request_id 非法）永久吞掉。
+ */
+const errText = (e: unknown): string => String((e as Error)?.message ?? e);
 
 export function GrowthPage() {
   const [weights, setWeights] = useState<DimWeights>({ ...DEFAULT_WEIGHTS });
@@ -49,6 +59,9 @@ export function GrowthPage() {
   // 批次61 GAP-1/GAP-2：召回权重与反馈策略也从 growth:v1 读写（默认值 = 历史常量 / 策略关闭）
   const [recallWeights, setRecallWeights] = useState<RecallWeights>({ ...DEFAULT_RECALL_WEIGHTS });
   const [feedbackPolicy, setFeedbackPolicy] = useState<FeedbackPolicy>({ ...DEFAULT_FEEDBACK_POLICY });
+  // M0-5：自生长进化配置 + 调度频率表达式（与判重配置独立读写，避免被「改判重」顺手重置）
+  const [evolution, setEvolution] = useState<EvolutionConfig>({ ...DEFAULT_EVOLUTION });
+  const [scheduleExprs, setScheduleExprs] = useState<ScheduleExprs>({ ...DEFAULT_SCHEDULE_EXPRS });
   const [devMode, setDevMode] = useState(false);
   // 结构照定稿：4 个页签（判重与嫁接 / 回归评估 / 调度 / 红线自检），只渲染当前页签
   const [tab, setTab] = useState(0);
@@ -58,6 +71,9 @@ export function GrowthPage() {
   const [real, setReal] = useState<RealGrowth | null>(null);
   const [receipt, setReceipt] = useState<GrowthReceipt | null>(null);
   const [sampleIdx, setSampleIdx] = useState(0);
+  // M5-2：手动跑一轮进化的运行态与真实回执文案
+  const [evoRunning, setEvoRunning] = useState(false);
+  const [evoReceipt, setEvoReceipt] = useState<string | null>(null);
   const { node: toast, show } = useToast();
   const reportMirror = useGrowthMirror();
 
@@ -74,6 +90,8 @@ export function GrowthPage() {
         setThresholds(cfg.thresholds);
         setRecallWeights(cfg.recall_weights);
         setFeedbackPolicy(cfg.feedback_policy);
+        setEvolution(cfg.evolution);
+        setScheduleExprs(cfg.schedule_exprs);
         setSchedule(DEFAULT_SCHEDULE.map((s) => ({
           ...s,
           enabled: s.key === 'decay' ? true : cfg.schedule[s.key],
@@ -106,16 +124,21 @@ export function GrowthPage() {
   // R3：Δ 取自真实 7.1 反馈（调权重前后命中率差；最近一次 weight_tuned 审计的 payload）
   const lastTuned = audit.filter((a) => a.event === 'weight_tuned').slice(0, 1)[0];
   const deltaBefore = real && lastTuned ? extractDeltaBefore(lastTuned) : 0;
+  // 口径分离：聚合 Δ 优先取真实回归采纳的测试集 F1 提升；无采纳记录才退回历史 weight_tuned 的命中率差。
+  const adopted = real?.regressionRecords.find(
+    (r) => r.kind === 'adopted' && r.before && r.after,
+  );
+  const hasF1Baseline = Boolean(adopted?.before && adopted.after);
+  // 2026-11-14 事故：此前无基线时 deltaBefore 落 0，于是 Δ = 当前命中率（0.942）被当成「改善 +0.942」并标绿，
+  // 与同卡「暂无真实自生长调参记录」自相矛盾。没有基线就明说没有基线，绝不拿 0 冒充「调前」。
+  const deltaMetric: DeltaMetric = hasF1Baseline ? 'f1_gain' : lastTuned ? 'hitrate_delta' : 'none';
   const delta = useMemo(() => {
-    // Δ 优先取真实回归采纳的测试集 F1 提升；无采纳记录才退回历史 weight_tuned 的命中率差。
-    const adopted = real?.regressionRecords.find(
-      (r) => r.kind === 'adopted' && r.before && r.after,
-    );
     if (adopted?.before && adopted.after) {
       return Math.round((adopted.after.f1 - adopted.before.f1) * 1000) / 1000;
     }
+    if (!lastTuned) return 0; // 无基线 → 数字无意义，由 DeltaPanel 按 deltaMetric='none' 渲染
     return growthDelta(deltaBefore, metrics.hit_rate);
-  }, [real, deltaBefore, metrics.hit_rate]);
+  }, [adopted, lastTuned, deltaBefore, metrics.hit_rate]);
 
   const wCheck = validateWeights(weights);
   const tCheck = validateThresholds(thresholds);
@@ -255,6 +278,73 @@ export function GrowthPage() {
     }
   }
 
+  /**
+   * M0-5：保存自生长进化设置（mode / 窗口 / 最小样本 / 回滚 / 护栏 / 调度频率表达式）。
+   * 只改这两块的保存不得重置判重权重/阈值/调度开关/召回权重/反馈策略（coreSaveGrowthConfig 继承账本现值）；
+   * 写入真审计 evolution_settings_changed，重进页面不丢历史。
+   */
+  async function handleSaveEvolution(nextEvolution: EvolutionConfig, nextExprs: ScheduleExprs) {
+    const requestId = newRequestId('req');
+    const at = Date.now();
+    try {
+      await coreSaveGrowthConfig(
+        { weights, thresholds, schedule: flagsOf(schedule), evolution: nextEvolution, schedule_exprs: nextExprs },
+        requestId,
+      );
+      const entry: GrowthAuditEntry = {
+        event: 'evolution_settings_changed', action: 'save_evolution_settings',
+        payload: JSON.stringify({ evolution: nextEvolution, schedule_exprs: nextExprs }), at,
+      };
+      await coreGrowthAudit(entry, requestId);
+      reportMirror('evolution_settings_changed', requestId, entry);
+      const [fresh, cfg] = await Promise.all([loadRealGrowthData(), coreLoadGrowthConfig()]);
+      setReal(fresh);
+      setEvolution(cfg.evolution);
+      setScheduleExprs(cfg.schedule_exprs);
+      setAudit(fresh.growthAudit.slice().reverse());
+      show('自生长进化设置已写入 growth:v1（真实审计 evolution_settings_changed）');
+    } catch {
+      show('进化设置保存失败：内核暂不可达');
+    }
+  }
+
+  /**
+   * M5-2：手动跑一轮进化（与每周日 03:00 cron 同一套函数：进化轮 + 回诊）。
+   * 回执只说真实结果：mode=off → 零审计；无样本 → 明确「还需 N 次」；有采纳/回滚 → 报真实状态。
+   */
+  async function handleRunEvolution() {
+    setEvoRunning(true);
+    setEvoReceipt(null);
+    try {
+      const r = await coreRunEvolution({ force: true });
+      if (r.mode === 'off') {
+        const msg = '进化已关闭（mode=off）：本轮没有运行，也没有写任何审计';
+        setEvoReceipt(msg);
+        show(msg);
+        return;
+      }
+      const recall = r.round.decisions.find((d) => d.family === 'recall_weights');
+      const parts: string[] = [`本轮新增 ${r.added} 条 growth_op 审计`];
+      if (recall) parts.push(`召回权重：${recall.status}（${recall.reason}）`);
+      parts.push(`回诊：${r.rollback.status}`);
+      const msg = parts.join(' · ');
+      setEvoReceipt(msg);
+      show(msg);
+      // 真实重载：时间线/漂移/审计全部来自账本，不手工拼点
+      const [fresh, cfg] = await Promise.all([loadRealGrowthData(), coreLoadGrowthConfig()]);
+      setReal(fresh);
+      setRecallWeights(cfg.recall_weights);
+      setAudit(fresh.growthAudit.slice().reverse());
+    } catch (e) {
+      // 报真因：本轮已在 core 内做过审计形状自检，异常文本本身就是可执行的排查线索。
+      const msg = `手动进化触发失败：${errText(e)}`;
+      setEvoReceipt(msg);
+      show(msg);
+    } finally {
+      setEvoRunning(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="p0-page" data-testid="growth-page">
@@ -338,8 +428,18 @@ export function GrowthPage() {
           onSave={handleSaveFeedbackPolicy}
         />
         <RegressionTable records={real?.regressionRecords ?? []} />
+        <EvolutionEffectCard records={real?.regressionRecords ?? []} />
+        {/* M4：进化轮时间线（growth_op 扁平事件逐条）+ 召回权重漂移仪表（当前 vs 出厂基准） */}
+        <EvolutionTimelineCard
+          entries={real?.evolutionTimeline ?? []}
+          current={recallWeights}
+          onRun={handleRunEvolution}
+          running={evoRunning}
+          lastRun={evoReceipt ?? undefined}
+        />
         <DeltaPanel
-          series={series} delta={delta} audit={audit} onManualTrigger={handleManualTrigger}
+          series={series} delta={delta} deltaMetric={deltaMetric} currentHitRate={metrics.hit_rate}
+          audit={audit} onManualTrigger={handleManualTrigger}
           regression={real?.regression ?? { kind: 'never_run', ts: null }}
           receipt={receipt}
         />
@@ -353,6 +453,12 @@ export function GrowthPage() {
           <span className="p0-tag">13.3 周期任务</span>
         </div>
         <ScheduleTimeline schedule={schedule} onToggle={handleToggle} hostKind={hostCapability()} />
+        <EvolutionSettingsCard
+          evolution={evolution}
+          scheduleExprs={scheduleExprs}
+          audit={real?.sampleAudits ?? []}
+          onSave={handleSaveEvolution}
+        />
       </div>
       )}
 

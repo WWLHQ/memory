@@ -11,7 +11,11 @@ import {
 import {
   runGrowthRegression, type RegressionRunResult,
 } from '../../core/memagent/regression.ts';
-import type { GrowthConfig } from '../../shared/growthConfig.ts';
+import {
+  runEvolutionRound, runRollbackCheck,
+  type LoopResult, type RollbackCheckResult,
+} from '../../core/memagent/evolution/loop.ts';
+import type { EvolutionMode, GrowthConfig } from '../../shared/growthConfig.ts';
 import type { GrowthAuditEntry } from './types.ts';
 interface GrowthCtx {
   ma: MemAgent;
@@ -55,19 +59,22 @@ export async function coreLoadGrowthConfig(): Promise<GrowthConfig> {
  * 写 growth:v1: preference 记录（旧记录 delete + 新记录 put，pinned 豁免 gc）+ param_save 审计。
  */
 export async function coreSaveGrowthConfig(
-  cfg: Omit<GrowthConfig, 'recall_weights' | 'feedback_policy'>
-    & Partial<Pick<GrowthConfig, 'recall_weights' | 'feedback_policy'>>,
+  cfg: Omit<GrowthConfig, 'recall_weights' | 'feedback_policy' | 'evolution' | 'schedule_exprs'>
+    & Partial<Pick<GrowthConfig, 'recall_weights' | 'feedback_policy' | 'evolution' | 'schedule_exprs'>>,
   requestId: string,
 ): Promise<{ request_id: string; mem_id: string; version: number }> {
   const { storage } = await getCtx();
   const tenant = getTenant();
   // 批次61 GAP-1/GAP-2：页面保存判重参数时不传这两块 → 一律继承账本现值。
   // 否则「改判重权重」会顺手把召回权重清回默认、还能把用户已启用的反馈策略悄悄关掉。
+  // M0：evolution / schedule_exprs 同一规则——只改权阈的保存不得重置进化设置与调度节奏。
   const ledger = growthConfigFromLedger(await storage.listMemories({}));
   const merged: GrowthConfig = {
     ...cfg,
     recall_weights: cfg.recall_weights ?? ledger.recall_weights,
     feedback_policy: cfg.feedback_policy ?? ledger.feedback_policy,
+    evolution: cfg.evolution ?? ledger.evolution,
+    schedule_exprs: cfg.schedule_exprs ?? ledger.schedule_exprs,
   };
   const saved = await saveGrowthConfigToLedger(storage, merged, {
     requestId, form: 'web', enterpriseId: tenant.enterprise_id, teamId: tenant.team_id,
@@ -104,4 +111,34 @@ export async function coreRunGrowthRegression(): Promise<{
     : result.status === 'not_adopted' ? 'weight_regression' : 'weight_tuned';
   const total = (await storage.queryAudit({ action })).length;
   return { result, receipt: { requestId, action, total, at: Date.now() } };
+}
+
+/**
+ * M5-2：页面「手动跑一轮进化」= 走与主进程 cron **同一个** `runEvolutionRound` + `runRollbackCheck`。
+ * 只读真实账本、只写真实审计；不伪造结论。`force=true` = 立即回诊（跳过 due_at，仍受 min_recalls 约束）。
+ * `mode='off'` 时两者都不产审计（返回 added=0，页面据此提示「进化已关闭」）。
+ */
+export interface EvolutionRunReceipt {
+  requestId: string;
+  mode: EvolutionMode;
+  round: LoopResult;
+  rollback: RollbackCheckResult;
+  /** 本轮真实新增的 growth_op 审计条数（前后计数差，不是估算） */
+  added: number;
+  at: number;
+}
+
+export async function coreRunEvolution(opts?: { force?: boolean }): Promise<EvolutionRunReceipt> {
+  const { storage } = await getCtx();
+  const tenant = getTenant();
+  const requestId = newRequestId('evo');
+  const before = (await storage.queryAudit({ action: 'growth_op' })).length;
+  const common = {
+    requestId, form: 'web' as const,
+    enterpriseId: tenant.enterprise_id, teamId: tenant.team_id, now: Date.now(),
+  };
+  const round = await runEvolutionRound(storage, common);
+  const rollback = await runRollbackCheck(storage, { ...common, force: opts?.force });
+  const added = (await storage.queryAudit({ action: 'growth_op' })).length - before;
+  return { requestId, mode: round.mode, round, rollback, added, at: Date.now() };
 }

@@ -127,8 +127,11 @@ describe('RecallWeightCard（A）', () => {
         onApply={onApply}
       />,
     );
-    expect(screen.getByTestId('recall-weight-suggestion')).toHaveTextContent('w_f=0.35');
-    expect(screen.getByTestId('recall-weight-suggestion')).toHaveTextContent('w_c=0.20');
+    // 2026-11-14 用户硬性要求：UI 整页人话，不出 w_f/w_c 这类字段名
+    expect(screen.getByTestId('recall-weight-suggestion')).toHaveTextContent('新鲜度 0.35');
+    expect(screen.getByTestId('recall-weight-suggestion')).toHaveTextContent('置信度 0.20');
+    expect(screen.getByTestId('recall-weight-suggestion')).not.toHaveTextContent('w_f');
+    expect(screen.getByTestId('recall-weight-suggestion')).not.toHaveTextContent('w_c');
     fireEvent.click(screen.getByTestId('recall-weight-apply'));
     expect(onApply).toHaveBeenCalledWith(TO);
   });

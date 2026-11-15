@@ -35,6 +35,17 @@ describe('GrowthPage × 内核审计账本', () => {
     expect(audits.some((e) => e.event === 'weight_tuned')).toBe(false);
   });
 
+  it('冷启动无基线 → Δ 不显示「改善」，而是明说无基线（2026-11-14 假改善修复）', async () => {
+    await renderLoaded();
+    // 空账本既无 weight_tuned 也无采纳记录 → 不存在「调前」，Δ 必须为空口径
+    const v = screen.getByTestId('delta-value');
+    expect(v.getAttribute('data-dir')).toBe('none');
+    expect(v.textContent).toContain('无基线');
+    const verdict = screen.getByTestId('delta-verdict');
+    expect(verdict).toHaveTextContent('无对比基线');
+    expect(verdict).not.toHaveTextContent('改善了效果');
+  });
+
   it('调度停用 → schedule_changed 审计真写内核', async () => {
     await renderLoaded();
     fireEvent.click(screen.getByTestId('gtab-2'));
@@ -45,7 +56,7 @@ describe('GrowthPage × 内核审计账本', () => {
     });
   });
 
-  it('重挂载 → 内核账本历史回放（growth-audit 区可见 weight_tuned）', async () => {
+  it('重挂载 → 内核账本历史回放（growth-audit 区可见中文事件名，不出原始 JSON）', async () => {
     // 先由真实链路写一条 weight_tuned（不经 UI），再验证页面回放
     const entry = auditOptimization(
       { auditName: 'weight_tuned', action: 'regress_mode_weights', key: 'regress_weights' },
@@ -59,7 +70,10 @@ describe('GrowthPage × 内核审计账本', () => {
     render(<GrowthPage />);
     await waitFor(() => expect(screen.getByTestId('gtab-1')).toBeInTheDocument());
     fireEvent.click(screen.getByTestId('gtab-1'));
-    await waitFor(() => expect(screen.getByTestId('growth-audit')).toHaveTextContent(/weight_tuned/));
+    // 2026-11-14：整页人话 → 出中文事件名；英文事件名与 payload 原文都不许上屏
+    await waitFor(() => expect(screen.getByTestId('growth-audit')).toHaveTextContent(/权重调优已采纳/));
+    expect(screen.getByTestId('growth-audit').textContent).not.toContain('weight_tuned');
+    expect(screen.getByTestId('growth-audit').textContent).not.toContain('delta_before');
   });
 
   it('useGrowthMirror 暴露上抛回调（fire-and-forget）', () => {

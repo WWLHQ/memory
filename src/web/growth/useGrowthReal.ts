@@ -11,13 +11,14 @@ import type { Memory, AuditRecord } from '../../core/memagent/types.ts';
 import type { StorageBackend } from '../../core/memagent/types.ts';
 import { getKernelStorage } from '../kernel.ts';
 import type {
-  DedupSample, DeltaPoint, DimKey, DimWeights, GrowthMetrics, LayerThresholds,
+  DedupSample, DeltaMetric, DeltaPoint, DimKey, DimWeights, GrowthMetrics, LayerThresholds,
   ScheduleItem, GrowthAuditEntry, ScheduleRunInfo, RegressionOutcome, RegressionRecord,
   RecallSuggestionView, FeedbackSignalView,
 } from './types.ts';
 import { DEFAULT_SCHEDULE, DEFAULT_THRESHOLDS, DEFAULT_WEIGHTS } from './spec.ts';
 import { SCHEDULE_KEYS, validRecallWeights, type ScheduleKey } from '../../shared/growthConfig.ts';
 import { summarizeAgentUsage, type AgentUsageSummary } from '../../core/memagent/agentUsage.ts';
+import { evolutionTimelineFromLedger, type EvolutionTimelineEntry } from './evolutionTimeline.ts';
 
 export type RealStorage = Pick<StorageBackend, 'listMemories' | 'queryAudit'>;
 
@@ -169,7 +170,9 @@ export function deltaSeriesFromLedger(audits: AuditRecord[]): DeltaPoint[] {
   return tuned.slice(-14).map((a) => {
     const d = new Date(a.ts);
     const gain = regressionF1GainOf(a);
-    return { day: DAY_NAMES[d.getDay()], delta: gain ?? deltaBeforeOf(a), is_tuned: true };
+    // 口径分离：同一根曲线上的点必须标注来源，否则 F1 提升（0~0.05 量级）与命中率差（可达 0.x）混算会误导趋势。
+    const metric: DeltaMetric = gain != null ? 'f1_gain' : 'hitrate_delta';
+    return { day: DAY_NAMES[d.getDay()], delta: gain ?? deltaBeforeOf(a), is_tuned: true, metric };
   });
 }
 
@@ -272,6 +275,14 @@ export function regressionRecordsFromLedger(audits: AuditRecord[]): RegressionRe
       const after = testMetricsOf(m?.after);
       if (before) rec.before = before;
       if (after) rec.after = after;
+      // M0-4：提取权重/阈值前后对照。adopted 分支的 detail.before/after 存的是 {weights, thresholds}
+      // （与 not_adopted 分支的 before/after 是 f1/precision 不同），仅此处有真实参数变化可展示。
+      const bw = d.before as { weights?: DimWeights; thresholds?: LayerThresholds } | undefined;
+      const aw = d.after as { weights?: DimWeights; thresholds?: LayerThresholds } | undefined;
+      if (bw?.weights && aw?.weights) { rec.weightsBefore = bw.weights; rec.weightsAfter = aw.weights; }
+      if (bw?.thresholds && aw?.thresholds) {
+        rec.thresholdsBefore = bw.thresholds; rec.thresholdsAfter = aw.thresholds;
+      }
     }
     out.push(rec);
   }
@@ -409,6 +420,12 @@ export interface RealGrowth {
   /** 每次真实回归的逐条记录（最新在前；无记录 = 空数组） */
   regressionRecords: RegressionRecord[];
   /**
+   * 原始回归审计（insufficient_samples / weight_regression / weight_tuned）——
+   * 供「进化设置卡」做可行性预测（窗口内样本/负例增速，诚实不靠新埋点）。
+   * 这些是内核直接写的 AuditRecord，不在 growthAudit（仅 growth_op 包装项）里，故单独暴露。
+   */
+  sampleAudits: AuditRecord[];
+  /**
    * 批次61 GAP-3：Agent 侧使用画像（同一批审计实算，7 天窗）。
    * 只读聚合：不写审计、不改记忆；verdict 分布只能到项目级（memory_op 审计无 client 字段）。
    */
@@ -417,6 +434,12 @@ export interface RealGrowth {
   recallSuggestion: RecallSuggestionView | null;
   /** 批次61 GAP-2：最新净化周期的反馈信号画像（无 gc 记录 → null，页面显「暂无数据」） */
   feedbackSignal: FeedbackSignalView | null;
+  /**
+   * M4：进化轮时间线（growth_op 扁平 detail.event 投影，最新在前）。
+   * 与 growthAudit 互补：growthAudit 只认旧式 detail.entry 包装项，二者不重叠、不双份。
+   * 空数组 = 账本暂无进化记录（页面显「暂无进化记录」，不显示 0）。
+   */
+  evolutionTimeline: EvolutionTimelineEntry[];
 }
 
 // 真实账本实算标记（供构建产物核验）
@@ -430,7 +453,11 @@ export async function loadRealGrowthData(): Promise<RealGrowth> {
   ]);
   const growthAudit = audits
     .filter((a) => a.action === 'growth_op')
-    .map((a) => (a.detail as { entry?: GrowthAuditEntry }).entry)
+    .map((a): GrowthAuditEntry | undefined => {
+      const e = (a.detail as { entry?: GrowthAuditEntry }).entry;
+      // 2026-11-14：页面禁止上屏原始 payload，只保留可回查的审计 ID（账本 request_id）
+      return e ? { ...e, requestId: a.request_id } : undefined;
+    })
     .filter((e): e is GrowthAuditEntry => Boolean(e));
 
   return {
@@ -445,10 +472,12 @@ export async function loadRealGrowthData(): Promise<RealGrowth> {
     scheduleRuns: scheduleRunsFromLedger(audits),
     regression: regressionOutcomeFromLedger(audits),
     regressionRecords: regressionRecordsFromLedger(audits),
+    sampleAudits: audits.filter((a) => REGRESSION_ACTIONS.has(a.action)),
     // 与其它指标读同一份审计快照，保证页面上「Agent 侧」与「反馈指标」不会各说一套
     agentUsage: summarizeAgentUsage(audits, Date.now(), 7),
     recallSuggestion: recallSuggestionFromLedger(audits),
     feedbackSignal: feedbackSignalFromLedger(audits),
+    evolutionTimeline: evolutionTimelineFromLedger(audits),
   };
 }
 

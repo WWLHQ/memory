@@ -109,6 +109,12 @@ export interface RegressionRecord {
   reason?: string;
   /** true = 已采纳并把新权重/阈值写入 growth:v1 账本；false = 未改动任何配置 */
   applied: boolean;
+  /** 采纳时权重前后对照（仅 adopted 分支的审计 detail.before/after 含权重；其余分支不含） */
+  weightsBefore?: DimWeights;
+  weightsAfter?: DimWeights;
+  /** 采纳时六层阈值前后对照 */
+  thresholdsBefore?: LayerThresholds;
+  thresholdsAfter?: LayerThresholds;
 }
 
 /** 手动触发的真实审计回执（request_id + 动作 + 该动作账本累计条数） */
@@ -119,12 +125,21 @@ export interface GrowthReceipt {
   at: number;
 }
 
+/**
+ * Δ 口径：两种来源数值范围不同、不可直接比较，UI/审计需据此分离展示。
+ * `none` = **没有任何基线**（从未 weight_tuned 采纳过参数）：
+ * 此时不存在「改善量」，页面必须显式说"无基线"，不得把当前命中率当 Δ 显示（2026-11-14 事故）。
+ */
+export type DeltaMetric = 'f1_gain' | 'hitrate_delta' | 'none';
+
 /** 自生长收益曲线点（7.2 / 13.3） */
 export interface DeltaPoint {
   day: string;
   delta: number;
   /** 是否 weight_tuned 触发点（每周日 03:00） */
   is_tuned: boolean;
+  /** 口径来源：f1_gain=测试集 F1 提升（判重回归采纳）；hitrate_delta=调权重前后命中率差（手动/历史优化）。未标注时按来源推断。 */
+  metric?: DeltaMetric;
 }
 
 /**
@@ -163,4 +178,9 @@ export interface GrowthAuditEntry {
   action: string;
   payload: string;
   at: number;
+  /**
+   * 账本 request_id（2026-11-14）：原始 payload **禁止上屏**，页面只给「审计 ID + 时间」供回查；
+   * 旧式 entry 里没有这个字段 → undefined，页面写「账本未带审计 ID」，不编。
+   */
+  requestId?: string;
 }
