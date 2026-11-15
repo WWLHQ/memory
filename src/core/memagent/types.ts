@@ -661,6 +661,7 @@ export type AuditAction =
   | 'agent_rotate'
   | 'agent_revoke'
   | 'monitor_alert'
+  | 'agent_probe'
   | 'security_change'
   // 真实质量/可靠性事件（监控仪表盘与冲突队列的真实口径来源）
   | 'recall_breach' | 'cold_recall' | 'evidence_thin' | 'sync_fail' | 'conflict_resolve' | 'merge'

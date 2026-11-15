@@ -68,6 +68,8 @@ const mcpClients = {
     ipcRenderer.invoke(IPC.mcpClientSnippet, id, sessionId) as Promise<{ ok: boolean; snippet?: string; error?: string }>,
   wire: (id: string, sessionId?: string | null) =>
     ipcRenderer.invoke(IPC.mcpClientWire, id, sessionId) as Promise<{ ok: boolean; changed?: boolean; path?: string; backupPath?: string; error?: string }>,
+  enable: (id: string, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.mcpClientEnable, id, sessionId) as Promise<{ ok: boolean; changed?: boolean; path?: string; backupPath?: string; error?: string }>,
 };
 
 // 会话采集器桥（19.9 接入成功立即读各 agent 会话/记忆）：宿主真扫命中后立刻触发一次对账
@@ -310,6 +312,11 @@ const recallHard = {
     ipcRenderer.invoke(IPC.recallHardSet, patch, sessionId),
 };
 
+// 原子任务 B：监控仪表盘只读聚合（Agent 健康 + 写入率 + 校验异常）。公开观测，不需会话。
+const monitor = {
+  stats: () => ipcRenderer.invoke(IPC.monitorStats),
+};
+
 /**
  * 顶部自绘标题栏（批次48 S10）：把壳层当前主题同步给主进程的窗口按钮覆盖层。
  * 只改系统绘制的三个按钮的底色/符号色；按钮行为（最小化/最大化/关闭）仍归系统。
@@ -329,4 +336,4 @@ const shell = {
 };
 
 contextBridge.exposeInMainWorld('__ELECTRON__', true);
-contextBridge.exposeInMainWorld('api', { storage, personal, hostScan, hostAgentDetect, tenant, mcpClients, collector, backup, dataRoot, log, l0, setup, legacy, ledgerReset, rulesRejudge, ledgerFields, refineQueue, sync, llm, recallHard, shell });
+contextBridge.exposeInMainWorld('api', { storage, personal, hostScan, hostAgentDetect, tenant, mcpClients, collector, backup, dataRoot, log, l0, setup, legacy, ledgerReset, rulesRejudge, ledgerFields, refineQueue, sync, llm, recallHard, monitor, shell });

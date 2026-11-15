@@ -167,6 +167,10 @@ export interface McpConfigProbe {
   hasAuth: boolean;
   /** 批次41-X：条目里是否已带显式身份头 `X-Memagent-Client`（缺≠坏，老配置照常工作，只是身份仍靠归并） */
   hasClientId?: boolean;
+  /** 客户端应用内的「已禁用」标记：仅当配置条目显式为布尔 true 时才带此字段。
+   *  缺省 = 本次没读到禁用标记，不代表客户端一定已启用（无从判定时 UI 应显示「未知」）。
+   *  不改 McpWireState 七态契约：开关是独立维度，配置是否接通过仍然是 state。 */
+  disabled?: boolean;
   error?: string;
 }
 
@@ -212,6 +216,12 @@ export function renderMcpSnippet(spec: McpClientSpec, endpoint: string, token: s
   return `端点：${endpoint}\n${headerLines}\n（${spec.note ?? '请在客户端设置中手工添加'}）\n`;
 }
 
+/** 客户端应用内开关：只认显式布尔 true，字符串 "true" / 数字 1 / 其它值一律不猜。
+ *  没有禁用标记时原样返回（不带新键），保证既有七态探测结果逐字不变。 */
+function markDisabled(probe: McpConfigProbe, entry: Record<string, unknown>): McpConfigProbe {
+  return entry.disabled === true ? { ...probe, disabled: true } : probe;
+}
+
 /** 判断 JSON 配置里本服务的接入状态（不返回令牌） */
 export function probeJsonConfig(text: string | null, spec: McpClientSpec, endpoint: string): McpConfigProbe {
   if (text === null) return { state: 'no_config', hasAuth: false };
@@ -233,7 +243,7 @@ export function probeJsonConfig(text: string | null, spec: McpClientSpec, endpoi
   }
   const e = entry as Record<string, unknown>;
   const url = typeof e.url === 'string' ? e.url : typeof e.httpUrl === 'string' ? e.httpUrl : undefined;
-  if (url !== endpoint) return { state: 'conflict', foundUrl: url, hasAuth: false };
+  if (url !== endpoint) return markDisabled({ state: 'conflict', foundUrl: url, hasAuth: false }, e);
   const headers = e.headers;
   const headerBag = headers && typeof headers === 'object' && !Array.isArray(headers)
     ? (headers as Record<string, unknown>)
@@ -243,7 +253,7 @@ export function probeJsonConfig(text: string | null, spec: McpClientSpec, endpoi
   const hasAuth = typeof auth === 'string' && /^Bearer\s+\S+/i.test(auth.trim());
   const clientId = readHeader(MCP_CLIENT_HEADER_NAME);
   const hasClientId = typeof clientId === 'string' && clientId.trim().length > 0;
-  return { state: hasAuth ? 'wired' : 'missing_auth', foundUrl: url, hasAuth, hasClientId };
+  return markDisabled({ state: hasAuth ? 'wired' : 'missing_auth', foundUrl: url, hasAuth, hasClientId }, e);
 }
 
 /** 转义正则元字符（TOML 段名可能含点/短横线） */
@@ -271,7 +281,8 @@ export function probeTomlConfig(text: string | null, spec: McpClientSpec, endpoi
   const auth = /\bAuthorization\s*=\s*"([^"]*)"/i.exec(section)?.[1];
   const hasAuth = typeof auth === 'string' && /^Bearer\s+\S+/i.test(auth.trim());
   const hasClientId = tomlHeaderRe(MCP_CLIENT_HEADER_NAME).test(section);
-  return { state: hasAuth ? 'wired' : 'missing_auth', foundUrl: url, hasAuth, hasClientId };
+  const probe: McpConfigProbe = { state: hasAuth ? 'wired' : 'missing_auth', foundUrl: url, hasAuth, hasClientId };
+  return /\bdisabled\s*=\s*true\b/i.test(section) ? { ...probe, disabled: true } : probe;
 }
 
 /** TOML 里某个请求头是否已写（裸键与带引号键两种写法都认） */

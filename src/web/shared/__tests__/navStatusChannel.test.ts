@@ -118,4 +118,30 @@ describe('REQ-014 T6 · buildNavStatus（真实状态 → 条目）', () => {
     expect(items.map((i) => i.key)).toEqual(['l0-pending', 'refine', 'collector', 'sync']);
     expect(items.map((i) => i.tone)).toEqual(['warn', 'busy', 'busy', 'busy']);
   });
+
+  it('T4 加固 · 客户端 MCP 开关：真实读到已禁用 → 产出 warn 条目且 label 含客户端名', () => {
+    const items = buildNavStatus({ mcpSwitch: { name: 'WorkBuddy' } });
+    expect(items).toContainEqual({ key: 'mcp-switch', label: 'WorkBuddy MCP 开关已关闭', tone: 'warn' });
+  });
+
+  it('① 待生效：pending=true → 条目标题变「已清除，待生效」而不是「已关闭」', () => {
+    const items = buildNavStatus({ mcpSwitch: { name: 'Trae Code CN', pending: true } });
+    expect(items).toContainEqual({ key: 'mcp-switch', label: 'Trae Code CN MCP 已清除，待生效', tone: 'warn' });
+  });
+
+  it('T4 加固 · 读不到 / 未禁用 → 不产任何 mcp-switch 条目（不冒充已连接）', () => {
+    expect(buildNavStatus({})).not.toContainEqual(expect.objectContaining({ key: 'mcp-switch' }));
+    expect(buildNavStatus({ mcpSwitch: null })).not.toContainEqual(expect.objectContaining({ key: 'mcp-switch' }));
+    expect(buildNavStatus({ mcpSwitch: { name: '' } })).not.toContainEqual(expect.objectContaining({ key: 'mcp-switch' }));
+  });
+
+  it('T4 加固 · 与其它来源共存时 mcp-switch 固定在最后（顺序稳定）', () => {
+    const items = buildNavStatus({
+      pendingWrites: { count: 1 },
+      refine: { queued: 2 },
+      collector: { running: true },
+      mcpSwitch: { name: 'WorkBuddy' },
+    });
+    expect(items.map((i) => i.key)).toEqual(['l0-pending', 'refine', 'collector', 'mcp-switch']);
+  });
 });

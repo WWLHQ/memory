@@ -31,6 +31,31 @@ function pruneOldBackups(path: string): void {
   }
 }
 
+/** 备份 + 临时文件 + rename 原子替换（一键接入与一键打开共用同一条写入路径）。
+ *  失败时清掉半成品临时文件；令牌只存在于配置文本里，绝不进返回值或日志。 */
+function writeConfigAtomically(
+  path: string, text: string, now: number,
+): { ok: true; backupPath?: string } | { ok: false; error: string } {
+  const existed = existsSync(path);
+  let backupPath: string | undefined;
+  const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    if (existed) {
+      const stamp = new Date(now).toISOString().replace(/[:.]/g, '-');
+      backupPath = `${path}.bak-${stamp}`;
+      copyFileSync(path, backupPath);
+    }
+    writeFileSync(tmp, text, 'utf8');
+    renameSync(tmp, path);
+  } catch (e) {
+    try { rmSync(tmp, { force: true }); } catch { /* 已不存在或被占用：忽略 */ }
+    return { ok: false, error: `写入失败：${String((e as Error)?.message ?? e)}` };
+  }
+  pruneOldBackups(path);
+  return { ok: true, ...(backupPath ? { backupPath } : {}) };
+}
+
 export interface McpClientStatus {
   id: string;
   name: string;
@@ -48,6 +73,12 @@ export interface McpClientStatus {
    *  `false` = 条目已接入但缺身份头（41-X 之前写入的老配置）→ 可点「补身份头」重新写入；
    *  `undefined` = 无从判定（无稳定配置文件、审计升级来的）。 */
   hasClientId?: boolean;
+  /** 客户端应用内把本服务标成已禁用：只有读到显式布尔 true 才为 true。
+   *  独立维度，不改 state 七态；UI 必须优先用它判「开关关了」，不能只看 wired。 */
+  disabled?: boolean;
+  /** 客户端软件当前是否在运行（T6 新增）：仅对有稳定桌面进程的客户端给布尔值；
+   *  CLI（Claude/Codex/Gemini/Qwen）与无稳定进程的客户端缺省（undefined）→ UI 不显示，避免误报。 */
+  running?: boolean;
   foundUrl?: string;
   rulesHint: string;
   note?: string;
@@ -193,6 +224,7 @@ export function scanMcpClients(options: {
       state,
       hasAuth: probe.hasAuth,
       ...(probe.hasClientId !== undefined ? { hasClientId: probe.hasClientId } : {}),
+      ...(probe.disabled === true ? { disabled: true } : {}),
       ...(note !== undefined ? { note } : {}),
       ...(probe.foundUrl ? { foundUrl: probe.foundUrl } : {}),
       ...(probe.error ? { error: probe.error } : {}),
@@ -219,6 +251,12 @@ export function scanMcpClients(options: {
   }
   // 批次30：召回审计证据升级 —— 文件扫不到但真实调用过的客户端（如 Zcode 配置存应用内部）如实显示已接入
   applyRecallEvidence(clients, options.recallEvidence ?? []);
+  // 客户端开关优先于审计证据：审计记的是「关闭之前」的真实调用，不能拿它把
+  // 「现在已禁用」这件事冲掉。放在最后统一追加，宿主继承/证据升级都盖不掉。
+  for (const c of clients) {
+    if (c.disabled !== true) continue;
+    c.note = `${c.note ? `${c.note}；` : ''}客户端开关已关闭：配置条目与令牌都在，但客户端不会挂载本服务的工具`;
+  }
   return { endpoint, home, scannedAt: Date.now(), clients };
 }
 
@@ -278,25 +316,82 @@ export function wireMcpClient(
   }
   if (!merged.changed) return { ok: true, changed: false, path, state: probe.state };
 
-  const existed = existsSync(path);
-  let backupPath: string | undefined;
-  const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
+  const written = writeConfigAtomically(path, merged.text, options.now ?? Date.now());
+  if (!written.ok) return { ok: false, path, error: written.error };
+  return {
+    ok: true, changed: true, path,
+    ...(written.backupPath ? { backupPath: written.backupPath } : {}),
+    state: 'wired',
+  };
+}
+
+/**
+ * 一键打开客户端开关（T2）：备份原配置 → 只删本服务条目的「已禁用」标记 → 原子替换。
+ * 不改 url / headers / type / 条目上的其它字段 / 其它客户端条目 / 其它顶层键；不重建条目。
+ * 只支持 JSON 配置（WorkBuddy 等）：TOML / 无稳定配置面如实拒绝并提示手动打开，不假装成功。
+ * 客户端不会热重读配置，因此本函数只保证「下次启动 / 新会话」是打开的；提示话术由 UI 给出。
+ */
+export function enableMcpClient(
+  id: string,
+  options: { home?: string; appData?: string; endpoint?: string; now?: number } = {},
+): McpWireResult {
+  let spec: McpClientSpec;
   try {
-    mkdirSync(dirname(path), { recursive: true });
-    if (existed) {
-      const stamp = new Date(options.now ?? Date.now()).toISOString().replace(/[:.]/g, '-');
-      backupPath = `${path}.bak-${stamp}`;
-      copyFileSync(path, backupPath);
-    }
-    writeFileSync(tmp, merged.text, 'utf8');
-    renameSync(tmp, path);
+    spec = specOfMcpClient(id);
   } catch (e) {
-    // 批次26-B P2-15：写入失败清掉半成品临时文件（残留的 .tmp 含合并结果，不留给调用方收拾）
-    try { rmSync(tmp, { force: true }); } catch { /* 已不存在或被占用：忽略 */ }
-    return { ok: false, path, error: `写入失败：${String((e as Error)?.message ?? e)}` };
+    return { ok: false, error: String((e as Error)?.message ?? e) };
   }
-  pruneOldBackups(path);
-  return { ok: true, changed: true, path, ...(backupPath ? { backupPath } : {}), state: 'wired' };
+  if (!spec.configPath || !spec.writable) {
+    return { ok: false, error: '该客户端不支持自动写入（请到设置中手动打开开关）' };
+  }
+  if (spec.format !== 'json') {
+    return { ok: false, error: '该客户端配置不是 JSON，暂不支持自动打开开关（请到设置中手动打开）' };
+  }
+  const home = options.home ?? homedir();
+  const appData = options.appData ?? process.env.APPDATA ?? join(home, 'AppData', 'Roaming');
+  const endpoint = options.endpoint ?? MCP_ENDPOINT;
+  const path = expandHome(spec.configPath, home, appData);
+  const read = readConfig(path);
+  if (read.error) return { ok: false, path, error: read.error };
+  if (read.text === null) return { ok: false, path, error: '配置文件不存在，请先完成接入' };
+
+  const probe = probeClientConfig(spec, read.text, endpoint);
+  if (probe.state === 'invalid') {
+    return { ok: false, path, error: `配置文件无法解析：${probe.error ?? '格式错误'}` };
+  }
+  if (probe.state === 'conflict') {
+    return { ok: false, path, state: probe.state, error: `同名条目指向其它端点（${probe.foundUrl ?? '未填写'}），拒绝覆盖` };
+  }
+  // 幂等：没有禁用标记就不写盘、不产生备份（不能把「无需操作」伪装成「已打开」）
+  if (probe.disabled !== true) return { ok: true, changed: false, path, state: probe.state };
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(read.text) as Record<string, unknown>;
+  } catch (e) {
+    return { ok: false, path, error: `配置文件无法解析：${String((e as Error)?.message ?? e)}` };
+  }
+  const serversRaw = parsed.mcpServers;
+  const servers = serversRaw && typeof serversRaw === 'object' && !Array.isArray(serversRaw)
+    ? (serversRaw as Record<string, unknown>)
+    : null;
+  const entry = servers?.[spec.serverKey];
+  if (!servers || !entry || typeof entry !== 'object' || Array.isArray(entry)) {
+    return { ok: false, path, error: '配置里没有本服务条目，拒绝改写' };
+  }
+  const next = { ...(entry as Record<string, unknown>) };
+  delete next.disabled;
+  servers[spec.serverKey] = next;
+  parsed.mcpServers = servers;
+
+  const written = writeConfigAtomically(path, `${JSON.stringify(parsed, null, 2)}\n`, options.now ?? Date.now());
+  if (!written.ok) return { ok: false, path, error: written.error };
+  const after = probeClientConfig(spec, readConfig(path).text, endpoint);
+  return {
+    ok: true, changed: true, path,
+    ...(written.backupPath ? { backupPath: written.backupPath } : {}),
+    state: after.state,
+  };
 }
 
 export { MCP_ENDPOINT };

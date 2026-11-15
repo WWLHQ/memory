@@ -5,6 +5,7 @@
 // 问账本问答框已独立为整页（assistant.html · src/web/assistant/AssistantPage.tsx），本页不再渲染底部输入框。
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  loadMcpPanel,
   loadOverview,
   type OverviewSnapshot,
   type OverviewRefinePanel,
@@ -15,7 +16,14 @@ import {
 } from '../shell/overview.ts';
 import { HOME_BASE, ONBOARD_BASE } from '../backend.ts';
 import { useHostTheme } from '../shared/hostTheme.ts';
+import { currentSessionId } from '../shared/session.ts';
 import { requestShellView } from '../shared/shellNavigate.ts';
+import {
+  deriveMcpSwitch, requestEnableMcpSwitch, MCP_SWITCH_POLL_MS,
+  MCP_LAUNCH_HINT, MCP_MANUAL_HINT,
+} from '../shared/mcpSwitch.ts';
+import { McpSwitchAlert } from './McpSwitchAlert.tsx';
+import { listMcpPending, markMcpPending, subscribeMcpPending } from '../shared/mcpPending.ts';
 import { rebuildKernelForDataPlane } from '../kernel.ts';
 import { Icon } from '../shell/Icons.tsx';
 import { refineStopRows } from '../params/refineQueue.ts';
@@ -246,13 +254,16 @@ function McpPanel({ p }: { p: OverviewMcpPanel }) {
     body = (
       <div className="af-list">
         {p.clients.map((c) => {
-          const dot = c.state === 'wired' ? 'var(--ok)' : c.state === 'missing_auth' ? 'var(--warn)' : 'var(--muted)';
+          const dot = c.disabled === true ? 'var(--bad)'
+            : c.state === 'wired' ? 'var(--ok)' : c.state === 'missing_auth' ? 'var(--warn)' : 'var(--muted)';
           return (
-            <div className="af-li" key={c.id}>
+            <div className="af-li" key={c.id} data-switch={c.disabled === true ? 'off' : undefined}>
               <span className="st" style={{ background: dot }} />
               <span className="nm">{c.name}</span>
               {c.detail ? <span className="ds">{c.detail}</span> : null}
-              <span className={`rt ${c.state === 'missing_auth' ? 'warn' : ''}`}>{c.label}</span>
+              <span className={`rt ${c.disabled === true || c.state === 'missing_auth' ? 'warn' : ''}`}>
+                {c.disabled === true ? '客户端已关闭' : c.label}
+              </span>
             </div>
           );
         })}
@@ -374,9 +385,16 @@ export function OverviewPage() {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
   const [focus, setFocus] = useState<Focus>('all');
+  // T3/①：待生效来自共享信号（首页/接入页/壳层同源），不再用本地布尔，避免一处点了另两处消失
+  const [mcpPendingIds, setMcpPendingIds] = useState<string[]>(() => listMcpPending());
+  const [mcpBusy, setMcpBusy] = useState(false);
+  const [mcpError, setMcpError] = useState<string | null>(null);
+  const [mcpHint, setMcpHint] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     setBusy(true);
+    setMcpError(null);
+    setMcpHint(null);
     try {
       const next = await loadOverview();
       setSnap(next);
@@ -407,7 +425,51 @@ export function OverviewPage() {
     };
   }, [reload]);
 
+  // ①待生效共享信号：其它落点（接入页/壳层）改了这个信号，首页立刻跟上；12s 轮询也顺带刷新
+  useEffect(() => {
+    setMcpPendingIds(listMcpPending());
+    return subscribeMcpPending(() => setMcpPendingIds(listMcpPending()));
+  }, []);
+
   const view = useMemo(() => (snap ? deriveHomeView(snap) : null), [snap]);
+
+  /** 每 12 秒只复核 MCP 客户端配置这一路，不整页重读账本；失败保留上一轮真值。
+   *  依赖为空：快照还没到时更新会被 setSnap 的前值判断忽略，无需随快照重建定时器。 */
+  useEffect(() => {
+    const timer = setInterval(() => {
+      void loadMcpPanel(currentSessionId())
+        .then((mcp) => {
+          setSnap((prev) => (prev ? { ...prev, mcp } : prev));
+          // ①顺带让过期的待生效自动掉（TTL 到期不发事件）
+          setMcpPendingIds(listMcpPending());
+        })
+        .catch(() => { /* 复核失败：保留上一轮，不冒充最新 */ });
+    }, MCP_SWITCH_POLL_MS);
+    return () => clearInterval(timer);
+  }, []);
+
+  const switchState = useMemo(
+    () => (snap && view
+      ? deriveMcpSwitch({
+        healthOk: view.healthOk, mcpOk: snap.mcp.ok,
+        clients: snap.mcp.clients, pendingIds: mcpPendingIds,
+      })
+      : null),
+    [snap, view, mcpPendingIds],
+  );
+
+  const onMcpEnable = async () => {
+    if (!switchState?.canEnable || !switchState.enableId) return;
+    const id = switchState.enableId;
+    setMcpBusy(true);
+    setMcpError(null);
+    const r = await requestEnableMcpSwitch(id);
+    setMcpBusy(false);
+    if (!r.ok) { setMcpError(r.error ?? '未知原因'); return; }
+    // ①登记共享待生效：首页/接入页/壳层三处一起保持「待生效」，不再只有本页知道
+    markMcpPending(id);
+    setMcpPendingIds(listMcpPending());
+  };
 
   return (
     <div className="ov-page" data-testid="overview-page">
@@ -470,6 +532,20 @@ export function OverviewPage() {
                   <span className="tag">L0</span>{view.l0Alert}
                   <button className="af-link" type="button" onClick={() => requestShellView('security')}>去安全页解锁 →</button>
                 </div>
+              )}
+
+              {/* T3 落点①：客户端 MCP 开关状态（服务端在线但客户端关了 → 红条 + 一键打开） */}
+              {switchState && (
+                <McpSwitchAlert
+                  state={switchState}
+                  busy={mcpBusy}
+                  error={mcpError}
+                  hint={mcpHint}
+                  onEnable={() => void onMcpEnable()}
+                  onManual={() => setMcpHint(MCP_MANUAL_HINT)}
+                  onLaunch={() => setMcpHint(MCP_LAUNCH_HINT)}
+                  onReload={() => void reload()}
+                />
               )}
 
               <div className="af-g4" data-testid="home-gains">

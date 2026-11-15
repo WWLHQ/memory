@@ -22,6 +22,7 @@ function snap(p: Partial<ShellStatusSnapshot> = {}): ShellStatusSnapshot {
     pendingWrites: { status: 'ok', view: 0 },
     refine: { status: 'ok', view: { pending: 0, failed: 0, enabled: true } },
     collector: collectorOk(),
+    mcpSwitch: { status: 'ok', view: { id: '', name: '', disabled: false } },
     ...p,
   };
 }
@@ -64,5 +65,24 @@ describe('REQ-014 T7 · toNavStatusSource（读不到就不进状态源）', () 
     expect(SHELL_STATUS_POLL_MS).toBeGreaterThanOrEqual(10_000);
     expect(SHELL_STATUS_POLL_MS).toBeLessThanOrEqual(15_000);
     expect(SHELL_STATUS_POLL_MS).not.toBe(25_000);
+  });
+
+  it('T3：客户端确实被禁用 → 产出需要关注的 mcp-switch 条目', () => {
+    const src = toNavStatusSource(snap({
+      mcpSwitch: { status: 'ok', view: { id: 'workbuddy', name: 'WorkBuddy', disabled: true } },
+    }));
+    expect(src.mcpSwitch).toEqual({ name: 'WorkBuddy' });
+    expect(buildNavStatus(src)).toEqual([
+      { key: 'mcp-switch', label: 'WorkBuddy MCP 开关已关闭', tone: 'warn' },
+    ]);
+  });
+
+  it('T3：客户端配置读不到 / 没禁用 → 不产出条目（不冒充状态）', () => {
+    const unread = toNavStatusSource(snap({ mcpSwitch: { status: 'unavailable', detail: '浏览器模式' } }));
+    expect(unread.mcpSwitch).toBeUndefined();
+    expect(buildNavStatus(unread)).toEqual([]);
+    const ok = toNavStatusSource(snap());
+    expect(ok.mcpSwitch).toBeUndefined();
+    expect(buildNavStatus(ok)).toEqual([]);
   });
 });

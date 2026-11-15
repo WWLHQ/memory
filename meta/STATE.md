@@ -5,9 +5,35 @@
 ## 一句话定位
 本工作区 = **工作法体系** + 真实项目「**多 Agent 记忆助手**」（需求规格与原型已结构化并跑通首个功能）。
 
-## 当前状态（2026-11-14 11:50 压缩快照 · 优先于下方历史段落）
+## 当前状态（2026-11-15 20:18 压缩快照 · 优先于下方历史段落）
 
-### P0 召回质量增强收口（2026-11-14 11:50 · **最新** · 未打包 / 未提交 / 未 push）
+### 批次63 · 监控仪表盘人话化（A + B + C + 实机修复 + UI 微调完成 · 停·等实测 / 需第三轮重打包 / 未提交 / 未 push）
+
+- **UI 微调（2026-11-15 20:10–20:18，用户两条指令）**：①「检索表现移动到最上面，精炼队列移动到最下面」→ `useMonitorReal.metricsFromLedger` 返回数组重排为 **检索性能(1h) 5 张 → Agent 健康 3 张 → 冷存储 2 张 → 人工审核 2 张 → 队列 1 张**（`groupMetrics` 用 Map 保插入序，故顺序=数组顺序）；`__tests__/fixtures.ts` 的 `SEED_METRICS` 同步重排。②「连通率缺少百分号」→ 该卡删掉写死的 `unit: ''`，改回 `c.unit ?? t.unit` 回退真源 `'%'`（空字符串不触发 `??`，这就是缺 % 的真因；实机先前显示「100」无单位）。
+- **本轮新补测试缺口**：原顺序锁只断言夹具 `SEED_METRICS`，**锁不住生产数组**——变异「队列置顶」时 43 例仍全绿。已在 `MonitorPage.test.tsx` 空账本用例加生产组序断言 `mgroup-检索性能(1h) → … → mgroup-队列`，并新增渲染层用例「连通率有样本 → 值位必须是 `100%`」（锁住「卡片级写死 unit 压掉真源」这个实机 bug）。
+- **门禁（UI 微调后）**：`test:gate` **277 文件 / 3329 例 / 0 失败 / 0 重试**；typecheck 0 错；oxlint 0w0e；`check:no-demo` 通过；`validate_project.py` 0 失败（144 既有 WARN）；`generate.py --check` 同步；`code:index --write` + `--check` 通过（399 源码 / 148 文档）。
+- **C 变异（本轮 2 次）**：① 连通率加回 `unit: ''` → 1 例精确红灯 `expected '100' to be '100%'`；② 精炼队列卡移到数组首位 → 补锁后 1 例精确红（组序 `toEqual` 失败）。还原后 `useMonitorReal.ts` SHA256 回到基线 `B81FAAED800937D018D15FFCFFBAF4218B5664F7CE82323B2E2E32A8AA7D9B17`，43 例复绿。
+- **产物状态**：上一轮包（20:02:40，SHA256 `934598135F…`）**已不含本轮 UI 调整**，需重打包（第三轮）后才能实测。
+
+- **用户 3 条拍板（2026-11-15）**：① 短名 ≤5 字 + 一句白话；② 队列组改「精炼队列」显示成功 / 失败 / 等待，删死信卡（14→13 卡）；③ Agent 健康新增主进程定时拨测（60s 一轮、每 5 分钟落 1 条汇总审计）。
+- **A 已落地**：唯一中文真源 `src/web/growth/recallLabels.ts` 扩出 13 卡短名 / 白话 / 阈值 / 依据 / 单位 + 5 组名 + 值翻译；`MetricGrid.tsx` 只按内部键翻译，原始字段名 / 英文枚举 / 规格编号不进 UI；空值「暂无数据 / 暂无结论」；`MetricCard.parts` 承载精炼队列三项真计数；`useMonitorReal.ts` 动态导入 `refineQueueState()` 取主进程真回执（浏览器模式诚实空态），删死信卡；`theme.css` 标题可换行 + 摘要样式；`MonitorPage.tsx` 头部 / 筛选 / 空态全人话。
+- **B 已落地（定时拨测 + 其余卡接真）**：新增 `src/electron/agentProbe.ts` —— 主进程每 60s TCP 拨测 5 个本机端口（AgentOnboard/Mirror/MCP/Webhook/MCP-HTTP），真实熔断状态机（CLOSED→连续 5 次失败→OPEN→60s 后 HALF_OPEN→恢复→CLOSED），每 5 分钟落 1 条 `agent_probe` 只读汇总审计；慢计算（写入率 / 哈希校验异常）每 5 分钟缓存。`useMonitorReal.ts` 新增 `MonitorStats` 接口 + `applyMonitorStats()` 覆盖 Agent 健康 3 卡 + 冷存储 2 卡（写入率真算 24h `action:'write'`、校验异常逐条重算 sha256 比对落盘值）。链路开销 `pipeline_llm_tokens p95` 如实显示真实 0（本地检索不调大模型）；待裁决 / 超期 7d 真实 0 显示 0（修 0 值误判 bug）；极简证据不足率分母为 0 显「近 1 天没有极简检索」而非假 0%。新增只读 IPC `monitor:stats`（`ipcChannels`/`hostBridge`/`preload`/`main` 全链路接入）。
+- **顺带修掉的真实 bug**：`MetricGrid.tsx` 值位用静态 `t.unit`，导致极简卡在显示「近 1 天没有极简检索」时尾巴多拼一个 `%`；改为 `c.unit ?? t.unit`（卡片级单位优先），极简 `无极简` 态 `c.unit=''` 不再拼 `%`，其余卡单位不变。
+- **规格同步**：`specs/需求规格书.md` §12.1 表与 §12.2 示意、`specs/需求规格书_其余页面字段级交互规格.md` 均改为 13 卡 + 人话文案表。
+- **门禁（A+B 合并）**：`test:gate` **276 文件 / 3311 例 / 0 失败 / 0 重试**；typecheck 0 错；oxlint 0 warnings / 0 errors；`check:no-demo` 通过；`validate_project.py` 0 失败；`generate.py --check` 同步；`code:index --write` + `--check` 通过（398 源码 / 148 文档）。新增单测：`agentProbe.test.ts`（熔断状态机 7 例 + 初始空态 2 例）、`metricsHonesty.test.tsx` 增 `applyMonitorStats` 接真 4 例、修正空账本断言（9×暂无数据 + 2×0条 + 1×0字 + 1×近1天没有极简检索）。
+- **C 变异（真代码级，2 次，均红灯→还原→绿灯）**：① `agentProbe.ts` 熔断判定 `streak >= CIRCUIT_OPEN_STREAK` 改为 `>` → 「第 5 次失败→OPEN」1 例精确红灯（`expected 'CLOSED' to be 'OPEN'`），还原复绿；② `MetricGrid.tsx` 单位 `c.unit ?? t.unit` 改回 `t.unit` → 极简卡「近1天没有极简检索」尾巴复现 `%`，空账本 1 例精确红灯，还原复绿。两次还原后文件 SHA256 与基线逐字节一致（agentProbe `6760CD…D94EB`、MetricGrid `5B1E21…52CD`），复跑两测试文件 16/16 全绿。另 `applyMonitorStats` 接真/接 null 双向覆盖、真实 0/无样本/无极简三态锁住。
+- **原子任务 C · 打包闭环（2026-11-15 19:08 现查）**：① 全门禁复核全绿（`test:gate` 276 文件 / 3311 例 / 0 失败 / 0 重试 EXIT=0；typecheck 0；oxlint 0 warning 0 error；no-demo 通过；index 同步 398/148；validate 0 失败 144 既有 WARN；generate 同步）；② 关旧端：4 个 `MultiAgent Memory` 进程（PID 8968 主进程监听 8200–8204，18:56 启动自本工作区 `release\installer\win-unpacked`）全停，复核进程数 0 + 8200–8204 无 LISTENING；③ 重打包 `CODEBUDDY_SAFE_DELETE_ENABLED=0 npm run package` EXIT=0（tail 里大量历史 `installer-*` EBUSY 删除失败属已知无害，`release/` 已 gitignored）；`git diff -- package.json` 为空（electron-builder 未改写，无需 checkout）；④ 验产物：安装包 `release\installer\MultiAgent Memory-0.1.0-setup.exe` **128,047,755 字节 / SHA256 `86F6311EB01166CE4AC647F0AFD05B2CE3A3429909C0434CF63D1D4B7AD36D32`**；`app.asar.unpacked/dist-electron/main.cjs` 与源码 `dist-electron/main.cjs` **SHA256 逐字节一致 `01E67E7D…F6C3D7E`**（1,014,918 字节，19:05 新时间戳），含本轮全部标记 `monitor:stats` / `agent_probe` / `agentProbe` / `monitorStats` 均 true；渲染层在 asar 压缩内明文 grep 不到属已知正常；⑤ **启新端需用户双击**（工具会话起 Electron 会退出 0 / main.log 零新增 / 端口不监听，已三组对照排除产品缺陷）；⑥ 工作区卫生：删 `test-results/` 5.03MB（Node fs.rm，避开 genie-trash），根目录无散落临时物 / 无 `main.cjs` 残留。
+- **提交拆分风险 → 用户已拍板 A（2026-11-15 19:15）**：`main.ts` / `ipcChannels.ts` / `hostBridge.ts` / `preload.ts` 4 个本任务改动文件**同时混有并行会话（mcpClients / mcpSwitch / recallHard / overview / shell）的行级改动**，无法按文件干净拆分。用户选 **A = 等并行会话收工，一起提交**（不接受只 stage 本任务文件导致并行改动被强行带入，也不单独先提交）。**执行约定**：并行会话收工后，先确认其改动已完成且门禁全绿，再统一 stage 全部待提交项一次性提交；提交信息需分别列明本任务（批次63 监控仪表盘）与并行会话（mcpClients / mcpSwitch / overview / shell）两块改动。
+- **当前等待项（两道，缺一不可）**：① 【停·等用户双击实测】仪表盘 13 卡真实值；② 【停·等并行会话收工 + 用户明确确认】才 commit/push。
+- **实机测试（2026-11-15 19:57）发现并修复 3 个问题（用户拍板方案 1）**：
+  1. **写入率永久误报红灯**：`computeWriteRate` 把质量门正常过滤（`detail.action='filtered_l0_to_l1'`，24h 27 条 thin/short_low_signal）算进分母 → 91/118=77%，而真失败为 0。**方案 1 修复**：抽出纯函数 `classifyWriteRows()`，分母只算「成功 + 真失败（detail.error 或 ok=false）」，质量门过滤单列旁证 → 实机口径变 91/91=100%。
+  2. **熔断零样本冒充「正常」**：`circuit` 模块初始值硬编码 `'CLOSED'`，`windowSamples=0` 时显示层翻译成「正常 ✓」（截图铁证）。修复：`windowSamples <= 0` 时不覆盖，保持「暂无数据 / 暂无结论」。
+  3. **crit 档偏离规格**：规格 12.1 只有 `<99.5% → ⚠️` 一档，代码私自加了 `<95% → 🔴 crit`，把 77% 渲染成刺眼红灯。修复：连通率 / 写入率都只留 warn 档，与规格逐字对齐（熔断 OPEN 的 crit、校验异常 >0 的 crit 是规格明确的，保留）。
+- **门禁（方案 1 修复后）**：`test:gate` **276 文件 / 3322 例 / 0 失败 / 0 重试**（新增 11 例分类/零样本/档位用例）；typecheck 0；oxlint 0w0e；no-demo 通过；validate 0 失败；generate 同步；`code:index --write` + `--check` 通过（398/148）。
+- **C 变异（3 次，全部精确红灯 → 还原 → 复绿）**：① `filtered++` 改成 `failed++` → 3 例红（`filtered:0/failed:27/rate:77` vs 期望 27/0/100）；② `windowSamples <= 0` 改 `< 0` → 1 例红（`expected 'CLOSED' to be '未取数'`）；③ 写入率判定改回带 crit → 1 例红（`expected 'crit' to be 'warn'`）。还原后 47 例全绿。
+- **纪律**：【停·等用户实测】→【停·等用户明确确认】→ 才 commit/push。工作区混有并行会话在途改动（mcpClients*/McpSwitch*/overview*/shell*），**禁 `git add .`**。
+
+### 历史快照（2026-11-14 11:50 · P0 召回质量增强收口 · 未打包 / 未提交 / 未 push）
 
 - **REQ-013 / AC-013 / TC-015 + 任务文件 `specs/tasks/RECALL-SHAPING.md`（T1–T7）**：借鉴 dsh-hindsight 客户端整形层，纯逻辑补强，零外部模型 / 零出网。
 - **T1 时间窗**：`src/shared/timeWindow.ts` 相对时间→本地时区戳 + `query_timestamp` + 时间窗命中；东八区边界（早上 7 点不落前一天）。

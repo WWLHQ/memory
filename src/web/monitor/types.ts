@@ -3,13 +3,15 @@
 
 export type AlertLevel = 'ok' | 'warn' | 'crit';
 
-/** 指标卡（12.1 全量 14 项，分 6 组） */
+/** 指标卡（12.1 全量 13 项，分 5 组；2026-11-15 用户批准删「死信」卡） */
 export interface MetricCard {
   group: 'Agent 健康' | '队列' | '冷存储' | '人工审核' | '检索性能(1h)';
   metric: string;
   /** 当前值（数值或状态串，如 OPEN） */
   value: number | string;
   unit?: string;
+  /** 精炼队列卡专用：三项真实计数（来自主进程补炼队列，无真源时整个字段缺失） */
+  parts?: { ok: number; failed: number; waiting: number; skipped: number };
   /** 阈值描述文案 */
   threshold: string;
   level: AlertLevel;

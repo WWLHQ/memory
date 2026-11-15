@@ -24,6 +24,8 @@ export interface McpClientRow {
   displayPath?: string | null;
   error?: string;
   foundUrl?: string;
+  /** 客户端应用内的「已禁用」标记（显式 true 才有）；自动发现不据此伪造已接入 */
+  disabled?: boolean;
 }
 
 export interface HostInstallScan {

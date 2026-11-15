@@ -7,9 +7,9 @@ import { render, screen, waitFor, act } from '@testing-library/react';
 import type { OverviewSnapshot } from '../../shell/overview.ts';
 import { emptyLayerGraph } from '../../Home/layerGraph.ts';
 
-const h = vi.hoisted(() => ({ loadOverview: vi.fn() }));
+const h = vi.hoisted(() => ({ loadOverview: vi.fn(), loadMcpPanel: vi.fn() }));
 
-vi.mock('../../shell/overview.ts', () => ({ loadOverview: h.loadOverview }));
+vi.mock('../../shell/overview.ts', () => ({ loadOverview: h.loadOverview, loadMcpPanel: h.loadMcpPanel }));
 vi.mock('../../kernel.ts', () => ({ rebuildKernelForDataPlane: vi.fn() }));
 vi.mock('../../shared/hostTheme.ts', () => ({ useHostTheme: () => 'light' }));
 vi.mock('../../shared/shellNavigate.ts', () => ({ requestShellView: vi.fn() }));
@@ -48,6 +48,8 @@ const UNLOCKED = snap({ l0Write: { available: true, unlocked: true, detail: null
 describe('首页写锁提示：回到前台即补读真实写锁', () => {
   beforeEach(() => {
     h.loadOverview.mockReset();
+    h.loadMcpPanel.mockReset();
+    h.loadMcpPanel.mockResolvedValue({ ok: false, available: false, endpoint: null, clients: [], error: '非桌面壳' });
   });
 
   it('窗口 focus → 重读一次，已解锁则红条消失（不必等 storage 事件）', async () => {

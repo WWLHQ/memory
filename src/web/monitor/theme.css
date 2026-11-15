@@ -11,7 +11,11 @@
 .p0-mcard.warn { border-color: color-mix(in srgb, var(--warn) 55%, var(--line)); background: color-mix(in srgb, var(--warn) 8%, var(--win)); }
 .p0-mcard.empty { background: transparent; border-style: dashed; }
 .p0-mhead { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-.p0-mhead .p0-note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+/* 短名标题：允许换行不省略；右侧级别徽标不被挤压 */
+.p0-mhead .p0-note { flex: 1; min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; color: var(--text); font-size: 11.5px; }
+.p0-mhead .level { flex-shrink: 0; }
+.p0-mhint { color: var(--muted); font-size: 10.5px; line-height: 1.5; }
+.mparts { font-size: 13px; font-weight: 700; line-height: 1.5; }
 .mval {
   font: 700 19px/1.25 var(--mono); color: var(--text); font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;

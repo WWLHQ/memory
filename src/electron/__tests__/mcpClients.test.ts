@@ -4,7 +4,7 @@ import { afterEach, describe, expect, test } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { MCP_ENDPOINT, expandHome, scanMcpClients, snippetForClient, wireMcpClient } from '../mcpClients.ts';
+import { MCP_ENDPOINT, enableMcpClient, expandHome, scanMcpClients, snippetForClient, wireMcpClient } from '../mcpClients.ts';
 
 const TOKEN = 'node-token-xyz789';
 const temps: string[] = [];
@@ -515,5 +515,138 @@ describe('批次41-X 显式身份头（写入 + 检出 + 补写）', () => {
     const zc = statusOf(home, 'zcode', { recallEvidence: [{ ts: Date.now(), client: 'zcode/0.16.9' }] });
     expect(zc.state).toBe('wired');
     expect(zc.hasClientId).toBeUndefined();
+  });
+});
+
+describe('客户端「已禁用」标记扫描（T1 检测层 · 真读临时 home）', () => {
+  const cfg = (disabled?: unknown) => {
+    const entry: Record<string, unknown> = {
+      type: 'http', url: MCP_ENDPOINT,
+      headers: { Authorization: `Bearer ${TOKEN}`, 'X-Memagent-Client': 'workbuddy' },
+    };
+    if (disabled !== undefined) entry.disabled = disabled;
+    return JSON.stringify({ mcpServers: { 'MultiAgent Memory': entry, 'wb-other': { command: 'npx' } } }, null, 2);
+  };
+
+  test('配置完整但显式已禁用 → disabled:true、state 仍 wired、note 说清是客户端开关', () => {
+    const home = tempHome();
+    write(home, '.workbuddy/mcp.json', cfg(true));
+    const c = statusOf(home, 'workbuddy', { currentToken: TOKEN });
+    expect(c.state).toBe('wired');
+    expect(c.disabled).toBe(true);
+    expect(c.note).toContain('客户端开关已关闭');
+  });
+
+  test('有历史审计证据也不冲掉「现在已禁用」', () => {
+    const home = tempHome();
+    write(home, '.workbuddy/mcp.json', cfg(true));
+    const c = statusOf(home, 'workbuddy', {
+      currentToken: TOKEN,
+      recallEvidence: [{ ts: Date.now(), client: 'workbuddy/1.0.0' }],
+    });
+    expect(c.disabled).toBe(true);
+    expect(c.note).toContain('客户端开关已关闭');
+  });
+
+  test('无标记 / false / 字符串 true → 不带 disabled，既有行为逐字不变', () => {
+    for (const v of [undefined, false, 'true']) {
+      const home = tempHome();
+      write(home, '.workbuddy/mcp.json', cfg(v));
+      const c = statusOf(home, 'workbuddy', { currentToken: TOKEN });
+      expect(c.state).toBe('wired');
+      expect(c.disabled).toBeUndefined();
+      expect(c.note).not.toContain('客户端开关已关闭');
+    }
+  });
+
+  test('只有读到显式标记的客户端带 disabled，其它客户端不受影响', () => {
+    const home = tempHome();
+    write(home, '.workbuddy/mcp.json', cfg(true));
+    const scan = scanMcpClients({ home, appData: home, currentToken: TOKEN });
+    expect(scan.clients.find((c) => c.id === 'workbuddy')!.disabled).toBe(true);
+    expect(scan.clients.filter((c) => c.disabled === true)).toHaveLength(1);
+  });
+});
+
+describe('一键打开客户端开关（T2 一键层 · 真读真写临时 home）', () => {
+  const cfg = (disabled?: unknown) => {
+    const entry: Record<string, unknown> = {
+      type: 'http', url: MCP_ENDPOINT,
+      headers: { Authorization: `Bearer ${TOKEN}`, 'X-Memagent-Client': 'workbuddy' },
+      qoder_url: 'keep-me',
+    };
+    if (disabled !== undefined) entry.disabled = disabled;
+    return `${JSON.stringify({
+      version: 1,
+      mcpServers: { 'wb-other': { command: 'npx', args: ['-y', 'wb-mcp'] }, 'MultiAgent Memory': entry },
+    }, null, 2)}\n`;
+  };
+  const entryOf = (home: string) => JSON.parse(readFileSync(join(home, '.workbuddy', 'mcp.json'), 'utf8')) as {
+    version: number;
+    mcpServers: Record<string, Record<string, unknown>>;
+  };
+
+  test('已禁用 → 备份 + 只删标记：条目其它字段 / 其它客户端 / 顶层键逐字保留，令牌不外泄', () => {
+    const home = tempHome();
+    const original = cfg(true);
+    write(home, '.workbuddy/mcp.json', original);
+    const r = enableMcpClient('workbuddy', { home, appData: home, now: Date.UTC(2026, 10, 15, 8, 0, 0) });
+    expect(r.ok).toBe(true);
+    expect(r.changed).toBe(true);
+    expect(r.backupPath).toBeTruthy();
+    expect(readFileSync(r.backupPath!, 'utf8')).toBe(original);
+    expect(JSON.stringify(r)).not.toContain(TOKEN);
+
+    const parsed = entryOf(home);
+    const entry = parsed.mcpServers['MultiAgent Memory'];
+    expect(entry).not.toHaveProperty('disabled');
+    expect(entry.type).toBe('http');
+    expect(entry.url).toBe(MCP_ENDPOINT);
+    expect(entry.qoder_url).toBe('keep-me');
+    expect(entry.headers).toEqual({ Authorization: `Bearer ${TOKEN}`, 'X-Memagent-Client': 'workbuddy' });
+    expect(parsed.mcpServers['wb-other']).toEqual({ command: 'npx', args: ['-y', 'wb-mcp'] });
+    expect(parsed.version).toBe(1);
+  });
+
+  test('复扫后 disabled 消失且 state 仍 wired（状态真的变了，不是嘴上说）', () => {
+    const home = tempHome();
+    write(home, '.workbuddy/mcp.json', cfg(true));
+    expect(statusOf(home, 'workbuddy', { currentToken: TOKEN }).disabled).toBe(true);
+    expect(enableMcpClient('workbuddy', { home, appData: home }).ok).toBe(true);
+    const c = statusOf(home, 'workbuddy', { currentToken: TOKEN });
+    expect(c.disabled).toBeUndefined();
+    expect(c.state).toBe('wired');
+    expect(c.note).not.toContain('客户端开关已关闭');
+  });
+
+  test('幂等：无标记 / 字符串 true / false → changed:false、不写盘、不产生备份', () => {
+    for (const v of [undefined, false, 'true']) {
+      const home = tempHome();
+      const original = cfg(v);
+      write(home, '.workbuddy/mcp.json', original);
+      const r = enableMcpClient('workbuddy', { home, appData: home });
+      expect(r.ok).toBe(true);
+      expect(r.changed).toBe(false);
+      expect(r.backupPath).toBeUndefined();
+      expect(readFileSync(join(home, '.workbuddy', 'mcp.json'), 'utf8')).toBe(original);
+    }
+  });
+
+  test('拒绝边界：冲突 / 坏 JSON / 文件不存在 / TOML / 不可写 / 未知 id，均不写盘', () => {
+    const conflict = tempHome();
+    write(conflict, '.workbuddy/mcp.json', JSON.stringify({ mcpServers: { 'MultiAgent Memory': { type: 'http', url: 'http://other/mcp', disabled: true } } }));
+    expect(enableMcpClient('workbuddy', { home: conflict, appData: conflict }).error).toContain('拒绝覆盖');
+
+    const bad = tempHome();
+    write(bad, '.workbuddy/mcp.json', '{bad');
+    expect(enableMcpClient('workbuddy', { home: bad, appData: bad }).error).toContain('无法解析');
+
+    const none = tempHome();
+    expect(enableMcpClient('workbuddy', { home: none, appData: none }).error).toContain('配置文件不存在');
+    expect(enableMcpClient('zcode', { home: none, appData: none }).error).toContain('不支持自动写入');
+    expect(enableMcpClient('not-a-client', { home: none, appData: none }).error).toContain('未知 MCP 客户端');
+
+    const toml = tempHome();
+    expect(enableMcpClient('codex', { home: toml, appData: toml }).error).toContain('不是 JSON');
   });
 });

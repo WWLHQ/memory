@@ -38,11 +38,15 @@ describe('filterAlerts（12.2 三维 AND）', () => {
 });
 
 describe('groupMetrics', () => {
-  it('14 卡分 6 组', () => {
+  it('13 卡分 5 组（死信卡已删），检索性能置顶 / 队列置底', () => {
     const g = groupMetrics(SEED_METRICS);
-    expect(SEED_METRICS.length).toBe(14);
-    expect(g.length).toBe(5); // 规格表实际 5 组
-    expect(g[0][0]).toBe('Agent 健康');
+    expect(SEED_METRICS.length).toBe(13);
+    expect(g.length).toBe(5);
+    // 2026-11-15 用户要求：检索表现置顶、精炼队列置底
+    expect(g[0][0]).toBe('检索性能(1h)');
+    expect(g[g.length - 1][0]).toBe('队列');
+    expect(SEED_METRICS.some((m) => m.metric === '死信消息(24h)')).toBe(false);
+    expect(SEED_METRICS.some((m) => m.metric === '精炼队列')).toBe(true);
   });
 });
 

@@ -90,6 +90,8 @@ export interface NavStatusSource {
   pendingWrites?: { count?: number } | null;
   refine?: { queued?: number; running?: boolean } | null;
   sync?: { active?: boolean; lastError?: string | null } | null;
+  /** T3：只有真实读到客户端把本服务标成已禁用、或共享信号里的待生效时才带（读不到一律不产出条目） */
+  mcpSwitch?: { name?: string; pending?: boolean } | null;
 }
 
 export function buildNavStatus(src: NavStatusSource): NavStatusItem[] {
@@ -125,6 +127,15 @@ export function buildNavStatus(src: NavStatusSource): NavStatusItem[] {
     items.push({ key: 'sync', label: '同步进行中', tone: 'busy' });
   } else if (typeof s?.lastError === 'string' && s.lastError) {
     items.push({ key: 'sync', label: '上次同步失败', tone: 'warn' });
+  }
+
+  // 5) 客户端 MCP 开关：服务端在线但客户端把本服务关了 → 需要关注；已清标记待重开 → 也提醒
+  if (typeof src.mcpSwitch?.name === 'string' && src.mcpSwitch.name) {
+    if (src.mcpSwitch.pending === true) {
+      items.push({ key: 'mcp-switch', label: `${src.mcpSwitch.name} MCP 已清除，待生效`, tone: 'warn' });
+    } else {
+      items.push({ key: 'mcp-switch', label: `${src.mcpSwitch.name} MCP 开关已关闭`, tone: 'warn' });
+    }
   }
 
   return items;

@@ -46,6 +46,7 @@ function setHost(opts: {
   list?: () => Promise<unknown>;
   wire?: (id: string, sid: string) => Promise<unknown>;
   snippet?: (id: string, sid: string) => Promise<unknown>;
+  enable?: (id: string, sid: string) => Promise<unknown>;
 } = {}) {
   (window as unknown as { __ELECTRON__: boolean }).__ELECTRON__ = true;
   (window as unknown as { api: unknown }).api = {
@@ -53,6 +54,7 @@ function setHost(opts: {
       list: opts.list ?? (() => Promise.resolve(SCAN)),
       wire: opts.wire ?? (() => Promise.resolve({ ok: true, changed: true, path: 'C:/x/.claude.json', backupPath: 'C:/x/.claude.json.bak' })),
       snippet: opts.snippet ?? (() => Promise.resolve({ ok: true, snippet: '{"mcpServers":{}}' })),
+      enable: opts.enable ?? (() => Promise.resolve({ ok: true, changed: true })),
     },
   };
 }
@@ -82,6 +84,47 @@ afterEach(() => {
 });
 
 describe('McpClientsPanel', () => {
+  test('T3：客户端开关已关闭 → 红色状态 + 一键打开；成功后保持待生效不跳绿', async () => {
+    const enable = vi.fn(() => Promise.resolve({ ok: true, changed: true }));
+    mockRole('admin');
+    setHost({
+      list: () => Promise.resolve({
+        endpoint: 'http://127.0.0.1:8204/mcp',
+        scannedAt: Date.UTC(2026, 0, 1),
+        clients: [baseRow({
+          id: 'workbuddy', name: 'WorkBuddy', badge: 'p0',
+          displayPath: '~/.workbuddy/mcp.json', state: 'wired', hasAuth: true, disabled: true,
+        })],
+      }),
+      enable,
+    });
+    render(<McpClientsPanel />);
+    await waitFor(() => expect(screen.getByTestId('state-workbuddy').textContent).toBe('客户端已关闭'));
+    expect((document.querySelector('[data-client="workbuddy"]') as HTMLElement).dataset.switch).toBe('off');
+    await userEvent.click(screen.getByRole('button', { name: '一键打开' }));
+    await waitFor(() => expect(enable).toHaveBeenCalledWith('workbuddy', 'sid_test'));
+    await waitFor(() => expect(screen.getByTestId('state-workbuddy').textContent).toBe('已清除标记 · 待生效'));
+    expect(screen.queryByRole('button', { name: '一键打开' })).toBeNull();
+    expect(screen.getByRole('button', { name: '去设置手动打开' })).toBeTruthy();
+  });
+
+  test('T3：非 JSON 配置不提供一键打开，如实只给状态提示', async () => {
+    mockRole('admin');
+    setHost({
+      list: () => Promise.resolve({
+        endpoint: 'http://127.0.0.1:8204/mcp',
+        scannedAt: Date.UTC(2026, 0, 1),
+        clients: [baseRow({
+          id: 'codex', name: 'Codex', badge: 'p2', displayPath: '~/.codex/config.toml',
+          format: 'toml', state: 'wired', hasAuth: true, disabled: true,
+        })],
+      }),
+    });
+    render(<McpClientsPanel />);
+    await waitFor(() => expect(screen.getByTestId('state-codex').textContent).toBe('客户端已关闭'));
+    expect(screen.queryByRole('button', { name: '一键打开' })).toBeNull();
+  });
+
   test('浏览器模式：如实降级为只读说明，不伪造客户端列表或「已接入」', async () => {
     render(<McpClientsPanel />);
     expect(screen.getByTestId('mcp-browser-note')).toBeInTheDocument();
@@ -295,6 +338,51 @@ describe('McpClientsPanel', () => {
     expect((screen.getByTestId('mcp-wire-all') as HTMLButtonElement).disabled).toBe(true);
     const claudeRow = document.querySelector('[data-client="claude-code"]') as HTMLElement;
     expect((claudeRow.querySelector('[data-act="mcp-wire"]') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  test('普通成员：一键打开（只清自己机器上的禁用标记）可用；复制/接入仍卡管理员', async () => {
+    const enable = vi.fn(() => Promise.resolve({ ok: true, changed: true }));
+    mockRole('member');
+    setHost({
+      list: () => Promise.resolve({
+        endpoint: SCAN.endpoint,
+        clients: [baseRow({
+          id: 'workbuddy', name: 'WorkBuddy', badge: 'p0',
+          displayPath: '~/.workbuddy/mcp.json', state: 'wired', hasAuth: true, disabled: true,
+        })],
+      }),
+      enable,
+    });
+    render(<McpClientsPanel />);
+    await waitFor(() => expect(screen.getByTestId('state-workbuddy').textContent).toBe('客户端已关闭'));
+    const btn = screen.getByRole('button', { name: '一键打开' }) as HTMLButtonElement;
+    expect(btn.disabled).toBe(false); // 成员也能修自己机器上的开关（下放成员）
+    await userEvent.click(btn);
+    await waitFor(() => expect(enable).toHaveBeenCalledWith('workbuddy', 'sid_test'));
+    await waitFor(() => expect(screen.getByTestId('state-workbuddy').textContent).toBe('已清除标记 · 待生效'));
+    // 写含令牌条目 / 复制片段仍只给管理员
+    expect((document.querySelector('[data-act="mcp-copy"]') as HTMLButtonElement).disabled).toBe(true);
+    expect((document.querySelector('[data-act="mcp-wire"]') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  test('桌面客户端卡片显示运行态：已启动 / 未启动；CLI 无进程面不显示', async () => {
+    mockRole('admin');
+    setHost({
+      list: () => Promise.resolve({
+        endpoint: SCAN.endpoint,
+        clients: [
+          baseRow({ id: 'workbuddy', name: 'WorkBuddy', badge: 'p0', displayPath: '~/.workbuddy/mcp.json', state: 'wired', hasAuth: true, running: true }),
+          baseRow({ id: 'qoder-cn', name: 'Qoder CN', badge: 'p3', displayPath: '~/.qoder-cn/settings.json', state: 'wired', hasAuth: true, running: false }),
+          baseRow({ id: 'claude-code', name: 'Claude Code', badge: 'p1', displayPath: '~/.claude.json', state: 'wired', hasAuth: true }),
+        ],
+      }),
+    });
+    render(<McpClientsPanel />);
+    await waitFor(() => expect(screen.getByTestId('state-workbuddy').textContent).toBe('已接入'));
+    await waitFor(() => expect(screen.getByTestId('run-workbuddy').textContent).toBe('已启动'));
+    expect(screen.getByTestId('run-qoder-cn').textContent).toBe('未启动');
+    // CLI 无稳定进程面 → 不显示运行态，绝不误报「未启动」
+    expect(screen.queryByTestId('run-claude-code')).toBeNull();
   });
 
   test('管理员：复制片段 → 展示一次性片段并写剪贴板（含令牌不外泄到日志）', async () => {

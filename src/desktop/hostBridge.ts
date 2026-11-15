@@ -33,6 +33,7 @@ export type HostMethod =
   | 'mcp:clients'
   | 'mcp:clientSnippet'
   | 'mcp:clientWire'
+  | 'mcp:clientEnable'
   | 'collector:triggerNow'
   | 'collector:status'
   | 'backup:getConfig'
@@ -76,7 +77,9 @@ export type HostMethod =
   /** 批次48 A31：厂商余额视图（需会话）/ 独立 billing 凭据（仅管理员） */
   | 'llm:billing' | 'llm:billingKey'
   /** 批次62：硬前置召回 A/B/C 三层开关（状态需会话 / 保存仅管理员） */
-  | 'recallHard:state' | 'recallHard:set';
+  | 'recallHard:state' | 'recallHard:set'
+  /** 原子任务 B：监控仪表盘只读聚合（Agent 健康 + 写入率 + 校验异常）；公开观测 */
+  | 'monitor:stats';
 
 /** 扁平 channel → preload 暴露的嵌套对象方法（window.api[ns][fn]） */
 const CHANNEL_TO_NATIVE: Record<HostMethod, [string, string]> = {
@@ -99,6 +102,7 @@ const CHANNEL_TO_NATIVE: Record<HostMethod, [string, string]> = {
   'mcp:clients': ['mcpClients', 'list'],
   'mcp:clientSnippet': ['mcpClients', 'snippet'],
   'mcp:clientWire': ['mcpClients', 'wire'],
+  'mcp:clientEnable': ['mcpClients', 'enable'],
   'collector:triggerNow': ['collector', 'triggerNow'],
   'collector:status': ['collector', 'status'],
   'backup:getConfig': ['backup', 'getConfig'],
@@ -185,6 +189,7 @@ const CHANNEL_TO_NATIVE: Record<HostMethod, [string, string]> = {
   'llm:billingKey': ['llm', 'setBillingKey'],
   'recallHard:state': ['recallHard', 'state'],
   'recallHard:set': ['recallHard', 'set'],
+  'monitor:stats': ['monitor', 'stats'],
 };
 
 /** 顶层窗口是否具备原生 preload 能力 */

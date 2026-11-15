@@ -1,5 +1,5 @@
-// 监控仪表盘（REQ-006 / P6）· 14 卡分 5 组 + 告警时间轴（左轴级别色）+ 三档过滤
-// 数据真相 = 内核账本：指标实算（没有真实口径的卡不显示数字、值位标「未采集」，不冒充读数）；
+// 监控仪表盘（REQ-006 / P6）· 13 卡分 5 组 + 告警时间轴（左轴级别色）+ 三档过滤
+// 数据真相 = 内核账本 + 主进程补炼队列：指标实算（没有真实口径的卡不显示数字、值位说「暂无数据」，不冒充读数）；
 // 告警 = 真实 monitor_alert 审计只读回放，点击跳到真实审计 / 记忆深链（不是假跳）。
 // ⚠ 内核读不到（批次25 P0-7）→ 三态加载：显示内核原因 + 重试，绝不渲染成「账本为空」。
 import { useState } from 'react';
@@ -26,11 +26,11 @@ export function MonitorPage({ load = loadRealMonitorData }: { load?: () => Promi
   const head = (
     <div className="p0-hd">
       <h2>监控仪表盘</h2>
-      <span className="p0-tag">REQ-006 · P6</span>
-      <span className="p0-sub">12.1 指标卡（14 项 / 5 组）+ 12.2 告警时间线</span>
+      <span className="p0-tag">本机运行状况</span>
+      <span className="p0-sub">13 项监控指标，分 5 组；下方是告警时间线</span>
       <span className="p0-right">
-        {real ? <span className="p0-tag">账本 {real.memCount} 条记忆 / {real.auditCount} 条审计</span> : null}
-        <span className="p0-tag info">只读真实账本</span>
+        {real ? <span className="p0-tag">本机已有 {real.memCount} 条记忆 · {real.auditCount} 条操作记录</span> : null}
+        <span className="p0-tag info">只显示真实数据</span>
       </span>
     </div>
   );
@@ -39,7 +39,7 @@ export function MonitorPage({ load = loadRealMonitorData }: { load?: () => Promi
     return (
       <div className="p0-page" data-testid="monitor-page">
         {head}
-        <div className="p0-card"><div className="p0-note">加载真实账本中…</div></div>
+        <div className="p0-card"><div className="p0-note">正在读取本机数据…</div></div>
       </div>
     );
   }
@@ -59,8 +59,8 @@ export function MonitorPage({ load = loadRealMonitorData }: { load?: () => Promi
 
       <div className="p0-card">
         <div className="p0-hd">
-          <h3>筛选（12.2）</h3>
-          <span className="p0-sub">级别 / 时间窗 / 宿主 Agent（三维 AND）</span>
+          <h3>筛选告警</h3>
+          <span className="p0-sub">按级别、时间范围、宿主 Agent 三个条件同时筛选</span>
           <span className="p0-right p0-tag">命中 {alerts.length} 条</span>
         </div>
         <div className="p0-row-actions" style={{ marginTop: 0 }}>
@@ -92,10 +92,10 @@ export function MonitorPage({ load = loadRealMonitorData }: { load?: () => Promi
         <MetricGrid cards={cards} />
       ) : (
         <div className="p0-card" data-testid="metrics-empty">
-          <div className="p0-hd"><h3>指标卡</h3><span className="p0-tag warn">未采集</span></div>
+          <div className="p0-hd"><h3>指标卡</h3><span className="p0-tag warn">暂无数据</span></div>
           <div className="p0-note">
-            已读到内核账本，但没有监控样本：指标数字全部来自真实账本实算（召回审计 / conflict_resolve / sync_fail 等），
-            账本为空时不会伪造演示数字。请先在「写入页」产生真实记忆或运行检索后刷新。
+            已读到本机数据，但还没有可用于统计的记录：所有数字都从真实账本和本机队列算出来，
+            没有记录时不会编造演示数字。请先在「写入页」产生真实记忆，或运行一次检索后刷新。
           </div>
         </div>
       )}
@@ -104,7 +104,7 @@ export function MonitorPage({ load = loadRealMonitorData }: { load?: () => Promi
         <div className="p0-card" data-testid="operations-status">
           <div className="p0-hd">
             <h3>后台操作状态</h3>
-            <span className="p0-sub">真实审计只读派生（定时任务 / 记忆精炼 / 合并 / 遗忘周期 / 同步 / 接入）；409 = 排队中，不算失败</span>
+            <span className="p0-sub">只读本机操作记录（定时任务 / 记忆精炼 / 合并 / 遗忘周期 / 同步 / 接入）；排队中不算失败</span>
           </div>
           {(() => {
             const s = summarizeOperations(real.operations!);
@@ -130,8 +130,8 @@ export function MonitorPage({ load = loadRealMonitorData }: { load?: () => Promi
         <div className="p0-card" data-testid="alerts-empty">
           <div className="p0-hd"><h3>告警时间线</h3><span className="p0-tag">0 条</span></div>
           <div className="p0-note">
-            当前真实账本无 monitor_alert 告警记录。告警时间线只回放内核真实写入的 monitor_alert 审计（不灌种子告警）；
-            监控探测触发真实告警后此处自动展示，并可点击跳到对应审计 / 记忆。
+            当前本机没有告警记录。这里只显示真实写进账本的告警，不会预先塞入演示告警；
+            监控探测触发告警后会自动出现在这里，点一下可跳到对应的审计或记忆。
           </div>
         </div>
       ) : (

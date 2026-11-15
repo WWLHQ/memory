@@ -789,6 +789,18 @@ html[data-theme='dark'] .qa { border-left-color: var(--line); }
 }
 .shell-status-item .ss-label { overflow: hidden; text-overflow: ellipsis; }
 .shell-status-item.warn { color: var(--warn, #b8860b); }
+/* T3：客户端 MCP 开关一键打开（对齐 design/ui/客户端MCP开关状态_原型.html ③） */
+.shell-status-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 5px 10px 4px 24px; }
+.shell-status-btn {
+  background: var(--panel, transparent); color: var(--tx2); border: 1px solid var(--line2);
+  border-radius: 5px; padding: 2px 8px; font-size: 11px; cursor: pointer;
+}
+.shell-status-btn.primary { border-color: var(--accent, #4d9fff); color: var(--accent, #4d9fff); }
+.shell-status-btn:disabled { opacity: .5; cursor: default; }
+.shell-status-err, .shell-status-hint {
+  padding: 2px 10px 4px 24px; font-size: 11px; line-height: 1.5; color: var(--tx2);
+}
+.shell-status-err { color: var(--err, #d44); }
 .strata-scale .tree-group { padding: 7px 12px 3px; }
 /* 列位与导航树严格对齐：色块占「图标列」x=24..36，层号从「文字列」x=44 起
    （.tree-row padding-left 6 + .tw 12 + gap 6 = 24；再 + 图标 12 + gap 8 = 44）。 */

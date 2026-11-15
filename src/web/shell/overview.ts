@@ -100,6 +100,8 @@ export interface OverviewMcpRow {
   state: McpWireState;
   label: string;
   detail: string;
+  /** 客户端应用内把本服务标成已禁用（显式 true 才有）；T3 首页据此显示「客户端已关闭」 */
+  disabled?: boolean;
 }
 
 export interface OverviewMcpPanel {
@@ -181,6 +183,8 @@ interface McpClientRaw {
   state: McpWireState;
   installed: boolean;
   displayPath: string | null;
+  /** 客户端应用内的「已禁用」标记（显式 true 才有）；T3 首页状态卡据此判开关，不只看 state */
+  disabled?: boolean;
 }
 
 interface McpScanReply {
@@ -351,8 +355,9 @@ async function loadRefinePanel(): Promise<OverviewRefinePanel> {
   return { ok: r.ok, available: true, view: r.view, error: r.error };
 }
 
-/** MCP 接入：主进程读本机客户端配置（mcp:clients）；非桌面壳诚实不可用 */
-async function loadMcpPanel(sid: string | null): Promise<OverviewMcpPanel> {
+/** MCP 接入：主进程读本机客户端配置（mcp:clients）；非桌面壳诚实不可用。
+ *  T3 起导出：首页 12 秒轻量轮询只复核这一路，不整页重读账本。 */
+export async function loadMcpPanel(sid: string | null): Promise<OverviewMcpPanel> {
   if (hostCapability() === 'none') {
     return { ok: false, available: false, endpoint: null, clients: [], error: '非桌面壳：无法读取本机 MCP 客户端配置' };
   }
@@ -366,6 +371,7 @@ async function loadMcpPanel(sid: string | null): Promise<OverviewMcpPanel> {
         state: c.state,
         label: MCP_STATE_LABEL[c.state] ?? c.state,
         detail: c.displayPath ?? '',
+        ...(c.disabled === true ? { disabled: true } : {}),
       }));
     return { ok: true, available: true, endpoint: r.endpoint ?? null, clients, error: null };
   } catch (e) {

@@ -17,10 +17,11 @@ export const IPC = {
   hostScanRun: 'hostScan:run',
   hostAgentDetectRun: 'hostAgentDetect:run',
   hostAgentDetectConfig: 'hostAgentDetect:config',
-  /** 批次15：MCP 客户端接入状态 / 片段 / 一键写入 */
+  /** 批次15：MCP 客户端接入状态 / 片段 / 一键写入 / 一键打开客户端开关 */
   mcpClients: 'mcp:clients',
   mcpClientSnippet: 'mcp:clientSnippet',
   mcpClientWire: 'mcp:clientWire',
+  mcpClientEnable: 'mcp:clientEnable',
   collectorTriggerNow: 'collector:triggerNow',
   collectorStatus: 'collector:status',
   backupGetConfig: 'backup:getConfig',
@@ -140,6 +141,8 @@ export const IPC = {
   /** 批次62：硬前置召回 A/B/C 三层开关 —— 状态需会话（读真值）；保存仅管理员（会改宿主配置 / 起停网关 / 切门禁） */
   recallHardState: 'recallHard:state',
   recallHardSet: 'recallHard:set',
+  /** 原子任务 B：监控仪表盘只读聚合（Agent 健康 + 写入率 + 校验异常）；公开观测，不需会话 */
+  monitorStats: 'monitor:stats',
   /** 批次39：L2–L6 后台补炼队列 —— 状态（需会话）/ 开关与补炼与重试失败行（仅管理员） */
   refineState: 'refine:state',
   refineSetEnabled: 'refine:setEnabled',

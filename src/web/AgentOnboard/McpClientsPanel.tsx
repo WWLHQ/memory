@@ -9,6 +9,8 @@ import { hostCall, hostCapability } from '../../desktop/hostBridge.ts';
 import { MCP_CLIENT_HEADER_NAME, MCP_ENDPOINT, specOfMcpClient, type McpWireState } from '../../agentOnboard/mcpClients.ts';
 import type { BadgeClass } from '../../types/agentOnboard.ts';
 import { currentSessionId, useSessionContext } from '../shared/session.ts';
+import { MCP_MANUAL_HINT, MCP_SWITCH_POLL_MS } from '../shared/mcpSwitch.ts';
+import { listMcpPending, markMcpPending, subscribeMcpPending } from '../shared/mcpPending.ts';
 
 interface ClientRow {
   id: string;
@@ -22,6 +24,10 @@ interface ClientRow {
   hasAuth: boolean;
   /** 批次41-X：配置里是否带显式身份头；false = 已接入但缺身份头（可点「补身份头」） */
   hasClientId?: boolean;
+  /** 客户端应用内把本服务标成已禁用（显式 true 才有）；T3 接入页据此显示「客户端已关闭」 */
+  disabled?: boolean;
+  /** 客户端软件当前是否在运行（T6）；仅桌面客户端有值，CLI 无值 → 不显示 */
+  running?: boolean;
   foundUrl?: string;
   rulesHint: string;
   note?: string;
@@ -135,10 +141,13 @@ export function McpClientsPanel({ onInstalledCount }: { onInstalledCount?: (n: n
   const [snippets, setSnippets] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState('');
   const [message, setMessage] = useState('');
+  /** ①待生效来自共享信号（首页/接入页/壳层同源），不再用本地 Record */
+  const [pendingList, setPendingList] = useState<string[]>(() => listMcpPending());
 
-  const refresh = useCallback((opts: { announce?: boolean } = {}) => {
+  const refresh = useCallback((opts: { announce?: boolean; silent?: boolean } = {}) => {
     if (capability === 'none') return Promise.resolve();
-    setScanning(true);
+    // silent = 后台轮询：不置 scanning，避免每 12 秒把按钮闪一次禁用态
+    if (!opts.silent) setScanning(true);
     return hostCall<ScanReply>('mcp:clients', [currentSessionId()])
       .then((r) => {
         setScan(r);
@@ -155,10 +164,23 @@ export function McpClientsPanel({ onInstalledCount }: { onInstalledCount?: (n: n
         setScanError(reason);
         if (opts.announce) setMessage(`重新扫描失败：${reason}`);
       })
-      .finally(() => setScanning(false));
+      .finally(() => { if (!opts.silent) setScanning(false); });
   }, [capability]);
 
   useEffect(() => { void refresh(); }, [refresh]);
+
+  // T3 落点② 同步：与首页/壳层同口径 12 秒静默轮询，避免「首页已红、接入页仍绿」的不一致
+  useEffect(() => {
+    if (capability === 'none') return;
+    const t = setInterval(() => {
+      void refresh({ silent: true });
+      setPendingList(listMcpPending()); // ①过期待生效自动掉
+    }, MCP_SWITCH_POLL_MS);
+    return () => clearInterval(t);
+  }, [capability, refresh]);
+
+  // ①其它落点改了待生效信号 → 本页立刻跟上
+  useEffect(() => subscribeMcpPending(() => setPendingList(listMcpPending())), []);
 
   /** 只展示本机真实检出（配置文件存在或安装痕迹命中）的客户端 */
   const rows = useMemo<ClientRow[]>(
@@ -282,6 +304,21 @@ export function McpClientsPanel({ onInstalledCount }: { onInstalledCount?: (n: n
 
   const admin = session.role === 'admin';
   const disabledReason = session.loading ? '正在校验管理员身份…' : admin ? '' : '需管理员';
+
+  /** T3 落点②：只清禁用标记并备份原配置；成功后显示「待生效」，绝不冒充已打开。 */
+  const enableSwitch = (row: ClientRow) => {
+    if (!session.sid) { setMessage('请先登录后再打开开关'); return; }
+    setBusy(`enable:${row.id}`);
+    hostCall<WireReply>('mcp:clientEnable', [row.id, session.sid])
+      .then((r) => {
+        if (!r.ok) { setMessage(`一键打开失败：${r.error ?? '未知原因'}`); return; }
+        markMcpPending(row.id);
+        setPendingList(listMcpPending());
+        setMessage('已清除禁用标记并备份原配置。请在设置里手动打开开关，或重新打开软件后生效。');
+      })
+      .catch((e) => setMessage(`一键打开失败：${String((e as Error)?.message ?? e)}`))
+      .finally(() => setBusy(''));
+  };
   const scannedAt = scan && typeof scan.scannedAt === 'number' ? formatClock(scan.scannedAt) : '';
   const endpoint = scan?.endpoint ?? MCP_ENDPOINT;
   const wireTargets = rows.filter(canWire);
@@ -373,14 +410,30 @@ export function McpClientsPanel({ onInstalledCount }: { onInstalledCount?: (n: n
 
         <div id="mcp-client-rows">
           {rows.map((row) => {
-            const label = STATE_LABEL[row.state];
+            const disabledByClient = row.disabled === true;
+            const switchPending = pendingList.includes(row.id);
+            const label = switchPending
+              ? { text: '已清除标记 · 待生效', cls: 'pill gold' }
+              : disabledByClient
+                ? { text: '客户端已关闭', cls: 'pill red' }
+                : STATE_LABEL[row.state];
             const snippet = snippets[row.id];
             return (
-              <div className="found" data-client={row.id} data-state={row.state} key={row.id}>
+              <div className="found" data-client={row.id} data-state={row.state}
+                data-switch={switchPending ? 'pending' : disabledByClient ? 'off' : undefined} key={row.id}>
                 <div className="found-head">
                   <span className={`badge ${row.badge}`}>{row.badge.toUpperCase()}</span>
                   <b>{row.name}</b>
                   <span className={label.cls} data-testid={`state-${row.id}`}>{label.text}</span>
+                  {row.running !== undefined && (
+                    <span
+                      className={row.running ? 'pill on' : 'pill'}
+                      data-testid={`run-${row.id}`}
+                      title="客户端软件当前是否在运行（仅桌面客户端可判定）"
+                    >
+                      {row.running ? '已启动' : '未启动'}
+                    </span>
+                  )}
                   <span className="method mcp-path" title={row.displayPath ?? '无稳定配置路径'}>
                     {row.displayPath ?? '无稳定配置路径'}
                   </span>
@@ -423,6 +476,25 @@ export function McpClientsPanel({ onInstalledCount }: { onInstalledCount?: (n: n
                       {row.state === 'wired'
                         ? needsClientId(row) ? '补身份头' : '已接入'
                         : row.state === 'missing_auth' ? '补齐令牌' : '一键接入'}
+                    </button>
+                  )}
+                  {disabledByClient && !switchPending && row.format === 'json' && (
+                    <button
+                      className="btn primary" type="button" data-act="mcp-enable"
+                      disabled={!session.sid || busy !== ''}
+                      title={'备份原配置后只清掉禁用标记；客户端不会实时重读配置，仍需手动打开或重新打开软件'}
+                      onClick={() => enableSwitch(row)}
+                    >
+                      一键打开
+                    </button>
+                  )}
+                  {disabledByClient && !switchPending && row.format !== 'json' && (
+                    <span className="method">该客户端配置不是 JSON，请到设置中手动打开开关</span>
+                  )}
+                  {switchPending && (
+                    <button className="btn" type="button" data-act="mcp-manual"
+                      onClick={() => setMessage(MCP_MANUAL_HINT)}>
+                      去设置手动打开
                     </button>
                   )}
                 </div>

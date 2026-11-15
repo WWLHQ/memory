@@ -1,5 +1,5 @@
 // E2E 测试：监控仪表盘（REQ-006 / P6）自包含（系统分配端口）
-// 指标卡 = 真实账本实算：空账本时 14 卡全部「未采集」（值位不显示数字，不伪造 crit/warn）；
+// 指标卡 = 真实账本实算：空账本时 13 卡全部「暂无数据」（值位不显示数字，不伪造 crit/warn）；
 // 告警时间线 = 真实 monitor_alert 审计，空账本 → 诚实空态。
 import { test, expect, disconnectBrowser, collectErrors } from './harness.ts';
 import { startStatic, type StaticServer } from './servers.ts';
@@ -18,23 +18,31 @@ test.afterAll(async () => {
 });
 
 test.describe('监控仪表盘 · 真实账本', () => {
-  test('14 指标卡渲染：未采集显「未采集」，不伪造 crit/warn', async ({ page }) => {
+  test('13 指标卡渲染：空值显「暂无数据」，人话短名，不伪造 crit/warn', async ({ page }) => {
     const errors = collectErrors(page);
     await page.goto(APP);
     await expect(page.locator('[data-testid="monitor-page"]')).toBeVisible();
     await expect(page.locator('[data-testid="metric-grid"]')).toBeVisible();
-    await expect(page.locator('.p0-mcard')).toHaveCount(14);
-    // 熔断状态无真实探活采样 → 「未采集」且级别 ok（诚实：不伪造严重告警）
+    await expect(page.locator('.p0-mcard')).toHaveCount(13);
+    // 熔断无真实探活采样 → 「暂无数据」且级别 ok（诚实：不伪造严重告警）
     await expect(page.locator('[data-testid="metric-熔断状态"]')).toHaveClass(/ok/);
-    await expect(page.locator('[data-testid="metric-熔断状态"]')).toContainText('未采集');
-    await expect(page.locator('[data-testid="metric-连通成功率(5min)"]')).toContainText('未采集');
+    await expect(page.locator('[data-testid="metric-熔断状态"]')).toContainText('暂无数据');
+    await expect(page.locator('[data-testid="metric-连通成功率(5min)"]')).toContainText('暂无数据');
     await expect(page.locator('.p0-mcard.crit')).toHaveCount(0);
+    // 用户点名的四项必须是人话短名，页面不得再出现原始字段名 / 规格编号
+    const text = await page.locator('[data-testid="metric-grid"]').innerText();
+    for (const raw of ['payload_tokens', 'pipeline_llm_tokens', 'RawArchive', 'p95', 'p99', '12.1']) {
+      expect(text, `UI 泄漏原始标记：${raw}`).not.toContain(raw);
+    }
+    for (const label of ['注入量', '链路开销', '尾延迟', '精炼队列']) {
+      expect(text).toContain(label);
+    }
     expect(errors).toEqual([]);
   });
 
   test('告警时间线：空账本 → 诚实空态，无种子告警行', async ({ page }) => {
     await page.goto(APP);
-    await expect(page.locator('[data-testid="alerts-empty"]')).toContainText('当前真实账本无 monitor_alert 告警记录');
+    await expect(page.locator('[data-testid="alerts-empty"]')).toContainText('当前本机没有告警记录');
     await expect(page.locator('[data-testid^="alert-"]')).toHaveCount(0);
     await expect(page.locator('[data-testid^="alert-req-"]')).toHaveCount(0);
   });

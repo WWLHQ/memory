@@ -24,6 +24,7 @@ import {
 import { validateAuditRecord as sharedValidateAuditRecord } from '../shared/auditShape.ts';
 import { scanHost } from './hostScan.ts';
 import { IPC, missingChannels, handleBootFailure, SHELL_SHORTCUT_CHANNEL, type ShellShortcut } from './ipcChannels.ts';
+import { initAgentProbe, getMonitorStats } from './agentProbe.ts';
 import { createStorageReadWriteHandlers } from './storageIpc.ts';
 import { initActionLog, actionLog, actionLogError, tailActionLog } from './actionLog.ts';
 import type { TenantContext } from '../types/home.ts';
@@ -36,7 +37,8 @@ import {
 } from './dataRoot.ts';
 import { AUDIT_FILE_NAME } from '../core/memagent/auditLog.ts';
 import { detectLocalAgents, hostAgentConfig } from './agentDetect.ts';
-import { applyRecallEvidence, scanMcpClients, snippetForClient, wireMcpClient } from './mcpClients.ts';
+import { applyRecallEvidence, enableMcpClient, scanMcpClients, snippetForClient, wireMcpClient } from './mcpClients.ts';
+import { probeRunningClients } from './clientProcess.ts';
 import {
   applyProbeResult, applyProxyAccounting, LLM_PRESETS, llmEngineViews, loadLlmConfig, loadLlmGateway, loadLlmKeys, mergeLlmConfig,
   saveLlmConfig, saveLlmKey, testEngine, type LlmConfigPatch, type LlmGatewayConfig, type LlmGatewayProvider,
@@ -1029,10 +1031,9 @@ function registerPersonalIpc(opts: {
 // 令牌只在返回值出现一次，日志只记客户端/路径/备份与结果，绝不记令牌。
 function registerMcpClientsIpc(token: string): void {
   handleIpc(IPC.mcpClients, async (_e, sessionId?: string) => {
-    // 成功回包形状是 { endpoint, clients, scannedAt }（非 IpcResult）——闸门失败必须抛错，
-    // 让渲染层走「扫描失败」路径，而不是被当成空 clients 静默显示「无客户端」。
-    const gate = requireSession(sessionId, IPC.mcpClients);
-    if (!gate.ok) throw new Error(gate.error);
+    // ②本地诊断：MCP 客户端配置扫描只读本机文件（配置路径/开关/运行态），不涉及账号或租户数据，
+    // 因此不再要求登录——登录前也能看开关状态（此前重启后未登录会显示「未知」）。审计证据取不到则退回纯文件口径。
+    void sessionId;
     // 批次30：召回审计作为接入证据（Zcode 等配置存应用内部的客户端文件扫不到，但真实调用可证明接通）；
     // 审计读不到时退回纯文件扫描，不影响扫描本身。
     let recallEvidence: Parameters<typeof applyRecallEvidence>[1] = [];
@@ -1041,7 +1042,13 @@ function registerMcpClientsIpc(token: string): void {
         ts: a.ts, client: (a.detail as { client?: unknown } | null)?.client,
       }));
     } catch { /* 证据不可用 → 纯文件口径 */ }
-    return scanMcpClients({ currentToken: token, recallEvidence });
+    const scan = scanMcpClients({ currentToken: token, recallEvidence });
+    // T6：附上桌面客户端软件运行态（CLI 客户端无稳定进程 → 不给值，UI 不显示）
+    const running = probeRunningClients();
+    for (const c of scan.clients) {
+      if (running[c.id] !== undefined) c.running = running[c.id];
+    }
+    return scan;
   });
   handleIpc(IPC.mcpClientSnippet, (_e, id: unknown, sessionId?: string) => {
     const gate = requireAdmin(sessionId, IPC.mcpClientSnippet);
@@ -1058,6 +1065,21 @@ function registerMcpClientsIpc(token: string): void {
     const client = String(id ?? '');
     const r = wireMcpClient(client, token, { currentToken: token });
     actionLog('mcp', 'client-wire', {
+      client, ok: r.ok, changed: !!r.changed, path: r.path, backup: r.backupPath,
+      ...(r.error ? { error: r.error } : {}),
+    }, { level: r.ok ? 'info' : 'warn' });
+    return r;
+  });
+  handleIpc(IPC.mcpClientEnable, (_e, id: unknown, sessionId?: string) => {
+    // 一键打开只清「当前系统用户自己 home 目录、自己客户端配置」里的禁用标记，纯本地自助修复，
+    // 不碰租户共享数据与他人配置 → 与扫描（requireSession）同口径，任意登录成员都可修自己的开关。
+    // 一键接入/片段（写入含令牌条目）仍需管理员，保持 requireAdmin。
+    const gate = requireSession(sessionId, IPC.mcpClientEnable);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    const client = String(id ?? '');
+    const r = enableMcpClient(client);
+    // 只记客户端 / 路径 / 备份 / 结果；配置原文与令牌绝不进日志。
+    actionLog('mcp', 'client-enable', {
       client, ok: r.ok, changed: !!r.changed, path: r.path, backup: r.backupPath,
       ...(r.error ? { error: r.error } : {}),
     }, { level: r.ok ? 'info' : 'warn' });
@@ -3065,6 +3087,14 @@ async function bootstrap(): Promise<void> {
   // 批次39：写入只落 L0+L1，深层由这条后台队列补炼（存量启动即入队，幂等；引擎没就绪就先排着不判死）
   registerRefineIpc();
   void startRefineQueue(collectorVector);
+  // 原子任务 B：监控仪表盘只读聚合（Agent 健康 + 写入率 + 校验异常）由主进程定时拨测提供。
+  // 注册 IPC（公开只读观测，不需会话）；启动 60s 一轮拨测 + 慢计算缓存 + 每 5 分钟落 agent_probe 审计。
+  handleIpc(IPC.monitorStats, () => getMonitorStats());
+  initAgentProbe({
+    storage,
+    ledgerDir: LIB_PATHS?.ledgerDir ?? USER_DATA,
+    ports: [AGENT_ONBOARD_PORT, MIRROR_PORT, MCP_PORT, WEBHOOK_PORT, MCP_HTTP_PORT],
+  });
 
   // D6-2：启动自动建共享项目 P-shared（若注册表无则建；只读镜像/无写权限时静默跳过，绝不阻碍启动）
   await ensureSharedProject(storage);

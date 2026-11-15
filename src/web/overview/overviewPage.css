@@ -69,6 +69,13 @@ html[data-theme="dark"] body { background: #060B16; color: #E4EDF8; }
 .af-alert.bad .tag { background: var(--bad); color: #fff; }
 .af-alert .af-link { margin-left: auto; }
 
+/* T3：客户端 MCP 开关提示条（对齐 design/ui/客户端MCP开关状态_原型.html ①） */
+.af-alert.warn { background: var(--warn-soft, var(--accent-soft)); border-color: var(--warn, var(--accent)); color: var(--ink); }
+.af-alert .mcp-switch-text { flex: 1 1 320px; }
+.af-alert .mcp-switch-text b { font-weight: 600; }
+.mcp-switch-actions { display: inline-flex; gap: 6px; flex: none; margin-left: auto; flex-wrap: wrap; }
+.af-note.mcp-switch-note { margin: 4px 0 12px; }
+
 /* L0 写密钥未解锁：常驻醒目提示（用户 2026-11-10）。只要锁没解就一直显示，
    真源是 l0Status.write_unlocked，不依赖近 30 分钟是否有写入被拒。 */
 .l0-lock-alert {

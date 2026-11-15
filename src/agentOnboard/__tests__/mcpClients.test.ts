@@ -314,3 +314,43 @@ describe('mergeMcpTomlConfig（批次23：Codex 等 TOML 客户端）', () => {
     expect(() => mergeMcpTomlConfig(null, qoder, EP, TOKEN)).toThrow('E_UNSUPPORTED_CLIENT');
   });
 });
+
+describe('客户端「已禁用」标记探测（T1 检测层）', () => {
+  const wb = specOfMcpClient('workbuddy');
+  const wired = { type: 'http', url: EP, headers: { Authorization: `Bearer ${TOKEN}` } };
+  const cfg = (entry: Record<string, unknown>) => JSON.stringify({ mcpServers: { 'MultiAgent Memory': entry } });
+
+  test('显式 true → 带 disabled:true，state 仍是 wired（七态契约不变）', () => {
+    const r = probeClientConfig(wb, cfg({ ...wired, disabled: true }), EP);
+    expect(r.state).toBe('wired');
+    expect(r.disabled).toBe(true);
+  });
+
+  test('无标记 / false / 字符串 / 数字 / null → 不带新键，既有探测结果逐字不变', () => {
+    for (const v of [undefined, false, 'true', 1, null]) {
+      const entry: Record<string, unknown> = { ...wired };
+      if (v !== undefined) entry.disabled = v;
+      const r = probeClientConfig(wb, cfg(entry), EP);
+      expect(r).not.toHaveProperty('disabled');
+      expect(r.state).toBe('wired');
+    }
+    expect(probeClientConfig(wb, null, EP)).toEqual({ state: 'no_config', hasAuth: false });
+    expect(probeClientConfig(wb, '{}', EP)).toEqual({ state: 'missing_entry', hasAuth: false });
+  });
+
+  test('同名条目冲突时也带标记；其它客户端同样识别（通用维度）', () => {
+    const r = probeJsonConfig(cfg({ type: 'http', url: 'http://other/mcp', disabled: true }), wb, EP);
+    expect(r.state).toBe('conflict');
+    expect(r.disabled).toBe(true);
+    const q = probeJsonConfig(cfg({ ...wired, disabled: true }), qoder, EP);
+    expect(q.disabled).toBe(true);
+  });
+
+  test('TOML 段里 disabled = true 也识别；false / 缺省不识别', () => {
+    const cx = specOfMcpClient('codex');
+    const head = `[mcp_servers.multiagent_memory]\nurl = "${EP}"\nhttp_headers = { Authorization = "Bearer ${TOKEN}" }`;
+    expect(probeTomlConfig(`${head}\ndisabled = true\n`, cx, EP).disabled).toBe(true);
+    expect(probeTomlConfig(`${head}\ndisabled = false\n`, cx, EP).disabled).toBeUndefined();
+    expect(probeTomlConfig(`${head}\n`, cx, EP).disabled).toBeUndefined();
+  });
+});
