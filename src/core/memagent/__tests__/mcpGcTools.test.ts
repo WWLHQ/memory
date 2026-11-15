@@ -314,7 +314,7 @@ describe('GAP-3 gc_report × Agent 侧聚合', () => {
     await storage.appendAudit(mk(NOW - 2000, { hits: 1, client: 'qoder', saved_tokens: 200, evidence_thin: true }));
     await storage.appendAudit(mk(NOW - 3000, { hits: 1 }));                 // 无 client
     await storage.appendAudit({ request_id: 'c1', action: 'mcp_call', agent: 'qoder', ts: NOW - 500,
-      detail: { reliable: true, first_call: true, recalled_before: true } } as never);
+      detail: { reliable: true, first_call: true, recalled_before: false, tool: 'recall_memory' } } as never);
 
     const r = await runGcReportTool(ma, { project_id: 'P1' }, FULL_ACCOUNT, { storage, now: NOW, windowDays: 7 });
     if (!r.agent_usage.ok) throw new Error('agent_usage 应可读');

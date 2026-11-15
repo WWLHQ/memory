@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { render } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { metricsFromLedger, percentile, applyMonitorStats, type MonitorStats } from '../useMonitorReal.ts';
+import { metricsFromLedger, percentile, applyMonitorStats, applyMonitorOps, type MonitorStats } from '../useMonitorReal.ts';
 import { MetricGrid } from '../MetricGrid.tsx';
 import { MONITOR_GROUP_TEXT, monitorMetricKeys, monitorText, monitorValueText } from '../../growth/recallLabels.ts';
 import { createMemAgent } from '../../../core/memagent/agent.ts';
@@ -86,19 +86,29 @@ describe('监控指标时间窗口与真实字段（阶段4-I / B8 变异杀手�
     expect(cardOf(audits, '极简证据不足率(1d)')?.value).toBe(50);
   });
 
-  it('空账本 + 无 monitor：依赖主进程拨测的 5 卡保持「未取数」，账本可算卡显示真实值（0 / 无极简）', () => {
+  it('空账本 + 无 monitor：依赖主进程的 7 卡保持「未取数」，账本可算卡显示真实值（0 / 无极简）', () => {
     const cards = metricsFromLedger([], [], NOW);
-    expect(cards).toHaveLength(13);
+    expect(cards).toHaveLength(20);
     const vals = Object.fromEntries(cards.map((c) => [c.metric, c.value]));
     // 主进程拨测相关（无 monitor 数据）：诚实空态
     for (const k of ['连通成功率(5min)', '熔断状态', '平均延迟', '写入成功率', '哈希校验失败(24h)']) {
       expect(vals[k], k).toBe('未取数');
     }
+    // 批次64 新增的 2 张主进程卡（采集器 / 最近备份）同样诚实空态
+    expect(vals['采集器']).toBe('未取数');
+    expect(vals['最近备份']).toBe('未取数');
     // 账本可算：真实 0 不是假 0%
     expect(vals['待裁决']).toBe(0);
     expect(vals['超期 7d']).toBe(0);
     expect(vals['pipeline_llm_tokens p95']).toBe(0);
     expect(vals['极简证据不足率(1d)']).toBe('无极简');
+    // 批次64 新增的账本卡：空账本 = 真实 0（不冒充空态）
+    expect(vals['MCP 调用(24h)']).toBe(0);
+    expect(vals['质量门拦截(24h)']).toBe(0);
+    expect(vals['定时任务失败(24h)']).toBe(0);
+    expect(vals['解锁失败(24h)']).toBe(0);
+    // 无可靠 mcp_call 会话 → 首查率无分母，显「未取数」而不是 0%
+    expect(vals['首调先查记忆率(7d)']).toBe('未取数');
     // 无召回审计
     expect(vals['命中率']).toBe('未取数');
     expect(vals['payload_tokens p95']).toBe('未取数');
@@ -145,14 +155,14 @@ describe('监控指标时间窗口与真实字段（阶段4-I / B8 变异杀手�
   it('MetricGrid：无样本卡标「暂无数据」、有真实值卡（含真实 0 / 无极简）不标', () => {
     const empty = metricsFromLedger([], [], NOW);
     const first = render(<MetricGrid cards={empty} />);
-    // 9 张无样本（Agent 健康3 + 冷存储2 + 命中率/注入量/尾延迟 + 精炼队列）；其余 4 张显示真实值
-    expect(first.container.querySelectorAll('.mval.empty')).toHaveLength(9);
+    // 12 张无样本（检索性能 3 + 首查率 + Agent 健康 3 + 采集器/最近备份 + 冷存储 2 + 精炼队列）；其余 8 张显示真实值
+    expect(first.container.querySelectorAll('.mval.empty')).toHaveLength(12);
     expect(first.container.textContent).toContain('暂无数据');
     expect(first.container.textContent).toContain('近 1 天没有极简检索');
     first.unmount();
-    // 第 0 张（连通率）设值后不再 empty
+    // 第 0 张（命中率）设值后不再 empty
     const second = render(<MetricGrid cards={empty.map((c, i) => (i === 0 ? { ...c, value: 42 } : c))} />);
-    expect(second.container.querySelectorAll('.mval.empty')).toHaveLength(8);
+    expect(second.container.querySelectorAll('.mval.empty')).toHaveLength(11);
   });
 
   it('源码声明契约：旧全量分母 / 假分位数 / 缺接线不得回流', () => {
@@ -170,10 +180,10 @@ describe('监控指标时间窗口与真实字段（阶段4-I / B8 变异杀手�
 });
 
 describe('监控页人话契约（2026-11-15 用户拍板：短名 ≤5 字 + 一句白话）', () => {
-  it('13 张指标卡全部有中文短名，且短名 / 依据 ≤5 字', () => {
-    expect(monitorMetricKeys()).toHaveLength(13);
+  it('20 张指标卡全部有中文短名，且短名 / 依据 ≤5 字', () => {
+    expect(monitorMetricKeys()).toHaveLength(20);
     const cards = metricsFromLedger([], [], NOW);
-    expect(cards).toHaveLength(13);
+    expect(cards).toHaveLength(20);
     for (const c of cards) {
       const t = monitorText(c.metric);
       expect(t.label.length).toBeLessThanOrEqual(5);
@@ -181,7 +191,7 @@ describe('监控页人话契约（2026-11-15 用户拍板：短名 ≤5 字 + �
       expect(t.hint.length).toBeGreaterThan(0);
       expect(t.basis.length).toBeLessThanOrEqual(5);
     }
-    expect(Object.keys(MONITOR_GROUP_TEXT)).toHaveLength(5);
+    expect(Object.keys(MONITOR_GROUP_TEXT)).toHaveLength(8);
   });
 
   it('用户点名的四项都变成人话短名', () => {
@@ -233,7 +243,7 @@ describe('监控页人话契约（2026-11-15 用户拍板：短名 ≤5 字 + �
     expect(without?.parts).toBeUndefined();
   });
 
-  it('死信卡已删：13 张卡里不存在该指标', () => {
+  it('死信卡已删：20 张卡里不存在该指标', () => {
     expect(metricsFromLedger([], [], NOW).some((c) => c.metric === '死信消息(24h)')).toBe(false);
   });
 });
@@ -309,5 +319,108 @@ const stats = (over: Partial<MonitorStats> = {}): MonitorStats => ({
     const m = applyMonitorStats(base(), s);
     expect(m.find((c) => c.metric === '写入成功率')?.value).toBe('未取数');
     expect(m.find((c) => c.metric === '哈希校验失败(24h)')?.value).toBe('未取数');
+  });
+});
+
+describe('批次64：新增 7 张卡的真实口径（每条都断言真实值真的变了、真值 0 不被当空态）', () => {
+  const base = () => metricsFromLedger([], [], NOW);
+  type Rec = Partial<AuditRecord>;
+  const row = (over: Rec): AuditRecord => audit(over);
+
+  it('首调先查记忆率：只算「可靠会话的首调」，3/4 → 75% 判 warn', () => {
+    const audits = [
+      row({ action: 'mcp_call', detail: { reliable: true, first_call: true, recalled_before: false, tool: 'recall_memory' } }),
+      row({ action: 'mcp_call', detail: { reliable: true, first_call: true, recalled_before: false, tool: 'recall_memory' } }),
+      row({ action: 'mcp_call', detail: { reliable: true, first_call: true, recalled_before: false, tool: 'recall_memory' } }),
+      // 真实账本里确实存在：会话首调直接写了 write_memory（没先查）→ 不合规
+      row({ action: 'mcp_call', detail: { reliable: true, first_call: true, recalled_before: false, tool: 'write_memory' } }),
+      // 以下两条都不该进分母：非首调、不可靠会话
+      row({ action: 'mcp_call', detail: { reliable: true, first_call: false, recalled_before: true, tool: 'recall_memory' } }),
+      row({ action: 'mcp_call', detail: { reliable: false, first_call: true, recalled_before: false, tool: 'write_memory' } }),
+    ];
+    const c = cardOf(audits, '首调先查记忆率(7d)');
+    expect(c?.value).toBe(75);
+    expect(c?.level).toBe('warn');
+  });
+
+  it('首调合规：没有可靠会话 → 暂无数据（不拿 0% 冒充「全都没先查」）', () => {
+    const audits = [row({ action: 'mcp_call', detail: { reliable: false, first_call: true, recalled_before: false, tool: 'write_memory' } })];
+    expect(cardOf(audits, '首调先查记忆率(7d)')?.value).toBe('未取数');
+  });
+
+  it('MCP 调用(24h)：真实计数，2 天前的不算（3 条窗口内 → 3）', () => {
+    const audits = [
+      row({ action: 'mcp_call', detail: {} }),
+      row({ action: 'mcp_call', detail: {} }),
+      row({ action: 'mcp_call', detail: {} }),
+      row({ action: 'mcp_call', ts: NOW - 2 * DAY, detail: {} }),
+    ];
+    expect(cardOf(audits, 'MCP 调用(24h)')?.value).toBe(3);
+  });
+
+  it('质量门拦截(24h)：只数 filtered_l0_to_l1，普通写入不计；恒判 ok（这是正常过滤不是故障）', () => {
+    const audits = [
+      row({ action: 'write', detail: { action: 'filtered_l0_to_l1', filter_code: 'thin' } }),
+      row({ action: 'write', detail: { action: 'filtered_l0_to_l1', filter_code: 'short_low_signal' } }),
+      row({ action: 'write', detail: {} }),
+      row({ action: 'write', detail: { action: 'new' } }),
+      row({ action: 'write', ts: NOW - 2 * DAY, detail: { action: 'filtered_l0_to_l1' } }),
+    ];
+    const c = cardOf(audits, '质量门拦截(24h)');
+    expect(c?.value).toBe(2);
+    expect(c?.level).toBe('ok');
+  });
+
+  it('定时任务失败(24h)：只数 failed，skipped/ok 不算失败', () => {
+    const audits = [
+      row({ action: 'schedule_run', detail: { task: 'decay', status: 'failed' } }),
+      row({ action: 'schedule_run', detail: { task: 'self_growth', status: 'skipped', result: { reason: 'insufficient_samples' } } }),
+      row({ action: 'schedule_run', detail: { task: 'decay', status: 'ok' } }),
+    ];
+    const c = cardOf(audits, '定时任务失败(24h)');
+    expect(c?.value).toBe(1);
+    expect(c?.level).toBe('warn');
+  });
+
+  it('解锁失败(24h)：密码错 + 越权拒绝都算，>3 判 warn，正好 3 不告警', () => {
+    const mk = (action: 'l0_auth_fail' | 'l0_auth_deny', n: number) => Array.from({ length: n }, () => row({ action, detail: {} }));
+    const three = [...mk('l0_auth_fail', 2), ...mk('l0_auth_deny', 1)];
+    expect(cardOf(three, '解锁失败(24h)')?.value).toBe(3);
+    expect(cardOf(three, '解锁失败(24h)')?.level).toBe('ok');
+    const four = [...mk('l0_auth_fail', 2), ...mk('l0_auth_deny', 2)];
+    expect(cardOf(four, '解锁失败(24h)')?.level).toBe('warn');
+  });
+
+  it('采集器：在跑=ok；已停止 / 已停重试 / 连续失败都判 warn（停止不是「正常」）', () => {
+    const pick = (ops: Parameters<typeof applyMonitorOps>[1]) => applyMonitorOps(base(), ops);
+    expect(pick({ collector: { running: true, consecutiveFails: 0, autoRetryStopped: false, lastAt: NOW }, backupOk: false, lastBackupAt: null })
+      .find((c) => c.metric === '采集器')).toMatchObject({ value: '在跑', level: 'ok' });
+    expect(pick({ collector: { running: false, consecutiveFails: 0, autoRetryStopped: false, lastAt: null }, backupOk: false, lastBackupAt: null })
+      .find((c) => c.metric === '采集器')).toMatchObject({ value: '已停止', level: 'warn' });
+    expect(pick({ collector: { running: true, consecutiveFails: 0, autoRetryStopped: true, lastAt: NOW }, backupOk: false, lastBackupAt: null })
+      .find((c) => c.metric === '采集器')).toMatchObject({ value: '已停重试', level: 'warn' });
+    expect(pick({ collector: { running: true, consecutiveFails: 3, autoRetryStopped: false, lastAt: NOW }, backupOk: false, lastBackupAt: null })
+      .find((c) => c.metric === '采集器')).toMatchObject({ value: '连续失败 3 轮', level: 'warn' });
+  });
+
+  it('最近备份：读不到 ≠ 没备份；真读到空目录才说「从未备份」；超过 7 天判 warn', () => {
+    const pick = (ops: Parameters<typeof applyMonitorOps>[1]) => applyMonitorOps(base(), ops, NOW);
+    // 读不到 → 保持未取数（绝不谎报「从未备份」）
+    expect(pick({ collector: null, backupOk: false, lastBackupAt: null })
+      .find((c) => c.metric === '最近备份')?.value).toBe('未取数');
+    // 读到了但一条都没有 → 从未备份 + warn
+    expect(pick({ collector: null, backupOk: true, lastBackupAt: null })
+      .find((c) => c.metric === '最近备份')).toMatchObject({ value: '从未备份', level: 'warn' });
+    // 2 天前 → 2 天 ok；10 天前 → warn
+    expect(pick({ collector: null, backupOk: true, lastBackupAt: NOW - 2 * DAY })
+      .find((c) => c.metric === '最近备份')).toMatchObject({ value: 2, level: 'ok' });
+    expect(pick({ collector: null, backupOk: true, lastBackupAt: NOW - 10 * DAY })
+      .find((c) => c.metric === '最近备份')).toMatchObject({ value: 10, level: 'warn' });
+  });
+
+  it('ops 为 null（浏览器 / 主进程未就绪）→ 两张卡原样保持未取数', () => {
+    const m = applyMonitorOps(base(), null);
+    expect(m.find((c) => c.metric === '采集器')?.value).toBe('未取数');
+    expect(m.find((c) => c.metric === '最近备份')?.value).toBe('未取数');
   });
 });

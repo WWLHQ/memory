@@ -3,7 +3,7 @@
 //   数据真相 = 内核账本（桌面 Electron 下 = 主进程 FileStorage 持久库；浏览器降级 = 内存态，
 //   未写入过即空账本 → 诚实空态，绝不伪造数据）。
 //
-// 指标卡（12.1）诚实口径（阶段4-I / B8 跨模块接真；2026-11-15 用户批准 14→13 卡）：
+// 指标卡（12.1）诚实口径（阶段4-I / B8 跨模块接真；2026-11-15 用户批准 14→13；批次64 再补 7 卡 → 20）：
 //   · 时间窗口按规格 §12.1 真过滤：命中率 / payload p95 / 延迟 p99 = 1h，证据不足率 = 1d；
 //     历史审计缺 detail 字段的行**不计入分母**，不拿 0 / false 冒充已采集。
 //   · 命中率 = 1h 内「有命中条数(hits>0)」的召回占比（真实 detail.hits），不再是恒 100% 的调用成功率；
@@ -24,6 +24,7 @@ import type { AlertItem, MetricCard } from './types.ts';
 import type { RefineQueueSummary } from '../params/refineQueue.ts';
 import { agentOptionsFromLedger } from './options.ts';
 import { operationEntriesFromAudits, operationStatusFromAudits, type OperationEntry, type OperationStatus } from './operationState.ts';
+import { summarizeAgentUsage } from '../../core/memagent/agentUsage.ts';
 import { hostCall } from '../../desktop/hostBridge.ts';
 
 export type RealStorage = Pick<StorageBackend, 'listMemories' | 'queryAudit'>;
@@ -33,7 +34,7 @@ function getRealStorage(): RealStorage {
   return getKernelStorage();
 }
 
-/* ---------- 指标卡真实实算（12.1 五组 13 项；按规格时间窗口过滤；无口径 → 值位「未取数」） ---------- */
+/* ---------- 指标卡真实实算（12.1 八组 20 项；按规格时间窗口过滤；无口径 → 值位「未取数」） ---------- */
 
 const HOUR = 3600 * 1000;
 const DAY = 24 * HOUR;
@@ -112,7 +113,73 @@ export function applyMonitorStats(metrics: MetricCard[], stats: MonitorStats | n
   });
 }
 
-/** 从真实账本（记忆表 + 审计）+ 主进程补炼队列回执实算 13 张指标卡；now 可注入以便确定性测试 */
+/** 主进程运维态（采集器 + 最近备份）：取不到就是 null，界面显「暂无数据」，绝不猜 */
+export interface MonitorOps {
+  collector: { running: boolean; consecutiveFails: number; autoRetryStopped: boolean; lastAt: number | null } | null;
+  /** 是否真的读到了备份目录（false = 读不到，不能当成「没有备份」） */
+  backupOk: boolean;
+  /** 最近一次备份的毫秒时间戳；仅 backupOk=true 时有意义，null = 目录里一条备份都没有 */
+  lastBackupAt: number | null;
+}
+
+/**
+ * 用主进程运维态覆盖 2 张卡（采集器 / 最近备份）。ops 为 null（浏览器、主进程未就绪）时原样返回。
+ * 采集器口径：在跑且无连续失败 = 正常；已停止 / 自动重试已放弃 / 有连续失败 = 告警。
+ */
+export function applyMonitorOps(metrics: MetricCard[], ops: MonitorOps | null, now: number = Date.now()): MetricCard[] {
+  if (!ops) return metrics;
+  return metrics.map((m) => {
+    if (m.metric === '采集器') {
+      const c = ops.collector;
+      if (!c) return m;
+      if (!c.running) return { ...m, value: '已停止', level: 'warn' };
+      if (c.autoRetryStopped) return { ...m, value: '已停重试', level: 'warn' };
+      if (c.consecutiveFails > 0) return { ...m, value: `连续失败 ${c.consecutiveFails} 轮`, level: 'warn' };
+      return { ...m, value: '在跑', level: 'ok' };
+    }
+    if (m.metric === '最近备份') {
+      // 读不到备份目录 ≠ 没有备份：读不到保持「暂无数据」，只有真读到空目录才说「从未备份」。
+      if (!ops.backupOk) return m;
+      if (ops.lastBackupAt === null) return { ...m, value: '从未备份', level: 'warn' };
+      const days = Math.max(0, Math.floor((now - ops.lastBackupAt) / DAY));
+      return { ...m, value: days, level: days > 7 ? 'warn' : 'ok' };
+    }
+    return m;
+  });
+}
+
+/** 读主进程运维态；任一通道失败只让对应那项为 null（不因为备份读不到就把采集器也说成没数据） */
+async function loadMonitorOps(): Promise<MonitorOps> {
+  // 每个通道各自 try/catch：hostCall 在无宿主环境会同步抛，放进 Promise.allSettled 也接不住。
+  const safeCollector = async () => {
+    try {
+      return await hostCall<{ ok?: boolean; running?: boolean; consecutiveFails?: number; autoRetryStopped?: boolean; last?: { ts?: number } | null }>('collector:status', []);
+    } catch { return null; }
+  };
+  const safeBackup = async () => {
+    try { return await hostCall<{ items?: { time?: string }[] }>('backup:list', []); } catch { return null; }
+  };
+  const [col, bak] = await Promise.all([safeCollector(), safeBackup()]);
+  let collector: MonitorOps['collector'] = null;
+  if (col && typeof col.running === 'boolean') {
+    collector = {
+      running: col.running,
+      consecutiveFails: typeof col.consecutiveFails === 'number' ? col.consecutiveFails : 0,
+      autoRetryStopped: col.autoRetryStopped === true,
+      lastAt: typeof col.last?.ts === 'number' ? col.last.ts : null,
+    };
+  }
+  let lastBackupAt: number | null = null;
+  if (bak && Array.isArray(bak.items)) {
+    for (const it of bak.items) {
+      const t = typeof it?.time === 'string' ? Date.parse(it.time) : NaN;
+      if (Number.isFinite(t) && (lastBackupAt === null || t > lastBackupAt)) lastBackupAt = t;
+    }
+  }
+  return { collector, backupOk: bak !== null, lastBackupAt };
+}
+
+/** 从真实账本（记忆表 + 审计）+ 主进程补炼队列回执实算 20 张指标卡；now 可注入以便确定性测试 */
 export function metricsFromLedger(
   mems: Memory[], audits: AuditRecord[], now: number = Date.now(), refine: RefineQueueSummary | null = null,
 ): MetricCard[] {
@@ -146,6 +213,25 @@ export function metricsFromLedger(
   const overdue7d = mems.filter((m) => m.conflict_id && m.decay_class !== 'archived' && m.decay_class !== 'dormant'
     && now - (m.created_at ?? now) > 7 * DAY).length;
 
+  /* ---------- 批次64：账本里已有、但页面上没人看的 5 个真实信号 ---------- */
+
+  // ① 首调先查记忆率(7d)：复用内核 agentUsage 的同一份口径（分母只算带 Mcp-Session-Id 的可靠首调），
+  //    不再在渲染层抄第二套算法；没可靠会话 → null（显「暂无数据」，绝不拿 0% 冒充「全都不合规」）。
+  const usage = summarizeAgentUsage(audits, now, 7);
+  const firstRecallCompliance = usage.totals.first_call_compliance === null
+    ? null
+    : Math.round(usage.totals.first_call_compliance * 100);
+  // ② MCP 调用(24h)：Agent 侧真实调用量（读+写），0 是真实值（今天没人用 ≠ 没采集）。
+  const mcpCalls24h = audits.filter((a) => a.action === 'mcp_call' && within(a, DAY, now)).length;
+  // ③ 质量门拦截(24h)：write 审计里 action='filtered_l0_to_l1' 的行——正常过滤，不是失败（与写入率分母已剥离）。
+  const qualityFiltered24h = audits.filter((a) => a.action === 'write' && within(a, DAY, now)
+    && (a.detail as { action?: unknown } | undefined)?.action === 'filtered_l0_to_l1').length;
+  // ④ 定时任务失败(24h)：cron 真执行记录里 status='failed'（skipped 是「条件不满足主动跳过」，不算失败）。
+  const scheduleFailed24h = audits.filter((a) => a.action === 'schedule_run' && within(a, DAY, now)
+    && (a.detail as { status?: unknown } | undefined)?.status === 'failed').length;
+  // ⑤ 解锁失败(24h)：l0_auth_fail（密码错）+ l0_auth_deny（越权拒绝），安全侧真实计数。
+  const unlockFailed24h = audits.filter((a) => (a.action === 'l0_auth_fail' || a.action === 'l0_auth_deny') && within(a, DAY, now)).length;
+
   // 级别判定（诚实：有真实值才判；未采集 = null → ok，不伪造告警）
   const levelOf = (v: number | null, warn: (n: number) => boolean, crit: (n: number) => boolean): MetricCard['level'] => {
     if (v === null) return 'ok';
@@ -163,20 +249,30 @@ export function metricsFromLedger(
     { group: '检索性能(1h)', metric: 'pipeline_llm_tokens p95', value: 0, threshold: '>3000', level: 'ok', jump: '' },
     { group: '检索性能(1h)', metric: '延迟 p99', value: latencyP99 ?? '未取数', unit: 's', threshold: '>2s ⚠️', level: levelOf(latencyP99, (n) => n > 2, () => false), jump: '' },
     { group: '检索性能(1h)', metric: '极简证据不足率(1d)', value: evidenceThinRate, unit: evidenceThinRate === '无极简' ? '' : '%', threshold: '>20% ⚠️', level: evidenceThinRate === '无极简' ? 'ok' : levelOf(evidenceThinRate, (n) => n > 20, () => false), jump: '2.4.3' },
+    // Agent 使用：账本里 mcp_call 审计的真实聚合（读+写都算），看「Agent 到底有没有在用、有没有按规矩先查」。
+    { group: 'Agent 使用(7d)', metric: '首调先查记忆率(7d)', value: firstRecallCompliance ?? '未取数', unit: firstRecallCompliance === null ? '' : '%', threshold: '<80% ⚠️', level: levelOf(firstRecallCompliance, (n) => n < 80, () => false), jump: 'P10' },
+    { group: 'Agent 使用(7d)', metric: 'MCP 调用(24h)', value: mcpCalls24h, unit: '次', threshold: '只看趋势', level: 'ok', jump: 'P10' },
     // Agent 健康：值位由主进程 monitor:stats 覆盖；无主进程/无样本 → 未取数。
     // 单位不在此写死（旧写法 unit:'' 会让 MetricGrid 的 `c.unit ?? t.unit` 不回退真源，导致「100」缺 %）；
     // 留空 undefined → 回退 recallLabels 的 '%'；空态走「暂无数据」分支本就不拼单位。
     { group: 'Agent 健康', metric: '连通成功率(5min)', value: '未取数', threshold: '<95% ⚠️', level: 'ok', jump: 'P10' },
     { group: 'Agent 健康', metric: '熔断状态', value: '未取数', threshold: 'OPEN 🔴', level: 'ok', jump: 'P10' },
     { group: 'Agent 健康', metric: '平均延迟', value: '未取数', unit: 's', threshold: '>5s ⚠️', level: 'ok', jump: 'P10' },
+    // 采集与备份：值位由主进程 collector:status / backup:list 覆盖；无主进程 → 未取数。
+    { group: '采集与备份', metric: '采集器', value: '未取数', threshold: '停止/连续失败 ⚠️', level: 'ok', jump: 'P9' },
+    { group: '采集与备份', metric: '最近备份', value: '未取数', unit: '天', threshold: '>7 天 ⚠️', level: 'ok', jump: 'S3' },
     // 冷存储：写入率 / 校验异常由主进程 monitor:stats 覆盖；无主进程/无样本 → 未取数。
     { group: '冷存储', metric: '写入成功率', value: '未取数', unit: '%', threshold: '<99.5% ⚠️', level: 'ok', jump: '5.4' },
     { group: '冷存储', metric: '哈希校验失败(24h)', value: '未取数', threshold: '>0 🔴', level: 'ok', jump: '5.4' },
+    // 质量门拦截是设计正确的主动过滤（不是写入失败），只做趋势；不要把数量当告警。
+    { group: '冷存储', metric: '质量门拦截(24h)', value: qualityFiltered24h, unit: '条', threshold: '正常过滤', level: 'ok', jump: '5.4' },
+    // 安全：密码错/越权拒绝的真实计数（安全页有明细，这里只看苗头）
+    { group: '安全', metric: '解锁失败(24h)', value: unlockFailed24h, unit: '次', threshold: '>3 次 ⚠️', level: levelOf(unlockFailed24h, (n) => n > 3, () => false), jump: 'S2' },
     // 人工审核（真实账本实算；真实 0 显示 0，不冒充空态）
     { group: '人工审核', metric: '待裁决', value: pendingReview, threshold: '>20 ⚠️', level: levelOf(pendingReview, (n) => n > 20, (n) => n > 50), jump: 'P7' },
     { group: '人工审核', metric: '超期 7d', value: overdue7d, threshold: '>0 ⚠️', level: levelOf(overdue7d, (n) => n > 0, () => false), jump: 'P7' },
     // 精炼队列：四项计数来自主进程 refine:state 真回执；无宿主 / 无回执 → 整卡「未取数」，不猜数字。
-    // 2026-11-15 用户要求：精炼队列置底。
+    // 2026-11-15 用户要求：精炼队列置底（组内第一张，组整体仍是最末一组）。
     {
       group: '队列', metric: '精炼队列',
       value: refine ? refine.pending : '未取数',
@@ -185,6 +281,8 @@ export function metricsFromLedger(
       level: levelOf(refine?.pending ?? null, (n) => n > 1000, () => false),
       jump: 'P10(5.3)',
     },
+    // 定时任务失败：skipped 是「条件不满足主动跳过」（如样本不足、同步未接），不算失败，只有 failed 计入。
+    { group: '队列', metric: '定时任务失败(24h)', value: scheduleFailed24h, unit: '次', threshold: '>0 ⚠️', level: levelOf(scheduleFailed24h, (n) => n > 0, () => false), jump: 'P9' },
   ];
 }
 
@@ -232,19 +330,21 @@ export async function loadRealMonitorData(): Promise<RealMonitor> {
   const storage = getRealStorage();
   // 动态导入：纯函数 metricsFromLedger 的单测不必加载宿主桥；浏览器模式会诚实回 ok:false → 队列卡「暂无数据」。
   const { refineQueueState } = await import('../params/refineQueue.ts');
-  const [mems, audits, alerts, refine, mon] = await Promise.all([
+  const [mems, audits, alerts, refine, mon, ops] = await Promise.all([
     storage.listMemories({}),
     storage.queryAudit({}),
     realLoadAlerts(),
     refineQueueState(),
     loadMonitorStats(),
+    loadMonitorOps(),
   ]);
   const refineSummary: RefineQueueSummary | null = refine.ok ? refine.view?.summary ?? null : null;
+  const now = Date.now();
   return {
     available: mems.length > 0 || audits.length > 0,
     memCount: mems.length,
     auditCount: audits.length,
-    metrics: applyMonitorStats(metricsFromLedger(mems, audits, Date.now(), refineSummary), mon),
+    metrics: applyMonitorOps(applyMonitorStats(metricsFromLedger(mems, audits, now, refineSummary), mon), ops, now),
     alerts,
     // 批次48 A25：选项只来自真实账本，空账本只留「全部」
     agentOptions: agentOptionsFromLedger(alerts, mems.map((m) => m.created_by_agent)),

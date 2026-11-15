@@ -22,7 +22,7 @@ function recall(ts: number, o: { client?: string; saved?: number; thin?: boolean
   } as AuditRecord;
 }
 
-function call(ts: number, agent: string, o: { reliable?: boolean; first?: boolean; recalled?: boolean } = {}): AuditRecord {
+function call(ts: number, agent: string, o: { reliable?: boolean; first?: boolean; recalled?: boolean; tool?: string } = {}): AuditRecord {
   return {
     request_id: `req_c_${ts}`, action: 'mcp_call', agent, ts,
     detail: {
@@ -30,7 +30,7 @@ function call(ts: number, agent: string, o: { reliable?: boolean; first?: boolea
       reliable: o.reliable !== false,
       first_call: o.first === true,
       recalled_before: o.recalled === true,
-      tool: 'recall_memory',
+      tool: o.tool ?? 'recall_memory',
     },
   } as AuditRecord;
 }
@@ -51,7 +51,8 @@ describe('summarizeAgentUsage（C2：每个数字与审计逐条对得上）', (
     recall(NOW - 40 * DAY, { client: 'qoder', saved: 9999 }), // 窗外，不计
     call(NOW - 500, 'qoder', { first: true, recalled: true }),
     call(NOW - 600, 'qoder', { first: false }),
-    call(NOW - 700, 'cursor', { first: true, recalled: false }),
+    // 2026-11-15：首调合规改按 tool 判定（recalled_before 在首调前必然 false，旧口径恒 0%）
+    call(NOW - 700, 'cursor', { first: true, tool: 'write_memory' }),
     call(NOW - 800, 'cursor', { reliable: false, first: true, recalled: true }), // 不可靠会话不进分母
     op(NOW - 900, 'reject'),
     op(NOW - 950, 'confirm'),
@@ -77,9 +78,19 @@ describe('summarizeAgentUsage（C2：每个数字与审计逐条对得上）', (
 
   it('首调合规分母只算可靠会话（UA 兜底会话不得稀释合规率）', () => {
     const u = summarizeAgentUsage(audits, NOW, 30);
-    // qoder：1 次可靠首调且命中 → 1/1；cursor：1 次可靠首调未命中 + 1 次不可靠首调（不计）→ 0/1
+    // qoder：1 次可靠首调、tool=recall_memory → 1/1；cursor：1 次可靠首调但是 write_memory + 1 次不可靠首调（不计）→ 0/1
     expect(u.totals).toMatchObject({ first_call_recall: 1, reliable_first_calls: 2, first_call_compliance: 0.5 });
     expect(u.agents.find((a) => a.client === 'qoder')).toMatchObject({ first_call_recall: 1, reliable_first_calls: 1 });
+  });
+
+  it('首调合规按 tool 判定：recalled_before 在首调前必然 false，不得再拿它当判据（旧口径恒 0%）', () => {
+    // 真实账本形态：可靠首调、tool=recall_memory、recalled_before=false（首调前当然没召回过）
+    const real = [call(NOW - 1000, 'workbuddy', { first: true, recalled: false })];
+    const u = summarizeAgentUsage(real, NOW, 7);
+    expect(u.totals).toMatchObject({ first_call_recall: 1, reliable_first_calls: 1, first_call_compliance: 1 });
+    // 反向：首调不是 recall_memory 就不算合规，即便 recalled_before 为 true
+    const bad = [call(NOW - 1000, 'workbuddy', { first: true, recalled: true, tool: 'list_projects' })];
+    expect(summarizeAgentUsage(bad, NOW, 7).totals.first_call_compliance).toBe(0);
   });
 
   it('verdict 只到项目级，且如实声明不可按 Agent 拆分', () => {

@@ -1,10 +1,10 @@
-// 监控仪表盘（REQ-006 / P6）· 13 卡分 5 组 + 告警时间轴（左轴级别色）+ 三档过滤
-// 数据真相 = 内核账本 + 主进程补炼队列：指标实算（没有真实口径的卡不显示数字、值位说「暂无数据」，不冒充读数）；
+// 监控仪表盘（REQ-006 / P6）· 20 卡分 8 组 + 告警时间轴（左轴级别色）+ 三档过滤
+// 数据真相 = 内核账本 + 主进程补炼队列/采集器/备份：指标实算（没有真实口径的卡不显示数字、值位说「暂无数据」，不冒充读数）；
 // 告警 = 真实 monitor_alert 审计只读回放，点击跳到真实审计 / 记忆深链（不是假跳）。
 // ⚠ 内核读不到（批次25 P0-7）→ 三态加载：显示内核原因 + 重试，绝不渲染成「账本为空」。
 import { useState } from 'react';
 import { ALL_AGENTS_OPTION } from './options.ts';
-import { filterAlerts } from './logic.ts';
+import { filterAlerts, groupMetrics } from './logic.ts';
 import { operationLabel, summarizeOperations } from './operationState.ts';
 import { loadRealMonitorData, type RealMonitor } from './useMonitorReal.ts';
 import { useMonitorMirror } from './useMonitorMirror.ts';
@@ -22,12 +22,16 @@ export function MonitorPage({ load = loadRealMonitorData }: { load?: () => Promi
   const alertsAll: AlertItem[] = real?.alerts ?? [];
   const alerts = filterAlerts(alertsAll, filter);
   const cards = real?.metrics ?? [];
+  // 卡数/组数写死在文案里会随增卡漂移（13→20 就漂过一次），这里按真实卡片算。
+  const groupCount = groupMetrics(cards).length;
 
   const head = (
     <div className="p0-hd">
       <h2>监控仪表盘</h2>
       <span className="p0-tag">本机运行状况</span>
-      <span className="p0-sub">13 项监控指标，分 5 组；下方是告警时间线</span>
+      <span className="p0-sub">
+        {cards.length > 0 ? `${cards.length} 项监控指标，分 ${groupCount} 组` : '监控指标'}；下方是告警时间线
+      </span>
       <span className="p0-right">
         {real ? <span className="p0-tag">本机已有 {real.memCount} 条记忆 · {real.auditCount} 条操作记录</span> : null}
         <span className="p0-tag info">只显示真实数据</span>

@@ -23,7 +23,7 @@ export const CLIENT_UNKNOWN = '未标识';
 export const AGENT_USAGE_NOTE =
   '口径：全部来自审计逐条计数（recall / mcp_call / memory_op），非实时、不含本轮未落审计的调用；'
   + 'recalls / saved_tokens / evidence_thin 取自 recall 审计的 detail（client 为当时上报值，缺失归「未标识」）；'
-  + 'calls / 首调合规取自 mcp_call 审计（记录级 agent 字段；首调合规率分母只算带 Mcp-Session-Id 的可靠会话）；'
+  + 'calls / 首调合规取自 mcp_call 审计（记录级 agent 字段；首调合规 = 会话第一次 tools/call 就是 recall_memory，分母只算带 Mcp-Session-Id 的可靠会话）；'
   + 'verdict 分布取自 memory_op 审计，该审计无 client 字段，故只能到项目级、不可按 Agent 拆分；'
   + '本聚合只读，不写审计、不改记忆。';
 
@@ -101,11 +101,15 @@ export function summarizeAgentUsage(
     if (a.action === 'mcp_call') {
       const r = row(typeof a.agent === 'string' ? a.agent : '');
       r.calls += 1;
-      const d = a.detail as { reliable?: unknown; first_call?: unknown; recalled_before?: unknown } | undefined;
+      const d = a.detail as { reliable?: unknown; first_call?: unknown; tool?: unknown } | undefined;
       // 分母只算可靠会话（带 Mcp-Session-Id）；UA 兜底会话不可靠，进分母会把合规率稀释成假象
       if (d?.reliable === true && d?.first_call === true) {
         r.reliable_first_calls += 1;
-        if (d?.recalled_before === true) r.first_call_recall += 1;
+        // 合规 = 会话第一次 tools/call 就是 recall_memory。
+        // 2026-11-15 修正：原判据用 `recalled_before === true`，但该字段语义是「本次调用**之前**已召回过」
+        // （见 mcpHttp.ts `recalled = recalledBySession.get(sid)`，在首调前写入），首调时必然 false
+        // → 旧口径结构上恒 0%，真实账本 196 次可靠首调算出来 0%。现改用 tool 判定（同一份审计里就有）。
+        if (d?.tool === 'recall_memory') r.first_call_recall += 1;
       }
       continue;
     }

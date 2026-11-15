@@ -5,9 +5,24 @@
 ## 一句话定位
 本工作区 = **工作法体系** + 真实项目「**多 Agent 记忆助手**」（需求规格与原型已结构化并跑通首个功能）。
 
-## 当前状态（2026-11-15 20:28 压缩快照 · 优先于下方历史段落）
+## 当前状态（2026-11-15 20:50 压缩快照 · 优先于下方历史段落）
 
-### 批次63 + 并行会话 · 已提交推送（cf24de5 / origin/main 同步 · 工作区干净）
+### 批次64 · 监控页审查补卡（13 → 20 卡 / 5 → 8 组）· 用户已实测 · 已跑 CI · 提交中
+
+- **用户口径**：「重新审查程序，还缺哪些监控的直接加到监控页」→ 直接实施，不等方案确认。
+- **选卡方法**（不拍脑袋）：先统计真实 `audit.jsonl`（28864 行）的 action 分布，只补**账本/主进程里已有真实数据、页面上此前没人看**的信号；真实账本里零命中的事件（`recall_breach` / `evidence_thin` / `sync_fail` / `llm_fallback` / `rerank_fallback` / `login_fail`）一律不加卡——永远为 0 的指标只是噪声。
+- **新增 7 张（真实值，20:40 现查）**：首查率 `95%(187/196)`（7d，含 reliability 过滤）、调用量 `69 次/24h`、质量拦截 `31 条/24h`、定时失败 `0 次`（另有 skipped 1 次不计）、解锁失败 `0 次`、采集器（`collector:status`：在跑/已停止/已停重试/连续失败 N 轮）、最近备份（`backup:list` 最新 mtime，本机备份是**目录形态**，`Get-ChildItem -File` 会误判为空）。
+- **审查发现真 bug（内核 `agentUsage.summarizeAgentUsage`）**：首调合规原判据用 `detail.recalled_before === true`，但该字段语义是「本次调用**之前**已召回过」（`mcpHttp.ts:503` 在首调前写入），**首调时必然 false → 合规率结构上恒 0%**；真实账本 196 次可靠首调算出 0%，而其中 187 次首调就是 `recall_memory`。改为按 `detail.tool === 'recall_memory'` 判定，真实值 95%；`gc_report` 的 agent_usage 同步修正（此前一直是错的，因页面没人看未暴露）。
+- **分组顺序**：检索表现 → Agent 使用 → 连接状况 → 采集备份 → 落盘校验 → 安全 → 人工裁决 → 后台任务（原「队列」组显示名改「后台任务」，因同时装精炼队列与定时任务失败；内部键不变）。
+- **门禁**：`test:gate` **278 文件 / 3348 例 / 0 失败**；typecheck 0；oxlint 0w0e；no-demo / validate(0 失败 144 既有 WARN) / generate 同步；index 重建并 check（400 源码 / 148 文档）。
+- **C 变异 2 次**：① 内核判据改回 `recalled_before` → 2 例精确红灯（内核 + 监控卡）；② `status === 'failed'` 改 `!== 'ok'` → 1 例红（`expected 2 to be 1`）。还原后 `agentUsage.ts` `1ADCB80D…`、`useMonitorReal.ts` `7B10E4B0…` 与基线一致，63 例复绿。
+- **打包（第四轮）**：EXE **128,049,817 B / 20:47:18 / SHA256 `DB77DC16B9D4C7B3BB263717B2162A63322D3E7F3302C5A0359B521BA3DA482F`**；`app.asar` 1,469,931 B @20:46:43；`main.cjs` 产物=源码 EQUAL=True；包内新卡字面量与组序索引递增（896930 < 897529 < 898042 < 898998）。
+- **在途（非本轮）**：`src/electron/clientProcess.ts` + 测试、`src/web/AgentOnboard/McpClientsPanel.tsx` + 测试由并行会话改动，提交时只能 stage 本轮 17 项。
+- **CI 复核（22:33–22:36，提交前现跑）**：`verify:fast` 首跑 **3 例红**，全是 `personalInvoke.test.ts` / `personal.test.ts` 的 `Test timed out in 5000ms`（PgSyncHub 重初始化在并行分片下超 5s，非本轮代码相关）；单独复跑这两文件 **31 例 3.44s 全绿**，整链路二跑 **278 文件 / 3348 例 / 0 失败 / EXIT=0**，覆盖 80.5%–72.68%–76.36%–83.81%。属既有 `verify:fast` 并行脆弱（同 `d3fbda6` 那类），本轮未改这些测试，如实记录不掩盖。
+- **其余 CI**：`validate_project.py` 检查 4 项 / 失败 0 / 警告 144（既有）；`generate.py --check` BUILD 与 specs 同步；`build:electron` `main.cjs` / `preload.cjs` / `recall-hard/force_recall.mjs` 均 built OK（`import.meta` WARNING 为既有）。
+- **提交范围**：只 stage 本轮 18 项；`specs/reports/recall-snapshots.jsonl`（本会话 recall 工具自写的数据行）与并行会话 4 项一律不入本次提交。
+
+### 批次63 + 并行会话 · 已提交推送（cf24de5 / origin/main 同步）
 
 - **提交**：`cf24de5 feat(monitor): 监控仪表盘人话化 + MCP 客户端开关状态三处落点` —— **49 文件 / +2558 / −213**，按用户拍板方案 A（并行会话改动与 `main.ts`/`ipcChannels.ts`/`hostBridge.ts`/`preload.ts` 行级交织，无法按文件拆分）一次性提交，提交信息分列两块。推送 `ebe1d3c..cf24de5 main -> main` EXIT=0，`main...origin/main` 已同步、`git status` 0 项。
 - **提交前确认并行会话收工**：观察 45 秒 `src/**` 零写入、`git status` 状态行恒为 49 → 判定收工。

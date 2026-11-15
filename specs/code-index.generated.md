@@ -42,7 +42,7 @@
 | 文件 | 行数 | 摘要 | 导出 |
 |---|---|---|---|
 | [src/core/memagent/agent.ts](src/core/memagent/agent.ts) | 862 | createMemAgent（§1 入口）：内核装配 + 9 核心API + 全动作审计（§3.2） | createMemAgent(fn) |
-| [src/core/memagent/agentUsage.ts](src/core/memagent/agentUsage.ts) | 167 | 批次61 GAP-3：Agent 侧 × 桌面侧双向可观测。 | summarizeAgentUsage(fn), readAgentUsage(fn), CLIENT_UNKNOWN(const), AGENT_USAGE_NOTE(const), GC_CONCURRENCY_NOTE(const), AgentUsageRow(type), AgentUsageSummary(type), AgentUsageRead(type) |
+| [src/core/memagent/agentUsage.ts](src/core/memagent/agentUsage.ts) | 171 | 批次61 GAP-3：Agent 侧 × 桌面侧双向可观测。 | summarizeAgentUsage(fn), readAgentUsage(fn), CLIENT_UNKNOWN(const), AGENT_USAGE_NOTE(const), GC_CONCURRENCY_NOTE(const), AgentUsageRow(type), AgentUsageSummary(type), AgentUsageRead(type) |
 | [src/core/memagent/auditLog.ts](src/core/memagent/auditLog.ts) | 398 | 内核审计账本（批次41-A）：从 memories.db.json 里搬出来，独立成追加式 JSONL。 | AUDIT_FILE_NAME(const), AUDIT_ACTIVE_MAX_BYTES(const), AuditLogCorruptError(class), AuditLogLockedError(class), FileAuditLog(class), AuditFilter(type), AuditLogStats(type), FileAuditLogOptions(type) |
 | [src/core/memagent/collectDaemon.ts](src/core/memagent/collectDaemon.ts) | 161 | 批次44-A：独立采集守护（headless）——daemon 只做「扫描 + 指纹去重 + 暂存分片」，**永不碰账本**。 | runDaemonRound(fn), drainCollectPending(fn), DAEMON_DIR_NAME(const), PENDING_DIR_NAME(const), DaemonState(type), DaemonRoundReport(type), DrainReport(type) |
 | [src/core/memagent/conflict.ts](src/core/memagent/conflict.ts) | 256 | 批次46-3：内核冲突裁决原子 API（方案 §3 / §9.7 + P7 hold） | coreListConflicts(fn), coreResolveConflict(fn), CONFLICT_NOTE(const), CONFLICT_VERDICTS(const) |
@@ -123,7 +123,7 @@
 | [src/electron/agentDetect.ts](src/electron/agentDetect.ts) | 322 | 本机 Agent 检测 · 后续扩展（2026-10-24）· 主进程 node 层（仅 Electron 使用） | detectLocalAgents(fn), detectCliAgents(fn), hostAgentConfig(fn), LocalAgentFound(type), AgentConfigSuggestion(type) |
 | [src/electron/agentProbe.ts](src/electron/agentProbe.ts) | 226 | 主进程 Agent 健康定时拨测 + 真实熔断状态机 + 慢计算缓存（原子任务 B）。 | nextCircuitState(fn), classifyWriteRows(fn), getMonitorStats(fn), initAgentProbe(fn), MonitorStats(type), CircuitState(type) |
 | [src/electron/backupFiles.ts](src/electron/backupFiles.ts) | 153 | 批次37-D：双库备份的文件配方（纯函数，主进程与单测共用同一真源）。 | groupOfKind(fn), backupTargetDir(fn), backupTargetDirs(fn), planBackupFiles(fn), kindOfBackupName(fn), tsOfBackupName(fn), isRecipeBackupName(fn), selectBackupsToDelete(fn), sortBackupsNewestFirst(fn), BACKUP_PREFIX(const), BACKUP_EXT(const), BACKUP_KINDS(const), BACKUP_GROUP(const), BackupSourceFile(type), BackupDirConfig(type), BackupKind(type), BackupGroup(type) |
-| [src/electron/clientProcess.ts](src/electron/clientProcess.ts) | 55 | 客户端软件运行态探测（T6）：只对「有稳定桌面进程」的客户端判断是否在运行。 | matchRunningClients(fn), listProcessNames(fn), probeRunningClients(fn), CLIENT_PROCESS_NAMES(const) |
+| [src/electron/clientProcess.ts](src/electron/clientProcess.ts) | 56 | 客户端软件运行态探测（T6）：按真实进程可执行文件名判断客户端是否在运行。 | matchRunningClients(fn), listProcessNames(fn), probeRunningClients(fn), CLIENT_PROCESS_NAMES(const) |
 | [src/electron/dataRoot.ts](src/electron/dataRoot.ts) | 449 | 数据根目录（批次6）：记忆库、采集游标、日志、MCP 令牌、备份配置等全部持久数据 | defaultDataRoot(fn), dataRootPointerPath(fn), readDataRootPointer(fn), writeDataRootPointer(fn), clearDataRootMigrateFrom(fn), resolveLibraryPaths(fn), isSetupComplete(fn), wizardRequired(fn), hasLibraryDirs(fn), libraryFileState(fn), validateDataRootPath(fn), samePath(fn), ensureDirWritable(fn), hasAnyData(fn), summarizeDataDir(fn), detectDataRoots(fn), migrateDataRoot(fn), adoptLibraryDirIntoPlace(fn), DATA_ROOT_DIR_NAME(const), DATA_ROOT_POINTER_NAME(const), DATA_ROOT_POINTER_VERSION(const), DATA_ROOT_MIGRATE_FILES(const), DATA_ROOT_MIGRATE_DIRS(const), LEDGER_FILE_NAME(const), L0_FILE_NAME(const), L0_KEYRING_FILE_NAME(const), DataRootPointer(type), DataRootSummary(type), DataRootMigration(type), LibraryPaths(type), DataRootPointerRead(type) |
 | [src/electron/hostScan.ts](src/electron/hostScan.ts) | 163 | 宿主真扫 · node IO 层（仅 Electron 主进程使用）： | parseTasklistCsv(fn), parseWmicJson(fn), listProcessNames(fn), detectMcpEntries(fn), detectConfigFiles(fn), scanHost(fn) |
 | [src/electron/ipcChannels.ts](src/electron/ipcChannels.ts) | 212 | preload 暴露的 IPC channel 清单（唯一真源）。 | missingChannels(fn), formatBootFailure(fn), handleBootFailure(fn), IPC(const), SHELL_SHORTCUT_CHANNEL(const), PRELOAD_CHANNELS(const), BootFailureDeps(type), ShellShortcut(type) |
@@ -186,7 +186,7 @@
 | [src/web/AgentOnboard/Gains.tsx](src/web/AgentOnboard/Gains.tsx) | 25 | 效果证据 · 用户可感知的「省」与「快」（19.1 / 9.x / 2.4.x / 19.8 反代理） | Gains(fn) |
 | [src/web/AgentOnboard/IsolationConfig.tsx](src/web/AgentOnboard/IsolationConfig.tsx) | 34 | 隔离粒度配置行（规格 19.4 · R1 project_id 共享 / user_id 偏好跨项目） | IsolationConfig(fn) |
 | [src/web/AgentOnboard/KeyMgmt.tsx](src/web/AgentOnboard/KeyMgmt.tsx) | 21 | 密钥管理行（规格 T7 / §4 · R5 恒脱敏不回显 / R6 轮换宽限 24h / 超 90 天告警） | KeyMgmt(fn) |
-| [src/web/AgentOnboard/McpClientsPanel.tsx](src/web/AgentOnboard/McpClientsPanel.tsx) | 534 | MCP 客户端接入面板（批次15 建 / 批次21 交互收敛 / 批次23 一键适配全部 + 逐客户端接通指引）： | McpClientsPanel(fn) |
+| [src/web/AgentOnboard/McpClientsPanel.tsx](src/web/AgentOnboard/McpClientsPanel.tsx) | 541 | MCP 客户端接入面板（批次15 建 / 批次21 交互收敛 / 批次23 一键适配全部 + 逐客户端接通指引）： | McpClientsPanel(fn) |
 | [src/web/AgentOnboard/McpToolConfig.tsx](src/web/AgentOnboard/McpToolConfig.tsx) | 61 | MCP 工具配置行（规格 T5 / 19.5 · 须带 project_id） | toolRef(fn), McpToolConfig(fn) |
 | [src/web/AgentOnboard/OneClickOnboard.tsx](src/web/AgentOnboard/OneClickOnboard.tsx) | 248 | 一键接入本机 Agent（规格 T4 / AC-003.4 / 19.9 · 扫→分→绑→验 四段进度 + 自动绑定 + 可撤销） | OneClickOnboard(fn) |
 | [src/web/AgentOnboard/TestPanel.tsx](src/web/AgentOnboard/TestPanel.tsx) | 70 | 接入测试面板（规格 T8 / AC-003.8 · R7 必记 request_id · 注入预览） | TestPanel(fn), TestEvidence(type) |
@@ -255,7 +255,7 @@
 | [src/web/growth/evolutionTimeline.ts](src/web/growth/evolutionTimeline.ts) | 243 | M4（收尾）：进化时间线 + 参数漂移仪表 的纯数据层。 | evolutionTimelineFromLedger(fn), rollbackStateOf(fn), driftRows(fn), recallDrift(fn), dedupDrift(fn), thresholdDrift(fn), RECALL_LABELS(const), DEDUP_LABELS(const), THRESHOLD_LABELS(const), EvolutionTimelineEntry(type), RollbackStateView(type), DriftRow(type), TimelineDecision(type), RollbackState(type) |
 | [src/web/growth/growthEntry.tsx](src/web/growth/growthEntry.tsx) | 11 | 自我净化与生长页（REQ-009 / P14）入口 | — |
 | [src/web/growth/logic.ts](src/web/growth/logic.ts) | 139 | P14 纯逻辑（T2）：五维加权 / 逐层阈值 / 短路嫁接 / 优化评估 / Δ 收益 / 调度校验 / 审计 | weightedScore(fn), layerThresholdOf(fn), isDuplicate(fn), validateWeights(fn), validateThresholds(fn), shortCircuitPath(fn), evaluateOptimizations(fn), growthDelta(fn), appendTunedPoint(fn), validateSchedule(fn), auditOptimization(fn) |
-| [src/web/growth/recallLabels.ts](src/web/growth/recallLabels.ts) | 184 | 全站 UI「人话名」唯一真源（2026-11-14 用户硬性要求：UI 不出原始字段名 / JSON / 英文枚举）。 | fmtRecallWeights(fn), monitorText(fn), monitorGroupText(fn), monitorValueText(fn), monitorMetricKeys(fn), RECALL_KEY_LABEL(const), MONITOR_METRIC_TEXT(const), MONITOR_GROUP_TEXT(const), MonitorText(type) |
+| [src/web/growth/recallLabels.ts](src/web/growth/recallLabels.ts) | 238 | 全站 UI「人话名」唯一真源（2026-11-14 用户硬性要求：UI 不出原始字段名 / JSON / 英文枚举）。 | fmtRecallWeights(fn), monitorText(fn), monitorGroupText(fn), monitorValueText(fn), monitorMetricKeys(fn), RECALL_KEY_LABEL(const), MONITOR_METRIC_TEXT(const), MONITOR_GROUP_TEXT(const), MonitorText(type) |
 | [src/web/growth/spec.ts](src/web/growth/spec.ts) | 41 | 自我净化与生长页规格常量（非演示数据）：五维默认权重 / 逐层阈值 / 标签 / 调度。 | DEFAULT_WEIGHTS(const), DEFAULT_THRESHOLDS(const), DIM_LABELS(const), LAYERS(const), OPT_CONDITIONS(const), DEFAULT_SCHEDULE(const) |
 | [src/web/growth/types.ts](src/web/growth/types.ts) | 187 | P14 自我净化与生长页（REQ-009 6.1/6.2/7.1/7.2/13.3）数据模型 | DedupSample(type), ShortCircuitStep(type), GrowthMetrics(type), OptimizationItem(type), ScheduleItem(type), ScheduleRunInfo(type), RegressionOutcome(type), RegressionRecord(type), GrowthReceipt(type), DeltaPoint(type), RecallSuggestionView(type), FeedbackSignalView(type), GrowthAuditEntry(type), OptState(type), DeltaMetric(type) |
 | [src/web/growth/useGrowthMirror.ts](src/web/growth/useGrowthMirror.ts) | 11 | 自我净化与生长页后端镜像：growth_op 动作审计上抛（G6 fire-and-forget）。 | useGrowthMirror(fn) |
@@ -322,8 +322,8 @@
 | [src/web/models/types.ts](src/web/models/types.ts) | 71 | P13 大模型配置页（REQ-009 13.2 / 19.8）数据模型 | VectorModelInfo(type), UsageConfig(type), ProxySource(type), ProxyCallAuditEntry(type), ModelConfigAuditEntry(type), VectorModelKey(type), LlmUsage(type), ProxyTier(type), ProxySelectMode(type), ProxyAuditEntry(type) |
 | [src/web/models/useToast.tsx](src/web/models/useToast.tsx) | 13 | — | useToast(fn) |
 | [src/web/monitor/AlertTimeline.tsx](src/web/monitor/AlertTimeline.tsx) | 74 | P6-T3 告警时间线（12.2） | AlertTimeline(fn) |
-| [src/web/monitor/MetricGrid.tsx](src/web/monitor/MetricGrid.tsx) | 56 | P6-T3 指标卡网格（12.1：5 组 13 卡） | MetricGrid(fn) |
-| [src/web/monitor/MonitorPage.tsx](src/web/monitor/MonitorPage.tsx) | 143 | 监控仪表盘（REQ-006 / P6）· 13 卡分 5 组 + 告警时间轴（左轴级别色）+ 三档过滤 | MonitorPage(fn) |
+| [src/web/monitor/MetricGrid.tsx](src/web/monitor/MetricGrid.tsx) | 56 | P6-T3 指标卡网格（12.1：8 组 20 卡） | MetricGrid(fn) |
+| [src/web/monitor/MonitorPage.tsx](src/web/monitor/MonitorPage.tsx) | 147 | 监控仪表盘（REQ-006 / P6）· 20 卡分 8 组 + 告警时间轴（左轴级别色）+ 三档过滤 | MonitorPage(fn) |
 | [src/web/monitor/coreMonitor.ts](src/web/monitor/coreMonitor.ts) | 39 | 监控仪表盘（REQ-006 / P6）接真内核：告警时间线读真实账本（action='monitor_alert'，只读回放，不再灌种子）。 | coreLoadAlerts(fn), coreRaiseAlert(fn) |
 | [src/web/monitor/logic.ts](src/web/monitor/logic.ts) | 47 | 监控仪表盘（REQ-006 / P6）纯逻辑层 | evalLevel(fn), inWindow(fn), filterAlerts(fn), groupMetrics(fn), percentile(fn), levelBadge(fn) |
 | [src/web/monitor/monitorEntry.tsx](src/web/monitor/monitorEntry.tsx) | 11 | 监控仪表盘（REQ-006 / P6）入口（T1 壳） | — |
@@ -331,7 +331,7 @@
 | [src/web/monitor/options.ts](src/web/monitor/options.ts) | 28 | 监控页宿主 Agent 筛选选项（批次48 A25：只由真实账本派生，不内置占位 agent 名）。 | agentOptionsFromLedger(fn), ALL_AGENTS_OPTION(const) |
 | [src/web/monitor/types.ts](src/web/monitor/types.ts) | 38 | 监控仪表盘（REQ-006 / P6）数据模型 | MetricCard(type), AlertItem(type), MonitorFilter(type), AlertLevel(type) |
 | [src/web/monitor/useMonitorMirror.ts](src/web/monitor/useMonitorMirror.ts) | 13 | 监控仪表盘后端镜像：挂载视图上抛（G6 fire-and-forget，monitor_view）。 | useMonitorMirror(fn) |
-| [src/web/monitor/useMonitorReal.ts](src/web/monitor/useMonitorReal.ts) | 256 | 监控仪表盘（REQ-006 / P6）· 真实数据接真层 | percentile(fn), applyMonitorStats(fn), metricsFromLedger(fn), realLoadAlerts(fn), loadRealMonitorData(fn), MONITOR_REAL_DATA_SOURCE(const), MonitorStats(type), RealMonitor(type), RealStorage(type) |
+| [src/web/monitor/useMonitorReal.ts](src/web/monitor/useMonitorReal.ts) | 356 | 监控仪表盘（REQ-006 / P6）· 真实数据接真层 | percentile(fn), applyMonitorStats(fn), applyMonitorOps(fn), metricsFromLedger(fn), realLoadAlerts(fn), loadRealMonitorData(fn), MONITOR_REAL_DATA_SOURCE(const), MonitorStats(type), MonitorOps(type), RealMonitor(type), RealStorage(type) |
 | [src/web/monitor/useToast.tsx](src/web/monitor/useToast.tsx) | 13 | — | useToast(fn) |
 | [src/web/overview/McpSwitchAlert.tsx](src/web/overview/McpSwitchAlert.tsx) | 59 | 首页「客户端 MCP 开关」提示条（T3 展示层 · 落点①）。 | McpSwitchAlert(fn), McpSwitchAlertProps(type) |
 | [src/web/overview/Overview.tsx](src/web/overview/Overview.tsx) | 136 | REQ-003 + REQ-005 配合展示（通览演示页） | Overview(fn) |
@@ -593,11 +593,11 @@
 | [specs/文档对齐确认需求稿.md](specs/文档对齐确认需求稿.md) | 124 | 文档对齐确认需求稿（批次43） |
 | [specs/记忆库写入分类与溯源规范.md](specs/记忆库写入分类与溯源规范.md) | 98 | 记忆库写入分类与溯源规范（草案） |
 | [specs/记忆库工具能力清单.md](specs/记忆库工具能力清单.md) | 126 | 记忆库工具能力清单（读 / 写 / 管理） |
-| [specs/需求规格书.md](specs/需求规格书.md) | 4357 | title: 需求规格书 |
+| [specs/需求规格书.md](specs/需求规格书.md) | 4381 | title: 需求规格书 |
 | [specs/需求规格书_Agent接入页字段级交互规格.md](specs/需求规格书_Agent接入页字段级交互规格.md) | 188 | title: 需求规格书_Agent接入页字段级交互规格 |
 | [specs/需求规格书_Agent界面内联记忆标识.md](specs/需求规格书_Agent界面内联记忆标识.md) | 101 | title: 需求规格书_Agent界面内联记忆标识 |
 | [specs/需求规格书_UI页面设计.md](specs/需求规格书_UI页面设计.md) | 742 | title: 需求规格书_UI页面设计 |
-| [specs/需求规格书_其余页面字段级交互规格.md](specs/需求规格书_其余页面字段级交互规格.md) | 238 | title: 需求规格书_其余页面字段级交互规格 |
+| [specs/需求规格书_其余页面字段级交互规格.md](specs/需求规格书_其余页面字段级交互规格.md) | 249 | title: 需求规格书_其余页面字段级交互规格 |
 | [specs/需求规格书_内核API契约.md](specs/需求规格书_内核API契约.md) | 351 | title: 需求规格书_内核API契约 |
 | [specs/需求规格书_同步机制详细设计.md](specs/需求规格书_同步机制详细设计.md) | 147 | title: 需求规格书_同步机制详细设计 |
 | [specs/需求规格书_大模型与净化生长页字段级交互规格.md](specs/需求规格书_大模型与净化生长页字段级交互规格.md) | 170 | title: 需求规格书_大模型与净化生长页字段级交互规格 |
@@ -630,7 +630,7 @@ src/auth/hash.ts 3919b27befef
 src/auth/loginService.ts a0cc1ede21f9
 src/auth/memberSync.ts dd7d2d4ed60e
 src/core/memagent/agent.ts c367dde90e15
-src/core/memagent/agentUsage.ts e6913ee6c9ac
+src/core/memagent/agentUsage.ts 1adcb80d4114
 src/core/memagent/auditLog.ts 041c6c71e76e
 src/core/memagent/collectDaemon.ts 1c66b6cd74c0
 src/core/memagent/conflict.ts e537b2588f67
@@ -701,7 +701,7 @@ src/electron/actionLog.ts 4f0d6d2ad7da
 src/electron/agentDetect.ts 3c31af9a1ae7
 src/electron/agentProbe.ts 5e887368b4c3
 src/electron/backupFiles.ts edc4d8fb358f
-src/electron/clientProcess.ts 4f0fc09a55bf
+src/electron/clientProcess.ts 76b1b66d5b70
 src/electron/dataRoot.ts 917293cd3730
 src/electron/hostScan.ts 694d58d7048c
 src/electron/ipcChannels.ts 0ffd1edb3350
@@ -744,7 +744,7 @@ src/web/AgentOnboard/FormBadge.tsx b2425eba179f
 src/web/AgentOnboard/Gains.tsx 5dd221d1770f
 src/web/AgentOnboard/IsolationConfig.tsx ae7060ad6cce
 src/web/AgentOnboard/KeyMgmt.tsx 1f40e96ae2f1
-src/web/AgentOnboard/McpClientsPanel.tsx d59e448199b2
+src/web/AgentOnboard/McpClientsPanel.tsx 1ee9ac18f583
 src/web/AgentOnboard/McpToolConfig.tsx 5bb834b70576
 src/web/AgentOnboard/OneClickOnboard.tsx 6d27b6fefff5
 src/web/AgentOnboard/TestPanel.tsx 616d8c8aaa4f
@@ -813,7 +813,7 @@ src/web/growth/coreGrowth.ts 57c4391b3953
 src/web/growth/evolutionTimeline.ts 1b59c5b24459
 src/web/growth/growthEntry.tsx 5b43a02238b6
 src/web/growth/logic.ts 53b37d83d095
-src/web/growth/recallLabels.ts 33441aabec05
+src/web/growth/recallLabels.ts b0b509023083
 src/web/growth/spec.ts b0d713d66185
 src/web/growth/types.ts cd1bd54d375f
 src/web/growth/useGrowthMirror.ts f485e5b5dae2
@@ -880,16 +880,16 @@ src/web/models/modelsEntry.tsx 3ddbadcf3a9e
 src/web/models/types.ts 973af42c99c1
 src/web/models/useToast.tsx 85cd09d2e1f5
 src/web/monitor/AlertTimeline.tsx 6fa33bdfb738
-src/web/monitor/MetricGrid.tsx 5b1e216858c6
-src/web/monitor/MonitorPage.tsx e178e95ba917
+src/web/monitor/MetricGrid.tsx 55fbc0375d81
+src/web/monitor/MonitorPage.tsx 2552bed0aae0
 src/web/monitor/coreMonitor.ts 6b0c29922b63
 src/web/monitor/logic.ts 047ec4b39ad1
 src/web/monitor/monitorEntry.tsx 1cc2038c2ad6
 src/web/monitor/operationState.ts e7185e07928b
 src/web/monitor/options.ts 59d853ad7cd4
-src/web/monitor/types.ts 591fd1663e8a
+src/web/monitor/types.ts d685ccc9f522
 src/web/monitor/useMonitorMirror.ts 9e87dd8cc071
-src/web/monitor/useMonitorReal.ts b81faaed8009
+src/web/monitor/useMonitorReal.ts 7b10e4b032d7
 src/web/monitor/useToast.tsx 85cd09d2e1f5
 src/web/overview/McpSwitchAlert.tsx 07eb66b2a116
 src/web/overview/Overview.tsx c6badb469e6a
@@ -1146,11 +1146,11 @@ specs/改哪里-任务到文件速查.md 86efe439fccd
 specs/文档对齐确认需求稿.md 5da42259c355
 specs/记忆库写入分类与溯源规范.md 2fb0f14ebadc
 specs/记忆库工具能力清单.md 5da556d65280
-specs/需求规格书.md 292e026feebf
+specs/需求规格书.md d13026a847ba
 specs/需求规格书_Agent接入页字段级交互规格.md 5abdf956efd3
 specs/需求规格书_Agent界面内联记忆标识.md 01227d78ce47
 specs/需求规格书_UI页面设计.md 5c4da6598034
-specs/需求规格书_其余页面字段级交互规格.md 9edc7e25a7d2
+specs/需求规格书_其余页面字段级交互规格.md 2e060478caac
 specs/需求规格书_内核API契约.md 7ea3677b0a9b
 specs/需求规格书_同步机制详细设计.md d65a3a654ee5
 specs/需求规格书_大模型与净化生长页字段级交互规格.md 3100266733ce

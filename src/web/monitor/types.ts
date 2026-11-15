@@ -3,9 +3,9 @@
 
 export type AlertLevel = 'ok' | 'warn' | 'crit';
 
-/** 指标卡（12.1 全量 13 项，分 5 组；2026-11-15 用户批准删「死信」卡） */
+/** 指标卡（12.1 全量 20 项，分 8 组；2026-11-15 用户批准删「死信」卡，同批新增 7 张真实信号卡） */
 export interface MetricCard {
-  group: 'Agent 健康' | '队列' | '冷存储' | '人工审核' | '检索性能(1h)';
+  group: 'Agent 健康' | '队列' | '冷存储' | '人工审核' | '检索性能(1h)' | 'Agent 使用(7d)' | '采集与备份' | '安全';
   metric: string;
   /** 当前值（数值或状态串，如 OPEN） */
   value: number | string;

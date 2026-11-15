@@ -1,5 +1,5 @@
 // E2E 测试：监控仪表盘（REQ-006 / P6）自包含（系统分配端口）
-// 指标卡 = 真实账本实算：空账本时 13 卡全部「暂无数据」（值位不显示数字，不伪造 crit/warn）；
+// 指标卡 = 真实账本实算：空账本时 20 卡全部「暂无数据」（真实 0 的卡如实显示 0）（值位不显示数字，不伪造 crit/warn）；
 // 告警时间线 = 真实 monitor_alert 审计，空账本 → 诚实空态。
 import { test, expect, disconnectBrowser, collectErrors } from './harness.ts';
 import { startStatic, type StaticServer } from './servers.ts';
@@ -23,7 +23,7 @@ test.describe('监控仪表盘 · 真实账本', () => {
     await page.goto(APP);
     await expect(page.locator('[data-testid="monitor-page"]')).toBeVisible();
     await expect(page.locator('[data-testid="metric-grid"]')).toBeVisible();
-    await expect(page.locator('.p0-mcard')).toHaveCount(13);
+    await expect(page.locator('.p0-mcard')).toHaveCount(20);
     // 熔断无真实探活采样 → 「暂无数据」且级别 ok（诚实：不伪造严重告警）
     await expect(page.locator('[data-testid="metric-熔断状态"]')).toHaveClass(/ok/);
     await expect(page.locator('[data-testid="metric-熔断状态"]')).toContainText('暂无数据');
