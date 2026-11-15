@@ -12,7 +12,8 @@
 - **提交**：`cf24de5 feat(monitor): 监控仪表盘人话化 + MCP 客户端开关状态三处落点` —— **49 文件 / +2558 / −213**，按用户拍板方案 A（并行会话改动与 `main.ts`/`ipcChannels.ts`/`hostBridge.ts`/`preload.ts` 行级交织，无法按文件拆分）一次性提交，提交信息分列两块。推送 `ebe1d3c..cf24de5 main -> main` EXIT=0，`main...origin/main` 已同步、`git status` 0 项。
 - **提交前确认并行会话收工**：观察 45 秒 `src/**` 零写入、`git status` 状态行恒为 49 → 判定收工。
 - **CI（提交前全绿）**：`verify:fast`（typecheck 0 错 / oxlint 0w0e / code:index 同步 / no-demo 通过 / **278 文件 3336 例 0 失败** / 覆盖 80.45%–72.65%–76.27%–83.78%）、`validate_project.py` 失败 0（144 既有 WARN）、`generate.py --check` 同步、`build:electron` OK、打包 EXIT=0。远端 GitHub Actions 结果需用户到页面确认（本环境无 token 直连）。
-- **产物**：`release\installer\MultiAgent Memory-0.1.0-setup.exe` 128,048,481 B / 20:18:47 / SHA256 `3D1EF7974117BF0B3D8FD0E1E5658664A246FEC6BCBF0F33DE63485AC17F6056`；`release\installer\win-unpacked` 为真产物目录（`release\win-unpacked` 是 00:56 旧残留，EBUSY 未删，勿混淆）。
+- **产物（以 20:21 那次为准）**：`release\installer\MultiAgent Memory-0.1.0-setup.exe` **128,048,745 B / 20:21:35 / SHA256 `25AE9EC5AFBEF68996C90D2523A8856D558030F38D95CF8D4B9FA2879556889F`**；`app.asar` 1,465,520 B @20:21:16；`main.cjs` 产物=源码 SHA256 逐字节一致（`1071D500A246…`，含并行会话 20:19–20:20 的 `main.ts` 改动）。当天共两次打包：20:18:47（`3D1EF797…`，早于并行会话最后一次 `main.ts` 写入）与 20:21:35（`25AE9EC5…`，**当前有效**）；真产物目录是 `release\installer\win-unpacked`（`release\win-unpacked` 为 00:56 旧残留，EBUSY 未删，勿用于验收）。
+- **产物内字面量核验**：卡片索引 `命中率 897047 < 连通率 897646 < 写入率 897917 < 精炼队列 898280`（检索性能置顶 / 队列置底成立）；连通率卡片字面量无 `unit` 字段（% 正常回退）。
 - **实测**：新端 20:19:20 由用户双击启动，8200–8204 全部 LISTENING；用户已确认。
 
 ### 批次63 · 监控仪表盘人话化（A + B + C + 实机修复 + UI 微调，已提交）
