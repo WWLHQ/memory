@@ -143,6 +143,8 @@ export function McpClientsPanel({ onInstalledCount }: { onInstalledCount?: (n: n
   const [message, setMessage] = useState('');
   /** ①待生效来自共享信号（首页/接入页/壳层同源），不再用本地 Record */
   const [pendingList, setPendingList] = useState<string[]>(() => listMcpPending());
+  /** 手动打开提示的行内展开（提示就显示在该客户端按钮旁，不甩到页面最底部） */
+  const [manualHintId, setManualHintId] = useState('');
 
   const refresh = useCallback((opts: { announce?: boolean; silent?: boolean } = {}) => {
     if (capability === 'none') return Promise.resolve();
@@ -427,7 +429,7 @@ export function McpClientsPanel({ onInstalledCount }: { onInstalledCount?: (n: n
                   <span className={label.cls} data-testid={`state-${row.id}`}>{label.text}</span>
                   {row.running !== undefined && (
                     <span
-                      className={row.running ? 'pill on' : 'pill'}
+                      className={row.running ? 'pill on' : 'pill red'}
                       data-testid={`run-${row.id}`}
                       title="客户端软件当前是否在运行（仅桌面客户端可判定）"
                     >
@@ -493,11 +495,21 @@ export function McpClientsPanel({ onInstalledCount }: { onInstalledCount?: (n: n
                   )}
                   {switchPending && (
                     <button className="btn" type="button" data-act="mcp-manual"
-                      onClick={() => setMessage(MCP_MANUAL_HINT)}>
+                      onClick={() => setManualHintId(row.id)}>
                       去设置手动打开
                     </button>
                   )}
                 </div>
+                {manualHintId === row.id && (
+                  <div
+                    className="warn show"
+                    data-testid={`manual-hint-${row.id}`}
+                    style={{ marginTop: 8 }}
+                    ref={(el) => { el?.scrollIntoView?.({ block: 'nearest' }); }}
+                  >
+                    <b>手动打开位置：</b>{MCP_MANUAL_HINT}
+                  </div>
+                )}
                 {row.error && <div className="errbox show">{row.error}</div>}
                 {snippet && (
                   <pre className="inject" data-testid={`snippet-${row.id}`} style={{ width: '100%', overflow: 'auto' }}>

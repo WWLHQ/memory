@@ -63,4 +63,21 @@ describe('T3 · 首页 MCP 开关提示条', () => {
       error="需管理员" {...handlers()} />);
     expect(screen.getByTestId('mcp-switch-error').textContent).toContain('需管理员');
   });
+
+  // 用户 2026-11-15 实机反馈：点「去设置手动打开」后提示看不见（排在脚注后的小灰字）。
+  // 锁死两点：① 提示必须是醒目块（af-alert warn，不是 af-note 小灰字）；
+  //          ② 提示紧贴按钮所在提示条下方，排在脚注之前。
+  it('手动打开提示是醒目块，且紧贴按钮下方（在脚注之前）', () => {
+    render(<McpSwitchAlert state={stateOf({ pending: true })} hint="请在设置中打开开关" {...handlers()} />);
+    const hint = screen.getByTestId('mcp-switch-hint');
+    expect(hint.className).toContain('af-alert');
+    expect(hint.className).toContain('warn');
+    expect(hint.className).not.toContain('af-note');
+    expect(hint.textContent).toContain('手动打开位置');
+    // 顺序：提示条 → 提示块 → 脚注
+    const alert = screen.getByTestId('home-mcp-switch-alert');
+    const footnote = screen.getByText(/不冒充已连接/);
+    expect(alert.compareDocumentPosition(hint) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(hint.compareDocumentPosition(footnote) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
 });

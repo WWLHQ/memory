@@ -50,9 +50,15 @@ export function McpSwitchAlert(p: McpSwitchAlertProps) {
           )}
         </span>
       </div>
+      {/* 用户 2026-11-15 实机反馈：提示必须紧贴「去设置手动打开」按钮下方且足够醒目，
+          原先用小灰字（.af-note）排在脚注之后，实际被当成没反应。 */}
+      {p.hint ? (
+        <div className="af-alert warn mcp-switch-hint" role="status" data-testid="mcp-switch-hint">
+          <b>手动打开位置：</b><span>{p.hint}</span>
+        </div>
+      ) : null}
       <div className="af-note mcp-switch-note">{p.state.footnote}</div>
       {p.error ? <div className="af-alert bad" role="alert" data-testid="mcp-switch-error">一键打开失败：{p.error}</div> : null}
-      {p.hint ? <div className="af-note mcp-switch-note" data-testid="mcp-switch-hint">{p.hint}</div> : null}
     </div>
   );
 }

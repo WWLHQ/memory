@@ -186,7 +186,7 @@
 | [src/web/AgentOnboard/Gains.tsx](src/web/AgentOnboard/Gains.tsx) | 25 | 效果证据 · 用户可感知的「省」与「快」（19.1 / 9.x / 2.4.x / 19.8 反代理） | Gains(fn) |
 | [src/web/AgentOnboard/IsolationConfig.tsx](src/web/AgentOnboard/IsolationConfig.tsx) | 34 | 隔离粒度配置行（规格 19.4 · R1 project_id 共享 / user_id 偏好跨项目） | IsolationConfig(fn) |
 | [src/web/AgentOnboard/KeyMgmt.tsx](src/web/AgentOnboard/KeyMgmt.tsx) | 21 | 密钥管理行（规格 T7 / §4 · R5 恒脱敏不回显 / R6 轮换宽限 24h / 超 90 天告警） | KeyMgmt(fn) |
-| [src/web/AgentOnboard/McpClientsPanel.tsx](src/web/AgentOnboard/McpClientsPanel.tsx) | 541 | MCP 客户端接入面板（批次15 建 / 批次21 交互收敛 / 批次23 一键适配全部 + 逐客户端接通指引）： | McpClientsPanel(fn) |
+| [src/web/AgentOnboard/McpClientsPanel.tsx](src/web/AgentOnboard/McpClientsPanel.tsx) | 546 | MCP 客户端接入面板（批次15 建 / 批次21 交互收敛 / 批次23 一键适配全部 + 逐客户端接通指引）： | McpClientsPanel(fn) |
 | [src/web/AgentOnboard/McpToolConfig.tsx](src/web/AgentOnboard/McpToolConfig.tsx) | 61 | MCP 工具配置行（规格 T5 / 19.5 · 须带 project_id） | toolRef(fn), McpToolConfig(fn) |
 | [src/web/AgentOnboard/OneClickOnboard.tsx](src/web/AgentOnboard/OneClickOnboard.tsx) | 248 | 一键接入本机 Agent（规格 T4 / AC-003.4 / 19.9 · 扫→分→绑→验 四段进度 + 自动绑定 + 可撤销） | OneClickOnboard(fn) |
 | [src/web/AgentOnboard/TestPanel.tsx](src/web/AgentOnboard/TestPanel.tsx) | 70 | 接入测试面板（规格 T8 / AC-003.8 · R7 必记 request_id · 注入预览） | TestPanel(fn), TestEvidence(type) |
@@ -333,9 +333,9 @@
 | [src/web/monitor/useMonitorMirror.ts](src/web/monitor/useMonitorMirror.ts) | 13 | 监控仪表盘后端镜像：挂载视图上抛（G6 fire-and-forget，monitor_view）。 | useMonitorMirror(fn) |
 | [src/web/monitor/useMonitorReal.ts](src/web/monitor/useMonitorReal.ts) | 356 | 监控仪表盘（REQ-006 / P6）· 真实数据接真层 | percentile(fn), applyMonitorStats(fn), applyMonitorOps(fn), metricsFromLedger(fn), realLoadAlerts(fn), loadRealMonitorData(fn), MONITOR_REAL_DATA_SOURCE(const), MonitorStats(type), MonitorOps(type), RealMonitor(type), RealStorage(type) |
 | [src/web/monitor/useToast.tsx](src/web/monitor/useToast.tsx) | 13 | — | useToast(fn) |
-| [src/web/overview/McpSwitchAlert.tsx](src/web/overview/McpSwitchAlert.tsx) | 59 | 首页「客户端 MCP 开关」提示条（T3 展示层 · 落点①）。 | McpSwitchAlert(fn), McpSwitchAlertProps(type) |
+| [src/web/overview/McpSwitchAlert.tsx](src/web/overview/McpSwitchAlert.tsx) | 65 | 首页「客户端 MCP 开关」提示条（T3 展示层 · 落点①）。 | McpSwitchAlert(fn), McpSwitchAlertProps(type) |
 | [src/web/overview/Overview.tsx](src/web/overview/Overview.tsx) | 136 | REQ-003 + REQ-005 配合展示（通览演示页） | Overview(fn) |
-| [src/web/overview/OverviewPage.tsx](src/web/overview/OverviewPage.tsx) | 639 | 首页总览工作台（批次57-C · 版式对齐定稿图 stratum-l1l3-preview pg-home）： | deriveHomeView(fn), OverviewPage(fn), HomeDerived(type) |
+| [src/web/overview/OverviewPage.tsx](src/web/overview/OverviewPage.tsx) | 646 | 首页总览工作台（批次57-C · 版式对齐定稿图 stratum-l1l3-preview pg-home）： | deriveHomeView(fn), OverviewPage(fn), HomeDerived(type) |
 | [src/web/overview/overviewEntry.tsx](src/web/overview/overviewEntry.tsx) | 20 | REQ-003 + REQ-005 通览演示页入口 | — |
 | [src/web/overview/overviewPageData.ts](src/web/overview/overviewPageData.ts) | 146 | 问账本（壳层「记忆助手」复用）：只转述真实账本快照能证实的内容，不编造模型回答。 | answerOverviewQuestion(fn), OVERVIEW_SUGGESTIONS(const), OverviewAnswer(type) |
 | [src/web/params/DevPanel.tsx](src/web/params/DevPanel.tsx) | 94 | P5-T3 开发者模式（折叠面板，暴露底层参数；2.4.3 / 2.4.1 / 15.3 / 9.10 / 15.1） | DevPanel(fn) |
@@ -424,7 +424,7 @@
 | [src/web/shell/Icons.tsx](src/web/shell/Icons.tsx) | 77 | 壳层图标：定稿里的线性图标集，按需内联渲染（不引入外部图标库、不依赖网络）。 | Icon(fn) |
 | [src/web/shell/PersonalMemoryPanel.tsx](src/web/shell/PersonalMemoryPanel.tsx) | 268 | 个人记忆壳层常驻面板（N8）：点击「记忆管理 / 个人记忆」或状态栏快捷按钮展开，全局常驻， | PersonalMemoryPanel(fn), PersonalMemoryPanelProps(type) |
 | [src/web/shell/ShellLoginDialog.tsx](src/web/shell/ShellLoginDialog.tsx) | 279 | 壳层登录弹窗（批次49）：菜单栏 / 快速访问工具条 / 登录状态处三处入口共用同一个实例。 | ShellLoginDialog(fn), ShellLoginDialogProps(type) |
-| [src/web/shell/ShellStatusCard.tsx](src/web/shell/ShellStatusCard.tsx) | 100 | REQ-014 / T7（C8）：侧栏真实状态卡。 | ShellStatusCard(fn) |
+| [src/web/shell/ShellStatusCard.tsx](src/web/shell/ShellStatusCard.tsx) | 104 | REQ-014 / T7（C8）：侧栏真实状态卡。 | ShellStatusCard(fn) |
 | [src/web/shell/StrataScale.tsx](src/web/shell/StrataScale.tsx) | 51 | 功能导航栏底部的「层级刻度」（批次53）：L0–L6 七档真实计数。 | StrataScale(fn) |
 | [src/web/shell/Workspace.tsx](src/web/shell/Workspace.tsx) | 1994 | 工作台壳层（批次48 S1）：Ribbon + 导航树 + 标签条 + 属性检查器 + 任务窗 + 底部五标签 + 状态栏。 | Workspace(fn) |
 | [src/web/shell/dock.ts](src/web/shell/dock.ts) | 170 | 底部面板真实数据源（S6）：输出=程序动作日志尾读；问题=该日志派生的错误/警告； | loadOutputLog(fn), problemsFromLog(fn), loadScheduleRuns(fn), auditMentions(fn), loadAuditForMemory(fn), OutputLogView(type), ProblemRow(type), ScheduleRun(type), AuditRow(type), DockResult(type) |
@@ -744,7 +744,7 @@ src/web/AgentOnboard/FormBadge.tsx b2425eba179f
 src/web/AgentOnboard/Gains.tsx 5dd221d1770f
 src/web/AgentOnboard/IsolationConfig.tsx ae7060ad6cce
 src/web/AgentOnboard/KeyMgmt.tsx 1f40e96ae2f1
-src/web/AgentOnboard/McpClientsPanel.tsx 1ee9ac18f583
+src/web/AgentOnboard/McpClientsPanel.tsx 13a387abd81a
 src/web/AgentOnboard/McpToolConfig.tsx 5bb834b70576
 src/web/AgentOnboard/OneClickOnboard.tsx 6d27b6fefff5
 src/web/AgentOnboard/TestPanel.tsx 616d8c8aaa4f
@@ -891,9 +891,9 @@ src/web/monitor/types.ts d685ccc9f522
 src/web/monitor/useMonitorMirror.ts 9e87dd8cc071
 src/web/monitor/useMonitorReal.ts 7b10e4b032d7
 src/web/monitor/useToast.tsx 85cd09d2e1f5
-src/web/overview/McpSwitchAlert.tsx 07eb66b2a116
+src/web/overview/McpSwitchAlert.tsx a2936cd108fa
 src/web/overview/Overview.tsx c6badb469e6a
-src/web/overview/OverviewPage.tsx ebb50eaa8d37
+src/web/overview/OverviewPage.tsx ac7f8efbc7cb
 src/web/overview/overviewEntry.tsx 5f4488678cc7
 src/web/overview/overviewPageData.ts 3ef40afe6bc5
 src/web/params/DevPanel.tsx 58ca53015c5a
@@ -982,7 +982,7 @@ src/web/shell/ContextMenu.tsx e2dcb1ea4ce9
 src/web/shell/Icons.tsx d33b2ab2156f
 src/web/shell/PersonalMemoryPanel.tsx 0a3ea4f72113
 src/web/shell/ShellLoginDialog.tsx 200a169aee11
-src/web/shell/ShellStatusCard.tsx bfe31daba932
+src/web/shell/ShellStatusCard.tsx 635ba4fdd69f
 src/web/shell/StrataScale.tsx 4455d8f22378
 src/web/shell/Workspace.tsx ca70bc6bb4f5
 src/web/shell/dock.ts 029c48568f1d

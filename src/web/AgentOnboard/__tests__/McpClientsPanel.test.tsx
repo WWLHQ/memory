@@ -108,6 +108,30 @@ describe('McpClientsPanel', () => {
     expect(screen.getByRole('button', { name: '去设置手动打开' })).toBeTruthy();
   });
 
+  test('待生效：点「去设置手动打开」→ 提示展开在该客户端卡片内（不甩到页面底部）', async () => {
+    mockRole('admin');
+    setHost({
+      list: () => Promise.resolve({
+        endpoint: SCAN.endpoint,
+        clients: [baseRow({ id: 'workbuddy', name: 'WorkBuddy', badge: 'p0', displayPath: '~/.workbuddy/mcp.json', state: 'wired', hasAuth: true, disabled: true })],
+      }),
+    });
+    render(<McpClientsPanel />);
+    await waitFor(() => expect(screen.getByTestId('state-workbuddy').textContent).toBe('客户端已关闭'));
+    await userEvent.click(screen.getByRole('button', { name: '一键打开' }));
+    await waitFor(() => expect(screen.getByTestId('state-workbuddy').textContent).toBe('已清除标记 · 待生效'));
+    expect(screen.queryByTestId('manual-hint-workbuddy')).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: '去设置手动打开' }));
+    const hint = screen.getByTestId('manual-hint-workbuddy');
+    expect(hint.textContent).toContain('重新打开软件');
+    // 用户 2026-11-15 实机反馈「点了像没反应」：提示必须是可见块（warn show），不能是 11px 灰字 .method
+    expect(hint.className).toContain('warn');
+    expect(hint.className).toContain('show');
+    expect(hint.className).not.toContain('method');
+    // 提示就在该客户端卡片的容器里（按钮旁），不是页面底部的全局消息
+    expect(document.querySelector('[data-client="workbuddy"]')?.contains(hint)).toBe(true);
+  });
+
   test('T3：非 JSON 配置不提供一键打开，如实只给状态提示', async () => {
     mockRole('admin');
     setHost({

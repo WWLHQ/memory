@@ -93,7 +93,11 @@ export function ShellStatusCard() {
         </div>
       )}
       {enableError ? <div className="shell-status-err">一键打开失败：{enableError}</div> : null}
-      {hint ? <div className="shell-status-hint" data-testid="shell-status-mcp-hint">{hint}</div> : null}
+      {hint ? (
+        <div className="shell-status-hint" data-testid="shell-status-mcp-hint">
+          <b>手动打开位置：</b>{hint}
+        </div>
+      ) : null}
     </div>
   );
 }

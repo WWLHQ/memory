@@ -394,7 +394,6 @@ export function OverviewPage() {
   const reload = useCallback(async () => {
     setBusy(true);
     setMcpError(null);
-    setMcpHint(null);
     try {
       const next = await loadOverview();
       setSnap(next);
@@ -457,6 +456,14 @@ export function OverviewPage() {
       : null),
     [snap, view, mcpPendingIds],
   );
+
+  /** 手动打开提示只在「开关态消失（已正常 / 未知）」时收起。
+   *  用户 2026-11-15 实机反馈：点完像没反应——原先 reload() 一开始就 setMcpHint(null)，
+   *  任何 storage/focus 触发的整页重读都会把刚点出来的提示抹掉。 */
+  useEffect(() => {
+    if (!switchState) return;
+    if (switchState.view !== 'off' && switchState.view !== 'pending') setMcpHint(null);
+  }, [switchState]);
 
   const onMcpEnable = async () => {
     if (!switchState?.canEnable || !switchState.enableId) return;

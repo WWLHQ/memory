@@ -21,17 +21,21 @@ describe('T6 · matchRunningClients', () => {
     expect(r['deepseek-harness']).toBe(true);
   });
 
-  it('CLI 客户端（Claude/Codex/Gemini/Qwen）不给运行态（不在结果里，绝不误报未启动）', () => {
-    const r = matchRunningClients(['codex.exe', 'node.exe']);
-    expect('claude-code' in r).toBe(false);
-    expect('codex' in r).toBe(false);
+  it('桌面版 Claude Code / Codex 也判运行态（claude.exe / codex.exe）', () => {
+    const r = matchRunningClients(['claude.exe', 'codex.exe']);
+    expect(r['claude-code']).toBe(true);
+    expect(r.codex).toBe(true);
+  });
+
+  it('无可靠桌面进程的 Gemini CLI / Qwen 不给运行态（不在结果里，绝不误报未启动）', () => {
+    const r = matchRunningClients(['node.exe']);
     expect('gemini-cli' in r).toBe(false);
     expect('qwen-code' in r).toBe(false);
   });
 
-  it('映射表只包含有稳定桌面进程的客户端', () => {
+  it('映射表包含所有已确认 exe 名的客户端（含 claude-code / codex）', () => {
     expect(Object.keys(CLIENT_PROCESS_NAMES).sort()).toEqual(
-      ['cursor', 'deepseek-harness', 'qoder-cn', 'trae-cn', 'workbuddy', 'zcode'],
+      ['claude-code', 'codex', 'cursor', 'deepseek-harness', 'qoder-cn', 'trae-cn', 'workbuddy', 'zcode'],
     );
   });
 });
