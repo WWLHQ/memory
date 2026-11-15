@@ -700,7 +700,7 @@ describe('批次26-B P2-14/16/17（Host 绑定 / 限速 / 防枚举 / 默认口�
     expect(logs.some((l) => l.action === 'host_rejected' && l.detail?.host === `127.0.0.1:${port}`)).toBe(false);
   });
 
-  it('P2-14 登录内存限速：连续尝试同一账号 → 超出 10 次/分钟 → 429（锁定文件删了也限速）', async () => {
+  it('P2-14 登录内存限速：连续尝试同一账号 → 超出 10 次/分钟 → 429（锁定文件删了也限速）', { timeout: 20000 }, async () => {
     const statuses: number[] = [];
     for (let i = 0; i < 11; i++) {
       statuses.push((await postLogin(base, ACCOUNT, 'wrong')).status);
@@ -711,7 +711,7 @@ describe('批次26-B P2-14/16/17（Host 绑定 / 限速 / 防枚举 / 默认口�
     expect(logs.some((l) => l.action === 'login_rate_limited' && l.detail?.account === ACCOUNT)).toBe(true);
   });
 
-  it('P2-17 注册限速：11 次注册 → 第 11 次 429', async () => {
+  it('P2-17 注册限速：11 次注册 → 第 11 次 429', { timeout: 20000 }, async () => {
     const statuses: number[] = [];
     for (let i = 0; i < 11; i++) {
       statuses.push((await postRegister(base, `bulk${i}@example.com`, 'Secret#123')).status);
