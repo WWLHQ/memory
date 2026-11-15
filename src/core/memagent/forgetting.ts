@@ -53,20 +53,76 @@ export function freshnessOf(m: Memory, now: number, halfLifeOverride?: number): 
 }
 
 /**
+ * M1（可验证自动进化）打分拆分：
+ * 把 17.5/17.8 的打分拆成「算四分量」与「按权重合成」两步，
+ * 让 `mems_detail` 埋点（M1-2）与离线 NDCG 重算（M2）能复用同一组分量。
+ * 拆分**逐位不变**——`scoreMemory` 仅是薄包装，既有调用点与测试用例一行不改。
+ */
+
+/** 17.5 四分量（f/imp/conf/boost），relevance 不在此算（由召回/嫁接各自提供） */
+export interface ScoreParts {
+  f: number;
+  imp: number;
+  conf: number;
+  boost: number;
+}
+
+/** 第一步：只算四分量，含 17.5 下限钳制；relevance / pinned 加分都不在此处 */
+export function scoreParts(m: Memory, now: number): ScoreParts {
+  return {
+    f: freshnessOf(m, now),
+    imp: Math.max(CLAMP.importance, m.importance ?? 0.5),
+    conf: Math.max(CLAMP.confidence, m.confidence ?? 0.5),
+    boost: Math.min(1, (m.access_count ?? 0) / 10),
+  };
+}
+
+/** 第二步：按权重 + pinned 加分合成最终分并千分位取整。与旧 scoreMemory 逐位相同 */
+export function scoreFromParts(
+  relevance: number,
+  parts: ScoreParts,
+  w: RecallWeights = SCORE_WEIGHTS,
+  pinned = false,
+): number {
+  let score = relevance * (w.w_f * parts.f + w.w_i * parts.imp + w.w_c * parts.conf + w.w_a * parts.boost);
+  if (pinned) score += 0.15; // 置顶加分
+  return Math.round(score * 1000) / 1000;
+}
+
+/**
  * 17.5/17.8 打分：score = relevance × (w_f·f + w_i·imp + w_c·conf + w_a·boost)
  * pinned +0.15 且免检进候选集（AC-03）；下限钳制防清零。
+ * M1 后仅作薄包装（逻辑见 scoreParts + scoreFromParts），签名与调用点一行未变。
  */
 export function scoreMemory(
   m: Memory, relevance: number, now: number,
   w: RecallWeights = SCORE_WEIGHTS,
 ): number {
-  const f = freshnessOf(m, now);
-  const imp = Math.max(CLAMP.importance, m.importance ?? 0.5);
-  const conf = Math.max(CLAMP.confidence, m.confidence ?? 0.5);
-  const boost = Math.min(1, (m.access_count ?? 0) / 10);
-  let score = relevance * (w.w_f * f + w.w_i * imp + w.w_c * conf + w.w_a * boost);
-  if (m.pinned) score += 0.15; // 置顶加分
-  return Math.round(score * 1000) / 1000;
+  return scoreFromParts(relevance, scoreParts(m, now), w, m.pinned);
+}
+
+/**
+ * M1-2：per-hit 分量埋点的一行（紧凑元组，字段顺序固定）：
+ * `[mem_id, relevance, f, imp, conf, boost]`，数值统一 3 位小数（千分位四舍五入）。
+ * 供 M2 离线 NDCG 重算复用「同一批召回的同一组分量」，禁止重跑向量检索。
+ */
+export type MemDetailRow = [string, number, number, number, number, number];
+
+/**
+ * M1-2：把召回排名候选（已按分数倒序）截断为埋点数组。
+ * `limit` = `min(topK, evolution.sample_top_n)`，条数严格 = `min(scored.length, limit)`。
+ * relevance 直接取召回阶段算好的值；四分量由 `scoreParts` 提供（与 scoreMemory 同源，逐位一致）。
+ */
+export function buildMemsDetail(
+  scored: Array<{ m: Memory; relevance: number }>,
+  now: number,
+  limit: number,
+): MemDetailRow[] {
+  const round3 = (v: number): number => Math.round(v * 1000) / 1000;
+  return scored.slice(0, Math.max(0, limit)).map(({ m, relevance }) => {
+    const p = scoreParts(m, now);
+    return [m.mem_id, round3(relevance), round3(p.f), round3(p.imp), round3(p.conf), round3(p.boost)];
+  });
 }
 
 /**

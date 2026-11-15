@@ -645,6 +645,8 @@ export type AuditAction =
   | 'llm_proxy' | 'llm_fallback' | 'log_view' | 'l0_view'
   | 'l0_auth_request' | 'l0_auth_grant' | 'l0_auth_deny' | 'l0_auth_revoke' | 'l0_auth_expire'
   | 'memory_op'
+  // M1-3：反馈归因到具体召回（detail = { recall_id, mem_id, verdict, ts }）；关联不到时不写本审计
+  | 'recall_feedback'
   | 'param_save'
   | 'growth_op'
   // 批次48 A23.2：cron 周期任务的真实执行记录（task / next_due_at / duration_ms / status）

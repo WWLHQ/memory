@@ -19,7 +19,9 @@ import {
   type RecallKey, type RecallWeights,
 } from '../../shared/growthConfig.ts';
 import { DEDUP_EVAL_SCHEMA_V, weightedDedupScore, type DimensionScores } from './dedup.ts';
-import { growthConfigFromLedger, saveGrowthConfigToLedger } from './paramsSnapshot.ts';
+import { growthConfigFromLedger } from './paramsSnapshot.ts';
+// M5-4：采纳改走带历史版本的写入口（saveConfigWithHistory 内部仍只用 saveGrowthConfigToLedger 落盘）
+import { saveConfigWithHistory } from './evolution/versioning.ts';
 import { sha256hex } from './sync.ts';
 import { ulid } from './ulid.ts';
 import type { AuditRecord, Form, StorageBackend } from './types.ts';
@@ -401,6 +403,9 @@ export function evaluateRegression(
     recall_weights: current.recall_weights,
     // 批次61 GAP-2：反馈回灌策略同理原样继承，判重回归不得顺手清掉用户已启用的策略。
     feedback_policy: current.feedback_policy,
+    // M0：进化可配项与调度表达式同样原样继承——判重回归只改写入权阈，不是进化轮本身。
+    evolution: { ...current.evolution },
+    schedule_exprs: { ...current.schedule_exprs },
   };
   const after = {
     train: classify(train, bestWeights, bestThresholds),
@@ -477,10 +482,14 @@ export async function runGrowthRegression(
   }
 
   await auditSuggestion();
-  await saveGrowthConfigToLedger(storage, result.config, {
+  // M5-4：采纳前存「上一版」到 growth:v1:history:<ulid>（与召回族同一版本化机制），
+  // 判重权重/阈值因此也具备一键回滚能力（此前只 saveGrowthConfigToLedger，历史版本只有召回侧有）。
+  const { history_saved } = await saveConfigWithHistory(storage, result.config, {
     requestId: opts.requestId, form: opts.form,
-    enterpriseId: opts.enterpriseId, teamId: opts.teamId,
+    enterpriseId: opts.enterpriseId, teamId: opts.teamId, now,
   });
+  // 回诊计划采纳时算死（due_at 不跟配置走），基线 = 本次采纳的测试集 F1
+  const plan = computeDedupRollbackPlan(now, current.evolution.rollback, result.after.test.f1, MIN_SAMPLES);
   await storage.appendAudit({
     request_id: opts.requestId, action: 'weight_tuned', form: opts.form,
     project_id: 'P_SYSTEM', ts: now,
@@ -490,6 +499,7 @@ export async function runGrowthRegression(
       before: { weights: current.weights, thresholds: current.thresholds },
       after: { weights: result.config.weights, thresholds: result.config.thresholds },
       metrics: { before: result.before, after: result.after },
+      history_saved, rollback_plan: plan,
       note: '已采纳：仅保留当时最优候选的五维分，换权重后的候选重排无法回溯（样本口径限制）',
     },
   });
@@ -499,6 +509,43 @@ export async function runGrowthRegression(
 /** 供主进程 cron 任务使用的 request_id（确定性可读前缀 + ulid） */
 export function regressionRequestId(now: number): string {
   return `req_reg_${ulid(now)}`;
+}
+
+// ── M5-4：判重族的回诊计划 ──────────────────────────────────────────
+// 与召回族同口径（`due_at` 采纳时算死、`max_drop` 取 `evolution.rollback.max_drop`），
+// 差别只在基线指标是**测试集 F1** 而不是 NDCG —— 判重回归的目标函数本来就不是 NDCG。
+// 定义在这里而非 evolution/registry.ts：registry 已 import 本文件，放那边会形成循环依赖。
+
+export interface DedupRollbackPlan {
+  family: 'dedup_weights';
+  adopted_ts: number;
+  due_at: number;
+  /** 回诊要求的最小样本量（沿用 MIN_SAMPLES，少于此不判） */
+  min_samples: number;
+  max_drop: number;
+  /** 采纳时的测试集 F1（回诊比较基线） */
+  baseline_test_f1: number;
+}
+
+export function computeDedupRollbackPlan(
+  now: number,
+  rb: { after_days: number; max_drop: number },
+  baselineTestF1: number,
+  minSamples = MIN_SAMPLES,
+): DedupRollbackPlan {
+  return {
+    family: 'dedup_weights',
+    adopted_ts: now,
+    due_at: now + rb.after_days * 24 * 3600 * 1000,
+    min_samples: minSamples,
+    max_drop: rb.max_drop,
+    baseline_test_f1: baselineTestF1,
+  };
+}
+
+/** 判重回诊：当前测试集 F1 相对基线的跌幅是否超过 max_drop。 */
+export function dedupDropExceeded(plan: DedupRollbackPlan, currentTestF1: number): boolean {
+  return plan.baseline_test_f1 - currentTestF1 > plan.max_drop + 1e-9;
 }
 
 

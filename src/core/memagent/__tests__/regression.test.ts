@@ -2,7 +2,8 @@
 import { describe, expect, it } from 'vitest';
 import type { AuditRecord } from '../types.ts';
 import {
-  DEFAULT_FEEDBACK_POLICY, DEFAULT_RECALL_WEIGHTS, DEFAULT_SCHEDULE_FLAGS, type GrowthConfig,
+  DEFAULT_FEEDBACK_POLICY, DEFAULT_RECALL_WEIGHTS, DEFAULT_SCHEDULE_FLAGS,
+  DEFAULT_EVOLUTION, DEFAULT_SCHEDULE_EXPRS, type GrowthConfig,
 } from '../../../shared/growthConfig.ts';
 import { InMemoryStorage } from '../storage.ts';
 import {
@@ -41,6 +42,9 @@ const currentConfig = (l1: number): GrowthConfig => ({
   schedule: { ...DEFAULT_SCHEDULE_FLAGS },
   recall_weights: { w_f: 0.35, w_i: 0.30, w_c: 0.15, w_a: 0.20 },
   feedback_policy: { ...DEFAULT_FEEDBACK_POLICY },
+  // M0：新增两块必填字段，测试夹具取默认值（默认即改造前行为）
+  evolution: { ...DEFAULT_EVOLUTION },
+  schedule_exprs: { ...DEFAULT_SCHEDULE_EXPRS },
 });
 
 /** 50 条（25 正 / 25 负）；分数 0.55 / 0.45，阈值 0.5 可分 */
