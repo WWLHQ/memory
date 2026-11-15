@@ -27,6 +27,7 @@
 - 硬前置召回（A 宿主钩子 / B LLM Gateway / C 内核门禁 + 能力边界 + 三层开关）：[specs/RECALL-HARD-PREFIX.md](specs/RECALL-HARD-PREFIX.md)
 - 审查报告（Agent 侧记忆库 × 净化生长是否打通）：[specs/reports/审查-Agent侧记忆库与净化生长打通-2026-11-12.md](specs/reports/审查-Agent侧记忆库与净化生长打通-2026-11-12.md)
 - 三个独立缺口任务（GAP-1 召回权重 / GAP-2 反馈回灌 / GAP-3 双向可观测）：[specs/tasks/GROWTH-AGENT-EVOLUTION.md](specs/tasks/GROWTH-AGENT-EVOLUTION.md)
+- 自我进化 · 可验证的自动生长（M0 可感知与可配 / M1 埋点归因 / M2 离线评估 / M3 自动采纳回滚 / M4 时间线与漂移仪表 / M5 手动验证·回诊三态·判重族版本化 · **已全落地**）：[specs/tasks/SELF-EVOLUTION.md](specs/tasks/SELF-EVOLUTION.md)
 - 项目需求规格（导入，待结构化）：
   - [需求规格书.md](specs/需求规格书.md)
   - [需求规格书_Agent接入页字段级交互规格.md](specs/需求规格书_Agent接入页字段级交互规格.md)

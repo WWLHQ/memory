@@ -1710,3 +1710,33 @@ status: draft
 > **已知边界**：① 切回首页一律重挂（重新 loadOverview），会重取数、丢失首页滚动位置，但保证写锁等状态为最新；② 仅 home 受影响（唯一显示写锁红条的中心页）；③ 轮5 信号监听 + 轮6 切回 tab 双触发，互不冲突（重复重挂幂等）。
 
 **待办（用户约定：自测完等实测+确认才提交）**：重打包验证产物含新逻辑 → 【停·等用户实测】→【停·等确认】→ 提交轮5+轮6 文件（`Workspace.tsx` / `workspace.test.tsx` / `code-map.md` 台账）+ 排除 recall-echo 在途改动（`mcpHttp.ts`/`recallInsight.ts` 等）。
+
+---
+
+## 自我进化 · 可验证的自动生长（M0–M4 · 2026-11-14）
+
+- 规格：[`specs/tasks/SELF-EVOLUTION.md`](tasks/SELF-EVOLUTION.md)（阶段总表 §3、AC §4–§8、诚实边界 §10）。
+- 一条闭环：**观测（per-hit 四分量入库）→ 配对（反馈归因到召回）→ 离线重算（只换权重）→ 判定（NDCG 提升 + 符号检验 + 护栏）→ 采纳（原子写 + 版本）→ 回诊 → 不达标自动回滚**。默认 `mode='suggest'`，行为与落地前逐字一致。
+
+| 阶段 | 任务→文件 | 实现 | 测试 |
+|---|---|---|---|
+| M0-1/2 | `core/memagent/forgetting.ts` | 打分拆 `scoreParts`（f/imp/conf/boost）→ `scoreFromParts` 合成，`scoreMemory` 退化为薄包装（行为逐位不变） | `__tests__/scoreParts.test.ts`（5 例：分量口径 + 逐位一致 + pinned 0.15 浮点容差） |
+| M0-3/5 | `web/growth/GrowthPanels.tsx`（`DeltaPanel`）、`web/growth/EvolutionSettingsCard.tsx`、`shared/growthConfig.ts`、`shared/growthSchedule.ts` | Δ 方向判定带浮点噪声阈值（好/坏/平）不再恒「+」恒绿；进化设置卡（mode / 采样窗口 / 最小样本 / 回滚天数与跌幅 / 护栏冷却与步长 / 调度频率）读写 `growth:v1` | `__tests__/deltaPanel.test.tsx`、`__tests__/evolutionSettingsCard.test.tsx`、`shared/__tests__/growthConfig.test.ts`、`growthSchedule.test.ts` |
+| M1-2 | `core/memagent/agent.ts`、`forgetting.ts#buildMemsDetail` | 召回审计追加 `mems_detail`：`[mem_id, relevance, f, imp, conf, boost]`（3 位小数，按 `min(topK, sample_top_n)` 截断），与 `scoreParts` 同源 | `__tests__/memsDetail.test.ts`（6 例） |
+| M1-3 | `core/memagent/mcpManageTools.ts`、`mcpSchema.ts`、`types.ts` | `feedback` 收可选 `recall_id`：显式 id 须真实存在**且**该召回 `detail.mems` 含该 mem 才 `linked`，否则只 `linked:false` 不冒充标签；关联成功写 `recall_feedback` 审计 | `__tests__/mcpManageTools.test.ts`（M1-3/M1-4 共 6 例） |
+| M2 | `core/memagent/evolution/recallEval.ts`（纯函数零写入） | 同批数据重算 NDCG@k、配对符号检验（双侧精确二项，`p≤0.10`）、护栏 `reject_ratio`/`evidence_thin_ratio` 上升 ≤0.02、弱标签单独评估；旧审计无 `mems_detail` → `skippedOld` | `__tests__/recallEval.test.ts`（11 例） |
+| M3 | `core/memagent/evolution/{registry,versioning,loop}.ts`、`core/memagent/paramsSnapshot.ts`、`electron/main.ts` | 五态决策（adopted/rejected/insufficient/guarded/rolled_back）；`off` 零审计、`suggest` 只产建议、`auto` 达标 + 护栏过才写；采纳前存 `growth:v1:history:<ulid>`，回诊计划 `rollback_plan.due_at` **采纳时算死**不跟配置走；`consumeGrowthHistory` 回滚 | `__tests__/evolutionLoop.test.ts`（8 例，含「改配置 after_days=30 仍按 +7d 回诊」） |
+| M4 | `web/growth/evolutionTimeline.ts`、`web/growth/EvolutionTimelineCard.tsx`、`web/growth/useGrowthReal.ts`、`web/growth/GrowthPage.tsx` | 时间线 = `growth_op` 扁平 `detail.event` 的**纯投影**（跳过旧式 `detail.entry`，交既有 `growthAudit`，不双份）；`suggest_recall_weights` 裁决取 `detail.status`；漂移仪表 `drift = 当前 − 基准`（真实差、不归一化、缺键按基准不按 0）；空账本显「暂无进化记录」不出表；审计没带的字段写明缺什么（P02 门禁禁「—」冒充读数） | `__tests__/evolutionTimeline.test.ts`（8 例）、`__tests__/evolutionTimelineCard.test.tsx`（3 例）；变异 4 组（去 `detail.entry` 跳过 / 漂移归一化 / 漂移列改显当前值 / 空态条件恒假）均「红灯 → 还原 → 复绿」 |
+
+> **诚实边界**：① 评估只在 top N（`sample_top_n`）内，边界外换榜不可知；② 历史召回无埋点，只能从 M1 上线后积累，冷启动显示还需 N 次；③ 标签稀疏是常态，`insufficient` 会长期出现且必须显示缺多少；④ 向量库自身在变，结论只对评估窗口负责；⑤ 判重回归拟合的是历史合并决策，不是「正确决策」。
+### M5 —— 可手动验证 + 多族统一（2026-11-14）
+
+| AC | 任务→文件 | 实现 | 测试 |
+|---|---|---|---|
+| M5-1 审计可解释 | `core/memagent/evolution/loop.ts` | `appendGrowthOp` 的 detail 类型强制 `phase`（evolution/rollback）+ 非空 `reason`；insufficient 写真实计数与 `need`；`rolled_back`/新增 `rollback_kept` 带跌幅与允许值；`feedback_policy` 族每轮落一条审计（request_id 带 `#fb`，避免同轮撞号） | `evolutionLoop.test.ts` M5-1 组 5 例（含「每条 growth_op 都有非空 reason+phase」全分支汇总断言） |
+| M5-2 手动可验证 | `web/growth/coreGrowth.ts#coreRunEvolution`、`EvolutionTimelineCard`（`evo-run-now` 按钮 + 回执）、`GrowthPage`、`EvolutionSettingsCard.modeHint` | 与 cron 同一套函数；回执报真实 `added`（前后计数差）/召回决策/回诊状态；`mode=off` → `runEvolutionRound` 与 `runRollbackCheck` 双双短路，零审计且明示「进化已关闭」 | `__tests__/evolutionRun.test.tsx` 4 例 + `evolutionLoop.test.ts`「off 回诊也不写」1 例 |
+| M5-3 回诊三态 | `web/growth/evolutionTimeline.ts#rollbackStateOf`、`EvolutionTimelineCard` | none / pending(剩余天数) / overdue / done；done = 该族之后已有 `rolled_back` 或 `rollback_kept`；回诊阶段样本不足不算 done；回诊审计的 `plan` 字段也读 `due_at` | `evolutionTimeline.test.ts` 回诊三态 7 例 + 卡片 1 例 |
+| M5-4 判重族版本化与回诊 | `core/memagent/regression.ts`（`DedupRollbackPlan`/`computeDedupRollbackPlan`/`dedupDropExceeded`，采纳改走 `saveConfigWithHistory`）、`evolution/loop.ts#runDedupRollbackCheck`、`electron/main.ts`（`req_evodrb_*`） | 采纳前存 `growth:v1:history:<ulid>`；计划基线 = 采纳时测试集 F1、`due_at` 采纳时算死；回诊用**当前**权重/阈值重算测试集 F1，跌破 `baseline−max_drop` → 回滚上一版并写 `growth_op.rolled_back`，未跌破写 `rollback_kept`，样本不足写 `insufficient`（带 need） | `__tests__/dedupRollback.test.ts` 8 例 |
+
+> **依赖方向**：判重回诊计划定义在 `regression.ts` 而不是 `evolution/registry.ts` —— registry 已 import regression，放那边会形成循环依赖。
+> **变异证据（6 组，均红灯→还原→复绿）**：insufficient reason 置空 / 去 `due_at` 完成判定 / 去 off 短路 / `dedupDropExceeded` 恒 false / 版本化不落历史 / 去 `detail.entry` 跳过。

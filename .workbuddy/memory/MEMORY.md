@@ -10,6 +10,11 @@
 - 提交前展示改动清单 + 门禁输出 + 拟用信息；在途改动单列，禁 `git add .`；conventional commit + `Co-Authored-By: CodeBuddy Code`。
 - 每个原子任务先展示成果等确认再下一步。
 
+## UI 铁律（2026-11-14 用户明确，最高优先）
+- **原始 JSON / `payload` / `JSON.stringify` 结果禁止进 UI 渲染**；整页必须是人话（中文名 + 一句摘要），不给「展开原文排查」的 `<details>`。
+- 类比：字段名（`w_f`）、英文事件名（`weight_tuned`）、枚举值（`off/suggest/auto`）一律译中文；中文名唯一来源 `web/growth/recallLabels.ts`，别再写第二套。
+- 回查改用「审计 ID + 时间」（`GrowthAuditEntry.requestId` 从账本 `request_id` 补），不靠把 JSON 糊给用户；不可翻译时写「没有可翻译的明细」，不拿原文兜底。
+
 ## 日志定位真因（不必跑起应用）
 - 工具会话起不了 Electron（退出 0、1s 结束、main.log 零新增、端口不监听；三组对照已排除产品缺陷）→ 启新端须用户双击，不得断言崩了。
 - 事实源：`%APPDATA%/MultiAgent Memory/` 的 `actions.log`（`[host:通道]{via,ms}` / `[ipc:通道]`）、`audit.jsonl`（解锁等业务事实）、`main.log`（bootstrap）。判读锁：看 `host:l0:writeUnlocked` 后有没有紧跟 `l0:myWriteWrap` 回退——有=端口返 false，无=返 true。
