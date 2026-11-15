@@ -7,7 +7,7 @@
 
 ## 当前状态（2026-11-15 20:50 压缩快照 · 优先于下方历史段落）
 
-### 批次64 · 监控页审查补卡（13 → 20 卡 / 5 → 8 组）· 用户已实测 · 已跑 CI · 提交中
+### 批次64 · 监控页审查补卡（13 → 20 卡 / 5 → 8 组）· 已提交推送（`d1a8f93` / origin/main 同步）
 
 - **用户口径**：「重新审查程序，还缺哪些监控的直接加到监控页」→ 直接实施，不等方案确认。
 - **选卡方法**（不拍脑袋）：先统计真实 `audit.jsonl`（28864 行）的 action 分布，只补**账本/主进程里已有真实数据、页面上此前没人看**的信号；真实账本里零命中的事件（`recall_breach` / `evidence_thin` / `sync_fail` / `llm_fallback` / `rerank_fallback` / `login_fail`）一律不加卡——永远为 0 的指标只是噪声。
@@ -21,6 +21,7 @@
 - **CI 复核（22:33–22:36，提交前现跑）**：`verify:fast` 首跑 **3 例红**，全是 `personalInvoke.test.ts` / `personal.test.ts` 的 `Test timed out in 5000ms`（PgSyncHub 重初始化在并行分片下超 5s，非本轮代码相关）；单独复跑这两文件 **31 例 3.44s 全绿**，整链路二跑 **278 文件 / 3348 例 / 0 失败 / EXIT=0**，覆盖 80.5%–72.68%–76.36%–83.81%。属既有 `verify:fast` 并行脆弱（同 `d3fbda6` 那类），本轮未改这些测试，如实记录不掩盖。
 - **其余 CI**：`validate_project.py` 检查 4 项 / 失败 0 / 警告 144（既有）；`generate.py --check` BUILD 与 specs 同步；`build:electron` `main.cjs` / `preload.cjs` / `recall-hard/force_recall.mjs` 均 built OK（`import.meta` WARNING 为既有）。
 - **提交范围**：只 stage 本轮 18 项；`specs/reports/recall-snapshots.jsonl`（本会话 recall 工具自写的数据行）与并行会话 4 项一律不入本次提交。
+- **提交 / 推送**：`d1a8f93 feat(monitor): 监控页审查补卡 13→20 卡（5→8 组）+ 修复首调合规率恒 0%` —— **18 文件 / +439 / −89**；`git push` `1a263ee..d1a8f93 main -> main` EXIT=0，`HEAD == origin/main == d1a8f9380dce06eb01512535cb8626de799b278e`，`main...origin/main` 已同步。工作区残留 5 项均为非本轮（并行会话 4 项 + recall 快照数据 1 项）。远端 GitHub Actions 结果需用户到页面确认（本环境无 token）。
 
 ### 批次63 + 并行会话 · 已提交推送（cf24de5 / origin/main 同步）
 
