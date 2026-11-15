@@ -390,7 +390,7 @@ describe('第二轮上行：显式授权 + 真实 PgSyncHub + sha256 幂等', ()
       .rejects.toMatchObject({ code: 'E_SYNC_TEAM_MISMATCH' });
   });
 
-  it('显式授权 → 真实中枢落账；重复上行与同内容条目按 sha256 幂等，不产生重复条目', async () => {
+  it('显式授权 → 真实中枢落账；重复上行与同内容条目按 sha256 幂等，不产生重复条目', { timeout: 20000 }, async () => {
     const hub = new PgSyncHub();
     await hub.init();
     try {
@@ -437,7 +437,7 @@ describe('第二轮上行：显式授权 + 真实 PgSyncHub + sha256 幂等', ()
     }
   });
 
-  it('中枢未接线：如实失败 stage=hub_init / E_SYNC_HUB_UNAVAILABLE，绝不显示已同步；接线后重试成功', async () => {
+  it('中枢未接线：如实失败 stage=hub_init / E_SYNC_HUB_UNAVAILABLE，绝不显示已同步；接线后重试成功', { timeout: 20000 }, async () => {
     const { ctx, audits } = syncCtx();
     const api = createPersonalApi(ctx);
     const a = await api.quickAdd('需要上行的条目');

@@ -168,7 +168,7 @@ describe('个人记忆 HTTP 数据面（真实内核）', () => {
     expect(snap.body.result?.sync_queue.map((e) => e.id)).toContain(id);
   });
 
-  it('第二轮 HTTP：显式授权 → 真实 PgSyncHub 落账；重复上行按 sha256/mem_id 幂等，不产生重复条目', async () => {
+  it('第二轮 HTTP：显式授权 → 真实 PgSyncHub 落账；重复上行按 sha256/mem_id 幂等，不产生重复条目', { timeout: 20000 }, async () => {
     await closeServer(server);
     const hub = new PgSyncHub();
     await hub.init();
