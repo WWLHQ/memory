@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>客户端 MCP 开关状态 · 三处效果页 — 多 Agent 记忆助手</title>
+<style>
+  :root{--bg:#0f1419;--panel:#1a212b;--panel2:#202833;--line:#2b3441;
+    --txt:#e6edf3;--muted:#8b98a7;--dim:#5b6675;--accent:#4d9fff;
+    --ok:#3ecf8e;--warn:#ffd166;--err:#ff5c5c}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.55 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
+  .wrap{max-width:1180px;margin:0 auto;padding:18px}
+  h1{font-size:17px;margin:0 0 2px}
+  .sub{color:var(--muted);font-size:12px;margin-bottom:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:14px}
+  .h{font-size:13px;font-weight:600;margin:0 0 10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .h .ref{font-size:10px;color:var(--dim);font-weight:400}
+  .note{font-size:11px;color:var(--dim);margin-top:10px;line-height:1.6}
+  .dim{color:var(--dim);font-size:11px}
+  .mock{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:14px}
+  .btn{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:7px 12px;cursor:pointer;font-size:12px}
+  .btn.primary{background:var(--accent);color:#04121f;border-color:var(--accent);font-weight:600}
+  .btn:hover{border-color:var(--accent)}
+  .btn:disabled{opacity:.4;cursor:not-allowed}
+  .pill{font-size:11px;padding:3px 9px;border-radius:6px;background:var(--panel2);border:1px solid var(--line);color:var(--muted)}
+  .pill.on{color:var(--txt);border-color:var(--accent)}
+  .pill.red{color:#ffb0b0;border-color:#6b2e2e;background:#3a1616}
+  .pill.gold{color:#ffe6a8;border-color:#6b5a1e;background:#3a2f10}
+  .rh-pick{display:inline-flex;gap:0;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .rh-choice{background:var(--panel);border:0;border-right:1px solid var(--line);color:var(--muted);padding:6px 14px;font-size:12px;cursor:pointer}
+  .rh-choice:last-child{border-right:0}
+  .rh-choice.active{background:var(--accent);color:#04121f;font-weight:600}
+  .rh-choice:hover:not(.active){color:var(--txt)}
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--accent);border-radius:8px;padding:9px 16px;font-size:13px;z-index:80;display:none;max-width:70%}
+  code{font-family:monospace;font-size:11px;color:var(--muted)}
+
+  .af-alert{display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:#16222f;border:1px solid #2b4a63;border-radius:9px;padding:10px 12px;font-size:13px;line-height:1.6;margin-bottom:8px}
+  .af-alert.bad{background:#2a1719;border-color:#6b2e2e}
+  .af-alert.warn{background:#2a2414;border-color:#6b5a1e}
+  .af-alert .tag{font-size:10px;padding:2px 7px;border-radius:4px;background:var(--panel2);border:1px solid var(--line);color:var(--muted)}
+  .af-alert .af-link{background:transparent;border:0;color:var(--accent);font-size:12px;cursor:pointer;padding:0}
+  .af-alert .af-link:hover{text-decoration:underline}
+  .af-note{font-size:11px;color:var(--dim);line-height:1.6;margin:6px 0 12px}
+  .af-panel{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:10px 12px}
+  .af-ph{display:flex;gap:8px;align-items:center;font-size:12px;font-weight:600;margin-bottom:9px}
+  .af-ph .hint{font-size:10px;color:var(--dim);font-weight:400}
+  .af-ph .af-link{margin-left:auto;background:transparent;border:0;color:var(--accent);font-size:11px;cursor:pointer}
+  .af-li{display:flex;gap:9px;align-items:center;padding:6px 0;font-size:12px;border-top:1px dashed var(--line)}
+  .af-li .st{width:7px;height:7px;border-radius:50%;flex:none}
+  .af-li .nm{flex:1}
+  .af-li .ds{color:var(--dim);font-size:11px}
+  .af-li .rt{font-size:11px;color:var(--muted)}
+
+  .client-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:11px 12px}
+  .client-row .nm{font-size:13px;font-weight:600;min-width:110px}
+  .client-row .ds{font-size:11px;color:var(--dim);flex:1;min-width:200px;line-height:1.5}
+  .client-row .btns{display:flex;gap:8px;flex-wrap:wrap}
+  .badge{font-size:10px;padding:2px 7px;border-radius:4px;background:#33294a;color:#c7b3ff}
+
+  .status-card{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:12px}
+  .status-line{display:flex;gap:9px;align-items:center;padding:7px 0;font-size:12px;border-bottom:1px dashed var(--line)}
+  .status-line:last-of-type{border-bottom:0}
+  .status-line .k{color:var(--muted);min-width:150px}
+  .status-line .v{flex:1}
+  .status-line .st{width:8px;height:8px;border-radius:50%;flex:none}
+  .status-foot{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);font-size:11px;color:var(--dim)}
+
+  .rule{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+  .rule div{background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:9px 11px;font-size:11px;line-height:1.6;color:var(--muted)}
+  .rule b{color:var(--txt);font-weight:600}
+  @media(max-width:760px){.rule{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>客户端 MCP 开关状态 · 三处效果页</h1>
+  <div class="sub">新增原型的唯一事实来源：首页提示条 / 接入页状态行 / 壳层系统状态卡。结构、样式类名、文案、交互逐字段对齐此页；整页只说人话，不渲染原始配置内容。</div>
+
+  <div class="card">
+    <div class="h">场景切换<span class="ref">点击看三处落点在每种真实状态下的呈现</span></div>
+    <div class="rh-pick" role="radiogroup" aria-label="场景">
+      <button type="button" class="rh-choice active" data-s="off">客户端已关闭</button>
+      <button type="button" class="rh-choice" data-s="ok">一切正常</button>
+      <button type="button" class="rh-choice" data-s="down">桌面端未启动</button>
+    </div>
+    <div class="note" id="scenario-note"></div>
+  </div>
+
+  <div class="card">
+    <div class="h">① 首页 · 提示条 + MCP 接入面板<span class="ref">对齐 overviewPage.css 的 af-alert / bad / tag / af-link 与 OverviewPage.tsx 的 McpPanel</span></div>
+    <div class="mock" id="home"></div>
+  </div>
+
+  <div class="card">
+    <div class="h">② 接入页 · 客户端状态行<span class="ref">对齐 McpClientsPanel.tsx 的 pill on / red / gold 与一键接入按钮</span></div>
+    <div class="mock" id="agent"></div>
+  </div>
+
+  <div class="card">
+    <div class="h">③ 壳层 · 系统状态卡<span class="ref">对齐 ShellStatusCard.tsx，每 12 秒复核一次</span></div>
+    <div class="mock" id="shell"></div>
+  </div>
+
+  <div class="card">
+    <div class="h">判定口径与生效边界<span class="ref">实施时逐字段对齐，不得自行简化或夸大按钮效果</span></div>
+    <div class="rule">
+      <div><b>状态从哪来</b>：客户端配置里的「已禁用」标记 + 本机服务健康检查 + 审计里最近一次真实召回。三处都读不到时显示「未知」，不冒充已连接。</div>
+      <div><b>两件事别混</b>：服务端在线但开关关闭 = 客户端问题；端口连不上 = 桌面端没启动。两种提示的文案与按钮完全不同。</div>
+      <div><b>一键打开做什么</b>：备份原配置 → 原子写回 → 只清掉「已禁用」标记，保留其它客户端条目与请求头 → 记一条动作日志。非管理员只可查看，按钮置灰。</div>
+      <div><b>一键打开不做什么</b>：客户端不会实时重读配置，所以按钮点击后只能说「已清除标记，待生效」，绝不能显示「已打开」。必须同时给「去设置手动打开」或「新开一个会话」两条出路。</div>
+    </div>
+    <div class="note">点击「一键打开」后的待生效态也在本页可验：状态卡不会跳成绿色，而是显示「已清除标记 · 待手动打开或新开会话」。这是刻意设计，不是没做完。</div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+  var state='off';
+  var toast=document.getElementById('toast'),timer=null;
+  function say(t){toast.textContent=t;toast.style.display='block';clearTimeout(timer);timer=setTimeout(function(){toast.style.display='none';},2600);}
+  function dot(c){return '<span class="st" style="background:'+c+'"></span>';}
+  var OK='var(--ok)',ERR='var(--err)',WARN='var(--warn)',DIM='var(--dim)';
+  var NOTE={
+    off:'记忆服务端在线，客户端把本服务标成已禁用。三处都要说清「服务端没问题、是客户端开关」，并给一键与手动两条出路。',
+    ok:'三处都收起告警，只保留状态点；壳层状态卡继续每 12 秒复核。',
+    down:'端口连不上，属于桌面端未启动，与客户端开关无关。此时不提供「一键打开」，只提示启动桌面端。',
+    pending:'已清除禁用标记并备份原配置，但客户端尚未重新读取。状态保持「待生效」，不给假的绿色。'
+  };
+  function onekey(){return '<button class="btn primary" data-act="onekey">一键打开</button><button class="btn" data-act="settings">去设置手动打开</button>';}
+
+  function renderHome(){
+    var el=document.getElementById('home'),h='';
+    if(state==='off'){
+      h+='<div class="af-alert bad"><span class="tag">MCP</span><span><b>WorkBuddy 的 MCP 开关已关闭</b>：记忆服务端在线，但客户端不会挂载召回工具，本轮回答用不上记忆库。</span>'+onekey()+'</div>';
+      h+='<div class="af-note">清除禁用标记后需新开会话才生效：客户端不会实时重读配置。</div>';
+    }else if(state==='pending'){
+      h+='<div class="af-alert warn"><span class="tag">MCP</span><span><b>已清除禁用标记，待生效</b>：原配置已备份。请在设置里手动打开开关，或新开一个会话。</span><button class="af-link" data-act="settings">去设置手动打开</button></div>';
+      h+='<div class="af-note">状态保持待生效，不冒充已连接；12 秒后复核仍为待生效时会继续提示。</div>';
+    }else if(state==='down'){
+      h+='<div class="af-alert bad"><span class="tag">MCP</span><span><b>记忆服务端未启动</b>：本机端口连不上，这不是客户端开关问题。</span><button class="af-link" data-act="launch">去启动桌面端</button></div>';
+      h+='<div class="af-note">桌面端启动后状态卡会自动复核；此时不显示「一键打开」，避免误导。</div>';
+    }else{
+      h+='<div class="af-note">无告警。仅在状态卡里保留一行绿色状态。</div>';
+    }
+    var st=state==='ok'?'已接入':state==='down'?'服务端未启动':state==='pending'?'待生效':'已关闭';
+    var c=state==='ok'?OK:state==='down'?WARN:ERR;
+    h+='<div class="af-panel"><div class="af-ph"><h3 style="margin:0;font-size:12px">MCP 接入</h3><span class="hint">http://127.0.0.1:8204/mcp</span><button class="af-link">接入</button></div>';
+    h+='<div class="af-li">'+dot(c)+'<span class="nm">WorkBuddy</span><span class="ds">'+(state==='ok'?'配置完整 · 最近一次真实调用 16:01':'见上方提示条')+'</span><span class="rt">'+st+'</span></div></div>';
+    el.innerHTML=h;
+  }
+
+  function renderAgent(){
+    var el=document.getElementById('agent'),h='';
+    var pill=state==='ok'?'pill on':state==='down'?'pill gold':state==='pending'?'pill gold':'pill red';
+    var label=state==='ok'?'已接入':state==='down'?'服务端未启动':state==='pending'?'已清除标记 · 待生效':'客户端已关闭';
+    var desc=state==='off'?'配置条目与令牌都在，但客户端把本服务标成已禁用；现成的一键接入不会处理这种情况。'
+      :state==='pending'?'已备份并清除禁用标记。请在设置里手动打开，或新开一个会话后复核。'
+      :state==='down'?'本机端口连不上，请先启动桌面端；扫描结果不会误报成客户端已关闭。'
+      :'配置完整，审计检测到真实调用，状态来自本机真值。';
+    h+='<div class="client-row"><span class="nm">WorkBuddy</span><span class="badge">p0</span><span class="'+pill+'">'+label+'</span><span class="ds">'+desc+'</span>';
+    if(state==='off')h+='<span class="btns">'+onekey()+'</span>';
+    if(state==='pending')h+='<span class="btns"><button class="btn" data-act="settings">去设置手动打开</button></span>';
+    if(state==='down')h+='<span class="btns"><button class="btn" data-act="launch">去启动桌面端</button></span>';
+    if(state==='ok')h+='<span class="btns"><button class="btn" disabled>一键接入（无需操作）</button></span>';
+    h+='</div>';
+    h+='<div class="note">仅管理员可写；动作只记客户端名、配置路径与备份路径，令牌与配置原文不进日志、不进界面。</div>';
+    el.innerHTML=h;
+  }
+
+  function renderShell(){
+    var el=document.getElementById('shell'),h='';
+    var serverUp=state!=='down';
+    var sw=state==='ok'?'已启用':state==='down'?'未知':state==='pending'?'待生效':'已关闭';
+    var swColor=state==='ok'?OK:state==='down'?DIM:state==='pending'?WARN:ERR;
+    h+='<div class="status-card"><div class="af-ph"><h3 style="margin:0;font-size:12px">系统状态</h3><span class="hint">每 12 秒复核</span></div>';
+    h+='<div class="status-line">'+dot(serverUp?OK:ERR)+'<span class="k">记忆服务端</span><span class="v">'+(serverUp?'在线 · 8204 端口可达':'未启动 · 端口连不上')+'</span></div>';
+    h+='<div class="status-line">'+dot(swColor)+'<span class="k">客户端 MCP 开关</span><span class="v">'+sw+'</span></div>';
+    h+='<div class="status-line">'+dot(serverUp?OK:DIM)+'<span class="k">最近一次真实召回</span><span class="v">'+(state==='ok'?'16:01 · 来自审计记录':state==='down'?'无':'15:39 · 开关关闭前的记录')+'</span></div>';
+    h+='<div class="status-foot"><span>判定不到时显示「未知」，不冒充已连接</span>';
+    if(state==='off')h+=onekey();
+    if(state==='pending')h+='<button class="btn" data-act="settings">去设置手动打开</button>';
+    if(state==='down')h+='<button class="btn" data-act="launch">去启动桌面端</button>';
+    h+='</div></div>';
+    el.innerHTML=h;
+  }
+
+  function render(){
+    document.querySelectorAll('[data-s]').forEach(function(b){b.classList.toggle('active',b.dataset.s===state);});
+    document.getElementById('scenario-note').textContent=NOTE[state];
+    renderHome();renderAgent();renderShell();
+  }
+
+  document.addEventListener('click',function(e){
+    var b=e.target.closest('button');if(!b)return;
+    if(b.dataset.s){state=b.dataset.s;render();return;}
+    if(b.dataset.act==='onekey'){state='pending';render();say('已清除禁用标记并备份原配置。请在设置里手动打开，或新开一个会话后生效。');return;}
+    if(b.dataset.act==='settings'){say('已定位到 WorkBuddy → 设置 → MCP 服务管理，请打开 MultiAgent Memory 的开关。');return;}
+    if(b.dataset.act==='launch'){say('请启动 MultiAgent Memory 桌面端，状态卡会在 12 秒内自动复核。');return;}
+  });
+  render();
+})();
+</script>
+</body>
+</html>

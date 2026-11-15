@@ -58,6 +58,7 @@
   - [检索页_原型.html](design/ui/检索页_原型.html)
   - [登录与首页_原型.html](design/ui/登录与首页_原型.html)
   - [回显气泡_原型.html](design/ui/回显气泡_原型.html)
+  - [客户端MCP开关状态_原型.html](design/ui/客户端MCP开关状态_原型.html)
 
 ## 元信息 meta
 - 宪章：[meta/charter.md](meta/charter.md)

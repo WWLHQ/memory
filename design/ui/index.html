@@ -76,6 +76,10 @@
         <span class="ic">🔒</span>
         <span class="lbl">硬前置召回开关<span class="desc">A 钩子 / B 网关 / C 门禁 · 启用·不启用</span></span>
       </div>
+      <div class="item" data-view="mcpSwitch">
+        <span class="ic">🟢</span>
+        <span class="lbl">客户端 MCP 开关状态<span class="desc">首页提示条 / 接入页状态行 / 壳层系统状态卡 · 一键打开</span></span>
+      </div>
       <div class="item" data-view="conflict">
         <span class="ic">⚖️</span>
         <span class="lbl">冲突裁决（P8）<span class="desc">自动 LWW + 9.7 人工队列</span></span>
@@ -124,6 +128,8 @@ const VIEWS={
     legend:"自我净化与生长（6.1/6.2/7.1/7.2/13.3）+ 大模型配置（13.2/6.1/2.4.3/7.2）：五维查重+短路嫁接 · 自生长五项优化+收益曲线 · 向量模型与本地/网络 LLM 按用途配置。"},
   recallhard:{title:"硬前置召回 A / B / C 启用选择",file:"硬前置召回开关_原型.html",
     legend:"批次62 硬前置召回：A 宿主钩子 / B LLM 网关 / C MCP 内核门禁，三层各一组「启用 · 不启用」二选一按钮，状态来自本机真实配置（宿主 settings.json / 网关端口监听 / 服务端门禁当前值）。B 启用后给上游地址与可复制的 base_url；C 切换即时生效无需重启。对应《specs/RECALL-HARD-PREFIX.md》。"},
+  mcpSwitch:{title:"客户端 MCP 开关状态 · 三处效果页",file:"客户端MCP开关状态_原型.html",
+    legend:"客户端把本服务标成已禁用时，三处都要说清「服务端在线、是客户端开关」：① 首页提示条 ② 接入页客户端状态行 ③ 壳层系统状态卡。一键打开 = 备份原配置后只清禁用标记，必须同时给「去设置手动打开」或「新开一个会话」两条出路，状态保持待生效、不冒充已连接；服务端未启动时单独提示启动桌面端，不提供一键打开。整页只说人话，不渲染原始配置内容。"},
   logs:{title:"日志记录页（P15）原型",file:"日志记录页_原型.html",
     legend:"P15 日志记录页：全软件所有动作的记录（非只异常）· 异常置顶 6 分类（熔断/同步失败/额度超限/L0 解密/向量报错/冲突挂起）· 审计日志点才弹出 modal（非常驻）· 日志/审计同目录独立文件 · 审计 append-only 禁简单删除需 Admin 权限 + 二次确认 + 写审计 audit_delete。对应《日志记录页字段级交互规格》。"},
   conflict:{title:"冲突裁决（P8）原型",file:"冲突裁决页_原型.html",
@@ -144,6 +150,7 @@ const LEGEND={
   story:"故事线：任务开始→召回注入→沉淀写入→跨 Agent 召回→看板收口，一键连续播放，展示三根线串起多 Agent 记忆闭环。",
   purify:"自我净化与生长 + 大模型配置：五维查重/短路嫁接 · 自生长五项优化+收益曲线（调权重前后 Δ）· 向量模型与本地/网络 LLM 按用途配置（含回退）。",
   recallhard:"硬前置召回 A/B/C：A 宿主钩子保证每轮必召回 · B LLM 网关把记忆置顶拼进 system · C 内核门禁保证没召回不许调别的工具。三层各一组「启用 · 不启用」二选一按钮，状态读本机真值；B 含上游地址与可复制 base_url。",
+  mcpSwitch:"客户端 MCP 开关状态三处效果页：首页提示条（af-alert bad / tag / af-link）、接入页状态行（pill red / on / gold）、壳层系统状态卡（12 秒复核）。一键打开只清禁用标记并备份，点击后显示「待生效」，需去设置手动打开或新开会话；服务端离线单独提示启动桌面端。",
   logs:"P15 日志记录页：全动作日志 + 异常置顶 + 审计弹出 modal（非常驻）+ 审计 append-only 禁简单删除需 Admin 权限。",
   conflict:"P8 冲突裁决：9.7 自动 LWW + 仅语义冲突人工 · dispute_flag 待决队列 · 裁决写审计 dispute_resolve。",
   timeline:"19.6 全链路：同一 project_id=P1 记忆空间被 Claude Code 与 Codex 先后读写。三根线：project_id 贯穿共享域、session_id 串会话、request_id 各记审计。",
