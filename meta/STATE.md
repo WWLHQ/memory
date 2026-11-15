@@ -5,9 +5,17 @@
 ## 一句话定位
 本工作区 = **工作法体系** + 真实项目「**多 Agent 记忆助手**」（需求规格与原型已结构化并跑通首个功能）。
 
-## 当前状态（2026-11-15 20:18 压缩快照 · 优先于下方历史段落）
+## 当前状态（2026-11-15 20:28 压缩快照 · 优先于下方历史段落）
 
-### 批次63 · 监控仪表盘人话化（A + B + C + 实机修复 + UI 微调完成 · 停·等实测 / 需第三轮重打包 / 未提交 / 未 push）
+### 批次63 + 并行会话 · 已提交推送（cf24de5 / origin/main 同步 · 工作区干净）
+
+- **提交**：`cf24de5 feat(monitor): 监控仪表盘人话化 + MCP 客户端开关状态三处落点` —— **49 文件 / +2558 / −213**，按用户拍板方案 A（并行会话改动与 `main.ts`/`ipcChannels.ts`/`hostBridge.ts`/`preload.ts` 行级交织，无法按文件拆分）一次性提交，提交信息分列两块。推送 `ebe1d3c..cf24de5 main -> main` EXIT=0，`main...origin/main` 已同步、`git status` 0 项。
+- **提交前确认并行会话收工**：观察 45 秒 `src/**` 零写入、`git status` 状态行恒为 49 → 判定收工。
+- **CI（提交前全绿）**：`verify:fast`（typecheck 0 错 / oxlint 0w0e / code:index 同步 / no-demo 通过 / **278 文件 3336 例 0 失败** / 覆盖 80.45%–72.65%–76.27%–83.78%）、`validate_project.py` 失败 0（144 既有 WARN）、`generate.py --check` 同步、`build:electron` OK、打包 EXIT=0。远端 GitHub Actions 结果需用户到页面确认（本环境无 token 直连）。
+- **产物**：`release\installer\MultiAgent Memory-0.1.0-setup.exe` 128,048,481 B / 20:18:47 / SHA256 `3D1EF7974117BF0B3D8FD0E1E5658664A246FEC6BCBF0F33DE63485AC17F6056`；`release\installer\win-unpacked` 为真产物目录（`release\win-unpacked` 是 00:56 旧残留，EBUSY 未删，勿混淆）。
+- **实测**：新端 20:19:20 由用户双击启动，8200–8204 全部 LISTENING；用户已确认。
+
+### 批次63 · 监控仪表盘人话化（A + B + C + 实机修复 + UI 微调，已提交）
 
 - **UI 微调（2026-11-15 20:10–20:18，用户两条指令）**：①「检索表现移动到最上面，精炼队列移动到最下面」→ `useMonitorReal.metricsFromLedger` 返回数组重排为 **检索性能(1h) 5 张 → Agent 健康 3 张 → 冷存储 2 张 → 人工审核 2 张 → 队列 1 张**（`groupMetrics` 用 Map 保插入序，故顺序=数组顺序）；`__tests__/fixtures.ts` 的 `SEED_METRICS` 同步重排。②「连通率缺少百分号」→ 该卡删掉写死的 `unit: ''`，改回 `c.unit ?? t.unit` 回退真源 `'%'`（空字符串不触发 `??`，这就是缺 % 的真因；实机先前显示「100」无单位）。
 - **本轮新补测试缺口**：原顺序锁只断言夹具 `SEED_METRICS`，**锁不住生产数组**——变异「队列置顶」时 43 例仍全绿。已在 `MonitorPage.test.tsx` 空账本用例加生产组序断言 `mgroup-检索性能(1h) → … → mgroup-队列`，并新增渲染层用例「连通率有样本 → 值位必须是 `100%`」（锁住「卡片级写死 unit 压掉真源」这个实机 bug）。
