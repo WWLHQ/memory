@@ -1,5 +1,5 @@
 // 首页总览工作台（批次57-C · 版式对齐定稿图 stratum-l1l3-preview pg-home）：
-// 头部 → L0 提示 → 效果四卡 → 双栏（左：图谱/异常/最近审计；右：TOKEN 节省率/补炼/MCP/引擎/今日概览）→ 页脚端口行。
+// 头部 → L0 提示 → 效果四卡（同宽同高）→ 双栏（左：图谱/异常/最近审计；右：TOKEN 节省率/今日概览/补炼/MCP/引擎）→ 页脚端口行。
 // 所有读数来自 loadOverview 单次真实取数：内核账本 / 审计 / 主进程 IPC（refine:state · mcp:clients · llm:config · dataRoot:get）/ /api/health。
 // 读不到就显示「读不到 / 未取数 / —」并给原因，绝不用演示数或 0 冒充成功读数。
 // 问账本问答框已独立为整页（assistant.html · src/web/assistant/AssistantPage.tsx），本页不再渲染底部输入框。
@@ -110,10 +110,10 @@ export function deriveHomeView(s: OverviewSnapshot): HomeDerived {
 /** 效果证据四卡（真实账本聚合；空账本 = 未取数，不伪造演示数字） */
 function EffectCard({ g }: { g: Gain }) {
   return (
-    <section className="af-panel af-stat">
+    <section className="af-panel af-stat" data-testid="home-gain-card">
       <div className="k">{g.title}<span>{g.icon}</span></div>
       <div className="v">{g.big}</div>
-      {/* desc 由内核聚合生成、仅插值数字（含 <b> 强调），与 AgentOnboard/Gains 同一渲染口径 */}
+      {/* desc 由内核聚合生成、仅插值数字（含 <b> 强调）；文案侧已去掉参数/编号，一律说人话（2026-11-16） */}
       <div className="d" dangerouslySetInnerHTML={{ __html: g.desc }} />
       <div className="src">{g.src}</div>
     </section>
@@ -620,10 +620,11 @@ export function OverviewPage() {
 
                 <div className="af-stack">
                   <TokenPanel p={snap.token} />
+                  {/* 今日概览上移到补炼队列之前：先看今天的量，再看队列在干什么（2026-11-16 用户要求） */}
+                  <TodayPanel p={snap.today} />
                   <RefinePanel p={snap.refine} />
                   <McpPanel p={snap.mcp} />
                   <EnginePanel p={snap.engines} />
-                  <TodayPanel p={snap.today} />
                 </div>
               </div>
 

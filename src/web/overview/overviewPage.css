@@ -112,17 +112,22 @@ html[data-theme="dark"] body { background: #060B16; color: #E4EDF8; }
 .af-stack { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 
 /* ── 效果证据四卡 / 统计卡 ── */
-.af-g4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-items: start; }
+/* 四卡统一尺寸（2026-11-16 用户要求）：同一行等宽 + 等高。
+   旧值 align-items:start 会让「解释多一行」的卡片自己变高、四卡参差不齐；
+   改为 stretch 拉平，卡内改 flex 列让「来源」行统一贴底，标题/大数字/说明三段始终对齐。 */
+.af-g4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-items: stretch; }
 .af-g4 > * { min-width: 0; }
-.af-stat { padding: 11px 13px; }
+.af-g4 > .af-stat { min-height: 96px; }
+.af-stat { padding: 11px 13px; display: flex; flex-direction: column; }
 .af-stat .k { font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; align-items: center; gap: 6px; }
 .af-stat .k span { font-family: var(--mono); font-size: 10px; }
 .af-stat .v { font-family: var(--mono); font-size: 23px; font-weight: 600; color: var(--ink); letter-spacing: -.02em; margin-top: 3px; line-height: 1.2; font-variant-numeric: tabular-nums; }
 .af-stat .v em { font-style: normal; font-size: 12px; color: var(--muted); font-weight: 400; margin-left: 1px; }
-.af-stat .d { font-size: 11px; margin-top: 2px; color: var(--ok); line-height: 1.5; }
+.af-stat .d { font-size: 11px; margin-top: 2px; color: var(--ok); line-height: 1.5; flex: 1 1 auto; }
 .af-stat .d.mut { color: var(--muted); }
 .af-stat .d b { color: var(--ink); font-weight: 600; }
-.af-stat .src { margin-top: 6px; font-family: var(--mono); font-size: 9px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 来源行贴底（flex 列 + margin-top:auto）：四卡等高后来源标注齐脚，不会一高一低 */
+.af-stat .src { margin-top: auto; padding-top: 6px; font-family: var(--mono); font-size: 9px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .af-spark { display: block; width: 100%; height: 32px; margin-top: 7px; }
 
 /* ── 双栏 ── */

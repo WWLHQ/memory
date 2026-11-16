@@ -1780,3 +1780,18 @@ status: draft
 | `web/shell/theme.css` | 新增 `.insp-reveal`（24px 竖排标签，沿用 `--panel2/--mu/--acc` 配色），收起态也有可见可点的展开入口，不依赖右键菜单 | 结构由 `qa-inspector-expand` 存在性与点击后 `.inspector-pane` 去掉 `collapsed` 断言锁；视觉由用户真机实测判定 |
 
 > 三道闸门（2026-11-16）：A 全量 `npm test` 290 文件 / 3455 项 EXIT 0、Web `tsc --noEmit` 0 错、改动文件 `oxlint` 0 错、`check:no-demo` 通过、索引 409 源码 / 148 文档最新 + `--check` 通过；B 定向 `workspace.test.tsx` 67 项全绿；C 两处变异分别判红 3 例 / 2 例，还原后复绿。**未打包、未提交、未推送，等用户实测 + 明确确认**。
+
+### 首页四卡等高 · 解释区去参数渲染 · 今日概览上移（2026-11-16）
+
+用户原话：「卡片长宽大小要统一，解释部分禁止出现参数渲染，用大白话和人话，今日概览向上移动到 L2-L6 补练队列上面」。
+
+| 任务→文件 | 实现 | 测试 / 门禁 |
+|---|---|---|
+| `web/overview/overviewPage.css` | 四卡不等高根因：`.af-g4` 用了 `align-items: start`（等高拉伸失效），「解释多一行」的第一张卡自己顶高，四卡参差。改 `align-items: stretch` + `.af-g4 > .af-stat { min-height: 96px }`；`.af-stat` 改 `display:flex; flex-direction:column`，`.af-stat .d { flex: 1 1 auto }` 吃掉剩余高度、`.af-stat .src { margin-top: auto }` 让来源行统一贴底 → 等宽（`repeat(4,minmax(0,1fr))` 不变）+ 等高 + 三段对齐 | 新增 `overview/__tests__/overviewCards.test.tsx` 版式契约 3 例（等高 stretch 且不得回退 start / flex 列 + `.d` 吃掉余高 + `.src` 贴底 / 四卡最小高度）；jsdom 不加载外链 CSS，故按 `ribbonLayout.test.ts` 先例直接读 `overviewPage.css` 钉住 |
+| `web/AgentOnboard/coreOnboard.ts` | 解释区参数渲染全部清掉（这里是四卡文案唯一来源，首页与接入页共用）：`内核账本·实时（2.4.1 预算）`→`内核账本 · 每次召回实算`、`（9.1 / 9.3 / 9.4）`→`每次命中实算`、`（19.4）`→`按项目统计`、`（19.8 proxy_select_mode=auto）`→`按单价折算`；desc 里的 `平均 payload 750/1500`、`极简 ≤600t、次模式 ≤200t 占位符`、`project_id 共享域（19.4）`、`省额 = 省量 × 参数单价` 一律改成一句人话，真实读数（次数 / 条数 / `t` / 金额）照旧保留；标题去掉 `（反代理 19.8）`；顺带修 `-0%`（省额为 0 时显示 `0%`，负零是计算痕迹不是人话） | `AgentOnboard/__tests__/coreReal.test.ts` 改 2 处旧断言（`750/1500`→`750t` 且不得含 `/1500`；`recall 省量`→`内核账本`+`单价`），新增 2 例：四卡（有数据 + 空账本）`title/desc/src` 一律不匹配 `/2\.4\.1\|9\.[134]\|19\.[48]\|payload\|project_id\|参数单价\|反代理\|proxy_select_mode\|口径/` 且 `src` 仍含「内核账本」；省额 0 → `big === '0%'` |
+| `web/overview/OverviewPage.tsx` | 右栏顺序改为 TOKEN 节省率 → **今日概览** → L2–L6 补炼队列 → MCP 接入 → 引擎延迟排行；`EffectCard` 加 `data-testid="home-gain-card"` 便于锁结构与父容器；首行文件头注释同步 | `overviewCards.test.tsx` 结构 2 例：四卡同父容器、同 `af-panel af-stat` class、`.k/.v/.src` 齐全；`home-today` 与 `home-refine` 同父且 `compareDocumentPosition` 证明 today 在前 |
+
+> 文案口径：真实数字（召回次数 / 命中条数 / 共享项目数 / 省量 `t` / 金额）一个不删，只把「参数怎么算的」换成人话；金额仍标「属估算值」，未设单价仍说「金额不估算」，不因为改文案而放松诚实边界。
+> 三道闸门（2026-11-16）：A `tsc --noEmit`（web + electron 双工程）0 错、`oxlint` 0 warning / 0 error（764 文件）、全量 `npm test` **293 文件 / 3505 项全绿**、`check:no-demo` 通过、`code:index --write` 411 源码 / 148 文档最新；B 定向 `coreReal + overviewCards + coreHome + overviewPageWake + homeView` 63 项全绿；C 三处变异（`.af-g4` 改回 `align-items:start` / 今日概览挪回右栏末尾 / 复用卡 `src` 改回 `内核账本·实时（19.4）`）**分别精确判红 1 例、其余 21 例仍绿**，还原后 24 项复绿、扩到 63 项仍全绿。
+> 一个坑：CSS 契约断言必须把匹配锁在声明块内（`\{[^}]*`），用 `[\s\S]*?` 会跨块命中 `.af-cols` 有意保留的 `align-items: start`，把「两栏顶对齐」误判成四卡回退。
+> 状态：**未打包、未提交、未推送**，等用户实测 + 明确确认。工作区另有在途改动（网页对话导出 `WebChatExport*`、recall hook 状态文件、`recallHard` 权限下放）不属本轮，提交时只精确 `git add` 这 5 个文件。

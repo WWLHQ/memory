@@ -41,7 +41,9 @@ describe('getOnboardGains（效果证据四卡真实聚合）', () => {
     // avg payload = 750 / 1500 → -50%
     expect(g[0].big).toBe('-50%');
     expect(g[0].desc).toContain('2 次召回');
-    expect(g[0].desc).toContain('750/1500');
+    // 2026-11-16：解释区改说人话，不再渲染「750/1500」这种参数算式，只留真实读数
+    expect(g[0].desc).toContain('750t');
+    expect(g[0].desc).not.toContain('/1500');
   });
 
   test('效率提升：跨会话召回次数与累计命中', async () => {
@@ -76,7 +78,9 @@ describe('getOnboardGains（效果证据四卡真实聚合）', () => {
     expect(g[3].big).toBe('省 ¥0.002');
     expect(g[3].desc).toContain('2 次召回');
     expect(g[3].desc).toContain('1,000t');
-    expect(g[3].src).toContain('recall 省量');
+    // 来源标注改成「内核账本 · 按单价折算」这类人话，不再写「recall 省量 × 参数单价」算式
+    expect(g[3].src).toContain('内核账本');
+    expect(g[3].src).toContain('单价');
   });
 
   test('模型成本节省：未设单价 → 显示真实省量 t，不编造金额', async () => {
@@ -93,6 +97,33 @@ describe('getOnboardGains（效果证据四卡真实聚合）', () => {
     await s.appendAudit(audit('llm_proxy', { cost: 0.02 }));
     const g = await getOnboardGains(s);
     expect(g[3].big).toBe('未取数');
+  });
+
+  test('四卡解释区一律人话：不出现版本号/口径编号/字段名/单价算式（2026-11-16）', async () => {
+    // 用户原话：解释部分禁止出现参数渲染，用大白话和人话。
+    // 变异靶点：把任意一条 src 改回「内核账本·实时（19.4）」或 desc 写回 payload/参数单价，本用例必红。
+    const PARAM_RENDER = /2\.4\.1|9\.[134]|19\.[48]|payload|project_id|参数单价|反代理|proxy_select_mode|口径/;
+    const s = new InMemoryStorage();
+    await s.putMemory(mem({ mem_id: 'm1', project_id: 'P1' }));
+    await s.appendAudit(audit('recall', {
+      query: 'q', hits: 2, payload_tokens: 300, injected_tokens: 300, saved_tokens: 700, corpus_tokens: 1000,
+    }));
+    const filled = await getOnboardGains(s);
+    for (const card of [...filled, ...emptyOnboardGains()]) {
+      const text = `${card.title} ${card.desc} ${card.src}`;
+      expect(text).not.toMatch(PARAM_RENDER);
+      // 真实读数照旧留在卡上，只是换了说法
+      expect(card.big.length).toBeGreaterThan(0);
+      expect(card.src).toContain('内核账本');
+    }
+  });
+
+  test('Token 节省为 0 时显示 0%，不显示「-0%」', async () => {
+    // 负零是计算痕迹：avg 已超过全量预算 → 省额被 clamp 到 0，读起来应是「0%」
+    const s = new InMemoryStorage();
+    await s.appendAudit(audit('recall', { query: 'q', hits: 1, payload_tokens: 2000, mems: ['m1'] }));
+    const g = await getOnboardGains(s);
+    expect(g[0].big).toBe('0%');
   });
 });
 
