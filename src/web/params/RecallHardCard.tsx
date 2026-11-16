@@ -64,9 +64,49 @@ function LayerPick(props: {
 const stCls = (on: boolean): string => `rh-st${on ? ' on' : ' idle'}`;
 const stTxt = (on: boolean): string => (on ? '已启用' : '未启用');
 
+/** 失败原因枚举 → 人话；UI 铁律：不显示英文枚举/原始 JSON。 */
+const FAIL_REASON_ZH: Record<string, string> = {
+  empty_input: '没收到提问内容',
+  bad_event: '收到的事件格式不对',
+  loopback_guard: '服务地址不是本机，出于安全未召回',
+  token_missing: '本机令牌缺失',
+  rpc_error: '记忆服务没响应（可能未启动）',
+  bad_response: '记忆服务返回了无法识别的结果',
+  unknown: '原因未知',
+};
+
+/** 最近一次钩子执行 → 角标文案 + 样式 + 悬停详情；null=尚无记录（不显示角标）。 */
+function lastRunBadge(run: RecallHardStateView['a']['lastRun']): { text: string; cls: string; title: string } | null {
+  if (!run) return null;
+  const when = new Date(run.at);
+  const time = Number.isNaN(when.getTime()) ? run.at : when.toLocaleString('zh-CN', { hour12: false });
+  if (run.status === 'ok') {
+    return {
+      text: `本轮已召回 ${run.hits} 条`,
+      cls: 'on',
+      title: `最近一次强制召回成功：注入 ${run.hits} 条记忆 · ${time}`,
+    };
+  }
+  if (run.status === 'empty') {
+    return {
+      text: '本轮零命中',
+      cls: 'idle',
+      title: `最近一次强制召回成功，但没有命中记忆（新项目属正常）· ${time}`,
+    };
+  }
+  return {
+    text: '最近召回失败',
+    cls: 'bad',
+    title: `最近一次强制召回失败：${FAIL_REASON_ZH[run.reason ?? 'unknown'] ?? FAIL_REASON_ZH.unknown} · ${time}。不影响提问，本轮回答未使用记忆库。`,
+  };
+}
+
 export function RecallHardCard() {
   const { role } = useSessionContext();
   const isAdmin = role === 'admin';
+  // 2026-11-16 权限下放：A 宿主钩子 / C 内核门禁 成员也能配；B（网关+上游凭据）仍需管理员。
+  // 判定与主进程共用 shared/recallHardConfig 的 MEMBER_EDITABLE_KEYS，避免「界面能点、后端拒绝」。
+  const canEditAC = isAdmin || role === 'member';
   const available = recallHardAvailable();
   const [state, setState] = useState<RecallHardStateView | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -179,12 +219,24 @@ export function RecallHardCard() {
             <div className="rh-head">
               <span className="rh-name">A · 宿主钩子</span>
               <span className={stCls(state.a.installed)} data-testid="rh-a-st">{stTxt(state.a.installed)}</span>
+              {(() => {
+                const badge = lastRunBadge(state.a.lastRun);
+                return badge ? (
+                  <span
+                    className={`rh-st rh-lastrun ${badge.cls}`}
+                    data-testid="rh-a-lastrun"
+                    title={badge.title}
+                  >
+                    {badge.text}
+                  </span>
+                ) : null;
+              })()}
             </div>
             <div className="rh-desc">
               宿主在模型处理前同步执行 UserPromptSubmit 强制召回，注入 additionalContext。桌面端需重启宿主并在 hooks 面板审核后生效。
             </div>
             <div className="rh-foot">
-              <LayerPick label="A 宿主钩子" testId="rh-a-pick" on={d.a_hook} disabled={!isAdmin || busy} onPick={(on) => pick('a_hook', on)} />
+              <LayerPick label="A 宿主钩子" testId="rh-a-pick" on={d.a_hook} disabled={!canEditAC || busy} onPick={(on) => pick('a_hook', on)} />
               <span className="rh-state" data-testid="rh-a-state">{state.a.note}</span>
             </div>
             {!state.a.scriptExists && (
@@ -197,12 +249,17 @@ export function RecallHardCard() {
                 宿主钩子实际指向：<code>{state.a.installedPath}</code>
               </div>
             )}
-            {state.a.installed && state.a.installedPath
+            {state.a.overwritten ? (
+              <div className="rh-warn" data-testid="rh-a-overwritten">
+                写入后又被宿主改回去了：宿主（WorkBuddy）内存里存着旧配置，落盘时盖掉了我们的修改，所以再点「保存并生效」也不会生效。
+                请先完全退出宿主（含托盘图标），再回到这里点「保存并生效」，最后启动宿主并到它的 hooks 面板确认这一条。
+              </div>
+            ) : (state.a.installed && state.a.installedPath
               && state.a.installedPath.replace(/\\/g, '/').toLowerCase() !== state.a.hookScript.replace(/\\/g, '/').toLowerCase() && (
               <div className="rh-warn" data-testid="rh-a-path-mismatch">
                 该路径与当前宿主脚本不符（开发态→打包态过渡常见）：点「保存并生效」会重写为 <code>{state.a.hookScript}</code>，再重启宿主即恢复每轮召回。
               </div>
-            )}
+            ))}
             {state.a.needsRestart && (
               <div className="rh-warn" data-testid="rh-a-restart">
                 A 的改动已写入宿主配置，但 hooks 不热加载：请重启宿主（或到 hooks 面板审核新钩子）后才会真正每轮召回。
@@ -219,6 +276,11 @@ export function RecallHardCard() {
             <div className="rh-desc">
               应用内置反向代理，把召回记忆置顶拼进 system，再转发上游。启用后把客户端 base_url 指向下方接入地址。
             </div>
+            {!isAdmin && (
+              <div className="note" data-testid="rh-b-need-admin">
+                B 需管理员：启用后本机端口成为转发出口，需管理员确认上游地址与凭据边界。
+              </div>
+            )}
             <div className="rh-foot">
               <LayerPick label="B LLM 网关" testId="rh-b-pick" on={d.b_gateway} disabled={!isAdmin || busy} onPick={(on) => pick('b_gateway', on)} />
               <span className="rh-state" data-testid="rh-b-state">
@@ -260,7 +322,7 @@ export function RecallHardCard() {
               可靠会话未先调用 recall_memory 时，除 recall_memory 自身外的所有工具都被硬拦。切换后无需重启，下一次 tools/call 立即按新口径判定。
             </div>
             <div className="rh-foot">
-              <LayerPick label="C MCP 内核门禁" testId="rh-c-pick" on={d.c_strict_gate} disabled={!isAdmin || busy} onPick={(on) => pick('c_strict_gate', on)} />
+              <LayerPick label="C MCP 内核门禁" testId="rh-c-pick" on={d.c_strict_gate} disabled={!canEditAC || busy} onPick={(on) => pick('c_strict_gate', on)} />
               <span className="rh-state" data-testid="rh-c-state">
                 {state.c.effective ? '严格门禁生效中 · 未召回即硬拦全部非 recall 工具' : '退回旧行为 · 只硬拦写入/治理类工具'}
               </span>
@@ -279,15 +341,20 @@ export function RecallHardCard() {
             </span>
             <span className="row" style={{ margin: 0 }}>
               <button type="button" className="btn" onClick={() => void refresh()} disabled={busy} data-testid="rh-refresh">刷新</button>
-              <button type="button" className="btn primary" onClick={() => void save()} disabled={!isAdmin || busy || !dirty} data-testid="rh-save">
+              <button type="button" className="btn primary" onClick={() => void save()} disabled={!canEditAC || busy || !dirty} data-testid="rh-save">
                 保存并生效
               </button>
             </span>
           </div>
 
-          {!isAdmin && (
+          {!canEditAC && (
             <div className="note" data-testid="rh-need-admin">
               需管理员：三层开关会改写宿主配置、起停本机端口、改变所有 Agent 的首步门禁强度；只读状态不限角色。
+            </div>
+          )}
+          {canEditAC && !isAdmin && (
+            <div className="note" data-testid="rh-member-scope">
+              成员可改 A（宿主钩子）与 C（内核门禁）；B（LLM 网关与上游地址）仍需管理员——它会把本机端口变成转发出口，并携带你客户端的上游凭据。
             </div>
           )}
           {msg && <div className="note" data-testid="rh-msg">{msg}</div>}

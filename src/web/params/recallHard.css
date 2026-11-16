@@ -20,6 +20,9 @@
 .rh-st { font-size: 10px; padding: 1px 7px; border-radius: 4px; }
 .rh-st.on { background: var(--ok-soft); color: var(--ok); }
 .rh-st.idle { background: var(--surface); color: var(--faint); border: 1px solid var(--line); }
+/* 最近一次召回角标：失败用醒目但不打断的软红，悬停 title 给人话原因 */
+.rh-st.rh-lastrun { cursor: help; }
+.rh-st.rh-lastrun.bad { background: var(--bad-soft, var(--warn-soft)); color: var(--bad); border: 1px solid var(--bad); }
 .rh-desc { font-size: 11px; color: var(--muted); margin-top: 4px; line-height: 1.55; }
 
 .rh-foot { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 8px; }

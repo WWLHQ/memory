@@ -33,6 +33,7 @@ import type { PersonalMemoryStore } from './personalStore.ts';
 import { runGetMemoryTool, runListMemoriesTool } from './mcpReadTools.ts';
 import { deleteAllowed, runFeedbackTool, runManageMemoryTool } from './mcpManageTools.ts';
 import { runGcReportTool } from './mcpGcTools.ts';
+import { runHookStatusTool } from './mcpHookTools.ts';
 import { runCreateProjectTool, runMintTokenTool } from './mcpProjectTools.ts';
 
 const PROTOCOL_VERSION = '2025-06-18';
@@ -196,6 +197,12 @@ export interface McpHttpOptions {
    * 传布尔值时行为与批次62 之前逐字一致（既有测试与老客户端零影响）。
    */
   strictRecallGate?: boolean | (() => boolean);
+  /**
+   * 强制召回钩子的状态文件绝对路径（recall_hook_status 用）。
+   * 缺省走 hookStatusFilePath()；主进程应显式传 join(USER_DATA, HOOK_STATUS_FILE)，
+   * 保证 MCP 读的和钩子写的是同一个文件（否则会误报 never_ran）。
+   */
+  hookStatusFile?: string;
 }
 
 export interface McpHttpHandle {
@@ -387,6 +394,10 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
       case 'get_write_status': {
         // 批次44-D4：写前探锁 + 解锁态顺带重放历史 pending
         return { result: await ma.getWriteStatus() };
+      }
+      case 'recall_hook_status': {
+        // 钩子健康度自检：读宿主侧钩子写的状态文件（只读本机文件，不碰记忆库）
+        return { result: runHookStatusTool({ statusFilePath: opts.hookStatusFile }) };
       }
       case 'list_memories': {
         // 批次44-D5-1：治理盘点（与 TCP 共用 runListMemoriesTool）

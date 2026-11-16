@@ -63,6 +63,19 @@ export function normalizeRecallHardConfig(raw: unknown): RecallHardConfig {
   return base;
 }
 
+/**
+ * 权限下放（2026-11-16 用户要求）：**A 宿主钩子 / C 内核门禁对所有登录成员开放**，
+ * B（LLM 网关与上游地址）仍限管理员——改 B 会把本机端口变成对外转发口并携带上游凭据。
+ * 主进程（真闸门）与渲染层（界面禁用）必须共用这一份判定，避免各写一套导致「界面能点、后端拒绝」。
+ */
+export const MEMBER_EDITABLE_KEYS = Object.freeze(['a_hook', 'c_strict_gate'] as const);
+
+/** 从一次 patch 里挑出成员无权修改的字段；空数组 = 全部允许。 */
+export function memberForbiddenFields(patch: object): string[] {
+  const allow = new Set<string>(MEMBER_EDITABLE_KEYS);
+  return Object.keys(patch).filter((k) => !allow.has(k));
+}
+
 /** 只挑出调用方显式给出的合法字段；非法字段直接拒绝，不静默吞掉。 */
 export function parseRecallHardPatch(raw: unknown):
   | { ok: true; patch: Partial<RecallHardConfig> }

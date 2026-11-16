@@ -1,11 +1,12 @@
 // 批次62 · A/B/C 主进程控制器单测（A 宿主钩子真值 / C 门禁运行时求值 / 配置落盘）。
 // 不测 B 的真实端口转发（会依赖网络与端口占用），B 的纯函数改写规则在 recallPrelude / recallGateway 侧覆盖。
-import { mkdtemp, readFile, writeFile, rm, stat } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import {
   RECALL_HARD_HOOK_TAG, RecallHardController, findInstalledHookPath, hostHookInstalled, mergeHostHooks,
+  readHookRunState, HOOK_STATUS_FILE,
 } from '../recallHard.ts';
 
 describe('批次62 · A 宿主钩子合并规则（纯函数）', () => {
@@ -55,6 +56,81 @@ describe('批次62 · A 宿主钩子合并规则（纯函数）', () => {
     expect(hostHookInstalled({})).toBe(false);
     expect(hostHookInstalled({ hooks: { UserPromptSubmit: [{ hooks: [{ command: 'node other.mjs' }] }] } })).toBe(false);
     expect(hostHookInstalled({ hooks: { UserPromptSubmit: [{ hooks: [{ command: 'node "x/force_recall.mjs"' }] }] } })).toBe(true);
+  });
+
+  test('findInstalledHookPath：路径含空格也完整取出（2026-11-16 误报根因）', () => {
+    // 真实值就长这样：%APPDATA% 是 C:\Users\LHQ\AppData\Roaming\MultiAgent Memory
+    const host = {
+      hooks: {
+        UserPromptSubmit: [{
+          hooks: [{ type: 'command', command: 'node "C:/Users/LHQ/AppData/Roaming/MultiAgent Memory/recall-hard/force_recall.mjs"', timeout: 5 }],
+        }],
+      },
+    };
+    expect(findInstalledHookPath(host))
+      .toBe('C:/Users/LHQ/AppData/Roaming/MultiAgent Memory/recall-hard/force_recall.mjs');
+    // 反斜杠写法同样要完整（不能只剩 Memory\...）
+    const win = {
+      hooks: {
+        UserPromptSubmit: [{
+          hooks: [{ command: 'node "C:\\Users\\LHQ\\AppData\\Roaming\\MultiAgent Memory\\recall-hard\\force_recall.mjs"' }],
+        }],
+      },
+    };
+    expect(findInstalledHookPath(win))
+      .toBe('C:/Users/LHQ/AppData/Roaming/MultiAgent Memory/recall-hard/force_recall.mjs');
+  });
+
+  test('findInstalledHookPath：无引号 / 无路径 / 无钩子三种边界', () => {
+    expect(findInstalledHookPath({ hooks: { UserPromptSubmit: [{ hooks: [{ command: 'node D:/x/force_recall.mjs' }] }] } }))
+      .toBe('D:/x/force_recall.mjs');
+    expect(findInstalledHookPath({ hooks: { UserPromptSubmit: [{ hooks: [{ command: 'node x.mjs' }] }] } })).toBeNull();
+    expect(findInstalledHookPath({})).toBeNull();
+    expect(findInstalledHookPath(null)).toBeNull();
+  });
+});
+
+describe('失败锁 · 钩子执行状态读取', () => {
+  let dir = '';
+  const savedStatus = process.env.MEMAGENT_HOOK_STATUS_FILE;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'rh-status-'));
+    delete process.env.MEMAGENT_HOOK_STATUS_FILE; // 用 dataDir 默认路径
+  });
+  afterEach(async () => {
+    if (savedStatus === undefined) delete process.env.MEMAGENT_HOOK_STATUS_FILE;
+    else process.env.MEMAGENT_HOOK_STATUS_FILE = savedStatus;
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test('无状态文件 → null（UI 据此不显示角标，不猜）', async () => {
+    expect(await readHookRunState(dir)).toBeNull();
+  });
+
+  test('读到成功状态：ok + hits', async () => {
+    await writeFile(join(dir, HOOK_STATUS_FILE), JSON.stringify({ schema: 1, status: 'ok', at: '2026-01-01T00:00:00.000Z', hits: 3 }) + '\n', 'utf8');
+    const st = await readHookRunState(dir);
+    expect(st?.status).toBe('ok');
+    expect(st?.hits).toBe(3);
+  });
+
+  test('读到失败状态：failed + reason，供 UI 显示人话', async () => {
+    await writeFile(join(dir, HOOK_STATUS_FILE), JSON.stringify({ schema: 1, status: 'failed', at: '2026-01-01T00:00:00.000Z', hits: 0, reason: 'rpc_error' }) + '\n', 'utf8');
+    const st = await readHookRunState(dir);
+    expect(st?.status).toBe('failed');
+    expect(st?.reason).toBe('rpc_error');
+  });
+
+  test('坏文件 → null，不抛错', async () => {
+    await writeFile(join(dir, HOOK_STATUS_FILE), 'not json', 'utf8');
+    expect(await readHookRunState(dir)).toBeNull();
+  });
+
+  test('state().a.lastRun 暴露真值', async () => {
+    await writeFile(join(dir, HOOK_STATUS_FILE), JSON.stringify({ schema: 1, status: 'empty', at: '2026-01-01T00:00:00.000Z', hits: 0 }) + '\n', 'utf8');
+    const c = new RecallHardController({ dataDir: dir, hookScript: join(dir, 'hook.mjs'), hostSettingsPath: join(dir, 'settings.json'), log: () => undefined });
+    expect((await c.state()).a.lastRun?.status).toBe('empty');
   });
 });
 
@@ -130,6 +206,63 @@ describe('批次62 · RecallHardController', () => {
     const st = await c.state();
     expect(st.a.installed).toBe(true);
     expect(st.a.needsRestart).toBe(false);
+    expect(st.a.overwritten).toBe(false);
+  });
+
+  test('写入后被宿主回写覆盖 → overwritten=true，且话术指向「先退出宿主」而不是「再点保存」', async () => {
+    // 模拟 2026-11-16 实测事故：我们写对了路径，宿主用它内存里的旧配置盖回去
+    await writeFile(hostPath, JSON.stringify({
+      hooks: { UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'node "D:/old/app.asar/force_recall.mjs"', timeout: 5 }] }] },
+    }), 'utf8');
+    const c = make();
+    await c.init(); // 会把路径重写成 hookScript（rewrote=true → aTouchedSinceBoot）
+    const fixed = JSON.parse(await readFile(hostPath, 'utf8')) as Record<string, unknown>;
+    expect(findInstalledHookPath(fixed)?.replace(/\\/g, '/').toLowerCase())
+      .toBe(hookScript.replace(/\\/g, '/').toLowerCase());
+
+    // 宿主回写覆盖：文件又变回旧路径
+    await writeFile(hostPath, JSON.stringify({
+      hooks: { UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'node "D:/old/app.asar/force_recall.mjs"', timeout: 5 }] }] },
+    }), 'utf8');
+
+    const st = await c.state();
+    expect(st.a.overwritten).toBe(true);
+    expect(st.a.installedPath).toContain('app.asar');
+    expect(st.a.note).toContain('又被宿主改回去了');
+    expect(st.a.note).toContain('退出宿主');
+    expect(st.a.note).not.toContain('保存或重启后会自动修正'); // 已经保存过了，这句会误导
+  });
+
+  test('本次没写过（路径本就正确）→ 文件被外部改掉也只报不符，不诬告成「被覆盖」', async () => {
+    await writeFile(hostPath, JSON.stringify({
+      hooks: { UserPromptSubmit: [{ hooks: [{ type: 'command', command: `node "${hookScript}"`, timeout: 5 }] }] },
+    }), 'utf8');
+    const c = make();
+    await c.init(); // 路径已正确 → rewrote=false → aTouchedSinceBoot 保持 false
+    await writeFile(hostPath, JSON.stringify({
+      hooks: { UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'node "D:/other/force_recall.mjs"', timeout: 5 }] }] },
+    }), 'utf8');
+
+    const st = await c.state();
+    expect(st.a.overwritten).toBe(false);
+    expect(st.a.note).toContain('宿主钩子指向路径与当前不符');
+  });
+
+  test('钩子脚本在含空格目录里（真实 %APPDATA%\\MultiAgent Memory 场景）→ 写对就是写对，不许误报被覆盖', async () => {
+    const spaced = join(dir, 'MultiAgent Memory');
+    await mkdir(join(spaced, 'recall-hard'), { recursive: true });
+    const script = join(spaced, 'recall-hard', 'force_recall.mjs');
+    await writeFile(script, '// hook\n', 'utf8');
+
+    const c = new RecallHardController({ dataDir: dir, hookScript: script, hostSettingsPath: hostPath, log: () => undefined });
+    await c.init(); // a_hook 默认 true → 写入宿主配置
+    const st = await c.state();
+
+    expect(st.a.installed).toBe(true);
+    // 关键：解析出来的必须和写进去的逐字一致（旧正则会把前半段含空格的部分吃掉）
+    expect(st.a.installedPath).toBe(script.replace(/\\/g, '/'));
+    expect(st.a.overwritten).toBe(false);
+    expect(st.a.note).not.toContain('不符');
   });
 
   test('apply({a_hook:false}) → 摘钩子 + 落配置 + state 读真值', async () => {

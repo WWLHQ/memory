@@ -49,8 +49,11 @@ import { UNSET_MANUAL_BILLING } from '../shared/billing.ts';
 import { createServer as httpCreateServer } from 'node:http';
 import { runMcpServer } from '../core/memagent/mcp.ts';
 import { runMcpHttpServer } from '../core/memagent/mcpHttp.ts';
+// 钩子状态文件名：MCP 的 recall_hook_status 要读与钩子写入的同一个文件，不能各处写字面量。
+import { HOOK_STATUS_FILE } from '../core/memagent/recallHook.ts';
 import { RecallHardController } from './recallHard.ts';
-import { parseRecallHardPatch } from '../shared/recallHardConfig.ts';
+import { ensureStableHookScript } from './recallHookScript.ts';
+import { memberForbiddenFields, parseRecallHardPatch } from '../shared/recallHardConfig.ts';
 import { MemoryPendingStore, type PendingStore } from '../core/memagent/pendingWrites.ts';
 import { summarizePendingWrites } from '../shared/pendingWritesView.ts';
 import { ensureSharedProject } from '../core/memagent/mcpRecall.ts';
@@ -148,10 +151,19 @@ const DIST = resolveDistDir();
  */
 function resolveRecallHookScript(): string {
   const packed = join(__dirname, 'recall-hard', 'force_recall.mjs');
-  if (existsSync(packed)) return packed;
   const dev = join(__dirname, '..', '..', '.codebuddy', 'hooks', 'force_recall.mjs');
-  if (existsSync(dev)) return dev;
-  return packed;
+  const source = existsSync(packed) ? packed : (existsSync(dev) ? dev : packed);
+  // 2026-11-16 实测事故后改：宿主用**外部 node** 执行这个脚本，node 不认 asar 归档内的虚拟路径
+  // （…\resources\app.asar\…\force_recall.mjs 在真实文件系统上不存在 → 每轮 ERR_MODULE_NOT_FOUND）。
+  // 而打包态 __dirname 本身就是 …\app.asar.unpacked\dist-electron，写进宿主后又绑死了安装目录。
+  // 两种路径都不可靠，所以统一复制到数据根固定位置，宿主配置只认这一个不变路径。
+  const stable = ensureStableHookScript(source, USER_DATA);
+  if (stable.degraded) {
+    void mlog('recall-hard:hook-script-degraded', { note: stable.note, source, used: stable.path });
+  } else if (stable.copied) {
+    void mlog('recall-hard:hook-script-staged', { from: source, to: stable.path });
+  }
+  return stable.path;
 }
 // USER_DATA / DB_PATH 等移至 bootstrap 内部（顶层 let 声明，bootstrap 内赋值；
 // flog/mlog 等顶层函数闭包依赖这些变量，必须在顶层声明而非 const 初始化）
@@ -2065,11 +2077,22 @@ function registerRecallHardIpc(): void {
     return recallHard.state();
   });
   handleIpc(IPC.recallHardSet, async (_e, patch: unknown, sessionId?: string) => {
-    const gate = requireAdmin(sessionId, IPC.recallHardSet);
+    // 2026-11-16 权限下放：A 宿主钩子 / C 内核门禁 对登录成员开放，B（网关+上游）仍需管理员。
+    // 所以先过登录闸门，再按**字段**细分——不要退回 requireAdmin，那会把 A/C 一起锁死。
+    const gate = requireSession(sessionId, IPC.recallHardSet);
     if (!gate.ok) return { ok: false, error: gate.error };
     if (!recallHard) return { ok: false, error: '硬前置召回还没就绪（主进程启动中或数据根不可写）' };
     const parsed = parseRecallHardPatch(patch);
     if (!parsed.ok) return { ok: false, error: parsed.error };
+    if (gate.ctx.role !== 'admin') {
+      const forbidden = memberForbiddenFields(parsed.patch);
+      if (forbidden.length > 0) {
+        actionLog('ipc', IPC.recallHardSet, {
+          denied: 'field_admin_only', user: gate.ctx.user_id, fields: forbidden.join(','),
+        }, { level: 'warn' });
+        return { ok: false, code: 'E_AUTH_FORBIDDEN', error: 'A / C 成员可改；B（LLM 网关与上游地址）仍需管理员' };
+      }
+    }
     try {
       const next = await recallHard.apply(parsed.patch);
       // 只记「改了哪几个字段」与三层真值，不记上游地址（可能带租户标识甚至密钥）
@@ -3274,7 +3297,7 @@ async function bootstrap(): Promise<void> {
     ...tenantTriple, is_admin: true as const, scope_project_ids: ['*'],
   };
 
-  const mcp = runMcpServer({ storage, port: MCP_PORT, token: mcpToken, l0: l0Vault, tokenStore, memberStore, account: mcpBootstrapAccount, pending: mcpPendingStore, personal: personalStoreRef ?? undefined });
+  const mcp = runMcpServer({ storage, port: MCP_PORT, token: mcpToken, l0: l0Vault, tokenStore, memberStore, account: mcpBootstrapAccount, pending: mcpPendingStore, personal: personalStoreRef ?? undefined, hookStatusFile: join(USER_DATA, HOOK_STATUS_FILE) });
   mcp.ready
     .then((p) => { void mlog('bootstrap:mcp-listening', { port: p }); })
     .catch((e) => { void mlog('bootstrap:mcp-listen-error', String((e as Error)?.message ?? e)); });
@@ -3292,6 +3315,8 @@ async function bootstrap(): Promise<void> {
     pending: mcpPendingStore,
     personal: personalStoreRef ?? undefined,
     strictRecallGate,
+    // 钩子健康度自检：读钩子写的同一份状态文件（recall_hook_status）
+    hookStatusFile: join(USER_DATA, HOOK_STATUS_FILE),
     // 批次41-R：同一条也落 actions.log（批次34 对 llm:* 的同一口径）——日志页读的是 actions.log，
     // 只写 main.log 等于「明细页有没有被点开过」对用户不可见。值只有 ok/miss，无 id、无正文。
     onViewDetail: (outcome) => {

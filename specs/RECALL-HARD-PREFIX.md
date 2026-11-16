@@ -41,6 +41,7 @@ Node 22.18+ 原生 TS 剥离可直接 import `.ts`，所以可执行脚本（`.m
 | `src/core/memagent/recallHookCli.ts` | IO 壳（打包态入口）：读 stdin / 分派 `--self-test`，**不含业务逻辑** |
 | `.codebuddy/hooks/force_recall.mjs` | 开发态薄壳：动态 import `recallHook.ts` 并分派（Node 22 原生 TS 剥离） |
 | `dist-electron/recall-hard/force_recall.mjs` | **打包态产物**（`build:electron` 用 esbuild 打成自包含 ESM，宿主用系统 node 直接跑，不依赖仓库源码 / node_modules / TS 剥离） |
+| `src/electron/recallHookScript.ts` | **稳定化层**：启动时把上面的产物复制到 `<数据根>/recall-hard/force_recall.mjs`，宿主配置只写这一份（见 §2.1） |
 | `tools/install-force-recall.mjs` | 宿主级 installer：探测 `~/.codebuddy` 与 `~/.workbuddy`，**合并**写入、留 `.bak`、默认 dry-run |
 
 打包态为什么必须单独出产物：`electron-builder` 只带 `dist/**` + `dist-electron/**` + `package.json`，仓库里的
@@ -59,6 +60,29 @@ Node 22.18+ 原生 TS 剥离可直接 import `.ts`，所以可执行脚本（`.m
 `~/.workbuddy/settings.json`，官方未承诺读同一套 hooks。**CLI 确定可用，桌面端需实测**。
 hooks 不热加载：启动时抓快照，改完须重启并在 `/hooks` 面板审核。
 Windows 上 hook 强制 Git Bash 执行，故 installer 写入时用 `node` 绝对路径 + 正斜杠路径。
+
+### 2.1 钩子脚本路径稳定化（2026-11-16 实测事故修复）
+
+**事故现象**：宿主 `~/.workbuddy/settings.json` 的 `command` 指向
+`…\resources\app.asar\dist-electron\recall-hard\force_recall.mjs`。asar 归档内的路径是**虚拟路径**——Electron 自己的
+`fs` 能看见，**系统 node 看不见**；宿主偏偏是用系统 node 起钩子子进程的。于是每轮 `ERR_MODULE_NOT_FOUND` →
+命中 fail-open → 静默退出 → `recall-hook-status.json` 从未生成，`recall_hook_status` 报 `never_ran`。
+即「A 已启用」在 UI 上是绿灯，实际**一次都没执行过**。
+
+**第二个坑**：打包态 `__dirname` 本身就是 `…\app.asar.unpacked\dist-electron`，若直接把它写进宿主配置，
+路径就绑死了安装目录 —— 换包 / 重装 / 换位置全都失效。
+
+**修复**（`src/electron/recallHookScript.ts`）：
+
+- 启动时 `ensureStableHookScript()` 把自包含产物复制到 `<数据根>/recall-hard/force_recall.mjs`，
+  **内容一致就不写盘**（不做无谓 IO，也便于判断文件是否被别人动过）；
+- 复制失败不阻断 A 层：降级退回源路径 + 记 `recall-hard:hook-script-degraded`，由 UI 如实显示；
+- `hookScript` 一律取稳定副本 → 宿主配置里那个路径**永远不变**，与 `app.asar` / 安装目录彻底解耦。
+
+**回读校验（写盘成功 ≠ 内容还在）**：宿主持有这份 settings 的内存态，会用旧配置回写覆盖我们的修改。
+所以 `reconcileA` 写完后立即回读，不一致记 `recall-hard:a-hook-not-landed`；
+`state.a.overwritten = 路径不符 && 本次运行内写过 A`，为真时话术改为
+「**先完全退出宿主（含托盘）再点保存**」，不再承诺「点保存会重写」——那句已被实测证伪，会让用户反复点。
 
 ## 3. B：LLM Gateway
 

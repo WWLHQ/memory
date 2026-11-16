@@ -5,7 +5,59 @@
 ## 一句话定位
 本工作区 = **工作法体系** + 真实项目「**多 Agent 记忆助手**」（需求规格与原型已结构化并跑通首个功能）。
 
-## 当前状态（2026-11-15 20:50 压缩快照 · 优先于下方历史段落）
+## 当前状态（2026-11-16 19:40 压缩快照 · 优先于下方历史段落）
+
+### A 层钩子：链路已通 + 修掉路径「空格截断」误报 · 待实测（未提交）
+
+- **现状判定（19:34 现查）**：宿主 `settings.json` 的 command 已是
+  `node "C:/Users/LHQ/AppData/Roaming/MultiAgent Memory/recall-hard/force_recall.mjs"`（写对了）；
+  `main.log` 有 `recall-hard:hook-script-staged`（19:30:51）；`recall-hook-status.json` = `{"status":"empty"}` →
+  **钩子真的执行了，`never_ran` → `empty`，A 链路已通**。`empty` 是健康值（那轮没命中）。
+- **但界面在误报**：`findInstalledHookPath` 把正则套在 `JSON.stringify(entry)` 上，`[^"'\s,}]*force_recall\.mjs`
+  遇空格截断 → `…\MultiAgent Memory\…` 被解析成 `Memory/recall-hard/force_recall.mjs` → 比对永远不等 →
+  UI 报「写入后又被宿主改回去了」（假警报），且「已装且正确 → 不重写」分支永远走不到（每次保存白重写一遍）。
+- **修复**：`extractHookPathFromCommand()`（**优先取引号内整段**，兜底才取无引号 token）+ `collectStrings()` 递归取字符串值，
+  不再对 JSON 文本套正则；`findInstalledHookPath` 改用它们。
+- **门禁**：定向 47 例全绿（新增 3 例含空格）；变异 1 次（去引号优先）→ 2 例精确红灯，报错原文
+  `expected 'Memory/recall-hard/force_recall.mjs' to be 'C:/Users/...'` 与截图症状逐字吻合，还原复绿；
+  全量 **293 文件 / 3508 例 / 0 失败**；typecheck 0；oxlint 0w0e；validate 失败 0；generate 同步；index 411/148 最新。
+- **产物**：setup **128,075,581 B / 19:38:22 / SHA256 `C6CB4C9596A5D3D5CCFC7DFC033E3BA6EE5C51D477A453F12CF9AA883B600999`**；
+  main.cjs 含 `extractHookPathFromCommand` / `collectStrings` / `ensureStableHookScript`；package.json 未改写。
+- **教训**：路径比对/解析的测试**必须至少一例带空格**（上一轮 44 例全用 `D:\repo\...` 干净路径，正好漏掉）。
+- **待办**：用户启动 19:38 新包 → A 层应显示「已写入配置 · 路径 …settings.json」，不再报「被宿主改回」→ 停·等确认 → 才 commit。
+- **【19:43 实测通过】**：A 层显示「宿主钩子已写入配置 · 路径 …settings.json」+ 路径完整（含空格）+ 灰色「本轮零命中」（`status:empty`，健康值）；
+  `recall-hook-status.json` 时间戳 `11:43:28Z` 正是发消息那一刻 → 钩子每轮真在跑；19:40:33 启动新包后日志**不再有** `a-hook-not-landed`，
+  且 `settings.json` mtime 停在 19:33:41 未被重写 → 「已装且路径正确 → 不重写」分支终于能走到（修复前永远走不到）。
+  C 层：`c_strict_gate=true` + 本会话工具清单带「【严格门禁已开启】」（`withRecallFirstNotes(strictGate)` 的活证据）；
+  `mcp_call` 审计 `reliable=True`、`session_id=01M7J2…` → WorkBuddy 带会话头，硬拦分支条件真的成立；但末 120 行 17 条全是
+  `recall_memory` 且 `first_call=True / recalled_before=False` → **生效 ≠ 触发，至今零拦截是合规的结果**。
+  界面「已启用 2/3 层」= A+C 开、B 关，与 config 逐字一致；底部「成员可改 A 与 C」说明当前是 member 账号，符合权限下放。
+
+## 历史快照（2026-11-16 19:2x · A 层路径稳定化）
+
+### A 层钩子路径稳定化 · 修「钩子从未执行过」事故 · 待实测（未提交）
+
+- **事故（用户截图提问「是否正常」→ 答案是「不正常」）**：宿主 `~/.workbuddy/settings.json` 的 `command` 指向
+  `…\resources\app.asar\dist-electron\recall-hard\force_recall.mjs`。asar 归档内是**虚拟路径**，Electron 的 `fs` 看得见、
+  **系统 node 看不见**，而宿主正是用系统 node 起钩子 → 每轮 `ERR_MODULE_NOT_FOUND` → fail-open 静默 →
+  `recall-hook-status.json` 从未生成 → `recall_hook_status` 报 **`never_ran`**。即 A 层 UI 绿灯但一次都没跑过。
+- **第二个坑**：打包态 `__dirname` 本身是 `…\app.asar.unpacked\dist-electron`，写进宿主就绑死安装目录，换包即失效。
+- **修复 ①（治本）**：新增 `src/electron/recallHookScript.ts` 的 `ensureStableHookScript()`——启动时把自包含产物复制到
+  `<数据根>/recall-hard/force_recall.mjs`，**内容一致不写盘**；复制失败降级用源路径并记 `recall-hard:hook-script-degraded`。
+  `hookScript` 一律取稳定副本 → 宿主配置里那个路径永远不变。
+- **修复 ②（不静默）**：`reconcileA` 写完后立即回读，不一致记 `recall-hard:a-hook-not-landed`；
+  `state.a.overwritten = 路径不符 && 本次运行内写过 A`，为真时话术改为「**先完全退出宿主（含托盘）再点保存**」，
+  并把「点保存会重写」那句撤掉——已被 19:09:32 实测证伪（写了、留了 `.bak`、落盘仍是旧路径），会让用户反复点。
+- **门禁**：定向 3 文件 **44 例全绿**；`test:gate` **292 文件 / 3500 例 / 0 失败**；typecheck 0；oxlint 0w0e；
+  `validate_project.py` 失败 0（143 既有 WARN）；`generate.py --check` 同步（重跑 `generate.py` 后）；
+  `code:index --write` → check 最新（411 源码 / 148 文档，注意**必须带 `--write`**，不带只打印）。
+- **变异 3 次**：① 去掉内容比对（`if (false && …)`）→ 「不重复写盘」精确红灯；② `overwritten = pathMismatch`（丢掉写过判断）
+  → 「不诬告被覆盖」红灯；③ UI 分支改 `false ?` → 「覆盖时不显示 mismatch」红灯。三次均单例失败、还原后 44 例复绿。
+- **待办**：打包 → 验产物（`main.cjs` 含 `ensureStableHookScript`、`app.asar.unpacked` 仍有 recall-hard）→ **停·等实测** →
+  **停·等确认** → 才 commit。实测要点：启动后宿主配置应变成 `<数据根>/recall-hard/force_recall.mjs`，重启宿主后
+  `recall_hook_status` 应从 `never_ran` 变 `ok`/`empty`。
+
+## 历史快照（2026-11-15 20:50）
 
 ### 批次64 · 监控页审查补卡（13 → 20 卡 / 5 → 8 组）· 已提交推送（`d1a8f93` / origin/main 同步）
 

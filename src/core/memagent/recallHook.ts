@@ -8,22 +8,49 @@
 //   · 只注入 hits[].content 正文，绝不注入 display.markdown / 回显话术 / 统计数字；
 //   · 不硬编码令牌，令牌只从本机 mcp-token.txt 读，且只发往 loopback；
 //   · MCP 未启动 / 超时 / 令牌缺失 → fail-open（只回 {continue:true}），绝不阻断用户提问。
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import {
   MAX_QUERY_CHARS, buildHookOutput, buildRecallPrelude, extractRecallHits, lastUserQuery,
   parseMcpRpcBody, RECALL_PRELUDE_OPEN, injectSystemPrelude,
+  buildHookRunState, serializeHookRunState, parseHookRunState, type HookRunState,
 } from './recallPrelude.ts';
 
 export const DEFAULT_MCP_URL = 'http://127.0.0.1:8204/mcp';
 export const HOOK_TIMEOUT_MS = 2500;
 /** 自检通过时打印的标签前缀（回归脚本按它判绿）；条数由实际断言数决定，不写死。 */
 export const HOOK_SELFTEST_PREFIX = 'SELFTEST_OK';
+/** 钩子执行状态文件：相对数据根，与桌面端共享同一路径（不依赖 cwd）。 */
+export const HOOK_STATUS_FILE = 'recall-hook-status.json';
 
 function log(msg: string): void {
   // 只写 stderr：stdout 必须是纯 JSON，且绝不打印令牌、prompt 正文。
   process.stderr.write(`[force_recall] ${msg}\n`);
+}
+
+/** 状态文件路径：优先环境变量（测试可注入），否则 %APPDATA%/MultiAgent Memory/。 */
+export function hookStatusFilePath(): string {
+  if (process.env.MEMAGENT_HOOK_STATUS_FILE) return process.env.MEMAGENT_HOOK_STATUS_FILE;
+  const appdata = process.env.APPDATA || process.env.LOCALAPPDATA;
+  if (appdata) return join(appdata, 'MultiAgent Memory', HOOK_STATUS_FILE);
+  return join(homedir(), '.config', 'multiagent-memory', HOOK_STATUS_FILE);
+}
+
+/**
+ * 写一次执行状态；失败只记 stderr，绝不影响钩子返回（fail-open 的延伸）。
+ * 结构化 stderr 行以 STATUS 开头，便于日志检索，且不含任何敏感正文。
+ */
+async function recordStatus(state: HookRunState): Promise<void> {
+  const line = `STATUS status=${state.status} at=${state.at} hits=${state.hits}${state.reason ? ` reason=${state.reason}` : ''}`;
+  log(line);
+  try {
+    const path = hookStatusFilePath();
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, serializeHookRunState(state), 'utf8');
+  } catch (e) {
+    log(`status-write-failed: ${String((e as Error)?.message ?? e).slice(0, 120)}`);
+  }
 }
 
 function tokenFile(): string {
@@ -68,18 +95,44 @@ async function rpc(url: string, token: string, body: unknown, sid?: string): Pro
  */
 export async function runHook(text: string): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = { continue: true };
+  const now = (): string => new Date().toISOString();
+  // 每个失败/空分支都 recordStatus —— 这是「失败锁」：钩子跑没跑、成没成，必须留痕，绝不静默。
   try {
     const raw = (text || '').trim();
-    if (!raw) return out;
+    if (!raw) {
+      await recordStatus(buildHookRunState('failed', now(), 0, 'empty_input'));
+      return out;
+    }
 
-    const event = JSON.parse(raw) as { prompt?: unknown };
+    let event: { prompt?: unknown };
+    try {
+      event = JSON.parse(raw) as { prompt?: unknown };
+    } catch {
+      await recordStatus(buildHookRunState('failed', now(), 0, 'bad_event'));
+      return out;
+    }
     const prompt = typeof event.prompt === 'string' ? event.prompt.trim() : '';
-    if (!prompt) return out;
+    if (!prompt) {
+      await recordStatus(buildHookRunState('failed', now(), 0, 'bad_event'));
+      return out;
+    }
 
     const url = process.env.MEMAGENT_MCP_URL || DEFAULT_MCP_URL;
-    if (!hookIsLoopback(url)) return out;
-    const token = (await readFile(tokenFile(), 'utf8')).trim();
-    if (!token) return out;
+    if (!hookIsLoopback(url)) {
+      await recordStatus(buildHookRunState('failed', now(), 0, 'loopback_guard'));
+      return out;
+    }
+
+    let token: string;
+    try {
+      token = (await readFile(tokenFile(), 'utf8')).trim();
+    } catch {
+      token = '';
+    }
+    if (!token) {
+      await recordStatus(buildHookRunState('failed', now(), 0, 'token_missing'));
+      return out;
+    }
 
     const init = await rpc(url, token, {
       jsonrpc: '2.0', id: 1, method: 'initialize',
@@ -97,10 +150,18 @@ export async function runHook(text: string): Promise<Record<string, unknown>> {
     }, init.newSid);
 
     const parsed = parseMcpRpcBody(recall.raw);
-    if (!parsed) return out;
-    return buildHookOutput(buildRecallPrelude(extractRecallHits(parsed)));
+    if (!parsed) {
+      await recordStatus(buildHookRunState('failed', now(), 0, 'bad_response'));
+      return out;
+    }
+    const hits = extractRecallHits(parsed);
+    const prelude = buildRecallPrelude(hits);
+    // 成功但零命中 = 合法结果（如新项目），记 empty 而非 failed，避免误报故障。
+    await recordStatus(buildHookRunState(prelude ? 'ok' : 'empty', now(), prelude ? hits.length : 0));
+    return buildHookOutput(prelude);
   } catch (e) {
     log(`skip: ${String((e as Error)?.message ?? e).slice(0, 120)}`);
+    await recordStatus(buildHookRunState('failed', now(), 0, 'rpc_error'));
     return out;
   }
 }
@@ -141,5 +202,13 @@ export async function hookSelfTest(): Promise<string> {
   assert((String(twice[0].content).match(/\[RECALL_PRELUDE_V1\]/g) || []).length === 1, '幂等：不重复叠加');
 
   assert(extractRecallHits({ result: { content: [{ text: '{"hits":[]}' }] } }).length === 0, '不猜 content 文本块');
+
+  // 失败锁：状态记录的构造/序列化/解析闭环 + 坏数据不猜。
+  const st = buildHookRunState('failed', '2026-01-01T00:00:00.000Z', 0, 'rpc_error');
+  assert(st.status === 'failed' && st.reason === 'rpc_error' && st.schema === 1, '状态记录带原因分类');
+  const round = parseHookRunState(serializeHookRunState(st));
+  assert(round?.status === 'failed' && round.reason === 'rpc_error', '状态序列化→解析闭环');
+  assert(parseHookRunState('not json') === null && parseHookRunState('{"schema":9}') === null, '坏状态不猜');
+  assert(buildHookRunState('ok', 'x').reason === undefined, '成功态不写原因');
   return `${HOOK_SELFTEST_PREFIX} ${passed}/${passed}`;
 }

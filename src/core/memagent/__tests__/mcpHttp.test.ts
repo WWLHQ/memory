@@ -81,7 +81,7 @@ describe('MCP HTTP（批次2 信任边界）', () => {
     const body = (await header.json()) as { result: { tools: Array<{ name: string; description?: string }> } };
     expect(body.result.tools.map((t) => t.name)).toEqual([
       'recall_memory', 'write_memory', 'list_projects', 'get_preferences', 'get_write_status',
-      'list_memories', 'get_memory', 'feedback', 'manage_memory', 'gc_report',
+      'recall_hook_status', 'list_memories', 'get_memory', 'feedback', 'manage_memory', 'gc_report',
       'create_project', 'mint_token',
     ]);
     // 批次14：措辞为「优先使用本工具 + 未命中/不可用再回退」，不是硬禁用
@@ -1254,7 +1254,7 @@ describe('批次44-D5-4：recall_memory(scope=session)（HTTP 8204 端到端）'
   it('tools/list 仍是 10 个工具；recall/write schema 含 session_id；instructions 点名会话视图', async () => {
     const list = await rpc('tools/list');
     const tools = list.tools as Array<{ name: string; inputSchema: { properties: Record<string, unknown> } }>;
-    expect(tools.map((t) => t.name)).toHaveLength(12); // D6-5 起 12 个工具
+    expect(tools.map((t) => t.name)).toHaveLength(13); // 钩子自检 recall_hook_status 起 13 个工具
     const props = tools.find((t) => t.name === 'recall_memory')!.inputSchema.properties;
     expect(props).toHaveProperty('scope');
     expect(props).toHaveProperty('session_id');
@@ -1469,7 +1469,7 @@ describe('批次47：L1 工具描述首步召回 + L2 会话门禁（HTTP 8204�
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
     });
     const tools = ((await res.json()) as { result: { tools: Array<{ name: string; description: string }> } }).result.tools;
-    expect(tools).toHaveLength(12);
+    expect(tools).toHaveLength(13);
     const recall = tools.find((t) => t.name === 'recall_memory')!;
     expect(recall.description).toContain('🔴【本会话第一步】');
     expect(recall.description).toContain('优先使用本工具'); // 原描述保留

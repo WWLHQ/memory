@@ -1,12 +1,16 @@
 // MCP 工具服务契约测试（§19.5）：三工具 schema + 参数校验 + 阶梯精炼管道 + 批次2 信任边界
 import { describe, expect, it, beforeAll, afterAll } from 'vitest';
 import { createConnection } from 'node:net';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { runMcpServer, type McpServerHandle } from '../mcp.ts';
 import { InMemoryStorage } from '../storage.ts';
 import { scoreMemory } from '../forgetting.ts';
 import type { L0Vault } from '../l0vault.ts';
 import { createTestVault, TEST_ADMIN_PW, TEST_ADMIN_ID } from './l0Kit.ts';
 import { MemoryPendingStore } from '../pendingWrites.ts';
+import { buildHookRunState, serializeHookRunState } from '../recallPrelude.ts';
 import type { Memory } from '../types.ts';
 
 const TOKEN = 'mcp-test-token-0123456789abcdef0123456789abcdef';
@@ -62,12 +66,12 @@ describe('MCP Server（§19.5）', () => {
     expect(r.result).toBeUndefined();
   });
 
-  it('tools/list 返回十二个工具且 schema 正确', async () => {
+  it('tools/list 返回十三个工具且 schema 正确', async () => {
     const r = await rpcCall(PORT, { jsonrpc: '2.0', id: 1, method: 'tools/list', params: { token: TOKEN } });
     const tools = (r.result as { tools: Array<{ name: string; inputSchema?: { required?: string[] } }> }).tools;
     expect(tools.map((t) => t.name)).toEqual([
       'recall_memory', 'write_memory', 'list_projects', 'get_preferences', 'get_write_status',
-      'list_memories', 'get_memory', 'feedback', 'manage_memory', 'gc_report',
+      'recall_hook_status', 'list_memories', 'get_memory', 'feedback', 'manage_memory', 'gc_report',
       'create_project', 'mint_token',
     ]);
     const recallTool = tools.find((t) => t.name === 'recall_memory')!;
@@ -81,6 +85,39 @@ describe('MCP Server（§19.5）', () => {
     expect(createTool.inputSchema!.required).toEqual(['project_id']);
     const mintTool = tools.find((t) => t.name === 'mint_token')!;
     expect(mintTool.inputSchema!.required).toEqual(['user_id', 'scope_project_ids']);
+    // 第 13 个工具：钩子健康度自检，无参数（读本机状态文件）
+    const hookTool = tools.find((t) => t.name === 'recall_hook_status')!;
+    expect(hookTool).toBeDefined();
+    expect(hookTool.inputSchema!.required).toBeUndefined();
+  });
+
+  it('recall_hook_status：无记录 → never_ran；有 ok 记录 → ok（绝不把「没记录」当正常）', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mam-hookstatus-'));
+    const file = join(dir, 'recall-hook-status.json');
+    const saved = process.env.MEMAGENT_HOOK_STATUS_FILE;
+    process.env.MEMAGENT_HOOK_STATUS_FILE = file;
+    try {
+      const miss = await rpcCall(PORT, {
+        jsonrpc: '2.0', id: 90, method: 'tools/call',
+        params: { token: TOKEN, name: 'recall_hook_status', arguments: {} },
+      });
+      const missText = JSON.stringify(miss.result);
+      expect(missText).toContain('never_ran');
+      expect(missText).toContain('从未记录到钩子执行');
+
+      await writeFile(file, serializeHookRunState(buildHookRunState('ok', new Date().toISOString(), 4)), 'utf8');
+      const hit = await rpcCall(PORT, {
+        jsonrpc: '2.0', id: 91, method: 'tools/call',
+        params: { token: TOKEN, name: 'recall_hook_status', arguments: {} },
+      });
+      const hitText = JSON.stringify(hit.result);
+      expect(hitText).toContain('"verdict":"ok"');
+      expect(hitText).toContain('注入 4 条');
+    } finally {
+      if (saved === undefined) delete process.env.MEMAGENT_HOOK_STATUS_FILE;
+      else process.env.MEMAGENT_HOOK_STATUS_FILE = saved;
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it('空账本 recall 省略 project_id → -32602 明示 project_id（不猜项目）', async () => {
@@ -721,7 +758,7 @@ describe('批次44-D5-3：gc_report（TCP）', () => {
     const tools = (r.result as {
       tools: Array<{ name: string; inputSchema?: { required?: string[]; properties?: Record<string, unknown> } }>;
     }).tools;
-    expect(tools.map((t) => t.name)).toHaveLength(12); // D6-5 增 create_project/mint_token 后为 12
+    expect(tools.map((t) => t.name)).toHaveLength(13); // 钩子自检 recall_hook_status 后为 13
     const gc = tools.find((t) => t.name === 'gc_report')!;
     expect(gc.inputSchema!.required).toEqual(['project_id']);
     expect(gc.inputSchema!.properties).toHaveProperty('resolve_conflicts');
@@ -909,7 +946,7 @@ describe('批次44-D5-4：recall_memory(scope=session)（TCP 8202 端到端）',
   it('tools/list：recall_memory 增 scope/session_id；initialize 指令点名会话视图', async () => {
     const list = await call(1100, 'tools/list');
     const tools = (list.result as { tools: Array<{ name: string; inputSchema: { properties: Record<string, unknown> } }> }).tools;
-    expect(tools.map((t) => t.name)).toHaveLength(12); // D6-5 起 12 个工具
+    expect(tools.map((t) => t.name)).toHaveLength(13); // 钩子自检 recall_hook_status 起 13 个工具
     const props = tools.find((t) => t.name === 'recall_memory')!.inputSchema.properties;
     expect(props).toHaveProperty('scope');
     expect(props).toHaveProperty('session_id');

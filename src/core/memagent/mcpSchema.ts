@@ -70,7 +70,8 @@ export const MCP_INSTRUCTIONS = `你是接入了 MultiAgent Memory 的 Agent。�
 6. 盘点：需要治理记忆（找过时/重复/低价值条目）时用 list_memories 按条件列清单；已知 mem_id 时用 get_memory 精确读单条。两者只返回可读摘要与状态字段，不含 L0 密文；project_id 超出令牌作用域会被拒绝。list_memories 是清单盘点，找答案仍应首选 recall_memory。
 7. 反馈与治理：只有用户明确认可或否定某条召回记忆时，才用 feedback 提交 verdict（confirm/reject/disputed），由内核计算可信度变化，不要凭自己的判断代用户表态。需要置顶/取消置顶、锁定/解锁、归档/恢复、降权/强化、调参或迁移时用 manage_memory；locked 的记忆只有 unlock 能操作。delete 不可逆且默认不开放（需服务端开关），除非用户明确要求删除，一律优先 forget（降权不删）或 archive（归档可恢复）。两工具只回可读摘要，不含 L0 密文；ok:false 或 blocked_locked:true 时必须如实告知，不得声称操作已生效。
 8. 遗忘可观测性：用户觉得「记忆变少了 / 状态变了」时用 gc_report 查本次遗忘周期会降档多少条。dry_run 缺省 true，只演算不改库不写审计；只有用户明确要求执行遗忘周期时才显式传 dry_run=false。报告是分层真实统计：衰减段保留 decayed/merged/conflicts_resolved，摘要合并段给出 freshness_updated/scanned/migrated/summaries_created/summaries_filtered/merged_originals/compressed，全部来自真实事件、note 说明各段口径；不得据此推断或编造任何数字，本入口未注入向量后端故 compressed 恒为 0。若用户明确要求处理已排队冲突，必须同时给 resolve_conflicts=true 与合法 verdict（auto_override/user_confirm/merge/hold）才落定；只给其中一个会被明确拒绝，绝不自动覆盖旧记忆；conflicts_resolved 只数真实落定，dry_run 或 user_confirm/hold 时为 0。
-9. 管理工具（D6，管理员专属）：create_project 登记受管项目（kind=shared/user/archive/general，命名规则见工具描述）与 mint_token 签发受限令牌（scope_project_ids/is_admin/过期）都仅限管理员令牌调用，非管理员会被明确拒绝——被拒时如实转告用户，不要重试或伪装成功。mint_token 返回的明文令牌只在结果里出现一次：必须原样、完整地转交给用户（建议用户写入客户端配置文件），绝不写入记忆库、日志或二次回显之外的地方；丢失后只能重新 mint，无法找回。`;
+9. 管理工具（D6，管理员专属）：create_project 登记受管项目（kind=shared/user/archive/general，命名规则见工具描述）与 mint_token 签发受限令牌（scope_project_ids/is_admin/过期）都仅限管理员令牌调用，非管理员会被明确拒绝——被拒时如实转告用户，不要重试或伪装成功。mint_token 返回的明文令牌只在结果里出现一次：必须原样、完整地转交给用户（建议用户写入客户端配置文件），绝不写入记忆库、日志或二次回显之外的地方；丢失后只能重新 mint，无法找回。
+10. 钩子健康度自检（recall_hook_status，第 13 个工具）：强制召回钩子跑在**宿主侧**、不在本服务进程内，失败时只写本机状态文件——Agent 侧原本完全看不见，这正是本项目历史上「钩子静默失效多日」的成因。出现以下情况必须调用它：① 用户问「记忆库是否正常 / 召回可不可信 / 今天怎么没读到记忆」；② 本轮召回结果可疑（命中 0 条但你确信库里有相关内容）、或召回工具报错；③ 你要在回答里断言「记忆库没有相关内容」之前。它返回最近一次执行结果（ok / empty / failed + 中文原因 + 时间 + 注入条数）、距今多久，以及最关键的「从未执行过」（状态文件不存在 = 钩子没装、安装路径写错、或从未触发）。**verdict 为 failed / never_ran / stale 时，必须在回答里如实写明「本轮强制召回未生效，我已回退现查」并给出原因，不得静默跳过、不得假装检索过**；verdict 为 ok / empty 时不要额外打扰用户。务必区分两件事：**「记忆库没命中」≠「钩子没生效」**——前者是真没有相关记忆，后者是根本没检索，混为一谈等于用「库里没有」掩盖「没查」。`;
 
 /** 标准 MCP 工具定义（tools/list 返回；顺序即客户端展示顺序） */
 export const MCP_TOOLS = [
@@ -131,6 +132,11 @@ export const MCP_TOOLS = [
   {
     name: 'get_write_status',
     description: '写前探锁（批次44-D4）：返回 l0_unlocked（写入是否解锁）、writeDek_present（写密钥是否在内存）与 pending_count（待重放的暂存写入条数）；不返回任何密钥材料。已解锁时调用会顺带自动重放历史 pending 条目。write_memory 返回 status=pending 说明写密钥锁定、内容已暂存而非落库，解锁后可再用本工具确认重放结果。',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'recall_hook_status',
+    description: '钩子健康度自检：确认「首步强制召回」是否真的生效。强制召回钩子跑在宿主侧，失败时只写本机状态文件，Agent 侧原本看不见——本工具把这个事实源暴露出来。返回最近一次执行结果（ok / empty / failed + 中文原因 + 时间 + 注入条数）、距今多久、状态文件路径，以及最关键的 verdict=never_ran（状态文件不存在 = 钩子没装 / 安装路径写错 / 从未触发，此时「首步强制召回」完全没生效）。verdict 也可能是 stale（超过 12 小时无新记录，钩子可能被卸载）。何时调用：用户问「记忆库是否正常 / 召回可不可信 / 怎么没读到记忆」时；本轮召回结果可疑或工具报错时；要在回答里断言「记忆库没有相关内容」之前。判定 failed / never_ran / stale 时必须如实告知用户「本轮强制召回未生效，我已回退现查」，不得静默或假装检索过；ok / empty 时不必额外打扰用户。「记忆库没命中」不等于「钩子没生效」，两者必须分开表述。只读本机状态文件，不含任何令牌、prompt 正文或记忆内容。',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
   {

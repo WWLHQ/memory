@@ -4,6 +4,7 @@
 import { hostCall, hostCapability } from '../../desktop/hostBridge.ts';
 import { getStoredSessionId } from '../Home/crossTabAuth.ts';
 import type { RecallHardConfig } from '../../shared/recallHardConfig.ts';
+import type { HookRunState } from '../../core/memagent/recallPrelude.ts';
 
 export interface RecallHardStateView {
   ok: boolean;
@@ -19,6 +20,10 @@ export interface RecallHardStateView {
     installedPath: string | null;
     /** 钩子脚本文件是否真的存在 */
     scriptExists: boolean;
+    /** 钩子最近一次执行状态（真值，null=尚无记录） */
+    lastRun: HookRunState | null;
+    /** 本次运行内写过宿主配置，但读回来仍不符：被宿主回写覆盖了（再点保存也没用，须先退出宿主） */
+    overwritten: boolean;
     note: string;
     /** hooks 不热加载：本次运行内改过 A 才需要重启宿主 */
     needsRestart: boolean;

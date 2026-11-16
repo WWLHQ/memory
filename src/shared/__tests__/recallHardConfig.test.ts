@@ -1,8 +1,10 @@
 // 批次62 · 硬前置召回 A/B/C 配置真源单测：
 // 默认值、坏结构归一、patch 校验（显式非法字段必须拒绝，不静默吞掉）、base_url 口径。
+// 2026-11-16 权限下放：成员可改 A / C，B 仍限管理员 —— 字段级判定必须是这一份单一真源。
 import { describe, expect, test } from 'vitest';
 import {
-  DEFAULT_RECALL_HARD_CONFIG, normalizeRecallHardConfig, parseRecallHardPatch,
+  DEFAULT_RECALL_HARD_CONFIG, MEMBER_EDITABLE_KEYS, memberForbiddenFields,
+  normalizeRecallHardConfig, parseRecallHardPatch,
   recallHardBaseUrl, validRecallHardPort, validRecallUpstream,
 } from '../recallHardConfig.ts';
 
@@ -74,5 +76,31 @@ describe('批次62 · recallHardConfig 配置真源', () => {
     const r = parseRecallHardPatch({ b_upstream: '  https://api.example.com  ' });
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.patch.b_upstream).toBe('https://api.example.com');
+  });
+});
+
+describe('2026-11-16 · 成员可配置范围（A / C 下放，B 限管理员）', () => {
+  test('成员可改字段只有 A 宿主钩子与 C 内核门禁', () => {
+    expect([...MEMBER_EDITABLE_KEYS]).toEqual(['a_hook', 'c_strict_gate']);
+  });
+
+  test('只改 A / C → 没有禁改字段（成员放行）', () => {
+    expect(memberForbiddenFields({ a_hook: false })).toEqual([]);
+    expect(memberForbiddenFields({ c_strict_gate: false })).toEqual([]);
+    expect(memberForbiddenFields({ a_hook: true, c_strict_gate: false })).toEqual([]);
+    expect(memberForbiddenFields({})).toEqual([]);
+  });
+
+  test('碰 B 的任何字段 → 逐字段点名拒绝（不静默只改一半）', () => {
+    expect(memberForbiddenFields({ b_gateway: true })).toEqual(['b_gateway']);
+    expect(memberForbiddenFields({ b_upstream: 'https://x.test' })).toEqual(['b_upstream']);
+    expect(memberForbiddenFields({ b_port: 8301 })).toEqual(['b_port']);
+    // 混合 patch：A / C 合法也必须整单拒绝，由调用方给出明确错误，避免「改了一半」
+    expect(memberForbiddenFields({ a_hook: false, b_gateway: true }))
+      .toEqual(['b_gateway']);
+  });
+
+  test('未知字段一律算禁改（白名单制，向前兼容新增字段默认限管理员）', () => {
+    expect(memberForbiddenFields({ d_new_layer: true })).toEqual(['d_new_layer']);
   });
 });

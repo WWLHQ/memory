@@ -178,3 +178,69 @@ export function buildHookOutput(prelude: string | null): Record<string, unknown>
     },
   };
 }
+
+// ── 钩子执行状态（防复发「失败锁」：钩子成功/失败必须可检测，绝不静默）──────────
+// 状态文件是钩子进程与桌面端 UI 之间唯一的真相载体：钩子每次执行写一次，UI 读最新一次。
+// 只记层名/结果/时间/原因分类，**绝不记 prompt 正文、令牌、命中内容**（与 stderr 同一红线）。
+
+export type HookRunStatus = 'ok' | 'empty' | 'failed';
+/** 失败原因分类：枚举而非自由文本，避免把异常 message（可能含 URL/令牌片段）写进状态文件。 */
+export type HookFailReason =
+  | 'empty_input'
+  | 'bad_event'
+  | 'loopback_guard'
+  | 'token_missing'
+  | 'rpc_error'
+  | 'bad_response'
+  | 'unknown';
+
+export interface HookRunState {
+  status: HookRunStatus;
+  reason?: HookFailReason;
+  /** UTC ISO 字符串；无命中/失败也记时间，便于 UI 显示「上次执行于…」 */
+  at: string;
+  /** 本轮注入的命中条数；失败为 0 */
+  hits: number;
+  schema: 1;
+}
+
+/** 构造一条状态记录；时间与条数由调用方注入，保持纯函数便于单测。 */
+export function buildHookRunState(
+  status: HookRunStatus,
+  at: string,
+  hits = 0,
+  reason?: HookFailReason,
+): HookRunState {
+  const state: HookRunState = { status, at, hits, schema: 1 };
+  if (reason) state.reason = reason;
+  return state;
+}
+
+/** 解析状态文件文本；坏 JSON / 结构不符 → null（UI 据此显示「尚无记录」，不猜）。 */
+export function parseHookRunState(raw: string | null | undefined): HookRunState | null {
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw) as Record<string, unknown>;
+    if (v?.schema !== 1) return null;
+    if (v.status !== 'ok' && v.status !== 'empty' && v.status !== 'failed') return null;
+    if (typeof v.at !== 'string') return null;
+    const hits = typeof v.hits === 'number' && Number.isFinite(v.hits) ? v.hits : 0;
+    const state: HookRunState = { status: v.status, at: v.at, hits, schema: 1 };
+    if (typeof v.reason === 'string') state.reason = v.reason as HookFailReason;
+    return state;
+  } catch {
+    return null;
+  }
+}
+
+/** 把状态记录序列化为落盘文本（稳定字段顺序，便于 diff / 排查）。 */
+export function serializeHookRunState(state: HookRunState): string {
+  const out: Record<string, unknown> = {
+    schema: 1,
+    status: state.status,
+    at: state.at,
+    hits: state.hits,
+  };
+  if (state.reason) out.reason = state.reason;
+  return `${JSON.stringify(out)}\n`;
+}

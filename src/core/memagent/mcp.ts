@@ -24,6 +24,7 @@ import type { PersonalMemoryStore } from './personalStore.ts';
 import { runGetMemoryTool, runListMemoriesTool } from './mcpReadTools.ts';
 import { deleteAllowed, runFeedbackTool, runManageMemoryTool } from './mcpManageTools.ts';
 import { runGcReportTool } from './mcpGcTools.ts';
+import { runHookStatusTool } from './mcpHookTools.ts';
 import { runCreateProjectTool, runMintTokenTool } from './mcpProjectTools.ts';
 
 const VERSION = '2.0';
@@ -110,6 +111,12 @@ export interface McpOptions {
   allowDelete?: boolean;
   /** 第一轮个人记忆：召回准入读同一独立存储（缺省 = 不追加个人条目，行为不变） */
   personal?: PersonalMemoryStore;
+  /**
+   * 强制召回钩子的状态文件绝对路径（recall_hook_status 用）。
+   * 缺省走 hookStatusFilePath()（env 覆盖 > %APPDATA%/MultiAgent Memory）；
+   * 主进程应显式传 join(USER_DATA, HOOK_STATUS_FILE)，保证与钩子写的是同一个文件。
+   */
+  hookStatusFile?: string;
 }
 
 export interface McpServerHandle {
@@ -130,7 +137,7 @@ interface SocketState {
 
 export function runMcpServer(opts: McpOptions): McpServerHandle {
   const token = assertMcpToken(opts.token);
-  const { port = 8202, maxLineBytes = DEFAULT_MAX_LINE_BYTES, account = DEFAULT_MCP_ACCOUNT } = opts;
+  const { port = 8202, maxLineBytes = DEFAULT_MAX_LINE_BYTES, account = DEFAULT_MCP_ACCOUNT, hookStatusFile } = opts;
   const sockets = new WeakMap<Socket, SocketState>();
   // 批次44-D4：所有 socket 共享一个 pending 队列（缺省内存；桌面可注入文件实现持久化）
   const sharedPending: PendingStore = opts.pending ?? new MemoryPendingStore();
@@ -284,6 +291,12 @@ export function runMcpServer(opts: McpOptions): McpServerHandle {
         // ── get_write_status（批次44-D4：写前探锁 + 解锁态顺带重放） ──────
         case 'get_write_status': {
           send(socket, ok(req.id, await s.getWriteStatus()));
+          return;
+        }
+
+        // ── recall_hook_status（钩子健康度自检：让「钩子静默没跑」不再无从发现） ──
+        case 'recall_hook_status': {
+          send(socket, ok(req.id, runHookStatusTool({ statusFilePath: hookStatusFile })));
           return;
         }
 

@@ -12,8 +12,21 @@ import {
   type RecallHardConfig,
 } from '../shared/recallHardConfig.ts';
 import { startRecallGateway, type RecallGatewayHandle } from './recallGateway.ts';
+import { parseHookRunState, type HookRunState } from '../core/memagent/recallPrelude.ts';
 
 export const RECALL_HARD_HOOK_TAG = 'force_recall.mjs';
+/** 钩子执行状态文件名，与 recallHook.ts 的 HOOK_STATUS_FILE 同口径（真值共享）。 */
+export const HOOK_STATUS_FILE = 'recall-hook-status.json';
+
+/** 读钩子最近一次执行状态；路径可被环境变量覆盖（与钩子侧一致）；坏文件返回 null。 */
+export async function readHookRunState(dataDir: string): Promise<HookRunState | null> {
+  const path = process.env.MEMAGENT_HOOK_STATUS_FILE || join(dataDir, HOOK_STATUS_FILE);
+  try {
+    return parseHookRunState(await readFile(path, 'utf8'));
+  } catch {
+    return null;
+  }
+}
 
 export interface RecallHardControllerOptions {
   /** 数据根（USER_DATA） */
@@ -39,6 +52,15 @@ export interface RecallHardState {
     installedPath: string | null;
     /** 钩子脚本文件是否真的存在：不存在时「已启用」是假的，必须让用户看见。 */
     scriptExists: boolean;
+    /** 钩子最近一次执行状态（读状态文件真值，null=尚无记录）；失败不静默，UI 据此显示角标。 */
+    lastRun: HookRunState | null;
+    /**
+     * 本次运行内我们写过宿主配置，但现在读回来仍不是要的路径 —— 写入被宿主改回去了。
+     * 2026-11-16 实测：点「保存并生效」后 settings.json 确实被改写（留了 .bak），
+     * 但落盘内容仍是旧的 app.asar 路径，说明宿主内存里存着旧配置、落盘时盖掉了我们的修改。
+     * 这种情况「再点一次保存」是没用的，必须让用户先完全退出宿主。
+     */
+    overwritten: boolean;
     note: string; needsRestart: boolean;
   };
   b: { enabled: boolean; running: boolean; port: number; upstream: string; baseUrl: string; error?: string };
@@ -86,17 +108,44 @@ function toComparePath(p: string): string {
   return p.replace(/\\/g, '/').toLowerCase();
 }
 
-/** 真值：宿主配置里本钩子实际指向的脚本路径（可能和当前 this.opts.hookScript 不一致）。 */
+/**
+ * 从一条 command 字符串里取出钩子脚本路径。
+ * **必须优先取引号内的整段**：安装路径可能含空格（`C:\Users\LHQ\AppData\Roaming\MultiAgent Memory\…`），
+ * 2026-11-16 实测事故就是旧正则 `[^"'\s,}]*force_recall\.mjs` 遇空格截断，
+ * 把正确路径解析成 `Memory/recall-hard/force_recall.mjs` → 比对永远不等 →
+ * 明明写对了却报「路径不符 / 被宿主改回」，还会让「已装且正确 → 不重写」的分支永远走不到。
+ */
+export function extractHookPathFromCommand(cmd: string): string | null {
+  const quoted = cmd.match(/["']([^"']*force_recall\.mjs)["']/i);
+  if (quoted) return quoted[1];
+  // 兜底：没加引号（路径不含空格）时取紧邻标记的那一段
+  const bare = cmd.match(/([^\s"',}]*force_recall\.mjs)/i);
+  return bare ? bare[1] : null;
+}
+
+function collectStrings(value: unknown, out: string[]): void {
+  if (typeof value === 'string') { out.push(value); return; }
+  if (Array.isArray(value)) { for (const v of value) collectStrings(v, out); return; }
+  if (value && typeof value === 'object') { for (const v of Object.values(value)) collectStrings(v, out); }
+}
+
+/**
+ * 真值：宿主配置里本钩子实际指向的脚本路径（可能和当前 this.opts.hookScript 不一致）。
+ * 逐个字符串值找含标记的 command 再取路径——不要对 `JSON.stringify(entry)` 直接套正则：
+ * 那会把引号转义成 `\"`、且路径里的空格会被字符类挡下（见 extractHookPathFromCommand 注释）。
+ */
 export function findInstalledHookPath(current: Record<string, unknown> | null): string | null {
   if (!current) return null;
   const hooks = current.hooks as Record<string, unknown> | undefined;
   const ups = hooks && Array.isArray(hooks.UserPromptSubmit) ? hooks.UserPromptSubmit : [];
   for (const entry of ups) {
-    const s = JSON.stringify(entry ?? {});
-    if (!s.includes(RECALL_HARD_HOOK_TAG)) continue;
-    // 取含 force_recall.mjs 的 token（可带引号）："D:/repo/.../force_recall.mjs" 或 D:/repo/.../force_recall.mjs
-    const m = s.match(/["']?([^"'\s,}]*force_recall\.mjs)["']?/i);
-    if (m) return m[1].replace(/\\\\/g, '\\').replace(/\\/g, '/'); // 先消 JSON 二次转义的双反斜杠
+    const strs: string[] = [];
+    collectStrings(entry, strs);
+    for (const s of strs) {
+      if (!s.includes(RECALL_HARD_HOOK_TAG)) continue;
+      const p = extractHookPathFromCommand(s);
+      if (p) return p.replace(/\\\\/g, '\\').replace(/\\/g, '/'); // 兼容 JSON 二次转义的双反斜杠
+    }
   }
   return null;
 }
@@ -186,6 +235,14 @@ export class RecallHardController {
     if (!enabled) {
       return { installed: false, note: '宿主钩子已摘除 · 其它钩子保留', rewrote: true };
     }
+    // 写完立刻回读一次：写盘成功 ≠ 内容还在（宿主会用它内存里的旧配置回写覆盖）。
+    // 这里只记日志不抛错——UI 的真值判断在 state() 里，避免两处口径分叉。
+    const landed = findInstalledHookPath(await readJsonFile(this.hostPath));
+    if (landed === null || toComparePath(landed) !== toComparePath(this.opts.hookScript)) {
+      this.opts.log?.('recall-hard:a-hook-not-landed', {
+        expected: this.opts.hookScript, landed, host: this.hostPath,
+      });
+    }
     const existingPath = findInstalledHookPath(current);
     const pathFixed = existingPath !== null && toComparePath(existingPath) !== toComparePath(this.opts.hookScript);
     return {
@@ -246,8 +303,12 @@ export class RecallHardController {
     const installed = hostHookInstalled(host);
     const installedPath = findInstalledHookPath(host);
     const scriptExists = this.scriptExists();
+    const lastRun = await readHookRunState(this.opts.dataDir);
     const pathMismatch = installed && installedPath !== null
       && toComparePath(installedPath) !== toComparePath(this.opts.hookScript);
+    // 本次运行内写过、现在读回来还是不符 —— 不是「还没保存」，是「保存了又被盖回去」。
+    // 两者给用户的动作完全不同（前者点保存、后者要先退出宿主），不能混成一句话。
+    const overwritten = pathMismatch && this.aTouchedSinceBoot;
     return {
       ok: true,
       config: { ...this.config },
@@ -258,12 +319,16 @@ export class RecallHardController {
         hookScript: this.opts.hookScript,
         installedPath,
         scriptExists,
+        lastRun,
+        overwritten,
         note: !scriptExists
           ? `钩子脚本不存在：${this.opts.hookScript}`
           : installed
-            ? (pathMismatch
-                ? `宿主钩子指向路径与当前不符：${installedPath}（应为 ${this.opts.hookScript}）。保存或重启后会自动修正。`
-                : `宿主钩子已写入配置 · 路径 ${this.hostPath}`)
+            ? (overwritten
+                ? `写入后又被宿主改回去了：现在指向 ${installedPath}，应为 ${this.opts.hookScript}。宿主内存里存着旧配置，落盘时覆盖了我们的修改——请先完全退出宿主（含托盘）再点「保存并生效」。`
+                : pathMismatch
+                  ? `宿主钩子指向路径与当前不符：${installedPath}（应为 ${this.opts.hookScript}）。保存或重启后会自动修正。`
+                  : `宿主钩子已写入配置 · 路径 ${this.hostPath}`)
             : '宿主钩子已摘除 · 其它钩子保留',
         needsRestart: this.aTouchedSinceBoot, // hooks 不热加载：本次运行内改过 A 才需重启宿主
       },
