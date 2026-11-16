@@ -30,6 +30,8 @@ export type HostMethod =
   | 'tenant:get'
   /** T2：机器级 tenant.json 三读一写（read 需登录；set/normalize 仅管理员） */
   | 'tenant:read' | 'tenant:set' | 'tenant:normalize'
+  /** OB：个人记忆账号绑定（read 需登录；set 仅管理员） */
+  | 'owner-bindings:read' | 'owner-bindings:set'
   /** 第一轮个人记忆本机闭环：独立存储单一数据面（owner 由主进程按会话解析） */
   | 'personal:invoke'
   | 'mcp:clients'
@@ -103,6 +105,8 @@ const CHANNEL_TO_NATIVE: Record<HostMethod, [string, string]> = {
   'tenant:read': ['tenant', 'read'],
   'tenant:set': ['tenant', 'set'],
   'tenant:normalize': ['tenant', 'normalize'],
+  'owner-bindings:read': ['ownerBindings', 'read'],
+  'owner-bindings:set': ['ownerBindings', 'set'],
   'personal:invoke': ['personal', 'invoke'],
   'mcp:clients': ['mcpClients', 'list'],
   'mcp:clientSnippet': ['mcpClients', 'snippet'],

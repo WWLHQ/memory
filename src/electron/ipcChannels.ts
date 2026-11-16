@@ -129,6 +129,9 @@ export const IPC = {
   ledgerFieldsBackfill: 'ledger:fieldsBackfill',
   /** 批次26-B P1-3：租户三元组由主进程按会话下发（渲染层不再自报 mam.tenant.v1） */
   tenantGet: 'tenant:get',
+  /** OB（个人记忆账号绑定 UI 化）：read 登录可读；set 仅管理员（逐字口令 BIND + 备份 + 审计，重启生效） */
+  ownerBindingsRead: 'owner-bindings:read',
+  ownerBindingsSet: 'owner-bindings:set',
   /**
    * T2（管理员与成员权限设计 §6.1）：机器级 tenant.json 三读一写。
    * tenant:read（需登录）读的是机器级真源文件，**不得用 tenant:get 代替**——后者返回登录会话三元组，

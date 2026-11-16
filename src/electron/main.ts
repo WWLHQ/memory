@@ -57,6 +57,7 @@ import { ensureSharedProject } from '../core/memagent/mcpRecall.ts';
 import { FileTokenStore } from '../core/memagent/tokenStore.ts';
 import { FileMemberStore } from '../core/memagent/memberStore.ts';
 import { loadOrCreateTenant, readTenantFile, writeTenant } from './tenantSource.ts';
+import { loadOwnerBindings, writeOwnerBindings, normalizeOwnerBindingsInput } from './ownerBindings.ts';
 import { DEFAULT_TENANT, type TenantTriple } from '../shared/tenantDefaults.ts';
 import { PgSyncHub } from '../core/memagent/pgSyncHub.ts';
 import { reconcile as syncReconcileEngine } from '../core/memagent/sync.ts';
@@ -2458,6 +2459,54 @@ async function registerStorageIpc(): Promise<void> {
       return { ok: false, error: String((e as Error)?.message ?? e) };
     }
   });
+  // ── OB（个人记忆账号绑定 UI 化）───────────────────────────────────────────
+  // owner-bindings:read：登录即可读。绑定值本身非敏感（账号名 + 内核用户标识），且成员需要看到
+  // 「自己绑没绑」才能理解个人记忆为什么 agent 召回不到。同时回报生效来源：env 覆盖优先于文件。
+  handleIpc(IPC.ownerBindingsRead, (_e, sessionId?: unknown) => {
+    const gate = requireSession(sessionId, IPC.ownerBindingsRead);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    try {
+      const bindings = loadOwnerBindings(USER_DATA);
+      const envRaw = process.env.MAM_PERSONAL_OWNER_BINDINGS;
+      const envOverride = typeof envRaw === 'string' && !!envRaw.trim();
+      return {
+        ok: true,
+        bindings,
+        source: envOverride ? 'env' : 'file',
+        kernel_user_id: tenantTriple.user_id,
+        env_override: envOverride,
+      };
+    } catch (e) {
+      return { ok: false, error: String((e as Error)?.message ?? e) };
+    }
+  });
+  // owner-bindings:set：仅管理员 + 逐字口令 BIND + 校验（重复账号/重复目标拒绝）+
+  // 机器级归属校验（每条 kernel_user_id 必须等于本机 tenant.json 的 user_id，防绑到不存在的目标）+
+  // 写前备份 + 审计 + 重启生效提示（绑定在 bootstrap 一次性加载进 personalOwnerBindings）。
+  handleIpc(IPC.ownerBindingsSet, async (_e, next?: unknown, confirm?: unknown, requestId?: unknown, sessionId?: unknown) => {
+    const gate = requireAdmin(sessionId, IPC.ownerBindingsSet);
+    if (!gate.ok) return { ok: false, error: gate.error, code: gate.code };
+    if (confirm !== 'BIND') {
+      actionLog('ipc', IPC.ownerBindingsSet, { denied: 'confirm_required' }, { level: 'warn' });
+      return { ok: false, error: '二次确认未通过：需逐字输入 BIND 才允许改写个人记忆账号绑定' };
+    }
+    try {
+      const validated = normalizeOwnerBindingsInput(next);
+      const bad = validated.find((b) => b.kernel_user_id !== tenantTriple.user_id);
+      if (bad) {
+        return { ok: false, error: `绑定目标「${bad.kernel_user_id}」不是本机内核用户标识（本机为 ${tenantTriple.user_id}）——绑到别的目标永远不会生效，已拒绝` };
+      }
+      const r = writeOwnerBindings(USER_DATA, validated);
+      actionLog('app', 'owner-bindings-set', {
+        old: r.prev, new: r.next, user: gate.ctx.user_id,
+        request_id: typeof requestId === 'string' && requestId ? requestId : undefined,
+        backup_file: r.backupFile || undefined, restart_required: true,
+      });
+      return { ok: true, prev: r.prev, next: r.next, backup_file: r.backupFile || undefined, restart_required: true };
+    } catch (e) {
+      return { ok: false, error: String((e as Error)?.message ?? e) };
+    }
+  });
 }
 
 // ── §6e 首启向导 IPC（批次37-B）────────────────────────────────────────────
@@ -2909,11 +2958,19 @@ async function bootstrap(): Promise<void> {
   tenantTriple = loadOrCreateTenant(USER_DATA);
   void mlog('bootstrap:tenant-source', { file: join(USER_DATA, 'tenant.json'), ...tenantTriple });
   actionLog('app', 'bootstrap:tenant-source', { user_id: tenantTriple.user_id, team_id: tenantTriple.team_id, enterprise_id: tenantTriple.enterprise_id });
-  // 第二轮 owner 口径：登录账号 → 内核账号显式绑定（env 真源；损坏 = 明确告警 + 保持空表，
-  // 绝不猜映射：未绑定的个人条目仅本机可见，agent 不召回）。
+  // 第二轮 owner 口径：登录账号 → 内核账号显式绑定。OB-1 起真源为本机文件 personal-owner-bindings.json
+  // （管理员可在安全页 UI 维护）；env MAM_PERSONAL_OWNER_BINDINGS 仍保留为最高优先覆盖（现网语义不变）。
+  // 损坏（文件或 env）= 明确告警 + 保持空表，绝不猜映射：未绑定的个人条目仅本机可见，agent 不召回。
   try {
-    personalOwnerBindings = parsePersonalOwnerBindings(process.env.MAM_PERSONAL_OWNER_BINDINGS);
-    actionLog('app', 'bootstrap:personal-owner-bindings', { count: personalOwnerBindings.length, kernel_user_id: tenantTriple.user_id });
+    const fileBindings = loadOwnerBindings(USER_DATA);
+    const envRaw = process.env.MAM_PERSONAL_OWNER_BINDINGS;
+    if (typeof envRaw === 'string' && envRaw.trim()) {
+      personalOwnerBindings = parsePersonalOwnerBindings(envRaw);
+      actionLog('app', 'bootstrap:personal-owner-bindings', { count: personalOwnerBindings.length, kernel_user_id: tenantTriple.user_id, via: 'env_override', file_count: fileBindings.length });
+    } else {
+      personalOwnerBindings = fileBindings;
+      actionLog('app', 'bootstrap:personal-owner-bindings', { count: personalOwnerBindings.length, kernel_user_id: tenantTriple.user_id, via: 'file' });
+    }
   } catch (e) {
     personalOwnerBindings = [];
     const msg = String((e as Error)?.message ?? e);

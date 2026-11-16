@@ -75,6 +75,20 @@ const tenant = {
     }>,
 };
 
+// OB：个人记忆账号绑定桥——read 登录可读（含生效来源 env/file）；set 仅管理员（逐字口令 BIND + 备份 + 审计，重启生效）
+const ownerBindings = {
+  read: (sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.ownerBindingsRead, sessionId) as Promise<{
+      ok: boolean; bindings?: { account: string; kernel_user_id: string }[]; source?: 'env' | 'file';
+      kernel_user_id?: string; env_override?: boolean; error?: string;
+    }>,
+  set: (next: { account: string; kernel_user_id: string }[], confirm: string, requestId: string, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.ownerBindingsSet, next, confirm, requestId, sessionId) as Promise<{
+      ok: boolean; prev?: { account: string; kernel_user_id: string }[]; next?: { account: string; kernel_user_id: string }[];
+      backup_file?: string; restart_required?: boolean; error?: string; code?: string;
+    }>,
+};
+
 // MCP 客户端接入桥（批次15）：状态扫描需登录会话（批次27 P3-4）；含令牌片段/一键写入需管理员（主进程按 sessionId 校验）
 const mcpClients = {
   list: (sessionId?: string | null) => ipcRenderer.invoke(IPC.mcpClients, sessionId),
@@ -352,4 +366,4 @@ const shell = {
 };
 
 contextBridge.exposeInMainWorld('__ELECTRON__', true);
-contextBridge.exposeInMainWorld('api', { storage, personal, hostScan, hostAgentDetect, tenant, mcpClients, collector, backup, dataRoot, log, l0, setup, legacy, ledgerReset, rulesRejudge, ledgerFields, refineQueue, sync, llm, recallHard, monitor, shell });
+contextBridge.exposeInMainWorld('api', { storage, personal, hostScan, hostAgentDetect, tenant, ownerBindings, mcpClients, collector, backup, dataRoot, log, l0, setup, legacy, ledgerReset, rulesRejudge, ledgerFields, refineQueue, sync, llm, recallHard, monitor, shell });

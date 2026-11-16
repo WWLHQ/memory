@@ -23,6 +23,7 @@ import { L0MigrateCard } from './L0MigrateCard.tsx';
 import { RebuildFromL0Card } from './RebuildFromL0Card.tsx';
 import { L0RecoveryCard } from './L0RecoveryCard.tsx';
 import { TenantIdentityCard } from './TenantIdentityCard.tsx';
+import { OwnerBindingsCard } from './OwnerBindingsCard.tsx';
 import { useSessionContext } from '../shared/session.ts';
 import { useToast } from './useToast.tsx';
 import {
@@ -301,7 +302,7 @@ export function SecurityPage() {
             className={`p0-tab${tab === i ? ' active' : ''}`}
             data-testid={`sec-tab-${i}`} data-tab={i}
             onClick={() => setTab(i)}
-          >{label}{i === 1 ? <span className="p0-tabnum">12</span> : null}</button>
+          >{label}{i === 1 ? <span className="p0-tabnum">13</span> : null}</button>
         ))}
       </div>
 
@@ -345,10 +346,10 @@ export function SecurityPage() {
           </div>
 
           <div className="card" data-testid="danger-overview">
-            <b>12 张危险操作卡（按权限前置分组；T4 新增「本机租户身份」）</b>
+            <b>13 张危险操作卡（按权限前置分组；T4 新增「本机租户身份」、OB 新增「个人记忆账号绑定」）</b>
             <div className="note" style={{ lineHeight: 1.9 }}>
               L0 相关 6 张：密钥环 / SPLIT / 遗留迁移 / 恢复 / 遗留账本清理 / 从 L0 重建；<br />
-              账本相关 3 张：RESET / REJUDGE / 字段回填；账号相关 3 张：管理员账号 / 密码策略 / 本机租户身份。<br />
+              账本相关 3 张：RESET / REJUDGE / 字段回填；账号相关 3 张：管理员账号 / 密码策略 / 本机租户身份；身份相关 1 张：个人记忆账号绑定。<br />
               破坏性卡执行条件：管理员角色 + 强制备份 + 逐字口令，缺一不可；账号/密码策略卡需管理员角色并调用真实后端接口；无接口时卡内标「程序无该接口」。
             </div>
           </div>
@@ -373,7 +374,7 @@ export function SecurityPage() {
         <div className="p0-sec">
           <div className="p0-sec-hd">
             <h3>危险操作卡</h3>
-            <span className="p0-tag warn">12 张 · 破坏性卡三段确认</span>
+            <span className="p0-tag warn">13 张 · 破坏性卡三段确认</span>
           </div>
           <div className="note" data-testid="danger-note" style={{ marginBottom: 8 }}>
             每张卡调用真实接口（主进程 IPC / 内核 L0 端口），成功后显示真实回执与 request_id；
@@ -410,6 +411,8 @@ export function SecurityPage() {
             <div data-testid="danger-card-11"><RebuildFromL0Card enabled={role === 'admin'} /></div>
             {/* T4（§14.2）：「本机租户身份」卡与 AccountAdminCard / L0AdminCard 并列；成员只读、管理员可编辑带护栏 */}
             <div data-testid="danger-card-12"><TenantIdentityCard enabled={role === 'admin'} /></div>
+            {/* OB-3：「个人记忆账号绑定」卡紧随身份卡（同属身份域）；成员只读、管理员可增删改带护栏 */}
+            <div data-testid="danger-card-13"><OwnerBindingsCard enabled={role === 'admin'} /></div>
           </div>
           {policyErr ? <div className="note" data-testid="pwd-policy-error" style={{ color: 'var(--warn)' }}>{policyErr}</div> : null}
           <div className="note" data-testid="pwd-policy-scope">
