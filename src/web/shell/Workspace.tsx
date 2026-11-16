@@ -202,6 +202,10 @@ export function Workspace() {
    * 收到写锁信号后递增本 nonce，主动重挂首页 iframe，让它重新 loadOverview 拿真值。
    */
   const [homeReloadNonce, setHomeReloadNonce] = useState(0);
+  /** T3：管理台默认视图只在会话身份首次解析时应用一次；此后不再覆盖用户选择。 */
+  const adminDefaultAppliedRef = useRef(false);
+  /** T3：用户是否已主动切换过视图（openView 的所有入口都算，含 Ribbon / 快捷键）。 */
+  const userNavigatedRef = useRef(false);
   const [message, setMessage] = useState('工作台已就绪：中心区为同源真实页面，壳层尚未接线的部位会明确标注原因。');
   const [sessionActive, setSessionActive] = useState(() => hasActiveSession());
   /** 当前会话真实身份（/api/me 确认；null = 未确认，绝不按 localStorage 冒充身份） */
@@ -519,12 +523,26 @@ export function Workspace() {
   // 缩放由 .shell 的 CSS zoom 统一承担（含 iframe），不再单独改写子页面文档，避免双重缩放
 
   const openView = useCallback((item: NavItem) => {
+    // T3：任何经导航入口的切换都算「用户已选定视图」——管理台默认视图只在会话身份首次解析时
+    // 应用一次，绝不覆盖用户（或 Ribbon/快捷键）主动做出的选择。
+    userNavigatedRef.current = true;
     setActiveId(item.id);
     setOpenTabs((tabs) => tabs.some((t) => t.id === item.id)
       ? tabs
       : [...tabs, { id: item.id, label: item.label, page: item.page, href: item.href, unavailable: item.unavailable }]);
     setMessage(`已切换到「${item.label}」。`);
   }, []);
+
+  // T3（§14.1）管理台默认视图：管理员登录后默认落「管理台」（复用 security.html 检查摘要页签）；
+  // 成员与未登录保持首页。只在会话身份首次解析时决定，且用户已手动切换过则不插手。
+  useEffect(() => {
+    if (adminDefaultAppliedRef.current || !identity) return;
+    adminDefaultAppliedRef.current = true;
+    if (identity.role === 'admin' && !userNavigatedRef.current) {
+      const admin = NAV.find((n): n is NavItem => n.kind === 'item' && n.id === 'admin-console');
+      if (admin) openView(admin);
+    }
+  }, [identity, openView]);
 
   // 概览页快捷胶囊 / 编号洞察 → 壳层导航（只接受本壳嵌入的 iframe 发来的请求）
   useEffect(() => {
@@ -934,7 +952,17 @@ export function Workspace() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [runShellShortcut]);
 
-  const navEntries = useMemo(() => filterEntries(NAV, navQuery.trim().toLowerCase()), [navQuery]);
+  const navEntries = useMemo(() => {
+    const base = filterEntries(NAV, navQuery.trim().toLowerCase());
+    // T3（§14.1）：「管理台」仅管理员可见；身份未确认（null）前同样不显示，避免成员登录前闪现。
+    // 剔除后若治理组变孤立分组则一并清理（与 filterEntries 同口径）。
+    if (identity?.role !== 'admin') {
+      return base
+        .filter((e) => e.kind !== 'item' || e.id !== 'admin-console')
+        .filter((e, i, all) => e.kind !== 'group' || (i + 1 < all.length && all[i + 1].kind === 'item'));
+    }
+    return base;
+  }, [navQuery, identity]);
 
   // 菜单收起：点菜单栏以外或按 Esc。只做收起，不吞其它按键。
   useEffect(() => {
@@ -1172,6 +1200,25 @@ export function Workspace() {
             <span className="app-name">MemoryDesk 记忆工作台</span>
             <span className="tb-sep" />
             <span className="tb-doc" title={docTitle}>{docLabel}</span>
+            {/* T3（§14.1）：管理员视图标识 + 一键切回工作台（不改变任何数据权限） */}
+            {identity?.role === 'admin' && (
+              <>
+                <span className="tb-sep" />
+                <span className="tb-tag ro" data-testid="shell-admin-badge" title="管理员视图：所有敏感操作均由主进程门禁并留痕到审计账本">管理员视图·操作留痕</span>
+                {activeId !== 'home' && (
+                  <button
+                    type="button"
+                    className="tb-tag ok"
+                    data-testid="shell-back-workbench"
+                    title="回到工作台首页（不改变数据可用性与权限）"
+                    onClick={() => {
+                      const homeNav = NAV.find((n): n is NavItem => n.kind === 'item' && n.id === 'home');
+                      if (homeNav) openView(homeNav);
+                    }}
+                  >回到工作台</button>
+                )}
+              </>
+            )}
             <button
               type="button"
               className={`tb-tag${sessionActive ? ' ok' : ' ro'}`}

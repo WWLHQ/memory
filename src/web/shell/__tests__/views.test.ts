@@ -34,7 +34,7 @@ describe('壳层导航映射', () => {
     expect(pages.some((p) => PAGES[p].file === 'overview.html')).toBe(false);
   });
 
-  it('功能导航为五组 20 项，名称、顺序与真实页面一一对应（记忆助手已是独立整页 assistant.html）', () => {
+  it('功能导航为五组 21 项，名称、顺序与真实页面一一对应（记忆助手已是独立整页 assistant.html；T3 新增「管理台」复用 security.html?tab=overview，仅管理员可见）', () => {
     const groups = NAV.flatMap((e) => e.kind === 'group' ? [e.label] : []);
     expect(groups).toEqual(['工作台', '记忆管理', '连接', '治理', '智能']);
 
@@ -54,6 +54,8 @@ describe('壳层导航映射', () => {
       { id: 'agent', label: 'Agent 接入', page: 'agent' },
       { id: 'cost', label: '大模型配置', page: 'models' },
       { id: 'sync', label: '同步中枢', page: 'sync' },
+      // T3（§14.1）：管理台复用 security.html 检查摘要页签；成员侧由 Workspace 过滤不渲染
+      { id: 'admin-console', label: '管理台', page: 'security' },
       { id: 'params', label: '全局参数', page: 'params' },
       { id: 'security', label: '账号与安全', page: 'security' },
       { id: 'logs', label: '日志记录', page: 'logs' },
@@ -62,7 +64,7 @@ describe('壳层导航映射', () => {
       { id: 'setup', label: '首启向导', page: 'setup' },
       { id: 'assistant', label: '记忆助手', page: 'assistant' },
     ]);
-    expect(items).toHaveLength(20);
+    expect(items).toHaveLength(21);
     // 旧的可展开子树、演示通览不再出现；首启向导已纳入治理组。
     // 记忆助手已由壳层浮窗改为独立整页 assistant.html（不再是 panel 触发项）。
     expect(flattenNav().some((n) => n.children?.length)).toBe(false);

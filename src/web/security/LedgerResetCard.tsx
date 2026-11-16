@@ -147,10 +147,11 @@ export function LedgerResetCard({ enabled }: { enabled: boolean }) {
     setTriggering(true);
     setTriggerErr(null);
     try {
+      // T1（数据使用门禁）：触发采集需登录会话，hostCall 展开参数须传 [agentNames, sessionId]
       const res = await hostCall<{
         ok: boolean; advanced?: boolean; collected?: number; deduped?: number; roleSkipped?: number;
         consecutiveFails?: number; autoRetryStopped?: boolean; skipped?: string[]; error?: string;
-      }>('collector:triggerNow', []);
+      }>('collector:triggerNow', [[], currentSessionId()]);
       if (res?.ok) {
         setTrigger({
           advanced: !!res.advanced,

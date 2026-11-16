@@ -3,7 +3,7 @@
 > 由 `npm run code:index` 生成，请勿手改；改代码/文档后重跑即可。
 > 用法：先在本表定位文件与导出符号，再只读该文件的局部区间（省 token、少误改）。
 
-共 400 个源码文件、148 个文档。
+共 403 个源码文件、148 个文档。
 
 ## e2e
 
@@ -111,7 +111,7 @@
 
 | 文件 | 行数 | 摘要 | 导出 |
 |---|---|---|---|
-| [src/desktop/hostBridge.ts](src/desktop/hostBridge.ts) | 395 | 宿主桥（iframe 场景）：把 preload 能力透传给概览页 iframe 内的子页面。 | hostLog(fn), handleBridgeMessage(fn), isEmbedded(fn), installHostBridge(fn), hostCall(fn), hostCapability(fn), HostLogOptions(type), HostMethod(type) |
+| [src/desktop/hostBridge.ts](src/desktop/hostBridge.ts) | 400 | 宿主桥（iframe 场景）：把 preload 能力透传给概览页 iframe 内的子页面。 | hostLog(fn), handleBridgeMessage(fn), isEmbedded(fn), installHostBridge(fn), hostCall(fn), hostCapability(fn), HostLogOptions(type), HostMethod(type) |
 | [src/desktop/hostScan.ts](src/desktop/hostScan.ts) | 185 | 宿主真扫（discover 真实化）· 纯类型 + 纯匹配层（零 node 依赖，可安全打进浏览器包）。 | matchAgentsFromProcesses(fn), matchAgentsFromMcp(fn), matchAgentsFromConfigFiles(fn), mergeHostAgents(fn), AGENT_FINGERPRINTS(const), AgentFingerprint(type), HostAgentFound(type), HostScanResult(type), HostScanApi(type) |
 | [src/desktop/ipcStorage.ts](src/desktop/ipcStorage.ts) | 104 | 桌面端存储桥接（Electron 渲染进程侧）：把内核 StorageBackend 接口经 preload 暴露的 | IpcStorageBackend(class), StorageIpc(type) |
 
@@ -125,18 +125,19 @@
 | [src/electron/backupFiles.ts](src/electron/backupFiles.ts) | 153 | 批次37-D：双库备份的文件配方（纯函数，主进程与单测共用同一真源）。 | groupOfKind(fn), backupTargetDir(fn), backupTargetDirs(fn), planBackupFiles(fn), kindOfBackupName(fn), tsOfBackupName(fn), isRecipeBackupName(fn), selectBackupsToDelete(fn), sortBackupsNewestFirst(fn), BACKUP_PREFIX(const), BACKUP_EXT(const), BACKUP_KINDS(const), BACKUP_GROUP(const), BackupSourceFile(type), BackupDirConfig(type), BackupKind(type), BackupGroup(type) |
 | [src/electron/clientProcess.ts](src/electron/clientProcess.ts) | 56 | 客户端软件运行态探测（T6）：按真实进程可执行文件名判断客户端是否在运行。 | matchRunningClients(fn), listProcessNames(fn), probeRunningClients(fn), CLIENT_PROCESS_NAMES(const) |
 | [src/electron/dataRoot.ts](src/electron/dataRoot.ts) | 449 | 数据根目录（批次6）：记忆库、采集游标、日志、MCP 令牌、备份配置等全部持久数据 | defaultDataRoot(fn), dataRootPointerPath(fn), readDataRootPointer(fn), writeDataRootPointer(fn), clearDataRootMigrateFrom(fn), resolveLibraryPaths(fn), isSetupComplete(fn), wizardRequired(fn), hasLibraryDirs(fn), libraryFileState(fn), validateDataRootPath(fn), samePath(fn), ensureDirWritable(fn), hasAnyData(fn), summarizeDataDir(fn), detectDataRoots(fn), migrateDataRoot(fn), adoptLibraryDirIntoPlace(fn), DATA_ROOT_DIR_NAME(const), DATA_ROOT_POINTER_NAME(const), DATA_ROOT_POINTER_VERSION(const), DATA_ROOT_MIGRATE_FILES(const), DATA_ROOT_MIGRATE_DIRS(const), LEDGER_FILE_NAME(const), L0_FILE_NAME(const), L0_KEYRING_FILE_NAME(const), DataRootPointer(type), DataRootSummary(type), DataRootMigration(type), LibraryPaths(type), DataRootPointerRead(type) |
+| [src/electron/dataUseGate.ts](src/electron/dataUseGate.ts) | 39 | T1 数据使用门禁（管理员与成员权限设计 §2）：会话有效即放行，管理员额外打审计标。 | checkDataUse(fn), DataUseGateDeps(type), DataUseGateResult(type) |
 | [src/electron/hostScan.ts](src/electron/hostScan.ts) | 163 | 宿主真扫 · node IO 层（仅 Electron 主进程使用）： | parseTasklistCsv(fn), parseWmicJson(fn), listProcessNames(fn), detectMcpEntries(fn), detectConfigFiles(fn), scanHost(fn) |
-| [src/electron/ipcChannels.ts](src/electron/ipcChannels.ts) | 212 | preload 暴露的 IPC channel 清单（唯一真源）。 | missingChannels(fn), formatBootFailure(fn), handleBootFailure(fn), IPC(const), SHELL_SHORTCUT_CHANNEL(const), PRELOAD_CHANNELS(const), BootFailureDeps(type), ShellShortcut(type) |
+| [src/electron/ipcChannels.ts](src/electron/ipcChannels.ts) | 222 | preload 暴露的 IPC channel 清单（唯一真源）。 | missingChannels(fn), formatBootFailure(fn), handleBootFailure(fn), IPC(const), SHELL_SHORTCUT_CHANNEL(const), PRELOAD_CHANNELS(const), BootFailureDeps(type), ShellShortcut(type) |
 | [src/electron/l0KeyringStore.ts](src/electron/l0KeyringStore.ts) | 72 | L0 密钥环落盘适配（§4.4.8）：l0-keyring.json 原子写（temp → fsync → rename）， | writeFileAtomic(fn), createL0KeyringStore(fn), createHomeLockStore(fn), cleanupTempFiles(fn) |
 | [src/electron/llmBilling.ts](src/electron/llmBilling.ts) | 405 | 批次48 A31-b：厂商余额查询适配器（主进程唯一真源）。 | billingGetJson(fn), loadBillingCredentials(fn), saveBillingCredential(fn), BILLING_CREDS_FILE(const), BILLING_TTL_MS(const), NO_ENDPOINT_VENDORS(const), LOCAL_BILLING_VENDORS(const), deepseekBilling(const), kimiBilling(const), siliconflowBilling(const), openrouterBilling(const), BILLING_ADAPTERS(const), LlmBillingService(class), BillingBalance(type), BillingFetchOutcome(type), BillingAdapter(type), BillingServiceDeps(type), EngineBillingView(type) |
 | [src/electron/llmGateway.ts](src/electron/llmGateway.ts) | 574 | 批次32：LLM 精炼网关（主进程唯一真源）——通用 OpenAI 兼容**多引擎**，路由口径「哪个能用、哪个快用哪个」。 | defaultLlmConfig(fn), loadLlmConfig(fn), saveLlmConfig(fn), loadLlmKeys(fn), saveLlmKey(fn), keyExists(fn), buildLayerPrompt(fn), chatEndpoint(fn), applyProxyAccounting(fn), testEngine(fn), applyProbeResult(fn), loadLlmGateway(fn), llmEngineViews(fn), mergeLlmConfig(fn), LLM_CONFIG_FILE(const), LLM_KEYS_FILE(const), LEGACY_DEEPSEEK_KEY_FILE(const), LLM_PRESETS(const), LlmGatewayProvider(class), LlmEngineConfig(type), LlmGatewayConfig(type), LlmPreset(type), EngineTestResult(type), LlmGatewayView(type), LlmEnginePatch(type), LlmAddEngine(type), LlmConfigPatch(type), LlmEngineView(type) |
-| [src/electron/main.ts](src/electron/main.ts) | 4250 | Electron 主进程入口： | — |
+| [src/electron/main.ts](src/electron/main.ts) | 4353 | Electron 主进程入口： | — |
 | [src/electron/mcpClients.ts](src/electron/mcpClients.ts) | 398 | MCP 客户端配置读写 · node 层（批次15，仅 Electron 主进程使用）。 | expandHome(fn), applyRecallEvidence(fn), scanMcpClients(fn), snippetForClient(fn), wireMcpClient(fn), enableMcpClient(fn), McpClientStatus(type), McpClientsScan(type), McpWireResult(type), McpRecallEvidence(type) |
-| [src/electron/preload.ts](src/electron/preload.ts) | 340 | Electron preload：contextIsolation 开启下，经 contextBridge 向渲染进程暴露存储桥接面与运行标识。 | — |
+| [src/electron/preload.ts](src/electron/preload.ts) | 356 | Electron preload：contextIsolation 开启下，经 contextBridge 向渲染进程暴露存储桥接面与运行标识。 | — |
 | [src/electron/recallGateway.ts](src/electron/recallGateway.ts) | 188 | 批次62 UI 开关 · B：应用内置 LLM 网关（OpenAI-compatible 反向代理）。 | isLoopback(fn), rewriteRequest(fn), fetchPrelude(fn), startRecallGateway(fn), RecallGatewayOptions(type), RecallGatewayHandle(type) |
 | [src/electron/recallHard.ts](src/electron/recallHard.ts) | 315 | 批次62 UI 开关 · 主进程控制器：A 宿主钩子 / B 内置网关 / C 严格门禁 三层统一编排。 | mergeHostHooks(fn), hostHookInstalled(fn), findInstalledHookPath(fn), RECALL_HARD_HOOK_TAG(const), RecallHardController(class), RecallHardControllerOptions(type), RecallHardState(type) |
 | [src/electron/storageIpc.ts](src/electron/storageIpc.ts) | 62 | 批次47 P0-3：存储数据面四条「读写/审计」通道统一走登录会话闸门。 | createStorageReadWriteHandlers(fn), StorageIpcDeps(type), StorageReadWriteHandlers(type) |
-| [src/electron/tenantSource.ts](src/electron/tenantSource.ts) | 44 | 批次45-A1 单一租户真源：数据根级 tenant.json（0600），类比 dataRoot 指针 / mcp-token.txt 的启动期指针文件。 | loadOrCreateTenant(fn), TENANT_FILE_NAME(const), TENANT_SCHEMA(const) |
+| [src/electron/tenantSource.ts](src/electron/tenantSource.ts) | 92 | 批次45-A1 单一租户真源：数据根级 tenant.json（0600），类比 dataRoot 指针 / mcp-token.txt 的启动期指针文件。 | loadOrCreateTenant(fn), readTenantFile(fn), writeTenant(fn), TENANT_FILE_NAME(const), TENANT_SCHEMA(const), WriteTenantResult(type) |
 | [src/electron/webhookServer.ts](src/electron/webhookServer.ts) | 103 | Webhook HTTP 服务（批次26-A P0-4，从 main.ts 内联处理器抽出以便单测）： | createWebhookHttpServer(fn), WebhookServerOptions(type) |
 
 ## src/home
@@ -376,19 +377,21 @@
 | [src/web/security/L0MigrateCard.tsx](src/web/security/L0MigrateCard.tsx) | 127 | 安全页 · L0 旧数据迁移卡（§4.4.6；从 L0AdminCard 里拆出来单独成卡） | L0MigrateCard(fn) |
 | [src/web/security/L0RecoveryCard.tsx](src/web/security/L0RecoveryCard.tsx) | 222 | 安全页 · L0 恢复卡（批次37-G） | L0RecoveryCard(fn) |
 | [src/web/security/L0SplitCard.tsx](src/web/security/L0SplitCard.tsx) | 186 | 安全页 · L0 存量拆分迁移卡（批次37-C） | L0SplitCard(fn) |
-| [src/web/security/LedgerResetCard.tsx](src/web/security/LedgerResetCard.tsx) | 311 | 安全页 · 记忆库清空重采卡（批次35） | LedgerResetCard(fn) |
+| [src/web/security/LedgerResetCard.tsx](src/web/security/LedgerResetCard.tsx) | 312 | 安全页 · 记忆库清空重采卡（批次35） | LedgerResetCard(fn) |
 | [src/web/security/LegacyLedgerCard.tsx](src/web/security/LegacyLedgerCard.tsx) | 138 | 安全页 · 遗留账本清理卡（批次24） | LegacyLedgerCard(fn) |
 | [src/web/security/MyWriteWrapCard.tsx](src/web/security/MyWriteWrapCard.tsx) | 145 | 成员端「本账号写密钥」卡（§4.4.4-B） | MyWriteWrapCard(fn) |
 | [src/web/security/PwdPolicyCard.tsx](src/web/security/PwdPolicyCard.tsx) | 62 | P12-T3 密码策略 + 实时校验（4.2） | PwdPolicyCard(fn) |
 | [src/web/security/RebuildFromL0Card.tsx](src/web/security/RebuildFromL0Card.tsx) | 271 | 安全页 · 按 L0 原文重建 L1–L6 卡（批次37-E） | RebuildFromL0Card(fn) |
 | [src/web/security/RulesRejudgeCard.tsx](src/web/security/RulesRejudgeCard.tsx) | 189 | 安全页 · 规则重判存量卡（批次36-C） | RulesRejudgeCard(fn) |
 | [src/web/security/SecurityCards.tsx](src/web/security/SecurityCards.tsx) | 121 | P12-T3 角色矩阵（只读）+ 成员表（真实账号，只读）+ 密钥表（真实 /api/keys：轮换/吊销） | RoleMatrixCard(fn), MemberTable(fn), KeyTable(fn) |
-| [src/web/security/SecurityPage.tsx](src/web/security/SecurityPage.tsx) | 478 | 账号与安全页（REQ-006 / P12）T4 编排 | SecurityPage(fn) |
+| [src/web/security/SecurityPage.tsx](src/web/security/SecurityPage.tsx) | 486 | 账号与安全页（REQ-006 / P12）T4 编排 | SecurityPage(fn) |
+| [src/web/security/TenantIdentityCard.tsx](src/web/security/TenantIdentityCard.tsx) | 197 | 安全页 · 「本机租户身份」卡（管理员与成员权限设计 §14.2，2026-11-15 用户确认新增； | TenantIdentityCard(fn) |
 | [src/web/security/accountsClient.ts](src/web/security/accountsClient.ts) | 255 | 账号管理 API client（批次7）：走 home server 的管理员接口，权限由后端强制。 | fetchMyContext(fn), fetchAccounts(fn), updateAccount(fn), fetchApiKeys(fn), mintApiKey(fn), revokeApiKey(fn), fetchMirrorIntegrity(fn), fetchPwdPolicy(fn), savePwdPolicy(fn), changeOwnPassword(fn), AccountView(type), ApiKeyRecord(type), MirrorIntegrityView(type), ApiResult(type) |
 | [src/web/security/coreSecurity.ts](src/web/security/coreSecurity.ts) | 130 | 账号与安全页（REQ-006 / P12）接真内核：安全操作真写 storage 审计账本 | coreSecurityAudit(fn), coreLoadSecurityAudit(fn), coreLoadL0Audit(fn), coreL0Status(fn), coreL0SetupAdminPassword(fn), coreL0ChangeAdminPassword(fn), coreL0ListRequests(fn), coreL0ListGrants(fn), coreL0Grant(fn), coreL0Deny(fn), coreL0Revoke(fn), coreL0UnlockWrite(fn), coreL0UnlockWriteForMember(fn), coreL0AddMemberWriteWrap(fn), coreL0RemoveMemberWriteWrap(fn), coreL0MyWriteWrap(fn), coreL0LockWrite(fn), coreL0Migrate(fn), L0AuditRow(type) |
 | [src/web/security/defaults.ts](src/web/security/defaults.ts) | 17 | 账号与安全页规格常量（密码策略 / 禁用词 / 角色矩阵）。 | DEFAULT_POLICY(const), FORBIDDEN_PATTERNS(const), ROLE_MATRIX(const) |
 | [src/web/security/logic.ts](src/web/security/logic.ts) | 44 | 账号与安全页（REQ-006 / P12）纯逻辑层 | validatePwd(fn), canCrossTeam(fn), rotateWarn(fn), inGrace(fn), maskKey(fn), ROTATE_GRACE_HOURS(const), ROTATE_WARN_DAYS(const) |
 | [src/web/security/securityEntry.tsx](src/web/security/securityEntry.tsx) | 11 | 账号与安全页（REQ-006 / P12）入口（T1 壳） | — |
+| [src/web/security/tenantLabels.ts](src/web/security/tenantLabels.ts) | 16 | 「本机租户身份」卡中文名唯一来源（管理员与成员权限设计 §14.2 / AC-11）。 | TENANT_FIELD_LABELS(const), TENANT_FIELD_KEYS(const), TENANT_CONFIRM_WORD(const), TenantFieldKey(type) |
 | [src/web/security/types.ts](src/web/security/types.ts) | 24 | 账号与安全页（REQ-006 / P12）数据模型 | TeamMember(type), ApiKey(type), Scope(type) |
 | [src/web/security/useSecurityMirror.ts](src/web/security/useSecurityMirror.ts) | 16 | 账号与安全页后端镜像（阶段5-C 口径统一）：真接 home server POST /api/mirror/audit。 | useSecurityMirror(fn), SecurityMirror(type) |
 | [src/web/security/useToast.tsx](src/web/security/useToast.tsx) | 13 | — | useToast(fn) |
@@ -426,7 +429,7 @@
 | [src/web/shell/ShellLoginDialog.tsx](src/web/shell/ShellLoginDialog.tsx) | 279 | 壳层登录弹窗（批次49）：菜单栏 / 快速访问工具条 / 登录状态处三处入口共用同一个实例。 | ShellLoginDialog(fn), ShellLoginDialogProps(type) |
 | [src/web/shell/ShellStatusCard.tsx](src/web/shell/ShellStatusCard.tsx) | 104 | REQ-014 / T7（C8）：侧栏真实状态卡。 | ShellStatusCard(fn) |
 | [src/web/shell/StrataScale.tsx](src/web/shell/StrataScale.tsx) | 51 | 功能导航栏底部的「层级刻度」（批次53）：L0–L6 七档真实计数。 | StrataScale(fn) |
-| [src/web/shell/Workspace.tsx](src/web/shell/Workspace.tsx) | 1994 | 工作台壳层（批次48 S1）：Ribbon + 导航树 + 标签条 + 属性检查器 + 任务窗 + 底部五标签 + 状态栏。 | Workspace(fn) |
+| [src/web/shell/Workspace.tsx](src/web/shell/Workspace.tsx) | 2041 | 工作台壳层（批次48 S1）：Ribbon + 导航树 + 标签条 + 属性检查器 + 任务窗 + 底部五标签 + 状态栏。 | Workspace(fn) |
 | [src/web/shell/dock.ts](src/web/shell/dock.ts) | 170 | 底部面板真实数据源（S6）：输出=程序动作日志尾读；问题=该日志派生的错误/警告； | loadOutputLog(fn), problemsFromLog(fn), loadScheduleRuns(fn), auditMentions(fn), loadAuditForMemory(fn), OutputLogView(type), ProblemRow(type), ScheduleRun(type), AuditRow(type), DockResult(type) |
 | [src/web/shell/layers.ts](src/web/shell/layers.ts) | 78 | L1–L6 / L0 面板真实数据（S7）：只在中心页为「分层 L1–L6」或「L0 密文」时显示的壳层条。 | loadLayerPanel(fn), PANEL_LAYERS(const), LayerCount(type), LayerPanelView(type), PanelLayer(type) |
 | [src/web/shell/navCounts.ts](src/web/shell/navCounts.ts) | 45 | 批次54：功能导航角标的真实数据加载器。 | loadNavCounts(fn), NavCountId(type), NavCounts(type) |
@@ -435,7 +438,7 @@
 | [src/web/shell/statusbar.ts](src/web/shell/statusbar.ts) | 129 | 状态栏真实数据（S7）：账本位置 / L0 保险库状态 / 采集器后台状态。 | loadL0Write(fn), loadL0Status(fn), loadCollectorStatus(fn), loadStatusbar(fn), shortLocation(fn), StoragePlaceView(type), CollectorView(type), StatusSnapshot(type), L0WriteView(type) |
 | [src/web/shell/strataScale.ts](src/web/shell/strataScale.ts) | 91 | 功能导航栏底部的「层级刻度」（批次53 定义 / 批次55 改数据源）：L0–L6 七档的真实计数。 | strataViewFromOverview(fn), STRATA_LAYERS(const), StrataLayerSpec(type), StrataRowView(type), StrataScaleView(type), StrataSnapshotLike(type), StrataLayerId(type) |
 | [src/web/shell/taskpane.ts](src/web/shell/taskpane.ts) | 40 | 任务窗「待重放写入」只读视图（S5 / D6）：经 hostBridge 读 l0:pendingWrites。 | loadPendingWrites(fn), PendingWritesResult(type) |
-| [src/web/shell/views.ts](src/web/shell/views.ts) | 380 | 工作台壳层的视图映射（批次48 S1）。 | flattenNav(fn), findNav(fn), navPages(fn), PAGES(const), NAV(const), RIBBON(const), BOTTOM_TABS(const), NavGroup(type), NavItem(type), RibbonItem(type), RibbonGroup(type), RibbonTab(type), BottomTab(type), PageKey(type), NavEntry(type), IconName(type), ShellAction(type), BottomTabId(type) |
+| [src/web/shell/views.ts](src/web/shell/views.ts) | 385 | 工作台壳层的视图映射（批次48 S1）。 | flattenNav(fn), findNav(fn), navPages(fn), PAGES(const), NAV(const), RIBBON(const), BOTTOM_TABS(const), NavGroup(type), NavItem(type), RibbonItem(type), RibbonGroup(type), RibbonTab(type), BottomTab(type), PageKey(type), NavEntry(type), IconName(type), ShellAction(type), BottomTabId(type) |
 | [src/web/shell/workspaceEntry.tsx](src/web/shell/workspaceEntry.tsx) | 20 | 工作台壳层入口（批次48 S1）：Electron 主窗口加载 workspace.html。 | — |
 | [src/web/sync/SyncPage.tsx](src/web/sync/SyncPage.tsx) | 340 | 同步与裁决页（批次42-C）：「立即同步」（真实 push/pull 报告）+ 中枢对账 + §9.7 人工裁决队列 | SyncPage(fn) |
 | [src/web/sync/coreSyncPage.ts](src/web/sync/coreSyncPage.ts) | 215 | 同步与裁决页（批次42-C）数据逻辑：内核 agent.sync 真跑 + §9.7 裁决队列经 HostSyncHub 代理。 | runSync(fn), listSyncConflicts(fn), resolveConflict(fn), hubOverview(fn), syncChannels(fn), SyncPageHub(type), SyncPageCtx(type), SyncRunView(type), HubOverviewView(type), SyncChannelRow(type), SyncChannelsView(type) |
@@ -524,7 +527,7 @@
 | [specs/ROADMAP-批次42-未接线三件套-方案.md](specs/ROADMAP-批次42-未接线三件套-方案.md) | 52 | ROADMAP 批次42+ — 未接线三件套（云端同步 / 每日全量补齐 / 独立采集守护进程）立项方案 |
 | [specs/ROADMAP-批次45-租户归一与成员密钥域模型-方案.md](specs/ROADMAP-批次45-租户归一与成员密钥域模型-方案.md) | 44 | ROADMAP 批次45+ — 令牌与租户欠账立项（MCP 作用域收紧前置 = 账本租户归一）+ 成员/API 密钥域模型 |
 | [specs/ROADMAP-批次B类-远端PG与多机硬过滤-方案.md](specs/ROADMAP-批次B类-远端PG与多机硬过滤-方案.md) | 102 | 批次 B 类 · 远端 PG 中枢（B4）+ 多机硬过滤（B1）+ 真实精炼（B3）方案 |
-| [specs/acceptance.md](specs/acceptance.md) | 72 | title: 验收标准 |
+| [specs/acceptance.md](specs/acceptance.md) | 80 | title: 验收标准 |
 | [specs/code-map.md](specs/code-map.md) | 1742 | status: draft |
 | [specs/demo-data-baseline.md](specs/demo-data-baseline.md) | 116 | 演示/种子数据基线清单（批次42 · 阶段0 冻结） |
 | [specs/project_id配置化_工程化落地方案.md](specs/project_id配置化_工程化落地方案.md) | 395 | project_id 配置化 · 工程化落地方案 |
@@ -684,7 +687,7 @@ src/core/memagent/recallSupersede.ts 05474d039dbe
 src/core/memagent/refineQueue.ts 8a4b9204d51d
 src/core/memagent/regression.ts b9cf3a11fcbc
 src/core/memagent/rejudge.ts fbbb37ee97b1
-src/core/memagent/sessionCollector.ts 88e8fd97ce41
+src/core/memagent/sessionCollector.ts 610fb766e2b9
 src/core/memagent/sqliteStorage.ts a39293991388
 src/core/memagent/storage.ts eec1bee4ec33
 src/core/memagent/sync.ts 137bbd6b4a46
@@ -694,7 +697,7 @@ src/core/memagent/types.ts 3cc7b68cf36c
 src/core/memagent/ulid.ts 634c99f1962a
 src/core/memagent/vector.ts fac22ffc234b
 src/core/memagent/webhook.ts deae36bbc0ca
-src/desktop/hostBridge.ts 0ffe9a75924a
+src/desktop/hostBridge.ts 17a3ed9787e3
 src/desktop/hostScan.ts 0559ae3ef556
 src/desktop/ipcStorage.ts 064dc1cf7381
 src/electron/actionLog.ts 4f0d6d2ad7da
@@ -703,18 +706,19 @@ src/electron/agentProbe.ts 5e887368b4c3
 src/electron/backupFiles.ts edc4d8fb358f
 src/electron/clientProcess.ts 76b1b66d5b70
 src/electron/dataRoot.ts 917293cd3730
+src/electron/dataUseGate.ts 83c5c74e205a
 src/electron/hostScan.ts 694d58d7048c
-src/electron/ipcChannels.ts 0ffd1edb3350
+src/electron/ipcChannels.ts 623efb6c90a7
 src/electron/l0KeyringStore.ts b900f5d523d5
 src/electron/llmBilling.ts 82ae5edccb1c
 src/electron/llmGateway.ts 5056e6447738
-src/electron/main.ts b1e9c3b42207
+src/electron/main.ts 50e4402b282e
 src/electron/mcpClients.ts 2cd4ce94102d
-src/electron/preload.ts b7bb7e5ed6d0
+src/electron/preload.ts fe4366cdec05
 src/electron/recallGateway.ts f06028e2c9c5
 src/electron/recallHard.ts 54969098f869
 src/electron/storageIpc.ts 9edb5f55187a
-src/electron/tenantSource.ts 8d493e4182d2
+src/electron/tenantSource.ts 00d523c12c1e
 src/electron/webhookServer.ts 62157c0b1e21
 src/home/dashboard.ts f973b667da77
 src/home/mirrorLedger.ts f4a64f6cae05
@@ -934,19 +938,21 @@ src/web/security/L0AdminCard.tsx 953d3c1577a3
 src/web/security/L0MigrateCard.tsx 5697922c5b40
 src/web/security/L0RecoveryCard.tsx a40305a2fe9a
 src/web/security/L0SplitCard.tsx f563aab06852
-src/web/security/LedgerResetCard.tsx 543ef52f2326
+src/web/security/LedgerResetCard.tsx f3ddf342303b
 src/web/security/LegacyLedgerCard.tsx c1251636ef98
 src/web/security/MyWriteWrapCard.tsx 8c35ae6e9ebd
 src/web/security/PwdPolicyCard.tsx ad12fb5ffafb
 src/web/security/RebuildFromL0Card.tsx d95cb49f94fb
 src/web/security/RulesRejudgeCard.tsx 85c96b3a0bb5
 src/web/security/SecurityCards.tsx 30ab0c49a8a4
-src/web/security/SecurityPage.tsx e034d454a636
+src/web/security/SecurityPage.tsx b693528406e6
+src/web/security/TenantIdentityCard.tsx dd3e743a7c63
 src/web/security/accountsClient.ts 2e5a401e76ee
 src/web/security/coreSecurity.ts 66cce020b7e0
 src/web/security/defaults.ts e5b4b56b9629
 src/web/security/logic.ts 8b9c8e8ce379
 src/web/security/securityEntry.tsx 2e5268781ae1
+src/web/security/tenantLabels.ts fa5d04b2399c
 src/web/security/types.ts 7a4d935eaa18
 src/web/security/useSecurityMirror.ts 26ac38844bbb
 src/web/security/useToast.tsx 85cd09d2e1f5
@@ -984,7 +990,7 @@ src/web/shell/PersonalMemoryPanel.tsx 0a3ea4f72113
 src/web/shell/ShellLoginDialog.tsx 200a169aee11
 src/web/shell/ShellStatusCard.tsx 635ba4fdd69f
 src/web/shell/StrataScale.tsx 4455d8f22378
-src/web/shell/Workspace.tsx ca70bc6bb4f5
+src/web/shell/Workspace.tsx 41d36d9109ed
 src/web/shell/dock.ts 029c48568f1d
 src/web/shell/layers.ts 3ecc77074f2c
 src/web/shell/navCounts.ts 29d436b7129f
@@ -993,7 +999,7 @@ src/web/shell/shellStatus.ts 0d582644829f
 src/web/shell/statusbar.ts 94daa7882c10
 src/web/shell/strataScale.ts 5d7103d2ad03
 src/web/shell/taskpane.ts 39d5562ae71b
-src/web/shell/views.ts e256f20bdbe6
+src/web/shell/views.ts 5d07e46c0059
 src/web/shell/workspaceEntry.tsx d81475dafbfc
 src/web/sync/SyncPage.tsx 4689f911164f
 src/web/sync/coreSyncPage.ts dc04d7145615
@@ -1077,7 +1083,7 @@ specs/RECALL-HARD-PREFIX.md 1bb2a36797a6
 specs/ROADMAP-批次42-未接线三件套-方案.md df1a6f9d6ed5
 specs/ROADMAP-批次45-租户归一与成员密钥域模型-方案.md 633abaaaad54
 specs/ROADMAP-批次B类-远端PG与多机硬过滤-方案.md 0c7857454a7d
-specs/acceptance.md 34ca5b088282
+specs/acceptance.md 22e711c8939c
 specs/code-map.md 395558bbb212
 specs/demo-data-baseline.md 1d9af215ac78
 specs/project_id配置化_工程化落地方案.md aecc14b503c9
@@ -1159,4 +1165,4 @@ specs/需求规格书_新增章节_十七_遗忘机制与用户体验设计.md e
 specs/需求规格书_新增章节_十八_ID字段整理.md ee6b806565fe
 specs/需求规格书_日志记录页字段级交互规格.md b44afab6b9cb
 specs/需求规格书_检索页字段级交互规格.md e6fa32f907de
-specs/需求规格书_管理员与成员权限设计.md 90abaa1303d7
+specs/需求规格书_管理员与成员权限设计.md 0e3b9d524ae1

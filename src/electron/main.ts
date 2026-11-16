@@ -26,6 +26,7 @@ import { scanHost } from './hostScan.ts';
 import { IPC, missingChannels, handleBootFailure, SHELL_SHORTCUT_CHANNEL, type ShellShortcut } from './ipcChannels.ts';
 import { initAgentProbe, getMonitorStats } from './agentProbe.ts';
 import { createStorageReadWriteHandlers } from './storageIpc.ts';
+import { checkDataUse } from './dataUseGate.ts';
 import { initActionLog, actionLog, actionLogError, tailActionLog } from './actionLog.ts';
 import type { TenantContext } from '../types/home.ts';
 import {
@@ -55,7 +56,8 @@ import { summarizePendingWrites } from '../shared/pendingWritesView.ts';
 import { ensureSharedProject } from '../core/memagent/mcpRecall.ts';
 import { FileTokenStore } from '../core/memagent/tokenStore.ts';
 import { FileMemberStore } from '../core/memagent/memberStore.ts';
-import { loadOrCreateTenant } from './tenantSource.ts';
+import { loadOrCreateTenant, readTenantFile, writeTenant } from './tenantSource.ts';
+import { DEFAULT_TENANT, type TenantTriple } from '../shared/tenantDefaults.ts';
 import { PgSyncHub } from '../core/memagent/pgSyncHub.ts';
 import { reconcile as syncReconcileEngine } from '../core/memagent/sync.ts';
 import { createWebhook } from '../core/memagent/webhook.ts';
@@ -180,6 +182,12 @@ let MAIN_LOG: string;
 let BACKUP_CFG_PATH: string;
 let COLLECTOR_CURSOR_FILE: string;
 let storage: FileStorage;
+/**
+ * 机器级租户三元组（45-A1 tenant.json 真源）。原为 bootstrap 局部 const；
+ * T2 的 tenant:normalize handler 需要读它做归一目标 → 提升为模块级（bootstrap 内启动期一次性赋值，
+ * 语义不变：tenant:set 改文件后仍须重启才会重新加载到本变量，「重启生效」口径不变）。
+ */
+let tenantTriple: TenantTriple = { ...DEFAULT_TENANT };
 /** 第一轮个人记忆：独立于记忆主库的文件存储（<数据根>/personal-memory.db.json） */
 let personalStoreRef: FilePersonalStore | null = null;
 /**
@@ -1243,6 +1251,25 @@ function requireSession(sessionId: unknown, channel: string): AdminGate {
     return { ok: false, code: 'E_AUTH_SESSION', error: '需要登录后操作（会话已过期或未登录）' };
   }
   return { ok: true, ctx };
+}
+
+/**
+ * T1 数据使用门禁：admin / member 均放行（超集模型），admin 调用强制留痕。
+ * 判定逻辑在 dataUseGate.ts 纯函数里（可单测），此处只注入会话真源与审计落点。
+ * 审计走独立的 ipc:data-use 动作名，不污染既有 handleIpc 耗时日志。
+ */
+function requireDataUse(sessionId: unknown, channel: string): AdminGate {
+  const r = checkDataUse(sessionId, channel, {
+    getSessionContext: (sid) => homeServerRef?.getSessionContext(sid) ?? null,
+    auditAdminUse: (ch, user) => {
+      actionLog('ipc', 'data-use', { channel: ch, user, actor_role: 'admin', via: 'admin_override' });
+    },
+  });
+  if (!r.ok) {
+    actionLog('ipc', channel, { denied: 'no_session' }, { level: 'warn' });
+    return { ok: false, code: r.code, error: r.error };
+  }
+  return { ok: true, ctx: r.ctx };
 }
 
 /**
@@ -2352,7 +2379,13 @@ async function registerStorageIpc(): Promise<void> {
     requireDataPlaneSession(sessionId, IPC.hostAgentDetectRun);
     return detectLocalAgents();
   });
-  handleIpc(IPC.hostAgentDetectConfig, (_e, agentName) => hostAgentConfig(agentName as string));
+  // T1（数据使用门禁 · 按实际场景收缩）：读本机 Agent 配置属本机信息面 → 需登录会话
+  // （admin/member 均放行，admin 强制打 admin_override 审计标）
+  handleIpc(IPC.hostAgentDetectConfig, (_e, agentName, sessionId?: unknown) => {
+    const gate = requireDataUse(sessionId, IPC.hostAgentDetectConfig);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    return hostAgentConfig(agentName as string);
+  });
   // 批次26-B P1-3：租户三元组由主进程按会话下发（真实源 = home server 会话），渲染层不再自报 mam.tenant.v1
   handleIpc(IPC.tenantGet, (_e, sessionId?: unknown) => {
     const gate = requireSession(sessionId, IPC.tenantGet);
@@ -2361,6 +2394,69 @@ async function registerStorageIpc(): Promise<void> {
       ok: true,
       tenant: { user_id: gate.ctx.user_id, team_id: gate.ctx.team_id, enterprise_id: gate.ctx.enterprise_id },
     };
+  });
+  // ── T2（管理员与成员权限设计 §6.1）：机器级 tenant.json 三读一写 ─────────────
+  // tenant:read：读机器级真源文件（与 tenant:get 的登录会话三元组是两套值，页面须各自标明，禁止合成一套）
+  handleIpc(IPC.tenantRead, (_e, sessionId?: unknown) => {
+    const gate = requireSession(sessionId, IPC.tenantRead);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    try {
+      return { ok: true, tenant: readTenantFile(USER_DATA) };
+    } catch (e) {
+      return { ok: false, error: String((e as Error)?.message ?? e) };
+    }
+  });
+  // tenant:set：仅管理员 + 逐字口令 TENANT；入参只接受三元组（normalizeTenantTriple 过滤多余字段）；
+  // 写前备份成功才允许写；审计 app:tenant-set 含新旧值 / 操作者 / request_id，不记任何密钥。重启后生效（tenantTriple 是启动期快照）。
+  handleIpc(IPC.tenantSet, async (_e, next?: unknown, confirm?: unknown, requestId?: unknown, sessionId?: unknown) => {
+    const gate = requireAdmin(sessionId, IPC.tenantSet);
+    if (!gate.ok) return { ok: false, error: gate.error, code: gate.code };
+    if (confirm !== 'TENANT') {
+      actionLog('ipc', IPC.tenantSet, { denied: 'confirm_required' }, { level: 'warn' });
+      return { ok: false, error: '二次确认未通过：需逐字输入 TENANT 才允许改写本机数据身份' };
+    }
+    try {
+      const r = writeTenant(USER_DATA, next);
+      actionLog('app', 'tenant-set', {
+        old: r.prev, new: r.next, user: gate.ctx.user_id,
+        request_id: typeof requestId === 'string' && requestId ? requestId : undefined,
+        backup_file: r.backupFile, restart_required: true,
+      });
+      return { ok: true, prev: r.prev, next: r.next, backup_file: r.backupFile, restart_required: true };
+    } catch (e) {
+      return { ok: false, error: String((e as Error)?.message ?? e) };
+    }
+  });
+  // tenant:normalize：仅管理员；按 45-A2 口径把存量账本 team_id/enterprise_id 归一到 tenant.json 规范值
+  //（user_id 保留）。mismatched=0 零写盘；有差异必须先备份成功才动账本，绝不无备份改用户数据。
+  handleIpc(IPC.tenantNormalize, async (_e, requestId?: unknown, sessionId?: unknown) => {
+    const gate = requireAdmin(sessionId, IPC.tenantNormalize);
+    if (!gate.ok) return { ok: false, error: gate.error, code: gate.code };
+    const target = { team_id: tenantTriple.team_id, enterprise_id: tenantTriple.enterprise_id };
+    try {
+      const preview = await scanRowsForTenantNormalize(storage, target);
+      if (preview.mismatched === 0) {
+        actionLog('app', 'tenant-normalize-clean', { total: preview.total, target, user: gate.ctx.user_id });
+        return { ok: true, total: preview.total, mismatched: 0, normalized: 0, backup_dir: null };
+      }
+      const dir = await backupBeforeKernelChange('tenant-normalize', 'ledger:tenant-backup');
+      const now = Date.now();
+      const report = await normalizeTenantFields({
+        storage, target, admin_user_id: tenantTriple.user_id,
+        request_id: typeof requestId === 'string' && requestId ? requestId : `req_tenant_norm_${now}`,
+        now, backup_confirmed: true,
+      });
+      actionLog('app', 'tenant-normalize', {
+        total: report.total, mismatched: report.mismatched, normalized: report.normalized,
+        failed: report.failed, target, backup_dir: dir, user: gate.ctx.user_id,
+      });
+      return {
+        ok: true, total: report.total, mismatched: report.mismatched, normalized: report.normalized,
+        failed: report.failed, tombstones: report.tombstones, backup_dir: dir,
+      };
+    } catch (e) {
+      return { ok: false, error: String((e as Error)?.message ?? e) };
+    }
   });
 }
 
@@ -2810,7 +2906,7 @@ async function bootstrap(): Promise<void> {
   }
   // 批次45-A1 单一租户真源：数据根级 tenant.json（0600）。采集器 / webhook / MCP 引导账户统一读它，
   // 不再各自写死三元组（首建 = 规范缺省 u1/t1/e1，与存量账本一致）；损坏 fail-fast 阻断启动。
-  const tenantTriple = loadOrCreateTenant(USER_DATA);
+  tenantTriple = loadOrCreateTenant(USER_DATA);
   void mlog('bootstrap:tenant-source', { file: join(USER_DATA, 'tenant.json'), ...tenantTriple });
   actionLog('app', 'bootstrap:tenant-source', { user_id: tenantTriple.user_id, team_id: tenantTriple.team_id, enterprise_id: tenantTriple.enterprise_id });
   // 第二轮 owner 口径：登录账号 → 内核账号显式绑定（env 真源；损坏 = 明确告警 + 保持空表，
@@ -3411,7 +3507,14 @@ async function bootstrap(): Promise<void> {
     };
   });
   // 19.9 接入成功立即对账：不等 5min 周期，接入后马上读新 agent 的会话日志
-  handleIpc(IPC.collectorTriggerNow, async (_e, agentNames?: string[]) => {
+  // T1（数据使用门禁 · 按实际场景收缩）：触发采集会读取本机 Agent 会话数据 → 需登录会话
+  // （admin/member 均放行，admin 强制打 admin_override 审计标）；签名 (agentNames, sessionId)，
+  // hostCall 展开参数时调用方须传 [agentNames, sessionId]。
+  handleIpc(IPC.collectorTriggerNow, async (_e, agentNames?: string[], sessionId?: string) => {
+    const gate = requireDataUse(sessionId, IPC.collectorTriggerNow);
+    if (!gate.ok) {
+      return { ok: false, error: gate.error, collected: 0, deduped: 0, roleSkipped: 0, skipped: [], ts: Date.now() };
+    }
     // 把 detector/接入流程探测到的 agent 并入白名单，再触发一轮采集
     if (agentNames && agentNames.length > 0) {
       detectedAgentNames = [...new Set([...detectedAgentNames, ...agentNames])];

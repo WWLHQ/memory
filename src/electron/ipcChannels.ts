@@ -129,6 +129,16 @@ export const IPC = {
   ledgerFieldsBackfill: 'ledger:fieldsBackfill',
   /** 批次26-B P1-3：租户三元组由主进程按会话下发（渲染层不再自报 mam.tenant.v1） */
   tenantGet: 'tenant:get',
+  /**
+   * T2（管理员与成员权限设计 §6.1）：机器级 tenant.json 三读一写。
+   * tenant:read（需登录）读的是机器级真源文件，**不得用 tenant:get 代替**——后者返回登录会话三元组，
+   * 两套值（本机：会话侧 local/admin-team vs 内核侧 u1/t1/e1），混用会让管理员看到的和编辑的不是同一份。
+   * tenant:set（仅管理员 + 逐字口令 TENANT + 写前备份 + 审计）改 tenant.json，重启后生效；
+   * tenant:normalize（仅管理员 + 强制备份）按 45-A2 口径把存量账本行归一到 tenant.json 规范值。
+   */
+  tenantRead: 'tenant:read',
+  tenantSet: 'tenant:set',
+  tenantNormalize: 'tenant:normalize',
   /** 批次31：LLM 精炼网关 —— 配置读/写（写需管理员）、连通真拨测（管理员）、逐层精炼代理（内核写路径经此走主进程 HTTP） */
   llmConfigGet: 'llm:config',
   llmConfigSet: 'llm:configSet',

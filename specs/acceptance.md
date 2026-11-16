@@ -69,3 +69,11 @@ status: review
 - A3 `source_excerpt` 可选字段（≤200 字、L0 密文不进）：写入侧填充，召回拼装时摘要+原文片段双保真（同文不重复）；单测覆盖填充、脱敏与拼装一致性。
 - A4 明细页 footer（`recallInsight.ts` 的 `buildRecallDetailHtml`）保真声明强化（数字同源 / 以最新为准 / 不含令牌 / 不编造）；不进 `display.markdown`、不进注入头；`display.markdown` 逐字不变（反向断言）。
 - A5 侧栏状态卡经 `hostCall` 拉取**真实可读**通道——`collector:status` / `l0:pendingWrites` / `refine:state`——轻量轮询（`SHELL_STATUS_POLL_MS = 12_000`，落在 10–15s）展示；`navStatusChannel.ts` 一次性回传状态摘要，与 `navCountChannel` 角标互不覆盖；读不到/失败/未知**不产出条目**（不拿 0 或「空闲」冒充）。**同步面例外并如实声明**：`sync:*` 全为主动触发/需会话的通道（`push`/`pull`/`reconcile`/`conflicts`…），**没有**被动读「是否在同步 / 上次是否失败」的通道，故状态卡**不展示**同步状态（`NavStatusSource.sync` 只作契约预留，未接源即不产出条目）。明确不实现长轮询与一键部署向导。
+
+## AC-015 管理员与成员权限（门禁 / 管理台 / 本机租户身份）
+对应 REQ-002（租户隔离：机器级 tenant.json 真源与身份写口）与 REQ-006（页面交互：安全页身份卡 / 壳层管理台），细则以《需求规格书_管理员与成员权限设计.md》为准（2026-11-15 冻结；§15 T1–T5）：
+- 门禁内核：`requireDataUse`（admin/member 均放行，admin 打 `actor_role=admin` 审计标）；`collector:triggerNow`、`hostAgentDetect:config` 补会话校验；`collector:status`、`mcp:clients` **保持免登录**（登录前可观测是有意决策，按实际场景收缩定稿）。
+- 身份写口：`tenant:read`（需登录，读机器级 tenant.json 真源，≠ `tenant:get` 的会话三元组）、`tenant:set`（仅管理员 + 逐字口令 TENANT + 写前备份 + 审计 + 重启生效）、`tenant:normalize`（仅管理员，45-A2 备份闸门口径）。
+- 管理台默认视图：管理员登录后壳层默认落「管理台」（复用 security.html 检查摘要页签，不新增 HTML 入口）；成员侧导航不出现该项、仍默认首页；顶栏「管理员视图·操作留痕」+ 一键切回工作台（不改变数据权限）。
+- 「本机租户身份」卡：读 `tenant:read`；成员只读无写入口；管理员编辑须二次确认/备份/重启提示，变更用户标识时提示个人记忆绑定失配；整页中文名 + 一句摘要，不渲染原始 JSON / 英文字段名。
+- **R1/G1 措辞澄清（用户已显式批准偏离原型）**：「租户 ID 禁手填」指业务表单（Agent 接入/写入等）不得让用户填写租户 ID；管理员经安全页对机器级 `tenant.json` 的维护是受控管理配置入口（逐字口令 + 备份 + 审计），不构成「表单手填」，不违反 R1/G1。

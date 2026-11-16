@@ -49,16 +49,30 @@ const hostScan = {
   run: () => ipcRenderer.invoke(IPC.hostScanRun, sidArg()),
 };
 
-// 本机 Agent 检测桥（后续扩展）：CLI 安装探测 + 接入配置建议（P1-2：需登录会话）
+// 本机 Agent 检测桥（后续扩展）：CLI 安装探测 + 接入配置建议（P1-2：需登录会话；T1：读配置也需会话）
 const hostAgentDetect = {
   run: () => ipcRenderer.invoke(IPC.hostAgentDetectRun, sidArg()),
-  config: (agentName: string) => ipcRenderer.invoke(IPC.hostAgentDetectConfig, agentName),
+  config: (agentName: string, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.hostAgentDetectConfig, agentName, sessionId ?? sidArg()),
 };
 
 // 租户身份桥（批次26-B P1-3）：主进程按会话下发三元组，渲染层不得自报
+// T2：机器级 tenant.json 三读一写——read 读真源文件（≠tenant:get 的会话三元组）；
+// set 仅管理员（逐字口令 TENANT + 写前备份 + 审计，重启生效）；normalize 仅管理员（45-A2 口径归一存量账本）
 const tenant = {
   get: (sessionId?: string | null) =>
     ipcRenderer.invoke(IPC.tenantGet, sessionId) as Promise<{ ok: boolean; tenant?: { user_id: string; team_id: string; enterprise_id: string }; error?: string }>,
+  read: (sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.tenantRead, sessionId) as Promise<{ ok: boolean; tenant?: { user_id: string; team_id: string; enterprise_id: string } | null; error?: string }>,
+  set: (next: { user_id: string; team_id: string; enterprise_id: string }, confirm: string, requestId: string, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.tenantSet, next, confirm, requestId, sessionId) as Promise<{
+      ok: boolean; prev?: { user_id: string; team_id: string; enterprise_id: string };
+      next?: { user_id: string; team_id: string; enterprise_id: string }; backup_file?: string; restart_required?: boolean; error?: string; code?: string;
+    }>,
+  normalize: (requestId: string, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.tenantNormalize, requestId, sessionId) as Promise<{
+      ok: boolean; total?: number; mismatched?: number; normalized?: number; failed?: number; backup_dir?: string | null; error?: string; code?: string;
+    }>,
 };
 
 // MCP 客户端接入桥（批次15）：状态扫描需登录会话（批次27 P3-4）；含令牌片段/一键写入需管理员（主进程按 sessionId 校验）
@@ -73,9 +87,11 @@ const mcpClients = {
 };
 
 // 会话采集器桥（19.9 接入成功立即读各 agent 会话/记忆）：宿主真扫命中后立刻触发一次对账
-// triggerNow(agentNames?)：传入已检测到的已安装 agent 名 → 扩展采集源白名单，立即读 L0
+// triggerNow(agentNames?, sessionId?)：传入已检测到的已安装 agent 名 → 扩展采集源白名单，立即读 L0；
+// T1（数据使用门禁）：触发采集需登录会话（admin/member 均放行，admin 留痕），hostCall 展开参数须传 [agentNames, sessionId]
 const collector = {
-  triggerNow: (agentNames?: string[]) => ipcRenderer.invoke(IPC.collectorTriggerNow, agentNames) as Promise<{ ok: boolean; collected: number; deduped: number; roleSkipped: number; skipped: string[]; ts: number }>,
+  triggerNow: (agentNames?: string[], sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.collectorTriggerNow, agentNames, sessionId ?? sidArg()) as Promise<{ ok: boolean; collected: number; deduped: number; roleSkipped: number; skipped: string[]; ts: number }>,
   status: () => ipcRenderer.invoke(IPC.collectorStatus) as Promise<{
     ok: boolean; running: boolean; intervalMs: number;
     last?: { collected: number; deduped: number; roleSkipped: number; skipped: string[]; ts: number } | null;

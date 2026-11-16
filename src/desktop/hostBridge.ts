@@ -28,6 +28,8 @@ export type HostMethod =
   | 'hostAgentDetect:run'
   | 'hostAgentDetect:config'
   | 'tenant:get'
+  /** T2：机器级 tenant.json 三读一写（read 需登录；set/normalize 仅管理员） */
+  | 'tenant:read' | 'tenant:set' | 'tenant:normalize'
   /** 第一轮个人记忆本机闭环：独立存储单一数据面（owner 由主进程按会话解析） */
   | 'personal:invoke'
   | 'mcp:clients'
@@ -98,6 +100,9 @@ const CHANNEL_TO_NATIVE: Record<HostMethod, [string, string]> = {
   'hostAgentDetect:run': ['hostAgentDetect', 'run'],
   'hostAgentDetect:config': ['hostAgentDetect', 'config'],
   'tenant:get': ['tenant', 'get'],
+  'tenant:read': ['tenant', 'read'],
+  'tenant:set': ['tenant', 'set'],
+  'tenant:normalize': ['tenant', 'normalize'],
   'personal:invoke': ['personal', 'invoke'],
   'mcp:clients': ['mcpClients', 'list'],
   'mcp:clientSnippet': ['mcpClients', 'snippet'],

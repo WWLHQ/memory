@@ -85,6 +85,11 @@ export const NAV: NavEntry[] = [
   { kind: 'item', id: 'cost', label: '大模型配置', icon: 'chart', page: 'models' },
   { kind: 'item', id: 'sync', label: '同步中枢', icon: 'sync', page: 'sync' },
   { kind: 'group', label: '治理' },
+  /**
+   * T3（管理员与成员权限设计 §14.1）：「管理台」复用 security.html 的「检查摘要」页签，
+   * 不新增第 23 个 HTML 入口。仅管理员可见（成员侧由 Workspace 过滤），管理员登录后默认落该视图。
+   */
+  { kind: 'item', id: 'admin-console', label: '管理台', icon: 'system', page: 'security', href: '?tab=overview' },
   { kind: 'item', id: 'params', label: '全局参数', icon: 'gear', page: 'params' },
   { kind: 'item', id: 'security', label: '账号与安全', icon: 'shield', page: 'security' },
   { kind: 'item', id: 'logs', label: '日志记录', icon: 'list', page: 'logs' },
