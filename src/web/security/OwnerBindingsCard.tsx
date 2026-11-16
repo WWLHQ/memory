@@ -16,6 +16,7 @@ const errText = (e: unknown): string => String((e as Error)?.message ?? e);
 
 export function OwnerBindingsCard({ enabled }: { enabled: boolean }) {
   const [bindings, setBindings] = useState<Binding[] | null>(null);
+  const [envBindings, setEnvBindings] = useState<Binding[]>([]);
   const [source, setSource] = useState<'env' | 'file'>('file');
   const [kernelUserId, setKernelUserId] = useState<string>('');
   const [readErr, setReadErr] = useState<string | null>(null);
@@ -25,16 +26,21 @@ export function OwnerBindingsCard({ enabled }: { enabled: boolean }) {
   const [receipt, setReceipt] = useState<string | null>(null);
   const [actionErr, setActionErr] = useState<string | null>(null);
   const hostReady = hostCapability() !== 'none';
+  // 展示口径：永远显示「实际生效」的绑定——env 接管时生效的是环境变量（文件只是待命配置），
+  // 否则生效的是文件。绝不用文件空表冒充「暂无绑定」。
+  const effective: Binding[] = source === 'env' ? envBindings : (bindings ?? []);
 
   const refresh = useCallback(async () => {
     if (!hostReady) return;
     setBusy(true);
     try {
       const res = await hostCall<{
-        ok: boolean; bindings?: Binding[]; source?: 'env' | 'file'; kernel_user_id?: string; error?: string;
+        ok: boolean; bindings?: Binding[]; source?: 'env' | 'file'; kernel_user_id?: string;
+        env_override?: boolean; env_bindings?: Binding[]; error?: string;
       }>('owner-bindings:read', [currentSessionId()]);
       if (res?.ok) {
         setBindings(res.bindings ?? []);
+        setEnvBindings(res.env_bindings ?? []);
         setDraft((res.bindings ?? []).map((b) => ({ ...b })));
         setSource(res.source ?? 'file');
         setKernelUserId(res.kernel_user_id ?? '');
@@ -121,45 +127,71 @@ export function OwnerBindingsCard({ enabled }: { enabled: boolean }) {
               <tr>
                 <th style={{ width: 160 }}>{BINDING_FIELD_LABELS.account.name}</th>
                 <th>{BINDING_FIELD_LABELS.kernel_user_id.name}</th>
-                {enabled ? <th style={{ width: 60 }}>操作</th> : null}
               </tr>
             </thead>
             <tbody>
-              {(draft ?? []).length === 0 && (
+              {effective.length === 0 && (
                 <tr data-testid="owner-bindings-empty">
-                  <td colSpan={enabled ? 3 : 2} className="dim">暂无绑定（所有账号的个人记忆都仅本机可见）。</td>
+                  <td colSpan={2} className="dim">暂无绑定（所有账号的个人记忆都仅本机可见）。</td>
                 </tr>
               )}
-              {(draft ?? []).map((row, idx) => (
+              {effective.map((row, idx) => (
                 <tr key={idx} data-testid={`owner-bindings-row-${idx}`}>
                   {BINDING_FIELD_KEYS.map((k) => (
-                    <td key={k}>
-                      {enabled
-                        ? <input
-                          data-testid={`owner-bindings-input-${idx}-${k}`}
-                          value={row[k]}
-                          onChange={(e) => updateDraft(idx, k, e.target.value)}
-                          aria-label={`${BINDING_FIELD_LABELS[k].name}（第 ${idx + 1} 条）`}
-                        />
-                        : <code>{row[k]}</code>}
-                    </td>
+                    <td key={k}><code>{row[k]}</code></td>
                   ))}
-                  {enabled ? (
-                    <td>
-                      <button type="button" className="btn" data-testid={`owner-bindings-remove-${idx}`} disabled={busy} onClick={() => removeRow(idx)}>
-                        删除
-                      </button>
-                    </td>
-                  ) : null}
                 </tr>
               ))}
             </tbody>
           </table>
+          {source === 'env' && (
+            <div className="note" data-testid="owner-bindings-env-note">
+              上面显示的是当前真正生效的绑定（来自系统环境变量）；环境变量清除并重启前，下方文件内容不会生效。
+            </div>
+          )}
           {!enabled && (
             <div className="note" data-testid="owner-bindings-member-note">需要管理员修改（成员只读，没有写入口）。</div>
           )}
           {enabled && (
             <>
+              <div className="row" style={{ marginTop: 8 }}>
+                <span className="dim">维护本机配置文件{source === 'env' ? '（环境变量接管中，以下修改保存后暂不生效）' : '（保存并重启后按此生效）'}：</span>
+              </div>
+              <table className="ltable" data-testid="owner-bindings-file-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: 160 }}>{BINDING_FIELD_LABELS.account.name}</th>
+                    <th>{BINDING_FIELD_LABELS.kernel_user_id.name}</th>
+                    <th style={{ width: 60 }}>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(draft ?? []).length === 0 && (
+                    <tr data-testid="owner-bindings-file-empty">
+                      <td colSpan={3} className="dim">文件里暂无绑定。</td>
+                    </tr>
+                  )}
+                  {(draft ?? []).map((row, idx) => (
+                    <tr key={idx}>
+                      {BINDING_FIELD_KEYS.map((k) => (
+                        <td key={k}>
+                          <input
+                            data-testid={`owner-bindings-input-${idx}-${k}`}
+                            value={row[k]}
+                            onChange={(e) => updateDraft(idx, k, e.target.value)}
+                            aria-label={`${BINDING_FIELD_LABELS[k].name}（第 ${idx + 1} 条）`}
+                          />
+                        </td>
+                      ))}
+                      <td>
+                        <button type="button" className="btn" data-testid={`owner-bindings-remove-${idx}`} disabled={busy} onClick={() => removeRow(idx)}>
+                          删除
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
               <div className="row">
                 <button type="button" className="btn" data-testid="owner-bindings-add" disabled={busy} onClick={addRow}>
                   添加一条绑定

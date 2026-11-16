@@ -71,10 +71,21 @@ describe('OwnerBindingsCard（OB 个人记忆账号绑定）', () => {
   });
 
   it('env 接管时如实提示「界面修改不会生效」', async () => {
-    mockHost({ read: { ok: true, bindings: BINDINGS, source: 'env', kernel_user_id: 'u1', env_override: true } });
+    mockHost({ read: { ok: true, bindings: [], source: 'env', kernel_user_id: 'u1', env_override: true, env_bindings: BINDINGS } });
     const { container } = render(<OwnerBindingsCard enabled={false} />);
     await waitFor(() => expect(screen.getByTestId('owner-bindings-row-0')).toBeInTheDocument());
     expect(container.textContent).toContain('界面修改不会生效');
+    expect(container.textContent).toContain('真正生效的绑定');
+  });
+
+  it('回归锁（2026-11-16 用户截图缺陷）：env 接管 + 文件空表时，必须显示 env 生效行，不得冒充「暂无绑定」', async () => {
+    mockHost({ read: { ok: true, bindings: [], source: 'env', kernel_user_id: 'u1', env_override: true, env_bindings: BINDINGS } });
+    render(<OwnerBindingsCard enabled={false} />);
+    await waitFor(() => expect(screen.getByTestId('owner-bindings-row-0')).toBeInTheDocument());
+    expect(screen.getByTestId('owner-bindings-row-0').textContent).toContain('13838528400');
+    expect(screen.getByTestId('owner-bindings-row-0').textContent).toContain('u1');
+    expect(screen.queryByTestId('owner-bindings-empty')).toBeNull();
+    expect(screen.getByTestId('owner-bindings-env-note').textContent).toContain('系统环境变量');
   });
 
   it('UI 铁律（AC-11）：整页不出现英文字段名 / 原始 JSON 字样，只有中文名与值', async () => {

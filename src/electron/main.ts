@@ -2469,12 +2469,23 @@ async function registerStorageIpc(): Promise<void> {
       const bindings = loadOwnerBindings(USER_DATA);
       const envRaw = process.env.MAM_PERSONAL_OWNER_BINDINGS;
       const envOverride = typeof envRaw === 'string' && !!envRaw.trim();
+      // env 接管时同时回传实际生效的 env 绑定：卡上必须显示「谁真的在生效」，
+      // 不能只回文件空表让用户看到「暂无绑定」却不知道召回其实按 env 在走。
+      let envBindings: { account: string; kernel_user_id: string }[] = [];
+      if (envOverride) {
+        try {
+          envBindings = parsePersonalOwnerBindings(envRaw);
+        } catch {
+          envBindings = []; // env 值损坏：bootstrap 已有 bad 告警行，这里如实回空表
+        }
+      }
       return {
         ok: true,
         bindings,
         source: envOverride ? 'env' : 'file',
         kernel_user_id: tenantTriple.user_id,
         env_override: envOverride,
+        env_bindings: envBindings,
       };
     } catch (e) {
       return { ok: false, error: String((e as Error)?.message ?? e) };
