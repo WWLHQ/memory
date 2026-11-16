@@ -52,8 +52,9 @@ export function toServiceInput(a: UiAgentCard): AgentCardInput {
     circuit: a.circuit === 'HALF_OPEN' ? 'HALF_OPEN' : a.circuit === 'OPEN' ? 'OPEN' : 'CLOSED',
     tenantManual: false, // R1：租户仅全局注入
     mcpTools: {
-      recall_memory: { project_id: 'p1', scene: a.tools.recall.scene, mode: a.tools.recall.mode || null, top_k: a.tools.recall.topk },
-      write_memory: { project_id: 'p1' },
+      // 与 service.ts 的下发真源保持一致：内核 DEFAULT_PROJECT_ID='P1'（区分大小写）
+      recall_memory: { project_id: 'P1', scene: a.tools.recall.scene, mode: a.tools.recall.mode || null, top_k: a.tools.recall.topk },
+      write_memory: { project_id: 'P1' },
       get_preferences: { user_id: 'u1' },
     },
     channels: { webhook: a.chan.webhook, apiPull: a.chan.api },

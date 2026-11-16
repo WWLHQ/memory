@@ -79,7 +79,7 @@ test('§8 一键接入：3 个本机 Agent 自动出现卡片（P0/P1/P2），�
     const c = svc.cards.get(n)!;
     assert.equal(c.status, 'CONNECTED');
     assert.equal(c.channels!.webhook && c.channels!.apiPull, true); // 双通道
-    assert.equal(c.mcpTools!.recall_memory!.project_id, 'p1'); // project 共享
+    assert.equal(c.mcpTools!.recall_memory!.project_id, 'P1'); // project 共享（与内核账本真实项目 ID 逐字一致）
   }
 });
 

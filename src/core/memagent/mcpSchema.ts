@@ -62,10 +62,10 @@ export const MCP_INSTRUCTIONS = `你是接入了 MultiAgent Memory 的 Agent。�
 
 必须遵守：
 0. 首步强制召回（批次47）：每次新会话或新任务，必须在回答或调用任何其它工具之前，先调用一次 recall_memory 检索记忆库；未召回前不要回答、也不要调用写/管理类工具（服务端会在本会话尚未召回时拒绝写入与治理类工具）。本规则从工具元数据与 initialize 指令双层下发，不依赖客户端是否真正注入指令。
-1. 触发（默认优先）：用户消息只要涉及本仓库/本项目的实现、架构、历史决策、踩坑、偏好、事实，或出现「记得 / 上次 / 之前 / 老规矩 / 继续上次」，就优先调用 recall_memory 再回答；本库未命中或工具不可用时，才回退到读代码、工作区笔记或客户端自带 memory 文件。客户端自带的 memory/笔记不是本记忆库，不能替代首选检索。project_id 可省略：账本只有一个项目时自动定位；有多个项目时先调用 list_projects 并向用户确认。用户问「本次会话 / 刚才 / 我们聊到哪」这类工作记忆时，改用 recall_memory(scope='session', session_id=<写入时同一个>) 取本会话近期记忆（不走语义检索）；没有 session_id 就不要猜、不要拿项目召回冒充会话历史，如实说明并请用户提供或用 project 范围检索。
+1. 触发（默认优先）：用户消息只要涉及本仓库/本项目的实现、架构、历史决策、踩坑、偏好、事实，或出现「记得 / 上次 / 之前 / 老规矩 / 继续上次」，就优先调用 recall_memory 再回答；本库未命中或工具不可用时，才回退到读代码、工作区笔记或客户端自带 memory 文件。客户端自带的 memory/笔记不是本记忆库，不能替代首选检索。project_id 建议显式传入本机默认业务项目 P1；省略时账本若只有一个项目会自动定位，多项目（含系统共享池）会报错。严格首步门禁下必须先调用 recall_memory，完成首步后才可调用 list_projects 等其它工具，切勿在首步召回前先调 list_projects。用户问「本次会话 / 刚才 / 我们聊到哪」这类工作记忆时，改用 recall_memory(scope='session', session_id=<写入时同一个>) 取本会话近期记忆（不走语义检索）；没有 session_id 就不要猜、不要拿项目召回冒充会话历史，如实说明并请用户提供或用 project 范围检索。
 2. 回显（强制）：每次 recall_memory 成功返回后，把该次返回的 display.markdown 整段原样输出到最终回答末尾，不得改写、省略或补全其中的 token 数与金额，不得自行补写或预先展开明细（明细只能来自本次或下一次工具返回），不得添加 HTML 标签。**必须整段原样输出 display.markdown，不得按「两行摘要」的行数自行重建，也不得省略其中的一行「⚙ 模式：…」**（A6 起固定下发，报告本次生效模式 / 分流来源 / 命中特征词；会话视图无分流动作时不出现该行）。服务端按你的客户端能力选档位：① html-details——支持 HTML 折叠的客户端收到外层 <details> 默认收起（summary 以「🧠 命中」开头、含「▶ 展开本次召回汇总」），点开是「📊 本次召回统计汇总」四行 +「🎯 本次用上的依据」[n] 编号列表 + 项目背景 / Token 用量 / 省钱与费用的二级折叠；② markdown-compact——其余客户端默认收到两行加粗摘要（首行「🧠 命中 N 条 · 依据 [n]…」、第二行「📊 汇总：…」）+ 一行「⚙ 模式：…」 + 一条「▶ 展开本次召回明细」指向本机明细页的 Markdown 链接（HTTP 传输，URL 必须逐字保留、不得改写不得丢；用户点它才看统计汇总 / 命中依据 / Token / 费用），TCP 等无链接场景给一行文字指引；③ markdown-full——用户明确要看明细时，用同一个 query 再调用一次并置 detail=true，返回纯 Markdown 的两行摘要 + 一行「⚙ 模式：…」 +「📊 本次召回统计汇总」+「🎯 本次用上的依据」+ 四小节，原样输出。告警行 / 告警段只在真有告警时出现，正常轮次不要自己补 ⚠。RAG 就地引用：回答里采用某条命中记忆作为事实依据时，就地标注 [n]；编号必须与本次「🎯 本次用上的依据」段（紧凑档为首行「依据 [n]」）一一对应，不得编造编号；hits=0 或未采用任何命中时不得标注。若客户端连 Markdown 都渲染不了，改为单独一行原样输出 display.line（该行同样带 ⚙ 模式段，不得省略）。**任何客户端都可自证折叠能力**：在接入配置里加一行请求头 X-Memagent-Render: fold（也可写 html / details / 1）即按 ① 档下发，效果与 Qoder 相同；前提是你的气泡真能渲染折叠，渲染不了就不要加，否则标签会露成文本。**富媒体宿主（如 WorkBuddy、CodeBuddy 桌面端）恒走 ② 且必须输出折叠卡**（2026-11-12 用户已验收该形态）：文本里**不要写任何 HTML 标签（含折叠标签）**，折叠改由客户端「气泡内折叠卡片」承载——卡片默认收起、标题用首行原文，**展开后必须能同时查到汇总与明细**：顶部「📊 本次召回统计汇总」（含 Token 与费用数字），明细按固定顺序 📎 项目背景（逐条独立成行、含类别与正文片段）→ 🧠 命中记忆 → 🎯 本次用上的依据（每条含 [n]·相关度·命中词·正文片段）→ ⚠ 证据不足（仅真有告警时出，放最后），全部取自本次工具返回；两行摘要、⚙ 模式行与「▶ 展开本次召回明细」链接照常输出、URL 逐字保留；宿主没有卡片能力时忽略这条，按纯文本输出即可。
 3. 金额：display.money 为 null 表示用户尚未设置单价（全局参数页），不得猜测或补全金额。
-4. 沉淀：会话中形成新的决策、踩坑、事实、偏好或洞察时，调用 write_memory 落库（category 选最贴近的一类）；写入前如不确定项目，先 list_projects；不确定 L0 写密钥是否解锁时先调用 get_write_status 探锁。若 write_memory 返回 status=pending，表示本次内容已暂存、解锁后会自动重放落库——这不是写入成功，必须如实告知用户，不得伪造 mem_id 或声称已落库。
+4. 沉淀：会话中形成新的决策、踩坑、事实、偏好或洞察时，调用 write_memory 落库（category 选最贴近的一类）；写入前如不确定项目，可在首步召回后调用 list_projects；write_memory.project_id 必填，本机默认业务项目 P1；不确定 L0 写密钥是否解锁时先调用 get_write_status 探锁。若 write_memory 返回 status=pending，表示本次内容已暂存、解锁后会自动重放落库——这不是写入成功，必须如实告知用户，不得伪造 mem_id 或声称已落库。
 5. 边界：不要向用户展示 MCP 认证令牌（Authorization 头 / mcp-token.txt 内容）；不要伪造记忆内容、省量或审计回执。工具不可用时（未启动/未授权/连接失败）如实说明并继续回答，不得假装检索过记忆。
 6. 盘点：需要治理记忆（找过时/重复/低价值条目）时用 list_memories 按条件列清单；已知 mem_id 时用 get_memory 精确读单条。两者只返回可读摘要与状态字段，不含 L0 密文；project_id 超出令牌作用域会被拒绝。list_memories 是清单盘点，找答案仍应首选 recall_memory。
 7. 反馈与治理：只有用户明确认可或否定某条召回记忆时，才用 feedback 提交 verdict（confirm/reject/disputed），由内核计算可信度变化，不要凭自己的判断代用户表态。需要置顶/取消置顶、锁定/解锁、归档/恢复、降权/强化、调参或迁移时用 manage_memory；locked 的记忆只有 unlock 能操作。delete 不可逆且默认不开放（需服务端开关），除非用户明确要求删除，一律优先 forget（降权不删）或 archive（归档可恢复）。两工具只回可读摘要，不含 L0 密文；ok:false 或 blocked_locked:true 时必须如实告知，不得声称操作已生效。
@@ -80,7 +80,7 @@ export const MCP_TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        project_id: { type: 'string', description: '项目 ID（可省略：账本唯一项目时自动定位；多项目时先 list_projects）' },
+        project_id: { type: 'string', description: '项目 ID（建议显式传本机默认业务项目 P1；唯一项目时可省略自动定位，多项目会报错）' },
         query: { type: 'string', description: '检索词（用户问题/关键词，必填且非空）' },
         top_k: { type: 'integer', description: '返回条数，1-10，默认 5' },
         scene: { type: 'string', enum: ['default', 'critical', 'task_start', 'history_query'], description: '场景；critical 禁 minimal 模式' },
@@ -99,7 +99,7 @@ export const MCP_TOOLS = [
       type: 'object',
       properties: {
         content: { type: 'string', description: '原始会话片段（具体、可复用）' },
-        project_id: { type: 'string', description: '项目 ID（必填；可先 list_projects 查询）' },
+        project_id: { type: 'string', description: '项目 ID（必填，本机默认业务项目 P1；不确定时可在首步召回后调用 list_projects 查询）' },
         category: { type: 'string', enum: ['fact', 'decision', 'pitfall', 'insight', 'preference', 'context'], description: '类别' },
         user_id: { type: 'string', description: '用户 ID（须与会话身份一致）' },
         session_id: { type: 'string', description: '会话 ID（溯源）' },

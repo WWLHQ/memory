@@ -445,8 +445,10 @@ export class AgentOnboardService<B extends OnboardBackend | null = null> {
         status: AgentStatus.CONFIGURED,
         tenantManual: false, // R1
         mcpTools: {
-          recall_memory: { project_id: 'p1', scene: 'default', mode: null }, // R2 带 project_id
-          write_memory: { project_id: 'p1' },
+          // project_id 须与内核账本真实项目 ID 逐字一致（DEFAULT_PROJECT_ID='P1'，区分大小写）；
+          // 写成小写 p1 会静默写/查一个不存在的项目。
+          recall_memory: { project_id: 'P1', scene: 'default', mode: null }, // R2 带 project_id
+          write_memory: { project_id: 'P1' },
           get_preferences: { user_id: 'u1' },
         },
         channels: { webhook: true, apiPull: true }, // R4 双通道至少一

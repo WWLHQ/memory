@@ -25,7 +25,7 @@
 | [src/agentOnboard/mcpClients.ts](src/agentOnboard/mcpClients.ts) | 459 | MCP 客户端接入配方（批次15）：单一真源。 | specOfMcpClient(fn), mcpHeaderPairs(fn), buildMcpEntry(fn), renderMcpSnippet(fn), probeJsonConfig(fn), probeTomlConfig(fn), probeClientConfig(fn), mergeMcpJsonConfig(fn), mergeMcpTomlConfig(fn), MCP_ENDPOINT(const), MCP_CLIENT_SPECS(const), MCP_CLIENT_HEADER_NAME(const), McpClientSpec(type), McpConfigProbe(type), McpClientId(type), McpConfigFormat(type), McpEntryStyle(type), McpWireState(type) |
 | [src/agentOnboard/probe.ts](src/agentOnboard/probe.ts) | 38 | Agent 接入真实拨测（Phase C2）：以「本机安装痕迹」为唯一真相。 | createHostAgentProbe(fn), HostAgentProbeOptions(type) |
 | [src/agentOnboard/server.ts](src/agentOnboard/server.ts) | 303 | Agent 接入真实后端（REQ-003 接真实后端 · T13） | createServer(fn), RunningServer(type) |
-| [src/agentOnboard/service.ts](src/agentOnboard/service.ts) | 512 | Agent 接入服务层(REQ-003 T11 集成 / T12 E2E 链路) | ONBOARD_SYNC_SCOPE(const), ONBOARD_DECAY_EXEMPT(const), AgentOnboardService(class), OnboardBackend(type), ConfigureResult(type), TestResult(type), RotateResult(type), RevokeKeyResult(type), RevokeBindResult(type), ProbeResult(type), TenantStamp(type), AuditStore(type), OnboardServiceOptions(type), OneClickResult(type), AuditEntry(type), DiscoverInput(type), AgentProbe(type) |
+| [src/agentOnboard/service.ts](src/agentOnboard/service.ts) | 514 | Agent 接入服务层(REQ-003 T11 集成 / T12 E2E 链路) | ONBOARD_SYNC_SCOPE(const), ONBOARD_DECAY_EXEMPT(const), AgentOnboardService(class), OnboardBackend(type), ConfigureResult(type), TestResult(type), RotateResult(type), RevokeKeyResult(type), RevokeBindResult(type), ProbeResult(type), TenantStamp(type), AuditStore(type), OnboardServiceOptions(type), OneClickResult(type), AuditEntry(type), DiscoverInput(type), AgentProbe(type) |
 | [src/agentOnboard/stateMachine.ts](src/agentOnboard/stateMachine.ts) | 66 | Agent 接入卡片状态机 (REQ-003 §0 页面状态 / T2) | transition(fn), TRANSITIONS(const), CardEvent(type) |
 | [src/agentOnboard/validators.ts](src/agentOnboard/validators.ts) | 116 | Agent 接入配置校验器 (REQ-003 §6 校验规则 R1-R6 / §7 边界约束 R1-R10 / T9) | checkR1_tenantNotHandFilled(fn), checkR2_projectIdRequired(fn), checkR3_criticalNoMinimal(fn), checkR4_dualChannelAtLeastOne(fn), checkR5_keyNotReflected(fn), checkR6_circuitDegrade(fn), checkR7_requestIdAudit(fn), checkR8_oneClickReadOnly(fn), checkR9_autoBindRevocable(fn), checkR10_discoverLocalOnly(fn), validateOnboard(fn), Violation(type) |
 
@@ -198,7 +198,7 @@
 | [src/web/AgentOnboard/ledger.ts](src/web/AgentOnboard/ledger.ts) | 249 | A29：Agent 接入状态写内核账本 + 页面状态从账本重建。 | recordAgentAction(fn), rebuildAgentLedger(fn), loadAgentLedger(fn), mergeLedgerIntoCards(fn), AGENT_LEDGER_ACTIONS(const), OnboardTenant(type), AgentLedgerAgent(type), AgentLedger(type), AgentActionInput(type) |
 | [src/web/AgentOnboard/onboardState.ts](src/web/AgentOnboard/onboardState.ts) | 73 | Agent 接入页「已接入」状态持久化（localStorage，跨 iframe 共享、切页/重载保持）。 | readOnboardState(fn), writeOnboardState(fn), clearOnboardState(fn), ONBOARD_STATE_KEY(const), OnboardMcpSummary(type), OnboardState(type) |
 | [src/web/AgentOnboard/store.ts](src/web/AgentOnboard/store.ts) | 62 | 接入页本地持久化：用户真实接入过的 agent 名单与卡片配置快照（localStorage，跨 iframe/重载保持）。 | addAgentCard(fn), removeAgentCard(fn), listDetectedAgents(fn), DetectedCardSnapshot(type) |
-| [src/web/AgentOnboard/useBackendMirror.ts](src/web/AgentOnboard/useBackendMirror.ts) | 320 | 真实后端镜像（接T13/T14）：把 UI 动作 best-effort 打到后端，并在挂载时 GET /agents 回填、 | resolveBackendUrl(fn), createService(fn), toServiceInput(fn), normalizeAgentKey(fn), statsForAgent(fn), computeAgentStats(fn), useBackendMirror(fn), TestOutcome(type), BackendMirror(type), BackendCardEcho(type) |
+| [src/web/AgentOnboard/useBackendMirror.ts](src/web/AgentOnboard/useBackendMirror.ts) | 321 | 真实后端镜像（接T13/T14）：把 UI 动作 best-effort 打到后端，并在挂载时 GET /agents 回填、 | resolveBackendUrl(fn), createService(fn), toServiceInput(fn), normalizeAgentKey(fn), statsForAgent(fn), computeAgentStats(fn), useBackendMirror(fn), TestOutcome(type), BackendMirror(type), BackendCardEcho(type) |
 | [src/web/Home/Dashboard.tsx](src/web/Home/Dashboard.tsx) | 152 | REQ-005 T7：首页 Dashboard 区块组件（功劳 + 异常 + 活跃 + 待办，§0.2） | Dashboard(fn), DashboardProps(type) |
 | [src/web/Home/HomePage.tsx](src/web/Home/HomePage.tsx) | 99 | REQ-005 T9：首页装配容器（HomePage，§0.1/§0.2/§0.3 集成） | HomePage(fn), HomePageProps(type) |
 | [src/web/Home/LayerGraphPanel.tsx](src/web/Home/LayerGraphPanel.tsx) | 537 | 首页 L1–L6 关系图谱交互面板（批次8-B）： | LayerGraphPanel(fn), LayerGraphPanelProps(type) |
@@ -623,7 +623,7 @@ src/agentOnboard/formMatrix.ts e7dd02db5873
 src/agentOnboard/mcpClients.ts 521880d08b49
 src/agentOnboard/probe.ts b1d3392a8393
 src/agentOnboard/server.ts e810cc4647d3
-src/agentOnboard/service.ts 1c43a137f044
+src/agentOnboard/service.ts f3d8f7217738
 src/agentOnboard/stateMachine.ts 8959634e14b2
 src/agentOnboard/validators.ts a7372fc705a7
 src/auth/hash.ts 3919b27befef
@@ -662,7 +662,7 @@ src/core/memagent/mcpManageTools.ts 922399b92e28
 src/core/memagent/mcpProjectTools.ts 465a286c11df
 src/core/memagent/mcpReadTools.ts 43f033b6dacc
 src/core/memagent/mcpRecall.ts 006d18427665
-src/core/memagent/mcpSchema.ts ad320550f70c
+src/core/memagent/mcpSchema.ts b36aad2a4591
 src/core/memagent/memberStore.ts 7e32317d359b
 src/core/memagent/memories.ts 44a702a96cab
 src/core/memagent/paramsSnapshot.ts fca0563c064c
@@ -756,7 +756,7 @@ src/web/AgentOnboard/coreOnboard.ts 5036e76fcd2e
 src/web/AgentOnboard/ledger.ts ea78efccf395
 src/web/AgentOnboard/onboardState.ts 3b1368aac6d8
 src/web/AgentOnboard/store.ts 0e28d5609de5
-src/web/AgentOnboard/useBackendMirror.ts 9ea9f0f9057f
+src/web/AgentOnboard/useBackendMirror.ts 80448ad1330f
 src/web/Home/Dashboard.tsx 85b749bf557a
 src/web/Home/HomePage.tsx 4e072431b79a
 src/web/Home/LayerGraphPanel.tsx 7c94457e288e
