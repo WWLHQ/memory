@@ -9,7 +9,7 @@ const BASE = 1_700_000_000_000;
 
 function makeMemory(over: Partial<Memory> & Pick<Memory, 'mem_id'>): Memory {
   return {
-    project_id: 'p1', enterprise_id: 'e1', team_id: 't1',
+    project_id: 'P1', enterprise_id: 'e1', team_id: 't1',
     category: 'fact', layer: 'L1', content: '内容', decay_class: 'hot',
     pinned: false, locked: false, version: 1, created_at: BASE,
     ...over,

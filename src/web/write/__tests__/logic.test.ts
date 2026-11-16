@@ -9,7 +9,7 @@ import { CATEGORY_PREVIEW, KERNEL_CATEGORY } from '../spec.ts';
 import type { MemoryDraft, MemoryCategory } from '../types.ts';
 
 const draft = (over: Partial<MemoryDraft>): MemoryDraft => ({
-  content: 'x', category: 'fact', tags: [], source: 'conversation', session_id: 's1', project_id: 'p1', ...over,
+  content: 'x', category: 'fact', tags: [], source: 'conversation', session_id: 's1', project_id: 'P1', ...over,
 });
 
 describe('estimateTokens', () => {

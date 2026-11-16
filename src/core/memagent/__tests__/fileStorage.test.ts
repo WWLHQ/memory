@@ -9,7 +9,7 @@ import type { Memory, AuditRecord } from '../types.ts';
 
 function mem(id: string, over: Partial<Memory> = {}): Memory {
   return {
-    mem_id: id, project_id: 'p1', enterprise_id: 'e1', team_id: 't1',
+    mem_id: id, project_id: 'P1', enterprise_id: 'e1', team_id: 't1',
     category: 'lesson', layer: 'L1', content: `content-${id}`, decay_class: 'hot',
     pinned: false, locked: false, ...over,
   } as unknown as Memory;

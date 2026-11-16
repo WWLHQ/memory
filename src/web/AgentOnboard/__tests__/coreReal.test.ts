@@ -55,8 +55,8 @@ describe('getOnboardGains（效果证据四卡真实聚合）', () => {
 
   test('跨 Agent 复用：记忆条数 + 共享 project_id 域数', async () => {
     const s = new InMemoryStorage();
-    await s.putMemory(mem({ mem_id: 'm1', project_id: 'p1' }));
-    await s.putMemory(mem({ mem_id: 'm2', project_id: 'p1' }));
+    await s.putMemory(mem({ mem_id: 'm1', project_id: 'P1' }));
+    await s.putMemory(mem({ mem_id: 'm2', project_id: 'P1' }));
     await s.putMemory(mem({ mem_id: 'm3', project_id: 'p2' }));
     const g = await getOnboardGains(s);
     expect(g[2].big).toBe('3 条 · 2 域');

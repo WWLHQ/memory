@@ -59,7 +59,7 @@ function fakeStorage(opts: {
 }
 
 const memA = {
-  mem_id: 'mem_a', project_id: 'p1', enterprise_id: 'e1', team_id: 't1', category: 'lesson',
+  mem_id: 'mem_a', project_id: 'P1', enterprise_id: 'e1', team_id: 't1', category: 'lesson',
   layer: 'L1', content: '为什么上次重构失败', decay_class: 'hot', pinned: false, locked: false,
   access_count: 0, created_at: 0, updated_at: 0,
 } as unknown as Memory;

@@ -26,7 +26,7 @@ const makeDedup = (over: Partial<DedupResult> = {}): DedupResult => ({
 });
 
 const memA = {
-  mem_id: 'mem_a', project_id: 'p1', enterprise_id: 'e1', team_id: 't1',
+  mem_id: 'mem_a', project_id: 'P1', enterprise_id: 'e1', team_id: 't1',
   category: 'fact', layer: 'L1', content: 'desktop authored note',
   decay_class: 'hot', pinned: false, locked: false,
   access_count: 0, created_at: 0, updated_at: 0,

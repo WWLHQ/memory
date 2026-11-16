@@ -4,6 +4,9 @@
 //  D2 = 接入配方下发的 project_id 与内核真机账本逐字一致（大写 'P1'），
 //       小写 'p1' 会静默写/查一个不存在的项目。badge 'p1' 是优先级徽标，与本契约无关，禁止误改。
 import { describe, expect, it } from 'vitest';
+import { readdirSync, readFileSync } from 'node:fs';
+import { dirname, join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { MCP_INSTRUCTIONS, MCP_TOOLS } from '../../../core/memagent/mcpSchema.ts';
 import { toServiceInput } from '../useBackendMirror.ts';
 import type { UiAgentCard } from '../../../types/agentOnboard.ts';
@@ -68,5 +71,35 @@ describe('D2 · 渲染层镜像下发 project_id 与内核账本逐字一致', (
     const input = toServiceInput(ui);
     expect(input.priority).toBe('P1');
     expect(input.mcpTools!.recall_memory!.project_id).toBe('P1');
+  });
+});
+
+// ── D2 全仓统一护栏：源码里不得再出现「project_id 赋值为小写」──
+// 只约束 project_id 值；badge 'p1' / CSS .badge.p1 / mem_id / request_id 等其它语义不受影响。
+describe('D2 · 全仓 project_id 字面量统一（回归护栏）', () => {
+  // __tests__ → AgentOnboard → web → src
+  const SRC_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+  // 拼接构造，避免本文件自身含被检测字面量而自命中；并显式豁免自身。
+  const NEEDLE = new RegExp('project_id' + "\\s*:\\s*['\"]p1['\"]");
+
+  function walk(dir: string, out: string[] = []): string[] {
+    for (const ent of readdirSync(dir, { withFileTypes: true })) {
+      if (ent.name === 'node_modules' || ent.name.startsWith('.')) continue;
+      const p = join(dir, ent.name);
+      if (ent.isDirectory()) walk(p, out);
+      else if (/\.(ts|tsx|mjs|js|jsx)$/.test(ent.name)) out.push(p);
+    }
+    return out;
+  }
+
+  it('src/ 下任何源码都不得把 project_id 写成小写 p1', () => {
+    const self = fileURLToPath(import.meta.url);
+    const files = walk(SRC_ROOT).filter((f) => resolve(f) !== resolve(self));
+    // 防假绿：SRC_ROOT 若算错会扫成空集，断言必须确认真的覆盖了源码树。
+    expect(files.length).toBeGreaterThan(100);
+    const offenders = files
+      .filter((f) => NEEDLE.test(readFileSync(f, 'utf8')))
+      .map((f) => relative(SRC_ROOT, f).replace(/\\/g, '/'));
+    expect(offenders).toEqual([]);
   });
 });

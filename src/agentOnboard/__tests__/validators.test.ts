@@ -7,8 +7,8 @@ import type { AgentCardCandidate } from '../../types/agentOnboard.ts';
 const okCard: AgentCardCandidate = {
   tenantManual: false,
   mcpTools: {
-    recall_memory: { project_id: 'p1', scene: 'default', mode: null },
-    write_memory: { project_id: 'p1' },
+    recall_memory: { project_id: 'P1', scene: 'default', mode: null },
+    write_memory: { project_id: 'P1' },
     get_preferences: { user_id: 'u1' },
   },
   channels: { webhook: true, apiPull: true },
@@ -42,7 +42,7 @@ test('R2 缺 project_id → 失败', () => {
 });
 
 test('R3 scene=critical + mode=minimal → 失败', () => {
-  const c: AgentCardCandidate = { ...okCard, mcpTools: { ...okCard.mcpTools, recall_memory: { project_id: 'p1', scene: 'critical', mode: 'minimal' } } };
+  const c: AgentCardCandidate = { ...okCard, mcpTools: { ...okCard.mcpTools, recall_memory: { project_id: 'P1', scene: 'critical', mode: 'minimal' } } };
   assert.deepEqual(viol(c), ['R3']);
 });
 

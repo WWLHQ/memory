@@ -20,8 +20,8 @@ const VALID = {
   priority: 'P0',
   tenantManual: false,
   mcpTools: {
-    recall_memory: { project_id: 'p1' },
-    write_memory: { project_id: 'p1' },
+    recall_memory: { project_id: 'P1' },
+    write_memory: { project_id: 'P1' },
     get_preferences: { user_id: 'u1' },
   },
   channels: { webhook: true, apiPull: true },

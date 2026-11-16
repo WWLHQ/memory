@@ -4,7 +4,7 @@ import { WriteForm } from '../WriteForm.tsx';
 import type { MemoryDraft } from '../types.ts';
 
 const base: MemoryDraft = {
-  content: 'abc', category: 'fact', tags: [], source: 'conversation', session_id: 's1', project_id: 'p1',
+  content: 'abc', category: 'fact', tags: [], source: 'conversation', session_id: 's1', project_id: 'P1',
 };
 
 describe('WriteForm (T3)', () => {

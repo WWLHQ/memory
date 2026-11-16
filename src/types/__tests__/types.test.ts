@@ -26,7 +26,7 @@ test('契约常量齐全（MCP/通道/密钥形状）', () => {
 test('assertShape 合法卡片通过', () => {
   const card: AgentCardCandidate = {
     agent_name: 'deepseek harness', priority: 'P0', status: 'CONFIGURED', circuit: 'CLOSED',
-    mcpTools: { recall_memory: { project_id: 'p1' }, write_memory: { project_id: 'p1' } },
+    mcpTools: { recall_memory: { project_id: 'P1' }, write_memory: { project_id: 'P1' } },
   };
   const r = assertShape(card);
   assert.equal(r.ok, true);
