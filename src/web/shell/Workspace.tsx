@@ -176,7 +176,8 @@ export function Workspace() {
   /** 第 2 段中文菜单当前展开项（null = 全部收起） */
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const [navCollapsed, setNavCollapsed] = useState(false);
-  const [inspCollapsed, setInspCollapsed] = useState(false);
+  // 用户 2026-11-16 要求：属性检查器默认收起，需要时由 QAT / 右侧竖条 / 右键菜单显式展开
+  const [inspCollapsed, setInspCollapsed] = useState(true);
   const [taskOpen, setTaskOpen] = useState(false);
   /** 定稿 D1：底部面板默认收起（只留 31px 标签栏），把纵向空间让给中心区；点标签/状态栏可展开 */
   const [dockOpen, setDockOpen] = useState(false);
@@ -598,7 +599,8 @@ export function Workspace() {
         break;
       case 'resetLayout':
         setNavWidth(250); setInspWidth(318); setDockHeight(190);
-        setNavCollapsed(false); setInspCollapsed(false); setTaskOpen(false); setDockOpen(true);
+        // 重置布局 = 回到默认：属性检查器默认收起（2026-11-16）
+        setNavCollapsed(false); setInspCollapsed(true); setTaskOpen(false); setDockOpen(true);
         setRibbonFolded(false); setZoom(100); setDensity('comfortable'); setStatusVisible(true);
         break;
       case 'refresh':
@@ -719,9 +721,13 @@ export function Workspace() {
         disabled: !active?.page, reason: '当前标签没有对应页面',
         run: () => { if (active?.page) copyText(PAGES[active.page].file, `已复制页面文件：${PAGES[active.page].file}`); },
       },
-      { id: 'collapse', icon: 'panel', label: '折叠属性检查器', run: () => setInspCollapsed(true) },
+      {
+        id: 'collapse', icon: 'panel',
+        label: inspCollapsed ? '展开属性检查器' : '折叠属性检查器',
+        run: () => setInspCollapsed((v) => !v),
+      },
     ]);
-  }, [openCtxMenu, selectionId, selection, active?.page, copyText]);
+  }, [openCtxMenu, selectionId, selection, active?.page, copyText, inspCollapsed]);
 
   /**
    * 全域右键兜底：标题栏 / 菜单栏 / QAT / Ribbon / 导航搜索框 / 状态栏 / 底部面板 / 中心空白
@@ -1091,6 +1097,13 @@ export function Workspace() {
       },
     },
     {
+      id: 'inspector', icon: 'panel', text: '属性检查器', active: !inspCollapsed,
+      title: inspCollapsed
+        ? '展开属性检查器：查看中心页回传的真实字段、复制记忆 ID、按选中记忆查审计'
+        : '收起属性检查器：把右侧空间让给中心页（选中与审计联动保留）',
+      run: () => setInspCollapsed((v) => !v),
+    },
+    {
       id: 'personal', icon: 'user', text: '个人记忆', active: personalOpen,
       title: '个人记忆常驻面板：快速记一条 / 发件箱归并 agent 记忆（会话信息已直接放行）。'
         + '点击展开/收起；切换中心标签不丢状态。完整管理请点左侧导航「记忆管理 / 个人记忆」',
@@ -1144,7 +1157,7 @@ export function Workspace() {
       id: 'view', label: '视图', rows: [
         { label: '任务窗格', icon: 'panel', checked: taskOpen, run: () => runShellAction('toggleTaskPane', '任务窗格') },
         { label: '折叠功能区', icon: 'fold', kbd: 'Ctrl+F1', checked: ribbonFolded, run: () => runShellAction('foldRibbon', '折叠功能区') },
-        { label: '折叠详情面板', icon: 'panel', checked: inspCollapsed, run: () => setInspCollapsed((v) => !v) },
+        { label: '属性检查器', icon: 'panel', checked: !inspCollapsed, run: () => setInspCollapsed((v) => !v) },
         { label: '层级管理', icon: 'layers', run: () => openNav('layered') },
         { label: '折叠功能导航', icon: 'chev', kbd: 'Ctrl+B', checked: navCollapsed, run: () => setNavCollapsed((v) => !v) },
         { sep: true },
@@ -1456,16 +1469,8 @@ export function Workspace() {
             ))}
           </div>
 
-          {!sessionActive && (
-            <div className="auth-strip" role="status" data-testid="auth-readonly-strip">
-              <Icon name="lock" size={11} />
-              <span>
-                未登录 · 按程序实际能力只读：成本余额、同步、账号等需会话的后端接口不可用；本地账本仍可读。
-              </span>
-              <button type="button" data-testid="auth-strip-login" onClick={() => setLoginOpen(true)}>去登录（打开登录弹窗）</button>
-            </div>
-          )}
-
+          {/* 未登录只读提示只由概览读取失败条统一给出：storage IPC 未登录一律拒绝，
+              旧灰条「本地账本仍可读」与真实能力矛盾，已移除，避免同屏重复提醒（2026-11-16） */}
           {active?.page === 'home' && overview?.storageError && (
             <div className="ov-error-strip" data-testid="overview-storage-error">
               账本暂时读不到（不是空的）：{humanErrorText(overview.storageError)}。请登录或稍后重试。
@@ -1545,6 +1550,19 @@ export function Workspace() {
           </div>
         </main>
 
+        {inspCollapsed && (
+          <button
+            className="insp-reveal"
+            type="button"
+            data-testid="qa-inspector-expand"
+            aria-label="展开属性检查器"
+            title="展开属性检查器：查看中心页回传的真实字段与审计联动"
+            onClick={() => setInspCollapsed(false)}
+          >
+            <Icon name="panel" size={12} />
+            <span>属性检查器</span>
+          </button>
+        )}
         {!inspCollapsed && (
           <div className="splitter" role="separator" aria-label="调整检查器宽度" onPointerDown={(e) => startDrag('insp', e)} />
         )}
@@ -1618,7 +1636,14 @@ export function Workspace() {
               <span className="ph-ic"><Icon name="panel" /></span>
               属性检查器
               <span className="ph-tools">
-                <button className="ph-btn" onClick={() => setInspCollapsed((v) => !v)} title="折叠属性检查器" type="button">
+                <button
+                  className="ph-btn"
+                  data-testid="qa-inspector-collapse"
+                  aria-label="收起属性检查器"
+                  onClick={() => setInspCollapsed(true)}
+                  title="收起属性检查器：把右侧空间让给中心页（选中与审计联动保留）"
+                  type="button"
+                >
                   <Icon name="chev" size={12} />
                 </button>
               </span>

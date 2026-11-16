@@ -65,6 +65,8 @@ export interface HomeDerived {
   dateText: string;
   dataRootText: string;
   sessionText: string;
+  /** 是否已登录：L0 写密钥类提示只在登录后出现（未登录先引导登录，不提前催解锁） */
+  session: boolean;
   healthOk: boolean;
   gains: Gain[];
   graph: LayerGraph;
@@ -90,6 +92,7 @@ export function deriveHomeView(s: OverviewSnapshot): HomeDerived {
       ? (s.dataRoot.root ?? s.dataRoot.error ?? '数据根未返回')
       : (s.dataRoot.error ?? '非桌面壳：无数据根'),
     sessionText: s.session ? '已登录' : '未登录 · 只读',
+    session: s.session === true,
     healthOk: s.health.status === 'ok',
     gains: s.effectGains,
     graph: s.graph,
@@ -513,8 +516,9 @@ export function OverviewPage() {
                 </div>
               )}
               {/* 账本读取失败由壳层顶部 ov-error-strip 统一提示（57-D 去重），本页只保各自面板的诚实失败原因 */}
-              {/* 常驻提示：只要 L0 写密钥锁没解就显示（真源 = l0Status.write_unlocked，不依赖近 30 分钟是否有写入被拒） */}
-              {view.l0WriteLocked && (
+              {/* 常驻提示：已登录且 L0 写密钥锁没解才显示（真源 = l0Status.write_unlocked，不依赖近 30 分钟是否有写入被拒）。
+                  未登录时先引导登录，不提前催解锁（2026-11-16） */}
+              {view.session && view.l0WriteLocked && (
                 <div className="af-alert bad l0-lock-alert" role="alert" data-testid="home-l0-lock-alert">
                   <span className="tag">L0</span>
                   <span className="l0-lock-text">
@@ -525,7 +529,7 @@ export function OverviewPage() {
                 </div>
               )}
               {/* 状态读不到时如实标注（不猜已解锁、也不误报未解锁）；已有真实被挡异常则照常显示 */}
-              {!view.l0WriteLocked && view.l0WriteUnknown && (
+              {view.session && !view.l0WriteLocked && view.l0WriteUnknown && (
                 <div className="af-alert l0-lock-unknown" data-testid="home-l0-lock-unknown">
                   <span className="tag">L0</span>
                   <span className="l0-lock-text">写密钥锁状态未取到：{view.l0WriteDetail ?? '桌面壳未返回状态'}（不能据此判断已解锁）。</span>
@@ -534,8 +538,8 @@ export function OverviewPage() {
               )}
               {/* 历史被挡（近 30 分钟聚合）只在【当前仍锁】或【锁状态读不到】时给提示；
                   已确认解锁则不再打扰——解锁动作已把被挡写入交给内核重放/重采 */}
-              {!view.l0WriteLocked && !view.l0WriteResolved && view.l0Alert && (
-                <div className="af-alert">
+              {view.session && !view.l0WriteLocked && !view.l0WriteResolved && view.l0Alert && (
+                <div className="af-alert" data-testid="home-l0-blocked-alert">
                   <span className="tag">L0</span>{view.l0Alert}
                   <button className="af-link" type="button" onClick={() => requestShellView('security')}>去安全页解锁 →</button>
                 </div>

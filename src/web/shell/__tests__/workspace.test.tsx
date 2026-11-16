@@ -316,17 +316,34 @@ describe('工作台壳层', () => {
     expect(strip.textContent).not.toContain('E_AUTH_SESSION');
   });
 
-  it('概览页整页渲染在 iframe 内：壳层不再叠旧首页数据条，未登录显示只读条', async () => {
+  it('概览页整页渲染在 iframe 内：壳层不再叠旧首页数据条，未登录也不再叠失真的只读灰条', async () => {
     const { container } = await renderShell();
     // 旧 ov-strip（4 卡 + chips）已移除，避免与概览页统计卡叠层重复
     expect(container.querySelector('.ov-strip')).toBeNull();
     expect(screen.queryByText('累计记忆')).toBeNull();
-    // 未登录：按程序实际能力标为只读，并提供真实登录入口
-    expect(screen.getByTestId('auth-readonly-strip')).toBeInTheDocument();
-    expect(screen.getByTestId('auth-readonly-strip').textContent).toContain('本地账本仍可读');
+    // 未登录：storage IPC 一律拒绝，「本地账本仍可读」是失真文案，整条移除
+    expect(screen.queryByTestId('auth-readonly-strip')).toBeNull();
+    expect(screen.queryByText(/本地账本仍可读/)).toBeNull();
+    // 登录入口仍在 QAT / 状态栏，不依赖灰条
+    expect(screen.getByTestId('qa-login')).toBeInTheDocument();
     // 成本余额需会话：如实不可用，不显示编造余额
     expect(screen.getByTestId('sb-billing').textContent).toContain('不可用');
     expect(screen.getByTestId('sb-billing').getAttribute('title')).toContain('需登录');
+  });
+
+  it('顶部提示去重：未登录且账本读取失败时只显示一条真实错误条（2026-11-16）', async () => {
+    vi.mocked(loadOverview).mockResolvedValueOnce({
+      ...m.defaultOverview,
+      storageError: "Error invoking remote method 'storage:queryAudit': Error: 需要登录后操作（会话已过期或未登录）",
+    } as never);
+    const { container } = await renderShell();
+    expect(screen.getByTestId('overview-storage-error')).toBeInTheDocument();
+    expect(screen.queryByTestId('auth-readonly-strip')).toBeNull();
+    expect(container.querySelectorAll('.ov-error-strip, .auth-strip')).toHaveLength(1);
+    // 唯一那条仍是人话，不带原始异常
+    const strip = screen.getByTestId('overview-storage-error');
+    expect(strip.textContent).toContain('请先登录，登录后即可查看');
+    expect(strip.textContent).not.toContain('Error invoking');
   });
 
   it('登录不再占主导航：login.html 保留为可直达兜底页（PAGES 映射未删）', async () => {
@@ -350,6 +367,8 @@ describe('工作台壳层', () => {
   });
 
   it('QAT 登出快捷按钮：登录态点击真实清除本机会话（与弹窗同一口径）', async () => {
+    // 登出会 POST /api/logout；不桩掉真实网络时，CI 并行负载下会卡过 waitFor 的 1s 窗口造成假红（2026-11-16）
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true } as Response);
     storeSessionId('sid_qa_logout_test');
     setTestOverride(true);
     try {
@@ -359,8 +378,10 @@ describe('工作台壳层', () => {
       fireEvent.click(logout);
       await waitFor(() => expect(getStoredSessionId()).toBeNull());
       expect(screen.getByTestId('sb-msg')).toHaveTextContent(/已登出|已清除本机会话/);
+      expect(fetchSpy).toHaveBeenCalledWith(expect.stringContaining('/api/logout'), expect.objectContaining({ method: 'POST' }));
     } finally {
       setTestOverride(false);
+      fetchSpy.mockRestore();
     }
   });
 
@@ -430,7 +451,36 @@ describe('工作台壳层', () => {
     expect(container.querySelectorAll('.vtab').length).toBe(tabs.length - 1);
   });
 
-  it('右键属性检查器：无选中时复制项禁用并写原因，折叠是真实动作', async () => {
+  it('属性检查器默认收起：右侧竖条 / QAT 可展开，标题栏按钮可再收起（2026-11-16）', async () => {
+    const { container } = await renderShell();
+    const pane = () => container.querySelector('.inspector-pane') as HTMLElement;
+    expect(pane().className).toContain('collapsed');
+    // 收起态必须留一个看得见、点得到的展开入口，不能只藏在右键菜单里
+    expect(screen.getByTestId('qa-inspector-expand')).toBeInTheDocument();
+    expect(screen.getByTestId('qa-inspector').getAttribute('title')).toContain('展开属性检查器');
+
+    fireEvent.click(screen.getByTestId('qa-inspector-expand'));
+    expect(pane().className).not.toContain('collapsed');
+    expect(screen.queryByTestId('qa-inspector-expand')).toBeNull();
+    expect(screen.getByTestId('qa-inspector').getAttribute('title')).toContain('收起属性检查器');
+
+    fireEvent.click(screen.getByTestId('qa-inspector-collapse'));
+    expect(pane().className).toContain('collapsed');
+    expect(screen.getByTestId('qa-inspector-expand')).toBeInTheDocument();
+  });
+
+  it('QAT 属性检查器按钮与右侧竖条同一状态：点两次回到默认收起', async () => {
+    const { container } = await renderShell();
+    const pane = () => container.querySelector('.inspector-pane') as HTMLElement;
+    const qa = screen.getByTestId('qa-inspector');
+    expect(pane().className).toContain('collapsed');
+    fireEvent.click(qa);
+    expect(pane().className).not.toContain('collapsed');
+    fireEvent.click(qa);
+    expect(pane().className).toContain('collapsed');
+  });
+
+  it('右键属性检查器：无选中时复制项禁用并写原因，菜单项可展开默认收起的检查器', async () => {
     const { container } = await renderShell();
     fireEvent.contextMenu(screen.getByTestId('shell-inspector'));
     expect(screen.getByTestId('ctx-inspmenu')).toBeInTheDocument();
@@ -438,8 +488,10 @@ describe('工作台壳层', () => {
     expect(copyId).toBeDisabled();
     expect(copyId.getAttribute('title')).toContain('中心页未选中记忆');
     expect(screen.getByTestId('ctx-inspmenu-copyFile')).toBeEnabled();
-    fireEvent.click(screen.getByTestId('ctx-inspmenu-collapse'));
-    expect((container.querySelector('.inspector-pane') as HTMLElement).className).toContain('collapsed');
+    const toggle = screen.getByTestId('ctx-inspmenu-collapse');
+    expect(toggle).toHaveTextContent('展开属性检查器');
+    fireEvent.click(toggle);
+    expect((container.querySelector('.inspector-pane') as HTMLElement).className).not.toContain('collapsed');
   });
 
   it('中心页表格行右键：同源 iframe 的真实 DOM 行触发壳层菜单；复制 ID 是真实动作，写操作禁用并写原因', async () => {
@@ -800,6 +852,9 @@ describe('S4 属性检查器：只显示真实页面回传的选中项', () => {
   };
 
   async function dispatchTo(container: HTMLElement, payload: unknown, opts: { origin?: string } = {}) {
+    // 属性检查器默认收起：这些用例验的是「展开后显示真实字段」，先走显式展开入口
+    const expand = screen.queryByTestId('qa-inspector-expand');
+    if (expand) fireEvent.click(expand);
     const frame = container.querySelector('.page-pane.active iframe.page-frame') as HTMLIFrameElement | null;
     expect(frame?.contentWindow).toBeTruthy();
     await act(async () => {
@@ -819,6 +874,17 @@ describe('S4 属性检查器：只显示真实页面回传的选中项', () => {
     expect(screen.getByText('mem_1')).toBeInTheDocument();
     expect(screen.getByText(/来源：memory.html 回传的真实账本字段/)).toBeInTheDocument();
     expect(screen.queryByText(/中心页尚未回传选中项/)).toBeNull();
+  });
+
+  it('收起再展开不丢选中项：折叠只收 UI，不动中心页回传的真实字段', async () => {
+    const { container } = await renderShell();
+    fireEvent.click(screen.getByRole('button', { name: /记忆列表/ }));
+    await dispatchTo(container, PAYLOAD);
+    fireEvent.click(screen.getByTestId('qa-inspector-collapse'));
+    expect((container.querySelector('.inspector-pane') as HTMLElement).className).toContain('collapsed');
+    fireEvent.click(screen.getByTestId('qa-inspector-expand'));
+    expect(screen.getByText(/记忆 mem_1/)).toBeInTheDocument();
+    expect(screen.getByText('mem_1')).toBeInTheDocument();
   });
 
   it('回传 null → 检查器退回诚实空态（不保留上一份选区）', async () => {

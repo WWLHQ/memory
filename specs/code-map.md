@@ -1758,4 +1758,25 @@ status: draft
 | `web/Home/theme.css` | 四卡不等大根因：`1fr`=`minmax(auto,1fr)` 被长数字/长标题撑宽列、卡内非 flex 脚注不对齐。改 `repeat(4,minmax(0,1fr))` + `.gain{min-width:0;display:flex;flex-direction:column}` + h3 固定 2 行高 + `.desc{flex:1}` 让 `.src` 贴底；窄屏 `repeat(2,minmax(0,1fr))`。按用户「四卡大小要一样」显式要求，属原型 CSS 的获准偏离 | 结构由 `Dashboard.test.tsx` `#effectGains > .gain` 4 卡契约锁；视觉等宽等高的最终判据是用户真机截图实测（CSS 本身不做像素级单测） |
 | `web/shell/ShellLoginDialog.tsx`、`web/shell/Workspace.tsx` | 抽出 `logoutCurrentSession()`（POST /api/logout + 清本机 session，后端不可达也清但如实回执），弹窗原 `doLogout` 与新增 QAT 快捷按钮共用同一口径，避免两处分叉。QAT 在「登录」后加 `qa-logout`：登录态可见可点、未登录 `aria-disabled` 并写明原因；点击后提示真实登出结果 | `shell/__tests__/workspace.test.tsx` 新增 2 组（未登录置灰给原因 / 登录态点击真清 session + 状态栏回执）。变异：`disabled: !sessionActive` 改 `false` → 1 例红灯，还原复绿 |
 
-> 三道闸门（2026-11-16）：A 全量 `npm test` 287 文件 / 3428 项全绿、Web `tsc --noEmit` 0 错、改动文件 `oxlint` 0 错、`check:no-demo` 通过、`code:index --write` 407 源码 / 148 文档最新；B 定向 103 项全绿；C 两处变异各判红 1 例、还原后复绿。同前一轮纪律：**未打包、未提交、未推送，等用户实测 + 明确确认**。
+> 三道闸门（2026-11-16）：A 全量 `npm test` 287 文件 / 3428 项全绿、Web `tsc --noEmit` 0 错、改动文件 `oxlint` 0 错、`check:no-demo` 通过、`code:index --write` 407 源码 / 148 文档最新；B 定向 103 项全绿；C 两处变异各判红 1 例、还原后复绿。本轮已由用户实测确认并提交推送 `68be096`（只含 UI 三项 + 人话化，网页对话导出在途改动未纳入）。
+
+### 顶部提示去重 · L0 提示仅登录态显示（2026-11-16）
+
+| 任务→文件 | 实现 | 测试 / 门禁 |
+|---|---|---|
+| `web/shell/Workspace.tsx`、`web/shell/theme.css` | 删除未登录灰条 `auth-strip`（文案「本地账本仍可读」与 `storageIpc.ts#requireSession` 未登录一律拒绝的真实能力矛盾），只保留由真实读取失败驱动的 `ov-error-strip` 红条；登录入口继续由 QAT / 状态栏 / 页内按钮提供，不依赖灰条。同步删掉死 CSS `.auth-strip*` | `shell/__tests__/workspace.test.tsx`：未登录不再出现 `auth-readonly-strip`、不再有失真文案；未登录且 `storageError` 存在时 `.ov-error-strip + .auth-strip` 总数恒为 1，且唯一那条仍是人话无 IPC 残片。变异：把灰条加回去 → 2 例红灯，还原复绿 |
+| `web/overview/OverviewPage.tsx` | `HomeDerived` 新增 `session: boolean`（来自 `OverviewSnapshot.session`，不拿 `sessionText` 猜），三条 L0 提示（写密钥未解锁 / 状态读不到 / 近 30 分钟被挡）渲染条件统一加 `view.session &&`：未登录完全隐藏，登录后同一真实状态照常显示。历史被挡条补 `data-testid="home-l0-blocked-alert"` 供定位 | `overview/__tests__/homeView.test.ts` 新增 session 透传断言；`overview/__tests__/overviewPageWake.test.tsx` 新增 3 组「登录态出现 → 未登录消失」用例。变异：`session: s.session === true` 写死 `true` → 4 例红灯，还原复绿 |
+| `web/overview/overviewPageData.ts`、`web/assistant/__tests__/AssistantPage.test.tsx` | 同一失真口径在「问账本」回答里复活：未登录说「本地账本仍可读 / 需要会话的能力只读」。改为「账本查询同样需要登录；登录后即可查看」，已登录则说「已登录会话下账本可查询」，与 `storageIpc.ts#requireSession` 一致 | `assistant/__tests__/AssistantPage.test.tsx` 新增 1 组双向断言（未登录不许出现失真句、登录态照常回答）。变异：把失真句回灌 → 精确红灯 1 例，还原复绿 |
+
+> 测试卫生：`overviewPageWake.test.tsx` 的 hidden 用例原来把 `Document.prototype` 上的 `visibilityState` descriptor 反写进 `document`，污染后续用例的 focus 补读；改为删掉 document 自身覆盖属性，后续用例改走「重读」按钮驱动，不依赖窗口前台状态。
+> 测试卫生：`workspace.test.tsx` 的 QAT 登出用例未桩 `/api/logout`，全量并行时真实网络失败偶尔超过 `waitFor` 1s 窗口造成假红（本轮复现 1 次，单文件 64/64 绿、重跑全量绿）；已加 `fetch` 桩并断言 POST 真发出，消除抖动。
+> 三道闸门（2026-11-16）：A 全量 `npm test` 290 文件 / 3452 项 EXIT 0、Web `tsc --noEmit` 0 错、改动文件 `oxlint` 0 错、`check:no-demo` 通过、`code:index --write` 409 源码 / 148 文档最新 + `--check` 通过；B 定向 `AssistantPage/workspace/homeView/overviewPageWake` 86 项全绿；C 三处变异分别判红 4 例 / 2 例 / 1 例，还原后复绿。**未打包、未提交、未推送，等用户实测 + 明确确认**。
+
+### 属性检查器默认收起 + 显式收起/展开按钮（2026-11-16）
+
+| 任务→文件 | 实现 | 测试 / 门禁 |
+|---|---|---|
+| `web/shell/Workspace.tsx` | 用户明确「默认收起、增加收起展开按钮」。初值 `inspCollapsed = true`；收起态右侧保留常驻竖条按钮 `qa-inspector-expand`（`insp-reveal` 样式），QAT 新增 `qa-inspector` 切换按钮（带当前状态 title），检查器标题栏 `qa-inspector-collapse` 只负责收起；右键菜单按状态切换「展开/折叠属性检查器」，视图菜单改「属性检查器」勾选态；「重置布局」回到默认收起。选中项回传、复制 ID、`selectionId → 底部审计` 链路完全不动，折叠只收 UI | `workspace.test.tsx` 新增 3 组（默认收起 + 三入口互切 / QAT 两次回到默认 / 收起再展开不丢选中项）；S4 各用例先走显式展开入口再验真实字段。变异：初值改回 `false` → 3 例红灯；去掉右侧展开入口 → 2 例红灯，还原后 67 项复绿 |
+| `web/shell/theme.css` | 新增 `.insp-reveal`（24px 竖排标签，沿用 `--panel2/--mu/--acc` 配色），收起态也有可见可点的展开入口，不依赖右键菜单 | 结构由 `qa-inspector-expand` 存在性与点击后 `.inspector-pane` 去掉 `collapsed` 断言锁；视觉由用户真机实测判定 |
+
+> 三道闸门（2026-11-16）：A 全量 `npm test` 290 文件 / 3455 项 EXIT 0、Web `tsc --noEmit` 0 错、改动文件 `oxlint` 0 错、`check:no-demo` 通过、索引 409 源码 / 148 文档最新 + `--check` 通过；B 定向 `workspace.test.tsx` 67 项全绿；C 两处变异分别判红 3 例 / 2 例，还原后复绿。**未打包、未提交、未推送，等用户实测 + 明确确认**。

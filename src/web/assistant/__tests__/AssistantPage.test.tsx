@@ -35,6 +35,7 @@ const m = vi.hoisted(() => ({
 vi.mock('../../shell/overview.ts', () => ({ loadOverview: m.loadOverview }));
 
 import { AssistantPage } from '../AssistantPage.tsx';
+import { answerOverviewQuestion } from '../../overview/overviewPageData.ts';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -58,6 +59,18 @@ describe('记忆助手整页', () => {
     const answer = screen.getByTestId('ma-answer');
     expect(answer.textContent).toContain('账本里有 7 条记忆');
     expect(answer.textContent).toContain('累计审计 12 条');
+  });
+
+  it('问登录/权限：未登录如实说账本查询也需要登录，不再声称「本地账本仍可读」（2026-11-16）', () => {
+    const out = answerOverviewQuestion('现在的登录状态怎么样？', m.defaultOverview as never);
+    expect(out.lead).toContain('需要先登录');
+    expect(out.body).toContain('账本查询同样需要登录');
+    expect(`${out.lead}${out.body}`).not.toContain('本地账本仍可读');
+    expect(`${out.lead}${out.body}`).not.toContain('不受影响');
+    // 登录态照常如实回答，不把未登录提示挂到已登录用户身上
+    const loggedIn = answerOverviewQuestion('现在的登录状态怎么样？', { ...m.defaultOverview, session: true } as never);
+    expect(loggedIn.lead).toContain('已登录');
+    expect(loggedIn.body).toContain('已登录会话下账本可查询');
   });
 
   it('页面内「重读」只重新取数，不重挂页面（与 F5 全站刷新分层）', async () => {

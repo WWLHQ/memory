@@ -43,6 +43,12 @@ describe('deriveHomeView（批次57-B 首页派生）', () => {
     expect(deriveHomeView(snap({ session: false })).sessionText).toBe('未登录 · 只读');
   });
 
+  it('session 作为真实登录态供 L0 提示渲染判定，不拿 sessionText 猜（2026-11-16）', () => {
+    // 变异靶点：写死 true 会让未登录也弹「写密钥未解锁」
+    expect(deriveHomeView(snap({ session: true })).session).toBe(true);
+    expect(deriveHomeView(snap({ session: false })).session).toBe(false);
+  });
+
   it('healthOk 只在后端真实可达（status=ok）时为真', () => {
     expect(deriveHomeView(snap()).healthOk).toBe(true);
     expect(deriveHomeView(snap({ health: { status: 'down', detail: '不可达', checkedAt: 1 } })).healthOk).toBe(false);

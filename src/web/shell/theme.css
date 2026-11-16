@@ -880,32 +880,7 @@ html[data-theme='dark'] .qa { border-left-color: var(--line); }
   background: var(--panel);
 }
 
-/* 未登录只读条 + 概览读取失败条：说明「程序实际能力」，不提供假功能入口 */
-.auth-strip {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 4px 9px;
-  border-bottom: 1px solid var(--line);
-  background: var(--panel2);
-  color: var(--tx2);
-  font-size: 11px;
-}
-.auth-strip svg { flex: none; color: var(--amber); }
-.auth-strip > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.auth-strip button {
-  flex: none;
-  padding: 1px 9px;
-  border: 1px solid var(--accent);
-  border-radius: var(--r);
-  background: var(--panel);
-  color: var(--accent);
-  font-size: 10.5px;
-  cursor: pointer;
-}
-.auth-strip button:hover { background: var(--accent); color: var(--accent-ink); }
-
+/* 概览读取失败条：只报真实读取失败，未登录时也由它统一提示，不叠第二条 */
 .ov-error-strip {
   flex: none;
   padding: 4px 9px;
@@ -1026,6 +1001,25 @@ html[data-theme='dark'] .qa { border-left-color: var(--line); }
   overflow: hidden;
 }
 .right-col.collapsed { border-left: none; }
+
+/* 属性检查器默认收起后，右侧保留一个明确的展开入口（2026-11-16） */
+.insp-reveal {
+  flex: none;
+  width: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 0;
+  border: 0;
+  border-left: 1px solid var(--line);
+  background: var(--panel2);
+  color: var(--mu);
+  font-size: 10.5px;
+  cursor: pointer;
+}
+.insp-reveal span { writing-mode: vertical-rl; letter-spacing: 2px; }
+.insp-reveal:hover { color: var(--acc); background: var(--panel); }
 
 .taskpane {
   flex: none;

@@ -120,10 +120,11 @@ export function answerOverviewQuestion(question: string, s: OverviewSnapshot): O
   if (/登录|会话|账号|权限/.test(q)) {
     return {
       question: q,
-      lead: s.session ? '已登录，会话有效。' : '未登录，需要会话的能力只读。',
+      lead: s.session ? '已登录，会话有效。' : '未登录，需要先登录才能查询。',
+      // 未登录时 storage IPC 的 requireSession 会拒绝账本查询，不能再声称「本地账本仍可读」（2026-11-16）
       body: s.session
-        ? '后端接口（/api/me、成本余额、同步）按会话鉴权；本地账本读取不受影响。'
-        : 'hasActiveSession=false：成本余额/同步/账号等后端接口不可用；本地账本仍可读。',
+        ? '后端接口（/api/me、成本余额、同步）按会话鉴权；已登录会话下账本可查询。'
+        : '成本余额、同步、账号等后端接口不可用，账本查询同样需要登录；登录后即可查看。',
       state: '依据：会话标记 + /api/health',
     };
   }

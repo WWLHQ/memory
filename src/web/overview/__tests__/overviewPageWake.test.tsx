@@ -3,7 +3,7 @@
 // index.html 作为独立文档错过事件后就一直停在旧快照上。
 // 闸门 C 变异靶点：删掉 focus / visibilitychange 监听，本文件 2 例必红。
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 import type { OverviewSnapshot } from '../../shell/overview.ts';
 import { emptyLayerGraph } from '../../Home/layerGraph.ts';
 
@@ -91,8 +91,48 @@ describe('首页写锁提示：回到前台即补读真实写锁', () => {
       });
       expect(h.loadOverview.mock.calls.length).toBe(before);
     } finally {
-      if (original) Object.defineProperty(Document.prototype, 'visibilityState', original);
-      else delete (document as unknown as Record<string, unknown>).visibilityState;
+      // original 取自 Document.prototype：document 自身覆盖的属性必须删掉，
+      // 否则后面用例的 focus 补读会被永久 hidden 吞掉（2026-11-16 实测污染）
+      void original;
+      delete (document as unknown as Record<string, unknown>).visibilityState;
     }
+  });
+});
+
+describe('首页 L0 提示：未登录完全隐藏，登录后照常显示（2026-11-16）', () => {
+  beforeEach(() => {
+    h.loadOverview.mockReset();
+    h.loadMcpPanel.mockReset();
+    h.loadMcpPanel.mockResolvedValue({ ok: false, available: false, endpoint: null, clients: [], error: '非桌面壳' });
+  });
+
+  async function loggedInThenOut(loggedIn: OverviewSnapshot, testId: string) {
+    // 先证明该提示在登录态确实会出现，再切到未登录同一写锁事实，证明只因登录态而隐藏
+    h.loadOverview.mockResolvedValueOnce(loggedIn).mockResolvedValue({ ...loggedIn, session: false });
+    render(<OverviewPage />);
+    await waitFor(() => expect(screen.getByTestId(testId)).toBeInTheDocument());
+    await act(async () => { fireEvent.click(screen.getByTestId('home-reload')); });
+    await waitFor(() => expect(screen.queryByTestId(testId)).toBeNull());
+    expect(h.loadOverview.mock.calls.length).toBeGreaterThanOrEqual(2);
+  }
+
+  it('写密钥未解锁：未登录隐藏', async () => {
+    await loggedInThenOut(LOCKED, 'home-l0-lock-alert');
+  });
+
+  it('写锁状态读不到：未登录隐藏', async () => {
+    const UNKNOWN = snap({ l0Write: { available: false, unlocked: false, detail: '桌面壳未返回状态' } });
+    await loggedInThenOut(UNKNOWN, 'home-l0-lock-unknown');
+  });
+
+  it('近 30 分钟写入被挡：未登录隐藏', async () => {
+    const BLOCKED = snap({
+      raw: {
+        gains: [], activeMemories: [], todos: [],
+        anomalies: [{ title: 'L0 写密钥未解锁：写入被挡', detail: '近 30 分钟 2 条没入库', level: 'error' }],
+      },
+      l0Write: { available: false, unlocked: false, detail: '桌面壳未返回状态' },
+    });
+    await loggedInThenOut(BLOCKED, 'home-l0-blocked-alert');
   });
 });
