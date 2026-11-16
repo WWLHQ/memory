@@ -3,6 +3,7 @@
 // 口径：所有读数来自 OverviewSnapshot（同一次账本读取 + /api/health + llm:billing + 会话标记）。
 // 读不到就显示「读不到 / 未取数」并给出原因，绝不用「—」或 0 冒充成功读数。
 import type { OverviewSnapshot } from '../shell/overview.ts';
+import { humanErrorText } from '../shared/kernelLoad.tsx';
 
 /** 问账本的固定建议问题（壳层记忆助手复用同一份） */
 export const OVERVIEW_SUGGESTIONS = [
@@ -44,7 +45,7 @@ export function answerOverviewQuestion(question: string, s: OverviewSnapshot): O
     return {
       question: q,
       lead: '账本没读到，无法回答。',
-      body: `真实原因：${s.storageError}。这不是空账本，先确认内核/会话状态。`,
+      body: `读不到的原因：${humanErrorText(s.storageError)}。这不是空账本，登录或稍后重试即可。`,
       state: base,
     };
   }

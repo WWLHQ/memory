@@ -24,6 +24,7 @@ import type { AuditRecord } from '../../core/memagent/types.ts';
 import { refineQueueState, refineQueueAvailable, type RefineQueueView } from '../params/refineQueue.ts';
 import { hostLlmAvailable, type LlmEngineView } from '../hostLlm.ts';
 import { getDataRoot } from '../memory/dataRoot.ts';
+import { humanErrorText } from '../shared/kernelLoad.tsx';
 import type { McpWireState } from '../../agentOnboard/mcpClients.ts';
 
 export interface OverviewHealth {
@@ -203,8 +204,7 @@ const MCP_STATE_LABEL: Record<string, string> = {
 };
 
 function describeError(e: unknown): string {
-  const msg = (e as { message?: string })?.message;
-  return msg && msg.trim() ? msg : String(e);
+  return humanErrorText(e);
 }
 
 /** UTC+08:00 时钟（审计 ts 是 epoch；用户可见时间统一本地时区） */

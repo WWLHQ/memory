@@ -13,6 +13,7 @@ import { SCHEDULE_TASKS } from '../../shared/growthConfig.ts';
 import { parseProgramLogLine, type ProgramLogLine } from '../Home/programLog.ts';
 import { getKernelStorage } from '../kernel.ts';
 import { currentSessionId } from '../shared/session.ts';
+import { humanErrorText } from '../shared/kernelLoad.tsx';
 
 export type DockResult<T> =
   | { status: 'ok'; view: T }
@@ -37,7 +38,7 @@ export async function loadOutputLog(scanLines = 50): Promise<DockResult<OutputLo
   try {
     const res = await hostCall<ActionLogTailResult>('log:tail', [scanLines]);
     if (!res?.ok) {
-      return { status: 'error', detail: res?.error ?? '日志读取失败（主进程未返回原因）' };
+      return { status: 'error', detail: humanErrorText(res?.error ?? '日志读取失败（主进程未返回原因）') };
     }
     return {
       status: 'ok',
@@ -49,7 +50,7 @@ export async function loadOutputLog(scanLines = 50): Promise<DockResult<OutputLo
       },
     };
   } catch (e) {
-    return { status: 'error', detail: String((e as Error)?.message ?? e) };
+    return { status: 'error', detail: humanErrorText(e) };
   }
 }
 
@@ -118,7 +119,7 @@ export async function loadScheduleRuns(limit = 20): Promise<DockResult<ScheduleR
     const runs = rows.map(scheduleRunFrom).sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
     return { status: 'ok', view: runs.slice(0, limit) };
   } catch (e) {
-    return { status: 'error', detail: String((e as Error)?.message ?? e) };
+    return { status: 'error', detail: humanErrorText(e) };
   }
 }
 
@@ -164,6 +165,6 @@ export async function loadAuditForMemory(memId: string, limit = 20): Promise<Doc
     const rows = audits.filter((a) => auditMentions(a, memId)).map(auditRowFrom).sort((a, b) => b.ts - a.ts);
     return { status: 'ok', view: rows.slice(0, limit) };
   } catch (e) {
-    return { status: 'error', detail: String((e as Error)?.message ?? e) };
+    return { status: 'error', detail: humanErrorText(e) };
   }
 }

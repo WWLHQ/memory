@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { KernelLoadError, kernelErrorText, useKernelLoad } from '../kernelLoad.tsx';
+import { KernelLoadError, humanErrorText, kernelErrorRaw, useKernelLoad } from '../kernelLoad.tsx';
 
 function Probe({ load }: { load: () => Promise<number[]> }) {
   const { phase, data, error, retry } = useKernelLoad('probe', load);
@@ -13,15 +13,28 @@ function Probe({ load }: { load: () => Promise<number[]> }) {
   );
 }
 
-describe('kernelErrorText', () => {
-  it('Error 取 message', () => {
-    expect(kernelErrorText(new Error('宿主桥 3s 未回话'))).toBe('宿主桥 3s 未回话');
+describe('humanErrorText（UI 只说人话，2026-11-16）', () => {
+  it('Electron IPC 包装串翻成一句人话，方法名和 Error 前缀不上屏', () => {
+    const raw = "Error invoking remote method 'storage:queryAudit': Error: 需要登录后操作（会话已过期或未登录）";
+    expect(humanErrorText(new Error(raw))).toBe('请先登录，登录后即可查看');
+    expect(humanErrorText(new Error(raw))).not.toMatch(/Error|storage:|E_/);
   });
-  it('带 E_XXX 码时保留码（便于对照 actions.log）', () => {
-    expect(kernelErrorText({ code: 'E_IPC_TIMEOUT', message: '宿主桥超时' })).toBe('E_IPC_TIMEOUT：宿主桥超时');
+  it('错误码与超时细节只进日志，不进 UI', () => {
+    const e = { code: 'E_IPC_TIMEOUT', message: '宿主桥超时' };
+    expect(kernelErrorRaw(e)).toBe('E_IPC_TIMEOUT：宿主桥超时');
+    expect(humanErrorText(e)).toBe('本机服务响应超时，请重试');
   });
-  it('空异常不产出空字符串', () => {
-    expect(kernelErrorText(undefined)).toBe('未知错误');
+  it('账本锁定 / 写锁未开 / 未实现都给人话动作', () => {
+    expect(humanErrorText(new Error('E_LEDGER_LOCKED'))).toBe('账本暂时被占用，请稍后重试');
+    expect(humanErrorText(new Error('E_L0_LOCKED'))).toBe('写密钥未解锁，请先解锁');
+    expect(humanErrorText(new Error('E_NOT_IMPLEMENTED'))).toBe('这个功能当前版本还没有提供');
+  });
+  it('本来就短的中文原因原样保留，不擅自改写成英文码', () => {
+    expect(humanErrorText(new Error('程序日志尚未初始化'))).toBe('程序日志尚未初始化');
+  });
+  it('空异常 / 纯技术残片给统一兜底句', () => {
+    expect(humanErrorText(undefined)).toBe('出了点问题，请稍后重试');
+    expect(humanErrorText(new Error('{"code":"E_X","payload":{}}'))).toBe('出了点问题，请稍后重试');
   });
 });
 
@@ -41,13 +54,14 @@ describe('useKernelLoad + KernelLoadError（批次25 P0-7）', () => {
     expect(screen.queryByTestId('kernel-error')).not.toBeInTheDocument();
   });
 
-  it('内核不可达 → 错误态带真实原因，绝不表现为空数据', async () => {
+  it('内核不可达 → 错误态给人话原因，绝不表现为空数据、不露错误码', async () => {
     const load = () => Promise.reject(new Error('E_IPC_TIMEOUT 宿主桥 3s 未回话'));
     render(<Probe load={load} />);
     await waitFor(() => expect(screen.getByTestId('phase')).toHaveTextContent('error'));
     expect(screen.getByTestId('kernel-error')).toBeInTheDocument();
     expect(screen.getByTestId('kernel-error-title')).toHaveTextContent('读取记忆账本失败：内核数据没读到');
-    expect(screen.getByTestId('kernel-error-reason')).toHaveTextContent('E_IPC_TIMEOUT 宿主桥 3s 未回话');
+    expect(screen.getByTestId('kernel-error-reason')).toHaveTextContent('本机服务响应超时，请重试');
+    expect(screen.getByTestId('kernel-error-reason').textContent).not.toContain('E_IPC_TIMEOUT');
     expect(screen.getByTestId('count')).toHaveTextContent('-');
   });
 

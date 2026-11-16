@@ -24,6 +24,29 @@ function detectForm(): Form {
   return 'desktop';
 }
 
+/**
+ * 登出真实会话：通知后端 /api/logout + 清本机会话。登录弹窗与壳层快捷按钮共用同一口径，
+ * 避免两处各写一份 fetch/clear（曾因此出现「弹窗登出了但快捷入口还显示已登录」）。
+ * 后端不可达也要清本机（否则用户卡在假登录态），但如实回执 backendAccepted。
+ */
+export async function logoutCurrentSession(): Promise<{ backendAccepted: boolean }> {
+  const current = getStoredSessionId();
+  let backendAccepted = false;
+  if (current) {
+    try {
+      const res = await fetch(`${homeBaseUrl()}/api/logout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-session-id': current },
+      });
+      backendAccepted = res.ok;
+    } catch {
+      backendAccepted = false;
+    }
+  }
+  clearStoredSessionId();
+  return { backendAccepted };
+}
+
 export interface ShellLoginDialogProps {
   open: boolean;
   onClose: () => void;
@@ -151,20 +174,7 @@ export function ShellLoginDialog({ open, onClose, onSession }: ShellLoginDialogP
     setNotice(null);
     setErr(null);
     try {
-      const current = getStoredSessionId();
-      let backendAccepted = false;
-      if (current) {
-        try {
-          const res = await fetch(`${homeBaseUrl()}/api/logout`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-session-id': current },
-          });
-          backendAccepted = res.ok;
-        } catch {
-          backendAccepted = false;
-        }
-      }
-      clearStoredSessionId();
+      const { backendAccepted } = await logoutCurrentSession();
       setSid(null);
       setContext(null);
       setCheck('none');

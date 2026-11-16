@@ -116,7 +116,7 @@ describe('loadScheduleRuns', () => {
     vi.mocked(hostCapability).mockReturnValue('bridge');
     queryAudit.mockRejectedValue(new Error('尚未登录'));
     const r = await loadScheduleRuns();
-    expect(r).toEqual({ status: 'error', detail: '尚未登录' });
+    expect(r).toEqual({ status: 'error', detail: '请先登录，登录后即可查看' });
   });
 });
 
@@ -152,6 +152,6 @@ describe('auditMentions / loadAuditForMemory', () => {
   it('真查失败 → error，不把失败当空集', async () => {
     queryAudit.mockRejectedValue(new Error('E_STORAGE_LOCKED'));
     const r = await loadAuditForMemory(MEM);
-    expect(r).toEqual({ status: 'error', detail: 'E_STORAGE_LOCKED' });
+    expect(r).toEqual({ status: 'error', detail: '账本暂时被占用，请稍后重试' });
   });
 });

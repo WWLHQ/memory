@@ -196,7 +196,8 @@ describe('MemoryPage 集成（T5）', () => {
   it('内核不可达 → 显示内核原因与重试，绝不显示「记忆账本还是空的」', async () => {
     render(<MemoryPage load={() => Promise.reject(new Error('E_IPC_TIMEOUT 宿主桥 3s 未回话'))} />);
     await waitFor(() => expect(screen.getByTestId('kernel-error')).toBeInTheDocument());
-    expect(screen.getByTestId('kernel-error-reason')).toHaveTextContent('E_IPC_TIMEOUT');
+    expect(screen.getByTestId('kernel-error-reason')).toHaveTextContent('本机服务响应超时，请重试');
+    expect(screen.getByTestId('kernel-error-reason').textContent).not.toContain('E_IPC_TIMEOUT');
     expect(screen.queryByTestId('memory-empty')).not.toBeInTheDocument();
     expect(screen.queryByTestId('goto-write')).not.toBeInTheDocument();
   });

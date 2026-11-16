@@ -217,7 +217,8 @@ describe('getHomeFeed（首页真实可算，内核账本聚合）', () => {
       listProjects: async () => [],
     };
     const feed = await getHomeFeed(broken);
-    expect(feed.storageError).toContain('E_IPC_TIMEOUT');
+    expect(feed.storageError).toContain('本机服务响应超时，请重试');
+    expect(feed.storageError).not.toContain('E_IPC_TIMEOUT');
     expect(feed.strata).toBeNull();
   });
 
@@ -244,15 +245,16 @@ describe('getHomeFeed（首页真实可算，内核账本聚合）', () => {
 
   it('效果证据四卡：与接入页同口径来自真实账本（首页关系图谱上方数据源）', async () => {
     const audits: AuditRecord[] = [
-      { request_id: 'r1', action: 'recall', ts: Date.now(), detail: { query: 'q', hits: 3, mems: ['mem_a'], payload_tokens: 300 } },
-      { request_id: 'r2', action: 'llm_proxy', ts: Date.now(), detail: { cost: 0.02 } },
+      { request_id: 'r1', action: 'recall', ts: Date.now(), detail: { query: 'q', hits: 3, mems: ['mem_a'], payload_tokens: 300, injected_tokens: 300, saved_tokens: 600, corpus_tokens: 900 } },
     ];
     const feed = await getHomeFeed(fakeStorage({ audits, memories: [memA] }));
     expect(feed.effectGains).toHaveLength(4);
     expect(feed.effectGains[0].big).toBe('-80%');
     expect(feed.effectGains[1].big).toBe('3 次命中');
     expect(feed.effectGains[2].big).toContain('1 条');
-    expect(feed.effectGains[3].big).toContain('¥0.02');
+    // 模型成本卡：真实 recall 省量 600t（未设单价 → 不估算金额，绝不再拿不存在的 llm_proxy 冒充）
+    expect(feed.effectGains[3].big).toContain('省 600t');
+    expect(feed.effectGains[3].big).not.toContain('未取数');
   });
 
   it('效果证据四卡：空账本全「未取数」，绝不伪造示例数字', async () => {

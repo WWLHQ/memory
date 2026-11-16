@@ -1,7 +1,7 @@
 // 壳层渲染行为（批次48 S1）：导航、不可用态、状态栏诚实口径、底部标签。
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { setTestOverride } from '../../Home/crossTabAuth.ts';
+import { getStoredSessionId, setTestOverride, storeSessionId } from '../../Home/crossTabAuth.ts';
 import { PAGES } from '../views.ts';
 import { SELECTION_MSG } from '../../shared/selectionChannel.ts';
 import { SHELL_GOTO_MSG } from '../../shared/shellNavigate.ts';
@@ -296,9 +296,24 @@ describe('工作台壳层', () => {
     } as never);
     const { container } = await renderShell();
     const scale = screen.getByTestId('strata-scale');
-    expect(scale.textContent).toContain('读取失败：账本读取失败：E_LEDGER_LOCKED');
+    expect(scale.textContent).toContain('读取失败：账本读取失败：账本暂时被占用，请稍后重试');
+    expect(scale.textContent).not.toContain('E_LEDGER_LOCKED');
     expect(container.querySelector('.strata-row')).toBeNull();
     expect(screen.queryByText('1467')).toBeNull();
+  });
+
+  it('首页账本读取失败：壳层错误条只说人话，不露 IPC 方法名与错误码（2026-11-16）', async () => {
+    vi.mocked(loadOverview).mockResolvedValueOnce({
+      ...m.defaultOverview,
+      storageError: "Error invoking remote method 'storage:queryAudit': Error: 需要登录后操作（会话已过期或未登录）",
+    } as never);
+    await renderShell();
+    const strip = screen.getByTestId('overview-storage-error');
+    expect(strip.textContent).toContain('账本暂时读不到（不是空的）');
+    expect(strip.textContent).toContain('请先登录，登录后即可查看');
+    expect(strip.textContent).not.toContain('Error invoking');
+    expect(strip.textContent).not.toContain('storage:queryAudit');
+    expect(strip.textContent).not.toContain('E_AUTH_SESSION');
   });
 
   it('概览页整页渲染在 iframe 内：壳层不再叠旧首页数据条，未登录显示只读条', async () => {
@@ -321,6 +336,32 @@ describe('工作台壳层', () => {
     // 兜底页仍是真实页面映射：深链 /login.html 继续可直达
     expect(PAGES.login.file).toBe('login.html');
     expect(container.querySelectorAll('iframe.page-frame').length).toBe(1);
+  });
+
+  it('QAT 登出快捷按钮：未登录禁用并写明原因', async () => {
+    await renderShell();
+    const logout = screen.getByTestId('qa-logout');
+    expect(logout).toBeInTheDocument();
+    // 壳层 QAT 统一用 aria-disabled + off 样式置灰（不设原生 disabled，保留 title 可悬浮读原因）
+    expect(logout).toHaveAttribute('aria-disabled', 'true');
+    expect(logout).toHaveClass('off');
+    expect(logout).toHaveTextContent('登出');
+    expect(logout.getAttribute('title')).toContain('未登录，无需登出');
+  });
+
+  it('QAT 登出快捷按钮：登录态点击真实清除本机会话（与弹窗同一口径）', async () => {
+    storeSessionId('sid_qa_logout_test');
+    setTestOverride(true);
+    try {
+      await renderShell();
+      const logout = screen.getByTestId('qa-logout');
+      expect(logout).toBeEnabled();
+      fireEvent.click(logout);
+      await waitFor(() => expect(getStoredSessionId()).toBeNull());
+      expect(screen.getByTestId('sb-msg')).toHaveTextContent(/已登出|已清除本机会话/);
+    } finally {
+      setTestOverride(false);
+    }
   });
 
   it('三处登录入口（菜单栏 / QAT / 登录状态处）打开同一个登录弹窗', async () => {
@@ -1067,7 +1108,8 @@ describe('S7 分层 L1–L6 / L0 面板：只在层级管理页或记忆库分�
     vi.mocked(loadLayerPanel).mockResolvedValue({ status: 'error', detail: '账本读取失败：E_LEDGER_LOCKED' });
     await renderShell();
     fireEvent.click(screen.getByRole('treeitem', { name: /层级管理/ }));
-    expect((await screen.findByTestId('layer-strip-error')).textContent).toContain('E_LEDGER_LOCKED');
+    expect((await screen.findByTestId('layer-strip-error')).textContent).toContain('账本暂时被占用，请稍后重试');
+    expect((await screen.findByTestId('layer-strip-error')).textContent).not.toContain('E_LEDGER_LOCKED');
     expect(screen.queryByText(/账本 7 条/)).toBeNull();
   });
 });

@@ -156,7 +156,8 @@ describe('ParamsPage × 内核加载三态（批次25 P0-7）', () => {
       .mockRejectedValue(new Error('E_IPC_TIMEOUT 宿主桥 3s 未回话'));
     render(<ParamsPage />);
     await waitFor(() => expect(screen.getByTestId('kernel-error')).toBeInTheDocument());
-    expect(screen.getByTestId('kernel-error-reason')).toHaveTextContent('E_IPC_TIMEOUT');
+    expect(screen.getByTestId('kernel-error-reason')).toHaveTextContent('本机服务响应超时，请重试');
+    expect(screen.getByTestId('kernel-error-reason').textContent).not.toContain('E_IPC_TIMEOUT');
     expect(screen.queryByTestId('params-default')).not.toBeInTheDocument();
     expect(screen.queryByTestId('params-from-kernel')).not.toBeInTheDocument();
   });

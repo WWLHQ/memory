@@ -6,6 +6,7 @@
 import { Icon } from './Icons.tsx';
 import type { DockResult } from './dock.ts';
 import type { StrataScaleView } from './strataScale.ts';
+import { humanErrorText } from '../shared/kernelLoad.tsx';
 
 interface Props {
   data: DockResult<StrataScaleView> | null;
@@ -19,7 +20,7 @@ export function StrataScale({ data, onRefresh }: Props) {
       {!data ? (
         <div className="strata-note">读取中…</div>
       ) : data.status !== 'ok' ? (
-        <div className="strata-note err" data-testid="strata-scale-error">读取失败：{data.detail}</div>
+        <div className="strata-note err" data-testid="strata-scale-error">读取失败：{humanErrorText(data.detail)}</div>
       ) : (
         <>
           {data.view.rows.map((r) => (

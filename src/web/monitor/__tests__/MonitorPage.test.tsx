@@ -113,7 +113,8 @@ describe('MonitorPage (P6-T5 编排·真实账本接真版)', () => {
       .mockRejectedValue(new Error('E_IPC_TIMEOUT 宿主桥 3s 未回话'));
     render(<MonitorPage />);
     await waitFor(() => expect(screen.getByTestId('kernel-error')).toBeInTheDocument());
-    expect(screen.getByTestId('kernel-error-reason')).toHaveTextContent('E_IPC_TIMEOUT');
+    expect(screen.getByTestId('kernel-error-reason')).toHaveTextContent('本机服务响应超时，请重试');
+    expect(screen.getByTestId('kernel-error-reason').textContent).not.toContain('E_IPC_TIMEOUT');
     expect(screen.queryByTestId('metrics-empty')).not.toBeInTheDocument();
     expect(screen.queryByTestId('alerts-empty')).not.toBeInTheDocument();
   });

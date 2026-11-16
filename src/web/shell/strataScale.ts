@@ -11,6 +11,7 @@
 //   · 短名（密文/脱敏/摘要/要点/场景/边界/索引）按定稿图，内核正式层名保留在 fullName/title。
 
 import type { DockResult } from './dock.ts';
+import { humanErrorText } from '../shared/kernelLoad.tsx';
 
 export type StrataLayerId = 'L0' | 'L1' | 'L2' | 'L3' | 'L4' | 'L5' | 'L6';
 
@@ -66,7 +67,7 @@ export interface StrataSnapshotLike {
 export function strataViewFromOverview(snapshot: StrataSnapshotLike | null): DockResult<StrataScaleView> {
   if (!snapshot) return { status: 'error', detail: '账本读取中…' };
   if (snapshot.storageError || !snapshot.strata) {
-    return { status: 'error', detail: `账本读取失败：${snapshot.storageError ?? '未拿到分层计数'}` };
+    return { status: 'error', detail: `账本读取失败：${humanErrorText(snapshot.storageError ?? '未拿到分层计数')}` };
   }
   const counts = new Map<string, number>();
   for (const s of snapshot.strata) {

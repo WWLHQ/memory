@@ -27,7 +27,8 @@ describe('loadLayerPanel', () => {
   it('账本读取失败 → error，不再去 browse 造数', async () => {
     vi.mocked(coreListMemories).mockRejectedValue(new Error('E_LEDGER_LOCKED'));
     const r = await loadLayerPanel();
-    expect(r).toEqual({ status: 'error', detail: '账本读取失败：E_LEDGER_LOCKED' });
+    expect(r).toEqual({ status: 'error', detail: '账本读取失败：账本暂时被占用，请稍后重试' });
+    expect(r.status !== 'ok' && r.detail).not.toContain('E_LEDGER_LOCKED');
     expect(coreBrowse).not.toHaveBeenCalled();
   });
 

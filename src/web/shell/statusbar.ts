@@ -10,6 +10,7 @@ import type { L0VaultStatus } from '../../core/memagent/types.ts';
 import { getKernel } from '../kernel.ts';
 import { readL0WriteState } from '../shared/l0WriteState.ts';
 import { storageLocation } from '../memory/coreMemoryOps.ts';
+import { humanErrorText } from '../shared/kernelLoad.tsx';
 import type { DockResult } from './dock.ts';
 
 export interface StoragePlaceView {
@@ -50,7 +51,7 @@ export interface L0WriteView {
   pending: number | null;
 }
 
-const errText = (e: unknown): string => String((e as Error)?.message ?? e);
+const errText = (e: unknown): string => humanErrorText(e);
 
 /**
  * 写锁状态（唯一读法）：走 shared/l0WriteState → 内核 getWriteStatus。

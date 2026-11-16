@@ -34,7 +34,8 @@ describe('strataViewFromOverview', () => {
 
   it('账本读取失败 / strata 为 null → 整块 error，绝不拿 0 冒充', () => {
     const a = strataViewFromOverview(snapshot({ storageError: 'E_LEDGER_LOCKED', strata: null }));
-    expect(a).toEqual({ status: 'error', detail: '账本读取失败：E_LEDGER_LOCKED' });
+    expect(a).toEqual({ status: 'error', detail: '账本读取失败：账本暂时被占用，请稍后重试' });
+    expect(a.status !== 'ok' && a.detail).not.toContain('E_LEDGER_LOCKED');
     const b = strataViewFromOverview(snapshot({ strata: null }));
     expect(b).toEqual({ status: 'error', detail: '账本读取失败：未拿到分层计数' });
   });

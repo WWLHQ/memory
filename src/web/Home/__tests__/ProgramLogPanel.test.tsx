@@ -86,6 +86,19 @@ describe('ProgramLogPanel', () => {
     expect(screen.queryByTestId('program-log-line')).toBeNull();
   });
 
+  it('尾读失败返回 IPC 原文：只说人话，不把异常代码糊到面板（2026-11-16）', async () => {
+    mockTail({
+      ok: false,
+      path: null,
+      lines: [],
+      error: "Error invoking remote method 'log:tail': Error: 需要登录后操作（会话已过期或未登录）",
+    });
+    render(<ProgramLogPanel pollMs={0} />);
+    await waitFor(() => expect(screen.getByText(/请先登录，登录后即可查看/)).toBeInTheDocument());
+    expect(document.body.textContent).not.toContain('Error invoking');
+    expect(document.body.textContent).not.toContain('log:tail');
+  });
+
   it('刷新按钮重新尾读并更新行', async () => {
     let n = 1;
     const tail = mockTail(() => ({

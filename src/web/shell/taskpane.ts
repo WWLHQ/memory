@@ -9,6 +9,7 @@
 import { hostCall, hostCapability } from '../../desktop/hostBridge.ts';
 import { currentSessionId } from '../shared/session.ts';
 import type { PendingWritesView } from '../../shared/pendingWritesView.ts';
+import { humanErrorText } from '../shared/kernelLoad.tsx';
 
 export type PendingWritesResult =
   | { status: 'ok'; view: PendingWritesView }
@@ -26,7 +27,7 @@ export async function loadPendingWrites(): Promise<PendingWritesResult> {
   try {
     const raw = await hostCall<PendingWritesView | { ok: false; error?: string }>('l0:pendingWrites', [sid]);
     if (!raw || typeof raw !== 'object' || (raw as { ok?: boolean }).ok !== true) {
-      return { status: 'error', detail: (raw as { error?: string })?.error ?? '主进程未返回 ok' };
+      return { status: 'error', detail: humanErrorText((raw as { error?: string })?.error ?? '主进程未返回 ok') };
     }
     const view = raw as PendingWritesView;
     if (typeof view.count !== 'number' || !Array.isArray(view.items)) {
@@ -34,6 +35,6 @@ export async function loadPendingWrites(): Promise<PendingWritesResult> {
     }
     return { status: 'ok', view };
   } catch (e) {
-    return { status: 'error', detail: String((e as Error)?.message ?? e) };
+    return { status: 'error', detail: humanErrorText(e) };
   }
 }

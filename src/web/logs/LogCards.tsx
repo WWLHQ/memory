@@ -8,6 +8,7 @@ import { coreAuditChain } from './coreLogs.ts';
 import { formatLogClock, formatLogDate } from '../Home/programLog.ts';
 import { formatRemaining } from '../shared/useL0Session.ts';
 import { DEFAULT_PROJECT_ID, listProjectIds } from '../shared/kernelProjects.ts';
+import { humanErrorText } from '../shared/kernelLoad.tsx';
 import { ColResizeHandle, useColWidths } from '../shared/useColWidths.tsx';
 import '../shared/tableResize.css';
 
@@ -155,7 +156,7 @@ export function AuditModal({
     setError(null);
     load(requestId)
       .then((r) => { if (alive) setRows(r); })
-      .catch((e) => { if (alive) setError(String((e as Error)?.message ?? e)); });
+      .catch((e) => { if (alive) setError(humanErrorText(e)); });
     return () => { alive = false; };
   }, [requestId, load]);
 

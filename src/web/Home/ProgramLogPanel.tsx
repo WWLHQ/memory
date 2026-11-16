@@ -15,6 +15,7 @@ import {
   type ProgramLogLine,
 } from './programLog.ts';
 import { humanizeProgramLog } from './programLogLabels.ts';
+import { humanErrorText } from '../shared/kernelLoad.tsx';
 
 const DEFAULT_SCAN = 50;
 const DEFAULT_POLL_MS = 5000;
@@ -58,7 +59,7 @@ export function ProgramLogPanel({
       const res = await hostCall<ActionLogTailResult>('log:tail', [scanLines]);
       if (!alive.current) return;
       if (!res?.ok) {
-        setState({ kind: 'error', error: res?.error ?? '日志读取失败（未知原因）' });
+        setState({ kind: 'error', error: humanErrorText(res?.error ?? '日志读取失败（未知原因）') });
         return;
       }
       setState({
@@ -69,7 +70,7 @@ export function ProgramLogPanel({
       setRefreshedAt(Date.now());
     } catch (e) {
       if (!alive.current) return;
-      setState({ kind: 'error', error: String((e as Error)?.message ?? e) });
+      setState({ kind: 'error', error: humanErrorText(e) });
     } finally {
       inFlight.current = false;
     }

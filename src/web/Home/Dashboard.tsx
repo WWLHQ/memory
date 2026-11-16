@@ -13,6 +13,7 @@ import type { SyncState } from '../../types/home.ts';
 import type { Gain } from '../../types/agentOnboard.ts';
 import { LayerGraphPanel } from './LayerGraphPanel.tsx';
 import { emptyLayerGraph, type LayerGraph } from './layerGraph.ts';
+import { humanErrorText } from '../shared/kernelLoad.tsx';
 
 export interface DashboardProps {
   /** 后端/镜像原始 feed（T4 消费） */
@@ -70,7 +71,7 @@ export function Dashboard({ raw, sync, graph, effectGains, storageError, onRefre
 
       {storageError && (
         <div className="offline-banner" data-testid="kernel-error-banner">
-          内核账本没读到（不是「账本为空」）：{storageError} —— 四卡 / 关系图谱暂为空，点「刷新图谱」重试。
+          账本暂时读不到（不是空的）：{humanErrorText(storageError)}。请先登录或稍后重试。
         </div>
       )}
 

@@ -161,11 +161,12 @@ describe('T7 首页 Dashboard 区块组件', () => {
     expect(container.textContent).not.toContain('离线 2 条待回传');
   });
 
-  it('内核读不到（storageError）→ 明示「不是账本为空」+ 真实原因（批次25 P0-7）', () => {
+  it('内核读不到（storageError）→ 人话说明不是空账本，不漏错误码（批次25 P0-7 / 2026-11-16）', () => {
     const { container } = renderAuth({ onTrace: () => {}, storageError: 'E_IPC_TIMEOUT 宿主桥 3s 未回话' });
     expect(container.querySelector('[data-testid="kernel-error-banner"]')).not.toBeNull();
-    expect(container.textContent).toContain('内核账本没读到');
-    expect(container.textContent).toContain('E_IPC_TIMEOUT');
+    expect(container.textContent).toContain('账本暂时读不到（不是空的）');
+    expect(container.textContent).toContain('本机服务响应超时，请重试');
+    expect(container.textContent).not.toContain('E_IPC_TIMEOUT');
   });
 
   it('账本可读（storageError=null）→ 不显示错误横幅', () => {

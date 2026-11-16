@@ -210,7 +210,7 @@ describe('个人记忆常驻面板：人机交互与诚实降级', () => {
   it('账本候选读取失败时如实报错并可重试，不把「读不到」伪装成「空」', async () => {
     h.splitAgentIngest.mockRejectedValueOnce(new Error('账本不可达')).mockResolvedValue({ sessionInfoCount: 0, candidates: [] });
     render(<PersonalMemoryPanel open onClose={vi.fn()} />);
-    await waitFor(() => expect(screen.getByTestId('pm-ingest-error').textContent).toContain('账本不可达'));
+    await waitFor(() => expect(screen.getByTestId('pm-ingest-error').textContent).toContain('连不上本机服务，请确认程序正在运行'));
     fireEvent.click(screen.getByTestId('pm-ingest-retry'));
     await waitFor(() => expect(screen.getByTestId('pm-ingest-empty')).toBeTruthy());
   });

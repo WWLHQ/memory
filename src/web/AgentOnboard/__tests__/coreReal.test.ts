@@ -62,12 +62,37 @@ describe('getOnboardGains（效果证据四卡真实聚合）', () => {
     expect(g[2].big).toBe('3 条 · 2 域');
   });
 
-  test('模型成本：llm_proxy 审计次数与实际花费', async () => {
+  test('模型成本节省：recall 省量 × 参数单价，与召回回显 money 同口径', async () => {
     const s = new InMemoryStorage();
-    await s.appendAudit(audit('llm_proxy', { llm_proxy_source: 'agent:claude-free', cost: 0, mode: 'auto' }));
-    await s.appendAudit(audit('llm_proxy', { llm_proxy_source: 'agent:gpt4o-mini', cost: 0.02, mode: 'auto' }));
+    // 参数快照：单价 ¥2 / 百万预算单位 t（与召回回显 normalizeUnitPrice 同源）
+    await s.putMemory(mem({
+      mem_id: 'params_1', project_id: 'P_SYSTEM', category: 'preference', user_id: 'system',
+      content: 'params:v1:' + JSON.stringify({ cfg: { cost_cny_per_mtok: 2 }, kbs: [], dev: {} }),
+    }));
+    await s.appendAudit(audit('recall', { query: 'q1', hits: 1, payload_tokens: 300, injected_tokens: 300, saved_tokens: 700, corpus_tokens: 1000 }));
+    await s.appendAudit(audit('recall', { query: 'q2', hits: 1, payload_tokens: 300, injected_tokens: 300, saved_tokens: 300, corpus_tokens: 1000 }));
     const g = await getOnboardGains(s);
-    expect(g[3].big).toBe('2 次 · ¥0.02');
+    // 省量 1000t × ¥2/百万t = ¥0.002（formatCny 小额留 6 位、去尾 0）
+    expect(g[3].big).toBe('省 ¥0.002');
+    expect(g[3].desc).toContain('2 次召回');
+    expect(g[3].desc).toContain('1,000t');
+    expect(g[3].src).toContain('recall 省量');
+  });
+
+  test('模型成本节省：未设单价 → 显示真实省量 t，不编造金额', async () => {
+    const s = new InMemoryStorage();
+    await s.appendAudit(audit('recall', { query: 'q', hits: 1, payload_tokens: 300, injected_tokens: 300, saved_tokens: 700, corpus_tokens: 1000 }));
+    const g = await getOnboardGains(s);
+    expect(g[3].big).toBe('省 700t（未设单价）');
+    expect(g[3].big).not.toContain('¥');
+    expect(g[3].desc).toContain('不估算');
+  });
+
+  test('模型成本节省：账本无 recall → 未取数（不再拿不存在的 llm_proxy 冒充）', async () => {
+    const s = new InMemoryStorage();
+    await s.appendAudit(audit('llm_proxy', { cost: 0.02 }));
+    const g = await getOnboardGains(s);
+    expect(g[3].big).toBe('未取数');
   });
 });
 

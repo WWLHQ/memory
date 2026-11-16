@@ -62,7 +62,7 @@ describe('loadPendingWrites', () => {
     vi.mocked(currentSessionId).mockReturnValue('sid_1');
     vi.mocked(hostCall).mockResolvedValue({ ok: false, error: '未登录会话' });
     const r = await loadPendingWrites();
-    expect(r).toEqual({ status: 'error', detail: '未登录会话' });
+    expect(r).toEqual({ status: 'error', detail: '请先登录，登录后即可查看' });
   });
 
   it('主进程返回结构不完整 → error，不渲染半截数据', async () => {

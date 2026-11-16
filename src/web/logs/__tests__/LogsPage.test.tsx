@@ -238,7 +238,8 @@ describe('AuditModal 审计全链路真查（批次25 P0-2）', () => {
       />,
     );
     await waitFor(() => expect(screen.getByTestId('modal-error')).toBeInTheDocument());
-    expect(screen.getByTestId('modal-error')).toHaveTextContent('E_IPC_TIMEOUT');
+    expect(screen.getByTestId('modal-error')).toHaveTextContent('本机服务响应超时，请重试');
+    expect(screen.getByTestId('modal-error').textContent).not.toContain('E_IPC_TIMEOUT');
     expect(screen.queryByTestId('modal-empty')).toBeNull();
     expect(screen.queryAllByTestId('modal-row')).toHaveLength(0);
   });

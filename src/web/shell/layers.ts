@@ -8,6 +8,7 @@ import { hostCapability } from '../../desktop/hostBridge.ts';
 import { coreBrowse, coreListMemories } from '../memory/coreMemoryOps.ts';
 import type { DockResult } from './dock.ts';
 import { loadL0Status, loadL0Write, type L0WriteView } from './statusbar.ts';
+import { humanErrorText } from '../shared/kernelLoad.tsx';
 
 export const PANEL_LAYERS = ['L6', 'L5', 'L4', 'L3', 'L2', 'L1'] as const;
 export type PanelLayer = typeof PANEL_LAYERS[number];
@@ -31,7 +32,7 @@ export interface LayerPanelView {
   loadedAt: number;
 }
 
-const errText = (e: unknown): string => String((e as Error)?.message ?? e);
+const errText = (e: unknown): string => humanErrorText(e);
 
 /** 一层内部：只要有非空内容就计入（与中心层级页 hasContent 口径一致） */
 function countWithContent(rows: { mem_id: string; content: string }[]): number {

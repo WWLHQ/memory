@@ -27,13 +27,14 @@
   .err{font-size:12px;color:var(--warn);margin-top:6px;min-height:16px}
   .lock-count{display:block;margin-top:4px;color:var(--warn);font-weight:600;letter-spacing:.3px}
   .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 16px;font-size:13px;z-index:80;display:none}
-  .gains{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:12px}
-  @media(max-width:820px){.gains{grid-template-columns:1fr 1fr}}
-  .gain{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px}
-  .gain h3{font-size:12px;margin:0 0 6px;color:var(--txt)}
-  .gain .big{font-size:22px;font-weight:800;font-family:monospace;color:var(--ok)}
-  .gain .desc{font-size:10px;color:var(--muted);margin-top:4px}
-  .gain .src{font-size:10px;color:var(--dim);margin-top:6px}
+  /* 四卡严格等宽等高：minmax(0,1fr) 防长数字/长标题撑开列；flex 列布局让脚注贴底对齐 */
+  .gains{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:12px}
+  @media(max-width:820px){.gains{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  .gain{min-width:0;display:flex;flex-direction:column;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px}
+  .gain h3{font-size:12px;margin:0 0 6px;color:var(--txt);min-height:2.8em;line-height:1.4;overflow-wrap:anywhere}
+  .gain .big{font-size:22px;font-weight:800;font-family:monospace;color:var(--ok);line-height:1.2;overflow-wrap:anywhere}
+  .gain .desc{font-size:10px;color:var(--muted);margin-top:4px;flex:1;overflow-wrap:anywhere}
+  .gain .src{font-size:10px;color:var(--dim);margin-top:6px;padding-top:6px;border-top:1px dashed var(--line);overflow-wrap:anywhere}
   .gain.off{opacity:.4}
   .dash-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
   @media(max-width:700px){.dash-grid{grid-template-columns:1fr}}

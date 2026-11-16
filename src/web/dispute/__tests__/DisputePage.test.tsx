@@ -48,7 +48,8 @@ describe('DisputePage (P7-T5 编排·真实账本接真版)', () => {
     vi.spyOn(await import('../coreDispute.ts'), 'coreConflicts').mockRejectedValue(new Error('E_IPC_TIMEOUT 宿主桥 3s 未回话'));
     render(<DisputePage />);
     await waitFor(() => expect(screen.getByTestId('kernel-error')).toBeInTheDocument());
-    expect(screen.getByTestId('kernel-error-reason')).toHaveTextContent('E_IPC_TIMEOUT');
+    expect(screen.getByTestId('kernel-error-reason')).toHaveTextContent('本机服务响应超时，请重试');
+    expect(screen.getByTestId('kernel-error-reason').textContent).not.toContain('E_IPC_TIMEOUT');
     expect(screen.queryByTestId('dispute-empty')).not.toBeInTheDocument();
     expect(screen.queryByTestId('queue')).not.toBeInTheDocument();
   });

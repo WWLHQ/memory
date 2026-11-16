@@ -16,12 +16,53 @@ export interface KernelLoadResult<T> {
   replace: (next: T | ((prev: T) => T)) => void;
 }
 
-/** 内核/宿主桥异常 → 一行可读原因（保留 E_XXX 码，便于对照 actions.log） */
-export function kernelErrorText(e: unknown): string {
+/** 原始异常文本（仅写 actions.log / 排查用；禁止直接进 UI） */
+export function kernelErrorRaw(e: unknown): string {
   const err = e as { code?: string; message?: string } | null;
   const msg = (err?.message ?? String(e ?? '')).trim();
   const text = msg || '未知错误';
   return err?.code && !text.includes(err.code) ? `${err.code}：${text}` : text;
+}
+
+/**
+ * UI 唯一错误文案出口（2026-11-16 用户要求：说人话）。
+ * Electron 会把主进程抛错包成 `Error invoking remote method 'xxx': Error: ...`，
+ * 错误码 / IPC 方法名 / JSON 残片一律不上屏；只给一句能看懂、能照着做的话。
+ */
+export function humanErrorText(e: unknown): string {
+  const raw = kernelErrorRaw(e);
+  const s = raw.toLowerCase();
+
+  if (/需要登录|未登录|会话.{0,8}(过期|失效)|e_auth_session|\b401\b/.test(s)) return '请先登录，登录后即可查看';
+  if (/timeout|超时|未回话|aborted?|e_ipc_timeout/.test(s)) return '本机服务响应超时，请重试';
+  if (/e_ledger_locked|e_storage_locked|账本.{0,8}锁定|库被.{0,12}锁定|\blocked\b/.test(s)) return '账本暂时被占用，请稍后重试';
+  if (/e_l0_locked|写密钥.{0,8}(锁|未解锁)/.test(s)) return '写密钥未解锁，请先解锁';
+  if (/failed to fetch|network|不可达|econnrefused|enotfound|\boffline\b/.test(s)) return '连不上本机服务，请确认程序正在运行';
+  if (/e_not_implemented|not implemented|未实现|未接入/.test(s)) return '这个功能当前版本还没有提供';
+  if (/^http\s+\d{3}/.test(s)) return '本机服务暂时没准备好，请稍后重试';
+  if (/未知错误|unknown error|undefined|null/.test(s)) return '出了点问题，请稍后重试';
+
+  // 剥掉 Electron IPC 的两层包装，再看里面有没有人能看懂的话
+  let text = raw
+    .replace(/^error invoking remote method\s+['"][^'"]+['"]\s*:\s*/i, '')
+    .replace(/^(?:error|typeerror|referenceerror)\s*:\s*/i, '')
+    .trim();
+  text = text.replace(/^(?:error|typeerror)\s*:\s*/i, '').trim();
+  // 内核常抛 `[E_XXX] 中文原因`：错误码丢掉，后面那句人话留着
+  text = text.replace(/^\[?E_[A-Z0-9_]+\]?\s*[:：-]?\s*/i, '').trim();
+
+  if (
+    !text || !/[\u4e00-\u9fa5]/.test(text) ||
+    /[[\]{}"]/.test(text) || /\bE_[A-Z0-9_]+\b/.test(text) || text.length > 40
+  ) {
+    return '出了点问题，请稍后重试';
+  }
+  return text;
+}
+
+/** 兼容旧调用：页面拿到的都是人话（原始异常由 kernelErrorRaw 留在日志里） */
+export function kernelErrorText(e: unknown): string {
+  return humanErrorText(e);
 }
 
 /**
@@ -41,8 +82,8 @@ export function useKernelLoad<T>(label: string, load: () => Promise<T>): KernelL
       (data) => { if (alive) setState({ phase: 'ok', data, error: null }); },
       (e: unknown) => {
         if (!alive) return;
-        const error = kernelErrorText(e);
-        uiLog('ui', 'kernel_load_error', { page: label, error }, { level: 'error' });
+        const error = humanErrorText(e);
+        uiLog('ui', 'kernel_load_error', { page: label, error: kernelErrorRaw(e) }, { level: 'error' });
         setState({ phase: 'error', data: undefined, error });
       },
     );

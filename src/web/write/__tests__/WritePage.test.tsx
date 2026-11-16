@@ -154,7 +154,8 @@ describe('WritePage 集成（T5）', () => {
       target: { value: '内核不可达时查重候选读取失败' },
     });
     await waitFor(() => expect(screen.getByTestId('kernel-error')).toBeInTheDocument());
-    expect(screen.getByTestId('kernel-error-reason')).toHaveTextContent('E_IPC_TIMEOUT');
+    expect(screen.getByTestId('kernel-error-reason')).toHaveTextContent('本机服务响应超时，请重试');
+    expect(screen.getByTestId('kernel-error-reason').textContent).not.toContain('E_IPC_TIMEOUT');
     expect(screen.queryByTestId('dedup-card')).not.toBeInTheDocument();
   });
 

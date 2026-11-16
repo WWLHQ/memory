@@ -7,6 +7,8 @@ import { getKernel, getKernelStorage } from '../kernel.ts';
 import { hostCall, hostCapability } from '../../desktop/hostBridge.ts';
 import type { HostScanResult } from '../../desktop/hostScan.ts';
 import type { Gain } from '../../types/agentOnboard.ts';
+import { findParamsSnapshot } from '../../core/memagent/paramsSnapshot.ts';
+import { formatCny, normalizeUnitPrice, rollupRecalls } from '../../core/memagent/recallInsight.ts';
 
 interface OnboardCtx {
   ma: MemAgent;
@@ -101,10 +103,12 @@ function asRecord(detail: unknown): Record<string, unknown> {
  *  · Token 节省：recall 审计 payload_tokens vs 1500 全量预算（2.4.1）
  *  · 效率提升：跨会话召回次数与累计命中条数（recall.detail.hits）
  *  · 跨 Agent 复用：记忆主表条数 + 共享 project_id 域数（19.4）
- *  · 模型成本：llm_proxy/llm_fallback 审计次数与实际花费（19.8）
+ *  · 模型成本节省：召回审计持久化的 saved_tokens × 参数快照单价（与召回回显 money 同口径）。
+ *    旧实现读 llm_proxy/llm_fallback 的 detail.cost，但真实账本里没有这类审计 → 永远「未取数」；
+ *    真实花费/省量其实都由 recall 审计的 injected_tokens/saved_tokens 累加得出（rollupRecalls）。
  * 账本为空 → 显「—」并说明「暂无账本」，绝不回退示例数字。
  */
-export function computeOnboardGains(audits: AuditRecord[], memories: Memory[]): Gain[] {
+export function computeOnboardGains(audits: AuditRecord[], memories: Memory[], now: number = Date.now()): Gain[] {
   const recalls = audits.filter((a) => a.action === 'recall');
   const payloads = recalls
     .map((a) => Number(asRecord(a.detail).payload_tokens))
@@ -113,12 +117,14 @@ export function computeOnboardGains(audits: AuditRecord[], memories: Memory[]): 
     const h = Number(asRecord(a.detail).hits ?? 0);
     return Number.isFinite(h) ? s + h : s;
   }, 0);
-  const proxies = audits.filter((a) => a.action === 'llm_proxy' || a.action === 'llm_fallback');
-  const costSum = proxies.reduce((s, a) => {
-    const c = Number(asRecord(a.detail).cost ?? 0);
-    return Number.isFinite(c) ? s + c : s;
-  }, 0);
   const projects = new Set(memories.map((m) => m.project_id)).size;
+  // 模型成本节省：与召回回显 money.all 同源——recall 审计持久化的省量 token × 参数快照单价。
+  // 单价未设置 → 只显示真实省量（t），不编造金额；连 recall 审计都没有 → 未取数。
+  const rollup = rollupRecalls(audits, now);
+  const price = normalizeUnitPrice(findParamsSnapshot(memories)?.cfg?.cost_cny_per_mtok);
+  const savedTokens = Math.round(rollup.all_saved_tokens);
+  const savedCny = price === null ? null : (rollup.all_saved_tokens / 1_000_000) * price;
+  const groupNum = (n: number) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 
   const g1: Gain = payloads.length > 0
     ? (() => {
@@ -148,13 +154,18 @@ export function computeOnboardGains(audits: AuditRecord[], memories: Memory[]): 
       }
     : { icon: '🔁', title: '跨 Agent 复用', big: '未取数', desc: '暂无记忆账本 · 写入记忆后自动累计', src: '内核账本·实时（19.4）' };
 
-  const g4: Gain = proxies.length > 0
+  const g4: Gain = rollup.all_calls > 0
     ? {
-        icon: '💸', title: '模型成本节省（反代理 19.8）', big: `${proxies.length} 次 · ¥${costSum.toFixed(2)}`,
-        desc: '自动选择<b>先免费、后低价</b> · 次数与花费来自内核 llm_proxy/llm_fallback 审计（19.8）',
-        src: '内核账本·实时（19.8 proxy_select_mode=auto）',
+        icon: '💸', title: '模型成本节省（反代理 19.8）',
+        big: savedCny === null
+          ? `省 ${groupNum(savedTokens)}t（未设单价）`
+          : `省 ${formatCny(savedCny)}`,
+        desc: savedCny === null
+          ? `本周期 <b>${rollup.all_calls} 次召回</b> · 累计少注入 <b>${groupNum(savedTokens)}t</b>；未设置单价，金额不估算（参数页可设 ¥/百万 t）`
+          : `本周期 <b>${rollup.all_calls} 次召回</b> · 累计少注入 <b>${groupNum(savedTokens)}t</b>；省额 = 省量 × 参数单价（与召回回显同口径，估算）`,
+        src: '内核账本·实时（recall 省量 × 参数单价）',
       }
-    : { icon: '💸', title: '模型成本节省（反代理 19.8）', big: '未取数', desc: '暂无代理调用账本 · 反代理调用后自动累计', src: '内核账本·实时（19.8 proxy_select_mode=auto）' };
+    : { icon: '💸', title: '模型成本节省（反代理 19.8）', big: '未取数', desc: '暂无召回账本 · 发起召回后自动累计真实省量', src: '内核账本·实时（recall 省量 × 参数单价）' };
 
   return [g1, g2, g3, g4];
 }

@@ -1740,3 +1740,22 @@ status: draft
 
 > **依赖方向**：判重回诊计划定义在 `regression.ts` 而不是 `evolution/registry.ts` —— registry 已 import regression，放那边会形成循环依赖。
 > **变异证据（6 组，均红灯→还原→复绿）**：insufficient reason 置空 / 去 `due_at` 完成判定 / 去 off 短路 / `dedupDropExceeded` 恒 false / 版本化不落历史 / 去 `detail.entry` 跳过。
+
+### 错误文案人话化（2026-11-16）
+
+| 任务→文件 | 实现 | 测试 / 门禁 |
+|---|---|---|
+| `web/shared/kernelLoad.tsx` | 新增 `humanErrorText`（UI 唯一错误文案出口）与 `kernelErrorRaw`（只写 actions.log）；`kernelErrorText` 转为兼容人话包装。剥掉 Electron `Error invoking remote method 'x': Error:` 与 `[E_XXX]` 前缀，登录态/超时/账本占用/写锁未开/未实现等映射成短句技术残片统一兜底，短中文原因原样保留 | `shared/__tests__/kernelLoad.test.tsx` 5 组：IPC 包装串不露方法名、错误码只进日志、三类错误码映射、中文原因保留、残片兜底；变异：登录映射改回 `raw` → kernelLoad/workspace/ProgramLogPanel 共 3 例红灯，还原后 89 例全绿 |
+| `web/Home/Dashboard.tsx`、`web/shell/Workspace.tsx`、`StrataScale.tsx`、`strataScale.ts`、`layers.ts`、`statusbar.ts`、`dock.ts`、`taskpane.ts`、`overview.ts`、`overviewPageData.ts`、`Home/ProgramLogPanel.tsx`、`logs/LogCards.tsx` | 首页横幅 / 壳层账本条 / 层级刻度 / 状态栏 / 底部面板 / 任务窗 / 概览面板 / 问账本 / 程序日志 / 审计弹窗统一走人话；横幅文案收短为「账本暂时读不到（不是空的）…」；渲染层再包一层 `humanErrorText`，注入 raw prop 也不漏码 | 全量 `npm test`：287 文件 / 3424 项全绿；Web 侧 `tsc --noEmit` 0 错；`check:no-demo` 通过；`code:index --write` + `--check` 407 源码文件最新。**已知在途阻塞**：`npm run typecheck` 的 electron 工程与 `oxlint` 仅因在途 `src/electron/main.ts` 重复 `dialog` 导入（非本轮改动）报 1 错，web 侧同规则 0 错；待在途任务修复后再跑全量静态门禁。 |
+
+> 口径：错误原文仍完整进 `actions.log`（`kernelErrorRaw`），UI 只给「请先登录，登录后即可查看 / 本机服务响应超时，请重试 / 账本暂时被占用，请稍后重试」等短句；不拿 `Error:`、`E_XXX`、JSON 或 IPC 方法名兜底。按用户约定：本轮只交付代码与证据，**等实测 + 明确确认后才打包/提交**。
+
+### 首页成本卡真实数据 · 四卡等大 · 登出快捷按钮（2026-11-16）
+
+| 任务→文件 | 实现 | 测试 / 门禁 |
+|---|---|---|
+| `web/AgentOnboard/coreOnboard.ts` | 模型成本卡根因：旧口径只读 `llm_proxy`/`llm_fallback` 的 `detail.cost`，但本机真实 `audit.jsonl` 里这类审计为 0 条 → 永远「未取数」。改为与召回回显 `money.all` 同源：`rollupRecalls` 累计 recall 审计持久化的 `saved_tokens` × 参数快照 `cost_cny_per_mtok`（`normalizeUnitPrice`）；有单价 → `省 ¥X`（`formatCny`，标注估算），无单价 → `省 Nt（未设单价）` 不编造金额，无 recall → 才是未取数。`computeOnboardGains` 加可选 `now` 便于定时口径测试 | `AgentOnboard/__tests__/coreReal.test.ts` 新增 3 组（有单价省额 ¥0.002 / 无单价显真实省量 / 仅 llm_proxy 仍判未取数）；`Home/__tests__/coreHome.test.ts` 效果证据卡改断言真实 recall 省量。变异：未设单价文案加 `·MUTANT` → coreReal 1 例红灯，还原复绿 |
+| `web/Home/theme.css` | 四卡不等大根因：`1fr`=`minmax(auto,1fr)` 被长数字/长标题撑宽列、卡内非 flex 脚注不对齐。改 `repeat(4,minmax(0,1fr))` + `.gain{min-width:0;display:flex;flex-direction:column}` + h3 固定 2 行高 + `.desc{flex:1}` 让 `.src` 贴底；窄屏 `repeat(2,minmax(0,1fr))`。按用户「四卡大小要一样」显式要求，属原型 CSS 的获准偏离 | 结构由 `Dashboard.test.tsx` `#effectGains > .gain` 4 卡契约锁；视觉等宽等高的最终判据是用户真机截图实测（CSS 本身不做像素级单测） |
+| `web/shell/ShellLoginDialog.tsx`、`web/shell/Workspace.tsx` | 抽出 `logoutCurrentSession()`（POST /api/logout + 清本机 session，后端不可达也清但如实回执），弹窗原 `doLogout` 与新增 QAT 快捷按钮共用同一口径，避免两处分叉。QAT 在「登录」后加 `qa-logout`：登录态可见可点、未登录 `aria-disabled` 并写明原因；点击后提示真实登出结果 | `shell/__tests__/workspace.test.tsx` 新增 2 组（未登录置灰给原因 / 登录态点击真清 session + 状态栏回执）。变异：`disabled: !sessionActive` 改 `false` → 1 例红灯，还原复绿 |
+
+> 三道闸门（2026-11-16）：A 全量 `npm test` 287 文件 / 3428 项全绿、Web `tsc --noEmit` 0 错、改动文件 `oxlint` 0 错、`check:no-demo` 通过、`code:index --write` 407 源码 / 148 文档最新；B 定向 103 项全绿；C 两处变异各判红 1 例、还原后复绿。同前一轮纪律：**未打包、未提交、未推送，等用户实测 + 明确确认**。

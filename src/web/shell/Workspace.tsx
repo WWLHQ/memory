@@ -13,7 +13,7 @@ import { fetchSessionContext } from '../shared/session.ts';
 import type { TenantContext } from '../../types/home.ts';
 import { Icon } from './Icons.tsx';
 import { ContextMenu, type ContextMenuItem, type ContextMenuState } from './ContextMenu.tsx';
-import { ShellLoginDialog } from './ShellLoginDialog.tsx';
+import { logoutCurrentSession, ShellLoginDialog } from './ShellLoginDialog.tsx';
 import { PersonalMemoryPanel } from './PersonalMemoryPanel.tsx';
 import { loadOverview, type OverviewSnapshot } from './overview.ts';
 import { emptyLayerGraph } from '../Home/layerGraph.ts';
@@ -36,6 +36,7 @@ import { loadNavCounts, type NavCounts } from './navCounts.ts';
 import { SELECTION_MSG, parseSelection, type SelectionPayload } from '../shared/selectionChannel.ts';
 import { NAV_COUNT_MSG, parseNavCount } from '../shared/navCountChannel.ts';
 import { SHELL_GOTO_MSG } from '../shared/shellNavigate.ts';
+import { humanErrorText } from '../shared/kernelLoad.tsx';
 import { onL0WriteLockChanged } from '../shared/l0WriteLockSignal.ts';
 
 const STORE_THEME = 'memdesk.shell.theme.v1';
@@ -1058,6 +1059,23 @@ export function Workspace() {
         : '登录 / 会话：打开登录弹窗（真实 POST /api/login）',
       run: () => setLoginOpen(true),
     },
+    {
+      id: 'logout', icon: 'x',
+      text: '登出',
+      title: sessionActive
+        ? '登出：清除本机会话并通知后端（其它视图回到只读）'
+        : '未登录，无需登出（需要先登录才可用）',
+      disabled: !sessionActive,
+      run: () => {
+        void (async () => {
+          const { backendAccepted } = await logoutCurrentSession();
+          onLoginSession(null);
+          setMessage(backendAccepted
+            ? '已登出：后端已受理，本机会话已清除。'
+            : '已清除本机会话；后端未确认登出（可能不可达）。');
+        })();
+      },
+    },
     { sep: true },
     { id: 'syncCheck', icon: 'sync', title: '同步检查：程序未提供独立指令；请在「同步」视图查看通道状态', disabled: true },
     { id: 'balance', icon: 'scale', title: '余额探测：程序未提供独立指令；请在「模型与成本」视图查看计费状态', disabled: true },
@@ -1450,7 +1468,7 @@ export function Workspace() {
 
           {active?.page === 'home' && overview?.storageError && (
             <div className="ov-error-strip" data-testid="overview-storage-error">
-              账本读取失败：{overview.storageError}（这不是空账本，概览页会如实标注）
+              账本暂时读不到（不是空的）：{humanErrorText(overview.storageError)}。请登录或稍后重试。
             </div>
           )}
 
@@ -1461,7 +1479,7 @@ export function Workspace() {
               {!layerPanel ? (
                 <span className="ls-note">读取中…</span>
               ) : layerPanel.status !== 'ok' ? (
-                <span className="ls-note err" data-testid="layer-strip-error">读取失败：{layerPanel.detail}</span>
+                <span className="ls-note err" data-testid="layer-strip-error">读取失败：{humanErrorText(layerPanel.detail)}</span>
               ) : (
                 <>
                   <span className="ls-total">账本 <b>{layerPanel.view.total}</b> 条</span>
@@ -1552,7 +1570,7 @@ export function Workspace() {
                   ) : pending.status === 'unavailable' ? (
                     <div className="tp-note" data-testid="pending-unavailable">{pending.detail}</div>
                   ) : pending.status === 'error' ? (
-                    <div className="tp-note red" data-testid="pending-error">读取失败：{pending.detail}</div>
+                    <div className="tp-note red" data-testid="pending-error">读取失败：{humanErrorText(pending.detail)}</div>
                   ) : (
                     <>
                       <div className="tp-count" data-testid="pending-count">
@@ -1777,7 +1795,7 @@ export function Workspace() {
         ) : data.status === 'unavailable' ? (
           <div className="bp-empty" data-testid="dock-log-unavailable"><Icon name="broken" size={20} /><div>{data.detail}</div></div>
         ) : data.status === 'error' ? (
-          <div className="bp-empty err" data-testid="dock-log-error"><Icon name="warn" size={20} /><div>读取失败：{data.detail}</div></div>
+          <div className="bp-empty err" data-testid="dock-log-error"><Icon name="warn" size={20} /><div>读取失败：{humanErrorText(data.detail)}</div></div>
         ) : isProblems ? renderProblems(data.view) : renderLogLines(data.view)}
       </>
     );
@@ -1850,7 +1868,7 @@ export function Workspace() {
         ) : dockTasks.status === 'unavailable' ? (
           <div className="bp-empty" data-testid="dock-tasks-unavailable"><Icon name="broken" size={20} /><div>{dockTasks.detail}</div></div>
         ) : dockTasks.status === 'error' ? (
-          <div className="bp-empty err" data-testid="dock-tasks-error"><Icon name="warn" size={20} /><div>读取失败：{dockTasks.detail}</div></div>
+          <div className="bp-empty err" data-testid="dock-tasks-error"><Icon name="warn" size={20} /><div>读取失败：{humanErrorText(dockTasks.detail)}</div></div>
         ) : dockTasks.view.length === 0 ? (
           <div className="bp-empty" data-testid="dock-tasks-empty">
             <Icon name="clock" size={20} />
@@ -1903,7 +1921,7 @@ export function Workspace() {
         ) : dockAudit.status === 'unavailable' ? (
           <div className="bp-empty" data-testid="dock-audit-unavailable"><Icon name="broken" size={20} /><div>{dockAudit.detail}</div></div>
         ) : dockAudit.status === 'error' ? (
-          <div className="bp-empty err" data-testid="dock-audit-error"><Icon name="warn" size={20} /><div>读取失败：{dockAudit.detail}</div></div>
+          <div className="bp-empty err" data-testid="dock-audit-error"><Icon name="warn" size={20} /><div>读取失败：{humanErrorText(dockAudit.detail)}</div></div>
         ) : dockAudit.view.length === 0 ? (
           <div className="bp-empty" data-testid="dock-audit-empty">
             <Icon name="list" size={20} />

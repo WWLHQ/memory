@@ -92,6 +92,7 @@ describe('记忆助手整页', () => {
     fireEvent.click(screen.getByRole('button', { name: '账本里有多少条记忆？' }));
     const answer = await screen.findByTestId('ma-answer');
     expect(answer.textContent).toContain('账本没读到，无法回答');
-    expect(answer.textContent).toContain('E_LEDGER_LOCKED');
+    expect(answer.textContent).toContain('账本暂时被占用，请稍后重试');
+    expect(answer.textContent).not.toContain('E_LEDGER_LOCKED');
   });
 });
