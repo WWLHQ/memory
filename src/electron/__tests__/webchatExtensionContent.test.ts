@@ -533,3 +533,36 @@ describe('内容脚本：历史遍历也要带诊断线索', () => {
     for (const p of h.payloads) expect(p.diag).toBeUndefined();
   }, 60000);
 });
+
+// ── 2026-11-17 用户实测：「所有导出的标题都一样」 ─────────────────────────
+// 截图证据：20261117-224922.md 的 `- 标题：MCP集成技能连接器插件 - DeepSeek`，
+// 正文却是「个人做的记忆系统怎么变现」。真因是历史遍历用 document.title，
+// 而标签页标题不随 SPA 切换会话更新 → 几十份文件全写同一个标题，跟内容对不上。
+describe('内容脚本：历史导出的标题用侧栏会话名', () => {
+  it('title = 侧栏条目文本，不再是标签页标题；标签页原标题留在 docTitle', async () => {
+    document.title = '当前正打开的那个会话 - DeepSeek';
+    const h = loadContent({
+      html: sidebarHtml(['第一条会话', '第二条会话', '第三条会话'].map((t) => `<div class="c08e6e93">${t}</div>`)),
+      onClick: (title) => ({
+        pathname: `/a/chat/s/${encodeURIComponent(title)}`,
+        messages: [
+          { role: 'user', text: `${title} 的问题` },
+          { role: 'assistant', text: `${title} 的回答` },
+        ],
+      }),
+    });
+
+    const res = await h.run({ type: 'EXPORT_HISTORY', waitMs: 200 });
+    expect(res.ok, `遍历失败原因：${res.reason ?? '未给出'}`).toBe(true);
+
+    const titles = h.payloads.map((p) => String(p.title));
+    // 每份标题都不一样，且都是侧栏里的会话名
+    expect(new Set(titles).size).toBe(titles.length);
+    expect(titles).toContain('第一条会话');
+    // 关键：标题必须就是断点用的那个键（侧栏条目文本），两边口径不能分叉
+    for (const p of h.payloads) expect(p.title).toBe(p.label);
+    // 旧实现用的是标签页标题；harnes 会模拟站点「跟着改标签标题」，
+    // 真机（DeepSeek/豆包）并不改——所以这里只能钉「Title 不来自标签页」这一条：
+    expect(h.payloads.every((p) => typeof p.docTitle === 'string')).toBe(true);
+  }, 60000);
+});

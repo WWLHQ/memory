@@ -331,7 +331,18 @@
           siteLabel: site.label,
           /** 0.5.2：后台据此「每条一落断点」，SW 被杀也不丢进度 */
           label: item.label,
-          title: document.title,
+          /**
+           * 0.5.6：标题必须用**侧栏里这个会话的名字**，不能用 document.title。
+           *
+           * 2026-11-17 用户实测：「所有导出的标题都一样」。真因：DeepSeek/豆包的标签页标题
+           * 不随 SPA 切换会话更新（一直是用户手动打开的那个会话的名字），于是历史遍历
+           * 导出的几十份文件全都写着同一个标题，跟正文内容对不上——
+           * 打开文件看到「MCP集成技能连接器插件」，正文却是「个人做的记忆系统怎么变现」。
+           * 侧栏条目的文本才是这一条的会话名，它本来就是断点用的键，拿来当标题正好一致。
+           * 标签页原标题留在 docTitle 里备查，不丢信息。
+           */
+          title: item.label || document.title,
+          docTitle: document.title,
           url: location.href,
           exportedAt: new Date().toISOString(),
           messages: messages,
