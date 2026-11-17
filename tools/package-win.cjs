@@ -79,6 +79,12 @@ fs.writeFileSync(
   'utf8',
 );
 
+// 3.1) 自研浏览器插件：必须以解压目录随包分发，才能被 Edge/QQ 浏览器加载。
+const extensionDst = path.join(outDir, 'resources', 'webchat-exporter');
+tryRemove(extensionDst);
+fs.mkdirSync(path.dirname(extensionDst), { recursive: true });
+fs.cpSync(path.join(root, 'browser-extension', 'webchat-exporter'), extensionDst, { recursive: true });
+
 // 4) 产物自检
 for (const p of [
   exeDst,
@@ -86,6 +92,7 @@ for (const p of [
   path.join(appDir, 'dist', 'index.html'),
   path.join(appDir, 'dist-electron', 'main.cjs'),
   path.join(appDir, 'dist-electron', 'preload.cjs'),
+  path.join(extensionDst, 'manifest.json'),
 ]) {
   if (!fs.existsSync(p)) fail(`打包产物缺失：${p}`);
 }

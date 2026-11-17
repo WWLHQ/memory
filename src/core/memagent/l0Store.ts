@@ -7,10 +7,39 @@ import { chmodSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readF
 import { dirname } from 'node:path';
 import { parseL0Envelope, parseL0EnvelopeV2 } from './crypto.ts';
 
-/** L0 库里的单条原始数据：信封密文 + 封存时刻 */
-export interface L0Blob {
+/** L0 元数据（归属/状态）：与信封一起落库；全部可选，旧数据缺省按「仅管理员」处理 */
+export interface L0BlobMeta {
+  owner_user_id?: string;
+  project_id?: string;
+  status?: 'accepted' | 'filtered';
+  filter_code?: string;
+  filter_reason?: string;
+  source_agent?: string;
+}
+
+/**
+ * L0 库里的单条原始数据：信封密文 + 封存时刻 + 可选归属/状态元数据。
+ * 元数据全部可选：旧库（批次37 形态，只有 envelope/sealed_at）读回来不带这些字段，
+ * 归属未知 → 只按「仅管理员可解」处理（decrypt 端判定），不做猜测式迁移。
+ */
+export interface L0Blob extends L0BlobMeta {
   envelope: string;
   sealed_at: number;
+}
+
+/** 从任意输入归一化 blob：只认已知字段，旧数据缺元数据不报错（向后兼容） */
+export function normalizeL0Blob(raw: unknown): L0Blob | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const b = raw as Partial<L0Blob>;
+  if (typeof b.envelope !== 'string' || !b.envelope) return null;
+  const out: L0Blob = { envelope: b.envelope, sealed_at: typeof b.sealed_at === 'number' ? b.sealed_at : 0 };
+  if (typeof b.owner_user_id === 'string' && b.owner_user_id) out.owner_user_id = b.owner_user_id;
+  if (typeof b.project_id === 'string' && b.project_id) out.project_id = b.project_id;
+  if (b.status === 'accepted' || b.status === 'filtered') out.status = b.status;
+  if (typeof b.filter_code === 'string' && b.filter_code) out.filter_code = b.filter_code;
+  if (typeof b.filter_reason === 'string' && b.filter_reason) out.filter_reason = b.filter_reason;
+  if (typeof b.source_agent === 'string' && b.source_agent) out.source_agent = b.source_agent;
+  return out;
 }
 
 /** L0 库读写端口（桌面端 = FileL0BlobStore；测试 = InMemoryL0BlobStore） */
@@ -26,6 +55,8 @@ export interface L0BlobStore {
   getAll?(mem_ids: readonly string[]): Promise<Map<string, string>>;
   put(mem_id: string, blob: L0Blob): Promise<void>;
   delete(mem_id: string): Promise<void>;
+  /** 全部条目含元数据（L0 备份卡列表用）；未实现时调用方退化为 ids()+逐条 get */
+  listAll?(): Promise<Map<string, L0Blob>>;
   /** 全部持有 L0 的 mem_id（完整性核对/重建扫描用） */
   ids(): Promise<string[]>;
   count(): Promise<number>;
@@ -188,9 +219,9 @@ export class FileL0BlobStore implements L0BlobStore {
       }
       const items: Record<string, L0Blob> = {};
       for (const [id, blob] of Object.entries(doc.items ?? {})) {
-        const b = blob as Partial<L0Blob> | null;
-        if (!b || typeof b.envelope !== 'string' || !b.envelope) throw new Error(`shape: ${id} 缺 envelope`);
-        items[id] = { envelope: b.envelope, sealed_at: typeof b.sealed_at === 'number' ? b.sealed_at : 0 };
+        const b = normalizeL0Blob(blob);
+        if (!b) throw new Error(`shape: ${id} 缺 envelope`);
+        items[id] = b;
       }
       return { version: typeof doc.version === 'number' ? doc.version : L0_DOC_VERSION, items };
     } catch (e) {
@@ -252,6 +283,13 @@ export class FileL0BlobStore implements L0BlobStore {
     return out;
   }
 
+  /** 全量条目（含元数据）：L0 备份卡列表用；只回引用快照，不给信封明文通道之外的写口 */
+  async listAll(): Promise<Map<string, L0Blob>> {
+    const out = new Map<string, L0Blob>();
+    for (const [id, blob] of Object.entries(this.doc.items)) out.set(id, { ...blob });
+    return out;
+  }
+
   async put(mem_id: string, blob: L0Blob): Promise<void> {
     this.assertWritable();
     assertMemId(mem_id);
@@ -259,7 +297,9 @@ export class FileL0BlobStore implements L0BlobStore {
       throw new L0NotSealedError(`L0 库只收已封存信封：${mem_id} 的正文不是 v2/v1 信封（明文不许进 L0 库）`);
     }
     const prev = this.doc.items[mem_id];
-    this.doc.items[mem_id] = { envelope: blob.envelope, sealed_at: blob.sealed_at };
+    const next = normalizeL0Blob(blob);
+    if (!next) throw new L0NotSealedError(`L0 库写入条目形状非法：${mem_id}`);
+    this.doc.items[mem_id] = next;
     this.touchOrRollback(() => {
       if (prev === undefined) delete this.doc.items[mem_id];
       else this.doc.items[mem_id] = prev;
@@ -358,6 +398,12 @@ export class InMemoryL0BlobStore implements L0BlobStore {
 
   async count(): Promise<number> {
     return this.items.size;
+  }
+
+  async listAll(): Promise<Map<string, L0Blob>> {
+    const out = new Map<string, L0Blob>();
+    for (const [id, blob] of this.items) out.set(id, { ...blob });
+    return out;
   }
 
   bytes(): number {

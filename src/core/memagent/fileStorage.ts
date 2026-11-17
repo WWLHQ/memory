@@ -9,7 +9,7 @@
 //     每追加一条审计不再等于「整库 stringify + fsync + rename」（评审 P1-5 的写放大）。
 import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync, openSync, fsyncSync, closeSync, unlinkSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { L0BlobStore } from './l0Store.ts';
+import type { L0BlobStore, L0BlobMeta } from './l0Store.ts';
 import { isSealedL0 } from './l0Store.ts';
 import type { AuditLogStats } from './auditLog.ts';
 import { AUDIT_FILE_NAME, AuditLogCorruptError, FileAuditLog } from './auditLog.ts';
@@ -420,13 +420,13 @@ export class FileStorage implements StorageBackend {
    * 反向（L0 已写、记忆库写失败）只会留下「库里有密文、行上没有」的孤儿——读不到、不可检索，
    * 由 `scanLedgerForSplit`/完整性核对点名，绝不假装两边一致。
    */
-  private async splitL0FromRow(m: Memory): Promise<Memory> {
+  private async splitL0FromRow(m: Memory, l0Meta?: L0BlobMeta): Promise<Memory> {
     const l0 = this.l0;
     if (!l0) return m;
     const envelope = m.content_l0_enc;
     if (envelope) {
       if (!isSealedL0(envelope)) return m; // 不合法信封：不搬不删，留给上层显式处理
-      await l0.put(m.mem_id, { envelope, sealed_at: m.updated_at ?? m.created_at });
+      await l0.put(m.mem_id, { envelope, sealed_at: m.updated_at ?? m.created_at, ...l0Meta });
       return { ...m, content_l0_enc: undefined, has_l0: true };
     }
     if (m.has_l0) return m;
@@ -442,9 +442,9 @@ export class FileStorage implements StorageBackend {
     return m;
   }
 
-  async putMemory(m: Memory): Promise<void> {
+  async putMemory(m: Memory, l0Meta?: L0BlobMeta): Promise<void> {
     this.assertWritable();
-    const row = this.l0 ? await this.splitL0FromRow(m) : m;
+    const row = this.l0 ? await this.splitL0FromRow(m, l0Meta) : m;
     const prev = this.doc.memories[row.mem_id];
     this.doc.memories[row.mem_id] = row;
     this.touchOrRollback(() => {

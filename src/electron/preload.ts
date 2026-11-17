@@ -100,6 +100,89 @@ const mcpClients = {
     ipcRenderer.invoke(IPC.mcpClientEnable, id, sessionId) as Promise<{ ok: boolean; changed?: boolean; path?: string; backupPath?: string; error?: string }>,
 };
 
+// 网页版对话导出目录桥（chat-exports）：渲染层引导用户把浏览器插件导出目录指到这里；
+// 只回路径与打开动作，不回任何文件内容（内容一律走采集器入库链路）
+const chatExports = {
+  get: () => ipcRenderer.invoke(IPC.chatExportsGet) as Promise<{
+    ok: boolean; dir?: string; pluginDir?: string | null; aligned?: boolean | null; error?: string;
+  }>,
+  open: () => ipcRenderer.invoke(IPC.chatExportsOpen) as Promise<{ ok: boolean; path?: string; error?: string }>,
+  set: () => ipcRenderer.invoke(IPC.chatExportsSet) as Promise<{ ok: boolean; dir?: string; canceled?: boolean; error?: string }>,
+  follow: () => ipcRenderer.invoke(IPC.chatExportsFollow) as Promise<{ ok: boolean; dir?: string; error?: string }>,
+  // 导出来源统计：按站点目录数 .md（只回计数，不回文件名/内容）
+  sites: () => ipcRenderer.invoke(IPC.chatExportsSites) as Promise<{
+    ok: boolean; dir?: string; sites?: { site: string; count: number }[]; total?: number; error?: string;
+  }>,
+};
+
+// 自研浏览器插件桥：只回插件目录与打开动作，不执行安装脚本、不读插件内容。
+const webchatExport = {
+  status: () => ipcRenderer.invoke(IPC.webchatExportStatus) as Promise<{
+    ok: boolean;
+    todayCount: number;
+    day: string;
+    last: { at: number; site: string; file: string; bytes: number } | null;
+    recent: { at: number; site: string; file: string; bytes: number }[];
+  }>,
+};
+
+// 网页对话导出完整性审计桥：跑一次「导出文档 vs 原对话」逐条比对，返回人话报告。
+// report 是 Markdown 文本（给人读），summary 是结构化计数（给 UI 画数字）。
+const webchatAudit = {
+  run: () => ipcRenderer.invoke(IPC.webchatAuditRun) as Promise<{
+    ok: boolean;
+    dir?: string;
+    report?: string;
+    diffCount?: number;
+    summary?: {
+      sessions: number;
+      sessionsWithSnapshot: number;
+      sourceMessages: number;
+      exportedMessages: number;
+      matched: number;
+      textExact: number;
+      roleMismatch: number;
+      missing: number;
+      extra: number;
+      truncated: number;
+      rewritten: number;
+      accuracy: number | null;
+    };
+    error?: string;
+  }>,
+};
+
+// 按来源清理旧格式网页导出条目桥（2026-11-17）：预览需会话、执行仅管理员 + 逐字口令 PURGE。
+// 与 ledgerReset 的分工：只删 `collector:webchat-export*` 来源的行，其它来源、采集游标、导出文件都不动。
+const webchatPurge = {
+  preview: (site?: string, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.webchatPurgePreview, site, sessionId) as Promise<{
+      ok: boolean;
+      preview?: {
+        total: number;
+        by_site: Record<string, number>;
+        by_layer: Record<string, number>;
+        with_l0_cipher: number;
+        tombstones: number;
+        sample_ids: string[];
+      };
+      error?: string;
+    }>,
+  run: (confirmText: string, site?: string, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.webchatPurgeRun, confirmText, site, sessionId) as Promise<{
+      ok: boolean;
+      report?: { total: number; purged: number; failed: number; vector_failed: number };
+      backup_dir?: string;
+      error?: string;
+    }>,
+};
+
+const webchatExt = {
+  get: () => ipcRenderer.invoke(IPC.webchatExtGet) as Promise<{ ok: boolean; path?: string; error?: string }>,
+  openFolder: () => ipcRenderer.invoke(IPC.webchatExtOpenFolder) as Promise<{ ok: boolean; path?: string; error?: string }>,
+  openBrowser: (browser: 'edge' | 'qq') => ipcRenderer.invoke(IPC.webchatExtOpenBrowser, browser) as Promise<{ ok: boolean; error?: string }>,
+};
+
 // 会话采集器桥（19.9 接入成功立即读各 agent 会话/记忆）：宿主真扫命中后立刻触发一次对账
 // triggerNow(agentNames?, sessionId?)：传入已检测到的已安装 agent 名 → 扩展采集源白名单，立即读 L0；
 // T1（数据使用门禁）：触发采集需登录会话（admin/member 均放行，admin 留痕），hostCall 展开参数须传 [agentNames, sessionId]
@@ -211,6 +294,35 @@ const l0 = {
     ipcRenderer.invoke(IPC.l0RebuildPreview, req ?? {}, sessionId),
   rebuildRun: (req?: { confirm_text?: string; l0_session_id?: string; use_llm?: boolean }, sessionId?: string | null) =>
     ipcRenderer.invoke(IPC.l0RebuildRun, req ?? {}, sessionId),
+  /** L0-first 拦截标记：列表/统计（本人看自己的，管理员看全部）；查阅需本人或管理员且密钥已解锁 */
+  filteredList: (sessionId?: string | null) => ipcRenderer.invoke(IPC.l0FilteredList, sessionId),
+  filteredView: (backupId: string, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.l0FilteredView, backupId, sessionId) as Promise<
+      { ok: true; content: string } | { ok: false; error: string }
+    >,
+  filteredRejudge: (backupId: string, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.l0FilteredRejudge, backupId, sessionId) as Promise<
+      { ok: true; mem_id: string; dedup: string } | { ok: false; error: string; still_filtered?: boolean; reason?: string }
+    >,
+  /** 口径一本人直读：解锁写密钥后免审批直读本人 L0 原文（归属校验在主进程） */
+  selfView: (memId: string, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.l0SelfView, memId, sessionId) as Promise<
+      { ok: true; content: string } | { ok: false; error: string }
+    >,
+  selfBrowse: (sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.l0SelfBrowse, sessionId) as Promise<
+      { ok: true; mine: number; decrypted: number; locked: boolean; no_owner: number; rows: Array<{ mem_id: string; content: string }> }
+      | { ok: false; error: string; locked?: boolean }
+    >,
+  /** 存量归属回填：预览（登录统计）/ 执行（管理员 + 写密钥解锁 + 先备份 L0 库文件） */
+  ownerBackfillPreview: (sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.l0OwnerBackfillPreview, sessionId) as Promise<
+      { ok: true; total: number; no_owner: number; mine: number; others: number } | { ok: false; error: string }
+    >,
+  ownerBackfillRun: (targetUserId: string, sessionId?: string | null) =>
+    ipcRenderer.invoke(IPC.l0OwnerBackfillRun, sessionId, targetUserId) as Promise<
+      { ok: true; backfilled: number; backup: string | null; target: string } | { ok: false; error: string }
+    >,
   /**
    * 批次37-G：L0 恢复码（忘记管理密码的唯一找回通道，一次性）。
    * recovery_code 只在 issue/recover/init 那一次的返回值里出现；状态接口永不回显。
@@ -366,4 +478,4 @@ const shell = {
 };
 
 contextBridge.exposeInMainWorld('__ELECTRON__', true);
-contextBridge.exposeInMainWorld('api', { storage, personal, hostScan, hostAgentDetect, tenant, ownerBindings, mcpClients, collector, backup, dataRoot, log, l0, setup, legacy, ledgerReset, rulesRejudge, ledgerFields, refineQueue, sync, llm, recallHard, monitor, shell });
+contextBridge.exposeInMainWorld('api', { storage, personal, hostScan, hostAgentDetect, tenant, ownerBindings, mcpClients, collector, chatExports, webchatExport, webchatAudit, webchatPurge, webchatExt, backup, dataRoot, log, l0, setup, legacy, ledgerReset, rulesRejudge, ledgerFields, refineQueue, sync, llm, recallHard, monitor, shell });

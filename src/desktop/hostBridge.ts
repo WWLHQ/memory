@@ -18,6 +18,26 @@ const MAX_RETRY = 12;
 /** 同一请求 id 的去重窗口：客户端重发只是探测父窗口就绪，绝不能重复执行原生副作用 */
 const DEDUPE_TTL_MS = 10_000;
 
+/**
+ * 受理回执（ack）之后的最长等待。
+ *
+ * 背景（2026-11-16 实测事故）：探测窗口只有 MAX_RETRY × RETRY_MS = 3 秒，而「立即采集」
+ * （collector:triggerNow）实测 **4013ms** 才返回 → 子 frame 提前放弃并误报
+ * 「宿主桥不可达（父窗口未安装桥或非同源）」，用户看到「采集未执行」，其实采集已经跑完。
+ * 同页 webchatExt:get / chatExports:sites 经桥都是 6~24ms，桥本身是通的。
+ *
+ * 因此改为两段式：顶层收到请求先回 ack（= 已受理，正在做），子 frame 收到 ack 即停止重发、
+ * 转入本时限的长等待；只有「连 ack 都没收到」才判桥不可达 —— 那才是真的没装桥或非同源。
+ */
+const ACCEPTED_WAIT_MS = 180_000;
+
+/**
+ * 「已受理但没有结果」类错误的固定前缀（单一真源）。
+ * UI 据此把「采集根本没开始」和「采集已经在跑、只是结果没取回」分成两句人话，
+ * 不要让界面把后者说成「采集未执行」——那会误导用户重复点击。
+ */
+export const HOST_ACCEPTED_ERROR_PREFIX = '宿主已受理';
+
 export type HostMethod =
   | 'storage:putMemory' | 'storage:getMemory' | 'storage:listMemories'
   | 'storage:deleteMemory' | 'storage:appendAudit' | 'storage:queryAudit'
@@ -40,6 +60,18 @@ export type HostMethod =
   | 'mcp:clientEnable'
   | 'collector:triggerNow'
   | 'collector:status'
+  | 'chatExports:get'
+  | 'chatExports:open'
+  | 'chatExports:set'
+  | 'chatExports:follow'
+  | 'chatExports:sites'
+  | 'webchatExport:status'
+  | 'webchatAudit:run'
+  | 'webchatPurge:preview'
+  | 'webchatPurge:run'
+  | 'webchatExt:get'
+  | 'webchatExt:openFolder'
+  | 'webchatExt:openBrowser'
   | 'backup:getConfig'
   | 'backup:saveConfig'
   | 'backup:chooseDir'
@@ -64,6 +96,9 @@ export type HostMethod =
   | 'l0:pendingWrites'
   | 'l0:splitPreview' | 'l0:splitRun'
   | 'l0:rebuildPreview' | 'l0:rebuildRun'
+  | 'l0:filteredList' | 'l0:filteredView' | 'l0:filteredRejudge'
+  | 'l0:selfView' | 'l0:selfBrowse'
+  | 'l0:ownerBackfillPreview' | 'l0:ownerBackfillRun'
   | 'l0:recoveryStatus' | 'l0:recoveryInit' | 'l0:recoveryIssue' | 'l0:recover' | 'l0:recoveryExport'
   | 'setup:state' | 'setup:reselectDirs' | 'setup:setL0Password' | 'setup:regenCode' | 'setup:exportCard' | 'setup:finish'
   /** 批次58：向导的两个可选步骤（备份路径 / 精炼大模型），门禁同 setup:*（向导未走完才放行） */
@@ -114,6 +149,18 @@ const CHANNEL_TO_NATIVE: Record<HostMethod, [string, string]> = {
   'mcp:clientEnable': ['mcpClients', 'enable'],
   'collector:triggerNow': ['collector', 'triggerNow'],
   'collector:status': ['collector', 'status'],
+  'chatExports:get': ['chatExports', 'get'],
+  'chatExports:open': ['chatExports', 'open'],
+  'chatExports:set': ['chatExports', 'set'],
+  'chatExports:follow': ['chatExports', 'follow'],
+  'chatExports:sites': ['chatExports', 'sites'],
+  'webchatExport:status': ['webchatExport', 'status'],
+  'webchatAudit:run': ['webchatAudit', 'run'],
+  'webchatPurge:preview': ['webchatPurge', 'preview'],
+  'webchatPurge:run': ['webchatPurge', 'run'],
+  'webchatExt:get': ['webchatExt', 'get'],
+  'webchatExt:openFolder': ['webchatExt', 'openFolder'],
+  'webchatExt:openBrowser': ['webchatExt', 'openBrowser'],
   'backup:getConfig': ['backup', 'getConfig'],
   'backup:saveConfig': ['backup', 'saveConfig'],
   'backup:chooseDir': ['backup', 'chooseDir'],
@@ -153,6 +200,13 @@ const CHANNEL_TO_NATIVE: Record<HostMethod, [string, string]> = {
   'l0:splitRun': ['l0', 'splitRun'],
   'l0:rebuildPreview': ['l0', 'rebuildPreview'],
   'l0:rebuildRun': ['l0', 'rebuildRun'],
+  'l0:filteredList': ['l0', 'filteredList'],
+  'l0:filteredView': ['l0', 'filteredView'],
+  'l0:filteredRejudge': ['l0', 'filteredRejudge'],
+  'l0:selfView': ['l0', 'selfView'],
+  'l0:selfBrowse': ['l0', 'selfBrowse'],
+  'l0:ownerBackfillPreview': ['l0', 'ownerBackfillPreview'],
+  'l0:ownerBackfillRun': ['l0', 'ownerBackfillRun'],
   'l0:recoveryStatus': ['l0', 'recoveryStatus'],
   'l0:recoveryInit': ['l0', 'recoveryInit'],
   'l0:recoveryIssue': ['l0', 'recoveryIssue'],
@@ -284,6 +338,13 @@ export function handleBridgeMessage(e: MessageEvent): void {
   const source = e.source as WindowProxy | null;
   if (!source || typeof source.postMessage !== 'function') return;
 
+  // 先回受理回执，再执行（顺序不能反）：长任务远超 3 秒探测窗口，不回执就会被判成「桥不可达」。
+  try {
+    source.postMessage({ [RES]: { id: req.id, ack: true } }, e.origin);
+  } catch {
+    /* 回执发不出去也不阻塞执行（结果包仍会尝试回送） */
+  }
+
   executeOnce(req.id, req.method, req.args)
     .then((data) => source.postMessage({ [RES]: { id: req.id, ok: true, data } }, e.origin))
     .catch((err) => source.postMessage({ [RES]: { id: req.id, ok: false, error: String((err as Error)?.message ?? err) } }, e.origin));
@@ -319,7 +380,7 @@ async function callNative<T>(method: HostMethod, args: unknown[]): Promise<T> {
   return (await target.apply(api[ns], args)) as T;
 }
 
-/** 走 iframe 消息桥（子 frame）：父窗口未就绪时按退避重试，最终失败由调用方降级 */
+/** 走 iframe 消息桥（子 frame）：先等受理回执，再等结果；两段超时语义分开 */
 async function callViaParent<T>(method: HostMethod, args: unknown[]): Promise<T> {
   if (!ALLOWED_METHODS.has(method)) throw new Error(`未知宿主能力: ${method}`);
   const id = ulid();
@@ -327,26 +388,43 @@ async function callViaParent<T>(method: HostMethod, args: unknown[]): Promise<T>
   return new Promise<T>((resolve, reject) => {
     let wait = 0;
     let settled = false;
+    let accepted = false;
+    let acceptTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      window.clearInterval(timer);
+      if (acceptTimer) window.clearTimeout(acceptTimer);
+      window.removeEventListener('message', onMsg);
+      fn();
+    };
+
     const onMsg = (e: MessageEvent) => {
       if (settled || e.origin !== parentOrigin) return;
       if (e.source && e.source !== window.parent) return;
-      const res = (e.data as { [RES]?: { id: string; ok: boolean; data?: unknown; error?: string } } | null)?.[RES];
+      const res = (e.data as { [RES]?: { id: string; ack?: boolean; ok?: boolean; data?: unknown; error?: string } } | null)?.[RES];
       if (!res || res.id !== id) return;
-      settled = true;
-      window.removeEventListener('message', onMsg);
-      window.clearInterval(timer);
-      if (res.ok) resolve(res.data as T);
-      else reject(new Error(res.error ?? 'host bridge call failed'));
+      if (res.ack) {
+        // 已受理：停止重发（父窗口已经在做了，重发只是白跑），转入长等待
+        if (accepted) return;
+        accepted = true;
+        window.clearInterval(timer);
+        acceptTimer = setTimeout(() => {
+          finish(() => reject(new Error(`${HOST_ACCEPTED_ERROR_PREFIX}，但 3 分钟内没有返回结果：任务可能仍在后台进行，稍后刷新查看`)));
+        }, ACCEPTED_WAIT_MS);
+        return;
+      }
+      finish(() => (res.ok ? resolve(res.data as T) : reject(new Error(res.error ?? 'host bridge call failed'))));
     };
+
     window.addEventListener('message', onMsg);
     const post = () => window.parent.postMessage({ [REQ]: { id, method, args } }, parentOrigin);
     const timer = window.setInterval(() => {
       wait += 1;
       if (wait >= MAX_RETRY) {
-        settled = true;
-        window.clearInterval(timer);
-        window.removeEventListener('message', onMsg);
-        reject(new Error('宿主桥不可达（父窗口未安装桥或非同源）'));
+        // 连「已受理」回执都没收到 → 这才是真的父窗口没装桥 / 非同源
+        finish(() => reject(new Error('宿主桥不可达（父窗口未安装桥或非同源）')));
         return;
       }
       post();

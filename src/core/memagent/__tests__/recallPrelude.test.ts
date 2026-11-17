@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   RECALL_PRELUDE_OPEN, RECALL_PRELUDE_CLOSE, RECALL_PRELUDE_MARKER,
-  PLUGIN_INJECTION_MARKER,
+  PLUGIN_INJECTION_MARKER, RECALL_EMPTY_HINT,
   buildRecallPrelude, extractRecallHits, parseMcpRpcBody, lastUserQuery,
   stripRecallPrelude, injectSystemPrelude, buildHookOutput,
 } from '../recallPrelude.ts';
@@ -52,9 +52,14 @@ describe('buildRecallPrelude：只注入命中正文，不注入回显话术', (
     expect(p).not.toContain('display.markdown');
   });
 
-  it('无命中 / 非字符串 content → null（调用方据此不注入）', () => {
-    expect(buildRecallPrelude([])).toBeNull();
-    expect(buildRecallPrelude([{ content: 123 }, { content: '' }])).toBeNull();
+  it('零命中 → 下发强制重试指令，不再返回 null（第 2 层防复发）', () => {
+    const p = buildRecallPrelude([]);
+    expect(p).not.toBeNull();
+    expect(p).toBe(RECALL_EMPTY_HINT);
+    expect(p).toContain('不同的 query');
+    expect(p).toContain('已回退现查');
+    // 非字符串 content / 空串同样视为零命中
+    expect(buildRecallPrelude([{ content: 123 }, { content: '' }])).toBe(RECALL_EMPTY_HINT);
   });
 
   it('超长命中被截断且整体不超过上限', () => {

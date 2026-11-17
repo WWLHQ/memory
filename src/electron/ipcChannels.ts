@@ -24,6 +24,24 @@ export const IPC = {
   mcpClientEnable: 'mcp:clientEnable',
   collectorTriggerNow: 'collector:triggerNow',
   collectorStatus: 'collector:status',
+  /** 网页版对话导出目录（chat-exports）：渲染层读真实路径 / 打开目录（引导插件设置用） */
+  chatExportsGet: 'chatExports:get',
+  chatExportsOpen: 'chatExports:open',
+  /** 更改导出目录：弹系统目录选择框，持久化到 userData/chat-exports.json，采集源即时生效 */
+  chatExportsSet: 'chatExports:set',
+  /** 跟随插件落点：把采集目录改成探测到的「插件真实写入位置」（浏览器下载目录/chat-exports） */
+  chatExportsFollow: 'chatExports:follow',
+  chatExportsSites: 'chatExports:sites',
+  webchatExportStatus: 'webchatExport:status',
+  /** 网页对话导出完整性审计：跑一次「导出文档 vs 原对话」逐条比对，出人话报告 */
+  webchatAuditRun: 'webchatAudit:run',
+  /** 按来源清理「旧格式网页导出条目」（重导前/后的噪声清理）：预览只读、执行前强制备份 */
+  webchatPurgePreview: 'webchatPurge:preview',
+  webchatPurgeRun: 'webchatPurge:run',
+  /** 自研网页对话导出插件：读随包分发的插件目录 / 打开目录 / 打开浏览器扩展管理页（一键增加插件） */
+  webchatExtGet: 'webchatExt:get',
+  webchatExtOpenFolder: 'webchatExt:openFolder',
+  webchatExtOpenBrowser: 'webchatExt:openBrowser',
   backupGetConfig: 'backup:getConfig',
   backupSaveConfig: 'backup:saveConfig',
   backupChooseDir: 'backup:chooseDir',
@@ -81,6 +99,29 @@ export const IPC = {
    */
   l0RebuildPreview: 'l0:rebuildPreview',
   l0RebuildRun: 'l0:rebuildRun',
+  /**
+   * L0-first 拦截标记（2026-11-17 用户拍板）：质量门拦截条目在主 L0 库以 bak_* 键留标记。
+   * 列表/统计需登录会话（本人看自己的，管理员看全部）；查阅需本人或管理员且 L0 密钥已解锁；
+   * 人工重判：解密 → 重跑质量门 → 通过即正常入库并收掉标记条目。
+   */
+  l0FilteredList: 'l0:filteredList',
+  l0FilteredView: 'l0:filteredView',
+  l0FilteredRejudge: 'l0:filteredRejudge',
+  /**
+   * 口径一本人直读（2026-11-17 用户拍板）：解锁写密钥后免审批、免 grant、免查阅会话直读本人 L0 原文。
+   * 归属校验在主进程（blob.owner_user_id === 当前登录账号）；旧数据无归属 → 明确拒绝不猜；
+   * 查阅他人一律拒（须申请授权 §4.4.2）。
+   */
+  l0SelfView: 'l0:selfView',
+  l0SelfBrowse: 'l0:selfBrowse',
+  /**
+   * 存量 L0 归属回填（2026-11-17 用户拍板）：归属元数据上线前落的存量 blob 全部无 owner（实测 3852 条），
+   * 本人直读对无归属条目 fail-closed 跳过 → 旧数据永远读不出。回填 = 把无归属条目归属到
+   * 当前执行操作的管理员账号（单成员库事实成立）；预览仅登录可见（只回数字统计），
+   * 执行需管理员 + 写密钥已解锁 + 先给 L0 库文件做 .bak 备份。
+   */
+  l0OwnerBackfillPreview: 'l0:ownerBackfillPreview',
+  l0OwnerBackfillRun: 'l0:ownerBackfillRun',
   /**
    * 批次37-G：L0 恢复码（忘记管理密码时唯一的找回通道，一次性）。
    * 状态只回「有没有/指纹/时间」；发码/找回/换发都只在返回值里出现码明文一次；

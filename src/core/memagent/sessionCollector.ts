@@ -288,13 +288,96 @@ export function parseDshProjcache(text: string, _sourceName?: string): ParsedMes
   return out;
 }
 
+// ─── 网页版 Agent 导出 Markdown 解析器（浏览器插件定时同步到 chat-exports） ───
+//
+// 背景：DeepSeek / 豆包 / Kimi / 智谱 / ChatGPT 等网页版本身没有单会话批量导出，
+// 对话只在服务端 + 浏览器 IndexedDB。本项目本地优先、不抓 DOM，因此走
+// 「浏览器插件定时导出 Markdown 到本地目录 → 本采集器扫该目录」的半自动链路
+// （导出环节需人工装一次插件并指定目录，之后全自动）。
+//
+// 各家插件（AI Chat Archiver / ModelAny / Chat2File / NousSave / ChatBridge 等）
+// 导出的 Markdown 角色标记不统一，这里取三类最大公约数：
+//   · 标题式：## User / ### Assistant / ## 用户 / ### 豆包（整行只有角色名）
+//   · 加粗式：**User:** xxx / **助手：** xxx
+//   · 行前缀式：User: xxx / 用户：xxx / 我：xxx
+// 剥离：YAML frontmatter、H1 文档标题、导出元信息（时间/来源/模型/链接/标题）、水平线。
+// 诚实边界：认不出任何角色标记 → 返回空数组（不把整篇当一条记忆灌进去）。
+// 时间：导出 Markdown 通常无逐条时间戳 → ts 诚实留 undefined，绝不伪造。
+
+const WEBCHAT_ROLE_NAMES = 'user|assistant|用户|助手|我|ai|gpt|model|模型|deepseek|豆包|kimi|智谱|元宝|claude|gemini|机器人';
+/** 标题式：整行只有角色名（H1 是文档标题，故从 ## 起） */
+const WEBCHAT_HEADING_RE = new RegExp(`^#{2,6}\\s*(${WEBCHAT_ROLE_NAMES})\\s*[:：]?\\s*$`, 'i');
+/** 加粗式：**Role:** / **Role：** 两种冒号位置都认，后允许同行正文 */
+const WEBCHAT_BOLD_RE = new RegExp(`^\\*\\*\\s*(${WEBCHAT_ROLE_NAMES})\\s*[:：]?\\s*(?:\\*\\*)?\\s*[:：]?\\s*(.*)$`, 'i');
+/** 行前缀式：只收明确的对话角色词（模型名留给下面的元信息行，避免把「模型：deepseek」当助手） */
+const WEBCHAT_PREFIX_RE = /^(user|assistant|用户|助手|我|ai)\s*[:：]\s*(.*)$/i;
+/** 导出元信息 key（含中文站点常见字段） */
+const WEBCHAT_META_RE = /^(导出(时间|日期|自|于)|export(ed)?(\s*(at|on|time|date))?|source|来源|url|链接|model|模型|title|标题|platform|平台|conversation|会话|id|创建时间|更新时间|tags?|标签|作者|author)\s*[:：]/i;
+const WEBCHAT_RULE_RE = /^(-{3,}|\*{3,}|_{3,})$/;
+
+/** 角色别名归一：只产 user / assistant；system 等一律不认。 */
+function normalizeWebchatRole(name: string): ParsedMessage['role'] | null {
+  const n = name.toLowerCase();
+  if (n === 'user' || n === '用户' || n === '我') return 'user';
+  if (WEBCHAT_ROLE_NAMES.split('|').includes(n)) return 'assistant';
+  return null;
+}
+
+export function parseWebchatMd(text: string, sourceName = 'webchat'): ParsedMessage[] {
+  if (!text || typeof text !== 'string') return [];
+  const lines = text.split(/\r?\n/);
+  const out: ParsedMessage[] = [];
+  let i = 0;
+  // YAML frontmatter：首行 --- 到下一个 --- 之间整段跳过
+  if (lines[0]?.trim() === '---') {
+    i = 1;
+    while (i < lines.length && lines[i].trim() !== '---') i++;
+    if (i < lines.length) i++;
+  }
+  let current: { role: ParsedMessage['role']; lines: string[] } | null = null;
+  let seq = 0;
+  const flush = (): void => {
+    if (!current) return;
+    const content = current.lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+    if (content !== '') out.push({ role: current.role, content, seq: seq++, session_id: sourceName });
+    current = null;
+  };
+  for (; i < lines.length; i++) {
+    const raw = lines[i];
+    const line = raw.trim();
+    if (!line) { if (current) current.lines.push(''); continue; }
+    if (WEBCHAT_RULE_RE.test(line)) continue; // 水平线
+
+    let role: ParsedMessage['role'] | null = null;
+    let inline = '';
+    let m: RegExpExecArray | null;
+    if ((m = WEBCHAT_HEADING_RE.exec(line))) role = normalizeWebchatRole(m[1]);
+    else if ((m = WEBCHAT_BOLD_RE.exec(line))) { role = normalizeWebchatRole(m[1]); inline = m[2] ?? ''; }
+    else if ((m = WEBCHAT_PREFIX_RE.exec(line))) { role = normalizeWebchatRole(m[1]); inline = m[2] ?? ''; }
+    if (role) {
+      flush();
+      current = { role, lines: inline ? [inline] : [] };
+      continue;
+    }
+    // 元信息行：**导出时间：** 2026-… / - 来源: xxx 都归一后判定
+    const normalized = line
+      .replace(/^\*\*/, '').replace(/\*\*\s*([:：])/, '$1')
+      .replace(/^\s*[-*]\s+/, '');
+    if (WEBCHAT_META_RE.test(normalized)) continue;
+    if (/^#\s/.test(line)) continue; // H1 文档标题
+    if (current) current.lines.push(raw);
+  }
+  flush();
+  return out;
+}
+
 // ─── 采集源配置 ───────────────────────────────────────────────────────────────
 
 export interface SessionLogSource {
   /** 来源标识（source_agent，写进审计 + 记忆 created_by_agent） */
   name: string;
   /** 解析器类型 */
-  parser: 'claude-jsonl' | 'workbuddy-md' | 'workbuddy-jsonl' | 'jsonl' | 'markdown' | 'dsh-zstd-jsonl' | 'dsh-projcache';
+  parser: 'claude-jsonl' | 'workbuddy-md' | 'workbuddy-jsonl' | 'jsonl' | 'markdown' | 'dsh-zstd-jsonl' | 'dsh-projcache' | 'webchat-md';
   /** 会话日志目录（缺失 → 诚实 skip） */
   dir: string;
   /** 文件名过滤（缺省按 parser 选：jsonl 类 *.jsonl，markdown 类 *.md，dsh-zstd-jsonl 类 *.jsonl.zstd） */
@@ -505,7 +588,7 @@ export async function scanSessionLogs(opts: ScanOptions): Promise<ScanResult> {
       continue;
     }
     const pattern = src.filePattern ?? (
-      src.parser === 'workbuddy-md' || src.parser === 'markdown' ? /\.md$/
+      src.parser === 'workbuddy-md' || src.parser === 'markdown' || src.parser === 'webchat-md' ? /\.md$/
       : src.parser === 'dsh-zstd-jsonl' ? /\.jsonl\.zstd$/
       : src.parser === 'dsh-projcache' ? /\.json$/
       : /\.jsonl$/
@@ -674,7 +757,9 @@ export async function scanSessionLogs(opts: ScanOptions): Promise<ScanResult> {
         // 限流/单文件上限中断时记 msgIndex（同一全文的下一条消息下标），下周期从该处续采
         const rawText = buf.toString('utf8');
         const wholeSha = sha256Buf(buf);
-        const parse = src.parser === 'dsh-projcache' ? (src.parseBlock ?? parseDshProjcache) : (src.parseBlock ?? parseWorkbuddyMd);
+        const parse = src.parser === 'dsh-projcache' ? (src.parseBlock ?? parseDshProjcache)
+          : src.parser === 'webchat-md' ? (src.parseBlock ?? parseWebchatMd)
+          : (src.parseBlock ?? parseWorkbuddyMd);
         // 批次35：整块解析先过角色白名单再算下标——游标 msgIndex 记的是「过滤后」的位置，续采口径才稳定
         const allMsgs = parse(rawText, src.name);
         const msgs = allMsgs.filter((m) => roles.includes(m.role));
@@ -685,7 +770,7 @@ export async function scanSessionLogs(opts: ScanOptions): Promise<ScanResult> {
         if (unchanged && startIdx >= msgs.length) {
           // 文件无变化 → 不重复采；如实统计幂等命中数（观测口径，游标保持）
           for (const m of msgs) {
-            const h = src.parser === 'dsh-projcache'
+            const h = (src.parser === 'dsh-projcache' || src.parser === 'webchat-md')
               ? sha256(`${m.content}|${src.name}|${rel}|${m.role}`)
               : sha256(`${m.content}|${src.name}|${rel}`);
             if (seenHashes.has(h)) deduped++;
@@ -707,8 +792,8 @@ export async function scanSessionLogs(opts: ScanOptions): Promise<ScanResult> {
             skipped.push(`${key}: 超过单文件上限 ${maxPerFile}，剩余下周期`);
             break;
           }
-          // dsh-projcache：hash 含 role（user/assistant 同 turn 不同 hash）；workbuddy：按块
-          const hash = src.parser === 'dsh-projcache'
+          // dsh-projcache / webchat-md：hash 含 role（user/assistant 同一内容不同 hash，完整对话两角色都要）；workbuddy：按块
+          const hash = (src.parser === 'dsh-projcache' || src.parser === 'webchat-md')
             ? sha256(`${m.content}|${src.name}|${rel}|${m.role}`)
             : sha256(`${m.content}|${src.name}|${rel}`);
           if (seenHashes.has(hash)) {
@@ -719,7 +804,7 @@ export async function scanSessionLogs(opts: ScanOptions): Promise<ScanResult> {
           collected++;
           fileNew++;
           items.push({
-            key, agent: src.name, role: m.role, content: stripPluginInjection(m.content),
+            key, agent: agentFor(src, rel), role: m.role, content: stripPluginInjection(m.content),
             hash, seq: m.seq ?? idx, category: src.category,
           });
           markProcessed();
@@ -1008,6 +1093,46 @@ export function defaultAgentSources(o: DefaultSourcesOpts = {}): SessionLogSourc
     });
   }
   return out;
+}
+
+/**
+ * 从导出文件的相对路径取站点目录名（插件写的是 `<下载目录>/chat-exports/<站点>/<时间戳>.md`）。
+ * 不在站点子目录下（用户自己丢在根目录的 md）→ 返回 null，绝不瞎猜站点。
+ */
+export function webchatSiteOf(rel: string): string | null {
+  const parts = String(rel ?? '').split(/[\\/]+/).filter(Boolean);
+  if (parts.length < 2) return null;
+  const site = parts[0].trim().toLowerCase();
+  return /^[a-z0-9_-]{1,40}$/.test(site) ? site : null;
+}
+
+/**
+ * 采集项的来源标识：网页导出按站点细分（`webchat-export:deepseek`），其余源原样。
+ * 目的：入库后能直接看出这条对话是 DeepSeek / 豆包 / 千问 哪家导出的
+ * （导出 Markdown 里那行「站点：」在解析时被当元信息剥离了，不靠它）。
+ */
+export function agentFor(src: Pick<SessionLogSource, 'name' | 'parser'>, rel: string): string {
+  if (src.parser !== 'webchat-md') return src.name;
+  const site = webchatSiteOf(rel);
+  return site ? `${src.name}:${site}` : src.name;
+}
+
+/**
+ * 网页版对话导出采集源（专用 chat-exports 目录）。
+ * 完整对话：roles 显式 ['user','assistant']（覆盖缺省「只采 user」）；
+ * 递归扫子目录（按平台/账号分目录导出的插件常见）；目录不存在由 scan 诚实 skip。
+ */
+export function webchatExportSource(dir: string): SessionLogSource {
+  return {
+    name: 'webchat-export',
+    parser: 'webchat-md',
+    dir,
+    recursive: true,
+    maxDepth: 4,
+    category: 'context',
+    filePattern: /\.md$/,
+    roles: ['user', 'assistant'],
+  };
 }
 
 // ─── 与 coreWrite 的桥接（P0 主源：入库走 L0→L6 阶梯） ────────────────────────

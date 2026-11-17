@@ -1,6 +1,6 @@
 // memagent-core 契约类型（REQ-007 §1/§2/§3/§5/§6 直译，19.10/19.11）
 // 内核 = 唯一事实源；端壳只调用不实现业务（19.11 红线①）。
-import type { L0BlobStore } from './l0Store.ts';
+import type { L0BlobStore, L0BlobMeta } from './l0Store.ts';
 import type { PendingStore, WriteKnobs } from './pendingWrites.ts';
 import type { LayerViolationCode } from './layerRules.ts';
 
@@ -466,8 +466,8 @@ export interface BrowseResult {
 export interface L0Port {
   /** 返回 v2 信封；写密钥未解锁抛 E_L0_LOCKED（绝不落明文/不伪造加密标记） */
   seal(plain: string): Promise<string>;
-  /** 按连续会话解密；会话无效/过期抛 E_L0_EXPIRED，密钥不匹配抛 E_AUTH_L0 */
-  decrypt(req: { l0_session_id: string; project_id: string; mem_id: string; envelope: string }): Promise<string>;
+  /** 按连续会话解密；会话无效/过期抛 E_L0_EXPIRED，密钥不匹配抛 E_AUTH_L0；owner_user_id = 归属人（租户隔离判定用） */
+  decrypt(req: { l0_session_id: string; project_id: string; mem_id: string; envelope: string; owner_user_id?: string }): Promise<string>;
   /** 会话归属（审计 l0_view 用 grant_id/user_id/scope；端壳实现） */
   sessionInfo?(l0_session_id: string): Promise<{
     grant_id?: string;
@@ -920,8 +920,8 @@ export interface ListProjectsFilter {
 }
 
 export interface StorageBackend {
-  /** 记忆主表 */
-  putMemory(m: Memory): Promise<void>;
+  /** 记忆主表；l0Meta = 拆行进 L0 原数据库时随密文落库的归属/状态元数据（L0-first 备份语义），实现可忽略 */
+  putMemory(m: Memory, l0Meta?: L0BlobMeta): Promise<void>;
   getMemory(mem_id: string): Promise<Memory | null>;
   listMemories(filter: Filter): Promise<Memory[]>;
   deleteMemory(mem_id: string): Promise<void>;
@@ -957,6 +957,12 @@ export interface MemAgentOptions {
    * 传入时 FileStorage 会把写入行的信封搬进此库、行只留 `has_l0`，browse 也从这里回读信封。
    */
   l0Blobs?: L0BlobStore;
+  /**
+   * L0-first 拦截标记写入口（2026-11-17 用户拍板：不建独立备份文件）：质量门拦截条目的原文密文
+   * 以 bak_* 键落**主 L0 库**（blob.status='filtered' + 归属人），统计可区分、可显示、可人工重判。
+   * 缺省 = 保留旧行为（拦截条目只写审计，不落标记条目）。
+   */
+  l0Backup?: { put(mem_id: string, blob: import('./l0Store.ts').L0Blob): Promise<void> };
   /**
    * 批次44-D4：写入落盘兜底队列存储端口。L0 锁定时 write_memory 暂存于此，解锁后重放。
    * 缺省 = 内存实现（进程内不丢，重启清空）；桌面应传入 FilePendingStore 以持久化。

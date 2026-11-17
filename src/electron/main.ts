@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, nativeTheme, powerMonitor, session, shell } from 'electron';
+﻿import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, powerMonitor, session, shell } from 'electron';
 process.on('uncaughtException', (err) => {
   console.error('[uncaught]', err?.message, err?.stack);
 });
@@ -16,7 +16,7 @@ import { FileStorage } from '../core/memagent/fileStorage.ts';
 import { FilePersonalStore } from '../core/memagent/personalStoreFile.ts';
 import { parsePersonalOwnerBindings, type PersonalOwnerBinding } from '../core/memagent/personalStore.ts';
 import { createPersonalApi, type PersonalSyncPort } from '../core/memagent/personal.ts';
-import { FileL0BlobStore } from '../core/memagent/l0Store.ts';
+import { FileL0BlobStore, type L0Blob } from '../core/memagent/l0Store.ts';
 import {
   BACKUP_PREFIX, backupTargetDir, backupTargetDirs, kindOfBackupName, planBackupFiles, selectBackupsToDelete, sortBackupsNewestFirst,
   type BackupKind,
@@ -36,6 +36,14 @@ import {
   samePath, summarizeDataDir, validateDataRootPath, wizardRequired, writeDataRootPointer,
   type DataRootMigration, type DataRootPointer, type DataRootSummary, type LibraryPaths,
 } from './dataRoot.ts';
+import { resolveWebchatExtensionDir } from './webchatExtensionPath.ts';
+import { ensureStableExtensionDir } from './webchatExtensionCopy.ts';
+import { createWebchatIngestServer, newWebchatIngestToken, writeWebchatRuntime } from './webchatIngest.ts';
+import { detectChatExportsDirs, samePath as sameFsPath, siteExportStats } from './chatExportsLocations.ts';
+import { formatAuditReport, resolveAuditDir, runAudit } from '../core/memagent/webchatAuditStore.ts';
+import {
+  buildExtensionPageActivationScript, extensionPageActivation, resolveBrowserExecutable, type SupportedBrowser,
+} from './browserLaunch.ts';
 import { AUDIT_FILE_NAME } from '../core/memagent/auditLog.ts';
 import { detectLocalAgents, hostAgentConfig } from './agentDetect.ts';
 import { applyRecallEvidence, enableMcpClient, scanMcpClients, snippetForClient, wireMcpClient } from './mcpClients.ts';
@@ -68,14 +76,16 @@ import { createWebhook } from '../core/memagent/webhook.ts';
 import { createWebhookHttpServer } from './webhookServer.ts';
 import type { AuditAction, Category, Form, Memory } from '../core/memagent/types.ts';
 import {
-  createReconciler, applyScanToStore, defaultAgentSources,
+  createReconciler, applyScanToStore, defaultAgentSources, webchatExportSource,
   type CollectorCursor, type ScanResult,
 } from '../core/memagent/sessionCollector.ts';
 import { DAEMON_DIR_NAME, drainCollectPending, PENDING_DIR_NAME } from '../core/memagent/collectDaemon.ts';
 import { coreWrite } from '../core/memagent/memories.ts';
+import { checkL0ToL1Quality } from '../core/memagent/qualityGate.ts';
 import { L0Vault } from '../core/memagent/l0vault.ts';
 import { demoteStubLayers, scanStubLayers } from '../core/memagent/legacyLayers.ts';
 import { purgeLedger, scanLedgerForReset } from '../core/memagent/ledgerReset.ts';
+import { purgeWebchatExports, selectWebchatExportMemories } from '../core/memagent/webchatPurge.ts';
 import { rejudgeRows, scanRowsForRejudge } from '../core/memagent/rejudge.ts';
 import { backfillMissingFields, scanRowsForBackfill } from '../core/memagent/fieldBackfill.ts';
 import { normalizeTenantFields, scanRowsForTenantNormalize } from '../core/memagent/tenantNormalize.ts';
@@ -104,9 +114,9 @@ import { JsVectorBackend } from '../core/memagent/vector.ts';
 import { readFile, appendFile, mkdir, writeFile, copyFile, readdir, unlink, stat } from 'node:fs/promises';
 import { join, extname, normalize, sep, basename, dirname } from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { execFile, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { existsSync, readFileSync, writeFileSync, renameSync, copyFileSync, mkdirSync } from 'node:fs';
-import { dialog } from 'electron';
+import { existsSync, readFileSync, writeFileSync, renameSync, copyFileSync, mkdirSync, readdirSync } from 'node:fs';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 文件地图（改代码先看这里；按 § 标题搜索，不要依赖行号）：
@@ -178,6 +188,8 @@ let L0_DB_PATH: string;
 let AUDIT_PATH: string;
 /** 批次37-A：L0 原数据库实例（主进程独占写；页面只能经 l0:blobs 按会话批量回读密文） */
 let l0Store: FileL0BlobStore;
+/** L0-first 拦截标记写入口（2026-11-17 用户拍板：不建独立备份文件，复用主 L0 库，bak_* 条目做标记） */
+let l0BackupStore: FileL0BlobStore;
 /**
  * 批次42-B：云端同步中枢（主进程 pglite 落盘，dataDir = 数据根 sync-hub/）。
  * init 失败不阻断应用启动（同步是增量能力）：置 null 并记日志，sync:* handler 如实报「中枢未就绪」。
@@ -233,6 +245,12 @@ const AGENT_ONBOARD_PORT = 8200;
 const MCP_PORT = 8202;
 const MCP_HTTP_PORT = 8204;
 const WEBHOOK_PORT = 8203;
+/**
+ * 插件导出接收端（2026-11-16）：插件 POST 到 127.0.0.1 由应用自己落盘。
+ * 端口被占就 +1 探测（最多 +9），实际端口写进插件目录的 runtime.json，插件不需要猜。
+ */
+const WEBCHAT_INGEST_PORT = 8206;
+const WEBCHAT_INGEST_PORT_PROBE = 9;
 /** 批次37-A：l0:blobs 单次回读上限（渲染层按 200 一批，留出余量；超限如实拒绝而不是静默截断） */
 const L0_BLOBS_MAX_IDS = 500;
 /**
@@ -1769,6 +1787,238 @@ function registerL0Ipc(vault: L0Vault, collectorVector: JsVectorBackend, pending
     } catch (e) { return l0Fail(e); }
   });
 
+  // ── L0-first 拦截标记（2026-11-17 用户拍板：不建独立备份文件）──────────────────
+  // 质量门拦截条目以 bak_* 键落主 L0 库（blob.status='filtered' + 归属人）。
+  // 权限：本人可查/可重判自己的（口径一：解锁写密钥后免审批直读）；管理员全量；
+  // 旧数据无归属 → 仅管理员。所有查阅与重判都落审计。
+  const filteredGateCheck = (blob: { owner_user_id?: string } | null, ctx: { user_id: string; role?: string }): string | null => {
+    const isAdmin = ctx.role === 'admin';
+    const isOwner = Boolean(blob?.owner_user_id && blob.owner_user_id === ctx.user_id);
+    if (!isAdmin && !isOwner) {
+      return '该条拦截记录不属于当前账号：仅本人或管理员可操作';
+    }
+    return null;
+  };
+
+  handleIpc(IPC.l0FilteredList, async (_e, sessionId?: string) => {
+    const gate = requireSession(sessionId, IPC.l0FilteredList);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    try {
+      const isAdmin = gate.ctx.role === 'admin';
+      const all = l0BackupStore.listAll ? await l0BackupStore.listAll() : new Map();
+      const items: Array<{
+        id: string; sealed_at: number; owner: string; mine: boolean; project_id: string;
+        source: string; filter_code: string; filter_reason: string;
+      }> = [];
+      let accepted_count = 0;
+      for (const [id, blob] of all) {
+        if (!id.startsWith('bak_')) { accepted_count++; continue; }
+        const mine = Boolean(blob.owner_user_id && blob.owner_user_id === gate.ctx.user_id);
+        if (!isAdmin && !mine) continue; // 旧数据无归属 → 仅管理员可见
+        items.push({
+          id, sealed_at: blob.sealed_at, owner: blob.owner_user_id ?? '', mine,
+          project_id: blob.project_id ?? '', source: blob.source_agent ?? '',
+          filter_code: blob.filter_code ?? '', filter_reason: blob.filter_reason ?? '',
+        });
+      }
+      items.sort((a, b) => b.sealed_at - a.sealed_at);
+      return {
+        ok: true, role: isAdmin ? 'admin' : 'member',
+        filtered_count: items.length, accepted_count,
+        items: items.slice(0, 200), truncated: items.length > 200,
+      };
+    } catch (e) { return l0Fail(e); }
+  });
+
+  handleIpc(IPC.l0FilteredView, async (_e, backupId?: string, sessionId?: string) => {
+    const gate = requireSession(sessionId, IPC.l0FilteredView);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    const id = typeof backupId === 'string' ? backupId.trim() : '';
+    try {
+      if (!id.startsWith('bak_')) return { ok: false, error: '拦截标记条目 id 形状不合法' };
+      const blob = await l0BackupStore.get(id);
+      if (!blob || blob.status !== 'filtered') return { ok: false, error: '拦截标记条目不存在或已重判收尾' };
+      const denied = filteredGateCheck(blob, gate.ctx);
+      if (denied) {
+        actionLog('kernel', 'l0:filtered-view-denied', { backup_id: id, user: gate.ctx.user_id, owner: blob.owner_user_id ?? null });
+        return { ok: false, error: denied };
+      }
+      const content = await vault.decryptWithKey(blob.envelope);
+      await storage.appendAudit({
+        request_id: `req_l0fview_${Date.now()}`, action: 'l0_view', ts: Date.now(),
+        project_id: blob.project_id, user_id: gate.ctx.user_id,
+        detail: { source: 'filtered_marker', backup_id: id, via: 'self_read' },
+      } as never);
+      return { ok: true, content };
+    } catch (e) { return l0Fail(e); }
+  });
+
+  handleIpc(IPC.l0FilteredRejudge, async (_e, backupId?: string, sessionId?: string) => {
+    const gate = requireSession(sessionId, IPC.l0FilteredRejudge);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    const id = typeof backupId === 'string' ? backupId.trim() : '';
+    try {
+      if (!id.startsWith('bak_')) return { ok: false, error: '拦截标记条目 id 形状不合法' };
+      const blob = await l0BackupStore.get(id);
+      if (!blob || blob.status !== 'filtered') return { ok: false, error: '拦截标记条目不存在或已重判收尾' };
+      const denied = filteredGateCheck(blob, gate.ctx);
+      if (denied) {
+        actionLog('kernel', 'l0:filtered-rejudge-denied', { backup_id: id, user: gate.ctx.user_id, owner: blob.owner_user_id ?? null });
+        return { ok: false, error: denied };
+      }
+      const plain = await vault.decryptWithKey(blob.envelope);
+      // 先本地预判：避免把「仍会拦截」的原文交给 coreWrite 再落一条重复的 bak 标记
+      const quality = checkL0ToL1Quality(plain);
+      if (!quality.ok) {
+        actionLog('kernel', 'l0:filtered-rejudge-still-blocked', { backup_id: id, code: quality.code ?? '', user: gate.ctx.user_id });
+        return { ok: false, still_filtered: true, reason: quality.reason ?? '仍未通过质量门', error: `重判仍未通过质量门：${quality.reason ?? ''}` };
+      }
+      const now = Date.now();
+      const r = await coreWrite(
+        {
+          content: plain,
+          category: 'context',
+          project_id: blob.project_id ?? 'P1',
+          user_id: blob.owner_user_id,
+          source_agent: blob.source_agent ? `${blob.source_agent}+rejudge` : 'l0-filtered-rejudge',
+        },
+        { storage, vector: collectorVector, account: tenantTriple, request_id: `req_l0frej_${now}`, now, l0: vault, l0Backup: l0BackupStore },
+      );
+      if (r.dedup.action === 'new' || r.dedup.action === 'grafted') {
+        // 重判已有效落库（新增或嫁接）→ 收掉标记条目；原文已在主库有自己的 L0 密文
+        await l0BackupStore.delete(id);
+        await storage.appendAudit({
+          request_id: `req_l0frej_${now}`, action: 'memory_op', ts: now, project_id: blob.project_id,
+          user_id: gate.ctx.user_id, detail: { op: 'l0_filtered_rejudge', backup_id: id, mem_id: r.mem_id, dedup: r.dedup.action },
+        } as never);
+        actionLog('kernel', 'l0:filtered-rejudge-done', { backup_id: id, mem_id: r.mem_id, dedup: r.dedup.action, user: gate.ctx.user_id });
+        return { ok: true, mem_id: r.mem_id, dedup: r.dedup.action };
+      }
+      actionLog('kernel', 'l0:filtered-rejudge-rejected', { backup_id: id, dedup: r.dedup.action, user: gate.ctx.user_id });
+      return { ok: false, error: `重判写入被内核拒绝（${r.dedup.action}），标记条目保留` };
+    } catch (e) { return l0Fail(e); }
+  });
+
+  // ── 口径一本人直读（2026-11-17 用户拍板）：解锁写密钥后免审批直读本人 L0 原文 ──────────
+  // 与拦截卡同一模式：归属校验在主进程（blob.owner_user_id === 当前登录账号），密钥 gate 在 vault
+  // （decryptWithKey：两把密钥都不在内存 → E_L0_LOCKED fail-closed）。查阅他人一律拒（§4.4.2）。
+  handleIpc(IPC.l0SelfView, async (_e, memId?: string, sessionId?: string) => {
+    const gate = requireSession(sessionId, IPC.l0SelfView);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    const id = typeof memId === 'string' ? memId.trim() : '';
+    try {
+      if (!id || id.startsWith('bak_')) return { ok: false, error: '记忆 id 形状不合法（拦截标记条目请用拦截记录卡查阅）' };
+      const blob = await l0Store.get(id);
+      if (!blob) return { ok: false, error: '该记忆没有 L0 密文（可能早于拆库落成，或 L0 已随删除清理）' };
+      if (!blob.owner_user_id) {
+        return { ok: false, error: '该记录缺少归属元数据（历史数据）：本人直读不可用，请走授权申请（§4.4.2）' };
+      }
+      if (blob.owner_user_id !== gate.ctx.user_id) {
+        actionLog('kernel', 'l0:self-view-denied', { mem_id: id, user: gate.ctx.user_id, owner: blob.owner_user_id });
+        return { ok: false, error: '该 L0 记录不属于当前账号：查阅他人原文须先申请授权（§4.4.2）' };
+      }
+      const content = await vault.decryptWithKey(blob.envelope);
+      await storage.appendAudit({
+        request_id: `req_l0self_${Date.now()}`, action: 'l0_view', ts: Date.now(),
+        project_id: blob.project_id, user_id: gate.ctx.user_id,
+        detail: { source: 'self_read', mem_id: id },
+      } as never);
+      return { ok: true, content };
+    } catch (e) { return l0Fail(e); }
+  });
+
+  handleIpc(IPC.l0SelfBrowse, async (_e, sessionId?: string) => {
+    const gate = requireSession(sessionId, IPC.l0SelfBrowse);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    try {
+      const all = l0Store.listAll ? await l0Store.listAll() : new Map<string, L0Blob>();
+      const rows: Array<{ mem_id: string; content: string }> = [];
+      let mine = 0;
+      let no_owner = 0;
+      let locked = false;
+      for (const [id, blob] of all) {
+        if (id.startsWith('bak_')) continue; // 拦截标记走专用卡，不混进本人列表
+        if (!blob.owner_user_id) { no_owner++; continue; } // 存量无归属 → fail-closed 跳过（可在安全页回填）
+        if (blob.owner_user_id !== gate.ctx.user_id) continue;
+        mine++;
+        try {
+          rows.push({ mem_id: id, content: await vault.decryptWithKey(blob.envelope) });
+        } catch (e) {
+          // 密钥没解锁（E_L0_LOCKED）→ 整页如实报锁定；个别坏条目只跳过不拖垮全页
+          if ((e as Error)?.message?.includes('E_L0_LOCKED') || (e as { code?: string })?.code === 'E_L0_LOCKED') locked = true;
+        }
+      }
+      if (locked && rows.length === 0) {
+        return { ok: false, locked: true, error: 'L0 密钥未解锁：请先在安全页解锁写密钥，再直读本人原文（§4.4.4）' };
+      }
+      await storage.appendAudit({
+        request_id: `req_l0selfb_${Date.now()}`, action: 'l0_view', ts: Date.now(),
+        user_id: gate.ctx.user_id,
+        detail: { source: 'self_browse', mine, decrypted: rows.length, locked, no_owner },
+      } as never);
+      return { ok: true, mine, decrypted: rows.length, locked, no_owner, rows };
+    } catch (e) { return l0Fail(e); }
+  });
+
+  // ── 存量 L0 归属回填（2026-11-17 用户拍板）────────────────────────────────────────
+  // 预览：登录即可，只回数字统计（不含任何正文/密钥材料）。
+  handleIpc(IPC.l0OwnerBackfillPreview, async (_e, sessionId?: string) => {
+    const gate = requireSession(sessionId, IPC.l0OwnerBackfillPreview);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    try {
+      const all = l0Store.listAll ? await l0Store.listAll() : new Map<string, L0Blob>();
+      let total = 0, no_owner = 0, mine = 0, others = 0;
+      for (const [id, blob] of all) {
+        if (id.startsWith('bak_')) continue;
+        total++;
+        if (!blob.owner_user_id) no_owner++;
+        else if (blob.owner_user_id === gate.ctx.user_id) mine++;
+        else others++;
+      }
+      return { ok: true, total, no_owner, mine, others };
+    } catch (e) { return l0Fail(e); }
+  });
+
+  // 执行：管理员 + 写密钥已解锁（现场确认闸门）+ 先给 L0 库文件做 .bak 备份；
+  // 归属目标 = **管理员显式指定的账号**（home 账号表的 account 字段，通常选成员账号）——
+  // 不再用执行者自己的账号：admin 与成员是两个账号，归给 admin 会让成员直读依旧读不到。
+  handleIpc(IPC.l0OwnerBackfillRun, async (_e, sessionId?: string, targetUserId?: string) => {
+    const gate = requireAdmin(sessionId, IPC.l0OwnerBackfillRun);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    const target = typeof targetUserId === 'string' ? targetUserId.trim() : '';
+    try {
+      if (!target || /[\s"'`]/.test(target)) {
+        return { ok: false, error: '归属目标账号无效：请从账号列表中选择（不猜、不接受自由输入）' };
+      }
+      if (!vault.isWriteUnlocked()) {
+        return { ok: false, error: 'L0 写密钥未解锁：请先在安全页解锁写密钥再执行回填（§4.4.4）' };
+      }
+      const all = l0Store.listAll ? await l0Store.listAll() : new Map<string, L0Blob>();
+      const targets: Array<{ id: string; blob: L0Blob }> = [];
+      for (const [id, blob] of all) {
+        if (id.startsWith('bak_')) continue;
+        if (!blob.owner_user_id) targets.push({ id, blob });
+      }
+      if (targets.length === 0) return { ok: true, backfilled: 0, backup: null, target };
+      // 批量改写前先备份（项目不变量）：L0 库文件原样复制一份
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const backupPath = `${L0_DB_PATH}.before-owner-backfill-${stamp}.bak`;
+      await copyFile(L0_DB_PATH, backupPath);
+      let backfilled = 0;
+      for (const { id, blob } of targets) {
+        await l0Store.put(id, { ...blob, owner_user_id: target });
+        backfilled++;
+      }
+      await storage.appendAudit({
+        request_id: `req_l0bfill_${Date.now()}`, action: 'memory_op', ts: Date.now(),
+        user_id: gate.ctx.user_id,
+        detail: { op: 'l0_owner_backfill', backfilled, total: targets.length, target, backup: backupPath },
+      } as never);
+      actionLog('kernel', 'l0:owner-backfill-done', { backfilled, target, user: gate.ctx.user_id, backup: backupPath });
+      return { ok: true, backfilled, backup: backupPath, target };
+    } catch (e) { return l0Fail(e); }
+  });
+
   // ── 批次37-G：L0 恢复码（忘记管理密码的唯一找回通道，一次性） ──────────────────
   // 卡面正文只能在主进程拼：l0Recovery.ts 引了 node:crypto，渲染层打包不了。
   // 码明文只在「发码那一次」的返回值里出现一次，之后任何接口都只回状态，绝不回显。
@@ -2940,6 +3190,9 @@ async function bootstrap(): Promise<void> {
   if (l0Store.readOnly) {
     void mlog('storage:l0-readonly', { path: L0_DB_PATH, lockedBy: l0Store.lockedBy ?? null });
   }
+  // L0-first 拦截标记（2026-11-17 用户拍板）：不建独立备份文件——质量门拦截条目的原文密文
+  // 直接落主 L0 库（key = bak_*，blob.status='filtered' + 归属），统计/展示/重判都从主库过滤。
+  l0BackupStore = l0Store;
   storage = new FileStorage(DB_PATH, { l0: l0Store, auditPath: AUDIT_PATH });
   // 上次损坏已隔离 → 本次是空库：必须让用户知道原件位置，不能静默开空库
   const corruptNotice = storage.takeCorruptionNotice();
@@ -3297,7 +3550,7 @@ async function bootstrap(): Promise<void> {
     ...tenantTriple, is_admin: true as const, scope_project_ids: ['*'],
   };
 
-  const mcp = runMcpServer({ storage, port: MCP_PORT, token: mcpToken, l0: l0Vault, tokenStore, memberStore, account: mcpBootstrapAccount, pending: mcpPendingStore, personal: personalStoreRef ?? undefined, hookStatusFile: join(USER_DATA, HOOK_STATUS_FILE) });
+  const mcp = runMcpServer({ storage, port: MCP_PORT, token: mcpToken, l0: l0Vault, l0Backup: l0BackupStore, tokenStore, memberStore, account: mcpBootstrapAccount, pending: mcpPendingStore, personal: personalStoreRef ?? undefined, hookStatusFile: join(USER_DATA, HOOK_STATUS_FILE) });
   mcp.ready
     .then((p) => { void mlog('bootstrap:mcp-listening', { port: p }); })
     .catch((e) => { void mlog('bootstrap:mcp-listen-error', String((e as Error)?.message ?? e)); });
@@ -3311,10 +3564,17 @@ async function bootstrap(): Promise<void> {
     ? recallHard.cStrict
     : () => process.env.MAM_STRICT_RECALL_GATE !== '0';
   const mcpHttp = runMcpHttpServer({
-    storage, port: MCP_HTTP_PORT, token: mcpToken, l0: l0Vault, tokenStore, memberStore, account: mcpBootstrapAccount,
+    storage, port: MCP_HTTP_PORT, token: mcpToken, l0: l0Vault, l0Backup: l0BackupStore, tokenStore, memberStore, account: mcpBootstrapAccount,
     pending: mcpPendingStore,
     personal: personalStoreRef ?? undefined,
     strictRecallGate,
+    /**
+     * 第四层·轮级放行（2026-11-17 用户明确）：会话级口径下「一次召回解锁整个会话」，
+     * 硬拦截形同虚设。开启后按「钩子账本最近一轮的时间戳」判定本轮是否召回。
+     * 账本读不到（钩子没装）时内核会自动退回会话级，不会把工具全锁死。
+     * 逃生阀 MAM_ROUND_SCOPED_GATE=0 可退回会话级，不需要改代码重打包。
+     */
+    roundScopedRecall: process.env.MAM_ROUND_SCOPED_GATE !== '0',
     // 钩子健康度自检：读钩子写的同一份状态文件（recall_hook_status）
     hookStatusFile: join(USER_DATA, HOOK_STATUS_FILE),
     // 批次41-R：同一条也落 actions.log（批次34 对 llm:* 的同一口径）——日志页读的是 actions.log，
@@ -3341,7 +3601,7 @@ async function bootstrap(): Promise<void> {
           project_id: input.project_id,
           source_agent: input.source_agent,
         },
-        { storage, vector: webhookVector, account: tenantTriple, request_id: `req_wh_${Date.now()}`, now: Date.now(), l0: l0Vault },
+        { storage, vector: webhookVector, account: tenantTriple, request_id: `req_wh_${Date.now()}`, now: Date.now(), l0: l0Vault, l0Backup: l0BackupStore },
       );
       const filtered = r.dedup.action === 'filtered';
       return {
@@ -3400,7 +3660,7 @@ async function bootstrap(): Promise<void> {
               source_agent: it.agent,
               session_id: undefined,
             },
-            { storage, vector: collectorVector, account: tenantTriple, request_id: `req_daemon_${Date.now()}`, now: Date.now(), l0: l0Vault },
+            { storage, vector: collectorVector, account: tenantTriple, request_id: `req_daemon_${Date.now()}`, now: Date.now(), l0: l0Vault, l0Backup: l0BackupStore },
           );
         },
       });
@@ -3433,7 +3693,41 @@ async function bootstrap(): Promise<void> {
   // 探测到的已安装 agent（宿主真扫 + 接入流程回填），用于扩展采集源白名单
   // 缺省覆盖 Qoder CN / Trae / Zcode / Cursor / Gemini / Qwen 等已知会话日志位置
   let detectedAgentNames: string[] = [];
-  const buildSources = () => defaultAgentSources({ agents: detectedAgentNames.length > 0 ? detectedAgentNames : undefined });
+  // 网页版 Agent 对话导出目录：浏览器插件定时把对话写成 Markdown 到这里，采集器递归扫描入库。
+  // 关键事实：插件只能用「相对浏览器下载目录」的文件名（Chromium 拒绝绝对路径），
+  // 所以它的真实落点是 <浏览器下载目录>/chat-exports。启动时从浏览器 Preferences 探测一次，
+  // **缺省就用这个位置** —— 这样用户不用再在应用与浏览器两边手动对齐。
+  const detectedChatExportsDirs = detectChatExportsDirs({
+    env: process.env,
+    platform: process.platform,
+    readText: (p) => {
+      try { return readFileSync(p, 'utf8'); } catch { return null; }
+    },
+    listDirs: (p) => {
+      try {
+        return readdirSync(p, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+      } catch { return []; }
+    },
+  });
+  /** 插件真实写入位置（探测值）；探不到为 null（此时只能靠用户手选） */
+  const pluginChatExportsDir = detectedChatExportsDirs[0] ?? null;
+  let chatExportsDir = pluginChatExportsDir ?? join(LIB_PATHS.root, 'chat-exports');
+  const chatExportsCfgFile = join(USER_DATA, 'chat-exports.json');
+  try {
+    const cfg = JSON.parse(readFileSync(chatExportsCfgFile, 'utf8')) as { dir?: string };
+    if (cfg.dir) chatExportsDir = cfg.dir;
+  } catch {
+    // 无配置 / 损坏 → 用缺省目录（不阻塞启动）
+  }
+  try {
+    mkdirSync(chatExportsDir, { recursive: true });
+  } catch {
+    // 建目录失败不阻塞启动；扫描阶段会如实记录 skip
+  }
+  const buildSources = () => [
+    ...defaultAgentSources({ agents: detectedAgentNames.length > 0 ? detectedAgentNames : undefined }),
+    webchatExportSource(chatExportsDir),
+  ];
   // source 用函数形式：每轮现取游标与 agent 白名单，保证增量续采与动态扩展都生效
   let lastApply: { written: number; filtered: number; failed: number; failed_l0_locked: number; ts: number } | null = null;
   const reconciler = createReconciler({
@@ -3481,7 +3775,7 @@ async function bootstrap(): Promise<void> {
                 source_agent: input.source_agent,
                 session_id: input.session_id,
               },
-              { storage, vector: collectorVector, account: tenantTriple, request_id: `req_col_${Date.now()}`, now: Date.now(), l0: l0Vault },
+              { storage, vector: collectorVector, account: tenantTriple, request_id: `req_col_${Date.now()}`, now: Date.now(), l0: l0Vault, l0Backup: l0BackupStore },
             );
             if (r.mem_id) writtenIds.push(r.mem_id);
             return { mem_id: r.mem_id, dedup: r.dedup };
@@ -3579,6 +3873,443 @@ async function bootstrap(): Promise<void> {
         throw new Error(`collector:round-not-advanced(${reason})`);
       }
     },
+  });
+
+  // 网页版对话导出目录（chat-exports）：渲染层引导页读真实路径 / 打开目录，帮用户把
+  // 浏览器插件导出位置指到这里。只回路径与打开结果，不回任何文件内容（内容一律走采集链路）。
+  // pluginDir/aligned：把「插件实际写哪」一并回给 UI，让用户看得见两边是否一致，不用自己猜。
+  handleIpc(IPC.chatExportsGet, () => {
+    const aligned = pluginChatExportsDir
+      ? sameFsPath(chatExportsDir, pluginChatExportsDir, process.platform)
+      : null;
+    return {
+      ok: existsSync(chatExportsDir),
+      dir: chatExportsDir,
+      pluginDir: pluginChatExportsDir,
+      aligned,
+      ...(existsSync(chatExportsDir) ? {} : { error: `目录不存在：${chatExportsDir}` }),
+    };
+  });
+  // 跟随插件落点：把采集目录改回探测到的插件真实写入位置（用户不必自己找路径、也不必改浏览器下载目录）。
+  handleIpc(IPC.chatExportsFollow, () => {
+    if (!pluginChatExportsDir) {
+      return { ok: false, error: '没探测到浏览器下载目录，无法自动跟随；请点「更改路径」手动选。' };
+    }
+    try {
+      mkdirSync(pluginChatExportsDir, { recursive: true });
+      writeFileSync(chatExportsCfgFile, `${JSON.stringify({ dir: pluginChatExportsDir }, null, 2)}\n`, {
+        encoding: 'utf8', mode: 0o600,
+      });
+    } catch (err) {
+      return { ok: false, error: `跟随失败：${String((err as Error)?.message ?? err)}` };
+    }
+    chatExportsDir = pluginChatExportsDir;
+    void mlog('collector:chat-exports-follow-plugin', { dir: chatExportsDir });
+    actionLog('collector', 'chat-exports-follow-plugin', { dir: chatExportsDir });
+    return { ok: true, dir: chatExportsDir };
+  });
+  // 壳层「网页导出状态」（0.3.0）：读接收端记账文件，给引导卡显示「最近一次网页导出」。
+  // 没有记录 = 应用运行以来还没收到过任何网页导出（不是故障，由 UI 说清口径与指引）。
+  handleIpc(IPC.webchatExportStatus, () => {
+    const file = join(USER_DATA, 'webchat-export-status.json');
+    try {
+      const raw = JSON.parse(readFileSync(file, 'utf8')) as {
+        day?: string; count?: number; recent?: { at: number; site: string; file: string; bytes: number }[];
+        updatedAt?: number;
+      };
+      const recent = Array.isArray(raw.recent) ? raw.recent.slice(0, 10) : [];
+      return {
+        ok: true,
+        todayCount: typeof raw.count === 'number' ? raw.count : 0,
+        day: typeof raw.day === 'string' ? raw.day : '',
+        last: recent[0] ?? null,
+        recent,
+      };
+    } catch {
+      return { ok: true, todayCount: 0, day: '', last: null, recent: [] };
+    }
+  });
+  // 导出来源统计（按站点数 .md）：卡片「导出来源」区按真实目录内容显示，
+  // 而不是把七个站点全列一遍让用户自己猜哪家导出过。只回计数，不回文件名/正文。
+  handleIpc(IPC.chatExportsSites, () => {
+    const list = (path: string, dirs: boolean): string[] => {
+      try {
+        return readdirSync(path, { withFileTypes: true })
+          .filter((d) => (dirs ? d.isDirectory() : d.isFile()))
+          .map((d) => d.name);
+      } catch {
+        return [];
+      }
+    };
+    const sites = siteExportStats({
+      dir: chatExportsDir,
+      listDirs: (p) => list(p, true),
+      listFiles: (p) => list(p, false),
+    });
+    return { ok: true, dir: chatExportsDir, sites, total: sites.reduce((n, s) => n + s.count, 0) };
+  });
+  // 网页对话导出完整性审计（2026-11-17 用户诉求）：
+  // 「请判断一下导出文档和原对话有无差异，是不是全部导出有无遗漏，正确率如何统计」
+  // 口径见 core/memagent/webchatAudit.ts。这里跑一次比对，返回**人话报告**（不是 JSON 原文）。
+  // 审计快照由插件随导出一起送上来（接收端落 <数据根>/webchat-audit/）；
+  // 没有快照 = 那些导出发生在本功能上线之前 → 如实说「无法比对」，不估数。
+  handleIpc(IPC.webchatAuditRun, () => {
+    const dir = resolveAuditDir(USER_DATA);
+    try {
+      const out = runAudit(dir);
+      actionLog('collector', 'webchat-audit-run', {
+        sessions: out.summary.sessions,
+        withSnapshot: out.summary.sessionsWithSnapshot,
+        accuracy: out.summary.accuracy,
+      });
+      return {
+        ok: true,
+        dir,
+        report: formatAuditReport(out),
+        summary: out.summary,
+        diffCount: out.results.filter((r) => (
+          r.result.missing > 0 || r.result.extra > 0 || r.result.truncated > 0
+          || r.result.rewritten > 0 || r.result.roleMismatch > 0
+        )).length,
+      };
+    } catch (e) {
+      const error = String((e as Error)?.message ?? e);
+      actionLog('collector', 'webchat-audit-failed', { error }, { level: 'warn' });
+      return { ok: false, error: `审计失败：${error}` };
+    }
+  });
+  // 按来源清理「旧格式网页导出条目」（2026-11-17 用户诉求）：
+  // 插件 0.5.3 给抽取层补上结构后，同一段对话抽出的正文变了 → 采集幂等键跟着变 → 重导内容会与旧格式条目
+  // 并存。旧条目丢掉列表层级与代码围栏，留着只污染召回、还让「重导」看起来像「翻倍」。
+  // 判据唯一来源 core/memagent/webchatPurge.ts（`collector:webchat-export` 前缀精确匹配），
+  // 这里只做门禁、备份与留痕；采集游标、导出文件、其它来源的行一概不动。
+  handleIpc(IPC.webchatPurgePreview, async (_e, site?: string, sessionId?: string) => {
+    const gate = requireSession(sessionId, IPC.webchatPurgePreview);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    try {
+      const rows = await storage.listMemories({ include_deleted: true });
+      return { ok: true, preview: selectWebchatExportMemories(rows, { site }).preview };
+    } catch (e) { return l0Fail(e); }
+  });
+
+  handleIpc(IPC.webchatPurgeRun, async (_e, confirmText?: string, site?: string, sessionId?: string) => {
+    const gate = requireAdmin(sessionId, IPC.webchatPurgeRun);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    // 二次确认口令：删行不可逆，必须逐字输入 PURGE（与整库 RESET、规则重判 REJUDGE 区分开）
+    if ((confirmText ?? '').trim().toUpperCase() !== 'PURGE') {
+      actionLog('kernel', 'webchat:purge-rejected', { reason: 'confirm_text', user: gate.ctx.user_id });
+      return { ok: false, error: '未输入确认口令 PURGE，已取消（删除不可逆）' };
+    }
+    let backupDir: string;
+    try {
+      backupDir = await backupBeforeKernelChange('webchat-purge', 'webchat:purge-backup');
+    } catch (e) {
+      const err = String((e as Error)?.message ?? e);
+      actionLog('kernel', 'webchat:purge-backup-fail', { error: err }, { level: 'error' });
+      return { ok: false, error: `清理前备份失败：${err}` };
+    }
+    try {
+      const now = Date.now();
+      const report = await purgeWebchatExports({
+        storage, vector: collectorVector, admin_user_id: gate.ctx.user_id,
+        request_id: `req_webchat_purge_${now}`, now, backup_confirmed: true, site,
+      });
+      actionLog('kernel', 'webchat:purge', {
+        site: site ?? 'all', total: report.total, purged: report.purged,
+        failed: report.failed, vector_failed: report.vector_failed,
+        with_l0_cipher: report.with_l0_cipher, tombstones: report.tombstones,
+        dir: backupDir,
+      });
+      return { ok: true, report, backup_dir: backupDir };
+    } catch (e) { return l0Fail(e); }
+  });
+  handleIpc(IPC.chatExportsOpen, async () => {
+    if (!existsSync(chatExportsDir)) {
+      return { ok: false, error: `目录不存在：${chatExportsDir}` };
+    }
+    const err = await shell.openPath(chatExportsDir);
+    return err ? { ok: false, error: err } : { ok: true, path: chatExportsDir };
+  });
+  // 更改导出目录：系统目录选择框 → 建目录 → 持久化配置 → 内存变量即时生效（采集源每轮现取）。
+  // 取消/失败不改变现状；配置文件只存路径，无敏感内容。
+  handleIpc(IPC.chatExportsSet, async (e) => {
+    const win = BrowserWindow.fromWebContents(e.sender) ?? BrowserWindow.getFocusedWindow();
+    if (!win) return { ok: false, error: '找不到可显示目录选择框的窗口' };
+    const picked = await dialog.showOpenDialog(win, {
+      title: '选择网页对话导出目录（浏览器插件把对话导出到这里）',
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    if (picked.canceled || !picked.filePaths?.length) return { ok: false, canceled: true };
+    const dir = picked.filePaths[0];
+    try {
+      mkdirSync(dir, { recursive: true });
+    } catch (err) {
+      return { ok: false, error: `目录不可用：${String((err as Error)?.message ?? err)}` };
+    }
+    try {
+      writeFileSync(chatExportsCfgFile, `${JSON.stringify({ dir }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+    } catch (err) {
+      return { ok: false, error: `保存配置失败：${String((err as Error)?.message ?? err)}` };
+    }
+    chatExportsDir = dir;
+    void mlog('collector:chat-exports-dir-changed', { dir });
+    actionLog('collector', 'chat-exports-dir-changed', { dir });
+    return { ok: true, dir };
+  });
+
+  // 自研浏览器插件的一键引导：读随包分发的插件目录 / 打开目录 / 打开扩展管理页。
+  // 不静默安装：Chromium 只允许用户在扩展页手动「加载已解压的扩展程序」。
+  //
+  // 目录分两层：随包目录（只读来源，升级会整目录替换）→ 首次需要时复制到 <数据根>/webchat-extension。
+  // 给用户看/让他去选的都是后者 —— 换机器自动重算、升级重装不失效、路径不随安装位置漂移。
+  let stableExtensionDir: { dir: string; copied: string[]; ok: boolean; error?: string } | null = null;
+  const webchatExtensionDir = (): string => {
+    if (!stableExtensionDir) {
+      const bundled = resolveWebchatExtensionDir({
+        appPath: app.getAppPath(),
+        resourcesPath: process.resourcesPath,
+        isPackaged: app.isPackaged,
+      });
+      stableExtensionDir = ensureStableExtensionDir({
+        sourceDir: bundled,
+        targetDir: join(USER_DATA, 'webchat-extension'),
+      });
+      if (!stableExtensionDir.ok) {
+        actionLog('collector', 'webchat-extension-copy-failed', {
+          bundled, target: stableExtensionDir.dir, error: stableExtensionDir.error ?? null,
+        }, { level: 'warn' });
+      } else if (stableExtensionDir.copied.length > 0) {
+        actionLog('collector', 'webchat-extension-copied', {
+          target: stableExtensionDir.dir, files: stableExtensionDir.copied,
+        });
+      }
+    }
+    return stableExtensionDir.dir;
+  };
+  // 启动即同步一次（不等用户点开接入页）：升级后浏览器里那份旧副本要能马上拿到新代码，
+  // 否则用户重新加载扩展读到的还是老的 —— 这正是「插件明明修了、浏览器里还报同样的错」的坑。
+  try { webchatExtensionDir(); } catch { /* 复制失败已记 warn 日志，不阻塞启动 */ }
+
+  // 插件导出接收端（根因见 webchatIngest.ts 顶部）：QQ 浏览器把 chrome.downloads 的
+  // chat-exports/<站点>/ 子目录整个剥掉、文件甩进 %TEMP%，应用扫 Downloads\chat-exports
+  // 永远「采到 0 条」。这里起一个只监听 127.0.0.1 的接收端，把「端口 + 令牌」写进插件
+  // 目录的 runtime.json；插件据此直推 → 由应用自己写进 chatExportsDir → 采集器必然扫到。
+  try {
+    const ingestCfgFile = join(USER_DATA, 'webchat-ingest.json');
+    let ingestToken = '';
+    try {
+      const cfg = JSON.parse(readFileSync(ingestCfgFile, 'utf8')) as { token?: string };
+      if (typeof cfg.token === 'string' && cfg.token.length >= 16) ingestToken = cfg.token;
+    } catch {
+      // 无配置 / 损坏 → 下面新生成
+    }
+    if (!ingestToken) {
+      ingestToken = newWebchatIngestToken();
+      try {
+        writeFileSync(ingestCfgFile, JSON.stringify({ token: ingestToken, createdAt: Date.now() }, null, 2), 'utf8');
+      } catch {
+        // 写不进去也能用：本次运行内令牌有效；重启换新令牌时插件会重新读 runtime.json 自动跟上
+      }
+    }
+    // 壳层「网页导出状态」记账（0.3.0）：每次插件直推成功落盘都记一笔，
+    // 用户就能在应用里看到「最近一次网页导出」，不用对着浏览器猜「到底导没导」。
+    const exportStatusFile = join(USER_DATA, 'webchat-export-status.json');
+    type ExportStatusEntry = { at: number; site: string; file: string; bytes: number };
+    const loadExportStatus = (): { day: string; count: number; recent: ExportStatusEntry[] } => {
+      try {
+        const raw = JSON.parse(readFileSync(exportStatusFile, 'utf8')) as {
+          day?: string; count?: number; recent?: ExportStatusEntry[];
+        };
+        return {
+          day: typeof raw.day === 'string' ? raw.day : '',
+          count: typeof raw.count === 'number' ? raw.count : 0,
+          recent: Array.isArray(raw.recent) ? raw.recent.slice(0, 10) : [],
+        };
+      } catch {
+        return { day: '', count: 0, recent: [] };
+      }
+    };
+    const recordExportSaved = (info: { site: string; path: string; bytes: number; at: number }): void => {
+      const st = loadExportStatus();
+      const day = new Date(info.at).toISOString().slice(0, 10);
+      if (st.day !== day) {
+        st.day = day;
+        st.count = 0;
+      }
+      st.count += 1;
+      st.recent = [{ at: info.at, site: info.site, file: info.path, bytes: info.bytes }, ...st.recent].slice(0, 10);
+      try {
+        writeFileSync(exportStatusFile, JSON.stringify({ ...st, updatedAt: info.at }, null, 2), 'utf8');
+      } catch {
+        // 状态文件写不进不影响导出：UI 少一次显示，主链路不受影响
+      }
+      actionLog('collector', 'webchat-export-saved', { site: info.site, bytes: info.bytes });
+    };
+    const ingest = createWebchatIngestServer({
+      token: ingestToken,
+      resolveExportDir: () => chatExportsDir,
+      // 诊断线索走独立目录：不进导出目录，采集器不会把它当对话扫走
+      resolveDiagDir: () => join(USER_DATA, 'webchat-verify'),
+      // 审计快照走独立目录：原对话 + 导出文档成对落盘，供「导出完整性审计」逐条比对
+      resolveAuditDir: () => resolveAuditDir(USER_DATA),
+      onSaved: recordExportSaved,
+      // 清空旧导出（插件「清空旧导出并重新导出」按钮触发）：只删导出目录里的 .md 与审计快照，
+      // 不动记忆库、不动诊断目录。留痕便于事后核对「重导前到底清掉了多少」。
+      onCleared: (info) => {
+        actionLog('collector', 'webchat-exports-cleared', {
+          deleted: info.deleted,
+          audit: info.deletedAudit,
+          sites: info.sites.join(','),
+        });
+      },
+    });
+    const tryIngestListen = (port: number, left: number): void => {
+      const onListenError = (e: NodeJS.ErrnoException): void => {
+        ingest.removeListener('error', onListenError);
+        if (e?.code === 'EADDRINUSE' && left > 0) {
+          tryIngestListen(port + 1, left - 1);
+          return;
+        }
+        actionLog('collector', 'webchat-ingest-listen-failed', {
+          port, error: String(e?.message ?? e),
+        }, { level: 'warn' });
+      };
+      ingest.once('error', onListenError);
+      ingest.listen(port, '127.0.0.1', () => {
+        ingest.removeListener('error', onListenError);
+        ingest.on('error', (e) => {
+          actionLog('collector', 'webchat-ingest-error', { error: String((e as Error)?.message ?? e) }, { level: 'warn' });
+        });
+        try {
+          const runtime = writeWebchatRuntime({ extDir: webchatExtensionDir(), port, token: ingestToken });
+          actionLog('collector', 'webchat-ingest-ready', { port, runtime });
+        } catch (err) {
+          actionLog('collector', 'webchat-ingest-runtime-failed', {
+            port, error: String((err as Error)?.message ?? err),
+          }, { level: 'warn' });
+        }
+      });
+    };
+    tryIngestListen(WEBCHAT_INGEST_PORT, WEBCHAT_INGEST_PORT_PROBE);
+  } catch (e) {
+    actionLog('collector', 'webchat-ingest-init-failed', {
+      error: String((e as Error)?.message ?? e),
+    }, { level: 'warn' });
+  }
+  const registryDisplayIcons = (): string[] => {
+    if (process.platform !== 'win32') return [];
+    const roots = [
+      'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
+      'HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
+      'HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
+    ];
+    const icons: string[] = [];
+    for (const root of roots) {
+      try {
+        const text = execFileSync('reg', ['query', root, '/s', '/v', 'DisplayIcon'], {
+          encoding: 'utf8', windowsHide: true, timeout: 3000,
+        });
+        for (const line of text.split(/\r?\n/)) {
+          const m = line.match(/^\s*DisplayIcon\s+REG_SZ\s+(.+)$/i);
+          if (m && /msedge|QQBrowser/i.test(m[1])) icons.push(m[1].trim());
+        }
+      } catch {
+        // 注册表读不到时回退固定路径；QQ 装在非系统盘时这里能补上 DisplayIcon。
+      }
+    }
+    return icons;
+  };
+  /** 跑地址栏激活脚本，返回退出码（0 成功 / 2 没窗口 / 3 无法激活）。 */
+  const runActivationScript = (script: string): Promise<number> => new Promise((resolve, reject) => {
+    execFile(
+      'powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command', script],
+      { windowsHide: true, timeout: 20000 },
+      (err) => {
+        if (!err) { resolve(0); return; }
+        const code = (err as { code?: unknown }).code;
+        if (typeof code === 'number') { resolve(code); return; }
+        reject(err);
+      },
+    );
+  });
+  /**
+   * 打开浏览器扩展页。
+   * 只能「模拟用户在地址栏输入」——内部页既不能走协议 handler，也不能当命令行参数（Chromium 丢弃）。
+   * 失败一律把地址留在剪贴板 + 给出手动三步，绝不让用户对着空白页猜。
+   * result 是给审计日志用的稳定短码（0/2/3/4 各自含义见 browserLaunch.ts）。
+   */
+  const launchBrowserExtensionPage = async (
+    browser: SupportedBrowser,
+  ): Promise<{ ok: boolean; error?: string; result: string }> => {
+    const label = browser === 'edge' ? 'Edge' : 'QQ 浏览器';
+    const spec = extensionPageActivation(browser);
+    const exe = resolveBrowserExecutable(browser, {
+      env: process.env,
+      platform: process.platform,
+      exists: existsSync,
+      registryIcons: registryDisplayIcons(),
+    });
+    if (!exe) {
+      return {
+        ok: false,
+        result: 'no-executable',
+        error: `未找到 ${label} 可执行文件，请用「一键打开插件目录」后手动打开扩展页。`,
+      };
+    }
+    // 地址先落剪贴板：即便后面模拟输入失败，用户 Ctrl+V 一下就能打开，这一下不算白点。
+    clipboard.writeText(spec.url);
+    const manual = `地址已复制到剪贴板：在浏览器里按 Ctrl+L，再按 Ctrl+V，回车。`;
+    try {
+      const code = await runActivationScript(
+        buildExtensionPageActivationScript({
+          processName: spec.processName,
+          executable: exe,
+          titleHints: spec.titleHints,
+        }),
+      );
+      if (code === 0) return { ok: true, result: 'ok' };
+      if (code === 2) return { ok: false, result: 'no-window', error: `${label} 窗口没出现。${manual}` };
+      if (code === 3) {
+        return { ok: false, result: 'no-focus', error: `没能把 ${label} 切到前台（被其它窗口挡住）。${manual}` };
+      }
+      if (code === 4) {
+        return { ok: false, result: 'no-navigate', error: `${label} 没跳转到扩展页（浏览器拦了自动跳转）。${manual}` };
+      }
+      return { ok: false, result: `code-${code}`, error: `自动打开扩展页失败（退出码 ${code}）。${manual}` };
+    } catch (err) {
+      return {
+        ok: false,
+        result: 'error',
+        error: `自动打开扩展页失败：${String((err as Error)?.message ?? err)}。${manual}`,
+      };
+    }
+  };
+  handleIpc(IPC.webchatExtGet, () => {
+    const dir = webchatExtensionDir();
+    return existsSync(join(dir, 'manifest.json'))
+      ? { ok: true, path: dir }
+      : { ok: false, error: `插件目录不存在：${dir}` };
+  });
+  handleIpc(IPC.webchatExtOpenFolder, async () => {
+    const dir = webchatExtensionDir();
+    if (!existsSync(join(dir, 'manifest.json'))) {
+      return { ok: false, error: `插件目录不存在：${dir}` };
+    }
+    const err = await shell.openPath(dir);
+    return err ? { ok: false, error: err } : { ok: true, path: dir };
+  });
+  handleIpc(IPC.webchatExtOpenBrowser, async (_e, browser: unknown) => {
+    if (browser !== 'edge' && browser !== 'qq') return { ok: false, error: '未知的浏览器类型' };
+    const opened = await launchBrowserExtensionPage(browser);
+    // 成败都记账：只在成功时记，失败就成了「用户说打不开、日志里查不到任何痕迹」。
+    actionLog(
+      'collector',
+      'webchat-extension-open-browser',
+      { browser, result: opened.result },
+      opened.ok ? {} : { level: 'warn' },
+    );
+    return opened.ok ? { ok: true } : { ok: false, error: opened.error };
   });
 
   handleIpc(IPC.collectorStatus, () => {

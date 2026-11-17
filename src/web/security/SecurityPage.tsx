@@ -22,6 +22,8 @@ import { L0SplitCard } from './L0SplitCard.tsx';
 import { L0MigrateCard } from './L0MigrateCard.tsx';
 import { RebuildFromL0Card } from './RebuildFromL0Card.tsx';
 import { L0RecoveryCard } from './L0RecoveryCard.tsx';
+import { L0FilteredCard } from './L0FilteredCard.tsx';
+import { L0OwnerBackfillCard } from './L0OwnerBackfillCard.tsx';
 import { TenantIdentityCard } from './TenantIdentityCard.tsx';
 import { OwnerBindingsCard } from './OwnerBindingsCard.tsx';
 import { useSessionContext } from '../shared/session.ts';
@@ -413,6 +415,10 @@ export function SecurityPage() {
             <div data-testid="danger-card-12"><TenantIdentityCard enabled={role === 'admin'} /></div>
             {/* OB-3：「个人记忆账号绑定」卡紧随身份卡（同属身份域）；成员只读、管理员可增删改带护栏 */}
             <div data-testid="danger-card-13"><OwnerBindingsCard enabled={role === 'admin'} /></div>
+            {/* L0-first 拦截记录卡（2026-11-17）：登录即可（本人看自己的，管理员看全部）；查阅/重判权限主进程再校验 */}
+            <div data-testid="danger-card-14"><L0FilteredCard enabled={Boolean(role)} /></div>
+            {/* 存量 L0 归属回填卡（2026-11-17）：统计登录可见；执行仅管理员（指定归属账号 + 写密钥解锁 + 自动备份） */}
+            <div data-testid="danger-card-15"><L0OwnerBackfillCard enabled={Boolean(role)} role={role} /></div>
           </div>
           {policyErr ? <div className="note" data-testid="pwd-policy-error" style={{ color: 'var(--warn)' }}>{policyErr}</div> : null}
           <div className="note" data-testid="pwd-policy-scope">

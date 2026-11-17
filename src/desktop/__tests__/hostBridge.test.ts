@@ -105,10 +105,15 @@ describe('批次2：hostBridge 信任边界（来源 / channel / 回包 targetOr
     await new Promise((r) => setTimeout(r, 0));
 
     expect(run).toHaveBeenCalledTimes(1);
-    expect(post).toHaveBeenCalledTimes(1);
-    expect(post.mock.calls[0][1]).toBe(window.location.origin);
-    expect(post.mock.calls[0][1]).not.toBe('*');
-    expect((post.mock.calls[0][0] as Record<string, { ok: boolean }>)[RES].ok).toBe(true);
+    // 两段式：先回受理回执（ack），再回真实结果
+    expect(post).toHaveBeenCalledTimes(2);
+    for (const call of post.mock.calls) {
+      expect(call[1]).toBe(window.location.origin);
+      expect(call[1]).not.toBe('*');
+    }
+    const payloads = post.mock.calls.map((c) => (c[0] as Record<string, { ack?: boolean; ok?: boolean }>)[RES]);
+    expect(payloads[0].ack).toBe(true);
+    expect(payloads[1].ok).toBe(true);
   });
 
   test('未知 channel / 非数组 args 被忽略', async () => {
@@ -142,7 +147,8 @@ describe('批次2：hostBridge 信任边界（来源 / channel / 回包 targetOr
     await new Promise((r) => setTimeout(r, 0));
 
     expect(runNow).toHaveBeenCalledTimes(1);
-    expect(post).toHaveBeenCalledTimes(2);
+    // 两次请求各回一条 ack + 一条结果（结果被去重，副作用只发生一次）
+    expect(post).toHaveBeenCalledTimes(4);
   });
 
   test('批次27 P3-5：同 id 不同 args 不互相劫持（去重键含 method+args）', async () => {
@@ -150,7 +156,7 @@ describe('批次2：hostBridge 信任边界（来源 / channel / 回包 targetOr
     (window as unknown as { __ELECTRON__?: boolean }).__ELECTRON__ = true;
     (window as unknown as { api: unknown }).api = { storage: { putMemory: put } };
     const { handleBridgeMessage } = await import('../hostBridge.ts');
-    const replies: { id: string; ok: boolean; data?: unknown }[] = [];
+    const replies: { id: string; ack?: boolean; ok?: boolean; data?: unknown }[] = [];
     const source = {
       postMessage: (payload: unknown) => {
         replies.push((payload as Record<string, { id: string; ok: boolean; data?: unknown }>)[RES]);
@@ -163,7 +169,7 @@ describe('批次2：hostBridge 信任边界（来源 / channel / 回包 targetOr
     await new Promise((r) => setTimeout(r, 0));
 
     expect(put).toHaveBeenCalledTimes(2);
-    const byId = replies.filter((r) => r.id === 'dup');
+    const byId = replies.filter((r) => r.id === 'dup' && !r.ack);
     expect(byId).toHaveLength(2);
     expect(byId.map((r) => r.data)).toEqual([{ ok: true, echo: 'first' }, { ok: true, echo: 'second' }]);
   });
@@ -184,6 +190,88 @@ describe('批次2：hostBridge 信任边界（来源 / channel / 回包 targetOr
 
     await vi.advanceTimersByTimeAsync(4000);
     await expect(p).rejects.toThrow(/宿主桥不可达/);
+    Object.defineProperty(window, 'parent', { value: window, configurable: true, writable: true });
+  });
+
+  test('长任务（立即采集）：先收回执 → 停止重发，越过 3 秒仍能拿到真实结果（2026-11-16 事故回归）', async () => {
+    // 真实事故：collector:triggerNow 实测 4013ms 才返回，旧实现 3 秒就放弃并误报
+    // 「宿主桥不可达（父窗口未安装桥或非同源）」，用户看到「采集未执行」，采集其实已经入库。
+    const reqIds: string[] = [];
+    let posted = 0;
+    const fakeParent = {
+      __ELECTRON__: true,
+      api: {},
+      postMessage: (payload: unknown) => {
+        const req = (payload as Record<string, { id: string }>)[REQ];
+        if (req) { reqIds.push(req.id); posted += 1; }
+      },
+    } as unknown as Window;
+    Object.defineProperty(window, 'parent', { value: fakeParent, configurable: true, writable: true });
+    const { hostCall } = await import('../hostBridge.ts');
+
+    vi.useFakeTimers();
+    const p = hostCall<{ ok: boolean; collected: number }>('collector:triggerNow', [[], 'sid_1']);
+    // 先挂 handler 再推进定时器：否则 settle 时还没有消费者 → unhandled rejection 噪声
+    const settled = p.then(
+      (v) => ({ ok: true as const, v }),
+      (e: Error) => ({ ok: false as const, e }),
+    );
+    await Promise.resolve();
+    expect(reqIds).toHaveLength(1);
+
+    const deliver = (data: unknown) =>
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          origin: window.location.origin,
+          source: window.parent as unknown as MessageEventSource,
+          data,
+        }),
+      );
+
+    deliver({ [RES]: { id: reqIds[0], ack: true } }); // 宿主受理
+    const afterAck = posted;
+    await vi.advanceTimersByTimeAsync(4000); // 越过旧 3 秒探测窗口：不重发、也不判不可达
+    expect(posted).toBe(afterAck);
+
+    deliver({ [RES]: { id: reqIds[0], ok: true, data: { ok: true, collected: 3 } } });
+    const outcome = await settled;
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) expect(outcome.v).toEqual({ ok: true, collected: 3 });
+    Object.defineProperty(window, 'parent', { value: window, configurable: true, writable: true });
+  });
+
+  test('受理后一直没结果：报「宿主已受理…」而不是「父窗口没装桥」', async () => {
+    const reqIds: string[] = [];
+    const fakeParent = {
+      __ELECTRON__: true,
+      api: {},
+      postMessage: (payload: unknown) => {
+        const req = (payload as Record<string, { id: string }>)[REQ];
+        if (req) reqIds.push(req.id);
+      },
+    } as unknown as Window;
+    Object.defineProperty(window, 'parent', { value: fakeParent, configurable: true, writable: true });
+    const { hostCall } = await import('../hostBridge.ts');
+
+    vi.useFakeTimers();
+    const p = hostCall('hostScan:run');
+    const settled = p.then(
+      () => null,
+      (e: Error) => e,
+    );
+    await Promise.resolve();
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        origin: window.location.origin,
+        source: window.parent as unknown as MessageEventSource,
+        data: { [RES]: { id: reqIds[0], ack: true } },
+      }),
+    );
+
+    await vi.advanceTimersByTimeAsync(181_000);
+    const err = await settled;
+    expect(String(err?.message)).toMatch(/宿主已受理/);
+    expect(String(err?.message)).not.toMatch(/父窗口未安装桥/);
     Object.defineProperty(window, 'parent', { value: window, configurable: true, writable: true });
   });
 });
@@ -249,7 +337,11 @@ describe('hostLog：动作日志通道（批次7）', () => {
     await new Promise((r) => setTimeout(r, 0));
 
     expect(write).toHaveBeenCalledWith('ui', 'click', { id: 'x' }, null);
-    expect((post.mock.calls[0][0] as Record<string, { ok: boolean }>).__memagent_host_res__.ok).toBe(true);
+    const results = post.mock.calls
+      .map((c) => (c[0] as Record<string, { id: string; ack?: boolean; ok?: boolean }>).__memagent_host_res__)
+      .filter((r) => !r.ack);
+    expect(results).toHaveLength(1);
+    expect(results[0].ok).toBe(true);
   });
 });
 

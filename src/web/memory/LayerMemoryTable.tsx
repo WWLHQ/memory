@@ -6,6 +6,7 @@ import type { MemoryRecord } from './types.ts';
 import type { LayerId } from './MemoryLayeredPage.tsx';
 import { decayClass } from './logic.ts';
 import { fmtLayerGen } from '../shared/layerTime.ts';
+import { webchatSiteLabel } from '../../shared/webchatSites.ts';
 
 /** 列标题 + 默认宽度（px） */
 const COLS = [
@@ -29,6 +30,9 @@ function sourceLabel(src: string | undefined): string {
   if (src === 'manual') return '✍️手动';
   if (src === 'webhook') return '⚡Webhook';
   if (src === 'mcp') return '🔌MCP';
+  // 网页导出按站点细分（collector:webchat-export:deepseek）→ 显示人话站点名，不倒原始标识
+  const webchat = /^collector:webchat-export:([a-z0-9_-]+)$/.exec(src);
+  if (webchat) return `📡网页导出·${webchatSiteLabel(webchat[1])}`;
   return `📡${src}`;
 }
 

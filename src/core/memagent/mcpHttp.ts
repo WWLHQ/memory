@@ -18,8 +18,9 @@ import { resolveAccountFor, type TokenStorePort } from './tokenStore.ts';
 import type { MemberStorePort } from './memberStore.ts';
 import {
   mcpInstructions, withRecallFirstNotes, RECALL_FIRST_REMINDER,
-  RECALL_FIRST_GATE_MSG, RECALL_FIRST_STRICT_GATE_MSG, RECALL_SOURCE_BOUNDARY,
+  RECALL_FIRST_GATE_MSG, RECALL_FIRST_STRICT_GATE_MSG, RECALL_ROUND_GATE_MSG, RECALL_SOURCE_BOUNDARY,
 } from './mcpSchema.ts';
+import { readLatestHookRoundAt } from './recallHook.ts';
 import { runListProjectsTool, runRecallTool, type RecallDisplayMode } from './mcpRecall.ts';
 import { RecallDetailTickets } from './recallDetailTickets.ts';
 import { buildRecallDetailExpiredPage } from './recallInsight.ts';
@@ -165,6 +166,8 @@ export interface McpHttpOptions {
   storage?: StorageBackend;
   /** L0 写密钥端口（主进程 L0Vault）；缺省 → 写入诚实报 E_L0_LOCKED */
   l0?: L0Port;
+  /** L0-first 拦截标记写入口：质量门拦截条目以 bak_* 键落主 L0 库；缺省 = 旧行为（只写审计） */
+  l0Backup?: { put(mem_id: string, blob: import('./l0Store.ts').L0Blob): Promise<void> };
   port?: number;
   host?: string;
   /** 必填：访问令牌（Authorization: Bearer / x-mcp-token） */
@@ -203,6 +206,19 @@ export interface McpHttpOptions {
    * 保证 MCP 读的和钩子写的是同一个文件（否则会误报 never_ran）。
    */
   hookStatusFile?: string;
+  /**
+   * 第四层·轮级放行（2026-11-17 用户明确）：把「是否已召回」从**会话级**收紧到**轮级**。
+   * 缺省 false = 会话级（批次47/62 行为逐字不变，既有测试与老客户端零影响）。
+   * 开启后：每次用户提问都由钩子账本追加一行，时间为本轮起点；只有当本会话的召回时间
+   * **晚于**账本里最近一轮的时间戳时才算「本轮已召回」，否则照样硬拦。
+   * 可传求值函数（同 strictRecallGate），由主进程按运行时配置决定。
+   */
+  roundScopedRecall?: boolean | (() => boolean);
+  /**
+   * 「钩子账本最近一轮」的时间戳读取器（ms，读不到返回 null）。缺省读本机
+   * `recall-hook-log.jsonl` 尾部；单测注入桩函数，避免读到真实用户账本导致结果不稳定。
+   */
+  latestRoundAt?: () => Promise<number | null>;
 }
 
 export interface McpHttpHandle {
@@ -287,6 +303,7 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
     vector: new JsVectorBackend(),
     storage,
     l0: opts.l0,
+    l0Backup: opts.l0Backup,
     // 批次44-D4：写入落盘兜底队列（缺省内存；桌面可注入文件实现持久化）
     pending: opts.pending ?? new MemoryPendingStore(),
     // 第一轮个人记忆召回准入（缺省 = 不追加，行为不变）
@@ -296,11 +313,33 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
   /** 会话 → 调用方（批次15：initialize.clientInfo 自报）；客户端不维护会话时用 UA 兜底 */
   const clientBySession = new Map<string, string>();
   /**
-   * 批次47（L2）：会话 → 是否已在本次会话调用过 recall_memory。
+   * 批次47（L2）+ 第四层（2026-11-17）：会话 → **最近一次调用 recall_memory 的时间戳**。
    * 只跟踪「带 Mcp-Session-Id 的可靠会话」——会话身份由服务端在 initialize 时签发并关联（协议级，不依赖客户端配置），
    * 因此对标准 MCP 客户端身份可靠；不带会话头的 UA 兜底请求一律按「不可靠」处理（只软提醒、不硬拦，防 §9 串号误杀）。
+   *
+   * 为什么从布尔改成时间戳：布尔是会话级口径——一次召回就把整个会话解锁，之后每一轮都放行，
+   * 硬拦截等于形同虚设。存时间戳才能和「钩子账本里最近一轮的起点」比大小，判出「本轮有没有召回」。
    */
-  const recalledBySession = new Map<string, boolean>();
+  const recallAtBySession = new Map<string, number>();
+  /** 轮级开关（可传求值函数，与 strictRecallGate 同法） */
+  const roundScoped = (): boolean => {
+    const v = opts.roundScopedRecall;
+    return typeof v === 'function' ? v() === true : v === true;
+  };
+  /**
+   * 读「钩子账本里最近一轮」的起点（ms）。
+   * 刻意**不做缓存**：只读文件尾部 8KB 本身很便宜，而缓存会带来一个更糟的失败模式——
+   * 新一轮刚开始时读到上一轮的旧时间戳 → 把「本轮没召回」误判成「已召回」，门禁又形同虚设。
+   * 读不到（没装钩子 / 文件被删 / 解析失败）返回 null，调用方退回会话级。
+   */
+  const currentRoundAt = async (): Promise<number | null> => {
+    try {
+      const raw = await (opts.latestRoundAt ?? readLatestHookRoundAt)();
+      return typeof raw === 'number' && Number.isFinite(raw) ? raw : null;
+    } catch {
+      return null; // 读盘故障 → 退回会话级，绝不因为读不到账本就把工具全锁死
+    }
+  };
   /**
    * 批次47（L3-b）：会话 → 是否已发生过任意 tools/call（用于算「首调合规率」）。
    * 同样只跟踪可靠会话（带 sid）；不可靠会话按 UA 兜底无法可靠归因，session_id 记 'ua-fallback' 且仅作观察。
@@ -452,6 +491,8 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
   async function emitMcpCallAudit(
     toolName: string, reliable: boolean, firstCall: boolean, recalledBefore: boolean, sid: string,
     client: string, acct: McpAccount,
+    /** 第四层：把「这次按什么口径判的」也写进审计——否则事后无法区分会话级与轮级 */
+    round?: { roundScoped: boolean; roundAt: number | null; recallAt: number | null },
   ): Promise<void> {
     try {
       const record: AuditRecord = {
@@ -466,6 +507,9 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
           first_call: reliable ? firstCall : false,
           recalled_before: reliable ? recalledBefore : false,
           tool: toolName,
+          ...(round?.roundScoped
+            ? { round_scoped: true, round_at: round.roundAt, recall_at: round.recallAt }
+            : {}),
         },
       };
       await storage.appendAudit(record);
@@ -511,26 +555,43 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
         // 写入/治理类工具 → 硬拦返回 MCP 错误；读类工具未召回只软提醒（追加提示、不拦截，保体验）；
         // 不带会话头的 UA 兜底请求一律按「不可靠」处理——只软提醒、不硬拦，防 §9 跨客户端串号误杀。
         const reliable = Boolean(incomingSid);
-        const recalled = reliable && Boolean(recalledBySession.get(incomingSid));
+        /**
+         * 第四层：轮级判定。
+         *   会话级（默认）：本会话召回过一次就放行（批次47 原口径）。
+         *   轮级（roundScopedRecall）：召回时间必须晚于「钩子账本里最近一轮」的起点。
+         * 账本读不到（钩子没装 / 文件被删）→ 退回会话级，不让读盘故障把工具全锁死。
+         */
+        const recallAt = reliable ? recallAtBySession.get(incomingSid) : undefined;
+        const useRound = reliable && roundScoped();
+        const roundAt = useRound ? await currentRoundAt() : null;
+        const recalled = recallAt !== undefined && (!useRound || roundAt === null || recallAt > roundAt);
         // 批次47（L3-b）：首调合规审计（在标记 called/recalled 之前取快照，确保 first_call / recalled_before 准确）。
         const firstCall = reliable && !calledBySession.has(incomingSid);
-        await emitMcpCallAudit(name, reliable, firstCall, recalled, incomingSid, client, acct);
+        await emitMcpCallAudit(name, reliable, firstCall, recalled, incomingSid, client, acct, {
+          roundScoped: useRound,
+          roundAt,
+          recallAt: recallAt ?? null,
+        });
         if (reliable) calledBySession.set(incomingSid, true);
         // C 方案：严格门禁开启时覆盖**所有**非 recall 工具（含原本只软提醒的读类）；
         // recall_memory 自身永远放行，否则会话永远无法解锁（死锁）。默认关闭时判定与批次47 逐字相同。
         if (reliable && !recalled && name !== 'recall_memory'
           && (WRITE_GATE_TOOLS.has(name) || strictGate)) {
+          // 轮级判定下「本会话尚未调用」会变成假话（上一轮明明查过）→ 用专用文案，说清是「本轮」没查
+          const blockedText = useRound && recallAt !== undefined && roundAt !== null
+            ? RECALL_ROUND_GATE_MSG
+            : strictGate ? RECALL_FIRST_STRICT_GATE_MSG : RECALL_FIRST_GATE_MSG;
           return {
             ...base,
             result: {
-              content: [{ type: 'text', text: strictGate ? RECALL_FIRST_STRICT_GATE_MSG : RECALL_FIRST_GATE_MSG }],
+              content: [{ type: 'text', text: blockedText }],
               isError: true,
             },
           };
         }
-        // recall 调用即标记本会话已召回（仅可靠会话跟踪；不可靠会话无法可靠归因，按软提醒常驻处理）。
+        // recall 调用即记录本会话的召回时间（仅可靠会话跟踪；不可靠会话无法可靠归因，按软提醒常驻处理）。
         if (name === 'recall_memory' && reliable) {
-          recalledBySession.set(incomingSid, true);
+          recallAtBySession.set(incomingSid, Date.now());
         }
         try {
           const out = await callTool(name, args, client, acct, renderFold);

@@ -224,3 +224,108 @@ describe('C：全局门禁支持运行时 getter（UI 开关切换即时生效�
     expect(body.result.instructions).toContain('严格首步召回门禁');
   });
 });
+
+// ── 第四层（2026-11-17 用户明确）：轮级放行 ──────────────────────────────
+// 真问题：`recalledBySession` 是**会话级**——一次召回把整个会话解锁，之后每一轮都放行，
+// 硬拦截形同虚设。改判「轮」：召回时间必须晚于「钩子账本里最近一轮」的起点。
+// 这里注入 latestRoundAt 桩（不读真实用户账本，否则用例会随本机钩子跑动而飘）。
+describe('第四层：轮级放行（按钩子账本最近一轮判定）', () => {
+  let handle: McpHttpHandle | null = null;
+  let url = '';
+  let storage: InMemoryStorage;
+  let roundAt: number | null = null;
+  const tick = () => new Promise<void>((ok) => setTimeout(ok, 5));
+
+  beforeAll(async () => {
+    storage = new InMemoryStorage();
+    const { vault } = await createTestVault();
+    handle = runMcpHttpServer({
+      port: 0, token: TOKEN, storage, l0: vault,
+      strictRecallGate: true,
+      roundScopedRecall: true,
+      latestRoundAt: async () => roundAt,
+    });
+    url = `http://127.0.0.1:${await handle.ready}/mcp`;
+    // 无会话头 → 不可靠会话不硬拦，用来准备项目数据
+    await rpc(url, call('create_project', { project_id: 'P1', kind: 'general', display_name: '轮级测试项目' }));
+  });
+  afterAll(() => { handle?.stop(); });
+
+  it('同一轮内召回后放行；账本出现新的一轮后，同一会话照样被拦回', async () => {
+    const { sid } = await rpc(url, INIT);
+    roundAt = Date.now() - 60_000;             // 上一轮是一分钟前
+    await rpc(url, call('recall_memory', { project_id: 'P1', query: '关键词甲' }), { 'Mcp-Session-Id': sid });
+    const allowed = await rpc(url, call('list_projects'), { 'Mcp-Session-Id': sid });
+    expect(allowed.body.result.isError).toBe(false);
+
+    // 用户又提了新问题：钩子追加一行 → 账本最近一轮比刚才那次召回更晚
+    await tick();
+    roundAt = Date.now();
+    const blocked = await rpc(url, call('list_projects'), { 'Mcp-Session-Id': sid });
+    expect(blocked.body.result.isError).toBe(true);
+    const text = blocked.body.result.content[0].text;
+    expect(text).toContain('本轮');
+    // 关键：不能继续说「本会话尚未调用」（上一轮明明查过）——文案要区分「没查」与「这轮没查」
+    expect(text).not.toContain('本会话尚未调用');
+
+    // 本轮再召回 → 放行
+    await tick();
+    await rpc(url, call('recall_memory', { project_id: 'P1', query: '关键词乙' }), { 'Mcp-Session-Id': sid });
+    const again = await rpc(url, call('list_projects'), { 'Mcp-Session-Id': sid });
+    expect(again.body.result.isError).toBe(false);
+  });
+
+  it('账本读不到（钩子没装）→ 退回会话级：召回过就放行，不会把工具全锁死', async () => {
+    roundAt = null;
+    const { sid } = await rpc(url, INIT);
+    const before = await rpc(url, call('list_projects'), { 'Mcp-Session-Id': sid });
+    expect(before.body.result.isError).toBe(true);          // 没召回仍然拦（会话级底线还在）
+    await rpc(url, call('recall_memory', { project_id: 'P1', query: '关键词丙' }), { 'Mcp-Session-Id': sid });
+    const after = await rpc(url, call('list_projects'), { 'Mcp-Session-Id': sid });
+    expect(after.body.result.isError).toBe(false);
+  });
+
+  it('审计留下本轮判定依据（round_scoped + round_at），事后能分清按哪套口径判的', async () => {
+    roundAt = 1_700_000_000_000;
+    const { sid } = await rpc(url, INIT);
+    await rpc(url, call('list_projects'), { 'Mcp-Session-Id': sid });
+    const rows = await storage.queryAudit({ action: 'mcp_call' });
+    const hit = rows.filter((r) => {
+      const d = r.detail as { session_id?: string; tool?: string; round_scoped?: boolean };
+      return d.session_id === sid && d.tool === 'list_projects' && d.round_scoped === true;
+    });
+    expect(hit.length).toBeGreaterThan(0);
+    const detail = hit[hit.length - 1].detail as { round_at?: number; recall_at?: number | null };
+    expect(detail.round_at).toBe(1_700_000_000_000);
+    expect(detail.recall_at).toBeNull();
+  });
+});
+
+// 默认关闭时绝对不能有轮级行为：这是「不打破既有客户端」的底线。
+describe('第四层：未开启 roundScopedRecall 时仍按会话级判（默认零变化）', () => {
+  let handle: McpHttpHandle | null = null;
+  let url = '';
+  let roundAt: number | null = null;
+
+  beforeAll(async () => {
+    const storage = new InMemoryStorage();
+    const { vault } = await createTestVault();
+    handle = runMcpHttpServer({
+      port: 0, token: TOKEN, storage, l0: vault,
+      strictRecallGate: true,
+      latestRoundAt: async () => roundAt,   // 账本一直在推新，但没开轮级 → 不该影响判定
+    });
+    url = `http://127.0.0.1:${await handle.ready}/mcp`;
+    await rpc(url, call('create_project', { project_id: 'P1', kind: 'general', display_name: '会话级测试项目' }));
+  });
+  afterAll(() => { handle?.stop(); });
+
+  it('召回过一次之后，即使账本已有更新的一轮，仍然放行', async () => {
+    const { sid } = await rpc(url, INIT);
+    roundAt = Date.now() - 60_000;
+    await rpc(url, call('recall_memory', { project_id: 'P1', query: '关键词丁' }), { 'Mcp-Session-Id': sid });
+    roundAt = Date.now() + 60_000;   // 故意把账本推到未来：会话级判定下不应有任何影响
+    const ok = await rpc(url, call('list_projects'), { 'Mcp-Session-Id': sid });
+    expect(ok.body.result.isError).toBe(false);
+  });
+});

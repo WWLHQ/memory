@@ -714,9 +714,10 @@ describe('工作台壳层', () => {
     expect(title).toContain('写锁（写密钥）已解锁');
   });
 
-  it('成员口径：查阅锁读不到（requireAdmin）时，写锁仍按真实值显示（2026-11-12 报障回归）', async () => {
+  it('成员口径：查阅锁读不到（requireAdmin）但写密钥已解锁 → 显示「本人可直读」（口径一回归）', async () => {
     // 成员调 l0:status 必被拒（查阅锁/授权是管理员口径），但写锁走 getWriteStatus，
     // 账号级通道是通的 —— 不能因为查阅锁读不到就把写锁也写成「不可用」。
+    // 口径一（2026-11-17）：解锁写密钥后本人可免审批直读自己的 L0 → 不再谎报「查阅不可用」。
     vi.mocked(loadStatusbar).mockResolvedValue({
       location: { status: 'ok', view: { kind: 'file', path: 'C:////data////memories.db.json', source: 'ipc' } },
       l0: { status: 'error', detail: '需要管理员权限（§4.4.4）' },
@@ -728,11 +729,28 @@ describe('工作台壳层', () => {
     });
     await renderShell();
     const cell = await screen.findByTestId('sb-l0');
-    expect(cell.textContent).toContain('查阅不可用');
+    expect(cell.textContent).toContain('查阅本人可直读');
+    expect(cell.textContent).not.toContain('查阅不可用');
     expect(cell.textContent).toContain('写已解');
     const title = cell.getAttribute('title')!;
     expect(title).toContain('写锁（写密钥）已解锁');
-    expect(title).toContain('需要管理员权限');
+    expect(title).toContain('本人条目可直读');
+  });
+
+  it('成员口径：查阅锁读不到且写锁也锁着 → 如实写「查阅不可用」', async () => {
+    vi.mocked(loadStatusbar).mockResolvedValue({
+      location: { status: 'ok', view: { kind: 'file', path: 'C:////data////memories.db.json', source: 'ipc' } },
+      l0: { status: 'error', detail: '需要管理员权限（§4.4.4）' },
+      l0Write: { status: 'ok', view: { unlocked: false, pending: 0 } },
+      collector: {
+        status: 'ok',
+        view: { running: true, intervalMs: 60_000, lastAt: 1_790_000_000_000, lastCollected: 12, autoRetryStopped: false, consecutiveFails: 0 },
+      },
+    });
+    await renderShell();
+    const cell = await screen.findByTestId('sb-l0');
+    expect(cell.textContent).toContain('查阅不可用');
+    expect(cell.textContent).toContain('写锁');
   });
 
   it('状态栏不可用态写原因，不用 0 或「—」冒充读数', async () => {

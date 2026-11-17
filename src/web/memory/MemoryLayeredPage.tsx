@@ -5,6 +5,8 @@
 // ⚠ 内核读不到（批次25 P0-7）→ 三态加载：显示原因 + 重试；某层 browse 失败也点名，绝不当成「该层为空」。
 import React, { useEffect, useState } from 'react';
 import { coreListMemories, coreBrowse, coreUpdateContent, openMemoryFile, storageLocation } from './coreMemoryOps.ts';
+import { hostCall } from '../../desktop/hostBridge.ts';
+import { currentSessionId } from '../shared/session.ts';
 import { DEDUP_THRESHOLDS } from '../../core/memagent/layerRules.ts';
 import type { MemoryRecord } from './types.ts';
 import { decayClass } from './logic.ts';
@@ -187,6 +189,36 @@ export function MemoryLayeredPage({ load = coreListMemories }: { load?: () => Pr
     setL0Msg('状态：已锁定 [L0 已加密 · 需授权]');
   }
 
+  // 口径一本人直读（2026-11-17 用户拍板）：解锁写密钥后免审批直读本人 L0 原文。
+  // 归属校验在主进程（blob 元数据 owner === 登录账号）；他人条目仍拒（须申请授权）。
+  const [selfBusy, setSelfBusy] = useState(false);
+  async function handleSelfBrowse() {
+    setSelfBusy(true);
+    try {
+      const r = await hostCall<{ ok: true; mine: number; decrypted: number; locked: boolean; no_owner?: number; rows: Array<{ mem_id: string; content: string }> }
+        | { ok: false; error: string; locked?: boolean }>('l0:selfBrowse', [currentSessionId()]);
+      if (!r || r.ok !== true) {
+        const msg = r && !r.ok ? r.error : '本人直读通道不可用（宿主桥未就绪）';
+        setL0Msg(`状态：本人直读未生效 · ${msg}`);
+        toast.show(`本人直读未生效：${msg}`);
+        return;
+      }
+      const map: Record<string, string | null> = {};
+      for (const row of r.rows) map[row.mem_id] = row.content;
+      setLayerContent((prev) => ({ ...prev, L0: map }));
+      const noOwner = r.no_owner ?? 0;
+      const noOwnerNote = noOwner > 0
+        ? `；另有 ${noOwner} 条存量无归属（可在安全页「存量 L0 归属回填」卡回填后直读）`
+        : '';
+      setL0Msg(`状态：本人直读完成 · 归属本人 ${r.mine} 条，已解出 ${r.decrypted} 条${noOwnerNote}（他人条目仍需授权 §4.4.2）`);
+      toast.show(`已直读本人 L0 原文 ${r.decrypted} 条${noOwner > 0 && r.decrypted === 0 ? `（存量 ${noOwner} 条无归属，先去安全页回填）` : ''}`);
+    } catch (e) {
+      setL0Msg(`状态：本人直读失败 · ${String((e as Error)?.message ?? e)}`);
+    } finally {
+      setSelfBusy(false);
+    }
+  }
+
   /** 非管理员提交查阅申请；管理员在「账号与安全」页批准并发放一次性密码 */
   async function handleRequest() {
     const ids = reqProjects.split(/[,，\s]+/).map((s) => s.trim()).filter(Boolean);
@@ -295,6 +327,16 @@ export function MemoryLayeredPage({ load = coreListMemories }: { load?: () => Pr
         </>
       )}
       <span data-testid="l0-status" style={{ fontSize: 11, color: 'var(--muted)' }}>{l0Msg}</span>
+      {role !== null && !l0Unlocked && (
+        <div className="row" data-testid="l0-self-read" style={{ width: '100%', alignItems: 'center' }}>
+          <button className="btn" data-testid="l0-self-browse" disabled={selfBusy} onClick={() => void handleSelfBrowse()}>
+            {selfBusy ? '直读中…' : '本人直读（免审批）'}
+          </button>
+          <span className="note" style={{ fontSize: 11, color: 'var(--muted)' }}>
+            先在安全页解锁写密钥，即可直读<b>本人</b>的 L0 原文；查阅他人的仍须申请授权
+          </span>
+        </div>
+      )}
       {role === 'member' && !l0Unlocked && (
         <div className="row" data-testid="l0-request" style={{ width: '100%' }}>
           <input

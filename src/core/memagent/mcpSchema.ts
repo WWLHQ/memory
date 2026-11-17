@@ -20,6 +20,13 @@ export const RECALL_FIRST_GATE_MSG =
  *  默认关闭时本常量不参与任何返回，老客户端与既有测试逐字不变。 */
 export const RECALL_FIRST_STRICT_GATE_MSG =
   '⛔ 本会话尚未调用 recall_memory（首步检索记忆库）。服务端已开启严格首步召回门禁，本会话除 recall_memory 外的所有工具均已锁定：请先调用一次 recall_memory，再继续本操作。';
+/**
+ * 第四层·轮级放行的专用文案（2026-11-17）。
+ * 为什么必须另写一句：轮级判定下「本会话尚未调用」会变成假话——上一轮明明召回过。
+ * 用户看到「没查」和「上一轮查了但这轮没查」要做的事完全不同，文案不能混。
+ */
+export const RECALL_ROUND_GATE_MSG =
+  '⛔ 本轮尚未调用 recall_memory：你上一轮调用过，但用户这次的新问题还没有重新检索记忆库。服务端按「轮」判定，除 recall_memory 外的所有工具在本轮均被锁定——请先针对本轮问题调用一次 recall_memory（换 query，不要原样重复上一轮），再继续本操作。';
 /** 严格门禁开启时追加到 initialize.instructions 的声明（默认不下发，保证老客户端逐字不变） */
 export const RECALL_GATE_STRICT_INSTRUCTIONS =
   '\n10. 严格首步召回门禁（服务端已开启）：本会话调用 recall_memory 之前，除 recall_memory 自身外的**所有**工具都会被服务端硬拦并返回 isError；读类工具不再只是软提醒。不要试图绕过，先调用一次 recall_memory 即解锁。';

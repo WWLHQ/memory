@@ -23,6 +23,10 @@ module.exports = {
     'package.json',
     '!node_modules/**/*',
   ],
+  // 浏览器插件必须作为真实目录存在才能「加载已解压的扩展程序」，不能塞进 asar。
+  extraResources: [
+    { from: 'browser-extension/webchat-exporter', to: 'webchat-exporter', filter: ['**/*'] },
+  ],
   asarUnpack: ['dist-electron/**/*'],
   npmRebuild: false,
   win: {

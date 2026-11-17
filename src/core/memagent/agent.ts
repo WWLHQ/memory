@@ -510,6 +510,7 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
       r = await coreWrite(req, {
         storage, vector, account, request_id, now: Date.now(), llm, llmModel: pick.model ?? undefined,
         l0: opts.l0,
+        l0Backup: opts.l0Backup,
       });
     } catch (e) {
       // 被拒写入也要能对账：把内核本次真实 request_id 带在错误详情上，界面不得伪造回执号

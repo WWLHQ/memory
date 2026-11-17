@@ -110,8 +110,12 @@ function summarize(list: Memory[], l0Count: number, l0Bytes: number, l0Ids: stri
     if (m.has_l0) out.already_split++;
     if (out.sample_ids.length < 20 && d.action !== 'none') out.sample_ids.push(m.mem_id);
   }
-  // 完整性核对（只读）：孤儿 = 库里没人认领；断链 = 行认领了库里没有
-  for (const id of l0Ids) if (!claimed.has(id)) out.orphan_blobs++;
+  // 完整性核对（只读）：孤儿 = 库里没人认领；断链 = 行认领了库里没有。
+  // L0-first 拦截标记（bak_*, 2026-11-17 用户拍板）是有意不入账本的标记条目，不算孤儿。
+  for (const id of l0Ids) {
+    if (id.startsWith('bak_')) continue;
+    if (!claimed.has(id)) out.orphan_blobs++;
+  }
   for (const m of list) {
     if (m.deleted || !m.has_l0) continue;
     if (!l0Set.has(m.mem_id)) {

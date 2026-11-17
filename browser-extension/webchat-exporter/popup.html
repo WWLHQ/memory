@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>网页对话导出到记忆库</title>
+  <style>
+    body { margin: 0; padding: 14px; width: 320px; font: 13px/1.6 "Microsoft YaHei", system-ui, sans-serif; color: #1f2937; background: #ffffff; }
+    h1 { margin: 0 0 6px; font-size: 15px; }
+    p { margin: 0 0 10px; color: #4b5563; }
+    button { width: 100%; margin: 4px 0; padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 6px; background: #f9fafb; color: #111827; cursor: pointer; }
+    button.primary { background: #2563eb; border-color: #2563eb; color: #ffffff; }
+    button:disabled { opacity: 0.6; cursor: default; }
+    #status { margin-top: 10px; padding: 8px; border-radius: 6px; background: #f3f4f6; min-height: 36px; }
+    #host { margin: 0 0 8px; padding: 7px 8px; border-radius: 6px; background: #f3f4f6; font-size: 12px; }
+    #host.good { background: #ecfdf5; color: #047857; }
+    #host.bad { background: #fef2f2; color: #b91c1c; }
+    #host.dim { background: #f3f4f6; color: #6b7280; }
+    #lastAuto { margin: 0 0 8px; padding: 7px 8px; border-radius: 6px; background: #f3f4f6; font-size: 12px; color: #4b5563; }
+    #lastAuto.bad { background: #fef2f2; color: #b91c1c; }
+    .dim { color: #6b7280; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>网页对话导出到记忆库</h1>
+  <div id="ver" class="dim"></div>
+  <p>读取当前页面已显示的对话，直接写入应用的「导出和同步目录」，采集器会自动入库；本机服务不可用时兜底存到浏览器下载目录。</p>
+  <div id="host" class="dim">正在检查本机接收服务…</div>
+  <div id="lastAuto" class="dim">正在读取最近一次自动检查…</div>
+  <button id="exportCurrent" class="primary" type="button">导出当前对话</button>
+  <button id="exportAll" type="button">导出所有已打开的对话</button>
+  <button id="exportHistory" type="button">导出全部历史对话（遍历侧栏）</button>
+  <button id="resetExports" type="button">清空旧导出并重新导出全部</button>
+  <div id="status">准备就绪。</div>
+  <p class="dim" id="note">自动同步每 5 分钟执行一次，只在你保持对应网页打开时有效；页面关闭后浏览器读不到页面内容。历史会话会在插件重载后的第一轮自动遍历一次，之后在你空闲时按站点补跑；想立刻再遍历一遍就点上面的按钮。</p>
+  <script src="shared/core.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -69,7 +69,7 @@ class Session {
   ma: ReturnType<typeof createMemAgent>;
   readonly account: McpAccount;
   readonly storage: StorageBackend;
-  constructor(account: McpAccount, storage?: StorageBackend, l0?: L0Port, pending?: PendingStore, personal?: PersonalMemoryStore) {
+  constructor(account: McpAccount, storage?: StorageBackend, l0?: L0Port, pending?: PendingStore, personal?: PersonalMemoryStore, l0Backup?: { put(mem_id: string, blob: import('./l0Store.ts').L0Blob): Promise<void> }) {
     this.account = account;
     this.storage = storage ?? new InMemoryStorage();
     this.ma = createMemAgent({
@@ -80,6 +80,7 @@ class Session {
       vector: new JsVectorBackend(),
       storage: this.storage,
       l0,
+      l0Backup,
       // 批次44-D4：跨 socket 共享同一 pending 队列，避免多连接各自暂存互不重放
       pending,
       // 第一轮个人记忆召回准入：只读 owner 的 confirmed 条目（未注入 = 零改变）
@@ -92,6 +93,8 @@ export interface McpOptions {
   storage?: StorageBackend;
   /** L0 写密钥端口（主进程 L0Vault）；缺省 → 写入诚实报 E_L0_LOCKED */
   l0?: L0Port;
+  /** L0-first 拦截标记写入口：质量门拦截条目以 bak_* 键落主 L0 库；缺省 = 旧行为（只写审计） */
+  l0Backup?: { put(mem_id: string, blob: import('./l0Store.ts').L0Blob): Promise<void> };
   /** 监听端口，缺省 8202；0 = 随机端口（测试） */
   port?: number;
   /** 必填：访问令牌（initialize / 任意请求的 params.token） */
@@ -157,7 +160,7 @@ export function runMcpServer(opts: McpOptions): McpServerHandle {
     const st = stateOf(socket);
     if (!st.session) {
       // D6-4：会话账户 = 鉴权时解析出的账户（st.account 已在鉴权点赋值，兜底引导账户防御）
-      st.session = new Session(st.account ?? account, opts.storage, opts.l0, sharedPending, opts.personal);
+      st.session = new Session(st.account ?? account, opts.storage, opts.l0, sharedPending, opts.personal, opts.l0Backup);
     }
     return st.session;
   }

@@ -107,7 +107,7 @@ export function summarizeAgentUsage(
         r.reliable_first_calls += 1;
         // 合规 = 会话第一次 tools/call 就是 recall_memory。
         // 2026-11-15 修正：原判据用 `recalled_before === true`，但该字段语义是「本次调用**之前**已召回过」
-        // （见 mcpHttp.ts `recalled = recalledBySession.get(sid)`，在首调前写入），首调时必然 false
+        // （见 mcpHttp.ts `recalled`，在首调前写入），首调时必然 false
         // → 旧口径结构上恒 0%，真实账本 196 次可靠首调算出来 0%。现改用 tool 判定（同一份审计里就有）。
         if (d?.tool === 'recall_memory') r.first_call_recall += 1;
       }

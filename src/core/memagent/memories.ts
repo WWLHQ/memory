@@ -13,7 +13,7 @@ import {
 } from './feedbackSignal.ts';
 import type { FeedbackPolicy } from '../../shared/growthConfig.ts';
 import { MemAgentError } from './errors.ts';
-import type { L0BlobStore } from './l0Store.ts';
+import type { L0Blob, L0BlobStore } from './l0Store.ts';
 import { embedSync, DEFAULT_VECTOR_DIM } from './vector.ts';
 import { checkL0ToL1Quality, filteredAuditDetail, QUALITY_GATE_VERSION } from './qualityGate.ts';
 import {
@@ -170,6 +170,12 @@ export interface WriteCtx {
   llmModel?: string;
   /** L0 写密钥端口（§4.4.4）：缺省/未解锁 → E_L0_LOCKED，绝不落明文 */
   l0?: L0Port;
+  /**
+   * L0-first 拦截标记写入口（2026-11-17 用户拍板：不建独立备份文件）：质量门拦截的条目不再纯丢弃——
+   * 原文密文以 bak_* 键落主 L0 库（status=filtered + 归属人），统计可区分、可显示、可人工重判生成 L1。
+   * 未接端口 → 保留旧行为（只写拦截审计，不落标记条目）。
+   */
+  l0Backup?: { put(mem_id: string, blob: L0Blob): Promise<void> };
 }
 
 /**
@@ -230,23 +236,8 @@ export async function coreWrite(input: WriteInput, ctx: WriteCtx): Promise<Write
   const dim = dimOf(vector);
   const auditRef: AuditRef = { request_id, action: 'write' };
 
-  // 1) L0→L1 质量门（§2.1）：必须在查重之前；噪声/无意义内容不落库
-  const quality = checkL0ToL1Quality(input.content);
-  if (!quality.ok) {
-    await storage.appendAudit({
-      ...auditRef, project_id: input.project_id, user_id: input.user_id, ts: now,
-      detail: { ...filteredAuditDetail(input.content, quality), source_agent: input.source_agent, session_id: input.session_id },
-    });
-    return {
-      mem_id: '',
-      dedup: { action: 'filtered', sim: -1 },
-      spec_violations: [`L0→L1 质量门拦截: ${quality.reason}`],
-      audit: auditRef,
-    };
-  }
-  const contentL1 = quality.content!;
-
-  // 1.5) L0 加密必须在任何 LLM 调用前确认（§4.4.4）：无写密钥 → E_L0_LOCKED，不落明文
+  // 1) L0 加密最先确认（§4.4.4 + L0-first 落库口径）：无写密钥 → E_L0_LOCKED，原文先封存。
+  //    备份语义：无论质量门放行与否，原文密文都要能归档（拦截条目靠它保底）。
   if (!ctx.l0) {
     throw new MemAgentError('E_L0_LOCKED', 'L0 写密钥未解锁：请输入 L0 管理密码解锁写密钥后再写入（桌面端安全页「L0 管理」，或写入被挡处的解锁框；§4.4.4）');
   }
@@ -257,6 +248,59 @@ export async function coreWrite(input: WriteInput, ctx: WriteCtx): Promise<Write
     if (e instanceof MemAgentError) throw e;
     throw new MemAgentError('E_L0_LOCKED', `L0 加密失败：${String((e as Error)?.message ?? e)}`);
   }
+
+  // 2) L0→L1 质量门（§2.1）：必须在查重之前；拦截条目不再纯丢弃——原文密文落 L0 备份库（可重判），只不建 L1 行
+  const quality = checkL0ToL1Quality(input.content);
+  if (!quality.ok) {
+    const owner = input.user_id ?? ctx.account.user_id;
+    let backup_id: string | undefined;
+    if (ctx.l0Backup) {
+      try {
+        backup_id = `bak_${ulid()}`;
+        await ctx.l0Backup.put(backup_id, {
+          envelope: content_l0_enc,
+          sealed_at: now,
+          owner_user_id: owner,
+          project_id: input.project_id,
+          status: 'filtered',
+          filter_code: quality.code ?? 'unspecified',
+          filter_reason: quality.reason,
+          source_agent: input.source_agent,
+        });
+      } catch (e) {
+        // 备份写失败不掩盖拦截事实：如实记进审计（backup_error），仍按 filtered 返回，绝不假装已备份
+        await storage.appendAudit({
+          ...auditRef, project_id: input.project_id, user_id: input.user_id, ts: now,
+          detail: {
+            ...filteredAuditDetail(input.content, quality),
+            source_agent: input.source_agent, session_id: input.session_id,
+            backup_error: String((e as Error)?.message ?? e),
+          },
+        });
+        return {
+          mem_id: '',
+          dedup: { action: 'filtered', sim: -1 },
+          spec_violations: [`L0→L1 质量门拦截: ${quality.reason}`],
+          audit: auditRef,
+        };
+      }
+    }
+    await storage.appendAudit({
+      ...auditRef, project_id: input.project_id, user_id: input.user_id, ts: now,
+      detail: {
+        ...filteredAuditDetail(input.content, quality),
+        source_agent: input.source_agent, session_id: input.session_id,
+        ...(backup_id ? { backup_id, l0_backup: true } : {}),
+      },
+    });
+    return {
+      mem_id: '',
+      dedup: { action: 'filtered', sim: -1 },
+      spec_violations: [`L0→L1 质量门拦截: ${quality.reason}`],
+      audit: auditRef,
+    };
+  }
+  const contentL1 = quality.content!;
 
   // 2) 查重候选：同 project、未删除；层文本由 findDuplicate 按层过滤（深层记忆也含浅层）
   const candidates = (await storage.listMemories({ project_id: input.project_id })).filter((m) => !m.deleted);
@@ -410,7 +454,13 @@ export async function coreWrite(input: WriteInput, ctx: WriteCtx): Promise<Write
   if (input.session_id !== undefined && input.session_id.trim()) {
     mem.session_id = input.session_id.trim();
   }
-  await storage.putMemory(mem);
+  // L0-first：主行密文拆行进原数据库时，随行带上归属/状态元数据（租户隔离 + 备份语义）
+  await storage.putMemory(mem, {
+    owner_user_id: input.user_id ?? ctx.account.user_id,
+    project_id: input.project_id,
+    status: 'accepted',
+    source_agent: input.source_agent,
+  });
   await vector.upsert(mem.mem_id, contentL1, { project_id: input.project_id, layer: deepest });
 
   if (graft) {
@@ -583,12 +633,26 @@ export async function coreBrowse(
     );
   }
 
+  // 租户隔离（2026-11-17）：把 L0 库里的归属元数据带给 decrypt（本人放行 / 他人须 grant / 管理员放行）
+  const ownerOf = new Map<string, string | undefined>();
+  if (ctx.l0Blobs) {
+    if (ctx.l0Blobs.listAll) {
+      for (const [id, blob] of await ctx.l0Blobs.listAll()) ownerOf.set(id, blob.owner_user_id);
+    } else {
+      for (const id of need) {
+        const blob = await ctx.l0Blobs.get(id);
+        ownerOf.set(id, blob?.owner_user_id);
+      }
+    }
+  }
+
   const ids = [...envelope.keys()];
   const plain = new Map<string, string>();
   try {
     for (const mem_id of ids) {
       plain.set(mem_id, await ctx.l0.decrypt({
         l0_session_id: sessionId, project_id: req.project_id, mem_id, envelope: envelope.get(mem_id)!,
+        owner_user_id: ownerOf.get(mem_id),
       }));
     }
   } catch (e) {

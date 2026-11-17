@@ -1,0 +1,54 @@
+{
+  "manifest_version": 3,
+  "name": "网页对话导出到记忆库",
+  "version": "0.5.5",
+  "description": "在支持的 AI 网页自动导出对话（含历史会话遍历），直接写入 MultiAgent Memory 的「导出和同步目录」（本机服务不可用时兜底存到浏览器下载目录）。所有内容只在本机流转。",
+  "permissions": [
+    "alarms",
+    "downloads",
+    "storage",
+    "tabs",
+    "activeTab",
+    "scripting",
+    "idle"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1/*",
+    "*://chat.deepseek.com/*",
+    "*://www.doubao.com/*",
+    "*://yiyan.baidu.com/*",
+    "*://www.qianwen.com/*",
+    "*://chat.qwen.ai/*",
+    "*://www.kimi.ai/*",
+    "*://kimi.moonshot.cn/*",
+    "*://chatglm.cn/*",
+    "*://aistudio.xiaomimimo.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "导出当前网页对话"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://chat.deepseek.com/*",
+        "*://www.doubao.com/*",
+        "*://yiyan.baidu.com/*",
+        "*://www.qianwen.com/*",
+        "*://chat.qwen.ai/*",
+        "*://www.kimi.ai/*",
+        "*://kimi.moonshot.cn/*",
+        "*://chatglm.cn/*",
+        "*://aistudio.xiaomimimo.com/*"
+      ],
+      "js": [
+        "shared/core.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

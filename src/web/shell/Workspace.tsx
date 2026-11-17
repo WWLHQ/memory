@@ -38,6 +38,7 @@ import { NAV_COUNT_MSG, parseNavCount } from '../shared/navCountChannel.ts';
 import { SHELL_GOTO_MSG } from '../shared/shellNavigate.ts';
 import { humanErrorText } from '../shared/kernelLoad.tsx';
 import { onL0WriteLockChanged } from '../shared/l0WriteLockSignal.ts';
+import { runStartupAutoOnboard } from '../AgentOnboard/startupAutoOnboard.ts';
 
 const STORE_THEME = 'memdesk.shell.theme.v1';
 const STORE_DENSITY = 'memdesk.shell.density.v1';
@@ -212,6 +213,8 @@ export function Workspace() {
   const [sessionActive, setSessionActive] = useState(() => hasActiveSession());
   /** 当前会话真实身份（/api/me 确认；null = 未确认，绝不按 localStorage 冒充身份） */
   const [identity, setIdentity] = useState<TenantContext | null>(null);
+  /** 身份是否已核对过一轮（区分「还没查」与「查了但没有会话」——启动自动接入要等这一步） */
+  const [identityChecked, setIdentityChecked] = useState(false);
   /** 壳层登录弹窗（菜单栏 / QAT / 登录状态处三处入口共用同一实例） */
   const [loginOpen, setLoginOpen] = useState(false);
   /** 个人记忆常驻面板（N8）：开闭状态同样挂在壳层，切换中心标签不丢状态；收起只是不渲染 */
@@ -413,13 +416,27 @@ export function Workspace() {
   // 启动时用本机 sessionId 向 /api/me 核对真实身份：查不到就不写身份（状态栏只显示「已登录/未登录」）
   useEffect(() => {
     const sid = getStoredSessionId();
-    if (!sid) { setIdentity(null); return; }
+    if (!sid) { setIdentity(null); setIdentityChecked(true); return; }
     let alive = true;
     fetchSessionContext(sid)
-      .then((ctx) => { if (alive) setIdentity(ctx); })
-      .catch(() => { if (alive) setIdentity(null); });
+      .then((ctx) => { if (alive) { setIdentity(ctx); setIdentityChecked(true); } })
+      .catch(() => { if (alive) { setIdentity(null); setIdentityChecked(true); } });
     return () => { alive = false; };
   }, []);
+
+  /**
+   * 启动即自动发现并接入本机 Agent（2026-11-16 用户要求：软件起来就扫，不等切到接入页）。
+   * 之前这条链路挂在接入页挂载 effect 上，用户不点「Agent 接入」就永远不跑。
+   * 等身份核对完成再起扫：写 MCP 配置要真实会话判定管理员权限，先扫只能记一堆「无会话」。
+   * 单次闸 + 会话内标记都在 runStartupAutoOnboard 里：切页/重挂/StrictMode 双挂载都不会重复三路真扫。
+   */
+  useEffect(() => {
+    if (!identityChecked) return;
+    void runStartupAutoOnboard({
+      sid: getStoredSessionId(),
+      role: identity?.role ?? null,
+    });
+  }, [identityChecked, identity?.role]);
 
   /** 登录弹窗回传会话变化：更新身份与只读门禁；概览/状态栏随 sessionActive 自动重读真实数据 */
   const onLoginSession = useCallback((ctx: TenantContext | null) => {
@@ -1017,15 +1034,21 @@ export function Workspace() {
   const l0 = status?.l0;
   const l0w = status?.l0Write;
   // L0 有两把独立的锁（§4.4.4，互不替代），且**读它们的通道不同**：
-  //   查阅锁 active_sessions（解密查阅会话）—— 走 l0:status，requireAdmin，成员读不到时如实写「不可用」；
+  //   查阅锁 active_sessions（解密查阅会话）—— 走 l0:status，requireAdmin，成员读不到；
   //   写锁 write_unlocked（写密钥）—— 走 shared/l0WriteState → 内核 getWriteStatus，**成员也读得到**。
-  // 旧实现两把锁都从 l0:status 取 → 成员解锁后状态栏仍显示「不可用/锁」，与安全页打架。
+  // 口径一（2026-11-17 用户拍板）：解锁写密钥后本人可免审批直读自己的 L0 ——
+  // 所以成员读不到查阅锁全貌时，只要写密钥已解锁就显示「本人可直读」，不对成员谎报「不可用」。
+  const selfReadable = l0?.status !== 'ok' && l0w?.status === 'ok' && l0w.view.unlocked;
   const l0Text = !status ? '读取中'
-    : `查阅${l0?.status === 'ok' ? (l0.view.active_sessions > 0 ? `${l0.view.active_sessions}会话` : '锁') : '不可用'} · 写${l0w?.status === 'ok' ? (l0w.view.unlocked ? '已解' : '锁') : '不可用'}`;
+    : `查阅${l0?.status === 'ok'
+      ? (l0.view.active_sessions > 0 ? `${l0.view.active_sessions}会话` : '锁')
+      : selfReadable ? '本人可直读' : '不可用'} · 写${l0w?.status === 'ok' ? (l0w.view.unlocked ? '已解' : '锁') : '不可用'}`;
   const l0Title = !status ? '尚未读取'
     : `L0 保险库：查阅锁（解密查阅会话）${l0?.status === 'ok'
       ? (l0.view.active_sessions > 0 ? `已开 ${l0.view.active_sessions} 个会话` : '锁定（无活跃查阅会话）')
-      : `读不到${l0 && 'detail' in l0 ? `（${l0.detail}）` : ''}`} · 写锁（写密钥）${l0w?.status === 'ok'
+      : selfReadable
+        ? '全貌仅管理员可读；写密钥已解锁，本人条目可直读（免审批，归属校验在主进程）'
+        : `读不到${l0 && 'detail' in l0 ? `（${l0.detail}）` : ''}`} · 写锁（写密钥）${l0w?.status === 'ok'
       ? (l0w.view.unlocked ? '已解锁' : '锁定')
       : `读不到${l0w && 'detail' in l0w ? `（${l0w.detail}）` : ''}`}${l0?.status === 'ok'
       ? ` · 有效授权 ${l0.view.active_grants} · 管理密钥${l0.view.has_admin_wrap ? '已设置' : '未设置'}`

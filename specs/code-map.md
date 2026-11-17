@@ -1238,6 +1238,69 @@ status: draft
 | 页面接真 | `src/web/monitor/useMonitorReal.ts`：`RealMonitor.agentOptions` 由 `loadRealMonitorData` 用同一份 `mems`/`alerts` 实算；`MonitorPage.tsx` 渲染 `real?.agentOptions ?? ['all']`，`all` 显示为「全部」 | 同上 + 既有 `MonitorPage.test.tsx`（mock 缺字段回落 `['all']` 仍通过） |
 | e2e 口径修正 | `e2e/monitor.spec.ts`：用例名改为「选项由真实账本派生，空账本只保留「全部」」，断言 1 项、含「全部」、不含 `sync-00`/`coder-01` | e2e 依赖 dist + 浏览器栈，本环境未执行；口径已由单测钉住 |
 
+### 插件「导出当前对话」必失败：MV3 Service Worker 没有 `URL.createObjectURL`（2026-11-16）
+
+> 动因：用户实测在插件弹窗点「导出当前对话」→ 必然失败，刷新对话页后仍然失败。原代码把任何异常都吞成一句「页面结构可能有变化」，指向了完全错误的方向（用户据此反复刷新页面，永远无效）。
+
+| 项 | 代码落点 | 测试 |
+|---|---|---|
+| 下载改 `data:` URL（根因修复） | `browser-extension/webchat-exporter/background.js`：`downloadMarkdown` 原先 `URL.createObjectURL(new Blob(...))` —— Chrome MV3 的 Service Worker 全局**已移除 `createObjectURL`**，调用即 `TypeError`。改为 `'data:text/markdown;charset=utf-8;base64,' + toBase64Utf8(md)`；`toBase64Utf8` 用 `TextEncoder` + 0x8000 分块 `String.fromCharCode.apply` 防爆栈后 `btoa`（中文 3 字节 → base64 4 字符，优于百分号编码 9 字符）；`MAX_DATA_URL_LENGTH = 1900000` 提前给「本次对话内容过大」人话而非静默失败 | `src/electron/__tests__/webchatExtensionBackground.test.ts`（8 例，`vm.createContext` 造 MV3 环境） |
+| 错误原因不再被吞 | 同文件 `errText(e)` 优先读 `chrome.runtime.lastError.message`；`askTab()` 把「内容脚本没注入」（`Receiving end does not exist` / `Could not establish connection`）与「读取页面失败」拆成两条不同人话——前者明确要求「刷新对话页后重试」；下载被拒时带真实原因与文件大小 | 同上（3 例专测文案分流） |
+| 弹窗侧同样读真因 | `popup.js`：`call()` 在回调里读 `chrome.runtime.lastError` 并 reject（原先忽略 → 恒给「扩展后台未响应」）；`GET_STATUS` 失败提示「在扩展管理页点『重新加载』可恢复」 | 无独立单测（薄壳，逻辑全在 background） |
+| 批量导出计数修正 | 同文件：`skipped` 只在 `out.unchanged` 时累加，其余计入 `failed` 并收集 `reasons`；`failed > 0 && reasons.length > 0` 才拼「原因：…」 | 同上（批量列原因用例） |
+| 版本号必须跟 | `manifest.json`：`0.1.0` → `0.1.1`（内容变了但清单不变时浏览器不会重载扩展，用户装新包仍是旧代码） | — |
+| 插件目录随包下发 + 幂等同步 | `src/electron/webchatExtensionCopy.ts`：`ensureStableExtensionDir({sourceDir, targetDir, list?})` 由六个文件的硬编码清单改为**递归整棵复制**（`walkFiles`，相对路径统一 `/`），逐文件字节比对，内容一致不写盘；`main.ts` 的 `webchatExtensionDir()` 指向 `<数据根>/webchat-extension`，并在**启动时同步一次**（失败只记 `webchat-extension-copy-failed` warn，不阻塞启动）——否则「插件修好了但浏览器里还是旧副本」 | `src/electron/__tests__/webchatExtensionCopy.test.ts`（6 例，含「源里多出的文件也会复制」） |
+
+> **口径**：① MV3 Service Worker 里**没有 `URL.createObjectURL`**，这是硬约束，不是环境偶发——凡是要在后台造文件，只能走 `data:` URL 或走 `chrome.downloads` 之外的落盘通路。② **「内容脚本没注入」与「页面结构变了」是两件不同的事**，装/更新插件后必须刷新对话页，文案必须分开，否则用户会按错误方向反复刷新。③ 单条 `data:` URL 有长度上限（实测约 2MB），超限要提前说人话。④ 插件是纯浏览器脚本不能 import 应用侧 ESM，站点词表允许两份实现、不允许两份真相——测试**直接读插件 `core.js`** 解析 `SITES` 与 `shared/webchatSites.ts` 逐 key/label 比对。
+> **三道闸门证据（按 `specs/开发纪律_三道闸门.md` §4）**：
+> **A·影响面回归**：影响面 = `background.js` / `popup.js` / `manifest.json` / `webchatExtensionCopy.ts` / `main.ts`（启动即同步）+ 新增 `webchatExtensionBackground.test.ts`。全量 `vitest run` **298 文件 / 3565 例全绿**；`npm run typecheck` 两工程 0 错；oxlint **0 warnings / 0 errors**；`check:no-demo` 通过（410 文件 / 26 判据 / 0 命中）；`code:index --write` 刷新 **416 源文件 / 148 文档** 且 `--check` 一致。
+> **B·效果验证**：`vm.createContext` 造出「像 MV3 Service Worker 的环境」，其中 **`URL` 故意不提供 `createObjectURL`**（用 `SandboxURL` 包 Node `URL`，而非直接给 Node 的 `URL`——Node 18+ 自带 `createObjectURL` 会让旧代码假通过）；其中一个用例专门断言「本沙箱确实没有 createObjectURL」作为前提。**状态真的变了**：导出成功路径产出 `data:text/markdown;charset=utf-8;base64,` 且中文 round-trip 无损坏；内容脚本未注入 → 文案含「刷新对话页」且**不含**「页面结构可能有变化」；下载被拒 → 带 `net::ERR_INVALID_URL` 真因；无新增 → 不写文件且计 `skipped`。
+> **C·变异验证**：**C1 一处代码级变异**——把 `downloadMarkdown` 改回 `URL.createObjectURL` → **3 例红灯**（导出成功路径 / 中文不坏 / 前提用例），原样还原后复绿 + 全量复跑全绿。C2 矩阵：成功 / 内容脚本未注入 / 下载被拒 / 内容脚本回原因 / 无新增 / 非支持站点 / 批量列原因 —— 七态全部明确断言。
+
+### 「立即采集」被误报「宿主桥不可达」：3 秒探测窗口掐死 4 秒长任务（2026-11-16）
+
+> 用户实测（截图红框）：卡片底部显示「**采集未执行：宿主桥不可达（父窗口未安装桥或非同源）**」。
+> 日志铁证（`%APPDATA%\MultiAgent Memory\actions.log`）：
+> ```
+> 14:23:39.735 [error] [host:collector:triggerNow] {"via":"bridge","ms":3004,"error":"宿主桥不可达（父窗口未安装桥或非同源）"}
+> 14:23:40.749 [info]  [ipc:collector:triggerNow]  {"ms":4013}
+> ```
+> 同一页面 `webchatExt:get` / `chatExports:sites` 经桥都是 **6~24ms**（桥本身完全正常）。真实情况是：采集**服务端跑了 4013ms 才返回**，而客户端桥在 **3004ms** 就放弃 —— 把「超时」说成了「父窗口没装桥」，用户据此以为插件没装好，实际采集已经跑完入库。
+
+| 项 | 代码落点 | 测试 |
+|---|---|---|
+| 两段式桥协议（根因修复） | `src/desktop/hostBridge.ts`：`handleBridgeMessage` 校验通过后**先回受理回执** `{[RES]:{id, ack:true}}` 再 `executeOnce`；`callViaParent` 收到 ack 即 `clearInterval` 停止重发，转入 `ACCEPTED_WAIT_MS = 180_000` 长等待，只有「连 ack 都没收到」才判「宿主桥不可达（父窗口未安装桥或非同源）」 | `src/desktop/__tests__/hostBridge.test.ts`（25 例，含 2 例新增） |
+| 「已受理但没结果」文案分离 | `hostBridge.ts` 导出 `HOST_ACCEPTED_ERROR_PREFIX = '宿主已受理'`（单一真源）；`WebChatExportCard.tsx` 按此前缀把「采集根本没开始」与「采集已在跑、只是结果没取回」分成两句人话 | 同上 + `WebChatExportCard.test.tsx`（27 例，含 1 例新增） |
+
+> **口径**：① 桥的 3 秒窗口只该用来判断「父窗口在不在」，不该用来判断「任务做没做完」——两件事必须分开计时。② 收到 ack 后**停止重发**：父窗口已经在做了，重发只是白跑（也顺带避免长任务跨过 `DEDUPE_TTL_MS` 后被重复执行）。③ 界面不得把「已受理超时」说成「采集未执行」，否则用户会重复点击。
+> **三道闸门证据**：
+> **A·影响面回归**：影响面 = `hostBridge.ts`（协议 + 客户端等待）+ `WebChatExportCard.tsx`（错误文案前缀）+ 两个测试文件。全量 `vitest run` **298 文件 / 3568 例 0 失败**（上一轮 3565 → +3）；`typecheck` 两工程 0 错；oxlint **0 warnings / 0 errors**（774 文件）；`check:no-demo` 通过；`code:index --write` 416 源文件 / 148 文档。既有行为钉住：`hostLog` 的 fire-and-forget 转发、同 id 去重只执行一次、targetOrigin 绝不为 `*`、非同一来源消息被忽略 —— 全部仍在全量中通过（相关计数断言已同步为「ack + 结果」两段）。
+> **B·效果验证**：新增「长任务：先收回执 → 停止重发，越过 3 秒仍能拿到真实结果」——用假定时器推进 4 秒，断言重发次数**不再增长**且最终 resolve 到 4 秒后才到的那份真实结果（正是 4013ms 事故的形状）；新增「受理后一直没结果 → 报『宿主已受理…』而不是『父窗口没装桥』」。**反向断言**：连 ack 都收不到时仍然在 3 秒判「宿主桥不可达」（原用例保留），说明这次放宽没有把「真没装桥」也一起放过去。
+> **C·变异验证（3 次，均原样还原）**：① 服务端不回 ack → **2 红**（ack/结果两段计数断言）；② 收到 ack 后不停重发 → **2 红**，核心用例报 `expected 13 to be 1`（重发了 12 次）；③ 界面恒说「采集未执行」→ **1 红**（新文案用例）。还原后 52 例定向 + 全量 3568 例复绿。
+
+### 插件导出改为「直推本机」：不再依赖浏览器下载目录（2026-11-16）
+
+> 用户实测（截图）：导出「成功」了—— `C:\Users\LHQ\AppData\Local\Temp\20261116-222305.md`（15156 B，22:23:20）。但采集仍然 0 条。
+> 铁证链：
+> 1. QQ 浏览器自己的下载库 `qb_file_dl_record_v1.db` 的 `dl_record` 第 45 条 = `C:\Users\LHQ\AppData\Local\Temp\20261116-222305.md` —— 文件确实是我们的插件产出的（文件名正是 `core.fileNameFor` 的 basename）。
+> 2. 插件请求的路径是 `<下载目录>/chat-exports/<站点>/<时间戳>.md`，QQ 浏览器把 **`chat-exports/<站点>/` 两层子目录整个剥掉**，文件甩进 `%TEMP%` 根。
+> 3. 系统默认下载目录其实是 `E:\下载`（注册表 `User Shell Folders\{374DE290-…}`），而应用扫的是 `C:\Users\LHQ\Downloads\chat-exports`（默认值，空目录）。三处互不相干。
+> 结论：只要还依赖「浏览器下载目录」，就永远在给各家浏览器的下载策略打补丁 → 改为**插件直推本机、由应用自己落盘**。
+
+| 项 | 代码落点 | 测试 |
+|---|---|---|
+| 本机接收端 | `src/electron/webchatIngest.ts`：`POST /export`（Bearer 鉴权 + 站点白名单正则 + 客户端文件名一律不采信、由服务端生成 + 同名加 `-1` 不覆盖 + 8MB 上限 + CORS 预检）、`GET /ping`；只监听 `127.0.0.1` | `src/electron/__tests__/webchatIngest.test.ts`（11 例：401 / 穿越 / 空正文 / 落盘 / 冲突 / 目录读失败 / HTTP 预检-413-405-404 / runtime.json） |
+| 端口与令牌下发 | `main.ts`：`WEBCHAT_INGEST_PORT = 8206` + 冲突 `+1` 探测（最多 9 次）；令牌持久化在 `<数据根>/webchat-ingest.json`；启动时把 `{port, token}` 写进插件目录的 `runtime.json`（0600）—— 插件不用猜端口 | 同上（`writeWebchatRuntime`） |
+| 插件三级交付 | `background.js`：`readRuntime()`（`fetch(chrome.runtime.getURL('runtime.json'))`，成功缓存 30s / 缺失只缓存 5s）→ `postToHost()` → 失败才 `downloadToBrowser()` 兜底；返回 `{via:'host'|'downloads'}`，弹窗据此说清「文件到底在哪」以及「为什么没走本机」 | `webchatExtensionBackground.test.ts`（11 例：直写不碰下载目录 / 令牌失效回退带真因 / 无 runtime.json 回退 / 原有 8 例） |
+| manifest | `version 0.1.1 → 0.2.0`，`host_permissions` 增加 `http://127.0.0.1/*`（MV3 里 fetch 本地端口需要它） | 插件测试读真实 manifest |
+| 文案 | 卡片顶部说明改为「直接写进下面的「导出和同步目录」；本机服务没启动时插件会兜底存到浏览器下载目录」；②提示「会直接写进…」 | `WebChatExportCard.test.tsx`（31 例） |
+
+> **口径**：① **落点由应用决定，不由浏览器决定** —— 这是本次根治的核心；下载目录只作为「应用没启动」时的内容兜底，且必须告知用户「这份可能采不到」。② **绝不信客户端文件名**：路径穿越风险从源头消掉（站点点名走 `^[a-z0-9_-]{1,40}$`，与采集侧同一判据）。③ `runtime.json` 由应用每次启动写入，插件每次导出现读（30 秒缓存）→ 端口变化/令牌轮换都不需要用户手动改配置。④ 本机服务没起来时**内容绝不能丢**（回退下载），但**不能假装成功**（消息里带真实原因）。
+> **三道闸门证据**：
+> **A·影响面回归**：影响面 = `webchatIngest.ts`（新）+ `main.ts`（import/常量/启动接线）+ `background.js`（交付链重写）+ `manifest.json` + 卡片文案 + 2 个测试文件。全量 `vitest run` **299 文件 / 3584 例 0 失败**（上一轮 3570 → +14）；`typecheck` 两工程 0 错；oxlint **0 warnings / 0 errors**（776 文件）；`check:no-demo` 通过（411 文件）；`code:index --write` **417 源文件 / 148 文档**。既有行为钉住：插件原有 8 例（含「SW 确实没有 createObjectURL」前提、内容脚本没注入的文案分流、批量导出列入失败原因）全部仍绿，只是「导出成功」断言从「已导出…」改为「改存到浏览器下载目录…」（兜底路径的如实描述）。
+> **B·效果验证**：**状态真的变了** —— 有 `runtime.json` 且 POST 200 时 `chrome.downloads.download` **一次都没被调用**（`expect(downloads).toHaveLength(0)`），POST 的 body 里 site/markdown 完整；HTTP 层真起端口：预检 204 + `Access-Control-Allow-Origin: *`、`/ping` 通、带令牌 POST 后文件真的落在 `<导出目录>/<站点>/<时间戳>.md` 且内容逐字一致；401/413/405/404 各自可辨。**反向断言**：令牌失效 → 回退下载且消息带「令牌无效」原文；无 `runtime.json` → 回退且说明原因；同一秒两次导出 → 第二个文件加 `-1`，绝不覆盖已采过的文件。
+> **C·变异验证（2 次，均原样还原）**：① 插件改成「跳过本机直写」→ **2 红**（直写用例 + 令牌失效回退带真因用例）；② 应用侧去掉 token 校验 → **2 红**（401 用例 + HTTP 层无令牌用例）。还原后 22 例定向 + 全量 3584 例复绿。
+
 > **A25 三道闸门证据**：
 > **A·影响面回归**：影响面 = `web/monitor/{options,useMonitorReal,MonitorPage}.tsx` + `e2e/monitor.spec.ts`。全量 `vitest run --maxWorkers=1` **206 文件 / 2444 例全绿**（A24 基线 205/2440 → +1 文件 / +4 例）；`typecheck` 两工程 0 错；oxlint **0/0**；`check:no-demo` 通过；`build` + `build:electron` 通过。
 > **B·效果验证**：空账本 → 下拉 **1 项「全部」**，不再出现占位 agent；账本有 `sync-00` → 选项 `['all','sync-00']` 且可选中、命中 0 条并显示诚实空态；`agentOptionsFromLedger` 对空白/重复/`all` 混合输入给出确定排序。**反向断言**：显式断言不含 `sync-00` / `coder-01`（防止占位名回潮）。
@@ -1795,3 +1858,54 @@ status: draft
 > 三道闸门（2026-11-16）：A `tsc --noEmit`（web + electron 双工程）0 错、`oxlint` 0 warning / 0 error（764 文件）、全量 `npm test` **293 文件 / 3505 项全绿**、`check:no-demo` 通过、`code:index --write` 411 源码 / 148 文档最新；B 定向 `coreReal + overviewCards + coreHome + overviewPageWake + homeView` 63 项全绿；C 三处变异（`.af-g4` 改回 `align-items:start` / 今日概览挪回右栏末尾 / 复用卡 `src` 改回 `内核账本·实时（19.4）`）**分别精确判红 1 例、其余 21 例仍绿**，还原后 24 项复绿、扩到 63 项仍全绿。
 > 一个坑：CSS 契约断言必须把匹配锁在声明块内（`\{[^}]*`），用 `[\s\S]*?` 会跨块命中 `.af-cols` 有意保留的 `align-items: start`，把「两栏顶对齐」误判成四卡回退。
 > 状态：**未打包、未提交、未推送**，等用户实测 + 明确确认。工作区另有在途改动（网页对话导出 `WebChatExport*`、recall hook 状态文件、`recallHard` 权限下放）不属本轮，提交时只精确 `git add` 这 5 个文件。
+
+### 网页对话导出目录自动对齐（2026-11-16）
+
+用户原话：「同步目录就不需要设置了，导出的目录同时也是 app 同步目录」。
+
+**关键事实（决定实现方式）**：插件只能用 `chrome.downloads.download({ filename })` 写文件，`filename` 是**相对浏览器下载目录**的（Chromium 拒绝绝对路径）；浏览器也**不把绝对路径告诉扩展**（`FileSystemDirectoryHandle` 只暴露 `name`）。所以「插件里选目录 → 应用跟着读同一个路径」在本平台走不通（FS Access 还要求用户手势，service worker 里的自动同步会直接断）。可行方向反过来：**应用算出插件会写到哪，缺省就用那个目录**。
+
+| 任务→文件 | 实现 | 测试 / 门禁 |
+|---|---|---|
+| 新增 `electron/chatExportsLocations.ts` | 纯函数探测：从 Edge / QQ 各 profile 的 `Preferences` 里读 `download.default_directory`（字段缺失=正常，回落 `%USERPROFILE%\Downloads`），拼出 `<下载目录>/chat-exports`；`samePath` 做 Win 大小写/末尾分隔符不敏感比对。非 Windows、无 USERPROFILE 一律返回空数组，绝不瞎猜盘符 | 新增 `__tests__/chatExportsLocations.test.ts` 9 例：读字段 / 字段缺失 / JSON 损坏 / 相对路径拒收 / 多 profile 去重 / 回落 Downloads / 无 USERPROFILE / 非 Windows / 路径比对 |
+| `electron/main.ts` | 缺省采集目录从「数据根/chat-exports」改为**探测到的插件落点**（无配置时）；`chatExports:get` 额外回 `pluginDir` + `aligned`；新增 `chatExports:follow` 把采集目录一键改回插件落点并持久化（`chat-exports.json`，含 `chat-exports-follow-plugin` 审计） | 由 UI 用例覆盖「不一致 → 跟随 → 已对齐」全链路；探测逻辑本身在纯函数用例里钉死 |
+| `ipcChannels.ts` / `preload.ts` / `desktop/hostBridge.ts` | 新增 `chatExports:follow` 通道与桥接白名单（契约类型同步 `pluginDir` / `aligned`） | 类型检查 + 桥接映射 |
+| `web/AgentOnboard/WebChatExportCard.tsx` | 列出「插件实际写到这里」；不一致时明说「现在点立即采集会是 0 条」并给「跟随插件位置」按钮；一致时只留一句「两边已对齐，不用再设置」；探不到（`pluginDir=null`）不显示任何对齐提示，不假装一致 | `__tests__/WebChatExportCard.test.tsx` 新增 3 例（不一致→跟随→对齐 / 本来就一致 / 探不到）；`changeDir` 后重读刷新对齐状态，mock 改为有状态以免误判 |
+
+> 一个坑：卡片在「更改路径」后会重读一次 `chatExports:get` 刷新对齐状态，测试里的 get 桩如果恒返回旧目录，就会误判成「改路径没生效」——mock 必须跟着 set/follow 变。
+> 三道闸门（2026-11-16）：A 全量 `npm test` **294 文件 / 3526 项 0 失败**、`tsc`（web + electron）0 错、`oxlint` 0 warning 0 error（766 文件）、`check:no-demo` 通过；B 定向 39 项全绿（探测 9 + 卡片 19 + 浏览器启动 11）；C 三处变异（去掉 Downloads 回落 / 接受相对路径 / 不一致时走已对齐分支）分别判红 1 例、1 例、2 例，还原后复绿。
+> 状态：**未打包、未提交、未推送**，等用户实测 + 明确确认。
+
+### 启动即自动发现并接入本机 Agent（2026-11-16）
+
+用户原话：「agent 接入页软件启动后要自动触发 自动发现并接入本机 agent 而不是等切换到接入页后在触发」。
+
+**根因**：自动接入挂在 `AgentOnboardPage` 的挂载 effect 上，而 `agentonboard.html` 是中心区 iframe，**只有用户主动点「Agent 接入」才挂载**。用户整场会话不点它 → 三路真扫一次都不跑，看起来就像「没发现本机 Agent」。壳层 `workspace.html` 是启动必挂载的顶层页面，且宿主 preload **只注入顶层 frame**（宿主真扫 / 安装痕迹 / MCP 写配置只在这里可用），所以启动扫描必须搬到这里。
+
+| 任务→文件 | 实现 | 测试 / 门禁 |
+|---|---|---|
+| 新增 `web/AgentOnboard/startupAutoOnboard.ts` | 单次闸（`launched`）+ 会话内标记（`hasAutoScannedSession`）双保险；默认延迟 1200ms 起扫（不跟首屏抢主进程）；结果与跳过原因都写 `onboarding/startup-auto-onboard*` 动作日志；异常只记 `level:error` 并返回 `null`，绝不把壳层带崩 | 新增 `__tests__/startupAutoOnboard.test.ts` 7 例：正常扫（trigger=auto/role/sid/form 透传）· 未登录不扫 · 已扫过不重扫 · 同窗口只扫一轮 · force 强跑 · 抛错不冒泡 · 延迟未到不扫 |
+| 新增 `web/shared/detectForm.ts` | `detectForm` 从接入页抽成独立模块：壳层若从页面文件导入，会把整个接入页（含 `McpClientsPanel`）打进壳层 bundle。`AgentOnboardPage` 原样再导出，既有引用路径不变 | 类型检查；接入页 19 例照旧全绿 |
+| `web/shell/Workspace.tsx` | 身份核对 effect 加 `identityChecked`（区分「还没查」与「查了没会话」），核对完成后起 `runStartupAutoOnboard({ sid, role })`；壳层登录（`ShellLoginDialog` 不走 LoginModal 那条链路）也靠这个 effect 覆盖 | 壳层 `__tests__` 13 文件 / 140 例全绿 |
+
+> 为什么等身份核对完再扫：写 MCP 配置要真实会话判定管理员权限，先扫只能记一堆「无会话」。
+> 为什么 `sid` 用 `opts.sid !== undefined ? … : getStoredSessionId()` 而不是 `??`：`??` 会把显式 `null`（= 当前明确没有会话）当成「没给」，又去存储里捞旧 sid，正好把「未登录不扫」这条边界吃掉 —— 这条被变异用例钉住了。
+> 三道闸门（2026-11-16）：A 全量 `npm test` **295 文件 / 3533 项 0 失败**、`tsc`（web + electron）0 错、`oxlint` 0 warning 0 error（769 文件）、`check:no-demo` 通过、`code:index:check` 最新（414 源码 / 148 文档）；B 定向 8 文件 / 153 项全绿（新增 7 + 接入页 19 + 卡片 19 + MCP 21 + 登录 15 …）；C 三处变异（去掉单次闸 / `sid` 写回 `??` / 去掉已扫过判定）各精确判红 1 例，还原后复绿。
+> 状态：**未打包、未提交、未推送**，等用户实测 + 明确确认。
+
+### 网页对话导出卡改造 · 五条（2026-11-16）
+
+用户原话：「1.导出来源要增加是 DeepSeek 还是豆包还是千问，导出目录改为导出和同步目录；2.立即采集前加说明文字：首次安装采集验收；3.将插件内置到打包文件内随打包文件一起下发，插件目录同时要改；4.导出路径在我电脑上可能是这个路径，但是换个电脑就不一样了，这个怎么处理？5.说明文字改为：内置插件安装好后…（原文）……重新布局优化此界面」。
+
+| 需求 | 实现 | 测试 / 变异 |
+|---|---|---|
+| ① 导出来源区分 + 目录改名 | 新增 `shared/webchatSites.ts`（应用侧唯一站点词表 + `webchatSiteLabel`）；采集侧 `sessionCollector.agentFor()` 从导出文件的相对路径取站点目录，`source_agent` 变成 `collector:webchat-export:deepseek`；卡片新增「已导出：DeepSeek 3 个 · 豆包 1 个」按真实目录计数；`LayerMemoryTable.sourceLabel` 把该前缀渲染成「📡网页导出·豆包」；「导出目录」→「**导出和同步目录**」 | `webchatExportCollector` 新增 3 例（`webchatSiteOf` / `agentFor` / 不同站点互不去重）；新增 `shared/__tests__/webchatSites.test.ts` 3 例，**直接读插件 core.js 比对 key/label**（两份实现、一份真相）；卡片 26 例覆盖改名与来源计数 |
+| ② 首次安装采集验收 | 卡片第 ④ 段：说明「先点一次「立即采集」确认能采到条目；之后每 5 分钟自动扫描」→ 按钮 | 卡片用例断言「首次安装采集验收」在采集按钮之前 |
+| ③ 插件内置随包 + 目录改 | 随包分发原已由 `electron-builder.extraResources` / `tools/package-win.cjs` 落到 `resources/webchat-exporter`；新增 `electron/webchatExtensionCopy.ts` 把插件**复制到 `<数据根>/webchat-extension`**（逐文件字节比对，一致不写盘），`webchatExtensionDir()` 优先返回稳定目录，成功/失败都记 `webchat-extension-copied` / `-copy-failed` 审计 | 新增 `webchatExtensionCopy.test.ts` 5 例（首次复制含子目录 / 幂等不写盘 / 只补变化文件 / 源缺 manifest 不造空目录 / 建目录失败如实报） |
+| ④ 换机路径 | 三层：插件目录随数据根自动重算（不写死）；采集目录从浏览器 `Preferences` 探测（上一条已做）；**配置里的目录在本机不存在**时卡片新增 `webchat-dir-missing`，明说「这台电脑上没有这个目录（多半是从别的电脑带过来的配置）」并给「跟随插件位置」（探不到插件落点则只给「更改路径」，不给假按钮） | 卡片新增 2 例：换机→跟随后转已对齐 / 无 pluginDir 时不出现跟随按钮 |
+| ⑤ 文案原文 + 重排版 | 顶部说明改为用户指定原文（一字不改）；原「步骤列表 + 按钮组」两段重复描述合并成 ①②③④ 四段（装插件 / 选站点导出 / 导出和同步目录 / 首次验收）；路径 `wordBreak:break-all` 不撑破容器；按钮改 `flexWrap` 行，不再挤成一行 | 卡片「顶部说明用用户指定原文」用例逐句断言三段原文；「导出和同步目录」改名用例 |
+
+> 为什么站点表允许两份：插件是纯浏览器脚本（不能 import 应用侧 ESM），应用侧也不该去解析插件 JS 运行时。折中做法是「允许两份实现、不允许两份真相」——测试直接读 `shared/core.js` 的 `SITES` 比对，任一边漂了立刻红。
+> 换机问题的答案：**路径永远不写死**。插件目录 = 数据根（每台机自己算）；导出目录 = 浏览器自己的下载目录（从它的配置里读）；两边不一致或旧路径失效时，卡片当场说清并给一键对齐。
+> 三道闸门（2026-11-16）：A 全量 `npm test` **297 文件 / 3556 项 0 失败**（复跑一次仍全绿，壳层 67 例连跑 3 次稳定）、`tsc` 双工程 0 错、`oxlint` 0 warning 0 error（773 文件）、`check:no-demo` 通过、`vite build` 2.90s 通过、`code:index:check` 最新（416 源码 / 148 文档）；B 定向：采集器 19 + 卡片 26 + 目录统计 14 + 插件复制 5 + 站点词表 3 全绿；C 三处变异（去掉站点后缀 / 去掉复制幂等比对 / 去掉换机缺失判定）分别判红 2 例、2 例、2 例，还原后复绿。
+> 状态：**未打包、未提交、未推送**，等用户实测 + 明确确认。

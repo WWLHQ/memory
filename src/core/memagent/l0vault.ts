@@ -588,12 +588,34 @@ export class L0Vault implements L0AdminPort {
     return encryptL0WithKey(plain, this.writeDek);
   }
 
+  /**
+   * 口径一（2026-11-17 用户拍板）：本人免审批直读的底层解密——直接用内存中的写密钥（或查阅密钥）。
+   * **归属校验在调用方**（主进程按 blob 元数据核对 owner_user_id / 管理员角色后再调本方法）；
+   * 两把密钥都不在内存 → E_L0_LOCKED（fail-closed，绝不落明文）。
+   */
+  async decryptWithKey(envelope: string): Promise<string> {
+    const dek = this.writeDek ?? this.viewDek;
+    if (!dek) {
+      throw new MemAgentError('E_L0_LOCKED', 'L0 密钥未解锁：请先在安全页解锁写密钥（或查阅密钥）后再查阅（§4.4.4）');
+    }
+    return decryptL0WithKey(envelope, dek);
+  }
+
   /** 连续会话解密；会话无效/过期 → E_L0_EXPIRED，scope 不含项目 → E_L0_NO_GRANT */
-  async decrypt(req: { l0_session_id: string; project_id: string; mem_id: string; envelope: string }): Promise<string> {
+  async decrypt(req: { l0_session_id: string; project_id: string; mem_id: string; envelope: string; owner_user_id?: string }): Promise<string> {
     await this.sweep();
     const s = this.sessions.get(req.l0_session_id);
     if (!s) {
       throw new MemAgentError('E_L0_EXPIRED', 'L0 查阅会话不存在或已过期：5 分钟无操作自动锁定，请重新申请（§4.4.3）');
+    }
+    // 租户隔离（2026-11-17 用户拍板）：归属人本人放行；管理员会话（scope 含 '*'）放行；
+    // 他人必须持有效 grant（申请→管理员批准签发的会话），否则一律拒绝。
+    // 旧数据无归属（owner 缺省）→ 只按项目 scope 判（沿用现状），不猜测归属。
+    if (req.owner_user_id && s.user_id !== req.owner_user_id && !s.scope_project_ids.includes('*') && !s.grant_id) {
+      await this.audit('l0_auth_fail', {
+        user_id: s.user_id, mem_id: req.mem_id, owner_user_id: req.owner_user_id, reason: 'not_owner',
+      }, { user_id: s.user_id });
+      throw new MemAgentError('E_L0_NO_GRANT', '该 L0 记录不属于当前账号：查阅他人原文须先申请授权（§4.4.2）');
     }
     if (!s.scope_project_ids.includes('*') && !s.scope_project_ids.includes(req.project_id)) {
       throw new MemAgentError('E_L0_NO_GRANT', `该 L0 授权不含项目 ${req.project_id}（scope 校验，§4.4.2）`);

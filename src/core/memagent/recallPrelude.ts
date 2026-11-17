@@ -70,7 +70,26 @@ export function extractRecallHits(rpc: unknown): RecallHit[] {
   return hits.map((h) => asRecord(h) as RecallHit | null).filter((h): h is RecallHit => h !== null);
 }
 
-/** 把命中正文拼成一段可注入的文本；无命中返回 null（调用方据此 fail-open 不注入）。 */
+/**
+ * 零命中时下发的「强制重试指令」块（第 2 层防复发，2026-11-17 用户明确）。
+ *
+ * 血泪教训：原来零命中返回 null —— 钩子明明每轮都调过 /recall，但模型上下文里
+ * **一个字都没注入**，于是「查过了但没命中」与「压根没查」在模型侧完全无法区分，
+ * 用户只能靠反复质问才发现。这就是「不查记忆库」反复复发的机制根源。
+ *
+ * 现在零命中也要下发一段**指令**（不是记忆内容）：换 query 再查一次、仍为空才可回退，
+ * 且回退必须显式声明。等于把「要不要再查」的执行权从模型的自觉手里拿走。
+ */
+export const RECALL_EMPTY_HINT = [
+  RECALL_PRELUDE_OPEN,
+  `${RECALL_PRELUDE_MARKER} 已执行，本轮零命中（hits=0）。`,
+  '零命中不等于「可以不查」：你必须自己再用**不同的 query**（换同义词/换角度，不要原样重复）调用一次 recall_memory；',
+  '仍为零命中才允许回退通用知识，且必须在回答里显式写一行「⚠ 本轮召回零命中，已回退现查」。',
+  '禁止用「库里没有」掩盖「我没查」。',
+  RECALL_PRELUDE_CLOSE,
+].join('\n');
+
+/** 把命中正文拼成一段可注入的文本；**零命中返回强制重试指令块**（不再返回 null）。 */
 export function buildRecallPrelude(hits: RecallHit[]): string | null {
   const lines: string[] = [];
   for (const hit of hits) {
@@ -87,7 +106,7 @@ export function buildRecallPrelude(hits: RecallHit[]): string | null {
       ? `[${n}] ${body}\n    原文摘录：${excerpt}`
       : `[${n}] ${body}`);
   }
-  if (lines.length === 0) return null;
+  if (lines.length === 0) return RECALL_EMPTY_HINT;
   const block = [
     RECALL_PRELUDE_OPEN,
     `${RECALL_PRELUDE_MARKER} 优先采信；与记忆冲突时以记忆为准，记忆库没有的再用通用知识。`,

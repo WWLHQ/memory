@@ -4,12 +4,13 @@
 // 批次16：登录自动接入结果经 storage 事件即时恢复；失败提示「🔍 手动检测」；卡片接真实统计/熔断/延迟/租户。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
-  AgentRealStats, DiscoveredAgent, Form, InstalledAgent, UiAgentCard,
+  AgentRealStats, DiscoveredAgent, InstalledAgent, UiAgentCard,
 } from '../../types/agentOnboard.ts';
 import { hasActiveSession } from '../Home/crossTabAuth.ts';
 import { AgentCard, toolRef } from './AgentCard.tsx';
 import type { TestEvidence } from './TestPanel.tsx';
 import { OneClickOnboard } from './OneClickOnboard.tsx';
+import { WebChatExportCard } from './WebChatExportCard.tsx';
 import { restoreCards, restoreDiscovered, makeCard, specOf } from './cards.ts';
 import { addAgentCard } from './store.ts';
 import {
@@ -32,15 +33,10 @@ import { useSessionContext } from '../shared/session.ts';
 import { McpClientsPanel } from './McpClientsPanel.tsx';
 import './theme.css';
 
-/** 19.10 运行时检测当前端；真实端壳注入，这里用 UA 粗判 */
-export function detectForm(): Form {
-  const ua = typeof navigator === 'undefined' ? '' : navigator.userAgent;
-  if (/Linux/.test(ua) && !/Android/.test(ua)) return 'linux';
-  if (/Mac/.test(ua)) return 'mac';
-  if (/Android|iPhone|iPad|Mobile/.test(ua)) return 'mobile';
-  if (/cli|node/i.test(ua)) return 'cli';
-  return 'desktop';
-}
+// 19.10 运行时检测当前端（实现已抽到 shared/detectForm.ts：壳层启动自动接入也要用同一份）。
+// 这里原样再导出，页面内部与既有调用方（含测试）的引用路径都不变。
+import { detectForm } from '../shared/detectForm.ts';
+export { detectForm };
 
 const RUNNING_STAGES = ['扫描注册信号中…', '自动打标 P0/P1/P2 中…', '按默认值绑定中…', '测通并写审计中…'];
 
@@ -635,6 +631,10 @@ export function AgentOnboardPage() {
           onManualDetect={onManualDetect}
           onAddCardForInstalled={onAddCardForInstalled}
         />
+
+        {/* 网页版对话接入引导（用户 2026-11-16 新增需求，非原型既有卡片；沿用本页 section/card 风格） */}
+        <div className="section-title">网页版对话接入 · 浏览器插件导出后由采集器自动入库</div>
+        <WebChatExportCard />
 
         <div className="section-title">接入摘要 · 状态来自后端真实回填与内核账本</div>
         {agents.length === 0 ? (

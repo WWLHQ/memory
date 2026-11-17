@@ -8,12 +8,12 @@
 //   · 只注入 hits[].content 正文，绝不注入 display.markdown / 回显话术 / 统计数字；
 //   · 不硬编码令牌，令牌只从本机 mcp-token.txt 读，且只发往 loopback；
 //   · MCP 未启动 / 超时 / 令牌缺失 → fail-open（只回 {continue:true}），绝不阻断用户提问。
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, appendFile, stat, open } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import {
   MAX_QUERY_CHARS, buildHookOutput, buildRecallPrelude, extractRecallHits, lastUserQuery,
-  parseMcpRpcBody, RECALL_PRELUDE_OPEN, injectSystemPrelude,
+  parseMcpRpcBody, RECALL_PRELUDE_OPEN, RECALL_EMPTY_HINT, injectSystemPrelude,
   buildHookRunState, serializeHookRunState, parseHookRunState, type HookRunState,
 } from './recallPrelude.ts';
 
@@ -23,6 +23,18 @@ export const HOOK_TIMEOUT_MS = 2500;
 export const HOOK_SELFTEST_PREFIX = 'SELFTEST_OK';
 /** 钩子执行状态文件：相对数据根，与桌面端共享同一路径（不依赖 cwd）。 */
 export const HOOK_STATUS_FILE = 'recall-hook-status.json';
+/**
+ * 钩子执行**流水账**（第 3 层防复发，2026-11-17 用户明确）。
+ *
+ * 为什么另开一个文件：`recall-hook-status.json` 是覆盖写，只留最后一次 ——
+ * 事后根本回答不了「第几轮没查」，于是每次争论都只能靠模型自述（等于没有证据）。
+ * 这里逐轮追加一行；配合 MCP 审计里的 `first_call` / `recalled_before`，
+ * 就能把「你觉得我没查」变成「账本里第几轮没查」。
+ */
+export const HOOK_LOG_FILE = 'recall-hook-log.jsonl';
+/** 流水账超过这个大小就裁剪，只留最近 HOOK_LOG_KEEP_LINES 行（防无界增长）。 */
+export const HOOK_LOG_MAX_BYTES = 512 * 1024;
+export const HOOK_LOG_KEEP_LINES = 2000;
 
 function log(msg: string): void {
   // 只写 stderr：stdout 必须是纯 JSON，且绝不打印令牌、prompt 正文。
@@ -37,9 +49,86 @@ export function hookStatusFilePath(): string {
   return join(homedir(), '.config', 'multiagent-memory', HOOK_STATUS_FILE);
 }
 
+/** 流水账路径：与状态文件同目录，可被 MEMAGENT_HOOK_LOG_FILE 覆盖（测试注入用）。 */
+export function hookLogFilePath(): string {
+  if (process.env.MEMAGENT_HOOK_LOG_FILE) return process.env.MEMAGENT_HOOK_LOG_FILE;
+  // 状态文件被显式指定时（测试 / 多实例），流水账跟着放同目录——
+  // 否则单测会写进真实用户目录 %APPDATA%/MultiAgent Memory，污染线上账本。
+  if (process.env.MEMAGENT_HOOK_STATUS_FILE) {
+    return join(dirname(process.env.MEMAGENT_HOOK_STATUS_FILE), HOOK_LOG_FILE);
+  }
+  const appdata = process.env.APPDATA || process.env.LOCALAPPDATA;
+  if (appdata) return join(appdata, 'MultiAgent Memory', HOOK_LOG_FILE);
+  return join(homedir(), '.config', 'multiagent-memory', HOOK_LOG_FILE);
+}
+
+/** 追加一行流水账；超过上限时保留最近 N 行。任何失败都只记 stderr，不影响钩子返回。 */
+async function appendRunLog(state: HookRunState): Promise<void> {
+  try {
+    const path = hookLogFilePath();
+    await mkdir(dirname(path), { recursive: true });
+    await appendFile(path, serializeHookRunState(state), 'utf8');
+    const info = await stat(path);
+    if (info.size <= HOOK_LOG_MAX_BYTES) return;
+    const text = await readFile(path, 'utf8');
+    const kept = text.split('\n').filter(Boolean).slice(-HOOK_LOG_KEEP_LINES).join('\n');
+    await writeFile(path, `${kept}\n`, 'utf8');
+  } catch (e) {
+    log(`run-log-write-failed: ${String((e as Error)?.message ?? e).slice(0, 120)}`);
+  }
+}
+
+/**
+ * 读「钩子账本里最近一轮」的时间戳（ms）；读不到（没装钩子/没有流水账）返回 null。
+ *
+ * 为什么需要它（第四层·轮级放行，2026-11-17 用户明确）：
+ *   MCP 内核原来用 `recalledBySession`（会话级）判「召回过没有」——一次召回就把整个会话
+ *   解锁了，之后每一轮都放行，硬拦截形同虚设。改判「轮」才符合真实要求：
+ *   每轮用户提问都必须重新召回。而「现在是第几轮」的唯一可靠信号就是钩子账本——
+ *   它由 UserPromptSubmit 每轮追加一行，时间戳即本轮起点。
+ *
+ * 只读文件尾部 8KB：门禁每次工具调用都要问一次，账本可能有几百 KB，不能整读。
+ */
+export async function readLatestHookRoundAt(): Promise<number | null> {
+  try {
+    const fh = await open(hookLogFilePath(), 'r');
+    try {
+      const info = await fh.stat();
+      const size = info.size;
+      if (size <= 0) return null;
+      const take = Math.min(size, 8192);
+      const buf = Buffer.alloc(take);
+      await fh.read(buf, 0, take, size - take);
+      const lines = buf.toString('utf8').split('\n').filter(Boolean);
+      const st = parseHookRunState(lines[lines.length - 1] ?? '');
+      if (!st) return null;
+      const ms = Date.parse(st.at);
+      return Number.isFinite(ms) ? ms : null;
+    } finally {
+      await fh.close();
+    }
+  } catch {
+    return null;
+  }
+}
+
+/** 读最近 N 轮流水账（新的在后）。读不到返回空数组，不猜、不抛。 */
+export async function readHookRunLog(limit = 50): Promise<HookRunState[]> {
+  try {
+    const text = await readFile(hookLogFilePath(), 'utf8');
+    const lines = text.split('\n').filter(Boolean).slice(-Math.max(1, limit));
+    return lines
+      .map((line) => parseHookRunState(line))
+      .filter((s): s is HookRunState => s !== null);
+  } catch {
+    return [];
+  }
+}
+
 /**
  * 写一次执行状态；失败只记 stderr，绝不影响钩子返回（fail-open 的延伸）。
  * 结构化 stderr 行以 STATUS 开头，便于日志检索，且不含任何敏感正文。
+ * 第 3 层：除覆盖写最新快照外，再**逐轮追加**一条流水账（可事后核验）。
  */
 async function recordStatus(state: HookRunState): Promise<void> {
   const line = `STATUS status=${state.status} at=${state.at} hits=${state.hits}${state.reason ? ` reason=${state.reason}` : ''}`;
@@ -51,6 +140,7 @@ async function recordStatus(state: HookRunState): Promise<void> {
   } catch (e) {
     log(`status-write-failed: ${String((e as Error)?.message ?? e).slice(0, 120)}`);
   }
+  await appendRunLog(state);
 }
 
 function tokenFile(): string {
@@ -156,8 +246,14 @@ export async function runHook(text: string): Promise<Record<string, unknown>> {
     }
     const hits = extractRecallHits(parsed);
     const prelude = buildRecallPrelude(hits);
-    // 成功但零命中 = 合法结果（如新项目），记 empty 而非 failed，避免误报故障。
-    await recordStatus(buildHookRunState(prelude ? 'ok' : 'empty', now(), prelude ? hits.length : 0));
+    /**
+     * 状态必须按「注入了什么」判，不能按「prelude 是否为 null」判：
+     * 第 2 层起零命中也会下发强制重试指令 → prelude 恒非 null，
+     * 若仍写 `prelude ? 'ok' : 'empty'` 会把零命中误记成成功（等于把漏洞藏起来）。
+     * 成功但零命中 = 合法结果（如新项目），记 empty 而非 failed，避免误报故障。
+     */
+    const hasHits = prelude !== RECALL_EMPTY_HINT;
+    await recordStatus(buildHookRunState(hasHits ? 'ok' : 'empty', now(), hasHits ? hits.length : 0));
     return buildHookOutput(prelude);
   } catch (e) {
     log(`skip: ${String((e as Error)?.message ?? e).slice(0, 120)}`);
@@ -176,6 +272,14 @@ export async function hookSelfTest(): Promise<string> {
 
   const empty = buildHookOutput(null);
   assert(empty.continue === true && !empty.hookSpecificOutput, '空命中只放行、不塞空上下文');
+
+  // 第 2 层（2026-11-17）：零命中必须下发「强制重试」指令，不能静默放行。
+  const zero = buildRecallPrelude([]);
+  assert(zero !== null && zero.includes('不同的 query'), '零命中下发强制重试指令');
+  assert(zero !== null && zero.includes('已回退现查'), '零命中要求显式声明回退');
+  const zeroOut = buildHookOutput(zero);
+  const zeroHso = zeroOut.hookSpecificOutput as Record<string, unknown> | undefined;
+  assert(typeof zeroHso?.additionalContext === 'string', '零命中指令真的进 additionalContext');
 
   const hits = extractRecallHits({ result: { structuredContent: { hits: [{ content: '记忆A' }, { content: '记忆B' }] } } });
   assert(hits.length === 2, '从 structuredContent 抽 hits');
