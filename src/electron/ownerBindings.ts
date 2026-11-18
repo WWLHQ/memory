@@ -7,8 +7,9 @@
 // - 写口：校验（复用 parsePersonalOwnerBindings 的单项校验 + 新增账号/目标重复拒绝）→ 备份原文件（备份失败即不写）
 //   → 临时文件 + rename 原子写 + 0600 → 返回新旧值。
 import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync, copyFileSync, renameSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { parsePersonalOwnerBindings, type PersonalOwnerBinding } from '../core/memagent/personalStore.ts';
+import { classifiedPath } from '../shared/dataLayout.ts';
 
 export const OWNER_BINDINGS_FILE_NAME = 'personal-owner-bindings.json';
 /** 文件自述版本（供未来迁移识别；读取时未知 schema 直接拒绝，不猜） */
@@ -20,7 +21,7 @@ export const OWNER_BINDINGS_SCHEMA = 'owner-bindings/1';
  * 兼容两种形态：裸数组（历史/手写）与 { schema, bindings } 包装文档（本模块写出的规范形态）。
  */
 export function loadOwnerBindings(dataRoot: string): PersonalOwnerBinding[] {
-  const file = join(dataRoot, OWNER_BINDINGS_FILE_NAME);
+  const file = classifiedPath(dataRoot, OWNER_BINDINGS_FILE_NAME);
   if (!existsSync(file)) return [];
   let raw: string;
   try {
@@ -81,7 +82,8 @@ export interface WriteOwnerBindingsResult {
  */
 export function writeOwnerBindings(dataRoot: string, next: unknown): WriteOwnerBindingsResult {
   const bindings = normalizeOwnerBindingsInput(next);
-  const file = join(dataRoot, OWNER_BINDINGS_FILE_NAME);
+  const file = classifiedPath(dataRoot, OWNER_BINDINGS_FILE_NAME);
+  mkdirSync(dirname(file), { recursive: true });
   const prev = loadOwnerBindings(dataRoot);
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
   let backupFile = '';

@@ -518,4 +518,71 @@ describe('批次41-X 显式身份头（面板补写口径）', () => {
     const row = document.querySelector('[data-client="qoder-cn"]') as HTMLElement;
     expect((row.querySelector('[data-act="mcp-wire"]') as HTMLButtonElement).textContent).toBe('已接入');
   });
+  // ── 2026-11-18：stdio 零维护形态（用户：客户端配置改成 stdio launcher 现读令牌，从此轮换零维护）──
+  test('传输形态徽标：stdio 显示「零维护」，http 显示「HTTP」（别让用户以为两者等价）', async () => {
+    mockRole('admin');
+    setHost({
+      list: () => Promise.resolve({
+        endpoint: 'http://127.0.0.1:8204/mcp',
+        clients: [
+          baseRow({ id: 'qoder-cn', name: 'Qoder CN', badge: 'p3', displayPath: '~/.qoder-cn/settings.json', state: 'wired', hasAuth: true, transport: 'stdio' }),
+          baseRow({ id: 'claude-code', name: 'Claude Code', badge: 'p1', displayPath: '~/.claude.json', state: 'wired', hasAuth: true, transport: 'http', hasClientId: true }),
+        ],
+      }),
+    });
+    render(<McpClientsPanel />);
+    await waitFor(() => expect(screen.getByTestId('transport-qoder-cn').textContent).toBe('stdio 零维护'));
+    expect(screen.getByTestId('transport-claude-code').textContent).toBe('HTTP');
+    // stdio 行的指引要说清「令牌轮换/数据根搬家都不用改配置」，而不是笼统「无需操作」
+    expect(screen.getByTestId('guide-qoder-cn').textContent).toContain('零维护');
+  });
+
+  test('「改用 stdio」→ 以 mode=stdio 调主进程；成功后回执说明配置里不再有令牌', async () => {
+    mockRole('admin');
+    const wire = vi.fn(() => Promise.resolve({ ok: true, changed: true, path: 'C:/h/.claude.json', backupPath: 'C:/h/.claude.json.bak' }));
+    setHost({ list: () => Promise.resolve(SCAN), wire });
+    render(<McpClientsPanel />);
+    await waitFor(() => expect(screen.getByTestId('stdio-qoder-cn')).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId('stdio-qoder-cn'));
+    // 第三个参数必须是 'stdio'：不带它主进程会按 HTTP 写回带令牌的配置（这就是要避免的事）
+    await waitFor(() => expect(wire).toHaveBeenCalledWith('qoder-cn', 'sid_test', 'stdio'));
+    await waitFor(() => expect(screen.getByTestId('mcp-message').textContent).toContain('零维护'));
+    expect(screen.getByTestId('mcp-message').textContent).toContain('不再有令牌');
+  });
+
+  test('已是 stdio 形态的行不再出现「改用 stdio」；冲突/无法解析的行也不出现（先修配置）', async () => {
+    mockRole('admin');
+    setHost({
+      list: () => Promise.resolve({
+        endpoint: 'http://127.0.0.1:8204/mcp',
+        clients: [
+          baseRow({ id: 'qoder-cn', name: 'Qoder CN', badge: 'p3', displayPath: '~/.qoder-cn/settings.json', state: 'wired', hasAuth: true, transport: 'stdio' }),
+          baseRow({ id: 'cursor', name: 'Cursor', badge: 'p3', displayPath: '~/.cursor/mcp.json', state: 'conflict', foundUrl: 'http://other/mcp' }),
+          baseRow({ id: 'gemini-cli', name: 'Gemini CLI', badge: 'p3', displayPath: '~/.gemini/settings.json', state: 'invalid', error: '坏 JSON' }),
+        ],
+      }),
+    });
+    render(<McpClientsPanel />);
+    await waitFor(() => expect(screen.getByTestId('transport-qoder-cn').textContent).toBe('stdio 零维护'));
+    expect(screen.queryByTestId('stdio-qoder-cn')).toBeNull();
+    expect(screen.queryByTestId('stdio-cursor')).toBeNull();
+    expect(screen.queryByTestId('stdio-gemini-cli')).toBeNull();
+  });
+
+  test('「⇄ 全改 stdio」：只对可写且还不是 stdio 的客户端发 mode=stdio，数量如实标出', async () => {
+    mockRole('admin');
+    const wire = vi.fn(() => Promise.resolve({ ok: true, changed: true }));
+    setHost({ list: () => Promise.resolve(SCAN), wire });
+    render(<McpClientsPanel />);
+    await waitFor(() => expect(screen.getByTestId('state-qoder-cn').textContent).toBe('已接入'));
+    // SCAN 里可写的三个（qoder-cn / claude-code / codex）都是 HTTP 形态 → 全部计入
+    const all = screen.getByTestId('mcp-stdio-all') as HTMLButtonElement;
+    expect(all.textContent).toContain('全改 stdio（3）');
+    await userEvent.click(all);
+    await waitFor(() => expect(wire).toHaveBeenCalledTimes(3));
+    for (const id of ['qoder-cn', 'claude-code', 'codex']) {
+      expect(wire).toHaveBeenCalledWith(id, 'sid_test', 'stdio');
+    }
+    await waitFor(() => expect(screen.getByTestId('mcp-message').textContent).toContain('改用 stdio 完成'));
+  });
 });

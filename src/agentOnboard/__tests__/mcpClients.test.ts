@@ -2,7 +2,8 @@
 // 覆盖正常、拒绝（冲突/无法解析/不支持）与边界（大小写头、TOML 子表、未变化不重写）。
 import { describe, expect, test } from 'vitest';
 import {
-  MCP_CLIENT_SPECS, MCP_ENDPOINT, buildMcpEntry, mergeMcpJsonConfig, mergeMcpTomlConfig,
+  MCP_BRIDGE_FILE_NAME, MCP_CLIENT_SPECS, MCP_ENDPOINT, buildMcpEntry, buildStdioMcpEntry, isStdioEntry,
+  mergeMcpJsonConfig, mergeMcpTomlConfig,
   probeClientConfig, probeJsonConfig, probeTomlConfig, renderMcpSnippet, specOfMcpClient,
 } from '../mcpClients.ts';
 
@@ -121,8 +122,9 @@ describe('probeJsonConfig', () => {
 
   test('端点正确但缺/空 Authorization → missing_auth（会 401）', () => {
     const noAuth = { type: 'http', url: EP };
+    // transport 是 2026-11-18 新增的**附加**字段（stdio 零维护形态要区分是哪种承载），七态契约不变
     expect(probeJsonConfig(JSON.stringify({ mcpServers: { 'MultiAgent Memory': noAuth } }), qoder, EP)).toEqual({
-      state: 'missing_auth', hasAuth: false, hasClientId: false, foundUrl: EP,
+      state: 'missing_auth', hasAuth: false, hasClientId: false, foundUrl: EP, transport: 'http',
     });
     const empty = { url: EP, headers: { Authorization: '   ' } };
     expect(probeJsonConfig(JSON.stringify({ mcpServers: { 'MultiAgent Memory': empty } }), qoder, EP).state).toBe('missing_auth');
@@ -352,5 +354,140 @@ describe('客户端「已禁用」标记探测（T1 检测层）', () => {
     expect(probeTomlConfig(`${head}\ndisabled = true\n`, cx, EP).disabled).toBe(true);
     expect(probeTomlConfig(`${head}\ndisabled = false\n`, cx, EP).disabled).toBeUndefined();
     expect(probeTomlConfig(`${head}\n`, cx, EP).disabled).toBeUndefined();
+  });
+});
+
+// ── 2026-11-18：stdio 零维护形态（用户要求「客户端配置改成 stdio launcher 现读令牌，轮换零维护」）──
+// 核心判据只有一条：**配置里不能有令牌**，且句柄（桥接脚本 / 引导指针）必须是稳定路径而非易变的数据根子路径。
+describe('stdio 零维护形态（条目 / 探测 / 合并）', () => {
+  const target = {
+    bridgePath: 'C://Users//u//AppData//Roaming//MultiAgent Memory\\mcp-bridge.cjs',
+    pointerPath: 'C://Users//u//AppData//Roaming//MultiAgent Memory\\data-root.json',
+    endpoint: EP,
+  };
+  const HEADER = 'X-Memagent-Client';
+
+  test('条目形态：command + args（桥接脚本 / 指针 / 端点 / 客户端id），不含任何凭据', () => {
+    const entry = buildStdioMcpEntry(qoder, target);
+    expect(entry.command).toBe('node');
+    expect(entry.args).toEqual([target.bridgePath, target.pointerPath, EP, 'qoder-cn']);
+    expect(entry).not.toHaveProperty('headers');
+    expect(entry).not.toHaveProperty('url');
+    expect(JSON.stringify(entry)).not.toContain(TOKEN);
+    expect(JSON.stringify(entry)).not.toContain('Bearer');
+    expect(isStdioEntry(entry)).toBe(true);
+    // 认不出「只是普通 command」的条目（不能把别人的 npx 条目误当成本服务的 stdio 条目）
+    expect(isStdioEntry({ command: 'npx', args: ['-y', 'obsidian-mcp'] })).toBe(false);
+    expect(isStdioEntry({ command: 'node', args: ['other.js'] })).toBe(false);
+  });
+
+  test('探测：JSON / TOML 都识别为 wired + transport=stdio（不会被误判成 missing_auth 反复要求重写）', () => {
+    const json = JSON.stringify({ mcpServers: { 'MultiAgent Memory': buildStdioMcpEntry(qoder, target) } });
+    const j = probeJsonConfig(json, qoder, EP);
+    expect(j.state).toBe('wired');
+    expect(j.transport).toBe('stdio');
+    expect(j.hasAuth).toBe(true);
+
+    const toml = `[mcp_servers.multiagent_memory]\ncommand = "node"\nargs = ["${target.bridgePath.replace(/\\/g, '\\\\')}", "${target.pointerPath.replace(/\\/g, '\\\\')}", "${EP}", "codex"]\n`;
+    const t = probeTomlConfig(toml, codex, EP);
+    expect(t.state).toBe('wired');
+    expect(t.transport).toBe('stdio');
+
+    // HTTP 形态照旧报 transport=http（改造不能顺手改掉老口径）
+    const http = probeJsonConfig(JSON.stringify({
+      mcpServers: { 'MultiAgent Memory': { type: 'http', url: EP, headers: { Authorization: `Bearer ${TOKEN}` } } },
+    }), qoder, EP);
+    expect(http.transport).toBe('http');
+  });
+
+  test('JSON 合并：HTTP → stdio 清掉 url/httpUrl/type/headers，保留其它字段与其它服务器；二次执行幂等', () => {
+    const text = JSON.stringify({
+      theme: 'dark',
+      mcpServers: {
+        'other-svc': { command: 'npx', args: ['-y', 'x'] },
+        'MultiAgent Memory': {
+          type: 'http', url: EP, qoder_url: 'keep-me',
+          headers: { Authorization: `Bearer ${TOKEN}`, [HEADER]: 'qoder-cn' },
+        },
+      },
+    }, null, 2);
+    const r = mergeMcpJsonConfig(text, qoder, EP, TOKEN, target);
+    expect(r.changed).toBe(true);
+    const parsed = JSON.parse(r.text) as { theme: string; mcpServers: Record<string, Record<string, unknown>> };
+    const entry = parsed.mcpServers['MultiAgent Memory'];
+    expect(entry.command).toBe('node');
+    expect(entry.args).toEqual([target.bridgePath, target.pointerPath, EP, 'qoder-cn']);
+    expect(entry.qoder_url).toBe('keep-me');       // 条目上的自定义字段保留
+    for (const k of ['url', 'httpUrl', 'type', 'headers']) expect(entry).not.toHaveProperty(k);
+    expect(parsed.theme).toBe('dark');
+    expect(parsed.mcpServers['other-svc'].command).toBe('npx');
+    // 令牌从此不在配置里（这是整件事的目的）
+    expect(r.text).not.toContain(TOKEN);
+    expect(probeJsonConfig(r.text, qoder, EP).transport).toBe('stdio');
+
+    const again = mergeMcpJsonConfig(r.text, qoder, EP, TOKEN, target);
+    expect(again.changed).toBe(false);
+    expect(again.text).toBe(r.text);
+  });
+
+  test('JSON 合并：同名条目指向其它端点 → 拒绝（不在别人的端点上做改造）', () => {
+    const text = JSON.stringify({ mcpServers: { 'MultiAgent Memory': { url: 'http://other/mcp' } } });
+    expect(() => mergeMcpJsonConfig(text, qoder, EP, TOKEN, target)).toThrow('指向其它端点');
+  });
+
+  test('TOML 合并：重建本服务段（http 内联头与子表一起清掉），其它段原样保留；二次执行幂等', () => {
+    const text = [
+      'model = "gpt-5"',
+      '',
+      '[mcp_servers.multiagent_memory]',
+      `url = "${EP}"`,
+      `http_headers = { Authorization = "Bearer ${TOKEN}" }`,
+      '',
+      '[mcp_servers.multiagent_memory.http_headers]',
+      `Authorization = "Bearer ${TOKEN}"`,
+      '',
+      '[other]',
+      'key = "keep"',
+      '',
+    ].join('\n');
+    const r = mergeMcpTomlConfig(text, codex, EP, TOKEN, target);
+    expect(r.changed).toBe(true);
+    expect(r.text).toContain('model = "gpt-5"');
+    expect(r.text).toContain('[other]\nkey = "keep"');
+    expect(r.text).toContain('command = "node"');
+    expect(r.text).not.toContain(TOKEN);
+    expect(r.text).not.toContain('http_headers');
+    expect(r.text).not.toContain('Authorization');
+    expect(r.text.match(/\[mcp_servers\.multiagent_memory\]/g)).toHaveLength(1);
+    expect(probeTomlConfig(r.text, codex, EP)).toMatchObject({ state: 'wired', transport: 'stdio' });
+
+    const again = mergeMcpTomlConfig(r.text, codex, EP, TOKEN, target);
+    expect(again.changed).toBe(false);
+    expect(again.text).toBe(r.text);
+  });
+
+  test('TOML 合并：无本服务段 → 追加；同名段指向其它端点 → 拒绝', () => {
+    const r = mergeMcpTomlConfig('model = "gpt-5"\n', codex, EP, TOKEN, target);
+    expect(r.changed).toBe(true);
+    expect(probeTomlConfig(r.text, codex, EP).transport).toBe('stdio');
+    expect(() => mergeMcpTomlConfig(`[mcp_servers.multiagent_memory]\nurl = "http://other/mcp"\n`, codex, EP, TOKEN, target))
+      .toThrow('指向其它端点');
+  });
+
+  test('stdio 片段里不含令牌（可安全转发）；http 片段照旧含令牌', () => {
+    const snippet = renderMcpSnippet(qoder, EP, TOKEN, target);
+    expect(snippet).not.toContain(TOKEN);
+    expect(snippet).toContain(MCP_BRIDGE_FILE_NAME);
+    const parsed = JSON.parse(snippet) as { mcpServers: Record<string, { command: string; args: string[] }> };
+    const entry = parsed.mcpServers['MultiAgent Memory'];
+    expect(entry.command).toBe('node');
+    // JSON 文本里反斜杠是转义的，所以按解析后的值断言路径（不是按裸文本查子串）
+    expect(entry.args).toEqual([target.bridgePath, target.pointerPath, EP, 'qoder-cn']);
+
+    const tomlSnippet = renderMcpSnippet(codex, EP, TOKEN, target);
+    expect(tomlSnippet).not.toContain(TOKEN);
+    expect(tomlSnippet).toContain('args = [');
+
+    expect(renderMcpSnippet(qoder, EP, TOKEN)).toContain(`Bearer ${TOKEN}`);
   });
 });

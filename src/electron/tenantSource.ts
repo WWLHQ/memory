@@ -6,8 +6,9 @@
 // - 文件损坏 / 字段缺失 → **fail-fast 抛错阻断启动**（与 mcp-tokens.json 同口径）：
 //   身份是账本归属的根，静默重造会让同一份账本再次混住多租户——宁可让用户人工修复。
 import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync, copyFileSync, renameSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { DEFAULT_TENANT, normalizeTenantTriple, type TenantTriple } from '../shared/tenantDefaults.ts';
+import { classifiedPath } from '../shared/dataLayout.ts';
 
 export const TENANT_FILE_NAME = 'tenant.json';
 /** 文件自述版本（供未来迁移识别；读取时对未知 schema 保持宽容，只校验三元组字段） */
@@ -15,8 +16,8 @@ export const TENANT_SCHEMA = 'tenant/1';
 
 /** 读取（或首建）数据根级租户真源；损坏 fail-fast，绝不静默回落重造身份。 */
 export function loadOrCreateTenant(dataRoot: string): TenantTriple {
-  const file = join(dataRoot, TENANT_FILE_NAME);
-  mkdirSync(dataRoot, { recursive: true });
+  const file = classifiedPath(dataRoot, TENANT_FILE_NAME);
+  mkdirSync(dirname(file), { recursive: true });
   if (existsSync(file)) {
     return parseTenantFile(file);
   }
@@ -49,7 +50,7 @@ function parseTenantFile(file: string): TenantTriple {
 
 /** 机器级 tenant.json 只读口（tenant:read 专用，不首建）：不存在返回 null；存在但损坏抛错（同口径 fail-fast）。 */
 export function readTenantFile(dataRoot: string): TenantTriple | null {
-  const file = join(dataRoot, TENANT_FILE_NAME);
+  const file = classifiedPath(dataRoot, TENANT_FILE_NAME);
   if (!existsSync(file)) return null;
   return parseTenantFile(file);
 }
@@ -71,7 +72,8 @@ export function writeTenant(dataRoot: string, next: unknown): WriteTenantResult 
   if (!triple) {
     throw new Error('三元组不合法：user_id / team_id / enterprise_id 均须为非空字符串');
   }
-  const file = join(dataRoot, TENANT_FILE_NAME);
+  const file = classifiedPath(dataRoot, TENANT_FILE_NAME);
+  mkdirSync(dirname(file), { recursive: true });
   const prev = readTenantFile(dataRoot);
   if (!prev) {
     throw new Error('tenant.json 不存在，无法安全改写（请重启应用让其按规范首建后再改）');

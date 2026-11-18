@@ -650,3 +650,94 @@ describe('一键打开客户端开关（T2 一键层 · 真读真写临时 home�
     expect(enableMcpClient('codex', { home: toml, appData: toml }).error).toContain('不是 JSON');
   });
 });
+
+// ── 2026-11-18：stdio 零维护形态的真写盘（用户要求「客户端配置改成 stdio launcher 现读令牌，轮换零维护」）──
+// 判据：写完后**配置文件里没有令牌**、扫描认得出 transport=stdio、二次执行幂等、冲突仍拒绝。
+describe('wireMcpClient mode=stdio（零维护形态）', () => {
+  const BRIDGE = join('C:', 'appdata', 'MultiAgent Memory', 'mcp-bridge.cjs');
+  const POINTER = join('C:', 'appdata', 'MultiAgent Memory', 'data-root.json');
+  const stdioOpts = { mode: 'stdio' as const, bridgePath: BRIDGE, pointerPath: POINTER };
+
+  test('WorkBuddy：HTTP 已接入 → 改写成 stdio，配置里不再有令牌；复扫 wired + transport=stdio；幂等', () => {
+    const home = tempHome();
+    // 先按老口径写入 HTTP 形态
+    const http = wireMcpClient('workbuddy', TOKEN, { home, appData: home, now: Date.UTC(2026, 10, 18, 3, 0, 0) });
+    expect(http.ok).toBe(true);
+    expect(readFileSync(join(home, '.workbuddy', 'mcp.json'), 'utf8')).toContain(TOKEN);
+
+    const r = wireMcpClient('workbuddy', TOKEN, { home, appData: home, ...stdioOpts, now: Date.UTC(2026, 10, 18, 4, 0, 0) });
+    expect(r.ok).toBe(true);
+    expect(r.changed).toBe(true);
+    expect(r.backupPath && existsSync(r.backupPath)).toBe(true);
+    const text = readFileSync(join(home, '.workbuddy', 'mcp.json'), 'utf8');
+    expect(text).not.toContain(TOKEN);       // 令牌不再落客户端配置
+    expect(text).not.toContain('Bearer');
+    const entry = (JSON.parse(text) as { mcpServers: Record<string, Record<string, unknown>> })
+      .mcpServers['MultiAgent Memory'];
+    expect(entry.command).toBe('node');
+    expect(entry.args).toEqual([BRIDGE, POINTER, MCP_ENDPOINT, 'workbuddy']);
+    expect(entry).not.toHaveProperty('url');
+    expect(entry).not.toHaveProperty('headers');
+
+    const after = statusOf(home, 'workbuddy', { currentToken: TOKEN });
+    expect(after.state).toBe('wired');
+    expect(after.transport).toBe('stdio');
+    expect(after.note).toContain('零维护');
+    // 返回值不含令牌
+    expect(JSON.stringify(r)).not.toContain(TOKEN);
+
+    const again = wireMcpClient('workbuddy', TOKEN, { home, appData: home, ...stdioOpts });
+    expect(again).toMatchObject({ ok: true, changed: false });
+  });
+
+  test('令牌轮换（currentToken 变化）不会让 stdio 配置变成「待修复」——本来就没有令牌可比', () => {
+    const home = tempHome();
+    wireMcpClient('claude-code', TOKEN, { home, appData: home, ...stdioOpts });
+    const rotated = statusOf(home, 'claude-code', { currentToken: 'a-completely-new-token' });
+    expect(rotated.state).toBe('wired');
+    expect(rotated.transport).toBe('stdio');
+    expect(rotated.note ?? '').not.toContain('不一致');
+  });
+
+  test('TOML（Codex）：改写成 command + args，url/http_headers 一并不见；复扫 transport=stdio', () => {
+    const home = tempHome();
+    wireMcpClient('codex', TOKEN, { home, appData: home });
+    expect(readFileSync(join(home, '.codex', 'config.toml'), 'utf8')).toContain('http_headers');
+    const r = wireMcpClient('codex', TOKEN, { home, appData: home, ...stdioOpts });
+    expect(r.ok).toBe(true);
+    expect(r.changed).toBe(true);
+    const text = readFileSync(join(home, '.codex', 'config.toml'), 'utf8');
+    expect(text).toContain('command = "node"');
+    expect(text).toContain('args = [');
+    expect(text).not.toContain('http_headers');
+    expect(text).not.toContain(TOKEN);
+    expect(statusOf(home, 'codex').transport).toBe('stdio');
+  });
+
+  test('缺桥接脚本/指针路径 → 明确拒绝，不写盘（不静默写成半截配置）', () => {
+    const home = tempHome();
+    const r = wireMcpClient('cursor', TOKEN, { home, appData: home, mode: 'stdio' });
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('stdio');
+    expect(existsSync(join(home, '.cursor', 'mcp.json'))).toBe(false);
+  });
+
+  test('冲突仍优先：同名条目指向其它端点 → 哪怕要改 stdio 也拒绝覆盖', () => {
+    const home = tempHome();
+    const original = JSON.stringify({ mcpServers: { 'MultiAgent Memory': { url: 'http://other/mcp' } } });
+    const path = write(home, '.cursor/mcp.json', original);
+    const r = wireMcpClient('cursor', TOKEN, { home, appData: home, ...stdioOpts });
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('拒绝覆盖');
+    expect(readFileSync(path, 'utf8')).toBe(original);
+  });
+
+  test('stdio 片段不含令牌；http 片段仍含（两种形态各自诚实）', () => {
+    const stdio = snippetForClient('workbuddy', TOKEN, MCP_ENDPOINT, {
+      bridgePath: BRIDGE, pointerPath: POINTER, endpoint: MCP_ENDPOINT,
+    });
+    expect(stdio).not.toContain(TOKEN);
+    expect(stdio).toContain('mcp-bridge.cjs');
+    expect(snippetForClient('workbuddy', TOKEN)).toContain(TOKEN);
+  });
+});

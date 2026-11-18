@@ -4,15 +4,22 @@
 // 本模块只做纯文件操作，不依赖 electron，便于单测。
 import {
   copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync,
-  statSync, unlinkSync, writeFileSync, type Dirent,
+  rmdirSync, statSync, unlinkSync, writeFileSync, type Dirent,
 } from 'node:fs';
 import { dirname, join, normalize, posix, win32 } from 'node:path';
 import { AUDIT_FILE_NAME } from '../core/memagent/auditLog.ts';
+import { DATA_SUBDIRS, LEGACY_LIBRARY_SUBDIR } from '../shared/dataLayout.ts';
 
 /** 默认数据目录名（安装包/便携包/开发态统一使用产品名目录） */
 export const DATA_ROOT_DIR_NAME = 'MultiAgent Memory';
 export const DATA_ROOT_POINTER_NAME = 'data-root.json';
 export const DATA_ROOT_POINTER_VERSION = 1;
+/**
+ * 默认数据根盘符（2026-11-18 用户约定：打包安装后所有配置数据统一落 D 盘的 MultiAgent Memory 文件夹）。
+ * 仅 Windows 生效；非 Windows 回退 appData 下的产品目录（跨平台仍能启动）。
+ * 注意这是「默认位置」，用户仍可在首启向导/参数页改到任意绝对路径——默认 ≠ 锁定。
+ */
+export const DEFAULT_DATA_ROOT_DRIVE = 'D:';
 
 /**
  * 迁移白名单（userData 顶层文件）：
@@ -94,12 +101,24 @@ export interface DataRootMigration {
   dbSource?: string;
 }
 
-export function defaultDataRoot(appDataDir: string): string {
+/**
+ * 默认数据根（2026-11-18 用户约定「统一落 D 盘」）：Windows 硬绑定
+ * `D:\MultiAgent Memory`，非 Windows 回退 appData 下的产品目录。
+ * 保留 appDataDir 入参只为跨平台回退与测试可注入；D 盘存在与否由启动期的
+ * ensureDirWritable 校验，不在此处探测（纯函数、不碰 fs）。
+ */
+export function defaultDataRoot(appDataDir: string, platform: string = process.platform): string {
+  if (platform === 'win32') return join(DEFAULT_DATA_ROOT_DRIVE + '\\', DATA_ROOT_DIR_NAME);
   return join(normalize(appDataDir), DATA_ROOT_DIR_NAME);
 }
 
+/**
+ * 引导指针路径固定放在 appData 下的产品目录，与默认数据根解耦（档1不搬指针）：
+ * 硬绑定 D 盘后若指针也跟过去，老指针就读不到、升级用户会被误判首次启动。
+ * 指针搬家属档3，届时单独迁移。
+ */
 export function dataRootPointerPath(appDataDir: string): string {
-  return join(defaultDataRoot(appDataDir), DATA_ROOT_POINTER_NAME);
+  return join(normalize(appDataDir), DATA_ROOT_DIR_NAME, DATA_ROOT_POINTER_NAME);
 }
 
 export function readDataRootPointer(file: string): DataRootPointerRead {
@@ -189,6 +208,98 @@ export interface LibraryPaths {
  * 旧版指针没有 ledgerDir/l0Dir 时都回落到 root——这是**兼容读取**，不是「向导可以跳过」：
  * 是否跳过向导由 isSetupComplete() 判，缺字段一律走向导。
  */
+/** 老档2 布局（两库在 `<root>/databases`）→ 新布局（`<root>/data`）的搬迁报告 */
+export interface LegacyLibraryMigrateReport {
+  migrated: boolean;
+  from?: string;
+  to?: string;
+  moved?: string[];
+  /** 目标已有同名文件时旧件让位后的名字（绝不覆盖目标里的数据） */
+  renamed?: string[];
+  errors?: string[];
+}
+
+/**
+ * 老布局判定：`<root>/databases`。
+ * **必须搬走**——`databases` 是 Chromium 用户配置目录的保留名（数据根同时是 userData），
+ * 启动时会被引擎整目录递归删除，Node 侧无任何调用痕迹（详见 shared/dataLayout.ts 顶部）。
+ */
+export function isLegacyLibraryDir(root: string, dir: string, platform: string = process.platform): boolean {
+  if (!dir) return false;
+  const n = normalize(dir);
+  const base = (platform === 'win32' ? win32 : posix).basename(n);
+  if (base.toLowerCase() !== LEGACY_LIBRARY_SUBDIR) return false;
+  return samePath(dirname(n), root, platform);
+}
+
+/**
+ * 启动早期把老布局的两库目录搬到 `data/` 并改写指针（同卷 rename，瞬时）。
+ * 逐条目搬：目标已有同名文件时把**旧件**改名让位，绝不覆盖目标数据；
+ * 任何一条搬不动都记进 errors（调用方必须落日志），仍然改写指针——
+ * 因为老的 `databases/` 下一次启动必被 Chromium 删掉，留在原处等于等着丢。
+ */
+export function migrateLegacyLibraryDir(file: string, platform: string = process.platform): LegacyLibraryMigrateReport {
+  const read = readDataRootPointer(file);
+  if (read.status !== 'ok') return { migrated: false };
+  const p = read.pointer;
+  const root = normalize(p.root);
+  const ledgerLegacy = isLegacyLibraryDir(root, p.ledgerDir ?? '', platform);
+  const l0Legacy = isLegacyLibraryDir(root, p.l0Dir ?? '', platform);
+  if (!ledgerLegacy && !l0Legacy) return { migrated: false };
+  const report: LegacyLibraryMigrateReport = { migrated: true, moved: [], renamed: [], errors: [] };
+  const targetDir = join(root, DATA_SUBDIRS.data);
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const sources = new Set<string>();
+  if (ledgerLegacy) sources.add(normalize(p.ledgerDir as string));
+  if (l0Legacy) sources.add(normalize(p.l0Dir as string));
+  report.from = [...sources].join('; ');
+  report.to = targetDir;
+  try {
+    mkdirSync(targetDir, { recursive: true });
+  } catch (e) {
+    report.errors?.push(`创建 ${targetDir} 失败：${String((e as Error)?.message ?? e)}`);
+    return report;
+  }
+  for (const src of sources) {
+    let entries: Dirent[] = [];
+    try {
+      entries = readdirSync(src, { withFileTypes: true }) as Dirent[];
+    } catch (e) {
+      report.errors?.push(`读取 ${src} 失败：${String((e as Error)?.message ?? e)}`);
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      const from = join(src, entry.name);
+      let to = join(targetDir, entry.name);
+      try {
+        if (existsSync(to)) {
+          to = `${to}.legacy-${stamp}`;
+          report.renamed?.push(entry.name);
+        }
+        renameSync(from, to);
+        report.moved?.push(entry.name);
+      } catch (e) {
+        report.errors?.push(`搬 ${entry.name} 失败：${String((e as Error)?.message ?? e)}`);
+      }
+    }
+    try {
+      if (readdirSync(src).length === 0) rmdirSync(src);
+    } catch { /* 目录非空/被占用：留给下次，指针已指向新目录 */ }
+  }
+  try {
+    writeDataRootPointer(file, {
+      ...p,
+      ledgerDir: ledgerLegacy ? targetDir : p.ledgerDir,
+      l0Dir: l0Legacy ? targetDir : p.l0Dir,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (e) {
+    report.errors?.push(`改写指针失败：${String((e as Error)?.message ?? e)}`);
+  }
+  return report;
+}
+
 export function resolveLibraryPaths(pointer: Pick<DataRootPointer, 'root' | 'ledgerDir' | 'l0Dir'>): LibraryPaths {
   const root = normalize(pointer.root);
   const ledgerDir = pointer.ledgerDir ? normalize(pointer.ledgerDir) : root;
@@ -309,11 +420,13 @@ export function summarizeDataDir(dir: string): DataRootSummary {
 }
 
 /**
- * 探测旧数据位置：默认目录（MultiAgent Memory）与旧目录（multi-agent-memory）。
+ * 探测旧数据位置：appData 下的默认产品目录（MultiAgent Memory）与旧目录（multi-agent-memory）。
+ * 注意这里探测的是**历史落点**，不是 defaultDataRoot()——后者硬绑定 D 盘（新落点），
+ * 拿它当候选会去读真实 D 盘，既污染测试也把「新默认根」误当旧迁移源。
  * 排除用户本次选定的目录；按最近修改时间倒序（最新者作为迁移源）。
  */
 export function detectDataRoots(appDataDir: string, chosenRoot: string, platform: string = process.platform): DataRootSummary[] {
-  const candidates = [defaultDataRoot(appDataDir), join(normalize(appDataDir), 'multi-agent-memory')];
+  const candidates = [join(normalize(appDataDir), DATA_ROOT_DIR_NAME), join(normalize(appDataDir), 'multi-agent-memory')];
   const seen = new Set<string>();
   const out: DataRootSummary[] = [];
   for (const dir of candidates) {

@@ -10,12 +10,13 @@
 //   · MCP 未启动 / 超时 / 令牌缺失 → fail-open（只回 {continue:true}），绝不阻断用户提问。
 import { readFile, writeFile, mkdir, appendFile, stat, open } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
-import { homedir } from 'node:os';
 import {
   MAX_QUERY_CHARS, buildHookOutput, buildRecallPrelude, extractRecallHits, lastUserQuery,
   parseMcpRpcBody, RECALL_PRELUDE_OPEN, RECALL_EMPTY_HINT, injectSystemPrelude,
   buildHookRunState, serializeHookRunState, parseHookRunState, type HookRunState,
 } from './recallPrelude.ts';
+import { resolveRecallDataRoot } from './pointerRoot.ts';
+import { classifiedPath } from '../../shared/dataLayout.ts';
 
 export const DEFAULT_MCP_URL = 'http://127.0.0.1:8204/mcp';
 export const HOOK_TIMEOUT_MS = 2500;
@@ -41,12 +42,14 @@ function log(msg: string): void {
   process.stderr.write(`[force_recall] ${msg}\n`);
 }
 
-/** 状态文件路径：优先环境变量（测试可注入），否则 %APPDATA%/MultiAgent Memory/。 */
+/**
+ * 状态文件路径：环境变量（测试注入）> 引导指针解析的真实数据根 > 旧 appData 硬编码。
+ * 数据根切到 D 盘后，钩子是外部 node 进程读不到 USER_DATA，必须从固定指针解析，
+ * 否则状态文件落在 C 盘、主进程读 D 盘 → 硬召回门禁误判 never_ran。
+ */
 export function hookStatusFilePath(): string {
   if (process.env.MEMAGENT_HOOK_STATUS_FILE) return process.env.MEMAGENT_HOOK_STATUS_FILE;
-  const appdata = process.env.APPDATA || process.env.LOCALAPPDATA;
-  if (appdata) return join(appdata, 'MultiAgent Memory', HOOK_STATUS_FILE);
-  return join(homedir(), '.config', 'multiagent-memory', HOOK_STATUS_FILE);
+  return classifiedPath(resolveRecallDataRoot(), HOOK_STATUS_FILE);
 }
 
 /** 流水账路径：与状态文件同目录，可被 MEMAGENT_HOOK_LOG_FILE 覆盖（测试注入用）。 */
@@ -57,9 +60,7 @@ export function hookLogFilePath(): string {
   if (process.env.MEMAGENT_HOOK_STATUS_FILE) {
     return join(dirname(process.env.MEMAGENT_HOOK_STATUS_FILE), HOOK_LOG_FILE);
   }
-  const appdata = process.env.APPDATA || process.env.LOCALAPPDATA;
-  if (appdata) return join(appdata, 'MultiAgent Memory', HOOK_LOG_FILE);
-  return join(homedir(), '.config', 'multiagent-memory', HOOK_LOG_FILE);
+  return classifiedPath(resolveRecallDataRoot(), HOOK_LOG_FILE);
 }
 
 /** 追加一行流水账；超过上限时保留最近 N 行。任何失败都只记 stderr，不影响钩子返回。 */
@@ -145,9 +146,8 @@ async function recordStatus(state: HookRunState): Promise<void> {
 
 function tokenFile(): string {
   if (process.env.MEMAGENT_MCP_TOKEN_FILE) return process.env.MEMAGENT_MCP_TOKEN_FILE;
-  const appdata = process.env.APPDATA || process.env.LOCALAPPDATA;
-  if (appdata) return join(appdata, 'MultiAgent Memory', 'mcp-token.txt');
-  return join(homedir(), '.config', 'multiagent-memory', 'mcp-token.txt');
+  // 与状态文件同一口径：从引导指针解析真实数据根 + 子目录归类，避免切 D 盘后钩子读 C 盘旧令牌
+  return classifiedPath(resolveRecallDataRoot(), 'mcp-token.txt');
 }
 
 /** 令牌只允许发往 loopback：防配置被改成远端地址时把机器级凭据送出去。 */

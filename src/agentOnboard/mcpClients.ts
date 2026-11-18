@@ -8,6 +8,30 @@ import type { BadgeClass } from '../types/agentOnboard.ts';
 /** 标准 MCP streamable-http 端点（与 src/electron/main.ts 的 MCP_HTTP_PORT 一致） */
 export const MCP_ENDPOINT = 'http://127.0.0.1:8204/mcp';
 
+/**
+ * stdio 桥接脚本文件名（2026-11-18 用户要求「客户端配置改成 stdio launcher 现读令牌，轮换零维护」）。
+ * 单一真源放这里：electron/mcpBridgeScript.ts 生成它、本文件生成/识别引用它的配置条目、探测函数认它。
+ */
+export const MCP_BRIDGE_FILE_NAME = 'mcp-bridge.cjs';
+
+/** stdio 接入时客户端配置里必须出现的最小形态（令牌**不在其中**，由桥接脚本每次现读） */
+export const MCP_STDIO_COMMAND = 'node';
+
+/** 配置条目承载的传输方式：http=把令牌抄进配置（轮换需重写）/ stdio=只写启动命令（轮换零维护） */
+export type McpTransport = 'http' | 'stdio';
+
+/**
+ * stdio 接入的三个路径参数（都必须是**指针或稳定路径**，不能写死数据根里的易变位置）：
+ *  · bridgePath  = 桥接脚本绝对路径（落在引导指针同目录，数据根搬家也不动）
+ *  · pointerPath = 引导指针 data-root.json（桥接脚本运行时据此现查数据根 → keys/mcp-token.txt）
+ *  · endpoint    = 本机 MCP 端点
+ */
+export interface McpStdioTarget {
+  bridgePath: string;
+  pointerPath: string;
+  endpoint: string;
+}
+
 export type McpClientId =
   | 'qoder-cn'
   | 'claude-code'
@@ -165,6 +189,9 @@ export interface McpConfigProbe {
   /** 命中的端点（不含令牌；用于解释 conflict） */
   foundUrl?: string;
   hasAuth: boolean;
+  /** 条目是哪种传输形态：stdio=只写启动命令（令牌由桥接脚本现读）/ http=令牌抄在配置里。
+   *  缺省 undefined = 没读到条目（no_config / missing_entry 等），不代表 http。 */
+  transport?: McpTransport;
   /** 批次41-X：条目里是否已带显式身份头 `X-Memagent-Client`（缺≠坏，老配置照常工作，只是身份仍靠归并） */
   hasClientId?: boolean;
   /** 客户端应用内的「已禁用」标记：仅当配置条目显式为布尔 true 时才带此字段。
@@ -202,8 +229,43 @@ export function buildMcpEntry(spec: McpClientSpec, endpoint: string, token: stri
   return { type: 'http', url: endpoint, headers };
 }
 
+/**
+ * stdio 条目（零维护形态）：配置里**没有任何凭据**，只有一句
+ * `node <bridge> <指针> <端点> <客户端 id>`。
+ *  · 令牌：桥接脚本每次调用现读 `指针 → 数据根/keys/mcp-token.txt`，轮换后不用改任何配置；
+ *  · 身份：客户端 id 走 argv，由桥接脚本作为 `X-Memagent-Client` 头带给服务端（比 http 形态更准）。
+ * 不写 env：多数客户端支持，但 env 是「值要跟着令牌走」的老路，这里一律不放凭据。
+ */
+export function buildStdioMcpEntry(spec: McpClientSpec, target: McpStdioTarget): Record<string, unknown> {
+  return {
+    command: MCP_STDIO_COMMAND,
+    args: [target.bridgePath, target.pointerPath, target.endpoint, spec.id],
+  };
+}
+
+/** 该条目是不是 stdio 桥接形态（只认「命令 + args 里有桥接脚本」，不认乱七八糟的同名 command） */
+export function isStdioEntry(entry: Record<string, unknown>): boolean {
+  if (typeof entry.command !== 'string' || !entry.command) return false;
+  const args = Array.isArray(entry.args) ? entry.args : [];
+  return args.some((a) => typeof a === 'string' && a.endsWith(MCP_BRIDGE_FILE_NAME));
+}
+
 /** 可复制的配置片段（JSON / TOML / 手工说明） */
-export function renderMcpSnippet(spec: McpClientSpec, endpoint: string, token: string): string {
+export function renderMcpSnippet(
+  spec: McpClientSpec, endpoint: string, token: string, stdio?: McpStdioTarget,
+): string {
+  if (stdio) {
+    // stdio 片段**不含令牌**，可以随便复制/贴给别人看
+    const entry = buildStdioMcpEntry(spec, stdio);
+    if (spec.format === 'toml') {
+      const args = (entry.args as string[]).map((a) => `"${tomlQuote(a)}"`).join(', ');
+      return `[mcp_servers.${spec.serverKey}]\ncommand = "${MCP_STDIO_COMMAND}"\nargs = [${args}]\n`;
+    }
+    if (spec.format === 'json') {
+      return `${JSON.stringify({ mcpServers: { [spec.serverKey]: entry } }, null, 2)}\n`;
+    }
+    return `启动命令：${MCP_STDIO_COMMAND} ${(entry.args as string[]).join(' ')}\n（stdio 启动型 MCP：配置里不含令牌，令牌由桥接脚本现读，轮换零维护）\n`;
+  }
   const pairs = mcpHeaderPairs(spec, token);
   if (spec.format === 'json') {
     return `${JSON.stringify({ mcpServers: { [spec.serverKey]: buildMcpEntry(spec, endpoint, token) } }, null, 2)}\n`;
@@ -242,8 +304,13 @@ export function probeJsonConfig(text: string | null, spec: McpClientSpec, endpoi
     return { state: 'missing_entry', hasAuth: false };
   }
   const e = entry as Record<string, unknown>;
+  // stdio 桥接形态（2026-11-18）：条目是 command+args，没有 url/headers——令牌由桥接脚本每次现读，
+  // 配置里**不含凭据**。认不出它就会被误判成 missing_auth 并反复要求重写。
+  if (isStdioEntry(e)) {
+    return markDisabled({ state: 'wired', hasAuth: true, hasClientId: true, transport: 'stdio' }, e);
+  }
   const url = typeof e.url === 'string' ? e.url : typeof e.httpUrl === 'string' ? e.httpUrl : undefined;
-  if (url !== endpoint) return markDisabled({ state: 'conflict', foundUrl: url, hasAuth: false }, e);
+  if (url !== endpoint) return markDisabled({ state: 'conflict', foundUrl: url, hasAuth: false, transport: 'http' }, e);
   const headers = e.headers;
   const headerBag = headers && typeof headers === 'object' && !Array.isArray(headers)
     ? (headers as Record<string, unknown>)
@@ -253,7 +320,9 @@ export function probeJsonConfig(text: string | null, spec: McpClientSpec, endpoi
   const hasAuth = typeof auth === 'string' && /^Bearer\s+\S+/i.test(auth.trim());
   const clientId = readHeader(MCP_CLIENT_HEADER_NAME);
   const hasClientId = typeof clientId === 'string' && clientId.trim().length > 0;
-  return markDisabled({ state: hasAuth ? 'wired' : 'missing_auth', foundUrl: url, hasAuth, hasClientId }, e);
+  return markDisabled({
+    state: hasAuth ? 'wired' : 'missing_auth', foundUrl: url, hasAuth, hasClientId, transport: 'http',
+  }, e);
 }
 
 /** 转义正则元字符（TOML 段名可能含点/短横线） */
@@ -276,12 +345,19 @@ export function probeTomlConfig(text: string | null, spec: McpClientSpec, endpoi
     body.push(line);
   }
   const section = body.join('\n');
+  // stdio 桥接形态（2026-11-18）：command + args 指向桥接脚本，配置里不含令牌
+  if (/\bcommand\s*=\s*"/.test(section) && /mcp-bridge\.cjs/.test(section)) {
+    const wired: McpConfigProbe = { state: 'wired', hasAuth: true, hasClientId: true, transport: 'stdio' };
+    return /\bdisabled\s*=\s*true\b/i.test(section) ? { ...wired, disabled: true } : wired;
+  }
   const url = /\b(?:url|http_url)\s*=\s*"([^"]*)"/.exec(section)?.[1];
-  if (url !== endpoint) return { state: 'conflict', foundUrl: url, hasAuth: false };
+  if (url !== endpoint) return { state: 'conflict', foundUrl: url, hasAuth: false, transport: 'http' };
   const auth = /\bAuthorization\s*=\s*"([^"]*)"/i.exec(section)?.[1];
   const hasAuth = typeof auth === 'string' && /^Bearer\s+\S+/i.test(auth.trim());
   const hasClientId = tomlHeaderRe(MCP_CLIENT_HEADER_NAME).test(section);
-  const probe: McpConfigProbe = { state: hasAuth ? 'wired' : 'missing_auth', foundUrl: url, hasAuth, hasClientId };
+  const probe: McpConfigProbe = {
+    state: hasAuth ? 'wired' : 'missing_auth', foundUrl: url, hasAuth, hasClientId, transport: 'http',
+  };
   return /\bdisabled\s*=\s*true\b/i.test(section) ? { ...probe, disabled: true } : probe;
 }
 
@@ -307,9 +383,11 @@ export function probeClientConfig(
 /**
  * 把本服务条目并入 JSON 配置（保留其它键与其它 MCP 服务器；同名条目只合并不替换）。
  * 仅允许 writable 的 JSON 客户端；conflict / invalid 由调用方先行拒绝。
+ * 传 stdio 时改写为**零维护形态**：清掉 url/httpUrl/type/headers（HTTP 形态的四个字段），
+ * 只留 command+args——否则客户端会按 url 走 HTTP，令牌照样被抄在配置里。
  */
 export function mergeMcpJsonConfig(
-  text: string | null, spec: McpClientSpec, endpoint: string, token: string,
+  text: string | null, spec: McpClientSpec, endpoint: string, token: string, stdio?: McpStdioTarget,
 ): { text: string; changed: boolean } {
   if (spec.format !== 'json' || !spec.writable) throw new Error(`E_UNSUPPORTED_CLIENT: ${spec.id}`);
   let parsed: unknown = {};
@@ -327,16 +405,22 @@ export function mergeMcpJsonConfig(
     ? { ...(serversRaw as Record<string, unknown>) }
     : {};
   const existing = servers[spec.serverKey];
-  let nextEntry = buildMcpEntry(spec, endpoint, token);
+  let nextEntry = stdio ? buildStdioMcpEntry(spec, stdio) : buildMcpEntry(spec, endpoint, token);
   if (existing && typeof existing === 'object' && !Array.isArray(existing)) {
     const old = existing as Record<string, unknown>;
     const url = typeof old.url === 'string' ? old.url : typeof old.httpUrl === 'string' ? old.httpUrl : undefined;
     if (url !== undefined && url !== endpoint) throw new Error('E_CONFIG_CONFLICT: 同名条目指向其它端点');
-    const oldHeaders = old.headers && typeof old.headers === 'object' && !Array.isArray(old.headers)
-      ? (old.headers as Record<string, unknown>)
-      : {};
     // 保留条目上的其它字段（如 qoder_url）与其它请求头，只覆盖本服务需要的字段
-    nextEntry = { ...old, ...nextEntry, headers: { ...oldHeaders, ...(nextEntry.headers as Record<string, unknown>) } };
+    if (stdio) {
+      const kept: Record<string, unknown> = { ...old };
+      for (const k of ['url', 'httpUrl', 'type', 'headers']) delete kept[k];
+      nextEntry = { ...kept, ...nextEntry };
+    } else {
+      const oldHeaders = old.headers && typeof old.headers === 'object' && !Array.isArray(old.headers)
+        ? (old.headers as Record<string, unknown>)
+        : {};
+      nextEntry = { ...old, ...nextEntry, headers: { ...oldHeaders, ...(nextEntry.headers as Record<string, unknown>) } };
+    }
   }
   // 只比较目标条目：未变化时原样返回，避免无意义地重排整个配置文件
   if (existing !== undefined && JSON.stringify(existing) === JSON.stringify(nextEntry)) {
@@ -353,16 +437,70 @@ function tomlQuote(v: string): string {
 }
 
 /**
+ * stdio 形态的 TOML 段重建（2026-11-18）：本服务段整个换成 `command` + `args`。
+ * 本服务段是**我们自己的**段，重建时连带丢掉它名下的子表（`.http_headers` / `.env`）——
+ * 留着它们会让客户端同时看到「启动命令」和「HTTP 请求头」两套互相矛盾的配置。
+ * 其它段与其它客户端条目一律原样保留（只跳过本服务段体）。
+ */
+function mergeTomlStdioSection(
+  source: string, spec: McpClientSpec, eol: string, stdio: McpStdioTarget,
+): { text: string; changed: boolean } {
+  const lines = source.split(/\r?\n/);
+  const headerRe = new RegExp(`^\\s*\\[mcp_servers\\.${escapeRe(spec.serverKey)}\\]\\s*$`);
+  const ownRe = new RegExp(`^\\s*\\[mcp_servers\\.${escapeRe(spec.serverKey)}(?:\\.|\\])`);
+  const args = buildStdioMcpEntry(spec, stdio).args as string[];
+  const body = [
+    `command = "${MCP_STDIO_COMMAND}"`,
+    `args = [${args.map((a) => `"${tomlQuote(a)}"`).join(', ')}]`,
+  ];
+  const headerIdx = lines.findIndex((l) => headerRe.test(l));
+  if (headerIdx === -1) {
+    const block = [`[mcp_servers.${spec.serverKey}]`, ...body].join(eol);
+    const base = source.trimEnd();
+    return { text: `${base.length > 0 ? `${base}${eol}${eol}` : ''}${block}${eol}`, changed: true };
+  }
+  // 冲突拒绝：本服务段里的 url 指向别的端点 → 不覆盖（与 HTTP 形态同口径）
+  const rest = lines.slice(headerIdx + 1);
+  const scanned: string[] = [];
+  for (const line of rest) {
+    if (/^\s*\[/.test(line) && !ownRe.test(line)) break;
+    scanned.push(line);
+  }
+  const foundUrl = /\b(?:url|http_url)\s*=\s*"([^"]*)"/.exec(scanned.join('\n'))?.[1];
+  if (foundUrl !== undefined && foundUrl !== stdio.endpoint) {
+    throw new Error('E_CONFIG_CONFLICT: 同名条目指向其它端点');
+  }
+  const out: string[] = [];
+  let insertAt = -1;
+  let mode: 'other' | 'main' | 'ownSub' = 'other';
+  for (const line of lines) {
+    if (/^\s*\[/.test(line)) {
+      if (headerRe.test(line)) { mode = 'main'; out.push(line); insertAt = out.length; continue; }
+      if (ownRe.test(line)) { mode = 'ownSub'; continue; }
+      mode = 'other';
+    }
+    if (mode !== 'other') continue;
+    out.push(line);
+  }
+  while (insertAt >= 0 && insertAt < out.length && out[insertAt].trim() === '') out.splice(insertAt, 1);
+  out.splice(insertAt, 0, ...body);
+  const text = out.join(eol);
+  return { text, changed: text !== source };
+}
+
+/**
  * 把本服务条目并入 TOML 配置（批次23：Codex 等 [mcp_servers.<key>] 客户端）。
  * 保留其它段与其它请求头；已有同名段只补齐/修正 Authorization；同名段指向其它端点 → 拒绝覆盖。
  * 支持两种写法：段内 `http_headers = { Authorization = "..." }`，或子表 `[mcp_servers.<key>.http_headers]`。
+ * 传 stdio 时改写为零维护形态（command + args，不含令牌），见 mergeTomlStdioSection。
  */
 export function mergeMcpTomlConfig(
-  text: string | null, spec: McpClientSpec, endpoint: string, token: string,
+  text: string | null, spec: McpClientSpec, endpoint: string, token: string, stdio?: McpStdioTarget,
 ): { text: string; changed: boolean } {
   if (spec.format !== 'toml' || !spec.writable) throw new Error(`E_UNSUPPORTED_CLIENT: ${spec.id}`);
   const source = text ?? '';
   const eol = source.includes('\r\n') ? '\r\n' : '\n';
+  if (stdio) return mergeTomlStdioSection(source, spec, eol, stdio);
   const lines = source.split(/\r?\n/);
   const headerRe = new RegExp(`^\\s*\\[mcp_servers\\.${escapeRe(spec.serverKey)}\\]\\s*$`);
   const ownRe = new RegExp(`^\\s*\\[mcp_servers\\.${escapeRe(spec.serverKey)}(?:\\.|\\])`);

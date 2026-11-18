@@ -32,10 +32,11 @@ import type { TenantContext } from '../types/home.ts';
 import {
   DATA_ROOT_POINTER_VERSION, LEDGER_FILE_NAME, L0_FILE_NAME, L0_KEYRING_FILE_NAME,
   adoptLibraryDirIntoPlace, clearDataRootMigrateFrom, dataRootPointerPath, defaultDataRoot, detectDataRoots, ensureDirWritable,
-  hasAnyData, hasLibraryDirs, isSetupComplete, libraryFileState, migrateDataRoot, readDataRootPointer, resolveLibraryPaths,
+  hasAnyData, hasLibraryDirs, isSetupComplete, libraryFileState, migrateDataRoot, migrateLegacyLibraryDir, readDataRootPointer, resolveLibraryPaths,
   samePath, summarizeDataDir, validateDataRootPath, wizardRequired, writeDataRootPointer,
-  type DataRootMigration, type DataRootPointer, type DataRootSummary, type LibraryPaths,
+  type DataRootMigration, type DataRootPointer, type DataRootSummary, type LegacyLibraryMigrateReport, type LibraryPaths,
 } from './dataRoot.ts';
+import { classifiedPath, classifiedDir, libraryDir } from '../shared/dataLayout.ts';
 import { resolveWebchatExtensionDir } from './webchatExtensionPath.ts';
 import { ensureStableExtensionDir } from './webchatExtensionCopy.ts';
 import { createWebchatIngestServer, newWebchatIngestToken, writeWebchatRuntime } from './webchatIngest.ts';
@@ -46,7 +47,8 @@ import {
 } from './browserLaunch.ts';
 import { AUDIT_FILE_NAME } from '../core/memagent/auditLog.ts';
 import { detectLocalAgents, hostAgentConfig } from './agentDetect.ts';
-import { applyRecallEvidence, enableMcpClient, scanMcpClients, snippetForClient, wireMcpClient } from './mcpClients.ts';
+import { applyRecallEvidence, enableMcpClient, readStoredToken, scanMcpClients, snippetForClient, wireMcpClient } from './mcpClients.ts';
+import { attachLiveProbe } from './mcpProbe.ts';
 import { probeRunningClients } from './clientProcess.ts';
 import {
   applyProbeResult, applyProxyAccounting, LLM_PRESETS, llmEngineViews, loadLlmConfig, loadLlmGateway, loadLlmKeys, mergeLlmConfig,
@@ -61,6 +63,10 @@ import { runMcpHttpServer } from '../core/memagent/mcpHttp.ts';
 import { HOOK_STATUS_FILE } from '../core/memagent/recallHook.ts';
 import { RecallHardController } from './recallHard.ts';
 import { ensureStableHookScript } from './recallHookScript.ts';
+// stdio 桥接脚本（2026-11-18）：写到引导指针同目录，客户端配置只留启动命令 → 令牌轮换零维护
+import { ensureMcpBridgeScript } from './mcpBridgeScript.ts';
+// 端点常量与客户端配方同一真源（stdio 启动命令里的端点不许另写字面量）
+import { MCP_ENDPOINT } from '../agentOnboard/mcpClients.ts';
 import { memberForbiddenFields, parseRecallHardPatch } from '../shared/recallHardConfig.ts';
 import { MemoryPendingStore, type PendingStore } from '../core/memagent/pendingWrites.ts';
 import { summarizePendingWrites } from '../shared/pendingWritesView.ts';
@@ -458,7 +464,10 @@ function adoptLibraryFile(fromDir: string, toDir: string, fileName: string): { c
 
 /** 两库位置依次问完（原数据库默认跟记忆库同目录）；任一步取消 → null */
 async function chooseLibraryDirs(root: string): Promise<{ ledgerDir: string; l0Dir: string } | null> {
-  const ledgerDir = await chooseLibraryDir('1/2', 'L1–L6 记忆库（可检索正文 + 层级 + 审计）', root);
+  // 2026-11-18 归类布局：两库默认落到 <数据根>/data（不能叫 databases——Chromium 保留名），
+  // 用户仍可在对话框里改选任意目录。
+  const libsRoot = libraryDir(root);
+  const ledgerDir = await chooseLibraryDir('1/2', 'L1–L6 记忆库（可检索正文 + 层级 + 审计）', libsRoot);
   if (!ledgerDir) return null;
   const l0Dir = await chooseLibraryDir('2/2', 'L0 原数据库（每条记忆的加密原文，唯一的原件副本）', ledgerDir);
   if (!l0Dir) return null;
@@ -602,7 +611,7 @@ async function mlog(step: string, detail?: unknown): Promise<void> {
  * 只允许通过文件把令牌交给 Agent；绝不打进日志/审计。
  */
 function loadOrCreateMcpToken(): string {
-  const file = join(USER_DATA, 'mcp-token.txt');
+  const file = classifiedPath(USER_DATA, 'mcp-token.txt');
   try {
     const saved = readFileSync(file, 'utf8').trim();
     if (/^[0-9a-f]{64}$/.test(saved)) return saved;
@@ -610,7 +619,7 @@ function loadOrCreateMcpToken(): string {
     /* 首次启动：文件不存在 */
   }
   const token = randomBytes(32).toString('hex');
-  mkdirSync(USER_DATA, { recursive: true });
+  mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, token + '\n', { encoding: 'utf8', mode: 0o600 });
   return token;
 }
@@ -774,7 +783,7 @@ async function runBackupOnce(
 ): Promise<{ ok: boolean; file?: string; files?: BackupFileReceipt[]; missing?: BackupKind[]; dirs?: string[]; error?: string }> {
   const cfg = loadBackupConfig();
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
-  const fallbackDir = join(USER_DATA, 'backups');
+  const fallbackDir = classifiedDir(USER_DATA, 'backups');
   const usedDirs = backupTargetDirs(cfg, fallbackDir).map((d) => d.dir);
   const files: BackupFileReceipt[] = [];
   try {
@@ -832,7 +841,7 @@ async function listBackups(): Promise<{
   items: { name: string; time: string; size: number; kind: BackupKind; dir: string }[];
 }> {
   const cfg = loadBackupConfig();
-  const fallbackDir = join(USER_DATA, 'backups');
+  const fallbackDir = classifiedDir(USER_DATA, 'backups');
   const dirs = backupTargetDirs(cfg, fallbackDir).map((d) => d.dir);
   const items: { name: string; time: string; size: number; kind: BackupKind; dir: string }[] = [];
   for (const dir of dirs) {
@@ -977,7 +986,7 @@ function registerDataRootIpc(): void {
     // 批次41-A：审计账本独立成追加文件，位置与体量如实回显（页面据此说明「审计不再混在主库里」）
     activeAuditPath: AUDIT_PATH,
     audit: storage.auditStats,
-    actionsLogPath: join(USER_DATA, 'actions.log'),
+    actionsLogPath: classifiedPath(USER_DATA, 'actions.log'),
   }));
   handleIpc(IPC.dataRootOpen, async () => {
     const err = await shell.openPath(USER_DATA);
@@ -1069,6 +1078,21 @@ function registerPersonalIpc(opts: {
 // 状态扫描需登录会话（批次27 P3-4）；含令牌片段与一键写配置会暴露/改写本机凭据 → 仅管理员。
 // 令牌只在返回值出现一次，日志只记客户端/路径/备份与结果，绝不记令牌。
 function registerMcpClientsIpc(token: string): void {
+  /**
+   * stdio 接入目标（2026-11-18）：桥接脚本放**引导指针同目录**，指针按设计永不搬，
+   * 所以这条绝对路径跨数据根迁移/重装都稳定 —— 客户端配置写一次就不用再改。
+   * 令牌与端点都不进配置：脚本运行时读指针 → `<数据根>/keys/mcp-token.txt`。
+   */
+  const stdioTarget = (): { bridgePath: string; pointerPath: string; endpoint: string } | { error: string } => {
+    if (!APP_DATA_DIR || !DATA_ROOT_POINTER) {
+      return { error: '无法确定应用数据目录（appData），无法生成 stdio 启动命令' };
+    }
+    return {
+      bridgePath: ensureMcpBridgeScript(dirname(DATA_ROOT_POINTER)),
+      pointerPath: DATA_ROOT_POINTER,
+      endpoint: MCP_ENDPOINT,
+    };
+  };
   handleIpc(IPC.mcpClients, async (_e, sessionId?: string) => {
     // ②本地诊断：MCP 客户端配置扫描只读本机文件（配置路径/开关/运行态），不涉及账号或租户数据，
     // 因此不再要求登录——登录前也能看开关状态（此前重启后未登录会显示「未知」）。审计证据取不到则退回纯文件口径。
@@ -1087,24 +1111,65 @@ function registerMcpClientsIpc(token: string): void {
     for (const c of scan.clients) {
       if (running[c.id] !== undefined) c.running = running[c.id];
     }
+    // 2026-11-18「实测连通」：拿**每个客户端配置里的令牌**真调一次 tools/list，用状态码说话。
+    // 为什么必须实测：令牌轮换后 6 个客户端全 401，而 state 是读配置推的、页面照样全绿（当天真实事故）。
+    // 同令牌只探一次（多数客户端共用一份），无文件面的客户端不探、如实留空。只读探活，令牌绝不进日志。
+    try {
+      // stdio 客户端配置里没有令牌可读——但它用的就是**当前令牌**（桥接脚本现读同一份 keys/mcp-token.txt），
+      // 所以对它们用现役令牌实测才等价于「它启动后能不能调通」；http 客户端仍只认它自己配置里的那份。
+      const stdioIds = new Set(scan.clients.filter((c) => c.transport === 'stdio').map((c) => c.id));
+      const live = await attachLiveProbe(scan.clients, (id) => (stdioIds.has(id) ? token : readStoredToken(id)), {
+        endpoint: scan.endpoint, currentToken: token,
+      });
+      scan.live = {
+        at: Date.now(), checked: live.checked, failed: live.failed,
+        ...(live.server ? { server: live.server } : {}),
+      };
+      if (live.failed > 0) {
+        actionLog('mcp', 'client-live-probe-bad', {
+          checked: live.checked, failed: live.failed,
+          clients: scan.clients
+            .filter((c) => c.live && !c.live.ok)
+            .map((c) => `${c.id}:${c.live?.status ?? 0}`),
+        }, { level: 'warn' });
+      }
+    } catch { /* 探活是增强信息：失败不得影响扫描本身 */ }
     return scan;
   });
-  handleIpc(IPC.mcpClientSnippet, (_e, id: unknown, sessionId?: string) => {
+  // 第 3 个参数 = 传输形态（'stdio' 输出**不含令牌**的启动命令片段；缺省/其它 = 原 HTTP 片段）
+  handleIpc(IPC.mcpClientSnippet, (_e, id: unknown, sessionId?: string, mode?: unknown) => {
     const gate = requireAdmin(sessionId, IPC.mcpClientSnippet);
     if (!gate.ok) return { ok: false, error: gate.error };
+    const wantStdio = mode === 'stdio';
+    const target = wantStdio ? stdioTarget() : null;
+    if (wantStdio && target && 'error' in target) return { ok: false, error: target.error };
     try {
-      return { ok: true, snippet: snippetForClient(String(id ?? ''), token) };
+      return {
+        ok: true,
+        snippet: wantStdio && target && !('error' in target)
+          ? snippetForClient(String(id ?? ''), token, target.endpoint, target)
+          : snippetForClient(String(id ?? ''), token),
+      };
     } catch (e) {
       return { ok: false, error: String((e as Error)?.message ?? e) };
     }
   });
-  handleIpc(IPC.mcpClientWire, (_e, id: unknown, sessionId?: string) => {
+  // 第 3 个参数 = 传输形态（'stdio' = 改成令牌零维护的启动命令；缺省 = 原 HTTP 一键接入）
+  handleIpc(IPC.mcpClientWire, (_e, id: unknown, sessionId?: string, mode?: unknown) => {
     const gate = requireAdmin(sessionId, IPC.mcpClientWire);
     if (!gate.ok) return { ok: false, error: gate.error };
     const client = String(id ?? '');
-    const r = wireMcpClient(client, token, { currentToken: token });
+    const wantStdio = mode === 'stdio';
+    const target = wantStdio ? stdioTarget() : null;
+    if (wantStdio && target && 'error' in target) return { ok: false, error: target.error };
+    const r = wireMcpClient(client, token, {
+      currentToken: token,
+      ...(wantStdio && target && !('error' in target)
+        ? { mode: 'stdio' as const, bridgePath: target.bridgePath, pointerPath: target.pointerPath }
+        : {}),
+    });
     actionLog('mcp', 'client-wire', {
-      client, ok: r.ok, changed: !!r.changed, path: r.path, backup: r.backupPath,
+      client, mode: wantStdio ? 'stdio' : 'http', ok: r.ok, changed: !!r.changed, path: r.path, backup: r.backupPath,
       ...(r.error ? { error: r.error } : {}),
     }, { level: r.ok ? 'info' : 'warn' });
     return r;
@@ -1312,7 +1377,7 @@ async function backupBeforeKernelChange(dirPrefix: string, logAction: string): P
   const cfg = loadBackupConfig();
   // 批次58：这里是「一次性回滚快照」而不是滚动备份——四类源**故意放进同一个子目录**，
   // 好在出事时整套回到同一时刻；目录位置取记忆库组（原数据库组可能被指到另一块盘，回滚快照分两处反而难用）。
-  const base = backupTargetDir('ledger', cfg, join(USER_DATA, 'backups'));
+  const base = backupTargetDir('ledger', cfg, classifiedDir(USER_DATA, 'backups'));
   const dir = join(base, `${dirPrefix}-${ts}`);
   await mkdir(dir, { recursive: true });
   // 批次37-D：批量改写账本前把三类落盘源一起备份 —— 只备记忆库会让 L0 原数据库成为唯一没有退路的那一份。
@@ -2627,7 +2692,7 @@ async function registerStorageIpc(): Promise<void> {
       }
       const m = await storage.getMemory(memId);
       if (!m) return { ok: false, error: 'Memory not found (may have been deleted)' };
-      const exportDir = join(USER_DATA, 'memories-export');
+      const exportDir = classifiedDir(USER_DATA, 'memories-export');
       await mkdir(exportDir, { recursive: true });
       const filePath = join(exportDir, `${memId}.json`);
       await writeFile(filePath, JSON.stringify(m, null, 2), 'utf8');
@@ -2888,7 +2953,7 @@ function registerSetupIpc(vault: L0Vault, staticPort: number): void {
         ledger_dir: backupCfg.ledgerDir ?? '',
         l0_dir: backupCfg.l0Dir ?? '',
         shared_dir: backupCfg.dir ?? '',
-        default_dir: join(USER_DATA, 'backups'),
+        default_dir: classifiedDir(USER_DATA, 'backups'),
         enabled: backupCfg.enabled,
         hour: backupCfg.hour,
         minute: backupCfg.minute,
@@ -2978,7 +3043,7 @@ function registerSetupIpc(vault: L0Vault, staticPort: number): void {
     if (!wizardOpen()) return { ok: false, error: '首启设置已完成：备份位置请到「记忆库」页修改' };
     const g = group === 'l0' ? 'l0' : 'ledger';
     const cfg = loadBackupConfig();
-    const current = (g === 'ledger' ? cfg.ledgerDir : cfg.l0Dir) || cfg.dir || join(USER_DATA, 'backups');
+    const current = (g === 'ledger' ? cfg.ledgerDir : cfg.l0Dir) || cfg.dir || classifiedDir(USER_DATA, 'backups');
     const pick = await dialog.showOpenDialog({
       title: g === 'ledger' ? '选择记忆库备份目录' : '选择原数据库备份目录',
       defaultPath: existsSync(current) ? current : undefined,
@@ -3149,6 +3214,12 @@ async function bootstrap(): Promise<void> {
   USER_DATA = app.getPath('userData');
   // 批次37-B：两个库各有自己的目录（首启向导写进指针）；没走过向导的老指针 = 都跟随数据根，
   // 这是「兼容读取」而不是「绕过向导」——向导门禁见 prepareDataRoot / setup:state
+  // 老档2 布局：两库/密钥环/审计曾落在 <root>/databases —— 那是 Chromium 用户配置目录的保留名，
+  // 启动瞬间即被引擎整目录递归删除（C++ 层，Node 探针抓不到）。必须在读指针之前先搬走，
+  // 否则后面每一步读到的都是「空库」，表现为写密钥授权消失、记忆全空。见 shared/dataLayout.ts 顶部。
+  const legacyLibraryMigration: LegacyLibraryMigrateReport = DATA_ROOT_POINTER
+    ? migrateLegacyLibraryDir(DATA_ROOT_POINTER)
+    : { migrated: false };
   {
     const p = DATA_ROOT_POINTER ? readDataRootPointer(DATA_ROOT_POINTER) : { status: 'missing' as const };
     LIB_PATHS = p.status === 'ok'
@@ -3163,14 +3234,20 @@ async function bootstrap(): Promise<void> {
   L0_DB_PATH = LIB_PATHS.l0;
   AUDIT_PATH = LIB_PATHS.audit;
   L0_KEYRING_PATH = join(LIB_PATHS.l0Dir, L0_KEYRING_FILE_NAME);
-  COLLECTOR_CURSOR_FILE = join(USER_DATA, 'collector-cursor.json');
-  MAIN_LOG = join(USER_DATA, 'main.log');
-  BACKUP_CFG_PATH = join(USER_DATA, 'backup-config.json');
+  COLLECTOR_CURSOR_FILE = classifiedPath(USER_DATA, 'collector-cursor.json');
+  MAIN_LOG = classifiedPath(USER_DATA, 'main.log');
+  BACKUP_CFG_PATH = classifiedPath(USER_DATA, 'backup-config.json');
   // 第一轮个人记忆：独立文件，与 memories.db.json / 审计账本分开（不扩 Memory 主表）
-  personalStoreRef = new FilePersonalStore(join(USER_DATA, 'personal-memory.db.json'));
+  personalStoreRef = new FilePersonalStore(classifiedPath(USER_DATA, 'personal-memory.db.json'));
   // 动作日志（批次7）：先于迁移/服务启动初始化，保证启动期动作也有落盘
-  initActionLog({ file: join(USER_DATA, 'actions.log') });
+  initActionLog({ file: classifiedPath(USER_DATA, 'actions.log') });
   actionLog('app', 'bootstrap:start', { root: USER_DATA });
+  // 老布局搬迁必须留痕：这次动了用户的库文件位置，成功/改名/失败三类都要能事后倒查
+  if (legacyLibraryMigration.migrated) {
+    void mlog('data-root:legacy-library-migrated', legacyLibraryMigration);
+    actionLog('dataRoot', 'setup:legacy-library-migrated', legacyLibraryMigration as never,
+      { level: (legacyLibraryMigration.errors?.length ?? 0) > 0 ? 'error' : 'info' });
+  }
   // 数据根迁移必须在 FileStorage/服务启动前完成（无在途写）：只复制白名单、不覆盖、不删源
   const dataRootMigration = applyDataRootMigration();
   const legacyDbImported = importLegacyDbDir();
@@ -3243,7 +3320,7 @@ async function bootstrap(): Promise<void> {
   // 批次45-A1 单一租户真源：数据根级 tenant.json（0600）。采集器 / webhook / MCP 引导账户统一读它，
   // 不再各自写死三元组（首建 = 规范缺省 u1/t1/e1，与存量账本一致）；损坏 fail-fast 阻断启动。
   tenantTriple = loadOrCreateTenant(USER_DATA);
-  void mlog('bootstrap:tenant-source', { file: join(USER_DATA, 'tenant.json'), ...tenantTriple });
+  void mlog('bootstrap:tenant-source', { file: classifiedPath(USER_DATA, 'tenant.json'), ...tenantTriple });
   actionLog('app', 'bootstrap:tenant-source', { user_id: tenantTriple.user_id, team_id: tenantTriple.team_id, enterprise_id: tenantTriple.enterprise_id });
   // 第二轮 owner 口径：登录账号 → 内核账号显式绑定。OB-1 起真源为本机文件 personal-owner-bindings.json
   // （管理员可在安全页 UI 维护）；env MAM_PERSONAL_OWNER_BINDINGS 仍保留为最高优先覆盖（现网语义不变）。
@@ -3411,14 +3488,14 @@ async function bootstrap(): Promise<void> {
   // 批次45-B1/B2 成员/API 密钥域模型：文件化成员库 userData/members.json（0600）。
   // 构造时缺文件即落一份**真实空表**（{ members: [], api_keys: [] }）——§9 欠账的表从第一天起就真实存在；
   // 损坏 fail-fast（与 mcp-tokens.json 同口径）。45-B2 起 home 账号域经 ServerOptions.memberStore 单向同步进本库。
-  const memberStore = new FileMemberStore(join(USER_DATA, 'members.json'));
-  void mlog('bootstrap:member-store-ready', { file: join(USER_DATA, 'members.json') });
+  const memberStore = new FileMemberStore(classifiedPath(USER_DATA, 'members.json'));
+  void mlog('bootstrap:member-store-ready', { file: classifiedPath(USER_DATA, 'members.json') });
   actionLog('app', 'bootstrap:member-store-ready', { file: 'members.json' });
 
   // home server（登录/审计镜像）：CORS/IPC 同源白名单 = 静态服务精确来源
   const home = createServer({
     port: MIRROR_PORT,
-    dataFile: join(USER_DATA, 'home-audit.json'),
+    dataFile: classifiedPath(USER_DATA, 'home-audit.json'),
     allowedOrigins: uiOrigins,
     // 未打包（npm run dev 配合桌面壳调试）时额外信任 Vite dev 源 5180；打包态严格只认自身静态端口
     allowDevOrigins: !app.isPackaged,
@@ -3475,7 +3552,7 @@ async function bootstrap(): Promise<void> {
 
   const agentOnboard = await createAgentOnboardServer({
     port: AGENT_ONBOARD_PORT,
-    dataFile: join(USER_DATA, 'agent-onboard.json'),
+    dataFile: classifiedPath(USER_DATA, 'agent-onboard.json'),
     allowedOrigins: uiOrigins,
     // 未打包调试时允许 Vite dev 源；打包态不放开
     allowDevOrigins: !app.isPackaged,
@@ -3493,7 +3570,7 @@ async function bootstrap(): Promise<void> {
   // MCP 两端口都要求令牌：HTTP 走 Authorization/x-mcp-token，TCP 走 initialize params.token。
   // 令牌只落 userData/mcp-token.txt（0600），用户把它配置给 Agent；日志只记路径，绝不记明文。
   const mcpToken = loadOrCreateMcpToken();
-  const mcpTokenFile = join(USER_DATA, 'mcp-token.txt');
+  const mcpTokenFile = classifiedPath(USER_DATA, 'mcp-token.txt');
   void mlog('bootstrap:mcp-token-ready', { file: mcpTokenFile });
   // 批次41-U：「令牌就绪」此前只在 main.log，日志页（读 actions.log）查不到；补双写。
   // 值只有文件路径，与 mlog 同一份载荷——令牌明文绝不进任何日志。
@@ -3541,7 +3618,7 @@ async function bootstrap(): Promise<void> {
 
   // D6-4 令牌代理：文件化受限令牌库 userData/mcp-tokens.json（0600；缺库 = 空库，引导令牌兜底 admin）。
   // 库损坏 fail-fast（抛错阻断启动，绝不静默清空既有授权）；TCP 与 HTTP 共用同一实例。
-  const tokenStore = new FileTokenStore(join(USER_DATA, 'mcp-tokens.json'));
+  const tokenStore = new FileTokenStore(classifiedPath(USER_DATA, 'mcp-tokens.json'));
 
   // 批次45-B1 成员库装配已上移至 home server 创建之前（45-B2 同步注入）；此处不再重复创建。
 
@@ -3550,7 +3627,7 @@ async function bootstrap(): Promise<void> {
     ...tenantTriple, is_admin: true as const, scope_project_ids: ['*'],
   };
 
-  const mcp = runMcpServer({ storage, port: MCP_PORT, token: mcpToken, l0: l0Vault, l0Backup: l0BackupStore, tokenStore, memberStore, account: mcpBootstrapAccount, pending: mcpPendingStore, personal: personalStoreRef ?? undefined, hookStatusFile: join(USER_DATA, HOOK_STATUS_FILE) });
+  const mcp = runMcpServer({ storage, port: MCP_PORT, token: mcpToken, l0: l0Vault, l0Backup: l0BackupStore, tokenStore, memberStore, account: mcpBootstrapAccount, pending: mcpPendingStore, personal: personalStoreRef ?? undefined, hookStatusFile: classifiedPath(USER_DATA, HOOK_STATUS_FILE) });
   mcp.ready
     .then((p) => { void mlog('bootstrap:mcp-listening', { port: p }); })
     .catch((e) => { void mlog('bootstrap:mcp-listen-error', String((e as Error)?.message ?? e)); });
@@ -3576,7 +3653,7 @@ async function bootstrap(): Promise<void> {
      */
     roundScopedRecall: process.env.MAM_ROUND_SCOPED_GATE !== '0',
     // 钩子健康度自检：读钩子写的同一份状态文件（recall_hook_status）
-    hookStatusFile: join(USER_DATA, HOOK_STATUS_FILE),
+    hookStatusFile: classifiedPath(USER_DATA, HOOK_STATUS_FILE),
     // 批次41-R：同一条也落 actions.log（批次34 对 llm:* 的同一口径）——日志页读的是 actions.log，
     // 只写 main.log 等于「明细页有没有被点开过」对用户不可见。值只有 ok/miss，无 id、无正文。
     onViewDetail: (outcome) => {
@@ -3712,7 +3789,7 @@ async function bootstrap(): Promise<void> {
   /** 插件真实写入位置（探测值）；探不到为 null（此时只能靠用户手选） */
   const pluginChatExportsDir = detectedChatExportsDirs[0] ?? null;
   let chatExportsDir = pluginChatExportsDir ?? join(LIB_PATHS.root, 'chat-exports');
-  const chatExportsCfgFile = join(USER_DATA, 'chat-exports.json');
+  const chatExportsCfgFile = classifiedPath(USER_DATA, 'chat-exports.json');
   try {
     const cfg = JSON.parse(readFileSync(chatExportsCfgFile, 'utf8')) as { dir?: string };
     if (cfg.dir) chatExportsDir = cfg.dir;
@@ -3911,7 +3988,7 @@ async function bootstrap(): Promise<void> {
   // 壳层「网页导出状态」（0.3.0）：读接收端记账文件，给引导卡显示「最近一次网页导出」。
   // 没有记录 = 应用运行以来还没收到过任何网页导出（不是故障，由 UI 说清口径与指引）。
   handleIpc(IPC.webchatExportStatus, () => {
-    const file = join(USER_DATA, 'webchat-export-status.json');
+    const file = classifiedPath(USER_DATA, 'webchat-export-status.json');
     try {
       const raw = JSON.parse(readFileSync(file, 'utf8')) as {
         day?: string; count?: number; recent?: { at: number; site: string; file: string; bytes: number }[];
@@ -4095,7 +4172,7 @@ async function bootstrap(): Promise<void> {
   // 永远「采到 0 条」。这里起一个只监听 127.0.0.1 的接收端，把「端口 + 令牌」写进插件
   // 目录的 runtime.json；插件据此直推 → 由应用自己写进 chatExportsDir → 采集器必然扫到。
   try {
-    const ingestCfgFile = join(USER_DATA, 'webchat-ingest.json');
+    const ingestCfgFile = classifiedPath(USER_DATA, 'webchat-ingest.json');
     let ingestToken = '';
     try {
       const cfg = JSON.parse(readFileSync(ingestCfgFile, 'utf8')) as { token?: string };
@@ -4113,7 +4190,7 @@ async function bootstrap(): Promise<void> {
     }
     // 壳层「网页导出状态」记账（0.3.0）：每次插件直推成功落盘都记一笔，
     // 用户就能在应用里看到「最近一次网页导出」，不用对着浏览器猜「到底导没导」。
-    const exportStatusFile = join(USER_DATA, 'webchat-export-status.json');
+    const exportStatusFile = classifiedPath(USER_DATA, 'webchat-export-status.json');
     type ExportStatusEntry = { at: number; site: string; file: string; bytes: number };
     const loadExportStatus = (): { day: string; count: number; recent: ExportStatusEntry[] } => {
       try {
@@ -4149,7 +4226,7 @@ async function bootstrap(): Promise<void> {
       token: ingestToken,
       resolveExportDir: () => chatExportsDir,
       // 诊断线索走独立目录：不进导出目录，采集器不会把它当对话扫走
-      resolveDiagDir: () => join(USER_DATA, 'webchat-verify'),
+      resolveDiagDir: () => classifiedDir(USER_DATA, 'webchat-verify'),
       // 审计快照走独立目录：原对话 + 导出文档成对落盘，供「导出完整性审计」逐条比对
       resolveAuditDir: () => resolveAuditDir(USER_DATA),
       onSaved: recordExportSaved,

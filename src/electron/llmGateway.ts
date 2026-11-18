@@ -5,8 +5,9 @@
 // 路由（批次32 改口径，取消 L2/L3–L6 分层绑定）：按各引擎**最近一次真实拨测延时**升序排队，
 // 未拨测的按列表顺序排后；逐个试，首个成功即用，失败回退下一个；全部不可用 → 抛错由内核记 refine_error 诚实回退。
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname } from 'node:path';
 import type { Category, LlmProvider, ModelInfo } from '../core/memagent/types.ts';
+import { classifiedPath } from '../shared/dataLayout.ts';
 import { layerBand, layerSpecOf, type RefineLayer } from '../core/memagent/layerRules.ts';
 // 单条引擎预算的单一真源在批次39 的队列模块（core → electron 依赖方向不变），避免两处各写一个 3
 import { REFINE_MAX_ENGINES_PER_CALL } from '../core/memagent/refineQueue.ts';
@@ -151,29 +152,30 @@ function clampConfig(raw: unknown): LlmGatewayConfig {
 
 export function loadLlmConfig(dir: string): LlmGatewayConfig {
   try {
-    return clampConfig(JSON.parse(readFileSync(join(dir, LLM_CONFIG_FILE), 'utf8')));
+    return clampConfig(JSON.parse(readFileSync(classifiedPath(dir, LLM_CONFIG_FILE), 'utf8')));
   } catch {
     return defaultLlmConfig();
   }
 }
 
 export function saveLlmConfig(dir: string, cfg: LlmGatewayConfig): void {
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, LLM_CONFIG_FILE), JSON.stringify(clampConfig(cfg), null, 2) + '\n', 'utf8');
+  const file = classifiedPath(dir, LLM_CONFIG_FILE);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, JSON.stringify(clampConfig(cfg), null, 2) + '\n', 'utf8');
 }
 
 /** 密钥表：{引擎 id: key}；deepseek 缺条目时只读兜底批次31 旧文件 */
 export function loadLlmKeys(dir: string): Record<string, string> {
   let map: Record<string, string> = {};
   try {
-    const raw = JSON.parse(readFileSync(join(dir, LLM_KEYS_FILE), 'utf8')) as Record<string, unknown>;
+    const raw = JSON.parse(readFileSync(classifiedPath(dir, LLM_KEYS_FILE), 'utf8')) as Record<string, unknown>;
     for (const [k, v] of Object.entries(raw ?? {})) if (typeof v === 'string' && v.trim()) map[k] = v.trim();
   } catch {
     map = {};
   }
   if (!map.deepseek) {
     try {
-      const legacy = readFileSync(join(dir, LEGACY_DEEPSEEK_KEY_FILE), 'utf8').trim();
+      const legacy = readFileSync(classifiedPath(dir, LEGACY_DEEPSEEK_KEY_FILE), 'utf8').trim();
       if (legacy) map.deepseek = legacy;
     } catch {
       /* 无旧文件：正常 */
@@ -188,8 +190,9 @@ export function saveLlmKey(dir: string, id: string, key: string): Record<string,
   const v = key.trim();
   if (v) map[id] = v;
   else delete map[id];
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, LLM_KEYS_FILE), JSON.stringify(map, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
+  const file = classifiedPath(dir, LLM_KEYS_FILE);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, JSON.stringify(map, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
   return map;
 }
 

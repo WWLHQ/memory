@@ -11,8 +11,9 @@
 //  · 无余额接口：zhipu / qwen / minimax / stepfun / spark / groq → 直接返 no_endpoint，不发 HTTP；
 //  · 本机：ollama / vllm / lmstudio → 0 元不限量（local_free），不查厂商。
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname } from 'node:path';
 import type { LlmEngineConfig, LlmGatewayConfig } from './llmGateway.ts';
+import { classifiedPath } from '../shared/dataLayout.ts';
 import type { BillingEngineView, BillingFetchStatus, BillingProvenance, ManualBilling } from '../shared/billing.ts';
 
 /** 独立 billing 凭据槽：与 llm-keys.json 同级、同样 0600；只存主进程，渲染层拿不到明文 */
@@ -222,7 +223,7 @@ export interface BillingServiceDeps {
 /** billing 凭据表：{引擎 id: 凭据}；空串 = 清除 */
 export function loadBillingCredentials(dataDir: string): Record<string, string> {
   try {
-    const raw = JSON.parse(readFileSync(join(dataDir, BILLING_CREDS_FILE), 'utf8')) as Record<string, unknown>;
+    const raw = JSON.parse(readFileSync(classifiedPath(dataDir, BILLING_CREDS_FILE), 'utf8')) as Record<string, unknown>;
     const out: Record<string, string> = {};
     for (const [k, v] of Object.entries(raw ?? {})) if (typeof v === 'string' && v.trim()) out[k] = v.trim();
     return out;
@@ -236,8 +237,9 @@ export function saveBillingCredential(dataDir: string, id: string, value: string
   const v = value.trim();
   if (v) map[id] = v;
   else delete map[id];
-  mkdirSync(dataDir, { recursive: true });
-  writeFileSync(join(dataDir, BILLING_CREDS_FILE), JSON.stringify(map, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
+  const file = classifiedPath(dataDir, BILLING_CREDS_FILE);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, JSON.stringify(map, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
   return map;
 }
 

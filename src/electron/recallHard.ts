@@ -13,6 +13,7 @@ import {
 } from '../shared/recallHardConfig.ts';
 import { startRecallGateway, type RecallGatewayHandle } from './recallGateway.ts';
 import { parseHookRunState, type HookRunState } from '../core/memagent/recallPrelude.ts';
+import { classifiedPath } from '../shared/dataLayout.ts';
 
 export const RECALL_HARD_HOOK_TAG = 'force_recall.mjs';
 /** 钩子执行状态文件名，与 recallHook.ts 的 HOOK_STATUS_FILE 同口径（真值共享）。 */
@@ -20,7 +21,7 @@ export const HOOK_STATUS_FILE = 'recall-hook-status.json';
 
 /** 读钩子最近一次执行状态；路径可被环境变量覆盖（与钩子侧一致）；坏文件返回 null。 */
 export async function readHookRunState(dataDir: string): Promise<HookRunState | null> {
-  const path = process.env.MEMAGENT_HOOK_STATUS_FILE || join(dataDir, HOOK_STATUS_FILE);
+  const path = process.env.MEMAGENT_HOOK_STATUS_FILE || classifiedPath(dataDir, HOOK_STATUS_FILE);
   try {
     return parseHookRunState(await readFile(path, 'utf8'));
   } catch {
@@ -164,7 +165,7 @@ export class RecallHardController {
 
   constructor(opts: RecallHardControllerOptions) {
     this.opts = opts;
-    this.configPath = join(opts.dataDir, RECALL_HARD_CONFIG_FILE);
+    this.configPath = classifiedPath(opts.dataDir, RECALL_HARD_CONFIG_FILE);
     this.hostPath = opts.hostSettingsPath ?? defaultHostSettingsPath();
   }
 

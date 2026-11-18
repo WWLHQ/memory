@@ -2,14 +2,16 @@
 // 覆盖：writeTenant 合法写（含备份/原子内容/返回新旧值）、非法三元组拒绝、原文件缺失拒绝、
 // 备份文件内容等于旧值、readTenantFile 三态（缺文件 null / 合法 / 损坏抛错）。
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, existsSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadOrCreateTenant, readTenantFile, writeTenant, TENANT_FILE_NAME } from '../tenantSource.ts';
+import { classifiedPath, DATA_SUBDIRS } from '../../shared/dataLayout.ts';
 
 const dirs: string[] = [];
 function tmpRoot(): string {
   const d = mkdtempSync(join(tmpdir(), 'mam-tenant-write-'));
+  for (const sub of Object.values(DATA_SUBDIRS)) mkdirSync(join(d, sub), { recursive: true });
   dirs.push(d);
   return d;
 }
@@ -28,7 +30,7 @@ describe('T2 tenant.json 写口（§6.1）', () => {
     expect(existsSync(r.backupFile)).toBe(true);
     const backup = JSON.parse(readFileSync(r.backupFile, 'utf8'));
     expect(backup.user_id).toBe('u1');
-    const now = JSON.parse(readFileSync(join(root, TENANT_FILE_NAME), 'utf8'));
+    const now = JSON.parse(readFileSync(classifiedPath(root, TENANT_FILE_NAME), 'utf8'));
     expect(now).toEqual({ schema: 'tenant/1', ...next });
     // 临时文件不残留（原子写）
     expect(readdirSync(root).filter((f) => f.includes('.tmp-'))).toEqual([]);
@@ -37,7 +39,7 @@ describe('T2 tenant.json 写口（§6.1）', () => {
   it('非法三元组（字段空 / 非对象 / 缺字段）一律拒绝，且不改文件', () => {
     const root = tmpRoot();
     loadOrCreateTenant(root);
-    const before = readFileSync(join(root, TENANT_FILE_NAME), 'utf8');
+    const before = readFileSync(classifiedPath(root, TENANT_FILE_NAME), 'utf8');
     for (const bad of [
       { user_id: '', team_id: 't', enterprise_id: 'e' },
       { user_id: 'u', team_id: 't' },
@@ -47,7 +49,7 @@ describe('T2 tenant.json 写口（§6.1）', () => {
     ]) {
       expect(() => writeTenant(root, bad)).toThrow(/三元组不合法/);
     }
-    expect(readFileSync(join(root, TENANT_FILE_NAME), 'utf8')).toBe(before);
+    expect(readFileSync(classifiedPath(root, TENANT_FILE_NAME), 'utf8')).toBe(before);
   });
 
   it('tenant.json 不存在时拒绝写（先重启首建，绝不无中生有）', () => {
@@ -63,7 +65,7 @@ describe('T2 tenant.json 写口（§6.1）', () => {
     const other = tmpRoot();
     loadOrCreateTenant(other);
     const { writeFileSync } = require('node:fs') as typeof import('node:fs');
-    writeFileSync(join(other, TENANT_FILE_NAME), '{broken', 'utf8');
+    writeFileSync(classifiedPath(other, TENANT_FILE_NAME), '{broken', 'utf8');
     expect(() => readTenantFile(other)).toThrow(/损坏/);
   });
 });

@@ -6,9 +6,11 @@ import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import {
   MCP_CLIENT_HEADER_NAME, MCP_CLIENT_SPECS, MCP_ENDPOINT, mergeMcpJsonConfig, mergeMcpTomlConfig,
-  probeClientConfig, renderMcpSnippet, specOfMcpClient, type McpClientSpec, type McpWireState,
+  probeClientConfig, renderMcpSnippet, specOfMcpClient,
+  type McpClientSpec, type McpStdioTarget, type McpTransport, type McpWireState,
 } from '../agentOnboard/mcpClients.ts';
 import type { BadgeClass } from '../types/agentOnboard.ts';
+import type { LiveProbeFields } from './mcpProbe.ts';
 
 /** 单文件读取上限：超过视为异常配置（.claude.json 正常可达数 MB） */
 const MAX_CONFIG_BYTES = 8 * 1024 * 1024;
@@ -56,7 +58,7 @@ function writeConfigAtomically(
   return { ok: true, ...(backupPath ? { backupPath } : {}) };
 }
 
-export interface McpClientStatus {
+export interface McpClientStatus extends LiveProbeFields {
   id: string;
   name: string;
   badge: BadgeClass;
@@ -69,6 +71,8 @@ export interface McpClientStatus {
   installed: boolean;
   state: McpWireState;
   hasAuth: boolean;
+  /** 条目承载方式：stdio=配置里只有启动命令（令牌零维护）/ http=令牌抄在配置里（轮换需重写） */
+  transport?: McpTransport;
   /** 批次41-X：配置里是否带显式身份头 `X-Memagent-Client`。
    *  `false` = 条目已接入但缺身份头（41-X 之前写入的老配置）→ 可点「补身份头」重新写入；
    *  `undefined` = 无从判定（无稳定配置文件、审计升级来的）。 */
@@ -90,6 +94,16 @@ export interface McpClientsScan {
   home: string;
   scannedAt: number;
   clients: McpClientStatus[];
+  /** 2026-11-18 实测连通汇总（主进程探活后回填；浏览器/未探测时缺省） */
+  live?: {
+    at: number;
+    /** 实际探了哪些客户端（同令牌去重后仍按客户端计数） */
+    checked: number;
+    /** 探不通的数量（401/超时/连接失败） */
+    failed: number;
+    /** 用当前 mcp-token.txt 探服务端本身的结果 */
+    server?: import('./mcpProbe.ts').McpLiveProbe;
+  };
 }
 
 export interface McpWireResult {
@@ -219,10 +233,15 @@ export function scanMcpClients(options: {
     if (state === 'wired' && probe.hasClientId === false) {
       note = `${spec.note ? `${spec.note}；` : ''}缺显式身份头 ${MCP_CLIENT_HEADER_NAME}：能调用但身份按 UA 归并（多客户端共用通用 UA 时会串号）——点「补身份头」写入`;
     }
+    // stdio 零维护形态：令牌不在配置里，轮换后无需重写（这类客户端没有「令牌过期」这一说）
+    if (state === 'wired' && probe.transport === 'stdio') {
+      note = `${spec.note ? `${spec.note}；` : ''}stdio 零维护形态：配置里只有启动命令，令牌由桥接脚本每次现读——令牌轮换不用重写配置`;
+    }
     return {
       ...base,
       state,
       hasAuth: probe.hasAuth,
+      ...(probe.transport ? { transport: probe.transport } : {}),
       ...(probe.hasClientId !== undefined ? { hasClientId: probe.hasClientId } : {}),
       ...(probe.disabled === true ? { disabled: true } : {}),
       ...(note !== undefined ? { note } : {}),
@@ -243,6 +262,8 @@ export function scanMcpClients(options: {
       self.hasAuth = true;
       self.error = undefined;
       self.hasClientId = host.hasClientId;
+      // 宿主怎么接的，本客户端就怎么接（宿主改 stdio，随宿主下发的客户端同样是零维护形态）
+      if (host.transport) self.transport = host.transport;
       self.note = `MCP 由宿主 ${host.name} 下发（宿主已接入，配置 ${host.displayPath ?? '宿主配置'}）——宿主接通即生效`
         + (host.hasClientId === false ? `；宿主配置缺显式身份头 ${MCP_CLIENT_HEADER_NAME}，对本客户端点「补身份头」即写宿主配置` : '');
     } else {
@@ -260,10 +281,37 @@ export function scanMcpClients(options: {
   return { endpoint, home, scannedAt: Date.now(), clients };
 }
 
-/** 生成含令牌的片段（调用方必须是受信渲染层；本函数不写日志、不落盘） */
-export function snippetForClient(id: string, token: string, endpoint = MCP_ENDPOINT): string {
+/** 生成片段（调用方必须是受信渲染层；本函数不写日志、不落盘）。
+ *  传 stdio 时输出**不含令牌**的启动命令片段（可安全转发给同事/贴进工单）。 */
+export function snippetForClient(
+  id: string, token: string, endpoint = MCP_ENDPOINT, stdio?: McpStdioTarget,
+): string {
   const spec = specOfMcpClient(id);
-  return renderMcpSnippet(spec, endpoint, token);
+  return renderMcpSnippet(spec, endpoint, token, stdio);
+}
+
+/**
+ * 读某客户端配置里存的令牌（2026-11-18，实测连通列用）。
+ * **仅主进程内部使用**：令牌只用来打一次 tools/list，绝不进 IPC 返回值、绝不落日志。
+ * 无稳定配置文件（configPath=null，如 Zcode/DSH）→ null，UI 如实显示「—」而不是拿现役令牌冒充。
+ */
+export function readStoredToken(
+  id: string, options: { home?: string; appData?: string } = {},
+): string | null {
+  let spec: McpClientSpec;
+  try {
+    spec = specOfMcpClient(id);
+  } catch {
+    return null;
+  }
+  if (!spec.configPath) return null;
+  const home = options.home ?? homedir();
+  const appData = options.appData ?? process.env.APPDATA ?? join(home, 'AppData', 'Roaming');
+  const path = expandHome(spec.configPath, home, appData);
+  const read = readConfig(path);
+  if (read.error) return null;
+  const stored = extractStoredBearer(spec.format, read.text, spec.serverKey);
+  return stored && stored.trim() ? stored.trim() : null;
 }
 
 /**
@@ -271,11 +319,19 @@ export function snippetForClient(id: string, token: string, endpoint = MCP_ENDPO
  *  · 先按真实内容判定；conflict/invalid 一律拒绝（不覆盖别人的条目、不改坏文件）
  *  · 已接入且已带显式身份头 → changed=false（不重写）；传 currentToken 时令牌过期也视为待修复（降级重写补齐）
  *  · 批次41-X：已接入但缺 X-Memagent-Client 也走合并补写该头（「补身份头」按钮的真身）
+ *  · 2026-11-18 mode='stdio'：改写为零维护形态（只写启动命令，不写令牌）。已是 stdio → changed=false；
+ *    当前是 http → 合并改写成 stdio（清掉 url/headers），令牌从此不进客户端配置。
  *  · 需要写入 → 备份原文件（.bak-<ISO>）+ 临时文件 + rename 原子替换
  */
 export function wireMcpClient(
   id: string, token: string,
-  options: { home?: string; appData?: string; endpoint?: string; currentToken?: string; now?: number } = {},
+  options: {
+    home?: string; appData?: string; endpoint?: string; currentToken?: string; now?: number;
+    /** 'stdio' = 零维护形态；缺省 'http'（既有行为逐字不变） */
+    mode?: McpTransport;
+    /** stdio 必填：桥接脚本绝对路径 + 引导指针路径（令牌由脚本运行时现读） */
+    bridgePath?: string; pointerPath?: string;
+  } = {},
 ): McpWireResult {
   const spec = specOfMcpClient(id);
   // 批次28-B：宿主继承客户端（configPath=null + inheritsFrom）的一键接入 = 委托宿主真实写入，
@@ -289,6 +345,14 @@ export function wireMcpClient(
   const home = options.home ?? homedir();
   const appData = options.appData ?? process.env.APPDATA ?? join(home, 'AppData', 'Roaming');
   const endpoint = options.endpoint ?? MCP_ENDPOINT;
+  const wantStdio = options.mode === 'stdio';
+  let stdio: McpStdioTarget | undefined;
+  if (wantStdio) {
+    if (!options.bridgePath || !options.pointerPath) {
+      return { ok: false, error: 'stdio 接入缺少桥接脚本或引导指针路径（内部参数不全，未写入）' };
+    }
+    stdio = { bridgePath: options.bridgePath, pointerPath: options.pointerPath, endpoint };
+  }
   const path = expandHome(spec.configPath, home, appData);
   const read = readConfig(path);
   if (read.error) return { ok: false, error: read.error };
@@ -300,17 +364,23 @@ export function wireMcpClient(
     return { ok: false, state: probe.state, error: `配置文件无法解析：${probe.error ?? '格式错误'}` };
   }
   if (probe.state === 'wired' && probe.hasClientId !== false) {
-    // 批次27：传了 currentToken 且配置内的令牌已过期 → 不短路，继续走合并把令牌补成当前值
-    const stale = options.currentToken !== undefined
-      && extractStoredBearer(spec.format, read.text, spec.serverKey) !== options.currentToken.trim();
-    if (!stale) return { ok: true, changed: false, path, state: probe.state };
+    if (wantStdio) {
+      // 已经是零维护形态 → 无需重写
+      if (probe.transport === 'stdio') return { ok: true, changed: false, path, state: probe.state };
+      // 当前是 http（令牌抄在配置里）→ 继续往下合并，改写成 stdio
+    } else {
+      // 批次27：传了 currentToken 且配置内的令牌已过期 → 不短路，继续走合并把令牌补成当前值
+      const stale = options.currentToken !== undefined
+        && extractStoredBearer(spec.format, read.text, spec.serverKey) !== options.currentToken.trim();
+      if (!stale) return { ok: true, changed: false, path, state: probe.state };
+    }
   }
 
   let merged: { text: string; changed: boolean };
   try {
     merged = spec.format === 'toml'
-      ? mergeMcpTomlConfig(read.text, spec, endpoint, token)
-      : mergeMcpJsonConfig(read.text, spec, endpoint, token);
+      ? mergeMcpTomlConfig(read.text, spec, endpoint, token, stdio)
+      : mergeMcpJsonConfig(read.text, spec, endpoint, token, stdio);
   } catch (e) {
     return { ok: false, error: String((e as Error)?.message ?? e) };
   }

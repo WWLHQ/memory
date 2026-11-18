@@ -3,6 +3,7 @@
 import { mkdtemp, mkdir, readFile, writeFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { classifiedPath, DATA_SUBDIRS } from '../../shared/dataLayout.ts';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import {
   RECALL_HARD_HOOK_TAG, RecallHardController, findInstalledHookPath, hostHookInstalled, mergeHostHooks,
@@ -96,6 +97,7 @@ describe('失败锁 · 钩子执行状态读取', () => {
 
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), 'rh-status-'));
+    for (const sub of Object.values(DATA_SUBDIRS)) await mkdir(join(dir, sub), { recursive: true });
     delete process.env.MEMAGENT_HOOK_STATUS_FILE; // 用 dataDir 默认路径
   });
   afterEach(async () => {
@@ -109,26 +111,26 @@ describe('失败锁 · 钩子执行状态读取', () => {
   });
 
   test('读到成功状态：ok + hits', async () => {
-    await writeFile(join(dir, HOOK_STATUS_FILE), JSON.stringify({ schema: 1, status: 'ok', at: '2026-01-01T00:00:00.000Z', hits: 3 }) + '\n', 'utf8');
+    await writeFile(classifiedPath(dir, HOOK_STATUS_FILE), JSON.stringify({ schema: 1, status: 'ok', at: '2026-01-01T00:00:00.000Z', hits: 3 }) + '\n', 'utf8');
     const st = await readHookRunState(dir);
     expect(st?.status).toBe('ok');
     expect(st?.hits).toBe(3);
   });
 
   test('读到失败状态：failed + reason，供 UI 显示人话', async () => {
-    await writeFile(join(dir, HOOK_STATUS_FILE), JSON.stringify({ schema: 1, status: 'failed', at: '2026-01-01T00:00:00.000Z', hits: 0, reason: 'rpc_error' }) + '\n', 'utf8');
+    await writeFile(classifiedPath(dir, HOOK_STATUS_FILE), JSON.stringify({ schema: 1, status: 'failed', at: '2026-01-01T00:00:00.000Z', hits: 0, reason: 'rpc_error' }) + '\n', 'utf8');
     const st = await readHookRunState(dir);
     expect(st?.status).toBe('failed');
     expect(st?.reason).toBe('rpc_error');
   });
 
   test('坏文件 → null，不抛错', async () => {
-    await writeFile(join(dir, HOOK_STATUS_FILE), 'not json', 'utf8');
+    await writeFile(classifiedPath(dir, HOOK_STATUS_FILE), 'not json', 'utf8');
     expect(await readHookRunState(dir)).toBeNull();
   });
 
   test('state().a.lastRun 暴露真值', async () => {
-    await writeFile(join(dir, HOOK_STATUS_FILE), JSON.stringify({ schema: 1, status: 'empty', at: '2026-01-01T00:00:00.000Z', hits: 0 }) + '\n', 'utf8');
+    await writeFile(classifiedPath(dir, HOOK_STATUS_FILE), JSON.stringify({ schema: 1, status: 'empty', at: '2026-01-01T00:00:00.000Z', hits: 0 }) + '\n', 'utf8');
     const c = new RecallHardController({ dataDir: dir, hookScript: join(dir, 'hook.mjs'), hostSettingsPath: join(dir, 'settings.json'), log: () => undefined });
     expect((await c.state()).a.lastRun?.status).toBe('empty');
   });
@@ -141,6 +143,7 @@ describe('批次62 · RecallHardController', () => {
 
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), 'rh-'));
+    for (const sub of Object.values(DATA_SUBDIRS)) await mkdir(join(dir, sub), { recursive: true });
     hostPath = join(dir, 'settings.json');
     hookScript = join(dir, 'force_recall.mjs');
     await writeFile(hookScript, '// hook\n', 'utf8');
@@ -274,7 +277,7 @@ describe('批次62 · RecallHardController', () => {
     expect(st.a.enabled).toBe(false);
     const host = JSON.parse(await readFile(hostPath, 'utf8')) as Record<string, unknown>;
     expect(hostHookInstalled(host)).toBe(false);
-    const cfg = JSON.parse(await readFile(join(dir, 'recall-hard-config.json'), 'utf8')) as Record<string, unknown>;
+    const cfg = JSON.parse(await readFile(classifiedPath(dir, 'recall-hard-config.json'), 'utf8')) as Record<string, unknown>;
     expect(cfg.a_hook).toBe(false);
   });
 

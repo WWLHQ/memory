@@ -4,7 +4,7 @@
 // 未安装的不占位。片段/一键写入需管理员（主进程二次校验）。
 // 无法自动写入的客户端不再只显示「未连通/需配置」：按客户端给出设置菜单/配置文件/条目名/端点与修复步骤。
 // 浏览器模式（无宿主桥）如实降级：只说明无法扫描，绝不伪造「已接入」或客户端列表。
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { hostCall, hostCapability } from '../../desktop/hostBridge.ts';
 import { MCP_CLIENT_HEADER_NAME, MCP_ENDPOINT, specOfMcpClient, type McpWireState } from '../../agentOnboard/mcpClients.ts';
 import type { BadgeClass } from '../../types/agentOnboard.ts';
@@ -22,6 +22,12 @@ interface ClientRow {
   installed: boolean;
   state: McpWireState;
   hasAuth: boolean;
+  /** 条目承载方式：stdio=配置里只有启动命令（令牌零维护）/ http=令牌抄在配置里（轮换需重写） */
+  transport?: 'http' | 'stdio';
+  /** 2026-11-18 实测连通：拿本客户端配置里的令牌真调一次 tools/list 的结果（无文件面时缺省） */
+  live?: { ok: boolean; status: number; tools?: number; error?: string; at: number };
+  /** 令牌与当前 mcp-token.txt 的关系；stale=配置里的令牌已失效（401） */
+  tokenState?: 'live' | 'stale' | 'unknown';
   /** 批次41-X：配置里是否带显式身份头；false = 已接入但缺身份头（可点「补身份头」） */
   hasClientId?: boolean;
   /** 客户端应用内把本服务标成已禁用（显式 true 才有）；T3 接入页据此显示「客户端已关闭」 */
@@ -39,6 +45,11 @@ interface ScanReply {
   home?: string;
   scannedAt?: number;
   clients: ClientRow[];
+  /** 实测连通汇总：服务端自身的探测结果 + 探了几个、几个不通 */
+  live?: {
+    at: number; checked: number; failed: number;
+    server?: { ok: boolean; status: number; tools?: number; error?: string; at: number };
+  };
 }
 
 interface WireReply {
@@ -76,6 +87,56 @@ function needsClientId(row: ClientRow): boolean {
   return row.state === 'wired' && row.hasClientId === false;
 }
 
+/** 能否切到 stdio（零维护形态）：可写、配置没坏、且还不是 stdio */
+function canStdio(row: ClientRow): boolean {
+  return row.writable && row.transport !== 'stdio' && row.state !== 'conflict' && row.state !== 'invalid';
+}
+
+/** 传输形态徽标：stdio = 配置里没有令牌（轮换零维护）；http = 令牌抄在配置里（轮换要重写） */
+function transportBadge(row: ClientRow): { text: string; cls: string; title: string } | null {
+  if (row.transport === 'stdio') {
+    return {
+      text: 'stdio 零维护', cls: 'pill on',
+      title: '配置里只有启动命令（node <桥接脚本> <引导指针> <端点> <客户端id>），没有任何令牌。'
+        + '桥接脚本每次调用现读数据根的 keys/mcp-token.txt：令牌轮换、数据根搬家都不需要改这份配置。',
+    };
+  }
+  if (row.transport === 'http') {
+    return {
+      text: 'HTTP', cls: 'pill',
+      title: '令牌（Bearer）被抄进了这份客户端配置：令牌一轮换它就会 401，必须重写配置。点「改用 stdio」可改成零维护形态。',
+    };
+  }
+  return null;
+}
+
+/**
+ * 实测连通徽标（2026-11-18）：只认 HTTP 状态码，不认"配置文件里看着像"。
+ * 无文件面的客户端（Zcode/DSH 这类配置存应用内部）如实显示「—」，绝不拿现役令牌冒充它的连通性。
+ */
+function liveBadge(row: ClientRow): { text: string; cls: string; title: string } {
+  const live = row.live;
+  if (!live) {
+    return {
+      text: '实测 —', cls: 'pill',
+      title: '该客户端没有稳定配置文件（或配置由客户端应用托管），读不到它自己的令牌、无法实测；用「复制片段」接入后以客户端日志为准',
+    };
+  }
+  const when = `${formatClock(live.at)}（UTC+08:00）`;
+  if (live.ok) {
+    return {
+      text: `实测 ✓ ${live.tools ?? '?'} 工具`, cls: 'pill on',
+      title: `用本客户端配置里的令牌调用 tools/list：HTTP ${live.status}，返回 ${live.tools ?? '?'} 个工具 · ${when}`,
+    };
+  }
+  const why = live.status === 401
+    ? '令牌已失效（401）：配置里的令牌与当前 mcp-token.txt 不一致'
+    : live.status === 0
+      ? (live.error ?? '连接失败（服务未启动？）')
+      : `HTTP ${live.status}${live.error ? `：${live.error}` : ''}`;
+  return { text: `实测 ✗ ${live.status || '不可达'}`, cls: 'pill red', title: `${why} · ${when}` };
+}
+
 function specOf(id: string) {
   try {
     return specOfMcpClient(id);
@@ -95,6 +156,9 @@ function guideFor(row: ClientRow, endpoint: string): string {
   const key = spec?.serverKey ?? 'MultiAgent Memory';
   switch (row.state) {
     case 'wired':
+      if (row.transport === 'stdio') {
+        return '已用 stdio 零维护形态接入：配置里只有启动命令（令牌不在其中），桥接脚本每次调用现读令牌——令牌轮换、数据根搬家都不用改这份配置，重启客户端即生效';
+      }
       if (!needsClientId(row)) {
         // 只在配置文件真读到该头时才声称「已写入」；无文件面的客户端（如审计证据升级来的 wired）无从判定，不谎报
         return row.hasClientId === true
@@ -145,6 +209,8 @@ export function McpClientsPanel({ onInstalledCount }: { onInstalledCount?: (n: n
   const [pendingList, setPendingList] = useState<string[]>(() => listMcpPending());
   /** 手动打开提示的行内展开（提示就显示在该客户端按钮旁，不甩到页面最底部） */
   const [manualHintId, setManualHintId] = useState('');
+  /** 循环检测：上一轮的实测失败数，用于"由好变坏"时提示一次（不至于每 12 秒刷屏） */
+  const lastFailedRef = useRef(0);
 
   const refresh = useCallback((opts: { announce?: boolean; silent?: boolean } = {}) => {
     if (capability === 'none') return Promise.resolve();
@@ -159,6 +225,15 @@ export function McpClientsPanel({ onInstalledCount }: { onInstalledCount?: (n: n
           const at = typeof r.scannedAt === 'number' ? formatClock(r.scannedAt) : formatClock(Date.now());
           setMessage(`已重新扫描：检出 ${n} 个已安装客户端 · ${at}（UTC+08:00）`);
         }
+        // 循环检测：实测失败数「由 0 变正」→ 主动提示（令牌轮换/服务未起都会走到这里；
+        // 只有真调过 tools/list 才算数，state=已接入但 401 的历史坑就是靠这条暴露的）。
+        const failed = r.live?.failed ?? 0;
+        if (failed > 0 && lastFailedRef.current === 0) {
+          const at = typeof r.live?.at === 'number' ? formatClock(r.live.at) : formatClock(Date.now());
+          setMessage(`⚠ 实测连通异常（${at}，UTC+08:00）：${failed} 个客户端用自己配置里的令牌调不通`
+            + `（服务端${r.live?.server?.ok ? '自身正常' : '也不通'}）——点该行「补齐令牌」或右上「⚡ 一键适配全部」修复`);
+        }
+        lastFailedRef.current = failed;
       })
       .catch((e) => {
         const reason = String((e as Error)?.message ?? e);
@@ -202,16 +277,23 @@ export function McpClientsPanel({ onInstalledCount }: { onInstalledCount?: (n: n
     return init;
   }, [rows]);
 
-  const copySnippet = (id: string) => {
-    if (!session.sid) { setMessage('请先登录后再复制（片段含令牌）'); return; }
+  const copySnippet = (row: ClientRow) => {
+    if (!session.sid) { setMessage('请先登录后再复制（HTTP 片段含令牌）'); return; }
+    const id = row.id;
+    // stdio 形态的片段里没有令牌，复制/外发都安全；http 形态仍是一次性展示的含令牌片段
+    const stdio = row.transport === 'stdio';
     setBusy(`snippet:${id}`);
-    hostCall<{ ok: boolean; snippet?: string; error?: string }>('mcp:clientSnippet', [id, session.sid])
+    hostCall<{ ok: boolean; snippet?: string; error?: string }>(
+      'mcp:clientSnippet', stdio ? [id, session.sid, 'stdio'] : [id, session.sid],
+    )
       .then(async (r) => {
         if (!r.ok || !r.snippet) { setMessage(`片段生成失败：${r.error ?? '未知原因'}`); return; }
         setSnippets((prev) => ({ ...prev, [id]: r.snippet! }));
         try {
           await navigator.clipboard.writeText(r.snippet);
-          setMessage('已复制（含令牌，请勿外传）；粘贴到客户端配置后重启生效');
+          setMessage(stdio
+            ? '已复制 stdio 启动命令片段（不含令牌，可安全转发）；粘贴到客户端配置后重启生效'
+            : '已复制（含令牌，请勿外传）；粘贴到客户端配置后重启生效');
         } catch {
           setMessage('浏览器拒绝剪贴板：请在下方片段框中手动复制');
         }
@@ -234,6 +316,59 @@ export function McpClientsPanel({ onInstalledCount }: { onInstalledCount?: (n: n
       })
       .catch((e) => setMessage(`写入失败：${String((e as Error)?.message ?? e)}`))
       .finally(() => setBusy(''));
+  };
+
+  /**
+   * 改用 stdio（2026-11-18）：把配置从「令牌抄在配置里」改成「只写启动命令」。
+   * 桥接脚本由主进程写到引导指针同目录（数据根搬家也不动），令牌每次现读 → 轮换零维护。
+   * 与 HTTP 一键接入同一条写入路径：先备份原文件、冲突/无法解析一律拒绝。
+   */
+  const toStdio = async (row: ClientRow) => {
+    if (!session.sid) { setMessage('请先登录后再写入配置'); return; }
+    setBusy(`stdio:${row.id}`);
+    try {
+      const r = await hostCall<WireReply>('mcp:clientWire', [row.id, session.sid, 'stdio']);
+      if (!r.ok) { setMessage(`改用 stdio 失败：${r.error ?? '未知原因'}`); return; }
+      setMessage(r.changed
+        ? `${row.name} 已改用 stdio 零维护形态${r.backupPath ? `（原配置已备份：${r.backupPath}）` : ''}：`
+          + '配置里不再有令牌，令牌轮换/数据根搬家都不用重写；请重启该客户端后验证提示行'
+        : `${row.name} 已是 stdio 形态，未改动`);
+      await refresh();
+    } catch (e) {
+      setMessage(`改用 stdio 失败：${String((e as Error)?.message ?? e)}`);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  /** 全部改用 stdio：对所有可写、且还不是 stdio 的客户端逐个改写（冲突/无法解析跳过并如实列出） */
+  const toStdioAll = async () => {
+    if (!session.sid) { setMessage('请先登录后再写入配置'); return; }
+    const targets = rows.filter(canStdio);
+    if (targets.length === 0) { setMessage('没有需要改写的客户端：可写的都已经是 stdio 形态了'); return; }
+    setBusy('stdio-all');
+    const failed: string[] = [];
+    let changed = 0;
+    let unchanged = 0;
+    for (let i = 0; i < targets.length; i += 1) {
+      const row = targets[i];
+      setMessage(`⇄ 正在改用 stdio：${i + 1}/${targets.length} · ${row.name}…`);
+      try {
+        const r = await hostCall<WireReply>('mcp:clientWire', [row.id, session.sid, 'stdio']);
+        if (!r.ok) failed.push(`${row.name}（${r.error ?? '未知原因'}）`);
+        else if (r.changed) changed += 1;
+        else unchanged += 1;
+      } catch (e) {
+        failed.push(`${row.name}（${String((e as Error)?.message ?? e)}）`);
+      }
+    }
+    setMessage(
+      `⇄ 改用 stdio 完成：改写 ${changed} 个 · 已是 stdio ${unchanged} 个`
+      + (failed.length > 0 ? ` · 失败 ${failed.length} 个：${failed.join('；')}` : '')
+      + '。请重启对应客户端后验证；此后令牌轮换无需再动任何客户端配置。',
+    );
+    setBusy('');
+    await refresh();
   };
 
   const canWire = (row: ClientRow) =>
@@ -325,6 +460,7 @@ export function McpClientsPanel({ onInstalledCount }: { onInstalledCount?: (n: n
   const endpoint = scan?.endpoint ?? MCP_ENDPOINT;
   const wireTargets = rows.filter(canWire);
   const snippetTargets = rows.filter((r) => !canWire(r) && (r.state !== 'wired' || needsClientId(r)));
+  const stdioTargets = rows.filter(canStdio);
   const batchLabel = wireTargets.length > 0
     ? `⚡ 一键适配全部（自动 ${wireTargets.length}${snippetTargets.length > 0 ? ` + 片段 ${snippetTargets.length}` : ''}）`
     : snippetTargets.length > 0
@@ -354,6 +490,15 @@ export function McpClientsPanel({ onInstalledCount }: { onInstalledCount?: (n: n
               上次扫描 {scannedAt}
             </span>
           )}
+          {scan?.live?.server && (
+            <span
+              className={scan.live.server.ok ? 'pill on' : 'pill red'}
+              data-testid="mcp-server-live"
+              title={`用当前 mcp-token.txt 实测本机 MCP 端点：HTTP ${scan.live.server.status}${scan.live.server.error ? ` · ${scan.live.server.error}` : ''}（${formatClock(scan.live.server.at)} UTC+08:00）`}
+            >
+              {scan.live.server.ok ? `服务端 ✓ ${scan.live.server.tools ?? '?'} 工具` : `服务端 ✗ ${scan.live.server.status || '不可达'}`}
+            </span>
+          )}
           <button
             className="btn" type="button" data-act="mcp-refresh"
             disabled={capability === 'none' || scanning}
@@ -370,16 +515,37 @@ export function McpClientsPanel({ onInstalledCount }: { onInstalledCount?: (n: n
           >
             {busy === 'wire-all' ? '适配中…' : batchLabel}
           </button>
+          <button
+            className="btn" type="button" data-act="mcp-stdio-all" data-testid="mcp-stdio-all"
+            disabled={!admin || busy !== '' || scanning || capability === 'none' || stdioTargets.length === 0}
+            title={capability === 'none'
+              ? '浏览器模式无法写入本机配置'
+              : disabledReason
+                || (stdioTargets.length === 0
+                  ? '可写的客户端都已经是 stdio 零维护形态（或配置冲突/无法解析需先手工修正）'
+                  : `把 ${stdioTargets.length} 个客户端改成 stdio 零维护形态：配置里不再有令牌，`
+                    + '桥接脚本每次现读数据根的 keys/mcp-token.txt —— 此后令牌轮换 / 数据根搬家都不用重写配置（逐行备份原文件）')}
+            onClick={() => { void toStdioAll(); }}
+          >
+            {busy === 'stdio-all' ? '改写中…' : `⇄ 全改 stdio（${stdioTargets.length}）`}
+          </button>
         </div>
         <div className="sub">
           所有客户端共用同一端点与令牌；提示行（项目背景 / 命中记忆 / Token / 费用）与四段折叠明细由服务端返回，
           接入成功并重启客户端后即生效，无需各客户端单独改造。仅显示本机真实检出的客户端。
+          <b>实测连通</b>（2026-11-18）：每行拿<b>该客户端配置里的令牌</b>真调一次 <code>tools/list</code>，用 HTTP 状态码说话——
+          「已接入」只说明配置里写着条目，401 说明令牌过期，两者不是一回事；本面板每轮静默复检（循环检测），
+          由好变坏时会主动提示。
         </div>
         <div className="sub" data-testid="mcp-actions-help">
           <b>复制片段</b>：生成含令牌的配置片段，任何客户端都可粘贴（令牌只在此处一次性展示）；
           <b>一键接入</b>：管理员专用，先备份再合并写入，支持 JSON（Qoder / Claude Code / Cursor / Gemini / Qwen）与 TOML（Codex）；
           <b>⚡ 一键适配全部</b>：一次处理所有已安装客户端——可写的自动备份写入，无法自动写入的自动生成片段并给出具体接通位置与步骤；
           配置冲突/无法解析时拒绝覆盖。
+          <b>改用 stdio / ⇄ 全改 stdio</b>（2026-11-18）：把客户端配置改成「只写启动命令」
+          <code>node &lt;桥接脚本&gt; &lt;引导指针&gt; &lt;端点&gt; &lt;客户端id&gt;</code>——
+          配置里<b>不再有令牌</b>，桥接脚本每次调用现读数据根的 <code>keys/mcp-token.txt</code>，
+          所以<b>令牌轮换、数据根搬家都不用重写任何客户端配置</b>（脚本落在引导指针同目录，路径本身也不随数据根漂移）。
           <b>补身份头</b>（批次41-X）：条目已接入但缺 <code>{MCP_CLIENT_HEADER_NAME}</code> 时出现——服务端据此认出「这次调用来自哪一家」，
           缺了就只能按 User-Agent 归并，多台客户端共用通用 UA（如 Node 的 <code>node</code>）时会把 A 的调用记成 B。
         </div>
@@ -396,6 +562,16 @@ export function McpClientsPanel({ onInstalledCount }: { onInstalledCount?: (n: n
         {!admin && capability !== 'none' && (
           <div className="warn show" data-testid="mcp-admin-gate">
             普通成员只读；复制含令牌片段与一键写入需管理员（主进程按登录会话二次校验）。
+          </div>
+        )}
+        {scan?.live && scan.live.failed > 0 && (
+          <div className="warn show" data-testid="mcp-live-alert">
+            <b>⚠ 实测连通异常（{formatClock(scan.live.at)}，UTC+08:00）：</b>
+            {scan.live.failed}/{scan.live.checked} 个客户端用<b>自己配置里的令牌</b>调 <code>tools/list</code> 失败——
+            {scan.live.server?.ok
+              ? `服务端本身正常（HTTP 200 · ${scan.live.server.tools ?? '?'} 个工具），是客户端配置里的令牌过期/路径不对。`
+              : `服务端自己也不通（${scan.live.server?.error ?? '未探测'}），先看桌面端是否在运行、8204 是否被占用。`}
+            点对应行的「补齐令牌」，或右上「⚡ 一键适配全部」统一重写；本面板每轮自动复检（循环检测）。
           </div>
         )}
 
@@ -427,6 +603,20 @@ export function McpClientsPanel({ onInstalledCount }: { onInstalledCount?: (n: n
                   <span className={`badge ${row.badge}`}>{row.badge.toUpperCase()}</span>
                   <b>{row.name}</b>
                   <span className={label.cls} data-testid={`state-${row.id}`}>{label.text}</span>
+                  {(() => {
+                    const lv = liveBadge(row);
+                    return (
+                      <span className={lv.cls} data-testid={`live-${row.id}`} title={lv.title}>
+                        {lv.text}
+                      </span>
+                    );
+                  })()}
+                  {(() => {
+                    const tb = transportBadge(row);
+                    return tb ? (
+                      <span className={tb.cls} data-testid={`transport-${row.id}`} title={tb.title}>{tb.text}</span>
+                    ) : null;
+                  })()}
                   {row.running !== undefined && (
                     <span
                       className={row.running ? 'pill on' : 'pill red'}
@@ -456,8 +646,10 @@ export function McpClientsPanel({ onInstalledCount }: { onInstalledCount?: (n: n
                   <button
                     className="btn" type="button" data-act="mcp-copy"
                     disabled={!admin || busy !== ''}
-                    title={disabledReason || '生成含令牌的配置片段并复制（可手工粘贴）'}
-                    onClick={() => copySnippet(row.id)}
+                    title={disabledReason || (row.transport === 'stdio'
+                      ? '生成 stdio 启动命令片段（不含令牌，可安全转发）并复制'
+                      : '生成含令牌的配置片段并复制（可手工粘贴）')}
+                    onClick={() => copySnippet(row)}
                   >
                     复制片段
                   </button>
@@ -478,6 +670,19 @@ export function McpClientsPanel({ onInstalledCount }: { onInstalledCount?: (n: n
                       {row.state === 'wired'
                         ? needsClientId(row) ? '补身份头' : '已接入'
                         : row.state === 'missing_auth' ? '补齐令牌' : '一键接入'}
+                    </button>
+                  )}
+                  {canStdio(row) && (
+                    <button
+                      className="btn" type="button" data-act="mcp-stdio" data-testid={`stdio-${row.id}`}
+                      disabled={!admin || busy !== ''}
+                      title={disabledReason
+                        || `把 ${row.name} 的配置从「令牌抄在配置里」改成「只写启动命令」：`
+                          + '配置里不再有令牌，桥接脚本每次调用现读数据根的 keys/mcp-token.txt，'
+                          + '此后令牌轮换 / 数据根搬家都不用重写这份配置（写前备份原文件）'}
+                      onClick={() => { void toStdio(row); }}
+                    >
+                      {busy === `stdio:${row.id}` ? '改写中…' : '改用 stdio'}
                     </button>
                   )}
                   {disabledByClient && !switchPending && row.format === 'json' && (
@@ -536,6 +741,8 @@ export function McpClientsPanel({ onInstalledCount }: { onInstalledCount?: (n: n
           写入前自动备份原文件，同名条目指向其它端点时拒绝覆盖。deepseek harness 随宿主 Qoder 下发（对宿主一键接入即自动接通）；
           Zcode 的配置存应用内部存储（表单 / JSON 两种方式，无文件面不代写），「复制片段」输出的 mcpServers JSON 可整段粘贴进其 JSON 标签页，保存即接通。
           服务端召回审计会记录调用方（client），可在审计页按 Agent 核验是否真的调用了记忆库。
+          stdio 形态下配置里没有凭据：桥接脚本按「引导指针 → 数据根 → keys/mcp-token.txt」现查令牌，
+          指针与脚本同放 <code>%APPDATA%\MultiAgent Memory</code>（跨数据根迁移不变），所以迁移/轮换都不需要再动客户端。
         </div>
       </div>
     </>

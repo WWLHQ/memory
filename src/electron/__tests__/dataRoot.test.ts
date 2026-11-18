@@ -6,8 +6,8 @@ import { tmpdir } from 'node:os';
 import {
   adoptLibraryDirIntoPlace, clearDataRootMigrateFrom, dataRootPointerPath, DATA_ROOT_MIGRATE_DIRS,
   DATA_ROOT_MIGRATE_FILES, defaultDataRoot, detectDataRoots,
-  ensureDirWritable, hasAnyData, hasLibraryDirs, isSetupComplete, libraryFileState,
-  migrateDataRoot, readDataRootPointer, resolveLibraryPaths, samePath,
+  ensureDirWritable, hasAnyData, hasLibraryDirs, isLegacyLibraryDir, isSetupComplete, libraryFileState,
+  migrateDataRoot, migrateLegacyLibraryDir, readDataRootPointer, resolveLibraryPaths, samePath,
   summarizeDataDir, validateDataRootPath, wizardRequired, writeDataRootPointer,
   type DataRootPointer, type DataRootPointerRead,
 } from '../dataRoot.ts';
@@ -209,9 +209,20 @@ describe('可写性与数据探测', () => {
     expect(s.newest).not.toBe('');
   });
 
+  test('默认数据根 Windows 硬绑定 D 盘、非 Windows 回退 appData；指针始终留在 appData', () => {
+    const appData = tempDir('default-root');
+    // 用户约定 2026-11-18：打包安装后配置数据统一落 D:\MultiAgent Memory
+    expect(defaultDataRoot(appData, 'win32')).toBe('D:\\MultiAgent Memory');
+    expect(defaultDataRoot(appData, 'linux')).toBe(join(appData, 'MultiAgent Memory'));
+    // 硬绑定默认根后，引导指针不能跟着跑（档1不搬指针）：仍固定 appData 下
+    expect(dataRootPointerPath(appData)).toBe(join(appData, 'MultiAgent Memory', 'data-root.json'));
+  });
+
   test('detectDataRoots 排除本次选定目录并按最近修改倒序', () => {
     const appData = tempDir('detect');
-    const def = defaultDataRoot(appData);
+    // 探测只针对 appData 下的历史位置（默认产品目录 + 旧目录名），与 D 盘默认根解耦，
+    // 用临时 appData 而非 defaultDataRoot()，避免测试往真实 D 盘写文件。
+    const def = join(appData, 'MultiAgent Memory');
     const legacy = join(appData, 'multi-agent-memory');
     write(join(def, 'memories.db.json'), '{}');
     write(join(legacy, 'memories.db.json'), '{}');
@@ -321,6 +332,94 @@ describe('migrateDataRoot（复制、不覆盖、不删除）', () => {
     const to2 = tempDir('audit-to2');
     expect(migrateDataRoot(from, to2).copied).toContain('audit.jsonl');
     expect(readFileSync(join(to2, 'audit.jsonl'), 'utf8')).toContain('"request_id":"r1"');
+  });
+});
+
+describe('老布局 <root>/databases → <root>/data 自动搬迁（2026-11-18 Chromium 保留名事故）', () => {
+  // 为什么必须有这段：databases 是 Chromium userData 保留名，启动即被引擎整目录删除。
+  // 搬迁是唯一能把老用户数据救回来的动作，写错了就是「升级后数据全丢」，因此逐条钉死。
+  test('isLegacyLibraryDir 只认「root 正下方的 databases」（含大小写），别层同名不算', () => {
+    const root = tempDir('legacy-detect');
+    expect(isLegacyLibraryDir(root, join(root, 'databases'), 'win32')).toBe(true);
+    expect(isLegacyLibraryDir(root, join(root, 'DataBases'), 'win32')).toBe(true);
+    // 不是 root 正下方 → 不是老布局，绝不越界搬别人的目录
+    expect(isLegacyLibraryDir(root, join(root, 'nested', 'databases'), 'win32')).toBe(false);
+    expect(isLegacyLibraryDir(root, join(root, 'data'), 'win32')).toBe(false);
+    expect(isLegacyLibraryDir(root, '', 'win32')).toBe(false);
+  });
+
+  test('搬迁：库 + 密钥环 + 审计都进 data/，空的老目录被删掉，指针改指新目录且 setupDone 不丢', () => {
+    const appData = tempDir('legacy-appdata');
+    const root = join(appData, 'root');
+    const legacy = join(root, 'databases');
+    write(join(legacy, 'memories.db.json'), '{"memories":{"m1":{}}}');
+    write(join(legacy, 'memories.l0.json'), '{"version":1}');
+    write(join(legacy, 'l0-keyring.json'), '{"v":1,"admin_wrap":{}}');
+    write(join(legacy, 'audit.jsonl'), '{"request_id":"r1"}\n');
+    const file = dataRootPointerPath(appData);
+    writeDataRootPointer(file, {
+      version: 1, root, ledgerDir: legacy, l0Dir: legacy, updatedAt: '', setupDone: true,
+    });
+
+    const report = migrateLegacyLibraryDir(file);
+    expect(report.migrated).toBe(true);
+    expect(report.errors).toEqual([]);
+    expect(report.moved?.sort()).toEqual(['audit.jsonl', 'l0-keyring.json', 'memories.db.json', 'memories.l0.json']);
+    for (const f of ['memories.db.json', 'memories.l0.json', 'l0-keyring.json', 'audit.jsonl']) {
+      expect(existsSync(join(root, 'data', f))).toBe(true);
+    }
+    expect(existsSync(legacy)).toBe(false); // 空壳不留：留着下次启动也会被 Chromium 删
+    const read = readDataRootPointer(file);
+    expect(read.status).toBe('ok');
+    if (read.status !== 'ok') return;
+    expect(read.pointer.ledgerDir).toBe(join(root, 'data'));
+    expect(read.pointer.l0Dir).toBe(join(root, 'data'));
+    expect(read.pointer.setupDone).toBe(true); // 搬库不许把用户退回向导
+  });
+
+  test('目标已有同名文件 → 目标原样保留，老件改名让位（绝不覆盖现有数据）', () => {
+    const appData = tempDir('legacy-clash');
+    const root = join(appData, 'root');
+    const legacy = join(root, 'databases');
+    write(join(legacy, 'memories.db.json'), 'OLD');
+    write(join(root, 'data', 'memories.db.json'), 'NEW');
+    const file = dataRootPointerPath(appData);
+    writeDataRootPointer(file, { version: 1, root, ledgerDir: legacy, l0Dir: legacy, updatedAt: '' });
+
+    const report = migrateLegacyLibraryDir(file);
+    expect(report.errors).toEqual([]);
+    expect(report.renamed).toEqual(['memories.db.json']);
+    expect(readFileSync(join(root, 'data', 'memories.db.json'), 'utf8')).toBe('NEW');
+    const letOld = readdirSync(join(root, 'data')).find((n) => n.startsWith('memories.db.json.legacy-'));
+    expect(letOld).toBeTruthy();
+    expect(readFileSync(join(root, 'data', letOld as string), 'utf8')).toBe('OLD');
+  });
+
+  test('只有一侧是老布局 → 只改那一侧，另一侧（用户自定义目录）原样不动', () => {
+    const appData = tempDir('legacy-one-side');
+    const root = join(appData, 'root');
+    const legacy = join(root, 'databases');
+    const custom = tempDir('legacy-custom-l0');
+    write(join(legacy, 'memories.db.json'), '{}');
+    const file = dataRootPointerPath(appData);
+    writeDataRootPointer(file, { version: 1, root, ledgerDir: legacy, l0Dir: custom, updatedAt: '' });
+
+    expect(migrateLegacyLibraryDir(file).migrated).toBe(true);
+    const read = readDataRootPointer(file);
+    if (read.status !== 'ok') throw new Error('pointer 应可读');
+    expect(read.pointer.ledgerDir).toBe(join(root, 'data'));
+    expect(read.pointer.l0Dir).toBe(custom);
+  });
+
+  test('不是老布局 / 指针缺失 → 什么都不做（幂等，绝不误搬）', () => {
+    const appData = tempDir('legacy-noop');
+    const root = join(appData, 'root');
+    const file = dataRootPointerPath(appData);
+    expect(migrateLegacyLibraryDir(file)).toEqual({ migrated: false });
+
+    writeDataRootPointer(file, { version: 1, root, ledgerDir: join(root, 'data'), l0Dir: join(root, 'data'), updatedAt: '' });
+    expect(migrateLegacyLibraryDir(file)).toEqual({ migrated: false });
+    expect(existsSync(join(root, 'data'))).toBe(false); // 不该顺手建空目录
   });
 });
 

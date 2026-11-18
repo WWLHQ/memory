@@ -1909,3 +1909,19 @@ status: draft
 > 换机问题的答案：**路径永远不写死**。插件目录 = 数据根（每台机自己算）；导出目录 = 浏览器自己的下载目录（从它的配置里读）；两边不一致或旧路径失效时，卡片当场说清并给一键对齐。
 > 三道闸门（2026-11-16）：A 全量 `npm test` **297 文件 / 3556 项 0 失败**（复跑一次仍全绿，壳层 67 例连跑 3 次稳定）、`tsc` 双工程 0 错、`oxlint` 0 warning 0 error（773 文件）、`check:no-demo` 通过、`vite build` 2.90s 通过、`code:index:check` 最新（416 源码 / 148 文档）；B 定向：采集器 19 + 卡片 26 + 目录统计 14 + 插件复制 5 + 站点词表 3 全绿；C 三处变异（去掉站点后缀 / 去掉复制幂等比对 / 去掉换机缺失判定）分别判红 2 例、2 例、2 例，还原后复绿。
 > 状态：**未打包、未提交、未推送**，等用户实测 + 明确确认。
+### 2026-11-18：MCP 令牌零维护（stdio launcher）+ 实测连通 + 循环检测
+
+> 起因（用户当天连提两件事）：接入页 8/8 显示「已接入」，而真调 `tools/list` 时 **6 个客户端全 401**（配置里的令牌早过期）；令牌被抄进每个客户端配置，一轮换就全挂。结论一句话：**能编造的证据都不算证据** —— 状态必须来自真调一次拿状态码，配置里不留凭据。
+
+| 能力 | 代码落点 | 测试/证据 |
+|---|---|---|
+| 实测连通（真调 `tools/list`） | `src/electron/mcpProbe.ts`（新：`parseToolsCount` 兼容 SSE / `probeMcpEndpoint` 1500ms 超时 / `attachLiveProbe` 同令牌去重）；`src/electron/main.ts` 的 `IPC.mcpClients` 挂探活并落 `mcp/client-live-probe-bad` | `mcpProbe.test.ts`（7 例：200/401/不可达/SSE 解析/同令牌只探一次）；面板 `live-<id>`、`mcp-server-live`、`mcp-live-alert` |
+| 循环检测 | `McpClientsPanel` 每 12 秒静默复检（沿用 `MCP_SWITCH_POLL_MS`），失败数「由 0 变正」才提示一次，避免刷屏 | 面板用例：`mcp-live-alert` 仅 `failed>0` 时出现 |
+| stdio 零维护形态 | `src/electron/mcpBridgeScript.ts`（新）+ `agentOnboard/mcpClients.ts` 的 `buildStdioMcpEntry`/`isStdioEntry`/`mergeTomlStdioSection` | `mcpBridgeScript.test.ts`（**真跑**：假端点 + 子进程 + **就地轮换令牌文件** → 第二次请求即用新令牌）；`agentOnboard/mcpClients.test.ts` 7 例；`electron/mcpClients.test.ts` 6 例真写盘 |
+| 传输形态可见 | `probe.transport`（`http`/`stdio`，**附加**字段，七态契约不变）→ 面板徽标 `stdio 零维护` / `HTTP` + 行内「改用 stdio」+ 顶部「⇄ 全改 stdio（N）」 | 面板用例 4 例（徽标 / mode=stdio 调用 / 已 stdio 与冲突行不出按钮 / 批量计数） |
+
+> **路径口径（柔性路径铁律落地）**：桥接脚本放**引导指针同目录**（`%APPDATA%\MultiAgent Memory\mcp-bridge.cjs`）。指针按设计永不搬（档1 只搬数据根），所以这条绝对路径跨数据根迁移稳定；脚本运行时读指针 → `<root>/keys/mcp-token.txt`（回落 `<root>/mcp-token.txt` 与指针目录）→ **令牌轮换、数据根搬家都不用改客户端配置**。客户端配置里只有 `node <bridge> <指针> <端点> <客户端id>`，**没有令牌**；身份走 argv[4] 上报 `X-Memagent-Client`。
+> **改写要点**：JSON 侧传 stdio 时必须删掉 `url`/`httpUrl`/`type`/`headers`（只加 `command` 不够，留着 `url` 客户端仍走 HTTP）；TOML 侧重建本服务段并连带丢掉 `.http_headers` 子表（两套配置并存会互相打架）。
+> **实测口径**：stdio 行没有令牌可读（`extractStoredBearer` 返 null），实测改用**现役令牌**（桥接脚本读的就是这份文件）；http 行仍只认它自己配置里的那份。
+> **三道闸门**：A `tsc` 双工程 0 错、`oxlint` 794 文件 0/0、`check:no-demo` 420 文件 0 命中、`code:index` 426 源码 / 150 文档新鲜；B `npm test` **308 文件 / 3808 例全绿**；C 三处变异（去掉 argv 客户端 id → 3 红；stdio 合并不清 headers → 2 红即令牌泄漏；桥接脚本不读 `keys/` → 1 红），还原后 127 例复绿。打包 128,139,638 B，SHA256 `03978C0FF664FA3535572EC8A4CE0346BD194064C9FA5373C7894682608B2408`。
+> 状态：**已打包，未提交、未推送**，等用户实测 + 明确确认。手动测试步骤见 `specs/MANUAL-TEST-FIX-BATCH-44.md`。

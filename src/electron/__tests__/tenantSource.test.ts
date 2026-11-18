@@ -1,16 +1,18 @@
 // 批次45-A1 单一租户真源：tenant.json 首建/复用/损坏三态 + 缺省三元组与存量账本一致性锁定。
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadOrCreateTenant, TENANT_FILE_NAME, TENANT_SCHEMA } from '../tenantSource.ts';
 import { DEFAULT_TENANT, normalizeTenantTriple } from '../../shared/tenantDefaults.ts';
+import { classifiedPath, DATA_SUBDIRS } from '../../shared/dataLayout.ts';
 
 let root: string;
 let cleanup: string[] = [];
 
 function tempRoot(): string {
   const dir = mkdtempSync(join(tmpdir(), 'tenant-src-'));
+  for (const sub of Object.values(DATA_SUBDIRS)) mkdirSync(join(dir, sub), { recursive: true });
   cleanup.push(dir);
   return dir;
 }
@@ -26,7 +28,7 @@ describe('批次45-A1 tenant.json 单一租户真源', () => {
   it('首建：文件不存在 → 返回规范缺省三元组并落盘（含 schema，0600）', () => {
     const t = loadOrCreateTenant(root);
     expect(t).toEqual({ user_id: 'u1', team_id: 't1', enterprise_id: 'e1' });
-    const file = join(root, TENANT_FILE_NAME);
+    const file = classifiedPath(root, TENANT_FILE_NAME);
     expect(existsSync(file)).toBe(true);
     const parsed = JSON.parse(readFileSync(file, 'utf8'));
     expect(parsed).toEqual({ schema: TENANT_SCHEMA, ...DEFAULT_TENANT });
@@ -37,7 +39,7 @@ describe('批次45-A1 tenant.json 单一租户真源', () => {
   });
 
   it('复用：文件已存在且合法 → 原样返回，不重写为缺省值', () => {
-    const file = join(root, TENANT_FILE_NAME);
+    const file = classifiedPath(root, TENANT_FILE_NAME);
     writeFileSync(file, JSON.stringify({ schema: TENANT_SCHEMA, user_id: 'u_carol', team_id: 't_x', enterprise_id: 'e_x' }));
     const t = loadOrCreateTenant(root);
     expect(t).toEqual({ user_id: 'u_carol', team_id: 't_x', enterprise_id: 'e_x' });
@@ -45,17 +47,17 @@ describe('批次45-A1 tenant.json 单一租户真源', () => {
   });
 
   it('损坏 fail-fast：非 JSON → 抛「租户真源损坏」，绝不静默重造身份', () => {
-    writeFileSync(join(root, TENANT_FILE_NAME), '{ not json');
+    writeFileSync(classifiedPath(root, TENANT_FILE_NAME), '{ not json');
     expect(() => loadOrCreateTenant(root)).toThrow(/租户真源损坏/);
   });
 
   it('损坏 fail-fast：字段缺失（缺 enterprise_id）→ 抛错，不回落缺省值', () => {
-    writeFileSync(join(root, TENANT_FILE_NAME), JSON.stringify({ user_id: 'u_carol', team_id: 't_x' }));
+    writeFileSync(classifiedPath(root, TENANT_FILE_NAME), JSON.stringify({ user_id: 'u_carol', team_id: 't_x' }));
     expect(() => loadOrCreateTenant(root)).toThrow(/租户真源损坏/);
   });
 
   it('损坏 fail-fast：字段为空字符串 → 抛错', () => {
-    writeFileSync(join(root, TENANT_FILE_NAME), JSON.stringify({ user_id: '', team_id: 't_x', enterprise_id: 'e_x' }));
+    writeFileSync(classifiedPath(root, TENANT_FILE_NAME), JSON.stringify({ user_id: '', team_id: 't_x', enterprise_id: 'e_x' }));
     expect(() => loadOrCreateTenant(root)).toThrow(/租户真源损坏/);
   });
 

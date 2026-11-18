@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LlmBillingService, loadBillingCredentials, saveBillingCredential, BILLING_CREDS_FILE } from '../llmBilling.ts';
 import { UNSET_MANUAL_BILLING, type ManualBilling } from '../../shared/billing.ts';
+import { classifiedPath } from '../../shared/dataLayout.ts';
 import type { LlmEngineConfig } from '../llmGateway.ts';
 
 const manual = (over: Partial<ManualBilling> = {}): ManualBilling => ({ ...UNSET_MANUAL_BILLING, ...over });
@@ -193,10 +194,10 @@ describe('TTL 与凭据槽', () => {
   });
 
   it('billing 凭据槽独立落盘；空串清除；读取不混入推理 key', () => {
-    expect(existsSync(join(dir, BILLING_CREDS_FILE))).toBe(false);
+    expect(existsSync(classifiedPath(dir, BILLING_CREDS_FILE))).toBe(false);
     saveBillingCredential(dir, 'openrouter', 'mgmt-key');
     // 0600 在 Windows 上不生效（Node 忽略 mode），只在 POSIX 断言
-    if (process.platform !== 'win32') expect(statSync(join(dir, BILLING_CREDS_FILE)).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') expect(statSync(classifiedPath(dir, BILLING_CREDS_FILE)).mode & 0o777).toBe(0o600);
     expect(loadBillingCredentials(dir)).toEqual({ openrouter: 'mgmt-key' });
     saveBillingCredential(dir, 'openrouter', '');
     expect(loadBillingCredentials(dir)).toEqual({});

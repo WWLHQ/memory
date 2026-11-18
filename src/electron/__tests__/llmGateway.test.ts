@@ -4,7 +4,7 @@
 // mergeLlmConfig 增删改、拨测结果写回口径、testEngine 诚实失败、层级规格提示词。
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'vitest';
 import { createServer, type Server, type IncomingMessage } from 'node:http';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { AddressInfo } from 'node:net';
@@ -16,6 +16,7 @@ import {
 } from '../llmGateway.ts';
 import { UNSET_MANUAL_BILLING } from '../../shared/billing.ts';
 import { UNSET_PROXY_ACCOUNTING } from '../../shared/proxyAccounting.ts';
+import { classifiedPath, DATA_SUBDIRS } from '../../shared/dataLayout.ts';
 
 const KEY = 'sk-test-key-abcdef123456';
 const KEYS = { deepseek: KEY, kimi: KEY }; // ollama 本地端点不需要密钥
@@ -24,6 +25,7 @@ let temps: string[] = [];
 
 function tempDir(): string {
   const d = mkdtempSync(join(tmpdir(), 'mam-llmgw-'));
+  for (const sub of Object.values(DATA_SUBDIRS)) mkdirSync(join(d, sub), { recursive: true });
   temps.push(d);
   return d;
 }
@@ -285,13 +287,13 @@ describe('配置与密钥落盘', () => {
     expect(loaded.engines.map((e) => e.id)).toEqual(['ollama', 'deepseek', 'kimi']);
     expect(loaded.engines[2].model).toBe('kimi-mock');
     saveLlmKey(dir, 'kimi', KEY);
-    expect(JSON.parse(readFileSync(join(dir, LLM_CONFIG_FILE), 'utf8'))).not.toHaveProperty('kimi');
-    expect(readFileSync(join(dir, LLM_CONFIG_FILE), 'utf8')).not.toContain(KEY);
+    expect(JSON.parse(readFileSync(classifiedPath(dir, LLM_CONFIG_FILE), 'utf8'))).not.toHaveProperty('kimi');
+    expect(readFileSync(classifiedPath(dir, LLM_CONFIG_FILE), 'utf8')).not.toContain(KEY);
   });
 
   test('批次31 旧形状 {ollama,deepseek} 读出即迁移为引擎列表，needsKey 按预设校正', () => {
     const dir = tempDir();
-    writeFileSync(join(dir, LLM_CONFIG_FILE), JSON.stringify({
+    writeFileSync(classifiedPath(dir, LLM_CONFIG_FILE), JSON.stringify({
       ollama: { enabled: true, baseURL: 'http://127.0.0.1:11434/', model: 'qwen2.5:7b' },
       deepseek: { enabled: true, baseURL: 'https://api.deepseek.com', model: 'deepseek-chat' },
     }), 'utf8');
@@ -304,7 +306,7 @@ describe('配置与密钥落盘', () => {
 
   test('非法字段钳回：非布尔 enabled→false、缺 id/重复 id 丢弃、空列表回默认、预设 needsKey 不被用户改坏', () => {
     const dir = tempDir();
-    writeFileSync(join(dir, LLM_CONFIG_FILE), JSON.stringify({
+    writeFileSync(classifiedPath(dir, LLM_CONFIG_FILE), JSON.stringify({
       engines: [
         { id: '', enabled: true, baseURL: 'http://x' },
         { id: 'deepseek', enabled: 'yes', baseURL: 'https://api.deepseek.com///', model: 'deepseek-chat', needsKey: false },
@@ -318,7 +320,7 @@ describe('配置与密钥落盘', () => {
     expect(clamped.engines[0].baseURL).toBe('https://api.deepseek.com'); // 去尾斜杠
     expect(clamped.engines[0].needsKey).toBe(true); // 预设为准（防密钥发给错误端点）
     expect(clamped.engines[1].needsKey).toBe(false); // 自定义引擎按落盘值
-    writeFileSync(join(dir, LLM_CONFIG_FILE), '{"engines":[]}', 'utf8');
+    writeFileSync(classifiedPath(dir, LLM_CONFIG_FILE), '{"engines":[]}', 'utf8');
     expect(loadLlmConfig(dir).engines.map((e) => e.id)).toEqual(['ollama', 'deepseek']);
   });
 
@@ -336,12 +338,12 @@ describe('配置与密钥落盘', () => {
 
   test('批次31 旧密钥文件只读兜底；llm-keys.json 有值时以其为准；清除不删用户旧文件', () => {
     const dir = tempDir();
-    writeFileSync(join(dir, LEGACY_DEEPSEEK_KEY_FILE), `${KEY}\n`, 'utf8');
+    writeFileSync(classifiedPath(dir, LEGACY_DEEPSEEK_KEY_FILE), `${KEY}\n`, 'utf8');
     expect(loadLlmKeys(dir).deepseek).toBe(KEY);
     saveLlmKey(dir, 'deepseek', 'sk-newer');
     expect(loadLlmKeys(dir).deepseek).toBe('sk-newer');
     saveLlmKey(dir, 'deepseek', '');
-    expect(JSON.parse(readFileSync(join(dir, LLM_KEYS_FILE), 'utf8'))).not.toHaveProperty('deepseek');
+    expect(JSON.parse(readFileSync(classifiedPath(dir, LLM_KEYS_FILE), 'utf8'))).not.toHaveProperty('deepseek');
     expect(loadLlmKeys(dir).deepseek).toBe(KEY); // 兜底仍在：要彻底清除需用户自行删旧文件（网关不代删）
   });
 

@@ -9,13 +9,13 @@
 import { createServer, request as httpRequest, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import { homedir } from 'node:os';
 import {
   parseMcpRpcBody, extractRecallHits, buildRecallPrelude,
   lastUserQuery, injectSystemPrelude, MAX_QUERY_CHARS,
 } from '../core/memagent/recallPrelude.ts';
 import { recallHardBaseUrl, validRecallUpstream } from '../shared/recallHardConfig.ts';
+import { resolveRecallDataRoot } from '../core/memagent/pointerRoot.ts';
+import { classifiedPath } from '../shared/dataLayout.ts';
 
 const DEFAULT_MCP_URL = 'http://127.0.0.1:8204/mcp';
 const DEFAULT_TIMEOUT_MS = 2500;
@@ -40,9 +40,8 @@ export interface RecallGatewayHandle {
 }
 
 function defaultTokenFile(): string {
-  const appdata = process.env.APPDATA || process.env.LOCALAPPDATA;
-  if (appdata) return join(appdata, 'MultiAgent Memory', 'mcp-token.txt');
-  return join(homedir(), '.config', 'multiagent-memory', 'mcp-token.txt');
+  // 与钩子/主进程同一口径：从引导指针解析真实数据根 + 子目录归类（切 D 盘后不再读 C 盘旧令牌）。
+  return classifiedPath(resolveRecallDataRoot(), 'mcp-token.txt');
 }
 
 export function isLoopback(raw: string): boolean {
