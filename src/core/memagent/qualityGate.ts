@@ -25,7 +25,7 @@ import { sanitizeL1, meaningfulLength, MIN_MEANINGFUL_CHARS, MIN_MEANINGFUL_WITH
  * 「这行是被哪一版规则放进来的」。历史行没有这个字段 → 按 v1（批次35 以前的口径）处理，
  * 绝不猜它是最新版。
  */
-export const QUALITY_GATE_VERSION = 3;
+export const QUALITY_GATE_VERSION = 4;
 
 /**
  * 拦截原因码（批次36-A）：跨版本**稳定**的英文码，专供回放器与重判统计用。
@@ -37,7 +37,9 @@ export type QualityBlockCode =
   | 'bare_number' | 'comment_only' | 'import_only' | 'require_only'
   | 'meta_question' | 'identity' | 'capability_list' | 'disclaimer' | 'narration'
   /** 批次40-B：短**且**无硬事实（两个条件同时成立才拦，见 `MIN_MEANINGFUL_WITHOUT_FACTS`） */
-  | 'short_low_signal';
+  | 'short_low_signal'
+  /** 批次63：模型/工具运行失败日志，剔除失败行后无正常对话（用户 2026-11-19 拍板） */
+  | 'run_failure';
 
 export interface QualityCheckResult {
   /** 是否通过质量门（true = 可进 L1；false = 拦截） */
@@ -543,6 +545,60 @@ function metaReplyReason(text: string): { code: QualityBlockCode; reason: string
   return null;
 }
 
+/* ---------- 批次63：模型/工具运行失败日志（用户 2026-11-19 拍板） ---------- */
+
+/**
+ * 运行失败的行标志：行首的「本轮运行失败 / 处理失败」等状态词。
+ * 刻意要求在**行首**（允许前置圆点）——正常技术讨论里「我们排查了运行失败问题」不在行首，不触发本规则。
+ */
+const RUN_FAILURE_LINE_RE =
+  /^\s*(?:[●•]\s*)?(?:本轮运行失败|运行失败|处理失败|模型运行失败|调用失败|生成失败|推理失败)\b/;
+/** 客户端渲染在行尾的运行时错误码标签 */
+const RUN_ERROR_TAG_RE =
+  /\b(?:PI_AI_ERROR|RATE_LIMIT|RATE_LIMIT_EXCEEDED|AUTHORIZATION_REQUIRED|NO_ADAPTER|MODEL_SWITCH_COMPACTION_FAILED|CONTEXT_COMPACTION_FAILED|API_ERROR|NETWORK_ERROR|TIMEOUT_ERROR|MODEL_UNAVAILABLE|PROVIDER_ERROR)\s*$/i;
+/** 网关 / OpenRouter 的失败文案（整句任意位置命中即视为失败详情） */
+const RUN_FAILURE_DETAIL_RE =
+  /(?:is no longer available on OpenRouter|no provider serves this model|no adapter registered for provider|context compaction failed|This model is unavailable for free|Rate limit:.*exceeded|Cannot switch to .*context compaction failed)/i;
+/** 失败上下文里的过程旁白行（非实质对话） */
+const RUN_NARRATION_LINE_RE =
+  /^\s*(?:[●•]\s*)?(?:已注入上下文|已重试模型请求|已调用工具(?:并向用户提出了问题)?|已读取(?:文件|上下文)?|已写入|处理中|重试中|正在(?:处理|重试|调用))/;
+
+function isRunFailureLine(line: string): boolean {
+  const t = line.trim();
+  if (!t) return true; // 空行不算正常对话
+  return (
+    RUN_FAILURE_LINE_RE.test(t)
+    || RUN_ERROR_TAG_RE.test(t)
+    || RUN_FAILURE_DETAIL_RE.test(t)
+    || RUN_NARRATION_LINE_RE.test(t)
+  );
+}
+
+/**
+ * 模型/工具运行失败日志判定：有失败信号、且剔除失败行与过程旁白后**无正常对话** → 拦截。
+ * · 命中失败信号（行首状态词 / 行尾错误码标签 / 网关失败文案）才进入本判定；
+ * · 同一条 content 若夹带真实问题或要求（剩余有实质内容）→ 放行，不误伤真实对话；
+ * · 仅提到「运行失败」但不在行首、无错误码标签 → 不触发，属正常技术讨论。
+ */
+function runFailureReason(text: string): { code: QualityBlockCode; reason: string } | null {
+  const lines = text.split(/[\r\n]+/);
+  const hasFailureSignal = lines.some((l) => {
+    const t = l.trim();
+    return RUN_FAILURE_LINE_RE.test(t) || RUN_ERROR_TAG_RE.test(t) || RUN_FAILURE_DETAIL_RE.test(t);
+  });
+  if (!hasFailureSignal) return null;
+
+  const rest = lines.filter((l) => !isRunFailureLine(l)).join('\n');
+  const plainRest = stripDecoration(rest);
+  if (!plainRest.trim()) return { code: 'run_failure', reason: '模型/工具运行失败日志，无正常对话内容' };
+  // 剩余即便非空，若既无硬事实也无具体技术信息且太短，仍属无实质对话
+  if (meaningfulLength(plainRest) < MIN_MEANINGFUL_WITHOUT_FACTS
+    && !hasHardFacts(plainRest) && !hasTechEvidence(plainRest)) {
+    return { code: 'run_failure', reason: '模型/工具运行失败日志，无正常对话内容' };
+  }
+  return null;
+}
+
 /**
  * L0→L1 质量门（§2.1 清洗红线）：
  * 1. 清洗（sanitizeL1）后的有效字符 < MIN_MEANINGFUL_CHARS → 拦截（标点/占位符不计）
@@ -573,6 +629,11 @@ export function checkL0ToL1Quality(raw: string): QualityCheckResult {
 
   const meta = metaReplyReason(sanitized);
   if (meta) return { ok: false, code: meta.code, reason: meta.reason };
+
+  // 批次63：模型/工具运行失败日志（有失败信号 + 剔除失败行/旁白后无正常对话）。
+  // 放在具体元信息码之后、short_low_signal 之前，保证失败日志记 run_failure 而非短门码。
+  const runFailure = runFailureReason(sanitized);
+  if (runFailure) return { ok: false, code: runFailure.code, reason: runFailure.reason };
 
   // 批次40-B：短且无硬事实 → 拦。放在所有具体码之后，保证噪声/元对话仍记它们自己的码。
   // 「短」单独不构成理由：实测 30–49 字带有 36% 含硬事实（「C# 7.3 不支持 dynamic」），那是最该留的短记忆。

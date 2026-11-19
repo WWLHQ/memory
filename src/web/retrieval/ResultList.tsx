@@ -21,21 +21,21 @@ export function ResultList({ hits, selectedId, onView, onRemember, onForget, onF
   const shown = expanded ? sorted.slice(0, 10) : sorted.slice(0, 5);
 
   return (
-    <div className="p0-card" data-testid="result-list">
-      <div className="p0-hd">
+    <div className="ret-card" data-testid="result-list">
+      <div className="ret-hd">
         <h3>检索结果（{sorted.length}）</h3>
-        <span className="p0-sub">Top K = {shown.length}{!expanded && sorted.length > 5 ? ' · 可加载至 10' : ''}</span>
-        <span className="p0-right">
+        <span className="ret-note">Top K = {shown.length}{!expanded && sorted.length > 5 ? ' · 可加载至 10' : ''}</span>
+        <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
           {onExport && (
             <>
-              <button type="button" className="p0-btn" data-testid="export-results" onClick={onExport}>导出 CSV</button>
-              <span className="p0-note">前端生成 · 无后端导出接口</span>
+              <button type="button" className="ret-btn" data-testid="export-results" onClick={onExport}>导出 CSV</button>
+              <span className="ret-note">前端生成 · 无后端导出接口</span>
             </>
           )}
         </span>
       </div>
 
-      <div className="p0-reslist">
+      <div className="ret-reslist">
         {shown.map((h, i) => (
           <ResultRow
             key={h.memory_id}
@@ -48,11 +48,11 @@ export function ResultList({ hits, selectedId, onView, onRemember, onForget, onF
             onFeedback={onFeedback}
           />
         ))}
-        {shown.length === 0 && <div className="p0-empty">本次无命中。</div>}
+        {shown.length === 0 && <div className="ret-empty" style={{ padding: '20px', borderTop: '1px solid var(--line)' }}>本次无命中。</div>}
       </div>
 
       {!expanded && sorted.length > 5 && (
-        <button type="button" className="p0-btn" data-testid="load-more" onClick={() => setExpanded(true)} style={{ marginTop: 6 }}>
+        <button type="button" className="ret-btn ret-loadmore" data-testid="load-more" onClick={() => setExpanded(true)}>
           加载更多（至 Top 10）
         </button>
       )}

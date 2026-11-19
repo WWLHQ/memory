@@ -1,4 +1,5 @@
-// REQ-012 T3 查询条（定稿 6 项）：查询 / 场景 / 项目 / 模式 / 预算 / 注入深度 + 联动校验
+// REQ-012 T3 查询条（定稿）：查询行「输入 + 场景 + 项目 + 检索」+ 模式行（胶囊）+ 预算/深度紧凑项。
+// 联动校验不变：scene=critical 禁极简（16.5）、短查询极简提示、session 只读（R1）。
 import { useMemo } from 'react';
 import type { ModeSel, Scene } from './types.ts';
 import { modeName, resolveModeLinkage, resolveSceneBudget, sceneName, validateQuery } from './logic.ts';
@@ -45,54 +46,40 @@ export function QueryBar({ value, projects = [], onChange, onSubmit, loading, di
     const r = resolveModeLinkage(value.scene, mode);
     onChange({ ...value, mode: r.mode }, r.toast);
   };
+  /** 模式胶囊清单：自动（null）+ 五个具体模式；场景禁用的置灰并带 16.5 说明 */
+  const pills: { id: ModeSel; label: string; disabled: boolean }[] = [
+    { id: null, label: '自动', disabled: false },
+    ...ALL_MODES.map((m) => ({ id: m as ModeSel, label: modeName(m), disabled: !table.modes.includes(m) })),
+  ];
 
   return (
-    <div className="p0-card" data-testid="query-bar">
-      <div className="p0-hd">
-        <h3>检索查询</h3>
-        <span className="p0-sub">查询条六项 · scene/mode 分流（2.4.4）</span>
-      </div>
+    <div className="ret-query" data-testid="query-bar">
+      <div className="ret-qrow">
+        <input
+          className="ret-in ret-q-in"
+          data-testid="q-input"
+          value={value.query}
+          placeholder="输入要检索的内容…"
+          onChange={(e) => onChange({ ...value, query: e.target.value }, null)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !error && !loading && !disabled) onSubmit();
+          }}
+        />
 
-      <div className="p0-form">
-        <div className="p0-frow p0-fcol">
-          <label>查询</label>
-          <input
-            className="p0-in"
-            data-testid="q-input"
-            value={value.query}
-            placeholder="输入查询内容…"
-            onChange={(e) => onChange({ ...value, query: e.target.value }, null)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !error && !loading && !disabled) onSubmit();
-            }}
-          />
-          <button
-            type="button"
-            className="p0-btn primary"
-            data-testid="q-submit"
-            disabled={!value.query.trim() || !!error || loading || disabled}
-            onClick={onSubmit}
-          >
-            检索
-          </button>
-        </div>
-
-        <div className="p0-frow">
-          <label>场景</label>
+        <label className="ret-pick" title="场景决定预算 / 回灌深度 / 重排强度">
+          <span>场景:</span>
           <select
-            className="p0-in"
             data-testid="q-scene"
             value={value.scene}
             onChange={(e) => setScene(e.target.value as Scene)}
           >
-            {SCENES.map((s) => <option key={s} value={s}>{sceneName(s)}（预算 {resolveSceneBudget(s).budget}t）</option>)}
+            {SCENES.map((s) => <option key={s} value={s}>{sceneName(s)}（{resolveSceneBudget(s).budget}t）</option>)}
           </select>
-        </div>
+        </label>
 
-        <div className="p0-frow">
-          <label>项目</label>
+        <label className="ret-pick">
+          <span>项目:</span>
           <select
-            className="p0-in"
             data-testid="q-project"
             value={value.project ?? 'all'}
             onChange={(e) => onChange({ ...value, project: e.target.value }, null)}
@@ -100,64 +87,73 @@ export function QueryBar({ value, projects = [], onChange, onSubmit, loading, di
             <option value="all">全部项目</option>
             {projects.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
-        </div>
+        </label>
 
-        <div className="p0-frow">
-          <label>模式</label>
-          <select
-            className="p0-in"
-            data-testid="q-mode"
-            value={value.mode ?? ''}
-            onChange={(e) => setMode(e.target.value === '' ? null : (e.target.value as NonNullable<ModeSel>))}
-          >
-            <option value="">自动</option>
-            {ALL_MODES.map((m) => (
-              <option key={m} value={m} disabled={!table.modes.includes(m)} title={!table.modes.includes(m) ? '合规场景禁用极简（16.5）' : undefined}>
-                {modeName(m)}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="p0-frow">
-          <label>预算</label>
-          <input
-            className="p0-in"
-            type="number"
-            min={1}
-            max={64}
-            step={1}
-            data-testid="q-budget"
-            value={budgetK}
-            onChange={(e) => {
-              const n = Math.max(1, Math.min(64, Math.floor(Number(e.target.value) || 1)));
-              onChange({ ...value, budget: n }, null);
-            }}
-            style={{ maxWidth: 90 }}
-          />
-          <span className="p0-note">× 1000 tokens（R9 硬熔断 3000t 由内核另判）</span>
-        </div>
-
-        <div className="p0-frow">
-          <label>深度</label>
-          <select
-            className="p0-in"
-            data-testid="q-depth"
-            value={depth}
-            onChange={(e) => onChange({ ...value, depth: e.target.value }, null)}
-          >
-            {DEPTH_OPTIONS.map((d) => <option key={d} value={d}>{d}</option>)}
-          </select>
-          <span className="p0-note">展示深度；注入纪律只 L1</span>
-        </div>
+        <button
+          type="button"
+          className="ret-btn primary ret-go"
+          data-testid="q-submit"
+          disabled={!value.query.trim() || !!error || loading || disabled}
+          onClick={onSubmit}
+        >
+          {loading ? '检索中' : '检索'}
+        </button>
       </div>
 
-      <div className="p0-note" data-testid="ctx-note">
-        session：自动继承（只读，R1）· 回灌深度 {table.backfillDepth} · 场景预算 {table.budget}t
-        {minimalHint && !critical && <span className="p0-tag info" data-testid="minimal-hint" style={{ marginLeft: 6 }}>短查询 · 将触发极简</span>}
-        {critical && <span className="p0-tag warn" data-testid="rerank-chip" style={{ marginLeft: 6 }}>重排：强制开（R5）</span>}
+      <div className="ret-modes">
+        <span className="ret-modes-k">模式:</span>
+        {pills.map((p) => {
+          const active = (value.mode ?? null) === p.id;
+          return (
+            <button
+              type="button"
+              key={p.id ?? 'auto'}
+              data-testid={p.id ? `mode-${p.id}` : 'mode-auto'}
+              className={`ret-pill${active ? ' active' : ''}`}
+              disabled={p.disabled}
+              title={p.disabled ? '合规场景禁用极简（16.5）' : undefined}
+              onClick={() => setMode(p.id)}
+            >
+              {p.label}
+            </button>
+          );
+        })}
+
+        {critical && <span className="ret-tag warn" data-testid="rerank-chip">重排：强制开（R5）</span>}
+        {minimalHint && !critical && <span className="ret-tag info" data-testid="minimal-hint">短查询 · 将触发极简</span>}
+
+        <span className="ret-modes-right">
+          <label className="ret-mini">
+            预算
+            <input
+              type="number"
+              min={1}
+              max={64}
+              step={1}
+              data-testid="q-budget"
+              value={budgetK}
+              onChange={(e) => {
+                const n = Math.max(1, Math.min(64, Math.floor(Number(e.target.value) || 1)));
+                onChange({ ...value, budget: n }, null);
+              }}
+            />
+            ×1000t
+          </label>
+          <label className="ret-mini">
+            深度
+            <select
+              data-testid="q-depth"
+              value={depth}
+              onChange={(e) => onChange({ ...value, depth: e.target.value }, null)}
+            >
+              {DEPTH_OPTIONS.map((d) => <option key={d} value={d}>{d}</option>)}
+            </select>
+          </label>
+          <span className="ret-note" data-testid="ctx-note">session 自动继承（只读）· 回灌 {table.backfillDepth}</span>
+        </span>
       </div>
-      {error && value.query.length > 0 && <div className="p0-note err" data-testid="q-err">{error}</div>}
+
+      {error && value.query.length > 0 && <div className="ret-err" data-testid="q-err">{error}</div>}
     </div>
   );
 }

@@ -1,6 +1,7 @@
-// REQ-012 T5 生效模式横幅（§2）
+// REQ-012 T5 生效横幅（§2）：一条蓝色场景带 —— 场景徽标 + 该场景的硬口径（重排/预算/纪律），
+// 右侧挂生效模式、冷层补查与可回放的 request_id。所有口径取内核实值（resolveSceneBudget / dispatch）。
 import type { ModeBannerData } from './types.ts';
-import { modeName, sceneName } from './logic.ts';
+import { modeName, resolveSceneBudget, sceneName } from './logic.ts';
 
 interface Props {
   data: ModeBannerData;
@@ -10,9 +11,7 @@ interface Props {
 
 export function ModeBanner({ data, onRequestId, onFactRetry }: Props) {
   // A6：来源与「建议 vs 实际」全部读内核 dispatch，不在这里重新判断。
-  // A9：自动极简观测档（applied='auto'）下，原先显示「极简轻量（自动分流）（分流建议极简轻量
-  // · 本轮按默认口径执行）」——既说极简已生效又说没执行，与内核回显「⚙ 模式：自动（…）」矛盾。
-  // 改为与回显逐字同口径：主标签写「自动」，建议模式只出现在括号里。不新增 UI 行/控件。
+  // A9：自动极简观测档（applied='auto'）下与回显逐字同口径：主标签写「自动」，建议只出现在括号里。
   const observedAuto = data.dispatch?.applied === 'auto';
   const sourceTag = observedAuto
     ? ''
@@ -25,43 +24,50 @@ export function ModeBanner({ data, onRequestId, onFactRetry }: Props) {
     ? `（分流建议${modeName(data.dispatch.suggested)} · 本轮按默认口径执行）`
     : '';
   const shownMode = observedAuto ? '自动' : modeName(data.mode);
+  const table = resolveSceneBudget(data.scene);
+  const rerank = table.rerank === true ? '强制重排' : table.rerank === 'auto' ? '自动重排' : '不重排';
+
   return (
-    <div className="card banner" data-testid="mode-banner">
-      <div className="row">
-        <span className="status stale" data-testid="banner-scene">场景: {sceneName(data.scene)}</span>
-        <span className="status stale" data-testid="banner-mode">
+    <div className={`ret-scenebar scene-${data.scene}`} data-testid="mode-banner">
+      <span className="ret-scene-badge" data-testid="banner-scene">{sceneName(data.scene)}</span>
+      <span className="ret-scene-text">
+        {rerank} · 预算 {table.budget} tokens · 命中不足如实返回，不编造
+      </span>
+
+      <span className="ret-scene-right">
+        <span className="ret-tag mode" data-testid="banner-mode">
           模式: {shownMode}{sourceTag}{notApplied}
         </span>
-        {data.cold_recall && <span className="status stale" data-testid="banner-cold">已补查 Cold/dormant 层</span>}
-        {data.hit_keywords.length > 0
-          ? data.hit_keywords.map((k) => <span key={k} className="mid">#{k}</span>)
-          : <span className="dim">无关键词命中（走 scene 默认）</span>}
-        <span
-          className="mid" style={{ cursor: 'pointer', textDecoration: 'underline' }}
-          data-testid="banner-req" title="点击跳审计并定位该链路"
+        {data.cold_recall && <span className="ret-tag cold" data-testid="banner-cold">已补查冷层</span>}
+        {data.hit_keywords.map((k) => <span key={k} className="ret-tag kw">#{k}</span>)}
+        <button
+          type="button"
+          className="ret-req"
+          data-testid="banner-req"
+          title="点击跳审计并定位该链路"
           onClick={() => onRequestId(data.request_id)}
-        >{data.request_id}</span>
-      </div>
-      {/* 分流依据不额外占一行：原型（design/ui/检索页_原型.html §2 横幅）用「模式 + 命中关键词 chips」
-          表达同一件事，再加一行 reason 属于偏离原型。完整依据在审计 mode_dispatch.reason 里按 request_id 可查。 */}
+        >
+          {data.request_id}
+        </button>
+      </span>
+
       {data.secondary_mode_hint && (
-        <details className="row" data-testid="secondary-hint">
-          <summary style={{ cursor: 'pointer', fontSize: 12 }}>次模式参考: {modeName(data.secondary_mode_hint.mode)}</summary>
-          <span className="dim">{data.secondary_mode_hint.note}</span>
+        <details className="ret-secondary" data-testid="secondary-hint">
+          <summary>次模式参考: {modeName(data.secondary_mode_hint.mode)}</summary>
+          <span className="ret-note">{data.secondary_mode_hint.note}</span>
           {data.secondary_mode_hint.content && (
-            <div className="dim" data-testid="secondary-content" style={{ fontSize: 12, marginTop: 4 }}>
-              {data.secondary_mode_hint.content}
-            </div>
+            <div className="ret-note" data-testid="secondary-content">{data.secondary_mode_hint.content}</div>
           )}
         </details>
       )}
+
       {data.evidence_thin && data.evidence_thin !== 'none' && (
-        <div className="status hibernating" data-testid="evidence-thin" style={{ display: 'block', marginTop: 8 }}>
+        <div className="ret-warnbar evidence" data-testid="evidence-thin">
           {data.evidence_thin === 'backfill_hit'
-            ? '证据不足：已追加 1 条 Cold 摘要作辅助参考。建议切事实优先模式重试。'
-            : '无可靠记忆证据，建议升级模式或人工确认。'}
+            ? '证据不足：已追加 1 条冷层摘要作辅助参考。建议切事实优先模式重试。'
+            : '无可信记忆证据，建议升级模式或人工确认。'}
           {' '}
-          <button type="button" className="btn" data-testid="fact-retry" onClick={onFactRetry}>切事实优先重试</button>
+          <button type="button" className="ret-btn" data-testid="fact-retry" onClick={onFactRetry}>切事实优先重试</button>
         </div>
       )}
     </div>

@@ -31,23 +31,26 @@ export function AuditTrailCard({ search }: { search: string }) {
   if (!requestId) return null;
 
   return (
-    <div className="card" data-testid="audit-trail-card">
-      <div className="row-head"><b>审计链路上下文</b> <span className="dim">request_id={requestId}</span></div>
-      {state === 'loading' && <div className="note" data-testid="trail-loading">读取内核审计账本…</div>}
-      {state === 'error' && <div className="note" data-testid="trail-error">读取审计账本失败：未展示任何上下文（不生成模拟结果）。</div>}
+    <div className="ret-card ret-trail" data-testid="audit-trail-card">
+      <div className="ret-trail-hd">
+        <h3>审计链路上下文</h3>
+        <span className="ret-note">request_id={requestId}</span>
+      </div>
+      {state === 'loading' && <div className="ret-note" data-testid="trail-loading">读取内核审计账本…</div>}
+      {state === 'error' && <div className="ret-note" style={{ color: 'var(--bad)' }} data-testid="trail-error">读取审计账本失败：未展示任何上下文（不生成模拟结果）。</div>}
       {state === 'ready' && rows.length === 0 && (
-        <div className="note" data-testid="trail-empty">账本中无该 request_id 的审计记录；此处不生成任何检索结果。</div>
+        <div className="ret-note" data-testid="trail-empty">账本中无该 request_id 的审计记录；此处不生成任何检索结果。</div>
       )}
       {state === 'ready' && rows.length > 0 && (
         <div data-testid="trail-rows">
           {rows.map((e, i) => (
-            <div className="note" key={`${e.request_id}-${i}`} data-testid={`trail-row-${i}`}>
-              {new Date(e.created_at).toLocaleString('zh-CN')} · {actionLabel(e.action)} · {e.resource_type}/{e.resource_id} · payload {e.payload_tokens}（预算单位）
+            <div className="ret-trail-row" key={`${e.request_id}-${i}`} data-testid={`trail-row-${i}`}>
+              {new Date(e.created_at).toLocaleString('zh-CN')} · <span className="ret-act">{actionLabel(e.action)}</span> · {e.resource_type}/{e.resource_id} · payload {e.payload_tokens}（预算单位）
             </div>
           ))}
         </div>
       )}
-      <div className="note">数据来源：内核审计账本（append-only）。本卡只展示已发生的审计行，不模拟召回。</div>
+      <div className="ret-note">数据来源：内核审计账本（append-only）。本卡只展示已发生的审计行，不模拟召回。</div>
     </div>
   );
 }

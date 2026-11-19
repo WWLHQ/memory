@@ -1,6 +1,6 @@
 // REQ-012 接真内核引擎（T7）：与 fakeEngine 同签名（async），内部走 memagent-core ma.recall
 // 数据源 = 内核 InMemoryStorage（禁止注入种子；空库即无命中，返回 EMPTY 态）；UI 类型/横幅/预算语义不变。
-import type { BudgetData, ModeBannerData, RetrievalHit, Scene, ModeSel, RecallHistoryRow } from './types.ts';
+import type { BudgetData, ModeBannerData, RetrievalHit, Scene, ModeSel, RecallHistoryRow, RecentRecallRow } from './types.ts';
 import { budgetLevel, resolveSceneBudget, sortHits, freshness, approxTokens } from './logic.ts';
 import type { Memory, RecallReq } from '../../core/memagent/types.ts';
 import type { MemAgent } from '../../core/memagent/types.ts';
@@ -154,6 +154,13 @@ export async function coreEngine(
 
   const payload = recalls.reduce((sum, rr) => sum + rr.payload_tokens, 0);
   const breach = budgetLevel(payload) === 'breach';
+  // 漏斗/裁剪明细口径：全部取内核真实计数，不在这里估。
+  // 扫描 = 逐项目 scanned_memories 求和（「本轮扫了多少条」）；背景 = 逐项目 background 求和；
+  // 注入总量 = 内核 savings.injected_tokens 求和（= payload + 背景，永不超过硬熔断）。
+  const scannedTotal = recalls.reduce((sum, rr) => sum + (rr.scanned_memories ?? 0), 0);
+  const backgroundTokens = recalls.reduce((sum, rr) => sum + (rr.background?.tokens ?? 0), 0);
+  const backgroundCount = recalls.reduce((sum, rr) => sum + (rr.background?.candidates ?? 0), 0);
+  const injectedTotal = recalls.reduce((sum, rr) => sum + (rr.savings?.injected_tokens ?? rr.payload_tokens), 0);
 
   // 2.4.3 逃生阀：任一项目触发过补查 → 合并后按是否有命中归档
   const anyThin = recalls.some((rr) => rr.evidence_thin);
@@ -204,9 +211,101 @@ export async function coreEngine(
     injected_count: injectedCount,
     dropped_count: droppedCount,
     depth,
+    scanned_count: scannedTotal,
+    background_tokens: backgroundTokens,
+    background_count: backgroundCount,
+    injected_total_tokens: injectedTotal,
+    trimmed_tokens: recalls.reduce((sum, rr) => sum + (rr.savings?.budget_trimmed_tokens ?? 0), 0),
   };
 
   return { hits: ordered, banner, budget, evidence_thin, breach, latency_ms: Date.now() - started, depth };
+}
+
+/** 账本里最近一次真实召回的快照（右侧栏在「本次还没检索」时用它，保证面板里没有一处是空占位） */
+export interface LastRecallSnapshot {
+  data: BudgetData;
+  ts: number;
+  request_id: string;
+  scene: string;
+  mode: string;
+  query: string;
+}
+
+/**
+ * 取最近一次 recall 审计行，按同一套口径还原成右侧栏结构。
+ * 审计没写的字段（如注入条数、未注入条数）一律留 undefined —— 由 UI 决定「不渲染这一行」，
+ * 绝不拿命中数冒充注入条数、也不写「—」冒充读数。
+ */
+export async function coreLastRecall(): Promise<LastRecallSnapshot | null> {
+  const rows = await getStorage().queryAudit({ action: 'recall' });
+  const latest = rows.slice().sort((a, b) => b.ts - a.ts)[0];
+  if (!latest) return null;
+  const d = latest.detail as Record<string, unknown>;
+  const num = (k: string) => (typeof d[k] === 'number' ? (d[k] as number) : undefined);
+  const hits = num('hits') ?? 0;
+  const payload = num('payload_tokens') ?? 0;
+  const background = num('background_tokens') ?? 0;
+  const trimmed = num('budget_trimmed_tokens');
+  return {
+    ts: latest.ts,
+    request_id: latest.request_id,
+    scene: typeof d.scene === 'string' ? d.scene : 'default',
+    mode: typeof d.mode === 'string' ? d.mode : 'auto',
+    query: typeof d.query === 'string' ? d.query : '',
+    data: {
+      payload_tokens: payload,
+      pipeline_llm_tokens: num('pipeline_llm_tokens') ?? 0,
+      stage1_count: hits,
+      stage2_count: hits,
+      rerank_applied: false,
+      budget_breach: (trimmed ?? 0) > 0,
+      budget_tokens: 3000,
+      // 审计不记录「注入条数」，这里不填 —— 面板据此不渲染该行，而不是拿命中数冒充
+      injected_count: undefined,
+      injected_tokens: undefined,
+      dropped_count: undefined,
+      scanned_count: num('scanned_memories'),
+      background_tokens: background,
+      injected_total_tokens: num('injected_tokens') ?? payload + background,
+      trimmed_tokens: trimmed,
+    },
+  };
+}
+
+/**
+ * 最近召回时间线（右侧栏）：只取账本 recall 审计行，按时间倒序。
+ * 「今日 N 次」按**北京时间自然日**归属（跨项目长期约定），不按 UTC 也不按本机时区。
+ * 注入量取审计里的 injected_tokens（payload + 背景的真实值）；旧行缺该字段时如实回落到 payload_tokens。
+ */
+export async function coreRecentRecalls(limit = 5): Promise<{ rows: RecentRecallRow[]; today: number }> {
+  const rows = await getStorage().queryAudit({ action: 'recall' });
+  const start = beijingDayStart(Date.now());
+  const now = Date.now();
+  const today = rows.filter((a) => a.ts >= start && a.ts <= now).length;
+  const mapped = rows
+    .slice()
+    .sort((a, b) => b.ts - a.ts)
+    .slice(0, limit)
+    .map((a) => {
+      const d = a.detail as Record<string, unknown>;
+      const hits = typeof d.hits === 'number' ? d.hits : 0;
+      const injected = typeof d.injected_tokens === 'number' ? d.injected_tokens : (typeof d.payload_tokens === 'number' ? d.payload_tokens : 0);
+      return {
+        request_id: a.request_id,
+        ts: a.ts,
+        query: typeof d.query === 'string' ? d.query : '（未记录查询词）',
+        hits,
+        injected_tokens: injected,
+      };
+    });
+  return { rows: mapped, today };
+}
+
+/** 北京时间当日 00:00 的毫秒时间戳（UTC+08:00，跨项目约定：日期归属一律按北京时） */
+export function beijingDayStart(now: number): number {
+  const OFFSET = 8 * 3600 * 1000;
+  const shifted = now + OFFSET;
+  return Math.floor(shifted / 86400000) * 86400000 - OFFSET;
 }
 
 /**

@@ -221,8 +221,9 @@ export function parseWriteKnobs(p: Record<string, unknown>): {
 }
 
 /**
- * 写入主流程（§2.2 不变量 1–8）：
- *   质量门 → L1 → 逐层（生成 → 规格校验 → 该层查重）→ 命中即分支嫁接并停止。
+ * 写入主流程（§2.2 不变量 1–8 + 批次63）：
+ *   写密钥校验 → 质量门（前置）→ L0 封存 → 通过者入 L0 主库并建 L1 → 逐层（生成 → 规格校验 → 该层查重）→ 命中即分支嫁接并停止。
+ * 质量门未通过者：不入 L0 主库，仅以密文落 L0 备份库供重判 + 审计留痕。
  * 新记忆保留自己的 L0/L1..Lk；目标记忆只刷新 grafted_from/confidence/last_access，
  * L1–L6 文本一字不改（§6.2）。
  */
@@ -236,11 +237,17 @@ export async function coreWrite(input: WriteInput, ctx: WriteCtx): Promise<Write
   const dim = dimOf(vector);
   const auditRef: AuditRef = { request_id, action: 'write' };
 
-  // 1) L0 加密最先确认（§4.4.4 + L0-first 落库口径）：无写密钥 → E_L0_LOCKED，原文先封存。
-  //    备份语义：无论质量门放行与否，原文密文都要能归档（拦截条目靠它保底）。
+  // 1) 写密钥先确认（§4.4.4 + L0-first 落库口径）：无写密钥 → E_L0_LOCKED。
+  //    必须在质量门之前 fail-closed：拦截条目也要封存密文落备份库，没有写密钥就无法留下重判凭据。
   if (!ctx.l0) {
     throw new MemAgentError('E_L0_LOCKED', 'L0 写密钥未解锁：请输入 L0 管理密码解锁写密钥后再写入（桌面端安全页「L0 管理」，或写入被挡处的解锁框；§4.4.4）');
   }
+
+  // 2) 质量门前置（批次63，用户 2026-11-19 拍板）：先判定，再决定是否加密入 L0 主库。
+  //    通过 → 封存密文入 L0 主库并建 L1 行；不通过 → 拒绝入 L0 主库，仅以密文落 L0 备份库供重判。
+  const quality = checkL0ToL1Quality(input.content);
+
+  // 原文先封存为密文：两条分支共用（通过者入主库、拦截者落备份库）；备份库只收 v2/v1 信封。
   let content_l0_enc: string;
   try {
     content_l0_enc = await ctx.l0.seal(input.content);
@@ -249,8 +256,7 @@ export async function coreWrite(input: WriteInput, ctx: WriteCtx): Promise<Write
     throw new MemAgentError('E_L0_LOCKED', `L0 加密失败：${String((e as Error)?.message ?? e)}`);
   }
 
-  // 2) L0→L1 质量门（§2.1）：必须在查重之前；拦截条目不再纯丢弃——原文密文落 L0 备份库（可重判），只不建 L1 行
-  const quality = checkL0ToL1Quality(input.content);
+  // 2b) 质量门未通过：不建 L1 行、不入 L0 主库，原文密文落备份库（可重判），审计留痕，绝不静默丢弃。
   if (!quality.ok) {
     const owner = input.user_id ?? ctx.account.user_id;
     let backup_id: string | undefined;

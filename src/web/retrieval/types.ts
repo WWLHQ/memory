@@ -83,6 +83,16 @@ export interface BudgetData {
   dropped_count?: number;
   /** 注入深度（L1 / L1–L3 / L1–L6；注入纪律仍只 L1） */
   depth?: string;
+  /** 本次真实扫描的记忆条数（内核 scanned_memories 跨项目求和） */
+  scanned_count?: number;
+  /** 项目背景注入 token（内核 background.tokens 跨项目求和） */
+  background_tokens?: number;
+  /** 参与背景筛选的候选条数（内核 background.candidates 跨项目求和） */
+  background_count?: number;
+  /** payload + 背景 = 本轮真实注入总量（内核 savings.injected_tokens） */
+  injected_total_tokens?: number;
+  /** 硬熔断裁掉的 token（审计 budget_trimmed_tokens / 内核 savings.budget_trimmed_tokens） */
+  trimmed_tokens?: number;
 }
 
 /** 检索历史（来源：账本审计 action=recall，无演示数据） */
@@ -96,4 +106,14 @@ export interface RecallHistoryRow {
   payload_tokens: number;
   latency_ms: number | null;
   evidence_thin: boolean;
+}
+
+/** 最近召回（右侧栏时间线用；同样只取账本 recall 审计行） */
+export interface RecentRecallRow {
+  request_id: string;
+  ts: number;
+  query: string;
+  hits: number;
+  /** 本次真实注入 token（audit.injected_tokens；旧行缺失时回落实 payload_tokens） */
+  injected_tokens: number;
 }

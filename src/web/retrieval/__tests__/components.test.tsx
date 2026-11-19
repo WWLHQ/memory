@@ -5,6 +5,7 @@ import { ResultList } from '../ResultList.tsx';
 import { ModeBanner } from '../ModeBanner.tsx';
 import { BudgetPanel } from '../BudgetPanel.tsx';
 import { ContextPanel } from '../ContextPanel.tsx';
+import { RecentRecallsCard, fmtClock } from '../RecentRecallsCard.tsx';
 import { useRetrieval } from '../useRetrieval.ts';
 import { renderHook, act as actHook } from '@testing-library/react';
 import { SEED_HITS } from './fixtures.ts';
@@ -18,17 +19,26 @@ describe('QueryBar (T3)', () => {
     render(<QueryBar value={base} onChange={() => {}} onSubmit={() => {}} loading={false} />);
     expect(screen.getByTestId('q-submit')).toBeDisabled();
   });
-  it('critical → minimal 选项禁用 + 重排徽章', () => {
+  it('critical → minimal 胶囊禁用 + 重排徽章', () => {
     render(<QueryBar value={{ ...base, scene: 'critical' }} onChange={() => {}} onSubmit={() => {}} loading={false} />);
     const opts = screen.getAllByTitle(/16\.5/);
     expect(opts.length).toBeGreaterThan(0);
+    expect(screen.getByTestId('mode-minimal')).toBeDisabled();
     expect(screen.getByTestId('rerank-chip')).toHaveTextContent('重排');
   });
-  it('critical 下选 minimal → 回落自动 + toast（§7.5）', () => {
+  it('点模式胶囊 → onChange 带该模式（自动 = null）', () => {
     const onChange = vi.fn();
-    render(<QueryBar value={{ ...base, scene: 'critical' }} onChange={onChange} onSubmit={() => {}} loading={false} />);
-    fireEvent.change(screen.getByTestId('q-mode'), { target: { value: 'minimal' } });
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ scene: 'critical', mode: null }), expect.stringContaining('16.5'));
+    render(<QueryBar value={base} onChange={onChange} onSubmit={() => {}} loading={false} />);
+    fireEvent.click(screen.getByTestId('mode-fact_first'));
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ mode: 'fact_first' }), null);
+    fireEvent.click(screen.getByTestId('mode-auto'));
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ mode: null }), null);
+  });
+  it('当前模式胶囊高亮（active 唯一）', () => {
+    render(<QueryBar value={{ ...base, mode: 'fact_first' }} onChange={() => {}} onSubmit={() => {}} loading={false} />);
+    const active = document.querySelectorAll('.ret-pill.active');
+    expect(active.length).toBe(1);
+    expect(active[0]).toHaveTextContent('事实优先');
   });
   it('短查询出现极简提示', () => {
     render(<QueryBar value={{ ...base, query: '修一下空指针' }} onChange={() => {}} onSubmit={() => {}} loading={false} />);
@@ -97,7 +107,7 @@ describe('ModeBanner (T5)', () => {
   });
   it('evidence_thin 黄条 + 切事实优先按钮', () => {
     render(<ModeBanner data={banner} onRequestId={() => {}} onFactRetry={() => {}} />);
-    expect(screen.getByTestId('evidence-thin')).toHaveTextContent('已追加 1 条 Cold');
+    expect(screen.getByTestId('evidence-thin')).toHaveTextContent('已追加 1 条冷层摘要');
     expect(screen.getByTestId('fact-retry')).toBeInTheDocument();
   });
   // A9：自动极简观测档（applied='auto'）下，横幅不能一边显示「极简轻量」一边说「本轮按默认口径执行」。
@@ -134,6 +144,44 @@ describe('BudgetPanel (T5)', () => {
     render(<BudgetPanel data={{ ...budget, payload_tokens: 3001 }} />);
     expect(screen.getByTestId('budget-level')).toHaveTextContent('硬熔断');
   });
+  it('右侧栏口径：占比按注入总量、漏斗与裁剪明细取真实计数', () => {
+    render(<BudgetPanel data={{
+      ...budget,
+      payload_tokens: 1460, budget_tokens: 3000, injected_total_tokens: 1840,
+      scanned_count: 1467, background_tokens: 220, background_count: 42,
+      stage1_count: 42, injected_count: 3, dropped_count: 39, budget_breach: false,
+    }} />);
+    expect(screen.getByTestId('budget-pct')).toHaveTextContent('61');
+    const funnel = screen.getByTestId('funnel');
+    expect(funnel).toHaveTextContent('1467');
+    expect(funnel).toHaveTextContent('42');
+    expect(funnel).toHaveTextContent('3');
+    const trim = screen.getByTestId('trim-detail');
+    expect(trim).toHaveTextContent('项目背景 220t');
+    expect(trim).toHaveTextContent('命中 42 条 1460t');
+    expect(trim).toHaveTextContent('合计 1840t');
+    expect(trim).toHaveTextContent('未注入 39 条');
+  });
+  it('审计快照口径：无注入条数就写「命中」，只渲染审计里有值的那几行', () => {
+    render(<BudgetPanel data={{
+      payload_tokens: 1460, pipeline_llm_tokens: 0, stage1_count: 3, stage2_count: 3,
+      rerank_applied: false, budget_breach: false, budget_tokens: 3000,
+      scanned_count: 4508, background_tokens: 265, injected_total_tokens: 1725,
+      trimmed_tokens: 3464, injected_count: undefined, dropped_count: undefined,
+    }} sourceNote="最近一次召回 · 16:20:53" />);
+    const funnel = screen.getByTestId('funnel');
+    expect(funnel).toHaveTextContent('命中');
+    expect(funnel).not.toHaveTextContent('注入');
+    expect(screen.getByTestId('trim-trimmed')).toHaveTextContent('熔断裁掉 3464t');
+    // 审计没记录未注入条数 → 这一行根本不渲染（不写「—」冒充读数）
+    expect(screen.queryByTestId('trim-dropped')).toBeNull();
+    expect(screen.getByTestId('budget-source')).toHaveTextContent('最近一次召回 · 16:20:53');
+  });
+  it('注入总量缺省 → 回落 payload，不出现 NaN/0%', () => {
+    render(<BudgetPanel data={{ ...budget, payload_tokens: 750, budget_tokens: 3000, budget_breach: false }} />);
+    expect(screen.getByTestId('budget-pct')).toHaveTextContent('25');
+    expect(screen.getByTestId('budget-pct').textContent).not.toContain('NaN');
+  });
 });
 
 describe('ContextPanel (T5)', () => {
@@ -143,6 +191,36 @@ describe('ContextPanel (T5)', () => {
     expect(screen.getByTestId('ctx-content')).toHaveTextContent('L2 摘要占位');
     fireEvent.click(screen.getByTestId('ctx-reveal'));
     expect(screen.getByTestId('ctx-content')).toHaveTextContent('旧数据库选型');
+  });
+});
+
+describe('RecentRecallsCard（右栏最近召回）', () => {
+  const rows = [
+    { request_id: 'req_a', ts: Date.UTC(2026, 10, 19, 8, 0, 0), query: 'SolidWorks 插件 批量转换', hits: 3, injected_tokens: 1840 },
+    { request_id: 'req_b', ts: Date.UTC(2026, 10, 19, 7, 12, 44), query: 'MCP 身份头 串号归并', hits: 2, injected_tokens: 960 },
+  ];
+  it('时间按北京时间显示（UTC 08:00 → 16:00:00）', () => {
+    expect(fmtClock(Date.UTC(2026, 10, 19, 8, 0, 0))).toBe('16:00:00');
+  });
+  it('列出时间 / query / 命中 / 注入 t，并显示今日次数', () => {
+    render(<RecentRecallsCard phase="ready" rows={rows} today={38} onRefresh={() => {}} onOpenAudit={() => {}} />);
+    expect(screen.getByTestId('recent-today')).toHaveTextContent('今日 38 次');
+    const first = screen.getByTestId('recent-row-req_a');
+    expect(first).toHaveTextContent('16:00:00');
+    expect(first).toHaveTextContent('SolidWorks 插件 批量转换');
+    expect(first).toHaveTextContent('3');
+    expect(first).toHaveTextContent('1840');
+  });
+  it('点一行 → 带 request_id 打开审计', () => {
+    const open = vi.fn();
+    render(<RecentRecallsCard phase="ready" rows={rows} today={2} onRefresh={() => {}} onOpenAudit={open} />);
+    fireEvent.click(screen.getByTestId('recent-row-req_b'));
+    expect(open).toHaveBeenCalledWith('req_b');
+  });
+  it('账本零记录 → 如实写 0 条，不塞演示行', () => {
+    render(<RecentRecallsCard phase="ready" rows={[]} today={0} onRefresh={() => {}} onOpenAudit={() => {}} />);
+    expect(screen.getByTestId('recent-empty')).toHaveTextContent('真实 0 条');
+    expect(document.querySelectorAll('.ret-recent-row').length).toBe(0);
   });
 });
 

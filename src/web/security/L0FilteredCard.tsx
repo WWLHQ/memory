@@ -16,6 +16,7 @@ const FILTER_CODE_ZH: Record<string, string> = {
   greeting: '纯打招呼/客套话',
   disclaimer: '免责声明',
   capability_list: '能力清单自述',
+  run_failure: '模型运行失败日志',
   unspecified: '未分类拦截',
 };
 

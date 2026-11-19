@@ -212,8 +212,8 @@ describe('批次40 短且无信号门（short_low_signal）', () => {
     expect(checkL0ToL1Quality('你是谁？').code).not.toBe('short_low_signal');
   });
 
-  it('质量门版本已升到 3（改判定口径必须 +1）', () => {
-    expect(QUALITY_GATE_VERSION).toBe(3);
+  it('质量门版本已升到 4（改判定口径必须 +1）', () => {
+    expect(QUALITY_GATE_VERSION).toBe(4);
   });
 });
 
@@ -253,6 +253,56 @@ describe('filteredAuditDetail', () => {
 
   it('批次36-A：未发码（异常调用）→ filter_code 如实记 unspecified，不冒充类别', () => {
     expect(filteredAuditDetail('好的', { ok: false, reason: '手工构造' }).filter_code).toBe('unspecified');
+  });
+});
+
+describe('批次63：模型/工具运行失败日志（有失败无正常对话 → 禁止入库）', () => {
+  // 用户 2026-11-19 给的两张截图原文（Our Free Model 更新失败），逐类钉住
+  it.each([
+    ['RATE_LIMIT', '● 本轮运行失败 Rate limit: our-free-model/nemotron-3.5-super-vl-free exceeded 10 req/min; retry in 4s    RATE_LIMIT'],
+    ['NO_ADAPTER', '已调用工具并向用户提出了问题\n\n● 本轮运行失败 no adapter registered for provider "our-free-model"    NO_ADAPTER'],
+    ['PI_AI_ERROR/404 下架', '处理失败\n\n已注入上下文\n\n● 本轮运行失败 404: {"message":"poolside/laguna-s-2.1:free is no longer available on OpenRouter: no provider serves this model anymore. See available models at https://openrouter.ai/models","code":404}    PI_AI_ERROR'],
+    ['AUTHORIZATION_REQUIRED', '● 本轮运行失败 需要 GitHub 授权并 star 仓库后使用 EAC 模型    AUTHORIZATION_REQUIRED'],
+    ['MODEL_SWITCH_COMPACTION_FAILED', '● 本轮运行失败 Cannot switch to our-free-model/beam-free: context compaction failed: 404: {"message":"This model is unavailable for free","code":404}. The previous request model is preserved; retry or select a model with a larger context window.    MODEL_SWITCH_COMPACTION_FAILED'],
+  ])('拦截：%s', (_name, text) => {
+    const r = checkL0ToL1Quality(text);
+    expect(r.ok, text).toBe(false);
+    expect(r.code, text).toBe('run_failure');
+  });
+
+  it('极短状态词「处理失败」由既有 thin 门拦下（先撞短门，属既有口径）', () => {
+    const r = checkL0ToL1Quality('处理失败');
+    expect(r.ok).toBe(false);
+    expect(r.code).toBe('thin');
+  });
+
+  it('失败行 + 过程旁白剔除后无实质内容 → run_failure', () => {
+    const text = '已重试模型请求 (2/2) · 2s\n● 本轮运行失败 no adapter registered for provider "our-free-model"    NO_ADAPTER\n已注入上下文';
+    const r = checkL0ToL1Quality(text);
+    expect(r.ok).toBe(false);
+    expect(r.code).toBe('run_failure');
+  });
+
+  // 放行边界：截图里夹在失败日志之间的正常对话，绝不能被误伤
+  it.each([
+    ['用户提问', '请帮我更新 Our Free Model 到最新版'],
+    ['助手正常回复', 'Our Free Model 当前版本为 2.7.4，更新需要先卸载再安装最新版。是否继续？确认更新'],
+    ['正常故障讨论', '我们昨天排查了运行失败的问题，根因是 OpenRouter 的 provider 下线，已切换到备用模型'],
+    ['技术记忆带错误码', '用户登录失败，错误码 E_AUTH，原因是 token 过期'],
+  ])('放行：%s', (_name, text) => {
+    expect(checkL0ToL1Quality(text).ok, text).toBe(true);
+  });
+
+  it('失败日志夹带真实诉求 → 放行（有正常对话就不拦）', () => {
+    const text = '本轮运行失败 404: model unavailable    PI_AI_ERROR\n\n请帮我排查一下 OpenRouter 的模型配置，残留 provider 已经下线需要更换';
+    expect(checkL0ToL1Quality(text).ok).toBe(true);
+  });
+
+  it('拦截码稳定：run_failure 走审计 detail.filter_code', () => {
+    const gate = checkL0ToL1Quality('● 本轮运行失败 Rate limit: exceeded 10 req/min    RATE_LIMIT');
+    const d = filteredAuditDetail('● 本轮运行失败 Rate limit: exceeded 10 req/min    RATE_LIMIT', gate);
+    expect(d.filter_code).toBe('run_failure');
+    expect(d.gate_version).toBe(QUALITY_GATE_VERSION);
   });
 });
 
