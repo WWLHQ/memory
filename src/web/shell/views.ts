@@ -9,7 +9,7 @@
 export type PageKey =
   | 'home' | 'login' | 'memory' | 'write' | 'retrieval'
   | 'lifecycle' | 'audit' | 'logs' | 'security' | 'growth' | 'models'
-  | 'monitor' | 'sync' | 'params' | 'setup' | 'agent'
+  | 'monitor' | 'sync' | 'params' | 'setup' | 'agent' | 'webonboard'
   | 'layered' | 'dispute' | 'feedback' | 'assistant';
 
 /** 真实页面清单（文件名与 vite.config.ts 的 rollupOptions.input 对齐） */
@@ -31,6 +31,7 @@ export const PAGES: Record<PageKey, { file: string; label: string; source: strin
   params: { file: 'params.html', label: '全局参数页', source: '参数快照 + 记忆库管理' },
   setup: { file: 'setup.html', label: '首启设置页', source: 'setup:state / finish' },
   agent: { file: 'agentonboard.html', label: 'Agent 接入页', source: 'agentOnboard 接口' },
+  webonboard: { file: 'webonboard.html', label: '网页端接入页', source: 'webchatAuto 状态/设置/采集/登录（宿主 IPC 真值）' },
   layered: { file: 'memory-layered.html', label: '记忆层级管理页', source: 'REQ-006 P8 · L0–L6 真实账本' },
   dispute: { file: 'dispute.html', label: '冲突裁决页', source: 'REQ-006 P7 · 内核真实 pending 冲突队列' },
   feedback: { file: 'feedback.html', label: '用户反馈页', source: 'REQ-006 P9 · 真实账本反馈' },
@@ -62,7 +63,7 @@ export interface NavItem {
 
 export type NavEntry = NavGroup | NavItem;
 
-/** 功能导航树：批次54 按用户参考图重排为四组 17 项；每项映射到真实 HTML，角标一律动态读真账本，不写死示例数。
+/** 功能导航树：批次54 按用户参考图重排、其后持续演进为五组 25 项（2026-11-19 网页端接入）；每项映射到真实 HTML，角标一律动态读真账本，不写死示例数。
  *  - 登录仍走壳层弹窗（login.html 只作深链兜底，不占主导航）；
  *  - 首启设置由 Electron 向导直接打开（setup.html），不在主导航露面；
  *  - 旧「记忆管理」可展开子树收敛为平铺入口，分层/冲突/反馈改指各自独立真实页面。
@@ -85,6 +86,7 @@ export const NAV: NavEntry[] = [
   { kind: 'item', id: 'dispute', label: '冲突裁决', icon: 'warn', page: 'dispute' },
   { kind: 'group', label: '连接' },
   { kind: 'item', id: 'agent', label: 'Agent 接入', icon: 'agent', page: 'agent' },
+  { kind: 'item', id: 'web-onboard', label: '网页端接入', icon: 'link', page: 'webonboard' },
   { kind: 'item', id: 'cost', label: '大模型配置', icon: 'chart', page: 'models' },
   { kind: 'item', id: 'sync', label: '同步中枢', icon: 'sync', page: 'sync' },
   { kind: 'group', label: '治理' },

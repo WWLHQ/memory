@@ -34,7 +34,7 @@ describe('壳层导航映射', () => {
     expect(pages.some((p) => PAGES[p].file === 'overview.html')).toBe(false);
   });
 
-  it('功能导航为五组 24 项，名称、顺序与真实页面一一对应（记忆助手已是独立整页 assistant.html；T3 新增「管理台」复用 security.html?tab=overview，仅管理员可见；记忆管理组含活跃/蛰伏休眠/已归档三个状态视图）', () => {
+  it('功能导航为五组 25 项，名称、顺序与真实页面一一对应（记忆助手已是独立整页 assistant.html；T3 新增「管理台」复用 security.html?tab=overview，仅管理员可见；记忆管理组含活跃/蛰伏休眠/已归档三个状态视图；连接组含网页端接入）', () => {
     const groups = NAV.flatMap((e) => e.kind === 'group' ? [e.label] : []);
     expect(groups).toEqual(['工作台', '记忆管理', '连接', '治理', '智能']);
 
@@ -55,6 +55,7 @@ describe('壳层导航映射', () => {
       { id: 'growth', label: '净化生长', page: 'growth' },
       { id: 'dispute', label: '冲突裁决', page: 'dispute' },
       { id: 'agent', label: 'Agent 接入', page: 'agent' },
+      { id: 'web-onboard', label: '网页端接入', page: 'webonboard' },
       { id: 'cost', label: '大模型配置', page: 'models' },
       { id: 'sync', label: '同步中枢', page: 'sync' },
       // T3（§14.1）：管理台复用 security.html 检查摘要页签；成员侧由 Workspace 过滤不渲染
@@ -67,7 +68,7 @@ describe('壳层导航映射', () => {
       { id: 'setup', label: '首启向导', page: 'setup' },
       { id: 'assistant', label: '记忆助手', page: 'assistant' },
     ]);
-    expect(items).toHaveLength(24);
+    expect(items).toHaveLength(25);
     // 旧的可展开子树、演示通览不再出现；首启向导已纳入治理组。
     // 记忆助手已由壳层浮窗改为独立整页 assistant.html（不再是 panel 触发项）。
     expect(flattenNav().some((n) => n.children?.length)).toBe(false);
@@ -108,6 +109,19 @@ describe('壳层导航映射', () => {
     expect(filterSrc).toContain('parseStatusParam');
     const memPage = readFileSync(`${ROOT}/src/web/memory/MemoryManagementPage.tsx`, 'utf8');
     expect(memPage).toContain('value="hibernating,dormant"');
+  });
+
+  it('「网页端接入」是真实整页：webonboard.html 已登记为构建入口，网页会话自动采集卡迁入该页且参数页不再持有', () => {
+    const vite = readFileSync(`${ROOT}/vite.config.ts`, 'utf8');
+    expect(vite.includes("'webonboard.html'")).toBe(true);
+    expect(existsSync(`${ROOT}/webonboard.html`)).toBe(true);
+    expect(existsSync(`${ROOT}/src/web/webonboard/WebOnboardPage.tsx`)).toBe(true);
+    expect(PAGES.webonboard.file).toBe('webonboard.html');
+    // 卡片真迁走了：新页持有、参数页摘除（防复发：不许再长回参数页）
+    const page = readFileSync(`${ROOT}/src/web/webonboard/WebOnboardPage.tsx`, 'utf8');
+    expect(page).toContain('WebchatAutoCard');
+    const paramsPage = readFileSync(`${ROOT}/src/web/params/ParamsPage.tsx`, 'utf8');
+    expect(paramsPage).not.toContain('WebchatAutoCard');
   });
 
   it('导航项不得携带演示计数/徽标字段', () => {

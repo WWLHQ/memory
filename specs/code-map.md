@@ -1954,3 +1954,18 @@ status: draft
 
 > **判据（下次一眼认出来）**：`actions.log` 里 `collector:webchat-auto:steps` 每轮 steps 标题串**完全相同**（如 deepseek 恒为「个人记忆系统变现路径/强制Agent先读记忆库/V100安装Win11可」）= 采集卡死；标题在变而 exported 0 才是真去重。
 > **三道闸门**：A 全量 `test:gate` **315 文件 / 3974 例 / 0 失败 / 0 重试**（20261119-194332）；typecheck 双工程 0 错；oxlint 811 文件 0/0；`check:no-demo` 430 文件 0 命中。B 新增 8 例（驱动 4 / 判定 1 / 卡片 3）全绿。C 三次变异：跳过处 `continue→break` → 1 红；去掉 `skipped>0` 判定 → 1 红；`toResult` 退回 `state: r` → 1 红；均恢复后复绿。
+
+## 批次65（2026-11-19）：功能导航「连接」组新增网页端接入页 + 采集卡自参数页迁入
+
+> 用户需求：功能导航「连接」组增加「网页端接入」页，并把全局参数页的「网页会话自动采集」卡片**移入**该页（不是复制）。
+> 不新增 HTML 入口数量以外的页面资产口径不变：真实页面 22→23（`webonboard.html`），全部登记 vite 构建入口。
+
+| 改动点 | 文件 / 函数 | 判据与测试 |
+|---|---|---|
+| 新页面入口 | `webonboard.html`；`src/web/webonboard/webOnboardEntry.tsx`（p0 样式 + actionLog）；`WebOnboardPage.tsx`（页壳 + 承载卡片） | `views.test.ts` 新例：`webonboard.html` 已登记 vite 入口、`PAGES.webonboard.file` 一致、新页持有 `WebchatAutoCard` 而 `ParamsPage.tsx` **不再持有**（防复发：不许长回参数页） |
+| 采集卡迁入（原路径作废） | `WebchatAutoCard.tsx` / `webchatAuto.ts` / `__tests__/WebchatAutoCard.test.tsx` 由 `src/web/params/` **git mv** 至 `src/web/webonboard/`；卡片 css 改 `../params/recallHard.css` | 迁移后用例原样在新路径全绿（250 例目录级）；控件与真值口径零改动 |
+| 参数页摘除 | `ParamsPage.tsx`：删 import 与 `<WebchatAutoCard />`，副标题写明「已迁至连接 → 网页端接入」 | 上条防复发锁 + `ParamsPage.test.tsx` 不受影响 |
+| 导航注册 | `views.ts`：`PageKey`+`PAGES.webonboard`；NAV 连接组 `web-onboard`（Agent 接入之后，icon `link`）；vite.config input | `views.test.ts` 导航锁 24→25 项含新项；`workspace.test.tsx` DOM 23→24 行 |
+| 批次64 旧路径说明 | 本表上一节 `web/params/webchatAuto.ts` 路径自本批次起为 `web/webonboard/webchatAuto.ts`（历史行保留原样作证据） | — |
+
+> **三道闸门**：A 全量 315 文件 / 3980 例 / 0 失败；typecheck 0 错；oxlint 813 文件 0/0；`check:no-demo` 432 文件 0 命中；`validate_project` 通过；`code:index` 重建 438 源文件。B 深链/导航/迁移三组断言端到端成立。C 变异：删掉 NAV `web-onboard` 行 → views.test 2 例红灯，还原后 10/10 复绿。

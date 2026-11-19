@@ -1,4 +1,4 @@
-// 阶段 B · 参数页「网页会话自动采集」卡。
+// 网页端接入页 ·「网页会话自动采集」卡（2026-11-19 自参数页迁入）。
 //
 // 为什么必须有这张卡：插件降级为手动入口后，这里是**唯一**的自动采集开关；
 // 没有它就只能改配置文件，等于没交付。
@@ -13,7 +13,7 @@ import {
   webchatAutoState, webchatAutoSweep, webchatExportDir, webchatExportOpen, webchatExportSet,
   type AutoStateView, type AutoSiteStatus,
 } from './webchatAuto.ts';
-import './recallHard.css';
+import '../params/recallHard.css';
 
 const INTERVALS = [15, 30, 60, 120];
 const PER_ROUNDS = [3, 5, 10, 20, 50];

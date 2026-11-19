@@ -16,6 +16,7 @@ export default defineConfig({
         workspace: 'workspace.html',
         login: 'login.html',
         agentonboard: 'agentonboard.html',
+        webonboard: 'webonboard.html',
         overview: 'overview.html',
         memory: 'memory.html',
         write: 'write.html',

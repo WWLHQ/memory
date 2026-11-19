@@ -3,7 +3,7 @@
 > 由 `npm run code:index` 生成，请勿手改；改代码/文档后重跑即可。
 > 用法：先在本表定位文件与导出符号，再只读该文件的局部区间（省 token、少误改）。
 
-共 436 个源码文件、150 个文档。
+共 438 个源码文件、150 个文档。
 
 ## e2e
 
@@ -368,10 +368,9 @@
 | [src/web/params/KbPolicyTable.tsx](src/web/params/KbPolicyTable.tsx) | 40 | P5-T3 知识库策略表（17.6 六类）—— 阶段5-E / B9：内核 policyFor() 的只读镜像。 | KbPolicyTable(fn) |
 | [src/web/params/LlmEngineCard.tsx](src/web/params/LlmEngineCard.tsx) | 312 | 全局参数页 · LLM 精炼引擎卡片（批次31 建 / 批次32 多引擎化）：任意多家 OpenAI 兼容引擎（预设快选或自定义）， | LlmEngineCard(fn) |
 | [src/web/params/NormalConfigCard.tsx](src/web/params/NormalConfigCard.tsx) | 117 | P5-T3 普通配置卡（17.6 文案化，G7 不暴露参数名） | NormalConfigCard(fn) |
-| [src/web/params/ParamsPage.tsx](src/web/params/ParamsPage.tsx) | 122 | 全局参数页（REQ-006 / P5）T4 编排 | ParamsPage(fn) |
+| [src/web/params/ParamsPage.tsx](src/web/params/ParamsPage.tsx) | 121 | 全局参数页（REQ-006 / P5）T4 编排 | ParamsPage(fn) |
 | [src/web/params/RecallHardCard.tsx](src/web/params/RecallHardCard.tsx) | 371 | 批次62 · 参数页「硬前置召回」卡片：A 宿主钩子 / B 内置 LLM 网关 / C MCP 内核门禁。 | RecallHardCard(fn) |
 | [src/web/params/RefineQueueCard.tsx](src/web/params/RefineQueueCard.tsx) | 230 | 参数页 · L2–L6 后台补炼队列卡（批次39）。 | RefineQueueCard(fn) |
-| [src/web/params/WebchatAutoCard.tsx](src/web/params/WebchatAutoCard.tsx) | 348 | 阶段 B · 参数页「网页会话自动采集」卡。 | WebchatAutoCard(fn) |
 | [src/web/params/appShell.ts](src/web/params/appShell.ts) | 64 | 阶段 A · 参数页两个开关（托盘常驻 / 开机自启）的渲染层桥。 | appShellAvailable(fn), appShellState(const), appShellSet(const), AppShellStateView(type), AppShellPatch(type), AppShellResult(type) |
 | [src/web/params/coreParams.ts](src/web/params/coreParams.ts) | 86 | 全局参数页（REQ-006 / P5）接真内核：参数快照存内核 preference 记忆（params:v1: JSON， | coreLoadParams(fn), coreSaveParams(fn) |
 | [src/web/params/defaults.ts](src/web/params/defaults.ts) | 77 | 全局参数页默认值与展示标签（规格常量；用户保存后以内核 preference 快照为真相）。 | kernelKbPolicies(fn), DEFAULT_CONFIG(const), SPEED_LABEL(const), RETENTION_LABEL(const), IMPORTANCE_LABEL(const), CATEGORY_LABEL(const), DEFAULT_KB_POLICIES(const), DEFAULT_DEV(const), LEVEL_MAPPING(const) |
@@ -383,7 +382,6 @@
 | [src/web/params/types.ts](src/web/params/types.ts) | 45 | 全局参数页（REQ-006 / P5）数据模型 | NormalConfig(type), KbPolicyRow(type), DevParams(type), ForgetSpeed(type), Retention(type), ImportanceLevel(type) |
 | [src/web/params/useParamsMirror.ts](src/web/params/useParamsMirror.ts) | 19 | 全局参数页后端镜像（阶段5-C 口径统一）：真接 home server POST /api/mirror/audit。 | useParamsMirror(fn), ParamsMirror(type) |
 | [src/web/params/useToast.tsx](src/web/params/useToast.tsx) | 13 | — | useToast(fn) |
-| [src/web/params/webchatAuto.ts](src/web/params/webchatAuto.ts) | 157 | 阶段 B · 参数页「网页会话自动采集」卡的渲染层桥。 | webchatAutoAvailable(fn), webchatAutoLogin(fn), webchatExportDir(fn), webchatExportOpen(fn), webchatExportSet(fn), AUTO_STATUS_LABEL(const), webchatAutoState(const), webchatAutoSet(const), webchatAutoRun(const), webchatAutoSweep(const), AutoConfigView(type), AutoSiteResult(type), AutoRoundView(type), AutoStateView(type), AutoResult(type), AutoPatch(type), ExportDirView(type), AutoSiteStatus(type) |
 | [src/web/retrieval/AuditTrailCard.tsx](src/web/retrieval/AuditTrailCard.tsx) | 56 | 检索页「审计链路上下文」卡（阶段5-A / A15 接线）。 | AuditTrailCard(fn) |
 | [src/web/retrieval/BudgetPanel.tsx](src/web/retrieval/BudgetPanel.tsx) | 153 | REQ-012 T5 右侧栏三块：Token 预算（R9 三档 + 分段量表）· 召回漏斗 · 裁剪明细。 | TokenBudgetCard(fn), FunnelCard(fn), TrimCard(fn), BudgetPanel(fn) |
 | [src/web/retrieval/ContextPanel.tsx](src/web/retrieval/ContextPanel.tsx) | 61 | REQ-012 T5 命中上下文（§4）：片段 → 关联记忆 → 参数（只读）→ 跳转。 | ContextPanel(fn) |
@@ -471,13 +469,17 @@
 | [src/web/shell/statusbar.ts](src/web/shell/statusbar.ts) | 130 | 状态栏真实数据（S7）：账本位置 / L0 保险库状态 / 采集器后台状态。 | loadL0Write(fn), loadL0Status(fn), loadCollectorStatus(fn), loadStatusbar(fn), shortLocation(fn), StoragePlaceView(type), CollectorView(type), StatusSnapshot(type), L0WriteView(type) |
 | [src/web/shell/strataScale.ts](src/web/shell/strataScale.ts) | 92 | 功能导航栏底部的「层级刻度」（批次53 定义 / 批次55 改数据源）：L0–L6 七档的真实计数。 | strataViewFromOverview(fn), STRATA_LAYERS(const), StrataLayerSpec(type), StrataRowView(type), StrataScaleView(type), StrataSnapshotLike(type), StrataLayerId(type) |
 | [src/web/shell/taskpane.ts](src/web/shell/taskpane.ts) | 41 | 任务窗「待重放写入」只读视图（S5 / D6）：经 hostBridge 读 l0:pendingWrites。 | loadPendingWrites(fn), PendingWritesResult(type) |
-| [src/web/shell/views.ts](src/web/shell/views.ts) | 388 | 工作台壳层的视图映射（批次48 S1）。 | flattenNav(fn), findNav(fn), navPages(fn), PAGES(const), NAV(const), RIBBON(const), BOTTOM_TABS(const), NavGroup(type), NavItem(type), RibbonItem(type), RibbonGroup(type), RibbonTab(type), BottomTab(type), PageKey(type), NavEntry(type), IconName(type), ShellAction(type), BottomTabId(type) |
+| [src/web/shell/views.ts](src/web/shell/views.ts) | 390 | 工作台壳层的视图映射（批次48 S1）。 | flattenNav(fn), findNav(fn), navPages(fn), PAGES(const), NAV(const), RIBBON(const), BOTTOM_TABS(const), NavGroup(type), NavItem(type), RibbonItem(type), RibbonGroup(type), RibbonTab(type), BottomTab(type), PageKey(type), NavEntry(type), IconName(type), ShellAction(type), BottomTabId(type) |
 | [src/web/shell/workspaceEntry.tsx](src/web/shell/workspaceEntry.tsx) | 20 | 工作台壳层入口（批次48 S1）：Electron 主窗口加载 workspace.html。 | — |
 | [src/web/sync/SyncPage.tsx](src/web/sync/SyncPage.tsx) | 340 | 同步与裁决页（批次42-C）：「立即同步」（真实 push/pull 报告）+ 中枢对账 + §9.7 人工裁决队列 | SyncPage(fn) |
 | [src/web/sync/coreSyncPage.ts](src/web/sync/coreSyncPage.ts) | 215 | 同步与裁决页（批次42-C）数据逻辑：内核 agent.sync 真跑 + §9.7 裁决队列经 HostSyncHub 代理。 | runSync(fn), listSyncConflicts(fn), resolveConflict(fn), hubOverview(fn), syncChannels(fn), SyncPageHub(type), SyncPageCtx(type), SyncRunView(type), HubOverviewView(type), SyncChannelRow(type), SyncChannelsView(type) |
 | [src/web/sync/syncEntry.tsx](src/web/sync/syncEntry.tsx) | 11 | 同步与裁决页（批次42-C）入口：挂载 SyncPage。 | — |
 | [src/web/test-setup.ts](src/web/test-setup.ts) | 1 | — | — |
 | [src/web/vite-env.d.ts](src/web/vite-env.d.ts) | 2 | Vite 侧效应导入（CSS）的类型声明 | — |
+| [src/web/webonboard/WebOnboardPage.tsx](src/web/webonboard/WebOnboardPage.tsx) | 22 | 网页端接入页（2026-11-19 新增）：功能导航「连接」组的网页端接入视图。 | WebOnboardPage(fn) |
+| [src/web/webonboard/WebchatAutoCard.tsx](src/web/webonboard/WebchatAutoCard.tsx) | 348 | 网页端接入页 ·「网页会话自动采集」卡（2026-11-19 自参数页迁入）。 | WebchatAutoCard(fn) |
+| [src/web/webonboard/webOnboardEntry.tsx](src/web/webonboard/webOnboardEntry.tsx) | 11 | 网页端接入页入口（2026-11-19 新增） | — |
+| [src/web/webonboard/webchatAuto.ts](src/web/webonboard/webchatAuto.ts) | 157 | 网页端接入页 ·「网页会话自动采集」卡的渲染层桥（2026-11-19 自参数页迁入）。 | webchatAutoAvailable(fn), webchatAutoLogin(fn), webchatExportDir(fn), webchatExportOpen(fn), webchatExportSet(fn), AUTO_STATUS_LABEL(const), webchatAutoState(const), webchatAutoSet(const), webchatAutoRun(const), webchatAutoSweep(const), AutoConfigView(type), AutoSiteResult(type), AutoRoundView(type), AutoStateView(type), AutoResult(type), AutoPatch(type), ExportDirView(type), AutoSiteStatus(type) |
 | [src/web/write/DedupCard.tsx](src/web/write/DedupCard.tsx) | 55 | 写入页（REQ-006 / P2）查重预览卡 · 批次58 定稿版式 | DedupCard(fn) |
 | [src/web/write/WriteForm.tsx](src/web/write/WriteForm.tsx) | 150 | 写入页（REQ-006 / P2）表单 · 批次58 定稿版式（只改写入表单 tab） | WriteForm(fn) |
 | [src/web/write/WriteL0UnlockCard.tsx](src/web/write/WriteL0UnlockCard.tsx) | 158 | 批次58：写入页右栏常驻「L0 UNLOCK」卡（定稿版式）。 | WriteL0UnlockCard(fn), L0UnlockStatus(type) |
@@ -562,7 +564,7 @@
 | [specs/ROADMAP-批次45-租户归一与成员密钥域模型-方案.md](specs/ROADMAP-批次45-租户归一与成员密钥域模型-方案.md) | 44 | ROADMAP 批次45+ — 令牌与租户欠账立项（MCP 作用域收紧前置 = 账本租户归一）+ 成员/API 密钥域模型 |
 | [specs/ROADMAP-批次B类-远端PG与多机硬过滤-方案.md](specs/ROADMAP-批次B类-远端PG与多机硬过滤-方案.md) | 102 | 批次 B 类 · 远端 PG 中枢（B4）+ 多机硬过滤（B1）+ 真实精炼（B3）方案 |
 | [specs/acceptance.md](specs/acceptance.md) | 80 | title: 验收标准 |
-| [specs/code-map.md](specs/code-map.md) | 1957 | status: draft |
+| [specs/code-map.md](specs/code-map.md) | 1972 | status: draft |
 | [specs/demo-data-baseline.md](specs/demo-data-baseline.md) | 116 | 演示/种子数据基线清单（批次42 · 阶段0 冻结） |
 | [specs/project_id配置化_工程化落地方案.md](specs/project_id配置化_工程化落地方案.md) | 395 | project_id 配置化 · 工程化落地方案 |
 | [specs/project_id零配置_详细实施方案.md](specs/project_id零配置_详细实施方案.md) | 289 | project_id 零配置 · 详细实施方案 |
@@ -767,7 +769,7 @@ src/electron/recallHookScript.ts c5fa0d8b82f2
 src/electron/storageIpc.ts 9edb5f55187a
 src/electron/tenantSource.ts 87de24ab1084
 src/electron/webchatAutoCollect.ts 7b6e5fb7d9ec
-src/electron/webchatAutoConfig.ts 4ed99cd9efdc
+src/electron/webchatAutoConfig.ts 1429d53da185
 src/electron/webchatAutoUa.ts ab336c80f96d
 src/electron/webchatExtensionCopy.ts 9883df1f4215
 src/electron/webchatExtensionPath.ts 71aba5a6fe3a
@@ -964,10 +966,9 @@ src/web/params/KbManagementCard.tsx a8c0b581a8c2
 src/web/params/KbPolicyTable.tsx c39b52ed1039
 src/web/params/LlmEngineCard.tsx 4c938ef647cb
 src/web/params/NormalConfigCard.tsx c9d2b664ee4f
-src/web/params/ParamsPage.tsx 35439d2ff7b4
+src/web/params/ParamsPage.tsx 77ec380f6399
 src/web/params/RecallHardCard.tsx b6f0e097dec2
 src/web/params/RefineQueueCard.tsx 704d8988fed9
-src/web/params/WebchatAutoCard.tsx 064ff0093fee
 src/web/params/appShell.ts d319152b4c42
 src/web/params/coreParams.ts 450ba203beb2
 src/web/params/defaults.ts 6dd5728ef0ec
@@ -979,7 +980,6 @@ src/web/params/refineQueue.ts 00f06b45c16c
 src/web/params/types.ts 9840a32c5e5d
 src/web/params/useParamsMirror.ts 5529b48cfccc
 src/web/params/useToast.tsx 85cd09d2e1f5
-src/web/params/webchatAuto.ts 96833b2a84cf
 src/web/retrieval/AuditTrailCard.tsx 0b7d40ddc359
 src/web/retrieval/BudgetPanel.tsx 903af44940e8
 src/web/retrieval/ContextPanel.tsx 61fc5aa1874b
@@ -1067,13 +1067,17 @@ src/web/shell/shellStatus.ts 0d582644829f
 src/web/shell/statusbar.ts 3ef75138b1cc
 src/web/shell/strataScale.ts 1f27d6bde9d4
 src/web/shell/taskpane.ts e1a473006974
-src/web/shell/views.ts e3ee7fd7ad4f
+src/web/shell/views.ts 54fd0f869a2a
 src/web/shell/workspaceEntry.tsx d81475dafbfc
 src/web/sync/SyncPage.tsx 4689f911164f
 src/web/sync/coreSyncPage.ts dc04d7145615
 src/web/sync/syncEntry.tsx 23e574e79aa4
 src/web/test-setup.ts 3a2ad06d2218
 src/web/vite-env.d.ts 191b7a12f3de
+src/web/webonboard/WebOnboardPage.tsx 7a7ddc537f93
+src/web/webonboard/WebchatAutoCard.tsx 4f1b699686c9
+src/web/webonboard/webOnboardEntry.tsx dfdb95cb7c5b
+src/web/webonboard/webchatAuto.ts e407dea3b45b
 src/web/write/DedupCard.tsx 4fc5c77cad3c
 src/web/write/WriteForm.tsx 3ef1a7e27ecc
 src/web/write/WriteL0UnlockCard.tsx 4bf32839ee38
@@ -1153,7 +1157,7 @@ specs/ROADMAP-批次42-未接线三件套-方案.md df1a6f9d6ed5
 specs/ROADMAP-批次45-租户归一与成员密钥域模型-方案.md 633abaaaad54
 specs/ROADMAP-批次B类-远端PG与多机硬过滤-方案.md 0c7857454a7d
 specs/acceptance.md 22e711c8939c
-specs/code-map.md d0402a06c9e3
+specs/code-map.md 846e39b43cda
 specs/demo-data-baseline.md 1d9af215ac78
 specs/project_id配置化_工程化落地方案.md aecc14b503c9
 specs/project_id零配置_详细实施方案.md 688c791a22bb

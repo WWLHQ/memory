@@ -192,12 +192,12 @@ describe('工作台壳层', () => {
     expect((container.querySelector('iframe.page-frame') as HTMLIFrameElement).getAttribute('src')).toContain('/index.html');
   });
 
-  it('DOM 为五组 23 项（记忆管理组含活跃/蛰伏休眠/已归档三个状态视图；管理台未登录不渲染），角标只显示真实读数，不出现参考图示例数', async () => {
+  it('DOM 为五组 24 项（记忆管理组含活跃/蛰伏休眠/已归档三个状态视图，连接组含网页端接入；管理台未登录不渲染），角标只显示真实读数，不出现参考图示例数', async () => {
     vi.mocked(loadNavCounts).mockResolvedValue({ 'memory-bank': 7, dispute: 2, agent: 3 });
     const { container } = await renderShell();
     const groups = Array.from(container.querySelectorAll('.tree .tree-group')).map((e) => e.textContent);
     expect(groups).toEqual(['工作台', '记忆管理', '连接', '治理', '智能']);
-    expect(container.querySelectorAll('.tree .tree-row')).toHaveLength(23);
+    expect(container.querySelectorAll('.tree .tree-row')).toHaveLength(24);
 
     expect((await screen.findByTestId('nav-count-memory-bank')).textContent).toBe('7');
     expect(screen.getByTestId('nav-count-dispute').textContent).toBe('2');
