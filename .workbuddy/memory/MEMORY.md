@@ -2,10 +2,14 @@
 
 > 精简版（2026-11-17 压缩）。只留「下次还会用到的判据 / 路径 / 坑」；被删的叙事与逐条证据见 `ARCHIVE-2026-11-full.md`（同目录，需要时再读）。
 
+## 0. 日期/时间口径（2026-11-18 用户明确，跨项目长期偏好）
+- 所有和日期/时间相关的内容一律按北京时间（Asia/Shanghai，UTC+08:00）和北京时间日期：展示、日志、报告、文件名/标题、周几与自然日归属、截止日期、「今天/昨天」判断等都如此；UTC 时间先换算成 `+08:00` 再写。仅当用户当轮明确指定其他时区时例外。用户级 `MEMORY.md` 与记忆库 `mem_01M7PAKDYJ0YAWDBK7JX774BY9` 为长期真源。
+
 ## 1. 提交 / 打包纪律（最高优先）
 - 远端 `github.com/WWLHQ/memory`(main)。CI：`npm test` → `validate_project.py` → `generate.py --check`；`build/` gitignored，CI 须先 generate 再 check。推含 `.github/workflows` 的提交 PAT 需 `workflow` 作用域。
 - **打包 → 等实测 → 等明确确认 → 才 commit/push**。顺序：全门禁 → `CODEBUDDY_SAFE_DELETE_ENABLED=0 npm run package` → 验产物（`release/installer/`、`release/win-unpacked/`）→ 停·等测试 → 停·等确认 → push。门禁全绿不算自动提交理由。
-- 打包会清空根 `package.json` 的 scripts/devDependencies 且不还原 → 打包后 `git checkout -- package.json`。
+- **【2026-11-19 用户明确 · 再次升级】需要打包时 assistant 直接关掉运行中的桌面端再打，不必停下来等用户确认、也不必等用户手动关闭**；关完仍须核实进程 0 + 8204 不通，再执行打包；整个打包闭环（关端→打包→验产物→启端→核运行态）一气呵成不等确认。此条只免「打包前的确认等待」；git commit/push 仍按提交前人工确认铁律单独等用户明确确认。
+- 打包脚本曾清空根 `package.json` 的 scripts/devDependencies；但 2026-11-19 实测本次未清空（哈希打包前后一致）。**不要无条件 `git checkout -- package.json`**：工作区该文件本就有未提交改动（与 HEAD 不同），checkout 会丢失它们。正确做法=打包前后各记一次 sha256，一致就不动；真被清空才从打包前备份还原。
 - 提交前展示改动清单 + 门禁输出 + 拟用信息；在途改动单列，禁 `git add .`；conventional commit + `Co-Authored-By: CodeBuddy Code`。每个原子任务先展示成果等确认再下一步。
 - 纯净度（AGENTS.md §0.1）：下一个任务不会再用的就是临时物；收尾五步 跑验→扫→清→核→报。Bash `rm -rf` 被 genie-trash 接管、多文件目录拒删；`CODEBUDDY_SAFE_DELETE_ENABLED=0` 只对 Node `fs.rm` 生效。删不掉如实说 + 给命令，不换 shell 绕过安全护栏。
 
@@ -19,6 +23,7 @@
 - 真源：`recallPrelude.ts`（buildHookRunState/parseHookRunState/serializeHookRunState）+ `recallHook.ts`（hookStatusFilePath/recordStatus）；UI 读口 `electron/recallHard.ts` 的 `readHookRunState()` → `state().a.lastRun` → `web/params/RecallHardCard.tsx` 的 `lastRunBadge()`；失败原因中文唯一表 = 该文件的 `FAIL_REASON_ZH`，别写第二套。
 - **第 13 个 MCP 工具 `recall_hook_status`**：读同一份状态文件，`verdict` = `ok`/`empty`/`failed`/`stale`(>12h)/`never_ran`。`never_ran` 最有价值（文件不存在 = 钩子没装/路径写错/从没触发）。真源 `mcpHookTools.ts` 的 `runHookStatusTool`（纯函数 + 注入 readText/now）；两处 dispatch：`mcp.ts`(8202) 与 `mcpHttp.ts`(8204)；主进程必须传 `join(USER_DATA, HOOK_STATUS_FILE)`，漏传会退回 env/APPDATA 默认路径 → 误报 `never_ran`。
 - **判「A 是否真通」只看状态文件不看 UI**：`%APPDATA%\MultiAgent Memory\recall-hook-status.json` 出现 `{"status":"ok"|"empty"}` 即钩子真跑（`empty` 是健康值）；文件不存在才是 `never_ran`。
+- **复盘补漏钩子（2026-11-18 落地）**：`~/.workbuddy/settings.json` 的 UserPromptSubmit 现有两个钩子：`force_recall.mjs` + `recall-hard/session_review_patch.mjs`。后者读上一条 assistant 文本查复盘标题+沉淀行，声明 mem_id 时同 session 先 recall 再 get_memory 验真，只注入 `additionalContext` 不阻断；审计 `%APPDATA%\MultiAgent Memory\session-review-patch-audit.jsonl`。**fail-open catch 要区分「令牌文件真缺」与「代码错误」**：曾因未 import `readFile` 被 catch 成 token missing，真假 mem_id 全放行；已改 `readFileSync`。钩子不热加载，改完须重启 WorkBuddy。
 
 ## 3. A 层钩子脚本路径（2026-11-16 事故）
 - 禁止把 `…\resources\app.asar\…` 写进宿主 settings.json：asar 是虚拟路径，Electron `fs` 看得见、**系统 node 看不见**（宿主用系统 node 起钩子）→ `ERR_MODULE_NOT_FOUND` → fail-open 静默 → 状态文件永不生成，UI 却全绿。

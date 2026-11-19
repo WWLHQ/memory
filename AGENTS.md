@@ -38,13 +38,15 @@ C = **至少一次代码级变异**（临时把关键判定改错 → 指定测�
 3. 删不掉的**如实说**并给出可执行命令，**不得换 shell 工具或写脚本穿透安全检查**（本机 `rm -rf` 被 genie-trash 守护 fail-closed 拦截即属此类；`CODEBUDDY_SAFE_DELETE_ENABLED=0` 只对走 Node `fs.rm` 的打包脚本有效，对 Bash 的 `rm` 无效）。
 4. **报告归位**：一次性修复报告写进 `specs/reports/`；外部程序误写的垃圾（如显卡驱动日志 `NVIDIA Corporation/`）删掉并补 `.gitignore` 防复发。
 
-### 0.2 交付闭环纪律（用户 2026-11-12 约定，长期生效）
+### 0.2 交付闭环纪律（用户 2026-11-12 约定，2026-11-19 修订，长期生效）
 
 **程序有优化（任何会进入运行时的改动）后，必须走完整闭环：关闭旧桌面端 → 重新打包 → 验证产物 → 启动新桌面端 → 核对运行态。** 只提交代码、只打包不重启、或只重启不重打包，都算未完成——旧进程仍跑旧口径，用户看到的行为与仓库不一致（批次60 观察计划里「常驻进程仍跑旧口径，必须重启桌面端」即此坑）。
 
+**【2026-11-19 用户明确 · 覆盖此前"停下等确认再关端打包"的旧做法】一旦判定需要打包（本轮有源码改动即触发），assistant 直接关端 → 打包 → 验产物 → 启端 → 核运行态，一气呵成，不在中途停下来等用户确认、也不等用户手动关端。** 关端动作本身仍须先验证（进程数 0 + 8200~8204 无 LISTENING）再打包。本条只免「打包前的确认等待」；git commit/push 仍按《提交前必须人工确认》铁律单独等用户明确确认，两者不混淆。
+
 | 步 | 动作 | 判据 / 已知坑 |
 |---|---|---|
-| 1 | 关旧端 | `MultiAgent Memory.exe` 进程数 0、8200~8204 无 LISTENING；否则打包会 EBUSY，产物收口不到固定路径 |
+| 1 | 关旧端（直接关，不等确认） | assistant 直接关闭运行中的桌面端，无需先问用户；关完核实 `MultiAgent Memory.exe` 进程数 0、8200~8204 无 LISTENING；否则打包会 EBUSY，产物收口不到固定路径 |
 | 2 | 重打包 | `CODEBUDDY_SAFE_DELETE_ENABLED=0 npm run package`；随后 `git diff -- package.json` 必须为空，非空则 `git checkout -- package.json`（electron-builder 会清空 `scripts`/`devDependencies` 且不还原） |
 | 3 | 验产物 | 安装包 exe 非空 + SHA256；**主进程代码在 `resources/app.asar.unpacked/dist-electron/main.cjs` 而非 `app.asar` 内**，须与 `dist-electron/main.cjs` 逐字节一致且含本轮改动标记（NSIS 压缩包明文 grep 不到字符串属正常） |
 | 4 | 启新端 | `env -u ELECTRON_RUN_AS_NODE -u NODE_OPTIONS -u https_proxy -u HTTPS_PROXY -u http_proxy -u HTTP_PROXY "./MultiAgent Memory.exe"`，用后台托管；不清 `ELECTRON_RUN_AS_NODE` 会以纯 Node 模式启动、不起 Chromium |
