@@ -34,7 +34,7 @@ describe('壳层导航映射', () => {
     expect(pages.some((p) => PAGES[p].file === 'overview.html')).toBe(false);
   });
 
-  it('功能导航为五组 21 项，名称、顺序与真实页面一一对应（记忆助手已是独立整页 assistant.html；T3 新增「管理台」复用 security.html?tab=overview，仅管理员可见）', () => {
+  it('功能导航为五组 24 项，名称、顺序与真实页面一一对应（记忆助手已是独立整页 assistant.html；T3 新增「管理台」复用 security.html?tab=overview，仅管理员可见；记忆管理组含活跃/蛰伏休眠/已归档三个状态视图）', () => {
     const groups = NAV.flatMap((e) => e.kind === 'group' ? [e.label] : []);
     expect(groups).toEqual(['工作台', '记忆管理', '连接', '治理', '智能']);
 
@@ -46,6 +46,9 @@ describe('壳层导航映射', () => {
       { id: 'retrieval', label: '检索', page: 'retrieval' },
       { id: 'monitor', label: '监控', page: 'monitor' },
       { id: 'memory-bank', label: '记忆库', page: 'memory' },
+      { id: 'memory-active', label: '活跃', page: 'memory' },
+      { id: 'memory-dormant', label: '蛰伏/休眠', page: 'memory' },
+      { id: 'memory-archived', label: '已归档', page: 'memory' },
       { id: 'personal', label: '个人记忆', page: 'memory' },
       { id: 'layered', label: '层级管理', page: 'layered' },
       { id: 'lifecycle', label: '生命周期', page: 'lifecycle' },
@@ -64,7 +67,7 @@ describe('壳层导航映射', () => {
       { id: 'setup', label: '首启向导', page: 'setup' },
       { id: 'assistant', label: '记忆助手', page: 'assistant' },
     ]);
-    expect(items).toHaveLength(21);
+    expect(items).toHaveLength(24);
     // 旧的可展开子树、演示通览不再出现；首启向导已纳入治理组。
     // 记忆助手已由壳层浮窗改为独立整页 assistant.html（不再是 panel 触发项）。
     expect(flattenNav().some((n) => n.children?.length)).toBe(false);
@@ -88,6 +91,23 @@ describe('壳层导航映射', () => {
     // 记忆库全页确实支持 personal 这个真实 Tab（不是编造参数）
     const memPage = readFileSync(`${ROOT}/src/web/memory/MemoryManagementPage.tsx`, 'utf8');
     expect(memPage).toContain("'all' | 'personal' | 'layers' | 'conflict' | 'review' | 'l0'");
+  });
+
+  it('记忆管理组的三个状态视图：深链指向记忆页真实支持的状态筛选（蛰伏/休眠为组合状态）', () => {
+    const active = flattenNav().find((n) => n.id === 'memory-active');
+    const dormant = flattenNav().find((n) => n.id === 'memory-dormant');
+    const archived = flattenNav().find((n) => n.id === 'memory-archived');
+    expect(active?.page).toBe('memory');
+    expect(active?.href).toBe('?tab=all&status=active');
+    expect(dormant?.page).toBe('memory');
+    expect(dormant?.href).toBe('?tab=all&status=hibernating,dormant');
+    expect(archived?.page).toBe('memory');
+    expect(archived?.href).toBe('?tab=all&status=archived');
+    // 记忆页确实支持组合状态（memoryFilter 有 parseStatusParam；下拉有对应选项）
+    const filterSrc = readFileSync(`${ROOT}/src/web/memory/memoryFilter.ts`, 'utf8');
+    expect(filterSrc).toContain('parseStatusParam');
+    const memPage = readFileSync(`${ROOT}/src/web/memory/MemoryManagementPage.tsx`, 'utf8');
+    expect(memPage).toContain('value="hibernating,dormant"');
   });
 
   it('导航项不得携带演示计数/徽标字段', () => {

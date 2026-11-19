@@ -27,16 +27,29 @@ export type { PageParams, Paged } from '../shared/paginate.ts';
 export const MEMORY_STATUS_VALUES = ['active', 'hibernating', 'archived', 'deprecated', 'stale', 'dormant'] as const;
 
 /**
+ * 深链 `?status=a` 或组合 `?status=hibernating,dormant`（逗号分隔，用于导航「蛰伏/休眠」页）。
+ * 逐个校验：任一片段不是合法六态 → 整体回 all（诚实：不假装筛选成功）。
+ * 合法时按「正则化后的逗号串」返回（去空白、保序、去重）。
+ */
+export function parseStatusParam(raw: string): string {
+  const parts = raw.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
+  if (parts.length === 0) return 'all';
+  const legal = MEMORY_STATUS_VALUES as readonly string[];
+  if (!parts.every((p) => legal.includes(p))) return 'all';
+  return [...new Set(parts)].join(',');
+}
+
+/**
  * D4：从 `?status=archived&source=manual&q=xxx` 解析记忆页初值。
- * 只接受已定义的状态/来源；无法识别的值按「不过滤」处理（诚实：不假装筛选成功）。
+ * 只接受已定义的状态/来源（status 支持逗号分隔组合）；无法识别的值按「不过滤」处理（诚实：不假装筛选成功）。
  */
 export function initialMemoryFilter(search: string): Pick<MemoryFilter, 'search' | 'status' | 'source'> {
   const p = new URLSearchParams(search);
   const q = (p.get('q') ?? '').trim();
-  const statusRaw = p.get('status') ?? 'all';
   const sourceRaw = p.get('source') ?? 'all';
   const source = sourceRaw === 'manual' || sourceRaw === 'collected' ? sourceRaw : 'all';
-  const status = (MEMORY_STATUS_VALUES as readonly string[]).includes(statusRaw) ? statusRaw : 'all';
+  const statusRaw = p.get('status') ?? 'all';
+  const status = statusRaw === 'all' ? 'all' : parseStatusParam(statusRaw);
   return { search: q, status, source };
 }
 
@@ -65,7 +78,11 @@ export function filterMemories(list: MemoryRecord[], f: MemoryFilter): MemoryRec
     out = out.filter((m) => m.type === f.type);
   }
   if (f.status && f.status !== 'all') {
-    out = out.filter((m) => m.status === f.status);
+    // 组合状态（如 'hibernating,dormant'，来自导航「蛰伏/休眠」页）：任一命中即保留
+    const parts = f.status.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
+    out = parts.length > 1
+      ? out.filter((m) => parts.includes(m.status))
+      : out.filter((m) => m.status === f.status);
   }
   if (f.source && f.source !== 'all') {
     if (f.source === 'collected') {

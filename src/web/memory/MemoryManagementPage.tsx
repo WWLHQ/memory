@@ -669,6 +669,7 @@ export function MemoryManagementPage() {
           >
             <option value="all">全部状态</option>
             {Object.entries(STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            <option value="hibernating,dormant">蛰伏/休眠</option>
           </select>
           <select
             className="mm-in"

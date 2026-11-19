@@ -52,6 +52,19 @@ describe('filterMemories', () => {
     expect(filterMemories(list, { status: 'archived' }).map((r) => r.id)).toEqual(['b']);
   });
 
+  it('组合状态过滤（导航「蛰伏/休眠」页）：逗号分隔，任一命中即保留', () => {
+    const mixed = [
+      rec({ id: 'h1', status: 'hibernating' }),
+      rec({ id: 'do1', status: 'dormant' }),
+      rec({ id: 'a1', status: 'active' }),
+      rec({ id: 'ar1', status: 'archived' }),
+    ];
+    expect(filterMemories(mixed, { status: 'hibernating,dormant' }).map((r) => r.id))
+      .toEqual(['h1', 'do1']);
+    // 单状态写法不受影响
+    expect(filterMemories(mixed, { status: 'dormant' }).map((r) => r.id)).toEqual(['do1']);
+  });
+
   it('source 过滤：all / collected / manual / 具体来源', () => {
     expect(filterMemories(list, { source: 'all' }).length).toBe(4);
     expect(filterMemories(list, { source: 'collected' }).map((r) => r.id)).toEqual(['a', 'b']); // webhook + mcp
@@ -157,6 +170,20 @@ describe('D4 深链初值（记忆页）', () => {
   it('识别合法 status/source/q', () => {
     expect(initialMemoryFilter('?status=archived&source=manual&q=%E9%87%8D%E8%A6%81')).toEqual({
       search: '重要', status: 'archived', source: 'manual',
+    });
+  });
+
+  it('组合状态深链：合法组合保留、去重保序；任一片段非法整体回 all', () => {
+    expect(initialMemoryFilter('?status=hibernating,dormant')).toEqual({
+      search: '', status: 'hibernating,dormant', source: 'all',
+    });
+    // 空白与重复被正则化
+    expect(initialMemoryFilter('?status=%20dormant%20,hibernating,dormant')).toEqual({
+      search: '', status: 'dormant,hibernating', source: 'all',
+    });
+    // 非法片段 → 整体 all（不假装筛选成功）
+    expect(initialMemoryFilter('?status=hibernating,deleted')).toEqual({
+      search: '', status: 'all', source: 'all',
     });
   });
 
