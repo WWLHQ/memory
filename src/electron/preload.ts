@@ -454,6 +454,21 @@ const recallHard = {
     ipcRenderer.invoke(IPC.recallHardSet, patch, sessionId),
 };
 
+// 阶段 A：托盘常驻 / 开机自启。改的是本机壳层行为，不碰密钥与账本；回执里的 applied 是系统真值。
+const appShell = {
+  state: (sessionId?: string | null) => ipcRenderer.invoke(IPC.appShellState, sessionId),
+  set: (patch: unknown, sessionId?: string | null) => ipcRenderer.invoke(IPC.appShellSet, patch, sessionId),
+};
+
+// 阶段 B：网页会话无头自动采集（起隐藏浏览器、访问站点、经本机接收端落盘）。全部需会话。
+const webchatAuto = {
+  state: (sessionId?: string | null) => ipcRenderer.invoke(IPC.webchatAutoState, sessionId),
+  set: (patch: unknown, sessionId?: string | null) => ipcRenderer.invoke(IPC.webchatAutoSet, patch, sessionId),
+  run: (sessionId?: string | null) => ipcRenderer.invoke(IPC.webchatAutoRun, sessionId),
+  sweep: (sessionId?: string | null) => ipcRenderer.invoke(IPC.webchatAutoSweep, sessionId),
+  login: (site: string, sessionId?: string | null) => ipcRenderer.invoke(IPC.webchatAutoLogin, site, sessionId),
+};
+
 // 原子任务 B：监控仪表盘只读聚合（Agent 健康 + 写入率 + 校验异常）。公开观测，不需会话。
 const monitor = {
   stats: () => ipcRenderer.invoke(IPC.monitorStats),
@@ -478,4 +493,4 @@ const shell = {
 };
 
 contextBridge.exposeInMainWorld('__ELECTRON__', true);
-contextBridge.exposeInMainWorld('api', { storage, personal, hostScan, hostAgentDetect, tenant, ownerBindings, mcpClients, collector, chatExports, webchatExport, webchatAudit, webchatPurge, webchatExt, backup, dataRoot, log, l0, setup, legacy, ledgerReset, rulesRejudge, ledgerFields, refineQueue, sync, llm, recallHard, monitor, shell });
+contextBridge.exposeInMainWorld('api', { storage, personal, hostScan, hostAgentDetect, tenant, ownerBindings, mcpClients, collector, chatExports, webchatExport, webchatAudit, webchatPurge, webchatExt, backup, dataRoot, log, l0, setup, legacy, ledgerReset, rulesRejudge, ledgerFields, refineQueue, sync, llm, recallHard, appShell, webchatAuto, monitor, shell });

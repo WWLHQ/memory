@@ -42,6 +42,8 @@ export const DATA_ROOT_MIGRATE_FILES = [
   'home-accounts.json',
   'home-mirror.json',
   'agent-onboard.json',
+  // 阶段 A：托盘常驻 / 开机自启的开关（跟数据根走；不带走会在换目录后回到默认值）
+  'app-shell.json',
   'l0-keyring.json',
   'llm-config.json',
   'llm-keys.json',

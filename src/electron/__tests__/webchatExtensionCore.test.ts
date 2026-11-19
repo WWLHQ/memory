@@ -229,6 +229,45 @@ describe('DeepSeek 消息容器规则（用户提问必须被导出）', () => {
     ]);
   });
 
+  it('用户提问里引用了 .ds-markdown 块也不丢（2026-11-19 首条用户丢失真因）', () => {
+    // 真机事故：导出文件首条是 ## 助手，用户提问整条消失。
+    // 根因是 excludeInside 用泛指的 .ds-markdown，把「用户引用了上一轮回答/搜索卡片」
+    // 的用户容器也当成助手丢掉。助手正文的真正标志是 .ds-assistant-message-main-content。
+    document.body.innerHTML = `
+      <div class="ds-virtual-list-visible-items">
+        <div class="d29f3d7d ds-message _63c77b1">
+          <div class="fbb737a4">请总结 Function Call 的注册方式</div>
+          <div class="ds-markdown quote-ref">引用：上一轮的回答</div>
+        </div>
+        <div class="ds-message _63c77b1">
+          <div class="ds-markdown ds-assistant-message-main-content">这是助手回答</div>
+        </div>
+      </div>`;
+    expect(core.extractMessages(document, 'deepseek')).toEqual([
+      { role: 'user', text: '请总结 Function Call 的注册方式\n\n引用：上一轮的回答' },
+      { role: 'assistant', text: '这是助手回答' },
+    ]);
+    const md = core.formatMarkdown({
+      site: 'deepseek', siteLabel: 'DeepSeek', url: 'https://chat.deepseek.com/a/chat/s/demo',
+      exportedAt: '2026-11-19T00:00:00.000Z', title: 'demo',
+      messages: core.extractMessages(document, 'deepseek'),
+    });
+    // 首条必须是用户，不再是助手
+    expect(md.split('\n').find((l: string) => l.startsWith('## '))).toBe('## 用户');
+  });
+
+  it('真助手容器（含 ds-assistant-message-main-content）仍不会被误认成用户', () => {
+    document.body.innerHTML = `
+      <div class="ds-virtual-list-visible-items">
+        <div class="ds-message _63c77b1">
+          <div class="ds-markdown ds-assistant-message-main-content">只有助手，没有用户提问</div>
+        </div>
+      </div>`;
+    const msgs = core.extractMessages(document, 'deepseek');
+    // 助手被 containerRules 排除，universal selector 仍会认成 assistant（不会被记成 user）
+    expect(msgs.every((m: { role: string }) => m.role !== 'user')).toBe(true);
+  });
+
   it('导出后不再触发「缺用户提问」诊断，Markdown 里 用户/助手 各 2 段', () => {
     document.body.innerHTML = DEEPSEEK_HTML;
     const messages = core.extractMessages(document, 'deepseek');

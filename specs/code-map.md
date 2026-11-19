@@ -70,7 +70,7 @@ status: draft
 | 能力 | 代码落点 | 测试 |
 |---|---|---|
 | 规则单一真源 | `src/core/memagent/layerRules.ts`：`LAYER_ORDER`、`LAYER_SPECS`、`DEDUP_THRESHOLDS`、`DEDUP_WEIGHTS[_NO_LLM]`、`L0_POLICY`、`MIN_MEANINGFUL_CHARS`、`sanitizeL1`、`meaningfulLength`、`checkLayerSpec`（**批次40 起另加 `DEPTH_CAP_BANDS`/`depthCapFor`/`targetLayers`/`layerBand`/`checkLayerSpecDetailed`/`headlineLayer`/`MIN_MEANINGFUL_WITHOUT_FACTS`，见批次40 小节**） | `src/core/memagent/__tests__/qualityGate.test.ts`（脱敏/门禁/规格）、`refine.test.ts`「每层生成规格」describe |
-| L0→L1 质量门 | `src/core/memagent/qualityGate.ts`（`checkL0ToL1Quality`：空/占位/无信息量/过短拦截，规则引用 layerRules；**批次40-B 起 `QUALITY_GATE_VERSION=3` + 码 `short_low_signal`：有效字 <30 且无硬事实且无技术证据 → 入库即拒**） | 同上 |
+| L0→L1 质量门 | `src/core/memagent/qualityGate.ts`（`checkL0ToL1Quality`：空/占位/无信息量/过短拦截，规则引用 layerRules；**批次40-B 起 `QUALITY_GATE_VERSION=3` + 码 `short_low_signal`：有效字 <30 且无硬事实且无技术证据 → 入库即拒；批次63 升 `=4` + 码 `run_failure`：模型运行失败日志无正常对话 → 拒，见批次63 小节**） | 同上 |
 | 逐层生成 → 校验 → 查重 → 嫁接停止 | `src/core/memagent/memories.ts`（`coreWrite`：L0 seal 前置、L1 本地脱敏、`makeLayerGenerator` 逐层、命中即 `graft_to/graft_layer` 并停止；目标只刷新 `grafted_from/confidence/version`） | `src/core/memagent/__tests__/refine.test.ts`、`contract.test.ts` |
 | 五维查重与逐层阈值 | `src/core/memagent/dedup.ts`（`findDuplicate`、权重归一化、`DEDUP_THRESHOLDS`） | `refine.test.ts` |
 | L0 密钥环与连续会话 | `src/core/memagent/l0vault.ts`（`L0Vault`：v2 信封、`admin_wrap`、一次性 grant、5min 空闲 + 60s 心跳、5 次错误 15min 锁、启动/锁屏/休眠/退出清理、全有或全无解密、幂等迁移 `sweep/onAppRestart/onSecurityLock/onExit`） | `src/core/memagent/__tests__/l0vault.test.ts` + `l0Kit.ts` |
@@ -1925,3 +1925,32 @@ status: draft
 > **实测口径**：stdio 行没有令牌可读（`extractStoredBearer` 返 null），实测改用**现役令牌**（桥接脚本读的就是这份文件）；http 行仍只认它自己配置里的那份。
 > **三道闸门**：A `tsc` 双工程 0 错、`oxlint` 794 文件 0/0、`check:no-demo` 420 文件 0 命中、`code:index` 426 源码 / 150 文档新鲜；B `npm test` **308 文件 / 3808 例全绿**；C 三处变异（去掉 argv 客户端 id → 3 红；stdio 合并不清 headers → 2 红即令牌泄漏；桥接脚本不读 `keys/` → 1 红），还原后 127 例复绿。打包 128,139,638 B，SHA256 `03978C0FF664FA3535572EC8A4CE0346BD194064C9FA5373C7894682608B2408`。
 > 状态：**已打包，未提交、未推送**，等用户实测 + 明确确认。手动测试步骤见 `specs/MANUAL-TEST-FIX-BATCH-44.md`。
+
+## 批次63（2026-11-19）：质量门前置到 L0 入库前 + 模型运行失败日志禁止入库
+
+> 用户诉求：质量闸门过滤放到 L0 入库之前，通过才入 L0、不通过拒绝入 L0；并把「模型异常停止、无实际意义」的对话（Our Free Model 更新失败截图：404 下架 / RATE_LIMIT / NO_ADAPTER / AUTHORIZATION_REQUIRED / MODEL_SWITCH_COMPACTION_FAILED）禁止入库。用户拍板：① 不通过者**不入 L0 主库，仍落备份库供重判**；② 边界取「**有失败日志、无正常对话才拦**」，正常讨论/夹带真实诉求放行。
+
+| 能力 | 代码落点 | 测试 |
+|---|---|---|
+| 运行失败拦截规则（单一真源） | `src/core/memagent/qualityGate.ts`：新 `QualityBlockCode='run_failure'`；`RUN_FAILURE_LINE_RE`（行首状态词）/ `RUN_ERROR_TAG_RE`（行尾错误码标签）/ `RUN_FAILURE_DETAIL_RE`（网关失败文案）/ `RUN_NARRATION_LINE_RE`（过程旁白）；`runFailureReason()` 剔除失败行与旁白后判有无正常对话；`QUALITY_GATE_VERSION` **3→4** | `src/core/memagent/__tests__/qualityGate.test.ts`「批次63」describe：截图 5 类样本拦截 + 4 类正常放行 + 混合诉求放行 + 审计码 |
+| 写入顺序前置 | `src/core/memagent/memories.ts` `coreWrite`：写密钥校验 → **质量门前置** → L0 封存 → 通过者入 L0 主库建 L1 / 不通过者仅落 `bak_*` 备份库（不建主库行、不建向量、审计 `filtered_l0_to_l1`）；密文两条分支共用 | `qualityGate.test.ts`、`l0First.test.ts`（bak 落库 + 未解锁不落明文备份口径不变） |
+| 拦截码人话 | `src/web/security/L0FilteredCard.tsx` `FILTER_CODE_ZH` 增 `run_failure:'模型运行失败日志'` | UI 卡片按码译名，无英文枚举 |
+| 全入口自动生效 | 会话采集 / daemon / webhook / MCP write_memory / Web 写入页均汇入 `coreWrite`，无一绕过质量门 → 新规则一处加、全局生效 | `sessionCollector.test.ts`、`webhook.test.ts`、`webchatIngest.test.ts` |
+
+> **误伤边界（保守口径）**：失败信号须是行首状态词 / 行尾错误码标签 / 网关失败文案之一；「我们排查了运行失败问题」这类不在行首、无错误码标签的正常讨论不触发；失败日志夹带真实诉求（剩余有硬事实/技术证据/≥30 字）则放行。`checkL0ToL1Quality` 调用顺序：thin → NOISE → meta → **run_failure** → short_low_signal，失败日志记 `run_failure` 而非短门码。
+> **三道闸门**：见本轮成果说明（A 影响面回归 / B 效果验证 / C 变异验证）。
+
+## 批次64（2026-11-19）：网页采集「卡死在前 N 条」修复 + 补齐历史
+
+> 用户诉求：这么久了为什么没有采集入库。现查结论：采集器每轮都在跑、也一直在入库（记忆库 `collector:webchat-export:*` 已有 568 条），但**导出侧 5 小时零新文件**——因为驱动脚本每轮固定从侧栏第 1 条点满 N 条，而侧栏最新几条早就采过 → 每轮全被去重命中 → `no_new`，其余 190+ 条永远轮不到。用户拍板：先一次性补历史，之后回增量；导出与入库两者都要（入库链路原本已存在）。
+
+| 能力 | 代码落点 | 测试 |
+|---|---|---|
+| 「跳过已采继续往下找」 | `src/electron/webchatAutoConfig.ts` `buildDriverScript`：新增 `skipKeys` / `startAt` / `maxAttempts`；循环从「点前 N 条」改为「最多试 maxAttempts 条、命中 skipKeys 就 `skipped++` 继续、收满 maxChats 条新的才停」，并回传 `nextStart` / `attempts` / `skipped` / `reachedEnd` | `webchatAutoConfig.test.ts`「三态真跑」新增 4 例：顶部 2 条已采过 → 采到第 3、4 条 / 走完 reachedEnd=true / 步数用完停并回报 nextStart / startAt 从中间接着扫 |
+| 跳过不再误报「页面结构变了」 | `judgeSite`：`chats.length===0` 时先看 `skipped>0 && attempts>0` → `no_new`（都采过），否则才 `dom_changed` | 同文件「单站结果判定」新增 1 例（含反面对照：真没抽到正文仍 dom_changed） |
+| 补齐历史（分批按游标推进） | `webchatAutoConfig.ts` 新常量 `AUTO_MAX_CHATS_SWEEP=30` / `AUTO_MAX_ATTEMPTS_SWEEP=40` / `AUTO_SWEEP_MAX_BATCHES=10`；`AutoState.cursors`（每站已扫到第几条，`normalizeAutoState` 校验非负整数）；`webchatAutoCollect.ts` `collectSiteSweep` 按游标循环、每批落盘、站点不可采/零收获即停 | `webchatAutoConfig.test.ts` 状态往返（cursors）；UI 例见下 |
+| 通道与入口 | `ipcChannels.ts` `webchatAutoSweep`；`main.ts` handler（需会话）；`preload.ts` `sweep`；`hostBridge.ts` `HostMethod` + 方法映射；`web/params/webchatAuto.ts` `webchatAutoSweep()`；`WebchatAutoCard.tsx` 新按钮「补齐历史会话」+ 说明行 | `WebchatAutoCard.test.tsx` 新增 3 例：调 sweep 不误调 run / 失败如实报错且不覆盖已加载配置 / 文案写明「只补还没采过的」 |
+| 失败回执不再被当成状态 | `web/params/webchatAuto.ts` `toResult`：`ok!==true` 时只有回执像状态（有 `config.sites`）才回传 `state`，否则 `state=null`；卡片侧 `st?.config?.sites` 兜底 | 上条「失败如实报错」用例在变异（退回 `state: r`）时红灯 |
+
+> **判据（下次一眼认出来）**：`actions.log` 里 `collector:webchat-auto:steps` 每轮 steps 标题串**完全相同**（如 deepseek 恒为「个人记忆系统变现路径/强制Agent先读记忆库/V100安装Win11可」）= 采集卡死；标题在变而 exported 0 才是真去重。
+> **三道闸门**：A 全量 `test:gate` **315 文件 / 3974 例 / 0 失败 / 0 重试**（20261119-194332）；typecheck 双工程 0 错；oxlint 811 文件 0/0；`check:no-demo` 430 文件 0 命中。B 新增 8 例（驱动 4 / 判定 1 / 卡片 3）全绿。C 三次变异：跳过处 `continue→break` → 1 红；去掉 `skipped>0` 判定 → 1 红；`toResult` 退回 `state: r` → 1 红；均恢复后复绿。

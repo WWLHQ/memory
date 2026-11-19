@@ -23,7 +23,11 @@
         {
           role: 'user',
           selector: '[class*="ds-message"]',
-          excludeInside: ['[class*="assistant-message"]', '.ds-markdown'],
+          // 只排除「助手正文标记」本身，不能用泛指的 .ds-markdown：
+          // 2026-11-19 实测事故——用户提问里若引用了上一轮回答/搜索卡片（复用了 .ds-markdown），
+          // 旧的 excludeInside 会把整条用户容器当助手丢掉，导致导出文件首条是助手、用户提问丢失。
+          // 助手正文的标志是 .ds-assistant-message-main-content，用户引用块没有它。
+          excludeInside: ['.ds-assistant-message-main-content', '[class*="assistant-message-main"]'],
         },
       ],
     },

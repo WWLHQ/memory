@@ -85,6 +85,11 @@ tryRemove(extensionDst);
 fs.mkdirSync(path.dirname(extensionDst), { recursive: true });
 fs.cpSync(path.join(root, 'browser-extension', 'webchat-exporter'), extensionDst, { recursive: true });
 
+// 3.2) 托盘图标（阶段 A）：主进程用 process.resourcesPath/icon.png 读，
+// 缺失时托盘会退化成空图标（仍能关窗常驻，但用户看不见入口）→ 与 builder 配置保持同一落点。
+const trayIconDst = path.join(outDir, 'resources', 'icon.png');
+fs.cpSync(path.join(root, 'build-resources', 'icon.png'), trayIconDst, { force: true });
+
 // 4) 产物自检
 for (const p of [
   exeDst,
@@ -93,6 +98,7 @@ for (const p of [
   path.join(appDir, 'dist-electron', 'main.cjs'),
   path.join(appDir, 'dist-electron', 'preload.cjs'),
   path.join(extensionDst, 'manifest.json'),
+  trayIconDst,
 ]) {
   if (!fs.existsSync(p)) fail(`打包产物缺失：${p}`);
 }

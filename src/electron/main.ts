@@ -1,4 +1,4 @@
-﻿import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, powerMonitor, session, shell } from 'electron';
+﻿import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, powerMonitor, session, shell, Tray } from 'electron';
 process.on('uncaughtException', (err) => {
   console.error('[uncaught]', err?.message, err?.stack);
 });
@@ -37,9 +37,16 @@ import {
   type DataRootMigration, type DataRootPointer, type DataRootSummary, type LegacyLibraryMigrateReport, type LibraryPaths,
 } from './dataRoot.ts';
 import { classifiedPath, classifiedDir, libraryDir } from '../shared/dataLayout.ts';
+import {
+  isHiddenLaunch, loginItemArgs, parseShellPatch, readShellSettings, resolveCloseAction,
+  writeShellSettings, type ShellSettings,
+} from './appShell.ts';
 import { resolveWebchatExtensionDir } from './webchatExtensionPath.ts';
 import { ensureStableExtensionDir } from './webchatExtensionCopy.ts';
 import { createWebchatIngestServer, newWebchatIngestToken, writeWebchatRuntime } from './webchatIngest.ts';
+import { createWebchatAutoCollector, type WebchatAutoCollector } from './webchatAutoCollect.ts';
+import { parseAutoPatch } from './webchatAutoConfig.ts';
+import { isWebchatStoragePath } from './webchatWindow.ts';
 import { detectChatExportsDirs, samePath as sameFsPath, siteExportStats } from './chatExportsLocations.ts';
 import { formatAuditReport, resolveAuditDir, runAudit } from '../core/memagent/webchatAuditStore.ts';
 import {
@@ -230,6 +237,13 @@ let personalOwnerBindings: PersonalOwnerBinding[] = [];
 let homeServerRef: HomeServer | null = null;
 /** L0 密钥环（§4.4）：DEK 只在主进程内存；退出时清空写密钥缓存 */
 let l0VaultRef: L0Vault | null = null;
+/** 阶段 B：网页会话无头采集器（窗口 + 定时器，随进程生命周期；托盘常驻后才能真正常跑） */
+let webchatAutoRef: WebchatAutoCollector | null = null;
+/**
+ * 阶段 B：接收端的**实际**监听端点。
+ * 端口会被占用时 +1 探测（最多 +9），所以采集器不能硬编码 8206 —— 必须用这里记下的真值。
+ */
+let webchatIngestEndpoint: { port: number; token: string } | null = null;
 /**
  * 批次37-G：本次运行内**待导出**的 L0 恢复卡（正文含恢复码，只在内存，绝不落数据根/日志）。
  * 换发新卡即覆盖；导出成功不改写（用户可能第一次选了别处想再存一份）。
@@ -2419,6 +2433,82 @@ function registerRecallHardIpc(): void {
       return next;
     } catch (e) { return l0Fail(e); }
   });
+
+  // ── 阶段 A：托盘常驻 / 开机自启（参数页两个开关） ─────────────────────────
+  // 需会话：这两项改的是本机壳层行为（关窗是否退出、是否写系统登录项），
+  // 不属于「只读观测」，所以和 recallHard 一样先过登录闸门。
+  handleIpc(IPC.appShellState, async (_e, sessionId?: string) => {
+    const gate = requireSession(sessionId, IPC.appShellState);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    return appShellStateView();
+  });
+  handleIpc(IPC.appShellSet, async (_e, patch: unknown, sessionId?: string) => {
+    const gate = requireSession(sessionId, IPC.appShellSet);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    const parsed = parseShellPatch(patch);
+    if (!parsed.ok) return { ok: false, error: parsed.error };
+    try {
+      updateShellSettings(parsed.patch);
+    } catch (e) {
+      // 写盘/注册表失败必须如实回执：报成功会让页面显示「已生效」而实际没落地
+      const msg = String((e as Error)?.message ?? e);
+      actionLog('app', 'appShell:set-fail', { error: msg }, { level: 'error' });
+      return { ok: false, error: `保存失败：${msg}` };
+    }
+    actionLog('app', 'appShell:set', { user: gate.ctx.user_id, fields: Object.keys(parsed.patch) });
+    return appShellStateView();
+  });
+
+  // ── 阶段 B：网页会话无头自动采集 ──────────────────────────────────────────
+  // 需会话：会起隐藏浏览器、访问外部站点、把内容写进记忆库，不属于只读观测。
+  const autoNotReady = { ok: false as const, error: '自动采集还没就绪（主进程启动中或初始化失败）' };
+  handleIpc(IPC.webchatAutoState, async (_e, sessionId?: string) => {
+    const gate = requireSession(sessionId, IPC.webchatAutoState);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    if (!webchatAutoRef) return autoNotReady;
+    return webchatAutoRef.state();
+  });
+  handleIpc(IPC.webchatAutoSet, async (_e, patch: unknown, sessionId?: string) => {
+    const gate = requireSession(sessionId, IPC.webchatAutoSet);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    if (!webchatAutoRef) return autoNotReady;
+    const parsed = parseAutoPatch(patch);
+    if (!parsed.ok) return { ok: false, error: parsed.error };
+    const next = webchatAutoRef.apply(parsed.patch);
+    actionLog('collector', 'webchat-auto:set', { user: gate.ctx.user_id, fields: Object.keys(parsed.patch) });
+    return next;
+  });
+  handleIpc(IPC.webchatAutoRun, async (_e, sessionId?: string) => {
+    const gate = requireSession(sessionId, IPC.webchatAutoRun);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    if (!webchatAutoRef) return autoNotReady;
+    try {
+      const summary = await webchatAutoRef.runNow();
+      return { ok: true, summary, state: webchatAutoRef.state() };
+    } catch (e) {
+      return { ok: false, error: `采集失败：${String((e as Error)?.message ?? e)}` };
+    }
+  });
+  handleIpc(IPC.webchatAutoSweep, async (_e, sessionId?: string) => {
+    const gate = requireSession(sessionId, IPC.webchatAutoSweep);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    if (!webchatAutoRef) return autoNotReady;
+    try {
+      const summary = await webchatAutoRef.sweepNow();
+      return { ok: true, summary, state: webchatAutoRef.state() };
+    } catch (e) {
+      return { ok: false, error: `补齐历史失败：${String((e as Error)?.message ?? e)}` };
+    }
+  });
+  handleIpc(IPC.webchatAutoLogin, async (_e, site: unknown, sessionId?: string) => {
+    const gate = requireSession(sessionId, IPC.webchatAutoLogin);
+    if (!gate.ok) return { ok: false, error: gate.error };
+    if (!webchatAutoRef) return autoNotReady;
+    if (typeof site !== 'string' || !site) return { ok: false, error: '站点必填' };
+    const r = await webchatAutoRef.openLogin(site);
+    actionLog('collector', 'webchat-auto:login-open', { site, ok: r.ok });
+    return r;
+  });
 }
 
 async function scheduleDataRootChange(mode: 'change' | 'restore', actor?: string): Promise<{  ok: boolean; root?: string; restartRequired?: boolean; canceled?: boolean; error?: string;
@@ -4254,6 +4344,8 @@ async function bootstrap(): Promise<void> {
       ingest.once('error', onListenError);
       ingest.listen(port, '127.0.0.1', () => {
         ingest.removeListener('error', onListenError);
+        // 记下实际端点：无头采集器要用它 POST /export（端口试过 +1，不能假设是 8206）
+        webchatIngestEndpoint = { port, token: ingestToken };
         ingest.on('error', (e) => {
           actionLog('collector', 'webchat-ingest-error', { error: String((e as Error)?.message ?? e) }, { level: 'warn' });
         });
@@ -4272,6 +4364,24 @@ async function bootstrap(): Promise<void> {
     actionLog('collector', 'webchat-ingest-init-failed', {
       error: String((e as Error)?.message ?? e),
     }, { level: 'warn' });
+  }
+  // 阶段 B：无头自动采集器。构造即排程（配置 enabled 时才真排），窗口与定时器随进程存活；
+  // 托盘常驻（阶段 A）保证进程在，这两件事才成立。
+  try {
+    webchatAutoRef = createWebchatAutoCollector({
+      root: () => USER_DATA,
+      coreJsPath: () => join(webchatExtensionDir(), 'shared', 'core.js'),
+      ingest: () => webchatIngestEndpoint,
+      log: (event, data, level) => actionLog('collector', event, data ?? {}, level ? { level } : undefined),
+    });
+    actionLog('collector', 'webchat-auto:ready', {
+      enabled: webchatAutoRef.state().config.enabled,
+      intervalMinutes: webchatAutoRef.state().config.intervalMinutes,
+    });
+  } catch (e) {
+    actionLog('collector', 'webchat-auto:init-failed', {
+      error: String((e as Error)?.message ?? e),
+    }, { level: 'error' });
   }
   const registryDisplayIcons = (): string[] => {
     if (process.platform !== 'win32') return [];
@@ -5060,6 +5170,9 @@ async function bootstrap(): Promise<void> {
       width: 1280,
       height: 860,
       title: '多Agent记忆助手',
+      // 阶段 A：开机自启带 --hidden 时不弹窗（只在托盘）；
+      // 首启向导例外——该走完的向导必须可见，不能藏在托盘里让人以为没启动。
+      show: wizardFirst ? true : !hiddenLaunch,
       ...(wizardFirst ? {} : shellChrome),
       webPreferences: {
         preload: join(__dirname, 'preload.cjs'),
@@ -5082,6 +5195,22 @@ async function bootstrap(): Promise<void> {
     app.quit();
     return;
   }
+
+  // 阶段 A：关窗=收进托盘（除非正在退出）。
+  // 关键：win 的 'closed' 回调会关停内核（storage.close / home / mcp / webhook / reconciler），
+  // 所以「隐藏」必须走 preventDefault 让窗口对象继续活着——否则后台服务随窗口一起停，
+  // 托盘常驻就是个空壳（这正是本阶段最容易写错的一处）。
+  win.on('close', (event) => {
+    const action = resolveCloseAction({ quitting, keepInTray: currentShellSettings().keepInTray });
+    if (action === 'close') return;
+    event.preventDefault();
+    win?.hide();
+    void mlog('app:window-hidden', {});
+    notifyHiddenOnce();
+  });
+  // 托盘与自启：联动口径见 updateShellSettings（无托盘就不写自启，避免开机后打不开）
+  if (currentShellSettings().keepInTray) ensureTray();
+  applyAutoStart(currentShellSettings().autoStart);
 
   win.webContents.setWindowOpenHandler(({ url }) => {
     // 仅本机页面允许开新窗口并注入 preload；来源必须是精确受信 origin，外部 URL 交给系统浏览器
@@ -5173,10 +5302,151 @@ async function bootstrap(): Promise<void> {
     mcpHttp.stop();
     webhookSrv.close();
     reconciler.stop();
+    // 阶段 B：隐藏浏览器窗口与定时器必须一起收（否则退出时会留下无头窗口）
+    webchatAutoRef?.stop();
+    webchatAutoRef = null;
+    webchatIngestEndpoint = null;
   });
 }
 
 
+
+// ── 阶段 A：托盘常驻 + 开机自启（2026-11-18） ────────────────────────────────
+// 为什么必须做：不做这层，后台采集只成立在「app 恰好开着」时——关窗即退出（见下方
+// window-all-closed）、且全库无开机自启。判据全部下沉 appShell.ts（纯函数可单测），
+// 这里只做 electron 接线（Tray / setLoginItemSettings），避免判据两份漂移。
+let trayRef: Tray | null = null;
+/** 托盘「退出」/系统退出置真：此时关窗必须放行，否则进程永远退不掉 */
+let quitting = false;
+let shellSettings: ShellSettings | null = null;
+let hiddenBalloonShown = false;
+const hiddenLaunch = isHiddenLaunch(process.argv);
+
+/** 托盘图标：打包态取 extraResources 的 icon.png；开发态回仓库 build-resources */
+function trayIconPath(): string {
+  const packed = join(process.resourcesPath ?? '', 'icon.png');
+  if (existsSync(packed)) return packed;
+  return join(__dirname, '..', 'build-resources', 'icon.png');
+}
+
+function currentShellSettings(): ShellSettings {
+  if (!shellSettings) shellSettings = readShellSettings(app.getPath('userData'));
+  return shellSettings;
+}
+
+/**
+ * 仅在打包态写登录项。
+ * 开发态 app.isPackaged=false 时写注册表会把 electron.exe 注册成开机启动——污染用户环境且无从解释。
+ */
+function applyAutoStart(on: boolean): void {
+  if (process.platform !== 'win32' || !app.isPackaged) return;
+  try {
+    app.setLoginItemSettings({ openAtLogin: on, args: loginItemArgs() });
+    void mlog('app:autostart', { openAtLogin: on, args: loginItemArgs() });
+  } catch (e) {
+    void mlog('app:autostart-fail', { on, error: String((e as Error)?.message ?? e) });
+  }
+}
+
+function showMainWindow(): void {
+  const win = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed());
+  if (!win) { void bootstrap(); return; }
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+
+function updateShellSettings(patch: Partial<ShellSettings>): void {
+  // 联动约束（无托盘就不写自启）在 appShell.writeShellSettings 里统一收敛，这里不再重复一套判据
+  const next = writeShellSettings(app.getPath('userData'), { ...currentShellSettings(), ...patch });
+  shellSettings = next;
+  applyAutoStart(next.autoStart);
+  if (next.keepInTray) ensureTray();
+  else if (trayRef) { trayRef.destroy(); trayRef = null; }
+  if (trayRef) trayRef.setContextMenu(buildTrayMenu());
+  actionLog('app', 'shell:settings', { keepInTray: next.keepInTray, autoStart: next.autoStart });
+}
+
+/** 壳层状态真值：`applied` 是系统里**真有没有**登录项，不是配置里写的意图 */
+function appShellStateView(): {
+  ok: true; keepInTray: boolean; autoStart: boolean; platform: string;
+  applied: boolean | null; trayActive: boolean; autostartNote: string;
+} {
+  const cur = currentShellSettings();
+  let applied: boolean | null = null;
+  let autostartNote = '';
+  if (process.platform !== 'win32') {
+    autostartNote = '当前系统不支持开机自启设置（本功能仅 Windows）';
+  } else if (!app.isPackaged) {
+    autostartNote = '开发态不写系统登录项：打包装机后才会真正生效（此处显示的是配置意图）';
+  } else {
+    try {
+      applied = app.getLoginItemSettings({ args: loginItemArgs() }).openAtLogin;
+    } catch {
+      applied = null;
+      autostartNote = '读取系统登录项失败：无法确认是否已生效';
+    }
+  }
+  return {
+    ok: true,
+    keepInTray: cur.keepInTray,
+    autoStart: cur.autoStart,
+    platform: process.platform,
+    applied,
+    trayActive: trayRef !== null,
+    autostartNote,
+  };
+}
+
+function buildTrayMenu(): Menu {
+  const cur = currentShellSettings();
+  return Menu.buildFromTemplate([
+    { label: '显示主窗口', click: () => showMainWindow() },
+    { type: 'separator' },
+    {
+      label: '关窗后留在托盘（后台继续跑）',
+      type: 'checkbox',
+      checked: cur.keepInTray,
+      click: (item) => updateShellSettings({ keepInTray: item.checked }),
+    },
+    {
+      label: '开机自动启动',
+      type: 'checkbox',
+      checked: cur.autoStart,
+      click: (item) => updateShellSettings({ autoStart: item.checked }),
+    },
+    { type: 'separator' },
+    { label: '退出', click: () => { quitting = true; app.quit(); } },
+  ]);
+}
+
+function ensureTray(): void {
+  if (trayRef) return;
+  let icon = nativeImage.createFromPath(trayIconPath());
+  if (icon.isEmpty()) {
+    void mlog('app:tray-icon-missing', { path: trayIconPath() });
+    icon = nativeImage.createEmpty();
+  } else {
+    icon = icon.resize({ width: 16, height: 16 });
+  }
+  trayRef = new Tray(icon);
+  trayRef.setToolTip('多Agent记忆助手：后台运行中');
+  trayRef.setContextMenu(buildTrayMenu());
+  trayRef.on('click', () => showMainWindow());
+  void mlog('app:tray-created', {});
+}
+
+/** 首次收进托盘时提示一次：否则用户以为进程已退出（气泡失败不影响关窗路径） */
+function notifyHiddenOnce(): void {
+  if (hiddenBalloonShown || !trayRef || process.platform !== 'win32') return;
+  hiddenBalloonShown = true;
+  try {
+    trayRef.displayBalloon({
+      title: '仍在后台运行',
+      content: '窗口已收进托盘，后台服务继续。要彻底退出请用托盘菜单里的「退出」。',
+    });
+  } catch { /* 气泡不可用不是错误 */ }
+}
 
 // 顶层注册：exe 正常启动时 require("electron") 返回主进程完整对象（app 一定可用）。
 // 保留 app 判空：若 main.cjs 被误用普通 Node 加载（shim 环境，app 为 undefined），
@@ -5200,6 +5470,9 @@ if (app && gotSingleInstanceLock) {
   // 未捕获异常/未处理拒绝由顶部 process.on 统一记录（app 上没有同名事件，别写 app.on）
   // L0 安全钩子（§4.4.3/§4.4.4）：退出清空内存密钥；锁屏/休眠在 whenReady 内注册（powerMonitor 需 app ready）
   app.on('before-quit', () => {
+    // 阶段 A：一旦进入退出流程，关窗拦截必须让路（否则 app.quit() 会被 close 拦截吞掉，
+    // 表现为「点了退出没反应、只能杀进程」）
+    quitting = true;
     void l0VaultRef?.onExit().catch(() => undefined);
     // 批次42-D：中枢优雅关闭——pglite 需显式 close 才保证 WASM 存储层完整刷盘；
     // close 失败只忽略（退出路径绝不阻断），中枢本身是衍生镜像（真源在各端账本，可 syncUp 重建）。
@@ -5208,12 +5481,17 @@ if (app && gotSingleInstanceLock) {
   app.on('browser-window-created', (_e, win) => {
     win.webContents.on('did-fail-load', (_e, code, desc, url) => console.error('[fail-load]', code, desc, url));
     win.webContents.on('render-process-gone', (_e, d) => console.error('[gone]', JSON.stringify(d)));
-    // 导航闸门：只允许留在本机页面；外部 http(s) 交给系统浏览器，其余一律拦截
-    win.webContents.on('will-navigate', (event, url) => {
-      if (isTrustedUrl(url)) return;
-      event.preventDefault();
-      if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
-    });
+    // 导航闸门：只允许留在本机页面；外部 http(s) 交给系统浏览器，其余一律拦截。
+    // 网页采集窗例外（persist:webchat-*）：它们本来就要浏览外部站点；若也套用此闸门，
+    // DeepSeek 扫码确认后的回调导航会被 preventDefault + openExternal 丢给 QQ浏览器，
+    // Electron 登录窗就永远停在「扫码成功」页（2026-11-19 真机根因）。
+    if (!isWebchatStoragePath(win.webContents.session.storagePath)) {
+      win.webContents.on('will-navigate', (event, url) => {
+        if (isTrustedUrl(url)) return;
+        event.preventDefault();
+        if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
+      });
+    }
     win.on('closed', () => console.error('[window-closed]'));
   });
 } else if (!app) {
@@ -5244,7 +5522,11 @@ if (app?.whenReady && gotSingleInstanceLock) {
 }
 
 app?.on?.('window-all-closed', () => {
-  if (process.platform !== 'darwin') void app?.quit?.();
+  if (process.platform === 'darwin') return;
+  // 阶段 A：常驻开启时不退出（进程要留着跑后台采集/本机服务）。
+  // 保底判断：托盘真的在才算数——托盘没建起来却拒绝退出，会变成「关不掉的幽灵进程」。
+  if (shellSettings?.keepInTray && trayRef) return;
+  void app?.quit?.();
 });
 
 app?.on?.('activate', () => {

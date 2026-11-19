@@ -117,6 +117,10 @@ export type HostMethod =
   | 'llm:billing' | 'llm:billingKey'
   /** 批次62：硬前置召回 A/B/C 三层开关（状态需会话 / 保存仅管理员） */
   | 'recallHard:state' | 'recallHard:set'
+  /** 阶段 A：托盘常驻 / 开机自启（本机壳层行为，需会话） */
+  | 'appShell:state' | 'appShell:set'
+  /** 阶段 B：网页会话无头自动采集（状态/开关/立即采一轮/登录窗口） */
+  | 'webchatAuto:state' | 'webchatAuto:set' | 'webchatAuto:run' | 'webchatAuto:sweep' | 'webchatAuto:login'
   /** 原子任务 B：监控仪表盘只读聚合（Agent 健康 + 写入率 + 校验异常）；公开观测 */
   | 'monitor:stats';
 
@@ -252,6 +256,13 @@ const CHANNEL_TO_NATIVE: Record<HostMethod, [string, string]> = {
   'llm:billingKey': ['llm', 'setBillingKey'],
   'recallHard:state': ['recallHard', 'state'],
   'recallHard:set': ['recallHard', 'set'],
+  'appShell:state': ['appShell', 'state'],
+  'appShell:set': ['appShell', 'set'],
+  'webchatAuto:state': ['webchatAuto', 'state'],
+  'webchatAuto:set': ['webchatAuto', 'set'],
+  'webchatAuto:run': ['webchatAuto', 'run'],
+  'webchatAuto:sweep': ['webchatAuto', 'sweep'],
+  'webchatAuto:login': ['webchatAuto', 'login'],
   'monitor:stats': ['monitor', 'stats'],
 };
 

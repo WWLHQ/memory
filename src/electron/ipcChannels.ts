@@ -195,6 +195,16 @@ export const IPC = {
   /** 批次62：硬前置召回 A/B/C 三层开关 —— 状态需会话（读真值）；保存仅管理员（会改宿主配置 / 起停网关 / 切门禁） */
   recallHardState: 'recallHard:state',
   recallHardSet: 'recallHard:set',
+  /** 阶段 A：托盘常驻 / 开机自启 —— 状态读真值（含系统是否真写入登录项），保存改本机壳层行为 */
+  appShellState: 'appShell:state',
+  appShellSet: 'appShell:set',
+  /** 阶段 B：网页会话无头自动采集 —— 状态 / 开关与周期 / 立即采一轮 / 打开登录窗口（均需会话） */
+  webchatAutoState: 'webchatAuto:state',
+  webchatAutoSet: 'webchatAuto:set',
+  webchatAutoRun: 'webchatAuto:run',
+  /** 补齐历史：按游标把侧栏剩下的会话分批采完（一次性补历史，之后回增量） */
+  webchatAutoSweep: 'webchatAuto:sweep',
+  webchatAutoLogin: 'webchatAuto:login',
   /** 原子任务 B：监控仪表盘只读聚合（Agent 健康 + 写入率 + 校验异常）；公开观测，不需会话 */
   monitorStats: 'monitor:stats',
   /** 批次39：L2–L6 后台补炼队列 —— 状态（需会话）/ 开关与补炼与重试失败行（仅管理员） */

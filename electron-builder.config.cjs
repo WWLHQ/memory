@@ -24,8 +24,10 @@ module.exports = {
     '!node_modules/**/*',
   ],
   // 浏览器插件必须作为真实目录存在才能「加载已解压的扩展程序」，不能塞进 asar。
+  // 图标一并外置：托盘要 createFromPath 读它（buildResources 只在打包期用，不进安装包）。
   extraResources: [
     { from: 'browser-extension/webchat-exporter', to: 'webchat-exporter', filter: ['**/*'] },
+    { from: 'build-resources/icon.png', to: 'icon.png' },
   ],
   asarUnpack: ['dist-electron/**/*'],
   npmRebuild: false,
