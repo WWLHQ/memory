@@ -5,7 +5,7 @@
 //
 // 三条纪律：
 //   ① 「需要重新登录」必须显眼——登录失效后整条链路静默停摆，藏起来就是假装全自动；
-//   ② 本轮结果按站点列「扫到几条 / 导出几条 / 为什么失败」，没有分母就永远答不了「是不是漏了」；
+//   ② 本轮结果按站点列「发现 / 已采 / 新增 / 失败」，没有分母就永远答不了「是不是漏了」；
 //   ③ 立即采一轮会跑几十秒，按钮期间必须禁用并显示「正在采集」，不能让人重复点。
 import { useCallback, useEffect, useState } from 'react';
 import {
@@ -80,10 +80,8 @@ export function WebchatAutoCard() {
   };
 
   /**
-   * 补齐历史：把侧栏里还没采过的旧会话一次采完。
-   *
-   * 为什么要单独一个按钮：每轮增量只补少量新的（防长时间占用），
-   * 而侧栏积压几百条时靠增量要等几十轮；这个动作按游标分批跑完，跑完自动回到增量。
+   * 补齐历史（全量对账）：每批从侧栏顶部发现，与导出目录已有文件做差集。
+   * 没有位置游标；删掉某会话的 md 文件后再点它，那条会被重新采回来。
    */
   const sweepOnce = async () => {
     if (running) return;
@@ -301,8 +299,8 @@ export function WebchatAutoCard() {
               </button>
               <button type="button" className="btn" data-testid="wa-sweep-btn"
                 disabled={running || st.running} onClick={() => void sweepOnce()}
-                title="把侧栏里还没采过的旧会话分批采完，跑完自动回到每轮增量">
-                {running || st.running ? '正在采集…' : '补齐历史会话'}
+                title="从侧栏顶部全量对账：只补导出目录里还没有的会话；删掉某个 md 文件后可重新采回">
+                {running || st.running ? '正在同步…' : '补齐历史会话'}
               </button>
               {needRelogin.length > 0 && (
                 <button type="button" className="btn" data-testid="wa-relogin-btn"
@@ -312,7 +310,7 @@ export function WebchatAutoCard() {
               )}
             </div>
             <div className="rh-desc" data-testid="wa-sweep-hint">
-              只补「还没采过」的：点「补齐历史会话」会从上次停下的位置接着往下扫，每站最多 10 批、每批最多 30 条。耗时较长，中途不用管它，补完自动回到每轮增量。
+              按会话 ID 全量对账：每批都从侧栏顶部发现会话，导出目录里已有同名文件的跳过，只补还没采过的；每站最多 10 批、每批最多 30 条新的。删掉某个 md 文件再点它，那条会重新采回来。
             </div>
             {needRelogin.length > 0 && (
               <div className="rh-warn" data-testid="wa-need-relogin">
@@ -322,14 +320,16 @@ export function WebchatAutoCard() {
 
             {st.lastRound && st.lastRound.results.length > 0 && (
               <table className="ltable" data-testid="wa-results" style={{ marginTop: 8 }}>
-                <thead><tr><th>站点</th><th>结果</th><th>扫到</th><th>导出</th><th>说明</th></tr></thead>
+                <thead><tr><th>站点</th><th>结果</th><th>发现</th><th>已采</th><th>新增</th><th>失败</th><th>说明</th></tr></thead>
                 <tbody>
                   {st.lastRound.results.map((r) => (
                     <tr key={r.site} data-testid={`wa-row-${r.site}`}>
                       <td>{st.sites.find((s) => s.key === r.site)?.label ?? r.site}</td>
                       <td><span className={stCls(r.status)}>{AUTO_STATUS_LABEL[r.status]}</span></td>
                       <td>{r.scanned}</td>
+                      <td>{r.skipped ?? 0}</td>
                       <td>{r.exported}</td>
+                      <td>{r.missing ?? 0}</td>
                       {/* 说明可能是长诊断（体检数字）：限定两行 + title 看全文，不撑破表格 */}
                       <td className="rh-state" title={r.reason ?? ''} style={{ maxWidth: 320, whiteSpace: 'normal' }}>
                         {r.reason ?? '无异常'}

@@ -8,7 +8,10 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { WebchatAutoCard } from '../WebchatAutoCard.tsx';
 
-type SiteResult = { site: string; status: string; scanned: number; exported: number; reason?: string };
+type SiteResult = {
+  site: string; status: string; scanned: number; exported: number;
+  skipped?: number; missing?: number; reason?: string;
+};
 type View = {
   ok: boolean; error?: string;
   config: { enabled: boolean; intervalMinutes: number; perRound: number; sites: string[] };
@@ -277,8 +280,10 @@ describe('WebchatAutoCard · 本轮结果表', () => {
     expect(ds[0].textContent).toBe('DeepSeek');
     expect(ds[1].textContent).toBe('已导出');
     expect(ds[2].textContent).toBe('5');
-    expect(ds[3].textContent).toBe('2');
-    expect(ds[4].textContent).toBe('无异常');
+    expect(ds[3].textContent).toBe('0');
+    expect(ds[4].textContent).toBe('2');
+    expect(ds[5].textContent).toBe('0');
+    expect(ds[6].textContent).toBe('无异常');
 
     const km = screen.getByTestId('wa-row-kimi');
     expect(km.textContent).toContain('页面结构变了');

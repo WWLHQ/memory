@@ -3,7 +3,7 @@
 > 由 `npm run code:index` 生成，请勿手改；改代码/文档后重跑即可。
 > 用法：先在本表定位文件与导出符号，再只读该文件的局部区间（省 token、少误改）。
 
-共 438 个源码文件、150 个文档。
+共 439 个源码文件、151 个文档。
 
 ## e2e
 
@@ -139,7 +139,7 @@
 | [src/electron/l0KeyringStore.ts](src/electron/l0KeyringStore.ts) | 72 | L0 密钥环落盘适配（§4.4.8）：l0-keyring.json 原子写（temp → fsync → rename）， | writeFileAtomic(fn), createL0KeyringStore(fn), createHomeLockStore(fn), cleanupTempFiles(fn) |
 | [src/electron/llmBilling.ts](src/electron/llmBilling.ts) | 407 | 批次48 A31-b：厂商余额查询适配器（主进程唯一真源）。 | billingGetJson(fn), loadBillingCredentials(fn), saveBillingCredential(fn), BILLING_CREDS_FILE(const), BILLING_TTL_MS(const), NO_ENDPOINT_VENDORS(const), LOCAL_BILLING_VENDORS(const), deepseekBilling(const), kimiBilling(const), siliconflowBilling(const), openrouterBilling(const), BILLING_ADAPTERS(const), LlmBillingService(class), BillingBalance(type), BillingFetchOutcome(type), BillingAdapter(type), BillingServiceDeps(type), EngineBillingView(type) |
 | [src/electron/llmGateway.ts](src/electron/llmGateway.ts) | 577 | 批次32：LLM 精炼网关（主进程唯一真源）——通用 OpenAI 兼容**多引擎**，路由口径「哪个能用、哪个快用哪个」。 | defaultLlmConfig(fn), loadLlmConfig(fn), saveLlmConfig(fn), loadLlmKeys(fn), saveLlmKey(fn), keyExists(fn), buildLayerPrompt(fn), chatEndpoint(fn), applyProxyAccounting(fn), testEngine(fn), applyProbeResult(fn), loadLlmGateway(fn), llmEngineViews(fn), mergeLlmConfig(fn), LLM_CONFIG_FILE(const), LLM_KEYS_FILE(const), LEGACY_DEEPSEEK_KEY_FILE(const), LLM_PRESETS(const), LlmGatewayProvider(class), LlmEngineConfig(type), LlmGatewayConfig(type), LlmPreset(type), EngineTestResult(type), LlmGatewayView(type), LlmEnginePatch(type), LlmAddEngine(type), LlmConfigPatch(type), LlmEngineView(type) |
-| [src/electron/main.ts](src/electron/main.ts) | 5536 | Electron 主进程入口： | — |
+| [src/electron/main.ts](src/electron/main.ts) | 5538 | Electron 主进程入口： | — |
 | [src/electron/mcpBridgeScript.ts](src/electron/mcpBridgeScript.ts) | 139 | stdio 桥接脚本（2026-11-18，用户要求「客户端配置改成 stdio launcher 现读令牌，轮换零维护」）。 | ensureMcpBridgeScript(fn), MCP_BRIDGE_SCRIPT(const) |
 | [src/electron/mcpClients.ts](src/electron/mcpClients.ts) | 468 | MCP 客户端配置读写 · node 层（批次15，仅 Electron 主进程使用）。 | expandHome(fn), applyRecallEvidence(fn), scanMcpClients(fn), snippetForClient(fn), readStoredToken(fn), wireMcpClient(fn), enableMcpClient(fn), McpClientStatus(type), McpClientsScan(type), McpWireResult(type), McpRecallEvidence(type) |
 | [src/electron/mcpProbe.ts](src/electron/mcpProbe.ts) | 174 | MCP 端点实测探活（2026-11-18，用户要求「实测连通」列 + 循环检测）。 | parseToolsCount(fn), probeMcpEndpoint(fn), attachLiveProbe(fn), McpLiveProbe(type), ProbeOptions(type), LiveProbeFields(type), LiveProbeTarget(type) |
@@ -150,12 +150,13 @@
 | [src/electron/recallHookScript.ts](src/electron/recallHookScript.ts) | 90 | 批次62 · A 层钩子脚本「稳定化」：把 force_recall.mjs 复制到数据根固定位置，宿主配置只指向这一份。 | stableHookScriptPath(fn), ensureStableHookScript(fn), STABLE_HOOK_REL(const), StableHookScriptResult(type), StableHookScriptDeps(type) |
 | [src/electron/storageIpc.ts](src/electron/storageIpc.ts) | 62 | 批次47 P0-3：存储数据面四条「读写/审计」通道统一走登录会话闸门。 | createStorageReadWriteHandlers(fn), StorageIpcDeps(type), StorageReadWriteHandlers(type) |
 | [src/electron/tenantSource.ts](src/electron/tenantSource.ts) | 94 | 批次45-A1 单一租户真源：数据根级 tenant.json（0600），类比 dataRoot 指针 / mcp-token.txt 的启动期指针文件。 | loadOrCreateTenant(fn), readTenantFile(fn), writeTenant(fn), TENANT_FILE_NAME(const), TENANT_SCHEMA(const), WriteTenantResult(type) |
-| [src/electron/webchatAutoCollect.ts](src/electron/webchatAutoCollect.ts) | 395 | 阶段 B：网页会话无头自动采集器（Electron 侧接线）。 | createWebchatAutoCollector(fn), AUTO_FALLBACK_CONFIG(const), AutoCollectorDeps(type), AutoStateView(type), WebchatAutoCollector(type) |
-| [src/electron/webchatAutoConfig.ts](src/electron/webchatAutoConfig.ts) | 796 | 阶段 B（无头自动采集）的纯逻辑层：配置、采集账、去重判据、页内驱动脚本。 | normalizeAutoConfig(fn), parseAutoPatch(fn), autoDir(fn), autoConfigPath(fn), autoStatePath(fn), autoLedgerPath(fn), readAutoConfig(fn), writeAutoConfig(fn), normalizeAutoState(fn), readAutoState(fn), writeAutoState(fn), appendLedger(fn), buildDriverScript(fn), parseDriverResult(fn), formatDiag(fn), summarizeSteps(fn), pickNewChats(fn), judgeSite(fn), AUTO_DIR_NAME(const), AUTO_CONFIG_FILE(const), AUTO_STATE_FILE(const), AUTO_LEDGER_FILE(const), AUTO_MIN_INTERVAL(const), AUTO_MAX_INTERVAL(const), AUTO_DEFAULT_INTERVAL(const), AUTO_MAX_CHATS_PER_ROUND(const), AUTO_MAX_CHATS_MANUAL(const), AUTO_MAX_ATTEMPTS_ROUND(const), AUTO_MAX_ATTEMPTS_MANUAL(const), AUTO_MAX_CHATS_SWEEP(const), AUTO_MAX_ATTEMPTS_SWEEP(const), AUTO_SWEEP_MAX_BATCHES(const), AUTO_MIN_PER_ROUND(const), AUTO_MAX_PER_ROUND(const), DEFAULT_AUTO_CONFIG(const), SITE_ENTRY_URL(const), DEFAULT_AUTO_STATE(const), WebchatAutoConfig(type), SiteRoundResult(type), RoundSummary(type), AutoState(type), DriverChat(type), SidebarDiag(type), DriverStep(type), DriverResult(type), PageSnapshot(type), AutoPatch(type), SiteStatus(type) |
+| [src/electron/webchatAutoCollect.ts](src/electron/webchatAutoCollect.ts) | 402 | 阶段 B：网页会话无头自动采集器（Electron 侧接线）。 | createWebchatAutoCollector(fn), AUTO_FALLBACK_CONFIG(const), AutoCollectorDeps(type), AutoStateView(type), WebchatAutoCollector(type) |
+| [src/electron/webchatAutoConfig.ts](src/electron/webchatAutoConfig.ts) | 941 | 阶段 B（无头自动采集）的纯逻辑层：配置、采集账、去重判据、页内驱动脚本。 | normalizeAutoConfig(fn), parseAutoPatch(fn), autoDir(fn), autoConfigPath(fn), autoStatePath(fn), autoLedgerPath(fn), readAutoConfig(fn), writeAutoConfig(fn), normalizeAutoState(fn), readAutoState(fn), writeAutoState(fn), appendLedger(fn), buildDriverScript(fn), parseDriverResult(fn), formatDiag(fn), summarizeSteps(fn), pickNewChats(fn), judgeSite(fn), AUTO_DIR_NAME(const), AUTO_CONFIG_FILE(const), AUTO_STATE_FILE(const), AUTO_LEDGER_FILE(const), AUTO_MIN_INTERVAL(const), AUTO_MAX_INTERVAL(const), AUTO_DEFAULT_INTERVAL(const), AUTO_MAX_CHATS_PER_ROUND(const), AUTO_MAX_CHATS_MANUAL(const), AUTO_MAX_ATTEMPTS_ROUND(const), AUTO_MAX_ATTEMPTS_MANUAL(const), AUTO_MAX_CHATS_SWEEP(const), AUTO_MAX_ATTEMPTS_SWEEP(const), AUTO_SWEEP_MAX_BATCHES(const), AUTO_MIN_PER_ROUND(const), AUTO_MAX_PER_ROUND(const), DEFAULT_AUTO_CONFIG(const), SITE_ENTRY_URL(const), DEFAULT_AUTO_STATE(const), WebchatAutoConfig(type), SiteRoundResult(type), RoundSummary(type), AutoState(type), DriverChat(type), SidebarDiag(type), DriverStep(type), DriverResult(type), PageSnapshot(type), AutoPatch(type), SiteStatus(type) |
 | [src/electron/webchatAutoUa.ts](src/electron/webchatAutoUa.ts) | 24 | 内嵌浏览器 UA 的最小去标记处理（2026-11-19）。 | stripElectronUa(fn), applyCleanUserAgent(fn), UaWebContents(type) |
 | [src/electron/webchatExtensionCopy.ts](src/electron/webchatExtensionCopy.ts) | 111 | 把随包下发的插件复制到数据根下的**稳定目录**，再让用户到浏览器里「加载已解压的扩展程序」指向它。 | ensureStableExtensionDir(fn), WEBCHAT_EXTENSION_FILES(const), EnsureStableExtensionOptions(type), EnsureStableExtensionResult(type) |
 | [src/electron/webchatExtensionPath.ts](src/electron/webchatExtensionPath.ts) | 21 | 自研网页对话导出插件的目录解析（纯函数，便于单测）。 | resolveWebchatExtensionDir(fn), WebchatExtensionPathOptions(type) |
-| [src/electron/webchatIngest.ts](src/electron/webchatIngest.ts) | 529 | 插件导出的本机接收端：让浏览器插件不再依赖「浏览器下载目录」。 | webchatExportFileName(fn), handleExportRequest(fn), handleClearRequest(fn), createWebchatIngestServer(fn), writeWebchatRuntime(fn), newWebchatIngestToken(fn), WEBCHAT_SITE_RE(const), WebchatIngestPayload(type), WebchatIngestOptions(type), WebchatIngestResult(type), WebchatClearOptions(type), WebchatClearResult(type) |
+| [src/electron/webchatIdReconcile.ts](src/electron/webchatIdReconcile.ts) | 116 | 无状态 ID 对账：会话 ID 是唯一主键，文件名即 ID，文件系统即账本。 | conversationIdFromUrl(fn), sanitizeConversationId(fn), webchatExportFileName(fn), chatCollectedKey(fn), pickNewChatsById(fn), listCollectedIds(fn), DriverChat(type) |
+| [src/electron/webchatIngest.ts](src/electron/webchatIngest.ts) | 550 | 插件导出的本机接收端：让浏览器插件不再依赖「浏览器下载目录」。 | webchatExportFileName(fn), handleExportRequest(fn), handleClearRequest(fn), createWebchatIngestServer(fn), writeWebchatRuntime(fn), newWebchatIngestToken(fn), WEBCHAT_SITE_RE(const), WebchatIngestPayload(type), WebchatIngestOptions(type), WebchatIngestResult(type), WebchatClearOptions(type), WebchatClearResult(type) |
 | [src/electron/webchatWindow.ts](src/electron/webchatWindow.ts) | 14 | 网页采集窗口的识别判据（2026-11-19 根因修复）。 | isWebchatStoragePath(fn) |
 | [src/electron/webhookServer.ts](src/electron/webhookServer.ts) | 103 | Webhook HTTP 服务（批次26-A P0-4，从 main.ts 内联处理器抽出以便单测）： | createWebhookHttpServer(fn), WebhookServerOptions(type) |
 
@@ -479,7 +480,7 @@
 | [src/web/webonboard/WebOnboardPage.tsx](src/web/webonboard/WebOnboardPage.tsx) | 22 | 网页端接入页（2026-11-19 新增）：功能导航「连接」组的网页端接入视图。 | WebOnboardPage(fn) |
 | [src/web/webonboard/WebchatAutoCard.tsx](src/web/webonboard/WebchatAutoCard.tsx) | 348 | 网页端接入页 ·「网页会话自动采集」卡（2026-11-19 自参数页迁入）。 | WebchatAutoCard(fn) |
 | [src/web/webonboard/webOnboardEntry.tsx](src/web/webonboard/webOnboardEntry.tsx) | 11 | 网页端接入页入口（2026-11-19 新增） | — |
-| [src/web/webonboard/webchatAuto.ts](src/web/webonboard/webchatAuto.ts) | 157 | 网页端接入页 ·「网页会话自动采集」卡的渲染层桥（2026-11-19 自参数页迁入）。 | webchatAutoAvailable(fn), webchatAutoLogin(fn), webchatExportDir(fn), webchatExportOpen(fn), webchatExportSet(fn), AUTO_STATUS_LABEL(const), webchatAutoState(const), webchatAutoSet(const), webchatAutoRun(const), webchatAutoSweep(const), AutoConfigView(type), AutoSiteResult(type), AutoRoundView(type), AutoStateView(type), AutoResult(type), AutoPatch(type), ExportDirView(type), AutoSiteStatus(type) |
+| [src/web/webonboard/webchatAuto.ts](src/web/webonboard/webchatAuto.ts) | 159 | 网页端接入页 ·「网页会话自动采集」卡的渲染层桥（2026-11-19 自参数页迁入）。 | webchatAutoAvailable(fn), webchatAutoLogin(fn), webchatExportDir(fn), webchatExportOpen(fn), webchatExportSet(fn), AUTO_STATUS_LABEL(const), webchatAutoState(const), webchatAutoSet(const), webchatAutoRun(const), webchatAutoSweep(const), AutoConfigView(type), AutoSiteResult(type), AutoRoundView(type), AutoStateView(type), AutoResult(type), AutoPatch(type), ExportDirView(type), AutoSiteStatus(type) |
 | [src/web/write/DedupCard.tsx](src/web/write/DedupCard.tsx) | 55 | 写入页（REQ-006 / P2）查重预览卡 · 批次58 定稿版式 | DedupCard(fn) |
 | [src/web/write/WriteForm.tsx](src/web/write/WriteForm.tsx) | 150 | 写入页（REQ-006 / P2）表单 · 批次58 定稿版式（只改写入表单 tab） | WriteForm(fn) |
 | [src/web/write/WriteL0UnlockCard.tsx](src/web/write/WriteL0UnlockCard.tsx) | 158 | 批次58：写入页右栏常驻「L0 UNLOCK」卡（定稿版式）。 | WriteL0UnlockCard(fn), L0UnlockStatus(type) |
@@ -572,6 +573,7 @@
 | [specs/reports/BATCH48-FIX-REPORT.md](specs/reports/BATCH48-FIX-REPORT.md) | 80 | 批次48 审计修复收尾报告 |
 | [specs/reports/RECALL-WEEK-PLAN.md](specs/reports/RECALL-WEEK-PLAN.md) | 120 | 召回 A 方案 · 一周真实数据观察计划（2026-11-12 ~ 2026-11-19） |
 | [specs/reports/T4-存量明文盘点-2026-11-12.md](specs/reports/T4-存量明文盘点-2026-11-12.md) | 51 | title: T4 存量明文盘点与不变量守卫 |
+| [specs/reports/WEBCHAT-ID-RECONCILE-PLAN.md](specs/reports/WEBCHAT-ID-RECONCILE-PLAN.md) | 145 | 网页会话采集：无状态 ID 对账改造 · 详细执行方案 |
 | [specs/reports/dsh-hindsight-local-对比与借鉴-2026-11-14.md](specs/reports/dsh-hindsight-local-对比与借鉴-2026-11-14.md) | 115 | dsh-hindsight-local 与 MultiAgent Memory 对比与借鉴建议 |
 | [specs/reports/dsh-hindsight-local-调研报告-2026-11-14.md](specs/reports/dsh-hindsight-local-调研报告-2026-11-14.md) | 266 | dsh-hindsight-local 仓库调研报告 |
 | [specs/reports/召回模式全程序审查报告-2026-11-13.md](specs/reports/召回模式全程序审查报告-2026-11-13.md) | 160 | title: 召回模式全程序审查报告 |
@@ -757,7 +759,7 @@ src/electron/ipcChannels.ts e0ba6c4cb1d4
 src/electron/l0KeyringStore.ts b900f5d523d5
 src/electron/llmBilling.ts d595849943b0
 src/electron/llmGateway.ts 0dfcbf3c5612
-src/electron/main.ts 62617867afdc
+src/electron/main.ts 687d5f371858
 src/electron/mcpBridgeScript.ts 506265c204e7
 src/electron/mcpClients.ts 18f98e39378e
 src/electron/mcpProbe.ts 5fb06a238c0b
@@ -768,12 +770,13 @@ src/electron/recallHard.ts 215714dee6ee
 src/electron/recallHookScript.ts c5fa0d8b82f2
 src/electron/storageIpc.ts 9edb5f55187a
 src/electron/tenantSource.ts 87de24ab1084
-src/electron/webchatAutoCollect.ts 7b6e5fb7d9ec
-src/electron/webchatAutoConfig.ts 1429d53da185
+src/electron/webchatAutoCollect.ts 6f838fe309e2
+src/electron/webchatAutoConfig.ts b18a395ad13a
 src/electron/webchatAutoUa.ts ab336c80f96d
 src/electron/webchatExtensionCopy.ts 9883df1f4215
 src/electron/webchatExtensionPath.ts 71aba5a6fe3a
-src/electron/webchatIngest.ts 7a6d4146b15e
+src/electron/webchatIdReconcile.ts c59dec54d461
+src/electron/webchatIngest.ts 7e48aa26ba9c
 src/electron/webchatWindow.ts e17a7abfe59b
 src/electron/webhookServer.ts 62157c0b1e21
 src/home/dashboard.ts f973b667da77
@@ -1075,9 +1078,9 @@ src/web/sync/syncEntry.tsx 23e574e79aa4
 src/web/test-setup.ts 3a2ad06d2218
 src/web/vite-env.d.ts 191b7a12f3de
 src/web/webonboard/WebOnboardPage.tsx 7a7ddc537f93
-src/web/webonboard/WebchatAutoCard.tsx 4f1b699686c9
+src/web/webonboard/WebchatAutoCard.tsx 1f1a739a5919
 src/web/webonboard/webOnboardEntry.tsx dfdb95cb7c5b
-src/web/webonboard/webchatAuto.ts e407dea3b45b
+src/web/webonboard/webchatAuto.ts 7f74b8814b20
 src/web/write/DedupCard.tsx 4fc5c77cad3c
 src/web/write/WriteForm.tsx 3ef1a7e27ecc
 src/web/write/WriteL0UnlockCard.tsx 4bf32839ee38
@@ -1165,6 +1168,7 @@ specs/recall-echo-contract.md 092d2eadd30f
 specs/reports/BATCH48-FIX-REPORT.md 7d62836888ad
 specs/reports/RECALL-WEEK-PLAN.md 9747f8a52112
 specs/reports/T4-存量明文盘点-2026-11-12.md 6dbc307b0320
+specs/reports/WEBCHAT-ID-RECONCILE-PLAN.md 64327356860c
 specs/reports/dsh-hindsight-local-对比与借鉴-2026-11-14.md 505ceb6e31e6
 specs/reports/dsh-hindsight-local-调研报告-2026-11-14.md 6a90063ae5da
 specs/reports/召回模式全程序审查报告-2026-11-13.md e91202c37a63

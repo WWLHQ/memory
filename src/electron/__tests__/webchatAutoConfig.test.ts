@@ -259,20 +259,30 @@ describe('页内驱动脚本 · 结构', () => {
 // 恰恰在逻辑里，不在文案里。所以这里用假 document / 假 core 把三种切换结果各跑一遍。
 describe('页内驱动脚本 · 三态真跑', () => {
   /** 造一个最小页面：listSidebarItems 给出 n 条、click 按场景改状态 */
-  function makePage(scenario: 'content' | 'no-nav' | 'nav-no-content' | 'headless' = 'content', n = 3): {
-    doc: unknown; loc: { href: string; pathname: string }; msgs: () => number; clicks: () => number; topReached: () => boolean;
+  function makePage(
+    scenario: 'content' | 'no-nav' | 'nav-no-content' | 'headless' | 'headless-late' | 'missing-user' = 'content',
+    n = 3,
+  ): {
+    doc: unknown; loc: { href: string; pathname: string }; msgs: () => number; clicks: () => number;
+    topReached: () => boolean; topHits: () => number;
   } {
     const state = {
       msgs: [] as Array<{ role: string; text: string }>,
       href: 'https://chat.deepseek.com/',
       clicks: 0,
       topReached: false,
+      topHits: 0,
     };
     const loc = { get href(): string { return state.href; }, get pathname(): string { return new URL(state.href).pathname; } };
     // 场景 headless：点击后首条是助手（模拟虚拟列表停在底部、第一条用户没渲染）；滚到顶后补出用户首条
     // querySelector 必须按选择器匹配语义返回：只有消息类选择器命中滚动锚点，
     // 其余（如登录页探测的 input[type="password"]）返回 null——无差别返回真值会把登录页探测误判成命中。
-    const scrollEl = { set scrollTop(v: number) { if (v === 0) state.topReached = true; }, get scrollTop(): number { return state.topReached ? 0 : 100; } };
+    const scrollEl = {
+      scrollHeight: 1000,
+      clientHeight: 300,
+      set scrollTop(v: number) { if (v === 0) { state.topReached = true; state.topHits += 1; } },
+      get scrollTop(): number { return state.topReached ? 0 : 100; },
+    };
     const doc = {
       querySelector: (sel: string) => (String(sel).includes('message') ? scrollEl : null),
       querySelectorAll: (): unknown[] => [scrollEl],
@@ -284,23 +294,31 @@ describe('页内驱动脚本 · 三态真跑', () => {
           click(): void {
             state.clicks += 1;
             if (scenario === 'content') {
-              state.href = `https://chat.deepseek.com/a/chat/s/${state.clicks}`;
+              state.href = `https://chat.deepseek.com/a/chat/s/0000000${state.clicks}`;
               state.msgs = [{ role: 'user', text: `第${state.clicks}条` }, { role: 'assistant', text: '答' }];
             } else if (scenario === 'headless') {
-              state.href = `https://chat.deepseek.com/a/chat/s/${state.clicks}`;
+              state.href = `https://chat.deepseek.com/a/chat/s/0000000${state.clicks}`;
               // 底部视角：虚拟列表只渲染后半段，首条是助手（顶上的用户提问还没进来）
               state.msgs = [{ role: 'assistant', text: '答' }, { role: 'user', text: `第${state.clicks}条第2问` }];
+            } else if (scenario === 'headless-late' || scenario === 'missing-user') {
+              state.href = `https://chat.deepseek.com/a/chat/s/0000000${state.clicks}`;
+              // 更坏的底部视角：当前只挂着助手，用户提问一条都没渲染
+              state.msgs = [{ role: 'assistant', text: '答' }];
             } else if (scenario === 'nav-no-content') {
-              state.href = `https://chat.deepseek.com/a/chat/s/${state.clicks}`;
+              state.href = `https://chat.deepseek.com/a/chat/s/0000000${state.clicks}`;
             }
           },
         },
       })),
       describeSidebar: () => ({ semantic: 11, groupRows: 11, groups: [], anchors: [{ href: '/a/chat/s/1', text: '会话1' }], messageAreaRows: 0 }),
-      // headless：滚动到底后（topReached=true）把首条用户补回来，模拟「滚到顶重新渲染」
-      extractMessages: () => (scenario === 'headless' && state.topReached && state.clicks > 0
-        ? [{ role: 'user', text: `第${state.clicks}条第1问` }, { role: 'user', text: `第${state.clicks}条第2问` }, { role: 'assistant', text: '答' }]
-        : state.msgs),
+      // headless：滚到顶后把首条用户补回来；headless-late：第一次滚顶还没挂上，轮询第二次才补出
+      extractMessages: () => {
+        const withHead = [{ role: 'user', text: `第${state.clicks}条第1问` }, { role: 'user', text: `第${state.clicks}条第2问` }, { role: 'assistant', text: '答' }];
+        if (scenario === 'missing-user') return [{ role: 'assistant', text: '答' }];
+        if (scenario === 'headless' && state.topReached && state.clicks > 0) return withHead;
+        if (scenario === 'headless-late' && state.topHits >= 2 && state.clicks > 0) return withHead;
+        return state.msgs;
+      },
       signature: (ms: Array<{ role: string; text: string }>) => ms.map((m) => `${m.role}:${m.text}`).join('\n'),
       contentKey: (site: string, sig: string) => `key:${site}:${sig}`,
       formatMarkdown: () => '## 用户\n第1条',
@@ -310,7 +328,10 @@ describe('页内驱动脚本 · 三态真跑', () => {
     // core.js 只经由 globalThis 取（脚本里就是 globalThis.WebchatExporterCore）；
     // document / location 在 jsdom 里是只读 getter，不能覆盖，所以走参数注入（参数会遮蔽同名全局）
     (globalThis as unknown as { WebchatExporterCore: unknown }).WebchatExporterCore = core;
-    return { doc, loc, msgs: () => state.msgs.length, clicks: () => state.clicks, topReached: () => state.topReached };
+    return {
+      doc, loc, msgs: () => state.msgs.length, clicks: () => state.clicks,
+      topReached: () => state.topReached, topHits: () => state.topHits,
+    };
   }
 
   /** 真跑脚本：document / location 作为形参注入，脚本内部同名引用被遮蔽 */
@@ -491,11 +512,22 @@ describe('页内驱动脚本 · 三态真跑', () => {
     expect(r.nextStart).toBe(2);
   });
 
-  test('startAt 从中间开始（补齐历史分批推进：不重复点前面已扫过的区间）', async () => {
+  test('startAt 已失效（无游标对账）：即使传 4 也从侧栏顶部扫，不再有位置状态', async () => {
     const page = makePage('content', 6);
-    const r = await runner(page)(buildDriverScript({ siteKey: 'deepseek', maxChats: 10, maxAttempts: 10, startAt: 4, chatWaitMs: 600 }));
-    expect((r.chats as Array<{ title: string }>).map((c) => c.title)).toEqual(['会话5', '会话6']);
+    const r = await runner(page)(buildDriverScript({ siteKey: 'deepseek', maxChats: 2, maxAttempts: 10, startAt: 4, chatWaitMs: 600 }));
+    expect((r.chats as Array<{ title: string }>).map((c) => c.title)).toEqual(['会话1', '会话2']);
     expect(r.attempts).toBe(2);
+  });
+
+  test('驱动产出的每条会话都带稳定 ID，且按 <ID>.md 跳过键去重', async () => {
+    const page = makePage('content', 3);
+    const r = await runner(page)(buildDriverScript({
+      siteKey: 'deepseek', maxChats: 5, maxAttempts: 5, chatWaitMs: 600, skipKeys: ['00000002.md'],
+    }));
+    const chats = r.chats as Array<{ id: string; title: string }>;
+    expect(chats.map((c) => c.id)).toEqual(['00000001', '00000003']);
+    expect(chats.map((c) => c.title)).toEqual(['会话1', '会话3']);
+    expect(r.skipped).toBe(1);
   });
 
   test('首条不是用户（虚拟列表停在底部）→ 滚到顶补抽，首条用户找回来', async () => {
@@ -506,6 +538,26 @@ describe('页内驱动脚本 · 三态真跑', () => {
     expect(chats[0].messages[0]).toEqual({ role: 'user', text: '第1条第1问' });
     expect(chats[0].messages[1]).toEqual({ role: 'user', text: '第1条第2问' });
     expect(page.topReached()).toBe(true);
+  });
+
+  test('滚顶一次没挂上用户提问 → 轮询重试后补回来', async () => {
+    const page = makePage('headless-late', 1);
+    const r = await runner(page)(buildDriverScript({ siteKey: 'deepseek', maxChats: 1, chatWaitMs: 600 }));
+    const chats = r.chats as Array<{ messages: Array<{ role: string; text: string }> }>;
+    expect(chats).toHaveLength(1);
+    expect(chats[0].messages[0]).toEqual({ role: 'user', text: '第1条第1问' });
+    expect(page.topHits()).toBeGreaterThanOrEqual(2);
+  });
+
+  test('滚顶后仍没有用户提问 → 不产出会话，step 标 missing-user（绝不落坏文件）', async () => {
+    const page = makePage('missing-user', 1);
+    const r = await runner(page)(buildDriverScript({ siteKey: 'deepseek', maxChats: 1, chatWaitMs: 600 }));
+    expect(r.chats).toEqual([]);
+    const steps = r.steps as Array<{ why: string }>;
+    expect(steps).toHaveLength(1);
+    expect(steps[0].why).toBe('missing-user');
+    expect(r.attempts).toBe(1);
+    expect(r.skipped).toBe(0);
   });
 });
 
@@ -525,6 +577,14 @@ describe('页面结果解析', () => {
 
   test('空正文的会话被丢掉：不许往库里塞空记忆', () => {
     const r = parseDriverResult({ items: ['a'], diag: '', chats: [chat({ markdown: '   ' })] });
+    expect(r?.chats).toEqual([]);
+  });
+
+  test('只有助手没有用户的会话被丢掉（第二道闸，坏文件不许进落盘层）', () => {
+    const r = parseDriverResult({
+      items: ['a'], diag: '',
+      chats: [chat({ messages: [{ role: 'assistant', text: '答' }], markdown: '## 助手\n答' })],
+    });
     expect(r?.chats).toEqual([]);
   });
 
@@ -598,7 +658,7 @@ describe('页面结果解析', () => {
 
 describe('本轮该采哪几条', () => {
   const mk = (key: string): DriverChat => ({
-    title: key, url: '', path: '', messages: [{ role: 'user', text: 'x' }], key, sig: '', markdown: '## 用户\nx',
+    title: key, id: '', url: '', path: '', messages: [{ role: 'user', text: 'x' }], key, sig: '', markdown: '## 用户\nx',
   });
 
   test('已采过的剔掉（重跑不重复入库）', () => {
@@ -641,7 +701,7 @@ describe('单站结果判定', () => {
     debug: null,
   });
   const one: DriverChat = {
-    title: 't', url: '', path: '', messages: [{ role: 'user', text: 'x' }], key: 'k', sig: '', markdown: 'm',
+    title: 't', id: '', url: '', path: '', messages: [{ role: 'user', text: 'x' }], key: 'k', sig: '', markdown: 'm',
   };
 
   test('有错误 → error，且原因原样带出（不吞异常）', () => {

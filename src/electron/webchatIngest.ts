@@ -26,6 +26,10 @@ import {
   type ServerResponse,
 } from 'node:http';
 import { basename, join, resolve as resolvePath, sep } from 'node:path';
+import {
+  webchatExportFileName as idReconcileFileName,
+  conversationIdFromUrl,
+} from './webchatIdReconcile.ts';
 
 /** 站点目录名的唯一判据（与 chatExportsLocations.siteExportStats 保持一致） */
 export const WEBCHAT_SITE_RE = /^[a-z0-9_-]{1,40}$/;
@@ -43,6 +47,8 @@ export interface WebchatIngestPayload {
   site?: unknown;
   title?: unknown;
   url?: unknown;
+  /** 会话稳定 ID：有它则文件名=<ID>.md（幂等覆盖），无它回落时间戳。ID 只对落盘命名有用，不进正文。 */
+  conversationId?: unknown;
   exportedAt?: unknown;
   markdown?: unknown;
   /** 页面结构诊断（仅当插件没认出用户提问时才有） */
@@ -136,20 +142,26 @@ function readBody(req: IncomingMessage, max: number): Promise<string> {
 }
 
 /** 文件名由服务端生成：<YYYYMMDD-HHmmss>.md（与插件侧 core.fileNameFor 同格式，便于识别） */
-export function webchatExportFileName(at: number): string {
-  const d = new Date(at);
-  const p = (n: number) => String(n).padStart(2, '0');
-  const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
-  return `${stamp}.md`;
+export function webchatExportFileName(at: number, conversationId?: string): string {
+  // 单一真源在 webchatIdReconcile：有会话 ID 用 ID 命名（幂等），无 ID 回落时间戳。
+  return idReconcileFileName(at, conversationId);
 }
 
-/** 在导出目录里选一个不与现有文件冲突的名字（秒级时间戳可能撞，撞了加 -1/-2） */
-function pickPath(exportDir: string, site: string, base: string, exists: (p: string) => boolean): string {
+/**
+ * 在导出目录里选落盘路径。
+ * - 幂等模式（有会话 ID）：直接用 <ID>.md，同名即覆盖——这是"每会话恰好一份 + 删文件重采"的关键，
+ *   绝不因为文件已存在就加 -1（那正是 135 md / 101 ID 重复文件的来源）。
+ * - 兼容模式（无 ID）：时间戳可能撞，撞了加 -1/-2。
+ */
+function pickPath(
+  exportDir: string, site: string, base: string, exists: (p: string) => boolean, idempotent = false,
+): string {
   const root = resolvePath(exportDir);
   const dir = resolvePath(join(root, site));
   // 严格边界：root 本身或 root + 分隔符开头，避免 `chat-evil` 这类前缀误判为同一目录
   const prefix = root.endsWith(sep) ? root : root + sep;
   if (dir !== root && !dir.startsWith(prefix)) throw new Error('E_PATH_ESCAPE');
+  if (idempotent) return join(dir, base);
   const stem = base.replace(/\.md$/, '');
   for (let i = 0; i < 100; i += 1) {
     const name = i === 0 ? base : `${stem}-${i}.md`;
@@ -198,6 +210,10 @@ export function handleExportRequest(
   }
   const at = Number(payload.exportedAt);
   const stampMs = Number.isFinite(at) && at > 0 ? at : (opts.now ?? Date.now)();
+  // 会话 ID 优先取显式字段，回落从 url 提取（兼容只传 url 的插件）。空 = 兼容模式时间戳命名。
+  const conversationId = typeof payload.conversationId === 'string' && payload.conversationId.trim()
+    ? payload.conversationId.trim()
+    : conversationIdFromUrl(typeof payload.url === 'string' ? payload.url : '');
   let exportDir: string;
   try {
     exportDir = opts.resolveExportDir();
@@ -209,7 +225,12 @@ export function handleExportRequest(
   const mkdirp = opts.mkdirp ?? ((d: string) => mkdirSync(d, { recursive: true }));
   const write = opts.writeFile ?? ((p: string, d: string) => writeFileSync(p, d, 'utf8'));
   try {
-    const target = pickPath(exportDir, site, webchatExportFileName(stampMs), exists);
+    const target = pickPath(
+      exportDir, site,
+      webchatExportFileName(stampMs, conversationId ?? undefined),
+      exists,
+      !!conversationId, // 幂等覆盖：有 ID 就固定文件名，同名直接覆盖
+    );
     mkdirp(join(exportDir, site));
     write(target, markdown);
     const body: WebchatIngestResult = { ok: true, path: target, site, bytes: Buffer.byteLength(markdown) };

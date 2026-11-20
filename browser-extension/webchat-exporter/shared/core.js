@@ -687,10 +687,10 @@
    */
   function listSidebarItems(root, opts) {
     var o = opts || {};
-    // 0.5.0：默认上限从 30 提到 200。原来 30 条一屏就满，而 74 个会话里
-    // 只有 29 个能被导出（漏 70%）——「默认值太小」本身就是遗漏的根因之一，
-    // 不能只靠调用方显式传 max。
-    var maxItems = typeof o.max === 'number' && o.max > 0 ? o.max : 200;
+    // 0.5.0：默认上限从 30 提到 200；无状态对账改造再提到 1000。
+    // 为什么不能只取 200：2026-11-20 事故里侧栏识别到 213 条，游标撞 200 后
+    // 循环一次都不执行却回报「扫到底」——上限本身就是死锁的一半。
+    var maxItems = typeof o.max === 'number' && o.max > 0 ? o.max : 1000;
     var out = [];
     var seen = new Set();
 

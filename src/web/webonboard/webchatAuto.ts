@@ -29,7 +29,11 @@ export interface AutoSiteResult {
   site: string;
   status: AutoSiteStatus;
   scanned: number;
+  /** 已在册（导出目录里已有同名文件）而跳过的条数 */
+  skipped?: number;
   exported: number;
+  /** 发现了但抽取失败的条数 */
+  missing?: number;
   reason?: string;
 }
 
@@ -100,10 +104,8 @@ export const webchatAutoState = (): Promise<AutoResult> => call('webchatAuto:sta
 export const webchatAutoSet = (patch: AutoPatch): Promise<AutoResult> => call('webchatAuto:set', [patch], '保存自动采集设置');
 export const webchatAutoRun = (): Promise<AutoResult> => call('webchatAuto:run', [], '立即采一轮');
 /**
- * 补齐历史：按游标把侧栏剩下的会话分批采完。
- *
- * 为什么需要单独一个动作：定时/手动轮每轮只补少量新的（防长时间占用），
- * 而侧栏已经积压了几百条历史时，靠增量要等几十轮才看得完。这个动作一次跑完，跑完回增量。
+ * 补齐历史（现语义：全量对账同步）：每批都从侧栏顶部发现会话，与导出目录里的 <会话ID>.md 做差集。
+ * 没有游标、没有「上次停在第几条」，删掉某个 md 文件后点它就能把那条重新采回来。
  */
 export const webchatAutoSweep = (): Promise<AutoResult> => call('webchatAuto:sweep', [], '补齐历史');
 

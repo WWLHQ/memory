@@ -18,11 +18,12 @@ import {
   AUTO_MAX_ATTEMPTS_MANUAL, AUTO_MAX_ATTEMPTS_ROUND, AUTO_MAX_ATTEMPTS_SWEEP, AUTO_MAX_CHATS_MANUAL,
   AUTO_MAX_CHATS_PER_ROUND, AUTO_MAX_CHATS_SWEEP, AUTO_SWEEP_MAX_BATCHES,
   DEFAULT_AUTO_CONFIG, SITE_ENTRY_URL, appendLedger,
-  autoDir, buildDriverScript, judgeSite, parseDriverResult, pickNewChats, readAutoConfig, readAutoState,
+  autoDir, buildDriverScript, judgeSite, parseDriverResult, readAutoConfig, readAutoState,
   writeAutoConfig, writeAutoState,
   type AutoPatch, type AutoState, type RoundSummary, type SiteRoundResult, type WebchatAutoConfig,
 } from './webchatAutoConfig.ts';
 import { applyCleanUserAgent } from './webchatAutoUa.ts';
+import { listCollectedIds, pickNewChatsById } from './webchatIdReconcile.ts';
 
 export interface AutoCollectorDeps {
   /** 数据根（配置/状态/账本都落这里） */
@@ -31,6 +32,8 @@ export interface AutoCollectorDeps {
   coreJsPath: () => string;
   /** 本机接收端（端口是探测出来的，拿不到就如实报「未就绪」而不是硬编码） */
   ingest: () => { port: number; token: string } | null;
+  /** 导出根目录（与接收端共用同一真源）；扫 <root>/<site>/*.md 得「已采 ID 集合」 */
+  exportDir: () => string;
   log: (event: string, data?: Record<string, unknown>, level?: 'warn' | 'error') => void;
 }
 
@@ -123,14 +126,16 @@ export function createWebchatAutoCollector(deps: AutoCollectorDeps): WebchatAuto
   }
 
   /**
-   * 该站点已采过的内容键。
+   * 注入页面内的跳过键 = 导出目录里该站点现存的 .md 文件名（<会话ID>.md）。
    *
-   * 前缀真源在 core.js 的 `contentKey`：`webchatExporter:contentKey:v1:<site>:<h1><h2>:<len>`。
-   * 只挑本站点的键注入页面——全量注入会让脚本体积随账本无限增长，而页面只关心自己这一站。
+   * 迁移完成前曾把旧内容指纹（doneKeys）一起注入做兜底，避免时间戳文件被重复导出；
+   * 迁移已实跑（2026-11-20）后必须撤掉：否则删掉 <ID>.md 后旧内容键仍命中跳过，
+   * 「删文件即重采」失效。文件系统是唯一账本，state.doneKeys 只读兼容、不再参与判据。
    */
-  function doneKeysForSite(site: string): string[] {
-    const prefix = `webchatExporter:contentKey:v1:${site}:`;
-    return Object.keys(state.doneKeys).filter((k) => k.startsWith(prefix));
+  function skipKeysForSite(site: string): string[] {
+    // 没有 `## 用户` 的旧坏文件不算已采：否则 2026-11-19 那些「只有助手」的会话
+    // 会被文件系统的 ID 账永久挡住，修了抽取代码也永远不会被重采回来。
+    return [...listCollectedIds(join(deps.exportDir(), site), { requireUserMessage: true })];
   }
 
   async function collectSite(
@@ -164,7 +169,7 @@ export function createWebchatAutoCollector(deps: AutoCollectorDeps): WebchatAuto
           siteKey: site,
           maxChats,
           // 已采过的往下跳，别停在原地空转（2026-11-19 采集停滞事故的修法）
-          skipKeys: doneKeysForSite(site),
+          skipKeys: skipKeysForSite(site),
           startAt: opts?.startAt ?? 0,
           maxAttempts: opts?.maxAttempts,
         }), true,
@@ -200,7 +205,9 @@ export function createWebchatAutoCollector(deps: AutoCollectorDeps): WebchatAuto
       }
     }
 
-    const fresh = pickNewChats(parsed.chats, state.doneKeys);
+    // 主进程侧再按「文件系统即账本」对一次差集：页面内已跳一遍，这里防并发/回传脏数据
+    const collected = listCollectedIds(join(deps.exportDir(), site), { requireUserMessage: true });
+    const fresh = pickNewChatsById(parsed.chats, collected);
     let exported = 0;
     const failures: string[] = [];
     for (const chat of fresh) {
@@ -212,6 +219,8 @@ export function createWebchatAutoCollector(deps: AutoCollectorDeps): WebchatAuto
             site,
             title: chat.title,
             url: chat.url,
+            // 会话 ID 决定落盘文件名；接收端同名即覆盖，不再出现 -1/-2 副本
+            conversationId: chat.id || undefined,
             exportedAt: Date.now(),
             markdown: chat.markdown,
             auditSource: chat.messages,
@@ -220,8 +229,8 @@ export function createWebchatAutoCollector(deps: AutoCollectorDeps): WebchatAuto
         const body = await res.json() as { ok?: boolean; error?: string };
         if (res.ok && body.ok) {
           exported += 1;
-          // 成功后才记账：失败也记 = 这段内容永远导不出去（插件 0.4.0 的教训）
-          state.doneKeys[chat.key] = Date.now();
+          // 不再写内容指纹账：文件本身（<ID>.md）就是账，删文件即重采。
+          // 失败依然不记任何东西——那会让这段内容永远导不出去（插件 0.4.0 的教训）。
         } else {
           failures.push(`${chat.title}: ${body.error ?? `HTTP ${res.status}`}`);
         }
@@ -232,7 +241,10 @@ export function createWebchatAutoCollector(deps: AutoCollectorDeps): WebchatAuto
 
     // 进度信息（跳过了几条 / 下批从哪开始 / 是否扫到底）必须随结果回传：
     // 补齐历史靠它推进游标，只报「导出 0 条」等于把「走完了」和「卡住了」混成一种状态
-    const progress = { skipped: parsed.skipped, nextStart: parsed.nextStart, reachedEnd: parsed.reachedEnd };
+    const missing = Math.max(0, parsed.attempts - parsed.chats.length - parsed.skipped);
+    const progress = {
+      skipped: parsed.skipped, missing, nextStart: parsed.nextStart, reachedEnd: parsed.reachedEnd,
+    };
     const judged = { ...judgeSite(site, parsed, exported), ...progress };
     if (failures.length > 0) {
       const reason = `有 ${failures.length} 条导出失败：${failures.slice(0, 2).join('；')}`;
@@ -253,34 +265,30 @@ export function createWebchatAutoCollector(deps: AutoCollectorDeps): WebchatAuto
   }
 
   /**
-   * 补齐历史：按游标分批往前走，直到触底 / 站点不可采 / 某批零收获 / 批数用完。
+   * 补齐历史：没有游标，每批都从侧栏顶部重新对账。
    *
-   * 为什么分批而不是一次扫完：单条切换要 2–10 秒，一次点 200 条会把隐藏窗占住十几分钟，
-   * 中途任何一次站点抽风都白跑。分批的每批结束都落一次 state，断了下次接着来。
+   * 已采会话由「文件系统里的 <ID>.md」跳过，所以下一批会自然越过上一批采到的，继续找没采的；
+   * 不再写 state.cursors（位置游标在虚拟列表 + 动态排序下不是稳定坐标，曾撞 200 上限死锁）。
    */
   async function collectSiteSweep(site: string): Promise<SiteRoundResult> {
     const plan = planFor('sweep');
-    let start = state.cursors[site] ?? 0;
     let exported = 0;
     let scanned = 0;
     let skipped = 0;
+    let missing = 0;
     let batches = 0;
     let last: SiteRoundResult | null = null;
     for (let batch = 0; batch < AUTO_SWEEP_MAX_BATCHES; batch += 1) {
-      const r = await collectSite(site, plan.maxChats, { startAt: start, maxAttempts: plan.maxAttempts });
+      const r = await collectSite(site, plan.maxChats, { startAt: 0, maxAttempts: plan.maxAttempts });
       last = r;
       batches += 1;
       scanned = r.scanned || scanned;
       exported += r.exported;
       skipped += r.skipped ?? 0;
+      missing += r.missing ?? 0;
       // 站点不可采就停：拿同一批空转 10 次只会把「未登录」重复十遍
       if (r.status === 'need_relogin' || r.status === 'dom_changed' || r.status === 'error') break;
-      if (typeof r.nextStart === 'number') start = r.nextStart;
-      state.cursors[site] = start;
-      state = writeAutoState(deps.root(), { ...state });
-      if (r.reachedEnd) break;
-      // 这一批一条新的都没收到，说明后面的区间大概率也采过（或抽不到），再走就是空转
-      if (r.exported === 0) break;
+      if (r.reachedEnd || r.exported === 0) break;
     }
     const base = last ?? { site, status: 'no_new' as const, scanned: 0, exported: 0 };
     return {
@@ -289,8 +297,7 @@ export function createWebchatAutoCollector(deps: AutoCollectorDeps): WebchatAuto
       scanned,
       exported,
       skipped,
-      nextStart: start,
-      reachedEnd: base.reachedEnd === true,
+      missing,
       status: exported > 0 ? 'exported' : base.status,
       reason: base.reason ?? (batches > 0 ? `补齐历史：走了 ${batches} 批，采到 ${exported} 条新的` : undefined),
     };

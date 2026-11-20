@@ -271,7 +271,9 @@ describe('WebChatExportCard（网页版对话接入引导）', () => {
      * 其他测试文件残留的监听器**一并触发 → 单跑必绿、全量并发偶发红（门禁抖一次）。
      * 断言「移除了谁」比「全局有没有人 preventDefault」精确，也不会被邻居污染。
      */
-    expect(removed).toContain(handlers[handlers.length - 1]);
+    // 全量并发下 effect cleanup 可能比 DOM 文案更新晚一拍：等注销动作真的发生，
+    // 不要用同步断言把"调度延迟"误报成"没注销"（单跑绿、全量偶发红的根因）。
+    await waitFor(() => expect(removed).toContain(handlers[handlers.length - 1]));
     removeSpy.mockRestore();
   });
 

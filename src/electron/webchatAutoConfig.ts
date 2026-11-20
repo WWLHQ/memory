@@ -6,6 +6,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { WEBCHAT_SITES } from '../shared/webchatSites.ts';
+import { conversationIdFromUrl, sanitizeConversationId } from './webchatIdReconcile.ts';
 
 export const AUTO_DIR_NAME = 'webchat-auto-collect';
 export const AUTO_CONFIG_FILE = 'config.json';
@@ -188,6 +189,8 @@ export interface SiteRoundResult {
   reason?: string;
   /** 本轮因「已在账里」而跳过的条数（诊断用：>0 说明去重真的在起作用） */
   skipped?: number;
+  /** 发现但抽取失败的条数（区分「没有新会话」与「有新会话但没采到」） */
+  missing?: number;
   /** 补齐历史：下一批从侧栏第几条开始（undefined = 本轮没跑驱动） */
   nextStart?: number;
   /** 补齐历史：侧栏是否已扫到底 */
@@ -201,13 +204,13 @@ export interface RoundSummary {
 }
 
 export interface AutoState {
-  /** 已采过的内容指纹（站点 + 内容短键）；只增不减，防止重跑重复入库 */
+  /**
+   * @deprecated 旧内容指纹账：新架构改用「导出目录里的 <会话ID>.md」当账，本字段只读兼容、不再写入。
+   * 迁移完成前仍作为兜底跳过键注入驱动，避免历史会话在迁移前被重复导出。
+   */
   doneKeys: Record<string, number>;
   /**
-   * 「补齐历史」进度：每站点已扫到侧栏第几条。
-   *
-   * 只有 sweep 用；定时/手动增量轮恒从 0 开始（靠 skipKeys 跳过已采），不读这个游标——
-   * 增量轮不需要时间倒序以外的顺序假设。
+   * @deprecated 旧侧栏位置游标：虚拟列表 + 动态排序下位置不稳定，且会撞 200 上限死锁，已停止读写。
    */
   cursors: Record<string, number>;
   /** 上次一轮的结果（UI 直接显示，不用去翻账本） */
@@ -270,6 +273,8 @@ export interface DriverChat {
   title: string;
   url: string;
   path: string;
+  /** 会话稳定 ID（从 URL 提取）；落盘文件名与去重都用它，正文改了也不重复采 */
+  id: string;
   messages: Array<{ role: string; text: string }>;
   /** 内容指纹短键（core.js contentKey） */
   key: string;
@@ -277,6 +282,8 @@ export interface DriverChat {
   sig: string;
   /** 页面里用 core.js formatMarkdown 生成的正文（与插件产物同格式） */
   markdown: string;
+  /** 兼容 ID 对账模块的通用结构（只用 id/title，其余字段原样透传） */
+  [k: string]: unknown;
 }
 
 /**
@@ -314,7 +321,7 @@ export interface DriverStep {
   msgs: number;
   /** 当前页面疑似消息容器数量（区分"没渲染"与"渲染了但认不出角色"） */
   containers: number;
-  /** '' = 抽到了；否则 `click-no-nav` / `nav-no-content` / `no-element` / `error:…` */
+  /** '' = 抽到了；否则 `click-no-nav` / `nav-no-content` / `no-element` / `missing-user` / `error:…` */
   why: string;
 }
 
@@ -361,11 +368,9 @@ const SNAPSHOT_MAX_CHARS = 300_000;
 
 /** 单条会话最长等多久（含 URL 变化后的 settle 期） */
 const CHAT_WAIT_MS = 10_000;
-/**
- * 滚到顶部后等正文渲染的时间。
- * 太短会抽到还没挂上的旧 DOM（等于没补），太长会把每轮耗时翻倍——700ms 是实测长会话也能补全的值。
- */
-const SCROLL_SETTLE_MS = 700;
+/** 滚顶补抽的轮询间隔/总预算：一次 sleep 不够（虚拟列表重挂可能慢半拍），但不能无限等。 */
+const USER_POLL_MS = 250;
+const USER_RETRY_MS = 1500;
 
 /**
  * 生成注入页面的驱动脚本（字符串，在页面上下文执行）。
@@ -402,7 +407,8 @@ export function buildDriverScript(input: {
   // 跳转后正文迟迟不出来的宽限期：跟着主预算缩放，最小 300ms
   const graceMs = Math.max(300, Math.min(4000, Math.round(waitMs / 2)));
   const skipKeys = Array.isArray(input.skipKeys) ? input.skipKeys.filter((k) => typeof k === 'string' && k) : [];
-  const startAt = Math.max(0, Math.floor(input.startAt ?? 0));
+  // startAt 只为兼容旧调用方保留，已不再注入页面：无状态对账每轮恒从顶部开始。
+  void input.startAt;
   // 缺省 = 只点 maxChats 条（旧语义）。允许 maxAttempts < maxChats：那只是「走不到那么多条」，不是错
   const maxAttempts = Math.max(1, Math.floor(input.maxAttempts ?? maxChats));
   return `(async () => {
@@ -423,8 +429,43 @@ export function buildDriverScript(input: {
       return u.host !== location.host;
     } catch (e) { return false; }
   };
-  const allItems = C.listSidebarItems(document, { max: 200 });
-  const items = allItems.filter((it) => !NON_CHAT_RE.test(String(it.label || '')) && !isExternalEntry(it.el));
+  const itemKey = (it) => {
+    let href = '';
+    try {
+      const a = it && it.el && it.el.closest ? it.el.closest('a[href]') : null;
+      if (a) href = String(a.href || '');
+    } catch (e) { href = ''; }
+    return href || ('label:' + String((it && it.label) || ''));
+  };
+  const collectItems = () => C.listSidebarItems(document, { max: 1000 })
+    .filter((it) => !NON_CHAT_RE.test(String(it.label || '')) && !isExternalEntry(it.el));
+  let items = collectItems();
+  // 虚拟列表只挂载可视区：逐屏滚一遍把没挂上的行也发现出来。
+  // 滚动只负责「发现」，点之前会重新取活元素，避免点到已卸载的旧节点。
+  try {
+    const sc = items.length && C.findScrollAncestor ? C.findScrollAncestor(items[0].el) : null;
+    const sh = sc ? Number(sc.scrollHeight || 0) : 0;
+    const ch = sc ? Number(sc.clientHeight || 0) : 0;
+    if (sc && sh > ch + 4) {
+      const seen = new Set(items.map(itemKey));
+      let prev = Number(sc.scrollTop || 0);
+      for (let pass = 0; pass < 20; pass += 1) {
+        sc.scrollTop = prev + Math.max(200, Math.floor(ch * 0.8));
+        await sleep(120);
+        const nowTop = Number(sc.scrollTop || 0);
+        let added = 0;
+        for (const more of collectItems()) {
+          const k = itemKey(more);
+          if (seen.has(k)) continue;
+          seen.add(k); items.push(more); added += 1;
+        }
+        if (nowTop <= prev || added === 0) break;
+        prev = nowTop;
+      }
+      sc.scrollTop = 0;
+      await sleep(120);
+    }
+  } catch (e) { /* 滚不动就按当前可见条目跑，绝不因为滚动失败整轮作废 */ }
   const titles = items.map((i) => i.label);
   // ② 登录页判据：URL / 表单标记 / 登录页文案任一命中即整轮不点。
   //    必须放在任何 click 之前——判断错了最多少采一轮，点错了会替用户打开外部网站。
@@ -447,6 +488,49 @@ export function buildDriverScript(input: {
     try {
       return Math.min(999, document.querySelectorAll('[class*="ds-message"], [data-message-role], [class*="message"]').length);
     } catch (e) { return -1; }
+  };
+  const hasUserMsg = (arr) => Array.isArray(arr) && arr.some((m) => m && m.role === 'user');
+  /**
+   * 滚顶补抽必须把所有「真能滚」的消息祖先都推到 0。
+   * 2026-11-19 老逻辑只取 document.querySelector 命中的第一个锚点：
+   * 命中侧栏/外层 wrapper 或拿到 overflow:auto 但 scrollHeight==clientHeight 的假容器时，
+   * scrollTop=0 什么也不会发生，首条 user 依旧没挂上，坏文件就被当成功导出。
+   */
+  const messageScrollRoots = () => {
+    var anchors = [];
+    try {
+      var preferred = document.querySelectorAll('[class*="ds-message"], [data-message-role]');
+      for (var pi = 0; pi < preferred.length; pi += 1) anchors.push(preferred[pi]);
+    } catch (e) { /* 没精确锚点就退回泛指 */ }
+    if (!anchors.length) {
+      try {
+        var fallback = document.querySelector('[class*="message"]');
+        if (fallback) anchors.push(fallback);
+      } catch (e) { /* 没有锚点就返回空，调用方按现状判 missing-user */ }
+    }
+    var roots = [];
+    for (var ai = 0; ai < anchors.length; ai += 1) {
+      var sc = C.findScrollAncestor ? C.findScrollAncestor(anchors[ai]) : null;
+      if (!sc || roots.indexOf(sc) !== -1) continue;
+      var sh = Number(sc.scrollHeight || 0);
+      var ch = Number(sc.clientHeight || 0);
+      if (sh > ch + 4) roots.push(sc);
+    }
+    return roots;
+  };
+  const scrollChatToTop = () => {
+    var roots = messageScrollRoots();
+    if (!roots.length) {
+      try {
+        var el = document.querySelector('[class*="ds-message"], [data-message-role], [class*="message"]');
+        var sc = el && C.findScrollAncestor ? C.findScrollAncestor(el) : null;
+        if (sc) roots = [sc];
+      } catch (e) { /* 滚不动就按现状判 missing-user */ }
+    }
+    for (var ri = 0; ri < roots.length; ri += 1) {
+      try { roots[ri].scrollTop = 0; } catch (e) { /* 单个容器失败不影响其它容器 */ }
+    }
+    return roots.length;
   };
   const chats = [];
   /**
@@ -473,12 +557,36 @@ export function buildDriverScript(input: {
   };
   const steps = [];
   let prevSig = C.signature(readMsgs());
-  // 已采过的内容键：命中就跳过继续往下找（不是停下），这是「采集能往前推进」的关键
-  const skipSet = new Set(${JSON.stringify(skipKeys)});
+  // 双轨跳过键：旧内容指纹（迁移前兼容）+ 新 <会话ID>.md 文件名（文件系统即账本）。
+  // 命中就跳过继续往下找（不是停下），这是「采集能往前推进」的关键。
+  const skipContentSet = new Set();
+  const skipIdSet = new Set();
+  for (const k of ${JSON.stringify(skipKeys)}) {
+    if (k.endsWith('.md')) skipIdSet.add(k.slice(0, -3));
+    else skipContentSet.add(k);
+  }
+  const idFromUrl = (u) => {
+    try {
+      const patterns = [
+        /(?:^|\\/)a\\/chat\\/s\\/([0-9a-fA-F-]{8,})/,
+        /(?:^|\\/)chat\\/([0-9]{8,})/,
+        /(?:^|\\/)search\\/([0-9]{8,})/,
+        /[?&]chat(?:id)?=([0-9a-zA-Z_-]{8,})/,
+      ];
+      for (const re of patterns) {
+        const m = re.exec(String(u || ''));
+        if (m && m[1]) return m[1];
+      }
+      return '';
+    } catch (e) { return ''; }
+  };
   const seenKeys = new Set();
+  const seenIds = new Set();
   const maxNew = ${maxChats};
   const maxAttempts = ${maxAttempts};
-  const startAt = needRelogin ? 0 : Math.max(0, Math.min(${startAt}, items.length));
+  // 无状态对账：每一轮都从侧栏顶部开始，不再有「从第几条接着扫」的位置状态。
+  // 虚拟列表动态排序下位置不是稳定坐标；旧的 startAt=min(cursor, items.length) 曾撞 200 上限死锁。
+  const startAt = 0;
   let attempts = 0;
   let skipped = 0;
   let nextStart = startAt;
@@ -487,8 +595,11 @@ export function buildDriverScript(input: {
   for (let i = startAt; i < items.length; i += 1) {
     if (needRelogin) { nextStart = i; reachedEnd = false; break; }
     if (attempts >= maxAttempts || chats.length >= maxNew) { nextStart = i; reachedEnd = false; break; }
-    const el = items[i].el;
     const label = items[i].label;
+    const wanted = itemKey(items[i]);
+    // 滚动发现阶段可能已把旧节点卸载：点之前重新取活元素，找不到才退回原节点（并如实记 no-element）
+    const live = collectItems().find((it) => itemKey(it) === wanted || String(it.label || '') === label);
+    const el = live ? live.el : items[i].el;
     const urlBefore = location.href;
     let msgs = [];
     let why = '';
@@ -544,19 +655,37 @@ export function buildDriverScript(input: {
      * 2026-11-19 实测：3 轮以上的长会话稳定丢第一条用户提问，1 轮的短会话完整；
      * 且 core.js 里早就有 findScrollAncestor（注释写着"不滚动就永远只能导到眼前这十几条"），
      * 但无头驱动一次都没调用过。修法：滚到顶、等一帧渲染、再抽一次，两段重叠合并。
-     * 抽不到就按已抽到的导出——补抽失败不能把整条会话变成空。
+     * 抽不到绝不按现状导出：那正是 2026-11-19 8 份「只有助手」坏文件的入口。
+     * 现在记 missing-user 并跳过，文件不动，下一轮继续补；好文件也绝不会被坏版本覆盖。
      */
-    if (msgs[0] && msgs[0].role !== 'user') {
+    // 首条不是 user 就补抽：哪怕后面有 user，也说明顶部那条提问还没挂上（2026-11-19 的截图就是这个形态）。
+    if (!msgs.length || msgs[0].role !== 'user') {
       try {
-        const anchor = document.querySelector('[class*="ds-message"], [data-message-role], [class*="message"]');
-        const sc = (anchor && C.findScrollAncestor) ? C.findScrollAncestor(anchor) : null;
-        if (sc) {
-          sc.scrollTop = 0;
-          await sleep(${SCROLL_SETTLE_MS});
-          const head = readMsgs();
-          if (head.length) msgs = mergeOverlap(head, msgs);
+        var roots = scrollChatToTop();
+        if (roots > 0) {
+          // 滚顶后虚拟列表要重新挂载，一次固定 sleep 可能早于渲染；轮询到认出 user 或预算用尽。
+          var headDeadline = Date.now() + ${USER_RETRY_MS};
+          do {
+            await sleep(${USER_POLL_MS});
+            // 虚拟列表重挂可能把 scrollTop 又推回去；每轮重新压到顶部再抽。
+            scrollChatToTop();
+            var head = readMsgs();
+            if (head.length) {
+              msgs = mergeOverlap(head, msgs);
+              if (hasUserMsg(msgs)) break;
+            }
+          } while (Date.now() < headDeadline);
         }
-      } catch (e) { /* 滚不动就按现状导出，绝不因为补抽失败丢掉整条 */ }
+      } catch (e) { /* 滚不动继续走硬校验：下面会如实记 missing-user，不落坏文件 */ }
+    }
+    // 硬校验：没有用户提问的 md 一律不落盘。旧逻辑"补抽失败也导出"正是坏文件反复出现的入口。
+    if (!hasUserMsg(msgs)) {
+      why = 'missing-user';
+      steps[steps.length - 1].why = why;
+      steps[steps.length - 1].msgs = msgs.length;
+      attempts += 1;
+      nextStart = i + 1;
+      continue;
     }
     attempts += 1;
     const sig2 = C.signature(msgs);
@@ -564,12 +693,17 @@ export function buildDriverScript(input: {
     nextStart = i + 1;
     // 内容键只能抽完正文才知道，所以「跳过已采」必须发生在这里：命中就继续往下一条，而不是停下
     const key2 = C.contentKey(siteKey, sig2);
-    if (skipSet.has(key2) || seenKeys.has(key2)) { skipped += 1; continue; }
+    const chatId = idFromUrl(location.href);
+    if (skipContentSet.has(key2) || skipIdSet.has(chatId) || seenKeys.has(key2) || (chatId && seenIds.has(chatId))) {
+      skipped += 1; continue;
+    }
     seenKeys.add(key2);
+    if (chatId) seenIds.add(chatId);
     const siteMeta = (C.SITES || []).find((s) => s.key === siteKey) || {};
     const plain = msgs.map((m) => ({ role: m.role, text: m.text }));
     chats.push({
       title: label,
+      id: chatId,
       url: location.href,
       path: location.pathname,
       messages: plain,
@@ -682,9 +816,17 @@ export function parseDriverResult(raw: unknown): DriverResult | null {
           .map((m) => ({ role: m.role as string, text: m.text as string }))
         : [];
       if (messages.length === 0) continue;
+      // 第二道闸：即使页面驱动漏判，也不让「只有助手」的会话回传到落盘层。
+      if (!messages.some((m) => m.role === 'user') || !/^##\s*用户\s*$/m.test(o.markdown)) continue;
+      const url = typeof o.url === 'string' ? o.url : '';
+      // ID 是落盘主键：页面已给就用页面值，缺了就从 URL 现提；两者都没有才留空（退化为标题键）。
+      const id = sanitizeConversationId(
+        typeof o.id === 'string' && o.id.trim() ? o.id.trim() : (conversationIdFromUrl(url) ?? ''),
+      );
       chats.push({
         title: o.title,
-        url: typeof o.url === 'string' ? o.url : '',
+        id,
+        url,
         path: typeof o.path === 'string' ? o.path : '',
         messages,
         key: o.key,
@@ -728,7 +870,9 @@ export function summarizeSteps(steps: DriverStep[]): string {
   const noNav = failed.filter((s) => s.why === 'click-no-nav').length;
   const noContent = failed.filter((s) => s.why === 'nav-no-content').length;
   const noEl = failed.filter((s) => s.why === 'no-element').length;
+  const missingUser = failed.filter((s) => s.why === 'missing-user').length;
   const errs = failed.filter((s) => s.why.startsWith('error:')).length;
+  if (missingUser === failed.length) return `点了 ${failed.length} 条，滚顶后仍没认出用户提问；本轮不落坏文件，下一轮继续重试`;
   if (noNav === failed.length) return `点了 ${failed.length} 条，地址都没变（点了但页面没切换，侧栏条目可能不是会话链接）`;
   if (noContent === failed.length) {
     const c = steps[0]?.containers ?? 0;
@@ -738,6 +882,7 @@ export function summarizeSteps(steps: DriverStep[]): string {
   if (noNav) bits.push(`${noNav} 条点了没跳转`);
   if (noContent) bits.push(`${noContent} 条跳过去没读到正文`);
   if (noEl) bits.push(`${noEl} 条拿不到可点元素`);
+  if (missingUser) bits.push(`${missingUser} 条没认出用户提问`);
   if (errs) bits.push(`${errs} 条报错`);
   return `点了 ${failed.length} 条：${bits.join('、')}`;
 }

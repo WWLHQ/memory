@@ -74,6 +74,7 @@ function makeDeps() {
     root: () => root,
     coreJsPath: () => core,
     ingest: () => ({ port: 8201, token: 'test' }),
+    exportDir: () => join(root, 'exports'),
     log: () => {},
   };
 }

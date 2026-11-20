@@ -1,0 +1,1424 @@
+{
+  "generatedAt": "2026-11-20T12:54:18.915Z",
+  "root": "C:/Users/LHQ/Downloads/chat-exports",
+  "apply": false,
+  "summary": {
+    "actions": 176,
+    "renames": 113,
+    "backups": 63,
+    "skipped": 0,
+    "errors": 0
+  },
+  "actions": [
+    {
+      "site": "deepseek",
+      "kind": "backup",
+      "id": "89afe628-4812-4b24-8a6d-b56ed1ca7f64",
+      "title": "MCP集成技能连接器插件",
+      "from": "deepseek\\20261119-114239.md",
+      "to": "deepseek\\_dedup_backup\\20261119-114239.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "89afe628-4812-4b24-8a6d-b56ed1ca7f64",
+      "title": "MCP集成技能连接器插件",
+      "from": "deepseek\\20261119-115639-6.md",
+      "to": "deepseek\\89afe628-4812-4b24-8a6d-b56ed1ca7f64.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "7ae5c6ea-129b-4263-a097-21cd86d7d6ca",
+      "title": "强制Agent先读记忆库",
+      "from": "deepseek\\20261119-115639-1.md",
+      "to": "deepseek\\7ae5c6ea-129b-4263-a097-21cd86d7d6ca.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "6b8c5db8-0eb7-4061-8fef-93dd4d981345",
+      "title": "V100安装Win11可行",
+      "from": "deepseek\\20261119-115639-2.md",
+      "to": "deepseek\\6b8c5db8-0eb7-4061-8fef-93dd4d981345.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "dec3d462-93a6-45d2-8d77-0228cc37c8de",
+      "title": "无法直接读取对话记录",
+      "from": "deepseek\\20261119-115639-3.md",
+      "to": "deepseek\\dec3d462-93a6-45d2-8d77-0228cc37c8de.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "backup",
+      "id": "b5121303-53e5-4a02-8c91-0b9b0bc4615e",
+      "title": "记忆库与Agent交互",
+      "from": "deepseek\\20261119-223511-1.md",
+      "to": "deepseek\\_dedup_backup\\20261119-223511-1.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "backup",
+      "id": "b5121303-53e5-4a02-8c91-0b9b0bc4615e",
+      "title": "记忆库与Agent交互",
+      "from": "deepseek\\20261119-115639-4.md",
+      "to": "deepseek\\_dedup_backup\\20261119-115639-4.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "b5121303-53e5-4a02-8c91-0b9b0bc4615e",
+      "title": "记忆库与Agent交互",
+      "from": "deepseek\\20261119-234249.md",
+      "to": "deepseek\\b5121303-53e5-4a02-8c91-0b9b0bc4615e.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "eaf04ff0-ff4f-4a54-bb55-9a5b7f9e4385",
+      "title": "记忆分类",
+      "from": "deepseek\\20261119-115639-5.md",
+      "to": "deepseek\\eaf04ff0-ff4f-4a54-bb55-9a5b7f9e4385.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "backup",
+      "id": "4f921218-2323-41c8-8bcc-f929e0992ec8",
+      "title": "DSH免费模型指南",
+      "from": "deepseek\\20261119-223511-2.md",
+      "to": "deepseek\\_dedup_backup\\20261119-223511-2.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "backup",
+      "id": "4f921218-2323-41c8-8bcc-f929e0992ec8",
+      "title": "DSH免费模型指南",
+      "from": "deepseek\\20261119-115639-7.md",
+      "to": "deepseek\\_dedup_backup\\20261119-115639-7.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "4f921218-2323-41c8-8bcc-f929e0992ec8",
+      "title": "DSH免费模型指南",
+      "from": "deepseek\\20261119-234249-1.md",
+      "to": "deepseek\\4f921218-2323-41c8-8bcc-f929e0992ec8.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "cffa5722-9751-4393-b109-e4b9d1764369",
+      "title": "Win11选MSI安装包",
+      "from": "deepseek\\20261119-115639-8.md",
+      "to": "deepseek\\cffa5722-9751-4393-b109-e4b9d1764369.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "975bf065-7397-4e39-8e7f-a867472fa2ea",
+      "title": "SolidWorks知识库搭建",
+      "from": "deepseek\\20261119-115639-9.md",
+      "to": "deepseek\\975bf065-7397-4e39-8e7f-a867472fa2ea.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "789ae568-f995-4b89-8e9b-3c649634eda1",
+      "title": "个人记忆系统变现路径",
+      "from": "deepseek\\20261119-115639.md",
+      "to": "deepseek\\789ae568-f995-4b89-8e9b-3c649634eda1.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "backup",
+      "id": "a55be505-be3a-47a5-a4b8-31dc7d12be0a",
+      "title": "Electron框架介绍",
+      "from": "deepseek\\20261119-194317.md",
+      "to": "deepseek\\_dedup_backup\\20261119-194317.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "a55be505-be3a-47a5-a4b8-31dc7d12be0a",
+      "title": "Electron框架介绍",
+      "from": "deepseek\\20261119-223511.md",
+      "to": "deepseek\\a55be505-be3a-47a5-a4b8-31dc7d12be0a.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "backup",
+      "id": "997d63ec-7119-41e9-ae2a-fe6fac083b67",
+      "title": "吹雪主板支持远程唤醒",
+      "from": "deepseek\\20261120-005236.md",
+      "to": "deepseek\\_dedup_backup\\20261120-005236.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "backup",
+      "id": "997d63ec-7119-41e9-ae2a-fe6fac083b67",
+      "title": "吹雪主板支持远程唤醒",
+      "from": "deepseek\\20261119-195310-1.md",
+      "to": "deepseek\\_dedup_backup\\20261119-195310-1.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "997d63ec-7119-41e9-ae2a-fe6fac083b67",
+      "title": "吹雪主板支持远程唤醒",
+      "from": "deepseek\\20261120-110128-2.md",
+      "to": "deepseek\\997d63ec-7119-41e9-ae2a-fe6fac083b67.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "6aa48bd5-6066-45ad-9365-304b502ee325",
+      "title": "全量投影局部修改技术",
+      "from": "deepseek\\20261119-195310-10.md",
+      "to": "deepseek\\6aa48bd5-6066-45ad-9365-304b502ee325.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "d606ccd2-48b5-400d-8adf-66d72846fc33",
+      "title": "Obsidian项目管理指南",
+      "from": "deepseek\\20261119-195310-11.md",
+      "to": "deepseek\\d606ccd2-48b5-400d-8adf-66d72846fc33.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "cddf15d8-d93e-4245-8c25-80fc087f1f7c",
+      "title": "Prompt缓存到LLM",
+      "from": "deepseek\\20261119-195310-12.md",
+      "to": "deepseek\\cddf15d8-d93e-4245-8c25-80fc087f1f7c.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "f21b7acc-dc5e-4ab4-b785-00c3214232dc",
+      "title": "需求到生产程序步骤",
+      "from": "deepseek\\20261119-195310-13.md",
+      "to": "deepseek\\f21b7acc-dc5e-4ab4-b785-00c3214232dc.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "7f0e5db8-7df9-4f09-806d-8a72ec419483",
+      "title": "AgentPM项目管理插件设计",
+      "from": "deepseek\\20261119-195310-14.md",
+      "to": "deepseek\\7f0e5db8-7df9-4f09-806d-8a72ec419483.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "a4634728-5fe3-47da-832e-e08ad28542d3",
+      "title": "DSH插件技能跨Agent共用",
+      "from": "deepseek\\20261119-195310-15.md",
+      "to": "deepseek\\a4634728-5fe3-47da-832e-e08ad28542d3.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "13c21812-38ad-4b3c-b3d6-2efadcaea0b1",
+      "title": "AI Agent项目管理插件",
+      "from": "deepseek\\20261119-195310-16.md",
+      "to": "deepseek\\13c21812-38ad-4b3c-b3d6-2efadcaea0b1.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "88a991df-7f72-468f-862a-101d3df603cd",
+      "title": "添加本地模型方法",
+      "from": "deepseek\\20261119-195310-17.md",
+      "to": "deepseek\\88a991df-7f72-468f-862a-101d3df603cd.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "34945ecd-0612-45cf-bbb4-ad0c8c16badd",
+      "title": "文档规划降token",
+      "from": "deepseek\\20261119-195310-18.md",
+      "to": "deepseek\\34945ecd-0612-45cf-bbb4-ad0c8c16badd.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "b4e749a9-7e16-446e-beaa-27a7c51771ec",
+      "title": "文档规划与成本控制",
+      "from": "deepseek\\20261119-195310-19.md",
+      "to": "deepseek\\b4e749a9-7e16-446e-beaa-27a7c51771ec.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "47fdc6ed-be2b-43e5-8cf3-c8b1b5909fd7",
+      "title": "项目拆分最小单元",
+      "from": "deepseek\\20261119-195310-2.md",
+      "to": "deepseek\\47fdc6ed-be2b-43e5-8cf3-c8b1b5909fd7.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "cba7d914-403c-4c5e-bb1e-217780c0bda8",
+      "title": "Markdown大文件拆分省算力",
+      "from": "deepseek\\20261119-195310-20.md",
+      "to": "deepseek\\cba7d914-403c-4c5e-bb1e-217780c0bda8.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "4332d145-38fd-4758-8cc8-92baf785d412",
+      "title": "PRD文档Token优化方案",
+      "from": "deepseek\\20261119-195310-21.md",
+      "to": "deepseek\\4332d145-38fd-4758-8cc8-92baf785d412.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "f9682bc4-bbe6-4fc2-a8f4-120171deaae8",
+      "title": "文档缓存减少token",
+      "from": "deepseek\\20261119-195310-22.md",
+      "to": "deepseek\\f9682bc4-bbe6-4fc2-a8f4-120171deaae8.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "2695c42a-95f7-46f9-8057-62a4bb560eac",
+      "title": "转接免费额度到CCSwitch",
+      "from": "deepseek\\20261119-195310-23.md",
+      "to": "deepseek\\2695c42a-95f7-46f9-8057-62a4bb560eac.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "d5a208da-7b57-4380-88a9-a53a229bda3b",
+      "title": "AI Agent聊天记忆",
+      "from": "deepseek\\20261119-195310-24.md",
+      "to": "deepseek\\d5a208da-7b57-4380-88a9-a53a229bda3b.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "b228eb38-06fe-427d-8c57-a3773c8ad580",
+      "title": "千帆免费模型汇总",
+      "from": "deepseek\\20261119-195310-25.md",
+      "to": "deepseek\\b228eb38-06fe-427d-8c57-a3773c8ad580.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "17b9c7df-a1d8-4876-9977-5c80ccac325f",
+      "title": "流程图制作软件推荐",
+      "from": "deepseek\\20261119-195310-26.md",
+      "to": "deepseek\\17b9c7df-a1d8-4876-9977-5c80ccac325f.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "4ce5ca8e-b86e-44e5-9889-2469eec9901e",
+      "title": "在线脑图推荐",
+      "from": "deepseek\\20261119-195310-27.md",
+      "to": "deepseek\\4ce5ca8e-b86e-44e5-9889-2469eec9901e.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "872f56b9-746d-4f9c-9235-a187f7b33492",
+      "title": "数据查重实现方法",
+      "from": "deepseek\\20261119-195310-28.md",
+      "to": "deepseek\\872f56b9-746d-4f9c-9235-a187f7b33492.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "f9e49ee4-d3fc-454c-9c2b-56868faec845",
+      "title": "Git仓库推荐",
+      "from": "deepseek\\20261119-195310-3.md",
+      "to": "deepseek\\f9e49ee4-d3fc-454c-9c2b-56868faec845.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "d613aaa0-1304-4b1e-9703-26cf9b96d1d5",
+      "title": "大模型处理文档程序局限",
+      "from": "deepseek\\20261119-195310-4.md",
+      "to": "deepseek\\d613aaa0-1304-4b1e-9703-26cf9b96d1d5.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "5673a598-028d-459e-9a44-0c48872b19ad",
+      "title": "Git简介",
+      "from": "deepseek\\20261119-195310-5.md",
+      "to": "deepseek\\5673a598-028d-459e-9a44-0c48872b19ad.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "7965a5b4-b4c1-4902-8de4-d3e93139f21b",
+      "title": "大模型CI含义",
+      "from": "deepseek\\20261119-195310-6.md",
+      "to": "deepseek\\7965a5b4-b4c1-4902-8de4-d3e93139f21b.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "3f68c360-15ee-4d34-bbb1-c67778067137",
+      "title": "知识库文档处理流程",
+      "from": "deepseek\\20261119-195310-7.md",
+      "to": "deepseek\\3f68c360-15ee-4d34-bbb1-c67778067137.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "798cb8e7-61a5-4f5e-9b64-5fcd2475bb9e",
+      "title": "CAD图纸知识库搭建",
+      "from": "deepseek\\20261119-195310-8.md",
+      "to": "deepseek\\798cb8e7-61a5-4f5e-9b64-5fcd2475bb9e.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "534153c7-f0d0-4a95-b3b8-8270213271e1",
+      "title": "大文档AI修改省token",
+      "from": "deepseek\\20261119-195310-9.md",
+      "to": "deepseek\\534153c7-f0d0-4a95-b3b8-8270213271e1.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "backup",
+      "id": "856eadfb-6489-4ae6-9aca-7be4afb3c36e",
+      "title": "V100 16G模型支持",
+      "from": "deepseek\\20261119-234249-2.md",
+      "to": "deepseek\\_dedup_backup\\20261119-234249-2.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "backup",
+      "id": "856eadfb-6489-4ae6-9aca-7be4afb3c36e",
+      "title": "V100 16G模型支持",
+      "from": "deepseek\\20261119-195310.md",
+      "to": "deepseek\\_dedup_backup\\20261119-195310.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "856eadfb-6489-4ae6-9aca-7be4afb3c36e",
+      "title": "V100 16G模型支持",
+      "from": "deepseek\\20261120-110128-1.md",
+      "to": "deepseek\\856eadfb-6489-4ae6-9aca-7be4afb3c36e.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "backup",
+      "id": "3c883796-9716-4910-9c67-49d9cd8f5813",
+      "title": "记忆知识原理",
+      "from": "deepseek\\20261119-195410-1.md",
+      "to": "deepseek\\_dedup_backup\\20261119-195410-1.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "3c883796-9716-4910-9c67-49d9cd8f5813",
+      "title": "记忆知识原理",
+      "from": "deepseek\\20261119-212036.md",
+      "to": "deepseek\\3c883796-9716-4910-9c67-49d9cd8f5813.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "86113a08-2982-42e2-8a2e-ed4a566fecd0",
+      "title": "智能体设置指南",
+      "from": "deepseek\\20261119-195410-10.md",
+      "to": "deepseek\\86113a08-2982-42e2-8a2e-ed4a566fecd0.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "backup",
+      "id": "95bf04ae-f237-478e-a8a9-ac3c6c0e9e1a",
+      "title": "Claude Code配置指南",
+      "from": "deepseek\\20261119-195410-11.md",
+      "to": "deepseek\\_dedup_backup\\20261119-195410-11.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "95bf04ae-f237-478e-a8a9-ac3c6c0e9e1a",
+      "title": "Claude Code配置指南",
+      "from": "deepseek\\20261119-212036-5.md",
+      "to": "deepseek\\95bf04ae-f237-478e-a8a9-ac3c6c0e9e1a.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "3cbac76c-dd61-4baa-a461-f92b767966a9",
+      "title": "Claude Code binary error fix",
+      "from": "deepseek\\20261119-195410-12.md",
+      "to": "deepseek\\3cbac76c-dd61-4baa-a461-f92b767966a9.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "9146a7f6-350c-431e-9fbb-ab55081ae39f",
+      "title": "Claude工作区启动失败",
+      "from": "deepseek\\20261119-195410-13.md",
+      "to": "deepseek\\9146a7f6-350c-431e-9fbb-ab55081ae39f.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "backup",
+      "id": "b229d90f-4b4a-432c-9770-eb785c70d584",
+      "title": "Claude Code配置DeepSeek",
+      "from": "deepseek\\20261119-195410-14.md",
+      "to": "deepseek\\_dedup_backup\\20261119-195410-14.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "b229d90f-4b4a-432c-9770-eb785c70d584",
+      "title": "Claude Code配置DeepSeek",
+      "from": "deepseek\\20261119-212036-6.md",
+      "to": "deepseek\\b229d90f-4b4a-432c-9770-eb785c70d584.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "backup",
+      "id": "1cce0cb8-0f3a-445d-90ae-045038628fa5",
+      "title": "配置被组织锁定",
+      "from": "deepseek\\20261119-195410-15.md",
+      "to": "deepseek\\_dedup_backup\\20261119-195410-15.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "1cce0cb8-0f3a-445d-90ae-045038628fa5",
+      "title": "配置被组织锁定",
+      "from": "deepseek\\20261119-212036-7.md",
+      "to": "deepseek\\1cce0cb8-0f3a-445d-90ae-045038628fa5.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "backup",
+      "id": "98bf6ae7-2579-4861-be51-e4089203c139",
+      "title": "Claude Code安装警告解决",
+      "from": "deepseek\\20261119-195410-16.md",
+      "to": "deepseek\\_dedup_backup\\20261119-195410-16.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "98bf6ae7-2579-4861-be51-e4089203c139",
+      "title": "Claude Code安装警告解决",
+      "from": "deepseek\\20261119-212036-8.md",
+      "to": "deepseek\\98bf6ae7-2579-4861-be51-e4089203c139.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "915b5417-501a-4487-b492-b9dcc2706978",
+      "title": "Windows设置未完成修复",
+      "from": "deepseek\\20261119-195410-17.md",
+      "to": "deepseek\\915b5417-501a-4487-b492-b9dcc2706978.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "backup",
+      "id": "96abb55f-2083-4ed0-890a-9ad2e9535590",
+      "title": "CC Switch数据库版本过新",
+      "from": "deepseek\\20261119-195410-18.md",
+      "to": "deepseek\\_dedup_backup\\20261119-195410-18.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "96abb55f-2083-4ed0-890a-9ad2e9535590",
+      "title": "CC Switch数据库版本过新",
+      "from": "deepseek\\20261119-212036-9.md",
+      "to": "deepseek\\96abb55f-2083-4ed0-890a-9ad2e9535590.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "backup",
+      "id": "302d35fa-7bb5-4f43-82ad-1636436034b9",
+      "title": "Claude Code格式选择",
+      "from": "deepseek\\20261119-195410-19.md",
+      "to": "deepseek\\_dedup_backup\\20261119-195410-19.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "302d35fa-7bb5-4f43-82ad-1636436034b9",
+      "title": "Claude Code格式选择",
+      "from": "deepseek\\20261119-212036-10.md",
+      "to": "deepseek\\302d35fa-7bb5-4f43-82ad-1636436034b9.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "65185f3f-d37d-48f1-a414-c5fbd16ff852",
+      "title": "遗忘方程式解释",
+      "from": "deepseek\\20261119-195410-2.md",
+      "to": "deepseek\\65185f3f-d37d-48f1-a414-c5fbd16ff852.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "f12d6b55-6084-4583-9840-d2956a74bbd3",
+      "title": "Codex恢复对话失败",
+      "from": "deepseek\\20261119-195410-20.md",
+      "to": "deepseek\\f12d6b55-6084-4583-9840-d2956a74bbd3.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "backup",
+      "id": "19d5a6b6-1440-4a3b-8b82-bbe547010d37",
+      "title": "程序设计Agent推荐",
+      "from": "deepseek\\20261119-195410-21.md",
+      "to": "deepseek\\_dedup_backup\\20261119-195410-21.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "19d5a6b6-1440-4a3b-8b82-bbe547010d37",
+      "title": "程序设计Agent推荐",
+      "from": "deepseek\\20261119-212036-11.md",
+      "to": "deepseek\\19d5a6b6-1440-4a3b-8b82-bbe547010d37.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "f27bc18b-a474-4dc0-87ca-15403a6bcf7b",
+      "title": "降低Qoder积分消耗",
+      "from": "deepseek\\20261119-195410-22.md",
+      "to": "deepseek\\f27bc18b-a474-4dc0-87ca-15403a6bcf7b.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "backup",
+      "id": "4b9566c3-4e75-4ac1-b2c4-013cf8edf4f4",
+      "title": "Agent开发SolidWorks提速",
+      "from": "deepseek\\20261119-195410-23.md",
+      "to": "deepseek\\_dedup_backup\\20261119-195410-23.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "4b9566c3-4e75-4ac1-b2c4-013cf8edf4f4",
+      "title": "Agent开发SolidWorks提速",
+      "from": "deepseek\\20261119-212036-12.md",
+      "to": "deepseek\\4b9566c3-4e75-4ac1-b2c4-013cf8edf4f4.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "backup",
+      "id": "11bddbd6-e98b-4d86-aece-9d1c682408b7",
+      "title": "极空间安装Hermes配置",
+      "from": "deepseek\\20261119-195410-24.md",
+      "to": "deepseek\\_dedup_backup\\20261119-195410-24.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "11bddbd6-e98b-4d86-aece-9d1c682408b7",
+      "title": "极空间安装Hermes配置",
+      "from": "deepseek\\20261119-212036-13.md",
+      "to": "deepseek\\11bddbd6-e98b-4d86-aece-9d1c682408b7.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "backup",
+      "id": "4b0dd034-0aa8-4eb8-8740-e85f77cab495",
+      "title": "极空间部署微力同步",
+      "from": "deepseek\\20261119-195410-25.md",
+      "to": "deepseek\\_dedup_backup\\20261119-195410-25.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "4b0dd034-0aa8-4eb8-8740-e85f77cab495",
+      "title": "极空间部署微力同步",
+      "from": "deepseek\\20261119-212036-14.md",
+      "to": "deepseek\\4b0dd034-0aa8-4eb8-8740-e85f77cab495.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "backup",
+      "id": "43f550f1-744d-42e7-b133-07135ede40f2",
+      "title": "DeepSeek Hermes安装",
+      "from": "deepseek\\20261119-195410-26.md",
+      "to": "deepseek\\_dedup_backup\\20261119-195410-26.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "43f550f1-744d-42e7-b133-07135ede40f2",
+      "title": "DeepSeek Hermes安装",
+      "from": "deepseek\\20261119-212036-15.md",
+      "to": "deepseek\\43f550f1-744d-42e7-b133-07135ede40f2.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "backup",
+      "id": "5adabcce-0e4c-4394-a19f-6262552ad2e7",
+      "title": "Docker装TortoiseSVN",
+      "from": "deepseek\\20261119-195410-3.md",
+      "to": "deepseek\\_dedup_backup\\20261119-195410-3.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "5adabcce-0e4c-4394-a19f-6262552ad2e7",
+      "title": "Docker装TortoiseSVN",
+      "from": "deepseek\\20261119-212036-1.md",
+      "to": "deepseek\\5adabcce-0e4c-4394-a19f-6262552ad2e7.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "backup",
+      "id": "d6f2cd69-8c3e-445f-a374-697e1a9b43b7",
+      "title": "分层记忆OS式解析",
+      "from": "deepseek\\20261119-195410-4.md",
+      "to": "deepseek\\_dedup_backup\\20261119-195410-4.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "d6f2cd69-8c3e-445f-a374-697e1a9b43b7",
+      "title": "分层记忆OS式解析",
+      "from": "deepseek\\20261119-212036-2.md",
+      "to": "deepseek\\d6f2cd69-8c3e-445f-a374-697e1a9b43b7.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "7aa4fc3a-0505-47be-bc9b-7ad96f93f898",
+      "title": "Schema meaning",
+      "from": "deepseek\\20261119-195410-5.md",
+      "to": "deepseek\\7aa4fc3a-0505-47be-bc9b-7ad96f93f898.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "backup",
+      "id": "49fd8ab7-bd8e-4bec-b73e-d388e11f83eb",
+      "title": "MecAgent分析",
+      "from": "deepseek\\20261119-195410-6.md",
+      "to": "deepseek\\_dedup_backup\\20261119-195410-6.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "49fd8ab7-bd8e-4bec-b73e-d388e11f83eb",
+      "title": "MecAgent分析",
+      "from": "deepseek\\20261119-212036-3.md",
+      "to": "deepseek\\49fd8ab7-bd8e-4bec-b73e-d388e11f83eb.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "backup",
+      "id": "dc7bbc81-9278-49fd-8074-5c7ffa319c4d",
+      "title": "AI设计大型软件指南",
+      "from": "deepseek\\20261119-195410-7.md",
+      "to": "deepseek\\_dedup_backup\\20261119-195410-7.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "dc7bbc81-9278-49fd-8074-5c7ffa319c4d",
+      "title": "AI设计大型软件指南",
+      "from": "deepseek\\20261119-212036-4.md",
+      "to": "deepseek\\dc7bbc81-9278-49fd-8074-5c7ffa319c4d.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "a4c9656b-3cd3-47f5-97fa-3102304f4c62",
+      "title": "大型软件开发顺序",
+      "from": "deepseek\\20261119-195410-8.md",
+      "to": "deepseek\\a4c9656b-3cd3-47f5-97fa-3102304f4c62.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "2435f8a0-bdf9-4ae7-916e-47f7d92eb36e",
+      "title": "Agent智能体插件解析",
+      "from": "deepseek\\20261119-195410-9.md",
+      "to": "deepseek\\2435f8a0-bdf9-4ae7-916e-47f7d92eb36e.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "565c1fe1-3199-4b7c-b86a-22d26658576a",
+      "title": "记忆系统核心问题",
+      "from": "deepseek\\20261119-195410.md",
+      "to": "deepseek\\565c1fe1-3199-4b7c-b86a-22d26658576a.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "29c50522-376a-4a19-92ca-7c26af3e7e80",
+      "title": "创建Skill方法",
+      "from": "deepseek\\20261119-195411-1.md",
+      "to": "deepseek\\29c50522-376a-4a19-92ca-7c26af3e7e80.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "659e4f86-d9b4-4a74-8509-cd5b277a14ec",
+      "title": "V100与3090对比",
+      "from": "deepseek\\20261119-195411-2.md",
+      "to": "deepseek\\659e4f86-d9b4-4a74-8509-cd5b277a14ec.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "d11a3d96-b8f1-44f7-a59f-cea6960ddf70",
+      "title": "RTX桌面管理详解",
+      "from": "deepseek\\20261119-195411.md",
+      "to": "deepseek\\d11a3d96-b8f1-44f7-a59f-cea6960ddf70.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "4a0697b3-d1c0-481c-a270-2ccc11c07f7a",
+      "title": "SolidWorks开发资源推荐",
+      "from": "deepseek\\20261119-195510-1.md",
+      "to": "deepseek\\4a0697b3-d1c0-481c-a270-2ccc11c07f7a.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "3a1edb85-ff7b-4543-9450-b75225104d9e",
+      "title": "国产编程Agent推荐",
+      "from": "deepseek\\20261119-195510-10.md",
+      "to": "deepseek\\3a1edb85-ff7b-4543-9450-b75225104d9e.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "283e071e-8af7-4e16-a167-f38f167dee47",
+      "title": "本地大模型布局指南",
+      "from": "deepseek\\20261119-195510-11.md",
+      "to": "deepseek\\283e071e-8af7-4e16-a167-f38f167dee47.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "e9c94f10-5f56-4a1a-9059-51f71f2b732c",
+      "title": "双显卡算力输出配置",
+      "from": "deepseek\\20261119-195510-12.md",
+      "to": "deepseek\\e9c94f10-5f56-4a1a-9059-51f71f2b732c.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "backup",
+      "id": "7df98965-522d-4481-912a-6689992c81da",
+      "title": "标准件轻量化方案",
+      "from": "deepseek\\20261119-195510-13.md",
+      "to": "deepseek\\_dedup_backup\\20261119-195510-13.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "7df98965-522d-4481-912a-6689992c81da",
+      "title": "标准件轻量化方案",
+      "from": "deepseek\\20261119-212126.md",
+      "to": "deepseek\\7df98965-522d-4481-912a-6689992c81da.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "20603aaa-783a-446c-a38e-ca7978ff2e07",
+      "title": "SolidWorks工具箱介绍",
+      "from": "deepseek\\20261119-195510-14.md",
+      "to": "deepseek\\20603aaa-783a-446c-a38e-ca7978ff2e07.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "46195cde-2471-49e8-b2ce-462fa828a323",
+      "title": "PDM多义解析",
+      "from": "deepseek\\20261119-195510-15.md",
+      "to": "deepseek\\46195cde-2471-49e8-b2ce-462fa828a323.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "dde644e5-476c-4b7d-80c7-0fed07d659bb",
+      "title": "双向同步软件推荐",
+      "from": "deepseek\\20261119-195510-16.md",
+      "to": "deepseek\\dde644e5-476c-4b7d-80c7-0fed07d659bb.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "01bd655d-490e-4cb2-acac-0f0274a603fe",
+      "title": "批量替换工程图模版",
+      "from": "deepseek\\20261119-195510-17.md",
+      "to": "deepseek\\01bd655d-490e-4cb2-acac-0f0274a603fe.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "backup",
+      "id": "1378e49e-fc7f-4ac6-8341-b040bd749f91",
+      "title": "CAD转SolidWorks模板",
+      "from": "deepseek\\20261119-195510-18.md",
+      "to": "deepseek\\_dedup_backup\\20261119-195510-18.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "1378e49e-fc7f-4ac6-8341-b040bd749f91",
+      "title": "CAD转SolidWorks模板",
+      "from": "deepseek\\20261119-212128.md",
+      "to": "deepseek\\1378e49e-fc7f-4ac6-8341-b040bd749f91.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "backup",
+      "id": "6a9b203e-0ebf-4078-8fd7-2a724cf0dfac",
+      "title": "Git初始化指南",
+      "from": "deepseek\\20261119-195510-19.md",
+      "to": "deepseek\\_dedup_backup\\20261119-195510-19.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "6a9b203e-0ebf-4078-8fd7-2a724cf0dfac",
+      "title": "Git初始化指南",
+      "from": "deepseek\\20261119-212129.md",
+      "to": "deepseek\\6a9b203e-0ebf-4078-8fd7-2a724cf0dfac.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "f6eb9f2c-c660-458a-8d30-3caf7906b5d7",
+      "title": "SolidWorks帮助文档格式",
+      "from": "deepseek\\20261119-195510-2.md",
+      "to": "deepseek\\f6eb9f2c-c660-458a-8d30-3caf7906b5d7.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "cdf42ae8-d9ac-4859-baef-3633541f3856",
+      "title": "知识库推荐指南",
+      "from": "deepseek\\20261119-195510-20.md",
+      "to": "deepseek\\cdf42ae8-d9ac-4859-baef-3633541f3856.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "a3b2a6d8-58e8-43c5-a5ba-026b58b591d0",
+      "title": "极空间Z4pro换32G内存",
+      "from": "deepseek\\20261119-195510-21.md",
+      "to": "deepseek\\a3b2a6d8-58e8-43c5-a5ba-026b58b591d0.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "backup",
+      "id": "20a01ad1-7d15-4c04-8d35-97d4f1c0837b",
+      "title": "免费双向同步软件推荐",
+      "from": "deepseek\\20261119-195510-22.md",
+      "to": "deepseek\\_dedup_backup\\20261119-195510-22.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "20a01ad1-7d15-4c04-8d35-97d4f1c0837b",
+      "title": "免费双向同步软件推荐",
+      "from": "deepseek\\20261119-212131.md",
+      "to": "deepseek\\20a01ad1-7d15-4c04-8d35-97d4f1c0837b.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "407cdd1e-2bde-48e5-8c66-85fa0b1d093c",
+      "title": "Prompt万能指南",
+      "from": "deepseek\\20261119-195510-23.md",
+      "to": "deepseek\\407cdd1e-2bde-48e5-8c66-85fa0b1d093c.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "backup",
+      "id": "aac4d343-fa07-4ec9-8a67-3e0aa48eb6db",
+      "title": "WorkBuddy同类产品",
+      "from": "deepseek\\20261119-195510-24.md",
+      "to": "deepseek\\_dedup_backup\\20261119-195510-24.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "aac4d343-fa07-4ec9-8a67-3e0aa48eb6db",
+      "title": "WorkBuddy同类产品",
+      "from": "deepseek\\20261119-212132.md",
+      "to": "deepseek\\aac4d343-fa07-4ec9-8a67-3e0aa48eb6db.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "e20a8403-0ab0-4912-b064-351753e2ee5d",
+      "title": "PRD定义解释",
+      "from": "deepseek\\20261119-195510-25.md",
+      "to": "deepseek\\e20a8403-0ab0-4912-b064-351753e2ee5d.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "f332d9a9-3540-4172-a9ec-4fed1e96edc9",
+      "title": "目录联接详解",
+      "from": "deepseek\\20261119-195510-26.md",
+      "to": "deepseek\\f332d9a9-3540-4172-a9ec-4fed1e96edc9.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "730bf718-c65c-45e5-9ef7-810ab6effe0d",
+      "title": "SaaS概念解析",
+      "from": "deepseek\\20261119-195510-27.md",
+      "to": "deepseek\\730bf718-c65c-45e5-9ef7-810ab6effe0d.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "backup",
+      "id": "8e991831-7b4b-407d-bffb-f2b6445e78c8",
+      "title": "VB进度条使用指南",
+      "from": "deepseek\\20261119-195510-28.md",
+      "to": "deepseek\\_dedup_backup\\20261119-195510-28.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "8e991831-7b4b-407d-bffb-f2b6445e78c8",
+      "title": "VB进度条使用指南",
+      "from": "deepseek\\20261119-212139.md",
+      "to": "deepseek\\8e991831-7b4b-407d-bffb-f2b6445e78c8.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "backup",
+      "id": "d7194af9-23f9-4b4d-8c78-e610b9d979d9",
+      "title": "SW自定义属性禁止修改",
+      "from": "deepseek\\20261119-195510-29.md",
+      "to": "deepseek\\_dedup_backup\\20261119-195510-29.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "d7194af9-23f9-4b4d-8c78-e610b9d979d9",
+      "title": "SW自定义属性禁止修改",
+      "from": "deepseek\\20261119-212147.md",
+      "to": "deepseek\\d7194af9-23f9-4b4d-8c78-e610b9d979d9.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "f3f95577-f71b-4fd3-9621-5864a4ec485b",
+      "title": "CHM文档喂给WorkBuddy",
+      "from": "deepseek\\20261119-195510-3.md",
+      "to": "deepseek\\f3f95577-f71b-4fd3-9621-5864a4ec485b.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "42bf7e52-4030-4382-aa83-9aa09d1b50a2",
+      "title": "吹雪Z790配3090P1000",
+      "from": "deepseek\\20261119-195510-4.md",
+      "to": "deepseek\\42bf7e52-4030-4382-aa83-9aa09d1b50a2.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "9f232f8b-54f7-44e0-ae29-fade707ea27c",
+      "title": "多显卡主板推荐",
+      "from": "deepseek\\20261119-195510-5.md",
+      "to": "deepseek\\9f232f8b-54f7-44e0-ae29-fade707ea27c.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "1555b26d-85cd-4b17-b178-258b07c7939c",
+      "title": "HTML帮助文档转MD或TXT",
+      "from": "deepseek\\20261119-195510-6.md",
+      "to": "deepseek\\1555b26d-85cd-4b17-b178-258b07c7939c.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "02c3dff2-548c-42b5-9eaf-667a1de6fa9b",
+      "title": "Codex设置中文方法",
+      "from": "deepseek\\20261119-195510-7.md",
+      "to": "deepseek\\02c3dff2-548c-42b5-9eaf-667a1de6fa9b.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "backup",
+      "id": "714743bb-80ba-4ddd-97ab-3874233e4be6",
+      "title": "免费大模型推荐",
+      "from": "deepseek\\20261119-195510-8.md",
+      "to": "deepseek\\_dedup_backup\\20261119-195510-8.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "714743bb-80ba-4ddd-97ab-3874233e4be6",
+      "title": "免费大模型推荐",
+      "from": "deepseek\\20261119-212036-16.md",
+      "to": "deepseek\\714743bb-80ba-4ddd-97ab-3874233e4be6.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "77c03666-f4bd-4bcc-bd05-2f47cb0539b4",
+      "title": "Codex注册问题解决",
+      "from": "deepseek\\20261119-195510-9.md",
+      "to": "deepseek\\77c03666-f4bd-4bcc-bd05-2f47cb0539b4.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "378a1e8c-390e-4366-949b-332b784d129c",
+      "title": "网页帮助文档爬取",
+      "from": "deepseek\\20261119-195510.md",
+      "to": "deepseek\\378a1e8c-390e-4366-949b-332b784d129c.md"
+    },
+    {
+      "site": "deepseek",
+      "kind": "rename",
+      "id": "980cb3dd-7e98-4e43-9a15-e3469eb65b4e",
+      "title": "个人搭建Agent指南",
+      "from": "deepseek\\20261120-110128.md",
+      "to": "deepseek\\980cb3dd-7e98-4e43-9a15-e3469eb65b4e.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "backup",
+      "id": "38452627118216962",
+      "title": "让agent优先读自建记忆库的方法",
+      "from": "doubao\\20261120-015247-1.md",
+      "to": "doubao\\_dedup_backup\\20261120-015247-1.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "backup",
+      "id": "38452627118216962",
+      "title": "让agent优先读自建记忆库的方法让agent优先读自建记忆库的方法让agent",
+      "from": "doubao\\20261119-200240.md",
+      "to": "doubao\\_dedup_backup\\20261119-200240.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "backup",
+      "id": "38452627118216962",
+      "title": "让agent优先读自建记忆库的方法让agent优先读自建记忆库的方法让agent",
+      "from": "doubao\\20261119-195828-4.md",
+      "to": "doubao\\_dedup_backup\\20261119-195828-4.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "backup",
+      "id": "38452627118216962",
+      "title": "让agent优先读自建记忆库的方法",
+      "from": "doubao\\20261119-135816-1.md",
+      "to": "doubao\\_dedup_backup\\20261119-135816-1.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "backup",
+      "id": "38452627118216962",
+      "title": "让agent优先读自建记忆库的方法",
+      "from": "doubao\\20261119-125552-1.md",
+      "to": "doubao\\_dedup_backup\\20261119-125552-1.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "backup",
+      "id": "38452627118216962",
+      "title": "让agent优先读自建记忆库的方法",
+      "from": "doubao\\20261119-115658-1.md",
+      "to": "doubao\\_dedup_backup\\20261119-115658-1.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "rename",
+      "id": "38452627118216962",
+      "title": "让agent优先读自建记忆库的方法",
+      "from": "doubao\\20261120-072948.md",
+      "to": "doubao\\38452627118216962.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "backup",
+      "id": "38452075168558338",
+      "title": "C盘清理建议",
+      "from": "doubao\\20261119-125552-2.md",
+      "to": "doubao\\_dedup_backup\\20261119-125552-2.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "backup",
+      "id": "38452075168558338",
+      "title": "C盘清理建议",
+      "from": "doubao\\20261119-115658-2.md",
+      "to": "doubao\\_dedup_backup\\20261119-115658-2.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "rename",
+      "id": "38452075168558338",
+      "title": "C盘清理建议C盘清理建议C盘清理建议",
+      "from": "doubao\\20261119-195828-5.md",
+      "to": "doubao\\38452075168558338.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "backup",
+      "id": "38450760964843778",
+      "title": "工作伙伴11140",
+      "from": "doubao\\20261119-195828-1.md",
+      "to": "doubao\\_dedup_backup\\20261119-195828-1.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "backup",
+      "id": "38450760964843778",
+      "title": "工作伙伴11140",
+      "from": "doubao\\20261119-115658-3.md",
+      "to": "doubao\\_dedup_backup\\20261119-115658-3.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "rename",
+      "id": "38450760964843778",
+      "title": "工作伙伴11140工作伙伴11140工作伙伴11140",
+      "from": "doubao\\20261119-195828-6.md",
+      "to": "doubao\\38450760964843778.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "backup",
+      "id": "1489363858572290",
+      "title": "主对话主对话主对话",
+      "from": "doubao\\20261119-195828-7.md",
+      "to": "doubao\\_dedup_backup\\20261119-195828-7.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "backup",
+      "id": "1489363858572290",
+      "title": "主对话",
+      "from": "doubao\\20261119-195828-2.md",
+      "to": "doubao\\_dedup_backup\\20261119-195828-2.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "backup",
+      "id": "1489363858572290",
+      "title": "主对话",
+      "from": "doubao\\20261119-115658-4.md",
+      "to": "doubao\\_dedup_backup\\20261119-115658-4.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "rename",
+      "id": "1489363858572290",
+      "title": "主对话",
+      "from": "doubao\\20261120-015247-2.md",
+      "to": "doubao\\1489363858572290.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "backup",
+      "id": "38448826186269954",
+      "title": "黑苹果笔记本推荐",
+      "from": "doubao\\20261119-115658-5.md",
+      "to": "doubao\\_dedup_backup\\20261119-115658-5.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "rename",
+      "id": "38448826186269954",
+      "title": "黑苹果笔记本推荐黑苹果笔记本推荐黑苹果笔记本推荐",
+      "from": "doubao\\20261119-195828-8.md",
+      "to": "doubao\\38448826186269954.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "backup",
+      "id": "38448402789873154",
+      "title": "华硕灵耀X双屏笔记本",
+      "from": "doubao\\20261119-115658-6.md",
+      "to": "doubao\\_dedup_backup\\20261119-115658-6.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "rename",
+      "id": "38448402789873154",
+      "title": "华硕灵耀X双屏笔记本华硕灵耀X双屏笔记本华硕灵耀X双屏笔记本",
+      "from": "doubao\\20261119-195828-9.md",
+      "to": "doubao\\38448402789873154.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "backup",
+      "id": "38446470283727362",
+      "title": "SolidWorks知识库搭建",
+      "from": "doubao\\20261119-115658-7.md",
+      "to": "doubao\\_dedup_backup\\20261119-115658-7.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "rename",
+      "id": "38446470283727362",
+      "title": "SolidWorks知识库搭建",
+      "from": "doubao\\20261119-222533.md",
+      "to": "doubao\\38446470283727362.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "backup",
+      "id": "38437203809865218",
+      "title": "无法访问SOLIDWORKS应用程序",
+      "from": "doubao\\20261119-142626.md",
+      "to": "doubao\\_dedup_backup\\20261119-142626.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "backup",
+      "id": "38437203809865218",
+      "title": "无法访问SOLIDWORKS应用程序",
+      "from": "doubao\\20261119-115658-8.md",
+      "to": "doubao\\_dedup_backup\\20261119-115658-8.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "rename",
+      "id": "38437203809865218",
+      "title": "无法访问SOLIDWORKS应用程序",
+      "from": "doubao\\20261119-195828-3.md",
+      "to": "doubao\\38437203809865218.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "backup",
+      "id": "38445532154386434",
+      "title": "AI Agent驱动的软件开发项目管理软件实施方案",
+      "from": "doubao\\20261120-041007-1.md",
+      "to": "doubao\\_dedup_backup\\20261120-041007-1.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "backup",
+      "id": "38445532154386434",
+      "title": "苹果19-21年笔记本跑AI可行性苹果19-21年笔记本跑AI可行性苹果19-2",
+      "from": "doubao\\20261119-222533-1.md",
+      "to": "doubao\\_dedup_backup\\20261119-222533-1.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "backup",
+      "id": "38445532154386434",
+      "title": "AI Agent驱动的软件开发项目管理软件实施方案",
+      "from": "doubao\\20261119-115658-9.md",
+      "to": "doubao\\_dedup_backup\\20261119-115658-9.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "rename",
+      "id": "38445532154386434",
+      "title": "AI Agent驱动的软件开发项目管理软件实施方案",
+      "from": "doubao\\20261120-141927.md",
+      "to": "doubao\\38445532154386434.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "backup",
+      "id": "38452793061650434",
+      "title": "苹果19-21年笔记本跑AI可行性",
+      "from": "doubao\\20261120-030124.md",
+      "to": "doubao\\_dedup_backup\\20261120-030124.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "backup",
+      "id": "38452793061650434",
+      "title": "苹果19-21年笔记本跑AI可行性",
+      "from": "doubao\\20261120-015247.md",
+      "to": "doubao\\_dedup_backup\\20261120-015247.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "backup",
+      "id": "38452793061650434",
+      "title": "苹果19-21年笔记本跑AI可行性",
+      "from": "doubao\\20261119-195828.md",
+      "to": "doubao\\_dedup_backup\\20261119-195828.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "backup",
+      "id": "38452793061650434",
+      "title": "苹果19-21年笔记本跑AI可行性",
+      "from": "doubao\\20261119-194323.md",
+      "to": "doubao\\_dedup_backup\\20261119-194323.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "backup",
+      "id": "38452793061650434",
+      "title": "苹果19-21年笔记本跑AI可行性",
+      "from": "doubao\\20261119-135816.md",
+      "to": "doubao\\_dedup_backup\\20261119-135816.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "backup",
+      "id": "38452793061650434",
+      "title": "苹果19-21年笔记本跑AI可行性",
+      "from": "doubao\\20261119-125552.md",
+      "to": "doubao\\_dedup_backup\\20261119-125552.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "backup",
+      "id": "38452793061650434",
+      "title": "苹果19-21年笔记本跑AI可行性",
+      "from": "doubao\\20261119-115658.md",
+      "to": "doubao\\_dedup_backup\\20261119-115658.md"
+    },
+    {
+      "site": "doubao",
+      "kind": "rename",
+      "id": "38452793061650434",
+      "title": "苹果19-21年笔记本跑AI可行性",
+      "from": "doubao\\20261120-041007.md",
+      "to": "doubao\\38452793061650434.md"
+    },
+    {
+      "site": "yiyan",
+      "kind": "backup",
+      "id": "13006829546652823379",
+      "title": "Claude code第一次对话时反应很慢是否正常，后面就正常了",
+      "from": "yiyan\\20261119-194331.md",
+      "to": "yiyan\\_dedup_backup\\20261119-194331.md"
+    },
+    {
+      "site": "yiyan",
+      "kind": "rename",
+      "id": "13006829546652823379",
+      "title": "Claude code第一次对话时反应很慢是否正常，后面就正常了",
+      "from": "yiyan\\20261119-194331-1.md",
+      "to": "yiyan\\13006829546652823379.md"
+    },
+    {
+      "site": "yiyan",
+      "kind": "rename",
+      "id": "8623347900665452511",
+      "title": "proxy",
+      "from": "yiyan\\20261119-194331-2.md",
+      "to": "yiyan\\8623347900665452511.md"
+    }
+  ],
+  "skipped": [],
+  "errors": []
+}

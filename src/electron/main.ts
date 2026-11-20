@@ -4372,6 +4372,8 @@ async function bootstrap(): Promise<void> {
       root: () => USER_DATA,
       coreJsPath: () => join(webchatExtensionDir(), 'shared', 'core.js'),
       ingest: () => webchatIngestEndpoint,
+      // 与接收端共用同一导出目录真源：已采会话集合从实际 .md 文件名读，不再依赖旧内容账
+      exportDir: () => chatExportsDir,
       log: (event, data, level) => actionLog('collector', event, data ?? {}, level ? { level } : undefined),
     });
     actionLog('collector', 'webchat-auto:ready', {
