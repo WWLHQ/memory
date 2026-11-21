@@ -52,6 +52,56 @@ export async function coreConflicts(ctx: DisputeCtx = getCtx()): Promise<Conflic
   return out.sort((x, y) => y.overdue_days - x.overdue_days);
 }
 
+/** 裁决历史行（参考稿底部「裁决历史」表）：全部来自账本 conflict_resolve 成对审计 */
+export interface ConflictHistoryRow {
+  request_id: string;
+  verdict: Verdict;
+  /** 内核写审计时的真实态：pending=true 表示未落定（user_confirm/hold） */
+  pending: boolean;
+  resolved: boolean;
+  merged_mem_id?: string;
+  old_id: string;
+  new_id: string;
+  conflict_id?: string;
+  ts: number;
+  /** 如实描述审计内容，供表格 note 列展示 */
+  note: string;
+}
+
+const VERDICT_LABEL: Record<Verdict, string> = {
+  auto_override: '自动覆盖',
+  user_confirm: '人工确认',
+  merge: '合并',
+  hold: '挂起',
+};
+
+/** 读账本里真实的裁决历史（最新在前）；不补演示行，空账本返回空数组 */
+export async function coreConflictHistory(ctx: DisputeCtx = getCtx()): Promise<ConflictHistoryRow[]> {
+  const audits = await ctx.storage.queryAudit({ action: 'conflict_resolve' });
+  const out: ConflictHistoryRow[] = [];
+  for (const a of audits) {
+    const d = (a.detail ?? {}) as Record<string, unknown>;
+    const verdict = d.verdict;
+    if (verdict !== 'auto_override' && verdict !== 'user_confirm' && verdict !== 'merge' && verdict !== 'hold') continue;
+    const pending = d.pending === true;
+    const resolved = d.resolved === true;
+    const merged = typeof d.merged_mem_id === 'string' ? d.merged_mem_id : undefined;
+    out.push({
+      request_id: a.request_id,
+      verdict,
+      pending,
+      resolved,
+      merged_mem_id: merged,
+      old_id: typeof d.old_id === 'string' ? d.old_id : '',
+      new_id: typeof d.new_id === 'string' ? d.new_id : '',
+      conflict_id: typeof d.conflict_id === 'string' ? d.conflict_id : undefined,
+      ts: a.ts,
+      note: `${VERDICT_LABEL[verdict]} · ${pending ? '保持 pending（未落定）' : '已落定'}${merged ? ` · 合并记忆 ${merged}` : ''}`,
+    });
+  }
+  return out.sort((x, y) => y.ts - x.ts);
+}
+
 export interface VerdictOutcome {
   kernel_request_ids: string[];
   merged_mem_id?: string;

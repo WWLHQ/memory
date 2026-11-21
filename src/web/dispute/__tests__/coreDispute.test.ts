@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { InMemoryStorage } from '../../../core/memagent/storage.ts';
 import type { Memory } from '../../../core/memagent/types.ts';
-import { coreConflicts, coreVerdict } from '../coreDispute.ts';
+import { coreConflictHistory, coreConflicts, coreVerdict } from '../coreDispute.ts';
 
 const DAY = 24 * 3600 * 1000;
 const NOW = 1_800_000_000_000;
@@ -81,6 +81,28 @@ describe('46-3 端壳：配对与裁决均下沉内核（无硬编码）', () =>
       expect(audits[0].project_id).toBe(PID);
       expect(audits[0].detail).toMatchObject({ pending: true, verdict: v });
     }
+  });
+
+  it('裁决历史读真实账本：request_id / pending / merged 与内核审计一一对应；空账本为空', async () => {
+    const empty = new InMemoryStorage();
+    expect(await coreConflictHistory({ storage: empty })).toEqual([]);
+
+    const storage = new InMemoryStorage();
+    await seed(storage);
+    const [rec] = await coreConflicts({ storage });
+    const out = await coreVerdict(rec, 'auto_override', { storage });
+    const audits = await storage.queryAudit({ action: 'conflict_resolve' });
+    const rows = await coreConflictHistory({ storage });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].request_id).toBe(audits[0].request_id);
+    expect(rows[0].verdict).toBe('auto_override');
+    expect(rows[0].pending).toBe(false);
+    expect(rows[0].resolved).toBe(true);
+    expect(rows[0].old_id).toBe('old');
+    expect(rows[0].new_id).toBe('new');
+    expect(rows[0].note).toContain('自动覆盖');
+    // 内核真实 request_id 与页面返回的 id 同源（不编造）
+    expect(out.kernel_request_ids.length).toBeGreaterThan(0);
   });
 
   it('对手缺失（测试夹具 ID）→ 如实空态不抛错、零写入，保住 DisputePage toast 回归', async () => {

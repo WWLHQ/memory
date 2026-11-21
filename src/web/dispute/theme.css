@@ -1,69 +1,183 @@
 /*
- * 冲突裁决页样式 —— 复用本项目暗色设计系统（与 memory/write/audit/theme.css 同源变量）。
+ * 冲突裁决页样式（批次53-R · 按用户截图 1:1 重做：密集表格流版式）。
+ * 特征：窄行高（行 padding 5-6px）、小字号（基准 12px / 表头 11px / 注释 10-11px）、
+ * 表格行替代卡片堆、chip 体系、四等宽裁决按钮 + 按钮下灰注释。
+ * 本 iframe 独立加载，令牌内嵌 .dsp-page；深色由 html[data-theme="dark"] .dsp-page 重定义。
  */
-:root {
-  --bg:#0f1419; --panel:#1a212b; --panel2:#202833; --line:#2b3441;
-  --txt:#e6edf3; --muted:#8b98a7; --dim:#5b6675; --accent:#4d9fff;
-  --ok:#3ecf8e; --warn:#ffd166; --err:#ff5c5c;
+.dsp-page {
+  --bg: #F3F5F8; --surface: #FFFFFF; --surface2: #EEF2F7;
+  --ink: #0B1526; --muted: #5A6B82; --line: #DCE4EE; --line2: #E6ECF3;
+  --accent: #0088CC; --accent-ink: #FFFFFF; --accent-soft: rgba(0, 136, 204, .10);
+  --ok: #0E9F6E; --warn: #B45309; --bad: #DC2626;
+  --ok-soft: rgba(14, 159, 110, .10); --warn-soft: rgba(180, 83, 9, .10); --bad-soft: rgba(220, 38, 38, .10);
+  --sans: "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
 }
-* { box-sizing:border-box; }
-body {
-  margin:0; background:var(--bg); color:var(--txt);
-  font:14px/1.55 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
+html[data-theme="dark"] .dsp-page {
+  --bg: #060B16; --surface: #0C1424; --surface2: #101B30;
+  --ink: #E4EDF8; --muted: #8296B0; --line: #1B2A45; --line2: #16233B;
+  --accent: #22D3EE; --accent-ink: #04222B; --accent-soft: rgba(34, 211, 238, .12);
+  --ok: #34D399; --warn: #FBBF24; --bad: #F87171;
+  --ok-soft: rgba(52, 211, 153, .12); --warn-soft: rgba(251, 191, 36, .12); --bad-soft: rgba(248, 113, 113, .12);
 }
-.wrap { max-width:1180px; margin:0 auto; padding:18px; }
-h1 { font-size:18px; margin:0 0 2px; }
-.sub { color:var(--muted); font-size:12px; margin-bottom:14px; }
-.card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:14px; }
-.badge { font-size:10px; font-weight:700; padding:2px 8px; border-radius:6px; border:1px solid var(--line); }
-.badge.p2 { background:#3a2f10; color:#ffd166; }
-.row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:8px 0; }
-.dim { color:var(--dim); }
-.mid { font-family:monospace; font-size:11px; color:var(--accent); }
 
-/* 冲突类型徽标 */
-.ctype { font-size:11px; padding:2px 8px; border-radius:6px; border:1px solid var(--line); }
-.ctype.direct_contradiction { background:#3a1616; color:#ffb0b0; border-color:#6b2e2e; }
-.ctype.partial_overlap { background:#3a2f10; color:#ffe6a8; border-color:#6b5a1e; }
-.ctype.context_dependent { background:#13283a; color:#8cc7ff; border-color:#2a4a66; }
-.ctype.uncertain { background:var(--panel2); color:var(--muted); }
+* { box-sizing: border-box; }
+.dsp-page {
+  height: 100%; display: flex; flex-direction: column; min-height: 0;
+  background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 12px; line-height: 1.5;
+}
+.dsp-scroll { flex: 1; min-height: 0; overflow: auto; }
+.dsp-main { padding: 14px 18px 26px; min-width: 0; }
+.af-stack { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 
-/* 左右分栏对比 */
-.compare { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:10px 0; }
-.compare .side { background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:10px; }
-.compare .side.old { border-color:#6b2e2e; }
-.compare .side.new { border-color:#2e5a3a; }
-.compare .side b { font-size:12px; display:block; margin-bottom:4px; }
-.compare .side .v { font-size:12px; color:var(--txt); }
-.compare .conf { font-size:11px; color:var(--muted); margin-top:6px; font-family:monospace; }
+/* ── 页头：标题 + 灰注 + 右侧计数徽标（截图第一行） ── */
+.af-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.af-head h1 { font-size: 15px; font-weight: 700; margin: 0; }
+.af-head .sub { color: var(--muted); font-size: 11px; }
+.af-head .af-badge { margin-left: auto; }
 
-.overdue { color:var(--warn); font-size:11px; }
-.overdue.hot { color:var(--err); font-weight:700; }
+/* ── chip 徽标（11px mono 同色系） ── */
+.af-badge {
+  display: inline-block; font-size: 11px; font-family: var(--mono); border-radius: 4px;
+  border: 1px solid var(--line); padding: 0 7px; line-height: 18px; color: var(--muted); white-space: nowrap;
+}
+.af-badge.warn { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+.af-badge.bad { color: var(--bad); border-color: var(--bad); background: var(--bad-soft); }
+.af-badge.acc { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.af-badge.ok { color: var(--ok); border-color: var(--ok); background: var(--ok-soft); }
 
-/* 队列卡片 */
-.queue { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:10px; }
-.queue .item { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:12px; cursor:pointer; }
-.queue .item.selected { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
-.queue .item.overdue { border-color:#6b5a1e; background:#231f10; }
-.queue .empty { color:var(--dim); padding:14px; text-align:center; }
-.row-head { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
-.score { font-family:monospace; font-size:11px; color:var(--muted); }
-.overdue-badge { font-size:10px; font-weight:700; padding:2px 7px; border-radius:6px; background:#3a1616; color:var(--err); border:1px solid #6b2e2e; }
-.side .meta { font-family:monospace; font-size:10px; color:var(--muted); display:block; margin-bottom:4px; }
+/* ── 页头第二行小灰 chip 行（批次54 对齐截图） ── */
+.af-chiprow { display: flex; gap: 6px; flex-wrap: wrap; }
+/* 筛选行：可点的 chip 用 button，选中态高亮；类型筛选禁用时如实变灰 */
+.af-chiprow button.af-badge { cursor: pointer; background: transparent; }
+.af-chiprow button.af-badge:hover:not(:disabled) { color: var(--ink); border-color: var(--muted); }
+.af-chiprow button.af-badge[aria-pressed='true'] { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.af-chiprow button.af-badge:disabled { opacity: .55; cursor: not-allowed; }
 
-/* 裁决按钮 */
-.verdict { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
-.btn { background:var(--panel2); border:1px solid var(--line); color:var(--txt); border-radius:8px; padding:7px 12px; cursor:pointer; font-size:12px; }
-.btn.primary { background:var(--accent); color:#04121f; border-color:var(--accent); font-weight:600; }
-.btn.danger { color:#ffb0b0; border-color:#6b2e2e; }
-.btn:disabled { opacity:.4; cursor:not-allowed; }
+/* ── 裁决方式切换（人工 / AI）：参考稿结构，AI 未接内核如实禁用 ── */
+.verdict-mode { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 0 0 8px; }
+.verdict-mode .vm-label { font-size: 11px; color: var(--muted); font-family: var(--mono); }
+.verdict-mode .vm-hint { font-size: 10.5px; color: var(--muted); }
+.verdict-mode button.af-badge { cursor: pointer; background: transparent; }
+.verdict-mode button.af-badge[aria-pressed='true'] { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.verdict-mode button.af-badge:disabled { opacity: .55; cursor: not-allowed; }
 
-/* 队列表 */
-.dtable { width:100%; border-collapse:collapse; font-size:12.5px; }
-.dtable th, .dtable td { padding:8px 10px; text-align:left; border-bottom:1px solid var(--line); vertical-align:top; }
-.dtable th { color:var(--muted); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.4px; }
-.dtable tr:hover { background:var(--panel2); }
-.dtable tr.overdue { background:#3a2f10; }
+/* ── 面板骨架：细边 + 极窄内边距 ── */
+.af-panel { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.af-ph { display: flex; align-items: center; gap: 9px; padding: 7px 12px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.af-ph h3 { margin: 0; font-size: 12.5px; font-weight: 600; color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
+.af-ph h3.mono-title { font-family: var(--mono); font-weight: 600; }
+.af-ph .hint { margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--muted); white-space: nowrap; }
+.af-pb { padding: 8px 12px; }
+.af-pb.af-flush { padding: 0; }
+.af-note { font-size: 11px; color: var(--muted); line-height: 1.6; margin: 0; }
 
-.toast { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:9px 16px; font-size:13px; z-index:80; }
-.note { font-size:11px; color:var(--dim); margin-top:14px; line-height:1.6; }
+/* ── 队列密集表格（ul>li 网格行；.item 保留测试锚类） ── */
+.queue { list-style: none; margin: 0; padding: 0; min-width: 0; }
+.queue .q-head, .queue .item {
+  display: grid;
+  grid-template-columns: 148px 96px minmax(220px, 1fr) 78px 78px 92px 52px;
+  gap: 8px; align-items: center; padding: 5px 12px;
+}
+.queue .q-head { font-size: 11px; color: var(--muted); border-bottom: 1px solid var(--line); background: var(--surface2); }
+.queue .item { border-bottom: 1px solid var(--line2); cursor: pointer; min-width: 0; }
+.queue .item:last-child { border-bottom: 0; }
+.queue .item:hover { background: var(--surface2); }
+.queue .item.selected { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent); }
+.queue .item.overdue .wait { color: var(--warn); font-weight: 600; }
+.queue .empty { color: var(--muted); padding: 10px 12px; font-size: 12px; }
+/* 批次54：空态的诚实空行（与数据行同网格，占满整行） */
+.queue .empty-row {
+  display: block; padding: 10px 12px; color: var(--muted); font-size: 12px; line-height: 1.7;
+  border-bottom: 1px solid var(--line2);
+}
+.queue .empty-row:last-child { border-bottom: 0; }
+.queue .empty-row b { color: var(--ink); margin-right: 6px; }
+.queue .num { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
+.queue .mem { display: flex; gap: 4px; align-items: baseline; min-width: 0; flex-wrap: nowrap; overflow: hidden; }
+.queue .mem i { color: var(--muted); font-style: normal; flex: none; }
+.queue .mem em { font-style: normal; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; }
+.queue .wait { display: flex; gap: 6px; align-items: center; font-family: var(--mono); white-space: nowrap; }
+.queue .act { text-align: center; }
+.mid { font-family: var(--mono); font-size: 11px; color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+/* 行内「裁决」chip 按钮（截图操作列蓝 chip） */
+.q-go {
+  border: 0; background: var(--accent-soft); color: var(--accent); font: inherit; font-size: 11px;
+  padding: 1px 10px; line-height: 18px; border-radius: 4px; cursor: pointer; white-space: nowrap;
+}
+.q-go:hover { background: var(--accent); color: var(--accent-ink); }
+
+/* ── 冲突类型 chip ── */
+.ctype { font-size: 11px; padding: 0 7px; line-height: 18px; border-radius: 4px; border: 1px solid var(--line); white-space: nowrap; justify-self: start; }
+.ctype.direct_contradiction { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 55%, var(--line)); background: var(--bad-soft); }
+.ctype.partial_overlap { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 55%, var(--line)); background: var(--warn-soft); }
+.ctype.context_dependent { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); background: var(--accent-soft); }
+.ctype.uncertain, .ctype.unknown { color: var(--muted); }
+
+/* ── 双列对比（截图中部：浅灰底两块 + 头行 tag + meta） ── */
+.compare { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 4px 0 10px; }
+.compare .side { background: var(--surface2); border-radius: 6px; padding: 8px 10px; min-width: 0; overflow-wrap: anywhere; }
+.compare .side.old { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--bad) 35%, var(--line)); }
+.compare .side.new { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ok) 35%, var(--line)); }
+.side-hd { display: flex; gap: 8px; align-items: center; margin-bottom: 5px; flex-wrap: wrap; }
+.side-hd .tag { font-size: 10.5px; line-height: 17px; padding: 0 7px; border-radius: 4px; background: var(--line2); color: var(--muted); font-weight: 600; flex: none; }
+.side-hd .meta { font-family: var(--mono); font-size: 10.5px; color: var(--muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-bd { font-size: 12px; color: var(--ink); }
+/* 批次63：对齐设计稿 pg-dispute——旧值 <del> 红、新值 <ins> 绿（令牌驱动，深色自动适配） */
+.side-bd del { background: var(--bad-soft); color: var(--bad); text-decoration: line-through; padding: 0 2px; border-radius: 3px; }
+.side-bd ins { background: var(--ok-soft); color: var(--ok); text-decoration: none; padding: 0 2px; border-radius: 3px; }
+
+/* ── 裁决按钮区（截图：四等宽一行 + 按钮下灰注） ── */
+.verdict { min-width: 0; }
+.v-head { display: flex; gap: 10px; align-items: baseline; margin-bottom: 7px; flex-wrap: wrap; }
+.v-head b { font-size: 12px; font-family: var(--mono); }
+.v-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.v-col { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.v-btn {
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  border-radius: 6px; padding: 6px 8px; font: inherit; font-size: 12px; font-weight: 600;
+  cursor: pointer; white-space: nowrap; width: 100%;
+}
+.v-btn:hover { border-color: var(--accent); color: var(--accent); }
+.v-btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.v-btn.primary:hover { color: var(--accent-ink); opacity: .92; }
+.v-btn.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 55%, var(--line)); }
+.v-btn.danger:hover { color: var(--bad); border-color: var(--bad); }
+.v-cap { font-size: 10px; color: var(--muted); text-align: center; line-height: 1.4; }
+
+/* ── 裁决历史密集表格（3 列网格行） ── */
+.audit-list { list-style: none; margin: 0; padding: 0; min-width: 0; }
+.audit-list .q-head, .audit-list .a-row {
+  display: grid; grid-template-columns: 200px 96px 1fr;
+  gap: 8px; align-items: center; padding: 5px 12px;
+}
+.audit-list .q-head { font-size: 11px; color: var(--muted); border-bottom: 1px solid var(--line); background: var(--surface2); }
+.audit-list .a-row { border-bottom: 1px solid var(--line2); }
+.audit-list .a-row:last-child { border-bottom: 0; }
+.audit-list .note-cell { color: var(--muted); font-size: 11.5px; min-width: 0; overflow-wrap: anywhere; }
+.chip { font-style: normal; font-size: 10.5px; padding: 0 7px; line-height: 17px; border-radius: 4px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.chip.auto_override { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.chip.user_confirm { color: var(--ok); border-color: var(--ok); background: var(--ok-soft); }
+.chip.merge { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+.chip.hold { color: var(--muted); }
+
+/* ── 通用按钮（内核错误态重试 btn 等，对齐 v-btn 密集度量） ── */
+.dsp-page .btn {
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  border-radius: 6px; padding: 4px 12px; font: inherit; font-size: 12px; font-weight: 500; cursor: pointer;
+}
+.dsp-page .btn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ── toast ── */
+.toast {
+  position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+  background: var(--surface2); border: 1px solid var(--line); border-radius: 8px;
+  color: var(--ink); padding: 8px 16px; font-size: 12px; z-index: 80; max-width: 80vw;
+}
+
+@media (max-width: 900px) {
+  .compare { grid-template-columns: 1fr; }
+  .dsp-main { padding: 12px 14px 20px; }
+  .queue .q-head, .queue .item { grid-template-columns: 120px 84px minmax(160px, 1fr) 60px 60px 80px 48px; }
+}
