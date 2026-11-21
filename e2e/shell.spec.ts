@@ -45,11 +45,11 @@ test.afterAll(async () => {
 
 async function openShell(page: Page, target = SHELL): Promise<void> {
   await page.goto(target);
-  await expect(page.locator('[data-testid="shell-menubar"]')).toBeVisible();
+  await expect(page.locator('[data-testid="shell-titlebar"]')).toBeVisible();
 }
 
-async function openLoginByQat(page: Page): Promise<void> {
-  await page.locator('[data-testid="qa-login"]').click();
+async function openLoginByAvatar(page: Page): Promise<void> {
+  await page.locator('[data-testid="shell-avatar"]').click();
   await expect(page.locator('[data-testid="shell-login-modal"]')).toBeVisible();
 }
 
@@ -59,25 +59,18 @@ test.describe('壳层 · 登录弹窗与右键菜单（真实后端）', () => {
     await page.evaluate(() => localStorage.clear());
   });
 
-  test('三处登录入口打开同一个弹窗（菜单栏 / QAT / 登录状态处）', async ({ page }) => {
+  test('登录入口打开同一个弹窗（标题栏头像 / 状态栏会话格；批次51：QAT 已整簇取消、菜单栏已移除）', async ({ page }) => {
     const errors = collectErrors(page);
     await openShell(page);
 
-    // ① 菜单栏：文件 → 登录 / 会话…
-    await page.locator('[data-testid="shell-menubar"]').getByRole('button', { name: '文件', exact: true }).click();
-    await page.getByRole('menuitem', { name: /登录 \/ 会话/ }).click();
-    await expect(page.locator('[data-testid="shell-login-modal"]')).toBeVisible();
+    // ① 标题栏头像（STRATUM：24px accent 圆）
+    await openLoginByAvatar(page);
     await expect(page.locator('[data-testid="slm-account"]')).toBeVisible();
     await page.locator('[data-testid="slm-close"]').click();
     await expect(page.locator('[data-testid="shell-login-modal"]')).toHaveCount(0);
 
-    // ② 快速访问工具条
-    await openLoginByQat(page);
-    await page.keyboard.press('Escape');
-    await expect(page.locator('[data-testid="shell-login-modal"]')).toHaveCount(0);
-
-    // ③ 标题栏登录状态处 + 状态栏会话格：同一弹窗
-    await page.locator('[data-testid="shell-session-btn"]').click();
+    // ② 状态栏会话格：同一弹窗
+    await page.locator('[data-testid="sb-session"]').click();
     await expect(page.locator('[data-testid="shell-login-modal"]')).toBeVisible();
     await page.locator('[data-testid="slm-close"]').click();
     await page.locator('[data-testid="sb-session"]').click();
@@ -94,7 +87,7 @@ test.describe('壳层 · 登录弹窗与右键菜单（真实后端）', () => {
   test('真实登录：密码错 401 如实 → 成功显示账号/团队/角色 → 登出清除', async ({ page }) => {
     const errors = collectErrors(page);
     await openShell(page);
-    await openLoginByQat(page);
+    await openLoginByAvatar(page);
 
     // 401：真实 /api/login 拒绝，文案如实带状态码与原因，不写「已登录」
     await page.locator('[data-testid="slm-account"]').fill(ACCOUNT);
@@ -113,7 +106,7 @@ test.describe('壳层 · 登录弹窗与右键菜单（真实后端）', () => {
     await expect(page.locator('[data-testid="slm-session-role"]')).toHaveText(/管理员|成员/);
     await expect(page.locator('[data-testid="slm-notice"]')).toContainText('登录成功');
     // 状态区如实显示身份；会话仍存 session:realpage
-    await expect(page.locator('[data-testid="shell-session-btn"]')).toHaveText(ACCOUNT);
+    await expect(page.locator('[data-testid="shell-avatar"]')).toBeVisible();
     await expect(page.locator('[data-testid="sb-session"]')).toContainText(ACCOUNT);
     const sid = await page.evaluate(() => localStorage.getItem('session:realpage'));
     expect(sid).toBeTruthy();
@@ -122,21 +115,21 @@ test.describe('壳层 · 登录弹窗与右键菜单（真实后端）', () => {
     await page.locator('[data-testid="slm-logout"]').click();
     await expect(page.locator('[data-testid="slm-notice"]')).toContainText('已登出');
     await expect(page.locator('[data-testid="slm-account"]')).toBeVisible();
-    await expect(page.locator('[data-testid="shell-session-btn"]')).toHaveText('只读会话');
+    await expect(page.locator('[data-testid="sb-session"]')).toContainText('只读');
     expect(await page.evaluate(() => localStorage.getItem('session:realpage'))).toBeNull();
     expect(errors).toEqual([]);
   });
 
   test('后端不可达：登录弹窗如实报错，不写「已登录」', async ({ page }) => {
     await openShell(page, SHELL_NO_BACKEND);
-    await openLoginByQat(page);
+    await openLoginByAvatar(page);
     await page.locator('[data-testid="slm-account"]').fill(ACCOUNT);
     await page.locator('[data-testid="slm-password"]').fill(PWD);
     await page.locator('[data-testid="slm-submit"]').click();
     await expect(page.locator('[data-testid="slm-error"]')).toContainText('后端不可达');
     await expect(page.locator('[data-testid="slm-error"]')).toContainText('后端未响应');
     await expect(page.locator('[data-testid="slm-session"]')).toHaveCount(0);
-    await expect(page.locator('[data-testid="shell-session-btn"]')).toHaveText('只读会话');
+    await expect(page.locator('[data-testid="sb-session"]')).toContainText('只读');
   });
 
   test('未登录时需登录动作禁用并写「未登录（会话 401）」', async ({ page }) => {
@@ -145,7 +138,7 @@ test.describe('壳层 · 登录弹窗与右键菜单（真实后端）', () => {
     await expect(gated.first()).toBeVisible();
     await expect(gated.first()).toHaveAttribute('title', /未登录（会话 401）/);
     // 未登录时不发任何登录请求：状态区仍是只读会话
-    await expect(page.locator('[data-testid="shell-session-btn"]')).toHaveText('只读会话');
+    await expect(page.locator('[data-testid="sb-session"]')).toContainText('只读');
   });
 
   test('右键导航树：真实动作可用；无能力项禁用并写原因', async ({ page }) => {
@@ -160,7 +153,7 @@ test.describe('壳层 · 登录弹窗与右键菜单（真实后端）', () => {
     await expect(toggle).toHaveAttribute('title', /该导航项没有子项/);
     await expect(toggle).toContainText('该导航项没有子项');
     // 真实动作：打开记忆库 → 中心区出现对应标签（批次54 后为平铺入口）
-    await page.getByRole('treeitem', { name: /记忆库/ }).click({ button: 'right' });
+    await page.getByRole('treeitem', { name: '记忆库', exact: true }).click({ button: 'right' });
     await page.locator('[data-testid="ctx-navmenu-open"]').click();
     await expect(page.locator('[data-testid^="shell-tab-"]').filter({ hasText: '记忆库' })).toBeVisible();
     await expect(page.locator('[data-testid="ctx-navmenu"]')).toHaveCount(0);
@@ -179,7 +172,7 @@ test.describe('壳层 · 登录弹窗与右键菜单（真实后端）', () => {
     await expect(page.locator('[data-testid="ctx-tabmenu-refresh"]')).toBeEnabled();
 
     // 打开第二个标签后，右键真实关闭
-    await page.getByRole('treeitem', { name: /记忆库/ }).click();
+    await page.getByRole('treeitem', { name: '记忆库', exact: true }).click();
     await expect(tabs).toHaveCount(2);
     await tabs.last().click({ button: 'right' });
     await page.locator('[data-testid="ctx-tabmenu-close"]').click();
@@ -207,7 +200,7 @@ test.describe('壳层 · 登录弹窗与右键菜单（真实后端）', () => {
       }, true);
     });
     await openShell(page);
-    await expect(page.locator('[data-testid="qa-login"]')).toBeVisible();
+    await expect(page.locator('[data-testid="shell-avatar"]')).toBeVisible();
 
     await page.locator('.statusbar').click({ button: 'right' });
     const menu = page.locator('[data-testid="ctx-shellmenu"]');
@@ -224,33 +217,24 @@ test.describe('壳层 · 登录弹窗与右键菜单（真实后端）', () => {
     await page.locator('[data-testid="ctx-shellmenu-refresh"]').click();
     await expect(page.locator('[data-testid="sb-msg"]')).toHaveText(/已刷新全部打开的真实页面/);
 
-    await page.locator('.ribbon-body').click({ button: 'right' });
-    await expect(page.locator('[data-testid="ctx-shellmenu"]')).toContainText('右键：功能区');
+    // 批次51：Ribbon/QAT 已移除——标题栏空白处右键走默认壳层菜单且不含登录项
+    await page.locator('[data-testid="shell-titlebar"]').click({ button: 'right' });
+    await expect(page.locator('[data-testid="ctx-shellmenu"]')).toContainText('右键：标题栏');
     await expect(page.locator('[data-testid="ctx-shellmenu-login"]')).toHaveCount(0);
 
-    await page.locator('.qa').click({ button: 'right' });
-    await expect(page.locator('[data-testid="ctx-shellmenu"]')).toContainText('右键：快速访问工具条');
-    await expect(page.locator('[data-testid="ctx-shellmenu-login"]')).toHaveCount(0);
-
-    // 真有登录入口的位置：QAT 登录按钮 / 标题栏会话按钮 / 状态栏会话格 / 菜单栏
-    await page.locator('[data-testid="qa-login"]').click({ button: 'right' });
+    // 真有登录入口的位置：标题栏头像 / 状态栏会话格
+    await page.locator('[data-testid="shell-avatar"]').click({ button: 'right' });
     await page.locator('[data-testid="ctx-shellmenu-login"]').click();
     await expect(page.locator('[data-testid="shell-login-modal"]')).toBeVisible();
     await page.locator('[data-testid="slm-close"]').click();
 
-    await page.locator('[data-testid="shell-session-btn"]').click({ button: 'right' });
-    await expect(page.locator('[data-testid="ctx-shellmenu-login"]')).toBeVisible();
     await page.locator('[data-testid="sb-session"]').click({ button: 'right' });
-    await expect(page.locator('[data-testid="ctx-shellmenu-login"]')).toBeVisible();
-    // 批次52 后 QAT 紧跟菜单项，点 .menubar 几何中心可能落进 .qa（该处按设计不补登录入口）；
-    // 这里明确右键「文件」菜单项，验证菜单栏本身仍是登录入口。
-    await page.locator('.menubar .menu-wrap').first().click({ button: 'right' });
     await expect(page.locator('[data-testid="ctx-shellmenu-login"]')).toBeVisible();
   });
 
   test('登录弹窗密码默认为密文，显示/隐藏切换保留已输入内容与焦点', async ({ page }) => {
     await openShell(page);
-    await page.locator('[data-testid="qa-login"]').click();
+    await page.locator('[data-testid="shell-avatar"]').click();
     const pw = page.locator('[data-testid="slm-password"]');
     await expect(pw).toHaveAttribute('type', 'password');
     await pw.fill('S3cret-visible');
@@ -270,27 +254,23 @@ test.describe('壳层 · 登录弹窗与右键菜单（真实后端）', () => {
     await expect(toggle).toHaveAttribute('aria-label', '显示密码');
   });
 
-  test('QAT 登录入口：1024 宽度与浅/深主题下都有可见文字、可点开真实登录弹窗', async ({ page }) => {
+  test('标题栏登录入口：1024 宽度与浅/深主题下头像可见、可点开真实登录弹窗', async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 768 });
     await openShell(page);
-    const qaLogin = page.locator('[data-testid="qa-login"]');
-    await expect(qaLogin).toBeVisible();
-    await expect(qaLogin).toContainText('登录');
-    await expect(qaLogin).toBeEnabled();
+    const avatar = page.locator('[data-testid="shell-avatar"]');
+    await expect(avatar).toBeVisible();
+    await expect(avatar).toBeEnabled();
     // 浅色主题
-    await qaLogin.click();
+    await avatar.click();
     await expect(page.locator('[data-testid="shell-login-modal"]')).toBeVisible();
     await expect(page.locator('[data-testid="slm-account"]')).toBeVisible();
     await page.locator('[data-testid="slm-close"]').click();
-    // 切到深色（跟随系统 → 浅色 → 深色）后再验一次可见可点
-    for (let i = 0; i < 3; i++) {
-      if (await page.locator('html').getAttribute('data-theme') === 'dark') break;
-      await page.locator('[data-testid="qa-theme"]').click();
-    }
+    // 切到深色（三联按钮直接点「深色」）后再验一次可见可点
+    await page.locator('[data-testid="shell-themes"] button[aria-label="深色"]').click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-    await expect(qaLogin).toBeVisible();
-    await expect(qaLogin).toBeEnabled();
-    await qaLogin.click();
+    await expect(avatar).toBeVisible();
+    await expect(avatar).toBeEnabled();
+    await avatar.click();
     await expect(page.locator('[data-testid="shell-login-modal"]')).toBeVisible();
   });
 
@@ -303,7 +283,7 @@ test.describe('壳层 · 登录弹窗与右键菜单（真实后端）', () => {
       }, true);
     });
     await openShell(page);
-    await page.getByRole('treeitem', { name: /记忆库/ }).click();
+    await page.getByRole('treeitem', { name: '记忆库', exact: true }).click();
     const frame = page.frameLocator('iframe.page-frame[title*="memory.html"]');
     await expect(frame.locator('body')).toBeVisible();
     await frame.locator('body').click({ button: 'right', position: { x: 20, y: 20 } });
@@ -316,5 +296,57 @@ test.describe('壳层 · 登录弹窗与右键菜单（真实后端）', () => {
     await expect(page.locator('[data-testid="ctx-rowmenu"]')).toHaveCount(0);
     const prevented = await frame.locator('body').evaluate(() => (window as unknown as { __ctxPrevented?: boolean }).__ctxPrevented);
     expect(prevented).toBe(true);
+  });
+
+  test('导航归属：MCP 接入进连接组、个人记忆库进记忆管理组并直达真实整页', async ({ page }) => {
+    const errors = collectErrors(page);
+    await openShell(page);
+    // 个人记忆库：唯一项，打开后中心区是 personal.html 真实整页（非记忆库 Tab 别名）
+    const personal = page.getByRole('treeitem', { name: /^个人记忆库/ });
+    await expect(personal).toHaveCount(1);
+    await personal.click();
+    const personalFrame = page.frameLocator('iframe.page-frame[title*="personal.html"]');
+    await expect(personalFrame.locator('body')).toBeVisible();
+    await expect(page.locator('[data-testid^="shell-tab-"]').filter({ hasText: '个人记忆库' })).toBeVisible();
+
+    // MCP 接入：连接组新页。壳层 iframe 走父窗口桥，但浏览器态的顶层没有原生宿主能力
+    // → 面板如实降级为「读取本机配置失败」，绝不列出客户端、绝不写「已接入」。
+    await page.getByRole('treeitem', { name: 'MCP 接入', exact: true }).click();
+    const mcpFrame = page.frameLocator('iframe.page-frame[title*="mcp.html"]');
+    await expect(mcpFrame.locator('[data-testid="mcp-page"]')).toBeVisible();
+    await expect(mcpFrame.locator('[data-testid="mcp-clients"]')).toBeVisible();
+    await expect(mcpFrame.locator('[data-testid="mcp-scan-error"]')).toContainText('读取本机配置失败');
+    await expect(mcpFrame.locator('[data-testid="mcp-table"]')).toHaveCount(0);
+    // 没有真扫结果时连「七态总览」都不渲染：不把未知渲染成「已接入」
+    await expect(mcpFrame.locator('[data-testid="mcp-state-summary"]')).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
+  test('冲突裁决页（浏览器壳层）：真实页面挂载；无原生宿主桥时如实报内核不可读，不伪造空态/行', async ({ page }) => {
+    const errors = collectErrors(page);
+    await openShell(page);
+    // 浏览器态内核账本要真实会话才能读；先走真实登录，再进冲突裁决页
+    await openLoginByAvatar(page);
+    await page.locator('[data-testid="slm-account"]').fill(ACCOUNT);
+    await page.locator('[data-testid="slm-password"]').fill(PWD);
+    await page.locator('[data-testid="slm-submit"]').click();
+    await expect(page.locator('[data-testid="slm-session"]')).toBeVisible();
+    await page.locator('[data-testid="slm-close"]').click();
+
+    await page.getByRole('treeitem', { name: '冲突裁决', exact: true }).click();
+    const frame = page.frameLocator('iframe.page-frame[title*="dispute.html"]');
+    await expect(frame.locator('[data-testid="dispute-page"]')).toBeVisible();
+    await expect(frame.locator('[data-testid="dispute-head"]')).toContainText('冲突裁决');
+    // 壳层 iframe 走父窗口宿主桥，但浏览器态的顶层没有 window.api → 内核读不到就如实报错；
+    // 绝不把「读不到」渲染成「当前账本无待裁决冲突」的空态，也绝不编造队列行。
+    // （真实空账本的诚实空态与真实行由 dispute.spec.ts / 单测在无桥环境覆盖。）
+    await expect(frame.locator('[data-testid="kernel-error"]')).toBeVisible({ timeout: 15000 });
+    await expect(frame.locator('[data-testid="kernel-error-title"]')).toContainText('读取待裁决冲突队列失败');
+    await expect(frame.locator('[data-testid="dispute-empty"]')).toHaveCount(0);
+    await expect(frame.locator('[data-testid^="queue-item-"]')).toHaveCount(0);
+    await expect(frame.locator('[data-testid="dispute-filter"]')).toHaveCount(0);
+    await expect(frame.locator('[data-testid="verdict-panel"]')).toHaveCount(0);
+    await expect(frame.locator('[data-testid="audit-log"]')).toHaveCount(0);
+    expect(errors).toEqual([]);
   });
 });

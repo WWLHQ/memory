@@ -1,7 +1,7 @@
 // 壳层渲染行为（批次48 S1）：导航、不可用态、状态栏诚实口径、底部标签。
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { getStoredSessionId, setTestOverride, storeSessionId } from '../../Home/crossTabAuth.ts';
+import { setTestOverride } from '../../Home/crossTabAuth.ts';
 import { PAGES } from '../views.ts';
 import { SELECTION_MSG } from '../../shared/selectionChannel.ts';
 import { SHELL_GOTO_MSG } from '../../shared/shellNavigate.ts';
@@ -192,12 +192,12 @@ describe('工作台壳层', () => {
     expect((container.querySelector('iframe.page-frame') as HTMLIFrameElement).getAttribute('src')).toContain('/index.html');
   });
 
-  it('DOM 为五组 24 项（记忆管理组含活跃/蛰伏休眠/已归档三个状态视图，连接组含网页端接入；管理台未登录不渲染），角标只显示真实读数，不出现参考图示例数', async () => {
+  it('DOM 为五组 22 项（新增「MCP 接入」「个人记忆库」；管理台未登录不渲染），角标只显示真实读数，不出现参考图示例数', async () => {
     vi.mocked(loadNavCounts).mockResolvedValue({ 'memory-bank': 7, dispute: 2, agent: 3 });
     const { container } = await renderShell();
     const groups = Array.from(container.querySelectorAll('.tree .tree-group')).map((e) => e.textContent);
     expect(groups).toEqual(['工作台', '记忆管理', '连接', '治理', '智能']);
-    expect(container.querySelectorAll('.tree .tree-row')).toHaveLength(24);
+    expect(container.querySelectorAll('.tree .tree-row')).toHaveLength(22);
 
     expect((await screen.findByTestId('nav-count-memory-bank')).textContent).toBe('7');
     expect(screen.getByTestId('nav-count-dispute').textContent).toBe('2');
@@ -213,47 +213,51 @@ describe('工作台壳层', () => {
     expect(container.querySelector('[data-testid^="nav-count-"]')).toBeNull();
   });
 
-  it('顶部布局：快捷按钮紧跟菜单项之后，品牌块在标题栏居中', async () => {
+  it('批次51 顶部布局：品牌左对齐标题栏 + 命令入口；QAT 工具簇整簇取消；命令条含面包屑/命令/命令按钮（范围读数已取消）', async () => {
     const { container } = await renderShell();
-    const menubar = screen.getByTestId('shell-menubar');
     const titlebar = screen.getByTestId('shell-titlebar');
-    const qa = container.querySelector('.qa') as HTMLElement | null;
-    expect(qa).not.toBeNull();
-    // ① 快捷按钮脱离标题栏，紧跟在「文件/编辑/视图/工具/帮助」之后（不是被弹簧推到最右）
-    expect(titlebar.contains(qa as Node)).toBe(false);
-    expect(menubar.contains(qa as Node)).toBe(true);
-    const wraps = menubar.querySelectorAll('.menu-wrap');
-    expect(wraps.length).toBe(5);
-    expect((qa as HTMLElement).previousElementSibling).toBe(wraps[wraps.length - 1]);
-    const spring = menubar.querySelector('.rib-spring') as HTMLElement | null;
-    expect(spring).not.toBeNull();
-    expect((qa as HTMLElement).compareDocumentPosition(spring as HTMLElement) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(menubar.lastElementChild?.classList.contains('menu-scope')).toBe(true);
-    // ② 品牌块（图标 + 记忆工作台）仍在标题栏，且标题栏声明居中布局
+    // ① QAT 工具簇已整簇取消（用户 2026-11-21）：标题栏不得再出现 .qa / qa-* 按钮
+    expect(container.querySelector('.qa')).toBeNull();
+    expect(screen.queryByTestId('qa-login')).toBeNull();
+    expect(screen.queryByTestId('qa-logout')).toBeNull();
+    expect(screen.queryByTestId('qa-theme')).toBeNull();
+    expect(screen.queryByTestId('qa-assistant')).toBeNull();
+    expect(screen.queryByTestId('qa-inspector')).toBeNull();
+    expect(screen.queryByTestId('qa-personal')).toBeNull();
+    expect(screen.queryByTestId('shell-menubar')).toBeNull();
+    // ② 品牌块仍在标题栏（STRATUM：strata 六条徽标 + MultiAgent Memory + 「层析 STRATUM」小字）
     const brand = titlebar.querySelector('.tb-left') as HTMLElement | null;
     expect(brand).not.toBeNull();
-    expect(brand?.querySelector('.app-mark')).not.toBeNull();
-    expect(brand?.querySelector('.app-name')?.textContent).toContain('记忆工作台');
-    expect(titlebar.dataset.brandAlign).toBe('center');
-    // ③ 8 个标签整行排在功能区之后（保留上一轮确认的下移）
-    const body = container.querySelector('.ribbon-body') as HTMLElement | null;
-    const tabs = container.querySelector('.ribbon-tabs') as HTMLElement | null;
-    expect(body).not.toBeNull();
-    expect(tabs).not.toBeNull();
-    expect((body as HTMLElement).compareDocumentPosition(tabs as HTMLElement) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(container.querySelectorAll('.rib-tab').length).toBe(8);
+    expect(brand?.querySelector('.strata-logo')).not.toBeNull();
+    expect(brand?.querySelector('.app-name')?.textContent).toContain('MultiAgent Memory');
+    expect(brand?.querySelector('.tb-sub')?.textContent).toContain('层析 STRATUM');
+    expect(titlebar.dataset.brandAlign).toBeUndefined();
+    // ③ 命令入口 + 44px 命令条（面包屑；批次53：命令面板按钮已取消，范围读数与状态栏重复也已取消）
+    expect(screen.getByTestId('shell-cmd-entry')).toBeInTheDocument();
+    const cmdbar = screen.getByTestId('shell-cmdbar');
+    expect(cmdbar.querySelector('.cb-crumbs')).not.toBeNull();
+    expect(cmdbar.querySelector('.cb-scope')).toBeNull();
+    expect(screen.queryByTestId('cmdbar-palette')).toBeNull();
+    // ④ Ribbon 已移除
+    expect(container.querySelector('.ribbon-body')).toBeNull();
+    expect(container.querySelector('.ribbon-tabs')).toBeNull();
   });
 
-  it('批次55：功能区命令按 2 行排布，单列小按钮不超过 2 个且不丢命令', async () => {
+  it('v5 命令条：首页显示「写入记忆」主命令与「重读」，面包屑为工作台分组', async () => {
     const { container } = await renderShell();
-    const cols = [...container.querySelectorAll('.rgroup-main .rcol')];
-    expect(cols.length).toBeGreaterThan(0);
-    for (const col of cols) expect(col.querySelectorAll('.rsmall').length).toBeLessThanOrEqual(2);
-    const smalls = container.querySelectorAll('.rgroup-main .rsmall').length;
-    expect(cols.reduce((n, c) => n + c.querySelectorAll('.rsmall').length, 0)).toBe(smalls);
+    const cmdbar = screen.getByTestId('shell-cmdbar');
+    expect(cmdbar.querySelector('.cb-crumb')?.textContent).toBe('工作台');
+    expect(cmdbar.querySelector('.cb-crumb.cur')?.textContent).toBe('首页');
+    expect(screen.getByTestId('cb-cmd-写入记忆')).toBeInTheDocument();
+    expect(screen.getByTestId('cb-cmd-重读')).toBeInTheDocument();
+    // 主命令为墨青实底
+    expect(screen.getByTestId('cb-cmd-写入记忆').classList.contains('primary')).toBe(true);
+    // 导航折叠按钮在命令条最左
+    expect(cmdbar.querySelector('[data-testid="cmdbar-nav-toggle"]')).not.toBeNull();
+    expect(container).toBeDefined();
   });
 
-  it('批次55：层级刻度复用概览页同一次账本快照，七档真实读数、标题无 STRATA', async () => {
+  it('批次55：层级刻度复用概览页同一次账本快照，七档真实读数，标题为「层级刻度 · STRATA」', async () => {
     const { container } = await renderShell();
     const scale = screen.getByTestId('strata-scale');
     const nav = container.querySelector('.nav-pane') as HTMLElement;
@@ -261,10 +265,8 @@ describe('工作台壳层', () => {
     expect(nav.contains(scale)).toBe(true);
     const tree = container.querySelector('.tree') as HTMLElement;
     expect(tree.compareDocumentPosition(scale) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // ② 纯中文标题，STRATA 英文已取消
-    expect(scale.querySelector('.tree-group')?.textContent).toBe('层级刻度');
-    expect(scale.textContent).not.toContain('STRATA');
-    expect(scale.textContent?.toLowerCase()).not.toContain('strata');
+    // ② 标题带 STRATA 层析英文（STRATUM 1:1 复刻：层级刻度 · STRATA）
+    expect(scale.querySelector('.tree-group')?.textContent).toBe('层级刻度 · STRATA');
     // ③ L0–L6 共 7 行，顺序与定稿一致
     const rows = [...scale.querySelectorAll('.strata-row')];
     expect(rows.map((r) => r.getAttribute('data-layer'))).toEqual(['L0', 'L1', 'L2', 'L3', 'L4', 'L5', 'L6']);
@@ -324,8 +326,8 @@ describe('工作台壳层', () => {
     // 未登录：storage IPC 一律拒绝，「本地账本仍可读」是失真文案，整条移除
     expect(screen.queryByTestId('auth-readonly-strip')).toBeNull();
     expect(screen.queryByText(/本地账本仍可读/)).toBeNull();
-    // 登录入口仍在 QAT / 状态栏，不依赖灰条
-    expect(screen.getByTestId('qa-login')).toBeInTheDocument();
+    // 登录入口仍在标题栏头像 / 状态栏，不依赖灰条
+    expect(screen.getByTestId('shell-avatar')).toBeInTheDocument();
     // 成本余额需会话：如实不可用，不显示编造余额
     expect(screen.getByTestId('sb-billing').textContent).toContain('不可用');
     expect(screen.getByTestId('sb-billing').getAttribute('title')).toContain('需登录');
@@ -355,60 +357,20 @@ describe('工作台壳层', () => {
     expect(container.querySelectorAll('iframe.page-frame').length).toBe(1);
   });
 
-  it('QAT 登出快捷按钮：未登录禁用并写明原因', async () => {
+  it('批次51：QAT 登出按钮已取消——登出入口迁至首页页头（见 overview 用例），壳层不再有 qa-logout', async () => {
     await renderShell();
-    const logout = screen.getByTestId('qa-logout');
-    expect(logout).toBeInTheDocument();
-    // 壳层 QAT 统一用 aria-disabled + off 样式置灰（不设原生 disabled，保留 title 可悬浮读原因）
-    expect(logout).toHaveAttribute('aria-disabled', 'true');
-    expect(logout).toHaveClass('off');
-    expect(logout).toHaveTextContent('登出');
-    expect(logout.getAttribute('title')).toContain('未登录，无需登出');
+    expect(screen.queryByTestId('qa-logout')).toBeNull();
+    expect(screen.getByTestId('shell-avatar')).toBeInTheDocument();
   });
 
-  it('QAT 登出快捷按钮：登录态点击真实清除本机会话（与弹窗同一口径）', async () => {
-    // 登出会 POST /api/logout；不桩掉真实网络时，CI 并行负载下会卡过 waitFor 的 1s 窗口造成假红（2026-11-16）
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true } as Response);
-    storeSessionId('sid_qa_logout_test');
-    setTestOverride(true);
-    try {
-      await renderShell();
-      const logout = screen.getByTestId('qa-logout');
-      expect(logout).toBeEnabled();
-      fireEvent.click(logout);
-      await waitFor(() => expect(getStoredSessionId()).toBeNull());
-      expect(screen.getByTestId('sb-msg')).toHaveTextContent(/已登出|已清除本机会话/);
-      expect(fetchSpy).toHaveBeenCalledWith(expect.stringContaining('/api/logout'), expect.objectContaining({ method: 'POST' }));
-    } finally {
-      setTestOverride(false);
-      fetchSpy.mockRestore();
-    }
-  });
-
-  it('三处登录入口（菜单栏 / QAT / 登录状态处）打开同一个登录弹窗', async () => {
+  it('STRATUM：登录入口（标题栏头像 / 状态栏会话格）打开同一个登录弹窗', async () => {
     await renderShell();
 
-    // ① 菜单栏：文件 → 登录 / 会话…
-    fireEvent.click(screen.getByRole('button', { name: /^文件$/ }));
-    fireEvent.click(screen.getByRole('menuitem', { name: /登录 \/ 会话/ }));
-    expect(screen.getByTestId('shell-login-modal')).toBeInTheDocument();
-    fireEvent.click(screen.getByTestId('slm-close'));
-    expect(screen.queryByTestId('shell-login-modal')).toBeNull();
-
-    // ② 快速访问工具条（QAT）：必须有可见文字，不只是同形图标
-    const qaLogin = screen.getByTestId('qa-login');
-    expect(qaLogin).toBeEnabled();
-    expect(qaLogin).toHaveTextContent('登录');
-    fireEvent.click(qaLogin);
-    expect(screen.getByTestId('shell-login-modal')).toBeInTheDocument();
-    fireEvent.keyDown(document, { key: 'Escape' });
-    expect(screen.queryByTestId('shell-login-modal')).toBeNull();
-
-    // ③ 标题栏登录状态处（快捷按钮）
-    fireEvent.click(screen.getByTestId('shell-session-btn'));
+    // ① 标题栏头像（STRATUM：24px accent 圆 + 角色）
+    fireEvent.click(screen.getByTestId('shell-avatar'));
     const modal = screen.getByTestId('shell-login-modal');
     expect(modal).toBeInTheDocument();
-    // 三处是同一实例：未登录时给出真实登录表单（真实 /api/login 由 E2E 覆盖）
+    // 同一实例：未登录时给出真实登录表单（真实 /api/login 由 E2E 覆盖）
     expect(screen.getByTestId('slm-account')).toBeInTheDocument();
     expect(screen.getByTestId('slm-password')).toBeInTheDocument();
     expect(screen.getByTestId('slm-submit')).toBeEnabled();
@@ -443,7 +405,7 @@ describe('工作台壳层', () => {
     expect(screen.getByTestId('ctx-tabmenu-closeOthers')).toBeDisabled();
     expect(screen.getByTestId('ctx-tabmenu-refresh')).toBeEnabled();
 
-    fireEvent.click(screen.getByRole('treeitem', { name: /记忆库/ }));
+    fireEvent.click(screen.getByRole('treeitem', { name: /^记忆库$/ }));
     const tabs = container.querySelectorAll('.vtab');
     expect(tabs.length).toBeGreaterThan(1);
     fireEvent.contextMenu(tabs[tabs.length - 1] as HTMLElement);
@@ -451,32 +413,29 @@ describe('工作台壳层', () => {
     expect(container.querySelectorAll('.vtab').length).toBe(tabs.length - 1);
   });
 
-  it('属性检查器默认收起：右侧竖条 / QAT 可展开，标题栏按钮可再收起（2026-11-16）', async () => {
+  it('属性检查器默认收起：右侧竖条可展开、面板按钮可再收起（批次51：QAT 按钮已随工具簇取消）', async () => {
     const { container } = await renderShell();
     const pane = () => container.querySelector('.inspector-pane') as HTMLElement;
     expect(pane().className).toContain('collapsed');
     // 收起态必须留一个看得见、点得到的展开入口，不能只藏在右键菜单里
     expect(screen.getByTestId('qa-inspector-expand')).toBeInTheDocument();
-    expect(screen.getByTestId('qa-inspector').getAttribute('title')).toContain('展开属性检查器');
 
     fireEvent.click(screen.getByTestId('qa-inspector-expand'));
     expect(pane().className).not.toContain('collapsed');
     expect(screen.queryByTestId('qa-inspector-expand')).toBeNull();
-    expect(screen.getByTestId('qa-inspector').getAttribute('title')).toContain('收起属性检查器');
 
     fireEvent.click(screen.getByTestId('qa-inspector-collapse'));
     expect(pane().className).toContain('collapsed');
     expect(screen.getByTestId('qa-inspector-expand')).toBeInTheDocument();
   });
 
-  it('QAT 属性检查器按钮与右侧竖条同一状态：点两次回到默认收起', async () => {
+  it('v5-BC：Ctrl+Shift+I 切换属性检查器（与右侧竖条/面板同一状态源）', async () => {
     const { container } = await renderShell();
     const pane = () => container.querySelector('.inspector-pane') as HTMLElement;
-    const qa = screen.getByTestId('qa-inspector');
     expect(pane().className).toContain('collapsed');
-    fireEvent.click(qa);
+    fireEvent.keyDown(window, { key: 'I', ctrlKey: true, shiftKey: true });
     expect(pane().className).not.toContain('collapsed');
-    fireEvent.click(qa);
+    fireEvent.keyDown(window, { key: 'i', ctrlKey: true, shiftKey: true });
     expect(pane().className).toContain('collapsed');
   });
 
@@ -560,32 +519,25 @@ describe('工作台壳层', () => {
     fireEvent.click(screen.getByTestId('ctx-shellmenu-refresh'));
     await waitFor(() => expect(screen.getByTestId('sb-msg')).toHaveTextContent('已刷新全部打开的真实页面'));
 
-    expect(fireEvent.contextMenu(container.querySelector('.ribbon-body') as HTMLElement)).toBe(false);
-    expect(screen.getByTestId('ctx-shellmenu')).toHaveTextContent('右键：功能区');
+    expect(fireEvent.contextMenu(screen.getByTestId('shell-cmdbar'))).toBe(false);
+    expect(screen.getByTestId('ctx-shellmenu')).toHaveTextContent('右键：命令条');
     expect(screen.queryByTestId('ctx-shellmenu-login')).toBeNull();
 
-    expect(fireEvent.contextMenu(container.querySelector('.qa') as HTMLElement)).toBe(false);
-    expect(screen.getByTestId('ctx-shellmenu')).toHaveTextContent('右键：快速访问工具条');
+    // 批次51：标题栏工具簇已取消，右键标题栏空白处走默认菜单（无登录项）
+    expect(fireEvent.contextMenu(screen.getByTestId('shell-titlebar'))).toBe(false);
+    expect(screen.getByTestId('ctx-shellmenu')).toBeInTheDocument();
     expect(screen.queryByTestId('ctx-shellmenu-login')).toBeNull();
 
-    // 真有登录入口的四个位置：QAT 登录按钮、标题栏会话按钮、状态栏会话格、菜单栏
-    expect(fireEvent.contextMenu(screen.getByTestId('qa-login'))).toBe(false);
-    expect(screen.getByTestId('ctx-shellmenu-login')).toBeInTheDocument();
-    fireEvent.click(screen.getByTestId('ctx-shellmenu-login'));
-    expect(screen.getByTestId('shell-login-modal')).toBeInTheDocument();
-    fireEvent.click(screen.getByTestId('slm-close'));
-
-    expect(fireEvent.contextMenu(screen.getByTestId('shell-session-btn'))).toBe(false);
+    // 真有登录入口的位置：标题栏头像、状态栏会话格
+    expect(fireEvent.contextMenu(screen.getByTestId('shell-avatar'))).toBe(false);
     expect(screen.getByTestId('ctx-shellmenu-login')).toBeInTheDocument();
     expect(fireEvent.contextMenu(screen.getByTestId('sb-session'))).toBe(false);
-    expect(screen.getByTestId('ctx-shellmenu-login')).toBeInTheDocument();
-    expect(fireEvent.contextMenu(container.querySelector('.menubar') as HTMLElement)).toBe(false);
     expect(screen.getByTestId('ctx-shellmenu-login')).toBeInTheDocument();
   });
 
   it('登录弹窗密码默认为密文，显示/隐藏切换保留内容与焦点', async () => {
     await renderShell();
-    fireEvent.click(screen.getByTestId('qa-login'));
+    fireEvent.click(screen.getByTestId('shell-avatar'));
     const pw = screen.getByTestId('slm-password') as HTMLInputElement;
     expect(pw.getAttribute('type')).toBe('password');
     fireEvent.change(pw, { target: { value: 'S3cret-pass' } });
@@ -636,31 +588,49 @@ describe('工作台壳层', () => {
     expect(screen.queryByText(/通览/)).toBeNull();
   });
 
-  it('批次54：记忆库平铺入口打开 memory.html?tab=all；个人记忆进主导航并打开记忆库的个人记忆 Tab', async () => {
+  it('记忆管理组：记忆库平铺入口打开 memory.html?tab=all；个人记忆库为独立导航项并直达 personal.html（只一项，不重复）', async () => {
     const { container } = await renderShell();
-    fireEvent.click(screen.getByRole('treeitem', { name: /记忆库/ }));
+    fireEvent.click(screen.getByRole('treeitem', { name: /^记忆库$/ }));
     const frame = container.querySelector('.page-pane.active iframe.page-frame');
     const src = frame ? frame.getAttribute('src') : null;
     expect(src).toContain('/memory.html');
     expect(src).toContain('tab=all');
     expect(container.querySelectorAll('iframe.page-frame').length).toBeGreaterThan(1);
-    // 个人记忆进主导航（不占假计数），点击直接打开记忆库全页的个人记忆 Tab
-    expect(screen.getByRole('treeitem', { name: /个人记忆/ })).toBeTruthy();
+    // 个人记忆库：唯一导航项，落在记忆管理组内，直达真实整页 personal.html
+    const personalItems = screen.getAllByRole('treeitem', { name: /^个人记忆库/ });
+    expect(personalItems).toHaveLength(1);
+    // 组内位置：紧跟「记忆库」、在「层级管理」之前（确属记忆管理组）
+    const labels = Array.from(container.querySelectorAll('.tree .tree-row')).map((e) => e.textContent ?? '');
+    const iBank = labels.findIndex((t) => t.includes('记忆库'));
+    const iPersonal = labels.findIndex((t) => t.includes('个人记忆库'));
+    const iLayered = labels.findIndex((t) => t.includes('层级管理'));
+    expect(iPersonal).toBe(iBank + 1);
+    expect(iLayered).toBe(iPersonal + 1);
+    fireEvent.click(personalItems[0]);
+    const frame2 = container.querySelector('.page-pane.active iframe.page-frame');
+    expect(frame2 ? frame2.getAttribute('src') : null).toContain('/personal.html');
+    // 旧四子项中活跃/蛰伏/已归档仍不进主导航（反向断言）
+    for (const label of [/活跃/, /蛰伏\/休眠/, /已归档/]) {
+      expect(screen.queryByRole('treeitem', { name: label })).toBeNull();
+    }
     expect(container.querySelector('.shell-empty')).toBeFalsy();
-    fireEvent.click(screen.getByRole('treeitem', { name: /个人记忆/ }));
-    const personalFrame = container.querySelector('.page-pane.active iframe.page-frame');
-    const personalSrc = personalFrame ? personalFrame.getAttribute('src') : null;
-    expect(personalSrc).toContain('/memory.html');
-    expect(personalSrc).toContain('tab=personal');
-    // 点击导航项不弹壳层浮层面板（那是状态栏快捷按钮的职责）
-    expect(container.querySelector('.pm-shell-panel')).toBeFalsy();
   });
 
-  it('工具栏不可用命令被禁用并给出原因，不伪造结果', async () => {
+  it('v5 命令面板：禁用命令被置灰并给出原因，不伪造结果；帮助入口真实打开快捷键参考', async () => {
     await renderShell();
-    const help = screen.getByRole('button', { name: /快捷键/ });
-    expect(help).toBeDisabled();
-    expect(help.getAttribute('title')).toContain('未提供快捷键清单页');
+    // Ctrl+K 打开命令面板
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+    expect(screen.getByTestId('shell-palette')).toBeInTheDocument();
+    // 无对应能力的命令置灰并写原因（原菜单「打开记忆库…」）
+    const openLib = screen.getByText('打开记忆库…').closest('.pal-row') as HTMLElement;
+    expect(openLib.classList.contains('disabled')).toBe(true);
+    expect(openLib.getAttribute('title')).toContain('程序未提供库切换指令');
+    // 「检查更新」同样禁用带原因
+    expect(screen.getByText('检查更新').closest('.pal-row')?.classList.contains('disabled')).toBe(true);
+    // 帮助命令真实打开快捷键参考浮层（不再是禁用占位）
+    fireEvent.click(screen.getByText('快捷键参考'));
+    expect(screen.getByTestId('shell-keys')).toBeInTheDocument();
+    expect(screen.getByText('Ctrl 1..8')).toBeInTheDocument();
   });
 
   it('底部终端标签如实说明不可用', async () => {
@@ -784,31 +754,39 @@ describe('S3 深链接线（D4）：壳层把初值真的交给目标真实页�
     return frame ? frame.getAttribute('src') : null;
   }
 
-  it('Ribbon「归档（需登录）」开独立标签，iframe src 带 ?status=archived', async () => {
+  function openPalette() {
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+    expect(screen.getByTestId('shell-palette')).toBeInTheDocument();
+  }
+
+  it('命令面板「归档（需登录）」开独立标签，iframe src 带 ?status=archived', async () => {
     // 该动作按程序能力需登录：临时置会话有效，验证深链初值确实交给目标页
     setTestOverride(true);
     const { container } = await renderShell();
-    fireEvent.click(screen.getByRole('button', { name: /归档（需登录）/ }));
+    openPalette();
+    fireEvent.click(screen.getByText('归档（需登录）'));
     const src = activeFrameSrc(container);
     expect(src).toContain('/memory.html');
     expect(src).toContain('status=archived');
     // 归档与「全部记忆」是同一页面不同初值 → 必须是独立标签，不能复用旧标签
-    expect(container.querySelector('.tabstrip')?.textContent ?? '').toContain('归档（需登录）');
+    expect(container.querySelector('.tabstrip')?.textContent ?? '').toContain('已归档');
     setTestOverride(false);
   });
 
   it('未登录时「需登录」动作按程序实际能力禁用并给出原因', async () => {
     await renderShell();
-    const archive = screen.getByRole('button', { name: /归档（需登录）/ });
-    expect(archive).toBeDisabled();
+    openPalette();
+    const archive = screen.getByText('归档（需登录）').closest('.pal-row') as HTMLElement;
+    expect(archive.classList.contains('disabled')).toBe(true);
     expect(archive.getAttribute('title')).toContain('未登录（会话 401）');
   });
 
-  it('批次54：L0 不再占主导航，Ribbon 深链仍打开 memory.html?tab=l0', async () => {
+  it('批次54：L0 不再占主导航，命令深链仍打开 memory.html?tab=l0', async () => {
     const { container } = await renderShell();
     expect(screen.queryByRole('treeitem', { name: /L0 密文/ })).toBeNull();
+    openPalette();
     await act(async () => {
-      fireEvent.click(screen.getAllByRole('button', { name: /解锁 L0/ })[0]);
+      fireEvent.click(screen.getByText('显示 L0 密文'));
       await Promise.resolve();
     });
     const src = activeFrameSrc(container);
@@ -820,7 +798,8 @@ describe('S3 深链接线（D4）：壳层把初值真的交给目标真实页�
 
   it('无 href 的命令仍复用原有标签，不凭空新增重复标签', async () => {
     const { container } = await renderShell();
-    fireEvent.click(screen.getByRole('button', { name: /记忆列表/ }));
+    openPalette();
+    fireEvent.click(screen.getByText('记忆列表（全部）'));
     const src = activeFrameSrc(container);
     expect(src).toContain('/memory.html');
     expect(src).not.toContain('status=archived');
@@ -886,7 +865,8 @@ describe('S4 属性检查器：只显示真实页面回传的选中项', () => {
 
   it('收到当前页合法回传 → 检查器显示字段与来源，不显示「尚未接入」占位', async () => {
     const { container } = await renderShell();
-    fireEvent.click(screen.getByRole('button', { name: /记忆列表/ }));
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+    fireEvent.click(screen.getByText('记忆列表（全部）'));
     await dispatchTo(container, PAYLOAD);
     expect(screen.getByText(/记忆 mem_1/)).toBeInTheDocument();
     expect(screen.getByText('mem_1')).toBeInTheDocument();
@@ -896,7 +876,8 @@ describe('S4 属性检查器：只显示真实页面回传的选中项', () => {
 
   it('收起再展开不丢选中项：折叠只收 UI，不动中心页回传的真实字段', async () => {
     const { container } = await renderShell();
-    fireEvent.click(screen.getByRole('button', { name: /记忆列表/ }));
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+    fireEvent.click(screen.getByText('记忆列表（全部）'));
     await dispatchTo(container, PAYLOAD);
     fireEvent.click(screen.getByTestId('qa-inspector-collapse'));
     expect((container.querySelector('.inspector-pane') as HTMLElement).className).toContain('collapsed');
@@ -907,7 +888,8 @@ describe('S4 属性检查器：只显示真实页面回传的选中项', () => {
 
   it('回传 null → 检查器退回诚实空态（不保留上一份选区）', async () => {
     const { container } = await renderShell();
-    fireEvent.click(screen.getByRole('button', { name: /记忆列表/ }));
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+    fireEvent.click(screen.getByText('记忆列表（全部）'));
     await dispatchTo(container, PAYLOAD);
     await dispatchTo(container, null);
     expect(screen.queryByText('mem_1')).toBeNull();
@@ -916,7 +898,8 @@ describe('S4 属性检查器：只显示真实页面回传的选中项', () => {
 
   it('非同源来源的回传被丢弃', async () => {
     const { container } = await renderShell();
-    fireEvent.click(screen.getByRole('button', { name: /记忆列表/ }));
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+    fireEvent.click(screen.getByText('记忆列表（全部）'));
     await dispatchTo(container, PAYLOAD, { origin: 'http://evil.example' });
     expect(screen.queryByText('mem_1')).toBeNull();
   });
@@ -930,7 +913,8 @@ describe('S4 属性检查器：只显示真实页面回传的选中项', () => {
 
   it('形状不合法的回传被丢弃', async () => {
     const { container } = await renderShell();
-    fireEvent.click(screen.getByRole('button', { name: /记忆列表/ }));
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+    fireEvent.click(screen.getByText('记忆列表（全部）'));
     await dispatchTo(container, { v: 1, page: 'memory.html', title: 'x', fields: [] });
     expect(screen.queryByText('x')).toBeNull();
   });
@@ -1148,7 +1132,14 @@ describe('S6 底部五标签：只渲染真实数据，不可用就给原因', (
       view: [{ requestId: 'req_audit_1', action: 'memory_op', ts: 1_790_000_000_000, summary: '{"mem_id":"mem_1","op":"pin"}' }],
     });
     const { container } = await renderShell();
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /记忆列表/ })); });
+    await act(async () => {
+      fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId('shell-palette')).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByText('记忆列表（全部）'));
+    });
     const frame = container.querySelector('.page-pane.active iframe.page-frame') as HTMLIFrameElement;
     await act(async () => {
       window.dispatchEvent(new MessageEvent('message', {
@@ -1207,8 +1198,8 @@ describe('记忆助手：已从壳层浮窗改为独立整页', () => {
     fireEvent.click(screen.getByRole('treeitem', { name: /记忆助手/ }));
     const frame = container.querySelector('.page-pane.active iframe.page-frame');
     expect(frame?.getAttribute('src')).toContain('/assistant.html');
-    // 状态栏「记忆助手」按钮同样改为打开整页
-    expect(screen.getByTestId('qa-assistant').textContent).toContain('记忆助手');
+    // 批次51：QAT「记忆助手」按钮已随工具簇取消，入口只剩导航树
+    expect(screen.queryByTestId('qa-assistant')).toBeNull();
   });
 });
 
@@ -1253,5 +1244,16 @@ describe('功能导航折叠：折叠后只显示图标栏（不归零、不隐�
     expect(container.querySelectorAll('.tree-row.icon-only').length).toBe(0);
     const shell = container.querySelector('.shell') as HTMLElement;
     expect(shell.style.getPropertyValue('--nav-w')).not.toBe('44px');
+  });
+});
+
+describe('v5 设计稿对齐：导航头部工具（新建记忆 + 折叠，无前置图标）', () => {
+  it('「新建记忆」按钮打开写入页；头部不再渲染前置图标', async () => {
+    const { container } = await renderShell();
+    // v5 设计稿 nav-head 只有 label + 工具按钮（新建/折叠），没有 folder 前置图标
+    expect(container.querySelector('.nav-pane .pane-head .ph-ic')).toBeNull();
+    fireEvent.click(screen.getByTestId('nav-new-memory'));
+    const frame = container.querySelector('.page-pane.active iframe.page-frame');
+    expect(frame?.getAttribute('src')).toContain('/write.html');
   });
 });

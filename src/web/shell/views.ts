@@ -7,9 +7,9 @@
 // - 个人记忆有真实独立存储（第一轮本机闭环）：静态导航只带入口，待确认计数由页面按真实内核回传
 
 export type PageKey =
-  | 'home' | 'login' | 'memory' | 'write' | 'retrieval'
+  | 'home' | 'login' | 'memory' | 'personal' | 'write' | 'retrieval'
   | 'lifecycle' | 'audit' | 'logs' | 'security' | 'growth' | 'models'
-  | 'monitor' | 'sync' | 'params' | 'setup' | 'agent' | 'webonboard'
+  | 'monitor' | 'sync' | 'params' | 'setup' | 'agent' | 'webonboard' | 'mcp'
   | 'layered' | 'dispute' | 'feedback' | 'assistant';
 
 /** 真实页面清单（文件名与 vite.config.ts 的 rollupOptions.input 对齐） */
@@ -17,7 +17,8 @@ export const PAGES: Record<PageKey, { file: string; label: string; source: strin
   home: { file: 'index.html', label: '概览页', source: 'getHomeFeed（单次账本读取）+ /api/health + llm:billing' },
   // login.html 为可直达兜底页（不进主导航）；主流程入口是壳层登录弹窗
   login: { file: 'login.html', label: '登录与会话页', source: 'POST /api/login · /api/me · session:realpage' },
-  memory: { file: 'memory.html', label: '记忆管理六标签页', source: '账本清单 + 分层策略 + L0 会话 + 冲突队列' },
+  memory: { file: 'memory.html', label: '记忆管理六页签页', source: '账本清单 + 分层策略 + 冲突队列读数（批次57 精简六页签）' },
+  personal: { file: 'personal.html', label: '个人记忆页', source: 'personal:snapshot 个人记忆真实快照（内核账本）' },
   write: { file: 'write.html', label: '写入页', source: 'ma.write 表单与回执' },
   retrieval: { file: 'retrieval.html', label: '检索页', source: '透明化召回' },
   lifecycle: { file: 'lifecycle.html', label: '生命周期页', source: '六态机 + 调参' },
@@ -32,9 +33,10 @@ export const PAGES: Record<PageKey, { file: string; label: string; source: strin
   setup: { file: 'setup.html', label: '首启设置页', source: 'setup:state / finish' },
   agent: { file: 'agentonboard.html', label: 'Agent 接入页', source: 'agentOnboard 接口' },
   webonboard: { file: 'webonboard.html', label: '网页端接入页', source: 'webchatAuto 状态/设置/采集/登录（宿主 IPC 真值）' },
+  mcp: { file: 'mcp.html', label: 'MCP 接入页', source: 'mcp:clients 主进程真扫客户端配置与连通（宿主 IPC 真值）' },
   layered: { file: 'memory-layered.html', label: '记忆层级管理页', source: 'REQ-006 P8 · L0–L6 真实账本' },
   dispute: { file: 'dispute.html', label: '冲突裁决页', source: 'REQ-006 P7 · 内核真实 pending 冲突队列' },
-  feedback: { file: 'feedback.html', label: '用户反馈页', source: 'REQ-006 P9 · 真实账本反馈' },
+  feedback: { file: 'feedback.html', label: '反馈页', source: 'REQ-006 P9 · 真实账本反馈' },
   assistant: { file: 'assistant.html', label: '记忆助手页', source: 'loadOverview 同源快照 · 问答只转述真实账本' },
 };
 
@@ -48,6 +50,8 @@ export interface NavItem {
   id: string;
   label: string;
   icon: IconName;
+  /** STRATUM 设计稿（1:1 复刻）规定导航图标用 emoji 原样；未给 emoji 的项回落 SVG 图标 */
+  emoji?: string;
   /** 真实页面；缺省时必须给出 unavailable 原因 */
   page?: PageKey;
   /** 页面初值（D4）：`?status=archived` 或 `?tab=conflict`，由目标页自行解析并真正筛选/定位 */
@@ -63,43 +67,42 @@ export interface NavItem {
 
 export type NavEntry = NavGroup | NavItem;
 
-/** 功能导航树：批次54 按用户参考图重排、其后持续演进为五组 25 项（2026-11-19 网页端接入）；每项映射到真实 HTML，角标一律动态读真账本，不写死示例数。
+/** 功能导航树：批次54 按用户参考图重排、批次52 起「记忆管理」组去掉活跃/蛰伏休眠/已归档/个人记忆四子项（状态筛选留在记忆页内），每项映射到真实 HTML，角标一律动态读真账本，不写死示例数。
  *  - 登录仍走壳层弹窗（login.html 只作深链兜底，不占主导航）；
  *  - 首启设置由 Electron 向导直接打开（setup.html），不在主导航露面；
- *  - 旧「记忆管理」可展开子树收敛为平铺入口，分层/冲突/反馈改指各自独立真实页面。
+ *  - 个人记忆库作为记忆管理组独立入口进主导航，直达真实整页 personal.html；记忆库 Tab 与状态栏常驻面板保留；
  */
 export const NAV: NavEntry[] = [
   { kind: 'group', label: '工作台' },
-  { kind: 'item', id: 'home', label: '首页', icon: 'spark', page: 'home' },
-  { kind: 'item', id: 'write', label: '写入', icon: 'receipt', page: 'write' },
-  { kind: 'item', id: 'retrieval', label: '检索', icon: 'search', page: 'retrieval' },
-  { kind: 'item', id: 'monitor', label: '监控', icon: 'play', page: 'monitor' },
+  { kind: 'item', id: 'home', label: '首页', icon: 'spark', emoji: '🏠', page: 'home' },
+  { kind: 'item', id: 'write', label: '写入', icon: 'receipt', emoji: '✍️', page: 'write' },
+  { kind: 'item', id: 'retrieval', label: '检索', icon: 'search', emoji: '🔍', page: 'retrieval' },
+  // 批次54：反馈上移到工作台（检索下方），不再放治理组；批次55 「用户反馈」改名「反馈」
+  { kind: 'item', id: 'feedback', label: '反馈', icon: 'pen', emoji: '💬', page: 'feedback' },
+  { kind: 'item', id: 'monitor', label: '监控', icon: 'play', emoji: '📡', page: 'monitor' },
   { kind: 'group', label: '记忆管理' },
-  { kind: 'item', id: 'memory-bank', label: '记忆库', icon: 'db', page: 'memory', href: '?tab=all' },
-  { kind: 'item', id: 'memory-active', label: '活跃', icon: 'sun', page: 'memory', href: '?tab=all&status=active' },
-  { kind: 'item', id: 'memory-dormant', label: '蛰伏/休眠', icon: 'moon', page: 'memory', href: '?tab=all&status=hibernating,dormant' },
-  { kind: 'item', id: 'memory-archived', label: '已归档', icon: 'archive', page: 'memory', href: '?tab=all&status=archived' },
-  { kind: 'item', id: 'personal', label: '个人记忆', icon: 'user', page: 'memory', href: '?tab=personal' },
-  { kind: 'item', id: 'layered', label: '层级管理', icon: 'layers', page: 'layered' },
-  { kind: 'item', id: 'lifecycle', label: '生命周期', icon: 'clock', page: 'lifecycle' },
-  { kind: 'item', id: 'growth', label: '净化生长', icon: 'layers', page: 'growth' },
-  { kind: 'item', id: 'dispute', label: '冲突裁决', icon: 'warn', page: 'dispute' },
+  { kind: 'item', id: 'memory-bank', label: '记忆库', icon: 'db', emoji: '🗄', page: 'memory', href: '?tab=all' },
+  { kind: 'item', id: 'personal-memory', label: '个人记忆库', icon: 'user', emoji: '👤', page: 'personal' },
+  { kind: 'item', id: 'layered', label: '层级管理', icon: 'layers', emoji: '🧬', page: 'layered' },
+  { kind: 'item', id: 'lifecycle', label: '生命周期', icon: 'clock', emoji: '♻️', page: 'lifecycle' },
+  { kind: 'item', id: 'growth', label: '净化生长', icon: 'layers', emoji: '🌱', page: 'growth' },
+  { kind: 'item', id: 'dispute', label: '冲突裁决', icon: 'warn', emoji: '⚖️', page: 'dispute' },
   { kind: 'group', label: '连接' },
-  { kind: 'item', id: 'agent', label: 'Agent 接入', icon: 'agent', page: 'agent' },
+  { kind: 'item', id: 'agent', label: 'Agent 接入', icon: 'agent', emoji: '🔌', page: 'agent' },
+  { kind: 'item', id: 'mcp-clients', label: 'MCP 接入', icon: 'agent', emoji: '🧩', page: 'mcp' },
   { kind: 'item', id: 'web-onboard', label: '网页端接入', icon: 'link', page: 'webonboard' },
-  { kind: 'item', id: 'cost', label: '大模型配置', icon: 'chart', page: 'models' },
-  { kind: 'item', id: 'sync', label: '同步中枢', icon: 'sync', page: 'sync' },
+  { kind: 'item', id: 'cost', label: '大模型配置', icon: 'chart', emoji: '🧠', page: 'models' },
+  { kind: 'item', id: 'sync', label: '同步中枢', icon: 'sync', emoji: '🔄', page: 'sync' },
   { kind: 'group', label: '治理' },
   /**
    * T3（管理员与成员权限设计 §14.1）：「管理台」复用 security.html 的「检查摘要」页签，
    * 不新增第 23 个 HTML 入口。仅管理员可见（成员侧由 Workspace 过滤），管理员登录后默认落该视图。
    */
   { kind: 'item', id: 'admin-console', label: '管理台', icon: 'system', page: 'security', href: '?tab=overview' },
-  { kind: 'item', id: 'params', label: '全局参数', icon: 'gear', page: 'params' },
-  { kind: 'item', id: 'security', label: '账号与安全', icon: 'shield', page: 'security' },
-  { kind: 'item', id: 'logs', label: '日志记录', icon: 'list', page: 'logs' },
-  { kind: 'item', id: 'audit', label: '审计日志', icon: 'book', page: 'audit' },
-  { kind: 'item', id: 'feedback', label: '用户反馈', icon: 'pen', page: 'feedback' },
+  { kind: 'item', id: 'params', label: '全局参数', icon: 'gear', emoji: '⚙️', page: 'params' },
+  { kind: 'item', id: 'security', label: '账号与安全', icon: 'shield', emoji: '🛡', page: 'security' },
+  { kind: 'item', id: 'logs', label: '日志记录', icon: 'list', emoji: '📜', page: 'logs' },
+  { kind: 'item', id: 'audit', label: '审计日志', icon: 'book', emoji: '🧾', page: 'audit' },
   { kind: 'item', id: 'setup', label: '首启向导', icon: 'gear', page: 'setup' },
   { kind: 'group', label: '智能' },
   { kind: 'item', id: 'assistant', label: '记忆助手', icon: 'spark', page: 'assistant' },
@@ -128,236 +131,91 @@ export type IconName =
   | 'unlock' | 'eye' | 'eye-off' | 'broken' | 'ring' | 'system' | 'sun' | 'moon' | 'terminal'
   | 'chev' | 'caret' | 'x' | 'folder' | 'link' | 'dot' | 'save' | 'undo' | 'more' | 'pen';
 
-export interface RibbonItem {
-  label: string;
-  icon: IconName;
-  /** 跳转到真实页面 */
-  go?: PageKey;
-  /** 页面初值（D4），与 go 同时使用 */
-  href?: string;
-  /** 壳层内动作（由 Workspace 实现） */
-  action?: ShellAction;
-  big?: boolean;
-  kbd?: string;
-  /** 程序无此能力时给出的诚实原因（同时禁用按钮） */
-  unavailable?: string;
-}
-
-export interface RibbonGroup {
-  label: string;
-  items: RibbonItem[];
-}
-
-export interface RibbonTab {
-  id: string;
-  label: string;
-  groups: RibbonGroup[];
-}
-
 /** 壳层自己就能完成的动作（真实改变界面状态，不伪造业务结果） */
 export type ShellAction =
-  | 'toggleTaskPane' | 'foldRibbon' | 'toggleDock' | 'toggleStatus' | 'density'
-  | 'zoom' | 'resetLayout' | 'refresh' | 'focusFilter';
+  | 'toggleTaskPane' | 'toggleNav' | 'toggleDock' | 'toggleStatus' | 'density'
+  | 'zoom' | 'resetLayout' | 'refresh' | 'openPalette' | 'theme';
 
-/** 功能区：8 分页，视觉分组取自定稿；每条命令要么跳真实页面，要么明确「未接入」 */
-export const RIBBON: RibbonTab[] = [
-  {
-    id: 'start', label: '开始', groups: [
-      { label: '剪贴板', items: [{ label: '复制 ID', icon: 'copy', action: 'focusFilter' }] },
-      {
-        label: '记忆', items: [
-          { label: '新建记忆', icon: 'plus', go: 'write', big: true, kbd: 'Ctrl+N' },
-          { label: '打开回执', icon: 'receipt', go: 'write', big: true },
-          { label: '归档（需登录）', icon: 'archive', go: 'memory', href: '?tab=all&status=archived' },
-          { label: '锁定行（本地）', icon: 'lock', go: 'memory', href: '?tab=all' },
-          { label: '解锁 L0', icon: 'key', go: 'memory', href: '?tab=l0' },
-        ],
-      },
-      {
-        label: '筛选', items: [
-          { label: '仅冲突', icon: 'filter', go: 'memory', href: '?tab=conflict' },
-          { label: '刷新', icon: 'refresh', action: 'refresh', kbd: 'F5' },
-          { label: '在库中查找', icon: 'search', action: 'focusFilter', kbd: 'Ctrl+F' },
-        ],
-      },
-      {
-        label: '视图', items: [
-          { label: '记忆列表', icon: 'list', go: 'memory', href: '?tab=all' },
-          { label: '任务窗格', icon: 'panel', action: 'toggleTaskPane' },
-          { label: '折叠功能区', icon: 'fold', action: 'foldRibbon' },
-        ],
-      },
-      {
-        label: '帮助', items: [
-          { label: '快捷键', icon: 'help', unavailable: '程序未提供快捷键清单页' },
-          { label: '限制说明', icon: 'info', unavailable: '程序未提供限制说明页' },
-        ],
-      },
-    ],
-  },
-  {
-    id: 'memory', label: '记忆', groups: [
-      {
-        label: '分层内容', items: [
-          { label: '分层内容', icon: 'layers', go: 'memory', href: '?tab=layers', big: true },
-          { label: '解锁 L0', icon: 'key', go: 'memory', href: '?tab=l0', big: true },
-          { label: '查看 L1 注入', icon: 'eye', unavailable: '程序未提供 L1 注入明细视图' },
-          { label: 'L0 密文说明', icon: 'lock', go: 'memory', href: '?tab=l0' },
-        ],
-      },
-      {
-        label: '生命周期', items: [
-          { label: '归档（需登录）', icon: 'archive', go: 'memory', href: '?tab=all&status=archived', big: true },
-          { label: '激活', icon: 'play', go: 'lifecycle' },
-          { label: '转入休眠', icon: 'moon', go: 'lifecycle' },
-        ],
-      },
-      {
-        label: '写入与去重', items: [
-          { label: '新建记忆', icon: 'plus', go: 'write', big: true },
-          { label: '写入预检', icon: 'check', go: 'write' },
-          { label: '去重策略', icon: 'scale', go: 'growth' },
-        ],
-      },
-      {
-        label: '审计', items: [
-          { label: '查看审计', icon: 'book', go: 'audit', big: true },
-          { label: '导出审计', icon: 'export', go: 'audit' },
-          { label: '保留策略', icon: 'clock', go: 'params' },
-        ],
-      },
-    ],
-  },
-  {
-    id: 'retrieve', label: '检索与写入', groups: [
-      {
-        label: '检索', items: [
-          { label: '运行检索', icon: 'search', go: 'retrieval', big: true, kbd: 'F6' },
-          { label: '检索筛选', icon: 'filter', go: 'retrieval' },
-        ],
-      },
-      {
-        label: '写入', items: [
-          { label: '新建记忆', icon: 'plus', go: 'write', big: true },
-          { label: '写入预检', icon: 'check', go: 'write' },
-        ],
-      },
-      {
-        label: '接口', items: [
-          { label: 'ma.read 快照', icon: 'db', go: 'home', big: true },
-          { label: 'Agent 探针', icon: 'agent', go: 'agent' },
-          { label: '检索结果导出', icon: 'export', go: 'retrieval' },
-        ],
-      },
-    ],
-  },
-  {
-    id: 'growth', label: '生长', groups: [
-      {
-        label: '回归', items: [
-          { label: '运行回归', icon: 'play', go: 'growth', big: true },
-          { label: '样本集', icon: 'db', go: 'growth', big: true },
-          { label: '放行门槛', icon: 'check', go: 'params' },
-          { label: '回归状态', icon: 'warn', go: 'growth' },
-        ],
-      },
-      {
-        label: '调度', items: [
-          { label: '调度状态', icon: 'clock', go: 'monitor', big: true },
-          { label: '宿主注册', icon: 'link', go: 'monitor' },
-          { label: '下次到期', icon: 'clock', go: 'monitor' },
-        ],
-      },
-      {
-        label: '配置', items: [
-          { label: '评估参数', icon: 'gear', go: 'params' },
-          { label: '回归报告', icon: 'book', go: 'growth' },
-        ],
-      },
-    ],
-  },
-  {
-    id: 'cost', label: '成本', groups: [
-      {
-        label: '余额', items: [
-          { label: '余额探测', icon: 'ring', go: 'models', big: true, kbd: 'F7' },
-          { label: '手工兜底', icon: 'user', go: 'models' },
-          { label: '本地推算', icon: 'scale', go: 'models' },
-        ],
-      },
-      {
-        label: '预算与账本', items: [
-          { label: '成本台账', icon: 'chart', go: 'models', big: true },
-          { label: 'cost_cap', icon: 'gear', go: 'models' },
-          { label: '导出账本', icon: 'export', go: 'audit' },
-        ],
-      },
-      {
-        label: '口径', items: [{ label: '刷新时间', icon: 'refresh', go: 'models' }],
-      },
-    ],
-  },
-  {
-    id: 'sync', label: '同步', groups: [
-      {
-        label: '节点', items: [
-          { label: '立即同步', icon: 'sync', go: 'sync', big: true, kbd: 'F8' },
-          { label: '同步检查', icon: 'play', go: 'sync' },
-          { label: '冲突裁决', icon: 'warn', go: 'memory', href: '?tab=conflict' },
-        ],
-      },
-      {
-        label: '规则', items: [
-          { label: 'L0 排除', icon: 'lock', go: 'sync', big: true },
-          { label: '下行游标', icon: 'chev', go: 'sync' },
-          { label: 'sha256 幂等', icon: 'check', go: 'sync' },
-        ],
-      },
-      {
-        label: '状态', items: [
-          { label: '同步状态', icon: 'dot', go: 'sync' },
-          { label: '冲突状态', icon: 'broken', go: 'sync' },
-        ],
-      },
-    ],
-  },
-  {
-    id: 'security', label: '安全', groups: [
-      {
-        label: '体检', items: [
-          { label: '安全体检', icon: 'shield', go: 'security', big: true, kbd: 'F9' },
-          { label: '会话守卫', icon: 'user', go: 'security' },
-          { label: 'L0 密钥', icon: 'key', go: 'memory', href: '?tab=l0' },
-        ],
-      },
-      {
-        label: '审计与密钥', items: [
-          { label: '审计导出', icon: 'export', go: 'audit', big: true },
-          { label: '写密钥策略', icon: 'key', go: 'params' },
-        ],
-      },
-    ],
-  },
-  {
-    id: 'view', label: '视图', groups: [
-      {
-        label: '面板', items: [
-          { label: '任务窗格', icon: 'panel', action: 'toggleTaskPane', big: true },
-          { label: '折叠功能区', icon: 'fold', action: 'foldRibbon', big: true },
-          { label: '底部面板', icon: 'panel', action: 'toggleDock' },
-          { label: '重置布局', icon: 'refresh', action: 'resetLayout' },
-        ],
-      },
-      {
-        label: '显示', items: [
-          { label: '状态栏', icon: 'list', action: 'toggleStatus' },
-          { label: '紧凑密度', icon: 'table', action: 'density' },
-          { label: '缩放', icon: 'gear', action: 'zoom' },
-        ],
-      },
-    ],
-  },
-];
+/** 上下文命令（v5 命令条）：当前视图的高频命令；只收壳层真实能力（跳转 / 壳层动作），不伪造业务结果 */
+export interface CmdItem {
+  label: string;
+  icon: IconName;
+  go?: PageKey;
+  href?: string;
+  action?: ShellAction;
+  kbd?: string;
+  primary?: boolean;
+}
+
+const REREAD: CmdItem = { label: '重读', icon: 'refresh', action: 'refresh', kbd: 'F5' };
+
+/** 44px 上下文命令条的每视图命令（v5）：跳转与壳层动作都是真实能力；页面内操作留在页面内 */
+export const CMDS: Partial<Record<PageKey, CmdItem[]>> = {
+  home: [
+    { label: '写入记忆', icon: 'plus', go: 'write', primary: true },
+    REREAD,
+  ],
+  memory: [
+    { label: '写入记忆', icon: 'plus', go: 'write', primary: true },
+    { label: '已归档', icon: 'archive', go: 'memory', href: '?tab=all&status=archived' },
+    { label: '冲突裁决', icon: 'warn', go: 'dispute' },
+    REREAD,
+  ],
+  personal: [
+    { label: '记忆库', icon: 'db', go: 'memory', href: '?tab=all' },
+    REREAD,
+  ],
+  write: [
+    { label: '检索', icon: 'search', go: 'retrieval', kbd: 'F6' },
+    REREAD,
+  ],
+  retrieval: [
+    { label: '写入记忆', icon: 'plus', go: 'write', primary: true },
+    REREAD,
+  ],
+  layered: [
+    { label: '记忆库', icon: 'db', go: 'memory', href: '?tab=all' },
+    REREAD,
+  ],
+  dispute: [
+    { label: '记忆库', icon: 'db', go: 'memory', href: '?tab=all' },
+    REREAD,
+  ],
+  lifecycle: [REREAD],
+  audit: [REREAD],
+  logs: [REREAD],
+  security: [REREAD],
+  growth: [REREAD],
+  models: [REREAD],
+  monitor: [REREAD],
+  sync: [REREAD],
+  params: [REREAD],
+  agent: [REREAD],
+  mcp: [REREAD],
+  webonboard: [REREAD],
+  feedback: [REREAD],
+  assistant: [REREAD],
+  setup: [REREAD],
+};
+
+/** Ctrl+1..8 快速切换的前 8 个视图（v5 快捷键表；id 为导航项 id） */
+export const QUICK_VIEWS: string[] = ['home', 'memory-bank', 'write', 'retrieval', 'cost', 'security', 'audit', 'logs'];
+
+/** 命令面板分组顺序（v5）：原菜单 + Ribbon 全量命令收进面板，禁用项带原因 */
+export const PALETTE_GROUPS = ['转到页面', '执行', '工具 · 诊断直达', '视图 · 布局', '帮助'] as const;
+
+/** 命令面板条目：run 由 Workspace 注入（依赖壳层状态）；禁用项必须给出原因 */
+export interface PaletteItem {
+  id: string;
+  group: string;
+  label: string;
+  icon: IconName;
+  desc?: string;
+  kbd?: string;
+  disabled?: boolean;
+  reason?: string;
+  run?: () => void;
+}
 
 export type BottomTabId = 'output' | 'problems' | 'audit' | 'tasks' | 'term';
 

@@ -4,6 +4,8 @@ import { createRoot } from 'react-dom/client';
 import '../shared/actionLog.ts';
 import '../shared/p0.css';
 import '../shared/p0Legacy.css';
+// 迁入的「自带插件导出」卡沿用 Agent 接入页 af-* 版式，需要其设计令牌
+import '../AgentOnboard/theme.css';
 import { WebOnboardPage } from './WebOnboardPage.tsx';
 
 const el = document.getElementById('root');
