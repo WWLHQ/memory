@@ -3,7 +3,7 @@
 > 由 `npm run code:index` 生成，请勿手改；改代码/文档后重跑即可。
 > 用法：先在本表定位文件与导出符号，再只读该文件的局部区间（省 token、少误改）。
 
-共 443 个源码文件、164 个文档。
+共 446 个源码文件、166 个文档。
 
 ## e2e
 
@@ -205,7 +205,7 @@
 | 文件 | 行数 | 摘要 | 导出 |
 |---|---|---|---|
 | [src/web/AgentOnboard/AgentCard.tsx](src/web/AgentOnboard/AgentCard.tsx) | 186 | 单家宿主 Agent 接入卡片（批次48 起 1:1 对齐设计真源 stratum-a-full.html pg-agent 的 af-panel 卡）： | AgentCard(fn), AgentCardProps(type) |
-| [src/web/AgentOnboard/AgentOnboardPage.tsx](src/web/AgentOnboard/AgentOnboardPage.tsx) | 716 | Agent 接入页容器（REQ-003 · 批次48 起 1:1 对齐设计真源 stratum-a-full.html pg-agent 段）： | AgentOnboardPage(fn) |
+| [src/web/AgentOnboard/AgentOnboardPage.tsx](src/web/AgentOnboard/AgentOnboardPage.tsx) | 734 | Agent 接入页容器（REQ-003 · 批次48 起 1:1 对齐设计真源 stratum-a-full.html pg-agent 段）： | AgentOnboardPage(fn) |
 | [src/web/AgentOnboard/ChannelConfig.tsx](src/web/AgentOnboard/ChannelConfig.tsx) | 38 | 采集通道配置行（规格 T6 / 19.3 · R4 双通道至少开一 + SHA-256 幂等不可关） | ChannelConfig(fn) |
 | [src/web/AgentOnboard/FormBadge.tsx](src/web/AgentOnboard/FormBadge.tsx) | 42 | 按端置灰徽标（规格 T10 / AC-003.10 / 19.10） | FormBadge(fn), GRAYED_BY_FORM(const) |
 | [src/web/AgentOnboard/Gains.tsx](src/web/AgentOnboard/Gains.tsx) | 25 | 效果证据 · 用户可感知的「省」与「快」（19.1 / 9.x / 2.4.x / 19.8 反代理） | Gains(fn) |
@@ -254,10 +254,10 @@
 | [src/web/audit/useAuditMirror.ts](src/web/audit/useAuditMirror.ts) | 20 | 审计日志页后端镜像（T5）：沿用 ?backend= 覆盖模式。 | useAuditMirror(fn), AuditMirror(type) |
 | [src/web/audit/useToast.tsx](src/web/audit/useToast.tsx) | 13 | — | useToast(fn) |
 | [src/web/backend.ts](src/web/backend.ts) | 156 | 本机后端地址单一真源（与 src/electron/main.ts 的 MIRROR_PORT / AGENT_ONBOARD_PORT 对齐）。 | backendParam(fn), agentBackendParam(fn), homeBaseUrl(fn), onboardBaseUrl(fn), rememberHomeBase(fn), discoverTrustedDevBackend(fn), HOME_BASE(const), ONBOARD_BASE(const), DEV_FALLBACK_PORTS(const) |
-| [src/web/dispute/DisputePage.tsx](src/web/dispute/DisputePage.tsx) | 238 | 冲突裁决页 T5：完整编排 + mirror · 真实数据接真版 | DisputePage(fn) |
+| [src/web/dispute/DisputePage.tsx](src/web/dispute/DisputePage.tsx) | 335 | 冲突裁决页 T5：完整编排 + mirror · 真实数据接真版 | DisputePage(fn) |
 | [src/web/dispute/DisputeQueue.tsx](src/web/dispute/DisputeQueue.tsx) | 79 | P7-T3 冲突裁决队列组件（批次53-R 重做：截图目标版式 = 密集表格，非卡片堆） | DisputeQueue(fn) |
 | [src/web/dispute/DisputeVerdict.tsx](src/web/dispute/DisputeVerdict.tsx) | 45 | P7-T4 裁决操作组件（批次53-R 重做：截图目标版式 = 四等宽按钮 + 按钮下各一行灰注释） | DisputeVerdict(fn), VERDICTS(const) |
-| [src/web/dispute/coreDispute.ts](src/web/dispute/coreDispute.ts) | 95 | 冲突裁决页（REQ-006 / P7）接真内核：队列与裁决**全部下沉到内核原子 API**（批次46-3）。 | coreConflicts(fn), coreVerdict(fn), DisputeCtx(type), VerdictOutcome(type) |
+| [src/web/dispute/coreDispute.ts](src/web/dispute/coreDispute.ts) | 145 | 冲突裁决页（REQ-006 / P7）接真内核：队列与裁决**全部下沉到内核原子 API**（批次46-3）。 | coreConflicts(fn), coreConflictHistory(fn), coreVerdict(fn), DisputeCtx(type), ConflictHistoryRow(type), VerdictOutcome(type) |
 | [src/web/dispute/disputeEntry.tsx](src/web/dispute/disputeEntry.tsx) | 12 | 冲突裁决页（REQ-006 / P7）入口：挂载 DisputePage（批次53 起 af 化版式，p0-pagehead 旧版式类清零）。 | — |
 | [src/web/dispute/labels.ts](src/web/dispute/labels.ts) | 11 | 冲突类型 → 中文标签（规格常量）。页面数据真相 = 内核账本，无演示冲突。 | CONFIRM_TYPE_LABEL(const) |
 | [src/web/dispute/logic.ts](src/web/dispute/logic.ts) | 82 | 冲突裁决页（REQ-006 / P7）纯逻辑层 | initialConflictId(fn), typeLabel(fn), overdueDays(fn), isOverdue(fn), applyVerdict(fn), auditPair(fn), queueSort(fn), VerdictResult(type) |
@@ -265,9 +265,9 @@
 | [src/web/dispute/useDisputeMirror.ts](src/web/dispute/useDisputeMirror.ts) | 24 | 冲突裁决页后端镜像（阶段5-C 口径统一）：真接 home server POST /api/mirror/audit。 | useDisputeMirror(fn), DisputeMirror(type) |
 | [src/web/dispute/useToast.tsx](src/web/dispute/useToast.tsx) | 22 | 轻量 toast hook（T5）：返回展示节点与 show(msg) | useToast(fn) |
 | [src/web/feedback/FeedbackForm.tsx](src/web/feedback/FeedbackForm.tsx) | 102 | P9-T3 反馈表单（13.7） | FeedbackForm(fn) |
-| [src/web/feedback/FeedbackPage.tsx](src/web/feedback/FeedbackPage.tsx) | 107 | 用户反馈页（REQ-006 / P9）T4 编排 | FeedbackPage(fn) |
+| [src/web/feedback/FeedbackPage.tsx](src/web/feedback/FeedbackPage.tsx) | 155 | 用户反馈页（REQ-006 / P9）T4 编排 | FeedbackPage(fn) |
 | [src/web/feedback/StatCards.tsx](src/web/feedback/StatCards.tsx) | 36 | P9-T3 统计卡（7.1/7.2） | StatCards(fn) |
-| [src/web/feedback/coreFeedback.ts](src/web/feedback/coreFeedback.ts) | 73 | 用户反馈页（REQ-006 / P9）接真内核：提交走 ma._feedback（17.4 trust_delta 内核计算） | coreSubmitFeedback(fn), coreListMemoryOptions(fn), coreLoadFeedbackRecords(fn), FeedbackOutcome(type), MemoryOption(type) |
+| [src/web/feedback/coreFeedback.ts](src/web/feedback/coreFeedback.ts) | 113 | 用户反馈页（REQ-006 / P9）接真内核：提交走 ma._feedback（17.4 trust_delta 内核计算） | coreSubmitFeedback(fn), coreListMemoryOptions(fn), coreLoadFeedbackRecords(fn), coreLoadRecallEchoes(fn), FeedbackOutcome(type), MemoryOption(type), RecallEchoRow(type) |
 | [src/web/feedback/feedbackEntry.tsx](src/web/feedback/feedbackEntry.tsx) | 12 | 用户反馈页（REQ-006 / P9）入口（T1 壳） | — |
 | [src/web/feedback/logic.ts](src/web/feedback/logic.ts) | 72 | 用户反馈页（REQ-006 / P9）纯逻辑层 | trustDelta(fn), validateDraft(fn), statShare(fn), composeRecord(fn), FeedbackStats(type) |
 | [src/web/feedback/types.ts](src/web/feedback/types.ts) | 28 | 用户反馈页（REQ-006 / P9）数据模型 | FeedbackDraft(type), InjectedContext(type), FeedbackRecord(type), FeedbackAction(type) |
@@ -314,24 +314,27 @@
 | [src/web/logs/types.ts](src/web/logs/types.ts) | 52 | 日志记录页（REQ-011 / P15）数据模型 | LogEntry(type), LogFilter(type), L0State(type), LogLevel(type), LogForm(type), LogAction(type), ErrorKind(type) |
 | [src/web/logs/useToast.tsx](src/web/logs/useToast.tsx) | 13 | — | useToast(fn) |
 | [src/web/main.tsx](src/web/main.tsx) | 19 | 概览页入口（index.html）：批次57-B 按 Stratum A 版式整页重做（总览工作台），替换旧 .ovx 首页。 | — |
+| [src/web/mcp/McpPage.tsx](src/web/mcp/McpPage.tsx) | 28 | MCP 接入页（2026-11-21 新增）：导航「连接」组的独立视图。 | McpPage(fn) |
+| [src/web/mcp/mcpEntry.tsx](src/web/mcp/mcpEntry.tsx) | 11 | MCP 接入页入口（2026-11-21）：独立页面挂载点。 | — |
 | [src/web/memory/LayerFilterBar.tsx](src/web/memory/LayerFilterBar.tsx) | 130 | 记忆层级管理页（19.11）· 每层 L0-L6 过滤栏 + 分页控件 | LayerFilterBar(fn), LayerPager(fn) |
 | [src/web/memory/LayerMemoryTable.tsx](src/web/memory/LayerMemoryTable.tsx) | 179 | 层级管理页每层内的记忆表格（带可拖拽表头列宽） | LayerMemoryTable(fn) |
 | [src/web/memory/MemoryActions.tsx](src/web/memory/MemoryActions.tsx) | 80 | 记忆管理页（REQ-006 / P8）操作区（T4） | MemoryActions(fn) |
 | [src/web/memory/MemoryDrawer.tsx](src/web/memory/MemoryDrawer.tsx) | 160 | 记忆管理页详情/编辑抽屉（T5） | MemoryDrawer(fn) |
 | [src/web/memory/MemoryLayeredPage.tsx](src/web/memory/MemoryLayeredPage.tsx) | 724 | 记忆层级管理页（REQ-006 / P8 · 19.11） | MemoryLayeredPage(fn), LayerId(type) |
-| [src/web/memory/MemoryManagementPage.tsx](src/web/memory/MemoryManagementPage.tsx) | 1210 | 记忆管理统一视图（批次：记忆管理组）：六标签 + 9 列账本 + 分层策略 + L0 + 四模式冲突裁决。 | MemoryManagementPage(fn) |
+| [src/web/memory/MemoryManagementPage.tsx](src/web/memory/MemoryManagementPage.tsx) | 892 | 记忆管理统一视图（批次57 精简六页签）：全部记忆 / 活跃 / 休眠 / 归档 / 弃用 / 分层 L1–L6 + 9 列账本 + 分层策略。 | MemoryManagementPage(fn) |
 | [src/web/memory/MemoryPage.tsx](src/web/memory/MemoryPage.tsx) | 177 | 记忆库管理页（REQ-006 / P8）· 完整编排（T5） | MemoryPage(fn) |
 | [src/web/memory/MemoryRow.tsx](src/web/memory/MemoryRow.tsx) | 80 | 记忆管理页（REQ-006 / P8）单行（T3） | MemoryRow(fn) |
 | [src/web/memory/MemoryTable.tsx](src/web/memory/MemoryTable.tsx) | 255 | 记忆管理页（REQ-006 / P8）列表（T3）+ 过滤 + 分页 + 可拖拽列宽 | MemoryTable(fn), TYPE_OPTIONS(const), STATUS_OPTIONS(const), SOURCE_OPTIONS(const), MemoryTableFilterState(type), PageSize(type) |
 | [src/web/memory/PersonalMemoryPane.tsx](src/web/memory/PersonalMemoryPane.tsx) | 444 | 个人记忆双窗（第一轮本机闭环 + 第二轮跨端同步）：左「已确认」/ 右「收件箱」。 | PersonalMemoryPane(fn), PersonalPaneProps(type) |
 | [src/web/memory/backup.ts](src/web/memory/backup.ts) | 114 | 记忆库管理页 · 自动备份（P8 扩展）：渲染层经 hostCall 走 preload IPC 调主进程备份能力。 | backupAvailable(fn), backupGetConfig(fn), backupSaveConfig(fn), backupChooseDir(fn), backupRunNow(fn), backupList(fn), BACKUP_KIND_LABEL(const), BackupConfigView(type), BackupItem(type), BackupRunReceipt(type), BackupKind(type), BackupOpResult(type) |
-| [src/web/memory/coreMemoryOps.ts](src/web/memory/coreMemoryOps.ts) | 397 | 记忆管理页（REQ-006 / P8）接真内核：17.3 九操作统一走 ma._memoryOp。 | getStorage(fn), toRecord(fn), coreApplyOp(fn), storageLocation(fn), openMemoryFile(fn), coreListMemories(fn), loadAgentMemoryCandidates(fn), splitAgentIngest(fn), coreLayerPolicy(fn), coreUpdateContent(fn), coreBrowse(fn), AgentMemoryCandidate(type), AgentIngestSplit(type), LayerPolicySnapshot(type) |
+| [src/web/memory/coreMemoryOps.ts](src/web/memory/coreMemoryOps.ts) | 413 | 记忆管理页（REQ-006 / P8）接真内核：17.3 九操作统一走 ma._memoryOp。 | getStorage(fn), deriveMemoryStatus(fn), toRecord(fn), coreApplyOp(fn), storageLocation(fn), openMemoryFile(fn), coreListMemories(fn), loadAgentMemoryCandidates(fn), splitAgentIngest(fn), coreLayerPolicy(fn), coreUpdateContent(fn), coreBrowse(fn), AgentMemoryCandidate(type), AgentIngestSplit(type), LayerPolicySnapshot(type), DerivedMemoryStatus(type) |
 | [src/web/memory/dataRoot.ts](src/web/memory/dataRoot.ts) | 89 | 数据存放位置（批次6）：记忆库/采集游标/日志/MCP 令牌/备份配置等全部数据挂在用户选定目录。 | dataRootAvailable(fn), getDataRoot(fn), openDataRoot(fn), changeDataRoot(fn), restoreDefaultDataRoot(fn), AuditLogInfo(type), DataRootInfo(type), DataRootChangeResult(type) |
 | [src/web/memory/layerFilter.ts](src/web/memory/layerFilter.ts) | 60 | 记忆层级管理页（19.11）· 每层 L0-L6 的过滤 + 分页纯逻辑 | initialLayerSource(fn), filterLayerPaged(fn), LAYER_DEFAULT_PAGE_SIZE(const), LAYER_PAGE_SIZES(const), LAYER_DEFAULT_FILTER(const), LayerFilterState(type) |
 | [src/web/memory/logic.ts](src/web/memory/logic.ts) | 107 | 记忆管理页（REQ-006 / P8）纯逻辑层 | decayClass(fn), sortMemories(fn), summarizeContent(fn), applyOp(fn), OP_TOAST(const) |
 | [src/web/memory/memoryEntry.tsx](src/web/memory/memoryEntry.tsx) | 11 | 记忆管理页入口：六标签统一视图（全部 / 个人 / 分层 / 冲突 / 待重放 / L0）。 | — |
 | [src/web/memory/memoryFilter.ts](src/web/memory/memoryFilter.ts) | 123 | 记忆管理页（REQ-006 / P8）· 过滤 + 分页纯逻辑 | parseStatusParam(fn), initialMemoryFilter(fn), isCollected(fn), filterMemories(fn), filterAndPaged(fn), MEMORY_STATUS_VALUES(const), MemoryFilter(type) |
 | [src/web/memory/memoryLayeredEntry.tsx](src/web/memory/memoryLayeredEntry.tsx) | 11 | 记忆层级管理页入口（REQ-006 / P8 · 19.11） | — |
+| [src/web/memory/personalEntry.tsx](src/web/memory/personalEntry.tsx) | 40 | 个人记忆独立页入口（批次57）：记忆库页签精简后 PersonalMemoryPane 的新宿主。 | PersonalMemoryStandalonePage(fn) |
 | [src/web/memory/types.ts](src/web/memory/types.ts) | 98 | 记忆管理页（REQ-006 / P8）数据模型 | MemoryRecord(type), OpResult(type), MemoryStoreLocation(type), MemoryStatus(type), DecayClass(type), MemoryType(type), MemoryOp(type) |
 | [src/web/memory/useMemoryMirror.ts](src/web/memory/useMemoryMirror.ts) | 19 | 记忆管理页后端镜像（阶段5-C 口径统一）：真接 home server POST /api/mirror/audit。 | useMemoryMirror(fn), MemoryMirror(type) |
 | [src/web/memory/useToast.tsx](src/web/memory/useToast.tsx) | 22 | 轻量 toast hook（T5）：返回展示节点与 show(msg) | useToast(fn) |
@@ -362,7 +365,7 @@
 | [src/web/monitor/useToast.tsx](src/web/monitor/useToast.tsx) | 13 | — | useToast(fn) |
 | [src/web/overview/McpSwitchAlert.tsx](src/web/overview/McpSwitchAlert.tsx) | 65 | 首页「客户端 MCP 开关」提示条（T3 展示层 · 落点①）。 | McpSwitchAlert(fn), McpSwitchAlertProps(type) |
 | [src/web/overview/Overview.tsx](src/web/overview/Overview.tsx) | 136 | REQ-003 + REQ-005 配合展示（通览演示页） | Overview(fn) |
-| [src/web/overview/OverviewPage.tsx](src/web/overview/OverviewPage.tsx) | 649 | 首页总览工作台（STRATUM 1:1 复刻 · 设计真源 stratum-a-full.html pg-home）： | deriveHomeView(fn), OverviewPage(fn), HomeDerived(type) |
+| [src/web/overview/OverviewPage.tsx](src/web/overview/OverviewPage.tsx) | 732 | 首页总览工作台（STRATUM 1:1 复刻 · 设计真源 stratum-a-full.html pg-home）： | deriveHomeView(fn), OverviewPage(fn), HomeDerived(type) |
 | [src/web/overview/overviewEntry.tsx](src/web/overview/overviewEntry.tsx) | 20 | REQ-003 + REQ-005 通览演示页入口 | — |
 | [src/web/overview/overviewPageData.ts](src/web/overview/overviewPageData.ts) | 148 | 问账本（壳层「记忆助手」复用）：只转述真实账本快照能证实的内容，不编造模型回答。 | answerOverviewQuestion(fn), OVERVIEW_SUGGESTIONS(const), OverviewAnswer(type) |
 | [src/web/params/AppShellCard.tsx](src/web/params/AppShellCard.tsx) | 170 | 阶段 A · 参数页「后台常驻」卡片：托盘常驻 + 开机自启两个二选一开关。 | AppShellCard(fn) |
@@ -465,7 +468,7 @@
 | [src/web/shell/ShellLoginDialog.tsx](src/web/shell/ShellLoginDialog.tsx) | 289 | 壳层登录弹窗（批次49）：菜单栏 / 快速访问工具条 / 登录状态处三处入口共用同一个实例。 | logoutCurrentSession(fn), ShellLoginDialog(fn), ShellLoginDialogProps(type) |
 | [src/web/shell/ShellStatusCard.tsx](src/web/shell/ShellStatusCard.tsx) | 104 | REQ-014 / T7（C8）：侧栏真实状态卡。 | ShellStatusCard(fn) |
 | [src/web/shell/StrataScale.tsx](src/web/shell/StrataScale.tsx) | 52 | 功能导航栏底部的「层级刻度」（批次53）：L0–L6 七档真实计数。 | StrataScale(fn) |
-| [src/web/shell/Workspace.tsx](src/web/shell/Workspace.tsx) | 1921 | 工作台壳层（批次48 S1 建；v5 重设计改造）：36px 标题栏 + 44px 上下文命令条 + 导航树 + 标签条 | Workspace(fn), ShellShortcutAction(type) |
+| [src/web/shell/Workspace.tsx](src/web/shell/Workspace.tsx) | 1924 | 工作台壳层（批次48 S1 建；v5 重设计改造）：36px 标题栏 + 44px 上下文命令条 + 导航树 + 标签条 | Workspace(fn), ShellShortcutAction(type) |
 | [src/web/shell/dock.ts](src/web/shell/dock.ts) | 171 | 底部面板真实数据源（S6）：输出=程序动作日志尾读；问题=该日志派生的错误/警告； | loadOutputLog(fn), problemsFromLog(fn), loadScheduleRuns(fn), auditMentions(fn), loadAuditForMemory(fn), OutputLogView(type), ProblemRow(type), ScheduleRun(type), AuditRow(type), DockResult(type) |
 | [src/web/shell/layers.ts](src/web/shell/layers.ts) | 79 | L1–L6 / L0 面板真实数据（S7）：只在中心页为「分层 L1–L6」或「L0 密文」时显示的壳层条。 | loadLayerPanel(fn), PANEL_LAYERS(const), LayerCount(type), LayerPanelView(type), PanelLayer(type) |
 | [src/web/shell/navCounts.ts](src/web/shell/navCounts.ts) | 45 | 批次54：功能导航角标的真实数据加载器。 | loadNavCounts(fn), NavCountId(type), NavCounts(type) |
@@ -474,16 +477,16 @@
 | [src/web/shell/statusbar.ts](src/web/shell/statusbar.ts) | 130 | 状态栏真实数据（S7）：账本位置 / L0 保险库状态 / 采集器后台状态。 | loadL0Write(fn), loadL0Status(fn), loadCollectorStatus(fn), loadStatusbar(fn), shortLocation(fn), StoragePlaceView(type), CollectorView(type), StatusSnapshot(type), L0WriteView(type) |
 | [src/web/shell/strataScale.ts](src/web/shell/strataScale.ts) | 92 | 功能导航栏底部的「层级刻度」（批次53 定义 / 批次55 改数据源）：L0–L6 七档的真实计数。 | strataViewFromOverview(fn), STRATA_LAYERS(const), StrataLayerSpec(type), StrataRowView(type), StrataScaleView(type), StrataSnapshotLike(type), StrataLayerId(type) |
 | [src/web/shell/taskpane.ts](src/web/shell/taskpane.ts) | 41 | 任务窗「待重放写入」只读视图（S5 / D6）：经 hostBridge 读 l0:pendingWrites。 | loadPendingWrites(fn), PendingWritesResult(type) |
-| [src/web/shell/views.ts](src/web/shell/views.ts) | 239 | 工作台壳层的视图映射（批次48 S1）。 | flattenNav(fn), findNav(fn), navPages(fn), PAGES(const), NAV(const), CMDS(const), QUICK_VIEWS(const), PALETTE_GROUPS(const), BOTTOM_TABS(const), NavGroup(type), NavItem(type), CmdItem(type), PaletteItem(type), BottomTab(type), PageKey(type), NavEntry(type), IconName(type), ShellAction(type), BottomTabId(type) |
+| [src/web/shell/views.ts](src/web/shell/views.ts) | 248 | 工作台壳层的视图映射（批次48 S1）。 | flattenNav(fn), findNav(fn), navPages(fn), PAGES(const), NAV(const), CMDS(const), QUICK_VIEWS(const), PALETTE_GROUPS(const), BOTTOM_TABS(const), NavGroup(type), NavItem(type), CmdItem(type), PaletteItem(type), BottomTab(type), PageKey(type), NavEntry(type), IconName(type), ShellAction(type), BottomTabId(type) |
 | [src/web/shell/workspaceEntry.tsx](src/web/shell/workspaceEntry.tsx) | 20 | 工作台壳层入口（批次48 S1）：Electron 主窗口加载 workspace.html。 | — |
-| [src/web/sync/SyncPage.tsx](src/web/sync/SyncPage.tsx) | 326 | 同步与裁决页（批次42-C）：「立即同步」（真实 push/pull 报告）+ 中枢对账 + §9.7 人工裁决队列 | SyncPage(fn) |
+| [src/web/sync/SyncPage.tsx](src/web/sync/SyncPage.tsx) | 358 | 同步与裁决页（批次42-C）：「立即同步」（真实 push/pull 报告）+ 中枢对账 + §9.7 人工裁决队列 | SyncPage(fn) |
 | [src/web/sync/coreSyncPage.ts](src/web/sync/coreSyncPage.ts) | 215 | 同步与裁决页（批次42-C）数据逻辑：内核 agent.sync 真跑 + §9.7 裁决队列经 HostSyncHub 代理。 | runSync(fn), listSyncConflicts(fn), resolveConflict(fn), hubOverview(fn), syncChannels(fn), SyncPageHub(type), SyncPageCtx(type), SyncRunView(type), HubOverviewView(type), SyncChannelRow(type), SyncChannelsView(type) |
 | [src/web/sync/syncEntry.tsx](src/web/sync/syncEntry.tsx) | 12 | 同步与裁决页（批次42-C）入口：挂载 SyncPage。 | — |
 | [src/web/test-setup.ts](src/web/test-setup.ts) | 1 | — | — |
 | [src/web/vite-env.d.ts](src/web/vite-env.d.ts) | 2 | Vite 侧效应导入（CSS）的类型声明 | — |
-| [src/web/webonboard/WebOnboardPage.tsx](src/web/webonboard/WebOnboardPage.tsx) | 24 | 网页端接入页（2026-11-19 新增）：功能导航「连接」组的网页端接入视图。 | WebOnboardPage(fn) |
+| [src/web/webonboard/WebOnboardPage.tsx](src/web/webonboard/WebOnboardPage.tsx) | 30 | 网页端接入页（2026-11-19 新增）：功能导航「连接」组的网页端接入视图。 | WebOnboardPage(fn) |
 | [src/web/webonboard/WebchatAutoCard.tsx](src/web/webonboard/WebchatAutoCard.tsx) | 348 | 网页端接入页 ·「网页会话自动采集」卡（2026-11-19 自参数页迁入）。 | WebchatAutoCard(fn) |
-| [src/web/webonboard/webOnboardEntry.tsx](src/web/webonboard/webOnboardEntry.tsx) | 11 | 网页端接入页入口（2026-11-19 新增） | — |
+| [src/web/webonboard/webOnboardEntry.tsx](src/web/webonboard/webOnboardEntry.tsx) | 13 | 网页端接入页入口（2026-11-19 新增） | — |
 | [src/web/webonboard/webchatAuto.ts](src/web/webonboard/webchatAuto.ts) | 159 | 网页端接入页 ·「网页会话自动采集」卡的渲染层桥（2026-11-19 自参数页迁入）。 | webchatAutoAvailable(fn), webchatAutoLogin(fn), webchatExportDir(fn), webchatExportOpen(fn), webchatExportSet(fn), AUTO_STATUS_LABEL(const), webchatAutoState(const), webchatAutoSet(const), webchatAutoRun(const), webchatAutoSweep(const), AutoConfigView(type), AutoSiteResult(type), AutoRoundView(type), AutoStateView(type), AutoResult(type), AutoPatch(type), ExportDirView(type), AutoSiteStatus(type) |
 | [src/web/write/DedupCard.tsx](src/web/write/DedupCard.tsx) | 59 | 写入页右栏「查重预览」面板（STRATUM 1:1 复刻 · 设计真源 stratum-a-full.html pg-write 右栏）： | DedupCard(fn) |
 | [src/web/write/WriteForm.tsx](src/web/write/WriteForm.tsx) | 149 | 写入页表单（STRATUM 1:1 复刻 · 设计真源 stratum-a-full.html pg-write 写入表单面板）： | WriteForm(fn) |
@@ -563,6 +566,8 @@
 | [specs/MANUAL-TEST-FIX-BATCH-53.md](specs/MANUAL-TEST-FIX-BATCH-53.md) | 101 | 批次53 手动测试报告（2026-11-21） |
 | [specs/MANUAL-TEST-FIX-BATCH-54.md](specs/MANUAL-TEST-FIX-BATCH-54.md) | 45 | 批次54 手动测试报告（2026-11-21 第三轮） |
 | [specs/MANUAL-TEST-FIX-BATCH-55.md](specs/MANUAL-TEST-FIX-BATCH-55.md) | 56 | 批次55 手动测试报告（2026-11-21） |
+| [specs/MANUAL-TEST-FIX-BATCH-56.md](specs/MANUAL-TEST-FIX-BATCH-56.md) | 44 | 批次56 · 手动测试报告（2026-11-21 第五轮） |
+| [specs/MANUAL-TEST-FIX-BATCH-57.md](specs/MANUAL-TEST-FIX-BATCH-57.md) | 68 | 批次57 手动测试报告：记忆库页签精简 + 行右键常驻详情菜单 + 个人记忆独立页 |
 | [specs/MANUAL-TEST-FIX-BATCH-6.md](specs/MANUAL-TEST-FIX-BATCH-6.md) | 138 | status: done |
 | [specs/MANUAL-TEST-FIX-BATCH-7.md](specs/MANUAL-TEST-FIX-BATCH-7.md) | 159 | status: done |
 | [specs/MANUAL-TEST-FIX-BATCH-8.md](specs/MANUAL-TEST-FIX-BATCH-8.md) | 143 | status: done |
@@ -581,7 +586,7 @@
 | [specs/ROADMAP-批次B类-远端PG与多机硬过滤-方案.md](specs/ROADMAP-批次B类-远端PG与多机硬过滤-方案.md) | 102 | 批次 B 类 · 远端 PG 中枢（B4）+ 多机硬过滤（B1）+ 真实精炼（B3）方案 |
 | [specs/STRATUM-设计系统规格.md](specs/STRATUM-设计系统规格.md) | 100 | STRATUM 设计系统规格（方案A · 层析） |
 | [specs/acceptance.md](specs/acceptance.md) | 80 | title: 验收标准 |
-| [specs/code-map.md](specs/code-map.md) | 2177 | status: draft |
+| [specs/code-map.md](specs/code-map.md) | 2208 | status: draft |
 | [specs/demo-data-baseline.md](specs/demo-data-baseline.md) | 116 | 演示/种子数据基线清单（批次42 · 阶段0 冻结） |
 | [specs/memory-loop-enhancement-plan.md](specs/memory-loop-enhancement-plan.md) | 118 | 记忆闭环增强方案（回显 × 进化 × 生命周期 × 画像） |
 | [specs/project_id配置化_工程化落地方案.md](specs/project_id配置化_工程化落地方案.md) | 395 | project_id 配置化 · 工程化落地方案 |
@@ -822,7 +827,7 @@ src/shared/webchatSites.ts c3c69f88cd38
 src/types/agentOnboard.ts d4d887c55e8a
 src/types/home.ts 15302ed61695
 src/web/AgentOnboard/AgentCard.tsx 24c7aa14e0c7
-src/web/AgentOnboard/AgentOnboardPage.tsx 697bc6161c1c
+src/web/AgentOnboard/AgentOnboardPage.tsx 7936a992539a
 src/web/AgentOnboard/ChannelConfig.tsx 2aa078aac8bc
 src/web/AgentOnboard/FormBadge.tsx bbaff2d72c5a
 src/web/AgentOnboard/Gains.tsx 5dd221d1770f
@@ -871,10 +876,10 @@ src/web/audit/types.ts 71090ca7cf55
 src/web/audit/useAuditMirror.ts 34865de958b6
 src/web/audit/useToast.tsx 85cd09d2e1f5
 src/web/backend.ts 8fdc10aa241d
-src/web/dispute/DisputePage.tsx 26292945bfd8
+src/web/dispute/DisputePage.tsx d643fe76b312
 src/web/dispute/DisputeQueue.tsx caf114a20325
 src/web/dispute/DisputeVerdict.tsx 9d38207f49d5
-src/web/dispute/coreDispute.ts 780c2875d82a
+src/web/dispute/coreDispute.ts 9c83acf7ad55
 src/web/dispute/disputeEntry.tsx 2a5b7885df73
 src/web/dispute/labels.ts c6d8f1dcee8f
 src/web/dispute/logic.ts 922708539fd5
@@ -882,9 +887,9 @@ src/web/dispute/types.ts 34294be31812
 src/web/dispute/useDisputeMirror.ts a2f4cf373f8e
 src/web/dispute/useToast.tsx c650d8662672
 src/web/feedback/FeedbackForm.tsx 74c6412a809f
-src/web/feedback/FeedbackPage.tsx 643add4476e5
+src/web/feedback/FeedbackPage.tsx 7aa75e4b322b
 src/web/feedback/StatCards.tsx 826d2fdad9f4
-src/web/feedback/coreFeedback.ts dbee04d2dde7
+src/web/feedback/coreFeedback.ts 90fdb60eb199
 src/web/feedback/feedbackEntry.tsx 8e909b081887
 src/web/feedback/logic.ts 176b33a17311
 src/web/feedback/types.ts 938ae560ed3e
@@ -931,24 +936,27 @@ src/web/logs/logsEntry.tsx e9e70ec7c1d4
 src/web/logs/types.ts c57557c7576e
 src/web/logs/useToast.tsx 85cd09d2e1f5
 src/web/main.tsx c3a2e36cac32
+src/web/mcp/McpPage.tsx 7c30046ce202
+src/web/mcp/mcpEntry.tsx 94cd27be0cf2
 src/web/memory/LayerFilterBar.tsx 475a5c5132a7
 src/web/memory/LayerMemoryTable.tsx 351b89d07ecf
 src/web/memory/MemoryActions.tsx 9983e64102b0
 src/web/memory/MemoryDrawer.tsx 7c124fc0ce30
 src/web/memory/MemoryLayeredPage.tsx b6ee0a006302
-src/web/memory/MemoryManagementPage.tsx ff3a6d7ba7f9
+src/web/memory/MemoryManagementPage.tsx ecac1b208c15
 src/web/memory/MemoryPage.tsx f85d97504af7
 src/web/memory/MemoryRow.tsx c9e3667cfed7
 src/web/memory/MemoryTable.tsx d0e26f9d929e
 src/web/memory/PersonalMemoryPane.tsx 3c7718e012b1
 src/web/memory/backup.ts 30b82c06df00
-src/web/memory/coreMemoryOps.ts 1d196e0a91c1
+src/web/memory/coreMemoryOps.ts bd26d0782d2d
 src/web/memory/dataRoot.ts 6a1b94c2d4d7
 src/web/memory/layerFilter.ts 1940d5a207df
 src/web/memory/logic.ts da69f12783ea
 src/web/memory/memoryEntry.tsx 016b5f9a2228
 src/web/memory/memoryFilter.ts e2b9121687e5
 src/web/memory/memoryLayeredEntry.tsx e4330788466f
+src/web/memory/personalEntry.tsx e98f600923fd
 src/web/memory/types.ts 51eb8e91195f
 src/web/memory/useMemoryMirror.ts 50fcdb730ba3
 src/web/memory/useToast.tsx c650d8662672
@@ -979,7 +987,7 @@ src/web/monitor/useMonitorReal.ts a2f7572d8d75
 src/web/monitor/useToast.tsx 85cd09d2e1f5
 src/web/overview/McpSwitchAlert.tsx a2936cd108fa
 src/web/overview/Overview.tsx af714c83cbf8
-src/web/overview/OverviewPage.tsx 79170451b5eb
+src/web/overview/OverviewPage.tsx fde29cd98475
 src/web/overview/overviewEntry.tsx 5f4488678cc7
 src/web/overview/overviewPageData.ts c848c75900dc
 src/web/params/AppShellCard.tsx e362c323daf5
@@ -1082,7 +1090,7 @@ src/web/shell/PersonalMemoryPanel.tsx f5cb39561151
 src/web/shell/ShellLoginDialog.tsx eab40cd6a2f5
 src/web/shell/ShellStatusCard.tsx 635ba4fdd69f
 src/web/shell/StrataScale.tsx bdbf17e3ce0e
-src/web/shell/Workspace.tsx 732272de3c93
+src/web/shell/Workspace.tsx f91f28beaa5e
 src/web/shell/dock.ts 4ede5427d4ef
 src/web/shell/layers.ts ee5f32438ab6
 src/web/shell/navCounts.ts 29d436b7129f
@@ -1091,16 +1099,16 @@ src/web/shell/shellStatus.ts 0d582644829f
 src/web/shell/statusbar.ts 3ef75138b1cc
 src/web/shell/strataScale.ts 1f27d6bde9d4
 src/web/shell/taskpane.ts e1a473006974
-src/web/shell/views.ts 0352c82dac01
+src/web/shell/views.ts 044d87ace37f
 src/web/shell/workspaceEntry.tsx d81475dafbfc
-src/web/sync/SyncPage.tsx 8b2ef93dec30
+src/web/sync/SyncPage.tsx 647adbd62941
 src/web/sync/coreSyncPage.ts dc04d7145615
 src/web/sync/syncEntry.tsx bec16a8ef35b
 src/web/test-setup.ts 3a2ad06d2218
 src/web/vite-env.d.ts 191b7a12f3de
-src/web/webonboard/WebOnboardPage.tsx 4da38d539b46
+src/web/webonboard/WebOnboardPage.tsx 8ef87a054c9b
 src/web/webonboard/WebchatAutoCard.tsx 1f1a739a5919
-src/web/webonboard/webOnboardEntry.tsx dfdb95cb7c5b
+src/web/webonboard/webOnboardEntry.tsx e25174eac855
 src/web/webonboard/webchatAuto.ts 7f74b8814b20
 src/web/write/DedupCard.tsx fb4cc5d90207
 src/web/write/WriteForm.tsx 762819e19cfd
@@ -1175,6 +1183,8 @@ specs/MANUAL-TEST-FIX-BATCH-52.md ad9982e829ad
 specs/MANUAL-TEST-FIX-BATCH-53.md aeb6849babfa
 specs/MANUAL-TEST-FIX-BATCH-54.md 4c6f55df0afa
 specs/MANUAL-TEST-FIX-BATCH-55.md 4b2bce6a3069
+specs/MANUAL-TEST-FIX-BATCH-56.md d8d8e5827554
+specs/MANUAL-TEST-FIX-BATCH-57.md 0b5ef1fa5210
 specs/MANUAL-TEST-FIX-BATCH-6.md c54de515c35c
 specs/MANUAL-TEST-FIX-BATCH-7.md ae151c45c321
 specs/MANUAL-TEST-FIX-BATCH-8.md 486d92ec3ba0
@@ -1193,7 +1203,7 @@ specs/ROADMAP-批次45-租户归一与成员密钥域模型-方案.md 633abaaaad
 specs/ROADMAP-批次B类-远端PG与多机硬过滤-方案.md 0c7857454a7d
 specs/STRATUM-设计系统规格.md 375da8d11302
 specs/acceptance.md 22e711c8939c
-specs/code-map.md 2422b4d1742f
+specs/code-map.md bfdb18e708e1
 specs/demo-data-baseline.md 1d9af215ac78
 specs/memory-loop-enhancement-plan.md f47ac02bca3d
 specs/project_id配置化_工程化落地方案.md aecc14b503c9

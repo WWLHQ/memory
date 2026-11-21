@@ -17,6 +17,21 @@ test.afterAll(async () => {
   await disconnectBrowser();
 });
 
+/** 相对亮度（WCAG）：用于验证级别色在两套主题下都够对比 */
+function hexLum(hex: string): number {
+  const n = Number.parseInt(hex.replace('#', ''), 16);
+  const ch = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => {
+    const s = v / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
+}
+
+function contrastRatio(a: string, b: string): number {
+  const [hi, lo] = [hexLum(a), hexLum(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+}
+
 test.describe('日志记录页 · 真实账本', () => {
   test('空账本：事件流为空态，无 n/a 告警、无红底错误行', async ({ page }) => {
     const errors = collectErrors(page);
@@ -79,5 +94,60 @@ test.describe('日志记录页 · 真实账本', () => {
   test('审计区无普通删除按钮（R-LOG8）', async ({ page }) => {
     await page.goto(APP);
     await expect(page.locator('[data-testid="logs-page"]')).not.toContainText('删除审计');
+  });
+
+  test('程序运行日志配色跟随皮肤：浅/深/跟随系统三态真实切换，级别色两套主题对比达标', async ({ page }) => {
+    const errors = collectErrors(page);
+    await page.goto(APP);
+
+    const readVars = () => page.evaluate(() => {
+      const cs = getComputedStyle(document.documentElement);
+      const panel = document.querySelector('[data-testid="program-log"]') as HTMLElement;
+      return {
+        theme: document.documentElement.getAttribute('data-theme') ?? '',
+        bg: cs.getPropertyValue('--log-term-bg').trim(),
+        ink: cs.getPropertyValue('--log-term-ink').trim(),
+        warn: cs.getPropertyValue('--log-term-warn').trim(),
+        err: cs.getPropertyValue('--log-term-err').trim(),
+        track: cs.getPropertyValue('--log-term-scroll-track').trim(),
+        panelBg: getComputedStyle(panel).backgroundColor,
+      };
+    });
+    const apply = async (mode: 'light' | 'dark' | 'system') => {
+      await page.evaluate((m) => localStorage.setItem('memdesk.shell.theme.v1', m), mode);
+      await page.reload();
+      await expect(page.locator('[data-testid="logs-page"]')).toBeVisible();
+    };
+
+    // 浅色：浅底深字，级别色对浅底达标
+    await apply('light');
+    const light = await readVars();
+    expect(light.theme).toBe('light');
+    expect(hexLum(light.bg)).toBeGreaterThan(0.8);
+    for (const color of [light.ink, light.warn, light.err]) {
+      expect(contrastRatio(color, light.bg)).toBeGreaterThanOrEqual(4.5);
+    }
+
+    // 深色：深底浅字，级别色对深底达标
+    await apply('dark');
+    const dark = await readVars();
+    expect(dark.theme).toBe('dark');
+    expect(hexLum(dark.bg)).toBeLessThan(0.08);
+    for (const color of [dark.ink, dark.warn, dark.err]) {
+      expect(contrastRatio(color, dark.bg)).toBeGreaterThanOrEqual(4.5);
+    }
+    // 同一面板的真实渲染底色随主题变化；滚动条轨道也不再写死深色
+    expect(dark.panelBg).not.toBe(light.panelBg);
+    expect(dark.track).not.toBe(light.track);
+
+    // 跟随系统：系统深色 → 深色令牌；系统浅色 → 浅色令牌
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await apply('system');
+    expect((await readVars()).theme).toBe('dark');
+    await page.emulateMedia({ colorScheme: 'light' });
+    await page.reload();
+    await expect(page.locator('[data-testid="logs-page"]')).toBeVisible();
+    expect((await readVars()).theme).toBe('light');
+    expect(errors).toEqual([]);
   });
 });

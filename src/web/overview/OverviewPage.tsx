@@ -1,5 +1,5 @@
-// 首页总览工作台（批次57-C · 版式对齐定稿图 stratum-l1l3-preview pg-home）：
-// 头部 → L0 提示 → 效果四卡（同宽同高）→ 双栏（左：图谱/异常/最近审计；右：TOKEN 节省率/今日概览/补炼/MCP/引擎）→ 页脚端口行。
+﻿// 首页总览工作台（STRATUM 1:1 复刻 · 设计真源 stratum-a-full.html pg-home）：
+// af-head → L0/MCP 提示 → 效果四卡 → 双栏（左：图谱/异常/最近审计；右：今日概览/TOKEN 节省率/补炼/MCP/引擎）→ 页脚端口行。
 // 所有读数来自 loadOverview 单次真实取数：内核账本 / 审计 / 主进程 IPC（refine:state · mcp:clients · llm:config · dataRoot:get）/ /api/health。
 // 读不到就显示「读不到 / 未取数 / —」并给原因，绝不用演示数或 0 冒充成功读数。
 // 问账本问答框已独立为整页（assistant.html · src/web/assistant/AssistantPage.tsx），本页不再渲染底部输入框。
@@ -18,6 +18,7 @@ import { HOME_BASE, ONBOARD_BASE } from '../backend.ts';
 import { useHostTheme } from '../shared/hostTheme.ts';
 import { currentSessionId } from '../shared/session.ts';
 import { requestShellView } from '../shared/shellNavigate.ts';
+import { logoutCurrentSession } from '../shell/ShellLoginDialog.tsx';
 import {
   deriveMcpSwitch, requestEnableMcpSwitch, MCP_SWITCH_POLL_MS,
   MCP_LAUNCH_HINT, MCP_MANUAL_HINT,
@@ -25,11 +26,10 @@ import {
 import { McpSwitchAlert } from './McpSwitchAlert.tsx';
 import { listMcpPending, markMcpPending, subscribeMcpPending } from '../shared/mcpPending.ts';
 import { rebuildKernelForDataPlane } from '../kernel.ts';
-import { Icon } from '../shell/Icons.tsx';
-import { refineStopRows } from '../params/refineQueue.ts';
 import type { Gain } from '../../types/agentOnboard.ts';
 import type { LayerGraph } from '../Home/layerGraph.ts';
 import type { RawHomeFeed } from '../../home/dashboard.ts';
+import '../shared/p0.css';
 import './overviewPage.css';
 
 type RawAnomaly = NonNullable<RawHomeFeed['anomalies']>[number];
@@ -41,11 +41,41 @@ const LAYER_COLOR: Record<string, string> = {
 const LAYER_SHORT: Record<string, string> = {
   L0: '原文', L1: '脱敏', L2: '摘要', L3: '得失', L4: '模式', L5: '洞察', L6: '索引',
 };
-/** 六层枢纽在图谱里的固定坐标（viewBox 760×352，账本核居中 380,176） */
-const HUB_POS: Record<string, { x: number; y: number }> = {
-  L1: { x: 126, y: 110 }, L2: { x: 380, y: 48 }, L3: { x: 634, y: 110 },
-  L4: { x: 634, y: 242 }, L5: { x: 380, y: 304 }, L6: { x: 126, y: 242 },
-};
+/** 图谱几何（viewBox 760×352）：L6 投影索引居中为汇聚点，L1–L5 自正上方起顺时针均分环绕。
+   所有坐标都是常量推导（无随机数、不依赖真实数据多少），数据只决定计数与是否命中所选筛选。 */
+const GRAPH_CENTER = { x: 380, y: 176 };
+const GRAPH_RING = { rx: 286, ry: 122 };
+const GRAPH_HUB_R = 21;
+const GRAPH_CORE_R = 38;
+/** L1–L5 按顺时针排列在环上（角度自正上方 -90° 起，每层间隔 72°） */
+const RING_LAYERS = ['L1', 'L2', 'L3', 'L4', 'L5'] as const;
+
+const HUB_POS: Record<string, { x: number; y: number }> = (() => {
+  const pos: Record<string, { x: number; y: number }> = { L6: GRAPH_CENTER };
+  RING_LAYERS.forEach((layer, i) => {
+    const rad = (-90 + i * 72) * (Math.PI / 180);
+    pos[layer] = {
+      x: Math.round((GRAPH_CENTER.x + GRAPH_RING.rx * Math.cos(rad)) * 10) / 10,
+      y: Math.round((GRAPH_CENTER.y + GRAPH_RING.ry * Math.sin(rad)) * 10) / 10,
+    };
+  });
+  return pos;
+})();
+
+/** 层 → L6 的辐条：从层枢边缘出发，箭头落在 L6 圆盘外沿（朝向随位置自动旋转） */
+function spokeToCore(p: { x: number; y: number }): { x1: number; y1: number; x2: number; y2: number } {
+  const dx = GRAPH_CENTER.x - p.x;
+  const dy = GRAPH_CENTER.y - p.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len;
+  const uy = dy / len;
+  return {
+    x1: p.x + ux * (GRAPH_HUB_R + 2),
+    y1: p.y + uy * (GRAPH_HUB_R + 2),
+    x2: GRAPH_CENTER.x - ux * (GRAPH_CORE_R + 9),
+    y2: GRAPH_CENTER.y - uy * (GRAPH_CORE_R + 9),
+  };
+}
 
 type Focus = 'all' | 'L2' | 'L3' | 'L4+';
 
@@ -111,55 +141,107 @@ export function deriveHomeView(s: OverviewSnapshot): HomeDerived {
 function EffectCard({ g }: { g: Gain }) {
   return (
     <section className="af-panel af-stat" data-testid="home-gain-card">
-      <div className="k">{g.title}<span>{g.icon}</span></div>
+      <div className="k">{g.title}</div>
       <div className="v">{g.big}</div>
-      {/* desc 由内核聚合生成、仅插值数字（含 <b> 强调）；文案侧已去掉参数/编号，一律说人话（2026-11-16） */}
-      <div className="d" dangerouslySetInnerHTML={{ __html: g.desc }} />
-      <div className="src">{g.src}</div>
+      {/* desc 由内核聚合生成、仅插值数字（含 <b> 强调）；文案说人话（2026-11-16）。设计稿 stat 卡 = k/v/d 三段，无图标位与来源行 */}
+      <div className="d mut" dangerouslySetInnerHTML={{ __html: g.desc }} />
     </section>
   );
 }
 
-/** 关系图谱：环轨 + 六层枢纽（真实层计数）+ 账本核（真实总数）。无卫星标签（没有真实映射，不编造）。 */
+/** 关系图谱：L6 居中（汇聚点，尺寸/金辉/光晕与外围区分），L1–L5 环绕一圈并各带指向 L6 的箭头。
+    计数全部来自真实层枢纽，账本核总数取自 stats.total；筛选只改变「聚焦/变暗」，不增删数据。 */
 function LayerGraphSvg({ graph, focus }: { graph: LayerGraph; focus: Focus }) {
   const total = graph.stats.total;
   const inFocus = (layer: string) =>
     focus === 'all' ? true : focus === 'L4+' ? ['L4', 'L5', 'L6'].includes(layer) : layer === focus;
+  const l6 = graph.hubs.find((h) => h.layer === 'L6');
   return (
-    <svg className="af-graph" viewBox="0 0 760 352" role="img" aria-label={`L1–L6 关系图谱，账本共 ${total} 条记忆`}>
+    <svg className="af-graph" viewBox="0 0 760 352" role="img" aria-label={`L1–L6 关系图谱，L6 居中汇聚，账本共 ${total} 条记忆`}>
       <defs>
-        <radialGradient id="ov-core" cx="50%" cy="42%" r="65%">
-          <stop offset="0%" stopColor="var(--accent)" stopOpacity=".9" />
-          <stop offset="100%" stopColor="var(--accent)" stopOpacity=".25" />
+        {/* L6 圆盘：金色球面（浅色/深色都足够亮，文字用深色墨保证对比） */}
+        <radialGradient id="ov-core" cx="36%" cy="30%" r="78%">
+          <stop offset="0%" stopColor="#FFF0BC" />
+          <stop offset="52%" style={{ stopColor: 'var(--c-l6)', stopOpacity: .98 }} />
+          <stop offset="100%" style={{ stopColor: 'var(--c-l6)', stopOpacity: .58 }} />
         </radialGradient>
+        {/* 外围层枢：表面到深一档的球面渐变，形成层次 */}
+        <radialGradient id="af-hub-face" cx="34%" cy="28%" r="82%">
+          <stop offset="0%" style={{ stopColor: 'var(--surface)' }} />
+          <stop offset="100%" style={{ stopColor: 'var(--surface4)' }} />
+        </radialGradient>
+        <radialGradient id="af-core-glow" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" style={{ stopColor: 'var(--c-l6)', stopOpacity: .34 }} />
+          <stop offset="100%" style={{ stopColor: 'var(--c-l6)', stopOpacity: 0 }} />
+        </radialGradient>
+        {/* 箭头：orient=auto 按线段方向自动旋转，refX=8 让尖端落在线端点（L6 外沿） */}
+        <marker id="af-arrow" viewBox="0 0 8 8" refX="8" refY="4"
+          markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse" orient="auto">
+          <path d="M0 0 L8 4 L0 8 Z" fill="var(--accent)" />
+        </marker>
       </defs>
-      <g stroke="var(--muted)" strokeOpacity=".45" strokeWidth="1" fill="none">
-        <ellipse cx="380" cy="176" rx="300" ry="128" strokeDasharray="3 5" />
-        <ellipse cx="380" cy="176" rx="196" ry="84" />
+
+      {/* 透视底：中心辉光 + 两道椭圆轨道（远景细、近景粗），制造景深 */}
+      <circle cx={GRAPH_CENTER.x} cy={GRAPH_CENTER.y} r="156" fill="url(#af-core-glow)" opacity=".5" />
+      <g fill="none" stroke="var(--muted)">
+        <ellipse cx={GRAPH_CENTER.x} cy={GRAPH_CENTER.y} rx="300" ry="128" strokeOpacity=".30" strokeDasharray="3 5" />
+        <ellipse cx={GRAPH_CENTER.x} cy={GRAPH_CENTER.y} rx="196" ry="84" strokeOpacity=".14" />
       </g>
-      {graph.hubs.map((h) => {
-        const p = HUB_POS[h.layer];
+
+      {/* L1–L5 → L6 辐条（箭头指向 L6，朝向随位置旋转） */}
+      {RING_LAYERS.map((layer) => {
+        const p = HUB_POS[layer];
         if (!p) return null;
+        const s = spokeToCore(p);
         return (
-          <line key={`e-${h.layer}`} x1="380" y1="176" x2={p.x} y2={p.y}
-            stroke="var(--accent)" strokeOpacity={inFocus(h.layer) ? .35 : .1} strokeWidth="1" />
+          <line
+            key={`e-${layer}`}
+            className="af-spoke"
+            x1={s.x1} y1={s.y1} x2={s.x2} y2={s.y2}
+            stroke="var(--accent)"
+            strokeOpacity={inFocus(layer) ? .55 : .12}
+            strokeWidth="1.2"
+            markerEnd="url(#af-arrow)"
+          />
         );
       })}
-      {graph.hubs.map((h) => {
-        const p = HUB_POS[h.layer];
-        if (!p) return null;
-        const labelY = p.y < 176 ? p.y - 22 : p.y + 34;
+
+      {/* 外围五层枢：真实层计数，球面高光 + 落影 */}
+      {RING_LAYERS.map((layer) => {
+        const p = HUB_POS[layer];
+        const h = graph.hubs.find((x) => x.layer === layer);
+        if (!p || !h) return null;
+        const labelY = p.y < GRAPH_CENTER.y ? p.y - 24 : p.y + 33;
         return (
-          <g key={h.layer} opacity={inFocus(h.layer) ? 1 : .3}>
-            <circle className="af-hub" cx={p.x} cy={p.y} r="21" fill="var(--surface)" stroke={LAYER_COLOR[h.layer]} strokeWidth="1.6" />
-            <text x={p.x} y={p.y + 4} textAnchor="middle" fontSize="11" fontWeight="600" fill="var(--ink)">{h.layer}</text>
-            <text x={p.x} y={labelY} textAnchor="middle" fontSize="11" fill="var(--muted)">{LAYER_SHORT[h.layer] ?? ''} {h.count}</text>
+          <g key={h.layer} className={`af-hub-g${inFocus(layer) ? '' : ' off'}`} data-graph-layer={layer}>
+            <circle className="af-hub-ring" cx={p.x} cy={p.y} r={GRAPH_HUB_R + 6}
+              fill="none" stroke={LAYER_COLOR[layer]} strokeOpacity=".26" />
+            <circle className="af-hub" cx={p.x} cy={p.y} r={GRAPH_HUB_R}
+              fill="url(#af-hub-face)" stroke={LAYER_COLOR[layer]} strokeWidth="1.6" />
+            <ellipse className="af-hub-hl" cx={p.x - 7} cy={p.y - 8} rx="8" ry="4.6"
+              fill="#FFFFFF" opacity=".18" transform={`rotate(-28 ${p.x - 7} ${p.y - 8})`} />
+            <text x={p.x} y={p.y + 4} textAnchor="middle" fontSize="11" fontWeight="700" fill="var(--ink)">{h.layer}</text>
+            <text className="af-hub-lb" x={p.x} y={labelY} textAnchor="middle" fontSize="10.5" fill="var(--muted)">
+              {LAYER_SHORT[h.layer] ?? ''} {h.count}
+            </text>
           </g>
         );
       })}
-      <circle cx="380" cy="176" r="34" fill="url(#ov-core)" stroke="var(--accent)" strokeWidth="1.5" />
-      <text className="af-core-l" x="380" y="172" textAnchor="middle">账本核</text>
-      <text className="af-core-n" x="380" y="188" textAnchor="middle">{total}</text>
+
+      {/* L6 汇聚点：更大的金盘 + 光晕环 + 账本核总数（全部真实读数） */}
+      <g className={`af-core${inFocus('L6') ? '' : ' off'}`}>
+        <circle className="af-core-halo" cx={GRAPH_CENTER.x} cy={GRAPH_CENTER.y} r="64" fill="url(#af-core-glow)" />
+        <circle cx={GRAPH_CENTER.x} cy={GRAPH_CENTER.y} r="47" fill="none"
+          stroke="var(--c-l6)" strokeOpacity=".45" strokeDasharray="4 4" />
+        <circle className="af-hub af-hub-core" cx={GRAPH_CENTER.x} cy={GRAPH_CENTER.y} r={GRAPH_CORE_R}
+          fill="url(#ov-core)" stroke="var(--c-l6)" strokeWidth="2" />
+        <text x={GRAPH_CENTER.x} y={GRAPH_CENTER.y - 4} textAnchor="middle" fontSize="13" fontWeight="800" fill="#2A1B00">L6</text>
+        <text x={GRAPH_CENTER.x} y={GRAPH_CENTER.y + 12} textAnchor="middle" fontSize="9.5" fill="#3A2600">
+          {l6?.count ?? 0} 条
+        </text>
+        <text className="af-core-l" x={GRAPH_CENTER.x} y={GRAPH_CENTER.y + 62} textAnchor="middle">账本核</text>
+        <text className="af-core-n" x={GRAPH_CENTER.x} y={GRAPH_CENTER.y + 78} textAnchor="middle">{total}</text>
+      </g>
     </svg>
   );
 }
@@ -174,7 +256,7 @@ function StrataRow({ graph }: { graph: LayerGraph }) {
         return (
           <div className="af-strata-cell" key={h.layer}>
             <div className="lb"><span>{h.layer}</span><span>{pct}%</span></div>
-            <div className="bar"><i style={{ width: `${pct}%`, background: LAYER_COLOR[h.layer] }} /></div>
+            <div className="bar"><i style={{ width: `${pct}%` }} /></div>
             <div className="vl">{h.count}</div>
           </div>
         );
@@ -183,67 +265,60 @@ function StrataRow({ graph }: { graph: LayerGraph }) {
   );
 }
 
+/** 异常行：设计稿模板 = af-alert（error→bad / 其余→warn）+ tag + 单行文本 + rid mono 内联（无独立卡片版式）。 */
 function AnomalyRow({ a }: { a: RawAnomaly }) {
   const err = a.level === 'error';
   return (
-    <li className={`af-anom ${err ? 'error' : 'warn'}`}>
+    <div className={`af-alert ${err ? 'bad' : 'warn'}`}>
       <span className="tag">{err ? '阻断' : '提醒'}</span>
-      <span className="body">
-        <span className="t">{a.title}</span>
-        <span className="d">{a.detail}</span>
+      <span style={{ minWidth: 0 }}>
+        {a.title}{a.detail ? `：${a.detail}` : ''}
+        {a.request_id ? <span className="af-mono" style={{ marginLeft: 6, opacity: .8 }}>{a.request_id}</span> : null}
       </span>
-      {a.request_id ? <span className="rid">{a.request_id}</span> : <span className="rid mut">账本无链路</span>}
-    </li>
+    </div>
   );
 }
 
+/** 补炼队列：设计稿模板 = af-ph(h3 + 今日 hint，无链接) + prog + prog-lb + 两行说明列表；引擎态并入「运行中/待引擎」行。 */
 function RefinePanel({ p }: { p: OverviewRefinePanel }) {
-  let body: React.ReactNode;
-  if (!p.available) body = <div className="af-pb"><div className="af-note">{p.error ?? '非桌面壳不可用'}</div></div>;
-  else if (!p.ok || !p.view) body = <div className="af-pb"><div className="af-note bad">{p.error ?? '读取补炼队列失败'}</div></div>;
-  else {
-    const sm = p.view.summary;
-    const eng = p.view.engine;
-    const total = sm.pending + sm.done + sm.failed + sm.skipped;
-    const w = (n: number) => (total > 0 ? `${(n / total) * 100}%` : '0%');
-    const stops = refineStopRows(sm.stop_codes).slice(0, 4);
-    body = (
-      <>
-        <div className="af-pb">
-          <div className="af-eng-state">{eng.loaded ? (eng.usable ? '引擎可用 · 队列在干活' : '引擎不可用 · 排队但不干活') : '网关未加载 · 队列只排队'}</div>
-          <div className="af-prog">
-            <i className="done" style={{ width: w(sm.done) }} />
-            <i className="failed" style={{ width: w(sm.failed) }} />
-            <i className="skip" style={{ width: w(sm.skipped) }} />
-          </div>
-          <div className="af-prog-lb">
-            <span className="ok">done {sm.done}</span>
-            <span>pending {sm.pending}</span>
-            <span className="bad">failed {sm.failed}</span>
-            <span className="warn">skip {sm.skipped}</span>
-          </div>
-          {stops.length > 0 && (
-            <div className="af-stops">{stops.map((st) => <span key={st.code}>{st.label} ×{st.count}</span>)}</div>
-          )}
-        </div>
-        <div className="af-list bordered">
-          <div className="af-li"><span className="nm">单条 ≤ 3 引擎</span><span className="rt">llm_partial 不自动重试</span></div>
-          <div className="af-li"><span className="nm">队列续炼</span><span className="ds">refine-queue.json</span>
-            <span className={`rt ${eng.loaded && eng.usable ? 'ok' : ''}`}>{eng.loaded ? (eng.usable ? '运行中' : '待引擎') : '未加载'}</span>
-          </div>
-        </div>
-      </>
+  if (!p.available || !p.ok || !p.view) {
+    const msg = !p.available ? (p.error ?? '非桌面壳不可用') : (p.error ?? '读取补炼队列失败');
+    return (
+      <div className="af-panel" data-testid="home-refine">
+        <div className="af-ph"><h3>L2–L6 补炼队列</h3></div>
+        <div className="af-pb"><div className={`af-note${p.available ? ' bad' : ''}`}>{msg}</div></div>
+      </div>
     );
   }
-  const sm = p.view?.summary;
+  const sm = p.view.summary;
+  const eng = p.view.engine;
+  const total = sm.pending + sm.done + sm.failed + sm.skipped;
+  const w = (n: number) => (total > 0 ? `${(n / total) * 100}%` : '0%');
   return (
     <div className="af-panel" data-testid="home-refine">
       <div className="af-ph">
         <h3>L2–L6 补炼队列</h3>
-        {sm && <span className="hint">今日 {sm.day_rows}{sm.day_limit != null ? ` / ${sm.day_limit}` : ' · 不限额'}</span>}
-        <button className="af-link" type="button" onClick={() => requestShellView('params')}>管理</button>
+        <span className="hint">今日 {sm.day_rows}{sm.day_limit != null ? ` / ${sm.day_limit}` : ' · 不限额'}</span>
       </div>
-      {body}
+      <div className="af-pb" style={{ paddingBottom: 4 }}>
+        <div className="af-prog">
+          <i className="done" style={{ width: w(sm.done) }} />
+          <i className="failed" style={{ width: w(sm.failed) }} />
+          <i className="skip" style={{ width: w(sm.skipped) }} />
+        </div>
+        <div className="af-prog-lb">
+          <span className="ok">done {sm.done}</span>
+          <span>pending {sm.pending}</span>
+          <span className="bad">failed {sm.failed}</span>
+          <span className="warn">skip {sm.skipped}</span>
+        </div>
+      </div>
+      <div className="af-list bordered">
+        <div className="af-li"><span className="nm">单条 ≤ 3 引擎</span><span className="rt">llm_partial 不自动重试</span></div>
+        <div className="af-li"><span className="nm">队列续炼</span><span className="ds">refine-queue.json</span>
+          <span className={`rt ${eng.loaded && eng.usable ? 'ok' : ''}`}>{eng.loaded ? (eng.usable ? '运行中' : '待引擎') : '未加载'}</span>
+        </div>
+      </div>
     </div>
   );
 }
@@ -278,7 +353,6 @@ function McpPanel({ p }: { p: OverviewMcpPanel }) {
       <div className="af-ph">
         <h3>MCP 接入</h3>
         {p.endpoint && <span className="hint">{p.endpoint}</span>}
-        <button className="af-link" type="button" onClick={() => requestShellView('agent')}>接入</button>
       </div>
       {body}
     </div>
@@ -296,7 +370,7 @@ function EnginePanel({ p }: { p: OverviewEnginePanel }) {
       <div className="af-list">
         {rows.map((e, i) => (
           <div className="af-li" key={`${e.name}-${i}`}>
-            <span className="rk" style={i === 0 ? { color: 'var(--accent)' } : undefined}>{pad2(i + 1)}</span>
+            <span className="rk" style={i < 3 ? { color: 'var(--accent)' } : undefined}>{pad2(i + 1)}</span>
             <span className="nm">{e.name}{e.model ? <span className="ds">{e.model}</span> : null}</span>
             <span className="rt">{e.latencyMs == null ? '未拨测' : `${e.latencyMs}ms`}</span>
           </div>
@@ -308,8 +382,7 @@ function EnginePanel({ p }: { p: OverviewEnginePanel }) {
     <div className="af-panel" data-testid="home-engine">
       <div className="af-ph">
         <h3>引擎延迟排行</h3>
-        <span className="hint">最近拨测</span>
-        <button className="af-link" type="button" onClick={() => requestShellView('cost')}>配置</button>
+        <span className="hint">最近成功拨测</span>
       </div>
       {body}
     </div>
@@ -376,8 +449,8 @@ function Sparkline({ series }: { series: number[] }) {
   const line = pts.join(' ');
   return (
     <svg className="af-spark" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" role="img" aria-label="今日召回 payload 走势">
-      <polyline points={`${pad},${h - pad} ${line} ${w - pad},${h - pad}`} fill="var(--accent-soft)" stroke="none" />
       <polyline points={line} fill="none" stroke="var(--accent)" strokeWidth="1.8" />
+      <polyline points={`${pad},${h - pad} ${line} ${w - pad},${h - pad}`} fill="var(--accent-soft)" stroke="none" />
     </svg>
   );
 }
@@ -386,16 +459,26 @@ export function OverviewPage() {
   useHostTheme();
   const [snap, setSnap] = useState<OverviewSnapshot | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [busy, setBusy] = useState(true);
   const [focus, setFocus] = useState<Focus>('all');
   // T3/①：待生效来自共享信号（首页/接入页/壳层同源），不再用本地布尔，避免一处点了另两处消失
   const [mcpPendingIds, setMcpPendingIds] = useState<string[]>(() => listMcpPending());
   const [mcpBusy, setMcpBusy] = useState(false);
   const [mcpError, setMcpError] = useState<string | null>(null);
   const [mcpHint, setMcpHint] = useState<string | null>(null);
+  /** 批次51：页头登出（用户要求放在「立即备份」前）；busy 防重复点击 */
+  const [loggingOut, setLoggingOut] = useState(false);
+  /**
+   * 登出（真实 POST /api/logout + 清本机会话，与登录弹窗同一口径）。
+   * 本页是壳层的同源 iframe：清完会话后整壳重载（window.parent 同源可重载），
+   * 让壳层状态栏 / 头像 / 各页登录态同步回到「只读」，不保留任何假登录态。
+   */
+  const handleLogout = useCallback(() => {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    void logoutCurrentSession().finally(() => window.parent.location.reload());
+  }, [loggingOut]);
 
   const reload = useCallback(async () => {
-    setBusy(true);
     setMcpError(null);
     try {
       const next = await loadOverview();
@@ -403,8 +486,6 @@ export function OverviewPage() {
       setErr(null);
     } catch (e) {
       setErr((e as { message?: string })?.message ?? String(e));
-    } finally {
-      setBusy(false);
     }
   }, []);
 
@@ -487,52 +568,45 @@ export function OverviewPage() {
         <div className="hmx">
           {view && snap && (
             <>
-              <div className="af-head">
-                <div className="af-title">
-                  <h1>总览工作台</h1>
-                  <div className="sub">{view.dateText} · UTC+08:00 · {view.dataRootText}</div>
-                </div>
-                <div className="af-actions">
+              <div className="af-head" data-testid="overview-head">
+                <h1>总览工作台</h1>
+                <span className="sub">
+                  {view.dateText} · UTC+08:00 · {snap.dataRoot.available ? `数据根 ${view.dataRootText}` : view.dataRootText}
+                </span>
+                <div className="right">
                   {snap && !snap.session && (
-                    <button className="af-btn sm" type="button" onClick={() => requestShellView('login')}>
-                      <Icon name="user" size={12} />去登录
-                    </button>
+                    <button className="af-btn" type="button" onClick={() => requestShellView('login')}>去登录</button>
                   )}
-                  <button className="af-btn sm" type="button" onClick={() => requestShellView('security')}>
-                    <Icon name="shield" size={12} />立即备份
-                  </button>
-                  <button className="af-btn sm pri" type="button" onClick={() => requestShellView('write')}>
-                    <Icon name="plus" size={12} />写入记忆
-                  </button>
-                  <button className="af-btn sm" type="button" onClick={() => void reload()} disabled={busy} title="重新读取真实账本" data-testid="home-reload">
-                    <Icon name="refresh" size={12} />{busy ? '读取中…' : '重读'}
-                  </button>
+                  {snap?.session && (
+                    <button className="af-btn" type="button" data-testid="ov-logout" disabled={loggingOut}
+                      title="登出：真实 POST /api/logout 并清除本机会话，随后整壳重载回到只读态"
+                      onClick={handleLogout}>{loggingOut ? '登出中…' : '登出'}</button>
+                  )}
+                  <button className="af-btn" type="button" onClick={() => requestShellView('security')}>立即备份</button>
+                  <button className="af-btn pri" type="button" onClick={() => requestShellView('write')}>+ 写入记忆</button>
                 </div>
               </div>
 
               {err && (
                 <div className="af-alert bad" role="alert">
-                  概览聚合失败：{err}。这不是空数据；请确认内核与后端状态后点「重读」重试。
+                  概览聚合失败：{err}。这不是空数据；请确认内核与后端状态，切回本页会自动重读。
                 </div>
               )}
               {/* 账本读取失败由壳层顶部 ov-error-strip 统一提示（57-D 去重），本页只保各自面板的诚实失败原因 */}
               {/* 常驻提示：已登录且 L0 写密钥锁没解才显示（真源 = l0Status.write_unlocked，不依赖近 30 分钟是否有写入被拒）。
                   未登录时先引导登录，不提前催解锁（2026-11-16） */}
               {view.session && view.l0WriteLocked && (
-                <div className="af-alert bad l0-lock-alert" role="alert" data-testid="home-l0-lock-alert">
+                <div className="af-alert" role="alert" data-testid="home-l0-lock-alert">
                   <span className="tag">L0</span>
-                  <span className="l0-lock-text">
-                    <b>写密钥未解锁</b>：新的写入会被挡下并暂存到 pending 队列，解锁后自动重放落库，绝不落明文。
-                    {view.l0Alert ? <span className="l0-lock-sub">近期已有写入因此被挡：{view.l0Alert}。</span> : null}
-                  </span>
+                  <span>写密钥未解锁：新的写入会被挡下并暂存到 pending 队列，解锁后自动重放落库，绝不落明文。{view.l0Alert ? `近期已有写入因此被挡：${view.l0Alert}。` : ''}</span>
                   <button className="af-link" type="button" onClick={() => requestShellView('security')}>去安全页解锁 →</button>
                 </div>
               )}
               {/* 状态读不到时如实标注（不猜已解锁、也不误报未解锁）；已有真实被挡异常则照常显示 */}
               {view.session && !view.l0WriteLocked && view.l0WriteUnknown && (
-                <div className="af-alert l0-lock-unknown" data-testid="home-l0-lock-unknown">
+                <div className="af-alert" data-testid="home-l0-lock-unknown">
                   <span className="tag">L0</span>
-                  <span className="l0-lock-text">写密钥锁状态未取到：{view.l0WriteDetail ?? '桌面壳未返回状态'}（不能据此判断已解锁）。</span>
+                  <span>写密钥锁状态未取到：{view.l0WriteDetail ?? '桌面壳未返回状态'}（不能据此判断已解锁）。</span>
                   <button className="af-link" type="button" onClick={() => void reload()}>重读 →</button>
                 </div>
               )}
@@ -584,11 +658,18 @@ export function OverviewPage() {
                   </section>
 
                   <section className="af-panel">
-                    <div className="af-ph"><h3>异常速览</h3><span className="hint">近 1 小时 · 内核窗口聚合</span></div>
+                    <div className="af-ph"><h3>异常速览</h3><span className="hint">近 30 分钟 · 窗口聚合</span></div>
                     <div className="af-pb" data-testid="home-anomalies">
                       {view.anomalies.length === 0
                         ? <p className="af-note">账本里没有异常：无 LLM 降级、召回零命中或 L0 写入锁定记录。</p>
-                        : <ul className="af-anoms">{view.anomalies.map((a, i) => <AnomalyRow key={`${a.title}-${i}`} a={a} />)}</ul>}
+                        : (
+                          <>
+                            <div className="af-stack" style={{ gap: 7 }}>
+                              {view.anomalies.map((a, i) => <AnomalyRow key={`${a.title}-${i}`} a={a} />)}
+                            </div>
+                            <p className="af-note" style={{ marginTop: 8 }}>正文不进首页；本条随窗口老化自动消失，可凭 request_id 到日志页真查。</p>
+                          </>
+                        )}
                     </div>
                   </section>
 
@@ -619,9 +700,9 @@ export function OverviewPage() {
                 </div>
 
                 <div className="af-stack">
-                  <TokenPanel p={snap.token} />
-                  {/* 今日概览上移到补炼队列之前：先看今天的量，再看队列在干什么（2026-11-16 用户要求） */}
+                  {/* 右栏顺序（用户 2026-11-21）：今日概览上移至 TOKEN 节省率位置（首位），其余顺延 */}
                   <TodayPanel p={snap.today} />
+                  <TokenPanel p={snap.token} />
                   <RefinePanel p={snap.refine} />
                   <McpPanel p={snap.mcp} />
                   <EnginePanel p={snap.engines} />

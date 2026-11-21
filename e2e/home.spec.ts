@@ -65,7 +65,7 @@ test.describe('REQ-005 首页与登录 · 点击级 E2E', () => {
     await page.goto(HOME);
     await expect(page.locator('[data-testid="overview-page"]')).toBeVisible();
     // 标题 + 效果证据四卡（真实账本聚合；浏览器空账本显示「未取数」，不伪造）
-    await expect(page.locator('.af-title h1')).toContainText('总览工作台');
+    await expect(page.locator('.af-head h1')).toContainText('总览工作台');
     await expect(page.locator('.af-g4 .af-stat')).toHaveCount(4);
     await expect(page.locator('.af-foot')).toContainText('未登录');
     // 未登录仍可读本地账本（诚实口径），并给出「去登录」快捷入口
@@ -257,7 +257,7 @@ test.describe('REQ-005 首页与登录 · 点击级 E2E', () => {
     // 桌面壳默认 1280×860 窗 − 250 导航栏 − 318 检查器 − 10 分条 ≈ 702px 中心 iframe 宽
     await page.setViewportSize({ width: 702, height: 860 });
     await page.goto(HOME);
-    await expect(page.locator('.af-title h1')).toContainText('总览工作台');
+    await expect(page.locator('.af-head h1')).toContainText('总览工作台');
     // 双栏：1fr + 264px（中段收窄），不是塌成单列
     const cols = await page.locator('.af-cols').evaluate((el) => getComputedStyle(el).gridTemplateColumns);
     const parts = cols.split(' ').filter(Boolean);
@@ -268,6 +268,54 @@ test.describe('REQ-005 首页与登录 · 点击级 E2E', () => {
     expect(graph).toBeTruthy();
     expect(graph!.height).toBeLessThan(330);
     expect(graph!.height).toBeGreaterThan(120);
+    expect(errors).toEqual([]);
+  });
+
+  test('⑨ 关系图谱：L6 居中汇聚、L1–L5 环绕，五条箭头均指向 L6，筛选仍真实生效', async ({ page }) => {
+    const errors = collectErrors(page);
+    await page.goto(HOME);
+    const svg = page.locator('.af-graph');
+    await expect(svg).toBeVisible();
+    // 六层枢纽仍在（L1–L5 环上 + L6 中心），账本核总数仍读真实 stats.total
+    await expect(svg.locator('.af-hub')).toHaveCount(6);
+    await expect(svg.locator('.af-hub-core')).toHaveCount(1);
+
+    const box = await svg.boundingBox();
+    const core = await svg.locator('.af-hub-core').boundingBox();
+    expect(box && core).toBeTruthy();
+    const center = { x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 };
+    expect(Math.abs(core!.x + core!.width / 2 - center.x)).toBeLessThan(2);
+    expect(Math.abs(core!.y + core!.height / 2 - center.y)).toBeLessThan(2);
+
+    // L6 明显大于外围层枢（尺寸区分，颜色/光晕由样式承担）
+    const ring = await svg.locator('[data-graph-layer="L1"] .af-hub').boundingBox();
+    expect(ring).toBeTruthy();
+    expect(core!.width).toBeGreaterThan(ring!.width * 1.5);
+
+    // 五条辐条：全部带箭头，且终点（L6 外沿）比起点更靠近中心 → 箭头朝 L6
+    const spokes = svg.locator('line.af-spoke');
+    await expect(spokes).toHaveCount(5);
+    for (let i = 0; i < 5; i += 1) {
+      const spoke = spokes.nth(i);
+      await expect(spoke).toHaveAttribute('marker-end', 'url(#af-arrow)');
+      const g = await spoke.evaluate((el) => {
+        const l = el as SVGLineElement;
+        return {
+          x1: Number(l.getAttribute('x1')), y1: Number(l.getAttribute('y1')),
+          x2: Number(l.getAttribute('x2')), y2: Number(l.getAttribute('y2')),
+        };
+      });
+      const far = Math.hypot(g.x1 - 380, g.y1 - 176);
+      const near = Math.hypot(g.x2 - 380, g.y2 - 176);
+      expect(near).toBeLessThan(far);
+      expect(near).toBeLessThan(60);
+    }
+
+    // 筛选（全部 / L2 / L3 / L4+）仍是真实过滤：非聚焦层变暗，其余四层被置暗
+    await page.locator('.af-chip').filter({ hasText: /^L2$/ }).click();
+    await expect(svg.locator('.af-hub-g.off')).toHaveCount(4);
+    await page.locator('.af-chip').filter({ hasText: /^全部$/ }).click();
+    await expect(svg.locator('.af-hub-g.off')).toHaveCount(0);
     expect(errors).toEqual([]);
   });
 });
