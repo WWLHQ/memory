@@ -240,24 +240,27 @@ export function buildRecallHint(
   rollup: RecallRollup,
   unitPriceCnyPerMTok: number | null,
 ): RecallHint {
+  // 2026-11-21 用户拍板：命中项前加 🎯、背景项用 📎（两图标一一对应，卡片标题与三档共用本行）。
+  // 零命中时不加 🎯（没有命中就不标命中图标，保持诚实），仍写「未命中」。
   const hitPart = result.hits.length > 0
-    ? `命中 ${result.hits.length} 条（${fmtInt(result.savings.payload_tokens)}t）`
+    ? `🎯 命中 ${result.hits.length} 条 (${fmtInt(result.savings.payload_tokens)}t)`
     : `未命中（扫描 ${fmtInt(result.scanned_memories)} 条，未注入命中内容）`;
   const bg = result.background;
-  const bgPart = `📎 背景 ${bg.items.length} 条（${fmtInt(bg.tokens)}t）`;
-  const savePart = `⚡ 本次省 ${fmtInt(result.savings.saved_tokens)}t（全量约 ${fmtInt(result.savings.corpus_tokens)}t）`;
+  const bgPart = `📎 背景 ${bg.items.length} 条 (${fmtInt(bg.tokens)}t)`;
+  // 2026-11-21 用户二次拍板：摘要压到 2 行（客户端气泡宽度有限，原格式折成 4 行）。
+  // 省量去掉「全量约 Xt」——全量基线仍在 detail 档「⚡ Token 用量」段完整保留，不丢信息。
+  const savePart = `⚡ 省 ${fmtInt(result.savings.saved_tokens)}t`;
 
   // 批次 RAG：告警抽成唯一函数，提示行与三档模板共用同一份（正常轮次不产出常驻噪声）
   const warnings = recallWarnings(result, rollup, unitPriceCnyPerMTok);
+  // 摘要行内联的告警用短版（冒号前），detail 档告警段仍用完整版（recallWarnings 原值）——同源派生，不另立文案。
+  const shortWarnings = warnings.map((w) => w.split(/[:：]/)[0]);
 
   const price = normalizeUnitPrice(unitPriceCnyPerMTok);
   let money: RecallMoney | null = null;
   let moneyPart: string;
-  /** 批次33-C 折叠档第二行：本次花费/省额 + 今日/全部次数（今日/全部的金额明细挪到本机明细页，仍同源） */
-  let moneyShort: string;
   if (price === null) {
-    moneyPart = '💰 金额未开：未设置单价（全局参数页可设 ¥/百万预算单位 t；金额按本地预算单位估算）';
-    moneyShort = `💰 金额未开（参数页可设 ¥/百万预算单位 t） ｜ 今日 ${rollup.today_calls} 次 ｜ 全部 ${rollup.all_calls} 次`;
+    moneyPart = '💰 金额未开：未设置单价（可在全局参数页设置）';
   } else {
     money = {
       unit_price_cny_per_mtok: price,
@@ -279,28 +282,25 @@ export function buildRecallHint(
         legacy_calls: rollup.all_legacy_calls,
       },
     };
-    moneyPart = `💰 金额估算（本地预算单位 t × 单价）：本次 ${formatCny(money.this_call.cost_cny)}（省 ${formatCny(money.this_call.saved_cny)}）`
-      + ` ｜ 今日 ${rollup.today_calls} 次 ${formatCny(money.today.cost_cny)}（省 ${formatCny(money.today.saved_cny)}）`
-      + ` ｜ 全部 ${rollup.all_calls} 次 ${formatCny(money.all.cost_cny)}（省 ${formatCny(money.all.saved_cny)}）`;
-    moneyShort = `💰 估算 本次 ${formatCny(money.this_call.cost_cny)}（省 ${formatCny(money.this_call.saved_cny)}）`
+    // 2026-11-21 用户二次拍板（摘要压 2 行）：金额只留本次「💰 ¥x（省 ¥y）」，
+    // 今日/全部只留次数「今日 N 次 ｜ 全部 N 次」——金额明细在 detail 档「💰 省钱与费用」段完整保留。
+    moneyPart = `💰 ¥${formatCny(money.this_call.cost_cny).replace(/^¥/, '')}（省 ¥${formatCny(money.this_call.saved_cny).replace(/^¥/, '')}）`
       + ` ｜ 今日 ${rollup.today_calls} 次 ｜ 全部 ${rollup.all_calls} 次`;
   }
 
-  // A6/A8：模式行是「本次生效模式」的唯一口径。line 保持单行，但必须带上它——
-  // display.line / text / HTTP content[0] 是纯文本客户端的兜底，缺了这段就等于 A6 没生效。
+  // A6/A8：模式行是「本次生效模式」的唯一口径。2026-11-21 用户口径：⚙ 模式行放在**摘要行首**。
+  // 2026-11-21 二次拍板（压 2 行）：摘要行用**模式简称**（如「⚙ 事实优先」），丢掉括号里的
+  // 分流解释；完整模式行（含 source/reason/hit_keywords）仍在 detail 档与审计里，不丢可核对信息。
+  // 行首 ▶ 是气泡标题的展开标记（纯文本，客户端是否可折叠由渲染器决定，见 note）。
   const modeLine = buildRecallModeLine(result);
-  const line = [
-    `🧠 Memory ｜ ${hitPart} ｜ ${bgPart} ｜ ${savePart} ｜ ${moneyPart}`,
-    ...warnings,
-    ...(modeLine ? [modeLine] : []),
-  ].join(' ｜ ');
-  // A6：shortLine 是「无 echo 时的兜底摘要」，模式行同样带上（§3.4 透明），dispatch=null 时不加
-  const shortLine = [
-    `🧠 Memory ｜ ${hitPart} ｜ ${bgPart} ｜ ${savePart}`,
-    moneyShort,
-    ...(modeLine ? [modeLine] : []),
-    ...warnings,
-  ].join('\n');
+  const shortMode = modeLine ? modeLine.replace(/（[^）]*）/g, '').replace('⚙ 模式：', '⚙ ') : null;
+  const line = `▶ ${[
+    ...(shortMode ? [shortMode] : []),
+    `${hitPart} ｜ ${bgPart} ｜ ${savePart} ｜ ${moneyPart}`,
+    ...shortWarnings,
+  ].join(' ｜ ')}`;
+  // 摘要统一为单行（折叠气泡标题与 compact 档共用）；shortLine 保留字段以兼容旧调用方，值即同一行。
+  const shortLine = line;
   const hint: RecallHint = { line, shortLine, money, rollup };
   hint.echo = buildRecallEchoSummary(result, hint, unitPriceCnyPerMTok);
   return hint;
@@ -380,14 +380,7 @@ export function buildRecallModeLine(result: RecallResult): string | null {
   return `⚙ 模式：${body}${sec}`;
 }
 
-/** 折叠档外层 summary：≤80 字，命中数 + top3 命中词 + 省量比例 + 展开提示 */
-export function buildRecallFoldSummary(result: RecallResult): string {
-  const terms = recallHitTerms(result, 3);
-  const termPart = terms.length > 0 ? ` · 依据${terms.map((t) => `「${plainClip(t, 12)}」`).join('')}` : '';
-  return `🧠 命中 ${result.hits.length} 条${termPart} ｜ 省 ${recallSavingRatio(result)} ｜ ▶ 展开本次召回汇总`;
-}
-
-/** 两行短收摘要：首行命中依据前置，第二行统计汇总；warnings 独立成行（异常驱动） */
+/** 明细页头部摘要（页面自带结构，不是聊天回显）：命中数 + 前 3 条代表词 + 省量比例 + 金额口径 */
 export function buildRecallEchoSummary(
   result: RecallResult, hint: RecallHint, unitPriceCnyPerMTok: number | null,
 ): RecallEchoSummary {
@@ -400,7 +393,7 @@ export function buildRecallEchoSummary(
     ? ' · 依据 ' + cited.map((x) => `[${x.n}]「${plainClip(x.term, 20)}」`).join('')
     : '';
   const moneyTag = hint.money === null ? '金额未开' : `估算 ${formatCny(hint.money.this_call.cost_cny)}`;
-  const headline = `🧠 命中 ${result.hits.length} 条${termPart} ｜ 省 ${recallSavingRatio(result)}`
+  const headline = `💠 Memory ｜ 命中 ${result.hits.length} 条${termPart} ｜ 省 ${recallSavingRatio(result)}`
     + `（${fmtInt(result.savings.saved_tokens)}t）｜ ${moneyTag}`;
   const stats = `📊 汇总：注入 ${fmtInt(result.savings.injected_tokens)}t / 基线 ${fmtInt(result.savings.corpus_tokens)}t`
     + ` · 背景 ${result.background.items.length} 条（${fmtInt(result.background.tokens)}t）`
@@ -468,21 +461,12 @@ function buildRecallEchoBody(
   return `**📊 本次召回统计汇总**\n\n${stats}${citeBlock ? `\n\n${citeBlock}` : ''}`;
 }
 
-/* ---------- 聊天窗口明细（批次13 HTML 折叠 / 批次29 纯 Markdown）：四段；不支持 HTML 的客户端用纯 Markdown ---------- */
+/* ---------- 聊天窗口明细：四段平铺纯 Markdown（2026-11-21 起三档统一零 HTML 标签） ---------- */
 
-/** 折叠块文本安全化：记忆内容里的尖括号不得破坏 <details> 结构 */
-function mdInline(s: string, maxChars: number): string {
-  return plainClip(s, maxChars).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-/** 纯 Markdown 版不转义 HTML（客户端如 DSH 只渲染 Markdown，转义串会原样露出 &lt;） */
+/** 纯 Markdown 不转义 HTML（客户端如 DSH 只渲染 Markdown，转义串会原样露出 &lt;） */
 function plainClip(s: string, maxChars: number): string {
   const one = s.replace(/\s+/g, ' ').trim();
   return one.length > maxChars ? `${one.slice(0, maxChars)}…` : one;
-}
-
-function mdSection(summary: string, body: string): string {
-  return `<details>\n<summary>${summary}</summary>\n\n${body}\n</details>`;
 }
 
 export interface RecallMarkdownOpts {
@@ -596,9 +580,9 @@ export function buildRecallSections(
     saveLines.push(`今日含 ${r.today_legacy_calls} 次旧记录（无省量字段，金额按载荷下限计）`);
   }
 
-  const hitTitle = `🧠 命中记忆 ${result.hits.length} 条（${fmtInt(t.payload_tokens)}t）`;
+  const hitTitle = `💠 命中记忆 ${result.hits.length} 条 (${fmtInt(t.payload_tokens)}t)`;
   return [
-    { title: `📎 项目背景 ${bg.items.length} 条（${fmtInt(bg.tokens)}t）`, lines: bgLines },
+    { title: `📎 项目背景 ${bg.items.length} 条 (${fmtInt(bg.tokens)}t)`, lines: bgLines },
     {
       // 读法说明只在真有命中词时追加：旧的/无语义的命中（matched_terms 为空）标题逐字不变
       title: hasTerms && hitStyle.readingHint ? `${hitTitle}｜ ${hitStyle.readingHint}` : hitTitle,
@@ -618,76 +602,171 @@ export function buildRecallMarkdown(
   result: RecallResult,
   hint: RecallHint,
   unitPriceCnyPerMTok: number | null,
-  opts: RecallMarkdownOpts = {},
+  _opts: RecallMarkdownOpts = {},
 ): string {
-  const htmlDetails = opts.htmlDetails !== false;
-  const clip = htmlDetails ? mdInline : plainClip;
-  const markup: HitMarkup = htmlDetails ? 'html' : 'markdown';
-  // 批次59：同一份四段口径带上各自的高亮载体——HTML 档用 <mark>，纯 Markdown 档用加粗引号
-  const sections = buildRecallSections(result, hint, unitPriceCnyPerMTok, clip, 120, htmlDetails
-    ? { markup: 'html', readingHint: '黄色 = 与本次提问重合的片段；🎯 = 命中的词' }
-    : { markup: 'markdown', readingHint: '加粗「」= 与本次提问重合的片段；🎯 = 命中的词' });
-  const echo = hint.echo ?? buildRecallEchoSummary(result, hint, unitPriceCnyPerMTok);
+  // 2026-11-21 用户明确「禁止用 HTML」：三档一律零标签——不再有 <details>/<summary>/<mark>。
+  // htmlDetails 参数保留只为兼容旧调用方（签名不破坏），但已不再改变输出形态；折叠交由客户端
+  // 气泡卡承载，摘要行首的 ▶ 就是展开标记；明细统一为纯 Markdown 平铺。
+  const clip = plainClip;
+  const markup: HitMarkup = 'markdown';
+  const sections = buildRecallSections(result, hint, unitPriceCnyPerMTok, clip, 120, {
+    markup: 'markdown', readingHint: '加粗「」= 与本次提问重合的片段；🎯 = 命中的词',
+  });
   const echoBody = buildRecallEchoBody(result, hint, markup, clip);
-  const warningBlock = echo.warnings.length > 0
-    ? (htmlDetails
-        ? `<details><summary>⚠ 状态 ${echo.warnings.length} 项</summary>\n\n`
-          + `${echo.warnings.map((w) => `- ${mdInline(w, 200)}`).join('\n')}\n</details>`
-        : echo.warnings.map((w) => `**${w}**`).join('\n\n'))
-    : '';
-
-  if (!htmlDetails) {
-    const inner = sections
-      .map((s) => `**${s.title}**\n\n${s.lines.map((l) => `- ${l}`).join('\n')}`)
-      .join('\n\n');
-    // 2026-11-12（T9 同源缺陷）：markdown-full 档原来用单换行拼三行，同样会被客户端合并成一段。
-    // 与 compact 档保持同一口径：**空行分段**，段落数 = 2（摘要）+ warning 数。
-    // A6：模式行紧跟汇总（§3.4 透明），会话视图无分流时为 null，不产出空行。
-    const summary = [echo.headline, echo.stats, ...(echo.mode_line ? [echo.mode_line] : [])]
-      .map((l) => `**${l}**`).join('\n\n');
-    return summary
-      + (warningBlock ? `\n\n${warningBlock}` : '')
-      + `\n\n${echoBody}\n\n${inner}`;
-  }
-
-  const inner = sections
-    .map((s) => mdSection(mdInline(s.title, 240), s.lines.map((l) => `- ${l}`).join('\n')))
+  const sectionBlock = sections
+    .map((s) => `**${s.title}**\n\n${s.lines.map((l) => `- ${l}`).join('\n')}`)
     .join('\n\n');
-  return `<details>\n<summary>${mdInline(buildRecallFoldSummary(result), 160)}</summary>\n\n`
-    + `${echoBody}`
-    + (echo.mode_line ? `\n\n**${mdInline(echo.mode_line, 160)}**` : '')
-    + `\n\n${inner}`
-    + (warningBlock ? `\n\n${warningBlock}` : '')
-    + '\n</details>';
+  return `**${hint.line}**\n\n${echoBody}\n\n${sectionBlock}`;
 }
 
 /**
- * 批次32-C / 33-C：不支持 HTML 折叠的客户端（DSH 实测只渲染 Markdown，`<details>` 原样露出）只给
- * **两行短摘要 + 一个可点链接**，点开是本机明细页（真 `<details>` 折叠，数字同源）。
- * 批次 RAG：首行改为「命中数 + top3 编号依据词 + 省量比例 + 金额」，第二行改为统计汇总，
- * 告警行只在真有 warning 时追加（异常驱动），链接文案加入「统计汇总 / 命中依据」以与实际内容一致。
- * detailUrl 缺失（TCP 8202 等无端口场景）时退回文字指引：明细用同 query + detail=true 再取。
- * hint.echo 缺省（手写 hint 的老调用方）时退回 shortLine，不抛异常。
+ * 2026-11-21 用户按截图定稿：compact 档（WorkBuddy 恒走此档）**只输出一整行加粗摘要**。
+ * 行首 ▶ 就是「点开看明细」的标记，展开由客户端气泡折叠卡承载；不再输出「▶ 展开本次召回明细」
+ * 链接行，也不再输出「📌 链接点不开时…」提示行 —— 用户明确「这显示这些就可以了」，
+ * 截图里只有摘要那一行，多出来的链接/提示都属于未按要求实现。
+ * detailUrl 保留在签名里仅为兼容旧调用方（detail_url 字段仍在 payload 里给需要的客户端），
+ * 但 compact markdown 不再依赖它，也不把它写进用户可见文本。
  */
-export function buildRecallCompactMarkdown(hint: RecallHint, detailUrl?: string): string {
-  const echo = hint.echo;
-  // 2026-11-12（WorkBuddy 实测回填）：三行之间必须留**空行**。原先用单换行，Markdown 视作软换行，
-  // WorkBuddy 会把「🧠 摘要 / 📊 汇总 / ⚠ 告警」合并成一整段（截图实证），读者根本分不出层级。
-  // 空行 = 段落分隔，是所有客户端都认的硬分隔；末尾不追加空行，保持 rows 数为 2~3。
-  const summary = echo
-    ? [echo.headline, echo.stats, ...(echo.mode_line ? [echo.mode_line] : []), ...echo.warnings]
-      .map((l) => `**${l}**`).join('\n\n')
-    : `**${hint.shortLine}**`;
-  if (detailUrl) {
-    // 2026-11-12（用户回填）：WorkBuddy 桌面端与手机端点本机链接均无反应 —— 手机是 127.0.0.1 不可达，
-    // 桌面端是客户端不跳外链。链接保留（浏览器/别的客户端仍可用），但必须给一条不依赖链接的取明细路径，
-    // 否则用户永远看不到「统计汇总 / 命中依据」。这句是给用户看的，Agent 原样输出即可。
-    return `${summary}\n\n▶ [展开本次召回明细（统计汇总 / 命中依据 / Token / 费用）](${detailUrl})`
-      + '\n\n📌 链接点不开时（手机端 / 部分客户端），直接说「看明细」即可，我用同一个 query 取回明细铺开。';
-  }
-  return `${summary}\n\n`
-    + '📌 明细已收起（统计汇总 / 命中依据 / Token 用量 / 省钱与费用）。需要看时用同一个 query 再调用一次 recall_memory 并置 detail=true，'
-    + '然后把返回的 display.markdown 原样输出；不需要就保持本行，不要自行编造明细。';
+export function buildRecallCompactMarkdown(hint: RecallHint, _detailUrl?: string): string {
+  return `**${hint.line}**`;
+}
+
+/* ---------- 2026-11-21 用户拍板：给富媒体宿主（WorkBuddy / CodeBuddy 桌面端）下发的结构化卡片数据 ---------- */
+
+/** 卡片展开提示小字的唯一文案（宿主直接渲染，不得改写） */
+export const RECALL_CARD_HINT = '点击查阅详细内容';
+
+/** 批次 A2：每条命中的反馈入口提示（宿主逐条渲染，N 替换为该条 [n] 编号） */
+export const RECALL_FEEDBACK_HINT = '回复「N 有用」或「N 没用」反馈本条';
+
+/** 卡片里的一条命中/依据（index 即回答里就地标注的 [n]，1-based） */
+export interface RecallCardHit {
+  index: number;
+  mem_id: string;
+  layer: string;
+  decay_class: string;
+  /** 相关度 0–1（保留 3 位，与明细页同口径） */
+  score: number;
+  /** 命中的共有词（无则为空数组，不编造） */
+  terms: string[];
+  /** 正文片段 */
+  excerpt: string;
+  /** 批次 A2：反馈入口提示（常量 RECALL_FEEDBACK_HINT，宿主把 N 替换为 index） */
+  feedback_hint: string;
+  /** 批次 A3：累计被用户确认/强化次数（无记录则省略，不补 0 伪装） */
+  reinforce_count?: number;
+  /** 批次 B：合并提示（本条是合并后的最新版时带上；宿主后缀渲染在摘要后） */
+  supersede_note?: string;
+}
+
+/**
+ * 富媒体宿主的「卡片数据结构」——直接可渲染，宿主不必再从 display.line 里拆字符串。
+ * 为什么单独下发：此前卡片标题靠 Agent 手拆 display.line，任何一处漏改就会出现
+ * 「文本一行、卡片另一行」两套口径；这里给结构化字段，数字与文本摘要同源。
+ */
+export interface RecallCardData {
+  /** 标题第一行：模式简称 ｜ 命中 ｜ 背景 ｜ 省量（已去行首 ▶，不含金额） */
+  titleLine1: string;
+  /** 标题第二行：金额 ｜ 今日 ｜ 全部（不含小字提示） */
+  titleLine2: string;
+  /** 展开提示小字（固定 RECALL_CARD_HINT） */
+  hint: string;
+  /** 统计汇总（label/value 成对，宿主按序渲染 4–5 行） */
+  summary: Array<{ label: string; value: string }>;
+  /** 项目背景（逐条独立） */
+  background: Array<{ category: string; mem_id: string; excerpt: string }>;
+  /** 命中记忆（每条含 [n]） */
+  hits: RecallCardHit[];
+  /** 本次用上的依据（与 hits 同源同序，编号一一对应） */
+  basis: RecallCardHit[];
+  /** 告警短版（正常轮次为空数组） */
+  warnings: string[];
+}
+
+/**
+ * 构建卡片数据结构。数字全部复用 fmtInt / formatCny / hint.money / hint.rollup（唯一真源），
+ * 标题两行从 hint.line 派生而非重算——保证卡片标题与文本摘要逐字一致，不出现两套口径。
+ */
+export function buildRecallCardData(
+  result: RecallResult,
+  hint: RecallHint,
+  unitPriceCnyPerMTok: number | null,
+  /** 批次 B：进化状态行（富媒体宿主由调用方算好传入；缺省不加该行，非富媒体宿主不计算） */
+  growth?: { label: string; value: string } | null,
+): RecallCardData {
+  const t = result.savings;
+  const r = hint.rollup;
+  const money = hint.money;
+
+  // 标题两行：去掉行首 ▶，按「 ｜ 」切分。金额段**本身含**「 ｜ 今日 … ｜ 全部 …」，
+  // 所以不能只挑「含 💰」的那一段——要从第一个金额段起，其后的今日/全部一并归第二行。
+  // 这样重建（titleLine1 + titleLine2）能逐字还原 hint.line，顺序不被打乱。
+  const parts = hint.line.replace(/^▶\s*/, '').split(' ｜ ').map((s) => s.trim()).filter(Boolean);
+  const moneyAt = parts.findIndex((p) => p.startsWith('💰') || p.startsWith('金额未开'));
+  const titleLine1 = (moneyAt >= 0 ? parts.slice(0, moneyAt) : parts).join(' ｜ ');
+  const titleLine2 = moneyAt >= 0 ? parts.slice(moneyAt).join(' ｜ ') : '';
+
+  const summary: Array<{ label: string; value: string }> = [
+    {
+      label: 'Token',
+      value: `语料 ${fmtInt(t.corpus_tokens)}t → 注入 ${fmtInt(t.injected_tokens)}t，`
+        + `省 ${fmtInt(t.saved_tokens)}t（命中 ${fmtInt(t.payload_tokens)}t ｜ 背景 ${fmtInt(t.background_tokens)}t）`,
+    },
+    {
+      label: '费用',
+      value: money === null
+        ? '金额未开（未设置单价）'
+        : `本次 ${formatCny(money.this_call.cost_cny)}，省 ${formatCny(money.this_call.saved_cny)}`,
+    },
+    {
+      label: '今日',
+      value: money === null
+        ? `${r.today_calls} 次 ｜ 省 ${fmtInt(r.today_saved_tokens)}t`
+        : `${r.today_calls} 次 ｜ ${formatCny(money.today.cost_cny)} ｜ 省 ${formatCny(money.today.saved_cny)}`,
+    },
+    {
+      label: '全部',
+      value: money === null
+        ? `${r.all_calls} 次 ｜ 省 ${fmtInt(r.all_saved_tokens)}t`
+        : `${r.all_calls} 次 ｜ ${formatCny(money.all.cost_cny)} ｜ 省 ${formatCny(money.all.saved_cny)}`,
+    },
+  ];
+
+  const hits: RecallCardHit[] = result.hits.map((h, i) => ({
+    index: i + 1,
+    mem_id: h.mem_id,
+    layer: h.layer,
+    decay_class: h.decay_class,
+    score: Math.round(h.score * 1000) / 1000,
+    terms: displayTerms(h.matched_terms, h.content, 5),
+    excerpt: plainClip(h.content, 160),
+    feedback_hint: RECALL_FEEDBACK_HINT,
+    ...(h.reinforce_count !== undefined ? { reinforce_count: h.reinforce_count } : {}),
+    // 批次 B：合并提示（REQ-014 superseded 补带 + merged_from_count，无则不带）
+    ...(h.superseded
+      ? { supersede_note: h.merged_from_count
+        ? `以最新为准（合并自 ${h.merged_from_count} 条旧记录）`
+        : '以最新为准' }
+      : {}),
+  }));
+
+  // 批次 B：进化状态行固定最后（调用方未传则不加，四行口径不变）
+  if (growth) summary.push({ label: growth.label, value: growth.value });
+
+  return {
+    titleLine1,
+    titleLine2,
+    hint: RECALL_CARD_HINT,
+    summary,
+    background: result.background.items.map((it) => ({
+      category: it.category,
+      mem_id: it.mem_id,
+      excerpt: plainClip(it.content, 160),
+    })),
+    hits,
+    basis: hits,
+    warnings: recallWarnings(result, r, unitPriceCnyPerMTok),
+  };
 }
 
 /* ---------- 本机召回明细页（批次33-C）：聊天里点链接展开，页面自己支持真折叠 ---------- */
@@ -784,7 +863,7 @@ export function buildRecallDetailPage(
     ? `<ul class="warn">${echo.warnings.map((w) => `<li>${htmlEscape(w)}</li>`).join('')}</ul>`
     : '';
   // 依据段标题沿用 buildRecallSections 的第 2 段（数字与聊天侧同源，含读法说明），正文换成编号卡
-  const citesTitle = sections[1]?.title ?? `🧠 命中记忆 ${result.hits.length} 条（${fmtInt(result.savings.payload_tokens)}t）`;
+  const citesTitle = sections[1]?.title ?? `💠 命中记忆 ${result.hits.length} 条 (${fmtInt(result.savings.payload_tokens)}t)`;
   const citeCards = result.hits.length > 0
     ? result.hits.map((h, i) => hitCardHtml(h, i, clipChars)).join('\n')
     : `<p class="muted">未命中（扫描 ${fmtInt(result.scanned_memories)} 条）：本页不编造条目，也不出现任何 [n] 编号。</p>`;
@@ -945,7 +1024,7 @@ main{max-width:720px;margin:0 auto}h1{font-size:18px}code{font-family:ui-monospa
 <p>要看明细，任选一种：</p>
 <ul>
 <li>回到聊天窗口，让助手「用同一个问题再检索一次并展开明细」（即 <code>recall_memory</code> 置 <code>detail=true</code>），会重新得到一份纯 Markdown 四段明细；</li>
-<li>或在客户端里重新提问一次，摘要行里会带一条新的「▶ 展开本次召回明细」链接。</li>
+<li>或在客户端里重新提问一次；摘要行首的「▶」就是展开标记，点开气泡折叠卡即可看当次明细（2026-11-21 起摘要行不再附明细链接）。</li>
 </ul>
 <p>本页面不含令牌，也不显示任何其它项目的记忆；链接本身由随机 id 把守。</p>
 </main></body></html>

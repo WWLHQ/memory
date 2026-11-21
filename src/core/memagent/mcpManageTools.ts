@@ -16,6 +16,7 @@
 import { projectInScope, type McpAccount } from './mcpAuth.ts';
 import { McpToolError } from './mcpRecall.ts';
 import { toMemoryView, type MemoryView } from './mcpReadTools.ts';
+import { ulid } from './ulid.ts';
 import type {
   DecayClass, FeedbackKind, MemAgent, MemOp, MemOpPatch, StorageBackend,
 } from './types.ts';
@@ -45,6 +46,10 @@ export interface FeedbackToolResult {
   request_id: string;
   /** M1-3：反馈→召回归因结果（linked=false 时不写 recall_feedback 审计，绝不把猜测当标签） */
   recall_link: { linked: boolean; recall_id: string | null };
+  /** 批次 A1：implicit confirm 弱信号（不动信任分，只 reinforce_count+1，进评估样本池） */
+  implicit?: boolean;
+  /** 批次 A1：同一 request_id+mem_id 已记过隐式反馈（幂等去重，不再重复 +1） */
+  duplicate?: boolean;
 }
 
 export interface ManageToolResult {
@@ -125,7 +130,15 @@ function parsePatch(raw: unknown, action: MemOp): MemOpPatch {
   return patch;
 }
 
-/** 用户反馈：trust_delta 由内核 coreFeedback 计算，MCP 层不自行判定 */
+/**
+ * 用户反馈：trust_delta 由内核 coreFeedback 计算，MCP 层不自行判定。
+ * 批次 A1（记忆闭环方案）：verdict=confirm 可携 implicit=true —— 「引用即隐式确认」弱信号口：
+ * 不走 coreFeedback（confidence 一分不动），只 reinforce_count+1 并落两条审计
+ * （memory_op[op=confirm,implicit] + recall_feedback[implicit]——后者会被 recallEval
+ * 自动当强标签进评估样本池，这正是「只进样本池」的落点）。
+ * 红线：必须能归因到具体召回（linked=false 直接拒绝，不写任何标签，M1-4）；
+ * 同一 request_id + mem_id 幂等去重，重复返回 duplicate:true 且不再 +1（防刷）。
+ */
 export async function runFeedbackTool(
   ma: MemAgent,
   storage: StorageBackend,
@@ -137,12 +150,27 @@ export async function runFeedbackTool(
   if (typeof verdict !== 'string' || !VERDICTS.includes(verdict as FeedbackKind)) {
     throw new McpToolError(`feedback.verdict 非法：${String(verdict)}（允许：${VERDICTS.join('/')}）`);
   }
+  // 批次 A1：implicit 仅布尔且仅 confirm 可携，其它组合明确拒绝，不静默降级
+  const implicit = args.implicit === true;
+  if (args.implicit !== undefined && typeof args.implicit !== 'boolean') {
+    throw new McpToolError('feedback.implicit 须为布尔值');
+  }
+  if (implicit && verdict !== 'confirm') {
+    throw new McpToolError(`feedback.implicit 仅 verdict=confirm 可用（当前 verdict=${verdict}）：隐式信号只在采信 [n] 时提交`);
+  }
   // M1-3：可选 recall_id（产生该记忆的召回 request_id）；显式给了就必须是合法非空串
   const rawRecallId = args.recall_id;
   if (rawRecallId !== undefined && (typeof rawRecallId !== 'string' || !rawRecallId.trim())) {
     throw new McpToolError('feedback.recall_id 非法：须为非空字符串（recall_memory 回执里的 request_id）');
   }
   await assertInScope(storage, memId, account);
+
+  // ── 批次 A1：implicit confirm 弱信号分支（内核 coreFeedback 一行不改） ──
+  if (implicit) {
+    return runImplicitConfirm(storage, memId, account,
+      typeof rawRecallId === 'string' ? rawRecallId.trim() : undefined);
+  }
+
   // 内核行为一行不改：trust_delta 仍由 coreFeedback 计算（M1-3 只新增归因审计）
   const r = await ma.feedback(memId, verdict as FeedbackKind);
   // M1-3 归因：显式 recall_id 优先，否则按「最近一次含该 mem_id 的召回」自动关联；
@@ -164,6 +192,73 @@ export async function runFeedbackTool(
     trust_delta: r.trust_delta,
     request_id: r.request_id,
     recall_link: recallLink,
+  };
+}
+
+/**
+ * 批次 A1：implicit confirm 弱信号落地（MCP 层，内核 coreFeedback 一行不改）。
+ * - 必须能归因到具体召回（linked=false 直接拒绝——不可归因的弱信号既无法去重也不该当标签）；
+ * - 幂等去重：同一 request_id + mem_id 只记一次（查 recall_feedback 审计里 implicit 条目）；
+ * - 只 reinforce_count+1（version+1 / updated_at 照走），confidence 不动（trust_delta 恒 0）；
+ * - 不延寿、不触发降档（弱信号只进评估样本池，批次 C 才给显式 confirm 加延寿）。
+ */
+async function runImplicitConfirm(
+  storage: StorageBackend,
+  memId: string,
+  account: McpAccount,
+  explicitRecallId: string | undefined,
+): Promise<FeedbackToolResult> {
+  const recallLink = await resolveRecallLink(storage, memId, explicitRecallId, undefined);
+  if (!recallLink.linked || !recallLink.recall_id) {
+    throw new McpToolError(
+      'feedback.implicit 关联不到召回审计（recall_link.linked=false）：不可归因的隐式信号不记录，'
+      + '请携带本次 recall_memory 回执的 request_id 作为 recall_id',
+    );
+  }
+  const recallId = recallLink.recall_id;
+  const requestId = `req_${ulid()}`;
+  const now = Date.now();
+
+  // 防刷去重：同一 request_id + mem_id 已记过 → 幂等返回，不再 +1、不再写审计
+  const past = await storage.queryAudit({ action: 'recall_feedback' });
+  const already = past.some((a) => {
+    const d = a.detail;
+    return d.implicit === true && d.recall_id === recallId && d.mem_id === memId;
+  });
+  const current = await storage.getMemory(memId);
+  if (!current) {
+    return { ok: false, mem: null, trust_delta: 0, request_id: requestId, recall_link: recallLink };
+  }
+  if (already) {
+    return {
+      ok: true, mem: toMemoryView(current), trust_delta: 0, request_id: requestId,
+      recall_link: recallLink, implicit: true, duplicate: true,
+    };
+  }
+
+  // 只强化计数，不动信任分（confidence / half_life_days / decay_class 一律不碰）
+  const next = {
+    ...current,
+    reinforce_count: (current.reinforce_count ?? 0) + 1,
+    version: current.version + 1,
+    updated_at: now,
+  };
+  await storage.putMemory(next);
+  // 状态变更照走 memory_op 审计（trust_delta 诚实为 0，reinforce_only 标明不是打分确认）
+  await storage.appendAudit({
+    request_id: requestId, action: 'memory_op', ts: now, project_id: current.project_id,
+    user_id: account.user_id,
+    detail: { op: 'confirm', implicit: true, trust_delta: 0, reinforce_only: true, mem_id: memId },
+  });
+  // 复用 recall_feedback action（implicit 标记区分强弱）：recallEval 会自动当强标签进评估样本池
+  await storage.appendAudit({
+    request_id: requestId, action: 'recall_feedback', ts: now,
+    project_id: current.project_id, user_id: account.user_id,
+    detail: { recall_id: recallId, mem_id: memId, verdict: 'confirm', implicit: true, ts: now },
+  });
+  return {
+    ok: true, mem: toMemoryView(next), trust_delta: 0, request_id: requestId,
+    recall_link: recallLink, implicit: true,
   };
 }
 

@@ -81,8 +81,8 @@ describe('MCP HTTP（批次2 信任边界）', () => {
     const body = (await header.json()) as { result: { tools: Array<{ name: string; description?: string }> } };
     expect(body.result.tools.map((t) => t.name)).toEqual([
       'recall_memory', 'write_memory', 'list_projects', 'get_preferences', 'get_write_status',
-      'recall_hook_status', 'list_memories', 'get_memory', 'feedback', 'manage_memory', 'gc_report',
-      'create_project', 'mint_token',
+      'recall_hook_status', 'list_memories', 'growth_evolve', 'get_memory', 'feedback', 'manage_memory',
+      'gc_report', 'create_project', 'mint_token',
     ]);
     // 批次14：措辞为「优先使用本工具 + 未命中/不可用再回退」，不是硬禁用
     const recallDesc = body.result.tools.find((t) => t.name === 'recall_memory')?.description ?? '';
@@ -281,44 +281,49 @@ describe('MCP HTTP（批次2 信任边界）', () => {
     expect(body.result.structuredContent.resolved_from).toBe('single_project');
     expect(body.result.structuredContent.hits.length).toBeGreaterThan(0);
     expect(body.result.structuredContent.display.money).toBeNull();
-    expect(body.result.structuredContent.display.line).toContain('🧠 Memory');
+    expect(body.result.structuredContent.display.line.startsWith('▶ ')).toBe(true);
     expect(body.result.structuredContent.display.line).toContain('未设置单价');
     expect(body.result.content).toHaveLength(4); // 提示行 + 完整 JSON + 明细 + 展示要求
     expect(body.result.content[0].text).toBe(body.result.structuredContent.display.line);
     // A8：单行兜底 / 明细 / 展示要求四块都必须认识本次 ⚙ 模式行，不能只有 display.markdown 带
-    expect(body.result.structuredContent.display.line).toContain('⚙ 模式');
-    expect(body.result.content[0].text).toContain('⚙ 模式');
-    expect(body.result.content[2].text).toContain('⚙ 模式');
-    expect(body.result.content[3].text).toContain('⚙ 模式');
+    expect(body.result.structuredContent.display.line).toContain('⚙ ');
+    expect(body.result.content[0].text).toContain('⚙ ');
+    expect(body.result.content[2].text).toContain('⚙ ');
+    expect(body.result.content[3].text).toContain('⚙ 模式'); // 展示要求文案里仍有「⚙ 模式简称」
     expect(body.result.content[1].text).toContain('"saved_tokens"');
-    // 批次32-C/33-C：无会话（非 Qoder）→ 默认档「两行摘要 + 可点明细链接」，四段明细不在聊天里铺开
+    // 2026-11-21 用户定稿：无会话（非 Qoder）→ 默认档**只有一行摘要**，无链接行、无提示行
     expect(body.result.structuredContent.display.mode).toBe('markdown-compact');
     expect(body.result.content[2].text).toBe(body.result.structuredContent.display.markdown);
+    expect(body.result.content[2].text).toBe(`**${body.result.structuredContent.display.line}**`);
     expect(body.result.content[2].text).not.toContain('<details>');
     expect(body.result.content[2].text).not.toContain('**📎 项目背景');
-    expect(body.result.content[2].text).toContain('▶ [展开本次召回明细');
-    expect(body.result.content[2].text).toContain('/recall/');
-    expect(body.result.content[2].text).not.toContain('detail=true');
-    expect(body.result.structuredContent.display.detail_url).toContain('/recall/');
+    expect(body.result.content[2].text).not.toContain('展开本次召回明细');
+    expect(body.result.content[2].text).not.toContain('📌');
+    expect(body.result.content[2].text).not.toContain('/recall/');
+    expect(body.result.structuredContent.display.detail_url).toContain('/recall/'); // URL 只在 payload 里，不进 markdown
     expect(body.result.content[3].text).toContain('默认收起 + 点击展开');
-    expect(body.result.content[3].text).toContain('URL 必须逐字保留');
+    expect(body.result.content[3].text).toContain('没有第二行、没有明细页链接');
     expect(body.result.content[3].text).toContain('禁止自行补写');
     // 批次 RAG / C 组：compact 档展示要求必须带就地引用口径，且与实际下发的段名一致
+    // 2026-11-21：摘要行不再带 [n] 编号（「依据 [n]」已废），编号只在 detail=true 的依据段里
     expect(body.result.content[3].text).toContain('就地标注 [n]');
-    expect(body.result.content[3].text).toContain('依据 [n]');
-    expect(body.result.content[3].text).toContain('统计汇总 / 命中依据 / Token / 费用');
-    expect(body.result.content[2].text).toContain('📊 汇总：');
+    expect(body.result.content[3].text).toContain('本次摘要行不含 [n] 编号');
+    expect(body.result.content[3].text).toContain('展开后必须能同时查到汇总与明细');
+    expect(body.result.content[2].text).not.toContain('📊 汇总');
+    expect(body.result.content[2].text.split('\n')[0].startsWith('**▶ ⚙ ')).toBe(true);
     expect(body.result.content[3].text).not.toContain('<details>');
   });
 
-  it('批次33-C：摘要里的明细链接可点 → GET /recall/<id> 返回真折叠页面（无需令牌）', async () => {
+  it('批次33-C：detail_url 票据可点 → GET /recall/<id> 返回真折叠页面（无需令牌）', async () => {
     const r = await call(
       { jsonrpc: '2.0', id: 94, method: 'tools/call', params: { name: 'recall_memory', arguments: { query: 'MCP HTTP 写入测试' } } },
       { Authorization: `Bearer ${TOKEN}` },
     );
-    const body = (await r.json()) as { result: { structuredContent: { display: { markdown: string } } } };
-    const m = body.result.structuredContent.display.markdown.match(/\/recall\/([A-Za-z0-9_-]{16,32})/);
-    expect(m, '摘要里应带一条一次性明细页链接').not.toBeNull();
+    const body = (await r.json()) as { result: { structuredContent: { display: { markdown: string; detail_url: string | null } } } };
+    // 2026-11-21 定稿：链接不再写进 markdown，只在 payload 的 detail_url 字段里
+    expect(body.result.structuredContent.display.markdown).not.toContain('/recall/');
+    const m = body.result.structuredContent.display.detail_url?.match(/\/recall\/([A-Za-z0-9_-]{16,32})/);
+    expect(m, 'detail_url 应带一条一次性明细页链接').not.toBeNull();
     const page = await fetch(`http://${hostHeader}${m![0]}`);
     expect(page.status).toBe(200);
     expect(page.headers.get('content-type')).toContain('text/html');
@@ -327,7 +332,7 @@ describe('MCP HTTP（批次2 信任边界）', () => {
     const html = await page.text();
     // 页面 = 四段真折叠（客户端不渲染 HTML 也能点的那一份）：依据段默认展开，其余三段 data-fold 收起
     expect(html).toContain('📎 项目背景');
-    expect(html).toContain('🧠 命中记忆');
+    expect(html).toContain('💠 命中记忆');
     expect(html).toContain('⚡ Token 用量');
     expect(html).toContain('💰 省钱与费用');
     expect((html.match(/<details\b/g) ?? []).length).toBe(4);
@@ -354,8 +359,10 @@ describe('MCP HTTP（批次2 信任边界）', () => {
       { jsonrpc: '2.0', id: 95, method: 'tools/call', params: { name: 'recall_memory', arguments: { query: 'MCP HTTP 写入测试' } } },
       { Authorization: `Bearer ${TOKEN}` },
     );
-    const body = (await r.json()) as { result: { structuredContent: { display: { markdown: string } } } };
-    const path = body.result.structuredContent.display.markdown.match(/(\/recall\/[A-Za-z0-9_-]{16,32})/)?.[1] ?? '';
+    const body = (await r.json()) as { result: { structuredContent: { display: { markdown: string; detail_url: string | null } } } };
+    // 2026-11-21：链接不再写进 markdown，只从 payload 的 detail_url 取
+    expect(body.result.structuredContent.display.markdown).not.toContain('/recall/');
+    const path = body.result.structuredContent.display.detail_url?.match(/(\/recall\/[A-Za-z0-9_-]{16,32})/)?.[1] ?? '';
     expect(path).not.toBe('');
 
     const withOrigin = await fetch(`http://${hostHeader}${path}`, { headers: { Origin: 'http://evil.example' } });
@@ -483,8 +490,9 @@ describe('MCP HTTP（批次2 信任边界）', () => {
     const recallBody = (await recall.json()) as {
       result: { structuredContent: { display: { markdown: string } }; content: Array<{ text: string }> };
     };
-    // 批次29：Qoder 会话 → 仍发 <details> 折叠版（白名单内唯一实测客户端）
-    expect(recallBody.result.structuredContent.display.markdown).toContain('<details>');
+    // 2026-11-21 用户禁止 HTML：白名单客户端也只收纯 Markdown（判档不变、载体零标签）
+    expect(recallBody.result.structuredContent.display.markdown).toContain('**▶ ');
+    expect(recallBody.result.structuredContent.display.markdown).not.toContain('<details');
     // 批次 RAG / C 组：折叠档展示要求不再声称「四段」，段名与实际 markdown 逐字一致
     expect(recallBody.result.content[3].text).toContain('📊 本次召回统计汇总');
     expect(recallBody.result.content[3].text).toContain('🎯 本次用上的依据');
@@ -630,6 +638,41 @@ describe('MCP HTTP（批次2 信任边界）', () => {
     const auditA = (await storage.queryAudit({ action: 'recall' }))
       .filter((a) => (a.detail as { query?: string }).query === '批次41-X 甲客户端');
     expect((auditA[0].detail as { client?: string }).client).toBe('claude-code');
+  });
+
+  it('2026-11-21：display.card 只下发给富媒体宿主（WorkBuddy/CodeBuddy），qoder 为 null', async () => {
+    const GENERIC_UA = 'node';
+    const wb = await call(
+      { jsonrpc: '2.0', id: 170, method: 'tools/call', params: { name: 'recall_memory', arguments: { project_id: 'P1', query: '卡片结构 workbuddy' } } },
+      { Authorization: `Bearer ${TOKEN}`, 'User-Agent': GENERIC_UA, 'X-Memagent-Client': 'workbuddy' },
+    );
+    const wbBody = (await wb.json()) as {
+      result: { structuredContent: { display: { card: null | {
+        titleLine1: string; titleLine2: string; hint: string;
+        summary: Array<{ label: string; value: string }>;
+        hits: Array<{ feedback_hint?: string; reinforce_count?: number }>; basis: unknown[];
+      } } } };
+    };
+    const card = wbBody.result.structuredContent.display.card;
+    expect(card).not.toBeNull();
+    expect(card!.titleLine1.length).toBeGreaterThan(0);
+    expect(card!.titleLine1.startsWith('▶')).toBe(false);
+    expect(card!.hint).toBe('点击查阅详细内容');
+    expect(card!.summary.slice(0, 4).map((s) => s.label)).toEqual(['Token', '费用', '今日', '全部']);
+    expect(card!.summary[card!.summary.length - 1].label).toBe('进化'); // 批次 B：进化行固定最后
+    expect(card!.summary[card!.summary.length - 1].value).toContain('模式');
+    expect(card!.basis).toEqual(card!.hits);
+    // 批次 A2：命中逐条带反馈入口提示（hit 若存在）
+    for (const h of card!.hits) {
+      expect(h.feedback_hint).toBe('回复「N 有用」或「N 没用」反馈本条');
+    }
+
+    const qd = await call(
+      { jsonrpc: '2.0', id: 171, method: 'tools/call', params: { name: 'recall_memory', arguments: { project_id: 'P1', query: '卡片结构 qoder' } } },
+      { Authorization: `Bearer ${TOKEN}`, 'User-Agent': GENERIC_UA, 'X-Memagent-Client': 'qoder-cn' },
+    );
+    const qdBody = (await qd.json()) as { result: { structuredContent: { display: { card: unknown } } } };
+    expect(qdBody.result.structuredContent.display.card).toBeNull();
   });
 
   it('批次41-X：带身份头的客户端不占用通用 UA 那条键——随后无头同 UA 的调用不会被算成它', async () => {
@@ -1251,10 +1294,10 @@ describe('批次44-D5-4：recall_memory(scope=session)（HTTP 8204 端到端）'
     return ((await res.json()) as { result: Record<string, unknown> }).result;
   }
 
-  it('tools/list 仍是 10 个工具；recall/write schema 含 session_id；instructions 点名会话视图', async () => {
+  it('tools/list 仍是 14 个工具；recall/write schema 含 session_id；instructions 点名会话视图', async () => {
     const list = await rpc('tools/list');
     const tools = list.tools as Array<{ name: string; inputSchema: { properties: Record<string, unknown> } }>;
-    expect(tools.map((t) => t.name)).toHaveLength(13); // 钩子自检 recall_hook_status 起 13 个工具
+    expect(tools.map((t) => t.name)).toHaveLength(14); // 自进化 growth_evolve 起为 14 个工具
     const props = tools.find((t) => t.name === 'recall_memory')!.inputSchema.properties;
     expect(props).toHaveProperty('scope');
     expect(props).toHaveProperty('session_id');
@@ -1462,14 +1505,14 @@ describe('批次47：L1 工具描述首步召回 + L2 会话门禁（HTTP 8204�
   });
   afterAll(() => { handle?.stop(); });
 
-  it('L1：tools/list 全部 12 工具描述带「首步召回」前缀（recall=🔴、其余=⚠️，且保留原描述）', async () => {
+  it('L1：tools/list 全部 14 工具描述带「首步召回」前缀（recall=🔴、其余=⚠️，且保留原描述）', async () => {
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
     });
     const tools = ((await res.json()) as { result: { tools: Array<{ name: string; description: string }> } }).result.tools;
-    expect(tools).toHaveLength(13);
+    expect(tools).toHaveLength(14);
     const recall = tools.find((t) => t.name === 'recall_memory')!;
     expect(recall.description).toContain('🔴【本会话第一步】');
     expect(recall.description).toContain('优先使用本工具'); // 原描述保留
@@ -1589,7 +1632,7 @@ describe('批次 RAG · C 组：展示要求三处与实际 display.markdown 逐
       payload_tokens: 100, pipeline_llm_tokens: 0,
       budget: { soft: 1500, warn: 2000, hard: 3000, status: 'ok' },
       // A8：C 组是「note 与真实 markdown 逐字一致」的夹具，dispatch 必须是真值，
-      // 否则模式行根本不生成，旧「两行摘要」断言会假绿。
+      // 否则模式行根本不生成，旧「多行摘要」断言会假绿。
       mode: 'fact_first', hit_keywords: [], secondary_mode_hint: null,
       dispatch: {
         source: 'manual', suggested: 'fact_first', applied: 'fact_first', secondary: null,
@@ -1613,18 +1656,25 @@ describe('批次 RAG · C 组：展示要求三处与实际 display.markdown 逐
   it('C1-a html-details：note 段名逐字出现在真实 markdown，旧「四段」措辞已清除', () => {
     const { html } = fixtures();
     const note = recallEchoNote('html-details');
-    for (const s of ['📊 本次召回统计汇总', '🎯 本次用上的依据', '▶ 展开本次召回汇总']) {
+    for (const s of ['📊 本次召回统计汇总', '🎯 本次用上的依据', '📎 项目背景', '💠 命中记忆']) {
       expect(note, `展示要求缺 ${s}`).toContain(s);
       expect(html, `真实 markdown 缺 ${s}`).toContain(s);
     }
+    // 2026-11-21 禁止 HTML：<summary> 段名已废，摘要行首 ▶ 黑三角即展开标记
+    expect(note).not.toContain('<summary>');
+    expect(html).not.toContain('<summary>');
+    expect(html.startsWith('**▶ ')).toBe(true);
+    expect(note).not.toContain('展开本次召回汇总');
+    expect(html).not.toContain('展开本次召回汇总');
+    expect(html).not.toContain('<details');
     expect(note).toContain('就地标注 [n]');
     expect(note).toContain('不得编造编号');
     expect(note).toContain('【信息来源边界】');
     expect(note).not.toContain('<details> 四段');
     expect(note).not.toContain('四段明细');
     // A8：html 档展示要求也必须认识 ⚙ 模式行，且真实 markdown 里有
-    expect(note).toContain('⚙ 模式');
-    expect(html).toContain('⚙ 模式');
+    expect(note).toContain('⚙ 模式'); // note 文案用「⚙ 模式简称」
+    expect(html).toContain('⚙ 事实优先'); // 真实 markdown 用模式简称
   });
 
   it('C1-b markdown-full：段名与纯 Markdown 正文逐字一致、零 HTML 标签', () => {
@@ -1643,30 +1693,34 @@ describe('批次 RAG · C 组：展示要求三处与实际 display.markdown 逐
     expect(note).not.toContain('四段明细');
     // A8：full 档展示要求也必须认识 ⚙ 模式行
     expect(note).toContain('⚙ 模式');
-    expect(full).toContain('⚙ 模式');
+    expect(full).toContain('⚙ 事实优先');
   });
 
-  it('C1-c markdown-compact：note 与两行短摘要/链接文案逐字一致，且不含 <details>', () => {
+  it('C1-c markdown-compact：只有一行摘要，无链接行/提示行，note 也明说「没有第二行」', () => {
     const { compact } = fixtures();
     const note = recallEchoNote('markdown-compact');
     expect(note).toContain('默认收起 + 点击展开');
-    expect(note).toContain('依据 [n]');
-    expect(note).toContain('📊 汇总：');
-    expect(note).toContain('统计汇总 / 命中依据 / Token / 费用');
-    expect(note).toContain('URL 必须逐字保留');
+    expect(note).toContain('模式简称');
+    expect(note).toContain('📎 背景');
+    expect(note).toContain('没有第二行、没有明细页链接');
+    expect(note).not.toContain('URL 必须逐字保留');
     expect(note).toContain('就地标注 [n]');
-    expect(compact).toContain('[1]「回显」');
-    expect(compact).toContain('[2]「ui」');
-    expect(compact).toContain('📊 汇总：');
-    expect(compact).toContain('▶ [展开本次召回明细（统计汇总 / 命中依据 / Token / 费用）]');
+    // compact 档只有摘要：没有依据段/编号、没有 📊 汇总段、没有链接行与 📌 提示
+    expect(compact).not.toContain('[1]');
+    expect(compact).not.toContain('📊 汇总');
+    expect(compact.startsWith('**▶ ⚙ ')).toBe(true);
+    expect(compact.split('\n')).toHaveLength(1);
+    expect(compact).not.toContain('展开本次召回明细');
+    expect(compact).not.toContain('📌');
+    expect(compact).not.toContain('http://127.0.0.1:8204/recall/');
     expect(note).not.toContain('<details>');
     expect(note).not.toContain('四段明细');
-    // A8：compact 档展示要求与真实 markdown 都带 ⚙ 模式行（夹具 dispatch 已是真值）
+    // A8：compact 档展示要求与真实 markdown 都带行首 ⚙ 模式段（夹具 dispatch 已是真值）
     expect(note).toContain('⚙ 模式');
-    expect(compact).toContain('⚙ 模式');
+    expect(compact).toContain('⚙ 事实优先');
   });
 
-  it('C1-d A8 展示要求四处同口径：两行摘要 + 一行 ⚙ 模式，且必须原样输出 display.markdown', () => {
+  it('C1-d A8 展示要求四处同口径：一行摘要（行首 ⚙ 模式），且必须原样输出 display.markdown', () => {
     const tool = MCP_TOOLS.find((t) => t.name === 'recall_memory')!;
     const props = tool.inputSchema.properties as unknown as Record<string, { description?: string }>;
     const targets: Array<[string, string]> = [
@@ -1678,7 +1732,7 @@ describe('批次 RAG · C 组：展示要求三处与实际 display.markdown 逐
       ['recallEchoNote(markdown-compact)', recallEchoNote('markdown-compact')],
     ];
     for (const [label, text] of targets) {
-      expect(text, `${label} 不认识 ⚙ 模式行`).toContain('⚙ 模式');
+      expect(text, `${label} 不认识模式行`).toContain('⚙ ');
       expect(text, `${label} 仍用旧的「两行加粗短摘要」口径`).not.toContain('两行加粗短摘要');
     }
     for (const mode of ['html-details', 'markdown-full', 'markdown-compact'] as const) {
@@ -1697,7 +1751,9 @@ describe('批次 RAG · C 组：展示要求三处与实际 display.markdown 逐
     expect(MCP_INSTRUCTIONS).toContain('不得编造编号');
     expect(MCP_INSTRUCTIONS).toContain('📊 本次召回统计汇总');
     expect(MCP_INSTRUCTIONS).toContain('🎯 本次用上的依据');
-    expect(MCP_INSTRUCTIONS).toContain('URL 必须逐字保留');
+    expect(MCP_INSTRUCTIONS).toContain('markdown-compact');
+    expect(MCP_INSTRUCTIONS).toContain('没有第二行');
+    expect(MCP_INSTRUCTIONS).not.toContain('URL 必须逐字保留');
     const tool = MCP_TOOLS.find((t) => t.name === 'recall_memory');
     expect(tool).toBeTruthy();
     expect(tool!.description).toContain('就地标注 [n]');
@@ -1709,15 +1765,20 @@ describe('批次 RAG · C 组：展示要求三处与实际 display.markdown 逐
     expect(props.detail.description).toContain('[n]');
   });
 
-  it('C3 三档 note 互不串档：仅 html 档提 <details>、仅 compact 档提链接，三档均带来源边界', () => {
+  it('C3 三档 note 互不串档：三档都零 HTML、都讲折叠卡，compact 档不再提链接 URL', () => {
     const html = recallEchoNote('html-details');
     const full = recallEchoNote('markdown-full');
     const compact = recallEchoNote('markdown-compact');
-    expect(html).toContain('<details>');
-    expect(full).not.toContain('<details>');
-    expect(compact).not.toContain('<details>');
+    for (const note of [html, full, compact]) {
+      expect(note).not.toContain('<details');
+      expect(note).not.toContain('<summary>');
+      expect(note).not.toContain('<mark>');
+      expect(note).toContain('折叠卡');
+      expect(note).toContain('黑三角 ▶');
+    }
     expect(html).not.toContain('URL 必须逐字保留');
-    expect(compact).toContain('URL 必须逐字保留');
+    expect(compact).not.toContain('URL 必须逐字保留');
+    expect(compact).toContain('没有第二行');
     for (const note of [html, full, compact]) {
       expect(note).toContain('【信息来源边界】');
       expect(note).toContain('不得编造编号');
@@ -1725,33 +1786,60 @@ describe('批次 RAG · C 组：展示要求三处与实际 display.markdown 逐
     }
   });
 
-  it('C4 富媒体客户端（WorkBuddy）禁用 HTML：折叠只走气泡内折叠卡，且仅 compact 档授权', () => {
+  it('C4 富媒体客户端（WorkBuddy）禁用 HTML：卡片即回显、文本行二选一，且仅 compact 档授权', () => {
     const compact = recallEchoNote('markdown-compact');
-    expect(compact).toContain('气泡折叠档');
+    expect(compact).toContain('卡片即回显');
     expect(compact).toContain('折叠卡');
     expect(compact).toContain('默认收起');
     expect(compact).toContain('不要输出任何 HTML 标签');
-    expect(compact).toContain('URL 逐字保留');
-    // A8：气泡折叠卡文案也要带上第三行 ⚙ 模式，不能让卡片标题/摘要口径与 markdown 分叉
+    expect(compact).not.toContain('URL 逐字保留');
+    expect(compact).toContain('没有第二行');
+    // A8：卡片标题口径也要带上 ⚙ 模式简称，不能让卡片标题/摘要口径与 markdown 分叉
     expect(compact).toContain('⚙ 模式');
-    // 2026-11-12 用户验收该形态 → 从「能做就做」升级为「有卡片能力必须做」，并标注已验收
-    expect(compact).toContain('**必须**为本次召回输出一张');
-    expect(compact).toContain('已验收');
+    // 2026-11-21 用户最终拍板：卡片独占回显区——二选一绝不并存、标题 2 行、无大黑三角、小箭头、位置在末尾
+    expect(compact).toContain('二选一、绝不并存');
+    expect(compact).toContain('卡片标题压成 2 行');
+    expect(compact).toContain('不要大黑三角 ▶');
+    expect(compact).toContain('小箭头');
+    expect(compact).toContain('放在回答末尾的召回回显区');
+    // 2026-11-21 追加：箭头放大清晰 + 标题后小字提示 + 卡片后零文字（用户红框括注禁令）
+    expect(compact).toContain('箭头要放大到清晰可见');
+    // 2026-11-21 排版微调：省量放第一行末尾、小字「点击查阅详细内容」跟在「全部 N 次」后
+    expect(compact).toContain('⚡ 省 …t（省量/token 节省放第一行末尾）');
+    expect(compact).toContain('点击查阅详细内容');
+    expect(compact).not.toContain('点开查阅详细内容');
+    expect(compact).toContain('全部 N 次」后面紧跟');
+    expect(compact).toContain('卡片之后不要再输出任何文字');
+    // 2026-11-21 新增：富媒体宿主下发结构化 display.card，宿主按字段渲染、不拆字符串
+    expect(compact).toContain('display.card');
+    expect(compact).toContain('不要自己从 display.line 拆字符串');
+    expect(MCP_INSTRUCTIONS).toContain('display.card');
+    expect(MCP_INSTRUCTIONS).toContain('点击查阅详细内容');
+    expect(MCP_INSTRUCTIONS).toContain('省量放第一行末尾');
+    expect(MCP_INSTRUCTIONS).toContain('卡片之后不要再输出任何文字');
+    // 2026-11-21 反馈交互按钮：支持会话按钮的宿主把 feedback_hint 升级为 sendPrompt 按钮；无按钮宿主保留文字不伪造
+    expect(compact).toContain('「N 有用 ↗」「N 没用 ↗」');
+    expect(compact).toContain('sendPrompt');
+    expect(compact).toContain('不要伪造按钮');
+    expect(MCP_INSTRUCTIONS).toContain('sendPrompt');
+    expect(MCP_INSTRUCTIONS).toContain('不要伪造按钮');
     // 展开后要能查到「汇总 + 明细」，不只是汇总
     expect(compact).toContain('展开后必须能同时查到汇总与明细');
     expect(compact).toContain('正文片段');
     // 2026-11-12 用户拍板：明细固定顺序 背景 → 命中 → 依据 → 证据不足（最后）
-    expect(compact).toMatch(/📎 项目背景[\s\S]*🧠 命中记忆[\s\S]*🎯 本次用上的依据[\s\S]*⚠ 证据不足/);
+    // 段名 emoji：背景用 📎（用户 2026-11-21 最终拍板，曾短暂改 🔑 后改回）、命中记忆 💠（旧 🧠→💠）
+    expect(compact).toMatch(/📎 项目背景[\s\S]*💠 命中记忆[\s\S]*🎯 本次用上的依据[\s\S]*⚠ 证据不足/);
     // 背景必须逐条独立成行，不得压成一整段
     expect(compact).toContain('逐条独立成行');
-    // 反向：折叠档 / 明细档不得出现这条增强通道（它们本身就是 HTML / 四小节载体）
-    expect(recallEchoNote('html-details')).not.toContain('气泡折叠档');
-    expect(recallEchoNote('markdown-full')).not.toContain('气泡折叠档');
-    // 三处指令同步：WorkBuddy 恒定两行摘要档，折叠交给客户端气泡卡片，文本零 HTML
-    expect(MCP_INSTRUCTIONS).toContain('气泡内折叠卡片');
+    // 2026-11-21 禁止 HTML 后三档统一带折叠卡口径：html/full 档也必须携带这条折叠口径
+    expect(recallEchoNote('html-details')).toContain('折叠卡');
+    expect(recallEchoNote('markdown-full')).toContain('折叠卡');
+    // 三处指令同步：WorkBuddy 恒走 compact 档，卡片即回显、文本行二选一，文本零 HTML
+    expect(MCP_INSTRUCTIONS).toContain('卡片即回显');
+    expect(MCP_INSTRUCTIONS).toContain('二选一、绝不并存');
     expect(MCP_INSTRUCTIONS).toContain('WorkBuddy');
     const tool = MCP_TOOLS.find((t) => t.name === 'recall_memory');
-    expect(tool!.description).toContain('气泡内折叠卡片');
-    expect(tool!.description).toContain('不要在文本里写 HTML 标签');
+    expect(tool!.description).toContain('卡片即回显');
+    expect(tool!.description).toContain('不要写 HTML 标签');
   });
 });

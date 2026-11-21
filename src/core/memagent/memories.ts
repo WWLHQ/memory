@@ -923,7 +923,8 @@ export async function coreMemoryOp(
 
 /**
  * 用户反馈（17.4 trust_delta，P9 提交入口）：
- * confirm confidence +0.1（reinforce_count 分家计数）；
+ * confirm confidence +0.1（reinforce_count 分家计数）+ 批次 C2 延寿：显式 half_life_days +3（封顶 90 天，
+ * 已 ≥90 不再动；未显式设置的不猜类别默认值，不固化策略）；
  * reject confidence −0.05（下限钳制 0.05）；disputed 不动分，挂 9.7 裁决（conflict_id）。
  */
 export async function coreFeedback(
@@ -948,10 +949,15 @@ export async function coreFeedback(
 
   if (kind === 'confirm') {
     delta = 0.1;
+    // 批次 C2：显式 confirm 延寿——已显式设置 half_life_days 的记忆 +3（封顶 90，已 ≥90 不再动）；
+    // 未显式设置的不动（不猜类别默认值，避免把策略默认固化进记录）。implicit 弱信号不走本分支、永不延寿。
+    const curHld = m.half_life_days;
+    const nextHld = curHld !== undefined && curHld < 90 ? Math.min(curHld + 3, 90) : undefined;
     next = {
       ...m,
       confidence: clamp((m.confidence ?? 0.5) + delta, CLAMP.confidence),
       reinforce_count: (m.reinforce_count ?? 0) + 1, // 用户确认与召回命中分家（17.4）
+      ...(nextHld !== undefined ? { half_life_days: nextHld } : {}),
     };
   } else if (kind === 'reject') {
     delta = -0.05;
@@ -990,6 +996,9 @@ export async function coreFeedback(
     request_id, action: 'memory_op', ts: now, project_id: m.project_id,
     detail: {
       op: kind, trust_delta: delta, mem_id, confidence: next.confidence,
+      ...(next.half_life_days !== undefined && next.half_life_days !== m.half_life_days
+        ? { half_life_days: next.half_life_days }
+        : {}),
       ...(rated !== undefined ? { rating: rated } : {}),
       ...(note !== undefined ? { comment: note } : {}),
       ...(pairing ? { conflict_pair: pairing } : {}),

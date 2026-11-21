@@ -24,6 +24,7 @@ import type { PersonalMemoryStore } from './personalStore.ts';
 import { runGetMemoryTool, runListMemoriesTool } from './mcpReadTools.ts';
 import { deleteAllowed, runFeedbackTool, runManageMemoryTool } from './mcpManageTools.ts';
 import { runGcReportTool } from './mcpGcTools.ts';
+import { runGrowthEvolveTool } from './mcpGrowthTools.ts';
 import { runHookStatusTool } from './mcpHookTools.ts';
 import { runCreateProjectTool, runMintTokenTool } from './mcpProjectTools.ts';
 
@@ -326,6 +327,12 @@ export function runMcpServer(opts: McpOptions): McpServerHandle {
         case 'gc_report': {
           // 批次61 GAP-3：注入会话存储，供报告附只读 Agent 侧聚合（不改变 gc 本身的写入语义）
           send(socket, ok(req.id, await runGcReportTool(s, p, acct, { storage: sessionStorage })));
+          return;
+        }
+
+        // ── growth_evolve（批次 B/C/D：自进化与场景画像；status/profile 只读，adopt/policy 写配置） ──
+        case 'growth_evolve': {
+          send(socket, ok(req.id, await runGrowthEvolveTool(sessionStorage, p, { form: 'desktop' })));
           return;
         }
 

@@ -120,6 +120,7 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
       pinned: m.pinned, locked: m.locked,
       score: 0, // 未做语义相关度计算，0 是诚实值，不冒充相关度
       evidence_ref: `l0:${m.mem_id}`,
+      ...(m.reinforce_count !== undefined ? { reinforce_count: m.reinforce_count } : {}),
     }));
     const background = { items: [], tokens: 0, candidates: 0 };
     const savings = computeRecallSavings({ memories: all, hits, background, preCapTokens });
@@ -252,6 +253,8 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
       matched_terms: matchedTerms(req.query, m.content),
       // REQ-014 / T3（C6-B）：摘要 + 原文摘录双保真；无摘录时不带该字段（与改造前逐字一致）
       ...(m.source_excerpt ? { source_excerpt: m.source_excerpt } : {}),
+      // 批次 A3：进化状态带出（个人记忆命中无记忆记录则省略）
+      ...(m.reinforce_count !== undefined ? { reinforce_count: m.reinforce_count } : {}),
     }));
     // 背景去重口径：topK + 冷回填已考虑过的记忆都不得再以「背景」身份注入（防止被裁命中借道回灌）
     const consideredIds = new Set(scored.map(({ m }) => m.mem_id));
@@ -339,6 +342,7 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
             evidence_ref: `l0:${m.mem_id}`,
             matched_terms: matchedTerms(req.query, m.content),
             ...(m.source_excerpt ? { source_excerpt: m.source_excerpt } : {}),
+            ...(m.reinforce_count !== undefined ? { reinforce_count: m.reinforce_count } : {}),
           });
           consideredIds.add(m.mem_id);
         }

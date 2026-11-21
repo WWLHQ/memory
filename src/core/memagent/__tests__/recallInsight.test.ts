@@ -2,10 +2,11 @@
 import { describe, expect, it } from 'vitest';
 import type { AuditRecord, Hit, Memory, RecallResult } from '../types.ts';
 import {
-  BACKGROUND_MAX_ITEMS, BACKGROUND_MAX_TOKENS, buildRecallCompactMarkdown, buildRecallDetailExpiredPage,
-  buildRecallDetailPage, buildRecallEchoSummary, buildRecallFoldSummary, buildRecallHint, buildRecallMarkdown,
+  BACKGROUND_MAX_ITEMS, BACKGROUND_MAX_TOKENS, buildRecallCardData, buildRecallCompactMarkdown, buildRecallDetailExpiredPage,
+  RECALL_FEEDBACK_HINT,
+  buildRecallDetailPage, buildRecallEchoSummary, buildRecallHint, buildRecallMarkdown,
   buildRecallSections, buildRecallStatLines, computeRecallSavings, corpusTokens, formatCny, htmlEscape,
-  localDayStart, normalizeUnitPrice, recallSavingRatio, rollupRecalls, selectRecallBackground,
+  localDayStart, normalizeUnitPrice, RECALL_CARD_HINT, recallSavingRatio, rollupRecalls, selectRecallBackground,
 } from '../recallInsight.ts';
 import { createMemAgent } from '../agent.ts';
 import { clientSupportsHtmlDetails, recallDisplayMode } from '../mcpRecall.ts';
@@ -164,9 +165,12 @@ describe('rollupRecalls / 金额（批次11）', () => {
     ], now), 10);
     expect(hint.line).toContain('命中 2 条');
     expect(hint.line).toContain('📎 背景 2 条');
-    expect(hint.line).toContain('本次省 9,898t');
+    // 2026-11-21 压 2 行：省量简写「⚡ 省 Xt」，金额只留本次，今日/全部只留次数
+    expect(hint.line).toContain('⚡ 省 9,898t');
     expect(hint.line).toContain('今日 2 次');
     expect(hint.line).toContain('全部 2 次');
+    expect(hint.line).not.toContain('全量约');
+    expect(hint.line).not.toMatch(/今日 \d+ 次 ¥/);
     expect(hint.line).not.toContain('\n');
     expect(hint.money).not.toBeNull();
     // 10 元/百万预算单位 t：本次注入 102t → 0.00102 → ¥0.00102（6 位，估算值）
@@ -293,22 +297,21 @@ describe('内核 recall 接线（批次11）', () => {
 describe('buildRecallMarkdown（批次13）', () => {
   const none = () => rollupRecalls([], Date.now());
 
-  it('批次 RAG：外层短收 summary 默认收起；统计汇总 + 编号依据默认可见；四段降级为二级折叠', () => {
+  it('2026-11-21 零 HTML：摘要行首 ▶ 黑三角，统计汇总 + 编号依据 + 四段平铺（无 <details>/<summary>）', () => {
     const r = recallResult();
     const hint = buildRecallHint(r, none(), null);
     const md = buildRecallMarkdown(r, hint, null);
-    expect(md.startsWith('<details>\n<summary>🧠 命中 2 条')).toBe(true);
-    expect(md).not.toContain('<details open');
-    expect(md.match(/<details>/g)).toHaveLength(5); // 外层 1 + 四段 4（无 warning）
-    expect(md.match(/<\/details>/g)).toHaveLength(5);
-    expect(md).toContain('▶ 展开本次召回汇总');
+    expect(md.startsWith('**▶ ')).toBe(true);
+    expect(md).not.toContain('<details');
+    expect(md).not.toContain('<summary>');
+    expect(md).not.toContain('<mark>');
     expect(md).toContain('**📊 本次召回统计汇总**');
     expect(md).toContain('**🎯 本次用上的依据**');
     expect(md).toContain('- [1] ');
     expect(md).toContain('- [2] ');
-    expect(md).toContain('📎 项目背景 2 条（2t）');
+    expect(md).toContain('📎 项目背景 2 条 (2t)');
     expect(md).toContain('- [decision] 决策');
-    expect(md).toContain('🧠 命中记忆 2 条（100t）');
+    expect(md).toContain('💠 命中记忆 2 条 (100t)');
     expect(md).toContain('- [L1/hot] ' + 'a'.repeat(100) + '（相关度 0.90）');
     expect(md).toContain('⚡ Token 用量（本次注入 102t）');
     expect(md).toContain('本次注入：102t（命中 100t + 背景 2t）');
@@ -331,13 +334,13 @@ describe('buildRecallMarkdown（批次13）', () => {
     expect(md).toContain('金额口径：本地预算单位 t');
   });
 
-  it('记忆内容含尖括号与 & → 转义，不破坏折叠结构', () => {
+  it('记忆内容含尖括号与 & → 纯 Markdown 原样保留，零 HTML 转义（2026-11-21 禁止 HTML）', () => {
     const r = recallResult({ hits: [hit('m9', '<script>alert("x")</script> & done')] });
     const hint = buildRecallHint(r, none(), null);
     const md = buildRecallMarkdown(r, hint, null);
-    expect(md).not.toContain('<script>');
-    expect(md).toContain('&lt;script&gt;alert("x")&lt;/script&gt; &amp; done');
-    expect(md.match(/<details>/g)).toHaveLength(5);
+    expect(md).toContain('<script>alert("x")</script> & done');
+    expect(md).not.toContain('&lt;script&gt;');
+    expect(md).not.toContain('<details');
   });
 
   it('长文截断 120 字 + 空白折叠；空命中如实标注未命中', () => {
@@ -364,91 +367,92 @@ describe('buildRecallMarkdown（批次13）', () => {
 describe('buildRecallMarkdown 纯 Markdown（批次29，DSH 实测只渲染 Markdown 不渲染 HTML）', () => {
   const none = () => rollupRecalls([], Date.now());
 
-  it('htmlDetails:false → 零 HTML 标签/转义，两行短摘要 + 统计汇总 + 编号依据 + 四小节加粗标题', () => {
+  it('htmlDetails:false → 零 HTML 标签/转义，一行摘要 + 统计汇总 + 编号依据 + 四小节加粗标题', () => {
     const r = recallResult();
     const hint = buildRecallHint(r, none(), null);
     const md = buildRecallMarkdown(r, hint, null, { htmlDetails: false });
     expect(md).not.toContain('<details>');
     expect(md).not.toContain('<summary>');
     expect(md).not.toContain('&lt;');
-    expect(md.startsWith(`**${hint.echo!.headline}**`)).toBe(true);
-    expect(md).toContain(`**${hint.echo!.stats}**`);
-    // 2026-11-12（与 compact 同源缺陷）：markdown-full 的摘要行也必须是空行分段，否则会被合并成一段
+    expect(md.startsWith(`**${hint.line}**`)).toBe(true);
+    // 摘要统一为一行；下一段直接是统计汇总
     expect(md).not.toMatch(/\*\*\n\*\*/);
-    expect(md.split('\n\n')[1]).toBe(`**${hint.echo!.stats}**`);
+    expect(md.split('\n\n')[1]).toBe('**📊 本次召回统计汇总**');
     expect(md).toContain('**📊 本次召回统计汇总**');
     expect(md).toContain('**🎯 本次用上的依据**');
-    expect(md).toContain('**📎 项目背景 2 条（2t）**');
+    expect(md).toContain('**📎 项目背景 2 条 (2t)**');
     expect(md).toContain('- [decision] 决策');
-    expect(md).toContain('**🧠 命中记忆 2 条（100t）**');
+    expect(md).toContain('**💠 命中记忆 2 条 (100t)**');
     expect(md).toContain('- [L1/hot] ' + 'a'.repeat(100) + '（相关度 0.90）');
     expect(md).toContain('**⚡ Token 用量（本次注入 102t）**');
     expect(md).toContain('**💰 省钱与费用（本次省 9,898t）**');
   });
 
-  it('内容含尖括号 → 纯版原样保留（不转义），HTML 版仍转义护结构', () => {
+  it('内容含尖括号 → 两档输出一致（2026-11-21 htmlDetails 参数已失效，三档零 HTML）', () => {
     const r = recallResult({ hits: [hit('m9', '<script>alert("x")</script> & done')] });
     const hint = buildRecallHint(r, none(), null);
     const plain = buildRecallMarkdown(r, hint, null, { htmlDetails: false });
     expect(plain).toContain('<script>alert("x")</script> & done');
     const html = buildRecallMarkdown(r, hint, null);
-    expect(html).toContain('&lt;script&gt;alert("x")&lt;/script&gt; &amp; done');
-    expect(html.match(/<details>/g)).toHaveLength(5);
+    expect(html).toBe(plain);
+    expect(html).not.toContain('<details');
   });
 });
 
 // 批次32-C：DSH 里没有可点击折叠控件 → 不支持 HTML 的客户端默认只给短摘要，明细靠 detail=true 再取
-// 批次33-C：摘要压到两行（shortLine）+ 可选「展开明细」链接指向本机明细页
+// 2026-11-21 用户定稿：compact 档只有一整行摘要（shortLine === line），无链接行、无提示行，展开靠气泡折叠卡
 describe('buildRecallCompactMarkdown + recallDisplayMode（批次32-C/33-C 默认收起）', () => {
   const none = () => rollupRecalls([], Date.now());
 
-  it('短摘要两行：第一行命中/背景/省量，第二行金额与次数；不铺四小节', () => {
+  it('短摘要单行：命中/背景/省量/金额/次数压成一行；不铺四小节', () => {
     const r = recallResult();
     const hint = buildRecallHint(r, none(), null);
-    const rows = hint.shortLine.split('\n');
-    expect(rows).toHaveLength(2);
-    expect(rows[0]).toContain('🧠 Memory');
-    expect(rows[0]).toContain('命中 2 条（100t）');
-    expect(rows[0]).not.toContain('💰'); // 金额只在第二行，避免第一行过长换行
-    expect(rows[1]).toBe('💰 金额未开（参数页可设 ¥/百万预算单位 t） ｜ 今日 0 次 ｜ 全部 0 次');
+    expect(hint.shortLine.split('\n')).toHaveLength(1); // 摘要统一为单行
+    expect(hint.line.startsWith('▶ ')).toBe(true);
+    expect(hint.line).toContain('命中 2 条 (100t)');
+    expect(hint.line).toContain('💰 金额未开');
     // 完整提示行仍是单行（HTML 折叠档 / detail=true 档用）
     expect(hint.line).not.toContain('\n');
   });
 
-  it('设了单价 → 短摘要第二行给本次花费/省额与次数，今日·全部的金额明细挪到明细页', () => {
+  it('设了单价 → 摘要只留本次金额，今日·全部只留次数（2026-11-21 压 2 行）', () => {
     const now = Date.now();
     const rollup = rollupRecalls(
       [audit({ ts: now, detail: { saved_tokens: 4000, payload_tokens: 100, injected_tokens: 102 } })],
       now,
     );
     const hint = buildRecallHint(recallResult(), rollup, 10);
-    const rows = hint.shortLine.split('\n');
-    expect(rows[1]).toBe('💰 估算 本次 ¥0.00102（省 ¥0.099） ｜ 今日 1 次 ｜ 全部 1 次');
-    // 今日/全部的金额仍在完整提示行里（同源，只是折叠档不占聊天两行）
-    expect(hint.line).toContain(`今日 1 次 ${formatCny(rollup.today_injected_tokens * 10 / 1e6)}`);
+    expect(hint.line).toContain('💰 ¥0.00102（省 ¥0.099）');
+    expect(hint.line).toContain('今日 1 次');
+    expect(hint.line).toContain('全部 1 次');
+    // 今日/全部的金额明细已挪出摘要行，只在 detail 档「💰 省钱与费用」段保留（同源）
+    expect(hint.line).not.toMatch(/今日 1 次 \d/);
+    expect(hint.money!.today.cost_cny).toBeCloseTo(rollup.today_injected_tokens * 10 / 1e6, 8);
   });
 
-  it('无链接（TCP 等）→ 两行摘要 + detail=true 文字指引，零 HTML 标签、不铺四小节', () => {
+  it('无链接（TCP 等）→ 只有一行摘要，零 HTML 标签、无提示行、不铺四小节', () => {
     const r = recallResult();
     const hint = buildRecallHint(r, none(), null);
     const md = buildRecallCompactMarkdown(hint);
-    expect(md.startsWith(`**${hint.echo!.headline}**`)).toBe(true);
-    expect(md).toContain(`**${hint.echo!.stats}**`);
-    expect(md).toContain('detail=true');
+    expect(md).toBe(`**${hint.line}**`);
+    expect(md).toContain('▶ ');
+    expect(md).not.toContain('detail=true');
+    expect(md).not.toContain('📌');
     expect(md).not.toContain('<details>');
     expect(md).not.toContain('**📎 项目背景');
     expect(md).not.toContain('- [decision] 决策');
   });
 
-  it('有链接（批次33-C）→ 两行摘要 + 一行可点 Markdown 链接，不再要求二次调用', () => {
+  it('有 detailUrl 也只输出一行摘要，不写链接行与提示行（2026-11-21 用户定稿）', () => {
     const r = recallResult();
     const hint = buildRecallHint(r, none(), null);
     const url = 'http://127.0.0.1:8204/recall/abcdefghij0123456789AB';
     const md = buildRecallCompactMarkdown(hint, url);
-    expect(md.startsWith(`**${hint.echo!.headline}**`)).toBe(true);
-    expect(md).toContain(`**${hint.echo!.stats}**`);
-    expect(md).toContain(`▶ [展开本次召回明细（统计汇总 / 命中依据 / Token / 费用）](${url})`);
-    expect(md).not.toContain('detail=true'); // 默认档不再引导用户预先展开
+    expect(md).toBe(`**${hint.line}**`);
+    expect(md).not.toContain(url);
+    expect(md).not.toContain('展开本次召回明细');
+    expect(md).not.toContain('📌');
+    expect(md).not.toContain('detail=true');
     expect(md).not.toContain('<details>');
     expect(md).not.toContain('**📎 项目背景');
     expect(md).not.toContain('- [decision] 决策');
@@ -458,7 +462,7 @@ describe('buildRecallCompactMarkdown + recallDisplayMode（批次32-C/33-C 默�
     const now = Date.now();
     const rollup = rollupRecalls([audit({ ts: now, detail: { payload_tokens: 50 } })], now);
     const hint = buildRecallHint(recallResult(), rollup, 10);
-    expect(hint.shortLine.split('\n')).toHaveLength(3);
+    expect(hint.shortLine.split('\n')).toHaveLength(1);
     expect(hint.shortLine).toContain('⚠ 今日含 1 次旧记录');
   });
 
@@ -533,8 +537,8 @@ describe('buildRecallDetailPage + buildRecallSections（批次33-C 本机明细�
     const hint = buildRecallHint(r, none(), 10);
     const sections = buildRecallSections(r, hint, 10, (s, n) => plainPass(s, n));
     expect(sections.map((s) => s.title)).toEqual([
-      '📎 项目背景 2 条（2t）',
-      '🧠 命中记忆 2 条（100t）',
+      '📎 项目背景 2 条 (2t)',
+      '💠 命中记忆 2 条 (100t)',
       '⚡ Token 用量（本次注入 102t）',
       '💰 省钱与费用（本次省 9,898t）',
     ]);
@@ -554,7 +558,7 @@ describe('buildRecallDetailPage + buildRecallSections（批次33-C 本机明细�
     const html = buildRecallDetailExpiredPage();
     expect(html).toContain('本次召回明细链接已失效');
     expect(html).toContain('detail=true');
-    expect(html).toContain('▶ 展开本次召回明细');
+    expect(html).toContain('摘要行首的「▶」就是展开标记');
     expect(html).toContain('本页面不含令牌');
     expect(html.match(/<details>/g)).toBeNull();
   });
@@ -685,28 +689,25 @@ describe('批次 RAG T2：A 引用锚点 / B 折叠统计汇总 / D 不变项', 
   it('A5 无 matched_terms 不写 🎯、不谎称语义命中（Hit 类型无 scope 字段，不伪造「会话工作记忆」）', () => {
     const r = recallResult({ hits: [hit('m1', '一条与提问无字面重合的记忆')] });
     const md = buildRecallMarkdown(r, buildRecallHint(r, none(), null), null);
-    expect(md).not.toContain('🎯 命中');
+    // 摘要统计项的「🎯 命中 N 条」是新图标（与有无语义命中词无关）；这里锁的是依据段不写「🎯 命中「词」」高亮
+    expect(md).not.toContain('🎯 命中「');
     expect(md).toContain('无字面重合，仅按相关度参考');
     expect(md).toContain('- [1] ');
   });
 
-  it('B1/B2 外层默认收起；summary ≤80 字且含命中数·top3 命中词·省量比例·▶', () => {
+  it('B1/B2 零 HTML：摘要行首 ▶ 黑三角，直接带出统计字段（无 <summary>，旧「展开本次召回汇总」已废）', () => {
     const r = recallResult({ hits: [withTerms(['回显']), withTerms(['折叠']), withTerms(['ui'])] });
     const hint = buildRecallHint(r, none(), null);
     const md = buildRecallMarkdown(r, hint, null);
-    expect(md.startsWith('<details>\n<summary>')).toBe(true);
-    expect(md).not.toContain('<details open');
-    const summary = buildRecallFoldSummary(r);
-    expect(summary.length).toBeLessThanOrEqual(80);
+    expect(md.startsWith('**▶ ')).toBe(true);
+    expect(md).not.toContain('<details');
+    const summary = md.slice(0, md.indexOf('\n'));
+    // 2026-11-21 压 2 行：品牌词 💠 Memory 已从摘要行移除（命中数直接在 ▶ 后）
+    expect(summary).not.toContain('💠 Memory');
     expect(summary).toContain('命中 3 条');
-    expect(summary).toContain('「回显」');
-    expect(summary).toContain('「折叠」');
-    expect(summary).toContain('「ui」');
-    expect(summary).toContain('省 99.0%');
-    expect(summary).toContain('▶');
-    const bare = buildRecallFoldSummary(recallResult());
-    expect(bare).not.toContain('依据');
-    expect(bare).toContain('省 99.0%');
+    expect(summary).toContain('📎 背景');
+    expect(summary).toContain('省 ');
+    expect(summary).not.toContain('展开本次召回汇总');
   });
 
   it('B3 统计汇总四行数字与 display.line / sections 同源（不重算）', () => {
@@ -724,65 +725,65 @@ describe('批次 RAG T2：A 引用锚点 / B 折叠统计汇总 / D 不变项', 
     expect(lines[2]).toContain(formatCny(hint.money!.this_call.cost_cny));
     expect(lines[3]).toContain('今日 0 次');
     expect(lines[3]).toContain('全部 0 次');
-    for (const s of ['10,000t', '9,898t', '100t']) expect(hint.line).toContain(s);
+    // 2026-11-21 压 2 行：全量基线 10,000t 移出摘要行，只在统计汇总（lines[1]）与 detail 档保留
+    expect(hint.line).toContain('9,898t');
+    expect(hint.line).toContain('100t');
+    expect(hint.line).not.toContain('10,000t');
   });
 
-  it('B4 依据段默认可见、不套内层 <details>（展开外层即见 <mark> 与 🎯）', () => {
+  it('B4 依据段展开即见 **「」** 高亮与 🎯（零 HTML，无 <mark>）', () => {
     const r = recallResult({ hits: [withTerms(['回显'])] });
     const md = buildRecallMarkdown(r, buildRecallHint(r, none(), null), null);
     const citeIdx = md.indexOf('**🎯 本次用上的依据**');
-    const firstInner = md.indexOf('<details>', 10);
     expect(citeIdx).toBeGreaterThan(-1);
-    expect(citeIdx).toBeLessThan(firstInner);
-    expect(md.slice(citeIdx, firstInner)).toContain('<mark>回显</mark>');
-    expect(md.slice(citeIdx, firstInner)).toContain('🎯 命中「回显」');
+    expect(md).not.toContain('<details');
+    const citeBlock = md.slice(citeIdx);
+    expect(citeBlock).toContain('**「回显」**');
+    expect(citeBlock).toContain('🎯 命中「回显」');
   });
 
   it('B5 告警段仅在 warnings 非空时生成（异常驱动，正常轮次无 ⚠）', () => {
     const ok = recallResult();
     const okHint = buildRecallHint(ok, none(), null);
-    expect(buildRecallMarkdown(ok, okHint, null)).not.toContain('⚠ 状态');
+    expect(buildRecallMarkdown(ok, okHint, null)).not.toContain('⚠');
     expect(buildRecallCompactMarkdown(okHint, URL)).not.toContain('⚠');
 
     const thin = recallResult({ evidence_thin: true });
     const thinHint = buildRecallHint(thin, none(), null);
     const md = buildRecallMarkdown(thin, thinHint, null);
-    expect(md).toContain('⚠ 状态 1 项');
-    expect(md).toContain('⚠ 证据不足：未命中权威来源');
+    // 告警以短版内联在摘要行末（不再单独 ⚠ 状态折叠块）；完整告警只在 echo.warnings / 明细页
+    expect(md).toContain('⚠ 证据不足');
+    expect(thinHint.echo?.warnings.join(' ')).toContain('⚠ 证据不足：未命中权威来源');
     const compactThin = buildRecallCompactMarkdown(thinHint, URL);
-    expect(compactThin).toContain('**⚠ 证据不足：未命中权威来源，建议事实优先重试**');
-    // 告警行同样要独占段落：单换行会被合并进 📊 汇总那一行（2026-11-12 实测）
-    expect(compactThin.split('\n\n').filter(Boolean)).toHaveLength(5); // 摘要 2 + 告警 1 + 链接 1 + 点不开提示 1
+    expect(compactThin).toContain('⚠ 证据不足'); // 摘要行用短版（冒号前）
+    expect(compactThin).not.toContain('建议事实优先重试');
+    // 2026-11-21 定稿：compact 档只有摘要一行，告警内联在行尾
+    expect(compactThin).toBe(`**${thinHint.line}**`);
+    expect(compactThin.split('\n')).toHaveLength(1);
     expect(compactThin).not.toMatch(/\*\*\n\*\*/);
   });
 
-  it('B6/B8 compact 档两行 + 链接，URL 逐字保留；无票据时仍走文字指引、无伪造 URL', () => {
+  it('B6/B8 compact 档只有一行摘要，不写链接、不写提示语（有无票据都相同）', () => {
     const r = recallResult({ hits: [withTerms(['回显'])] });
     const hint = buildRecallHint(r, none(), null);
     const md = buildRecallCompactMarkdown(hint, URL);
-    const rows = md.split('\n\n').filter(Boolean);
-    expect(rows).toHaveLength(4); // 摘要 2 + 链接 1 + 「点不开就说看明细」兜底 1
-    expect(rows[0]).toBe(`**${hint.echo!.headline}**`);
-    expect(rows[1]).toBe(`**${hint.echo!.stats}**`);
-    expect(rows[2]).toContain(URL);
-    // 2026-11-12：链接在 WorkBuddy 桌面端/手机端点不开 → 必须有不依赖链接的取明细路径
-    expect(rows[3]).toContain('看明细');
+    expect(md).toBe(`**${hint.line}**`);
+    expect(md).not.toContain(URL);
+    expect(md).not.toContain('展开本次召回明细');
+    expect(md).not.toContain('看明细');
+    expect(md).not.toContain('📌');
     expect(md).not.toContain('<details>');
     expect(md).not.toContain('detail=true');
-    expect(rows[0]).toContain('[1]「回显」'); // 默认档也有真实编号可就地引用
-    // 2026-11-12 WorkBuddy 实测回填：行间必须空行。单换行是 Markdown 软换行，
-    // 客户端会把「🧠 摘要 / 📊 汇总 / ⚠ 告警」合并成一整段（已截图实证）。
     expect(md).not.toMatch(/\*\*\n\*\*/);
-    expect(md.split('\n\n')[0]).toBe(`**${hint.echo!.headline}**`);
 
     const noUrl = buildRecallCompactMarkdown(hint);
-    expect(noUrl).toContain('detail=true');
+    expect(noUrl).toBe(md); // 票据不影响 compact 文本
     expect(noUrl).not.toContain('/recall/');
   });
 
   // A8：B6 用的是 dispatch:null 夹具（本文件默认夹具，诚实但不产生模式行），
-  // 只靠它「两行 + 链接」的断言会假绿。这里补真实分流下的对偶用例。
-  it('A8 · 真实 dispatch 下 compact 档是「两行摘要 + 一行 ⚙ 模式 + 链接」，单行 line 同口径', () => {
+  // 只靠它「一行摘要」的断言会假绿。这里补真实分流下的对偶用例。
+  it('A8 · 真实 dispatch 下 compact 档只有「▶ + 一行摘要（行首 ⚙ 模式）」', () => {
     const r = recallResult({
       hits: [withTerms(['回显'])],
       dispatch: {
@@ -791,17 +792,16 @@ describe('批次 RAG T2：A 引用锚点 / B 折叠统计汇总 / D 不变项', 
       },
     });
     const hint = buildRecallHint(r, none(), null);
-    expect(hint.line).toContain('⚙ 模式：事实优先（用户指定）');
+    expect(hint.line).toContain('⚙ 事实优先'); // 2026-11-21 压 2 行：摘要用模式简称
     expect(hint.line).not.toContain('\n'); // 单行兜底不能被改成多行
-    expect(hint.shortLine).toContain('⚙ 模式：事实优先（用户指定）');
+    expect(hint.shortLine).toContain('⚙ 事实优先');
+    expect(hint.line.startsWith('▶ ⚙ 事实优先 ｜ 🎯 命中')).toBe(true); // ▶ 在最前，模式简称在摘要行首；命中项带 🎯
+    expect(hint.line).not.toContain('（用户指定）'); // 括号解释只在完整模式行/detail 档
     const md = buildRecallCompactMarkdown(hint, URL);
-    const rows = md.split('\n\n').filter(Boolean);
-    expect(rows).toHaveLength(5); // 摘要 2 + 模式 1 + 链接 1 + 「点不开就说看明细」1
-    expect(rows[0]).toBe(`**${hint.echo!.headline}**`);
-    expect(rows[1]).toBe(`**${hint.echo!.stats}**`);
-    expect(rows[2]).toBe('**⚙ 模式：事实优先（用户指定）**');
-    expect(rows[3]).toContain(URL);
-    expect(rows[4]).toContain('看明细');
+    expect(md).toBe(`**${hint.line}**`);
+    expect(md.split('\n')).toHaveLength(1);
+    expect(md).not.toContain(URL);
+    expect(md).not.toContain('看明细');
   });
 
   it('B7 未设单价时 compact 全档输出「金额未开」且无 ¥', () => {
@@ -831,7 +831,7 @@ describe('批次 RAG T2：A 引用锚点 / B 折叠统计汇总 / D 不变项', 
     const hint = buildRecallHint(r, none(), null);
     const sections = buildRecallSections(r, hint, null, (s, n) => s.slice(0, n), 120);
     expect(sections.map((s) => s.title)).toEqual([
-      '📎 项目背景 2 条（2t）', '🧠 命中记忆 2 条（100t）',
+      '📎 项目背景 2 条 (2t)', '💠 命中记忆 2 条 (100t)',
       '⚡ Token 用量（本次注入 102t）', '💰 省钱与费用（本次省 9,898t）',
     ]);
     expect(sections[2].lines[0]).toBe('本次注入：102t（命中 100t + 背景 2t）');
@@ -923,11 +923,12 @@ describe('批次59 回显命中高亮（方案 C）', () => {
   const withTerms = (terms: string[], content = MEM): Hit => ({ ...hit('m1', content), matched_terms: terms });
   const mk = (h: Hit | Hit[]) => recallResult({ hits: Array.isArray(h) ? h : [h] });
 
-  it('html-details 档：命中片段被 <mark> 包裹，相邻命中并成一片（哪一句被用上）', () => {
+  it('零 HTML：命中片段用 **「」** 包裹，相邻命中并成一片（哪一句被用上）', () => {
     const r = mk(withTerms(['超时', '重试']));
     const md = buildRecallMarkdown(r, buildRecallHint(r, noRollup(), null), null);
     // 正文是「超时重试上限 3 次」：两个命中词相邻，合并成一片比切成两段更自然
-    expect(md).toContain('<mark>超时重试</mark>');
+    expect(md).toContain('**「超时重试」**');
+    expect(md).not.toContain('<mark>');
   });
 
   it('纯 Markdown 档：用 **「」** 包裹，且零 HTML 标签（客户端不渲染 HTML 也不露尖括号）', () => {
@@ -943,11 +944,11 @@ describe('批次59 回显命中高亮（方案 C）', () => {
     expect(md).toContain('🎯 命中「超时」「重试」');
   });
 
-  it('段标题给出读法说明（黄色 = 重合片段；🎯 = 命中词）', () => {
+  it('段标题给出读法说明（加粗「」= 重合片段；🎯 = 命中词）', () => {
     const r = mk(withTerms(['超时']));
     const md = buildRecallMarkdown(r, buildRecallHint(r, noRollup(), null), null);
-    expect(md).toContain('🧠 命中记忆 1 条');
-    expect(md).toContain('黄色 = 与本次提问重合的片段；🎯 = 命中的词');
+    expect(md).toContain('💠 命中记忆 1 条');
+    expect(md).toContain('加粗「」= 与本次提问重合的片段；🎯 = 命中的词');
   });
 
   it('明细页：<mark> + legend 同时讲清「标黄」与「没标黄」两种含义', () => {
@@ -967,8 +968,9 @@ describe('批次59 回显命中高亮（方案 C）', () => {
     const r = mk(hit('m1', MEM));
     const md = buildRecallMarkdown(r, buildRecallHint(r, noRollup(), null), null);
     expect(md).not.toContain('<mark>');
-    expect(md).not.toContain('🎯 命中');
-    expect(md).toContain('🧠 命中记忆 1 条（');
+    // 摘要统计项「🎯 命中 N 条」恒有；此处锁依据段无「🎯 命中「词」」高亮
+    expect(md).not.toContain('🎯 命中「');
+    expect(md).toContain('💠 命中记忆 1 条 (');
   });
 
   it('命中词被截断切掉时不硬标：正文里没有该词就不出现 <mark>', () => {
@@ -977,11 +979,11 @@ describe('批次59 回显命中高亮（方案 C）', () => {
     expect(md).not.toContain('<mark>');
   });
 
-  it('跨句命中各自成片，不连成一整段黄', () => {
+  it('跨句命中各自成片，不连成一整段（零 HTML 用 **「」**）', () => {
     const r = mk(withTerms(['超时', '重试'], '超时。重试'));
     const md = buildRecallMarkdown(r, buildRecallHint(r, noRollup(), null), null);
-    expect(md).toContain('<mark>超时</mark>。');
-    expect(md).toContain('<mark>重试</mark>');
+    expect(md).toContain('**「超时」**。');
+    expect(md).toContain('**「重试」**');
   });
 });
 
@@ -1122,5 +1124,105 @@ describe('REQ-014 T4 · 明细页 footer 保真声明', () => {
     expect(md).not.toContain('保真口径');
     expect(md).not.toContain('以最新为准');
     expect(md).not.toContain('不补写、不推测');
+  });
+});
+
+describe('buildRecallCardData（2026-11-21 富媒体宿主专用卡片数据结构）', () => {
+  const issuedAt = 1_800_000_000_000;
+  it('标题两行从 display.line 派生：第一行去 ▶ 不含金额，第二行只含金额段，逐字同源', () => {
+    const r = recallResult();
+    const hint = buildRecallHint(r, rollupRecalls([], issuedAt), null);
+    const card = buildRecallCardData(r, hint, null);
+    // 两行拼回去（补回 ▶ 与分隔符）应等于原始摘要行
+    const rebuilt = `▶ ${[card.titleLine1, card.titleLine2].filter(Boolean).join(' ｜ ')}`;
+    expect(rebuilt).toBe(hint.line);
+    expect(card.titleLine1.startsWith('▶')).toBe(false);
+    expect(card.titleLine1).toContain('🎯 命中');
+    expect(card.titleLine1).toContain('📎 背景');
+    expect(card.titleLine1).toContain('⚡ 省');
+    expect(card.titleLine1).not.toContain('💰');
+    expect(card.titleLine2).toContain('金额未开');
+  });
+
+  it('hint 固定为「点击查阅详细内容」，summary 恒四行 label/value', () => {
+    const r = recallResult();
+    const hint = buildRecallHint(r, rollupRecalls([], issuedAt), null);
+    const card = buildRecallCardData(r, hint, null);
+    expect(card.hint).toBe(RECALL_CARD_HINT);
+    expect(RECALL_CARD_HINT).toBe('点击查阅详细内容');
+    expect(card.summary.map((s) => s.label)).toEqual(['Token', '费用', '今日', '全部']);
+    for (const s of card.summary) expect(s.value.length).toBeGreaterThan(0);
+  });
+
+  it('hits 与 basis 同源同序，index 从 1 开始对应 [n]；背景逐条独立', () => {
+    const r = recallResult();
+    const hint = buildRecallHint(r, rollupRecalls([], issuedAt), null);
+    const card = buildRecallCardData(r, hint, null);
+    expect(card.hits.length).toBe(r.hits.length);
+    expect(card.hits.map((h) => h.index)).toEqual([1, 2]);
+    expect(card.hits.map((h) => h.mem_id)).toEqual(r.hits.map((h) => h.mem_id));
+    expect(card.basis).toEqual(card.hits);
+    expect(card.background.length).toBe(r.background.items.length);
+    expect(card.background.map((b) => b.mem_id)).toEqual(['b1', 'b2']);
+    // 命中条数/省量与 savings 同源，不重算
+    expect(card.titleLine1).toContain(`${r.hits.length} 条`);
+  });
+
+  it('配置单价后 titleLine2 含金额，summary 费用/今日/全部带金额（与 hint.money 同源）', () => {
+    const r = recallResult();
+    const hint = buildRecallHint(r, rollupRecalls([], issuedAt), 0.2);
+    const card = buildRecallCardData(r, hint, 0.2);
+    // titleLine2 = hint.line 从金额段起的剩余部分（实现按「 ｜ 」切段拼接）；今日/全部金额在 summary 行，不在标题行
+    expect(card.titleLine2).toContain('💰 ¥');
+    expect(card.summary[1].value).toContain('本次');
+    expect(card.summary[2].value).toContain('次');
+    expect(card.summary[2].value).toContain('¥');
+    expect(card.summary[3].value).toContain('次');
+    expect(card.summary[3].value).toContain('¥');
+  });
+
+  it('零命中：titleLine1 写「未命中」而非编造 🎯，hits/basis 为空', () => {
+    const r = recallResult({ hits: [] });
+    const hint = buildRecallHint(r, rollupRecalls([], issuedAt), null);
+    const card = buildRecallCardData(r, hint, null);
+    expect(card.titleLine1).toContain('未命中');
+    expect(card.titleLine1).not.toContain('🎯');
+    expect(card.hits).toEqual([]);
+    expect(card.basis).toEqual([]);
+  });
+
+  it('批次 A2/A3：hits 每条带 feedback_hint 常量与 reinforce_count（无记录则省略，不补 0）', () => {
+    const withReinforce = { ...hit('m1', 'a'.repeat(100)), reinforce_count: 7 };
+    const r = recallResult({ hits: [withReinforce, hit('m2', 'b'.repeat(100))] });
+    const hint = buildRecallHint(r, rollupRecalls([], issuedAt), null);
+    const card = buildRecallCardData(r, hint, null);
+    expect(RECALL_FEEDBACK_HINT).toBe('回复「N 有用」或「N 没用」反馈本条');
+    expect(card.hits[0].feedback_hint).toBe(RECALL_FEEDBACK_HINT);
+    expect(card.hits[0].reinforce_count).toBe(7);
+    expect(card.hits[1].feedback_hint).toBe(RECALL_FEEDBACK_HINT);
+    expect(card.hits[1].reinforce_count).toBeUndefined(); // 无记录省略，不补 0 伪装
+    expect(card.basis).toEqual(card.hits); // basis 同源带出进化状态
+  });
+
+  it('批次 B：传入进化行 → summary 第 5 行「进化」固定最后；不传则四行口径不变', () => {
+    const r = recallResult();
+    const hint = buildRecallHint(r, rollupRecalls([], issuedAt), null);
+    const withGrowth = buildRecallCardData(r, hint, null, { label: '进化', value: '模式 suggest ｜ 暂无评估记录' });
+    expect(withGrowth.summary.map((s) => s.label)).toEqual(['Token', '费用', '今日', '全部', '进化']);
+    expect(withGrowth.summary[4].value).toBe('模式 suggest ｜ 暂无评估记录');
+    const withoutGrowth = buildRecallCardData(r, hint, null);
+    expect(withoutGrowth.summary.map((s) => s.label)).toEqual(['Token', '费用', '今日', '全部']);
+  });
+
+  it('批次 B：superseded 命中带合并提示（merged_from_count 计数；非合并命中不带该字段）', () => {
+    const merged = { ...hit('m1', 'a'.repeat(100)), superseded: true, merged_from_count: 2 };
+    const mergedNoCount = { ...hit('m2', 'b'.repeat(100)), superseded: true };
+    const r = recallResult({ hits: [merged, mergedNoCount, hit('m3', 'c'.repeat(100))] });
+    const hint = buildRecallHint(r, rollupRecalls([], issuedAt), null);
+    const card = buildRecallCardData(r, hint, null);
+    expect(card.hits[0].supersede_note).toBe('以最新为准（合并自 2 条旧记录）');
+    expect(card.hits[1].supersede_note).toBe('以最新为准');
+    expect(card.hits[2].supersede_note).toBeUndefined();
+    expect(card.basis).toEqual(card.hits); // basis 同源带出合并提示
   });
 });

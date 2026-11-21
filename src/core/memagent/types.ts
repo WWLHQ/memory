@@ -100,6 +100,11 @@ export interface Hit {
    */
   matched_terms?: string[];
   /**
+   * 批次 A3（记忆闭环方案）：该记忆累计被用户确认/强化的次数（含 implicit 弱信号）。
+   * 回显卡片据此展示「进化状态」；个人记忆命中（pm: 前缀）无此字段则省略。
+   */
+  reinforce_count?: number;
+  /**
    * REQ-014 / T1（C6-A）：本条是「合并后的最新版」。
    * 由 recallSupersede 的影子探测补带时置 true（命中行本就被直接命中、且有 merged_from 时也会置 true）；
    * 值为 undefined 表示与既有口径完全一致，回显不额外标注。

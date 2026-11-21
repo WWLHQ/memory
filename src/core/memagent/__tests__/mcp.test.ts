@@ -66,13 +66,13 @@ describe('MCP Server（§19.5）', () => {
     expect(r.result).toBeUndefined();
   });
 
-  it('tools/list 返回十三个工具且 schema 正确', async () => {
+  it('tools/list 返回十四个工具且 schema 正确', async () => {
     const r = await rpcCall(PORT, { jsonrpc: '2.0', id: 1, method: 'tools/list', params: { token: TOKEN } });
     const tools = (r.result as { tools: Array<{ name: string; inputSchema?: { required?: string[] } }> }).tools;
     expect(tools.map((t) => t.name)).toEqual([
       'recall_memory', 'write_memory', 'list_projects', 'get_preferences', 'get_write_status',
-      'recall_hook_status', 'list_memories', 'get_memory', 'feedback', 'manage_memory', 'gc_report',
-      'create_project', 'mint_token',
+      'recall_hook_status', 'list_memories', 'growth_evolve', 'get_memory', 'feedback', 'manage_memory',
+      'gc_report', 'create_project', 'mint_token',
     ]);
     const recallTool = tools.find((t) => t.name === 'recall_memory')!;
     expect(recallTool.inputSchema!.required).toEqual(['query']); // project_id 可省略（批次11）
@@ -350,7 +350,7 @@ describe('MCP Server（§19.5）', () => {
       project_id: string; resolved_from: string; hits: unknown[];
       savings: { saved_tokens: number; injected_tokens: number };
       background: { items: unknown[] };
-      display: { line: string; markdown: string; money: unknown; mode: string };
+      display: { line: string; markdown: string; money: unknown; mode: string; card: unknown };
     };
     expect(result.project_id).toBe('P1');
     expect(result.resolved_from).toBe('single_project');
@@ -358,12 +358,16 @@ describe('MCP Server（§19.5）', () => {
     expect(result.savings.injected_tokens).toBeGreaterThan(0);
     expect(result.savings.saved_tokens).toBeGreaterThanOrEqual(0);
     expect(result.display.money).toBeNull();
-    expect(result.display.line).toContain('🧠 Memory');
-    // 批次32-C：TCP 无 clientInfo（非实测支持 HTML 的客户端）→ 默认紧凑档，明细不铺满聊天窗口
+    // 2026-11-21：TCP 无客户端身份 → 非富媒体宿主，display.card 恒 null（只有 WorkBuddy/CodeBuddy 才下发）
+    expect(result.display.card).toBeNull();
+    expect(result.display.line.startsWith('▶ ')).toBe(true);
+    // 2026-11-21 用户定稿：TCP 无 clientInfo → 默认紧凑档只有一行摘要，无提示行/链接行
     expect(result.display.mode).toBe('markdown-compact');
+    expect(result.display.markdown).toBe(`**${result.display.line}**`);
     expect(result.display.markdown).not.toContain('<details>');
     expect(result.display.markdown).not.toContain('**📎 项目背景');
-    expect(result.display.markdown).toContain('detail=true');
+    expect(result.display.markdown).not.toContain('detail=true');
+    expect(result.display.markdown).not.toContain('📌');
   });
 
   it('recall detail=true → 纯 Markdown 四小节明细（数字与摘要行同源）', async () => {
@@ -373,15 +377,16 @@ describe('MCP Server（§19.5）', () => {
     const result = r.result as { display: { mode: string; markdown: string; line: string } };
     expect(result.display.mode).toBe('markdown-full');
     expect(result.display.markdown).toContain('**📎 项目背景');
-    expect(result.display.markdown).toContain('**🧠 命中记忆');
+    expect(result.display.markdown).toContain('**💠 命中记忆');
     expect(result.display.markdown).toContain('**⚡ Token 用量');
     expect(result.display.markdown).toContain('**💰 省钱与费用');
-    // 批次 RAG：markdown-full 档首行改成「命中依据前置」短摘要；完整长提示行仍是 display.line，数字同源
-    expect(result.display.markdown.startsWith('**🧠 命中 ')).toBe(true);
+    // 2026-11-21 压 2 行：摘要行首是「▶ ⚙ 模式简称」，全量基线/省量明细挪到 detail 段
+    expect(result.display.markdown.startsWith('**▶ ⚙ ')).toBe(true);
     expect(result.display.markdown).toContain('**📊 本次召回统计汇总**');
     expect(result.display.markdown).toContain('**🎯 本次用上的依据**');
-    const corpus = result.display.line.match(/全量约 ([\d,]+)t/)?.[1];
-    const saved = result.display.line.match(/本次省 ([\d,]+)t/)?.[1];
+    // 全量基线从 detail 档「⚡ Token 用量」段取（摘要行已不含「全量约 Xt」）
+    const corpus = result.display.markdown.match(/全量基线 ([\d,]+)t/)?.[1];
+    const saved = result.display.markdown.match(/省量：([\d,]+)t/)?.[1];
     expect(corpus).toBeTruthy();
     expect(saved).toBeTruthy();
     expect(result.display.markdown).toContain(`基线 ${corpus}t`);
@@ -758,7 +763,7 @@ describe('批次44-D5-3：gc_report（TCP）', () => {
     const tools = (r.result as {
       tools: Array<{ name: string; inputSchema?: { required?: string[]; properties?: Record<string, unknown> } }>;
     }).tools;
-    expect(tools.map((t) => t.name)).toHaveLength(13); // 钩子自检 recall_hook_status 后为 13
+    expect(tools.map((t) => t.name)).toHaveLength(14); // 自进化 growth_evolve 起为 14 个工具
     const gc = tools.find((t) => t.name === 'gc_report')!;
     expect(gc.inputSchema!.required).toEqual(['project_id']);
     expect(gc.inputSchema!.properties).toHaveProperty('resolve_conflicts');
@@ -946,7 +951,7 @@ describe('批次44-D5-4：recall_memory(scope=session)（TCP 8202 端到端）',
   it('tools/list：recall_memory 增 scope/session_id；initialize 指令点名会话视图', async () => {
     const list = await call(1100, 'tools/list');
     const tools = (list.result as { tools: Array<{ name: string; inputSchema: { properties: Record<string, unknown> } }> }).tools;
-    expect(tools.map((t) => t.name)).toHaveLength(13); // 钩子自检 recall_hook_status 起 13 个工具
+    expect(tools.map((t) => t.name)).toHaveLength(14); // 自进化 growth_evolve 起为 14 个工具
     const props = tools.find((t) => t.name === 'recall_memory')!.inputSchema.properties;
     expect(props).toHaveProperty('scope');
     expect(props).toHaveProperty('session_id');
@@ -987,7 +992,7 @@ describe('批次44-D5-4：recall_memory(scope=session)（TCP 8202 端到端）',
     expect(out.hits.map((h) => h.mem_id)).toEqual(['s_new', 's_mid']);
     expect(out.scanned_memories).toBe(3);
     expect(out.background.candidates).toBe(0); // 会话视图不注入项目背景
-    expect(out.display.line).toContain('🧠 Memory'); // 回显档位仍按既有逻辑组装
+    expect(out.display.line.startsWith('▶ ')).toBe(true); // 回显档位仍按既有逻辑组装（会话视图无模式段，但有 ▶）
     expect(out.display.markdown).toBeTruthy();
   });
 

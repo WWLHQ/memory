@@ -5,13 +5,25 @@ import { findParamsSnapshot } from './paramsSnapshot.ts';
 import { projectInScope, DEFAULT_MCP_ACCOUNT, type McpAccount } from './mcpAuth.ts';
 import { RECALL_DETAIL_TTL_MS } from './recallDetailTickets.ts';
 import {
-  buildRecallCompactMarkdown, buildRecallDetailPage, buildRecallHint, buildRecallMarkdown,
+  buildRecallCardData, buildRecallCompactMarkdown, buildRecallDetailPage, buildRecallHint, buildRecallMarkdown,
   normalizeUnitPrice, rollupRecalls,
-  type RecallMoney, type RecallRollup,
+  type RecallCardData, type RecallMoney, type RecallRollup,
 } from './recallInsight.ts';
+import { growthCardSummary } from './mcpGrowthTools.ts';
 
 /** 批次32-C：聊天窗口明细档位（HTML 折叠 / 纯 Markdown 四小节 / 短摘要 + 按需展开） */
 export type RecallDisplayMode = 'html-details' | 'markdown-full' | 'markdown-compact';
+
+/**
+ * 2026-11-21：富媒体宿主判定——只有这些能渲染组件卡片的宿主才下发 display.card 结构化数据。
+ * 口径与 mcpSchema/mcpHttp 文案一致（WorkBuddy / CodeBuddy 桌面端）。其余客户端 card 恒 null。
+ * 注意：这是「下不下发卡片结构」的判定，**不是**判档（判档仍由 recallDisplayMode 决定，富媒体宿主恒走 compact）。
+ */
+export function clientIsRichCardHost(client: string | undefined): boolean {
+  if (!client) return false;
+  const low = client.toLowerCase();
+  return low.includes('workbuddy') || low.includes('codebuddy');
+}
 
 /** 批次41-Q：白名单——首段命中即给 HTML <details> 折叠档。
  *  `qoder` = Qoder CN IDE/CLI 自报名（批次13 实测渲染过折叠块）；
@@ -131,6 +143,12 @@ export interface RecallToolPayload extends RecallResult {
      * 仅默认收起档下发；TCP 8202（无端口概念）与 HTML 折叠档为 null，聊天侧退回文字指引。
      */
     detail_url: string | null;
+    /**
+     * 2026-11-21 用户拍板：只给富媒体宿主（WorkBuddy / CodeBuddy 桌面端）下发的**结构化卡片数据**。
+     * 宿主直接按字段渲染组件折叠卡，不必再从 display.line 里拆字符串（避免文本与卡片两套口径）。
+     * 其余客户端恒 null——它们走文本摘要行，不需要这份结构。
+     */
+    card: RecallCardData | null;
   };
 }
 
@@ -208,7 +226,8 @@ export async function runRecallTool(
     }
   }
 
-  const infos = projectInfosFromMemories(await storage.listMemories({}));
+  const allMems = await storage.listMemories({});
+  const infos = projectInfosFromMemories(allMems);
   const project = resolveProjectId(infos, args.project_id);
   // 三池可见性门禁（D6-2）：shared 恒可见 / user 仅 owner 或 admin / archive 仅 admin / general 按令牌 scope 列表
   if (!projectInScope(account, project.project_id)) {
@@ -252,12 +271,18 @@ export async function runRecallTool(
   } else {
     markdown = buildRecallCompactMarkdown(hint);
   }
+  // 批次 B：进化状态行只在富媒体宿主算（非富媒体不下发卡片，不白扫审计）
+  const richHost = clientIsRichCardHost(client);
+  const growthRow = richHost
+    ? growthCardSummary(allMems, await storage.queryAudit({ action: 'growth_op' }), stamp)
+    : null;
+  const card = richHost ? buildRecallCardData(recall, hint, price, growthRow) : null;
   return {
     payload: {
       ...recall,
       project_id: project.project_id,
       resolved_from: project.resolved_from,
-      display: { line: hint.line, money: hint.money, rollup: hint.rollup, markdown, mode, detail_url: detailUrl },
+      display: { line: hint.line, money: hint.money, rollup: hint.rollup, markdown, mode, detail_url: detailUrl, card },
     },
     text: hint.line,
   };

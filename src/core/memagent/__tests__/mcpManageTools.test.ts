@@ -194,6 +194,130 @@ describe('M1-3 / M1-4：feedback ↔ recall 归因', () => {
   });
 });
 
+describe('批次 A1：feedback implicit=true（引用即隐式确认弱信号）', () => {
+  let storage: InMemoryStorage;
+  let ma: MemAgent;
+
+  const recallAudit = (request_id: string, ts: number, mems: string[]) => ({
+    request_id, action: 'recall' as const, ts, project_id: 'P1',
+    detail: { mems, hits: mems.length },
+  });
+
+  beforeEach(async () => {
+    storage = new InMemoryStorage();
+    ma = createMemAgent({
+      form: 'desktop', account: ACCOUNT,
+      llm: new FakeLlmProvider(), vector: new JsVectorBackend(), storage,
+    });
+    await storage.putMemory(mem({ mem_id: 'mem_1' }));
+  });
+
+  it('隐式确认：信任分不动（confidence 不变）、只 reinforce_count+1，落 memory_op[implicit] + recall_feedback[implicit] 两条审计', async () => {
+    await storage.appendAudit(recallAudit('req_r1', 5000, ['mem_1']));
+    const r = await runFeedbackTool(
+      ma, storage, { mem_id: 'mem_1', verdict: 'confirm', implicit: true, recall_id: 'req_r1' }, FULL_ACCOUNT,
+    );
+    expect(r.ok).toBe(true);
+    expect(r.implicit).toBe(true);
+    expect(r.trust_delta).toBe(0);
+    // 信任分一分不动：存储态 confidence 保持原值（fixture 未写 → undefined，不冒出默认 0.5）
+    expect((await storage.getMemory('mem_1'))?.confidence).toBeUndefined();
+    expect(r.mem?.reinforce_count).toBe(1);
+    expect(r.recall_link).toEqual({ linked: true, recall_id: 'req_r1' });
+
+    const ops = await storage.queryAudit({ action: 'memory_op' });
+    expect(ops).toHaveLength(1);
+    expect(ops[0].detail).toMatchObject({
+      op: 'confirm', implicit: true, trust_delta: 0, reinforce_only: true, mem_id: 'mem_1',
+    });
+    const tags = await storage.queryAudit({ action: 'recall_feedback' });
+    expect(tags).toHaveLength(1);
+    expect(tags[0].detail).toMatchObject({
+      recall_id: 'req_r1', mem_id: 'mem_1', verdict: 'confirm', implicit: true,
+    });
+    expect((await storage.getMemory('mem_1'))?.version).toBe(2);
+  });
+
+  it('防刷去重：同一 request_id+mem_id 第二次 → duplicate:true 且不再 +1、不再写审计', async () => {
+    await storage.appendAudit(recallAudit('req_r1', 5000, ['mem_1']));
+    const args = { mem_id: 'mem_1', verdict: 'confirm', implicit: true, recall_id: 'req_r1' };
+    const first = await runFeedbackTool(ma, storage, args, FULL_ACCOUNT);
+    expect(first.duplicate).toBeUndefined();
+    const second = await runFeedbackTool(ma, storage, args, FULL_ACCOUNT);
+    expect(second.ok).toBe(true);
+    expect(second.duplicate).toBe(true);
+    expect(second.implicit).toBe(true);
+    expect(second.trust_delta).toBe(0);
+    expect((await storage.getMemory('mem_1'))?.reinforce_count).toBe(1); // 只 +1 一次
+    expect(await storage.queryAudit({ action: 'recall_feedback' })).toHaveLength(1);
+    expect(await storage.queryAudit({ action: 'memory_op' })).toHaveLength(1);
+  });
+
+  it('不同 request_id 各记一次（去重键是 request_id+mem_id，不是 mem_id 单独）', async () => {
+    await storage.appendAudit(recallAudit('req_r1', 5000, ['mem_1']));
+    await storage.appendAudit(recallAudit('req_r2', 6000, ['mem_1']));
+    await runFeedbackTool(ma, storage, { mem_id: 'mem_1', verdict: 'confirm', implicit: true, recall_id: 'req_r1' }, FULL_ACCOUNT);
+    const second = await runFeedbackTool(ma, storage, { mem_id: 'mem_1', verdict: 'confirm', implicit: true, recall_id: 'req_r2' }, FULL_ACCOUNT);
+    expect(second.duplicate).toBeUndefined();
+    expect((await storage.getMemory('mem_1'))?.reinforce_count).toBe(2);
+  });
+
+  it('M1-4 纪律：关联不到召回 → 直接拒绝，不写任何标签、不改任何状态', async () => {
+    await storage.appendAudit(recallAudit('req_other', 5000, ['mem_x']));
+    await expect(
+      runFeedbackTool(ma, storage, { mem_id: 'mem_1', verdict: 'confirm', implicit: true }, FULL_ACCOUNT),
+    ).rejects.toThrow(/关联不到召回审计/);
+    expect((await storage.getMemory('mem_1'))?.reinforce_count).toBeUndefined(); // 未被强化
+    expect(await storage.queryAudit({ action: 'recall_feedback' })).toHaveLength(0);
+    expect(await storage.queryAudit({ action: 'memory_op' })).toHaveLength(0);
+  });
+
+  it('组合校验：implicit 与 reject/disputed 组合、implicit 非布尔 → McpToolError', async () => {
+    await storage.appendAudit(recallAudit('req_r1', 5000, ['mem_1']));
+    for (const bad of [
+      { mem_id: 'mem_1', verdict: 'reject', implicit: true },
+      { mem_id: 'mem_1', verdict: 'disputed', implicit: true },
+      { mem_id: 'mem_1', verdict: 'confirm', implicit: 'yes' },
+    ]) {
+      await expect(runFeedbackTool(ma, storage, bad, FULL_ACCOUNT)).rejects.toBeInstanceOf(McpToolError);
+    }
+    expect((await storage.getMemory('mem_1'))?.reinforce_count).toBeUndefined();
+  });
+
+  it('隐式确认不延寿：half_life_days 与 decay_class 均不动（批次 C 才给显式 confirm 加延寿）', async () => {
+    await storage.putMemory(mem({ mem_id: 'mem_2', half_life_days: 30 }));
+    await storage.appendAudit(recallAudit('req_r3', 7000, ['mem_2']));
+    await runFeedbackTool(
+      ma, storage, { mem_id: 'mem_2', verdict: 'confirm', implicit: true, recall_id: 'req_r3' }, FULL_ACCOUNT,
+    );
+    const m = await storage.getMemory('mem_2');
+    expect(m?.half_life_days).toBe(30);
+    expect(m?.decay_class).toBe('hot');
+  });
+
+  it('批次 C2：显式 confirm 延寿（+3 封顶 90；已 ≥90 不再动；未显式设置不猜默认值）', async () => {
+    const base = await runFeedbackTool(ma, storage, { mem_id: 'mem_1', verdict: 'confirm' }, FULL_ACCOUNT);
+    expect(base.mem?.reinforce_count).toBe(1);
+    // mem_1 未显式设置 half_life_days → 不猜类别默认值，不固化
+    expect((await storage.getMemory('mem_1'))?.half_life_days).toBeUndefined();
+
+    await storage.putMemory(mem({ mem_id: 'mem_30', half_life_days: 30 }));
+    const r30 = await runFeedbackTool(ma, storage, { mem_id: 'mem_30', verdict: 'confirm' }, FULL_ACCOUNT);
+    expect(r30.trust_delta).toBe(0.1);
+    expect((await storage.getMemory('mem_30'))?.half_life_days).toBe(33);
+    const audits30 = await storage.queryAudit({ request_id: r30.request_id });
+    expect(audits30[0].detail).toMatchObject({ op: 'confirm', half_life_days: 33 });
+
+    await storage.putMemory(mem({ mem_id: 'mem_89', half_life_days: 89 }));
+    await runFeedbackTool(ma, storage, { mem_id: 'mem_89', verdict: 'confirm' }, FULL_ACCOUNT);
+    expect((await storage.getMemory('mem_89'))?.half_life_days).toBe(90); // 封顶
+
+    await storage.putMemory(mem({ mem_id: 'mem_95', half_life_days: 95 }));
+    await runFeedbackTool(ma, storage, { mem_id: 'mem_95', verdict: 'confirm' }, FULL_ACCOUNT);
+    expect((await storage.getMemory('mem_95'))?.half_life_days).toBe(95); // 已 ≥90：不再动也不缩短
+  });
+});
+
 describe('批次44-D5-2：manage_memory（11 操作 + G4 + delete 门禁）', () => {
   let storage: InMemoryStorage;
   let ma: MemAgent;

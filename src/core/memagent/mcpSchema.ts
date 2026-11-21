@@ -55,36 +55,40 @@ export function withRecallFirstNotes(strictGate = false): Array<{ name: string; 
     inputSchema: t.inputSchema as Record<string, unknown>,
   }));
 }
-// 批次13：回显物为 display.markdown（<details> 可收起/展开），不渲染 HTML 的客户端回退 display.line。
-// 批次 RAG：改为「短收 summary + 📊 本次召回统计汇总 + 🎯 本次用上的依据 [n] + 四段二级折叠」，
-//         并要求回答正文就地标注 [n]（编号与依据段一致、不得编造）；三档与明细页段名逐字一致。
+// 2026-11-21 用户明确「禁止用 HTML」：回显物 display.markdown 三档一律零标签（无折叠/高亮标签）。
+// 2026-11-21 三次拍板：富媒体宿主（WorkBuddy/CodeBuddy 桌面端）「卡片即回显」——不再原样输出 `▶ ⚙ …` 文本行，
+//          改用组件折叠卡独占回显区（卡片标题 2 行、无大黑三角 ▶、小箭头展开），文本行与卡片二选一、绝不并存；
+//          无组件能力的客户端仍回退 display.line。
+// 批次 RAG 保留：📊 本次召回统计汇总 + 🎯 本次用上的依据 [n] + 四段平铺（加粗标题），
+//         回答正文就地标注 [n]（编号与依据段一致、不得编造）；三档与明细页段名逐字一致。
 // 批次14：触发措辞由「禁用本地检索」改为「优先用本库」——未命中/不可用时允许回退代码与本地笔记，
 //         避免客户端在工具未命中时无法继续；同时明示客户端自带 memory 文件不是本记忆库。
 // 批次32-C：不支持 HTML 折叠的客户端（DSH 实测只渲染 Markdown）默认只给一行摘要，明细改由 recall_memory 的 detail=true 按需取。
-// 批次33-C：默认收起档再收口为「两行摘要 + 一个可点的本机明细页链接」——DSH 里没有可点击的折叠控件，
-//           但 Markdown 链接能点开我们自己的真 HTML 页（四段 <details> 折叠）；无链接场景（TCP 8202）退回 detail=true 文字指引。
+// 2026-11-21 用户二次纠偏：默认收起档（compact）**只有一行摘要**——链接行与 📌 提示行全部删掉，
+//           展开只靠行首黑三角 ▶ + 客户端气泡折叠卡；本机明细页 URL 仍下发在 detail_url 字段里给需要的客户端，但不写进 display.markdown。
 // 2026-11-12（T8）：Qoder 真机验证折叠档可用 → 新增「任何客户端都可自证折叠能力」通道
-//           （请求头 X-Memagent-Render: fold），并扩 Qoder 派生名 + 运行时白名单；WorkBuddy 仍禁 HTML 走气泡卡片。
+//           （请求头 X-Memagent-Render: fold），并扩 Qoder 派生名 + 运行时白名单；判档逻辑不动，载体三档统一零 HTML 走气泡卡片。
 export const MCP_INSTRUCTIONS = `你是接入了 MultiAgent Memory 的 Agent。记忆库数据全部来自本机真实账本，工具返回的数字不得改写或编造。
 
 必须遵守：
 0. 首步强制召回（批次47）：每次新会话或新任务，必须在回答或调用任何其它工具之前，先调用一次 recall_memory 检索记忆库；未召回前不要回答、也不要调用写/管理类工具（服务端会在本会话尚未召回时拒绝写入与治理类工具）。本规则从工具元数据与 initialize 指令双层下发，不依赖客户端是否真正注入指令。
 1. 触发（默认优先）：用户消息只要涉及本仓库/本项目的实现、架构、历史决策、踩坑、偏好、事实，或出现「记得 / 上次 / 之前 / 老规矩 / 继续上次」，就优先调用 recall_memory 再回答；本库未命中或工具不可用时，才回退到读代码、工作区笔记或客户端自带 memory 文件。客户端自带的 memory/笔记不是本记忆库，不能替代首选检索。project_id 建议显式传入本机默认业务项目 P1；省略时账本若只有一个项目会自动定位，多项目（含系统共享池）会报错。严格首步门禁下必须先调用 recall_memory，完成首步后才可调用 list_projects 等其它工具，切勿在首步召回前先调 list_projects。用户问「本次会话 / 刚才 / 我们聊到哪」这类工作记忆时，改用 recall_memory(scope='session', session_id=<写入时同一个>) 取本会话近期记忆（不走语义检索）；没有 session_id 就不要猜、不要拿项目召回冒充会话历史，如实说明并请用户提供或用 project 范围检索。
-2. 回显（强制）：每次 recall_memory 成功返回后，把该次返回的 display.markdown 整段原样输出到最终回答末尾，不得改写、省略或补全其中的 token 数与金额，不得自行补写或预先展开明细（明细只能来自本次或下一次工具返回），不得添加 HTML 标签。**必须整段原样输出 display.markdown，不得按「两行摘要」的行数自行重建，也不得省略其中的一行「⚙ 模式：…」**（A6 起固定下发，报告本次生效模式 / 分流来源 / 命中特征词；会话视图无分流动作时不出现该行）。服务端按你的客户端能力选档位：① html-details——支持 HTML 折叠的客户端收到外层 <details> 默认收起（summary 以「🧠 命中」开头、含「▶ 展开本次召回汇总」），点开是「📊 本次召回统计汇总」四行 +「🎯 本次用上的依据」[n] 编号列表 + 项目背景 / Token 用量 / 省钱与费用的二级折叠；② markdown-compact——其余客户端默认收到两行加粗摘要（首行「🧠 命中 N 条 · 依据 [n]…」、第二行「📊 汇总：…」）+ 一行「⚙ 模式：…」 + 一条「▶ 展开本次召回明细」指向本机明细页的 Markdown 链接（HTTP 传输，URL 必须逐字保留、不得改写不得丢；用户点它才看统计汇总 / 命中依据 / Token / 费用），TCP 等无链接场景给一行文字指引；③ markdown-full——用户明确要看明细时，用同一个 query 再调用一次并置 detail=true，返回纯 Markdown 的两行摘要 + 一行「⚙ 模式：…」 +「📊 本次召回统计汇总」+「🎯 本次用上的依据」+ 四小节，原样输出。告警行 / 告警段只在真有告警时出现，正常轮次不要自己补 ⚠。RAG 就地引用：回答里采用某条命中记忆作为事实依据时，就地标注 [n]；编号必须与本次「🎯 本次用上的依据」段（紧凑档为首行「依据 [n]」）一一对应，不得编造编号；hits=0 或未采用任何命中时不得标注。若客户端连 Markdown 都渲染不了，改为单独一行原样输出 display.line（该行同样带 ⚙ 模式段，不得省略）。**任何客户端都可自证折叠能力**：在接入配置里加一行请求头 X-Memagent-Render: fold（也可写 html / details / 1）即按 ① 档下发，效果与 Qoder 相同；前提是你的气泡真能渲染折叠，渲染不了就不要加，否则标签会露成文本。**富媒体宿主（如 WorkBuddy、CodeBuddy 桌面端）恒走 ② 且必须输出折叠卡**（2026-11-12 用户已验收该形态）：文本里**不要写任何 HTML 标签（含折叠标签）**，折叠改由客户端「气泡内折叠卡片」承载——卡片默认收起、标题用首行原文，**展开后必须能同时查到汇总与明细**：顶部「📊 本次召回统计汇总」（含 Token 与费用数字），明细按固定顺序 📎 项目背景（逐条独立成行、含类别与正文片段）→ 🧠 命中记忆 → 🎯 本次用上的依据（每条含 [n]·相关度·命中词·正文片段）→ ⚠ 证据不足（仅真有告警时出，放最后），全部取自本次工具返回；两行摘要、⚙ 模式行与「▶ 展开本次召回明细」链接照常输出、URL 逐字保留；宿主没有卡片能力时忽略这条，按纯文本输出即可。
+2. 回显（强制）：每次 recall_memory 成功返回后，把该次返回的 display.markdown 整段原样输出到最终回答末尾，不得改写、省略或补全其中的 token 数与金额，不得自行补写或预先展开明细（明细只能来自本次或下一次工具返回），**不得添加任何 HTML 标签**（折叠标签、高亮标签一律不用）。**必须整段原样输出 display.markdown，不得按「摘要行」自行重建**——摘要就是**一整行**：行首「▶ ⚙ 模式简称」（黑三角 ▶ 是展开标记；⚙ 模式段 A6 起固定下发，摘要里只用简称如「事实优先」，完整分流来源 / 命中特征词见 detail 档；会话视图无模式段但仍有 ▶），接着「🎯 命中 N 条 (Nt) ｜ 📎 背景 N 条 (Nt) ｜ ⚡ 省 …t ｜ 💰 ¥…（省 ¥…） ｜ 今日 N 次 ｜ 全部 N 次」，告警短版（⚠ …）内联在行尾；金额只留本次、今日/全部只留次数（已压到约 2 行宽）。服务端按你的客户端能力选档位，但**三档 markdown 一律零 HTML 标签**：① html-details——折叠能力自证的客户端（白名单 / X-Memagent-Render: fold）收到一整行摘要 +「📊 本次召回统计汇总」+「🎯 本次用上的依据」[n] 编号列表 + 📎 项目背景 / 💠 命中记忆 / ⚡ Token 用量 / 💰 省钱与费用四段加粗平铺；② markdown-compact——其余客户端默认收到**仅一整行摘要**（同上），没有第二行、没有明细页链接、没有提示语，输出必须与 display.markdown 完全一致；③ markdown-full——用户明确要看明细时，用同一个 query 再调用一次并置 detail=true，返回纯 Markdown 的一行摘要 +「📊 本次召回统计汇总」+「🎯 本次用上的依据」+ 四段加粗小节，原样输出。告警只在真有告警时出现，正常轮次不要自己补 ⚠。RAG 就地引用：回答里采用某条命中记忆作为事实依据时，就地标注 [n]；编号必须与本次「🎯 本次用上的依据」段一一对应，不得编造编号；hits=0、未采用任何命中、或当前是 compact 档（摘要行不含编号，需 detail=true 才有依据段）时不得凭空标注。若客户端连 Markdown 都渲染不了，改为单独一行原样输出 display.line（该行同样以 ▶ 开头，不得省略）。**富媒体宿主（WorkBuddy、CodeBuddy 桌面端）走「卡片即回显」，卡片与文本摘要行二选一、绝不并存**（2026-11-21 用户最终拍板）：这类宿主能把回显渲染成组件折叠卡时，**不要再原样输出那行「▶ ⚙ 模式 …」文本摘要**——用宿主组件工具渲染一张**默认收起**的折叠卡，放在回答末尾的召回回显区（不要插在正文中间）；**卡片标题压成 2 行、不要大黑三角 ▶、用小箭头（▸/▾）标示可展开且箭头放大到清晰可见**，**标题固定排两行**：第一行 = 模式简称 ｜ 🎯 命中 N 条 (Nt) ｜ 📎 背景 N 条 (Nt) ｜ **⚡ 省 …t（省量放第一行末尾）**；第二行 = 💰 ¥…（省 ¥…）｜ 今日 N 次 ｜ 全部 N 次，**在「全部 N 次」后紧跟灰色小字「点击查阅详细内容」**（不另起一行）；去掉行首 ▶；**卡片之后不要再输出任何文字**（不写「卡片已作为会话最后一条内容输出」这类括注/说明，卡片必须是回答最后一条）；**展开后必须能同时查到汇总与明细**：顶部「📊 本次召回统计汇总」（含 Token 与费用数字），明细按固定顺序 📎 项目背景（逐条独立成行、含类别与正文片段）→ 💠 命中记忆 → 🎯 本次用上的依据（每条含 [n]·相关度·命中词·正文片段）→ ⚠ 证据不足（仅真有告警时出，放最后），全部取自本次工具返回，不得改写数字、不要写任何明细页链接。**文本里不要写任何 HTML 标签**；宿主确实没有组件卡片能力时，才回退为原样输出 display.markdown 文本摘要行，且不要文本与卡片同时出现。**富媒体宿主另有专门的卡片数据结构 display.card**（仅 WorkBuddy/CodeBuddy 桌面端非 null）：含 titleLine1 / titleLine2（标题两行、已去行首 ▶）、hint（灰色小字「点击查阅详细内容」）、summary（4 行 label/value）、background / hits / basis（逐条结构化，index 即 [n]）与 warnings。**display.card 非 null 时直接按字段渲染卡片，不要自己从 display.line 拆字符串、也不要重算任何数字**。**卡片 hits 每条含 feedback_hint（反馈入口提示，把其中的 N 替换为该条 [n] 编号后原样渲染）与 reinforce_count（累计被用户确认/强化次数，无则不显示）**。**支持会话按钮的宿主（WorkBuddy / CodeBuddy 桌面端）应把反馈提示升级为交互按钮**：每条命中渲染「N 有用 ↗」「N 没用 ↗」两个小按钮，点击经宿主的 sendPrompt 类机制把「N 有用 / N 没用」作为用户消息发出（Agent 收到后调 feedback 提交，幂等去重、不会重复计分）；无按钮能力的宿主保留文字提示原样渲染，不要伪造按钮。**富媒体宿主恒走 markdown-compact 档**。
 3. 金额：display.money 为 null 表示用户尚未设置单价（全局参数页），不得猜测或补全金额。
 4. 沉淀：会话中形成新的决策、踩坑、事实、偏好或洞察时，调用 write_memory 落库（category 选最贴近的一类）；写入前如不确定项目，可在首步召回后调用 list_projects；write_memory.project_id 必填，本机默认业务项目 P1；不确定 L0 写密钥是否解锁时先调用 get_write_status 探锁。若 write_memory 返回 status=pending，表示本次内容已暂存、解锁后会自动重放落库——这不是写入成功，必须如实告知用户，不得伪造 mem_id 或声称已落库。
 5. 边界：不要向用户展示 MCP 认证令牌（Authorization 头 / mcp-token.txt 内容）；不要伪造记忆内容、省量或审计回执。工具不可用时（未启动/未授权/连接失败）如实说明并继续回答，不得假装检索过记忆。
 6. 盘点：需要治理记忆（找过时/重复/低价值条目）时用 list_memories 按条件列清单；已知 mem_id 时用 get_memory 精确读单条。两者只返回可读摘要与状态字段，不含 L0 密文；project_id 超出令牌作用域会被拒绝。list_memories 是清单盘点，找答案仍应首选 recall_memory。
-7. 反馈与治理：只有用户明确认可或否定某条召回记忆时，才用 feedback 提交 verdict（confirm/reject/disputed），由内核计算可信度变化，不要凭自己的判断代用户表态。需要置顶/取消置顶、锁定/解锁、归档/恢复、降权/强化、调参或迁移时用 manage_memory；locked 的记忆只有 unlock 能操作。delete 不可逆且默认不开放（需服务端开关），除非用户明确要求删除，一律优先 forget（降权不删）或 archive（归档可恢复）。两工具只回可读摘要，不含 L0 密文；ok:false 或 blocked_locked:true 时必须如实告知，不得声称操作已生效。
+7. 反馈与治理：只有用户明确认可或否定某条召回记忆时，才用 feedback 提交 verdict（confirm/reject/disputed），由内核计算可信度变化，不要凭自己的判断代用户表态。**例外——隐式弱信号（批次 A1）：回答采信了某条 [n] 命中后，可在同轮调一次 feedback(mem_id=该条, verdict='confirm', implicit=true, recall_id=本次 request_id)**：它不动信任分、只强化计数并进评估样本池；同一召回+记忆已记过会幂等返回，不要重复提交；用户明确表态时仍用普通 confirm（不加 implicit）。需要置顶/取消置顶、锁定/解锁、归档/恢复、降权/强化、调参或迁移时用 manage_memory；locked 的记忆只有 unlock 能操作。delete 不可逆且默认不开放（需服务端开关），除非用户明确要求删除，一律优先 forget（降权不删）或 archive（归档可恢复）。两工具只回可读摘要，不含 L0 密文；ok:false 或 blocked_locked:true 时必须如实告知，不得声称操作已生效。
 8. 遗忘可观测性：用户觉得「记忆变少了 / 状态变了」时用 gc_report 查本次遗忘周期会降档多少条。dry_run 缺省 true，只演算不改库不写审计；只有用户明确要求执行遗忘周期时才显式传 dry_run=false。报告是分层真实统计：衰减段保留 decayed/merged/conflicts_resolved，摘要合并段给出 freshness_updated/scanned/migrated/summaries_created/summaries_filtered/merged_originals/compressed，全部来自真实事件、note 说明各段口径；不得据此推断或编造任何数字，本入口未注入向量后端故 compressed 恒为 0。若用户明确要求处理已排队冲突，必须同时给 resolve_conflicts=true 与合法 verdict（auto_override/user_confirm/merge/hold）才落定；只给其中一个会被明确拒绝，绝不自动覆盖旧记忆；conflicts_resolved 只数真实落定，dry_run 或 user_confirm/hold 时为 0。
 9. 管理工具（D6，管理员专属）：create_project 登记受管项目（kind=shared/user/archive/general，命名规则见工具描述）与 mint_token 签发受限令牌（scope_project_ids/is_admin/过期）都仅限管理员令牌调用，非管理员会被明确拒绝——被拒时如实转告用户，不要重试或伪装成功。mint_token 返回的明文令牌只在结果里出现一次：必须原样、完整地转交给用户（建议用户写入客户端配置文件），绝不写入记忆库、日志或二次回显之外的地方；丢失后只能重新 mint，无法找回。
-10. 钩子健康度自检（recall_hook_status，第 13 个工具）：强制召回钩子跑在**宿主侧**、不在本服务进程内，失败时只写本机状态文件——Agent 侧原本完全看不见，这正是本项目历史上「钩子静默失效多日」的成因。出现以下情况必须调用它：① 用户问「记忆库是否正常 / 召回可不可信 / 今天怎么没读到记忆」；② 本轮召回结果可疑（命中 0 条但你确信库里有相关内容）、或召回工具报错；③ 你要在回答里断言「记忆库没有相关内容」之前。它返回最近一次执行结果（ok / empty / failed + 中文原因 + 时间 + 注入条数）、距今多久，以及最关键的「从未执行过」（状态文件不存在 = 钩子没装、安装路径写错、或从未触发）。**verdict 为 failed / never_ran / stale 时，必须在回答里如实写明「本轮强制召回未生效，我已回退现查」并给出原因，不得静默跳过、不得假装检索过**；verdict 为 ok / empty 时不要额外打扰用户。务必区分两件事：**「记忆库没命中」≠「钩子没生效」**——前者是真没有相关记忆，后者是根本没检索，混为一谈等于用「库里没有」掩盖「没查」。`;
+10. 钩子健康度自检（recall_hook_status，第 13 个工具）：强制召回钩子跑在**宿主侧**、不在本服务进程内，失败时只写本机状态文件——Agent 侧原本完全看不见，这正是本项目历史上「钩子静默失效多日」的成因。出现以下情况必须调用它：① 用户问「记忆库是否正常 / 召回可不可信 / 今天怎么没读到记忆」；② 本轮召回结果可疑（命中 0 条但你确信库里有相关内容）、或召回工具报错；③ 你要在回答里断言「记忆库没有相关内容」之前。它返回最近一次执行结果（ok / empty / failed + 中文原因 + 时间 + 注入条数）、距今多久，以及最关键的「从未执行过」（状态文件不存在 = 钩子没装、安装路径写错、或从未触发）。**verdict 为 failed / never_ran / stale 时，必须在回答里如实写明「本轮强制召回未生效，我已回退现查」并给出原因，不得静默跳过、不得假装检索过**；verdict 为 ok / empty 时不要额外打扰用户。务必区分两件事：**「记忆库没命中」≠「钩子没生效」**——前者是真没有相关记忆，后者是根本没检索，混为一谈等于用「库里没有」掩盖「没查」。
+11. 自进化与画像（growth_evolve，批次 B/C/D）：用户问「进化/权重/评估怎么样」→ action=status（只读）；评估产了建议且用户明确说「采纳」→ action=adopt（重过护栏后写 growth:v1，护栏不过会被明确拒绝，如实转告不要重试）；用户问「我常用什么场景/画像」→ action=profile（只读派生，可删，只提示不改配置）；用户明确要启用/停用「连续 reject 降档」→ action=policy（enabled 必填，全局真源与参数页同源）。富媒体宿主的卡片 summary 已带「进化」行（模式/最近评估/近期降档数），回答时可直接引用，不要重算数字；adopt/policy 是写操作，必须用户明确表态才调，不要替用户决定。`;
 
 /** 标准 MCP 工具定义（tools/list 返回；顺序即客户端展示顺序） */
 export const MCP_TOOLS = [
   {
     name: 'recall_memory',
-    description: '检索项目记忆库（关键词 / 历史决策 / 踩坑 / 偏好 / 事实）。优先使用本工具：回答本项目相关问题（实现、架构、历史决定、踩过的坑、用户偏好）前先调用；未命中或工具不可用时再回退读代码或客户端本地笔记（本地 memory 文件不是本记忆库）。返回命中、项目背景、token 省量与本次/今日/全部金额；project_id 可省略（唯一项目自动定位）。调用后须在回答末尾原样输出 display.markdown：服务端按客户端能力选档——支持 HTML 折叠的客户端给外层 <details> 默认收起的「📊 本次召回统计汇总」+「🎯 本次用上的依据」[n] 编号列表 + 四段二级折叠；其余默认给两行加粗摘要（含 [n] 编号依据词）+ 一行「⚙ 模式：…」+ 一条「▶ 展开本次召回明细」的本机明细页链接（URL 逐字保留）；detail=true 给纯 Markdown 同结构（含 ⚙ 模式行）+ 四小节。原样整段输出 display.markdown，不得按「两行」重建而丢掉 ⚙ 模式行。回答采用某条命中作为事实依据时就地标注 [n]（编号必须与依据段一致，不得编造，hits=0 不标注）；不得自行补写或预先展开明细、不得添加 HTML 标签、数字/金额不得改写；用户明确要明细时再用同一 query 调用一次并置 detail=true。任何客户端都可加请求头 X-Memagent-Render: fold 自证折叠能力、按 HTML 折叠档下发（渲染不了时不要加）。富媒体宿主（如 WorkBuddy）恒走「两行摘要 + ⚙ 模式行」档且**必须输出折叠卡**（用户已验收该形态）：**不要在文本里写 HTML 标签**，折叠改用客户端「气泡内折叠卡片」承载——默认收起、标题用首行原文，展开后能查到汇总与明细：顶部统计汇总（含 Token 与费用），明细按 📎 项目背景（逐条独立成行）→ 🧠 命中记忆 → 🎯 依据（含 [n] 与正文片段）→ ⚠ 证据不足（放最后、仅真有告警时出）固定顺序，均取自本次返回；两行摘要、⚙ 模式行与链接仍照原样输出。',
+    description: '检索项目记忆库（关键词 / 历史决策 / 踩坑 / 偏好 / 事实）。优先使用本工具：回答本项目相关问题（实现、架构、历史决定、踩过的坑、用户偏好）前先调用；未命中或工具不可用时再回退读代码或客户端本地笔记（本地 memory 文件不是本记忆库）。返回命中、项目背景、token 省量与本次/今日/全部金额；project_id 可省略（唯一项目自动定位）。调用后须在回答末尾原样输出 display.markdown：**文本通道零 HTML 标签**，摘要恒为一整行（行首「▶ ⚙ 模式简称」+「🎯 命中 N 条 (Nt) ｜ 📎 背景 N 条 (Nt) ｜ ⚡ 省 …t ｜ 💰 ¥…（省 ¥…）｜ 今日 N 次 ｜ 全部 N 次」，告警短版内联行尾，已压到约 2 行宽）。服务端按客户端能力选档，但三档 markdown 都不含折叠/高亮标签：折叠能力自证客户端收到一行摘要 +「📊 本次召回统计汇总」+「🎯 本次用上的依据」[n] 编号列表 + 📎 项目背景 / 💠 命中记忆 / ⚡ Token 用量 / 💰 省钱与费用四段平铺；其余默认仅一整行摘要（无链接、无提示语）；detail=true 给纯 Markdown 同结构（一行摘要 + 统计汇总 + 依据 + 四段小节）。原样整段输出 display.markdown，不得按「摘要行」重建而丢掉行首 ▶ 与 ⚙ 模式段。回答采用某条命中作为事实依据时就地标注 [n]（编号必须与依据段一致，不得编造；hits=0 或 compact 档摘要行无编号时不标注）；不得自行补写或预先展开明细、不得添加 HTML 标签、数字/金额不得改写；用户明确要明细时再用同一 query 调用一次并置 detail=true。任何客户端都可加请求头 X-Memagent-Render: fold 自证折叠能力（渲染不了不要加）。富媒体宿主（如 WorkBuddy、CodeBuddy 桌面端）恒走 markdown-compact 档且**卡片即回显**：**不要原样输出那行 `▶ ⚙ 模式 …` 文本摘要**（文本行与卡片二选一、绝不并存），改用宿主组件工具渲染一张默认收起的折叠卡，放在回答末尾的召回回显区；卡片标题压 2 行、无大黑三角 ▶、用小箭头（▸/▾）标示可展开且箭头放大到清晰可见；第一行 = 模式简称 ｜ 命中/背景条数与 t ｜ ⚡ 省量（放第一行末尾），第二行 = 本次金额 ｜ 今日/全部次数，**「全部 N 次」后紧跟灰色小字「点击查阅详细内容」**（不另起一行）；去掉行首 ▶，卡片之后不输出任何文字（不写括注）；展开后能查到汇总与明细：顶部统计汇总（含 Token 与费用），明细按 📎 项目背景（逐条独立成行）→ 💠 命中记忆 → 🎯 依据（含 [n] 与正文片段）→ ⚠ 证据不足（放最后、仅真有告警时出）固定顺序，均取自本次返回；文本里不要写 HTML 标签、不要写任何明细页链接；宿主无组件能力才回退纯文本摘要行。**富媒体宿主另有专门的卡片数据结构 `display.card`**（2026-11-21 新增，仅 WorkBuddy/CodeBuddy 桌面端非 null）：含 `titleLine1`/`titleLine2`（卡片标题两行，已去行首 ▶）、`hint`（灰色小字「点击查阅详细内容」）、`summary`（统计汇总 4 行 label/value）、`background`/`hits`/`basis`（逐条结构化，含 index 即 [n]，hits 每条另含 feedback_hint 反馈提示与 reinforce_count 强化次数）与 `warnings`。**display.card 非 null 时，直接按它的字段渲染折叠卡，不要自己从 display.line 里拆字符串、也不要重算任何数字**——它是标题与明细的唯一真源，保证卡片与文本摘要同口径。卡片必须放在回答绝对末尾、其后零文字。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -93,7 +97,7 @@ export const MCP_TOOLS = [
         top_k: { type: 'integer', description: '返回条数，1-10，默认 5' },
         scene: { type: 'string', enum: ['default', 'critical', 'task_start', 'history_query'], description: '场景；critical 禁 minimal 模式' },
         mode: { type: 'string', enum: ['auto', 'top_insight', 'fact_first', 'event_replay', 'pattern_reasoning', 'minimal'], description: '召回模式开关：auto 或省略 = 自动（按 scene × 关键词自动分流，默认档）；5 个具体值为手动（强制采用该模式并改用该模式的打分权重，不做自动分流）。枚举外的值一律按参数错误拒绝，不静默降级。' },
-        detail: { type: 'boolean', description: '是否要完整明细（批次32-C/33-C，批次 RAG 更新）。省略/false = 只给两行加粗摘要 + 一行「⚙ 模式：…」（含 [n] 编号依据词；HTTP 档附一条可点本机明细页链接，页面含「统计汇总 / 命中依据 / Token / 费用」）；true = 直接返回纯 Markdown 的两行摘要 + 一行「⚙ 模式：…」 +「📊 本次召回统计汇总」+「🎯 本次用上的依据」[n] 编号列表 + 项目背景/命中记忆/Token/省钱与费用四小节。只在用户明确要看明细时置 true，query 与本次保持一致；不要因为「这样更完整」自行置 true' },
+        detail: { type: 'boolean', description: '是否要完整明细（批次32-C/33-C，批次 RAG 更新）。省略/false = 只给一整行加粗摘要（行首 ▶ + ⚙ 模式段，没有链接行与提示行；展开靠气泡折叠卡，明细页 URL 在 detail_url 字段里按需取）；true = 直接返回纯 Markdown 的一行摘要 +「📊 本次召回统计汇总」+「🎯 本次用上的依据」[n] 编号列表 + 📎 项目背景/💠 命中记忆/⚡ Token 用量/💰 省钱与费用四小节。三档一律零 HTML 标签，折叠靠客户端气泡卡。只在用户明确要看明细时置 true，query 与本次保持一致；不要因为「这样更完整」自行置 true' },
         scope: { type: 'string', enum: ['project', 'session'], description: "检索范围，默认 project（项目内语义检索）。session = 本会话工作记忆：只取写入时用同一 session_id 标记的近期记忆，按时间倒序取最近 N 条，不走向量语义检索，也不注入项目背景。适用于「上次我们聊到哪 / 本次会话已确定了什么」；一般问答仍用 project" },
         session_id: { type: 'string', description: "scope='session' 时必填：会话 ID（与 write_memory 写入时同一个）。scope='project' 时可省略；历史记忆没有该字段，不会出现在会话视图里" },
       },
@@ -164,6 +168,20 @@ export const MCP_TOOLS = [
     },
   },
   {
+    name: 'growth_evolve',
+    description: '自进化与场景画像（批次 B/C/D）。action=status：查进化状态（模式 off/suggest/auto、当前召回权重、最近一次评估结论、待采纳建议），只读；action=adopt：一键采纳最近一条建议权重——重过护栏（步长/漂移/冷却期）后写 growth:v1（存历史、挂回诊计划），护栏不过或 mode=off 会明确拒绝；action=profile：场景画像（窗口内召回审计按 scene 聚合，只读派生、不落库，window_days 1–365 默认 30；删除对应审计画像即消失；只提示场景偏好，不自动改分流配置）；action=policy：反馈降档策略开关（enabled 必填布尔，可选 window_days 1–365 / reject_downgrade_threshold 1–50；全局真源与参数页同源，只降不升、不推 dormant）。adopt/policy 会真实写配置，必须用户明确说「采纳」「启用/停用降档」才调用，不要替用户决定。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['status', 'adopt', 'profile', 'policy'], description: '操作类型；status/profile 只读，adopt/policy 真实写配置（须用户明确表态）' },
+        enabled: { type: 'boolean', description: '仅 action=policy：反馈降档总开关' },
+        window_days: { type: 'integer', description: 'action=profile 时为画像窗口 1–365（默认 30）；action=policy 时为降档统计窗口 1–365' },
+        reject_downgrade_threshold: { type: 'integer', description: '仅 action=policy：窗口内累计 reject 降档阈值 1–50' },
+      },
+      required: ['action'],
+    },
+  },
+  {
     name: 'get_memory',
     description: '按 mem_id 精确读一条记忆（补语义召回盲区）。mem_id 来自 recall_memory 的 hits[].mem_id 或 list_memories 的 items[].mem_id。只返回可读摘要与状态字段，绝不返回 L0 密文；不存在如实回 ok:false，项目超出令牌作用域会被拒绝。',
     inputSchema: {
@@ -176,13 +194,14 @@ export const MCP_TOOLS = [
   },
   {
     name: 'feedback',
-    description: '对一条召回结果给出用户反馈，反哺可信度与强化计数。confirm → confidence +0.1 且 reinforce_count +1；reject → confidence −0.05（下限 0.05）；disputed → 不改分、挂冲突待裁决（trust_delta=0）。仅在用户明确认可/否定召回内容时调用，不要凭自己的判断代用户表态。mem_id 须属于令牌作用域内的项目；只回可读摘要，不含 L0 密文。',
+    description: '对一条召回结果给出用户反馈，反哺可信度与强化计数。confirm → confidence +0.1 且 reinforce_count +1，并对已显式设置 half_life_days 的记忆延寿 +3 天（封顶 90，已 ≥90 不再动；未显式设置的不猜默认值）；reject → confidence −0.05（下限 0.05）；disputed → 不改分、挂冲突待裁决（trust_delta=0）。批次 A1 隐式弱信号：verdict=confirm 时可携 implicit=true（回答采信 [n] 后提交）——不动信任分、不延寿，只 reinforce_count+1 并进评估样本池；必须能归因到召回（建议携 recall_id=本次 request_id），同一召回+记忆幂等去重。仅在用户明确认可/否定召回内容时提交普通反馈，不要凭自己的判断代用户表态；implicit 只在回答确实采信了该条时提交。mem_id 须属于令牌作用域内的项目；只回可读摘要，不含 L0 密文。',
     inputSchema: {
       type: 'object',
       properties: {
         mem_id: { type: 'string', description: '记忆 ID（来自 recall_memory 的 hits[].mem_id 或 list_memories 的 items[].mem_id）' },
         verdict: { type: 'string', enum: ['confirm', 'reject', 'disputed'], description: '反馈类型（用户表态后才提交）' },
-        recall_id: { type: 'string', description: '可选：产生这条记忆的召回 request_id（recall_memory 回执里的 request_id），把反馈归因到具体召回；缺省则按「最近一次含该 mem_id 的召回」自动关联；关联不到只做信任分更新，不伪造标签' },
+        implicit: { type: 'boolean', description: '可选，仅 verdict=confirm 时允许：true = 「引用即隐式确认」弱信号（不动信任分，只强化计数并进评估样本池；同一召回+记忆幂等去重）。与 reject/disputed 组合会被拒绝' },
+        recall_id: { type: 'string', description: '可选：产生这条记忆的召回 request_id（recall_memory 回执里的 request_id），把反馈归因到具体召回；缺省则按「最近一次含该 mem_id 的召回」自动关联；关联不到只做信任分更新，不伪造标签。implicit=true 时强烈建议携带' },
       },
       required: ['mem_id', 'verdict'],
     },

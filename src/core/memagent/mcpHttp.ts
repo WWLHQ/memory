@@ -34,6 +34,7 @@ import type { PersonalMemoryStore } from './personalStore.ts';
 import { runGetMemoryTool, runListMemoriesTool } from './mcpReadTools.ts';
 import { deleteAllowed, runFeedbackTool, runManageMemoryTool } from './mcpManageTools.ts';
 import { runGcReportTool } from './mcpGcTools.ts';
+import { runGrowthEvolveTool } from './mcpGrowthTools.ts';
 import { runHookStatusTool } from './mcpHookTools.ts';
 import { runCreateProjectTool, runMintTokenTool } from './mcpProjectTools.ts';
 
@@ -236,54 +237,57 @@ const WRITE_GATE_TOOLS = new Set([
 ]);
 
 /** 结果末块：模型未必读 initialize.instructions，这里再要求一次展示方式。
- *  批次 RAG：文案按本次实际下发的档位，与 display.markdown 的段名逐字一致：
- *  html-details = 外层 <details> 短收 summary + 「📊 本次召回统计汇总」+「🎯 本次用上的依据」+ 四段二级折叠；
- *  markdown-full = 两行加粗摘要 + 一行 ⚙ 模式 + 同两段 + 四小节纯 Markdown；
- *  markdown-compact = 两行加粗摘要 + 一行 ⚙ 模式（含 [n] 编号依据词）+ 一条明细页链接。
- *  A8：三档文案都必须认识 ⚙ 模式行，且 display.line 单行兜底也带该段（不再静默丢模式信息）。
- *  三档统一要求正文就地标注 [n]、不得编造编号、不预展开；compact 档 URL 逐字保留。
- *  **2026-11-12 用户拍板（WorkBuddy 禁用 HTML）**：富媒体客户端（WorkBuddy 等）恒走 compact 档——
- *  文本通道**不得**出现 `<details>` 等 HTML 标签，折叠改由客户端「气泡内折叠卡片」承载；
- *  服务端不新增档位、不改白名单，只在 compact 档文案里授权这条增强通道（做不到的客户端直接忽略）。
- *  **2026-11-12（T8）**：Qoder 真机验证 ① 档折叠卡可用后，其他客户端可加请求头
- *  `X-Memagent-Render: fold` 自证折叠能力，服务端即按 ① 档下发（渲染不了就别加，否则露裸标签）。 */
+ *  2026-11-21 用户拍板「禁止用 HTML」：三档一律**零 HTML 标签**——没有 <details>/<summary>/<mark>。
+ *  摘要是一整行（2026-11-21 二次拍板压到 2 行宽）：行首 ▶ +「⚙ 模式简称」+「命中 …｜背景 …｜⚡ 省 …t｜💰 ¥…（省 ¥…）｜今日 N 次｜全部 N 次」
+ *  + 告警短版内联行尾；金额只留本次、今日/全部只留次数。展开看细节靠客户端气泡折叠卡或用户说「看明细」，服务端不输出任何折叠标签。
+ *  三档文案都必须认识行首 ▶ 与 ⚙ 模式段；display.line 单行兜底也带该段。
+ *  三档统一要求正文就地标注 [n]（compact 档无编号则不得凭空标）、不得编造编号、不预展开；
+ *  2026-11-21 用户二次纠偏：compact 档（WorkBuddy 恒走此档）**只有一行摘要**——没有链接行、没有 📌 提示行，
+ *  展开只靠黑三角 ▶ + 客户端气泡折叠卡；文案里不再要求输出/保留任何本机明细页 URL。
+ *  判档/白名单逻辑不动，只改文案与 markdown 载体形态。 */
 export function recallEchoNote(mode: RecallDisplayMode): string {
   const keep = '数字与金额不得改写、省略或补全。';
-  // A8：展示要求若只说「两行摘要」，Agent 会按行数重建并丢掉第三行 ⚙ 模式 —— 服务端必须自己堵住。
-  const noRebuild = '不得按「两行摘要」的行数自行重建 display.markdown：⚙ 模式行是本次结果的一部分，必须随整段原样输出、不得省略；';
-  const bubbleCard = '【气泡折叠档（富媒体宿主）】2026-11-12 用户已验收该形态（WorkBuddy 手机端/桌面端均可渲染）：'
-    + '若你的宿主能在消息气泡内渲染折叠卡片/折叠面板，**必须**为本次召回输出一张**默认收起**的折叠卡——'
-    + '卡片标题 = 首行摘要原文（「🧠 命中 N 条 · 依据 [n]… ｜ 省 … ｜ 本次 ¥…」）；'
+  const noRebuild = '不得按「摘要行」的行数自行重建 display.markdown：行首的黑三角 ▶ 与「⚙ 模式简称」段是本次结果的一部分，必须随整段原样输出、不得省略（会话视图无模式段时仍有 ▶）；';
+  /** 2026-11-21 用户口径：摘要恒为**一整行**，行首 ▶ 黑三角 + ⚙ 模式，告警内联行尾 */
+  const summaryShape = '**一整行**加粗摘要（已压到约 2 行宽）：行首「▶ ⚙ 模式简称」（黑三角 ▶ = 展开标记），接着「🎯 命中 N 条 (Nt) ｜ 📎 背景 N 条 (Nt) ｜ ⚡ 省 …t ｜ 💰 ¥…（省 ¥…） ｜ 今日 N 次 ｜ 全部 N 次」（命中用 🎯、背景用 📎，二者一一对应；零命中不标 🎯），告警短版（⚠ …）内联在行尾；金额只留本次、今日/全部只留次数';
+  const noHtml = '**文本里不要输出任何 HTML 标签**（折叠标签、高亮标签等一律不用）：黑三角 ▶ 只是纯文本标记，真正的折叠展开由客户端气泡卡承载；';
+  const bubbleCard = '【富媒体宿主回显·卡片即回显】WorkBuddy / CodeBuddy 桌面端等能渲染组件卡片的宿主：'
+    + '本次召回回显**只用一张默认收起的折叠卡承载**，回答里**不要再原样输出那行 `⚙ 模式 …` 文本摘要**（红框位置由卡片独占，文本行与卡片二选一、绝不并存）。'
+    + '用宿主提供的组件/折叠面板工具渲染这张卡，**卡片放在回答末尾的召回回显区**（不要插在正文中间）：'
+    + '**卡片标题压成 2 行、不要大黑三角 ▶、用小箭头（▸/▾）标示可展开，箭头要放大到清晰可见**（默认小箭头太小看不清）；'
+    + '**标题固定排成两行，各项分区明确**：第一行 = 模式简称 ｜ 🎯 命中 N 条 (Nt) ｜ 📎 背景 N 条 (Nt) ｜ **⚡ 省 …t（省量/token 节省放第一行末尾）**；第二行 = 💰 ¥…（省 ¥…）｜ 今日 N 次 ｜ 全部 N 次，**在「全部 N 次」后面紧跟灰色小字「点击查阅详细内容」**（不要另起一行、不要放在省量后）；各项取自 display.line 并去掉行首 ▶；'
+    + '**卡片之后不要再输出任何文字**——不写「卡片已作为会话最后一条内容输出」这类括注/说明，卡片必须是本次回答的最后一条内容；'
+    + '**富媒体宿主另有结构化字段 display.card（非 null 时）**：含 titleLine1 / titleLine2 / hint / summary / background / hits / basis / warnings，**直接按这些字段渲染卡片，不要自己从 display.line 拆字符串、也不要重算数字**；display.card 为 null 时才退回按 display.line 渲染。'
+    + '**卡片 hits 每条含 feedback_hint（反馈入口提示）与 reinforce_count（累计被用户确认/强化次数，无则不显示）**：把 feedback_hint 里的 N 替换为该条 [n] 编号后逐条渲染；用户按提示回复「N 有用 / N 没用」后，用 feedback 工具提交（明确表态用普通 confirm/reject；agent 自己采信了 [n] 也可在同轮提交一次 implicit=true 的弱信号，幂等去重、不会重复计分）。'
+    + '**支持会话按钮的宿主（WorkBuddy / CodeBuddy 桌面端）应把反馈提示升级为交互按钮**：每条命中渲染「N 有用 ↗」「N 没用 ↗」小按钮，点击经宿主 sendPrompt 类机制把该文案作为用户消息发出（Agent 收到后调 feedback 提交，幂等去重）；无按钮能力的宿主保留文字提示，不要伪造按钮。'
     + '**展开后必须能同时查到汇总与明细**：顶部放「📊 本次召回统计汇总」（四行，含 Token 与费用数字）；'
-    + '明细按用户指定的固定顺序 📎 项目背景（**逐条独立成行**，每条含类别与正文片段，不压缩成一整段）→ 🧠 命中记忆 → 🎯 本次用上的依据（每条含 [n]、层级/相关度、🎯 命中词、正文片段）→ ⚠ 证据不足（仅真有告警时出现，放在最后）；'
-    + '两行摘要、⚙ 模式行与「▶ 展开本次召回明细」链接仍照常输出、URL 逐字保留；'
-    + '**文本里不要输出任何 HTML 标签**（折叠标签也不行）；卡内正文只能取自本次工具返回，不得编造、不得改写数字或吞掉链接。'
+    + '明细按用户指定的固定顺序 📎 项目背景（**逐条独立成行**，每条含类别与正文片段，不压缩成一整段）→ 💠 命中记忆 → 🎯 本次用上的依据（每条含 [n]、层级/相关度、🎯 命中词、正文片段）→ ⚠ 证据不足（仅真有告警时出现，放在最后）；'
+    + noHtml + '卡内正文只能取自本次工具返回，不得编造、不得改写数字，也不要在文本里写任何明细页链接。'
     + '宿主没有卡片/折叠面板能力时忽略本条，按纯文本方式输出即可。';
   const citeFull = '正文里采用某条命中记忆作为事实依据时，就地标注 [n]：编号必须与「🎯 本次用上的依据」段一一对应，不得编造编号，hits=0 时不得标注；';
-  const citeCompact = '正文里采用某条命中记忆作为事实依据时，就地标注 [n]：编号必须与首行「依据 [n]」一一对应（完整依据段点开明细页可见），不得编造编号，hits=0 时不得标注；';
+  const citeCompact = '本次摘要行不含 [n] 编号，正文里不要凭空标注编号；要带编号引用就让用户说「看明细」，用同一 query 再调用一次并置 detail=true，按那次返回的「🎯 本次用上的依据」编号就地标注 [n]，不得编造编号；';
   if (mode === 'html-details') {
     return '【展示要求】本次是可折叠档：把上一条 display.markdown 整段原样输出到最终回答末尾。'
-      + '外层 <details> 默认收起（summary 以「🧠 命中」开头、含「▶ 展开本次召回汇总」），点开依次是'
-      + '「📊 本次召回统计汇总」四行、「🎯 本次用上的依据」[n] 编号列表，以及项目背景 / Token 用量 / 省钱与费用的二级折叠（告警段仅在真有告警时出现），并带一行「⚙ 模式：…」报告本次生效模式。'
-      + noRebuild + citeFull
-      + '不要替用户预先展开（不加 open 属性）、不要给回答添加额外 HTML 标签、不要自行补写命中条目或明细。'
-      + '若客户端不渲染 HTML，改为单独一行原样输出 display.line（以 🧠 Memory 开头的提示行，末尾同样带 ⚙ 模式段，不得省略）；两种情况均适用：' + keep
+      + `摘要行以黑三角 ▶ 开头（${summaryShape}），`
+      + '其后依次是「📊 本次召回统计汇总」、「🎯 本次用上的依据」[n] 编号列表，以及 📎 项目背景 / 💠 命中记忆 / ⚡ Token 用量 / 💰 省钱与费用四段加粗标题平铺（告警段仅在真有告警时出现）。'
+      + noRebuild + citeFull + bubbleCard
+      + '不要替用户预先展开明细、不要给回答添加 HTML 标签、不要自行补写命中条目或明细。'
+      + '若客户端不能承载气泡折叠卡，改为单独一行原样输出 display.line（以 ▶ 开头的提示行，有模式时随后是 ⚙ 模式简称，不得省略）；两种情况均适用：' + keep
       + RECALL_SOURCE_BOUNDARY;
   }
   if (mode === 'markdown-full') {
     return '【展示要求】本次是 detail=true 的明细返回：把上一条 display.markdown 整段原样输出到最终回答末尾，不要给回答添加任何 HTML 标签。'
-      + '结构是两行加粗摘要 + 一行「⚙ 模式：…」 +「📊 本次召回统计汇总」四行 +「🎯 本次用上的依据」[n] 编号列表 + 项目背景 / 命中记忆 / Token 用量 / 省钱与费用四个加粗小节（告警行仅在真有告警时追加）。'
-      + noRebuild + citeFull + '禁止自行补写或预先展开明细。' + keep + RECALL_SOURCE_BOUNDARY;
+      + `结构是${summaryShape} +「📊 本次召回统计汇总」+「🎯 本次用上的依据」[n] 编号列表 + 📎 项目背景 / 💠 命中记忆 / ⚡ Token 用量 / 💰 省钱与费用四个加粗小节。`
+      + noRebuild + citeFull + bubbleCard + '禁止自行补写或预先展开明细。' + keep + RECALL_SOURCE_BOUNDARY;
   }
-  return '【展示要求】本次按「默认收起 + 点击展开」下发：把上一条 display.markdown 整段原样输出到最终回答末尾'
-    + '（两行加粗摘要：首行「🧠 命中 N 条 · 依据 [n]… ｜ 省 …」、第二行「📊 汇总：…」；'
-    + '再加一行「⚙ 模式：…」报告本次生效模式；告警行仅在真有告警时追加；'
-    + '再加一行「▶ 展开本次召回明细」的 Markdown 链接），链接的 URL 必须逐字保留——用户点它才在本机明细页里看「统计汇总 / 命中依据 / Token / 费用」。'
-    + noRebuild + citeCompact
-    + '禁止自行补写命中条目、项目背景、Token 或费用明细，禁止把链接改写成纯文本/HTML 标签或自己编造 URL，也禁止替用户预先展开（不要因为觉得『这样更完整』而调用 detail=true）。'
-    + '只有用户在聊天里明确要看明细时，才用同一个 query 再调用 recall_memory 并置 detail=true，然后原样输出那次返回的 display.markdown。'
-    + '若客户端连 Markdown 链接都渲染不了（链接只是纯文本），照原样输出即可，不要改写摘要。'
+  return '【展示要求】本次按「默认收起 + 点击展开」下发——**富媒体宿主与纯文本宿主二选一，绝不并存**：'
     + bubbleCard
+    + '【纯文本宿主回退】宿主确实没有组件卡片/折叠面板能力时，才把上一条 display.markdown 单行原样输出到回答末尾的召回回显区——'
+    + `它**只有一整行摘要**（${summaryShape}），没有第二行、没有明细页链接、也没有任何提示语，输出的文本必须与此完全一致，不要多加一行；`
+    + '有组件能力的宿主不要走这条回退、更不要同时输出文本行与卡片。'
+    + citeCompact
+    + '禁止自行补写命中条目、项目背景、Token 或费用明细，禁止编造 URL 或明细页链接，也禁止替用户预先展开（不要因为觉得『这样更完整』而调用 detail=true）。'
+    + '只有用户在聊天里明确要看明细时，才用同一个 query 再调用 recall_memory 并置 detail=true，然后按明细档展示。'
     + keep + RECALL_SOURCE_BOUNDARY;
 }
 
@@ -458,6 +462,10 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
         // 批次44-D5-3：遗忘周期报告（与 TCP 共用 runGcReportTool，默认 dry_run=true）
         // 批次61 GAP-3：同 TCP 端，附只读 Agent 侧聚合
         return { result: await runGcReportTool(ma, args, acct, { storage }) };
+      }
+      case 'growth_evolve': {
+        // 批次 B/C/D：自进化与场景画像（与 TCP 共用 runGrowthEvolveTool；status/profile 只读，adopt/policy 写配置）
+        return { result: await runGrowthEvolveTool(storage, args, { form: 'desktop' }) };
       }
       case 'create_project': {
         // D6-5：受管创建项目（管理员专属，与 TCP 共用 runCreateProjectTool）

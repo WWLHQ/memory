@@ -108,18 +108,24 @@ describe('A6 · 回显模式行（§3.4 透明）', () => {
     expect(buildRecallCompactMarkdown(hint)).not.toContain('⚙ 模式');
   });
 
-  it('compact 摘要：模式行落在「汇总」之后、「明细」链接之前', async () => {
+  it('compact 摘要：模式行落在摘要行首，整段只有一行、没有链接行（2026-11-21 定稿）', async () => {
     const { ma } = makeAgent();
     await seed(ma);
     const r = await ma.recall({ query: '架构选型怎么定', project_id: 'P1', scene: 'task_start' });
     const hint = buildRecallHint(r, { today_calls: 1, today_injected_tokens: 1, today_saved_tokens: 1, today_legacy_calls: 0, all_calls: 1, all_injected_tokens: 1, all_saved_tokens: 1, all_legacy_calls: 0 }, null);
     const md = buildRecallCompactMarkdown(hint, 'http://127.0.0.1:8204/recall/abcdefghij0123456789AB');
-    const iStats = md.indexOf('📊 汇总');
-    const iMode = md.indexOf('⚙ 模式');
-    const iLink = md.indexOf('▶ [展开本次召回明细');
-    expect(iStats).toBeGreaterThan(-1);
-    expect(iMode).toBeGreaterThan(iStats);
-    expect(iLink).toBeGreaterThan(iMode);
+    const iMode = md.indexOf('⚙ ');
+    const iMem = md.indexOf('命中');
+    expect(iMode).toBeGreaterThan(-1);
+    // 2026-11-21 压 2 行：⚙ 模式简称在摘要行首（品牌词 💠 Memory 已移除），命中数紧随其后
+    expect(iMem).toBeGreaterThan(iMode);
+    expect(md).not.toContain('💠 Memory');
+    expect(md).toBe(`**${hint.line}**`);
+    expect(md).not.toContain('展开本次召回明细');
+    expect(md).not.toContain('📌');
+    // 单行摘要口径：compact 档不再自带「📊 汇总」独立段，明细只走气泡折叠卡
+    expect(md).not.toContain('📊 汇总');
+    expect(md.split('\n').filter((l) => l.trim().startsWith('**')).length).toBe(1);
   });
 });
 
@@ -140,13 +146,14 @@ describe('A8 · 模式行四档贯通 + 单行兜底同口径', () => {
     return { ma, r, hint: buildRecallHint(r, rollup, null) };
   }
 
-  it('display.line 仍是单行，但末尾携带与 markdown 同源的 ⚙ 模式段', async () => {
+  it('display.line 仍是单行，携带模式简称；完整模式行留在 echo.mode_line', async () => {
     const { r, hint } = await realRecall();
     const modeLine = buildRecallModeLine(r)!;
-    expect(hint.line).toContain(modeLine);
+    const shortMode = modeLine.replace(/（[^）]*）/g, '').replace('⚙ 模式：', '⚙ ');
+    expect(hint.line).toContain(shortMode);
     expect(hint.line).not.toContain('\n');
-    expect(hint.shortLine).toContain(modeLine);
-    expect(hint.echo?.mode_line).toBe(modeLine);
+    expect(hint.shortLine).toContain(shortMode);
+    expect(hint.echo?.mode_line).toBe(modeLine); // 完整分流说明仍在 echo / 明细页
   });
 
   it('会话视图没有分流动作 → 单行兜底也不编模式行', async () => {
@@ -161,21 +168,22 @@ describe('A8 · 模式行四档贯通 + 单行兜底同口径', () => {
     expect(hint.shortLine).not.toContain('⚙ 模式');
   });
 
-  it('四种载体都带 ⚙ 模式行，且与 buildRecallModeLine 逐字一致', async () => {
+  it('模式信息四载体贯通：markdown 三档用简称，detail-page 保留完整模式行', async () => {
     const { r, hint } = await realRecall();
     const modeLine = buildRecallModeLine(r)!;
+    const shortMode = modeLine.replace(/（[^）]*）/g, '').replace('⚙ 模式：', '⚙ ');
     const carriers = {
       'markdown-compact': buildRecallCompactMarkdown(hint, 'http://127.0.0.1:8204/recall/abcdefghij0123456789AB'),
       'markdown-full': buildRecallMarkdown(r, hint, null, { htmlDetails: false }),
       'html-details': buildRecallMarkdown(r, hint, null, { htmlDetails: true }),
       'detail-page': buildRecallDetailPage(r, hint, null, meta),
     };
-    for (const [name, text] of Object.entries(carriers)) {
-      expect(text, `${name} 缺模式行`).toContain(modeLine);
+    // 2026-11-21 压 2 行：三档 markdown 摘要行首用「⚙ 模式简称」，完整分流说明不进聊天回显
+    for (const name of ['markdown-compact', 'markdown-full', 'html-details'] as const) {
+      expect(carriers[name].startsWith(`**▶ ${shortMode}`), `${name} 缺模式简称`).toBe(true);
+      expect(carriers[name]).not.toContain('（自动分流 · ');
     }
-    expect(carriers['markdown-compact']).toContain(`**${modeLine}**`);
-    expect(carriers['markdown-full']).toContain(`**${modeLine}**`);
-    expect(carriers['html-details']).toContain(`**${modeLine}**`);
+    // 完整模式行（含 source/reason/命中词）仍在 detail-page，供核对
     expect(carriers['detail-page']).toContain(`<p class="sum">${modeLine}</p>`);
   });
 });

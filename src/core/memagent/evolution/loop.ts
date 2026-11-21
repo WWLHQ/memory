@@ -3,6 +3,7 @@
 // 门控：mode='off' → 连审计都不产；'suggest'（默认）→ 只落建议审计、绝不写 growth:v1；
 //       'auto' → 统计达标 + 护栏通过才写（采纳前存历史 + 写死回诊计划）。
 import type { EvolutionMode, GrowthConfig, RecallWeights } from '../../../shared/growthConfig.ts';
+import { RECALL_KEYS } from '../../../shared/growthConfig.ts';
 import { validateAuditRecord } from '../../../shared/auditShape.ts';
 import type { AuditRecord, Form, StorageBackend } from '../types.ts';
 import { growthConfigFromLedger } from '../paramsSnapshot.ts';
@@ -209,6 +210,89 @@ export async function runEvolutionRound(
 export interface RollbackCheckOptions extends LoopOptions {
   /** 用户「立即回诊」：忽略 due_at，但仍需满足 min_recalls（M3-7） */
   force?: boolean;
+}
+
+/* ── 批次 C1：一键采纳（suggest 模式下用户显式说「采纳」时的落库入口） ── */
+
+export interface AdoptResult {
+  applied: boolean;
+  reason: string;
+  from?: RecallWeights;
+  to?: RecallWeights;
+  history_saved?: boolean;
+  request_id: string;
+}
+
+/** 召回权重形状校验：四维齐全、各 0–1（与 normalizeGrowthConfig 同口径的入参闸门） */
+function validRecallWeights(w: unknown): w is RecallWeights {
+  if (!w || typeof w !== 'object') return false;
+  const r = w as Record<string, unknown>;
+  return RECALL_KEYS.every((k) => typeof r[k] === 'number' && Number.isFinite(r[k]) && r[k] >= 0 && r[k] <= 1);
+}
+
+/**
+ * 一键采纳：读最近一条 suggest_recall_weights 建议审计，重过护栏（步长/漂移/冷却期）后
+ * 走与 auto 采纳完全相同的落库链路（saveConfigWithHistory + 回诊计划 + growth_op.adopted）。
+ * 红线：只采纳**审计里真实存在**的建议（绝不现场现算建议替用户决定）；护栏不过就拒绝，不静默放行；
+ * mode='off' 拒绝；采纳与 auto 同样计入冷却期（latestAdoptTs 同源）。
+ */
+export async function adoptSuggestedRecallWeights(
+  storage: StorageBackend,
+  opts: LoopOptions,
+): Promise<AdoptResult> {
+  const cfg: GrowthConfig = growthConfigFromLedger(await storage.listMemories({}));
+  const mode = cfg.evolution.mode;
+  if (mode === 'off') {
+    return { applied: false, reason: '进化模式为 off：不采纳任何建议（先在参数页开启 suggest/auto）', request_id: opts.requestId };
+  }
+  const audits = await storage.queryAudit({});
+  let latest: { ts: number; from: RecallWeights; to: RecallWeights; ev?: RecallEvalResult } | null = null;
+  for (const a of audits) {
+    if (a.action !== 'growth_op') continue;
+    const d = a.detail as {
+      event?: unknown; family?: unknown; from?: unknown; to?: unknown; eval?: unknown;
+    };
+    if (d.event !== 'suggest_recall_weights' || d.family !== 'recall_weights') continue;
+    if (!validRecallWeights(d.from) || !validRecallWeights(d.to)) continue;
+    if (!latest || a.ts > latest.ts) {
+      latest = { ts: a.ts, from: d.from, to: d.to, ev: d.eval as RecallEvalResult | undefined };
+    }
+  }
+  if (!latest) {
+    return {
+      applied: false,
+      reason: '没有可采纳的建议：账本里尚无 suggest_recall_weights 审计（先跑一轮进化产建议）',
+      request_id: opts.requestId,
+    };
+  }
+  const guard = guardRecallWeights(latest.from, latest.to, cfg.evolution, latestAdoptTs(audits, 'recall_weights'), opts.now);
+  if (!guard.pass) {
+    return { applied: false, reason: `护栏未通过，拒绝采纳：${guard.reason}`, from: latest.from, to: latest.to, request_id: opts.requestId };
+  }
+  const nextCfg: GrowthConfig = { ...cfg, recall_weights: latest.to };
+  const { history_saved } = await saveConfigWithHistory(storage, nextCfg, {
+    requestId: opts.requestId, form: opts.form, enterpriseId: opts.enterpriseId, teamId: opts.teamId, now: opts.now,
+  });
+  // 回诊计划只在建得了基线（建议审计带 eval.meanTo）时挂：没有基线就如实不挂（回诊会忽略无计划的采纳），
+  // 绝不猜一个 baseline_mean_ndcg 凑数。
+  const meanTo = latest.ev && typeof latest.ev.meanTo === 'number' && Number.isFinite(latest.ev.meanTo)
+    ? latest.ev.meanTo : null;
+  const rollbackPlan = meanTo !== null
+    ? computeRollbackPlan(opts.now, cfg.evolution.rollback, latest.to, latest.from, meanTo)
+    : undefined;
+  await appendGrowthOp(storage, opts, {
+    phase: 'evolution',
+    reason: `用户一键采纳（suggest 模式建议 → 手动落库）${latest.ev?.reason ? `：${latest.ev.reason}` : ''}`
+      + (rollbackPlan ? '' : '；建议审计无评估基线，未挂回诊计划'),
+    event: 'adopted', family: 'recall_weights', applied: true, adopted_via: 'manual',
+    from: latest.from, to: latest.to, eval: latest.ev, guard, history_saved,
+    ...(rollbackPlan ? { rollback_plan: rollbackPlan } : {}),
+  });
+  return {
+    applied: true, reason: '已采纳建议权重并写入 growth:v1（存历史、挂回诊计划）'
+      + (rollbackPlan ? '' : '；无评估基线未挂回诊计划'),
+    from: latest.from, to: latest.to, history_saved, request_id: opts.requestId,
+  };
 }
 
 /**
