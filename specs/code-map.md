@@ -1,4 +1,4 @@
----
+﻿﻿---
 status: draft
 ---
 
@@ -1460,6 +1460,7 @@ status: draft
 | 壳层问答面板 | 新增 `src/web/shell/MemoryAssistant.tsx`：复用 `answerOverviewQuestion` + 壳层 `overview` 快照（与层级刻度/状态栏同一次读取）；建议问题 chips、Enter 发送 / Shift+Enter 换行、Esc 收起、刷新走 `refreshOverview()`；读不到/未取数如实标注 | `workspace.test.tsx`「回答只转述真实账本快照」「账本读取失败时如实回答没读到」 |
 | 切标签不丢会话 | 开闭状态在 `Workspace`（`assistantOpen`），问答 thread 在常驻 `MemoryAssistant`；中心标签切换只切 iframe，壳层不卸载 | `workspace.test.tsx`「切换中心标签：面板开闭状态与问答会话都不丢」 |
 | 首页移除问答框 | `src/web/overview/OverviewPage.tsx` 删 `.ov-ask` / `.ovx-answers` 与 input/thread 状态；`overviewPageData.ts` 建议问题抽为 `OVERVIEW_SUGGESTIONS` 导出（助手复用），`OverviewView.suggest` 字段删除；`overviewPage.css` 删孤儿样式（含 `--ov-accent-soft`） | 既有 `home.spec.ts` / `overview.spec.ts` / `crossTabAuth.spec.ts` 断言 `.ovx-*` 保持绿 |
+
 | 面板样式 | `src/web/shell/theme.css` 新增 `.qa-slot` / `.qa-btn.on` / `.ma-*`（全部走壳层令牌，浅/深/随系统自动跟随） | 浏览器浅/深截图目视 + 面板不溢出视口断言 |
 | 维护索引 | `specs/code-index.generated.md`、`specs/code-map.md` | `npm run code:index -- --write` + `code:index:check` |
 
@@ -1855,9 +1856,211 @@ status: draft
 | `web/overview/OverviewPage.tsx` | 右栏顺序改为 TOKEN 节省率 → **今日概览** → L2–L6 补炼队列 → MCP 接入 → 引擎延迟排行；`EffectCard` 加 `data-testid="home-gain-card"` 便于锁结构与父容器；首行文件头注释同步 | `overviewCards.test.tsx` 结构 2 例：四卡同父容器、同 `af-panel af-stat` class、`.k/.v/.src` 齐全；`home-today` 与 `home-refine` 同父且 `compareDocumentPosition` 证明 today 在前 |
 
 > 文案口径：真实数字（召回次数 / 命中条数 / 共享项目数 / 省量 `t` / 金额）一个不删，只把「参数怎么算的」换成人话；金额仍标「属估算值」，未设单价仍说「金额不估算」，不因为改文案而放松诚实边界。
+
+### 首页模板 1:1 复刻 STRATUM pg-home（2026-11-21，覆盖上表两条 2026-11-16 版式约定）
+
+用户要求：逐页 1:1 复刻设计真源 `stratum-a-full.html`（含页面格式模板，不只换肤），不残留上版任何东西；数据全接真实账本，演示数字不落。
+
+| 任务→文件 | 实现 | 测试 / 门禁 |
+|---|---|---|
+| `web/overview/overviewPage.css` | 令牌全表换 STRATUM（亮 `#F3F5F8/#0088CC/--r:10px`、暗 `#060B16/#22D3EE`，清除批次57-C 的 `#0E7490/#F7F9FB/--r:8px` 旧版）；组件度量逐条对齐设计稿：主区 `18px 20px 30px`（去 max-width）、`af-head` 新增（h1 18px + sub + right）、`af-btn 6px 13px r8`、`af-alert 8px 13px r10`（bad 不再压文字色）、`af-stat .v 24px mono`、`af-cols 316px`、gap 14、`af-graph 352px`、strata bar 默认 accent（不按层配色）、`af-li 7px 14px`、`af-foot 11px gap16`；删除上版残留：`.af-anoms/.af-anom`、`.l0-lock-*`、`.af-eng-state`、`.af-stops`、`.af-stat .src`、`.af-g4 > .af-stat` min-height（等高拉伸回退设计稿顶对齐）；新增 `.af-mono` 工具类 | `overviewCards.test.tsx` 版式契约改 2 例（`.af-g4` 必须 `align-items:start` 不得 stretch；`.v` mono 24px + `.d.mut` + 无 `.src`），strata 条新增「bar 默认 accent、不得回层色」断言 |
+| `web/overview/OverviewPage.tsx` | 页头 `p0-pagehead` → `af-head` 模板（h1 总览工作台 + sub `日期 · UTC+08:00 · 数据根 …` + 右侧「立即备份 / + 写入记忆」，去图标、去「重读」按钮——补读走 focus/visibilitychange 监听，错误文案同步改「切回本页会自动重读」；未登录态保留「去登录」按钮）；L0 提示条统一 `af-alert` 模板（tag L0 + 单行文本 + af-link，去掉自制 `l0-lock-*` 结构，locked 用设计稿默认 accent 档）；异常速览改设计稿模板（`af-alert bad/warn` 行 + rid mono 内联 + `af-note`「正文不进首页…」，hint 修正为「近 30 分钟 · 窗口聚合」——与内核 `L0_LOCK_ANOMALY_WINDOW_MS` 一致，原「近 1 小时」是错的）；四卡去图标位与 `.src` 行（k/v/d 三段）；右栏顺序改设计稿（TOKEN 节省率 → 补炼队列 → MCP 接入 → 引擎延迟排行 → **今日概览回末位**）；补炼/MCP/引擎三个面板头去掉「管理/接入/配置」链接（设计稿 af-ph 只有 h3+hint），补炼队列去 `af-eng-state`/`af-stops`（引擎态并入「运行中/待引擎」行）；引擎排行 hint 改「最近成功拨测」、前三名 accent；sparkline 画线顺序对齐设计稿；strata bar 去内联层色；busy 状态随「重读」按钮一并移除 | `overviewCards.test.tsx` 重写：右栏顺序 4 面板 `compareDocumentPosition` 链式断言（refine→mcp→engine→today）、页头 af-head 结构断言（无 `home-reload`）、异常行 af-alert.bad + hint「近 30 分钟」；`overviewPageWake.test.tsx` `loggedInThenOut` 改走 focus 事件（原点 `home-reload` 按钮，按钮已按设计稿删除） |
 > 三道闸门（2026-11-16）：A `tsc --noEmit`（web + electron 双工程）0 错、`oxlint` 0 warning / 0 error（764 文件）、全量 `npm test` **293 文件 / 3505 项全绿**、`check:no-demo` 通过、`code:index --write` 411 源码 / 148 文档最新；B 定向 `coreReal + overviewCards + coreHome + overviewPageWake + homeView` 63 项全绿；C 三处变异（`.af-g4` 改回 `align-items:start` / 今日概览挪回右栏末尾 / 复用卡 `src` 改回 `内核账本·实时（19.4）`）**分别精确判红 1 例、其余 21 例仍绿**，还原后 24 项复绿、扩到 63 项仍全绿。
 > 一个坑：CSS 契约断言必须把匹配锁在声明块内（`\{[^}]*`），用 `[\s\S]*?` 会跨块命中 `.af-cols` 有意保留的 `align-items: start`，把「两栏顶对齐」误判成四卡回退。
 > 状态：**未打包、未提交、未推送**，等用户实测 + 明确确认。工作区另有在途改动（网页对话导出 `WebChatExport*`、recall hook 状态文件、`recallHard` 权限下放）不属本轮，提交时只精确 `git add` 这 5 个文件。
+
+### 写入页模板 1:1 复刻 STRATUM pg-write（2026-11-21，批次47）
+
+用户要求同首页：1:1 复刻设计真源 `stratum-a-full.html` pg-write（行 1237–1300 视图段 + af-* 组件 CSS 段），不残留上版 v5/p0/wf 任何东西；数据全接真实账本。
+
+| 任务→文件 | 实现 | 测试 / 门禁 |
+|---|---|---|
+| [theme.css](../src/web/write/theme.css) | 整文件重写：STRATUM 令牌内嵌 `.wr-page`（亮 `#F3F5F8/#0088CC/--r:10px`、暗 `#060B16/#22D3EE`），af 基元子集（head/btn/alert/panel/ph/pb/field/input/select/textarea(88px)/formgrid/pill/stat/bar/table/badge/empty/kv/actline/toast），`wr-cols` 落设计稿 1fr 320px 双栏；wf-*/p0-* 旧版式清零 | `theme-visual.test.ts` CSS 契约（声明块内匹配）+ verify:fast 覆盖率 |
+| [WritePage.tsx](../src/web/write/WritePage.tsx) | 重建成设计稿单页模板：af-head（h1 写入记忆 + sub 实算 `质量门 v{QUALITY_GATE_VERSION}`）→ af-cols：左=写入表单 + E_L0_LOCKED warn alert（真被挡才出现）+ 就地解锁卡（warn 边框，已解锁不渲染）+ 回执/占位卡；右=查重预览；底部=最近写入通栏表。**tab 栏/p0-pagehead/页头状态徽标/`L0WriteUnlock` 右栏卡全部移除**（设计稿无右侧按钮区，锁状态由解锁卡如实承载） | `WritePage.test.tsx` STRATUM 模板断言 + `WritePage.session.test.tsx` 回归 |
+| [WriteForm.tsx](../src/web/write/WriteForm.tsx) | af-panel 模板：af-ph hint `≈{estimateTokens} tokens · {gateHint}`（实算，不抄设计稿样值 38）；af-formgrid 类别/来源 Agent/session_id 只读/project_id 可修改（修复轮3 行为保留）；标签联想 af-pill + note「点击采纳 · 脱敏在 L1 自动执行」；写入行 af-btn pri + 快路径 note | `WriteForm.test.tsx` 63 项中回归 |
+| [DedupCard.tsx](../src/web/write/DedupCard.tsx) | 设计稿右栏「查重预览」：af-stat 词面相似度单值（.k 带阈值/层实算）+ af-bar + 判读 note + 最接近记忆 pill + 内核裁决 note + 「查看净化生长 →」接真实导航 `requestShellView('growth')`（growth 视图真实存在）；诚实化契约（四类结果自动裁决/四维判重/无假刻度）逐句保留 | `DedupCard.test.tsx`（className 改 `af-panel`） |
+| [WriteReceiptCard.tsx](../src/web/write/WriteReceiptCard.tsx) | 回执=af-panel+af-badge+af-kv（request_id/memory_id/去重/精炼/时间，四类结果照内核真实返回）；被拒卡=未落库原因+request_id（未签发如实写）；最近写入=设计稿四列表（时间/mem_id/动作/层），**`WriteReceiptTable` 整体删除**（tab 版式残留） | `WritePage.test.tsx` 修复轮4 两断言保留 |
+| [WriteL0UnlockCard.tsx](../src/web/write/WriteL0UnlockCard.tsx) | 重写为设计稿「就地解锁 L0 写密钥」warn 边框面板：密码框+「解锁并自动重放」同行 nowrap（设计稿 flex-wrap:nowrap）；admin 管理密码 / §4.4.4-B 成员写解锁口令 / 未登录 need-admin 三路径原语义；密码边界不变 | `WritePage.l0locked.test.tsx`（`l0-unlock-done` 改为「解锁卡收起」断言） |
+> 三道闸门（2026-11-21）：A `npm run verify:fast` 全绿（typecheck + oxlint + 索引新鲜度 + 覆盖率 81.91%/73.93%/78.56%/85.19%；首次 0xC0000409 并发抖动复跑即绿）；B 写入页 6 文件 **63 项全绿**（STRATUM 模板/四类回执/L0 锁定/成员自解锁/信号广播全正向）；C 变异验证：拆掉 `rows.filter(filter_code===null)`（把质量门拦截算进最近写入）→ `WritePage.test.tsx` 修复轮4 精确判红，还原后 63 项复绿（另试 `showUnlockCard` 恒真变异——该判定与异步状态刷新冗余、非有效变异位，如实记录）。
+> 状态：**未提交、未推送**；交付闭环（关端→打包→验产物→启端→核运行态）已走完，等用户目视验收。
+
+### Agent 接入页模板 1:1 复刻 STRATUM pg-agent（2026-11-21，批次48-STRATUM，编号与 A23/A29 批次48 区分）
+
+用户要求同首页/写入页：1:1 复刻设计真源 `stratum-a-full.html` pg-agent 段（行 503–552 视图段 + af 基元 CSS），不残留旧 p0/tab 版式任何东西；数据全接真实账本，演示数字（成功率 98.2%/320ms/****9f2e/15:38）一律不落。
+
+| 任务→文件 | 实现 | 测试 / 门禁 |
+|---|---|---|
+| [theme.css](../src/web/AgentOnboard/theme.css) | 整文件重写：`.aob-page` 作用域令牌（亮暗两套）+ af 基元子集（head/btn+pri+danger+sm+off/alert+tag/panel/ph+hint/pb/note/row/g3/badge 5 色/pill/kv/table+scrollx+`.aob-detail-row` 详情行/field/input/select/textarea/formgrid/switch/check/steps+step+cur+**`.pend` 灰圈数字变体（诚实化新增，待触发步态）/det+det-b/pre/li/empty/toast/aob-gate 登录门禁/响应式 ≤900 单列）；保留布局辅助类（found/found-head/found-meta/sw/test-*/inject）；**p0-*/card/btn/pill/metrics/stages/errbox 旧版式清零** | verify:fast 覆盖率 + `check:no-demo` |
+| [AgentOnboardPage.tsx](../src/web/AgentOnboard/AgentOnboardPage.tsx) | **单页化，删 4 页签**（接入概览/MCP 客户端/探针结果/接入配置）：af-head（h1 Agent 接入 + 设计稿 sub + right 手动检测/撤销并重接）→ failureNode af-alert warn → **流水线 af-panel 三步 af-steps**（扫描/绑定/拨测，步态 done/cur/pend 实算，hint 带 `trigger={lastTrigger} · sid 记账去重`，note 全实算：命中 N Agent/M 客户端、auto_bind 审计 ×N、agent_test 真实写审计）→ OneClickOnboard → **af-g3 卡区**（空态 af-empty）→ mcp-wire-summary af-note → McpClientsPanel → WebChatExportCard。新增 `lastTrigger` state（login/auto/manual）；**概览表/探针表随页签移除**（指标由卡片 af-kv 承载、回执由测试面板承载） | `AgentOnboardPage.test.tsx` 16 处断言改新契约（`#cards > .af-panel`/`pipeline-steps .af-step[data-state]`/pipeline-hint/af-kv/alert-err/手动提示 adjacent-tr） |
+| [AgentCard.tsx](../src/web/AgentOnboard/AgentCard.tsx) | af-panel + af-ph(h3+af-badge) + **af-kv 四行**（连通态/成功率·平均延时实算、注记 `· 租户 {tenant}`、密钥尾号/轮换、最近拨测/轮换——无样本如实写「未取数 · 无有效样本」「未取数 · 无拨测样本」，check-no-demo 禁「—」；成功率<95% 用 `dd.warn`）+ badgeOf（OPEN→熔断中 bad / HALF_OPEN→半开 warn / CONNECTED ok / degraded→⚠ 降级 warn / 未配置）+ 降级/R4 alert（`data-err` 只在有错时渲染）+ af-det「接入配置」内嵌五子组件 + af-row（测试/轮换密钥/保存配置/**吊销 onRevoke 可选——容器按 discovered 是否含同名才传**） | `AgentCard.test.tsx` 9 处断言（af-kv dds、statusdot→textContent、`.warn.show`→`.af-alert.warn`、`[data-err]`、mask getAllByText、Codex 降级、⚡按钮名） |
+| [McpClientsPanel.tsx](../src/web/AgentOnboard/McpClientsPanel.tsx) | af-panel + af-ph（h3 + hint 内嵌 `mcp-scanned-at` + ⚡一键适配全部/刷新状态/⇄全改stdio）+ endpoint/mode/server-live af-row + af-alert 四种（browser/scan-error/admin-gate/live-failed）+ **七态总览 af-note**（`mcp-state-{s}`）+ **af-table 六列**（客户端 b+transport/live 徽标 / 状态短徽标 STATE_BADGE（完整语义在 title）/ 身份头 ✓id/缺失 / 建议 guideFor 全文 / 操作 af-btn sm 组）+ 行下 `.aob-detail-row` af-det 详情（触发规则/foundUrl/snippet pre/manual-hint）+ af-empty + 操作说明 af-det + 表尾 af-note 设计稿原文 + 安全说明。**全部逻辑原样保留**（七态/live 实测/12s 轮询/循环检测/stdio 零维护/⚠ 待生效文案） | `McpClientsPanel.test.tsx` 6 处断言（af-table/af-detail-row/hint 徽标/⚡名） |
+| [OneClickOnboard.tsx](../src/web/AgentOnboard/OneClickOnboard.tsx) + 五子组件 + FormBadge | af-panel「扫描明细 · 一键接入本机 Agent（19.9）」+ af-row（⚡/FormBadge/af-pill scanState）+ autoOnboardBadge 行 + af-det 信号源 af-check/发现行/已安装行/原理 note；FoundCard 统一外壳 af-badge（BADGE_CLS p0:acc p1:ok p2:warn p3:''）；**旧四段 stages 动画删除**（stageIndex 保留在 Props 但不再渲染，步进由容器层三步流水线承载）；五子组件 `.row`→af-row、checkbox 加 af-switch、pill→af-badge（ChannelConfig SHA-256 / KeyMgmt data-mask+超90天 warn）；data-tool/data-iso/data-chan/#formBadge 全保留 | `components.test.tsx` 3 处断言（found-head af-badge 结构、scanState 直读、stages→容器层） |
+| [WebChatExportCard.tsx](../src/web/AgentOnboard/WebChatExportCard.tsx) | 只换壳：card→af-panel+af-ph（标题「自带插件导出（网页版对话接入）」+hint）+af-pb af-stack；btn→af-btn；purge 输入加 af-input；testid 全保留（功能为批次44/用户 2026-11-16 需求成果，不动） | `WebChatExportCard.test.tsx` 原样全绿 |
+
+> 诚实化边界：设计稿演示值（98.2%/320ms/****9f2e/15:38 等）一律不落，卡片指标全部来自 `AgentRealStats` 真实拨测审计，无样本写「未取数」；`.af-step.pend` 是为「待触发」诚实态新增的灰圈数字变体（设计稿只有 done/cur 两态）；旧「探针结果/接入配置」两页签的信息按设计稿归位——探针回执在卡片测试面板、接入配置在卡片 af-det、MCP 状态在六列表。
+> 三道闸门：A `npm run verify:fast` 全绿（typecheck + oxlint + 索引新鲜 + vitest **319 文件 / 4030 例**全绿，覆盖率 81.9%/73.89%/78.59%/85.17%；`code:index --write` 441 源码/155 文档）；B AgentOnboard 定向 **164 例全绿**（11 文件）；C 变异 `badgeOf` `'OPEN'`→`'XOPEN'` → AgentCard 熔断用例精确判红（1 failed/11 绿），还原后 12 例复绿。
+> 交付闭环：关端（进程 0 + 8200~8204 无 LISTENING）→ `npm run package` → 安装包 123.3MB SHA256 `2438DAEFBB3733C2ECBA18D678666191DDD3182EA1A5331AB2F21C5786B3703E`（`git diff -- package.json` 为空；main.cjs 与 asar.unpacked 逐字节一致；asar 含 `aob-page`/`pipeline-steps`/`af-g3`，旧类 `agent-panel-0`/`agent-tab-` 0 命中）→ 启端 `bootstrap:done` + 8200~8204 全 LISTENING。
+> 状态：**未提交、未推送**，等用户目视验收。手动验证步骤见 [MANUAL-TEST-FIX-BATCH-48.md](MANUAL-TEST-FIX-BATCH-48.md)。
+
+### 监控告警页 1:1 复刻 STRATUM pg-monitor + 功能导航跟随主题（2026-11-21，批次49-STRATUM）
+
+两项同批：①用户要求「功能导航要和系统颜色变化而变化，浅色就是浅色深色就是深色」——rail 令牌原在浅色主题下也写死深墨蓝；②监控告警页按设计真源 `stratum-a-full.html` pg-monitor 段（行 891–920）1:1 复刻，不残留 p0-* 旧版式，数据全接真实账本、演示数字（3/3、180ms、15:40 等）一律不落。
+
+| 任务→文件 | 实现 | 测试 / 门禁 |
+|---|---|---|
+| [shell/theme.css](../src/web/shell/theme.css) | 浅色 `:root` rail 令牌改跟随主题（`--rail: var(--surface2)` / `--rail-ink: var(--muted)` / `--rail-active: var(--brand)` / `--rail-on: var(--ink)` / `--rail-hover/--rail-line/--rail-hot` 令牌化）；深色块保留原深值（`--rail: #04070F`）；`.tcount.hot` 改 `var(--rail-hot, var(--c-l5))` | `aTokens.test.ts` rail 断言新契约（浅色 var 引用 + 深色保留深值）；`ribbonLayout.test.ts` 用例名改「跟随主题」 |
+| [monitor/theme.css](../src/web/monitor/theme.css) | 整文件重写：`.mon-page` 作用域令牌（亮暗两套，深色走 `html[data-theme="dark"]`）+ af 基元子集（stack/head/btn+sm/link/panel/ph+hint/pb/note/row/g3/select/chip+on/badge 4 色/stat（.v mono 24px em 小字 .d ok/.mut）/det+det-b/tl（.ti 左 2px 色边 err/wrn + .tm 52px）/empty/li/响应式 ≤900 单列）；指标卡辅助类改名 `mon-mcard`（crit/warn/empty 染色、mgrid/mval/mparts/level 度量按 af 令牌取值）；**p0-mcard/p0-mgroup/p0-mhead/p0-tl 旧版式清零** | `check:no-demo` + verify:fast 覆盖率 |
+| [MonitorPage.tsx](../src/web/monitor/MonitorPage.tsx) | af-head（h1 监控告警 + 设计稿 sub「指标只来自真实账本 · 无数据显「— 未采集」…」+ right 刷新 af-btn=retry）→ 筛选 af-row（级别 af-select 110px + **1h/24h/7d af-chip 按钮**替代下拉 + 宿主 Agent af-select 150px + 空账本注释 + 命中 N 条 + 账本规模）→ **af-g3 六格 af-stat**（`monitor-summary`）→ **af-det「全部指标」折叠**收 20 卡 8 组（P6-T3 全量保留）→ 后台操作状态 af-panel（REQ-013 C5 保功能）→ AlertTimeline（hint 带窗口标签）。三态加载 / useMonitorMirror / useHostTheme 保留 | `MonitorPage.test.tsx` 原契约全绿 + 新增 3 例（无 summary 不渲染六格 / chips 真过滤 + hint 换窗 / 刷新按钮） |
+| [useMonitorReal.ts](../src/web/monitor/useMonitorReal.ts) | 新增 `SummaryStat` + `summaryFromLedger(cards, mems, audits, now)` 六格真实派生：①Agent 健康=连通率卡+熔断态（tone 取两者最差级别，OPEN 不被 100% 掩盖）②补炼队列=精炼队列卡 pending ③冷存储=mems cold+dormant 计数（归档另计）④人工审核=待裁决卡（>0 warn）⑤检索 P95=24h 窗 recall latency_ms p95（独立于 1h 卡，窗口如实标 24h）⑥今日召回=本地零点起 recall 审计数（0 是真实值）；空态值位整串「— 未采集」（check-no-demo 禁裸「—」）；`loadRealMonitorData` 回执增 `summary` | `metricsHonesty.test.tsx` 新增 3 例（空账本 0/未采集分明 / 全真实值+24h 窗外不计入 / 未采集整串契约） |
+| [MetricGrid.tsx](../src/web/monitor/MetricGrid.tsx) / [AlertTimeline.tsx](../src/web/monitor/AlertTimeline.tsx) | MetricGrid 换壳 af-panel+af-ph+af-pb（组头 h3+af-badge N 项）+ mon-mcard（data-testid 全保留）；AlertTimeline 换 af-tl（.tm 时间 + b 标题 + af-note af-mono 元信息行 agent=…·rid 深链·处置→），hint=`monitor_alert · {窗口} · N 条`，深链 audit/memory 全保留，删未用的 onJump 兼容参数 | 两文件原断言全绿（`.mval`/`alert-mem-0`/`alert-empty` 等） |
+| [e2e/monitor.spec.ts](../e2e/monitor.spec.ts) | 适配折叠：先点开 `metrics-det` summary 再断言 metric-grid 可见；`.p0-mcard`→`.mon-mcard`；新增六格 `monitor-summary .af-stat` =6 断言；用例名 13→20 | e2e 依赖 dist + 浏览器栈，本环境未执行；单测已钉住同等口径 |
+
+> 诚实化边界：六格全部真实派生（空账本冷存储/人工审核/今日召回显真实 0，健康/补炼/P95 显「— 未采集」）；设计稿演示值（3/3、180ms、coder-01、15:40）一律不落；Agent 下拉仍由 monitor_alert + created_by_agent 派生（A25 口径不变）。
+> 三道闸门：A `npm run verify:fast` 全绿（typecheck + oxlint + 索引新鲜 + vitest **319 文件 / 4036 例**，覆盖率达标）；B 监控定向 **77 例全绿**（5 文件，含批次49 新增 6 例）；C 变异 `summaryFromLedger` 冷存储 `v: String(coldDormant)`→`v: '0'` → metricsHonesty 全真实值用例精确判红，还原后 77 例复绿。
+> 状态：**未提交、未推送**，等用户目视验收；手动验证步骤见 [MANUAL-TEST-FIX-BATCH-49.md](MANUAL-TEST-FIX-BATCH-49.md)。
+
+### 批次50：顶栏可点性 + 图标让位 + 滚动条跟随主题 + 全部指标卡配色统一（2026-11-21）
+
+用户实测监控页截图反馈三项：①顶栏「目前不可点」+「最小化最大化下面有图标没有显示出来」；②竖向滚动条不随应用内主题变化（浅色下仍是 Chromium 默认深灰）；③「全部指标」折叠内小卡片与上方六格配色不统一。
+
+| 根因 → 文件 | 修复 | 钉子测试 |
+|---|---|---|
+| Electron 拖拽区 `no-drag` 白名单漏 `.tb-themes/.tb-tbtn/.tb-wizard/.tb-avatar/.tb-role/.tb-tag` → 主题三联/首启向导/头像·角色落在拖拽区点击无效（[theme.css](../src/web/shell/theme.css)） | no-drag 白名单补齐六类控件 | [ribbonLayout.test.ts](../src/web/shell/__tests__/ribbonLayout.test.ts) 批次50 用例：白名单含全部选择器 |
+| `win-space`（系统三按钮占位）是绝对定位不参与布局 → 标题栏右侧内容（头像·角色）伸进 titleBarOverlay（高 32px 不透明底）下面被盖住 → 「最小化最大化下面图标显示不出来」 | `.shell.electron .titlebar` 增 `padding-right: calc(135px * var(--shell-zoom, 1))` 让位 | 同上用例钉 `padding-right` 契约；变异删除判红后还原复绿 |
+| 滚动条无任何自定义规则 → Chromium 默认深灰跟随系统 nativeTheme 而非应用内主题（[shell/theme.css](../src/web/shell/theme.css) + [shared/p0.css](../src/web/shared/p0.css)） | 两处加令牌化滚动条规则（thumb=`color-mix(in srgb, var(--muted) 40%, transparent)`，track/corner 透明），浅色浅 / 深色深 | ribbonLayout 用例断言 thumb 用 `var(--muted)` 且禁写死色值 |
+| `mon-mcard` 用 `--surface2` 底 + 4px 圆角，与上方六格 af-stat（`--surface` + 10px）不一致（[monitor/theme.css](../src/web/monitor/theme.css)） | 统一为 surface 底 + line 边 + 10px 圆角（crit/warn 染色本就混 surface，同源） | [metricsHonesty.test.tsx](../src/web/monitor/__tests__/metricsHonesty.test.tsx) 批次50 视觉契约用例 |
+
+> 顶栏功能本身此前已全部接线（搜索=命令面板、主题三联=setTheme、⚙=首启向导、qa 八钮、头像=登录、回到工作台）——用户看到的「不可点」纯属拖拽区吞事件，非功能缺失。
+> 三道闸门：A 静态门禁绿（typecheck/oxlint/索引新鲜）；B 全量 vitest 经 `npm run test:gate`（319 文件 / 4038 例；verify:fast 连续两次 0xC0000409 原生崩溃后按批次48 口径改走 test:gate：片3 首跑原生崩溃自动重试，二次 1 例 WritePage 集成偶发失败、单跑 13/13 复绿，其余 4037 例全绿）；C 变异删 `padding-right` → ribbonLayout 批次50 用例精确判红，还原复绿；定向 47/47 两轮绿。
+> 交付闭环：安装包 123.3MB SHA256 `E9A851E805F248D4D06345A557F22884F578A08853301ADB3FAA8F9719C89D90`；main.cjs 逐字节一致；asar 含 `padding-right:calc(135px * var(--shell-zoom,1))` / `.mon-mcard{background:var(--surface)` / `::-webkit-scrollbar-thumb`×8；`git diff -- package.json` 为空；bootstrap + 8200~8204 全 LISTENING。
+> 状态：**未提交、未推送**，等用户目视验收；手动验证步骤见 [MANUAL-TEST-FIX-BATCH-50.md](MANUAL-TEST-FIX-BATCH-50.md)。
+
+### 批次51：顶栏 QAT 工具簇整簇取消 + 范围读数取消 + 首页登出按钮 + 监控卡全面统一 + 会话复盘沉淀规则（2026-11-21）
+
+用户四项要求：①「将顶栏的快捷按钮取消」；②命令条右侧范围读数与状态栏重复，判「无用」取消；③「立即备份前面增加登出按钮」；④「监控内的卡片配色，字体都要做统一，别让我说，所有都要统一」。另立长期规则：每次会话结束做复盘沉淀（已入 project_memory.md）。
+
+| 改动 → 文件 | 实现 | 钉子测试 |
+|---|---|---|
+| QAT 工具簇整簇删除（[Workspace.tsx](../src/web/shell/Workspace.tsx)） | `QaSpec` 接口 + `qaSpecs` 数组 + `.qa` JSX（含个人记忆浮窗挂载点）+ `personalOpen/closePersonal` 态 + `PersonalMemoryPanel` 导入 + 主题单循环三态（themeIcon/themeTip/cycleTheme，三联按钮本就独立存在）+ 右键桥选择器里的 `qa-login` + 右键 zone `.qa` 分支全删；登录/登出入口收敛为：标题栏头像弹窗、状态栏会话格、首页页头（登出）、login.html 兜底页 | [workspace.test.tsx](../src/web/shell/__tests__/workspace.test.tsx) 顶部布局用例改负断言（`.qa`/qa-* 全 queryByTestId null）+ QAT 登出两用例删除改「qa-logout 不存在」+ 登录入口/右键/检查器/记忆助手用例改头像与竖条入口 |
+| `.qa*` 样式与 no-drag 条目清除（[shell/theme.css](../src/web/shell/theme.css)） | `.qa/.qa-btn/.qa-btn.labeled/.qa-label/.qa-sep/.qa-slot/.qa-btn.on` 及深色覆写整块删除；no-drag 白名单去 `.qa/.qa-btn`；`.cb-scope` 样式与 1160px 媒询隐藏规则删除 | [ribbonLayout.test.ts](../src/web/shell/__tests__/ribbonLayout.test.ts)：`not.toContain('className="qa"')` + `not.toContain('qaSpecs')` + no-drag 白名单 `not.toContain('.qa')` + `/^\.qa[-\s{]/m` 不命中 |
+| 范围读数取消 | 命令条右侧 `scopeText/scopeTitle`（库位置+条数占位+会话态）整段删除——与状态栏 `sb-storage`/`sb-session` 同源重复，条数还是「—」占位 | ribbonLayout：`not.toContain('cb-scope')`；workspace.test：cmdbar 内 `.cb-scope` 为 null |
+| 首页页头登出按钮（[OverviewPage.tsx](../src/web/overview/OverviewPage.tsx)） | 「立即备份」前新增「登出」（仅登录态渲染，testid `ov-logout`）：`logoutCurrentSession()`（真实 POST /api/logout + 清本机会话，与登录弹窗同一口径）→ `window.parent.location.reload()` 整壳重载同步会话态（iframe 内无壳层回调通道，同源重载最可靠）；busy 期间禁用防重复；未登录仍显「去登录」 | [overviewCards.test.tsx](../src/web/overview/__tests__/overviewCards.test.tsx) 新增 2 例：登录态按钮存在+位于立即备份之前+点击触发一次登出并禁用；未登录不渲染登出。reload 靠源码级契约用例钉住 |
+| 监控卡全面统一（[monitor/theme.css](../src/web/monitor/theme.css) + [MonitorPage.tsx](../src/web/monitor/MonitorPage.tsx) + [useMonitorReal.ts](../src/web/monitor/useMonitorReal.ts)） | 六格与「全部指标」小卡同规格：容器 surface 底+line 边+10px 圆角+padding 12px 14px；数值统一 mono 20px/600 ink（af-stat .v 24→20、.mval 700 19→600 20，em 单位 11px）；标题/说明/hint/foot 统一 11px muted（mon-mhead .af-note ink→muted、mon-mhint 10.5→11、mon-mfoot 10→11）；`.mparts` 去 13px/700；`.mval.empty` 13px muted 500；**crit/warn 只染边框不再染整卡底**；六格 `SummaryStat.tone` 字段删除、MonitorPage inline 着色删除——数值一律墨色，级别信号由说明行与小卡边框承载 | [metricsHonesty.test.tsx](../src/web/monitor/__tests__/metricsHonesty.test.tsx) 批次51 视觉契约用例（20px/600、同容器规格、crit/warn 块不含 background）+ tone 断言删除 |
+| 首页四卡同步统一（[overviewPage.css](../src/web/overview/overviewPage.css)） | `.af-stat .v` 24px→20px、em 12px→11px——「所有都要统一」覆盖首页同款统计卡 | overviewCards CSS 契约用例 24px→20px |
+| e2e 同步（[e2e/shell.spec.ts](../e2e/shell.spec.ts)） | `qa-login/qa-theme/shell-session-btn/shell-menubar/.ribbon-body/.menubar`（批次48 起已不存在的旧引用）全部改为现行壳层事实：头像/状态栏会话格两处登录入口、标题栏右键走默认菜单、1024 深浅主题用三联「深色」按钮 | 同文件自洽；e2e 依赖 dist+浏览器栈，单测已钉同等口径 |
+| 复盘沉淀规则 | project_memory.md 追加「每次会话结束必须做复盘沉淀」（write_memory 落库） | 长期规则，非代码 |
+
+> 三道闸门：A `npm run verify:fast` 全绿（typecheck + oxlint + 索引新鲜 + vitest 319 文件 / 4039 例；一次偶发失败复跑即绿）；B 定向 77 shell + 13 overview + monitor 全绿（qa 取消负断言 / 登出按钮正反 / cb-scope 取消 / 统一规格 CSS 契约）；C 变异验证 ×3：①af-stat .v 20→24px → metricsHonesty 判红还原复绿 ②Workspace 残留 cb-scope 注释 → ribbonLayout 判红还原复绿 ③登出按钮绕过 session 守卫（`snap?.session`→`true`）→ overviewCards 未登录用例判红还原复绿。
+> 状态：**未提交、未推送**，等用户目视验收；手动验证步骤见 [MANUAL-TEST-FIX-BATCH-51.md](MANUAL-TEST-FIX-BATCH-51.md)。
+
+### 批次52：导航「记忆管理」收敛 + 首页今日概览上移/四卡等高 + 字号统一方向纠偏（2026-11-21）
+
+用户四项：①会话复盘沉淀（沿用批次51 规则，收尾执行）；②功能导航「记忆」改「记忆管理」，取消 活跃/蛰伏休眠/已归档/个人记忆 四子项；③首页右栏「今日概览」上移至 TOKEN 节省率位置 + 顶部四卡大小一样；④字号统一方向纠偏——「是全部指标的卡片字体对齐外面的，不是外面的对齐全部指标内部卡片字体」（批次51 的 20px 迁就方向作废，回归设计稿 24px）。
+
+| 改动 → 文件 | 实现 | 钉子测试 |
+|---|---|---|
+| 导航收敛（[views.ts](../src/web/shell/views.ts)） | NAV 组名 `记忆`→`记忆管理`；删除 `memory-active`/`memory-dormant`/`memory-archived`/`personal` 四项，主导航 25→21 项。能力不删：记忆页仍支持 `?tab=personal` 与 `status=hibernating,dormant` 真实筛选；个人记忆常驻面板保留（状态栏快捷按钮入口） | [views.test.ts](../src/web/shell/__tests__/workspace.test.tsx 同目录) 五组21项全清单 + 四子项反向断言（记忆页筛选能力同时钉住）；[workspace.test.tsx](../src/web/shell/__tests__/workspace.test.tsx) DOM 五组20项 + treeitem 反向断言；[e2e/personal.spec.ts](../e2e/personal.spec.ts) 导航项 toHaveCount(0)、面板走状态栏 |
+| 首页右栏顺序（[OverviewPage.tsx](../src/web/overview/OverviewPage.tsx)） | 右栏改为 今日概览 → TOKEN 节省率 → 补炼队列 → MCP 接入 → 引擎延迟排行（今日概览占首位） | [overviewCards.test.tsx](../src/web/overview/__tests__/overviewCards.test.tsx) DOM 顺序断言 home-today 首位 |
+| 四卡等高同尺寸（[overviewPage.css](../src/web/overview/overviewPage.css)） | `.af-g4` 去掉 `align-items: start`（列轨道本就是 4 等份），四卡默认 stretch 等高 | overviewCards CSS 契约：4 等份轨道 + 声明块内无 align-items |
+| 字号纠偏·首页（同上 css） | `.af-stat .v` 20px→24px/600 mono、em 11px→12px（回归设计稿） | overviewCards：24px 断言（批次52 说法） |
+| 字号纠偏·监控（[monitor/theme.css](../src/web/monitor/theme.css)） | `.af-stat .v` 24px、em 12px；`.mval` `600 20px`→`600 24px`；批次51 容器规格（surface+line+10px+12px 14px、标题 11px muted、crit/warn 只染边框）不变 | [metricsHonesty.test.tsx](../src/web/monitor/__tests__/metricsHonesty.test.tsx) 批次52 视觉契约（af-stat .v 24px + .mval 600 24px） |
+
+> 三道闸门：A `npm run verify:fast` 全绿（覆盖率 Statements 81.89%，索引刷新后过）；B 定向 4 文件 127 例全绿（导航组名/21项/反向断言、右栏顺序、四卡无 align-items、24px 契约）；C 变异：`.af-stat .v` 24→20px → overviewCards.test.tsx:88 红灯 → 还原 → 48 例复绿。
+> 状态：**未提交、未推送**，等用户目视验收；手动验证步骤见 [MANUAL-TEST-FIX-BATCH-52.md](MANUAL-TEST-FIX-BATCH-52.md)。
+
+### 批次53：顶栏全靠左 + 命令面板按钮取消 + 冲突裁决页 af 化（2026-11-21）
+
+用户三项（同日重申开场规则）：①顶栏内容全部靠左；②命令取消（红框=命令条右侧「命令 Ctrl K」按钮）；③改造冲突裁决页（按既定方向 p0-* → af-* STRATUM）。
+
+| 改动 → 文件 | 实现 | 钉子测试 |
+|---|---|---|
+| 顶栏靠左（[theme.css](../src/web/shell/theme.css)） | `.cmd-entry` `flex:1 1 auto; max-width:420px; margin:0 auto`（居中推手）→ `flex:0 1 420px; margin:0`；标题栏注释改写为「全部内容靠左」口径；右侧系统三按钮覆盖层 135px 不动 | [ribbonLayout.test.ts](../src/web/shell/__tests__/ribbonLayout.test.ts)：`.cmd-entry` 无 `margin: 0 auto`、`.titlebar` 无 `justify-content: center` |
+| 命令按钮取消（[Workspace.tsx](../src/web/shell/Workspace.tsx)） | 删 `.cb-spring` + `cmdbar-palette` 按钮；Ctrl+K 快捷键、标题栏 `shell-cmd-entry` 搜索框、命令面板本体保留；[theme.css](../src/web/shell/theme.css) 删无用 `.cb-spring` | [workspace.test.tsx](../src/web/shell/__tests__/workspace.test.tsx)：`queryByTestId('cmdbar-palette') → null`（反向）；ribbonLayout：workspace 源码不含 `cmdbar-palette` |
+| 冲突裁决 af 化（[dispute/theme.css](../src/web/dispute/theme.css) 全量重写 + [DisputePage.tsx](../src/web/dispute/DisputePage.tsx) / [DisputeVerdict.tsx](../src/web/dispute/DisputeVerdict.tsx) / [disputeEntry.tsx](../src/web/dispute/disputeEntry.tsx)） | p0-pagehead/p0-ph-* 清零；`.dsp-page` 壳（内嵌亮/暗令牌 + `useHostTheme` 跟随壳层主题，对齐监控页模式）；af-head / af-panel·ph·pb 三卡片（队列/裁决面板/裁决历史）/ af-btn（verdict primary/danger）/ af-badge·empty·note·mono；队列 `.item`/`.overdue`/`.selected`、ctype/compare 专属类度量全部按 af 令牌；入口补 legacyLight.css。**数据逻辑零改动**（useKernelLoad 三态/queueSort/coreVerdict/publishSelection/mirror.audit 全保留），全部 testid 保留 | [DisputePage.test.tsx](../src/web/dispute/__tests__/DisputePage.test.tsx) 25 例全绿（testid 结构 + 行为）；DisputeQueue/DisputeVerdict 既有用例不动即过 |
+
+> 附带修复：[recallInsight.test.ts](../src/core/memagent/__tests__/recallInsight.test.ts) 另一工作流新增 describe 块缺 `issuedAt`（5 处编译错）→ 补块内常量；titleLine2 断言按实现现状校准（今日/全部金额在 summary 行，不在标题行）。
+> 三道闸门：A `npm run verify:fast` 全绿（441 源码/160 文档索引刷新）；B 见上表（正向 + cmdbar-palette 反向断言）；C 双变异（`margin:0`→`margin:0 auto` → ribbonLayout 红灯；`dispute-empty`→`-x` → DisputePage 红灯）→ 原样还原 → 双双复绿。
+> 交付闭环：打包收口 `release/installer`（exe 129,312,986 bytes，SHA256 2BAD47BD…5613470A）；asar 含 dsp-page/af-head、不含 cmdbar-palette；`bootstrap:done` 07:58:42 + 8200~8204 LISTENING。
+> 状态：**未提交、未推送**，等用户目视验收；手动验证步骤见 [MANUAL-TEST-FIX-BATCH-53.md](MANUAL-TEST-FIX-BATCH-53.md)。
+
+### 批次53-R：冲突裁决 + 同步中枢重做为密集表格版式（2026-11-21 第二轮）
+
+用户否定第一轮 af 卡片版式（「和这个差距很大」），给出目标截图 = 信息密集表格流，并要求同步中枢页一并改造。数据逻辑与全部 testid 零改动，只重写版式层。
+
+| 改动 → 文件 | 实现 | 钉子测试 |
+|---|---|---|
+| 冲突裁决密集表格化（[DisputeQueue.tsx](../src/web/dispute/DisputeQueue.tsx)） | 卡片堆 → `ul>li` grid 表格行（7 列：conflict_id/类型 chip/mem_id old→new+内容预览/old 置信度/new 置信度/等待 xh·xd+超期红 chip/操作「裁决」chip 按钮）；仍保留 `item/overdue/selected` 类与全部 `q-*` testid | [DisputePage.test.tsx](../src/web/dispute/__tests__/DisputePage.test.tsx)：`closest('li')` + `toHaveClass('overdue')`（闸门 C 变异靶点） |
+| 裁决按钮四等宽（[DisputeVerdict.tsx](../src/web/dispute/DisputeVerdict.tsx)） | `v-grid` 四等宽一行（人工确认 = 蓝 primary），每按钮下一行 10px 灰注（内核真实语义），替代拼接 note 行 | 同上：四按钮 testid + 无假 request_id |
+| 页面编排（[DisputePage.tsx](../src/web/dispute/DisputePage.tsx)） | 页头单行 + 右侧 `待裁决 N` 徽标；双列对比改浅灰底块（旧值/新值 tag + meta + 正文）；裁决历史改 3 列 grid 表格（request_id 蓝 mono/动作 verdict chip/note） | DisputePage.test.tsx 7 例全过 |
+| 冲突裁决样式（[theme.css](../src/web/dispute/theme.css)) | 全重写：基准 12px/表头 11px/行 padding 5px、chip 体系、亮暗令牌保留 | — |
+| 同步中枢同版式（[SyncPage.tsx](../src/web/sync/SyncPage.tsx) + [theme.css](../src/web/sync/theme.css) + [syncEntry.tsx](../src/web/sync/syncEntry.tsx)) | p0-* 旧 chrome → af-head/af-panel + 密集 `ltable`（12px/11px、行 padding 4px 8px）；页签窄条下划线式；状态 chip 化；testid 全保留（btnSyncNow/sync-report/recon-table/conflict-*/channel-*/noConflicts 等） | [syncPage.test.tsx](../src/web/sync/__tests__/syncPage.test.tsx) 9 例全过（真报告/失败如实/裁决出队） |
+
+> 三道闸门（第二轮）：A `verify:fast` 全绿 4044 例 + 索引 441/161 刷新；B dispute+sync 定向 34 例；C 变异去掉队列行 `overdue` 类 → DisputePage.test.tsx:67 红灯 → 还原复绿。
+> 交付闭环（第二轮）：关端（进程 0 + 无 LISTENING）→ 打包收口（exe 129,314,355 bytes，SHA256 F8F7E53E…3A7890D）→ asar 含 `同步中枢`/`待裁决 ` 新标记 + main.cjs FC /b 一致 → 非沙箱启端 → `bootstrap:done` 08:34:06 + 8202/8203/8204 LISTENING。
+> 状态：**未提交、未推送**，等用户目视验收。
+
+### 批次54：冲突裁决空态对齐截图 + 同步中枢去页签 + 记忆助手深色 + 反馈页上移整合（2026-11-21 第三轮）
+
+用户四条原话：「冲突裁决记忆没有改啊！我说好几次了，你改的不对和我给你的图对齐」「记忆助手页要适配深色主题」「将治理中的用户反馈页改为反馈上移到工作台检索下面，此页面接回显反馈及用户反馈」「同步中枢也不对，要和我给你的页面对齐」。诊断：53-R 版式已入库，但用户账本无 pending 冲突 → 页面只显示一张光秃秃的居中说明卡，与目标截图结构完全对不上（「看起来没改」）；同步中枢保留的页签在截图里也不存在。
+
+| 改动 → 文件 | 实现 | 钉子测试 |
+|---|---|---|
+| 冲突裁决空态同构（[DisputePage.tsx](../src/web/dispute/DisputePage.tsx)） | 空态不再是居中说明卡 → 与有数据态同构的「冲突队列（0）面板 + 7 列表头骨架 + 诚实空行」；页头下补第二行小灰 chip（9.7 裁决队列 · 不自动覆盖 · 保存原文）；计数徽标改绿 `af-badge ok`；队列列头 `mem_id（old → new）` 收成 `mem_id` | DisputePage.test.tsx 空态断言补：面板内含 `conflict_id`/`old 置信度`/`冲突队列（0）`（闸门 C 变异靶点：改错列头 → 红灯）；不渲染 `queue` testid 的契约保留 |
+| 同步中枢去页签（[SyncPage.tsx](../src/web/sync/SyncPage.tsx) + [theme.css](../src/web/sync/theme.css)) | 四分区（同步与对账/冲突裁决/通道与游标/L0 排除）去掉 `sy-tabs` 页签直接堆叠，与冲突裁决页同版式语言；`sync-tabs`/`sync-tab-*` testid 移除（无任何测试引用）；其余 testid 全保留 | syncPage.test.tsx 新增批次54 用例：`sync-tabs` 不存在 + 「立即同步」标题/按钮同屏 ≥2 + L0 分区可见 |
+| 记忆助手深色（[AssistantPage.tsx](../src/web/assistant/AssistantPage.tsx)) | 根因：本页从不设置 `html[data-theme]`，memoryManagement.css 的深色变量永远不生效 → 深色模式整页发白。接入 `useHostTheme()` 一行修复 | AssistantPage.test.tsx 新增：写 `memdesk.shell.theme.v1=dark` 挂载 → `documentElement` 得 `data-theme=dark` |
+| 反馈导航上移 + 页面整合（[views.ts](../src/web/shell/views.ts) + [FeedbackPage.tsx](../src/web/feedback/FeedbackPage.tsx) + [FeedbackForm.tsx](../src/web/feedback/FeedbackForm.tsx)) | 「用户反馈」从治理组上移到工作台「检索」下方；页面整合两块：表单卡标题改「用户反馈（13.7 反馈表单 · confirm +0.1 / reject −0.05 / disputed 挂 9.7 裁决）」+ 历史区改「回显反馈（内核审计读回 · 含本页与接入 Agent 经 MCP 提交的记录）」；全部 testid 保留 | views.test.ts 期望序更新（feedback 位于工作台 retrieval 之后）；FeedbackPage.test.tsx 补：表单含「用户反馈」+ 历史卡含「回显反馈」 |
+| 顺手修（批次 A1 流工作区遗留，[mcpManageTools.ts](../src/core/memagent/mcpManageTools.ts)) | 裸导入 `import { ulid } from 'ulid'` 打断 electron-builder esbuild（打包直接失败），改 `./ulid.ts`；A1 其余未提交改动原样不动 | verify:fast + 打包通过即为证 |
+
+> 三道闸门：A `verify:fast` 全绿（typecheck/oxlint/索引新鲜度/no-demo/覆盖率）+ 索引刷新；B 定向 5 套件 44 例全绿（dispute/sync/feedback/assistant/views）；C 变异：空态骨架 `old 置信度` 列头改 `MUTATED-COL` → DisputePage.test 红灯 → 还原复绿（首靶 `conflict_id` 因空行正文含同词不锐，换靶重验）。
+> 交付闭环：关端（进程 0 + 8200-8204 无 LISTENING）→ 打包（首跑失败：A1 裸导入 `ulid` → 修后 exe 129,315,311 bytes，SHA256 F3C86960…97C782，dist 产物含批次54 全部标记，dist-electron/main.cjs 16:54 同批）→ NSIS /S 静默安装 → 非沙箱启端 → `bootstrap:done` 08:58:09 + 8200-8204 全 LISTENING + 进程 4。
+> 纯净度：pkg-log.txt、coverage/ 已删；test-results/playwright-report 无残留；工作区其余未提交改动属批次 A1 流，不在本批收口范围。
+> 状态：**未提交、未推送**，等用户目视验收。
+
+### 批次55：11 页深色主题适配 + 「用户反馈」改名「反馈」（2026-11-21 第四轮）
+
+用户 12 条原话核心：先质证批次54（已给产物级证据链：dispute/sync/feedback bundle 标记 + 上轮安装包 SHA + 运行态），随后点名 11 页深色适配（首启向导/审计/日志记录/账号安全/全局参数/同步中枢/大模型配置/网页端接入/生长与自动化/生命周期/层级管理）+「用户反馈改为反馈」+「改完要自测，自测通过再打包」。
+
+| 改动 → 文件 | 实现 | 钉子测试 |
+|---|---|---|
+| 9 页挂 `useHostTheme()`（audit/logs/security/params/sync/models/webonboard/growth/memory-layered 各 Page 组件） | 根因同批次54 记忆助手：这些页从不设置 `html[data-theme]`，p0.css 的深色令牌块永不生效。挂 hook 后 `documentElement` 随壳层 `memdesk.shell.theme.v1` 切换；setup/lifecycle 原本已接不动 | 各页测试文件各 +1 条「挂载即设置 html[data-theme=dark]」用例（模式照批次54 AssistantPage）；WebOnboardPage 补建测试文件 |
+| 深色 CSS 盘点结论：**仅 setupPage.css 需要补** | audit/theme.css、logs/extras.css、models/extras.css、sync/theme.css、memory/theme.css、p0Legacy.css、legacyLight.css 全部是令牌引用/已带 dark 块，深色值由 p0.css `html[data-theme="dark"]` 自动生效；[setupPage.css](../src/web/setup/setupPage.css) 是唯一硬编码浅色稿值的页面 → 补 `html[data-theme="dark"] .sw-page` 令牌块 + 徽标/输入框/代码块/警示/遮罩逐条覆写（浅色值未变） | SetupPage.test.tsx 深色用例 + dist 产物 `setup-BDCGEapJ.css` 含 `html[data-theme=dark] .sw-page` |
+| 「用户反馈」→「反馈」（[views.ts](../src/web/shell/views.ts) + [FeedbackPage.tsx](../src/web/feedback/FeedbackPage.tsx) + [FeedbackForm.tsx](../src/web/feedback/FeedbackForm.tsx) + [Overview.tsx](../src/web/overview/Overview.tsx)) | 导航 label、PAGES label、页头 h1「反馈页」、表单卡标题「反馈（13.7 反馈表单…）」、通览卡 lbl 全改；icon/emoji/page/testid 不动；「回显反馈」块标题不动 | views.test.ts 期望 label「反馈」；FeedbackPage.test.tsx 断言 feedback-form 含「反馈」+ 历史卡含「回显反馈」 |
+
+> 三道闸门：A `verify:fast` 全绿（320 文件 / 4064 测试 0 失败 + 覆盖率阈值 + 索引新鲜度）；B 定向 11 文件 130 例全绿（10 页各 +1 深色用例 + 新建 WebOnboardPage.test）+ views/feedback 30 例绿；C 变异：删 AuditPage `useHostTheme()` → 深色用例红灯（`expected null to be 'dark'`，其余 9 条不受影响）→ 还原复绿。
+> 交付闭环：关端（进程 0 + 无 LISTENING）→ 打包 exe 129,315,564 bytes，SHA256 2B6D066A…01AEB，`git diff package.json` 为空，dist 标记（setup 深色 CSS / 反馈改名 / 旧 label 消失 / hostTheme 进共享 chunk）全中 → `/S` 安装（asar 含 sw-page 新标记）→ 非沙箱启端 → `bootstrap:done` 09:17:50Z + 8202/8203/8204 LISTENING（PID 24984）。
+> 纯净度：coverage/（13.5MB）已删；历史 `release/installer-*` 13 个目录 EPERM 删不掉（已知边界，如实记录不阻塞）。
+> 状态：**未提交、未推送**，等用户目视验收。报告：[MANUAL-TEST-FIX-BATCH-55.md](MANUAL-TEST-FIX-BATCH-55.md)。
+
+### 批次56：feedback/lifecycle 深色根因修复 + sync/dispute 对齐设计稿 + 反馈页召回回显真数据（2026-11-21 第五轮）
+
+> 用户 5 条：①反馈页深色 ②生命周期页深色 ③按 stratum-a-full.html 再比对同步中枢/冲突裁决 ④首启向导固定（实机核实已是 fixed 胶囊，无需改码）⑤反馈页对接召回回显全真数据。
+
+| 需求 → 文件 | 实现 | 验证 |
+|---|---|---|
+| 深色根因修复（[shared/theme.css](../src/web/shared/theme.css)） | **构建产物里 `:root` 浅色字面量排在 p0.css 之后压掉深色别名**（--panel/--panel2/--txt/--dim/--err 等 11 名）→ 引本文件的页深色下卡片白底。补 `html[data-theme="dark"]` 令牌块（特异性 0-1-1 与加载顺序无关），色值同 p0.css 深色调色板 | 打包版复现白底 → 修复后实测 `.card` rgb(12,20,36)；feedback/lifecycle 双页 iframe 实测 dark |
+| 同步中枢（[SyncPage.tsx](../src/web/sync/SyncPage.tsx)） | 对齐 pg-sync：implemented 徽标、af-g2 双列、sy-stat pushed/pulled 卡、`goto-dispute` 链接、sy-alert 形态条；通道/L0 分区零改动 | 打包版逐元素命中；既有 testid 全保留 |
+| 冲突裁决（[DisputePage.tsx](../src/web/dispute/DisputePage.tsx)） | 对齐 pg-dispute：sub/badge warn、双栏对比带 conflict_id（内核无版本字段如实用 mem_id）、`<del>/<ins>`、裁决历史 hint | 打包版 sub/badge 命中；del/ins 随真实冲突渲染 |
+| 召回回显（[coreFeedback.ts](../src/web/feedback/coreFeedback.ts)） | `coreLoadRecallEchoes`：queryAudit(action=recall) 最近 ≤20 条 → `recall-echo` 卡（row-N/error/empty testid）；字段缺失写原因文本不编造 | 新增 4 例 vitest 全绿；audit.jsonl recall 行字段齐全已核实 |
+
+> 三道闸门：A verify:fast 全绿（全量 0 失败）；B 打包版逐页 iframe 实测（色值/testid/版式）+ setup fixed 胶囊截图目检；C 新增 4 例 + 白底→深色双向证明。壳层「首挂载 attr=light」经临时 E2E（点深色→重载→attr=dark）判别为 Trae 桥接浏览器环境假象，非产品 bug。
+> 交付闭环：关端→打包 exe 129,319,467 bytes SHA256 `7EF3DA6D…D66322`→main.cjs 逐字节一致→/S 安装→启端 bootstrap:done + 8202-8204 LISTENING。
+> 状态：**未提交、未推送**，等用户目视验收。报告：[MANUAL-TEST-FIX-BATCH-56.md](MANUAL-TEST-FIX-BATCH-56.md)。
+
+### 批次57：记忆库页签精简 + 行右键常驻详情菜单 + 个人记忆独立页（2026-11-21 第六轮）
+
+用户 3 条：①删「冲突/带重放写入/L0密文」页签，增「活跃/休眠/归档/弃用」②重新整理删重复/无实际意义项 ③记忆详情进右键且菜单不消失。三项口径均经 AskUserQuestion 确认（语义派生 / 精简 6 页签 / 常驻详情菜单）。
+
+| 需求 → 文件 | 实现 | 验证 |
+|---|---|---|
+| 页签精简（[MemoryManagementPage.tsx](../src/web/memory/MemoryManagementPage.tsx)） | 六页签 = 全部记忆/活跃/休眠/归档/弃用/分层 L1–L6；删 conflict（与 dispute.html 重复）/review（只读队列）/l0（与安全页重复，含解锁表单与浏览表）/personal（去独立页）；状态筛选下拉收敛四态；分层区「解锁 L0」→「L0 与安全」直达 security.html；页头冲突/L0 读数保留 | vitest 3 例（页签齐全 + 旧页签不存在 + 下拉四态）；E2E memory.spec 六页签断言 |
+| 语义派生（[coreMemoryOps.ts](../src/web/memory/coreMemoryOps.ts) `deriveMemoryStatus`） | 弃用=merged_into 非空（真实 40 条）、休眠=dormant/cold（68）、归档=archived（0 诚实空态）、活跃=hot/warm（5624）；toRecord/mergeBack 同源 | 4 例派生用例；**C 变异**：`false && merged_into` 判红 2 例 → 还原复绿 |
+| 常驻右键详情（同上 + [memoryManagement.css](../src/web/memory/memoryManagement.css) `mm-ctx-detail`） | 行右键弹常驻详情菜单：点外部/滚动不关闭、Esc/× 关闭、右键另一行切换内容；行点击抽屉保留。[Workspace.tsx](../src/web/shell/Workspace.tsx) iframe 右键接管改为「页面已 preventDefault 且目标在 memory-row-* 内 → 壳层不叠加」 | vitest 2 例（常驻 + 切换/关闭）；壳层其余右键行为既有测试未回归 |
+| 个人记忆独立页（新增 [personal.html](../../personal.html) + [personalEntry.tsx](../src/web/memory/personalEntry.tsx)，复用 PersonalMemoryPane） | vite 入口 22→23；e2e/personal.spec 改指 personal.html；[views.ts](../src/web/shell/views.ts) 补 PageKey 'personal'（他人流漏键）；批次51 面板下线后状态栏按钮断言移除 | E2E personal 9/9 绿；导航直达用例 |
+| 预存失败判别 | shell.spec 135/182/301/322 四条失败属他人未提交流（Workspace 大改 / untracked McpPage 无 mcp-browser-note / 批次52 stale 断言）；dispute.spec 直开同构建 2/2 绿可证与批次57 无关，不代改 | — |
+
+> 三道闸门：A verify:fast 全绿（vitest 4102 例）+ E2E memory/personal/layered 14 绿 + dispute 2 绿；B 新增 9 例正向用例（计数真的变、表格真的过滤、菜单真的常驻）；C 变异红→还原绿。
+> 交付闭环：关端（进程 0 + 8200-8204 无 LISTENING）→打包 exe 129,319,582 B SHA256 `D7384F8D…94310EB`→main.cjs 逐字节一致→/S 安装→启端 bootstrap:done + 8200-8204 全 LISTENING。
+> 状态：**未提交、未推送**，等用户验收。报告：[MANUAL-TEST-FIX-BATCH-57.md](MANUAL-TEST-FIX-BATCH-57.md)。
 
 ### 网页对话导出目录自动对齐（2026-11-16）
 
@@ -1969,3 +2172,36 @@ status: draft
 | 批次64 旧路径说明 | 本表上一节 `web/params/webchatAuto.ts` 路径自本批次起为 `web/webonboard/webchatAuto.ts`（历史行保留原样作证据） | — |
 
 > **三道闸门**：A 全量 315 文件 / 3980 例 / 0 失败；typecheck 0 错；oxlint 813 文件 0/0；`check:no-demo` 432 文件 0 命中；`validate_project` 通过；`code:index` 重建 438 源文件。B 深链/导航/迁移三组断言端到端成立。C 变异：删掉 NAV `web-onboard` 行 → views.test 2 例红灯，还原后 10/10 复绿。
+
+### 批次61：界面重设计 v5——壳层命令化 + 页头/表底 + 检查器快捷键（2026-11-20）
+
+> 口径：设计真源 `design-mockups/记忆工作台-界面重设计-v5.html`（Graphite + Signal Teal）。四个子批次：A 壳层（36px 标题栏 / 44px 命令条 / 26px 状态栏 / Ctrl+K 命令面板 / Ctrl+1..8·B·`）、B 三页页头+表底、C 检查器 Ctrl+Shift+I、D 全量视觉对齐（2026-11-21，用户确认「与效果图差距很大」后全量落地）。不动内核 API、不改审计格式、不改 MCP 契约。
+
+| 能力 | 代码落点 | 测试 |
+|---|---|---|
+| D·全量视觉对齐 | `src/web/shared/p0.css`：正文 13px/1.5、surface3/4 + line-strong/ink2/faint 令牌补齐、`--win`→surface2（页面底色）、卡片白面 8px 圆角+shadow-1、输入 31px+focus 环（box-shadow --focus）、按钮 29px+悬停 surface3、表格 31px 吸顶表头+`--row-h:34px`+悬停 surface2（去品牌色 hover）、tab 35px+计数徽标 16px、栅格 12px；`src/web/shell/theme.css`：正文 13px/1.5、`--row-h` 26→34（compact 22→28）、`--panel2`→surface2（导航/页签/右栏/状态卡灰底统一）、标题栏渐变+品牌块 23px 渐变、导航树行 29px+6px 圆角+active 左侧 3px 品牌条（::before 替换 inset shadow）、pane-head 36px、tabstrip 35px+顶条 2px+白底 active+右分隔线、检查器 .insp padding 12px+prop-grid 76px 右对齐+分区标题 10.5px 600、.btn 29px 6px 圆角、dock 头 32px+tab 底条+`.bn` 徽标 15px、`.tcount` 19px surface4 徽标、悬停态全面去品牌化（qa-btn/cb-icon/cb-cmd/sb-cell → surface3）；页面级：`memoryManagement.css` v5 令牌全换（accent 蓝→青 #0E7490、硬编码灰→令牌、行高 28→34、表头 24→31、控件 24→29px、圆角 3→6px、亮暗两套硬编码色块全换）、`write/theme.css`/`shared/theme.css`/`memory|dispute|AgentOnboard|Home|overview/theme.css`/`legacyLight.css`/`personalMemoryPane.css` 正文 13px + 卡片 8px 圆角 + accent 青化、`loginPage.css` 品牌块/焦点环/按钮青化 | `aTokens.test.ts` 契约更新（--win→surface2 / --field→surface / --focus / --row-h:34px 四条新断言） |
+| A·壳层命令化 | `src/web/shell/theme.css` v5 令牌（--brand:#0E7490 系）+ 36/44/26px 三条横栏样式、删 Ribbon/菜单；`src/web/shell/views.ts` 删 RIBBON、加 CMDS 上下文命令 + QUICK_VIEWS；新建 `src/web/shell/CommandPalette.tsx`（Ctrl+K，5 分组全量命令、禁用项带原因）；`Workspace.tsx` 标题栏/命令条重构、QAT 迁入标题栏；主进程 `main.ts` before-input-event 加 Ctrl+` / Ctrl+B / Ctrl+1..8（`ipcChannels.ts` `ShellShortcut` 扩展） | `views.test.ts` 版式契约、`workspace.test.tsx` 命令条断言、新建 `commandPalette.test.tsx` |
+| B·页头/表底 | `src/web/shared/p0.css` 新增 `.p0-pagehead`（20px 标题 + `.p0-tagline` 胶囊 + `.p0-ph-meta` 分隔符元信息行 + `.p0-ph-actions`）与 `.p0-tblft` + `.p0-pager`；新建 `src/web/shared/pagerWindow.ts`（‹ 1 … 4 5 6 … N › 数字窗口纯函数）；`PageNav.tsx` 加 `variant="pager"` 紧凑档（保留既有 testid）；`AuditPage.tsx` 页头改 page-head（导出按钮迁 ph-actions）、表底 p0-tblft；`MemoryManagementPage.tsx` 加 v5 页头（真实条数/库位置/会话/L0/冲突/快照）、center-foot 换数字 pager；`memoryManagement.css` tabstrip 对齐 v5 tabsline（35px 高、底部 2px 品牌线）；`RetrievalPage.tsx` 页头改 page-head（命中数/用时/预算真实读数、导出迁 ph-actions） | `pagerWindow.test.ts`（7 例）、`AuditPage.test.tsx` 分页两例改 pager 口径 + 页头断言、`MemoryManagementPage.head.test.tsx`（3 例，条数=真实账本） |
+| C·检查器快捷键 | `ipcChannels.ts` `ShellShortcut` 加 `'inspector'`；`main.ts` Ctrl+Shift+I 捕获（唯一放行的 Shift 组合，其余 Shift 键不拦截，防误触）；`Workspace.tsx` `ShellShortcutAction` + runShellShortcut 分支（与 QAT/命令面板同一 `inspCollapsed` 状态源）、浏览器 keydown 同步支持、F1 快捷键参考清单补行、命令面板 inspector 命令补 kbd | `workspace.test.tsx` 新增「Ctrl+Shift+I 切换属性检查器」；状态栏「已选」计数为既有真实实现（单选 1 条/无，多选不造假） |
+| F·导航对齐（2026-11-21） | `src/web/shell/theme.css`：`.tree` padding `4px 0 10px`→`0 8px 8px`、`.tree-group` padding 改 margin `12px 4px 5px`（first-child 2px）+ nowrap、`.tree-row.active::before` left `0`→`-8px`（药丸贴 pane 左缘）、`.tree-row.child` 26px/12px/muted（active accent）、`.tico` muted + hover ink2/active accent、`.tcount` 新增 hot/warn/soft 变体 + active 反白、`.shell-status`/`.strata-scale` 的 `.tree-group` 补 `margin:0` 防泄漏、`.ph-btn` 22→24px；`Workspace.tsx`：navWidth 250→236（v5 `--nav-w`）、pane-head 删 folder 前置图标 + 工具区改「新建记忆（openNav('write')，testid nav-new-memory）+ 折叠」双按钮、主项图标 14→16px、计数徽标接 `NAV_COUNT_VARIANTS`（dispute=hot / monitor·sync=warn / personal=soft）；`workspace.test.tsx` 新增「v5 设计稿对齐：导航头部工具」两断言（`.nav-pane .pane-head .ph-ic` 不存在 + 点击 nav-new-memory 打开 `/write.html`） | `workspace.test.tsx` 155/155（14 文件）；ShellStatusCard/StrataScale 版式保持批次53 真实数据卡口径（不换设计稿示例存储卡） |
+| E·全页对齐（2026-11-21） | ① 分页：`PageNav.tsx` 删旧完整档与 `variant` prop，统一紧凑数字 pager（note 并入左侧 `pg-note`）；`AuditPage.tsx` 去 `variant="pager"`；`LogsPage.tsx`/`LifecyclePage.tsx`（手写分页删除，每页条数选择保留）、`LayerFilterBar.tsx`（LayerPager 委托 PageNav）接入；`LogsPage.test.tsx` 分页三例改 pager 断言。② 页头：logs/write/monitor/growth（两处）/overview/feedback/dispute（四处）/lifecycle（三处）/MemoryLayeredPage/AgentOnboardPage 转 `p0-pagehead`；`disputeEntry.tsx`/`memoryLayeredEntry.tsx` 补引 `shared/p0.css`；`OverviewPage.tsx` 补引并清 af-head/af-title/af-actions 死 CSS、`write/theme.css` 清 wf-masthead 四规则。③ 符号：`ResultRow.tsx`（spark/x/receipt）、`LayerGraphPanel.tsx`（lock/scale）、`LogsPage.tsx`（warn×2）、`DedupCards.tsx`/`GrowthPanels.tsx`、AgentOnboard 五文件（spark/search/play/db）emoji 换 `Icon`，引用按钮名的文案同步去 emoji；`retrieval.css` ▶ 伪元素改 CSS 三角。④ 配色：`MemoryLayeredPage.tsx`/`layerGraph.ts` 层色板对齐 `shell/strataScale.ts` `STRATA_LAYERS`，`layerGraph.css` 8 处 #4d9fff→#38bdf8。⑤ `syncHub.ts`/`regression.ts`/`main.ts` 历史开头 BOM 清除（oxlint error 归零） | `LogsPage.test.tsx` 三例、`WritePage.test.tsx` 页头选择器、`components.test.tsx`/`AgentOnboardPage.test.tsx` 文案断言同步；其余页测试无页头/符号文本断言（已核实） |
+
+> **批次61-D 三道闸门证据（2026-11-21）**：
+> **A·影响面回归**：影响面 = p0.css（16 页共用基元）+ shell/theme.css（壳层组件）+ 11 份页面级 CSS（memoryManagement/write/shared/legacyLight/memory/dispute/AgentOnboard/Home/overview ×2/personalMemoryPane/login）+ aTokens.test.ts 契约。未改任何 TSX 组件结构、内核公开契约、审计格式、MCP 12 工具。门禁：typecheck 0 错、oxlint 0 errors、索引新鲜（package 前 --write 重建 441 源文件）、`test:gate` 4 分片 4022/4022 全绿（verify:fast 连续 3 次 0xC0000409 原生崩溃，按批次48 A27 口径改走带重试的 test:gate）、`test:coverage` 4022/4022 + 覆盖率 Lines 85.09% 达标。
+> **B·效果验证**：视觉验收点——页面底色 surface-2 #F7F9FB + 白面卡片 8px 圆角微阴影（p0 页 16 处 + legacy 8 页）；正文统一 13px/1.5；表格 31px 吸顶表头 + 34px 行高 + surface-2 悬停（记忆库/审计/分层矩阵三处）；导航树 29px 行 + active 左 3px 品牌条；页签条 35px 顶条白底 + 计数徽标；检查器 76px 右对齐属性栅格；dock 32px 头 + 15px 徽标；记忆库页 accent 蓝→青全换（亮暗两套）。打包闭环：关端（13 进程清零 + 8200-8204 无 LISTENING）→ `npm run package` → 产物 123.3MB / SHA256 `4120F308…818ECE` → main.cjs 逐字节一致 → 阻塞托管启端 → bootstrap:done + 8201-8204 LISTENING + MCP `get_write_status` 应答正常（`l0_unlocked:false` 重启默认锁定，预期安全行为）。
+> **C·变异验证**：`p0.css` `--row-h: 34px` 注入改回 26px → `aTokens.test.ts` 契约断言 `/--row-h:\s*34px/` 红灯（1 failed）→ 原样还原 → 同测试 4/4 复绿。输入/状态变异矩阵：aTokens 契约锁死 v5 令牌映射（--win/--field/--focus/--row-h 四条），任何单令牌回退都会被门禁红灯拦下。
+> **批次61-E 三道闸门证据（2026-11-21）**：
+> **A·影响面回归**：影响面 = `PageNav.tsx`（4 个调用方）+ 10 页页头（logs/write/monitor/growth/overview/feedback/dispute/lifecycle/MemoryLayeredPage/AgentOnboard）+ 2 个入口补 p0.css + 2 份死 CSS 清理 + 符号改动 9 文件 + 层色板 3 文件 + 测试 4 份。未改内核公开契约、审计格式、MCP 12 工具、后端/主进程（仅 main.ts 去历史 BOM，零语义变化）。门禁：typecheck 0 错、oxlint 0 errors（2 warnings 为 Workspace.tsx 既有 exhaustive-deps，非本轮引入）、索引新鲜；`test:gate` 4022 例 4021 绿 + 1 例环境抖动超时（`webchatExtensionContent.test.ts`「历史遍历分页续采」，分片 2 承接原生崩溃重试后负载 877s 超时，与本轮改动无关，单独复跑 13/13 通过）。
+> **B·效果验证**：AC→用例映射：① 五处分页统一 → `LogsPage.test.tsx` 三例（pg-info「第 1 / 2 页」、pg-note「每页 10 条 · 命中 15 条」、pg-page-2 点击换页、pg-size 换 100、过滤收敛回第 1 页）+ 生命周期/分层卡片复用同组件（156 例相关套件全绿）；② 十页页头 → `WritePage.test.tsx` write-head 常驻断言 + 其余页页头无测试文本断言（已核实，视觉验收见下）；③ 符号 → `components.test.tsx`/`AgentOnboardPage.test.tsx` 文案断言同步（「尚未测试 · 点「测试接入」」）；④ 层色板 → 无 hex 断言（已核实 grep 0 命中），色值与 `STRATA_LAYERS` 逐字一致。视觉验收点：十页页头同构（20px 标题+青色 tagline 胶囊+分隔符元信息行）；所有 pager 同构（‹ 数字 ›，无 emoji）；层色 L0 密文灰→L6 索引琥珀黄与首页刻度一致。
+> **C·变异验证**：`PageNav.tsx` `pg-next` 禁用阈值 `paged.page >= paged.totalPages` 注入改为 `>` → `LogsPage.test.tsx` + `AuditPage.test.tsx` 各 1 例红灯（2 failed / 156）→ 原样还原 → 同批 15 文件 156/156 复绿。输入/状态变异矩阵：LogsPage 15 条/10 条每页 → pg-info 与 pg-note 真实计数；过滤后不足一页 → 回第 1 页不空转；单页/越界 → ‹ › 双禁用。
+>
+> **批次61-F 三道闸门证据（2026-11-21）**：
+> **A·影响面回归**：影响面 = `src/web/shell/theme.css`（导航树/pane-head/计数徽标）+ `src/web/shell/Workspace.tsx`（navWidth、pane-head 工具区、NAV_COUNT_VARIANTS）+ `workspace.test.tsx` 新增 describe。未改内核公开契约、审计格式、MCP 12 工具、后端/主进程。门禁：typecheck 0 错、oxlint 0 errors（2 warnings 为 Workspace.tsx 既有 exhaustive-deps，非本轮引入）、索引新鲜；`test:gate` 4 分片 319 文件 / 4023 例 / 0 失败 / 0 重试全绿（打包后复跑，含批次 F 新增两例）。
+> **B·效果验证**：AC→用例映射：① 导航头部 → `workspace.test.tsx`「v5 设计稿对齐：导航头部工具」两例——`.nav-pane .pane-head .ph-ic` 为 null（folder 前置图标已删）+ 点击 `nav-new-memory` 后 active iframe src 含 `/write.html`（正向断言状态真的变了）；② 树体版式 → `.tree-group` margin/padding 与 `.tree-row.child` 26px/12px 由 CSS 契约承载（`.tree .tree-row` 恰 24 行结构断言不受影响，155/155）；③ 角标变体 → `NAV_COUNT_VARIANTS` 映射 dispute=hot/monitor·sync=warn/personal=soft，0 读数不渲染徽标的既有诚实口径不变。视觉验收点见 MANUAL-TEST-FIX-BATCH-45.md §管理员/日志验证步骤 第 9 条。打包闭环：关端（进程 0 + 8200-8204 无 LISTENING）→ `npm run package` → 产物 `release/installer-20261121-015518/MultiAgent Memory-0.1.0-setup.exe`（123.3MB，SHA256 `14095560…BDF6D0`）→ main.cjs 逐字节一致（批次 F 未动主进程，哈希同批次 E 属预期）+ app.asar 含渲染标记 `nav-new-memory` → 启新端 → `bootstrap:done` + 8200-8204 LISTENING + MCP `initialize`（memagent-mcp 1.0.0）+ `recall_memory`（命中 1 条；账本 2 项目时缺省 project_id 被诚实拒绝并提示，符合契约）+ `get_write_status`（`l0_unlocked:false` 重启默认锁定，预期安全行为）。
+> **C·变异验证**：`Workspace.tsx` 新建记忆按钮 `openNav('write')` 注入改为 `openNav('home')` → 「v5 设计稿对齐：导航头部工具」新用例红灯（iframe src 含 `/write.html` 断言失败，exit -1）→ 原样还原 → shell 14 文件 155/155 复绿。输入/状态变异矩阵：角标 0 读数 → 徽标不渲染（不造假）；无变体映射项 → 默认灰徽标；`.shell-status`/`.strata-scale` 卡片的 `.tree-group` 补 `margin:0` 防新 margin 泄漏（状态卡/层级刻度版式不变）。
+> **已知边界**：nav-foot 保留批次53 ShellStatusCard + StrataScale 真实数据卡版式，不换设计稿示例存储占用卡（壳内数字必须可追真实来源的设计边界）；`release/installer` 固定路径句柄占用落带时间戳目录（已知边界不阻塞）。
+>
+> **A·影响面回归**：影响面 = 壳层（theme.css/views.ts/Workspace.tsx/CommandPalette.tsx）+ 主进程（ipcChannels.ts/main.ts）+ 三页（AuditPage/MemoryManagementPage/RetrievalPage 及其 CSS）+ 共享（p0.css/PageNav.tsx/pagerWindow.ts）+ 测试 8 份。未改内核公开契约、存储序列化、审计格式、MCP 12 工具、TCP 8202/HTTP 8204、各 iframe 页面数据链路。`npm run verify:fast` 全绿（typecheck 两工程 0 错 + oxlint 0 errors + 索引新鲜 + vitest 319 文件 / 4022 例 + 覆盖率 Lines 85.09%）。既有行为回归：命令面板/壳层 68 例、日志页默认分页档（pg-first/pg-goto-input 等）不动、LayerFilterBar 旧分页不动。
+> **B·效果验证**：AC→用例映射：① 三页 v5 页头 → `audit-head`/`mm-head`/`ret-head` testid + `.p0-tagline`/`.p0-ph-sep` 结构断言，元信息读数来自真实账本（`audit-meta-count`=账本 N 条、`mm-head-count`=2 条记忆=写入数）；② 审计表底 → `audit-tblft`「显示 10 行 / 共 14 行」+ `pg-info`「第 1 / 2 页」+ `pg-page-2` 数字窗口 + `pg-size` 换 100 条/页一次看全；③ 记忆库表底 → `mm-page-1` 带 `.on`、单页时 ‹ › 均禁用；④ Ctrl+Shift+I → 浏览器 keydown 两连击折叠↔展开，与 QAT 同一状态；⑤ 检索页头 → `ret-head-meta` 未检索时「尚未检索」、结果后「命中 N 条 · 用时 X ms · 预算 Xt」。打包闭环：关端（进程 0 + 8200-8204 无 LISTENING）→ `npm run package` → 产物 `release/installer/MultiAgent Memory-0.1.0-setup.exe`（123.3MB，SHA256 `C91B2504…A1E15`）→ 主进程 `app.asar.unpacked/dist-electron/main.cjs` 与源码逐字节一致且含 `inspector` 标记 → 启新端 → `bootstrap:done` + 8201/8202/8203/8204 LISTENING + MCP `recall_memory`（命中 3 条）与 `get_write_status`（`l0_unlocked:false` 为重启后默认锁定，预期安全行为）全链路通。
+> **C·变异验证**：C1 关键判定注入缺陷：`pagerWindow.ts` `last = Math.max(1, totalPages)` 改 `Math.max(2, …)` → `pagerWindow.test.ts` 2 例红（单页 [1] 与 totalPages=0 钳制）→ 原样还原 → 同批 4 套件 88/88 复绿。C2 输入/状态变异矩阵：空账本 → `mm-head-count`「0 条记忆」（不伪造）；审计空账本 → 诚实空态保留；链路视图 2 行 → `audit-tblft`「共 2 行」；`pg-size` 换档 → 回第 1 页；大页数 257 → `[1,'…',256,257]` 窗口正确；越界 page=999/0 → 钳到边界页。
+> **已知边界**：检查器与表格选中联动沿用既有 selectionChannel 单选口径（状态栏「已选 1 条/无」），v5 设计稿的「多选计数进状态栏」未实现（页面无多选能力，不造假）；vtab/tl-tab 为视觉对齐而非像素级复刻；检索页 tbl-ft 未加（结果为列表非表格，设计稿亦未画该页分页）；7 个历史 `release/installer-*` 目录句柄占用删不掉（EPERM，已知边界不阻塞）。

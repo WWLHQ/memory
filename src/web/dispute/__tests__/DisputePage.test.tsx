@@ -1,8 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { DisputePage } from '../DisputePage.tsx';
 import { DisputeQueue } from '../DisputeQueue.tsx';
 import { DisputeVerdict } from '../DisputeVerdict.tsx';
+import { coreConflictHistory, coreConflicts, coreVerdict, type DisputeCtx } from '../coreDispute.ts';
+import { InMemoryStorage } from '../../../core/memagent/storage.ts';
+import type { Memory } from '../../../core/memagent/types.ts';
 import { SEED_CONFLICTS } from './fixtures.ts';
 
 const NOW = new Date('2026-10-10T09:00:00.000Z').getTime();
@@ -134,6 +137,116 @@ describe('DisputePage (P7-T5 编排·真实账本接真版)', () => {
     expect(screen.getByTestId('audit-row-0')).toHaveTextContent('req_hist_01');
     expect(screen.getByTestId('audit-row-0')).toHaveTextContent('保持 pending');
     expect(screen.getByTestId('audit-row-1')).toHaveTextContent('mem_merged');
+  });
+
+  // 2026-11-21 用户打回：空账本时双栏对比 / 裁决方式与动作 / 裁决历史被条件渲染整块吃掉。
+  // 此处锁定四块结构常驻：只有「行 / 选中态」随数据变化，面板与表头不得隐藏。
+  it('空账本 → 四块结构常驻（筛选行/双栏占位+禁用动作/裁决历史表头+如实空行）', async () => {
+    const { container } = render(<DisputePage load={async () => []} loadHistory={async () => []} />);
+    const $ = within(container);
+    await waitFor(() => expect($.getByTestId('dispute-empty')).toBeInTheDocument());
+
+    // ① 待裁决队列：筛选行 + 计数 + 表头骨架
+    expect($.getByTestId('dispute-filter')).toBeInTheDocument();
+    expect($.getByTestId('dispute-filter-all')).toHaveTextContent('待裁决队列（0）');
+    expect($.getByTestId('dispute-filter-overdue')).toHaveTextContent('超期 >7 天（0）');
+    expect($.getByTestId('dispute-filter-type')).toBeDisabled();
+    expect($.getByTestId('dispute-empty').textContent).toContain('conflict_id');
+    expect($.getByTestId('dispute-empty').textContent).toContain('new 置信度');
+    expect($.queryByTestId('queue')).toBeNull();
+
+    // ② 双栏对比：标题与两侧信息位常驻，未选中给占位而不是整块消失
+    const compare = $.getByTestId('compare-panel');
+    expect(compare).toBeInTheDocument();
+    expect(compare).toHaveTextContent('双栏对比');
+    expect($.getByTestId('compare-empty')).toHaveTextContent('在队列中选择一条冲突查看对照');
+    expect($.queryByTestId('panel-old')).toBeNull();
+    expect($.queryByTestId('panel-new')).toBeNull();
+
+    // ③ 裁决方式与动作：人工可选、AI 禁用写原因、四项动作常驻但禁用并写原因
+    expect($.getByTestId('dispute-verdict-mode')).toBeInTheDocument();
+    expect($.getByTestId('dispute-mode-human')).toHaveAttribute('aria-pressed', 'true');
+    const ai = $.getByTestId('dispute-mode-ai');
+    expect(ai).toBeDisabled();
+    expect(ai.getAttribute('title')).toContain('内核未提供 AI 裁决通道');
+    expect($.getByTestId('verdict-panel')).toBeInTheDocument();
+    for (const v of ['auto_override', 'user_confirm', 'merge', 'hold']) {
+      const btn = $.getByTestId(`verdict-${v}`);
+      expect(btn).toBeDisabled();
+      expect(btn.getAttribute('title')).toContain('请先在队列中选择一条冲突');
+    }
+
+    // ④ 裁决历史：表头常驻，无记录时表体一行如实空态（不整块隐藏）
+    const history = $.getByTestId('dispute-history');
+    expect(history).toBeInTheDocument();
+    expect($.getByTestId('audit-log').textContent).toContain('request_id');
+    expect($.getByTestId('audit-log').textContent).toContain('note');
+    await waitFor(() => expect($.getByTestId('history-empty')).toBeInTheDocument());
+    expect($.queryAllByTestId(/^audit-row-/).length).toBe(0);
+  });
+
+  // 2026-11-21 用户要求「真数据验证」：真实 InMemoryStorage 造 pending 冲突 →
+  // 队列真实行 → 双栏真实两侧正文/版本 → 裁决写真实 conflict_resolve 审计 → 历史出现对应 request_id。
+  it('真实账本闭环：InMemoryStorage 造冲突 → 四块齐全 → 裁决产生真实审计并出队', async () => {
+    // 同文件前面的用例用 vi.spyOn 替换过 coreDispute 导出；此处要的是真实内核函数，先还原
+    vi.restoreAllMocks();
+    const storage = new InMemoryStorage();
+    const DAY = 24 * 3600 * 1000;
+    const now = Date.now();
+    const mk = (id: string, content: string, confidence: number, created_at: number): Memory => ({
+      mem_id: id,
+      project_id: 'P1',
+      enterprise_id: 'E1',
+      team_id: 'T1',
+      category: 'fact',
+      layer: 'L1',
+      content,
+      content_l1: content,
+      decay_class: 'warm',
+      pinned: false,
+      locked: false,
+      version: 1,
+      created_at,
+      confidence,
+      conflict_id: 'cf_real_01',
+    });
+    await storage.putMemory(mk('mem_real_old', '缓存 TTL 设为 300s', 0.7, now - 10 * DAY));
+    await storage.putMemory(mk('mem_real_new', '缓存 TTL 设为 60s', 0.85, now - 60 * 1000));
+    const ctx: DisputeCtx = { storage };
+
+    const { container } = render(
+      <DisputePage
+        load={() => coreConflicts(ctx)}
+        loadHistory={() => coreConflictHistory(ctx)}
+        verdict={(rec, v) => coreVerdict(rec, v, ctx)}
+      />,
+    );
+    const $ = within(container);
+
+    // ① 队列出现真实行（conflict_id / 真实 mem_id / 真实置信度）
+    await waitFor(() => expect($.getAllByTestId(/^queue-item-/).length).toBe(1));
+    const row = $.getAllByTestId(/^queue-item-/)[0];
+    expect(row).toHaveTextContent('cf_real_01');
+    expect(row).toHaveTextContent('mem_real_old');
+    expect(row).toHaveTextContent('0.7');
+    // ② 双栏：真实两侧正文 + 版本信息位（默认选中第一条，占位消失）
+    await waitFor(() => expect($.getByTestId('panel-old')).toBeInTheDocument());
+    expect($.queryByTestId('compare-empty')).toBeNull();
+    expect($.getByTestId('panel-old')).toHaveTextContent('缓存 TTL 设为 300s');
+    expect($.getByTestId('panel-new')).toHaveTextContent('缓存 TTL 设为 60s');
+    expect($.getByTestId('compare-panel')).toHaveTextContent('mem_real_old → mem_real_new 候选');
+    // ③ 裁决产生真实 conflict_resolve 审计
+    fireEvent.click($.getByTestId('verdict-auto_override'));
+    await waitFor(async () => {
+      const audits = await storage.queryAudit({ action: 'conflict_resolve' });
+      expect(audits.length).toBe(1);
+    });
+    const [audit] = await storage.queryAudit({ action: 'conflict_resolve' });
+    // ④ 历史表出现对应 request_id 行；队列真实出队（旧值归档）
+    await waitFor(() => expect($.getByTestId('audit-row-0')).toHaveTextContent(audit.request_id));
+    await waitFor(() => expect($.getByTestId('dispute-empty')).toBeInTheDocument());
+    expect($.queryAllByTestId(/^queue-item-/).length).toBe(0);
+    expect((await storage.getMemory('mem_real_old'))?.decay_class).toBe('archived');
   });
 });
 

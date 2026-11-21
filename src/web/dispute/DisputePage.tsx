@@ -12,7 +12,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { queueSort, auditPair, initialConflictId, overdueDays } from './logic.ts';
 import { publishSelection } from '../shared/selectionChannel.ts';
 import { useDisputeMirror } from './useDisputeMirror.ts';
-import { coreConflictHistory, coreConflicts, coreVerdict, type ConflictHistoryRow } from './coreDispute.ts';
+import { coreConflictHistory, coreConflicts, coreVerdict, type ConflictHistoryRow, type VerdictOutcome } from './coreDispute.ts';
 import { KernelLoadError, kernelErrorText, useKernelLoad } from '../shared/kernelLoad.tsx';
 import { useHostTheme } from '../shared/hostTheme.ts';
 import { DisputeQueue } from './DisputeQueue.tsx';
@@ -34,9 +34,11 @@ const NO_CONFLICTS: ConflictRecord[] = [];
 
 const verdictLabel = (v: Verdict): string => VERDICTS.find((x) => x.key === v)?.label ?? v;
 
-export function DisputePage({ load = coreConflicts, loadHistory = coreConflictHistory }: {
+export function DisputePage({ load = coreConflicts, loadHistory = coreConflictHistory, verdict = coreVerdict }: {
   load?: () => Promise<ConflictRecord[]>;
   loadHistory?: () => Promise<ConflictHistoryRow[]>;
+  /** 测试可注入与 load/loadHistory 同一真实 storage 的裁决实现，保证「真写审计」闭环可验 */
+  verdict?: (rec: ConflictRecord, v: Verdict) => Promise<VerdictOutcome>;
 } = {}) {
   // 批次53：跟随壳层主题（浅/深），与监控/首页同口径；主题令牌内嵌 .dsp-page
   useHostTheme();
@@ -124,7 +126,7 @@ export function DisputePage({ load = coreConflicts, loadHistory = coreConflictHi
   const handleVerdict = async (v: Verdict, _result: unknown) => {
     if (!selected) return;
     try {
-      const out = await coreVerdict(selected, v);
+      const out = await verdict(selected, v);
       // 批次48 A19：request_id 只能来自内核裁决返回值；内核没给就不显示假 id
       const reqId = out.kernel_request_ids[0] ?? '';
       const evt = auditPair(selected, v, reqId);
@@ -133,7 +135,8 @@ export function DisputePage({ load = coreConflicts, loadHistory = coreConflictHi
       mirror.audit('dispute', selected, v, reqId);
       show(reqId ? `${evt.note}（${reqId}）` : `${evt.note}（内核未返回 request_id）`);
       // 内核裁决后刷新队列：resolved 出队；user_confirm/hold 保持 pending（真实语义）
-      ledger.replace(await coreConflicts());
+      // 回读走同一个 load（测试注入同一 storage 时也保持真账本闭环）
+      ledger.replace(await load());
       // 历史同步回读账本（内核写的是成对审计，页面不自行编造历史行）
       void reloadHistory();
     } catch (e) {
@@ -149,12 +152,6 @@ export function DisputePage({ load = coreConflicts, loadHistory = coreConflictHi
       <h1>冲突裁决</h1>
       <span className="sub">§9.7 裁决队列 · write/sync 冲突 · 超期 7 天升级告警</span>
       {phase === 'ok' && <span className="af-badge warn" data-testid="dispute-count">待裁决 {filtered.length}</span>}
-    </div>
-  );
-  const policyRow = (
-    <div className="af-chiprow" aria-hidden="true">
-      <span className="af-badge">9.7 裁决队列</span>
-      <span className="af-badge">不自动覆盖 · 保存原文</span>
     </div>
   );
   // 参考稿筛选行：①待裁决队列 / ②超期 >7 天 是真筛选；③类型筛选因内核未采样如实禁用
@@ -181,40 +178,46 @@ export function DisputePage({ load = coreConflicts, loadHistory = coreConflictHi
       <span className="af-badge">不自动覆盖 · 保存原文</span>
     </div>
   );
-  const historyPanel = (historyRows.length > 0 || historyErr) && (
+  // 参考稿「裁决历史」：表头与面板常驻；无记录时表体给一行如实空态，不整块隐藏
+  const historyPanel = (
     <section className="af-panel" data-testid="dispute-history">
       <div className="af-ph">
         <h3>裁决历史</h3>
         <span className="hint">conflict_resolve 成对审计 · 含 pending / resolved · 全部来自账本</span>
       </div>
       <div className="af-pb af-flush">
-        {historyErr ? (
-          <div className="af-note" data-testid="dispute-history-error">
-            读取裁决历史失败：{historyErr}（队列不受影响）
-          </div>
-        ) : (
-          <ul className="audit-list" data-testid="audit-log">
-            <li className="q-head" aria-hidden="true">
-              <span>request_id</span>
-              <span>动作</span>
-              <span>note</span>
+        <ul className="audit-list" data-testid="audit-log">
+          <li className="q-head" aria-hidden="true">
+            <span>request_id</span>
+            <span>动作</span>
+            <span>note</span>
+          </li>
+          {historyErr ? (
+            <li className="empty-row" data-testid="dispute-history-error">
+              读取裁决历史失败：{historyErr}（队列不受影响）
             </li>
-            {historyRows.map((e, i) => (
+          ) : historyRows.length === 0 ? (
+            <li className="empty-row" data-testid="history-empty">
+              暂无裁决记录：账本中还没有 conflict_resolve 审计。完成一次裁决后，这里会出现内核返回的真实 request_id 行。
+            </li>
+          ) : (
+            historyRows.map((e, i) => (
               <li className="a-row" key={`${e.request_id || 'live'}-${i}`} data-testid={`audit-row-${i}`}>
                 <span className="mid">{e.request_id || '账本无 request_id'}</span>
                 <span><i className={`chip ${e.verdict}`}>{verdictLabel(e.verdict)}</i></span>
                 <span className="note-cell">{e.note}</span>
               </li>
-            ))}
-          </ul>
-        )}
+            ))
+          )}
+        </ul>
       </div>
     </section>
   );
+  // 结构常驻：筛选行只在账本读成功后渲染（加载中不显示 0 冒充真实计数）
   const shell = (inner: ReactNode) => (
     <div className="dsp-page" data-testid="dispute-page">
       <div className="dsp-scroll"><div className="dsp-main"><div className="af-stack">
-        {head}{conflicts.length > 0 ? filterRow : policyRow}{inner}
+        {head}{phase === 'ok' && filterRow}{inner}
       </div></div></div>
     </div>
   );
@@ -237,67 +240,68 @@ export function DisputePage({ load = coreConflicts, loadHistory = coreConflictHi
     );
   }
 
-  if (conflicts.length === 0) {
-    // 批次54：空态不再是居中说明卡，而是与截图同构的「队列面板 + 表头骨架 + 诚实空行」；
-    // 不渲染 data-testid="queue"（空态测试断言它不存在），表头骨架仅 aria 装饰。
-    return shell(
-      <>
-        <div className="af-panel" data-testid="dispute-empty">
-          <div className="af-ph">
-            <h3>冲突队列（0）</h3>
-            <span className="hint">仅 dispute_flag=true · 超期 &gt;7d 告警 · 类型未采样 = 内核无检测引擎</span>
+  // 参考稿三块结构常驻：队列 / 双栏对比 / 裁决方式与动作 / 裁决历史。
+  // 空账本只影响「行」与「选中态」，不整块吞掉任何面板；未选中/无数据时给占位与禁用原因。
+  const queuePanel = conflicts.length === 0 ? (
+    <div className="af-panel" data-testid="dispute-empty">
+      <div className="af-ph">
+        <h3>冲突队列（0）</h3>
+        <span className="hint">仅 dispute_flag=true · 超期 &gt;7d 告警 · 类型未采样 = 内核无检测引擎</span>
+      </div>
+      <div className="af-pb af-flush">
+        <ul className="queue">
+          <li className="q-head" aria-hidden="true">
+            <span>conflict_id</span>
+            <span>类型</span>
+            <span>mem_id</span>
+            <span className="num">old 置信度</span>
+            <span className="num">new 置信度</span>
+            <span>等待</span>
+            <span>操作</span>
+          </li>
+          <li className="empty-row">
+            <b>当前账本无待裁决冲突。</b>
+            队列只反映真实账本中 pending 的冲突（记忆表 conflict_id 标记 + conflict_resolve
+            「转人工」审计）。请先在「写入页」产生记忆，当不同端对同一记忆产生并发版本时，
+            内核会真实产出冲突进入本队列。空账本不伪造数据。
+          </li>
+        </ul>
+      </div>
+    </div>
+  ) : (
+    <section className="af-panel">
+      <div className="af-ph">
+        <h3>冲突队列（{filtered.length}）</h3>
+        <span className="hint">仅 dispute_flag=true · 超期 &gt;7d 告警 · 类型未采样 = 内核无检测引擎</span>
+      </div>
+      <div className="af-pb af-flush">
+        {filtered.length === 0 ? (
+          <div className="queue empty" data-testid="queue-filter-empty">
+            当前筛选（超期 &gt;7 天）没有匹配的待裁决冲突；账本共 {filteredAll.length} 条，切回「待裁决队列」可见。
           </div>
-          <div className="af-pb af-flush">
-            <ul className="queue">
-              <li className="q-head" aria-hidden="true">
-                <span>conflict_id</span>
-                <span>类型</span>
-                <span>mem_id</span>
-                <span className="num">old 置信度</span>
-                <span className="num">new 置信度</span>
-                <span>等待</span>
-                <span>操作</span>
-              </li>
-              <li className="empty-row">
-                <b>当前账本无待裁决冲突。</b>
-                队列只反映真实账本中 pending 的冲突（记忆表 conflict_id 标记 + conflict_resolve
-                「转人工」审计）。请先在「写入页」产生记忆，当不同端对同一记忆产生并发版本时，
-                内核会真实产出冲突进入本队列。空账本不伪造数据。
-              </li>
-            </ul>
-          </div>
-        </div>
-        {historyPanel}
-      </>,
-    );
-  }
+        ) : (
+          <DisputeQueue list={filtered} now={now} onSelect={setSelectedId} selectedId={selectedId ?? undefined} />
+        )}
+      </div>
+    </section>
+  );
 
   return shell(
     <>
-      <section className="af-panel">
+      {queuePanel}
+      <section className="af-panel" data-testid="compare-panel">
         <div className="af-ph">
-          <h3>冲突队列（{filtered.length}）</h3>
-          <span className="hint">仅 dispute_flag=true · 超期 &gt;7d 告警 · 类型未采样 = 内核无检测引擎</span>
+          {/* 批次63：对齐设计稿——标题「双栏对比 · <conflict_id>」，hint「<mem_id> → <mem_id> 候选」
+              （内核冲突记录无版本号字段，不编造 v3→v4；用真实记忆 id 对）。 */}
+          <h3 className="mono-title">{selected ? `双栏对比 · ${selected.id}` : '双栏对比'}</h3>
+          <span className="hint">
+            {selected
+              ? `${selected.old_id} → ${selected.new_id} 候选`
+              : '未选中冲突 · 选中队列行后展示两侧正文/置信度'}
+          </span>
         </div>
-        <div className="af-pb af-flush">
-          {filtered.length === 0 ? (
-            <div className="queue empty" data-testid="queue-filter-empty">
-              当前筛选（超期 &gt;7 天）没有匹配的待裁决冲突；账本共 {filteredAll.length} 条，切回「待裁决队列」可见。
-            </div>
-          ) : (
-            <DisputeQueue list={filtered} now={now} onSelect={setSelectedId} selectedId={selectedId ?? undefined} />
-          )}
-        </div>
-      </section>
-      {selected && (
-        <section className="af-panel">
-          <div className="af-ph">
-            {/* 批次63：对齐设计稿——标题「双栏对比 · <conflict_id>」，hint「<mem_id> → <mem_id> 候选」
-                （内核冲突记录无版本号字段，不编造 v3→v4；用真实记忆 id 对）。 */}
-            <h3 className="mono-title">双栏对比 · {selected.id}</h3>
-            <span className="hint">{selected.old_id} → {selected.new_id} 候选</span>
-          </div>
-          <div className="af-pb">
+        <div className="af-pb">
+          {selected ? (
             <div className="compare">
               <div className="side old" data-testid="panel-old">
                 <div className="side-hd"><span className="tag">旧值</span><span className="meta">{selected.old_id} · conf {selected.old_confidence}</span></div>
@@ -308,25 +312,27 @@ export function DisputePage({ load = coreConflicts, loadHistory = coreConflictHi
                 <div className="side-bd"><ins>{selected.new_content}</ins></div>
               </div>
             </div>
-            {/* 参考稿「裁决方式切换」：人工可用；AI 裁决内核未接，如实禁用并写原因 */}
-            <div className="verdict-mode" data-testid="dispute-verdict-mode">
-              <span className="vm-label">裁决方式</span>
-              <button type="button" className="af-badge" data-testid="dispute-mode-human" aria-pressed="true">人工裁决</button>
-              <button
-                type="button" className="af-badge" data-testid="dispute-mode-ai" disabled
-                title="内核未提供 AI 裁决通道（无建议生成 / 无自动落定），当前只能用下方四项人工裁决"
-              >
-                AI 裁决（不可用）
-              </button>
-              <span className="vm-hint">AI 裁决需内核提供建议通道，当前未接入；下方四项动作即人工裁决</span>
-            </div>
-            <DisputeVerdict
-              record={selected}
-              onVerdict={handleVerdict}
-            />
+          ) : (
+            <div className="af-note" data-testid="compare-empty">在队列中选择一条冲突查看对照。</div>
+          )}
+          {/* 参考稿「裁决方式切换」：人工可用；AI 裁决内核未接，如实禁用并写原因 */}
+          <div className="verdict-mode" data-testid="dispute-verdict-mode">
+            <span className="vm-label">裁决方式</span>
+            <button type="button" className="af-badge" data-testid="dispute-mode-human" aria-pressed="true">人工裁决</button>
+            <button
+              type="button" className="af-badge" data-testid="dispute-mode-ai" disabled
+              title="内核未提供 AI 裁决通道（无建议生成 / 无自动落定），当前只能用下方四项人工裁决"
+            >
+              AI 裁决（不可用）
+            </button>
+            <span className="vm-hint">AI 裁决需内核提供建议通道，当前未接入；下方四项动作即人工裁决</span>
           </div>
-        </section>
-      )}
+          <DisputeVerdict
+            record={selected}
+            onVerdict={handleVerdict}
+          />
+        </div>
+      </section>
       {historyPanel}
       {toast}
     </>,

@@ -254,9 +254,9 @@
 | [src/web/audit/useAuditMirror.ts](src/web/audit/useAuditMirror.ts) | 20 | 审计日志页后端镜像（T5）：沿用 ?backend= 覆盖模式。 | useAuditMirror(fn), AuditMirror(type) |
 | [src/web/audit/useToast.tsx](src/web/audit/useToast.tsx) | 13 | — | useToast(fn) |
 | [src/web/backend.ts](src/web/backend.ts) | 156 | 本机后端地址单一真源（与 src/electron/main.ts 的 MIRROR_PORT / AGENT_ONBOARD_PORT 对齐）。 | backendParam(fn), agentBackendParam(fn), homeBaseUrl(fn), onboardBaseUrl(fn), rememberHomeBase(fn), discoverTrustedDevBackend(fn), HOME_BASE(const), ONBOARD_BASE(const), DEV_FALLBACK_PORTS(const) |
-| [src/web/dispute/DisputePage.tsx](src/web/dispute/DisputePage.tsx) | 335 | 冲突裁决页 T5：完整编排 + mirror · 真实数据接真版 | DisputePage(fn) |
+| [src/web/dispute/DisputePage.tsx](src/web/dispute/DisputePage.tsx) | 341 | 冲突裁决页 T5：完整编排 + mirror · 真实数据接真版 | DisputePage(fn) |
 | [src/web/dispute/DisputeQueue.tsx](src/web/dispute/DisputeQueue.tsx) | 79 | P7-T3 冲突裁决队列组件（批次53-R 重做：截图目标版式 = 密集表格，非卡片堆） | DisputeQueue(fn) |
-| [src/web/dispute/DisputeVerdict.tsx](src/web/dispute/DisputeVerdict.tsx) | 45 | P7-T4 裁决操作组件（批次53-R 重做：截图目标版式 = 四等宽按钮 + 按钮下各一行灰注释） | DisputeVerdict(fn), VERDICTS(const) |
+| [src/web/dispute/DisputeVerdict.tsx](src/web/dispute/DisputeVerdict.tsx) | 47 | P7-T4 裁决操作组件（批次53-R 重做：截图目标版式 = 四等宽按钮 + 按钮下各一行灰注释） | DisputeVerdict(fn), VERDICTS(const) |
 | [src/web/dispute/coreDispute.ts](src/web/dispute/coreDispute.ts) | 145 | 冲突裁决页（REQ-006 / P7）接真内核：队列与裁决**全部下沉到内核原子 API**（批次46-3）。 | coreConflicts(fn), coreConflictHistory(fn), coreVerdict(fn), DisputeCtx(type), ConflictHistoryRow(type), VerdictOutcome(type) |
 | [src/web/dispute/disputeEntry.tsx](src/web/dispute/disputeEntry.tsx) | 12 | 冲突裁决页（REQ-006 / P7）入口：挂载 DisputePage（批次53 起 af 化版式，p0-pagehead 旧版式类清零）。 | — |
 | [src/web/dispute/labels.ts](src/web/dispute/labels.ts) | 11 | 冲突类型 → 中文标签（规格常量）。页面数据真相 = 内核账本，无演示冲突。 | CONFIRM_TYPE_LABEL(const) |
@@ -466,9 +466,9 @@
 | [src/web/shell/Icons.tsx](src/web/shell/Icons.tsx) | 77 | 壳层图标：定稿里的线性图标集，按需内联渲染（不引入外部图标库、不依赖网络）。 | Icon(fn) |
 | [src/web/shell/PersonalMemoryPanel.tsx](src/web/shell/PersonalMemoryPanel.tsx) | 268 | 个人记忆壳层常驻面板（N8）：点击状态栏快捷按钮展开，全局常驻， | PersonalMemoryPanel(fn), PersonalMemoryPanelProps(type) |
 | [src/web/shell/ShellLoginDialog.tsx](src/web/shell/ShellLoginDialog.tsx) | 289 | 壳层登录弹窗（批次49）：菜单栏 / 快速访问工具条 / 登录状态处三处入口共用同一个实例。 | logoutCurrentSession(fn), ShellLoginDialog(fn), ShellLoginDialogProps(type) |
-| [src/web/shell/ShellStatusCard.tsx](src/web/shell/ShellStatusCard.tsx) | 104 | REQ-014 / T7（C8）：侧栏真实状态卡。 | ShellStatusCard(fn) |
+| [src/web/shell/ShellStatusCard.tsx](src/web/shell/ShellStatusCard.tsx) | 131 | REQ-014 / T7（C8）：系统状态条（批次58 起常驻命令条右端，原侧栏卡位已移除）。 | ShellStatusCard(fn) |
 | [src/web/shell/StrataScale.tsx](src/web/shell/StrataScale.tsx) | 52 | 功能导航栏底部的「层级刻度」（批次53）：L0–L6 七档真实计数。 | StrataScale(fn) |
-| [src/web/shell/Workspace.tsx](src/web/shell/Workspace.tsx) | 1924 | 工作台壳层（批次48 S1 建；v5 重设计改造）：36px 标题栏 + 44px 上下文命令条 + 导航树 + 标签条 | Workspace(fn), ShellShortcutAction(type) |
+| [src/web/shell/Workspace.tsx](src/web/shell/Workspace.tsx) | 1923 | 工作台壳层（批次48 S1 建；v5 重设计改造）：36px 标题栏 + 44px 上下文命令条 + 导航树 + 标签条 | Workspace(fn), ShellShortcutAction(type) |
 | [src/web/shell/dock.ts](src/web/shell/dock.ts) | 171 | 底部面板真实数据源（S6）：输出=程序动作日志尾读；问题=该日志派生的错误/警告； | loadOutputLog(fn), problemsFromLog(fn), loadScheduleRuns(fn), auditMentions(fn), loadAuditForMemory(fn), OutputLogView(type), ProblemRow(type), ScheduleRun(type), AuditRow(type), DockResult(type) |
 | [src/web/shell/layers.ts](src/web/shell/layers.ts) | 79 | L1–L6 / L0 面板真实数据（S7）：只在中心页为「分层 L1–L6」或「L0 密文」时显示的壳层条。 | loadLayerPanel(fn), PANEL_LAYERS(const), LayerCount(type), LayerPanelView(type), PanelLayer(type) |
 | [src/web/shell/navCounts.ts](src/web/shell/navCounts.ts) | 45 | 批次54：功能导航角标的真实数据加载器。 | loadNavCounts(fn), NavCountId(type), NavCounts(type) |
@@ -876,9 +876,9 @@ src/web/audit/types.ts 71090ca7cf55
 src/web/audit/useAuditMirror.ts 34865de958b6
 src/web/audit/useToast.tsx 85cd09d2e1f5
 src/web/backend.ts 8fdc10aa241d
-src/web/dispute/DisputePage.tsx d643fe76b312
+src/web/dispute/DisputePage.tsx 92d6b42cc0b6
 src/web/dispute/DisputeQueue.tsx caf114a20325
-src/web/dispute/DisputeVerdict.tsx 9d38207f49d5
+src/web/dispute/DisputeVerdict.tsx ef4c2d7c89dc
 src/web/dispute/coreDispute.ts 9c83acf7ad55
 src/web/dispute/disputeEntry.tsx 2a5b7885df73
 src/web/dispute/labels.ts c6d8f1dcee8f
@@ -1088,9 +1088,9 @@ src/web/shell/ContextMenu.tsx e2dcb1ea4ce9
 src/web/shell/Icons.tsx d33b2ab2156f
 src/web/shell/PersonalMemoryPanel.tsx f5cb39561151
 src/web/shell/ShellLoginDialog.tsx eab40cd6a2f5
-src/web/shell/ShellStatusCard.tsx 635ba4fdd69f
+src/web/shell/ShellStatusCard.tsx fce35e10123c
 src/web/shell/StrataScale.tsx bdbf17e3ce0e
-src/web/shell/Workspace.tsx f91f28beaa5e
+src/web/shell/Workspace.tsx 8cfb6f301b75
 src/web/shell/dock.ts 4ede5427d4ef
 src/web/shell/layers.ts ee5f32438ab6
 src/web/shell/navCounts.ts 29d436b7129f
