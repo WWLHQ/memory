@@ -153,7 +153,11 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
     };
     for (const h of hits) {
       const m = await storage.getMemory(h.mem_id);
-      if (m) await storage.putMemory({ ...m, access_count: (m.access_count ?? 0) + 1, last_access_time: now });
+      if (!m) continue;
+      // 命中计数回写是纯统计增强（影响 access_count/last_access_time），非召回语义；
+      // 跨租户/权限校验失败时不得中断 recall 与审计落盘——降级为 warn 并继续（B-2026-11-22）。
+      try { await storage.putMemory({ ...m, access_count: (m.access_count ?? 0) + 1, last_access_time: now }); }
+      catch (e) { console.warn('[recall:access-count-backfill] putMemory 失败，不阻断会话视图', { mem_id: h.mem_id, error: String((e as Error)?.message ?? e) }); }
     }
     await audit(request_id, 'recall', {
       query: req.query, hits: hits.length, payload_tokens, scene: req.scene ?? 'default', mode: 'auto',
@@ -468,7 +472,11 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
     // 17.4：召回命中计数（不含 confirm/reinforce）
     for (const h of hits) {
       const m = await storage.getMemory(h.mem_id);
-      if (m) await storage.putMemory({ ...m, access_count: (m.access_count ?? 0) + 1, last_access_time: now });
+      if (!m) continue;
+      // 命中计数回写是纯统计增强（影响 access_count/last_access_time），非召回语义；
+      // 跨租户/权限校验失败时不得中断 recall 与审计落盘——降级为 warn 并继续（B-2026-11-22）。
+      try { await storage.putMemory({ ...m, access_count: (m.access_count ?? 0) + 1, last_access_time: now }); }
+      catch (e) { console.warn('[recall:access-count-backfill] putMemory 失败，不阻断召回', { mem_id: h.mem_id, error: String((e as Error)?.message ?? e) }); }
     }
 
     const budgetStatus = payload_tokens >= BUDGET.hard ? 'fused' : payload_tokens >= BUDGET.warn ? 'warn' : 'ok';
