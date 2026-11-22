@@ -106,10 +106,10 @@ export function suggestRecallWeights(
     bump.w_c = 0.05;
     reasons.push(`reject 占比 ${(metrics.reject_ratio * 100).toFixed(1)}% > 30% → w_c +0.05`);
   }
-  if (metrics.evidence_thin_ratio > 0.35) {
-    bump.w_i = 0.05;
-    reasons.push(`证据不足占比 ${(metrics.evidence_thin_ratio * 100).toFixed(1)}% > 35% → w_i +0.05`);
-  }
+  // 档位B（2026-11-22）：停用「证据不足占比 > 35% → w_i +0.05」规则。
+  // 理由：importance 字段 99.5% 缺失恒取默认 0.5，调高 w_i 不带来任何排序信息增益；
+  // 且扣分来自 w_f/w_a，会稀释唯一真实有效的 freshness 分量，形成「假 thin→+w_i→更假」正反馈。
+  // evidence_thin_ratio 仍保留在 metrics 里供观测/审计，不删除该数据契约字段。
   const keys = Object.keys(bump) as RecallKey[];
   if (keys.length === 0) return { suggestion: null, metrics };
 

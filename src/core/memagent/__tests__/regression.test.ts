@@ -237,31 +237,36 @@ describe('suggestRecallWeights（GAP-1 回归建议算法）', () => {
     expect(suggestion!.reason).toContain('w_c +0.05');
   });
 
-  it('证据不足占比 > 35% → w_i +0.05，缺口从 w_f 扣', () => {
+  it('档位B：证据不足占比 > 35% 不再触发 w_i（metrics 仍如实计数）', () => {
     const { suggestion, metrics } = suggestRecallWeights(recalls(40, 2), DEFAULT_RECALL_WEIGHTS, NOW);
     expect(metrics.evidence_thin_ratio).toBe(0.5);
-    expect(suggestion!.to).toEqual({ w_f: 0.30, w_i: 0.35, w_c: 0.15, w_a: 0.20 });
-    expect(suggestion!.reason).toContain('w_i +0.05');
+    // 停用「thin→w_i」后，仅有 thin 信号 → 无建议（importance 缺失下调高 w_i 无信息增益，且形成正反馈）
+    expect(suggestion).toBeNull();
+    expect(metrics.evidence_thin).toBe(20);
   });
 
-  it('两条规则同时触发 → 共 +0.10，先扣 w_f（够扣就不动 w_a）', () => {
+  it('档位B：thin 超阈但 reject 也超阈 → 只按 reject 走 w_c，w_i 不动', () => {
     const audits = [
       ...recalls(40, 2),
       ...Array.from({ length: 10 }, (_, i) => opAudit(NOW - i * 1000, 'reject')),
     ];
-    const { suggestion } = suggestRecallWeights(audits, DEFAULT_RECALL_WEIGHTS, NOW);
-    expect(suggestion!.to).toEqual({ w_f: 0.25, w_i: 0.35, w_c: 0.20, w_a: 0.20 });
+    const { suggestion, metrics } = suggestRecallWeights(audits, DEFAULT_RECALL_WEIGHTS, NOW);
+    expect(metrics.evidence_thin_ratio).toBe(0.5);
+    expect(suggestion!.to).toEqual({ w_f: 0.30, w_i: 0.30, w_c: 0.20, w_a: 0.20 });
+    expect(suggestion!.reason).not.toContain('w_i');
+    expect(suggestion!.reason).toContain('w_c +0.05');
   });
 
-  it('w_f 不够扣时继续扣 w_a（两级扣减按序）', () => {
-    // w_f 只剩 0.05 的上方空间（0.10−0.05），两条规则共需 0.10 → 余 0.05 从 w_a 扣
-    const near = { w_f: 0.10, w_i: 0.50, w_c: 0.20, w_a: 0.20 };
+  it('w_f 不够扣时继续扣 w_a（两级扣减按序，单规则也可触发）', () => {
+    // w_c +0.05 需要 0.05 缺口；w_f 从 0.10 只能扣到 0.05（下限），恰好够扣 → 不动 w_a。
+    // 用 w_f=0.08 使 w_f 只能扣 0.03，余 0.02 落到 w_a，验证两级扣减顺序仍在。
+    const near = { w_f: 0.08, w_i: 0.50, w_c: 0.20, w_a: 0.22 };
     const audits = [
       ...recalls(40, 2),
       ...Array.from({ length: 10 }, (_, i) => opAudit(NOW - i * 1000, 'reject')),
     ];
     const { suggestion } = suggestRecallWeights(audits, near, NOW);
-    expect(suggestion!.to).toEqual({ w_f: 0.05, w_i: 0.55, w_c: 0.25, w_a: 0.15 });
+    expect(suggestion!.to).toEqual({ w_f: 0.05, w_i: 0.50, w_c: 0.25, w_a: 0.20 });
   });
 
   it('扣减守 0.05 下限：w_f/w_a 已触底仍不够 → 不建议，不硬凑', () => {
@@ -272,6 +277,7 @@ describe('suggestRecallWeights（GAP-1 回归建议算法）', () => {
     ];
     const { suggestion, metrics } = suggestRecallWeights(audits, pinned, NOW);
     expect(metrics.recalls).toBe(40);
+    // w_c +0.05 后总需从 w_f/w_a 扣 0.05，两者均已触底无可扣 → 不硬凑
     expect(suggestion).toBeNull();
   });
 
@@ -305,7 +311,9 @@ describe('suggestRecallWeights（GAP-1 回归建议算法）', () => {
       applied: boolean; suggestion: { to: Record<string, number> };
     };
     expect(payload.applied).toBe(false);
-    expect(payload.suggestion.to.w_i).toBe(0.35);
+    // 档位B：thin 信号不再驱动 w_i；本例 reject 也超阈 → 建议只动 w_c，w_i 保持默认
+    expect(payload.suggestion.to.w_i).toBe(DEFAULT_RECALL_WEIGHTS.w_i);
+    expect(payload.suggestion.to.w_c).toBe(0.20);
 
     // 账本未被改写：仍是 seed 里的默认召回权重
     expect(growthConfigFromLedger(await storage.listMemories({})).recall_weights).toEqual(DEFAULT_RECALL_WEIGHTS);

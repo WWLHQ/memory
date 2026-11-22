@@ -1,6 +1,6 @@
 // memagent-core 契约级验收用例（§8 全 8 条）
 import { describe, expect, it } from 'vitest';
-import { createMemAgent } from '../agent.ts';
+import { createMemAgent, isEvidenceThin, EVIDENCE_THIN_RELEVANCE } from '../agent.ts';
 import { MemAgentError } from '../errors.ts';
 import { FakeLlmProvider, routeProxy } from '../llm.ts';
 import { InMemoryStorage } from '../storage.ts';
@@ -173,6 +173,18 @@ describe('契约细节', () => {
     await expect(ma.recall({ query: 'x', project_id: 'P1', top_k: 11 })).rejects.toBeInstanceOf(MemAgentError);
     const r = await ma.recall({ query: '完全无关的查询词表', project_id: 'P1' });
     expect(r.evidence_thin).toBe(true);
+  });
+
+  it('档位B：evidence_thin 只认纯相关度 relevance，不被四分量乘数塌陷误判', () => {
+    // 零命中 → every=true → thin（与旧口径一致）
+    expect(isEvidenceThin([])).toBe(true);
+    // 全部低相关 → thin
+    expect(isEvidenceThin([{ relevance: 0.1 }, { relevance: 0.2 }])).toBe(true);
+    // 任一条 relevance 达标 → 非 thin（哪怕它的 score 因字段缺失被压到 0.3 以下）
+    expect(isEvidenceThin([{ relevance: EVIDENCE_THIN_RELEVANCE + 0.001 }, { relevance: 0.1 }])).toBe(false);
+    // 边界：恰好等于阈值不算 thin（用 < 严格小于）
+    expect(isEvidenceThin([{ relevance: EVIDENCE_THIN_RELEVANCE }])).toBe(false);
+    expect(EVIDENCE_THIN_RELEVANCE).toBe(0.3);
   });
 
   it('预算三档常量 + payload_tokens 估算', async () => {

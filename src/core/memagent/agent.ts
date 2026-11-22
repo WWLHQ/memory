@@ -46,6 +46,18 @@ const BUDGET = { soft: 1500, warn: 2000, hard: 3000 } as const;
 /** A5：次模式参考摘要上限（§2.4.3「次模式 ≤200t」） */
 const SECONDARY_MAX_TOKENS = 200;
 
+/**
+ * 证据不足（evidence_thin）判定口径（档位B 2026-11-22）：用纯相关度 relevance，不用 score。
+ * 理由：score = relevance × 四分量乘数，而 importance 99.5% / half_life_days 100% /
+ * confidence 74% 缺失让乘数中位塌到 0.774，把 82.3% 的相关命中误判成 thin（真零命中仅 5.3%）。
+ * relevance 不受字段缺失污染；真实账本模拟：score<0.3 → 61.4%，relevance<0.3 → 4.0%。
+ * scored 为空（零命中）时 every=true 仍判 thin，与旧口径一致；不触碰打分与排序逻辑。
+ */
+export const EVIDENCE_THIN_RELEVANCE = 0.3;
+export function isEvidenceThin(scored: ReadonlyArray<{ relevance: number }>): boolean {
+  return scored.every((s) => s.relevance < EVIDENCE_THIN_RELEVANCE);
+}
+
 export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHooks {
   const { form, account, llm, vector, storage } = opts;
   // 批次44-D4：写入落盘兜底队列。缺省内存实现（进程内不丢），桌面可注入 FilePendingStore 持久化。
@@ -298,7 +310,7 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
 
     // 2.4.1/R9：超硬熔断 3000t → 按分数从低到高丢弃直到预算内。
     // 初始命中与冷回填后都必须走同一裁剪，payload_tokens 必须按最终 hits 重算。
-    const applyHardCap = (list: Hit[]): { hits: Hit[]; payload: number } => {
+    const applyHardCap = (list: Hit[], protectedIds?: Set<string>): { hits: Hit[]; payload: number } => {
       let payload = list.reduce((a, h) => a + estTokens(h.content), 0);
       if (payload <= BUDGET.hard) return { hits: list, payload };
       const drop = new Set<string>();
@@ -312,10 +324,31 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
         : [...list].sort((a, b) => a.score - b.score);
       for (const h of order) {
         if (payload <= BUDGET.hard) break;
+        // 强制召回的个人记忆（pm:）不参与分数裁剪：预算不够时先丢项目记忆，个人记忆留到最后。
+        if (protectedIds?.has(h.mem_id)) continue;
         payload -= estTokens(h.content);
         drop.add(h.mem_id);
       }
-      const kept = list.filter((h) => !drop.has(h.mem_id));
+      let kept = list.filter((h) => !drop.has(h.mem_id));
+      // 个人记忆自身超硬顶（项目记忆全丢后仍超）：逐条截短正文到剩余额度，条目仍保留。
+      // 这样「强制包含」在条目层成立（每条都注入），代价是超长条目只注入前缀。
+      if (payload > BUDGET.hard && protectedIds && protectedIds.size > 0) {
+        const others = kept.filter((h) => !protectedIds.has(h.mem_id));
+        const protectedHits = kept.filter((h) => protectedIds.has(h.mem_id));
+        let remaining = BUDGET.hard - others.reduce((a, h) => a + estTokens(h.content), 0);
+        const trimmed = protectedHits.map((h) => {
+          const t = estTokens(h.content);
+          if (t <= remaining) {
+            remaining -= t;
+            return h;
+          }
+          const maxChars = Math.max(0, remaining * CHARS_PER_BUDGET_UNIT - 1);
+          const content = h.content.length > maxChars ? `${h.content.slice(0, maxChars)}…` : h.content;
+          remaining = Math.max(0, remaining - estTokens(content));
+          return { ...h, content, score: h.score };
+        });
+        kept = [...others, ...trimmed];
+      }
       return { hits: kept, payload: kept.reduce((a, h) => a + estTokens(h.content), 0) };
     };
     // 省量口径：硬熔断前（topK）的 token 快照；冷回填后再累加
@@ -324,9 +357,12 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
     hits = capped.hits;
     let payload_tokens = capped.payload;
 
-    // 2.4.3 逃生阀：零命中/全低分 → 补查 cold（15.3：sim≥0.85 强信号放行）
+    // 2.4.3 逃生阀：零命中/全低相关 → 补查 cold（15.3：sim≥0.85 强信号放行）
+    // 档位B（2026-11-22）：判定口径由 hits.score<0.3 改为 scored.relevance<0.3。
+    // 用 scored 而非 hits：hits 经硬熔断/影子补带后 score 仍含四分量乘数；scored 的
+    // relevance 是纯相关度信号，规避字段缺失导致的乘数塌陷假象（见 isEvidenceThin 注释）。
     let evidence_thin: boolean | undefined;
-    if (hits.every((h) => h.score < 0.3)) {
+    if (isEvidenceThin(scored)) {
       evidence_thin = true;
       const backfill = all
         .filter((m) => !minimal && (m.decay_class === 'cold' || m.decay_class === 'archived' || m.decay_class === 'dormant') && m.embedding)
@@ -354,22 +390,27 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
       }
     }
 
-    // 第一轮个人记忆召回准入：只有 confirmed 条目进召回（pending / rejected / 墓碑一律不进）。
-    // 独立于项目记忆打分：按关键词重合度取前 3 条，与项目命中同受 3000t 硬熔断约束。
+    // 个人记忆强制召回（2026-11-21 用户拍板）：已确认且未删除的条目**全部**注入每次召回，
+    // 不受关键词阈值、top_k 条数上限影响，也不因分数低被过滤（pending / rejected / 墓碑不进）。
+    // 「强制」的保证层在这里：候选装配完成后直接并入 hits，并在 applyHardCap 里以 pm: 前缀
+    // 受保护（预算不足先丢项目记忆；个人记忆自身超顶时逐条截短正文，条目不丢）。
     let personalHits: string[] = [];
+    const forcedPersonalIds = new Set<string>();
     if (opts.personal) {
-      const picks = await selectPersonalRecall(opts.personal, account.user_id, req.query, 3);
+      const picks = await selectPersonalRecall(opts.personal, account.user_id, req.query);
       if (picks.length > 0) {
         for (const { entry, score } of picks) {
+          const memId = `pm:${entry.id}`;
+          forcedPersonalIds.add(memId);
           hits.push({
-            mem_id: `pm:${entry.id}`, content: entry.content, layer: entry.layer,
+            mem_id: memId, content: entry.content, layer: entry.layer,
             decay_class: 'hot', pinned: false, locked: false, score,
             evidence_ref: `personal:${entry.id}`,
             matched_terms: matchedTerms(req.query, entry.content),
           });
         }
         preCapTokens += picks.reduce((a, { entry }) => a + estTokens(entry.content), 0);
-        capped = applyHardCap(hits);
+        capped = applyHardCap(hits, forcedPersonalIds);
         hits = capped.hits;
         payload_tokens = capped.payload;
         personalHits = hits.filter((h) => h.mem_id.startsWith('pm:')).map((h) => h.mem_id.slice(3));
@@ -495,6 +536,16 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
       injected_tokens: savings.injected_tokens,
       saved_tokens: savings.saved_tokens,
       budget_trimmed_tokens: savings.budget_trimmed_tokens,
+      // REQ-013 / C1：时间窗解析结果——让监控/审计页能实算「时间词query占比」「时间窗命中率」
+      ...(timeDetected ? {
+        query_timestamp: queryTs,
+        time_window: {
+          detected: true,
+          ts: queryTs,
+          hitCount: scored.filter(({ m }) => hitTimeWindow(queryTs, m.created_at, TIME_WINDOW_MARGIN_MS)).length,
+          bonusApplied: TIME_WINDOW_BONUS,
+        },
+      } : {}),
     }, { project_id: req.project_id, user_id: req.user_id });
     return result;
   }
@@ -601,6 +652,11 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
 
   async function countPending(): Promise<number> {
     return pending.count();
+  }
+
+  /** 是否真的接了 L0 通道；没有通道时 getWriteStatus 的 false 只是「读不到」，不是「未解锁」 */
+  function hasL0Channel(): boolean {
+    return Boolean(opts.l0 || opts.l0Admin);
   }
 
   /** 写前探锁：已解锁则顺带重放历史 pending，回报重放后的剩余条数（批次44-D4 三字段口径） */
@@ -855,7 +911,7 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
     l0SetupAdminPassword, l0ChangeAdminPassword, l0Migrate,
     l0AddMemberWriteWrap, l0RemoveMemberWriteWrap, l0UnlockWriteForMember, l0MyWriteWrap,
     // 批次44-D4：写入落盘兜底（L0 锁定不丢 / 解锁自动重放）
-    enqueuePending, flushPending, countPending, getWriteStatus,
+    enqueuePending, flushPending, countPending, getWriteStatus, hasL0Channel,
     // 批次44-D5-2：MCP 治理工具正式入口（与 core* 同源，非新实现）
     memoryOp, feedback,
     // 兼容钩子（批次27 P3-1 起供端壳/测试使用；_seedMemory 仅测试灌数，页面代码不得调用）
