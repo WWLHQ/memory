@@ -110,6 +110,27 @@ describe('getHomeFeed（首页真实可算，内核账本聚合）', () => {
     expect(feed.graph.hubs.find((h) => h.layer === 'L2')?.count).toBe(2);
   });
 
+  it('内部配置快照（params:/growth: + system）不是记忆：不参与分层/待办/增益读数（2026-11-22）', async () => {
+    const internal = [
+      { ...memA, mem_id: 'params_x', user_id: 'system', category: 'preference', content: 'params:v1:{"cfg":{"auto_organize":true}}', pinned: true },
+      { ...memA, mem_id: 'growth_x', user_id: 'system', category: 'preference', content: 'growth:v1:{"weights":{}}', pinned: true },
+      { ...memA, mem_id: 'growth_h_x', user_id: 'system', category: 'preference', content: 'growth:v1:history:01ABC' },
+    ] as unknown as Memory[];
+    const feed = await getHomeFeed(fakeStorage({ memories: [memA, ...internal] }));
+    // 账本 4 行，但配置快照 3 行不计入任何读数（用户看到的 L1 只应剩真实记忆）
+    expect(feed.graph.stats.total).toBe(1);
+    expect(feed.graph.nodes.map((n) => n.memId)).toEqual(['mem_a']);
+    expect(feed.strata?.find((s) => s.layer === 'L1')?.count).toBe(1);
+    expect(feed.raw.gains?.find((g) => g.title === '累计记忆')?.big).toBe('1');
+  });
+
+  it('system 用户的非配置前缀内容照常计入（过滤只认内部快照前缀，不误伤系统记忆）', async () => {
+    const sysMem = { ...memA, mem_id: 'sys_m', user_id: 'system', content: '系统级偏好：深色主题' } as unknown as Memory;
+    const feed = await getHomeFeed(fakeStorage({ memories: [sysMem] }));
+    expect(feed.graph.stats.total).toBe(1);
+    expect(feed.strata?.find((s) => s.layer === 'L1')?.count).toBe(1);
+  });
+
   it('空账本 → 四卡全 0（真实语义：无数据）', async () => {
     const feed = await getHomeFeed(fakeStorage({}));
     expect(feed.raw.gains!.every((g) => g.big === '0')).toBe(true);
@@ -249,7 +270,8 @@ describe('getHomeFeed（首页真实可算，内核账本聚合）', () => {
     ];
     const feed = await getHomeFeed(fakeStorage({ audits, memories: [memA] }));
     expect(feed.effectGains).toHaveLength(4);
-    expect(feed.effectGains[0].big).toBe('-80%');
+    // 新口径：省量 600 ÷（省量 600 + 注入 300）= 67%（旧口径按固定预算 1500 会得到 80%，此处锁死）
+    expect(feed.effectGains[0].big).toBe('-67%');
     expect(feed.effectGains[1].big).toBe('3 次命中');
     expect(feed.effectGains[2].big).toContain('1 条');
     // 模型成本卡：真实 recall 省量 600t（未设单价 → 不估算金额，绝不再拿不存在的 llm_proxy 冒充）
@@ -257,10 +279,33 @@ describe('getHomeFeed（首页真实可算，内核账本聚合）', () => {
     expect(feed.effectGains[3].big).not.toContain('未取数');
   });
 
+  it('2026-11-22 单价同源：参数快照行被过滤后，模型成本卡仍按「全局参数」单价折算', async () => {
+    const audits: AuditRecord[] = [
+      { request_id: 'r1', action: 'recall', ts: Date.now(), detail: { query: 'q', hits: 1, mems: ['mem_a'], payload_tokens: 300, injected_tokens: 300, saved_tokens: 600, corpus_tokens: 900 } },
+    ];
+    const paramsRow = {
+      ...memA, mem_id: 'params_x', user_id: 'system', category: 'preference', layer: 'L1', pinned: true,
+      content: 'params:v1:{"cfg":{"cost_cny_per_mtok":3},"kbs":[],"dev":{}}',
+    } as unknown as Memory;
+    const feed = await getHomeFeed(fakeStorage({ audits, memories: [memA, paramsRow] }));
+    // 配置行不进用户读数（仍按 1 条真实记忆）
+    expect(feed.raw.gains?.find((g) => g.title === '累计记忆')?.big).toBe('1');
+    expect(feed.graph.stats.total).toBe(1);
+    // 单价 3 元/百万词元 × 600t = ¥0.0018；desc 指向同一份「全局参数」单价
+    expect(feed.effectGains[3].big).toBe('省 ¥0.0018');
+    expect(feed.effectGains[3].big).not.toContain('未设单价');
+    expect(feed.effectGains[3].desc).toContain('¥3/百万词元');
+    // 未设单价时同一批省量只报 token，不猜金额（对照）
+    const noPrice = await getHomeFeed(fakeStorage({ audits, memories: [memA] }));
+    expect(noPrice.effectGains[3].big).toBe('省 600t（未设单价）');
+  });
+
   it('效果证据四卡：空账本全「未取数」，绝不伪造示例数字', async () => {
     const feed = await getHomeFeed(fakeStorage({}));
     expect(feed.effectGains).toHaveLength(4);
-    expect(feed.effectGains.every((g) => g.big === '未取数')).toBe(true);
+    // Token 节省卡无采样 → 如实写「未采样」（不再用旧口径估一个百分比）；其余三卡「未取数」
+    expect(feed.effectGains[0].big).toBe('未采样');
+    expect(feed.effectGains.slice(1).every((g) => g.big === '未取数')).toBe(true);
   });
 
   it('storage 不可达 → 效果证据四卡安全降级为「未取数」', async () => {
@@ -274,7 +319,8 @@ describe('getHomeFeed（首页真实可算，内核账本聚合）', () => {
     };
     const feed = await getHomeFeed(broken);
     expect(feed.effectGains).toHaveLength(4);
-    expect(feed.effectGains.every((g) => g.big === '未取数')).toBe(true);
+    expect(feed.effectGains[0].big).toBe('未采样');
+    expect(feed.effectGains.slice(1).every((g) => g.big === '未取数')).toBe(true);
   });
 });
 

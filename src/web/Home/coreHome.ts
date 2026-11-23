@@ -12,6 +12,8 @@ import type { AnomalyItem, ActiveMemory, TodoItem, SyncState } from '../../types
 import type { Gain } from '../../types/agentOnboard.ts';
 import { computeOnboardGains, emptyOnboardGains } from '../AgentOnboard/coreOnboard.ts';
 import { deriveLayerGraph, emptyLayerGraph, type LayerGraph } from './layerGraph.ts';
+import { findParamsSnapshot, isInternalPrefRow } from '../../core/memagent/paramsSnapshot.ts';
+import { normalizeUnitPrice } from '../../core/memagent/recallInsight.ts';
 
 export interface TraceHit {
   source: string;
@@ -309,8 +311,14 @@ export async function getHomeFeed(storage: StorageBackend, opts: GetHomeFeedOpts
   let storageOk = false;
   let storageError: string | null = null;
 
+  // 成本单价必须从「过滤前」的原始账本取：参数快照属于内部配置行，过滤后就不在 memories 里了。
+  // 这样首页「模型成本节省」卡与「全局参数 → 成本与配额 → 成本单价」读的是同一行、同一份配置。
+  let unitPrice: number | null = null;
   try {
     [audits, memories] = await Promise.all([storage.queryAudit({}), storage.listMemories({})]);
+    unitPrice = normalizeUnitPrice(findParamsSnapshot(memories)?.cfg?.cost_cny_per_mtok);
+    // 内部配置快照（params:/growth: + system 用户）不是用户记忆：不参与分层读数/待办/增益
+    memories = memories.filter((m) => !isInternalPrefRow(m));
     storageOk = true;
     anomalies = anomalies.concat(deriveKernelAnomalies(audits, now));
     activeMemories = await deriveRecallTop3(audits, storage, 3);
@@ -394,7 +402,7 @@ export async function getHomeFeed(storage: StorageBackend, opts: GetHomeFeedOpts
     raw: { gains, anomalies: sorted, activeMemories, todos },
     sync,
     graph,
-    effectGains: storageOk ? computeOnboardGains(audits, memories) : emptyOnboardGains(),
+    effectGains: storageOk ? computeOnboardGains(audits, memories, Date.now(), unitPrice) : emptyOnboardGains(),
     storageError,
     facts,
     strata,

@@ -91,28 +91,33 @@ export async function coreHostDiscover(): Promise<{
 
 // ---------- 效果证据四卡（真实可算，来自内核账本） ----------
 
-/** 2.4.1 全量召回预算（token）：payload 相对该基线的节省比例。导出供首页 TOKEN 节省率 sparkline 复用同一口径。 */
-export const FULL_BUDGET = 1500;
-
 function asRecord(detail: unknown): Record<string, unknown> {
   return (detail && typeof detail === 'object' ? detail : {}) as Record<string, unknown>;
 }
 
 /**
  * 效果证据四卡（纯函数）：首页与接入页共用同一口径，全部来自内核审计/记忆账本。
- *  · Token 节省：recall 审计 payload_tokens vs 1500 全量预算（2.4.1）
+ *  · Token 节省：recall 审计真实省量 ÷（省量 + 注入），与模型成本节省同源；
+ *    旧账（无 saved_tokens 字段）无法核算比例 → 如实「未采样」，不拿固定预算硬套。
  *  · 效率提升：跨会话召回次数与累计命中条数（recall.detail.hits）
  *  · 跨 Agent 复用：记忆主表条数 + 共享 project_id 域数（19.4）
  *  · 模型成本节省：召回审计持久化的 saved_tokens × 参数快照单价（与召回回显 money 同口径）。
  *    旧实现读 llm_proxy/llm_fallback 的 detail.cost，但真实账本里没有这类审计 → 永远「未取数」；
  *    真实花费/省量其实都由 recall 审计的 injected_tokens/saved_tokens 累加得出（rollupRecalls）。
- * 账本为空 → 显「—」并说明「暂无账本」，绝不回退示例数字。
+ * 账本为空 → 显「未取数 / 未采样」并说明原因，绝不回退示例数字。
  */
-export function computeOnboardGains(audits: AuditRecord[], memories: Memory[], now: number = Date.now()): Gain[] {
+export function computeOnboardGains(
+  audits: AuditRecord[],
+  memories: Memory[],
+  now: number = Date.now(),
+  /**
+   * 单价覆盖（2026-11-22）：首页在过滤内部配置行后再算四卡，参数快照行已被过滤掉；
+   * 这里由调用方从「未过滤的原始账本」取同一份单价传入，保证与「全局参数」页同源。
+   * undefined = 未提供，退回从 memories 里找参数快照（接入页直读原始账本时用）。
+   */
+  unitPrice?: number | null,
+): Gain[] {
   const recalls = audits.filter((a) => a.action === 'recall');
-  const payloads = recalls
-    .map((a) => Number(asRecord(a.detail).payload_tokens))
-    .filter((n) => Number.isFinite(n) && n >= 0);
   const hitsSum = recalls.reduce((s, a) => {
     const h = Number(asRecord(a.detail).hits ?? 0);
     return Number.isFinite(h) ? s + h : s;
@@ -121,26 +126,47 @@ export function computeOnboardGains(audits: AuditRecord[], memories: Memory[], n
   // 模型成本节省：与召回回显 money.all 同源——recall 审计持久化的省量 token × 参数快照单价。
   // 单价未设置 → 只显示真实省量（t），不编造金额；连 recall 审计都没有 → 未取数。
   const rollup = rollupRecalls(audits, now);
-  const price = normalizeUnitPrice(findParamsSnapshot(memories)?.cfg?.cost_cny_per_mtok);
+  const price = unitPrice === undefined
+    ? normalizeUnitPrice(findParamsSnapshot(memories)?.cfg?.cost_cny_per_mtok)
+    : normalizeUnitPrice(unitPrice);
   const savedTokens = Math.round(rollup.all_saved_tokens);
   const savedCny = price === null ? null : (rollup.all_saved_tokens / 1_000_000) * price;
   const groupNum = (n: number) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 
+  // Token 节省真实口径（2026-11-21 用户拍板）：省量 ÷（省量 + 注入），与成本节省同一批 recall 审计字段。
+  // 只统计同时带 saved_tokens 与 injected_tokens（旧账无 injected 时按 payload 兜底）的采样记录；
+  // 旧账（无 saved_tokens）无法核算比例 → 如实「未采样」，绝不拿固定预算 1500 硬套。
+  const samples: Array<{ saved: number; injected: number }> = [];
+  for (const a of recalls) {
+    const d = asRecord(a.detail);
+    const saved = Number(d.saved_tokens);
+    const injected = Number(d.injected_tokens ?? d.payload_tokens);
+    if (Number.isFinite(saved) && saved >= 0 && Number.isFinite(injected) && injected >= 0) {
+      samples.push({ saved, injected });
+    }
+  }
+  const sampledSaved = samples.reduce((s, x) => s + x.saved, 0);
+  const sampledInjected = samples.reduce((s, x) => s + x.injected, 0);
+  const denom = sampledSaved + sampledInjected;
+  const savedPct = samples.length > 0 && denom > 0 ? Math.round((sampledSaved / denom) * 100) : null;
+
   // 2026-11-16 用户要求：卡片解释区一律说人话，禁止出现参数渲染
   // （版本号 2.4.1 / 口径编号 9.1·19.4·19.8 / 字段名 payload·project_id / 单价算式）。
   // 真实读数照旧保留，只是改用一句能读懂的话讲它的意思。
-  const g1: Gain = payloads.length > 0
-    ? (() => {
-        const avg = payloads.reduce((s, n) => s + n, 0) / payloads.length;
-        const savedPct = Math.max(0, Math.round((1 - avg / FULL_BUDGET) * 100));
-        return {
-          // 0 省额时不再显示「-0%」（负零是计算痕迹，不是人话）
-          icon: '🪙', title: 'Token 节省', big: savedPct > 0 ? `-${savedPct}%` : '0%',
-          desc: `本周期共 <b>${payloads.length} 次召回</b>，每次平均带 <b>${Math.round(avg)}t</b> 上下文；带得越少，Agent 越省`,
-          src: '内核账本 · 每次召回实算',
-        };
-      })()
-    : { icon: '🪙', title: 'Token 节省', big: '未取数', desc: '暂无召回账本 · 发起召回后自动累计', src: '内核账本 · 每次召回实算' };
+  const g1: Gain = savedPct !== null
+    ? {
+        // 0 省额时不再显示「-0%」（负零是计算痕迹，不是人话）
+        icon: '🪙', title: 'Token 节省', big: savedPct > 0 ? `-${savedPct}%` : '0%',
+        desc: `本周期共 <b>${samples.length} 次召回</b>，实注入 <b>${groupNum(sampledInjected)}t</b>、少注入 <b>${groupNum(sampledSaved)}t</b>；省量占「省量 + 注入」的比例`,
+        src: '内核账本 · 省量占省量加注入',
+      }
+    : {
+        icon: '🪙', title: 'Token 节省', big: '未采样',
+        desc: recalls.length > 0
+          ? '现有召回账本未记录省量与注入量（旧账）· 发起新一轮召回后自动采样'
+          : '暂无召回账本 · 发起召回后自动累计',
+        src: '内核账本 · 省量占省量加注入',
+      };
 
   const g2: Gain = recalls.length > 0
     ? {
@@ -165,11 +191,11 @@ export function computeOnboardGains(audits: AuditRecord[], memories: Memory[], n
           ? `省 ${groupNum(savedTokens)}t（未设单价）`
           : `省 ${formatCny(savedCny)}`,
         desc: savedCny === null
-          ? `本周期共 <b>${rollup.all_calls} 次召回</b>，累计少注入 <b>${groupNum(savedTokens)}t</b>；还没设单价，金额不估算，想折算成钱可在参数页填`
-          : `本周期共 <b>${rollup.all_calls} 次召回</b>，累计少注入 <b>${groupNum(savedTokens)}t</b>；金额按你设的单价折算，属估算值`,
-        src: '内核账本 · 按单价折算',
+          ? `本周期共 <b>${rollup.all_calls} 次召回</b>，累计少注入 <b>${groupNum(savedTokens)}t</b>；还没设置单价，金额就先不估算——到「治理 → 全局参数 → 成本与配额」填一次「成本单价」，这张卡就按同一份单价折算`
+          : `本周期共 <b>${rollup.all_calls} 次召回</b>，累计少注入 <b>${groupNum(savedTokens)}t</b>；金额按「全局参数」里的单价（¥${price}/百万词元）折算，属估算值`,
+        src: '内核账本 · 按「全局参数」单价折算',
       }
-    : { icon: '💸', title: '模型成本节省', big: '未取数', desc: '暂无召回账本 · 发起召回后自动累计真实省量', src: '内核账本 · 按单价折算' };
+    : { icon: '💸', title: '模型成本节省', big: '未取数', desc: '暂无召回账本 · 发起召回后自动累计真实省量', src: '内核账本 · 按「全局参数」单价折算' };
 
   return [g1, g2, g3, g4];
 }
@@ -186,7 +212,7 @@ export async function getOnboardGains(storage: StorageBackend): Promise<Gain[]> 
 /** 未加载/账本不可达时的四卡占位（全「—」，真实语义：账本为空） */
 export function emptyOnboardGains(): Gain[] {
   return [
-    { icon: '🪙', title: 'Token 节省', big: '未取数', desc: '暂无召回账本 · 发起召回后自动累计', src: '内核账本 · 每次召回实算' },
+    { icon: '🪙', title: 'Token 节省', big: '未采样', desc: '暂无召回账本 · 发起召回后自动累计', src: '内核账本 · 省量占省量加注入' },
     { icon: '⚡', title: '效率提升', big: '未取数', desc: '暂无召回账本 · 发起召回后自动累计', src: '内核账本 · 每次命中实算' },
     { icon: '🔁', title: '跨 Agent 复用', big: '未取数', desc: '暂无记忆账本 · 写入记忆后自动累计', src: '内核账本 · 按项目统计' },
     { icon: '💸', title: '模型成本节省', big: '未取数', desc: '暂无召回账本 · 发起召回后自动累计真实省量', src: '内核账本 · 按单价折算' },

@@ -25,6 +25,26 @@ export const GROWTH_PREF_PREFIX = 'growth:v1:';
  */
 export const GROWTH_HISTORY_PREFIX = 'growth:v1:history:';
 
+/** 内部配置前缀：这些行只服务参数页/生长页读取配置，不是用户记忆 */
+const INTERNAL_PREF_PREFIXES = [PARAMS_PREF_PREFIX, GROWTH_PREF_PREFIX, GROWTH_HISTORY_PREFIX];
+
+/**
+ * 内部配置快照行（system 用户 + params/growth 前缀）。
+ * 2026-11-22 用户实机反馈：`params_…` 落进 L1 记忆列表毫无意义。根因是参数页把配置快照
+ * 当普通记忆写进账本；现统一在展示与统计侧过滤（记忆列表 / 层级页 / 生命周期 / 首页分层读数 /
+ * 反馈下拉 / 对账计数），账本行保留不篡改（历史脏行也不删，配置读取仍走原始 listMemories）。
+ */
+export function isInternalPrefRow(m: Pick<Memory, 'user_id' | 'content'>): boolean {
+  if (m.user_id !== 'system') return false;
+  return isInternalPrefContent(m.content);
+}
+
+/** 仅凭正文前缀判断（层级页 browse 行只回 mem_id/content，没有 user_id 字段） */
+export function isInternalPrefContent(content: unknown): boolean {
+  if (typeof content !== 'string' || !content) return false;
+  return INTERNAL_PREF_PREFIXES.some((p) => content.startsWith(p));
+}
+
 export interface ParamsSnapshot {
   cfg: {
     auto_organize?: boolean;
@@ -145,7 +165,8 @@ export async function saveProxyCapsToLedger(
     mem_id: `params_${ulid(now)}`,
     project_id: 'P_SYSTEM', user_id: 'system',
     enterprise_id: opts.enterpriseId ?? '', team_id: opts.teamId ?? '',
-    category: 'preference', layer: 'L2',
+    // 配置快照只落 L1 原文：写 L2 却没有 L2 正文会被 legacyLayers 判为层标注不实反复降级（2026-11-22）
+    category: 'preference', layer: 'L1',
     content: `${PARAMS_PREF_PREFIX}${JSON.stringify(snapshot)}`,
     decay_class: 'hot', pinned: true, locked: false,
     version: (old?.version ?? 0) + 1, created_at: old?.created_at ?? now, updated_at: now,
@@ -202,7 +223,8 @@ export async function saveGrowthConfigToLedger(
     mem_id: `growth_${ulid(now)}`,
     project_id: 'P_SYSTEM', user_id: 'system',
     enterprise_id: opts.enterpriseId ?? '', team_id: opts.teamId ?? '',
-    category: 'preference', layer: 'L2',
+    // 同参数快照：配置不是分层记忆，只落 L1 原文，避免被误标层清理反复降级（2026-11-22）
+    category: 'preference', layer: 'L1',
     content: `${GROWTH_PREF_PREFIX}${JSON.stringify(cfg)}`,
     decay_class: 'hot', pinned: true, locked: false,
     version: (old?.version ?? 0) + 1, created_at: now, updated_at: now,

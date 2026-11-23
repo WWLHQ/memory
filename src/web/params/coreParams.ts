@@ -32,7 +32,13 @@ async function findParamsMemory(storage: StorageBackend): Promise<Memory | null>
 }
 
 /** 加载：内核 preference 记忆回填；无已保存快照 → null（页面用默认值） */
-export async function coreLoadParams(): Promise<{ cfg: NormalConfig; kbs: KbPolicyRow[]; dev: DevParams } | null> {
+export async function coreLoadParams(): Promise<{
+  cfg: NormalConfig; kbs: KbPolicyRow[]; dev: DevParams;
+  /** 快照真实保存时间（账本 updated_at） */
+  savedAt: number;
+  /** 快照真实版本号（账本 version，每次保存 +1） */
+  version: number;
+} | null> {
   const { storage } = await getCtx();
   const m = await findParamsMemory(storage);
   const saved = m ? tryParsePayload(m.content) : null;
@@ -45,13 +51,18 @@ export async function coreLoadParams(): Promise<{ cfg: NormalConfig; kbs: KbPoli
     proxy_daily_quota: normalizeAccountingQuota(saved.cfg?.proxy_daily_quota),
   };
   setHostProxyAccounting({ price_cny_per_kcall: cfg.proxy_price_cny_per_kcall, daily_quota: cfg.proxy_daily_quota });
-  return { ...saved, cfg };
+  return {
+    ...saved,
+    cfg,
+    savedAt: m?.updated_at ?? m?.created_at ?? 0,
+    version: m?.version ?? 0,
+  };
 }
 
 /** 保存：快照写内核（旧快照 delete + 新快照 put，pinned 豁免 gc）+ param_save 审计落账本 */
 export async function coreSaveParams(
   cfg: NormalConfig, kbs: KbPolicyRow[], dev: DevParams, requestId: string,
-): Promise<{ request_id: string; mem_id: string; version: number }> {
+): Promise<{ request_id: string; mem_id: string; version: number; savedAt: number }> {
   const { storage } = await getCtx();
   const tenant = getTenant();
   const old = await findParamsMemory(storage);
@@ -66,7 +77,11 @@ export async function coreSaveParams(
   const mem: Memory = {
     mem_id: newRequestId('params'),
     project_id: 'P_SYSTEM', user_id: 'system', enterprise_id: tenant.enterprise_id, team_id: tenant.team_id,
-    category: 'preference', layer: 'L2',
+    // 2026-11-22：配置快照不是分层记忆，只落 L1 原文。此前写 L2 却没有 L2 正文，
+    // 每次启动都会被 legacyLayers.demoteStubLayers 判为「层标注不实」降回 L1 并记审计，
+    // 用户的 L1 列表里因此多出一条 params_…（详见 batch64 根因）。
+    // 该行还会在展示侧被 isInternalPrefRow 过滤，不进入记忆/层级列表。
+    category: 'preference', layer: 'L1',
     content: packContent({ cfg: cfgWithCaps, kbs, dev }),
     decay_class: 'hot', pinned: true, locked: false,
     version: (old?.version ?? 0) + 1, created_at: Date.now(), updated_at: Date.now(),
@@ -81,5 +96,8 @@ export async function coreSaveParams(
     price_cny_per_kcall: normalizeAccountingPrice(cfg.proxy_price_cny_per_kcall),
     daily_quota: normalizeAccountingQuota(cfg.proxy_daily_quota),
   });
-  return { request_id: requestId, mem_id: mem.mem_id, version: mem.version };
+  return {
+    request_id: requestId, mem_id: mem.mem_id,
+    version: mem.version ?? 0, savedAt: mem.updated_at ?? mem.created_at,
+  };
 }

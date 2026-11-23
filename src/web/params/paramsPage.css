@@ -1,0 +1,91 @@
+/* 全局参数页（批次63）：版式对齐概览页的 af-panel / af-g3 / af-stat。
+   只定义本页需要的骨架，令牌沿用 shared/p0.css（STRATUM），不引入整份 overviewPage.css。 */
+
+.params-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+/* .p0-page 自带 height:100% + overflow:auto；flex 子项默认 flex-shrink:1 会在
+   内容超高时把各卡片压扁（overflow:hidden 的卡被压到 2px，按钮被裁掉），
+   这里固定不收缩，让容器滚动而不是压缩卡片。 */
+.params-page > * { flex: 0 0 auto; }
+
+/* ── 页头（同概览 af-head） ── */
+.params-page .af-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.params-page .af-head h1 { font-size: 18px; font-weight: 600; margin: 0; }
+.params-page .af-head .sub { color: var(--muted); font-size: 12px; }
+.params-page .af-head .right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+/* ── 面板骨架 ── */
+.params-page .af-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  min-width: 0;
+}
+.params-page .af-ph {
+  display: flex; align-items: center; gap: 9px;
+  padding: 10px 14px; border-bottom: 1px solid var(--line); flex-wrap: wrap;
+}
+.params-page .af-ph h3 { margin: 0; font-size: 13px; font-weight: 600; color: var(--ink); }
+.params-page .af-ph .hint { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.params-page .af-pb { padding: 12px 14px; }
+.params-page .af-note { font-size: 11px; color: var(--muted); line-height: 1.6; margin: 0; }
+.params-page .af-note.bad { color: var(--bad); }
+.params-page .af-stack { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+
+/* ── 摘要四卡 / 分组三列 ── */
+.params-page .af-g4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.params-page .af-g4 > * { min-width: 0; }
+.params-page .af-g3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  /* 2026-11-22：改为默认 stretch——同一行卡片等高，行与行之间只剩 14px 正常间距，
+     不再因某张卡内容多把下一行推远、留下大片空白。 */
+  align-items: stretch;
+}
+.params-page .af-g3 > * { min-width: 0; }
+
+/* ── 统计卡（同概览 af-stat 规格） ── */
+.params-page .af-stat { padding: 12px 14px; }
+.params-page .af-stat .k { font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.params-page .af-stat .k span { font-family: var(--mono); font-size: 11px; }
+.params-page .af-stat .v {
+  font-family: var(--mono); font-size: 24px; font-weight: 600; color: var(--ink);
+  letter-spacing: -.02em; margin-top: 3px; line-height: 1.2; font-variant-numeric: tabular-nums;
+}
+.params-page .af-stat .v em { font-style: normal; font-size: 12px; color: var(--muted); font-weight: 400; margin-left: 1px; }
+.params-page .af-stat .d { font-size: 11px; margin-top: 2px; color: var(--ok); line-height: 1.5; }
+.params-page .af-stat .d.mut { color: var(--muted); }
+
+/* 组内沿用旧卡片组件：去掉内层 card 的边框/底色，避免卡中卡 */
+.params-page .af-pb > .card {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+  margin: 0;
+}
+
+/* 审计与安全卡内容多，占两列（仍属三列网格） */
+.params-page .af-panel.params-wide { grid-column: span 2; }
+/* 2026-11-22：开发者模式独立卡占满整行置于最后 */
+.params-page .af-panel.af-span3 { grid-column: span 3; }
+
+@media (max-width: 1180px) {
+  .params-page .af-g3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .params-page .af-panel.af-span3 { grid-column: span 2; }
+}
+@media (max-width: 820px) {
+  .params-page .af-g4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .params-page .af-g3 { grid-template-columns: 1fr; }
+  .params-page .af-panel.params-wide { grid-column: span 1; }
+  .params-page .af-panel.af-span3 { grid-column: span 1; }
+}
+@media (max-width: 520px) {
+  .params-page .af-g4 { grid-template-columns: 1fr; }
+}

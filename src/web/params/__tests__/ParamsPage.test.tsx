@@ -19,6 +19,8 @@ describe('ParamsPage (P5-T4 编排)', () => {
     expect(screen.getByTestId('retention-months')).toBeChecked();
     expect(screen.getByTestId('auto-organize')).toBeChecked();
     expect(screen.getByTestId('importance-important')).toBeChecked();
+    // 2026-11-21：LLM 精炼引擎已整块迁到「模型与成本 → 引擎」，参数页不再挂载
+    expect(screen.queryByTestId('llm-engine-card')).toBeNull();
   });
 
   it('改档位 → 待保存列表 + 保存 toast（G6 request_id，内核回执驱动）', async () => {
@@ -44,6 +46,18 @@ describe('ParamsPage (P5-T4 编排)', () => {
     await waitFor(() => expect(screen.getByTestId('speed-mid')).toBeChecked());
     fireEvent.click(screen.getByTestId('auto-organize'));
     expect(screen.getByTestId('save-errors')).toHaveTextContent(/自动整理/);
+  });
+
+  it('跟随壳层深色主题：挂载即设置 html[data-theme="dark"]', () => {
+    // 批次55：深色主题适配正向断言
+    localStorage.setItem('memdesk.shell.theme.v1', 'dark');
+    try {
+      render(<ParamsPage />);
+      expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+    } finally {
+      localStorage.setItem('memdesk.shell.theme.v1', 'light');
+      document.documentElement.removeAttribute('data-theme');
+    }
   });
 });
 
@@ -168,6 +182,55 @@ describe('ParamsPage × 内核加载三态（批次25 P0-7）', () => {
     await waitFor(() => expect(screen.getByTestId('params-default')).toBeInTheDocument());
     expect(screen.getByTestId('params-default')).toHaveTextContent('默认值');
     expect(screen.queryByTestId('kernel-error')).not.toBeInTheDocument();
+  });
+});
+
+describe('ParamsPage × 场景分组与摘要（批次63）', () => {
+  it('五组真实场景 + 摘要读数（参数量/最近保存/生效范围/未保存）+ 默认与来源说明', async () => {
+    resetKernelForTests();
+    render(<ParamsPage />);
+    await waitFor(() => expect(screen.getByTestId('speed-mid')).toBeChecked());
+
+    expect(screen.getByTestId('sum-param-count')).toHaveTextContent('20');
+    for (const g of ['recall', 'growth', 'sync', 'audit', 'cost']) {
+      expect(screen.getByTestId(`param-group-${g}`)).toBeInTheDocument();
+    }
+    // 分组写明来源/默认值，不是平铺字段
+    expect(screen.getByTestId('param-group-recall').textContent).toContain('params:v1');
+    expect(screen.getByTestId('param-group-growth').textContent).toContain('growth:v1');
+    expect(screen.getByTestId('param-group-sync').textContent).toContain('只读');
+    expect(screen.getByTestId('param-group-cost').textContent).toContain('模型与成本');
+    expect(screen.getByTestId('sum-dirty')).toHaveTextContent('与内核快照一致');
+
+    fireEvent.click(screen.getByTestId('speed-fast'));
+    expect(screen.getByTestId('sum-dirty')).toHaveTextContent('已修改未保存');
+    expect(screen.getByTestId('sum-dirty')).toHaveTextContent('1');
+    // LLM 精炼引擎只在大模型页，参数页不重复
+    expect(screen.queryByTestId('llm-engine-card')).toBeNull();
+  });
+
+  it('保存成功 → 摘要持久显示 param_save 回执（request_id/version），未保存归零', async () => {
+    resetKernelForTests();
+    render(<ParamsPage />);
+    await waitFor(() => expect(screen.getByTestId('speed-mid')).toBeChecked());
+    fireEvent.click(screen.getByTestId('speed-fast'));
+    fireEvent.click(screen.getByTestId('save-btn'));
+    await waitFor(() => expect(screen.getByTestId('params-receipt')).toHaveTextContent(/req_/));
+    const receipt = screen.getByTestId('params-receipt').textContent ?? '';
+    expect(receipt).toContain('param_save');
+    expect(receipt).toMatch(/v\d+/);
+    expect(screen.getByTestId('sum-dirty')).toHaveTextContent('与内核快照一致');
+  });
+
+  it('保存失败 → 显示真实错误码，不伪造成已保存', async () => {
+    resetKernelForTests();
+    render(<ParamsPage />);
+    await waitFor(() => expect(screen.getByTestId('speed-mid')).toBeChecked());
+    vi.spyOn(await import('../coreParams.ts'), 'coreSaveParams')
+      .mockRejectedValue(Object.assign(new Error('账本已锁'), { code: 'E_LEDGER_LOCKED' }));
+    fireEvent.click(screen.getByTestId('save-btn'));
+    await waitFor(() => expect(screen.getByTestId('params-save-error')).toHaveTextContent('[E_LEDGER_LOCKED]'));
+    expect(screen.getByTestId('params-receipt').textContent).not.toContain('req_');
   });
 });
 
