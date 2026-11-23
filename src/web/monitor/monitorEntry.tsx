@@ -3,6 +3,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../shared/actionLog.ts';
 import '../shared/p0.css';
+import '../shared/legacyLight.css';
 import { MonitorPage } from './MonitorPage.tsx';
 import './theme.css';
 

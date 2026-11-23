@@ -18,17 +18,21 @@ test.afterAll(async () => {
 });
 
 test.describe('监控仪表盘 · 真实账本', () => {
-  test('13 指标卡渲染：空值显「暂无数据」，人话短名，不伪造 crit/warn', async ({ page }) => {
+  test('20 指标卡渲染（af 版式收进「全部指标」折叠）：空值显「暂无数据」，人话短名，不伪造 crit/warn', async ({ page }) => {
     const errors = collectErrors(page);
     await page.goto(APP);
     await expect(page.locator('[data-testid="monitor-page"]')).toBeVisible();
+    // 批次49：六格汇总（af-g3 af-stat）常驻真实派生
+    await expect(page.locator('[data-testid="monitor-summary"] .af-stat')).toHaveCount(6);
+    // 20 卡收进「全部指标」折叠：先展开再断言（P6-T3 全量功能保留）
+    await page.locator('[data-testid="metrics-det"] summary').click();
     await expect(page.locator('[data-testid="metric-grid"]')).toBeVisible();
-    await expect(page.locator('.p0-mcard')).toHaveCount(20);
+    await expect(page.locator('.mon-mcard')).toHaveCount(20);
     // 熔断无真实探活采样 → 「暂无数据」且级别 ok（诚实：不伪造严重告警）
     await expect(page.locator('[data-testid="metric-熔断状态"]')).toHaveClass(/ok/);
     await expect(page.locator('[data-testid="metric-熔断状态"]')).toContainText('暂无数据');
     await expect(page.locator('[data-testid="metric-连通成功率(5min)"]')).toContainText('暂无数据');
-    await expect(page.locator('.p0-mcard.crit')).toHaveCount(0);
+    await expect(page.locator('.mon-mcard.crit')).toHaveCount(0);
     // 用户点名的四项必须是人话短名，页面不得再出现原始字段名 / 规格编号
     const text = await page.locator('[data-testid="metric-grid"]').innerText();
     for (const raw of ['payload_tokens', 'pipeline_llm_tokens', 'RawArchive', 'p95', 'p99', '12.1']) {

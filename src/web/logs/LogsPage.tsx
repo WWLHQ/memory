@@ -9,14 +9,17 @@ import { useL0Session } from '../shared/useL0Session.ts';
 import { useSessionContext } from '../shared/session.ts';
 import { DEFAULT_PAGE_SIZE, paginate } from '../shared/paginate.ts';
 import { PageNav } from '../shared/PageNav.tsx';
+import { Icon } from '../shell/Icons.tsx';
 import { LogFilterBar } from './LogFilterBar.tsx';
 import { AuditModal, ErrorAggr, L0AuthCard, LogTable } from './LogCards.tsx';
 import { ProgramLogPanel } from '../Home/ProgramLogPanel.tsx';
 import { useToast } from './useToast.tsx';
 import { kernelErrorText } from '../shared/kernelLoad.tsx';
+import { useHostTheme } from '../shared/hostTheme.ts';
 import './extras.css';
 
 export function LogsPage() {
+  useHostTheme();
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [l0Sample, setL0Sample] = useState<string | undefined>(undefined);
@@ -122,25 +125,34 @@ export function LogsPage() {
 
   return (
     <div className="p0-page" data-testid="logs-page">
-      <div className="p0-hd">
-        <h2>日志记录</h2>
-        <span className="p0-tag">REQ-011 · P15</span>
-        <span className="p0-sub">审计动作流（真实账本）+ 程序日志（真实 log:tail）· error 恒置顶</span>
-        <span className="p0-right">
+      {/* v5 页头（批次 E）：20px 标题 + tagline 胶囊 + 分隔符元信息行 + 右侧主操作 */}
+      <div className="p0-pagehead" data-testid="logs-head">
+        <div className="p0-ph-main">
+          <div className="p0-ph-title">
+            <h1>日志记录</h1>
+            <span className="p0-tagline">REQ-011 · P15</span>
+          </div>
+          <div className="p0-ph-meta">
+            <span>审计动作流（真实账本）+ 程序日志（真实 log:tail）</span>
+            <span className="p0-ph-sep" />
+            <span>error 恒置顶</span>
+          </div>
+        </div>
+        <div className="p0-ph-actions">
           <button type="button" className="p0-btn" data-testid="logs-jump-l0" onClick={jumpToL0}>去 L0 授权</button>
-        </span>
+        </div>
       </div>
 
       {loadErr && (
         <div className="p0-banner err" data-testid="logs-load-error">
-          ⚠️ 读取审计动作流失败：{loadErr}——这是「加载失败」，不是「没有日志」。
+          <Icon name="warn" size={13} /> 读取审计动作流失败：{loadErr}——这是「加载失败」，不是「没有日志」。
           <button type="button" className="p0-btn" onClick={() => void reload()}>重试</button>
         </div>
       )}
 
       {missing > 0 && (
         <div className="p0-banner warn" data-testid="missing-warn">
-          ⚠ {missing} 条日志缺少 request_id，已标 n/a —— 动作没记审计是严重 bug（R-LOG2）。
+          <Icon name="warn" size={13} /> {missing} 条日志缺少 request_id，已标 n/a —— 动作没记审计是严重 bug（R-LOG2）。
         </div>
       )}
 

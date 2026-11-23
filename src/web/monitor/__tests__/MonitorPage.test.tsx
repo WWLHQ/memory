@@ -146,3 +146,62 @@ describe('AlertTimeline (T3 · 组件单测用种子夹具)', () => {
     expect(screen.getByTestId('alert-mem-0')).toBeInTheDocument();
   });
 });
+
+describe('批次49：af 版式（六格汇总 / 时间窗 chips / 刷新按钮）', () => {
+  beforeEach(() => resetKernelForTests());
+  afterEach(() => vi.restoreAllMocks());
+
+  it('无 summary（旧 mock 契约）→ 六格不渲染不编造；有 summary → 六格 af-stat 渲染真实值', async () => {
+    const mod = await import('../useMonitorReal.ts');
+    const spy = vi.spyOn(mod, 'loadRealMonitorData');
+    spy.mockResolvedValue({ available: true, memCount: 0, auditCount: 0, metrics: [], alerts: [] });
+    const first = render(<MonitorPage />);
+    await waitFor(() => expect(screen.getByTestId('monitor-page')).toBeInTheDocument());
+    expect(screen.queryByTestId('monitor-summary')).toBeNull();
+    first.unmount();
+    spy.mockResolvedValue({
+      available: true, memCount: 3, auditCount: 5, metrics: [], alerts: [],
+      summary: [
+        { k: 'Agent 健康', sub: '拨测', v: '— 未采集', d: '无拨测样本', mut: true },
+        { k: '补炼队列', sub: 'pending', v: '0', d: '成功 0 · 失败 0', mut: false },
+        { k: '冷存储', sub: 'cold+dormant', v: '2', unit: '行', d: '归档 1 行另计', mut: false },
+        { k: '人工审核', sub: '待办', v: '2', d: '超期 7 天 1 条', mut: false },
+        { k: '检索 P95', sub: '24h', v: '180', unit: 'ms', d: '38 次召回样本', mut: false },
+        { k: '今日召回', sub: 'recall 审计', v: '38', unit: '次', d: '12 次有命中', mut: false },
+      ],
+    });
+    render(<MonitorPage />);
+    await waitFor(() => expect(screen.getByTestId('monitor-summary')).toBeInTheDocument());
+    expect(screen.getByTestId('summary-人工审核').querySelector('.v')?.textContent).toBe('2');
+    expect(screen.getByTestId('summary-冷存储').querySelector('.v')?.textContent).toBe('2行');
+    expect(screen.getByTestId('summary-检索 P95').querySelector('.v em')?.textContent).toBe('ms');
+    // 数值位不出现裸「—」当值：未采集必带「未采集」文字
+    const text = screen.getByTestId('monitor-summary').textContent ?? '';
+    expect(text).toMatch(/— 未采集/);
+    expect(text).not.toMatch(/—(?! 未采集)/);
+  });
+
+  it('时间窗 chips：点 7d → hint 换「近 7 天」；点 1h → 真过滤出空态', async () => {
+    vi.spyOn(await import('../useMonitorReal.ts'), 'loadRealMonitorData').mockResolvedValue({
+      available: true, memCount: 0, auditCount: 0, metrics: [], alerts: SEED_ALERTS,
+    });
+    render(<MonitorPage />);
+    await waitFor(() => expect(screen.getAllByTestId(/^alert-\d+$/)).toHaveLength(SEED_ALERTS.length));
+    expect(screen.getByTestId('alert-timeline').textContent).toContain('近 24 小时');
+    // 7d 窗：SEED_ALERTS 全在 159 分钟内 → 5 条照显，hint 换「近 7 天」
+    fireEvent.click(screen.getByTestId('f-window-7d'));
+    expect(screen.getAllByTestId(/^alert-\d+$/)).toHaveLength(SEED_ALERTS.length);
+    expect(screen.getByTestId('alert-timeline').textContent).toContain('近 7 天');
+    expect(screen.getByTestId('f-window-7d').className).toContain('on');
+    // 1h 窗：全在窗外 → 诚实空态「当前筛选无告警」
+    fireEvent.click(screen.getByTestId('f-window-1h'));
+    expect(screen.queryByTestId(/^alert-\d+$/)).toBeNull();
+    expect(screen.getByTestId('alert-empty')).toHaveTextContent('当前筛选无告警');
+  });
+
+  it('af-head 带刷新按钮（重取本页数据入口）', async () => {
+    render(<MonitorPage />);
+    await waitFor(() => expect(screen.getByTestId('monitor-refresh')).toBeInTheDocument());
+    expect(screen.getByTestId('monitor-refresh')).toHaveTextContent('刷新');
+  });
+});

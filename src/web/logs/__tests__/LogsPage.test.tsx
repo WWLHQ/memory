@@ -117,57 +117,56 @@ describe('LogsPage (P15-T4 编排，审计流来自内核)', () => {
     expect(screen.getAllByTestId(/^extra-\d+$/)[0]).toBeInTheDocument();
   });
 
-  // 批次24 #4：分页 + 可调表头（参考记忆库管理页口径，预设每页 10 条）
+  // 批次 E：分页统一为 v5 紧凑数字 pager（‹ 1 2 ›），行号连续不串位口径不变
   it('分页：默认每页 10 条，翻页后行号连续不串位', async () => {
     render(<LogsPage />);
     await waitFor(() => expect(screen.getAllByTestId(/^log-\d+$/).length).toBe(10));
-    expect(screen.getByTestId('pg-info').textContent).toContain('/ 2 页 · 共 15 条');
-    expect(screen.getByTestId('pg-goto-input')).toHaveValue(1);
+    expect(screen.getByTestId('pg-info').textContent).toContain('第 1 / 2 页');
     expect(screen.getByTestId('pg-note').textContent).toContain('每页 10 条 · 命中 15 条');
     expect(screen.getByTestId('log-0')).toBeInTheDocument();
     expect(screen.getByTestId('log-9')).toBeInTheDocument();
     expect(screen.queryByTestId('log-10')).toBeNull();
-    // 首页按钮在第 1 页禁用，下一页可点
-    expect(screen.getByTestId('pg-first')).toBeDisabled();
+    // 上一页按钮在第 1 页禁用，下一页可点
     expect(screen.getByTestId('pg-prev')).toBeDisabled();
+    expect(screen.getByTestId('pg-next')).toBeEnabled();
 
     fireEvent.click(screen.getByTestId('pg-next'));
     await waitFor(() => expect(screen.getAllByTestId(/^log-\d+$/).length).toBe(5));
     // 第二页首行仍是全局序号 10（indexOffset），行详情不会串位
     expect(screen.getByTestId('log-10')).toBeInTheDocument();
     expect(screen.getByTestId('log-14')).toBeInTheDocument();
-    expect(screen.getByTestId('pg-goto-input')).toHaveValue(2);
+    expect(screen.getByTestId('pg-info').textContent).toContain('第 2 / 2 页');
     expect(screen.getByTestId('pg-next')).toBeDisabled();
-    expect(screen.getByTestId('pg-last')).toBeDisabled();
+    expect(screen.getByTestId('pg-prev')).toBeEnabled();
 
-    fireEvent.click(screen.getByTestId('pg-first'));
-    await waitFor(() => expect(screen.getByTestId('pg-goto-input')).toHaveValue(1));
+    fireEvent.click(screen.getByTestId('pg-prev'));
+    await waitFor(() => expect(screen.getByTestId('pg-info').textContent).toContain('第 1 / 2 页'));
   });
 
-  it('分页：跳页输入 + 每页条数切换（10→100 一次看全 15 条）', async () => {
+  it('分页：页码点击 + 每页条数切换（10→100 一次看全 15 条）', async () => {
     render(<LogsPage />);
     await waitFor(() => expect(screen.getAllByTestId(/^log-\d+$/).length).toBe(10));
 
-    fireEvent.change(screen.getByTestId('pg-goto-input'), { target: { value: '2' } });
-    await waitFor(() => expect(screen.getByTestId('pg-goto-input')).toHaveValue(2));
+    fireEvent.click(screen.getByTestId('pg-page-2'));
+    await waitFor(() => expect(screen.getByTestId('pg-info').textContent).toContain('第 2 / 2 页'));
     expect(screen.queryByTestId('log-0')).toBeNull();
 
     fireEvent.change(screen.getByTestId('pg-size'), { target: { value: '100' } });
     await waitFor(() => expect(screen.getAllByTestId(/^log-\d+$/).length).toBe(15));
     // 换档回到第 1 页，且总数口径不变
-    expect(screen.getByTestId('pg-info').textContent).toContain('/ 1 页 · 共 15 条');
-    expect(screen.getByTestId('pg-goto-input')).toHaveValue(1);
+    expect(screen.getByTestId('pg-info').textContent).toContain('第 1 / 1 页');
+    expect(screen.getByTestId('pg-note').textContent).toContain('命中 15 条');
   });
 
   it('分页：过滤后条数不足一页时不再停留在空页', async () => {
     render(<LogsPage />);
     await waitFor(() => expect(screen.getAllByTestId(/^log-\d+$/).length).toBe(10));
     fireEvent.click(screen.getByTestId('pg-next'));
-    await waitFor(() => expect(screen.getByTestId('pg-goto-input')).toHaveValue(2));
+    await waitFor(() => expect(screen.getByTestId('pg-info').textContent).toContain('第 2 / 2 页'));
 
     fireEvent.change(screen.getByTestId('lf-kw'), { target: { value: 'req_l11' } });
     // 关键词把结果收敛到 1 条 → 页码回第 1 页（不留在空页）
-    await waitFor(() => expect(screen.getByTestId('pg-info').textContent).toContain('/ 1 页 · 共 1 条'));
+    await waitFor(() => expect(screen.getByTestId('pg-info').textContent).toContain('第 1 / 1 页'));
     expect(screen.getAllByTestId(/^log-\d+$/)).toHaveLength(1);
   });
 
@@ -195,6 +194,18 @@ describe('LogsPage (P15-T4 编排，审计流来自内核)', () => {
     fireEvent.click(screen.getByTestId('log-col-reset'));
     expect(screen.getByTestId('log-th-4')).toHaveAttribute('data-w', '300');
     expect(localStorage.getItem('logsColWidths')).toBe('[]');
+  });
+
+  it('跟随壳层深色主题：挂载即设置 html[data-theme="dark"]', () => {
+    // 批次55：深色主题适配正向断言
+    localStorage.setItem('memdesk.shell.theme.v1', 'dark');
+    try {
+      render(<LogsPage />);
+      expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+    } finally {
+      localStorage.setItem('memdesk.shell.theme.v1', 'light');
+      document.documentElement.removeAttribute('data-theme');
+    }
   });
 });
 

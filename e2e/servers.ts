@@ -1,7 +1,7 @@
 // E2E 用：进程内静态文件服务器 + 复用真实后端，避免 Playwright webServer 子进程在 Windows 上卡 teardown。
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { readFileSync, statSync, existsSync, mkdtempSync } from 'node:fs';
+import { readFileSync, writeFileSync, statSync, existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, basename, extname, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -81,6 +81,8 @@ export async function startHomeBackend(opts: {
   personalOwnerBindings?: PersonalOwnerBinding[];
   /** 第二轮真实同步通道：同一 PgSyncHub（真实 pglite 中枢，非 mock）；缺省上行如实不可用 */
   personalSyncHub?: AnySyncHub;
+  /** 预置 mirror 上抛账本条目（模拟历史无签名旧段；本参数只给 E2E 造真实旧账本用） */
+  mirrorAuditSeed?: unknown[];
 }): Promise<{ server: http.Server; homeServer: HomeServer; port: number; stop: () => Promise<void> }> {
   // server.ts 把锁定表/账号表/镜像写在 dirname(dataFile) 下（home-locks.json 等）。
   // E2E 是同一进程串跑多份后端，若 dataFile 都直接落在 tmpdir 根，就会共用同一份锁定快照，
@@ -90,6 +92,10 @@ export async function startHomeBackend(opts: {
   // loginService 的锁定表是模块级 Map，单 worker 下跨 spec 存活；生产里每次起服都是新进程。
   // 起服前清空，等价于「进程重启」的干净锁表，避免历史失败计数串到本轮用例。
   importLockSnapshot({});
+  // 预置 mirror 账本必须写在 server 真正读取的 dataDir 下（server.ts 取 dirname(auditFile)）
+  if (opts.mirrorAuditSeed) {
+    writeFileSync(join(dataDir, 'home-mirror.json'), JSON.stringify(opts.mirrorAuditSeed, null, 2));
+  }
   const homeServer = createHomeServer({
     dataFile: join(dataDir, basename(opts.dataFile)),
     allowedOrigins: opts.allowedOrigins,

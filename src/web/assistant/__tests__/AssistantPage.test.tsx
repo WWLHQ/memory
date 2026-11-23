@@ -73,6 +73,17 @@ describe('记忆助手整页', () => {
     expect(loggedIn.body).toContain('已登录会话下账本可查询');
   });
 
+  it('批次54：跟随壳层主题——挂载即写 html[data-theme]，assistant.html 的深色变量才会生效', () => {
+    localStorage.setItem('memdesk.shell.theme.v1', 'dark');
+    try {
+      render(<AssistantPage />);
+      expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+    } finally {
+      localStorage.setItem('memdesk.shell.theme.v1', 'light');
+      document.documentElement.removeAttribute('data-theme');
+    }
+  });
+
   it('页面内「重读」只重新取数，不重挂页面（与 F5 全站刷新分层）', async () => {
     render(<AssistantPage />);
     await waitFor(() => expect(m.loadOverview).toHaveBeenCalledTimes(1));

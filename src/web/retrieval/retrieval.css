@@ -310,8 +310,14 @@
 }
 .ret-secondary summary::-webkit-details-marker { display: none; }
 .ret-secondary summary::before {
-  content: '▶ ';
+  content: '';
   display: inline-block;
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid currentColor;
+  margin-right: 5px;
   transition: transform .15s;
 }
 .ret-secondary[open] summary::before { transform: rotate(90deg); }

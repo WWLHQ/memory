@@ -107,6 +107,21 @@ describe('deriveHomeView（批次57-B 首页派生）', () => {
     expect(deriveHomeView(snap({ raw })).l0WriteResolved).toBe(false);
   });
 
+  it('启动冷启探针超时（transient）→ 标暂态、不按「读不到」打扰；非超时读不到仍如实标注', () => {
+    const timeout = deriveHomeView(snap({
+      l0Write: { available: false, unlocked: false, detail: '写锁状态读取超时（不阻塞首页其它读数）', transient: true },
+    }));
+    expect(timeout.l0WritePending).toBe(true);   // 页面据此静默 + 后台重试
+    expect(timeout.l0WriteUnknown).toBe(true);   // 真值仍未知，绝不冒充已解锁
+    expect(timeout.l0WriteLocked).toBe(false);
+
+    const hardFail = deriveHomeView(snap({
+      l0Write: { available: false, unlocked: false, detail: '浏览器模式：读不到' },
+    }));
+    expect(hardFail.l0WritePending).toBe(false); // 非超时必须显示中性提示（不静默吞掉）
+    expect(hardFail.l0WriteUnknown).toBe(true);
+  });
+
   it('效果四卡与图谱原样透传真实账本聚合（不重算、不伪造）', () => {
     const s = snap();
     const v = deriveHomeView(s);

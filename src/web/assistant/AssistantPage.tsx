@@ -12,8 +12,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { loadOverview, type OverviewSnapshot } from '../shell/overview.ts';
 import { answerOverviewQuestion, OVERVIEW_SUGGESTIONS, type OverviewAnswer } from '../overview/overviewPageData.ts';
 import { Icon } from '../shell/Icons.tsx';
+import { useHostTheme } from '../shared/hostTheme.ts';
 
 export function AssistantPage() {
+  // 批次54：跟随壳层主题（浅/深）。此前本页从不设置 html[data-theme]，
+  // memoryManagement.css 的深色变量永远不生效 → 深色模式下整页发白。
+  useHostTheme();
   const [overview, setOverview] = useState<OverviewSnapshot | null>(null);
   const [busy, setBusy] = useState(true);
   const [err, setErr] = useState<string | null>(null);

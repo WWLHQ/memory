@@ -134,6 +134,8 @@ describe('DisputePage (P7-T5 编排·真实账本接真版)', () => {
       ]}
     />);
     await waitFor(() => expect(screen.getByTestId('dispute-history')).toBeInTheDocument());
+    // loadHistory 是异步账本回读：历史行到达前断言会撞空态（既有竞态），改为等真实行出现再逐条断言
+    await waitFor(() => expect(screen.getByTestId('audit-row-0')).toBeInTheDocument());
     expect(screen.getByTestId('audit-row-0')).toHaveTextContent('req_hist_01');
     expect(screen.getByTestId('audit-row-0')).toHaveTextContent('保持 pending');
     expect(screen.getByTestId('audit-row-1')).toHaveTextContent('mem_merged');

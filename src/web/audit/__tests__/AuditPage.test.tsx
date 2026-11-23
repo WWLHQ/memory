@@ -38,9 +38,24 @@ describe('AuditPage 集成（T5，审计流来自内核）', () => {
   it('点 request_id → 展开同链路全行', async () => {
     render(<AuditPage />);
     await waitFor(() => expect(screen.getAllByTestId(/row-req_/)).toHaveLength(8));
-    fireEvent.click(screen.getByTestId('rid-req_a1-0'));
+    fireEvent.click(screen.getAllByTestId(/^rid-req_a1-/)[0]);
     expect(screen.getAllByTestId(/row-req_a1-/)).toHaveLength(3);
     expect(screen.getByTestId('clear-chain')).toBeInTheDocument();
+  });
+
+  it('事件流按时间倒序后分页：第 1 页最新在前，翻页为更早记录', async () => {
+    await seedAuditLedger(EXTRA_AUDIT);
+    render(<AuditPage />);
+    await waitFor(() => expect(screen.getAllByTestId(/row-req_/)).toHaveLength(10));
+    // 最新一条（10-09 18:40 归档）在首行；表底口径写明倒序
+    expect(screen.getAllByTestId(/row-req_/)[0]).toHaveAttribute('data-testid', 'row-req_d4-0');
+    expect(screen.getByTestId('audit-tblft').textContent).toContain('按时间倒序');
+
+    fireEvent.click(screen.getByTestId('pg-next'));
+    await waitFor(() => expect(screen.getAllByTestId(/row-req_/)).toHaveLength(4));
+    // 第 2 页承接最早 4 条，末行是最早的 req_a1（09:12:00）
+    const ids = screen.getAllByTestId(/row-req_/).map((e) => e.getAttribute('data-testid'));
+    expect(ids[ids.length - 1]).toBe('row-req_a1-13');
   });
 
   it('重置恢复全部', async () => {
@@ -65,40 +80,45 @@ describe('AuditPage 集成（T5，审计流来自内核）', () => {
     await waitFor(() => expect(screen.getAllByTestId('ev-thin').length).toBeGreaterThan(0));
   });
 
-  // 批次24 #4：分页（预设每页 10 条）+ 可调表头固化
+  // 批次24 #4：分页（预设每页 10 条）+ 可调表头固化；批次 B：页头改 v5 page-head、表底改 v5 紧凑 pager
   it('分页：14 条 → 每页 10 条，翻页看余下 4 条，换 100 条/页一次看全', async () => {
     await seedAuditLedger(EXTRA_AUDIT);
     render(<AuditPage />);
     await waitFor(() => expect(screen.getAllByTestId(/row-req_/)).toHaveLength(10));
-    expect(screen.getByTestId('pg-info').textContent).toContain('/ 2 页 · 共 14 条');
-    expect(screen.getByTestId('pg-note').textContent).toContain('每页 10 条 · 当前视图 14 条');
-    expect(screen.getByTestId('pg-goto-input')).toHaveValue(1);
+    // v5 页头：标题 + 元信息行（账本条数真实反映）
+    expect(screen.getByTestId('audit-head').textContent).toContain('审计日志');
+    expect(screen.getByTestId('audit-meta-count').textContent).toContain('账本 14 条');
+    // v5 表底：左统计（显示/共） + 右紧凑 pager（数字窗口）
+    expect(screen.getByTestId('audit-tblft').textContent).toContain('显示 10 行 / 共 14 行');
+    expect(screen.getByTestId('pg-info').textContent).toContain('第 1 / 2 页');
+    expect(screen.getByTestId('pg-page-2')).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('pg-next'));
     await waitFor(() => expect(screen.getAllByTestId(/row-req_/)).toHaveLength(4));
-    expect(screen.getByTestId('pg-goto-input')).toHaveValue(2);
+    expect(screen.getByTestId('pg-info').textContent).toContain('第 2 / 2 页');
     expect(screen.getByTestId('pg-next')).toBeDisabled();
 
     fireEvent.change(screen.getByTestId('pg-size'), { target: { value: '100' } });
     await waitFor(() => expect(screen.getAllByTestId(/row-req_/)).toHaveLength(14));
-    expect(screen.getByTestId('pg-goto-input')).toHaveValue(1);
+    expect(screen.getByTestId('pg-info').textContent).toContain('第 1 / 1 页');
   });
 
   it('分页：链路视图同样走分页口径（进链路回第 1 页，退出恢复总数）', async () => {
     await seedAuditLedger(EXTRA_AUDIT);
     render(<AuditPage />);
     await waitFor(() => expect(screen.getAllByTestId(/row-req_/)).toHaveLength(10));
-    fireEvent.click(screen.getByTestId('pg-last'));
-    await waitFor(() => expect(screen.getByTestId('pg-goto-input')).toHaveValue(2));
+    fireEvent.click(screen.getByTestId('pg-page-2'));
+    await waitFor(() => expect(screen.getByTestId('pg-info').textContent).toContain('第 2 / 2 页'));
 
-    // 第 2 页点 req_c3 链路 → 页码回第 1 页，只显示该链路 2 行
-    fireEvent.click(screen.getByTestId('rid-req_c3-11'));
-    await waitFor(() => expect(screen.getByTestId('pg-goto-input')).toHaveValue(1));
-    expect(screen.getAllByTestId(/row-req_c3-/)).toHaveLength(2);
-    expect(screen.getByTestId('pg-info').textContent).toContain('/ 1 页 · 共 2 条');
+    // 第 2 页（倒序后为最早 4 条）点 req_a1 链路 → 页码回第 1 页，只显示该链路 3 行
+    fireEvent.click(screen.getAllByTestId(/^rid-req_a1-/)[0]);
+    await waitFor(() => expect(screen.getByTestId('pg-info').textContent).toContain('第 1 / 1 页'));
+    expect(screen.getAllByTestId(/row-req_a1-/)).toHaveLength(3);
+    expect(screen.getByTestId('audit-tblft').textContent).toContain('共 3 行');
 
     fireEvent.click(screen.getByTestId('clear-chain'));
-    expect(screen.getByTestId('pg-info').textContent).toContain('/ 2 页 · 共 14 条');
+    expect(screen.getByTestId('pg-info').textContent).toContain('第 1 / 2 页');
+    expect(screen.getByTestId('audit-tblft').textContent).toContain('共 14 行');
   });
 
   it('表头：9 列固定表头 + 拖把手调宽固化（重新挂载仍保持）', async () => {
@@ -123,5 +143,17 @@ describe('AuditPage 集成（T5，审计流来自内核）', () => {
 
     fireEvent.click(screen.getByTestId('audit-col-reset'));
     expect(screen.getByTestId('audit-th-0')).toHaveAttribute('data-w', '80');
+  });
+
+  it('跟随壳层深色主题：挂载即设置 html[data-theme="dark"]', () => {
+    // 批次55：深色主题适配正向断言
+    localStorage.setItem('memdesk.shell.theme.v1', 'dark');
+    try {
+      render(<AuditPage />);
+      expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+    } finally {
+      localStorage.setItem('memdesk.shell.theme.v1', 'light');
+      document.documentElement.removeAttribute('data-theme');
+    }
   });
 });

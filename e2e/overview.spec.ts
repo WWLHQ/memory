@@ -67,15 +67,15 @@ test.describe('REQ-003 + REQ-005 通览页 · 点击级 E2E', () => {
     await expect(page.locator('#stage')).toHaveAttribute('src', /\/index\.html/);
     const home = page.frameLocator('#stage');
     await expect(home.locator('[data-testid="overview-page"]')).toBeVisible();
-    await expect(home.locator('.af-title h1')).toContainText('总览工作台');
+    await expect(home.locator('.af-head h1')).toContainText('总览工作台');
 
-    // 切到接入配置页（REQ-003）：持久化名单恢复 3 张卡（未拨测 → 未配置）；卡片在「接入配置」页签
+    // 切到接入配置页（REQ-003）：持久化名单恢复 3 张卡（未拨测 → 未配置）
     await page.click('.nav .item:has-text("Agent 接入配置页")');
     await expect(page.locator('#stage')).toHaveAttribute('src', /\/agentonboard\.html/);
     const onboard = page.frameLocator('#stage');
     await expect(onboard.locator('[data-testid="agent-onboard-page"]')).toBeVisible();
-    await onboard.locator('[data-testid="agent-tabs"] [role="tab"]').nth(3).click();
-    const cards = onboard.locator('#cards > .card');
+    // 接入页已无页签（重构为单页流水线）：卡片区在 #cards，卡根节点是 section.af-panel[data-agent]
+    const cards = onboard.locator('#cards > section.af-panel');
     await expect(cards).toHaveCount(3);
     await expect(cards.nth(0)).toContainText('未配置');
 
@@ -88,5 +88,42 @@ test.describe('REQ-003 + REQ-005 通览页 · 点击级 E2E', () => {
     await expect(page.locator('[data-testid="demo-badge"]')).toHaveCount(0);
 
     expect(errors).toEqual([]);
+  });
+
+  test('TOKEN 节省率用真实口径 省量 ÷（省量 + 注入），不再按固定预算估算', async ({ page }) => {
+    // 真实 recall 审计两条：省 700/300、注入 300/300 → 比例 = 1000 / 1600 = 63%
+    // 旧口径（payload 300 对固定预算 1500）会得到 80%，本用例锁住新口径。
+    const now = Date.now();
+    for (const [i, a] of ([
+      { saved: 700, injected: 300 },
+      { saved: 300, injected: 300 },
+    ] as const).entries()) {
+      const res = await fetch(`http://localhost:${homeBackend!.port}/api/kernel/invoke`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-session-id': ADMIN_SID },
+        body: JSON.stringify({
+          method: 'appendAudit',
+          args: [{
+            request_id: `e2e_token_${i}`,
+            action: 'recall',
+            ts: now - i * 1_000,
+            detail: {
+              hits: 1, payload_tokens: a.injected, injected_tokens: a.injected,
+              saved_tokens: a.saved, corpus_tokens: a.saved + a.injected,
+            },
+          }],
+        }),
+      });
+      expect(res.ok).toBe(true);
+    }
+
+    await page.addInitScript(([sid]) => localStorage.setItem('session:realpage', sid as string), [ADMIN_SID]);
+    // 直开首页产物：顶层页面无宿主桥 → 走 home 后端的 HTTP 账本，读到刚写入的两条 recall 审计
+    await page.goto(`http://localhost:${staticSrv!.port}/index.html?backend=http://localhost:${homeBackend!.port}`);
+    const token = page.locator('[data-testid="home-token"]');
+    await expect(token.locator('.v')).toContainText('63%');
+    await expect(token.locator('.v')).not.toContainText('80');
+    await expect(token.locator('.d')).toContainText('召回 2 次');
+    await expect(token.locator('.d')).toContainText('省 1.0k tokens');
   });
 });

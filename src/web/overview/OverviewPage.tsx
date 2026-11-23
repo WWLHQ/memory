@@ -14,8 +14,9 @@ import {
   type OverviewTokenPanel,
   type OverviewTodayPanel,
 } from '../shell/overview.ts';
-import { HOME_BASE, ONBOARD_BASE } from '../backend.ts';
 import { useHostTheme } from '../shared/hostTheme.ts';
+import { loadL0Write } from '../shell/statusbar.ts';
+import { L0WriteUnlock } from '../shared/L0WriteUnlock.tsx';
 import { currentSessionId } from '../shared/session.ts';
 import { requestShellView } from '../shared/shellNavigate.ts';
 import { logoutCurrentSession } from '../shell/ShellLoginDialog.tsx';
@@ -77,11 +78,29 @@ function spokeToCore(p: { x: number; y: number }): { x1: number; y1: number; x2:
   };
 }
 
-type Focus = 'all' | 'L2' | 'L3' | 'L4+';
+/** 环向相邻层箭头：L1→L2 … L4→L5，沿同一条椭圆轨道顺时针（与 L1–L5 环序一致）。
+    端点按角度让出层枢半径，箭头贴轨道走，与指向 L6 的辐条在形态/走向上区分开。 */
+const RING_PAD_DEG = 17;
+const RING_ARCS = RING_LAYERS.slice(0, -1).map((from, i) => {
+  const to = RING_LAYERS[i + 1];
+  const pt = (deg: number) => {
+    const rad = deg * (Math.PI / 180);
+    return {
+      x: Math.round((GRAPH_CENTER.x + GRAPH_RING.rx * Math.cos(rad)) * 10) / 10,
+      y: Math.round((GRAPH_CENTER.y + GRAPH_RING.ry * Math.sin(rad)) * 10) / 10,
+    };
+  };
+  const s = pt(-90 + i * 72 + RING_PAD_DEG);
+  const e = pt(-90 + (i + 1) * 72 - RING_PAD_DEG);
+  return {
+    id: `${from}-${to}`,
+    from,
+    to,
+    d: `M ${s.x} ${s.y} A ${GRAPH_RING.rx} ${GRAPH_RING.ry} 0 0 1 ${e.x} ${e.y}`,
+  };
+});
 
-/** 页脚端口标签：home/onboard 从 backend.ts 单一真源派生（A4 门禁禁硬编码字面量） */
-const HOME_PORT = `:${new URL(HOME_BASE).port}`;
-const ONBOARD_PORT = `:${new URL(ONBOARD_BASE).port}`;
+type Focus = 'all' | 'L2' | 'L3' | 'L4+';
 
 function pad2(n: number): string { return String(n).padStart(2, '0'); }
 
@@ -107,6 +126,8 @@ export interface HomeDerived {
   l0WriteLocked: boolean;
   /** 写锁状态读不到（浏览器模式/IPC 失败）：不猜已解锁，也不误报未解锁 */
   l0WriteUnknown: boolean;
+  /** 读不到只是启动冷启探针超时（暂态）：页面不提示「重读」，后台自动重试 */
+  l0WritePending: boolean;
   /** 写锁已确认解锁（内核真值）：历史被挡类提示不再挂在首页（解锁后不该继续催解锁） */
   l0WriteResolved: boolean;
   l0WriteDetail: string | null;
@@ -131,6 +152,7 @@ export function deriveHomeView(s: OverviewSnapshot): HomeDerived {
     // 锁状态是唯一真源：available+unlocked=false → 常驻提示；读不到 → 绝不冒充「已解锁」
     l0WriteLocked: s.l0Write?.available === true && s.l0Write.unlocked === false,
     l0WriteUnknown: !s.l0Write || s.l0Write.available !== true,
+    l0WritePending: s.l0Write?.transient === true,
     // 已解锁 → 历史被挡异常（近 30 分钟聚合）不再当待办提示：解锁动作已经处理，内核会重放/重采
     l0WriteResolved: s.l0Write?.available === true && s.l0Write.unlocked === true,
     l0WriteDetail: s.l0Write?.detail ?? null,
@@ -179,12 +201,22 @@ function LayerGraphSvg({ graph, focus }: { graph: LayerGraph; focus: Focus }) {
           markerWidth="7" markerHeight="7" markerUnits="userSpaceOnUse" orient="auto">
           <path d="M0 0 L8 4 L0 8 Z" fill="var(--accent)" />
         </marker>
+        {/* 环向箭头：每个目标层一套同色箭头（沿用层原色，不引入新配色） */}
+        {RING_LAYERS.slice(1).map((layer) => (
+          <marker key={`ra-${layer}`} id={`af-ring-arrow-${layer}`} viewBox="0 0 8 8" refX="7.2" refY="4"
+            markerWidth="6.4" markerHeight="6.4" markerUnits="userSpaceOnUse" orient="auto">
+            <path d="M0 .6 L8 4 L0 7.4 Z" fill={LAYER_COLOR[layer]} />
+          </marker>
+        ))}
       </defs>
 
-      {/* 透视底：中心辉光 + 两道椭圆轨道（远景细、近景粗），制造景深 */}
+      {/* 透视底：中心辉光 + 椭圆轨道（后圈细淡、前圈略亮，制造前后景深） */}
       <circle cx={GRAPH_CENTER.x} cy={GRAPH_CENTER.y} r="156" fill="url(#af-core-glow)" opacity=".5" />
       <g fill="none" stroke="var(--muted)">
-        <ellipse cx={GRAPH_CENTER.x} cy={GRAPH_CENTER.y} rx="300" ry="128" strokeOpacity=".30" strokeDasharray="3 5" />
+        <path d={`M ${GRAPH_CENTER.x - 300} ${GRAPH_CENTER.y} A 300 128 0 0 1 ${GRAPH_CENTER.x + 300} ${GRAPH_CENTER.y}`}
+          strokeOpacity=".14" strokeDasharray="3 5" />
+        <path d={`M ${GRAPH_CENTER.x - 300} ${GRAPH_CENTER.y} A 300 128 0 0 0 ${GRAPH_CENTER.x + 300} ${GRAPH_CENTER.y}`}
+          strokeOpacity=".32" strokeDasharray="3 5" />
         <ellipse cx={GRAPH_CENTER.x} cy={GRAPH_CENTER.y} rx="196" ry="84" strokeOpacity=".14" />
       </g>
 
@@ -206,6 +238,23 @@ function LayerGraphSvg({ graph, focus }: { graph: LayerGraph; focus: Focus }) {
         );
       })}
 
+      {/* 环向相邻层箭头（L1→L2 … L4→L5）：沿轨道顺时针，颜色沿用目标层原色 */}
+      {RING_ARCS.map((a) => (
+        <path
+          key={`ring-${a.id}`}
+          className="af-ring-arc"
+          data-graph-ring={a.id}
+          d={a.d}
+          fill="none"
+          stroke={LAYER_COLOR[a.to]}
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          strokeDasharray="5 4"
+          strokeOpacity={inFocus(a.to) ? .66 : .16}
+          markerEnd={`url(#af-ring-arrow-${a.to})`}
+        />
+      ))}
+
       {/* 外围五层枢：真实层计数，球面高光 + 落影 */}
       {RING_LAYERS.map((layer) => {
         const p = HUB_POS[layer];
@@ -214,6 +263,8 @@ function LayerGraphSvg({ graph, focus }: { graph: LayerGraph; focus: Focus }) {
         const labelY = p.y < GRAPH_CENTER.y ? p.y - 24 : p.y + 33;
         return (
           <g key={h.layer} className={`af-hub-g${inFocus(layer) ? '' : ' off'}`} data-graph-layer={layer}>
+            <ellipse className="af-hub-shadow" cx={p.x} cy={p.y + GRAPH_HUB_R + 5} rx={GRAPH_HUB_R * 0.9} ry="4.4"
+              fill="#000" opacity=".18" />
             <circle className="af-hub-ring" cx={p.x} cy={p.y} r={GRAPH_HUB_R + 6}
               fill="none" stroke={LAYER_COLOR[layer]} strokeOpacity=".26" />
             <circle className="af-hub" cx={p.x} cy={p.y} r={GRAPH_HUB_R}
@@ -230,11 +281,15 @@ function LayerGraphSvg({ graph, focus }: { graph: LayerGraph; focus: Focus }) {
 
       {/* L6 汇聚点：更大的金盘 + 光晕环 + 账本核总数（全部真实读数） */}
       <g className={`af-core${inFocus('L6') ? '' : ' off'}`}>
+        <ellipse className="af-core-shadow" cx={GRAPH_CENTER.x} cy={GRAPH_CENTER.y + GRAPH_CORE_R + 7}
+          rx={GRAPH_CORE_R * 0.95} ry="6" fill="#000" opacity=".2" />
         <circle className="af-core-halo" cx={GRAPH_CENTER.x} cy={GRAPH_CENTER.y} r="64" fill="url(#af-core-glow)" />
         <circle cx={GRAPH_CENTER.x} cy={GRAPH_CENTER.y} r="47" fill="none"
           stroke="var(--c-l6)" strokeOpacity=".45" strokeDasharray="4 4" />
         <circle className="af-hub af-hub-core" cx={GRAPH_CENTER.x} cy={GRAPH_CENTER.y} r={GRAPH_CORE_R}
           fill="url(#ov-core)" stroke="var(--c-l6)" strokeWidth="2" />
+        <ellipse cx={GRAPH_CENTER.x - 11} cy={GRAPH_CENTER.y - 13} rx="13" ry="7"
+          fill="#FFFFFF" opacity=".3" transform={`rotate(-28 ${GRAPH_CENTER.x - 11} ${GRAPH_CENTER.y - 13})`} />
         <text x={GRAPH_CENTER.x} y={GRAPH_CENTER.y - 4} textAnchor="middle" fontSize="13" fontWeight="800" fill="#2A1B00">L6</text>
         <text x={GRAPH_CENTER.x} y={GRAPH_CENTER.y + 12} textAnchor="middle" fontSize="9.5" fill="#3A2600">
           {l6?.count ?? 0} 条
@@ -417,17 +472,20 @@ function TodayPanel({ p }: { p: OverviewTodayPanel }) {
   );
 }
 
-/** TOKEN 节省率：今日召回 payload 相对 2.4.1 全量预算的节省；sparkline 画真实 payload 走势 */
+/** TOKEN 节省率：今日召回真实省量 ÷（省量 + 注入）；无采样记录 → 未采样；sparkline 画真实 payload 走势 */
 function TokenPanel({ p }: { p: OverviewTokenPanel }) {
   const has = p.ok && p.savedPct != null;
+  const noSample = p.ok && p.savedPct == null && p.recallCount > 0;
   return (
     <section className="af-panel af-stat" data-testid="home-token">
       <div className="k">TOKEN 节省率<span>今日</span></div>
-      <div className="v">{has ? <>{p.savedPct}<em>%</em></> : '未取数'}</div>
+      <div className="v">{has ? <>{p.savedPct}<em>%</em></> : (p.ok ? '未采样' : '未取数')}</div>
       <div className={`d${has ? '' : ' mut'}`}>
         {has
           ? <>▲ 召回 {p.recallCount} 次 · 省 {(p.savedTokens / 1000).toFixed(1)}k tokens</>
-          : p.ok ? '今日暂无召回 · 发起召回后自动累计' : (p.error ?? '账本读不到')}
+          : noSample
+            ? '召回账本未记录省量与注入量（旧账）· 新一轮召回后自动采样'
+            : p.ok ? '今日暂无召回 · 发起召回后自动采样' : (p.error ?? '账本读不到')}
       </div>
       {has && p.series.length >= 2 && <Sparkline series={p.series} />}
     </section>
@@ -467,6 +525,8 @@ export function OverviewPage() {
   const [mcpHint, setMcpHint] = useState<string | null>(null);
   /** 批次51：页头登出（用户要求放在「立即备份」前）；busy 防重复点击 */
   const [loggingOut, setLoggingOut] = useState(false);
+  /** 首页就地解锁弹窗：点「去解锁」一次即弹出输入框（不再先跳安全页） */
+  const [unlockOpen, setUnlockOpen] = useState(false);
   /**
    * 登出（真实 POST /api/logout + 清本机会话，与登录弹窗同一口径）。
    * 本页是壳层的同源 iframe：清完会话后整壳重载（window.parent 同源可重载），
@@ -507,6 +567,43 @@ export function OverviewPage() {
       document.removeEventListener('visibilitychange', onWake);
     };
   }, [reload]);
+
+  /**
+   * 启动冷启：写锁探针 2.5s 超时只会把 l0Write 标成 transient，不弹「重读」。
+   * 这里后台静默重试（最多 4 次、间隔 1.2s），读到真值后补回快照：
+   * 真锁 → 常驻解锁提示；真解锁 → 提示自动消失，全程无需用户点按钮。
+   */
+  useEffect(() => {
+    if (snap?.l0Write?.available === true || snap?.l0Write?.transient !== true) return;
+    let cancelled = false;
+    let tries = 0;
+    let timer: number | undefined;
+    const tick = () => {
+      if (cancelled) return;
+      void loadL0Write()
+        .then((g) => {
+          if (cancelled) return;
+          if (g.status === 'ok') {
+            setSnap((prev) => (prev
+              ? { ...prev, l0Write: { available: true, unlocked: g.view.unlocked, detail: null } }
+              : prev));
+            return;
+          }
+          tries += 1;
+          if (tries < 4) timer = window.setTimeout(tick, 1200);
+          else setSnap((prev) => (prev
+            ? { ...prev, l0Write: { available: false, unlocked: false, detail: g.detail ?? null, transient: false } }
+            : prev));
+        })
+        .catch(() => {
+          if (cancelled) return;
+          tries += 1;
+          if (tries < 4) timer = window.setTimeout(tick, 1200);
+        });
+    };
+    timer = window.setTimeout(tick, 800);
+    return () => { cancelled = true; if (timer) window.clearTimeout(timer); };
+  }, [snap?.l0Write?.available, snap?.l0Write?.transient]);
 
   // ①待生效共享信号：其它落点（接入页/壳层）改了这个信号，首页立刻跟上；12s 轮询也顺带刷新
   useEffect(() => {
@@ -599,15 +696,14 @@ export function OverviewPage() {
                 <div className="af-alert" role="alert" data-testid="home-l0-lock-alert">
                   <span className="tag">L0</span>
                   <span>写密钥未解锁：新的写入会被挡下并暂存到 pending 队列，解锁后自动重放落库，绝不落明文。{view.l0Alert ? `近期已有写入因此被挡：${view.l0Alert}。` : ''}</span>
-                  <button className="af-link" type="button" onClick={() => requestShellView('security')}>去安全页解锁 →</button>
+                  <button className="af-link" type="button" data-testid="home-l0-unlock-open" onClick={() => setUnlockOpen(true)}>去解锁</button>
                 </div>
               )}
-              {/* 状态读不到时如实标注（不猜已解锁、也不误报未解锁）；已有真实被挡异常则照常显示 */}
-              {view.session && !view.l0WriteLocked && view.l0WriteUnknown && (
-                <div className="af-alert" data-testid="home-l0-lock-unknown">
-                  <span className="tag">L0</span>
-                  <span>写密钥锁状态未取到：{view.l0WriteDetail ?? '桌面壳未返回状态'}（不能据此判断已解锁）。</span>
-                  <button className="af-link" type="button" onClick={() => void reload()}>重读 →</button>
+              {/* 状态读不到时如实标注（不猜已解锁、也不误报未解锁）。
+                  启动冷启探针超时 = 暂态：不提示、不要求「重读」，后台自动重试（见 l0WritePending effect） */}
+              {view.session && !view.l0WriteLocked && view.l0WriteUnknown && !view.l0WritePending && (
+                <div className="af-note" data-testid="home-l0-lock-unknown">
+                  写密钥锁状态暂不可读：{view.l0WriteDetail ?? '桌面壳未返回状态'}（不能据此判断已解锁；写入时会再次确认）。
                 </div>
               )}
               {/* 历史被挡（近 30 分钟聚合）只在【当前仍锁】或【锁状态读不到】时给提示；
@@ -615,7 +711,7 @@ export function OverviewPage() {
               {view.session && !view.l0WriteLocked && !view.l0WriteResolved && view.l0Alert && (
                 <div className="af-alert" data-testid="home-l0-blocked-alert">
                   <span className="tag">L0</span>{view.l0Alert}
-                  <button className="af-link" type="button" onClick={() => requestShellView('security')}>去安全页解锁 →</button>
+                  <button className="af-link" type="button" data-testid="home-l0-unlock-open-blocked" onClick={() => setUnlockOpen(true)}>去解锁</button>
                 </div>
               )}
 
@@ -709,20 +805,36 @@ export function OverviewPage() {
                 </div>
               </div>
 
+              {/* 页脚只留审计与数据来源（用户 2026-11-21 图3）：健康/登录/端口串已整组移到壳层状态栏最右，
+                  全应用只保留那一份；这里不再出现 HTTP 状态或任何端口。 */}
               <div className="af-foot">
-                <span className={view.healthOk ? 'ok' : 'bad'}>● {snap.health.detail}</span>
-                <span>{view.sessionText}</span>
-                <span>home {HOME_PORT}</span>
-                <span>onboard {ONBOARD_PORT}</span>
-                <span>mcp :8202 / :8204</span>
-                <span>webhook :8203</span>
                 <span>{snap.recentAudits.ok ? `audit.jsonl ${snap.recentAudits.total} 行` : 'audit.jsonl 不可读'}</span>
+                <span className="af-foot-right" data-testid="overview-foot-source">
+                  数据来源 getHomeFeed（单次账本读取）
+                </span>
               </div>
             </>
           )}
 
           {!view && (
             <div className="hmx-wait">{err ? `概览聚合失败：${err}` : '正在读取真实账本、审计与主进程遥测…'}</div>
+          )}
+
+          {/* 首页就地解锁：点一次「去解锁」直接弹框（复用安全页同一个 L0WriteUnlock，管理员口令 / 成员自解锁都走真实内核） */}
+          {unlockOpen && (
+            <div
+              className="ov-modal-mask"
+              data-testid="home-unlock-mask"
+              onMouseDown={(e) => { if (e.target === e.currentTarget) setUnlockOpen(false); }}
+            >
+              <div className="ov-modal" role="dialog" aria-modal="true" aria-label="解锁 L0 写密钥">
+                <div className="ov-modal-head">
+                  <b>解锁 L0 写密钥</b>
+                  <button className="af-link" type="button" data-testid="home-unlock-close" onClick={() => setUnlockOpen(false)}>关闭</button>
+                </div>
+                <L0WriteUnlock scene="首页" onUnlocked={() => { setUnlockOpen(false); void reload(); }} />
+              </div>
+            </div>
           )}
         </div>
       </div>

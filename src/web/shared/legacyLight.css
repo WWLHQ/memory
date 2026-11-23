@@ -3,17 +3,17 @@
  * 更高优先级把同名令牌映射到 p0 浅色，保证 iframe 跟随壳层亮色时不再是黑底。
  * 暗色走各自 :root，不受影响。表单控件在两种主题下都用令牌（修掉白底输入框）。 */
 html[data-theme="light"] {
-  --bg: #f8fafc;
-  --panel: #f2f4f7;
-  --panel2: #eef1f4;
-  --line: #d7dce2;
-  --txt: #27313b;
-  --muted: #6d7885;
-  --dim: #9aa4af;
-  --accent: #0f6cbd;
-  --ok: #2f7d32;
-  --warn: #a86b12;
-  --err: #b33b31;
+  --bg: #f7f9fb;
+  --panel: #ffffff;
+  --panel2: #edf1f5;
+  --line: #dce3ea;
+  --txt: #0e1926;
+  --muted: #4d5e72;
+  --dim: #5f7085;
+  --accent: #0e7490;
+  --ok: #15803d;
+  --warn: #b45309;
+  --err: #b42318;
 }
 
 input, select, textarea {

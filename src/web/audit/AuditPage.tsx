@@ -13,6 +13,7 @@ import { DEFAULT_PAGE_SIZE, paginate } from '../shared/paginate.ts';
 import { PageNav } from '../shared/PageNav.tsx';
 import { KernelLoadError, kernelErrorText } from '../shared/kernelLoad.tsx';
 import type { AuditFilter, AuditEntry } from './types.ts';
+import { useHostTheme } from '../shared/hostTheme.ts';
 import './theme.css';
 
 type Phase = 'loading' | 'ok' | 'error';
@@ -25,10 +26,12 @@ function mergeAudit(prev: AuditEntry[], next: AuditEntry[]): AuditEntry[] {
     const k = `${e.request_id}|${e.action}|${e.created_at}|${e.resource_id}`;
     if (!seen.has(k)) { seen.add(k); out.push(e); }
   }
-  return out.sort((a, b) => (a.created_at < b.created_at ? -1 : 1));
+  // 事件流倒序（最新在前），分页在倒序结果上切片
+  return out.sort((a, b) => b.created_at.localeCompare(a.created_at));
 }
 
 export function AuditPage() {
+  useHostTheme();
   const initialFilter = initialAuditFilter(location.search);
   const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [filter, setFilter] = useState<AuditFilter>(initialFilter);
@@ -96,14 +99,33 @@ export function AuditPage() {
 
   return (
     <div className="p0-page" data-testid="audit-page">
-      <div className="p0-hd">
-        <h2>审计日志</h2>
-        <span className="p0-tag">REQ-006 · P11</span>
-        <span className="p0-sub">4.3 统一审计 · append-only · 9 列 · request_id 链路追踪（18.2-E）</span>
-        <span className="p0-right">
-          <span className="p0-tag info">数据真相 = 内核审计账本</span>
-          {phase === 'ok' && <span className="p0-tag">账本 {entries.length} 条</span>}
-        </span>
+      {/* v5 页头（批次 B）：20px 标题 + tagline 胶囊 + 分隔符元信息行 + 右侧导出主操作 */}
+      <div className="p0-pagehead" data-testid="audit-head">
+        <div className="p0-ph-main">
+          <div className="p0-ph-title">
+            <h1>审计日志</h1>
+            <span className="p0-tagline">REQ-006 · P11 · 追加式账本 · 不可改写</span>
+          </div>
+          <div className="p0-ph-meta">
+            <span>数据真相 = 内核审计账本</span>
+            <span className="p0-ph-sep" />
+            <span data-testid="audit-meta-count">
+              {phase === 'ok' ? `账本 ${entries.length} 条` : phase === 'loading' ? '账本读取中…' : '账本读取失败'}
+            </span>
+            <span className="p0-ph-sep" />
+            <span>append-only · 9 列 · request_id 链路追踪（18.2-E）</span>
+          </div>
+        </div>
+        <div className="p0-ph-actions">
+          <button type="button" className="p0-btn" data-testid="export-csv"
+            onClick={() => download('audit.csv', exportCsv(displayed), 'text/csv')}>
+            导出 CSV（{displayed.length}）
+          </button>
+          <button type="button" className="p0-btn" data-testid="export-json"
+            onClick={() => download('audit.json', exportJson(displayed), 'application/json')}>
+            导出 JSON（{displayed.length}）
+          </button>
+        </div>
       </div>
 
       <FilterBar filter={filter} onChange={setFilter} onQuery={handleQuery} onReset={handleReset} />
@@ -141,14 +163,6 @@ export function AuditPage() {
               <h3>事件流</h3>
               <span className="p0-sub">当前视图 {displayed.length} 条</span>
               <span className="p0-right">
-                <button type="button" className="p0-btn" data-testid="export-csv"
-                  onClick={() => download('audit.csv', exportCsv(displayed), 'text/csv')}>
-                  导出 CSV（{displayed.length}）
-                </button>
-                <button type="button" className="p0-btn" data-testid="export-json"
-                  onClick={() => download('audit.json', exportJson(displayed), 'application/json')}>
-                  导出 JSON（{displayed.length}）
-                </button>
                 {chainId && (
                   <button type="button" className="p0-btn" data-testid="clear-chain" onClick={() => setChainId(null)}>
                     退出链路视图（{chainId}）
@@ -162,12 +176,17 @@ export function AuditPage() {
               activeRequestId={chainId}
               onToggleChain={handleToggleChain}
             />
-            <PageNav
-              paged={paged}
-              onPage={(page) => setPager((p) => ({ ...p, page }))}
-              onPageSize={(pageSize) => setPager({ page: 1, pageSize })}
-              note={`每页 ${paged.pageSize} 条 · 当前视图 ${displayed.length} 条`}
-            />
+            {/* v5 表底（批次 B）：左统计 + 右紧凑数字 pager */}
+            <div className="p0-tblft" data-testid="audit-tblft">
+              <span>显示 {paged.items.length} 行 / 共 {displayed.length} 行</span>
+              <span className="p0-ph-sep" />
+              <span>按时间倒序 · 请求 ID 可回查</span>
+              <PageNav
+                paged={paged}
+                onPage={(page) => setPager((p) => ({ ...p, page }))}
+                onPageSize={(pageSize) => setPager({ page: 1, pageSize })}
+              />
+            </div>
           </div>
         </>
       )}

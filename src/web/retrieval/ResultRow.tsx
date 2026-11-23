@@ -1,6 +1,7 @@
 // REQ-012 T4 结果行（定稿·紧凑版）：分数徽标 + 命中正文（默认一行）+ 元信息（id · 温度 · 新鲜/重要/置信）
 // 右侧「展开」切换完整正文；记住/忘记/反馈 收在行内悬浮操作组（悬停或展开时出现），行为一字未改。
 import type { RetrievalHit } from './types.ts';
+import { Icon } from '../shell/Icons.tsx';
 
 interface Props {
   hit: RetrievalHit;
@@ -57,9 +58,9 @@ export function ResultRow({ hit, index, selected, onView, onRemember, onForget, 
       </div>
 
       <div className="ret-res-act" onClick={(e) => e.stopPropagation()}>
-        <button type="button" className="ret-icon-btn" title="记住：提升这条的权重" data-testid={`remember-${index}`} onClick={() => onRemember(hit.memory_id)}>📌</button>
-        <button type="button" className="ret-icon-btn" title="忘记：降低这条的权重" data-testid={`forget-${index}`} onClick={() => onForget(hit.memory_id)}>⌫</button>
-        <button type="button" className="ret-icon-btn" title="反馈：去反馈页" data-testid={`fb-${index}`} onClick={() => onFeedback(hit.memory_id)}>☆</button>
+        <button type="button" className="ret-icon-btn" title="记住：提升这条的权重" data-testid={`remember-${index}`} onClick={() => onRemember(hit.memory_id)}><Icon name="spark" size={13} /></button>
+        <button type="button" className="ret-icon-btn" title="忘记：降低这条的权重" data-testid={`forget-${index}`} onClick={() => onForget(hit.memory_id)}><Icon name="x" size={13} /></button>
+        <button type="button" className="ret-icon-btn" title="反馈：去反馈页" data-testid={`fb-${index}`} onClick={() => onFeedback(hit.memory_id)}><Icon name="receipt" size={13} /></button>
       </div>
 
       <button

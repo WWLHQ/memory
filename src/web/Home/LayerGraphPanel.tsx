@@ -12,6 +12,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { uiLog } from '../shared/actionLog.ts';
+import { Icon } from '../shell/Icons.tsx';
 import './layerGraph.css';
 import {
   GRAPH_CATEGORIES,
@@ -482,8 +483,8 @@ export function LayerGraphPanel({ graph, onRefresh }: LayerGraphPanelProps) {
               <span className="lg-badge">{selected.layer}</span>
               <span className="lg-badge dim">{DECAY_LABELS[selected.decay]}</span>
               {selected.pinned && <span className="lg-badge">📌 置顶</span>}
-              {selected.locked && <span className="lg-badge">🔒 锁定</span>}
-              {selected.conflict && <span className="lg-badge danger">⚖ 冲突</span>}
+              {selected.locked && <span className="lg-badge"><Icon name="lock" size={11} /> 锁定</span>}
+              {selected.conflict && <span className="lg-badge danger"><Icon name="scale" size={11} /> 冲突</span>}
               {selected.graftTo && <span className="lg-badge">🌿 嫁接{selected.graftLayer ? ` · ${selected.graftLayer}` : ''}</span>}
               <button type="button" className="lg-drawer-close" aria-label="关闭详情" onClick={() => setSelectedId(null)}>×</button>
             </header>

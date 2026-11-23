@@ -26,7 +26,7 @@ export function FeedbackForm({ draft, onChange, onSubmit }: Props) {
   const tenant = getTenant();
   return (
     <div className="card" data-testid="feedback-form">
-      <b>反馈表单（13.7）</b>
+      <b>反馈（13.7 反馈表单 · confirm +0.1 / reject −0.05 / disputed 挂 9.7 裁决）</b>
 
       <div className="row">
         <label style={{ width: 90 }}>memory_id *</label>

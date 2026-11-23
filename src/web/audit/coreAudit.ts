@@ -72,7 +72,9 @@ export async function coreLoadAudit(filter: AuditFilter = {}): Promise<AuditEntr
     until: toMs(filter.to),
     agent: filter.agent || undefined,
   });
+  // 事件流按时间倒序（最新在前），分页由页面层在倒序结果上切片。
+  // 链路视图仍由 chainByRequest 单独升序排列（看一次请求的先后因果），两者互不影响。
   return audits
     .map(toAuditEntry)
-    .sort((a, b) => (a.created_at < b.created_at ? -1 : 1));
+    .sort((a, b) => b.created_at.localeCompare(a.created_at));
 }

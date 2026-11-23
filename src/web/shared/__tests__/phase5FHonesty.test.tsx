@@ -44,26 +44,36 @@ const metrics = (o: Partial<GrowthMetrics> = {}): GrowthMetrics => ({
 });
 
 describe('5-F / ① 金额与预算单位口径（阶段4-D 遗留）', () => {
-  it('配单价 → 完整提示行明写「金额估算（本地预算单位 t × 单价）」，金额数值仍同源', () => {
+  it('配单价 → 摘要行只留本次金额，今日/全部只留次数（2026-11-21 压 2 行）', () => {
     const hint = buildRecallHint(recallResult(), rollupRecalls([], Date.now()), 10);
-    expect(hint.line).toContain('金额估算（本地预算单位 t × 单价）');
-    expect(hint.line).toContain('¥0.00102');
-    expect(hint.line).not.toContain('💰 本次 ¥');
+    // 2026-11-21 二次拍板：摘要压 2 行 —— 只留「💰 ¥x（省 ¥y） ｜ 今日 N 次 ｜ 全部 N 次」；
+    // 今日/全部金额明细移到 detail 档「💰 省钱与费用」段，估算口径由参数页承担。
+    expect(hint.line).toContain('💰 ¥0.00102');
+    expect(hint.line).toContain('（省 ¥');
+    expect(hint.line).toContain('｜ 今日 ');
+    expect(hint.line).toContain('｜ 全部 ');
+    expect(hint.line).not.toMatch(/今日 \d+ 次 ¥/); // 今日只留次数，不列金额
+    expect(hint.line).not.toContain('账单');
+    expect(hint.line).not.toContain('/百万 token');
     expect(hint.money).not.toBeNull();
   });
 
-  it('短摘要第二行以「💰 估算 本次」开头，不再像真实账单', () => {
+  it('短摘要已压成一行（shortLine === line），金额只留本次而不像真实账单', () => {
     const hint = buildRecallHint(recallResult(), rollupRecalls([], Date.now()), 10);
-    expect(hint.shortLine.split('\n')[1]).toMatch(/^💰 估算 本次 /);
+    expect(hint.shortLine).toBe(hint.line);
+    expect(hint.shortLine).not.toContain('\n');
+    expect(hint.line).toContain('💰 ¥');
+    expect(hint.line).not.toContain('💰 本次 ¥');
   });
 
-  it('未配单价 → 明示未设置单价 + 预算单位，且不出现「本次 ¥」或「/百万 token」', () => {
+  it('未配单价 → 明示未设置单价，且不出现任何金额符号', () => {
     const hint = buildRecallHint(recallResult(), rollupRecalls([], Date.now()), null);
     expect(hint.money).toBeNull();
     expect(hint.line).toContain('未设置单价');
-    expect(hint.line).toContain('预算单位 t');
     expect(hint.line).not.toContain('本次 ¥');
     expect(hint.line).not.toContain('/百万 token');
+    // 2026-11-21：未设单价时摘要行不出现 ¥（估算口径改由「💰 省钱与费用」段说明）
+    expect(hint.line).not.toContain('¥');
   });
 
   it('明细页 saveLines 标「估算花费」+ 金额口径说明，不写「/百万 token」', () => {
@@ -72,7 +82,9 @@ describe('5-F / ① 金额与预算单位口径（阶段4-D 遗留）', () => {
     expect(s).toContain('金额口径：本地预算单位 t');
     expect(s).toContain('不是网关真实 usage 账单');
     expect(s).not.toContain('/百万 token');
-    expect(s).not.toContain('💰 本次 ');
+    // 2026-11-21：摘要行按用户口径改为「本次 / 今日 / 全部」三段，估算说明仍只在省钱与费用段
+    expect(s).toContain('｜ 今日 ');
+    expect(s).toContain('｜ 全部 ');
   });
 
   it('参数页成本单价标「预算单位 t」并说明非厂商账单', () => {
@@ -91,8 +103,8 @@ describe('5-F / ① 金额与预算单位口径（阶段4-D 遗留）', () => {
     expect(insight).toMatch(/export const CHARS_PER_BUDGET_UNIT = 2/);
     expect(insight).toContain('**不是 LLM tokenizer 的 token 数**');
     const t = src('src/core/memagent/__tests__/recallInsight.test.ts');
-    expect(t).toContain('💰 估算 本次');
-    expect(t).toContain('¥/百万预算单位 t');
+    expect(t).toContain('金额未开：未设置单价');
+    expect(t).toContain('百万预算单位 t');
     expect(t).not.toContain('¥/百万 token');
   });
 });

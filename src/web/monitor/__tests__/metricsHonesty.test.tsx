@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { render } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { metricsFromLedger, percentile, applyMonitorStats, applyMonitorOps, type MonitorStats } from '../useMonitorReal.ts';
+import { metricsFromLedger, percentile, applyMonitorStats, applyMonitorOps, summaryFromLedger, type MonitorStats } from '../useMonitorReal.ts';
 import { MetricGrid } from '../MetricGrid.tsx';
 import { MONITOR_GROUP_TEXT, monitorMetricKeys, monitorText, monitorValueText } from '../../growth/recallLabels.ts';
 import { createMemAgent } from '../../../core/memagent/agent.ts';
@@ -422,5 +422,95 @@ describe('批次64：新增 7 张卡的真实口径（每条都断言真实值�
     const m = applyMonitorOps(base(), null);
     expect(m.find((c) => c.metric === '采集器')?.value).toBe('未取数');
     expect(m.find((c) => c.metric === '最近备份')?.value).toBe('未取数');
+  });
+});
+
+describe('批次49：六格汇总 summaryFromLedger（真实派生 · af-g3）', () => {
+  it('空账本 → 未采集格（健康/补炼/检索P95）+ 真实 0 格（冷存储/人工审核/今日召回），0 不冒充空态', () => {
+    const cards = metricsFromLedger([], [], NOW);
+    const s = summaryFromLedger(cards, [], [], NOW);
+    expect(s).toHaveLength(6);
+    const byK = Object.fromEntries(s.map((x) => [x.k, x]));
+    expect(byK['Agent 健康'].v).toBe('— 未采集');
+    expect(byK['Agent 健康'].mut).toBe(true);
+    expect(byK['补炼队列'].v).toBe('— 未采集');
+    expect(byK['冷存储'].v).toBe('0');
+    expect(byK['人工审核'].v).toBe('0');
+    expect(byK['检索 P95'].v).toBe('— 未采集');
+    expect(byK['检索 P95'].mut).toBe(true);
+    expect(byK['今日召回'].v).toBe('0');
+  });
+
+  it('有拨测 / 队列回执 / 冲突 / 召回审计 → 六格全真实值；待裁决>0 琥珀强调；24h 窗外样本不计入 P95', () => {
+    const mems = [
+      { mem_id: 'm1', decay_class: 'cold' },
+      { mem_id: 'm2', decay_class: 'dormant' },
+      { mem_id: 'm3', decay_class: 'archived' },
+      { mem_id: 'm4', decay_class: 'hot', conflict_id: 'c1' },
+    ] as never[];
+    const audits = [
+      audit({ detail: { hits: 1, payload_tokens: 100, latency_ms: 120, mode: 'auto', evidence_thin: false } }),
+      audit({ detail: { hits: 0, payload_tokens: 50, latency_ms: 40, mode: 'auto', evidence_thin: false } }),
+      // 2 天前：不在 24h 窗内，不进 P95 样本，也不进「今日召回」
+      audit({ ts: NOW - 2 * DAY, detail: { hits: 1, payload_tokens: 9, latency_ms: 9000, mode: 'auto', evidence_thin: false } }),
+    ];
+    const refine = {
+      enabled: true, pending: 4, done: 10, failed: 1, skipped: 2,
+      day: '2026-11-21', day_rows: 9, cap_enabled: false, cap_rows: 500,
+      day_limit: null, day_left: null, max_engines_per_call: 3,
+      stop_codes: {}, updated_at: NOW, queue_path: 'refine-queue.json',
+    };
+    const cards = applyMonitorStats(metricsFromLedger(mems, audits as never, NOW, refine), {
+      agent: { connectivityRate: 100, circuit: 'OPEN', avgLatencyMs: 1, probedAt: NOW, windowSamples: 5 },
+      writeRate: null,
+      checksumFail: null,
+    });
+    const s = summaryFromLedger(cards, mems as never, audits as never, NOW);
+    const byK = Object.fromEntries(s.map((x) => [x.k, x]));
+    expect(byK['Agent 健康'].v).toBe('100%');
+    expect(byK['Agent 健康'].d).toContain('已切断'); // monitorValueText('OPEN') 人话
+    expect(byK['补炼队列'].v).toBe('4');
+    expect(byK['补炼队列'].d).toContain('成功 10');
+    expect(byK['冷存储'].v).toBe('2'); // cold+dormant
+    expect(byK['冷存储'].d).toBe('归档 1 行另计');
+    expect(byK['人工审核'].v).toBe('1');
+    expect(byK['人工审核'].d).toContain('超期 7 天 0 条');
+    expect(byK['检索 P95'].v).toBe('120'); // 窗内样本 [40,120] → nearest-rank p95=120
+    expect(byK['检索 P95'].d).toBe('2 次召回样本');
+    expect(byK['今日召回'].v).toBe('2');
+    expect(byK['今日召回'].d).toBe('1 次有命中');
+  });
+
+  it('未采集值位是整串「— 未采集」，不是裸「—」（check-no-demo 契约）', () => {
+    const cards = metricsFromLedger([], [], NOW);
+    for (const x of summaryFromLedger(cards, [], [], NOW)) {
+      if (x.v === '— 未采集') expect(x.v.length).toBeGreaterThan(1);
+    }
+    const vs = summaryFromLedger(cards, [], [], NOW).map((x) => x.v);
+    expect(vs).not.toContain('—');
+  });
+});
+
+describe('批次52：全部指标小卡对齐六格 af-stat 规格（视觉契约，方向纠偏「内卡对齐外层」）', () => {
+  it('mon-mcard 与 af-stat 同容器规格（surface + line 边 + 10px + padding 12px 14px）；crit/warn 只染边框不染整卡底；数值 24px/600', () => {
+    const css = readFileSync(resolve(process.cwd(), 'src/web/monitor/theme.css'), 'utf8');
+    const block = css.match(/\.mon-mcard\s*\{[^}]*\}/)?.[0] ?? '';
+    expect(block).toContain('background: var(--surface)');
+    expect(block).toContain('border: 1px solid var(--line)');
+    expect(block).toContain('border-radius: 10px');
+    expect(block).toContain('padding: 12px 14px');
+    // 级别只染边框（与统一后的卡底同源混 line），不再整卡底染色
+    const crit = css.match(/\.mon-mcard\.crit\s*\{[^}]*\}/)?.[0] ?? '';
+    const warn = css.match(/\.mon-mcard\.warn\s*\{[^}]*\}/)?.[0] ?? '';
+    expect(crit).toContain('border-color');
+    expect(crit).toContain('var(--bad)');
+    expect(crit).not.toContain('background');
+    expect(warn).toContain('border-color');
+    expect(warn).toContain('var(--warn)');
+    expect(warn).not.toContain('background');
+    expect(css).not.toMatch(/\.mon-mcard\s*\{[^}]*--surface2/);
+    // 数值统一 24px/600（af-stat .v 与 .mval 同规格，批次52 回归设计稿）
+    expect(css).toMatch(/\.af-stat \.v\s*\{[^}]*font-size:\s*24px/);
+    expect(css).toMatch(/\.mval\s*\{[^}]*600 24px/);
   });
 });

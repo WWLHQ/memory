@@ -15,14 +15,14 @@ export interface LayerMeta {
   desc: string;
 }
 
-/** 层语义与配色逐字对齐 src/web/memory/MemoryLayeredPage.tsx（L6→L1 的官方色板） */
+/** 层语义与配色逐字对齐定稿色阶 STRATA_LAYERS（src/web/shell/strataScale.ts，批次 E 起与首页刻度同源） */
 export const GRAPH_LAYERS: readonly LayerMeta[] = [
-  { id: 'L1', name: '清洗脱敏', color: '#e0884f', desc: '唯一可进 prompt 的原始形态' },
-  { id: 'L2', name: '会话摘要', color: '#4d9fff', desc: '情景摘要 ≤300 字' },
-  { id: 'L3', name: '得失分析', color: '#3ecf8e', desc: '总结得失 ≤200 字' },
+  { id: 'L1', name: '清洗脱敏', color: '#22d3ee', desc: '唯一可进 prompt 的原始形态' },
+  { id: 'L2', name: '会话摘要', color: '#38bdf8', desc: '情景摘要 ≤300 字' },
+  { id: 'L3', name: '得失分析', color: '#818cf8', desc: '总结得失 ≤200 字' },
   { id: 'L4', name: '模式归纳', color: '#c084fc', desc: '规律提炼 ≤120 字' },
-  { id: 'L5', name: '洞察提炼', color: '#f59e0b', desc: '本质洞察 ≤60 字' },
-  { id: 'L6', name: '投影索引', color: '#22d3ee', desc: '关键字 ≤30 词 + relevance' },
+  { id: 'L5', name: '洞察提炼', color: '#f472b6', desc: '本质洞察 ≤60 字' },
+  { id: 'L6', name: '投影索引', color: '#fbbf24', desc: '关键字 ≤30 词 + relevance' },
 ];
 
 export interface CategoryMeta {

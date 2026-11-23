@@ -67,7 +67,14 @@ test.describe('REQ-005 首页与登录 · 点击级 E2E', () => {
     // 标题 + 效果证据四卡（真实账本聚合；浏览器空账本显示「未取数」，不伪造）
     await expect(page.locator('.af-head h1')).toContainText('总览工作台');
     await expect(page.locator('.af-g4 .af-stat')).toHaveCount(4);
-    await expect(page.locator('.af-foot')).toContainText('未登录');
+    // 页脚只留审计行 + 数据来源；HTTP/端口/登录串已整组移到壳层状态栏最右（图3），页面内不再有第二份
+    await expect(page.locator('.af-foot')).toContainText('audit.jsonl');
+    await expect(page.locator('[data-testid="overview-foot-source"]')).toContainText('数据来源');
+    await expect(page.locator('.af-foot')).not.toContainText('HTTP');
+    await expect(page.locator('.af-foot')).not.toContainText('home :');
+    await expect(page.locator('[data-testid="overview-health"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="overview-foot-right"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="sb-endpoints"]')).toHaveCount(0);
     // 未登录仍可读本地账本（诚实口径），并给出「去登录」快捷入口
     await expect(page.getByRole('button', { name: '去登录' })).toBeVisible();
     // 旧首页的门控遮罩 / 仪表盘 / 程序日志窗已随旧首页下线
@@ -80,17 +87,24 @@ test.describe('REQ-005 首页与登录 · 点击级 E2E', () => {
 
   test('①b 写密钥锁状态：浏览器无桌面壳时如实标注「状态未取到」，不冒充已解锁、也不误报未解锁', async ({ page }) => {
     const errors = collectErrors(page);
+    // 写锁提示只在登录后出现（2026-11-16：未登录先引导登录，不提前催解锁）
+    await login(page);
     await page.goto(HOME);
     await expect(page.locator('[data-testid="overview-page"]')).toBeVisible();
     // 常驻醒目条只在真实读到「未解锁」时出现；读不到时给诚实标注
     await expect(page.locator('[data-testid="home-l0-lock-alert"]')).toHaveCount(0);
-    await expect(page.locator('[data-testid="home-l0-lock-unknown"]')).toBeVisible();
-    await expect(page.locator('[data-testid="home-l0-lock-unknown"]')).toContainText('不能据此判断已解锁');
+    const unknown = page.locator('[data-testid="home-l0-lock-unknown"]');
+    await expect(unknown).toBeVisible();
+    await expect(unknown).toContainText('不能据此判断已解锁');
+    // 2026-11-22：启动读不到写锁时只做中性标注，不再要求用户「点重读」才继续
+    await expect(unknown).not.toContainText('重读');
+    await expect(unknown.locator('button')).toHaveCount(0);
     expect(errors).toEqual([]);
   });
 
   test('①c 写锁变化信号：收到信号即重读真实锁状态（解锁后红条不再常驻）', async ({ page }) => {
     const errors = collectErrors(page);
+    await login(page);
     await page.goto(HOME);
     await expect(page.locator('[data-testid="overview-page"]')).toBeVisible();
 
@@ -179,9 +193,8 @@ test.describe('REQ-005 首页与登录 · 点击级 E2E', () => {
     const sid = await page.evaluate(() => localStorage.getItem('session:realpage'));
     expect(sid).toBeTruthy();
 
-    // 概览页读同一份会话：页脚如实「已登录」，且不再显示「去登录」
+    // 概览页读同一份会话：不再显示「去登录」（登录态文字已随图3 统一移到壳层状态栏，见 shell.spec ⑰）
     await page.goto(HOME);
-    await expect(page.locator('.af-foot')).toContainText('已登录', { timeout: 10_000 });
     await expect(page.getByRole('button', { name: '去登录' })).toHaveCount(0);
     // 效果四卡为真实账本聚合（空账本 = 未取数，不伪造演示数字）；今日数字在「今日概览」列表（批次57-C 定稿版式）
     await expect(page.locator('.af-g4 .af-stat')).toHaveCount(4);
@@ -226,7 +239,7 @@ test.describe('REQ-005 首页与登录 · 点击级 E2E', () => {
     expect(await page.evaluate(() => localStorage.getItem('session:realpage'))).toBeFalsy();
 
     await page.goto(HOME);
-    await expect(page.locator('.af-foot')).toContainText('未登录', { timeout: 10_000 });
+    // 登录态文字已统一到壳层状态栏；概览页只保留「去登录」入口的显隐
     await expect(page.getByRole('button', { name: '去登录' })).toBeVisible();
     expect(errors).toEqual([]);
   });
@@ -243,11 +256,17 @@ test.describe('REQ-005 首页与登录 · 点击级 E2E', () => {
     await expect(page.locator('.af-graph .af-hub')).toHaveCount(6);
     await expect(page.locator('.af-graph .af-core-n')).toContainText('0');
 
-    // 真实分层界面：L6→L1 层卡片由账本派生；空账本如实空态（不展示 6 层卡片，不伪造节点）
+    // 真实分层界面：L6→L1 层明细由账本派生；空账本如实空态（无明细块、语义卡计数全 0）
     await page.goto(LAYERED);
     await expect(page.locator('[data-testid="layered-memory-page"]')).toBeVisible();
     await expect(page.locator('[data-testid="memory-empty"]')).toContainText('记忆账本还是空的');
-    await expect(page.locator('[data-layer]')).toHaveCount(0);
+    // 空账本不得出现任何层明细块（L6→L1 明细 + L0 解锁块）；[data-layer] 还包含固定语义说明卡，
+    // 所以按明细容器精确断言，并逐卡要求「有内容 0 条」——比旧的全局 [data-layer]=0 更严格。
+    await expect(page.locator('#layer-block-L6, #layer-block-L5, #layer-block-L4, #layer-block-L3, #layer-block-L2, #layer-block-L1')).toHaveCount(0);
+    await expect(page.locator('[data-testid="l0-stack"] [data-layer]')).toHaveCount(0);
+    for (const L of ['L1', 'L2', 'L3', 'L4', 'L5', 'L6']) {
+      await expect(page.locator(`[data-testid="layer-card-${L}"]`)).toContainText('有内容 0 条');
+    }
     await expect(page.locator('[data-testid="layered-memory-page"]')).toContainText('L6→L1');
     expect(errors).toEqual([]);
   });
@@ -316,6 +335,71 @@ test.describe('REQ-005 首页与登录 · 点击级 E2E', () => {
     await expect(svg.locator('.af-hub-g.off')).toHaveCount(4);
     await page.locator('.af-chip').filter({ hasText: /^全部$/ }).click();
     await expect(svg.locator('.af-hub-g.off')).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
+  test('⑨b 环向箭头：L1→L2 / L2→L3 / L3→L4 / L4→L5 四条，方向沿环顺序且贴轨道', async ({ page }) => {
+    const errors = collectErrors(page);
+    await page.goto(HOME);
+    const svg = page.locator('.af-graph');
+    await expect(svg).toBeVisible();
+
+    // 只补外圈相邻层的四条环向箭头；L5→L1 / L5→L6 不新增，避免与指向 L6 的辐条混淆
+    const arcs = svg.locator('path.af-ring-arc');
+    await expect(arcs).toHaveCount(4);
+    const ids = await arcs.evaluateAll((els) => els.map((e) => e.getAttribute('data-graph-ring')));
+    expect(ids).toEqual(['L1-L2', 'L2-L3', 'L3-L4', 'L4-L5']);
+
+    const ring = ['L1', 'L2', 'L3', 'L4', 'L5'];
+    const hub = (layer: string) => {
+      const i = ring.indexOf(layer);
+      const rad = (-90 + i * 72) * (Math.PI / 180);
+      return { x: 380 + 286 * Math.cos(rad), y: 176 + 122 * Math.sin(rad) };
+    };
+    const dist = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
+
+    for (let i = 0; i < 4; i += 1) {
+      const arc = arcs.nth(i);
+      const id = `L${i + 1}-L${i + 2}`;
+      const [from, to] = id.split('-');
+      // 箭头端点 = 目标层（方向沿环顺序）；箭头色/标记也落在目标层
+      await expect(arc).toHaveAttribute('marker-end', `url(#af-ring-arrow-${to})`);
+      const d = (await arc.getAttribute('d')) ?? '';
+      // 椭圆弧（rx=286 / ry=122）+ sweep=1 = 顺时针，即 L1→L2→L3→L4→L5 的环序
+      expect(d).toContain('A 286 122 0 0 1');
+      const m = d.match(/^M ([\d.]+) ([\d.]+) A [\d.]+ [\d.]+ [\d.]+ [\d.]+ [\d.]+ ([\d.]+) ([\d.]+)$/);
+      expect(m, `弧路径格式不符：${d}`).toBeTruthy();
+      const s = { x: Number(m![1]), y: Number(m![2]) };
+      const e = { x: Number(m![3]), y: Number(m![4]) };
+      expect(dist(s, hub(from)), `${id} 起点未贴近 ${from}`).toBeLessThan(dist(s, hub(to)));
+      expect(dist(e, hub(to)), `${id} 终点未贴近 ${to}（方向应沿环顺序）`).toBeLessThan(dist(e, hub(from)));
+    }
+
+    // 原配色不变：环向箭头沿用的仍是目标层主题令牌（L2..L5）
+    for (let i = 0; i < 4; i += 1) {
+      await expect(arcs.nth(i)).toHaveAttribute('stroke', `var(--c-l${i + 2})`);
+    }
+    expect(errors).toEqual([]);
+  });
+
+  test('⑩ 概览页页脚不再持有 HTTP/端口串（全应用唯一一份在壳层状态栏最右，见 shell.spec ⑰）', async ({ page }) => {
+    const errors = collectErrors(page);
+    await page.goto(HOME);
+    await expect(page.locator('[data-testid="overview-page"]')).toBeVisible();
+
+    const foot = page.locator('.af-foot');
+    await expect(foot).toContainText('audit.jsonl');
+    await expect(page.locator('[data-testid="overview-foot-source"]')).toContainText('数据来源');
+    // 端口 / HTTP 状态 / 登录串一律不在这里出现
+    await expect(foot).not.toContainText('HTTP');
+    await expect(foot).not.toContainText('home :');
+    await expect(foot).not.toContainText('onboard :');
+    await expect(foot).not.toContainText('mcp :');
+    await expect(foot).not.toContainText('webhook :');
+    await expect(page.locator('[data-testid="overview-health"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="overview-foot-right"]')).toHaveCount(0);
+    // 独立概览页里也不应出现壳层状态栏的那一份（唯一实例只在壳层）
+    await expect(page.locator('[data-testid="sb-endpoints"]')).toHaveCount(0);
     expect(errors).toEqual([]);
   });
 });

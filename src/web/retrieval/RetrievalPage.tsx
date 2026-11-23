@@ -171,26 +171,54 @@ export function RetrievalPage() {
       {/* 从审计页 ↗ 带 ?request_id= 跳来时，真查账本回放该链路；无参数不渲染 */}
       <AuditTrailCard search={typeof window === 'undefined' ? '' : window.location.search} />
 
-      <div className="ret-top">
-        <h1>检索</h1>
-        <span className="ret-sub">recall_memory 同源 · 令牌作用域 + 3000t 硬熔断 · 默认全部项目（逐项目真查后合并）</span>
-        <span className="ret-seg" role="tablist" aria-label="检索页标签">
-          {TABS.map((t) => (
-            <button
-              type="button"
-              key={t.id}
-              role="tab"
-              aria-selected={tab === t.id}
-              className={`ret-seg-item${tab === t.id ? ' active' : ''}`}
-              data-testid={`ret-tab-${t.id}`}
-              onClick={() => setTab(t.id)}
-            >
-              {t.label}
-              {t.id === 'history' && history.rows.length > 0 ? <span className="ret-tabnum">{history.rows.length}</span> : null}
-            </button>
-          ))}
-        </span>
+      {/* v5 页头（批次 B）：20px 标题 + tagline 胶囊 + 分隔符元信息行 + 右侧导出主操作 */}
+      <div className="p0-pagehead" data-testid="ret-head">
+        <div className="p0-ph-main">
+          <div className="p0-ph-title">
+            <h1>检索记忆</h1>
+            <span className="p0-tagline">recall_memory 同源 · 全部项目合并去重</span>
+          </div>
+          <div className="p0-ph-meta">
+            <span data-testid="ret-head-meta">
+              {phase === 'RESULT' && result
+                ? `命中 ${displayHits.length} 条`
+                : phase === 'LOADING'
+                  ? '召回中…'
+                  : phase === 'ERROR'
+                    ? '检索失败（真实错误，见下方面板）'
+                    : '尚未检索'}
+            </span>
+            <span className="p0-ph-sep" />
+            <span>{phase === 'RESULT' && result ? `用时 ${result.latency_ms} ms` : '运行一次真实检索后显示读数'}</span>
+            <span className="p0-ph-sep" />
+            <span>预算 {budgetView.budget_tokens}t</span>
+            <span className="p0-ph-sep" />
+            <span>令牌作用域 + 3000t 硬熔断</span>
+          </div>
+        </div>
+        <div className="p0-ph-actions">
+          {displayHits.length > 0 && (
+            <button type="button" className="p0-btn" data-testid="export-results" onClick={exportCsv}>导出 CSV</button>
+          )}
+        </div>
       </div>
+
+      <span className="ret-seg" role="tablist" aria-label="检索页标签">
+        {TABS.map((t) => (
+          <button
+            type="button"
+            key={t.id}
+            role="tab"
+            aria-selected={tab === t.id}
+            className={`ret-seg-item${tab === t.id ? ' active' : ''}`}
+            data-testid={`ret-tab-${t.id}`}
+            onClick={() => setTab(t.id)}
+          >
+            {t.label}
+            {t.id === 'history' && history.rows.length > 0 ? <span className="ret-tabnum">{history.rows.length}</span> : null}
+          </button>
+        ))}
+      </span>
 
       {tab === 'work' && (
         <>
@@ -252,11 +280,6 @@ export function RetrievalPage() {
                         ? `注入 ${result?.budget.injected_count ?? displayHits.length} 条 · 合并去重按 mem_id`
                         : '运行一次真实检索后显示召回结果'}
                   </span>
-                  {displayHits.length > 0 && (
-                    <span className="ret-sec-right">
-                      <button type="button" className="ret-linkbtn" data-testid="export-results" onClick={exportCsv}>导出 CSV</button>
-                    </span>
-                  )}
                 </div>
 
                 {loading && <div className="ret-empty">召回中…（真查内核账本）</div>}

@@ -4,6 +4,7 @@ import type { MemAgent } from '../../core/memagent/types.ts';
 import type { StorageBackend } from '../../core/memagent/types.ts';
 import { getKernel, getKernelStorage } from '../kernel.ts';
 import type { FeedbackDraft, FeedbackRecord } from './types.ts';
+import { isInternalPrefRow } from '../../core/memagent/paramsSnapshot.ts';
 
 function getStorage(): StorageBackend {
   return getKernelStorage();
@@ -38,7 +39,7 @@ export async function coreListMemoryOptions(): Promise<MemoryOption[]> {
   await getAgent();
   const mems = await getStorage().listMemories({});
   return mems
-    .filter((m) => !m.merged_into)
+    .filter((m) => !m.merged_into && !isInternalPrefRow(m))
     .map((m) => ({ id: m.mem_id, summary: (m.content_orig ?? m.content).slice(0, 60) }));
 }
 
@@ -69,4 +70,44 @@ export async function coreLoadFeedbackRecords(): Promise<FeedbackRecord[]> {
       created_at: new Date(a.ts).toISOString(),
     } satisfies FeedbackRecord;
   }).reverse(); // 新记录在前
+}
+
+/** 召回归显行（批次63）：字段全部来自内核 recall 审计真实 detail；null/占位文本由渲染层写明「账本未记录」，不伪造读数 */
+export interface RecallEchoRow {
+  request_id: string;
+  /** ISO 时间（由审计 ts 换算） */
+  created_at: string;
+  query: string;
+  /** 内核召回模式（auto / minimal / …；会话视图也记 auto） */
+  mode: string;
+  /** 命中数；审计无该字段时 null（渲染层写原因，不伪造 0） */
+  hits: number | null;
+  /** 调用方（批次15 client 字段；未识别时审计不写 → null，渲染层写原因） */
+  client: string | null;
+  injected_tokens: number | null;
+  saved_tokens: number | null;
+}
+
+/**
+ * 召回归显 = 内核审计账本中 action='recall' 的真实条目（接入 Agent 经 MCP recall_memory 调用落审计，
+ * 字段见 src/core/memagent/agent.ts 两处 audit(request_id, 'recall', …) 写入点）。
+ * 取最近 N≤20 条、新记录在前；空账本即空列表，绝不伪造行。
+ */
+export async function coreLoadRecallEchoes(limit = 20): Promise<RecallEchoRow[]> {
+  await getAgent();
+  const audits = await getStorage().queryAudit({ action: 'recall' });
+  const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  return audits.slice(-limit).reverse().map((a) => {
+    const d = a.detail as Record<string, unknown>;
+    return {
+      request_id: a.request_id,
+      created_at: new Date(a.ts).toISOString(),
+      query: typeof d.query === 'string' ? d.query : '（审计未记录）',
+      mode: typeof d.mode === 'string' ? d.mode : '（审计未记录）',
+      hits: num(d.hits),
+      client: typeof d.client === 'string' && d.client ? d.client : null,
+      injected_tokens: num(d.injected_tokens),
+      saved_tokens: num(d.saved_tokens),
+    } satisfies RecallEchoRow;
+  });
 }

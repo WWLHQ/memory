@@ -25,6 +25,7 @@ import type { RefineQueueSummary } from '../params/refineQueue.ts';
 import { agentOptionsFromLedger } from './options.ts';
 import { operationEntriesFromAudits, operationStatusFromAudits, type OperationEntry, type OperationStatus } from './operationState.ts';
 import { summarizeAgentUsage } from '../../core/memagent/agentUsage.ts';
+import { monitorValueText } from '../growth/recallLabels.ts';
 import { hostCall } from '../../desktop/hostBridge.ts';
 
 export type RealStorage = Pick<StorageBackend, 'listMemories' | 'queryAudit'>;
@@ -286,6 +287,108 @@ export function metricsFromLedger(
   ];
 }
 
+/* ---------- 批次49：六格汇总（af-g3 af-stat）真实派生；无口径值位「— 未采集」整串（含文字，不是裸「—」） ---------- */
+
+/** 六格汇总单格：k 主名 + sub 副名；v 主值（unit 走 em 小字）；d 说明行（mut=true 走 muted 色）。
+ * 批次51：tone 字段删除——数值一律墨色统一呈现，级别信号由说明行与「全部指标」小卡边框色承载 */
+export interface SummaryStat {
+  k: string;
+  sub: string;
+  v: string;
+  unit?: string;
+  d: string;
+  mut: boolean;
+}
+
+/** 未采集空态值：整串「— 未采集」（check-no-demo 禁裸「—」当值，故必须带文字） */
+const NO_SAMPLE = '— 未采集';
+
+function pctText(card: MetricCard | undefined): string {
+  if (!card || card.value === '未取数') return NO_SAMPLE;
+  return typeof card.value === 'number' ? `${card.value}%` : String(card.value);
+}
+
+/**
+ * 从最终 20 卡 + 记忆表 + 审计派生六格汇总（全部真实值，0 是真实健康态照显）：
+ * ① Agent 健康=连通成功率卡（拨测）② 补炼队列=精炼队列卡 pending ③ 冷存储=mems decay_class 计数
+ * ④ 人工审核=待裁决卡 ⑤ 检索 P95=24h 窗 recall latency_ms p95 ⑥ 今日召回=今日 recall 审计数。
+ */
+export function summaryFromLedger(
+  cards: MetricCard[], mems: Memory[], audits: AuditRecord[], now: number = Date.now(),
+): SummaryStat[] {
+  const of = (metric: string) => cards.find((c) => c.metric === metric);
+  const conn = of('连通成功率(5min)');
+  const circuit = of('熔断状态');
+  const refine = of('精炼队列');
+  const review = of('待裁决');
+  const overdue = of('超期 7d');
+
+  // ① Agent 健康（拨测）：连通率 + 熔断态说明；无拨测样本 → 未采集
+  const healthDetail = circuit && circuit.value !== '未取数'
+    ? `熔断 ${monitorValueText(circuit.value)}`
+    : '无拨测样本';
+  const health: SummaryStat = {
+    k: 'Agent 健康', sub: '拨测',
+    v: pctText(conn),
+    d: conn && conn.value !== '未取数' ? healthDetail : '无拨测样本',
+    mut: !conn || conn.value === '未取数',
+  };
+
+  // ② 补炼队列（pending）：0 是真实空队列
+  const pending = refine && refine.value !== '未取数' && typeof refine.value === 'number';
+  const refineStat: SummaryStat = pending && refine
+    ? {
+        k: '补炼队列', sub: 'pending',
+        v: String(refine.value),
+        d: refine.parts ? `成功 ${refine.parts.ok} · 失败 ${refine.parts.failed}` : '',
+        mut: false,
+      }
+    : { k: '补炼队列', sub: 'pending', v: NO_SAMPLE, d: '无主进程队列回执', mut: true };
+
+  // ③ 冷存储：cold+dormant 现存量行数；archived 归档另计（真实计数，0 也照显）
+  const coldDormant = mems.filter((m) => m.decay_class === 'cold' || m.decay_class === 'dormant').length;
+  const archived = mems.filter((m) => m.decay_class === 'archived').length;
+  const cold: SummaryStat = {
+    k: '冷存储', sub: 'cold+dormant',
+    v: String(coldDormant), unit: '行',
+    d: `归档 ${archived} 行另计`,
+    mut: false,
+  };
+
+  // ④ 人工审核（待办）：待裁决现存量；>0 琥珀强调；说明行带超期计数
+  const pendingReview = review && typeof review.value === 'number' ? review.value : null;
+  const overdueN = overdue && typeof overdue.value === 'number' ? overdue.value : null;
+  const reviewStat: SummaryStat = pendingReview === null
+    ? { k: '人工审核', sub: '待办', v: NO_SAMPLE, d: '无冲突裁决队列', mut: true }
+    : {
+        k: '人工审核', sub: '待办',
+        v: String(pendingReview),
+        d: `超期 7 天 ${overdueN ?? 0} 条`,
+        mut: false,
+      };
+
+  // ⑤ 检索 P95（24h）：recall latency_ms 分位数（独立于 1h 窗口卡，窗口按副名如实标 24h）
+  const recall24h = audits.filter((a) => a.action === 'recall' && within(a, DAY, now));
+  const latSamples = recall24h.map((a) => detailNum(a, 'latency_ms')).filter((v): v is number => v !== null);
+  const p95 = percentile(latSamples, 0.95);
+  const p95Stat: SummaryStat = p95 === null
+    ? { k: '检索 P95', sub: '24h', v: NO_SAMPLE, d: '24 小时内无召回记录', mut: true }
+    : { k: '检索 P95', sub: '24h', v: String(Math.round(p95)), unit: 'ms', d: `${latSamples.length} 次召回样本`, mut: false };
+
+  // ⑥ 今日召回：本地零点起的 recall 审计数（0 是真实「今天还没用过」）
+  const dayStart = new Date(now); dayStart.setHours(0, 0, 0, 0);
+  const todayRecalls = audits.filter((a) => a.action === 'recall' && typeof a.ts === 'number' && a.ts >= dayStart.getTime());
+  const withHits = todayRecalls.filter((a) => (detailNum(a, 'hits') ?? 0) > 0).length;
+  const today: SummaryStat = {
+    k: '今日召回', sub: 'recall 审计',
+    v: String(todayRecalls.length), unit: '次',
+    d: `${withHits} 次有命中`,
+    mut: false,
+  };
+
+  return [health, refineStat, cold, reviewStat, p95Stat, today];
+}
+
 /* ---------- 告警时间线：仅读真实账本 monitor_alert（不再灌种子告警） ---------- */
 
 /** 从真实账本读告警时间线（仅读，不写入；无告警 → 空数组，诚实空态） */
@@ -311,6 +414,8 @@ export interface RealMonitor {
   operations?: OperationStatus[];
   /** REQ-013 / C5（T6-A）：同上但带 action/标签/时间，供页面列明细（同一份派生） */
   operationEntries?: OperationEntry[];
+  /** 批次49：六格汇总（af-g3 af-stat），全部真实派生；空账本也有真实 0 / 未采集口径 */
+  summary?: SummaryStat[];
 }
 
 // 真实账本实算标记（供构建产物核验）
@@ -340,12 +445,15 @@ export async function loadRealMonitorData(): Promise<RealMonitor> {
   ]);
   const refineSummary: RefineQueueSummary | null = refine.ok ? refine.view?.summary ?? null : null;
   const now = Date.now();
+  const metrics = applyMonitorOps(applyMonitorStats(metricsFromLedger(mems, audits, now, refineSummary), mon), ops, now);
   return {
     available: mems.length > 0 || audits.length > 0,
     memCount: mems.length,
     auditCount: audits.length,
-    metrics: applyMonitorOps(applyMonitorStats(metricsFromLedger(mems, audits, now, refineSummary), mon), ops, now),
+    metrics,
     alerts,
+    // 批次49：六格汇总（从最终卡 + 记忆表 + 审计派生）
+    summary: summaryFromLedger(metrics, mems, audits, now),
     // 批次48 A25：选项只来自真实账本，空账本只留「全部」
     agentOptions: agentOptionsFromLedger(alerts, mems.map((m) => m.created_by_agent)),
     // REQ-013 / C5：从真实审计聚合后台操作状态（只读，不改落盘）；无相关审计 = 空数组诚实态

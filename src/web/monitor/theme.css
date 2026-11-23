@@ -1,54 +1,162 @@
-/* 监控仪表盘补充样式（亮暗令牌由 shared/p0.css 提供） */
+﻿/*
+ * 监控告警页样式（批次49 · STRATUM 1:1 复刻 · 设计真源 stratum-a-full.html pg-monitor 段）。
+ * af 基元度量抄自设计稿 CSS：af-stack/af-head/af-btn/af-panel/af-ph/af-pb/af-row/af-note/
+ * af-g3/af-chip/af-badge/af-select/af-det/af-stat/af-tl/af-empty/af-link/af-mono。
+ * 本 iframe 独立加载，令牌内嵌 .mon-page；深色由 html[data-theme="dark"] .mon-page 重定义。
+ * 批次49 起 p0-* 旧版式类清零（mgrid/mval/mparts/level 为指标卡布局辅助类，非版式类，按 af 度量保留）。
+ * 注意：CSS 块注释内不得出现「* /」连排字样。
+ */
 
-/* 指标卡：8 组，每组一卡容器 */
-.p0-mgroup { margin-bottom: 10px; }
-.mgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(196px, 1fr)); gap: 8px; margin-top: 6px; }
-.p0-mcard {
-  background: var(--chip); border: 1px solid var(--line); border-radius: 4px;
-  padding: 8px 9px; min-width: 0; display: flex; flex-direction: column; gap: 3px;
+.mon-page {
+  --bg: #F3F5F8; --surface: #FFFFFF; --surface2: #EDF1F6;
+  --ink: #0B1526; --muted: #5A6B82; --line: #DCE4EE;
+  --accent: #0088CC; --accent-ink: #FFFFFF; --accent-soft: rgba(0, 136, 204, .10);
+  --ok: #0E9F6E; --warn: #B45309; --bad: #DC2626;
+  --ok-soft: rgba(14, 159, 110, .10); --warn-soft: rgba(180, 83, 9, .10); --bad-soft: rgba(220, 38, 38, .10);
+  --r: 10px;
+  --sans: "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
 }
-.p0-mcard.crit { border-color: color-mix(in srgb, var(--err) 55%, var(--line)); background: color-mix(in srgb, var(--err) 8%, var(--win)); }
-.p0-mcard.warn { border-color: color-mix(in srgb, var(--warn) 55%, var(--line)); background: color-mix(in srgb, var(--warn) 8%, var(--win)); }
-.p0-mcard.empty { background: transparent; border-style: dashed; }
-.p0-mhead { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-/* 短名标题：允许换行不省略；右侧级别徽标不被挤压 */
-.p0-mhead .p0-note { flex: 1; min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; color: var(--text); font-size: 11.5px; }
-.p0-mhead .level { flex-shrink: 0; }
-.p0-mhint { color: var(--muted); font-size: 10.5px; line-height: 1.5; }
-.mparts { font-size: 13px; font-weight: 700; line-height: 1.5; }
+html[data-theme="dark"] .mon-page {
+  --bg: #060B16; --surface: #0C1424; --surface2: #101B30;
+  --ink: #E4EDF8; --muted: #8296B0; --line: #1B2A45;
+  --accent: #22D3EE; --accent-ink: #04222B; --accent-soft: rgba(34, 211, 238, .12);
+  --ok: #34D399; --warn: #FBBF24; --bad: #F87171;
+  --ok-soft: rgba(52, 211, 153, .12); --warn-soft: rgba(251, 191, 36, .12); --bad-soft: rgba(248, 113, 113, .12);
+}
+
+* { box-sizing: border-box; }
+.mon-page {
+  height: 100%; display: flex; flex-direction: column; min-height: 0;
+  background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 13px; line-height: 1.5;
+}
+.mon-scroll { flex: 1; min-height: 0; overflow: auto; }
+.mon-main { padding: 18px 20px 30px; min-width: 0; }
+.page > .af-stack, .mon-main > .af-stack { display: flex; flex-direction: column; gap: 14px; }
+.af-stack { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.af-mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+/* ── 页头（af-head：h1 18px/600 + sub 12px muted + right 右侧按钮区） ── */
+.af-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.af-head h1 { font-size: 18px; font-weight: 600; margin: 0; }
+.af-head .sub { color: var(--muted); font-size: 12px; }
+.af-head .right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+/* ── 按钮（af-btn：8px 圆角 6px 13px 12px/500；.sm=3px 9px 11px 6px 圆角） ── */
+.af-btn {
+  display: inline-block; border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  border-radius: 8px; padding: 6px 13px; font: inherit; font-size: 12px; font-weight: 500;
+  cursor: pointer; font-family: var(--sans); white-space: nowrap;
+}
+.af-btn:hover { border-color: var(--accent); color: var(--accent); }
+.af-btn:disabled { opacity: .45; cursor: not-allowed; }
+.af-btn.sm { padding: 3px 9px; font-size: 11px; border-radius: 6px; }
+.af-link { color: var(--accent); cursor: pointer; font-weight: 500; text-decoration: none; }
+.af-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+
+/* ── 面板骨架（af-panel 10px 圆角；af-ph 10px 14px 底边线 h3 13px/600 hint mono 11px 右侧；
+   af-pb 12px 14px；af-row flex 10px；af-note 11px muted） ── */
+.af-panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+.af-ph { display: flex; align-items: center; gap: 9px; padding: 10px 14px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.af-ph h3 { margin: 0; font-size: 13px; font-weight: 600; color: var(--ink); }
+.af-ph .hint { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.af-pb { padding: 12px 14px; }
+.af-note { font-size: 11px; color: var(--muted); line-height: 1.6; margin: 0; }
+.af-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; min-width: 0; }
+
+/* ── 三列卡区（af-g3：repeat(3,1fr) gap 14px） ── */
+.af-g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; align-items: start; }
+.af-g3 > * { min-width: 0; }
+
+/* ── 筛选基元（af-select surface2 底 7px 圆角；af-chip mono 11px 20px 圆角胶囊，.on=accent） ── */
+.af-select {
+  background: var(--surface2); border: 1px solid var(--line); border-radius: 7px;
+  color: var(--ink); font-family: var(--sans); font-size: 12px; padding: 6px 10px;
+}
+.af-select:focus { outline: 1px solid var(--accent); }
+.af-chip {
+  display: inline-block; font-family: var(--mono); font-size: 11px; border: 1px solid var(--line);
+  border-radius: 20px; padding: 2px 9px; color: var(--muted); cursor: pointer; background: var(--surface);
+}
+.af-chip.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+button.af-chip { font: inherit; font-family: var(--mono); }
+
+/* ── 徽标（af-badge mono 11px 4px 圆角 1px 7px 同色系） ── */
+.af-badge {
+  display: inline-block; font-size: 11px; font-family: var(--mono); border-radius: 4px;
+  border: 1px solid var(--line); padding: 1px 7px; color: var(--muted); white-space: nowrap;
+}
+.af-badge.ok { color: var(--ok); border-color: var(--ok); background: var(--ok-soft); }
+.af-badge.warn { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+.af-badge.bad { color: var(--bad); border-color: var(--bad); background: var(--bad-soft); }
+.af-badge.acc { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+
+/* ── 六格汇总（af-stat：padding 12px 14px；.k 11px muted space-between；.v mono 24px/600 -.02em
+   em 单位 12px muted；.d 11px ok 色，.d.mut=muted） ── */
+.af-stat { padding: 12px 14px; }
+.af-stat .k { font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; gap: 6px; }
+/* 批次52 方向纠偏（用户拍板「里面的卡片对齐外面的」）：数值回归设计稿 24px/600 mono，em 12px */
+.af-stat .v { font-family: var(--mono); font-size: 24px; font-weight: 600; margin-top: 3px; letter-spacing: -.02em; color: var(--ink); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.af-stat .v em { font-style: normal; font-size: 12px; color: var(--muted); font-weight: 400; }
+.af-stat .d { font-size: 11px; margin-top: 2px; color: var(--ok); }
+.af-stat .d.mut { color: var(--muted); }
+
+/* ── 折叠（af-det 7px 圆角 1px 边；summary 7px 10px 12px/500；det-b 8px 10px 顶部线） ── */
+.af-det { border: 1px solid var(--line); border-radius: 7px; background: var(--surface); }
+.af-det summary { padding: 7px 10px; font-size: 12px; cursor: pointer; font-weight: 500; list-style-position: inside; color: var(--ink); }
+.af-det .det-b { padding: 8px 10px; border-top: 1px solid var(--line); }
+
+/* ── 告警时间线（af-tl 纵列；.ti flex 10px 9px 14px 左边 2px 左缩 14px 12px 字；
+   .tm mono 11px muted 宽 52px；.ti.err 边 bad、.ti.wrn 边 warn、默认 line） ── */
+.af-tl { display: flex; flex-direction: column; }
+.af-tl .ti { display: flex; gap: 10px; padding: 9px 14px; border-left: 2px solid var(--line); margin-left: 14px; font-size: 12px; }
+.af-tl .ti .tm { font-family: var(--mono); font-size: 11px; color: var(--muted); flex: none; width: 52px; }
+.af-tl .ti.err { border-left-color: var(--bad); }
+.af-tl .ti.wrn { border-left-color: var(--warn); }
+.af-tl .ti b { font-weight: 600; }
+
+/* ── 空态（af-empty：22px 14px 居中 muted） ── */
+.af-empty { padding: 22px 14px; text-align: center; color: var(--muted); font-size: 12px; }
+.af-empty b { color: var(--ink); display: block; margin-bottom: 4px; }
+
+/* ── 列表行（af-li：7px 14px 12px；.nm 500；.ds muted 11px；.rt mono 右侧） ── */
+.af-li { display: flex; align-items: center; gap: 9px; padding: 7px 14px; font-size: 12px; }
+.af-li + .af-li { border-top: 1px solid var(--line); }
+.af-li .nm { font-weight: 500; }
+.af-li .ds { color: var(--muted); font-size: 11px; }
+.af-li .rt { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: nowrap; }
+
+/* ── 指标卡布局辅助（全部指标折叠内：mgrid 自适应栅格；mon-mcard 级别染边；
+   .mval 24px mono 600；empty 虚线卡；这些是本页独有辅助类，度量按 af 令牌取值） ── */
+.mgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(196px, 1fr)); gap: 8px; margin-top: 6px; }
+/* 批次52 统一规格（用户拍板「里面的卡片对齐外面的」）：容器规格沿用批次51——surface 底 + line 边 +
+   10px 圆角 + padding 12px 14px；级别只染边框不染整卡底；标题/说明 11px muted；数值对齐六格 af-stat 的 24px/600 mono ink */
+.mon-mcard {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+  padding: 12px 14px; min-width: 0; display: flex; flex-direction: column; gap: 3px;
+}
+.mon-mcard.crit { border-color: color-mix(in srgb, var(--bad) 55%, var(--line)); }
+.mon-mcard.warn { border-color: color-mix(in srgb, var(--warn) 55%, var(--line)); }
+.mon-mcard.empty { background: transparent; border-style: dashed; }
+.mon-mhead { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.mon-mhead .af-note { flex: 1; min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; color: var(--muted); font-size: 11px; }
+.mon-mhint { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.mon-mfoot { display: flex; align-items: center; justify-content: space-between; gap: 6px; flex-wrap: wrap; }
+.mon-mfoot .af-note { font-size: 11px; }
+.mparts { line-height: 1.5; }
 .mval {
-  font: 700 19px/1.25 var(--mono); color: var(--text); font-variant-numeric: tabular-nums;
+  font: 600 24px/1.25 var(--mono); color: var(--ink); font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
 }
-.mval.empty { color: var(--faint); font-size: 16px; }
-.p0-mfoot { display: flex; align-items: center; justify-content: space-between; gap: 6px; flex-wrap: wrap; }
-.p0-mfoot .p0-note { font-size: 10px; }
+.mval.empty { color: var(--muted); font-size: 13px; font-weight: 500; }
 .level { font-size: 12px; line-height: 1; }
-.level.crit { color: var(--err); }
+.level.crit { color: var(--bad); }
 .level.warn { color: var(--warn); }
 .level.ok { color: var(--ok); }
-.level.empty { color: var(--faint); font-size: 10.5px; }
+.level.empty { color: var(--muted); font-size: 10.5px; }
 
-/* 告警时间轴：左侧竖轴 + 级别色 */
-.p0-tl { list-style: none; margin: 8px 0 0; padding: 0 0 0 14px; position: relative; }
-.p0-tl::before {
-  content: ''; position: absolute; left: 4px; top: 2px; bottom: 2px;
-  width: 2px; background: var(--line);
+/* ── 响应式：≤900 三列卡区→单列（布局适配，非版式偏差） ── */
+@media (max-width: 900px) {
+  .af-g3 { grid-template-columns: 1fr; }
+  .mon-main { padding: 14px 16px 20px; }
 }
-.p0-tl-item {
-  position: relative; padding: 7px 0 8px 6px; border-bottom: 1px solid var(--line-2);
-  border-left: 3px solid var(--line); margin-left: -2px;
-}
-.p0-tl-item:last-child { border-bottom: 0; }
-.p0-tl-item.crit { border-left-color: var(--err); }
-.p0-tl-item.warn { border-left-color: var(--warn); }
-.p0-tl-dot {
-  position: absolute; left: -16px; top: 10px; width: 8px; height: 8px; border-radius: 50%;
-  background: var(--line); box-shadow: 0 0 0 2px var(--win);
-}
-.p0-tl-item.crit .p0-tl-dot { background: var(--err); }
-.p0-tl-item.warn .p0-tl-dot { background: var(--warn); }
-.p0-tl-body { min-width: 0; display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; }
-.p0-tl-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--muted); font-size: 10.5px; }
-.p0-tl-meta a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
-.p0-tl-meta a.p0-btn { text-decoration: none; color: var(--text); }

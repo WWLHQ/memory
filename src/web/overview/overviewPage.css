@@ -192,6 +192,12 @@ html[data-theme="dark"] .af-hub-core { filter: drop-shadow(0 6px 18px rgba(0, 0,
 .af-foot { display: flex; gap: 16px; font-family: var(--mono); font-size: 11px; color: var(--muted); padding: 2px 4px; flex-wrap: wrap; }
 .af-foot .ok { color: var(--ok); }
 .af-foot .bad { color: var(--bad); }
+/* 健康/登录/端口串整体贴状态栏最右端（其余状态格留在左侧） */
+.af-foot .af-foot-right { margin-left: auto; display: inline-flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.af-foot .af-health { font-weight: 600; white-space: nowrap; }
+.af-foot .af-health.online { color: var(--ok); }
+.af-foot .af-health.offline { color: var(--bad); }
+.af-foot .af-health.unknown { color: var(--muted); }
 
 /* ── 响应式：壳层中心区实宽 ≈ 702px 时双栏保持并排、中段右栏收窄；
    变窄时四卡→两卡、双栏→单栏、层级六格→三格（布局适配，非版式偏差）。 */
@@ -211,4 +217,26 @@ html[data-theme="dark"] .af-hub-core { filter: drop-shadow(0 6px 18px rgba(0, 0,
 @media (max-width: 480px) {
   .af-g4 { grid-template-columns: 1fr; }
   .hmx { padding: 14px 16px 20px; }
+}
+
+/* 首页就地解锁弹窗（2026-11-22）：点一次「去解锁」直接出框，不再先跳安全页。
+   复用安全页同一 L0WriteUnlock；深浅主题都取 .ov-page 令牌，不写死底色。 */
+.ov-modal-mask {
+  position: fixed; inset: 0; z-index: 90;
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 8vh 16px 20px; overflow: auto;
+  background: rgba(4, 10, 20, .46);
+}
+.ov-modal {
+  width: min(520px, 100%);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, .30);
+  padding: 14px 16px 16px;
+}
+.ov-modal-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 10px;
+  color: var(--ink); font-size: 14px;
 }
