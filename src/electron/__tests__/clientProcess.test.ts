@@ -1,6 +1,6 @@
 // T6 · 桌面客户端运行态匹配（纯函数，不依赖真实进程表）
 import { describe, expect, it } from 'vitest';
-import { CLIENT_PROCESS_NAMES, matchRunningClients } from '../clientProcess.ts';
+import { CLIENT_PROCESS_NAMES, matchRunningClients, probeRunningClients, resetProcessCache } from '../clientProcess.ts';
 
 describe('T6 · matchRunningClients', () => {
   it('进程表里出现 WorkBuddy.exe → workbuddy 已启动、qoder 未启动', () => {
@@ -37,5 +37,31 @@ describe('T6 · matchRunningClients', () => {
     expect(Object.keys(CLIENT_PROCESS_NAMES).sort()).toEqual(
       ['claude-code', 'codex', 'cursor', 'deepseek-harness', 'qoder-cn', 'trae-cn', 'workbuddy', 'zcode'],
     );
+  });
+});
+
+// 2026-11-22 启动提速：tasklist 同步耗时约 0.5s，10s 内复用缓存；空表不缓存（下次重试）。
+describe('T6 · probeRunningClients 进程表缓存', () => {
+  it('10s 内重复探测只调一次进程表；过期后重新探测', () => {
+    resetProcessCache();
+    let calls = 0;
+    const lister = () => { calls += 1; return ['WorkBuddy.exe']; };
+    expect(probeRunningClients({ now: 1_000, lister }).workbuddy).toBe(true);
+    expect(probeRunningClients({ now: 5_000 }).workbuddy).toBe(true);
+    expect(probeRunningClients({ now: 10_999 }).workbuddy).toBe(true);
+    expect(calls).toBe(1);
+    probeRunningClients({ now: 12_000, lister });
+    expect(calls).toBe(2);
+    resetProcessCache();
+  });
+
+  it('空表（tasklist 失败）不缓存，下次照常重试', () => {
+    resetProcessCache();
+    let calls = 0;
+    const lister = () => { calls += 1; return []; };
+    expect(probeRunningClients({ now: 1_000, lister })).toEqual({});
+    expect(probeRunningClients({ now: 2_000, lister })).toEqual({});
+    expect(calls).toBe(2);
+    resetProcessCache();
   });
 });

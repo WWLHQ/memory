@@ -84,7 +84,7 @@ export async function loadMcpSwitchBrief(): Promise<DockResult<McpSwitchBrief>> 
   try {
     const r = await hostCall<{
       clients?: Array<{ id: string; name?: string; disabled?: boolean }>;
-    }>('mcp:clients', [currentSessionId()]);
+    }>('mcp:clients', [currentSessionId(), { fast: true }]);
     if (!Array.isArray(r?.clients)) {
       return { status: 'error', detail: '主进程未返回客户端列表（开关状态不可读）' };
     }

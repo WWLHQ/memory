@@ -47,9 +47,28 @@ export function listProcessNames(): string[] {
   }
 }
 
+/**
+ * 进程表缓存（2026-11-22 启动提速）：tasklist 是同步子进程，实测单次约 0.45–0.5s，
+ * 会卡住主进程事件循环，连状态栏的 L0 读数也被排队（表现为「L0 读取中」迟迟不消失）。
+ * 运行态只用于展示，10s 内的结果足够准；失败（空表）不缓存，下次照常重试。
+ */
+const PROCESS_CACHE_MS = 10_000;
+let processCache: { at: number; value: Record<string, boolean> } | null = null;
+
 /** 探测桌面客户端运行态（仅主进程用）；失败返回 {} → UI 不显示运行态。 */
-export function probeRunningClients(): Record<string, boolean> {
-  const names = listProcessNames();
+export function probeRunningClients(opts: { now?: number; lister?: () => string[] } = {}): Record<string, boolean> {
+  const now = opts.now ?? Date.now();
+  if (!opts.lister && processCache && now - processCache.at < PROCESS_CACHE_MS) {
+    return processCache.value;
+  }
+  const names = (opts.lister ?? listProcessNames)();
   if (names.length === 0) return {};
-  return matchRunningClients(names);
+  const value = matchRunningClients(names);
+  processCache = { at: now, value };
+  return value;
+}
+
+/** 测试用：清空进程表缓存 */
+export function resetProcessCache(): void {
+  processCache = null;
 }

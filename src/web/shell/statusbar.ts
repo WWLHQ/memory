@@ -102,15 +102,22 @@ export async function loadCollectorStatus(): Promise<DockResult<CollectorView>> 
   }
 }
 
-export async function loadStatusbar(): Promise<StatusSnapshot> {
-  const [location, l0, l0Write, collector] = await Promise.all([
-    storageLocation()
-      .then((v): DockResult<StoragePlaceView> => ({ status: 'ok', view: v }))
-      .catch((e): DockResult<StoragePlaceView> => ({ status: 'error', detail: errText(e) })),
-    loadL0Status(),
-    loadL0Write(),
-    loadCollectorStatus(),
-  ]);
+/** 单格先到先显示（2026-11-22）：四路互不等待，某一格慢不再让「L0 读取中」陪着一起转。 */
+export type StatusbarPart =
+  | { location: DockResult<StoragePlaceView> }
+  | { l0: DockResult<L0VaultStatus> }
+  | { l0Write: DockResult<L0WriteView> }
+  | { collector: DockResult<CollectorView> };
+
+export async function loadStatusbar(onPart?: (p: StatusbarPart) => void): Promise<StatusSnapshot> {
+  const locationP = storageLocation()
+    .then((v): DockResult<StoragePlaceView> => ({ status: 'ok', view: v }))
+    .catch((e): DockResult<StoragePlaceView> => ({ status: 'error', detail: errText(e) }))
+    .then((r) => { onPart?.({ location: r }); return r; });
+  const l0P = loadL0Status().then((r) => { onPart?.({ l0: r }); return r; });
+  const l0WriteP = loadL0Write().then((r) => { onPart?.({ l0Write: r }); return r; });
+  const collectorP = loadCollectorStatus().then((r) => { onPart?.({ collector: r }); return r; });
+  const [location, l0, l0Write, collector] = await Promise.all([locationP, l0P, l0WriteP, collectorP]);
   return { location, l0, l0Write, collector };
 }
 

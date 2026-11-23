@@ -91,7 +91,8 @@ const ownerBindings = {
 
 // MCP 客户端接入桥（批次15）：状态扫描需登录会话（批次27 P3-4）；含令牌片段/一键写入需管理员（主进程按 sessionId 校验）
 const mcpClients = {
-  list: (sessionId?: string | null) => ipcRenderer.invoke(IPC.mcpClients, sessionId),
+  // opts.fast=true：首页快读，跳过同步 tasklist 与逐客户端实测探活（2026-11-22 启动提速）
+  list: (sessionId?: string | null, opts?: { fast?: boolean }) => ipcRenderer.invoke(IPC.mcpClients, sessionId, opts),
   snippet: (id: string, sessionId?: string | null) =>
     ipcRenderer.invoke(IPC.mcpClientSnippet, id, sessionId) as Promise<{ ok: boolean; snippet?: string; error?: string }>,
   wire: (id: string, sessionId?: string | null) =>
@@ -379,8 +380,9 @@ const rulesRejudge = {
 // 存量字段回填桥（批次41-T）：预览需会话、执行仅管理员，**没有逐字口令**——
 // 本桥不删行、不改正文、不动层级/version，只把历史行缺失的 sha256 / 向量补上（执行前仍强制备份）。
 const ledgerFields = {
-  preview: (sessionId?: string | null) => ipcRenderer.invoke(IPC.ledgerFieldsPreview, sessionId),
-  run: (sessionId?: string | null) => ipcRenderer.invoke(IPC.ledgerFieldsBackfill, sessionId),
+  // REQ-014 C6-B：fields 可选，缺省只补历史两字段（守恒）；显式含 source_excerpt 才补原文摘录。
+  preview: (sessionId?: string | null, fields?: unknown) => ipcRenderer.invoke(IPC.ledgerFieldsPreview, sessionId, fields),
+  run: (sessionId?: string | null, fields?: unknown) => ipcRenderer.invoke(IPC.ledgerFieldsBackfill, sessionId, fields),
 };
 
 // 批次39：L2–L6 后台补炼队列桥。状态只读需会话；开关/补炼存量/重试失败行仅管理员。

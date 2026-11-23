@@ -84,6 +84,28 @@ describe('loadStatusbar', () => {
     expect(s.l0.status).toBe('error');
     expect(s.collector.status).toBe('ok');
   });
+
+  it('单格先到先显示：慢的采集器不再拖住账本位置/L0（2026-11-22 启动提速）', async () => {
+    vi.mocked(hostCapability).mockReturnValue('native');
+    vi.mocked(storageLocation).mockResolvedValue({ kind: 'file', path: 'C:\\data\\memories.db.json', source: 'ipc' });
+    vi.mocked(getKernel).mockReturnValue({ l0Status: vi.fn(async () => L0) } as unknown as ReturnType<typeof getKernel>);
+    let release!: (v: unknown) => void;
+    const slow = new Promise((r) => { release = r; });
+    vi.mocked(hostCall).mockImplementation((channel: string) => (
+      channel === 'collector:status' ? slow as never : Promise.resolve({ ok: true, unlocked: true, pending: 0 })
+    ));
+    const parts: string[] = [];
+    const pending = loadStatusbar((p) => parts.push(Object.keys(p)[0]));
+    await new Promise((r) => setTimeout(r, 0));
+    // 采集器还没回，但账本位置/L0 已先显示，不需要一起转「读取中」
+    expect(parts).toContain('location');
+    expect(parts).toContain('l0');
+    expect(parts).not.toContain('collector');
+    release({ ok: true, running: true, intervalMs: 30000, last: null });
+    const s = await pending;
+    expect(s.collector.status).toBe('ok');
+    expect(parts).toContain('collector');
+  });
 });
 
 describe('shortLocation', () => {

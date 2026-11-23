@@ -12,7 +12,6 @@ import { homeBaseUrl } from '../backend.ts';
 import { hasActiveSession } from '../Home/crossTabAuth.ts';
 import { getHomeFeed, emptySync } from '../Home/coreHome.ts';
 import { emptyLayerGraph, type LayerGraph } from '../Home/layerGraph.ts';
-import { FULL_BUDGET } from '../AgentOnboard/coreOnboard.ts';
 import type { RawHomeFeed } from '../../home/dashboard.ts';
 import { getKernelStorage } from '../kernel.ts';
 import { currentSessionId } from '../shared/session.ts';
@@ -71,14 +70,14 @@ export interface OverviewTodayPanel {
   error: string | null;
 }
 
-/** TOKEN 节省率（今日召回 payload 相对 2.4.1 全量预算 FULL_BUDGET；sparkline 取近 N 次 payload） */
+/** TOKEN 节省率（今日召回真实省量 ÷（省量 + 注入）；sparkline 取近 N 次 payload） */
 export interface OverviewTokenPanel {
   ok: boolean;
-  /** 今日平均 payload 相对 FULL_BUDGET 的节省比例（0–100）；无今日召回为 null */
+  /** 今日省量占「省量 + 注入」的比例（0–100）；无今日召回或旧账无省量字段为 null（未采样） */
   savedPct: number | null;
   /** 今日召回次数 */
   recallCount: number;
-  /** 今日累计相对 FULL_BUDGET 基线省下的 token */
+  /** 今日召回累计真实省量 token（只累加带 saved_tokens 的采样记录） */
   savedTokens: number;
   /** 近 N 次召回 payload_tokens 序列（倒序取末尾，供 sparkline 画真实曲线） */
   series: number[];
@@ -139,6 +138,11 @@ export interface OverviewL0Write {
   available: boolean;
   unlocked: boolean;
   detail: string | null;
+  /**
+   * true = 只是启动冷启时探针超时（内核首次装载账本/探针尚未就绪），后台仍会重试；
+   * 页面按「暂不可读」静默处理，不弹「重读」打扰用户（2026-11-22 用户要求）。
+   */
+  transient?: boolean;
 }
 
 export interface OverviewSnapshot {
@@ -314,14 +318,28 @@ async function loadAuditPanels(recentLimit: number): Promise<{
       filtered: writeRec.filter((a) => asRecord(a.detail).action === 'filtered_l0_to_l1').length,
       error: null,
     };
-    // TOKEN 节省率：今日召回 payload_tokens vs FULL_BUDGET（2.4.1）；sparkline 取今日召回倒序 payload
+    // TOKEN 节省率：今日召回真实省量 ÷（省量 + 注入），与成本节省同源；旧账无省量字段 → 未采样。
+    // sparkline 仍取今日召回倒序 payload_tokens（真实序列，用于看注入量走势）。
     const payloads = recallToday
       .map((a) => Number(asRecord(a.detail).payload_tokens))
       .filter((n) => Number.isFinite(n) && n >= 0);
     const series = [...payloads].reverse().slice(-12);
-    const avg = payloads.length ? payloads.reduce((s, n) => s + n, 0) / payloads.length : 0;
-    const savedPct = payloads.length > 0 ? Math.max(0, Math.round((1 - avg / FULL_BUDGET) * 100)) : null;
-    const savedTokens = payloads.reduce((s, n) => s + Math.max(0, FULL_BUDGET - n), 0);
+    let sampledSaved = 0;
+    let sampledInjected = 0;
+    let samples = 0;
+    for (const a of recallToday) {
+      const d = asRecord(a.detail);
+      const saved = Number(d.saved_tokens);
+      const injected = Number(d.injected_tokens ?? d.payload_tokens);
+      if (Number.isFinite(saved) && saved >= 0 && Number.isFinite(injected) && injected >= 0) {
+        samples++;
+        sampledSaved += saved;
+        sampledInjected += injected;
+      }
+    }
+    const denom = sampledSaved + sampledInjected;
+    const savedPct = samples > 0 && denom > 0 ? Math.round((sampledSaved / denom) * 100) : null;
+    const savedTokens = Math.round(sampledSaved);
     const token: OverviewTokenPanel = {
       ok: true,
       savedPct,
@@ -362,7 +380,8 @@ export async function loadMcpPanel(sid: string | null): Promise<OverviewMcpPanel
     return { ok: false, available: false, endpoint: null, clients: [], error: '非桌面壳：无法读取本机 MCP 客户端配置' };
   }
   try {
-    const r = await hostCall<McpScanReply>('mcp:clients', [sid]);
+    // fast=true：首页卡只看配置面，跳过 tasklist 与逐客户端实测探活（接管耗时最坏数秒的同步/网络操作）。
+    const r = await hostCall<McpScanReply>('mcp:clients', [sid, { fast: true }]);
     const clients = (r.clients ?? [])
       .filter((c) => c.installed !== false)
       .map((c) => ({
@@ -412,6 +431,26 @@ async function loadDataRoot(): Promise<OverviewDataRoot> {
   return r.ok ? { available: true, root: r.info.root, error: null } : { available: true, root: null, error: r.error };
 }
 
+/** 写锁探针的等待上限：它只决定首页 L0 红条，不该拖住整页读数。
+ *  浏览器同源 iframe 若无父窗口桥，内核写锁三级降级 + pending 计数会串行吃满多次 3s 探测窗口，
+ *  整页会长时间停在「正在读取…」；超时即按「读不到」如实降级，其余面板照常渲染。 */
+const L0_WRITE_PROBE_TIMEOUT_MS = 2500;
+
+async function loadL0WriteBounded(): Promise<Awaited<ReturnType<typeof loadL0Write>>> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timedOut = new Promise<Awaited<ReturnType<typeof loadL0Write>>>((resolve) => {
+    timer = setTimeout(
+      () => resolve({ status: 'unavailable', detail: '写锁状态读取超时（不阻塞首页其它读数）' }),
+      L0_WRITE_PROBE_TIMEOUT_MS,
+    );
+  });
+  try {
+    return await Promise.race([loadL0Write(), timedOut]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 /** 真实加载：所有来源并行，任一失败都只影响自身字段，不影响其它读数 */
 export async function loadOverview(): Promise<OverviewSnapshot> {
   const session = hasActiveSession();
@@ -443,7 +482,7 @@ export async function loadOverview(): Promise<OverviewSnapshot> {
     loadMcpPanel(sid),
     loadEnginePanel(sid),
     loadDataRoot(),
-    loadL0Write(),
+    loadL0WriteBounded(),
   ]);
 
   const f = feed as typeof feed & {
@@ -479,6 +518,12 @@ export async function loadOverview(): Promise<OverviewSnapshot> {
     // 不再从 requireAdmin 的 l0Status 里取，否则成员会被误报「读不到写锁」。
     l0Write: l0WriteGuard.status === 'ok'
       ? { available: true, unlocked: l0WriteGuard.view.unlocked, detail: null }
-      : { available: false, unlocked: false, detail: 'detail' in l0WriteGuard ? l0WriteGuard.detail : null },
+      : {
+        available: false,
+        unlocked: false,
+        detail: 'detail' in l0WriteGuard ? l0WriteGuard.detail : null,
+        // 仅「超时」属于启动期的暂态：不当作告警，页面静默后台重试
+        transient: ('detail' in l0WriteGuard ? String(l0WriteGuard.detail ?? '') : '').includes('超时'),
+      },
   };
 }

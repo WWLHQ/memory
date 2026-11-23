@@ -1,4 +1,4 @@
-﻿import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, powerMonitor, session, shell, Tray } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, powerMonitor, session, shell, Tray } from 'electron';
 process.on('uncaughtException', (err) => {
   console.error('[uncaught]', err?.message, err?.stack);
 });
@@ -421,7 +421,11 @@ function isWizardIncomplete(): boolean {
 function mainWindowUrl(staticPort: number, wizardFirst: boolean): string {
   const origin = `http://127.0.0.1:${staticPort}`;
   if (wizardFirst) return `${origin}/setup.html`;
-  return `${origin}/workspace.html?backend=${origin}:${MIRROR_PORT}&agentBackend=${origin}:${AGENT_ONBOARD_PORT}`;
+  // 2026-11-22 修复：backend 必须给「镜像服务的完整 origin」，不能再拼一次静态端口
+  // （旧值 http://127.0.0.1:<静态端口>:8201 不是合法 URL，页面每次都报 backend_param_rejected 再兜底）。
+  const backend = `http://127.0.0.1:${MIRROR_PORT}`;
+  const agentBackend = `http://127.0.0.1:${AGENT_ONBOARD_PORT}`;
+  return `${origin}/workspace.html?backend=${backend}&agentBackend=${agentBackend}`;
 }
 
 /**
@@ -1108,10 +1112,14 @@ function registerMcpClientsIpc(token: string): void {
       endpoint: MCP_ENDPOINT,
     };
   };
-  handleIpc(IPC.mcpClients, async (_e, sessionId?: string) => {
+  handleIpc(IPC.mcpClients, async (_e, sessionId?: string, opts?: { fast?: boolean }) => {
     // ②本地诊断：MCP 客户端配置扫描只读本机文件（配置路径/开关/运行态），不涉及账号或租户数据，
     // 因此不再要求登录——登录前也能看开关状态（此前重启后未登录会显示「未知」）。审计证据取不到则退回纯文件口径。
     void sessionId;
+    // 2026-11-22 首页快读：首页「MCP 接入」卡只读配置面（路径/开关/证据），不展示运行态与实测连通。
+    // fast=true 跳过 tasklist（同步子进程，实测 0.45–0.5s）与逐客户端 tools/list 探活（最坏数秒），
+    // 避免首页首次读数被这两项拖住；「MCP 接入」页仍走完整扫描，数据不缩水。
+    const fast = opts?.fast === true;
     // 批次30：召回审计作为接入证据（Zcode 等配置存应用内部的客户端文件扫不到，但真实调用可证明接通）；
     // 审计读不到时退回纯文件扫描，不影响扫描本身。
     let recallEvidence: Parameters<typeof applyRecallEvidence>[1] = [];
@@ -1121,15 +1129,18 @@ function registerMcpClientsIpc(token: string): void {
       }));
     } catch { /* 证据不可用 → 纯文件口径 */ }
     const scan = scanMcpClients({ currentToken: token, recallEvidence });
-    // T6：附上桌面客户端软件运行态（CLI 客户端无稳定进程 → 不给值，UI 不显示）
-    const running = probeRunningClients();
-    for (const c of scan.clients) {
-      if (running[c.id] !== undefined) c.running = running[c.id];
+    // T6：附上桌面客户端软件运行态（CLI 客户端无稳定进程 → 不给值，UI 不显示）。首页快读不需要。
+    if (!fast) {
+      const running = probeRunningClients();
+      for (const c of scan.clients) {
+        if (running[c.id] !== undefined) c.running = running[c.id];
+      }
     }
     // 2026-11-18「实测连通」：拿**每个客户端配置里的令牌**真调一次 tools/list，用状态码说话。
     // 为什么必须实测：令牌轮换后 6 个客户端全 401，而 state 是读配置推的、页面照样全绿（当天真实事故）。
     // 同令牌只探一次（多数客户端共用一份），无文件面的客户端不探、如实留空。只读探活，令牌绝不进日志。
     try {
+      if (fast) return scan;
       // stdio 客户端配置里没有令牌可读——但它用的就是**当前令牌**（桥接脚本现读同一份 keys/mcp-token.txt），
       // 所以对它们用现役令牌实测才等价于「它启动后能不能调通」；http 客户端仍只认它自己配置里的那份。
       const stdioIds = new Set(scan.clients.filter((c) => c.transport === 'stdio').map((c) => c.id));
@@ -1354,11 +1365,12 @@ function l0Fail(e: unknown): { ok: false; code: string; error: string } {
 }
 
 /** 任意登录会话闸门（L0 申请/解锁/心跳/结束；不要求管理员） */
-function requireSession(sessionId: unknown, channel: string): AdminGate {
+function requireSession(sessionId: unknown, channel: string, level: 'warn' | 'info' = 'warn'): AdminGate {
   const sid = typeof sessionId === 'string' ? sessionId.trim() : '';
   const ctx = sid ? homeServerRef?.getSessionContext(sid) ?? null : null;
   if (!ctx) {
-    actionLog('ipc', channel, { denied: 'no_session' }, { level: 'warn' });
+    // 未登录是预期状态，不是故障：轮询类只读接口用 info 记账，不再每 10s 往「问题」面板灌一条警告。
+    actionLog('ipc', channel, { denied: 'no_session' }, { level });
     return { ok: false, code: 'E_AUTH_SESSION', error: '需要登录后操作（会话已过期或未登录）' };
   }
   return { ok: true, ctx };
@@ -2332,7 +2344,8 @@ function registerRefineIpc(): void {
     engine: { loaded: Boolean(llmGateway), usable: Boolean(llmGateway?.usable()) },
   });
   handleIpc(IPC.refineState, async (_e, sessionId?: string) => {
-    const gate = requireSession(sessionId, IPC.refineState);
+    // 首页每 10s 轮询一次；未登录时按 info 记账（预期状态），避免「问题」面板堆满 no_session 警告。
+    const gate = requireSession(sessionId, IPC.refineState, 'info');
     if (!gate.ok) return { ok: false, error: gate.error };
     if (!refineQueueDir) return { ok: false, error: '补炼队列还没就绪（主进程启动中或数据根不可写）' };
     try {
@@ -3694,7 +3707,10 @@ async function bootstrap(): Promise<void> {
   registerLlmIpc();
   // 批次39：写入只落 L0+L1，深层由这条后台队列补炼（存量启动即入队，幂等；引擎没就绪就先排着不判死）
   registerRefineIpc();
-  void startRefineQueue(collectorVector);
+  // 2026-11-22 启动提速：存量回填要整表扫 5700+ 条并把队列写回磁盘（实测 217ms，且和首屏 IPC 抢主线程）。
+  // 队列是幂等的后台工作，晚到首屏渲染完成后再跑，不改变任何数据；首屏不再等它。
+  const afterFirstPaint: Array<() => void> = [];
+  afterFirstPaint.push(() => void startRefineQueue(collectorVector));
   // 原子任务 B：监控仪表盘只读聚合（Agent 健康 + 写入率 + 校验异常）由主进程定时拨测提供。
   // 注册 IPC（公开只读观测，不需会话）；启动 60s 一轮拨测 + 慢计算缓存 + 每 5 分钟落 agent_probe 审计。
   handleIpc(IPC.monitorStats, () => getMonitorStats());
@@ -5273,6 +5289,13 @@ async function bootstrap(): Promise<void> {
     ledgerDir: LIB_PATHS.ledgerDir, l0Dir: LIB_PATHS.l0Dir,
   });
   void win.loadURL(mainWindowUrl(staticPort, wizardFirst));
+  // 首屏事件循环空出来后再跑非关键后台任务（补炼回填等），避免和状态栏/首页首次读数抢主线程。
+  win.webContents.once('did-finish-load', () => {
+    setTimeout(() => {
+      const tasks = afterFirstPaint.splice(0);
+      for (const run of tasks) run();
+    }, 400);
+  });
 
   if (corruptNotice) {
     const detail = [
