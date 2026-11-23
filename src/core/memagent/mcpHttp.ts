@@ -19,6 +19,7 @@ import type { MemberStorePort } from './memberStore.ts';
 import {
   mcpInstructions, withRecallFirstNotes, RECALL_FIRST_REMINDER,
   RECALL_FIRST_GATE_MSG, RECALL_FIRST_STRICT_GATE_MSG, RECALL_ROUND_GATE_MSG, RECALL_SOURCE_BOUNDARY,
+  RECALL_FEEDBACK_FAST_NOTE,
 } from './mcpSchema.ts';
 import { readLatestHookRoundAt } from './recallHook.ts';
 import { runListProjectsTool, runRecallTool, type RecallDisplayMode } from './mcpRecall.ts';
@@ -260,6 +261,7 @@ export function recallEchoNote(mode: RecallDisplayMode): string {
     + '**富媒体宿主另有结构化字段 display.card（非 null 时）**：含 titleLine1 / titleLine2 / hint / summary / background / hits / basis / warnings，**直接按这些字段渲染卡片，不要自己从 display.line 拆字符串、也不要重算数字**；display.card 为 null 时才退回按 display.line 渲染。'
     + '**卡片 hits 每条含 feedback_hint（反馈入口提示）与 reinforce_count（累计被用户确认/强化次数，无则不显示）**：把 feedback_hint 里的 N 替换为该条 [n] 编号后逐条渲染；用户按提示回复「N 有用 / N 没用」后，用 feedback 工具提交（明确表态用普通 confirm/reject；agent 自己采信了 [n] 也可在同轮提交一次 implicit=true 的弱信号，幂等去重、不会重复计分）。'
     + '**支持会话按钮的宿主（WorkBuddy / CodeBuddy 桌面端）应把反馈提示升级为交互按钮**：每条命中渲染「N 有用 ↗」「N 没用 ↗」小按钮，点击经宿主 sendPrompt 类机制把该文案作为用户消息发出（Agent 收到后调 feedback 提交，幂等去重）；无按钮能力的宿主保留文字提示，不要伪造按钮。'
+    + RECALL_FEEDBACK_FAST_NOTE
     + '**展开后必须能同时查到汇总与明细**：顶部放「📊 本次召回统计汇总」（四行，含 Token 与费用数字）；'
     + '明细按用户指定的固定顺序 📎 项目背景（**逐条独立成行**，每条含类别与正文片段，不压缩成一整段）→ 💠 命中记忆 → 🎯 本次用上的依据（每条含 [n]、层级/相关度、🎯 命中词、正文片段）→ ⚠ 证据不足（仅真有告警时出现，放在最后）；'
     + noHtml + '卡内正文只能取自本次工具返回，不得编造、不得改写数字，也不要在文本里写任何明细页链接。'

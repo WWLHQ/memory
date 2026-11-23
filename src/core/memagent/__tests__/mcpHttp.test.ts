@@ -1842,4 +1842,29 @@ describe('批次 RAG · C 组：展示要求三处与实际 display.markdown 逐
     expect(tool!.description).toContain('卡片即回显');
     expect(tool!.description).toContain('不要写 HTML 标签');
   });
+
+  // 2026-11-22 方案一：卡片按钮反馈快捷通道——单一真源常量三处引用，纯反馈短句才触发，先轻量召回过门禁、只回一句确认
+  it('反馈快捷通道：单一真源三处一致 + 纯短句触发 + 轻量召回过门禁 + 不加 implicit + 一句确认', () => {
+    const fast = MCP_INSTRUCTIONS;
+    const feedbackTool = MCP_TOOLS.find((t) => t.name === 'feedback')!;
+    const compact = recallEchoNote('markdown-compact');
+    // 三处都来自同一常量：关键锚点逐字一致（杜绝第二套词表漂移）
+    const anchors = ['反馈快捷通道', '整条只有', 'hits[N-1].mem_id', 'top_k=1', '不要加 implicit', '已记录：第 N 条'];
+    for (const a of anchors) expect(fast, `指令缺 ${a}`).toContain(a);
+    for (const a of anchors) expect(feedbackTool.description, `feedback 描述缺 ${a}`).toContain(a);
+    for (const a of anchors) expect(compact, `回显末块缺 ${a}`).toContain(a);
+    // 严格限定触发条件：只有纯短句，带其它诉求就不走通道
+    expect(fast).toContain('整条只有');
+    expect(fast).toContain('还含其它诉求');
+    expect(fast).toContain('不走本通道');
+    // 门禁口径：先轻量召回解锁、不回显、不作答案源（承认 feedback 是受控工具）
+    expect(fast).toContain('recall_memory(top_k=1) 解锁本轮门禁');
+    expect(fast).toContain('不回显、不作答案来源');
+    // 用户已明确表态 → 不加 implicit；幂等仍生效
+    expect(fast).toContain('不要加 implicit');
+    expect(fast).toContain('duplicate:true');
+    // 只回一句确认，不再渲染回显卡、不长篇
+    expect(fast).toContain('不要再输出召回回显卡');
+    expect(fast).toContain('不要长篇分析');
+  });
 });

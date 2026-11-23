@@ -27,11 +27,12 @@ export function McpToolConfig({ tools, onChange }: Props) {
   const write = toolRef(tools.write);
   const pref = toolRef(tools.pref);
   return (
-    <div className="row">
-      <span style={{ fontSize: 11, color: 'var(--muted)' }}>MCP 工具（19.5，须带 project_id）：</span>
+    <div className="af-row">
+      <span className="dim">MCP 工具（19.5，须带 project_id）：</span>
       <label className="sw">
         <input
           type="checkbox"
+          className="af-switch"
           data-tool="recall"
           checked={recall.on}
           onChange={(e) => onChange('recall', e.target.checked)}
@@ -41,6 +42,7 @@ export function McpToolConfig({ tools, onChange }: Props) {
       <label className="sw">
         <input
           type="checkbox"
+          className="af-switch"
           data-tool="write"
           checked={write.on}
           onChange={(e) => onChange('write', e.target.checked)}
@@ -50,6 +52,7 @@ export function McpToolConfig({ tools, onChange }: Props) {
       <label className="sw">
         <input
           type="checkbox"
+          className="af-switch"
           data-tool="pref"
           checked={pref.on}
           onChange={(e) => onChange('pref', e.target.checked)}

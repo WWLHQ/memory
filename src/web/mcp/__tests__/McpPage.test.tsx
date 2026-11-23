@@ -8,8 +8,19 @@ describe('MCP 接入页', () => {
   it('渲染独立页头与客户端接入状态面板（同一真值面板，不复制数据源）', async () => {
     render(<McpPage />);
     expect(screen.getByTestId('mcp-page')).toBeInTheDocument();
-    expect(screen.getByText('🧩 MCP 接入')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'MCP 接入' })).toBeInTheDocument();
     expect(await screen.findByTestId('mcp-clients')).toBeInTheDocument();
+  });
+
+  it('顶部摘要读数条 + 五个场景分组真实存在（浏览器模式如实空态）', async () => {
+    render(<McpPage />);
+    expect(screen.getByTestId('mcp-summary')).toBeInTheDocument();
+    expect(screen.getByTestId('mcp-groups')).toBeInTheDocument();
+    for (const id of ['status', 'server', 'probe', 'clients', 'errors']) {
+      expect(screen.getByTestId(`mcp-group-${id}`)).toBeInTheDocument();
+    }
+    // 浏览器模式：已安装 0、错误码 0，不伪造「已接入」
+    expect(screen.getByTestId('mcp-group-status')).toHaveTextContent('已接入 0');
   });
 
   it('浏览器模式无宿主桥 → 如实说明无法读取本机配置，不列客户端、不写「已接入」', async () => {

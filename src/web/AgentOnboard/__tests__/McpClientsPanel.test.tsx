@@ -124,12 +124,13 @@ describe('McpClientsPanel', () => {
     await userEvent.click(screen.getByRole('button', { name: '去设置手动打开' }));
     const hint = screen.getByTestId('manual-hint-workbuddy');
     expect(hint.textContent).toContain('重新打开软件');
-    // 用户 2026-11-15 实机反馈「点了像没反应」：提示必须是可见块（warn show），不能是 11px 灰字 .method
+    // 用户 2026-11-15 实机反馈「点了像没反应」：提示必须是可见块（af-alert warn），不能是 11px 灰字
+    expect(hint.className).toContain('af-alert');
     expect(hint.className).toContain('warn');
-    expect(hint.className).toContain('show');
     expect(hint.className).not.toContain('method');
-    // 提示就在该客户端卡片的容器里（按钮旁），不是页面底部的全局消息
-    expect(document.querySelector('[data-client="workbuddy"]')?.contains(hint)).toBe(true);
+    // 批次48 表格化后：提示在该客户端行的紧邻详情行里（按钮旁），不是页面底部的全局消息
+    const row = document.querySelector('[data-client="workbuddy"]') as HTMLElement;
+    expect(hint.closest('tr')?.previousElementSibling).toBe(row.closest('tr'));
   });
 
   test('T3：非 JSON 配置不提供一键打开，如实只给状态提示', async () => {
@@ -152,7 +153,7 @@ describe('McpClientsPanel', () => {
   test('浏览器模式：如实降级为只读说明，不伪造客户端列表或「已接入」', async () => {
     render(<McpClientsPanel />);
     expect(screen.getByTestId('mcp-browser-note')).toBeInTheDocument();
-    expect(document.querySelectorAll('#mcp-client-rows .found')).toHaveLength(0);
+    expect(document.querySelectorAll('#mcp-client-rows tr[data-client]')).toHaveLength(0);
     expect(screen.queryByText('已接入')).toBeNull();
     // 浏览器模式没有宿主能力 → 刷新禁用
     expect((screen.getByRole('button', { name: '刷新状态' }) as HTMLButtonElement).disabled).toBe(true);
@@ -165,7 +166,7 @@ describe('McpClientsPanel', () => {
     await waitFor(() => expect(screen.getByTestId('mcp-scan-error').textContent).toContain('IPC rejected'));
     expect(screen.getByText('扫描失败')).toBeInTheDocument();
     expect(screen.queryByText('已接入')).toBeNull();
-    expect(document.querySelectorAll('#mcp-client-rows .found')).toHaveLength(0);
+    expect(document.querySelectorAll('#mcp-client-rows tr[data-client]')).toHaveLength(0);
   });
 
   test('只显示本机真实检出的客户端（未安装的 Cursor 不占位）', async () => {
@@ -173,7 +174,7 @@ describe('McpClientsPanel', () => {
     setHost({ list: () => Promise.resolve(SCAN) });
     render(<McpClientsPanel />);
     await waitFor(() => expect(screen.getByTestId('state-qoder-cn').textContent).toBe('已接入'));
-    expect(document.querySelectorAll('#mcp-client-rows .found')).toHaveLength(4);
+    expect(document.querySelectorAll('#mcp-client-rows tr[data-client]')).toHaveLength(4);
     expect(document.querySelector('[data-client="cursor"]')).toBeNull();
     expect(screen.queryByText('Cursor')).toBeNull();
   });
@@ -183,7 +184,7 @@ describe('McpClientsPanel', () => {
     setHost({ list: () => Promise.resolve({ endpoint: SCAN.endpoint, clients: [] }) });
     render(<McpClientsPanel />);
     await waitFor(() => expect(screen.getByTestId('mcp-empty')).toBeInTheDocument());
-    expect(document.querySelectorAll('#mcp-client-rows .found')).toHaveLength(0);
+    expect(document.querySelectorAll('#mcp-client-rows tr[data-client]')).toHaveLength(0);
   });
 
   test('刷新状态：按钮进入扫描中并回显真实扫描结果与时间（UTC+08:00）', async () => {
@@ -214,8 +215,9 @@ describe('McpClientsPanel', () => {
     render(<McpClientsPanel />);
     await waitFor(() => expect(screen.getByTestId('state-qoder-cn').textContent).toBe('已接入'));
     expect(screen.getByTestId('state-claude-code').textContent).toContain('缺令牌');
-    expect(screen.getByTestId('state-codex').textContent).toBe('未配置本服务');
-    expect(screen.getByTestId('state-trae-cn').textContent).toBe('需手工添加');
+    // 批次48 表格状态列用短徽标文案（完整语义在 title 与详情折叠里）
+    expect(screen.getByTestId('state-codex').textContent).toBe('未配置');
+    expect(screen.getByTestId('state-trae-cn').textContent).toBe('需手工');
 
     const claudeRow = document.querySelector('[data-client="claude-code"]') as HTMLElement;
     await userEvent.click(claudeRow.querySelector('[data-act="mcp-wire"]') as HTMLButtonElement);

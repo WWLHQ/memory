@@ -1,10 +1,11 @@
-// MCP 客户端接入面板（批次15 建 / 批次21 交互收敛 / 批次23 一键适配全部 + 逐客户端接通指引）：
+// MCP 客户端接入面板（批次15 建 / 批次21 交互收敛 / 批次23 一键适配全部 + 逐客户端接通指引；
+// 批次48 起 1:1 对齐设计真源 stratum-a-full.html 的 af-panel + af-table 六列版式）。
 // 把「🧠 提示行 + 四段折叠明细」推广到所有已接入 Agent。
 // 状态来自主进程读取本机配置与安装痕迹（mcp:clients）；只显示本机真实检出的客户端，
 // 未安装的不占位。片段/一键写入需管理员（主进程二次校验）。
 // 无法自动写入的客户端不再只显示「未连通/需配置」：按客户端给出设置菜单/配置文件/条目名/端点与修复步骤。
 // 浏览器模式（无宿主桥）如实降级：只说明无法扫描，绝不伪造「已接入」或客户端列表。
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { hostCall, hostCapability } from '../../desktop/hostBridge.ts';
 import { MCP_CLIENT_HEADER_NAME, MCP_ENDPOINT, specOfMcpClient, type McpWireState } from '../../agentOnboard/mcpClients.ts';
 import type { BadgeClass } from '../../types/agentOnboard.ts';
@@ -60,14 +61,41 @@ interface WireReply {
   error?: string;
 }
 
+/** 页面摘要条只读这些真值（全部来自 mcp:clients 回执；未扫描 = null，不用 0 冒充） */
+export interface McpSummary {
+  available: boolean;
+  endpoint: string;
+  scannedAt: number | null;
+  installed: number;
+  wired: number;
+  missingAuth: number;
+  conflict: number;
+  invalid: number;
+  failed: number;
+  serverOk: boolean | null;
+  serverStatus: number | null;
+  scanError: string;
+}
+
 const STATE_LABEL: Record<McpWireState, { text: string; cls: string }> = {
-  wired: { text: '已接入', cls: 'pill on' },
-  missing_auth: { text: '缺令牌（调用会 401）', cls: 'pill gold' },
-  missing_entry: { text: '未配置本服务', cls: 'pill' },
-  conflict: { text: '冲突：同名条目指向其它端点', cls: 'pill red' },
-  invalid: { text: '配置无法解析', cls: 'pill red' },
-  no_config: { text: '无配置文件（可新建）', cls: 'pill' },
-  manual: { text: '需手工添加', cls: 'pill' },
+  wired: { text: '已接入', cls: 'ok' },
+  missing_auth: { text: '缺令牌（调用会 401）', cls: 'warn' },
+  missing_entry: { text: '未配置本服务', cls: '' },
+  conflict: { text: '冲突：同名条目指向其它端点', cls: 'bad' },
+  invalid: { text: '配置无法解析', cls: 'bad' },
+  no_config: { text: '无配置文件（可新建）', cls: '' },
+  manual: { text: '需手工添加', cls: '' },
+};
+
+/** 表格状态列的短文案（完整语义在 title 与详情折叠里，不丢信息） */
+const STATE_BADGE: Record<McpWireState, string> = {
+  wired: '已接入',
+  missing_auth: '缺令牌',
+  missing_entry: '未配置',
+  conflict: '冲突',
+  invalid: '无法解析',
+  no_config: '可新建',
+  manual: '需手工',
 };
 
 /** 每个状态下一步该做什么（无法自动写入时也给出具体位置，避免用户猜） */
@@ -96,14 +124,14 @@ function canStdio(row: ClientRow): boolean {
 function transportBadge(row: ClientRow): { text: string; cls: string; title: string } | null {
   if (row.transport === 'stdio') {
     return {
-      text: 'stdio 零维护', cls: 'pill on',
+      text: 'stdio 零维护', cls: 'ok',
       title: '配置里只有启动命令（node <桥接脚本> <引导指针> <端点> <客户端id>），没有任何令牌。'
         + '桥接脚本每次调用现读数据根的 keys/mcp-token.txt：令牌轮换、数据根搬家都不需要改这份配置。',
     };
   }
   if (row.transport === 'http') {
     return {
-      text: 'HTTP', cls: 'pill',
+      text: 'HTTP', cls: '',
       title: '令牌（Bearer）被抄进了这份客户端配置：令牌一轮换它就会 401，必须重写配置。点「改用 stdio」可改成零维护形态。',
     };
   }
@@ -118,14 +146,14 @@ function liveBadge(row: ClientRow): { text: string; cls: string; title: string }
   const live = row.live;
   if (!live) {
     return {
-      text: '实测 —', cls: 'pill',
+      text: '实测 —', cls: '',
       title: '该客户端没有稳定配置文件（或配置由客户端应用托管），读不到它自己的令牌、无法实测；用「复制片段」接入后以客户端日志为准',
     };
   }
   const when = `${formatClock(live.at)}（UTC+08:00）`;
   if (live.ok) {
     return {
-      text: `实测 ✓ ${live.tools ?? '?'} 工具`, cls: 'pill on',
+      text: `实测 ✓ ${live.tools ?? '?'} 工具`, cls: 'ok',
       title: `用本客户端配置里的令牌调用 tools/list：HTTP ${live.status}，返回 ${live.tools ?? '?'} 个工具 · ${when}`,
     };
   }
@@ -134,7 +162,7 @@ function liveBadge(row: ClientRow): { text: string; cls: string; title: string }
     : live.status === 0
       ? (live.error ?? '连接失败（服务未启动？）')
       : `HTTP ${live.status}${live.error ? `：${live.error}` : ''}`;
-  return { text: `实测 ✗ ${live.status || '不可达'}`, cls: 'pill red', title: `${why} · ${when}` };
+  return { text: `实测 ✗ ${live.status || '不可达'}`, cls: 'bad', title: `${why} · ${when}` };
 }
 
 function specOf(id: string) {
@@ -196,7 +224,10 @@ function formatClock(ts: number): string {
   return `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
 }
 
-export function McpClientsPanel({ onInstalledCount }: { onInstalledCount?: (n: number) => void } = {}) {
+export function McpClientsPanel({ onInstalledCount, onSummary }: {
+  onInstalledCount?: (n: number) => void;
+  onSummary?: (s: McpSummary) => void;
+} = {}) {
   const session = useSessionContext();
   const capability = hostCapability();
   const [scan, setScan] = useState<ScanReply | null>(null);
@@ -265,7 +296,7 @@ export function McpClientsPanel({ onInstalledCount }: { onInstalledCount?: (n: n
     [scan],
   );
 
-  /** 页签计数 = 本机真实检出的已安装客户端数（未知/浏览器模式为 0，不冒充定稿的 6） */
+  /** 计数回调 = 本机真实检出的已安装客户端数（未知/浏览器模式为 0，不冒充定稿的 6） */
   useEffect(() => { onInstalledCount?.(rows.length); }, [rows.length, onInstalledCount]);
 
   /** 七态总览：把 McpWireState 的七个真实状态全部列出（未出现的状态如实显示 0） */
@@ -458,6 +489,24 @@ export function McpClientsPanel({ onInstalledCount }: { onInstalledCount?: (n: n
   };
   const scannedAt = scan && typeof scan.scannedAt === 'number' ? formatClock(scan.scannedAt) : '';
   const endpoint = scan?.endpoint ?? MCP_ENDPOINT;
+
+  // 摘要上报：只报主进程回执里的真值（未扫描 → null / 0），页面据此渲染读数条
+  useEffect(() => {
+    onSummary?.({
+      available: capability !== 'none',
+      endpoint,
+      scannedAt: typeof scan?.scannedAt === 'number' ? scan.scannedAt : null,
+      installed: rows.length,
+      wired: stateCounts.wired,
+      missingAuth: stateCounts.missing_auth,
+      conflict: stateCounts.conflict,
+      invalid: stateCounts.invalid,
+      failed: scan?.live?.failed ?? 0,
+      serverOk: scan?.live?.server ? scan.live.server.ok : null,
+      serverStatus: scan?.live?.server ? scan.live.server.status : null,
+      scanError,
+    });
+  }, [onSummary, capability, endpoint, scan, rows.length, stateCounts, scanError]);
   const wireTargets = rows.filter(canWire);
   const snippetTargets = rows.filter((r) => !canWire(r) && (r.state !== 'wired' || needsClientId(r)));
   const stdioTargets = rows.filter(canStdio);
@@ -478,274 +527,323 @@ export function McpClientsPanel({ onInstalledCount }: { onInstalledCount?: (n: n
             : '全部客户端已接入，点击可复核');
 
   return (
-    <>
-      <div className="section-title">MCP 客户端接入 · 把记忆提示推广到所有已接入 Agent（批次15/21）</div>
-      <div className="card" id="mcpClients" data-testid="mcp-clients">
-        <div className="top">
-          <div className="agent-name">🧠 记忆库 MCP 接入状态</div>
-          <span className="pill" data-testid="mcp-endpoint">{scan?.endpoint ?? 'http://127.0.0.1:8204/mcp'}</span>
-          <span className="pill">{capability === 'none' ? '浏览器模式（只读说明）' : scanError ? '扫描失败' : scanning ? '扫描中…' : '本机配置真扫'}</span>
+    <section className="af-panel" id="mcpClients" data-testid="mcp-clients">
+      <div className="af-ph">
+        <h3>MCP 客户端接入状态</h3>
+        <span className="hint">
+          真实读取本机配置文件
           {scannedAt && (
-            <span className="pill" data-testid="mcp-scanned-at" title="最近一次真实扫描本机配置的时间（UTC+08:00）">
-              上次扫描 {scannedAt}
+            <span data-testid="mcp-scanned-at" title="最近一次真实扫描本机配置的时间（UTC+08:00）">
+              {' '}· 上次扫描 {scannedAt}（UTC+08:00）
             </span>
           )}
+        </span>
+        <button
+          className="af-btn pri sm" type="button" data-act="mcp-wire-all" data-testid="mcp-wire-all"
+          disabled={!admin || busy !== '' || scanning || capability === 'none' || rows.length === 0}
+          title={batchTitle}
+          onClick={() => { void wireAll(); }}
+        >
+          {busy === 'wire-all' ? '适配中…' : batchLabel}
+        </button>
+        <button
+          className="af-btn sm" type="button" data-act="mcp-refresh"
+          disabled={capability === 'none' || scanning}
+          title={capability === 'none' ? '浏览器模式无法读取本机配置' : '重新读取本机客户端配置与安装痕迹'}
+          onClick={() => { setMessage(''); void refresh({ announce: true }); }}
+        >
+          {scanning ? '扫描中…' : '刷新状态'}
+        </button>
+        <button
+          className="af-btn sm" type="button" data-act="mcp-stdio-all" data-testid="mcp-stdio-all"
+          disabled={!admin || busy !== '' || scanning || capability === 'none' || stdioTargets.length === 0}
+          title={capability === 'none'
+            ? '浏览器模式无法写入本机配置'
+            : disabledReason
+              || (stdioTargets.length === 0
+                ? '可写的客户端都已经是 stdio 零维护形态（或配置冲突/无法解析需先手工修正）'
+                : `把 ${stdioTargets.length} 个客户端改成 stdio 零维护形态：配置里不再有令牌，`
+                  + '桥接脚本每次现读数据根的 keys/mcp-token.txt —— 此后令牌轮换 / 数据根搬家都不用重写配置（逐行备份原文件）')}
+          onClick={() => { void toStdioAll(); }}
+        >
+          {busy === 'stdio-all' ? '改写中…' : `⇄ 全改 stdio（${stdioTargets.length}）`}
+        </button>
+      </div>
+
+      <div className="af-pb af-stack" style={{ gap: 8 }}>
+        <div className="af-row">
+          <span className="af-pill" data-testid="mcp-endpoint">{endpoint}</span>
+          <span className="af-badge">
+            {capability === 'none' ? '浏览器模式（只读说明）' : scanError ? '扫描失败' : scanning ? '扫描中…' : '本机配置真扫'}
+          </span>
           {scan?.live?.server && (
             <span
-              className={scan.live.server.ok ? 'pill on' : 'pill red'}
+              className={scan.live.server.ok ? 'af-badge ok' : 'af-badge bad'}
               data-testid="mcp-server-live"
               title={`用当前 mcp-token.txt 实测本机 MCP 端点：HTTP ${scan.live.server.status}${scan.live.server.error ? ` · ${scan.live.server.error}` : ''}（${formatClock(scan.live.server.at)} UTC+08:00）`}
             >
               {scan.live.server.ok ? `服务端 ✓ ${scan.live.server.tools ?? '?'} 工具` : `服务端 ✗ ${scan.live.server.status || '不可达'}`}
             </span>
           )}
-          <button
-            className="btn" type="button" data-act="mcp-refresh"
-            disabled={capability === 'none' || scanning}
-            title={capability === 'none' ? '浏览器模式无法读取本机配置' : '重新读取本机客户端配置与安装痕迹'}
-            onClick={() => { setMessage(''); void refresh({ announce: true }); }}
-          >
-            {scanning ? '扫描中…' : '刷新状态'}
-          </button>
-          <button
-            className="btn primary" type="button" data-act="mcp-wire-all" data-testid="mcp-wire-all"
-            disabled={!admin || busy !== '' || scanning || capability === 'none' || rows.length === 0}
-            title={batchTitle}
-            onClick={() => { void wireAll(); }}
-          >
-            {busy === 'wire-all' ? '适配中…' : batchLabel}
-          </button>
-          <button
-            className="btn" type="button" data-act="mcp-stdio-all" data-testid="mcp-stdio-all"
-            disabled={!admin || busy !== '' || scanning || capability === 'none' || stdioTargets.length === 0}
-            title={capability === 'none'
-              ? '浏览器模式无法写入本机配置'
-              : disabledReason
-                || (stdioTargets.length === 0
-                  ? '可写的客户端都已经是 stdio 零维护形态（或配置冲突/无法解析需先手工修正）'
-                  : `把 ${stdioTargets.length} 个客户端改成 stdio 零维护形态：配置里不再有令牌，`
-                    + '桥接脚本每次现读数据根的 keys/mcp-token.txt —— 此后令牌轮换 / 数据根搬家都不用重写配置（逐行备份原文件）')}
-            onClick={() => { void toStdioAll(); }}
-          >
-            {busy === 'stdio-all' ? '改写中…' : `⇄ 全改 stdio（${stdioTargets.length}）`}
-          </button>
         </div>
-        <div className="sub">
-          所有客户端共用同一端点与令牌；提示行（项目背景 / 命中记忆 / Token / 费用）与四段折叠明细由服务端返回，
-          接入成功并重启客户端后即生效，无需各客户端单独改造。仅显示本机真实检出的客户端。
-          <b>实测连通</b>（2026-11-18）：每行拿<b>该客户端配置里的令牌</b>真调一次 <code>tools/list</code>，用 HTTP 状态码说话——
-          「已接入」只说明配置里写着条目，401 说明令牌过期，两者不是一回事；本面板每轮静默复检（循环检测），
-          由好变坏时会主动提示。
-        </div>
-        <div className="sub" data-testid="mcp-actions-help">
-          <b>复制片段</b>：生成含令牌的配置片段，任何客户端都可粘贴（令牌只在此处一次性展示）；
-          <b>一键接入</b>：管理员专用，先备份再合并写入，支持 JSON（Qoder / Claude Code / Cursor / Gemini / Qwen）与 TOML（Codex）；
-          <b>⚡ 一键适配全部</b>：一次处理所有已安装客户端——可写的自动备份写入，无法自动写入的自动生成片段并给出具体接通位置与步骤；
-          配置冲突/无法解析时拒绝覆盖。
-          <b>改用 stdio / ⇄ 全改 stdio</b>（2026-11-18）：把客户端配置改成「只写启动命令」
-          <code>node &lt;桥接脚本&gt; &lt;引导指针&gt; &lt;端点&gt; &lt;客户端id&gt;</code>——
-          配置里<b>不再有令牌</b>，桥接脚本每次调用现读数据根的 <code>keys/mcp-token.txt</code>，
-          所以<b>令牌轮换、数据根搬家都不用重写任何客户端配置</b>（脚本落在引导指针同目录，路径本身也不随数据根漂移）。
-          <b>补身份头</b>（批次41-X）：条目已接入但缺 <code>{MCP_CLIENT_HEADER_NAME}</code> 时出现——服务端据此认出「这次调用来自哪一家」，
-          缺了就只能按 User-Agent 归并，多台客户端共用通用 UA（如 Node 的 <code>node</code>）时会把 A 的调用记成 B。
-        </div>
+
         {capability === 'none' && (
-          <div className="warn show" data-testid="mcp-browser-note">
+          <div className="af-alert warn" data-testid="mcp-browser-note">
             浏览器模式无法读取本机客户端配置，因此不列出任何客户端、也不显示「已接入」。请在桌面端打开本页并点「刷新状态」。
           </div>
         )}
         {scanError && (
-          <div className="warn show" data-testid="mcp-scan-error">
+          <div className="af-alert bad" data-testid="mcp-scan-error">
             读取本机配置失败：{scanError}（下方不展示客户端状态，避免把未知当成「已接入」）
           </div>
         )}
         {!admin && capability !== 'none' && (
-          <div className="warn show" data-testid="mcp-admin-gate">
+          <div className="af-alert warn" data-testid="mcp-admin-gate">
             普通成员只读；复制含令牌片段与一键写入需管理员（主进程按登录会话二次校验）。
           </div>
         )}
         {scan?.live && scan.live.failed > 0 && (
-          <div className="warn show" data-testid="mcp-live-alert">
+          <div className="af-alert bad" data-testid="mcp-live-alert">
             <b>⚠ 实测连通异常（{formatClock(scan.live.at)}，UTC+08:00）：</b>
-            {scan.live.failed}/{scan.live.checked} 个客户端用<b>自己配置里的令牌</b>调 <code>tools/list</code> 失败——
+            {scan.live.failed}/{scan.live.checked} 个客户端用<b>自己配置里的令牌</b>调 tools/list 失败——
             {scan.live.server?.ok
               ? `服务端本身正常（HTTP 200 · ${scan.live.server.tools ?? '?'} 个工具），是客户端配置里的令牌过期/路径不对。`
               : `服务端自己也不通（${scan.live.server?.error ?? '未探测'}），先看桌面端是否在运行、8204 是否被占用。`}
             点对应行的「补齐令牌」，或右上「⚡ 一键适配全部」统一重写；本面板每轮自动复检（循环检测）。
           </div>
         )}
+        {message && <div className="af-alert" data-testid="mcp-message">{message}</div>}
 
         {rows.length > 0 && (
-          <div className="note" data-testid="mcp-state-summary" style={{ margin: '6px 0' }}>
+          <p className="af-note" data-testid="mcp-state-summary">
             <b>七态总览（本机真扫）：</b>
             {(Object.keys(STATE_LABEL) as McpWireState[]).map((s) => (
               <span key={s} style={{ marginLeft: 8, whiteSpace: 'nowrap' }} data-testid={`mcp-state-${s}`}>
-                {STATE_LABEL[s].text} <b>{stateCounts[s]}</b>
+                {STATE_BADGE[s]} <b>{stateCounts[s]}</b>
               </span>
             ))}
-          </div>
+          </p>
         )}
 
-        <div id="mcp-client-rows">
-          {rows.map((row) => {
-            const disabledByClient = row.disabled === true;
-            const switchPending = pendingList.includes(row.id);
-            const label = switchPending
-              ? { text: '已清除标记 · 待生效', cls: 'pill gold' }
-              : disabledByClient
-                ? { text: '客户端已关闭', cls: 'pill red' }
-                : STATE_LABEL[row.state];
-            const snippet = snippets[row.id];
-            return (
-              <div className="found" data-client={row.id} data-state={row.state}
-                data-switch={switchPending ? 'pending' : disabledByClient ? 'off' : undefined} key={row.id}>
-                <div className="found-head">
-                  <span className={`badge ${row.badge}`}>{row.badge.toUpperCase()}</span>
-                  <b>{row.name}</b>
-                  <span className={label.cls} data-testid={`state-${row.id}`}>{label.text}</span>
-                  {(() => {
-                    const lv = liveBadge(row);
-                    return (
-                      <span className={lv.cls} data-testid={`live-${row.id}`} title={lv.title}>
-                        {lv.text}
-                      </span>
-                    );
-                  })()}
-                  {(() => {
-                    const tb = transportBadge(row);
-                    return tb ? (
-                      <span className={tb.cls} data-testid={`transport-${row.id}`} title={tb.title}>{tb.text}</span>
-                    ) : null;
-                  })()}
-                  {row.running !== undefined && (
-                    <span
-                      className={row.running ? 'pill on' : 'pill red'}
-                      data-testid={`run-${row.id}`}
-                      title="客户端软件当前是否在运行（仅桌面客户端可判定）"
-                    >
-                      {row.running ? '已启动' : '未启动'}
-                    </span>
-                  )}
-                  <span className="method mcp-path" title={row.displayPath ?? '无稳定配置路径'}>
-                    {row.displayPath ?? '无稳定配置路径'}
-                  </span>
-                </div>
-                <div className="found-meta">
-                  <span className="method">触发规则：{row.rulesHint}</span>
-                  {row.foundUrl && row.state === 'conflict' && (
-                    <span className="method">当前指向：{row.foundUrl}</span>
-                  )}
-                  {row.note && <span className="method">{row.note}</span>}
-                </div>
-                <div className="found-meta">
-                  <span className="method" data-hint={row.state} data-testid={`guide-${row.id}`}>
-                    接通指引：{guideFor(row, endpoint)}
-                  </span>
-                </div>
-                <div className="btns">
-                  <button
-                    className="btn" type="button" data-act="mcp-copy"
-                    disabled={!admin || busy !== ''}
-                    title={disabledReason || (row.transport === 'stdio'
-                      ? '生成 stdio 启动命令片段（不含令牌，可安全转发）并复制'
-                      : '生成含令牌的配置片段并复制（可手工粘贴）')}
-                    onClick={() => copySnippet(row)}
-                  >
-                    复制片段
-                  </button>
-                  {row.writable && (
-                    <button
-                      className="btn primary" type="button" data-act="mcp-wire"
-                      disabled={!admin || busy !== '' || !canWire(row)}
-                      title={disabledReason
-                        || (row.state === 'wired'
-                          ? needsClientId(row)
-                            ? `已接入但缺显式身份头 ${MCP_CLIENT_HEADER_NAME}：备份原文件后补写该头（服务端据此识别调用方，避免多客户端串号）`
-                            : '已接入，无需重复写入'
-                          : row.state === 'conflict' || row.state === 'invalid'
-                            ? '配置冲突/无法解析：请先手工修正，系统不覆盖'
-                            : '备份原文件后合并写入本服务条目（含身份头）')}
-                      onClick={() => wire(row)}
-                    >
-                      {row.state === 'wired'
-                        ? needsClientId(row) ? '补身份头' : '已接入'
-                        : row.state === 'missing_auth' ? '补齐令牌' : '一键接入'}
-                    </button>
-                  )}
-                  {canStdio(row) && (
-                    <button
-                      className="btn" type="button" data-act="mcp-stdio" data-testid={`stdio-${row.id}`}
-                      disabled={!admin || busy !== ''}
-                      title={disabledReason
-                        || `把 ${row.name} 的配置从「令牌抄在配置里」改成「只写启动命令」：`
-                          + '配置里不再有令牌，桥接脚本每次调用现读数据根的 keys/mcp-token.txt，'
-                          + '此后令牌轮换 / 数据根搬家都不用重写这份配置（写前备份原文件）'}
-                      onClick={() => { void toStdio(row); }}
-                    >
-                      {busy === `stdio:${row.id}` ? '改写中…' : '改用 stdio'}
-                    </button>
-                  )}
-                  {disabledByClient && !switchPending && row.format === 'json' && (
-                    <button
-                      className="btn primary" type="button" data-act="mcp-enable"
-                      disabled={!session.sid || busy !== ''}
-                      title={'备份原配置后只清掉禁用标记；客户端不会实时重读配置，仍需手动打开或重新打开软件'}
-                      onClick={() => enableSwitch(row)}
-                    >
-                      一键打开
-                    </button>
-                  )}
-                  {disabledByClient && !switchPending && row.format !== 'json' && (
-                    <span className="method">该客户端配置不是 JSON，请到设置中手动打开开关</span>
-                  )}
-                  {switchPending && (
-                    <button className="btn" type="button" data-act="mcp-manual"
-                      onClick={() => setManualHintId(row.id)}>
-                      去设置手动打开
-                    </button>
-                  )}
-                </div>
-                {manualHintId === row.id && (
-                  <div
-                    className="warn show"
-                    data-testid={`manual-hint-${row.id}`}
-                    style={{ marginTop: 8 }}
-                    ref={(el) => { el?.scrollIntoView?.({ block: 'nearest' }); }}
-                  >
-                    <b>手动打开位置：</b>{MCP_MANUAL_HINT}
-                  </div>
-                )}
-                {row.error && <div className="errbox show">{row.error}</div>}
-                {snippet && (
-                  <pre className="inject" data-testid={`snippet-${row.id}`} style={{ width: '100%', overflow: 'auto' }}>
-                    {snippet}
-                  </pre>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        {capability !== 'none' && !scanError && scan && rows.length === 0 && (
-          <div className="warn show" data-testid="mcp-empty">
+        {rows.length > 0 ? (
+          <div className="af-scrollx" id="mcp-client-rows">
+            <table className="af-table" data-testid="mcp-table">
+              <thead>
+                <tr>
+                  <th>客户端</th><th>配置文件</th><th>状态</th>
+                  <th>身份头 X-Memagent-Client</th><th>建议</th><th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => {
+                  const disabledByClient = row.disabled === true;
+                  const switchPending = pendingList.includes(row.id);
+                  const badge = switchPending
+                    ? { text: '已清除标记 · 待生效', cls: 'warn', title: '已清除禁用标记，待客户端重读配置后生效' }
+                    : disabledByClient
+                      ? { text: '客户端已关闭', cls: 'bad', title: '该客户端在应用内把本服务标成已禁用' }
+                      : { text: STATE_BADGE[row.state], cls: STATE_LABEL[row.state].cls, title: STATE_LABEL[row.state].text };
+                  const lv = liveBadge(row);
+                  const tb = transportBadge(row);
+                  const snippet = snippets[row.id];
+                  return (
+                    <Fragment key={row.id}>
+                      <tr
+                        data-client={row.id}
+                        data-state={row.state}
+                        data-switch={switchPending ? 'pending' : disabledByClient ? 'off' : undefined}
+                      >
+                        <td>
+                          <b>{row.name}</b>
+                          {tb && <span className={`af-badge ${tb.cls}`} data-testid={`transport-${row.id}`} title={tb.title}>{tb.text}</span>}
+                          <span className={`af-badge ${lv.cls}`} data-testid={`live-${row.id}`} title={lv.title}>{lv.text}</span>
+                          {row.running !== undefined && (
+                            <span
+                              className={row.running ? 'af-badge ok' : 'af-badge bad'}
+                              data-testid={`run-${row.id}`}
+                              title="客户端软件当前是否在运行（仅桌面客户端可判定）"
+                            >
+                              {row.running ? '已启动' : '未启动'}
+                            </span>
+                          )}
+                        </td>
+                        <td className="num" title={row.displayPath ?? '无稳定配置路径'}>
+                          {row.displayPath ?? '无稳定配置路径'}
+                        </td>
+                        <td>
+                          <span className={`af-badge ${badge.cls}`} data-testid={`state-${row.id}`} title={badge.title}>
+                            {badge.text}
+                          </span>
+                        </td>
+                        <td>
+                          {row.hasClientId === true ? (
+                            <span className="af-badge ok" title={`配置里已带 ${MCP_CLIENT_HEADER_NAME}: ${row.id}`}>✓ {row.id}</span>
+                          ) : row.state === 'wired' && row.hasClientId === false ? (
+                            <span className="af-badge warn" title={`已接入但缺 ${MCP_CLIENT_HEADER_NAME}，服务端只能按 UA 归并调用方`}>缺失</span>
+                          ) : (
+                            <span className="af-badge">—</span>
+                          )}
+                        </td>
+                        <td className="af-note" data-hint={row.state} data-testid={`guide-${row.id}`}>
+                          {guideFor(row, endpoint)}
+                        </td>
+                        <td>
+                          <div className="af-row" style={{ gap: 6 }}>
+                            <button
+                              className="af-btn sm" type="button" data-act="mcp-copy"
+                              disabled={!admin || busy !== ''}
+                              title={disabledReason || (row.transport === 'stdio'
+                                ? '生成 stdio 启动命令片段（不含令牌，可安全转发）并复制'
+                                : '生成含令牌的配置片段并复制（可手工粘贴）')}
+                              onClick={() => copySnippet(row)}
+                            >
+                              复制片段
+                            </button>
+                            {row.writable && (
+                              <button
+                                className={row.state === 'wired' && !needsClientId(row) ? 'af-btn sm off' : 'af-btn sm pri'}
+                                type="button" data-act="mcp-wire"
+                                disabled={!admin || busy !== '' || !canWire(row)}
+                                title={disabledReason
+                                  || (row.state === 'wired'
+                                    ? needsClientId(row)
+                                      ? `已接入但缺显式身份头 ${MCP_CLIENT_HEADER_NAME}：备份原文件后补写该头（服务端据此识别调用方，避免多客户端串号）`
+                                      : '已接入，无需重复写入'
+                                    : row.state === 'conflict' || row.state === 'invalid'
+                                      ? '配置冲突/无法解析：请先手工修正，系统不覆盖'
+                                      : '备份原文件后合并写入本服务条目（含身份头）')}
+                                onClick={() => wire(row)}
+                              >
+                                {row.state === 'wired'
+                                  ? needsClientId(row) ? '补身份头' : '已接入'
+                                  : row.state === 'missing_auth' ? '补齐令牌' : '一键接入'}
+                              </button>
+                            )}
+                            {canStdio(row) && (
+                              <button
+                                className="af-btn sm" type="button" data-act="mcp-stdio" data-testid={`stdio-${row.id}`}
+                                disabled={!admin || busy !== ''}
+                                title={disabledReason
+                                  || `把 ${row.name} 的配置从「令牌抄在配置里」改成「只写启动命令」：`
+                                    + '配置里不再有令牌，桥接脚本每次调用现读数据根的 keys/mcp-token.txt，'
+                                    + '此后令牌轮换 / 数据根搬家都不用重写这份配置（写前备份原文件）'}
+                                onClick={() => { void toStdio(row); }}
+                              >
+                                {busy === `stdio:${row.id}` ? '改写中…' : '改用 stdio'}
+                              </button>
+                            )}
+                            {disabledByClient && !switchPending && row.format === 'json' && (
+                              <button
+                                className="af-btn sm pri" type="button" data-act="mcp-enable"
+                                disabled={!session.sid || busy !== ''}
+                                title={'备份原配置后只清掉禁用标记；客户端不会实时重读配置，仍需手动打开或重新打开软件'}
+                                onClick={() => enableSwitch(row)}
+                              >
+                                一键打开
+                              </button>
+                            )}
+                            {disabledByClient && !switchPending && row.format !== 'json' && (
+                              <span className="af-note">该客户端配置不是 JSON，请到设置中手动打开开关</span>
+                            )}
+                            {switchPending && (
+                              <button className="af-btn sm" type="button" data-act="mcp-manual"
+                                onClick={() => setManualHintId(row.id)}>
+                                去设置手动打开
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                      <tr className="aob-detail-row">
+                        <td colSpan={6}>
+                          <details className="af-det" data-testid={`detail-${row.id}`}>
+                            <summary>详情 · 触发规则 / 完整指引 / 配置片段</summary>
+                            <div className="det-b af-stack" style={{ gap: 6 }}>
+                              <span className="af-note">触发规则：{row.rulesHint}</span>
+                              {row.foundUrl && row.state === 'conflict' && (
+                                <span className="af-note">当前指向：{row.foundUrl}</span>
+                              )}
+                              {row.note && <span className="af-note">{row.note}</span>}
+                              {row.error && <div className="af-alert bad">{row.error}</div>}
+                              {manualHintId === row.id && (
+                                <div
+                                  className="af-alert warn"
+                                  data-testid={`manual-hint-${row.id}`}
+                                  ref={(el) => { el?.scrollIntoView?.({ block: 'nearest' }); }}
+                                >
+                                  <b>手动打开位置：</b>{MCP_MANUAL_HINT}
+                                </div>
+                              )}
+                              {snippet && (
+                                <pre className="af-pre" data-testid={`snippet-${row.id}`}>
+                                  {snippet}
+                                </pre>
+                              )}
+                            </div>
+                          </details>
+                        </td>
+                      </tr>
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : capability === 'none' ? (
+          <div className="af-empty" data-testid="mcp-empty">
+            浏览器模式读不到本机客户端配置：请在桌面端打开本页并点「刷新状态」；未安装的客户端不会占位显示。
+          </div>
+        ) : scanError ? (
+          <div className="af-empty" data-testid="mcp-empty">
+            配置读取失败（{scanError}）：为避免把未知当成「已接入」，这里不列出客户端；修复后点「刷新状态」重试。
+          </div>
+        ) : !scan ? (
+          <div className="af-empty" data-testid="mcp-empty">
+            尚未完成首轮扫描：点右上「刷新状态」读取本机已安装的 MCP 客户端。
+          </div>
+        ) : (
+          <div className="af-empty" data-testid="mcp-empty">
             未检测到已安装的 MCP 客户端：安装并启动一次客户端后，点「刷新状态」重新扫描。未安装的客户端不再占位显示。
           </div>
         )}
 
-        {message && (
-          <div className="warn show" data-testid="mcp-message">{message}</div>
-        )}
-        <div className="note">
+        <details className="af-det" data-testid="mcp-actions-help">
+          <summary>操作说明与实测连通口径</summary>
+          <div className="det-b">
+            <p className="af-note">
+              所有客户端共用同一端点与令牌；提示行（项目背景 / 命中记忆 / Token / 费用）与四段折叠明细由服务端返回，
+              接入成功并重启客户端后即生效，无需各客户端单独改造。仅显示本机真实检出的客户端。
+              <b>实测连通</b>（2026-11-18）：每行拿<b>该客户端配置里的令牌</b>真调一次 tools/list，用 HTTP 状态码说话——
+              「已接入」只说明配置里写着条目，401 说明令牌过期，两者不是一回事；本面板每轮静默复检（循环检测），
+              由好变坏时会主动提示。
+            </p>
+            <p className="af-note">
+              <b>复制片段</b>：生成含令牌的配置片段，任何客户端都可粘贴（令牌只在此处一次性展示）；
+              <b>一键接入</b>：管理员专用，先备份再合并写入，支持 JSON（Qoder / Claude Code / Cursor / Gemini / Qwen）与 TOML（Codex）；
+              <b>一键适配全部</b>：一次处理所有已安装客户端——可写的自动备份写入，无法自动写入的自动生成片段并给出具体接通位置与步骤；
+              配置冲突/无法解析时拒绝覆盖。
+              <b>改用 stdio / ⇄ 全改 stdio</b>（2026-11-18）：把客户端配置改成「只写启动命令」
+              node &lt;桥接脚本&gt; &lt;引导指针&gt; &lt;端点&gt; &lt;客户端id&gt;——
+              配置里<b>不再有令牌</b>，桥接脚本每次调用现读数据根的 keys/mcp-token.txt，
+              所以<b>令牌轮换、数据根搬家都不用重写任何客户端配置</b>（脚本落在引导指针同目录，路径本身也不随数据根漂移）。
+              <b>补身份头</b>（批次41-X）：条目已接入但缺 {MCP_CLIENT_HEADER_NAME} 时出现——服务端据此认出「这次调用来自哪一家」，
+              缺了就只能按 User-Agent 归并，多台客户端共用通用 UA（如 Node 的 node）时会把 A 的调用记成 B。
+            </p>
+          </div>
+        </details>
+
+        <p className="af-note">
+          写入前自动备份原文件（.bak- 只留最新 3 份）；冲突 / 无法解析一律拒绝覆盖。令牌只在写入时一次性传给受信渲染层，绝不进日志。
           安全说明：片段中的 Authorization 令牌只在此处一次性展示，绝不写入日志/审计；一键写入支持结构稳定的
           JSON（Qoder CN / Claude Code / Cursor / Gemini / Qwen / Trae CN / WorkBuddy）与 TOML（Codex）客户端，
-          写入前自动备份原文件，同名条目指向其它端点时拒绝覆盖。deepseek harness 随宿主 Qoder 下发（对宿主一键接入即自动接通）；
+          同名条目指向其它端点时拒绝覆盖。deepseek harness 随宿主 Qoder 下发（对宿主一键接入即自动接通）；
           Zcode 的配置存应用内部存储（表单 / JSON 两种方式，无文件面不代写），「复制片段」输出的 mcpServers JSON 可整段粘贴进其 JSON 标签页，保存即接通。
           服务端召回审计会记录调用方（client），可在审计页按 Agent 核验是否真的调用了记忆库。
           stdio 形态下配置里没有凭据：桥接脚本按「引导指针 → 数据根 → keys/mcp-token.txt」现查令牌，
-          指针与脚本同放 <code>%APPDATA%\MultiAgent Memory</code>（跨数据根迁移不变），所以迁移/轮换都不需要再动客户端。
-        </div>
+          指针与脚本同放 %APPDATA%\MultiAgent Memory（跨数据根迁移不变），所以迁移/轮换都不需要再动客户端。
+        </p>
       </div>
-    </>
+    </section>
   );
 }
 

@@ -43,6 +43,20 @@ export const RECALL_SOURCE_BOUNDARY =
   '【信息来源边界】以下记忆来自本机真实账本；若本次 recall 命中数为 0（hits=0），请如实说明「未检索到相关记忆」，不要编造记忆内容或省量；回答的事实应优先采信命中记忆；工具不可用或网络失败时不得假装检索过记忆。';
 
 /**
+ * 反馈快捷通道（2026-11-22 用户拍板方案一）：卡片「N 有用 ↗」「N 没用 ↗」按钮经宿主 sendPrompt 变成用户消息。
+ * 单一真源——initialize 指令、feedback 工具描述、recallEchoNote 三处均引用本常量，杜绝第二套词表彼此矛盾。
+ * 用户已明确豁免「首步必须全文召回」铁律的**这一个特例**：只做 top_k=1 解锁门禁（仍在首步调 recall_memory，
+ * 不违背铁律的「先召回」，只是降级为极轻量、不回显、不作答案来源），直接拿到上一条卡片的 mem_id 提交反馈。
+ */
+export const RECALL_FEEDBACK_FAST_NOTE =
+  ' **反馈快捷通道（卡片按钮专用）**：当用户消息**整条只有**「N 有用」「N 没用」（可带 ↗ 或句末标点，如「2 有用 ↗」），且紧接你上一条召回回显卡：'
+  + '① 这是用户对卡片 [N] 的明确表态——目标 mem_id = 上一条卡片 hits[N-1].mem_id（不是新召回结果），「有用」→ confirm、「没用」→ reject；'
+  + '② 严格门禁下直接 feedback 会被硬拦：先调一次 recall_memory(top_k=1) 解锁本轮门禁，这次召回只为过门禁、不回显、不作答案来源；'
+  + '③ 调 feedback(mem_id=<目标>, verdict=<confirm|reject>)，**不要加 implicit**（用户已明确表态）；若返回 duplicate:true 说明已记过，不要重试；'
+  + '④ 只回一句「已记录：第 N 条标记有用/没用」，不要再输出召回回显卡、不要长篇分析；'
+  + '⑤ 消息还含其它诉求、N 超出上一条卡片命中数、或定位不到上一条卡片时，不走本通道，按正常流程处理并如实说明。';
+
+/**
  * 给 tools/list 返回的工具清单统一加「首步召回」提示：recall_memory 用更强口径，其余工具统一口径。
  * 返回新数组（不改动 MCP_TOOLS 原常量），避免两套协议漂移。
  */
@@ -78,7 +92,7 @@ export const MCP_INSTRUCTIONS = `你是接入了 MultiAgent Memory 的 Agent。�
 4. 沉淀：会话中形成新的决策、踩坑、事实、偏好或洞察时，调用 write_memory 落库（category 选最贴近的一类）；写入前如不确定项目，可在首步召回后调用 list_projects；write_memory.project_id 必填，本机默认业务项目 P1；不确定 L0 写密钥是否解锁时先调用 get_write_status 探锁。若 write_memory 返回 status=pending，表示本次内容已暂存、解锁后会自动重放落库——这不是写入成功，必须如实告知用户，不得伪造 mem_id 或声称已落库。
 5. 边界：不要向用户展示 MCP 认证令牌（Authorization 头 / mcp-token.txt 内容）；不要伪造记忆内容、省量或审计回执。工具不可用时（未启动/未授权/连接失败）如实说明并继续回答，不得假装检索过记忆。
 6. 盘点：需要治理记忆（找过时/重复/低价值条目）时用 list_memories 按条件列清单；已知 mem_id 时用 get_memory 精确读单条。两者只返回可读摘要与状态字段，不含 L0 密文；project_id 超出令牌作用域会被拒绝。list_memories 是清单盘点，找答案仍应首选 recall_memory。
-7. 反馈与治理：只有用户明确认可或否定某条召回记忆时，才用 feedback 提交 verdict（confirm/reject/disputed），由内核计算可信度变化，不要凭自己的判断代用户表态。**例外——隐式弱信号（批次 A1）：回答采信了某条 [n] 命中后，可在同轮调一次 feedback(mem_id=该条, verdict='confirm', implicit=true, recall_id=本次 request_id)**：它不动信任分、只强化计数并进评估样本池；同一召回+记忆已记过会幂等返回，不要重复提交；用户明确表态时仍用普通 confirm（不加 implicit）。需要置顶/取消置顶、锁定/解锁、归档/恢复、降权/强化、调参或迁移时用 manage_memory；locked 的记忆只有 unlock 能操作。delete 不可逆且默认不开放（需服务端开关），除非用户明确要求删除，一律优先 forget（降权不删）或 archive（归档可恢复）。两工具只回可读摘要，不含 L0 密文；ok:false 或 blocked_locked:true 时必须如实告知，不得声称操作已生效。
+7. 反馈与治理：只有用户明确认可或否定某条召回记忆时，才用 feedback 提交 verdict（confirm/reject/disputed），由内核计算可信度变化，不要凭自己的判断代用户表态。**例外——隐式弱信号（批次 A1）：回答采信了某条 [n] 命中后，可在同轮调一次 feedback(mem_id=该条, verdict='confirm', implicit=true, recall_id=本次 request_id)**：它不动信任分、只强化计数并进评估样本池；同一召回+记忆已记过会幂等返回，不要重复提交；用户明确表态时仍用普通 confirm（不加 implicit）。需要置顶/取消置顶、锁定/解锁、归档/恢复、降权/强化、调参或迁移时用 manage_memory；locked 的记忆只有 unlock 能操作。delete 不可逆且默认不开放（需服务端开关），除非用户明确要求删除，一律优先 forget（降权不删）或 archive（归档可恢复）。两工具只回可读摘要，不含 L0 密文；ok:false 或 blocked_locked:true 时必须如实告知，不得声称操作已生效。${RECALL_FEEDBACK_FAST_NOTE}
 8. 遗忘可观测性：用户觉得「记忆变少了 / 状态变了」时用 gc_report 查本次遗忘周期会降档多少条。dry_run 缺省 true，只演算不改库不写审计；只有用户明确要求执行遗忘周期时才显式传 dry_run=false。报告是分层真实统计：衰减段保留 decayed/merged/conflicts_resolved，摘要合并段给出 freshness_updated/scanned/migrated/summaries_created/summaries_filtered/merged_originals/compressed，全部来自真实事件、note 说明各段口径；不得据此推断或编造任何数字，本入口未注入向量后端故 compressed 恒为 0。若用户明确要求处理已排队冲突，必须同时给 resolve_conflicts=true 与合法 verdict（auto_override/user_confirm/merge/hold）才落定；只给其中一个会被明确拒绝，绝不自动覆盖旧记忆；conflicts_resolved 只数真实落定，dry_run 或 user_confirm/hold 时为 0。
 9. 管理工具（D6，管理员专属）：create_project 登记受管项目（kind=shared/user/archive/general，命名规则见工具描述）与 mint_token 签发受限令牌（scope_project_ids/is_admin/过期）都仅限管理员令牌调用，非管理员会被明确拒绝——被拒时如实转告用户，不要重试或伪装成功。mint_token 返回的明文令牌只在结果里出现一次：必须原样、完整地转交给用户（建议用户写入客户端配置文件），绝不写入记忆库、日志或二次回显之外的地方；丢失后只能重新 mint，无法找回。
 10. 钩子健康度自检（recall_hook_status，第 13 个工具）：强制召回钩子跑在**宿主侧**、不在本服务进程内，失败时只写本机状态文件——Agent 侧原本完全看不见，这正是本项目历史上「钩子静默失效多日」的成因。出现以下情况必须调用它：① 用户问「记忆库是否正常 / 召回可不可信 / 今天怎么没读到记忆」；② 本轮召回结果可疑（命中 0 条但你确信库里有相关内容）、或召回工具报错；③ 你要在回答里断言「记忆库没有相关内容」之前。它返回最近一次执行结果（ok / empty / failed + 中文原因 + 时间 + 注入条数）、距今多久，以及最关键的「从未执行过」（状态文件不存在 = 钩子没装、安装路径写错、或从未触发）。**verdict 为 failed / never_ran / stale 时，必须在回答里如实写明「本轮强制召回未生效，我已回退现查」并给出原因，不得静默跳过、不得假装检索过**；verdict 为 ok / empty 时不要额外打扰用户。务必区分两件事：**「记忆库没命中」≠「钩子没生效」**——前者是真没有相关记忆，后者是根本没检索，混为一谈等于用「库里没有」掩盖「没查」。
@@ -194,7 +208,7 @@ export const MCP_TOOLS = [
   },
   {
     name: 'feedback',
-    description: '对一条召回结果给出用户反馈，反哺可信度与强化计数。confirm → confidence +0.1 且 reinforce_count +1，并对已显式设置 half_life_days 的记忆延寿 +3 天（封顶 90，已 ≥90 不再动；未显式设置的不猜默认值）；reject → confidence −0.05（下限 0.05）；disputed → 不改分、挂冲突待裁决（trust_delta=0）。批次 A1 隐式弱信号：verdict=confirm 时可携 implicit=true（回答采信 [n] 后提交）——不动信任分、不延寿，只 reinforce_count+1 并进评估样本池；必须能归因到召回（建议携 recall_id=本次 request_id），同一召回+记忆幂等去重。仅在用户明确认可/否定召回内容时提交普通反馈，不要凭自己的判断代用户表态；implicit 只在回答确实采信了该条时提交。mem_id 须属于令牌作用域内的项目；只回可读摘要，不含 L0 密文。',
+    description: '对一条召回结果给出用户反馈，反哺可信度与强化计数。confirm → confidence +0.1 且 reinforce_count +1，并对已显式设置 half_life_days 的记忆延寿 +3 天（封顶 90，已 ≥90 不再动；未显式设置的不猜默认值）；reject → confidence −0.05（下限 0.05）；disputed → 不改分、挂冲突待裁决（trust_delta=0）。批次 A1 隐式弱信号：verdict=confirm 时可携 implicit=true（回答采信 [n] 后提交）——不动信任分、不延寿，只 reinforce_count+1 并进评估样本池；必须能归因到召回（建议携 recall_id=本次 request_id），同一召回+记忆幂等去重。仅在用户明确认可/否定召回内容时提交普通反馈，不要凭自己的判断代用户表态；implicit 只在回答确实采信了该条时提交。mem_id 须属于令牌作用域内的项目；只回可读摘要，不含 L0 密文。' + RECALL_FEEDBACK_FAST_NOTE,
     inputSchema: {
       type: 'object',
       properties: {
