@@ -21,22 +21,27 @@ import { publishSelection } from '../shared/selectionChannel.ts';
 import { LayerMemoryTable } from './LayerMemoryTable.tsx';
 import { filterLayerPaged, initialLayerSource, LAYER_DEFAULT_FILTER } from './layerFilter.ts';
 import type { LayerFilterState } from './layerFilter.ts';
+import { useHostTheme } from '../shared/hostTheme.ts';
+import './layeredPage.css';
 
 export type LayerId = 'L6' | 'L5' | 'L4' | 'L3' | 'L2' | 'L1' | 'L0';
+// 层色板（批次 E）：与首页层级刻度 STRATA_LAYERS（shell/strataScale.ts）同源——
+// L0 #8fa3bc / L1 #22d3ee / L2 #38bdf8 / L3 #818cf8 / L4 #c084fc / L5 #f472b6 / L6 #fbbf24。
 const LAYERS: { id: LayerId; name: string; color: string; desc: string; thr: string }[] = [
-  { id: 'L6', name: '投影索引', color: '#22d3ee', thr: DEDUP_THRESHOLDS.L6.toFixed(2), desc: '关键字 ≤30 词 + relevance' },
-  { id: 'L5', name: '洞察提炼', color: '#f59e0b', thr: DEDUP_THRESHOLDS.L5.toFixed(2), desc: '本质洞察 ≤60 字' },
+  { id: 'L6', name: '投影索引', color: '#fbbf24', thr: DEDUP_THRESHOLDS.L6.toFixed(2), desc: '关键字 ≤30 词 + relevance' },
+  { id: 'L5', name: '洞察提炼', color: '#f472b6', thr: DEDUP_THRESHOLDS.L5.toFixed(2), desc: '本质洞察 ≤60 字' },
   { id: 'L4', name: '模式归纳', color: '#c084fc', thr: DEDUP_THRESHOLDS.L4.toFixed(2), desc: '规律提炼 ≤120 字' },
-  { id: 'L3', name: '得失分析', color: '#3ecf8e', thr: DEDUP_THRESHOLDS.L3.toFixed(2), desc: '总结得失 ≤200 字' },
-  { id: 'L2', name: '会话摘要', color: '#4d9fff', thr: DEDUP_THRESHOLDS.L2.toFixed(2), desc: '情景摘要 ≤300 字' },
-  { id: 'L1', name: '清洗脱敏', color: '#e0884f', thr: DEDUP_THRESHOLDS.L1.toFixed(2), desc: '唯一可进 prompt 的原始形态' },
-  { id: 'L0', name: '原始对话', color: '#8e6bd8', thr: '不适用', desc: 'AES-256 加密，仅授权+密码' },
+  { id: 'L3', name: '得失分析', color: '#818cf8', thr: DEDUP_THRESHOLDS.L3.toFixed(2), desc: '总结得失 ≤200 字' },
+  { id: 'L2', name: '会话摘要', color: '#38bdf8', thr: DEDUP_THRESHOLDS.L2.toFixed(2), desc: '情景摘要 ≤300 字' },
+  { id: 'L1', name: '清洗脱敏', color: '#22d3ee', thr: DEDUP_THRESHOLDS.L1.toFixed(2), desc: '唯一可进 prompt 的原始形态' },
+  { id: 'L0', name: '原始对话', color: '#8fa3bc', thr: '不适用', desc: 'AES-256 加密，仅授权+密码' },
 ];
 
 /** layerContent[layer][memId] = content string | null（null 表示该层暂无内容） */
 type LayerContentMap = Record<LayerId, Record<string, string | null>>;
 
 export function MemoryLayeredPage({ load = coreListMemories }: { load?: () => Promise<MemoryRecord[]> } = {}) {
+  useHostTheme();
   const toast = useToast();
 
   const ledger = useKernelLoad('memory-layered', load);
@@ -77,6 +82,8 @@ export function MemoryLayeredPage({ load = coreListMemories }: { load?: () => Pr
   const [selectedMemId, setSelectedMemId] = useState<string | null>(null);
   const [selectedLayer, setSelectedLayer] = useState<LayerId | null>(null);
   const [loc, setLoc] = useState<{ kind: string; path?: string; source: string } | null>(null);
+  /** 层内容重读触发器（异常层处理里的「重试读取」真实重跑 coreBrowse，不是只刷新 UI） */
+  const [browseTick, setBrowseTick] = useState(0);
   // all / collected / manual / webhook / mcp（全局来源快捷过滤）；D4 深链 ?source= 在此生效
   const [filterSource, setFilterSource] = useState<string>(() => initialLayerSource(location.search));
 
@@ -147,7 +154,7 @@ export function MemoryLayeredPage({ load = coreListMemories }: { load?: () => Pr
       }
     });
     return () => { alive = false; };
-  }, [phase]);
+  }, [phase, browseTick]);
 
   /** 解锁 L0：管理员仅管理密码；被授权账号需 grant_id + 一次性授权密码（§4.4.2） */
   async function handleUnlock() {
@@ -282,6 +289,50 @@ export function MemoryLayeredPage({ load = coreListMemories }: { load?: () => Pr
     return { ok: true };
   }
 
+  // ── 真实读数（全部从 coreBrowse 层内容 + 账本派生；取不到就写未采样，不造数） ──
+  const shownLayers: Exclude<LayerId, 'L0'>[] = ['L6', 'L5', 'L4', 'L3', 'L2', 'L1'];
+  /** 该层有真实内容的记忆条数（layerContent 来自 coreBrowse，null/空串不算） */
+  function layerFilled(id: LayerId): number {
+    const map = layerContent[id] ?? {};
+    return Object.keys(map).filter((k) => {
+      const c = map[k];
+      return !!c && c.trim().length > 0;
+    }).length;
+  }
+  /** 记忆自身最深层落在该层的条数（rec.layer） */
+  function layerOwn(id: LayerId): number {
+    return memories.filter((m) => (m.layer ?? 'L1') === id).length;
+  }
+  /** 该层最近一次内容写入（取含该层内容的记忆 updated_at 最大值；账本无层级时间戳） */
+  function layerLastWrite(id: LayerId): string | null {
+    const map = layerContent[id] ?? {};
+    let best: string | null = null;
+    for (const m of memories) {
+      const c = map[m.id];
+      if (!c || !c.trim()) continue;
+      const t = Date.parse(m.updated_at);
+      if (!Number.isFinite(t)) continue;
+      if (!best || t > Date.parse(best)) best = m.updated_at;
+    }
+    return best;
+  }
+  function fmtWhen(iso: string | null): string {
+    if (!iso) return '未记录';
+    const d = new Date(iso);
+    if (!Number.isFinite(d.getTime())) return '时间不可读';
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+  const l1Filled = layerFilled('L1');
+  const derivedFilled = shownLayers.filter((i) => i !== 'L1').reduce((n, i) => n + layerFilled(i), 0);
+  const missingLayer = memories.filter((m) => !m.layer).length;
+  const lockedMemories = memories.filter((m) => m.locked).length;
+  const flowMax = Math.max(memories.length, 1);
+  function jumpTo(id: LayerId): void {
+    const el = document.getElementById(`layer-block-${id}`);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
   /** L0 授权框：管理员=管理密码；被授权账号=grant_id + 一次性密码；成员可就地申请（§4.4.2） */
   const l0Bar = (
     <div className="l0bar" id="l0bar" data-testid="l0-bar" style={{ flexWrap: 'wrap' }}>
@@ -355,14 +406,129 @@ export function MemoryLayeredPage({ load = coreListMemories }: { load?: () => Pr
   );
 
   return (
-    <div className="wrap" data-testid="layered-memory-page">
-      <h1>
-        📚 记忆层级管理页
-        <span className="badge new">19.11 · L0-L6</span>
-      </h1>
-      <div className="sub">
-        管理 L0–L6 全部记忆 · 按精炼层分层显示 · 每条可打开阅读/编辑 · L0 需授权+密码
+    <div className="p0-page layered-page" data-testid="layered-memory-page">
+      <div className="af-head" data-testid="layered-head">
+        <h1>层级管理</h1>
+        <span className="sub">L1–L6 精炼分层 · L0 原始层需授权 · 数据真相 = 本机账本（coreListMemories + coreBrowse）</span>
+        <span className="right">
+          <span className="p0-tag info">{memories.length} 条记忆</span>
+          <span className="p0-tag">{l0Unlocked ? 'L0 已解锁' : 'L0 已锁定'}</span>
+          {!l0Unlocked && (
+            <button
+              type="button"
+              className="btn"
+              data-testid="layered-goto-l0"
+              onClick={() => document.getElementById('l0bar')?.scrollIntoView({ behavior: 'smooth', block: 'center' })}
+            >
+              去授权 L0
+            </button>
+          )}
+        </span>
       </div>
+
+      {/* ── 摘要读数条：回答「现在分层里有多少东西、缺哪层」 ── */}
+      <section className="af-panel" data-testid="layered-summary">
+        <div className="af-ph"><h3>分层摘要</h3><span className="hint">账本快照 · 非示例数据</span></div>
+        <div className="af-pb">
+          <div className="af-g4">
+            <div className="af-stat">
+              <div className="k">记忆总数 <span>ledger</span></div>
+              <div className="v">{memories.length}</div>
+              <div className="d mut">来源过滤后 {visibleMemories.length} 条</div>
+            </div>
+            <div className="af-stat">
+              <div className="k">L1 已生成 <span>coreBrowse</span></div>
+              <div className="v">{l1Filled}<em>/{memories.length}</em></div>
+              <div className="d mut">唯一可进 prompt 的原始形态</div>
+            </div>
+            <div className="af-stat">
+              <div className="k">L2–L6 已生成 <span>coreBrowse</span></div>
+              <div className="v">{derivedFilled}</div>
+              <div className={derivedFilled > 0 ? 'd' : 'd mut'}>
+                {derivedFilled > 0 ? '上层派生内容合计（同一条可多层级计）' : '尚无派生内容：未接 LLM 时不生成占位文本'}
+              </div>
+            </div>
+            <div className="af-stat">
+              <div className="k">L0 原始层 <span>加密</span></div>
+              <div className="v">{l0Unlocked ? layerFilled('L0') : '未授权'}</div>
+              <div className={l0Unlocked ? 'd' : 'd mut'}>{l0Unlocked ? '本次连续会话已解锁' : '需管理密码 / grant_id + 一次性密码'}</div>
+            </div>
+          </div>
+          <div className={layerError ? 'af-note bad' : 'af-note'} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span>
+              {layerError
+                ? layerError
+                : '层内容读取自 coreBrowse；账本只有记忆 updated_at，没有逐层写入时间，因此「最近写入」取含该层内容的记忆最后更新时间。'}
+            </span>
+            {layerError && (
+              <button type="button" className="btn" data-testid="layered-retry-browse" onClick={() => setBrowseTick((t) => t + 1)}>重试读取</button>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* ── 三列网格：L6→L1 每层一张语义卡（定义 / 条数 / 规则 / 可执行的定位动作） ── */}
+      <div className="af-g3" data-testid="layered-layer-grid">
+        {LAYERS.filter((l) => l.id !== 'L0').map((L) => {
+          const filled = layerFilled(L.id);
+          const own = layerOwn(L.id);
+          const editableHint = L.id === 'L1'
+            ? 'L1 是写入入口：记忆自身最深层为 L1 时可在这里改写主内容'
+            : `派生层：仅当记忆自身最深层就是 ${L.id} 时可编辑（当前 ${own} 条），其余只读`;
+          return (
+            <section className="af-panel layer-sem" key={L.id} data-testid={`layer-card-${L.id}`} data-layer={L.id}>
+              <div className="af-ph">
+                <span className="layer-dot" style={{ background: L.color }} />
+                <h3 style={{ color: L.color }}>{L.id} · {L.name}</h3>
+                <span className="hint">阈值 {L.thr}</span>
+              </div>
+              <div className="af-pb">
+                <p className="af-q">回答：{L.desc}，这一层现在有多少条、最近什么时候写过、能不能改。</p>
+                <div className="layer-mini">
+                  <span>有内容 <b>{filled}</b> 条</span>
+                  <span>自身层级 <b>{own}</b> 条</span>
+                  <span>最近写入 <b>{fmtWhen(layerLastWrite(L.id))}</b></span>
+                </div>
+                <p className="af-note">{editableHint}。数据来源：coreBrowse('{L.id}')，读不到会点名而不是当作空层。</p>
+                <div className="layer-actions">
+                  <button type="button" className="btn" data-testid={`layered-jump-${L.id}`} onClick={() => jumpTo(L.id)}>
+                    定位到 {L.id} 明细
+                  </button>
+                </div>
+              </div>
+            </section>
+          );
+        })}
+      </div>
+
+      {/* ── 层间流动（整行；异常层处理卡已按用户要求移除，读取失败/重试内联在摘要里） ── */}
+      <section className="af-panel" data-testid="layered-flow">
+          <div className="af-ph"><h3>层间流动 · L1 → L6</h3><span className="hint">各层有内容的记忆条数 / 总数 {memories.length}</span></div>
+          <div className="af-pb">
+            <div className="layer-flow">
+              {shownLayers.map((id) => {
+                const L = LAYERS.find((x) => x.id === id)!;
+                const n = layerFilled(id);
+                return (
+                  <div className="flow-row" key={id}>
+                    <span className="flow-id" style={{ color: L.color }}>{id}</span>
+                    <span className="flow-name">{L.name}</span>
+                    <span className="flow-bar"><i style={{ width: `${Math.round((n / flowMax) * 100)}%`, background: L.color }} /></span>
+                    <span className="flow-n">{n}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="af-note">
+              流动规则：L1 由写入 / 采集产生，是唯一可进 prompt 的原始形态；L2–L6 由精炼链路从下层向上生成。
+              层本身不按时间衰减——降温、归档、弃用由生命周期页管理。
+              数据侧写：未标层 {missingLayer} 条 · 锁定 {lockedMemories} 条。
+            </p>
+            <div className="layer-actions">
+              <a className="btn" href="/lifecycle.html" data-testid="layered-goto-lifecycle">去生命周期页处理衰减/归档</a>
+            </div>
+          </div>
+        </section>
 
       {phase === 'loading' && (
         <div className="card" style={{ textAlign: 'center', padding: 40, color: 'var(--dim)' }}>
@@ -379,6 +545,12 @@ export function MemoryLayeredPage({ load = coreListMemories }: { load?: () => Pr
       )}
       {phase === 'ok' && (
         <>
+          <section className="af-panel" data-testid="layered-workbench">
+            <div className="af-ph">
+              <h3>分层查阅与编辑</h3>
+              <span className="hint">点条目在右侧阅读/编辑 · 保存 = 真写内核账本 + memory_op 审计</span>
+            </div>
+            <div className="af-pb layered-workbench-body">
           {memories.length === 0 ? (
             <div className="cols">
               <div className="left-col">
@@ -409,7 +581,7 @@ export function MemoryLayeredPage({ load = coreListMemories }: { load?: () => Pr
               {/* 左列：层卡片堆叠 */}
               <div className="left-col">
                 {/* 采集来源过滤栏（§19.3 双通道） */}
-                <div className="card" data-testid="source-filter" style={{ marginBottom: 8 }}>
+                <div className="layer-toolbar" data-testid="source-filter">
                   <span style={{ fontSize: 12, fontWeight: 600, marginRight: 8 }}>📡 采集来源</span>
                   {(['all', 'collected', 'manual', 'webhook', 'mcp'] as const).map((opt) => (
                     <button
@@ -433,7 +605,7 @@ export function MemoryLayeredPage({ load = coreListMemories }: { load?: () => Pr
                 {LAYERS.filter((l) => l.id !== 'L0').map((L) => {
                   const paged = pagedForLayer(L.id);
                   return (
-                    <div key={L.id} className="layer" data-layer={L.id}>
+                    <div key={L.id} className="layer" id={`layer-block-${L.id}`} data-layer={L.id}>
                       <div className="layer-head">
                         <span className="dot" style={{ background: L.color }} />
                         <h2 style={{ color: L.color, margin: 0 }}>{L.id} · {L.name}</h2>
@@ -527,8 +699,8 @@ export function MemoryLayeredPage({ load = coreListMemories }: { load?: () => Pr
                 {l0Bar}
               </div>
 
-              {/* 右列：详情/编辑 */}
-              <div className="detail" data-testid="detail">
+              {/* 右列：详情/编辑（窄窗口由 CSS 转为悬浮抽屉，点选即见） */}
+              <div className={`detail${selectedMem ? ' detail-open' : ''}`} data-testid="detail">
                 {!selectedMem ? (
                   <div className="empty-detail">← 点左侧任意层中的记忆条目，在此打开阅读与编辑该层内容。</div>
                 ) : (
@@ -556,14 +728,34 @@ export function MemoryLayeredPage({ load = coreListMemories }: { load?: () => Pr
               </div>
             </div>
           )}
+            </div>
+          </section>
 
-          <div className="legend">
-            <b>层语义（§2.1）</b>：L6 关键字投影（≤30 词 + relevance）· L5 洞察提炼（≤60 字）· L4 模式归纳（≤120 字）· L3 得失分析（≤200 字）· L2 会话摘要（≤300 字）· L1 清洗脱敏（唯一可进 prompt 的原始形态）· L0 原始对话（AES-256 加密，仅授权+密码）。<br />
-            <b>显示规则</b>：L6→L1 始终可见，自上而下最精炼→最深层；<b>L0 授权框固定显示在 L1 卡片正下方</b>（与层卡片等宽、等距）；管理员用管理密码、被授权账号用 grant_id + 一次性密码解锁后，L0 卡片出现在授权框上方（连续会话，每次 l0_view 写审计）。<br />
-            <b>连续查阅</b>：空闲 <b>5 分钟</b>自动锁定（页面倒计时 + 60s 心跳，主进程空闲回收兜底）；锁定后 wrapped DEK 删除，再次查阅须重新解锁，成员需重新申请。<br />
-            <b>编辑规则</b>：只有记忆<b>自身的最深层</b>可编辑（保存 = 写主内容 + 该层，version+1、重算 sha256／L1 向量，并落 <code>memory_op</code> 审计）；上层是派生视图，<b>只读</b>并提示应去哪层改；<b>L0 只读</b>（落盘为 v2 密文）；<b>locked 记忆</b>（🔒）内容只读，需先解锁。被内核拒绝（空内容／未过质量门／已锁定）时页面显示原因，草稿保留、账本不动。<br />
-            <b>当前阶段说明</b>：尚未接入真实 LLM —— 写入只生成 L1 清洗脱敏内容（列表标「未精炼」），L2–L6 不生成占位文本、各层显示「该层暂无内容」；接入 LLM 后替换内核 `generateRefinedContent` 单点即可生成 L2–L6。
-          </div>
+          <section className="af-panel" data-testid="layered-rules">
+            <div className="af-ph"><h3>规则与边界</h3><span className="hint">层语义 · 显示 · 连续查阅 · 编辑</span></div>
+            <div className="af-pb layer-rules-grid">
+              <div>
+                <b>层语义（§2.1）</b>
+                <p>L6 关键字投影（≤30 词 + relevance）· L5 洞察提炼（≤60 字）· L4 模式归纳（≤120 字）· L3 得失分析（≤200 字）· L2 会话摘要（≤300 字）· L1 清洗脱敏（唯一可进 prompt 的原始形态）· L0 原始对话（AES-256 加密，仅授权+密码）。</p>
+              </div>
+              <div>
+                <b>显示与 L0</b>
+                <p>L6→L1 始终可见；L0 授权框固定显示在 L1 明细之后，管理员用管理密码、被授权账号用 grant_id + 一次性密码解锁后，L0 卡片出现在授权框上方（连续会话，每次 l0_view 写审计）。</p>
+              </div>
+              <div>
+                <b>连续查阅</b>
+                <p>空闲 <b>5 分钟</b>自动锁定（页面倒计时 + 60s 心跳，主进程空闲回收兜底）；锁定后 wrapped DEK 删除，再次查阅须重新解锁，成员需重新申请。</p>
+              </div>
+              <div>
+                <b>编辑规则</b>
+                <p>只有记忆<b>自身的最深层</b>可编辑（保存 = 写主内容 + 该层，version+1、重算 sha256／L1 向量，并落 <code>memory_op</code> 审计）；上层是派生视图只读并提示应去哪层改；L0 只读（v2 密文）；locked 记忆内容只读。被内核拒绝（空内容／未过质量门／已锁定）时显示原因，草稿保留、账本不动。</p>
+              </div>
+              <div>
+                <b>当前阶段</b>
+                <p>尚未接入真实 LLM：写入只生成 L1 清洗脱敏内容（列表标「未精炼」），L2–L6 不生成占位文本、各层显示「该层暂无内容」；接入后替换内核 <code>generateRefinedContent</code> 单点即可生成 L2–L6。</p>
+              </div>
+            </div>
+          </section>
         </>
       )}
 

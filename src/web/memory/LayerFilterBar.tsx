@@ -4,6 +4,8 @@
 import type { CSSProperties } from 'react';
 import { LAYER_PAGE_SIZES } from './layerFilter.ts';
 import type { LayerFilterState } from './layerFilter.ts';
+import { PageNav } from '../shared/PageNav.tsx';
+import type { Paged } from '../shared/paginate.ts';
 
 /** 类型选项（与记忆管理页一致） */
 const TYPE_OPTS = ['all', 'fact', 'decision', 'pitfall', 'preference', 'project', 'feedback'];
@@ -93,7 +95,7 @@ export function LayerFilterBar({
 }
 
 /**
- * 层卡片底部的分页控件（上一页 / 页码 / 下一页 + 计数）。
+ * 层卡片底部的分页控件（批次 E：与首页 v5 pager 统一，复用 shared/PageNav）。
  * 仅在 total>0 时渲染。
  */
 export function LayerPager({
@@ -110,79 +112,18 @@ export function LayerPager({
   onChange: (next: LayerFilterState) => void;
 }) {
   if (total === 0) return null;
-  const page = state.page;
-  const pgBtn: CSSProperties = { padding: '2px 8px', fontSize: 11 };
+  const paged: Paged<never> = { items: [], total, totalPages, page: state.page, pageSize: state.pageSize };
   return (
     <div
       className="layer-pager"
       data-testid={`${layer}-pager`}
       style={{
-        display: 'flex', alignItems: 'center', gap: 5, padding: '6px 10px',
-        borderTop: '1px solid var(--line)', fontSize: 11, color: 'var(--muted)', flexWrap: 'wrap',
+        display: 'flex', alignItems: 'center',
+        padding: '6px 10px', borderTop: '1px solid var(--line)',
+        fontSize: 11, color: 'var(--muted)',
       }}
     >
-      <button
-        className="btn"
-        data-testid={`${layer}-pg-first`}
-        disabled={page <= 1}
-        style={pgBtn}
-        title="首页"
-        onClick={() => onChange({ ...state, page: 1 })}
-      >
-        ⏮ 首页
-      </button>
-      <button
-        className="btn"
-        data-testid={`${layer}-pg-prev`}
-        disabled={page <= 1}
-        style={pgBtn}
-        title="上一页"
-        onClick={() => onChange({ ...state, page: page - 1 })}
-      >
-        ‹ 上页
-      </button>
-      <span data-testid={`${layer}-pg-info`}>
-        第
-        <input
-          type="number"
-          min={1}
-          max={totalPages}
-          data-testid={`${layer}-pg-goto-input`}
-          value={page}
-          style={{ width: 34, padding: '1px 3px', margin: '0 3px', background: 'var(--panel2)', border: '1px solid var(--line)', borderRadius: 4, color: 'var(--txt)', fontSize: 11, textAlign: 'center' }}
-          onChange={(e) => {
-            const v = parseInt(e.target.value, 10);
-            if (!isNaN(v) && v >= 1 && v <= totalPages) onChange({ ...state, page: v });
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              const v = parseInt((e.target as HTMLInputElement).value, 10);
-              if (!isNaN(v) && v >= 1 && v <= totalPages) onChange({ ...state, page: v });
-            }
-          }}
-        />
-        / {totalPages} 页 · 共 {total} 条
-      </span>
-      <button
-        className="btn"
-        data-testid={`${layer}-pg-next`}
-        disabled={page >= totalPages}
-        style={pgBtn}
-        title="下一页"
-        onClick={() => onChange({ ...state, page: page + 1 })}
-      >
-        下页 ›
-      </button>
-      <button
-        className="btn"
-        data-testid={`${layer}-pg-last`}
-        disabled={page >= totalPages}
-        style={pgBtn}
-        title="尾页"
-        onClick={() => onChange({ ...state, page: totalPages })}
-      >
-        尾页 ⏭
-      </button>
+      <PageNav paged={paged} onPage={(page) => onChange({ ...state, page })} />
     </div>
   );
 }

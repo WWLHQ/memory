@@ -1,6 +1,6 @@
 // 个人记忆常驻面板（N8 回退改良版）组件契约：
 // - 界面回到原「左已确认 / 右收件箱」双窗，与记忆库全页共用同一个 PersonalMemoryPane（narrow 模式）；
-// - 「快速记一条 + 记一条」置顶通栏（由 Pane 提供，两处同时生效）；
+// - 顶部快速记录通栏已删；左「已确认」窗内置自由输入文本框 +「保存」（由 Pane 提供，两处同时生效）；
 // - 壳层额外提供 Agent 记忆归并区：读取会话时自动拉取 + agent 主动投递 + 手动拉取兜底；
 // - 一次点击完成分流：是我的 → 私人池（import + confirm）；不是我的 → 进共享（reject_from_agent）；
 // - 人机交互：Esc 收起；导入成功但确认失败时如实说明，绝不谎报已归入私人池。
@@ -42,8 +42,11 @@ vi.mock('../../memory/PersonalMemoryPane.tsx', () => ({
     h.paneProps.push(props);
     return (
       <div data-testid="mm-personal-pane">
-        <div data-testid="pm-quick-top"><textarea data-testid="pm-quick-input" /></div>
-        <div data-testid="pm-confirmed" />
+        <div data-testid="pm-hd"><span data-testid="pm-owner-binding" /></div>
+        <div data-testid="pm-confirmed">
+          <textarea data-testid="pm-note-input" />
+          <button type="button" data-testid="pm-note-save">保存</button>
+        </div>
         <div data-testid="pm-inbox" />
       </div>
     );
@@ -110,12 +113,14 @@ async function renderPanel(onClose = vi.fn()) {
 }
 
 describe('个人记忆常驻面板：回退原双窗界面', () => {
-  it('内嵌与全页共用的原双窗 Pane（narrow），快速记一条置顶通栏', async () => {
+  it('内嵌与全页共用的原双窗 Pane（narrow），左窗文本框 + 保存、顶部快速记录已删', async () => {
     await renderPanel();
     expect(screen.getByTestId('personal-memory-panel')).toBeTruthy();
     expect(screen.getByTestId('mm-personal-pane')).toBeTruthy();
-    expect(screen.getByTestId('pm-quick-top')).toBeTruthy();
-    expect(screen.getByTestId('pm-quick-input')).toBeTruthy();
+    expect(screen.queryByTestId('pm-quick-top')).toBeNull();
+    expect(screen.queryByTestId('pm-quick-input')).toBeNull();
+    expect(screen.getByTestId('pm-note-input')).toBeTruthy();
+    expect(screen.getByTestId('pm-note-save')).toBeTruthy();
     expect(screen.getByTestId('pm-confirmed')).toBeTruthy();
     expect(screen.getByTestId('pm-inbox')).toBeTruthy();
     // 共用同一组件：narrow=true 让窄面板双窗上下堆叠

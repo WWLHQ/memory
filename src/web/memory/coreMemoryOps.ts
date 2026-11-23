@@ -11,7 +11,7 @@ import { homeBaseUrl } from '../backend.ts';
 import { policyFor } from '../../core/memagent/forgetting.ts';
 import { checkL0ToL1Quality, filteredAuditDetail, QUALITY_GATE_VERSION } from '../../core/memagent/qualityGate.ts';
 import { layerSpecOf, LAYER_SPECS } from '../../core/memagent/layerRules.ts';
-import { forgettingPrefsFromSnapshot } from '../../core/memagent/paramsSnapshot.ts';
+import { forgettingPrefsFromSnapshot, isInternalPrefRow, isInternalPrefContent } from '../../core/memagent/paramsSnapshot.ts';
 import { embedSync } from '../../core/memagent/vector.ts';
 import { sha256hex } from '../../core/memagent/sync.ts';
 import { configuredVectorDim } from '../models/modelConfig.ts';
@@ -37,6 +37,22 @@ export function getStorage(): StorageBackend {
   return getKernelStorage();
 }
 
+/**
+ * 记忆状态四态语义派生（批次57，用户确认口径）：
+ * - 弃用 = merged_into 非空（已被合并进新值，旧值让位）；
+ * - 归档 = decay_class archived；
+ * - 休眠 = decay_class dormant 或 cold（冷记忆不活跃）；
+ * - 其余（hot/warm）= 活跃。
+ * 全部由账本真实字段派生，不注入演示状态。
+ */
+export type DerivedMemoryStatus = 'active' | 'dormant' | 'archived' | 'deprecated';
+export function deriveMemoryStatus(m: Pick<Memory, 'decay_class' | 'merged_into'>): DerivedMemoryStatus {
+  if (m.merged_into) return 'deprecated';
+  if (m.decay_class === 'archived') return 'archived';
+  if (m.decay_class === 'dormant' || m.decay_class === 'cold') return 'dormant';
+  return 'active';
+}
+
 /** 内核单例由 kernel.ts 收敛；模型配置变更会重建单例，此处不得再缓存旧实例 */
 function getAgent(): Promise<MemAgent> {
   return Promise.resolve(getKernel());
@@ -57,7 +73,7 @@ export function toRecord(m: Memory): MemoryRecord {
     pinned: m.pinned,
     locked: m.locked,
     archived: m.decay_class === 'archived',
-    status: m.decay_class === 'archived' ? 'archived' : m.decay_class === 'dormant' ? 'dormant' : 'active',
+    status: deriveMemoryStatus(m),
     merged_from: m.merged_from,
     merged_into: m.merged_into,
     created_at: new Date(m.created_at ?? Date.now()).toISOString(),
@@ -86,7 +102,7 @@ function mergeBack(prev: MemoryRecord, m: Memory): MemoryRecord {
     pinned: m.pinned,
     locked: m.locked,
     archived: d === 'archived',
-    status: d === 'archived' ? 'archived' : d === 'dormant' ? 'dormant' : prev.status,
+    status: deriveMemoryStatus(m),
     updated_at: new Date(m.updated_at ?? Date.now()).toISOString(),
     version: m.version,
     pending_sync: m.pending_sync,
@@ -159,7 +175,8 @@ export async function openMemoryFile(memId: string): Promise<{ ok: boolean; path
 export async function coreListMemories(): Promise<MemoryRecord[]> {
   await getAgent();
   const mems = await getStorage().listMemories({});
-  return mems.map(toRecord);
+  // 内部配置快照（params:/growth: 前缀 + system 用户）不是用户记忆，不进记忆列表/层级页/统计
+  return mems.filter((m) => !isInternalPrefRow(m)).map(toRecord);
 }
 
 /** 从 agent 记忆归入个人时的候选（不含正文脱敏之外字段，只给归并面板用） */
@@ -215,6 +232,7 @@ export async function splitAgentIngest(excludeRefIds: Set<string>): Promise<Agen
   let sessionInfoCount = 0;
   const candidates: AgentMemoryCandidate[] = [];
   for (const m of mems) {
+    if (isInternalPrefRow(m)) continue;
     if (!m.created_by_agent || m.created_by_agent === 'manual') continue;
     if (excludeRefIds.has(m.mem_id)) continue;
     // 会话信息（带 session_id）→ 直接放行，不进发件箱
@@ -260,7 +278,7 @@ export async function coreLayerPolicy(): Promise<LayerPolicySnapshot[]> {
     halfLifeDays: prefs.halfLifeDays,
     autoArchiveDays: prefs.autoArchiveDays,
     forgettingEnabled: prefs.enabled,
-    ledgerRows: mems.length,
+    ledgerRows: mems.filter((m) => !isInternalPrefRow(m)).length,
   }));
 }
 
@@ -384,7 +402,8 @@ export async function coreBrowse(
     };
     try {
       const res: BrowseResult = await ma.browse(req);
-      rows.push(...res.rows);
+      // 层级页正文列表同样过滤内部配置快照（browse 行没有 user_id，按正文前缀判定）
+      rows.push(...res.rows.filter((r) => !isInternalPrefContent(r.content)));
       l0_masked = l0_masked || res.l0_masked;
     } catch {
       // 单项目失败（如 L0 授权不覆盖该项目）只跳过该项目；全部失败才报给调用方

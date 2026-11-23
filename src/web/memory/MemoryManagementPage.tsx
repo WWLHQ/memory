@@ -1,57 +1,54 @@
-// 记忆管理统一视图（批次：记忆管理组）：六标签 + 9 列账本 + 分层策略 + L0 + 四模式冲突裁决。
+// 记忆管理统一视图（批次57 精简六页签）：全部记忆 / 活跃 / 休眠 / 归档 / 弃用 / 分层 L1–L6 + 9 列账本 + 分层策略。
 //
 // 数据口径：
-// - 列表 / 分层计数 / 最近写入 / 到龄 / L0 条目 / 冲突队列全部读真实账本与内核；
+// - 列表 / 分层计数 / 最近写入 / 到龄 / 库位置全部读真实账本与内核；
+// - 状态四态语义派生（coreMemoryOps.deriveMemoryStatus）：弃用=merged_into、休眠=cold/dormant、归档=archived、其余=活跃；
 // - 账本没有的字段（按条成本、同步游标、端别）如实写「未记录 / 未提供」，不用演示值冒充；
-// - 个人记忆按 D2 保持「程序暂无数据模型」的标签内不可用态，不显示任何计数；
-// - 冲突裁决以内核返回的 ok/resolved 为准，拒绝或未落定一律不当成功。
+// - 冲突队列与 L0 会话只作页头/真源条读数；裁决在冲突裁决页（dispute.html）、L0 管理在安全页，本页不重复；
+// - 批次57 起行右键 = 常驻详情菜单（点外部/滚动不关闭，Esc 或 × 关闭），行点击仍是右侧详情抽屉。
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { hostCapability } from '../../desktop/hostBridge.ts';
-import { coreConflicts, coreVerdict } from '../dispute/coreDispute.ts';
-import { VERDICTS } from '../dispute/DisputeVerdict.tsx';
-import type { ConflictRecord, Verdict } from '../dispute/types.ts';
-import { useDisputeMirror } from '../dispute/useDisputeMirror.ts';
+import { coreConflicts } from '../dispute/coreDispute.ts';
 import { useHostTheme } from '../shared/hostTheme.ts';
-import { kernelErrorText, useKernelLoad, useRefreshAll } from '../shared/kernelLoad.tsx';
+import { useKernelLoad, useRefreshAll } from '../shared/kernelLoad.tsx';
+import { pagerWindow } from '../shared/pagerWindow.ts';
 import { autoPageSize, MIN_AUTO_PAGE_SIZE } from '../shared/paginate.ts';
 import { publishSelection } from '../shared/selectionChannel.ts';
 import { useSessionContext } from '../shared/session.ts';
 import { requestShellView } from '../shared/shellNavigate.ts';
 import { formatRemaining, useL0Session } from '../shared/useL0Session.ts';
-import { loadPendingWrites, type PendingWritesResult } from '../shell/taskpane.ts';
 import {
-  coreBrowse, coreLayerPolicy, coreListMemories, openMemoryFile, storageLocation,
+  coreApplyOp, coreLayerPolicy, coreListMemories, coreUpdateContent, openMemoryFile, storageLocation,
   type LayerPolicySnapshot,
 } from './coreMemoryOps.ts';
 import { filterAndPaged, initialMemoryFilter, type MemoryFilter } from './memoryFilter.ts';
-import { PersonalMemoryPane } from './PersonalMemoryPane.tsx';
-import { loadPersonalSnapshot } from '../shared/personalPort.ts';
-import type { PersonalSnapshot } from '../../core/memagent/personal.ts';
 import type { MemoryRecord } from './types.ts';
 
-type TabId = 'all' | 'personal' | 'layers' | 'conflict' | 'review' | 'l0';
-const TAB_IDS: TabId[] = ['all', 'personal', 'layers', 'conflict', 'review', 'l0'];
+type TabId = 'all' | 'active' | 'dormant' | 'archived' | 'deprecated' | 'layers';
+const TAB_IDS: TabId[] = ['all', 'active', 'dormant', 'archived', 'deprecated', 'layers'];
 
 const TAB_LABEL: Record<TabId, string> = {
   all: '全部记忆',
-  personal: '个人记忆',
+  active: '活跃',
+  dormant: '休眠',
+  archived: '归档',
+  deprecated: '弃用',
   layers: '分层 L1–L6',
-  conflict: '冲突',
-  review: '待重放写入',
-  l0: 'L0 密文（需解锁）',
 };
+
+/** 状态页签（批次57）：按 deriveMemoryStatus 语义派生的账本状态过滤 */
+const STATUS_TABS: readonly TabId[] = ['active', 'dormant', 'archived', 'deprecated'];
 
 const LAYER_IDS = ['L1', 'L2', 'L3', 'L4', 'L5', 'L6'] as const;
 type LayerId = typeof LAYER_IDS[number];
 
+/** 四态语义派生后的展示标签（批次57 起 status 只有这四种，蛰伏/陈旧不再出现在本页） */
 const STATUS_LABEL: Record<string, string> = {
   active: '活跃',
-  hibernating: '蛰伏',
-  archived: '已归档',
-  deprecated: '弃用',
-  stale: '陈旧',
   dormant: '休眠',
+  archived: '归档',
+  deprecated: '弃用',
 };
 
 const TYPE_LABEL: Record<string, string> = {
@@ -63,24 +60,21 @@ const TYPE_LABEL: Record<string, string> = {
   feedback: '反馈',
 };
 
-const CONFLICT_TYPE_LABEL: Record<string, string> = {
-  direct_contradiction: '直接矛盾',
-  partial_overlap: '部分重叠',
-  context_dependent: '依赖上下文',
-  uncertain: '不确定',
-};
-
 const loadMemories = () => coreListMemories();
 const loadLayerPolicy = () => coreLayerPolicy();
 const loadConflicts = () => coreConflicts();
-const loadPending = () => loadPendingWrites();
 const loadStorage = () => storageLocation();
 
 function initialTab(): TabId {
   try {
     const raw = new URLSearchParams(location.search).get('tab') ?? '';
     if ((TAB_IDS as string[]).includes(raw)) return raw as TabId;
-    if (location.hash.includes('l0bar')) return 'l0';
+    // 旧深链兼容（批次57 前的 tab=conflict/review/l0/personal）→ 语义最近的新页签；
+    // hash l0bar 同理。不做隐藏页签，页签条里没有的就是回 all。
+    if (location.hash.includes('l0bar')) return 'all';
+    if (raw === 'dormant' || raw === 'hibernating') return 'dormant';
+    if (raw === 'archived' || raw === 'deprecated') return raw;
+    if (raw === 'personal' || raw === 'l0' || raw === 'review' || raw === 'conflict') return 'all';
   } catch {
     /* 无 location（测试/SSR）→ 全部 */
   }
@@ -165,43 +159,142 @@ interface LayerStat {
   policyKey: string;
 }
 
-/** 9 列账本（ID / 摘要 / 层级 / 状态 / 重要度 / 访问 / 最近更新 / 成本来源 / 同步）+ 动作位 */
-function MemoryGrid({
-  paged, selectedId, onSelect, onOpenFile, canOpenFile,
+/** 9 列账本（ID / 摘要 / 层级 / 状态 / 重要度 / 访问 / 最近更新 / 成本来源 / 同步）+ 动作位 + 行右键 */
+export const COL_WIDTHS_DEFAULT = [84, 200, 52, 82, 64, 54, 96, 206, 82, 52];
+export const COL_WIDTHS_KEY = 'mm.grid.colWidths.v1';
+
+/** 列宽读盘：只接受与列数一致、且在 [44,520] 内的真实数值，异常时回落默认（不写坏账） */
+function readColWidths(): number[] {
+  try {
+    const raw = localStorage.getItem(COL_WIDTHS_KEY);
+    const arr = raw ? (JSON.parse(raw) as unknown) : null;
+    if (Array.isArray(arr) && arr.length === COL_WIDTHS_DEFAULT.length
+      && arr.every((n) => typeof n === 'number' && Number.isFinite(n) && n >= 44 && n <= 520)) {
+      return arr as number[];
+    }
+  } catch {
+    /* 隐私模式/损坏值：回落默认 */
+  }
+  return COL_WIDTHS_DEFAULT;
+}
+
+export function MemoryGrid({
+  paged, selectedId, onSelect, onOpenFile, canOpenFile, onRowContext,
+  onEdit, onDelete, onGotoLayer, onToast,
 }: {
   paged: ReturnType<typeof filterAndPaged>;
   selectedId: string | null;
   onSelect: (id: string) => void;
   onOpenFile: (rec: MemoryRecord) => void;
   canOpenFile: boolean;
+  onRowContext: (rec: MemoryRecord, x: number, y: number) => void;
+  onEdit: (rec: MemoryRecord) => void;
+  onDelete: (rec: MemoryRecord) => void;
+  onGotoLayer: (layer: string) => void;
+  onToast: (msg: string) => void;
 }) {
+  // 列宽可拖拽 + 本地持久化（刷新 / 切页 / 重登 / 重启后仍生效）
+  const [widths, setWidths] = useState<number[]>(readColWidths);
+  const widthsRef = useRef(widths);
+  widthsRef.current = widths;
+  const dragRef = useRef<{ index: number; startX: number; startW: number } | null>(null);
+  /** 「更多」菜单：fixed 定位，避免被滚动容器裁切；点外部 / Esc 关闭 */
+  const [menu, setMenu] = useState<{ rec: MemoryRecord; x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    if (!menu) return;
+    const onDown = (ev: PointerEvent) => {
+      const t = ev.target as HTMLElement;
+      if (t.closest('.mm-more-menu') || t.closest('[data-mm-more]')) return;
+      setMenu(null);
+    };
+    const onKey = (ev: KeyboardEvent) => { if (ev.key === 'Escape') setMenu(null); };
+    document.addEventListener('pointerdown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [menu]);
+
+  function startResize(index: number, ev: React.PointerEvent) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    dragRef.current = { index, startX: ev.clientX, startW: widthsRef.current[index] };
+    const move = (e: PointerEvent) => {
+      const d = dragRef.current;
+      if (!d) return;
+      const w = Math.max(44, Math.min(520, Math.round(d.startW + (e.clientX - d.startX))));
+      setWidths((prev) => {
+        if (prev[d.index] === w) return prev;
+        const next = [...prev];
+        next[d.index] = w;
+        return next;
+      });
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+      dragRef.current = null;
+      try {
+        localStorage.setItem(COL_WIDTHS_KEY, JSON.stringify(widthsRef.current));
+      } catch {
+        /* 配额/隐私模式：本次仍生效，只是不跨会话 */
+      }
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+  }
+
+  async function copyText(text: string, label: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      onToast(`已复制${label}`);
+    } catch {
+      onToast(`复制${label}失败：当前环境未授权剪贴板`);
+    }
+  }
+
+  function openMenu(rec: MemoryRecord, ev: React.MouseEvent<HTMLButtonElement>) {
+    ev.stopPropagation();
+    const r = ev.currentTarget.getBoundingClientRect();
+    const x = Math.max(8, Math.min(r.right - 168, window.innerWidth - 176));
+    const y = Math.max(8, Math.min(r.bottom + 4, window.innerHeight - 270));
+    setMenu({ rec, x, y });
+  }
+
+  const totalWidth = widths.reduce((a, b) => a + b, 0);
+  const heads: { label: string; cls?: string }[] = [
+    { label: 'ID' }, { label: '摘要' }, { label: '层级' }, { label: '状态' },
+    { label: '重要度', cls: 'num' }, { label: '访问', cls: 'num' }, { label: '最近更新' },
+    { label: '成本来源' }, { label: '同步' }, { label: '动作', cls: 'ra' },
+  ];
+
   return (
     <div className="table-wrap mm-table-wrap">
-      <table className="grid mm-grid" data-testid="memory-table">
+      <table className="grid mm-grid" data-testid="memory-table" style={{ minWidth: totalWidth }}>
         <colgroup>
-          <col style={{ width: 84 }} />
-          <col style={{ width: 200 }} />
-          <col style={{ width: 52 }} />
-          <col style={{ width: 82 }} />
-          <col style={{ width: 64 }} />
-          <col style={{ width: 54 }} />
-          <col style={{ width: 96 }} />
-          <col style={{ width: 206 }} />
-          <col style={{ width: 82 }} />
-          <col style={{ width: 52 }} />
+          {widths.map((w, i) => <col key={i} style={{ width: w }} />)}
         </colgroup>
         <thead>
           <tr>
-            <th>ID</th>
-            <th>摘要</th>
-            <th>层级</th>
-            <th>状态</th>
-            <th className="num">重要度</th>
-            <th className="num">访问</th>
-            <th>最近更新</th>
-            <th>成本来源</th>
-            <th>同步</th>
-            <th className="ra">动作</th>
+            {heads.map((h, i) => (
+              <th key={h.label} className={h.cls} data-col={i}>
+                {h.label}
+                {i < heads.length - 1 && (
+                  <span
+                    className="mm-col-resizer"
+                    data-testid={`mm-col-resizer-${i}`}
+                    role="separator"
+                    aria-orientation="vertical"
+                    title="拖拽调整列宽（自动保存，刷新/重登后保持）"
+                    onPointerDown={(e) => startResize(i, e)}
+                  />
+                )}
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
@@ -215,6 +308,11 @@ function MemoryGrid({
                 data-testid={`memory-row-${m.id}`}
                 className={`${selectedId === m.id ? 'selected' : ''} ${m.locked ? 'locked' : ''}`}
                 onClick={() => onSelect(m.id)}
+                onContextMenu={(e) => {
+                  // 批次57：行右键 = 常驻详情菜单；preventDefault 让壳层不再接管本 iframe 事件
+                  e.preventDefault();
+                  onRowContext(m, e.clientX, e.clientY);
+                }}
               >
                 <td className="mono idc" title={m.id}>{shortId(m.id)}</td>
                 <td className="mm-summary" title={m.content}>
@@ -248,12 +346,13 @@ function MemoryGrid({
                     <button
                       type="button"
                       className="mm-icon-btn"
-                      title={canOpenFile ? '在系统里打开本条记忆文件' : '桌面端才可打开记忆文件'}
-                      aria-label="打开记忆文件"
-                      disabled={!canOpenFile}
-                      onClick={(e) => { e.stopPropagation(); onOpenFile(m); }}
+                      title="更多动作：编辑 / 复制 ID / 复制内容 / 跳分层 / 打开文件 / 删除"
+                      aria-label="更多动作"
+                      data-mm-more="1"
+                      data-testid={`mm-more-${m.id}`}
+                      onClick={(e) => openMenu(m, e)}
                     >
-                      <Glyph name="open" />
+                      <Glyph name="more" />
                     </button>
                   </span>
                 </td>
@@ -262,11 +361,22 @@ function MemoryGrid({
           })}
         </tbody>
       </table>
+      {menu ? (
+        <div className="mm-more-menu" role="menu" style={{ left: menu.x, top: menu.y }} data-testid="mm-more-menu">
+          <button type="button" role="menuitem" onClick={() => { setMenu(null); onSelect(menu.rec.id); }}>查看详情</button>
+          <button type="button" role="menuitem" data-testid="mm-more-edit" disabled={menu.rec.locked} onClick={() => { setMenu(null); onEdit(menu.rec); }}>编辑内容</button>
+          <button type="button" role="menuitem" data-testid="mm-more-copy-id" onClick={() => { void copyText(menu.rec.id, ' ID'); setMenu(null); }}>复制 ID</button>
+          <button type="button" role="menuitem" data-testid="mm-more-copy-content" onClick={() => { void copyText(menu.rec.content, '内容'); setMenu(null); }}>复制内容</button>
+          <button type="button" role="menuitem" data-testid="mm-more-goto-layer" onClick={() => { setMenu(null); onGotoLayer(layerOf(menu.rec)); }}>跳到分层 {layerOf(menu.rec)}</button>
+          <button type="button" role="menuitem" disabled={!canOpenFile} onClick={() => { setMenu(null); onOpenFile(menu.rec); }}>打开记忆文件</button>
+          <button type="button" role="menuitem" className="danger" data-testid="mm-more-delete" disabled={menu.rec.locked} onClick={() => { setMenu(null); onDelete(menu.rec); }}>删除</button>
+        </div>
+      ) : null}
     </div>
   );
 }
 
-function Glyph({ name }: { name: 'search' | 'refresh' | 'layers' | 'lock' | 'unlock' | 'eye' | 'open' | 'warn' | 'info' | 'user' | 'shield' | 'check' | 'x' | 'chev' }) {
+function Glyph({ name }: { name: 'search' | 'refresh' | 'layers' | 'lock' | 'unlock' | 'eye' | 'open' | 'warn' | 'info' | 'user' | 'shield' | 'check' | 'x' | 'chev' | 'more' }) {
   const paths: Record<typeof name, ReactNode> = {
     search: <><circle cx="7" cy="7" r="4.2" /><path d="M10.2 10.2l3.3 3.3" /></>,
     refresh: <><path d="M13.5 6.5A5.2 5.2 0 1 0 14 10" /><path d="M13.5 3.5v3h-3" /></>,
@@ -282,6 +392,7 @@ function Glyph({ name }: { name: 'search' | 'refresh' | 'layers' | 'lock' | 'unl
     check: <><path d="M3 8.4l3.2 3.1 6.8-7.1" /></>,
     x: <><path d="M4 4l8 8" /><path d="M12 4L4 12" /></>,
     chev: <><path d="M5 6.4l3 3 3-3" /></>,
+    more: <><circle cx="3.4" cy="8" r="1.1" /><circle cx="8" cy="8" r="1.1" /><circle cx="12.6" cy="8" r="1.1" /></>,
   };
   return (
     <svg className="ic" viewBox="0 0 16 16" aria-hidden="true" focusable="false">{paths[name]}</svg>
@@ -304,18 +415,15 @@ export function MemoryManagementPage() {
 
   const memories = useKernelLoad('memory-management-list', loadMemories);
   const layerPolicy = useKernelLoad('memory-management-layers', loadLayerPolicy);
+  // 冲突队列只作页头/真源条读数（裁决在冲突裁决页 dispute.html，本页不再重复四模式 UI）
   const conflictLoad = useKernelLoad('memory-management-conflicts', loadConflicts);
-  const pending = useKernelLoad<PendingWritesResult>('memory-management-pending', loadPending);
   const storage = useKernelLoad('memory-management-storage', loadStorage);
-  /** 第一轮个人记忆：独立存储（数据面失败时如实错误态，不回退成空账本） */
-  const personalMem = useKernelLoad<PersonalSnapshot>('memory-management-personal', loadPersonalSnapshot);
   /**
    * 页面级「刷新」= 本页全部数据源一起重取（2026-11-10 统一刷新逻辑）。
-   * 原先只刷列表与分层策略，冲突队列/待重放/库位置/个人记忆仍显示旧值。
+   * 批次57：个人记忆/待重放页签已删除，不再加载对应数据源。
    */
-  const refreshAll = useRefreshAll([memories, layerPolicy, conflictLoad, pending, storage, personalMem]);
+  const refreshAll = useRefreshAll([memories, layerPolicy, conflictLoad, storage]);
   const session = useSessionContext();
-  const mirror = useDisputeMirror();
 
   useEffect(() => {
     const onStorage = () => setDensity(readDensity());
@@ -368,6 +476,8 @@ export function MemoryManagementPage() {
   const tableSource = useMemo(() => {
     const list = memories.data ?? [];
     if (tab === 'layers' && selectedLayer) return list.filter((m) => m.layer === selectedLayer);
+    // 状态页签（批次57）：按语义派生状态过滤（status 已在 coreMemoryOps 派生）
+    if (STATUS_TABS.includes(tab)) return list.filter((m) => m.status === tab);
     return list;
   }, [memories.data, tab, selectedLayer]);
 
@@ -436,6 +546,12 @@ export function MemoryManagementPage() {
     [memories.data, selectedId],
   );
 
+  // 2026-11-22：详情抽屉内联编辑（真实 coreUpdateContent 写回原条目）；行「更多 → 编辑内容」直达
+  const [drawerEdit, setDrawerEdit] = useState<{ id: string; text: string; busy: boolean } | null>(null);
+  useEffect(() => {
+    setDrawerEdit((prev) => (prev && prev.id !== selectedId ? null : prev));
+  }, [selectedId]);
+
   useEffect(() => {
     if (!selectedRecord) {
       publishSelection(null);
@@ -468,6 +584,66 @@ export function MemoryManagementPage() {
     else setToast(`打开失败：${r.error ?? '主进程未返回原因'}`);
   }
 
+  /** 行「更多 → 编辑内容」/ 抽屉「编辑」：打开详情并进入内联编辑（locked 由内核拒绝，这里先提示） */
+  function startDrawerEdit(rec: MemoryRecord) {
+    if (rec.locked) {
+      setToast('locked：内核拒绝改写该条记忆');
+      return;
+    }
+    setSelectedId(rec.id);
+    setCtxDetail({ rec, x: Math.max(12, window.innerWidth - 380), y: 96 });
+    setDrawerEdit({ id: rec.id, text: rec.content, busy: false });
+  }
+
+  /** 内联编辑保存：真实 coreUpdateContent 写回原条目（版本 +1、落审计），成功后刷新账本 */
+  async function saveDrawerEdit() {
+    if (!selectedRecord || !drawerEdit || drawerEdit.id !== selectedRecord.id) return;
+    const text = drawerEdit.text.trim();
+    if (!text) {
+      setToast('内容为空：未保存（原条目保持原样）');
+      return;
+    }
+    setDrawerEdit({ ...drawerEdit, busy: true });
+    try {
+      const r = await coreUpdateContent(selectedRecord.id, text);
+      if (!r?.ok) {
+        setDrawerEdit({ ...drawerEdit, busy: false });
+        setToast(`保存失败：${r?.error ?? '内核未返回原因'}`);
+        return;
+      }
+      setDrawerEdit(null);
+      setCtxDetail(null);
+      refreshAll();
+      setToast(`已保存：写回记忆 ${shortId(selectedRecord.id)}（v${r.rec?.version ?? '更新'}，未新增重复）`);
+    } catch (e) {
+      setDrawerEdit({ ...drawerEdit, busy: false });
+      setToast(`保存失败：${String((e as Error)?.message ?? e)}`);
+    }
+  }
+
+  /** 行「更多 → 删除」：二次确认后走内核真实 delete（写墓碑/审计），成功后退出详情并刷新 */
+  async function deleteRecord(rec: MemoryRecord) {
+    const ok = typeof window !== 'undefined' && typeof window.confirm === 'function'
+      ? window.confirm(`删除记忆 ${shortId(rec.id)}？\n\n删除后立即退出检索与召回；账本保留墓碑可追溯，页面不再显示。`)
+      : false;
+    if (!ok) {
+      setToast('已取消删除：记忆未改动');
+      return;
+    }
+    try {
+      const r = await coreApplyOp(rec, 'delete');
+      if (!r?.ok) {
+        setToast(r?.audit === 'locked_blocked' ? '删除失败：locked 条目被内核拒绝改写' : '删除失败：内核未执行该操作');
+        return;
+      }
+      if (selectedId === rec.id) setSelectedId(null);
+      refreshAll();
+      setToast(`已删除 ${shortId(rec.id)}（审计 ${r.audit}）`);
+    } catch (e) {
+      setToast(`删除失败：${String((e as Error)?.message ?? e)}`);
+    }
+  }
+
   function resetFilter() {
     setFilter({ search: '', type: 'all', status: 'all', source: 'all' });
     setSelectedLayer(null);
@@ -482,122 +658,33 @@ export function MemoryManagementPage() {
     || selectedLayer,
   );
 
-  // L0 连续查阅会话（5 分钟；失焦不续期，到期自动上锁）
+  // L0 会话状态只作页头/真源条读数；解锁与查阅已归安全页，本页不再承载解锁表单
   const l0 = useL0Session({
     onExpired: (reason) => {
-      setL0Notice(null);
-      setL0Error(reason === 'idle_5min' ? 'L0 已自动上锁：空闲满 5 分钟。' : `L0 已自动上锁：${reason}`);
+      setToast(reason === 'idle_5min' ? 'L0 已自动上锁：空闲满 5 分钟。' : `L0 已自动上锁：${reason}`);
     },
   });
-  const [l0Password, setL0Password] = useState('');
-  const [l0Grant, setL0Grant] = useState('');
-  const [l0Error, setL0Error] = useState<string | null>(null);
-  const [l0Notice, setL0Notice] = useState<string | null>(null);
-  const [l0Rows, setL0Rows] = useState<{ rows: { mem_id: string; content: string }[]; l0_masked: boolean } | null>(null);
-  const [l0Loading, setL0Loading] = useState(false);
-  const l0SessionId = l0.session?.l0_session_id ?? null;
-  const lockL0 = l0.lock;
+
+  // 常驻右键详情菜单（批次57）：右键行打开，点外部/滚动不关闭，Esc 或 × 关闭；右键另一行切换内容
+  const [ctxDetail, setCtxDetail] = useState<{ rec: MemoryRecord; x: number; y: number } | null>(null);
 
   useEffect(() => {
-    if (!l0SessionId) { setL0Rows(null); return; }
-    let alive = true;
-    setL0Loading(true);
-    coreBrowse('L0', l0SessionId)
-      .then((r) => {
-        if (!alive) return;
-        if (!r) {
-          setL0Error('L0 会话失效，或授权未覆盖任何项目；已要求重新解锁。');
-          setL0Rows(null);
-          void lockL0();
-          return;
-        }
-        setL0Rows(r);
-      })
-      .catch((e: unknown) => { if (alive) setL0Error(kernelErrorText(e)); })
-      .finally(() => { if (alive) setL0Loading(false); });
-    return () => { alive = false; };
-  }, [l0SessionId, lockL0]);
-
-  async function unlockL0() {
-    setL0Error(null);
-    setL0Notice(null);
-    if (!l0Password.trim()) {
-      setL0Error('请输入解锁密码：管理员用管理员密码，成员用一次性授权密码。');
-      return;
-    }
-    const r = await l0.unlock(l0Password.trim(), l0Grant.trim() || undefined);
-    if (!r.ok) {
-      setL0Error(r.error);
-      return;
-    }
-    setL0Password('');
-    setL0Grant('');
-    setL0Notice('已解锁：本次查阅会话 5 分钟；页面失焦不续期，到期自动上锁。');
-  }
-
-  // 冲突
-  const [conflictId, setConflictId] = useState<string | null>(null);
-  const [verdictMode, setVerdictMode] = useState<Verdict | null>(null);
-  const [verdictBusy, setVerdictBusy] = useState(false);
-  const [verdictMsg, setVerdictMsg] = useState<{ kind: 'ok' | 'warn' | 'err'; text: string } | null>(null);
-
-  useEffect(() => {
-    if (conflictLoad.phase !== 'ok') { setConflictId(null); return; }
-    const list = conflictLoad.data ?? [];
-    setConflictId((prev) => (prev && list.some((c) => c.id === prev) ? prev : (list[0]?.id ?? null)));
-  }, [conflictLoad.phase, conflictLoad.data]);
-
-  const selectedConflict: ConflictRecord | null = useMemo(
-    () => (conflictLoad.data ?? []).find((c) => c.id === conflictId) ?? null,
-    [conflictLoad.data, conflictId],
-  );
-
-  useEffect(() => { setVerdictMode(null); }, [conflictId]);
-
-  async function runVerdict() {
-    if (!selectedConflict || !verdictMode || verdictBusy) return;
-    setVerdictBusy(true);
-    setVerdictMsg(null);
-    const rec = selectedConflict;
-    const mode = verdictMode;
-    try {
-      const out = await coreVerdict(rec, mode);
-      const requestId = out.kernel_request_ids[0] ?? '';
-      if (requestId) mirror.audit(`verdict_${mode}`, rec, mode, requestId);
-      let refreshError: string | null = null;
-      try {
-        const next = await coreConflicts();
-        conflictLoad.replace(next);
-        if (!next.some((c) => c.id === rec.id)) setConflictId(next[0]?.id ?? null);
-      } catch (e: unknown) {
-        refreshError = kernelErrorText(e);
-      }
-      if (!out.ok) {
-        setVerdictMsg({ kind: 'err', text: `内核拒绝本次裁决（${mode}）：${out.reason ?? '内核未给出原因'}${requestId ? ` · request_id ${requestId}` : ''}` });
-      } else if (out.resolved) {
-        setVerdictMsg({ kind: 'ok', text: `内核已落定（${mode} → resolved:true，旧值已归档）${requestId ? ` · request_id ${requestId}` : ''}${refreshError ? ` · 队列重读失败：${refreshError}` : ''}` });
-        setVerdictMode(null);
-      } else {
-        setVerdictMsg({ kind: 'warn', text: `内核已记录 ${mode} 但未落定（内核保持待处理，不改记忆）${requestId ? ` · request_id ${requestId}` : ''}${refreshError ? ` · 队列重读失败：${refreshError}` : ''}` });
-        setVerdictMode(null);
-      }
-    } catch (e: unknown) {
-      setVerdictMsg({ kind: 'err', text: `裁决调用失败：${kernelErrorText(e)}` });
-    } finally {
-      setVerdictBusy(false);
-    }
-  }
+    if (!ctxDetail) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setCtxDetail(null);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [ctxDetail]);
 
   const tabCount = (id: TabId): string | null => {
     if (id === 'all') return memories.phase === 'ok' ? String(memories.data?.length ?? 0) : null;
     if (id === 'layers') return layerPolicy.phase === 'ok' ? '6' : null;
-    if (id === 'conflict') return conflictLoad.phase === 'ok' ? String(conflictLoad.data?.length ?? 0) : null;
-    if (id === 'review') return pending.phase === 'ok' && pending.data?.status === 'ok' ? String(pending.data.view.count) : null;
-    if (id === 'l0') return l0.session ? '已开' : '锁';
-    if (id === 'personal') {
-      // 真实待确认计数（来自独立存储）；读不到时不显示数字，不编造
-      const n = personalMem.phase === 'ok' ? personalMem.data?.counts.pending ?? 0 : 0;
-      return n > 0 ? String(n) : null;
+    // 状态页签（批次57）：按语义派生状态计数，账本没读到就不显示数字，不编造
+    if (STATUS_TABS.includes(id)) {
+      return memories.phase === 'ok'
+        ? String((memories.data ?? []).filter((m) => m.status === id).length)
+        : null;
     }
     return null;
   };
@@ -624,6 +711,38 @@ export function MemoryManagementPage() {
 
   return (
     <div className="mm-app" data-density={density} data-testid="mm-page">
+      {/* v5 页头（批次 B）：20px 标题 + 右侧主操作。
+          2026-11-22 用户要求：删掉 tagline 描述文字，标题下只保留一行真实读数（原两行合并、不重复、不留空行）。 */}
+      <div className="p0-pagehead" data-testid="mm-head">
+        <div className="p0-ph-main">
+          <div className="p0-ph-title">
+            <h1>记忆库</h1>
+            <span className="mm-truthline" data-testid="mm-truthline" title="本页六个页签读的是同一份内核账本快照；以下均为真实读数，不是示例数据">
+              <span data-testid="mm-head-count">{(memories.data ?? []).length} 条记忆</span>
+              <span className="mm-truth-sep">·</span>
+              <span>{storage.phase === 'ok' ? storageText : '账本位置读取中…'}</span>
+              <span className="mm-truth-sep">·</span>
+              <span>会话 {sessionText}</span>
+              <span className="mm-truth-sep">·</span>
+              <span>L0 {l0Text}</span>
+              <span className="mm-truth-sep">·</span>
+              <span>冲突 {conflictText}</span>
+              <span className="mm-truth-sep">·</span>
+              <span>{`快照 ${snapshotAt ? fmtWhen(snapshotAt.toISOString(), false) : '尚未读取'}`}</span>
+            </span>
+          </div>
+        </div>
+        <div className="p0-ph-actions">
+          <button type="button" className="mm-btn" onClick={refreshAll}
+            title="重新读取本页全部数据（列表 / 分层策略 / 冲突队列 / 库位置）">
+            刷新
+          </button>
+          <button type="button" className="mm-btn primary" onClick={() => goView('write', 'write.html')}>
+            新建记忆
+          </button>
+        </div>
+      </div>
+
       <div className="tabstrip mm-tabstrip" role="tablist" aria-label="记忆管理标签">
         {TAB_IDS.map((id) => (
           <button
@@ -641,7 +760,7 @@ export function MemoryManagementPage() {
         ))}
       </div>
 
-      {tab === 'all' ? (
+      {(tab === 'all' || STATUS_TABS.includes(tab)) ? (
         <div className="mm-filterbar" data-testid="mm-filter">
           <label className="mm-search">
             <Glyph name="search" />
@@ -669,7 +788,6 @@ export function MemoryManagementPage() {
           >
             <option value="all">全部状态</option>
             {Object.entries(STATUS_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-            <option value="hibernating,dormant">蛰伏/休眠</option>
           </select>
           <select
             className="mm-in"
@@ -692,17 +810,8 @@ export function MemoryManagementPage() {
         </div>
       ) : null}
 
-      <div className="table-meta mm-truthbar" data-testid="mm-truthbar">
-        <span className="tm-strong">记忆管理</span>
-        <span className="tm-chip"><i className={`dot ${storage.phase === 'error' || storage.data?.kind === 'unknown' ? 'err' : storage.data?.kind === 'memory' ? 'warn' : 'ok'}`} />{storageText}</span>
-        <span className="tm-chip"><i className={`dot ${session.role === 'admin' ? 'ok' : session.role === 'member' ? 'info' : 'neutral'}`} />会话 {sessionText}</span>
-        <span className="tm-chip"><i className={`dot ${l0.session ? 'ok' : 'warn'}`} />L0 {l0Text}</span>
-        <span className="tm-chip"><i className={`dot ${conflictLoad.phase === 'error' ? 'err' : conflictLoad.data?.length ? 'warn' : 'neutral'}`} />冲突 {conflictText}</span>
-        <span className="tm-right">{snapshotAt ? `快照 ${fmtWhen(snapshotAt.toISOString(), false)}` : '尚未读取'}</span>
-      </div>
-
       <div className={`mm-body mm-body-${tab}`}>
-        {(tab === 'all' || tab === 'layers') ? (
+        {(tab === 'all' || tab === 'layers' || STATUS_TABS.includes(tab)) ? (
           <>
             {tab === 'layers' ? (
               <div className="layer-pane mm-layerpane">
@@ -711,10 +820,10 @@ export function MemoryManagementPage() {
                   <span className="mm-layer-sub">条数 / 占比 / 最近写入 / 到龄来自当前账本快照；半衰期与阈值来自内核 LAYER_SPECS 与参数快照</span>
                   <span className="mm-spacer" />
                   <div className="mm-layer-tools">
-                    <button type="button" className="mm-btn" onClick={refreshAll} title="重新读取本页全部数据（列表 / 分层策略 / 冲突队列 / 待重放 / 库位置 / 个人记忆）"><Glyph name="refresh" />刷新快照</button>
+                    <button type="button" className="mm-btn" onClick={refreshAll} title="重新读取本页全部数据（列表 / 分层策略 / 冲突队列 / 库位置）"><Glyph name="refresh" />刷新快照</button>
                     <button type="button" className="mm-btn" onClick={() => goView('params', 'params.html')}>查看参数</button>
                     <button type="button" className="mm-btn" disabled title="本组只读：批量归档需在生命周期页逐条执行">批量归档</button>
-                    <button type="button" className="mm-btn primary" onClick={() => goTab('l0')} title="L0 需管理员密码或成员 grant 解锁后查阅"><Glyph name="unlock" />解锁 L0</button>
+                    <button type="button" className="mm-btn primary" onClick={() => goView('security', 'security.html')} title="L0 解锁与管理已归安全页（批次57 起 L0 密文页签移除）"><Glyph name="unlock" />L0 与安全</button>
                   </div>
                 </div>
                 {layerPolicy.phase === 'loading' ? (
@@ -815,305 +924,126 @@ export function MemoryManagementPage() {
                     onSelect={(id) => setSelectedId((prev) => (prev === id ? null : id))}
                     onOpenFile={openFile}
                     canOpenFile={canOpenFile}
+                    onRowContext={(rec, x, y) => setCtxDetail({ rec, x, y })}
+                    onEdit={startDrawerEdit}
+                    onDelete={(rec) => void deleteRecord(rec)}
+                    onGotoLayer={(layer) => { goTab('layers'); setSelectedLayer(layer as LayerId); }}
+                    onToast={setToast}
                   />
-                  <div className="center-foot">
+                  <div className="center-foot p0-tblft">
                     <span className="cf-strong">{paged.total}</span>
                     <span>条 · 账本共 {(memories.data ?? []).length} 条</span>
                     <span>{selectedLayer ? `层 ${selectedLayer}` : '全部层'}</span>
                     <span className="lf-sp" />
                     <span>{selectedId ? '已选中 1 行' : '未选中行'} · {sessionText} · {canOpenFile ? '桌面端' : '浏览器只读'}</span>
                     <span>成本来源：账本无逐条金额，按精炼来源如实标注</span>
-                    <button type="button" className="mm-page-btn" disabled={paged.page <= 1} onClick={() => setPage(paged.page - 1)} aria-label="上一页">‹</button>
-                    <span className="mm-page-no">{paged.page} / {paged.totalPages}</span>
-                    <button type="button" className="mm-page-btn" disabled={paged.page >= paged.totalPages} onClick={() => setPage(paged.page + 1)} aria-label="下一页">›</button>
+                    {/* v5 表底（批次 B）：紧凑数字 pager 窗口（‹ 1 … 4 5 6 … N ›） */}
+                    <div className="p0-pager">
+                      <button type="button" disabled={paged.page <= 1} onClick={() => setPage(paged.page - 1)} aria-label="上一页" data-testid="mm-page-prev">‹</button>
+                      {pagerWindow(paged.page, paged.totalPages).map((cell, i) =>
+                        cell === '…' ? (
+                          <span key={`gap-${i}`} aria-hidden="true">…</span>
+                        ) : (
+                          <button
+                            key={cell}
+                            type="button"
+                            className={cell === paged.page ? 'on' : undefined}
+                            data-testid={`mm-page-${cell}`}
+                            onClick={() => setPage(cell)}
+                            aria-label={`第 ${cell} 页`}
+                          >
+                            {cell}
+                          </button>
+                        ),
+                      )}
+                      <button type="button" disabled={paged.page >= paged.totalPages} onClick={() => setPage(paged.page + 1)} aria-label="下一页" data-testid="mm-page-next">›</button>
+                    </div>
                   </div>
                 </>
               )}
             </div>
           </>
         ) : null}
-
-        {tab === 'personal' ? (
-          <PersonalMemoryPane
-            phase={personalMem.phase}
-            data={personalMem.data}
-            error={personalMem.error}
-            onRetry={personalMem.retry}
-            onChanged={personalMem.replace}
-          />
-        ) : null}
-
-        {tab === 'review' ? (
-          <div className="mm-scrollpane">
-            <div className="p0-hd">
-              <h3>待重放写入</h3>
-              <span className="p0-sub">只读队列：MCP 写入兜底条目（不向渲染层返回正文、密钥材料或 token）。</span>
-              <span className="p0-right">
-                <button type="button" className="mm-btn" onClick={refreshAll} title="重新读取本页全部数据（列表 / 分层策略 / 冲突队列 / 待重放 / 库位置 / 个人记忆）"><Glyph name="refresh" />刷新</button>
-              </span>
-            </div>
-            {pending.phase === 'loading' ? (
-              <div className="p0-empty">正在读取待重放队列…</div>
-            ) : pending.phase === 'error' ? (
-              <div className="p0-empty dashed"><b>待重放队列没读到</b><div>原因：{pending.error}</div></div>
-            ) : pending.data?.status === 'unavailable' ? (
-              <div className="p0-empty dashed" data-testid="mm-review-unavailable">
-                <b>暂不可读（不是空队列）</b>
-                <div>{pending.data.detail}</div>
-              </div>
-            ) : pending.data?.status === 'error' ? (
-              <div className="p0-empty dashed"><b>主进程返回错误</b><div>{pending.data.detail}</div></div>
-            ) : pending.data?.status === 'ok' ? (
-              pending.data.view.count === 0 ? (
-                <div className="p0-empty dashed"><b>待重放队列为空（真实 0 条）</b><div>主进程 {pending.data.view.source} · 采集于 {fmtWhen(pending.data.view.captured_at)}</div></div>
-              ) : (
-                <div data-testid="mm-review-list">
-                  <div className="p0-banner">
-                    <span>{pending.data.view.note} 共 <b>{pending.data.view.count}</b> 条{pending.data.view.truncated ? `（仅展示最近 ${pending.data.view.items.length} 条）` : ''}；来源 {pending.data.view.source} · 采集于 {fmtWhen(pending.data.view.captured_at)}</span>
-                  </div>
-                  <table className="p0-table">
-                    <thead>
-                      <tr><th>入队 ID</th><th>项目</th><th>来源 Agent</th><th>类别</th><th className="right">正文字符</th><th className="right">标签</th><th className="right">重要度</th><th>入队时间</th></tr>
-                    </thead>
-                    <tbody>
-                      {pending.data.view.items.map((it) => (
-                        <tr key={it.id}>
-                          <td className="mono">{shortId(it.id, 18)}</td>
-                          <td className="mono">{it.project_id}</td>
-                          <td>{it.source_agent ?? '未记录'}</td>
-                          <td>{it.category}</td>
-                          <td className="right">{it.content_chars}</td>
-                          <td className="right">{it.tags}</td>
-                          <td className="right">{it.importance === null ? '未记录' : fmtImportance(it.importance)}</td>
-                          <td>{fmtWhen(new Date(it.created_at).toISOString())}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )
-            ) : null}
-          </div>
-        ) : null}
-
-        {tab === 'l0' ? (
-          <div className="mm-scrollpane" data-testid="mm-l0">
-            <div className="p0-hd">
-              <h3>L0 密文</h3>
-              <span className="p0-sub">AES-256-GCM 原始层：不参与检索、不注入、不同步；查阅写 l0_view 审计。</span>
-              <span className="p0-right">
-                {l0.session ? (
-                  <>
-                    <span className="p0-tag ok">{`已解锁 · 剩余 ${formatRemaining(l0.remainingMs)}`}</span>
-                    <button type="button" className="mm-btn" onClick={() => void l0.lock()}><Glyph name="lock" />立即锁定</button>
-                  </>
-                ) : (
-                  <span className="p0-tag warn"><Glyph name="lock" />已锁定</span>
-                )}
-              </span>
-            </div>
-
-            {l0Notice ? <div className="p0-banner ok">{l0Notice}</div> : null}
-            {l0Error ? <div className="p0-banner err">{l0Error}</div> : null}
-
-            {!l0.session ? (
-              <div className="mm-l0-gate">
-                <div className="p0-card">
-                  <div className="p0-card-h"><Glyph name="shield" />管理员门禁<span className="p0-right p0-tag mono">l0_session</span></div>
-                  <div className="p0-card-b">
-                    <div className="p0-note">
-                      <b>解锁需要管理员密码，或管理员为成员发放的 grant_id + 一次性授权密码。</b>
-                      <div>未登录时不能解锁；角色为普通成员时，admin 需先在「安全与账号」批准并发放授权。L0 查阅会话 5 分钟，失焦不心跳续期。</div>
-                    </div>
-                    <div className="mm-l0-form">
-                      {session.role === 'member' ? (
-                        <label className="mm-field">
-                          <span>grant_id</span>
-                          <input className="mm-in" value={l0Grant} onChange={(e) => setL0Grant(e.target.value)} placeholder="管理员发放的授权 ID" autoComplete="off" />
-                        </label>
-                      ) : null}
-                      <label className="mm-field">
-                        <span>{session.role === 'member' ? '一次性授权密码' : '管理员密码'}</span>
-                        <input
-                          className="mm-in"
-                          type="password"
-                          value={l0Password}
-                          onChange={(e) => setL0Password(e.target.value)}
-                          placeholder={session.role === 'member' ? '一次性授权密码' : '管理员密码'}
-                          disabled={session.role === null || session.loading}
-                          autoComplete="off"
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        className="mm-btn primary"
-                        onClick={() => void unlockL0()}
-                        disabled={l0.busy || session.role === null || session.loading}
-                      >
-                        <Glyph name="unlock" />{l0.busy ? '解锁中…' : '解锁查阅'}
-                      </button>
-                      {session.role === null ? (
-                        <button type="button" className="mm-btn" onClick={() => goView('login', 'login.html')}>去登录</button>
-                      ) : null}
-                    </div>
-                    <div className="p0-note mm-l0-note">
-                      会话：{sessionText}{session.loading ? '（读取中）' : ''} · 角色：{session.role ?? '无'}.
-                      {session.role === null ? ' 未登录时不会尝试解锁，也不会伪造成功。' : ''}
-                      {session.role === 'member' ? ' 成员缺少 grant_id 时，内核会如实拒绝。' : ''}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <>
-                {l0Loading ? <div className="p0-empty">正在读取 L0 条目…</div> : null}
-                {l0Rows && l0Rows.rows.length === 0 ? (
-                  <div className="p0-empty dashed"><b>L0 暂无可查阅条目（真实 0 条）</b><div>解锁会话有效，但当前授权项目没有 L0 记录。</div></div>
-                ) : null}
-                {l0Rows && l0Rows.rows.length > 0 ? (
-                  <>
-                    <div className="p0-banner">
-                      <span>本次授权查阅 <b>{l0Rows.rows.length}</b> 条；{l0Rows.l0_masked ? '内核返回 l0_masked=true，内容仍为密文/脱敏。' : '内核返回已解密内容，仅在本次 5 分钟会话内可见。'}</span>
-                    </div>
-                    <table className="p0-table mm-l0-table">
-                      <thead>
-                        <tr><th>记忆 ID</th><th>内容片段</th><th className="right">字符数</th><th>查阅状态</th></tr>
-                      </thead>
-                      <tbody>
-                        {l0Rows.rows.map((r) => (
-                          <tr key={r.mem_id}>
-                            <td className="mono">{shortId(r.mem_id, 18)}</td>
-                            <td className="mm-l0-content" title={r.content}>{r.content}</td>
-                            <td className="right">{r.content.length}</td>
-                            <td>{l0Rows.l0_masked ? <span className="tag red">密文（未解密）</span> : <span className="tag green">已授权查阅</span>}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </>
-                ) : null}
-              </>
-            )}
-          </div>
-        ) : null}
-
-        {tab === 'conflict' ? (
-          <div className="mm-scrollpane" data-testid="mm-conflict">
-            <div className="p0-hd">
-              <h3>冲突裁决</h3>
-              <span className="p0-sub">队列来自内核冲突配对；类型/分数内核未检测字段如实为空，不猜测。</span>
-              <span className="p0-right">
-                <button type="button" className="mm-btn" onClick={refreshAll} title="重新读取本页全部数据（列表 / 分层策略 / 冲突队列 / 待重放 / 库位置 / 个人记忆）"><Glyph name="refresh" />重读队列</button>
-              </span>
-            </div>
-            {verdictMsg ? (
-              <div className={`p0-banner ${verdictMsg.kind}`} data-testid="mm-verdict-msg">{verdictMsg.text}</div>
-            ) : null}
-            {conflictLoad.phase === 'loading' ? (
-              <div className="p0-empty">正在读取冲突队列…</div>
-            ) : conflictLoad.phase === 'error' ? (
-              <div className="p0-empty dashed"><b>冲突队列没读到</b><div>原因：{conflictLoad.error}</div></div>
-            ) : (conflictLoad.data?.length ?? 0) === 0 ? (
-              <div className="p0-empty dashed" data-testid="mm-conflict-empty"><b>账本暂无待裁决冲突（真实 0 条）</b><div>内核只把有效配对入队；对手缺失或跨项目冲突不会在这里显示。</div></div>
-            ) : (
-              <div className="mm-conf-layout">
-                <div className="mm-conf-list" data-testid="mm-conflict-list">
-                  {(conflictLoad.data ?? []).map((c) => (
-                    <button
-                      key={c.id}
-                      type="button"
-                      className={`mm-conf-item ${conflictId === c.id ? 'sel' : ''}`}
-                      onClick={() => { setConflictId(c.id); setVerdictMsg(null); }}
-                    >
-                      <span className="mm-conf-item-t">
-                        <i className={`dot ${c.overdue_days >= 7 ? 'err' : c.overdue_days >= 2 ? 'warn' : 'neutral'}`} />
-                        <b>{shortId(c.id, 18)}</b>
-                      </span>
-                      <span className="mm-conf-item-m">
-                        <span className="mono">旧 {shortId(c.old_id, 12)}</span>
-                        <span className="mono">新 {shortId(c.new_id, 12)}</span>
-                      </span>
-                      <span className="mm-conf-item-m">
-                        <span>{c.conflict_type ? (CONFLICT_TYPE_LABEL[c.conflict_type] ?? c.conflict_type) : '类型未检测'}</span>
-                        <span>{c.overdue_days} 天</span>
-                      </span>
-                    </button>
-                  ))}
-                </div>
-
-                <div className="mm-conf-detail">
-                  {selectedConflict ? (
-                    <>
-                      <div className="p0-card">
-                        <div className="p0-card-h">
-                          <b>冲突 {shortId(selectedConflict.id, 24)}</b>
-                          <span className="p0-right">
-                            <span className="p0-tag mono">{selectedConflict.conflict_type ?? 'type=null'}</span>
-                            <span className="p0-tag mono">{selectedConflict.conflict_score === null ? 'score=null' : `score=${selectedConflict.conflict_score.toFixed(2)}`}</span>
-                            <span className="p0-tag warn">{selectedConflict.overdue_days} 天未裁决</span>
-                          </span>
-                        </div>
-                        <div className="p0-card-b">
-                          <div className="mm-cmp-grid">
-                            <div className="mm-cmp-card">
-                              <div className="mm-cmp-h"><span className="tag blue">旧值 · 本端记录</span><span className="mono">{selectedConflict.old_id}</span><span className="mm-cmp-conf">置信度 {selectedConflict.old_confidence.toFixed(2)}</span></div>
-                              <div className="mm-cmp-body">{selectedConflict.old_content || '内容为空（账本真实为空）'}</div>
-                            </div>
-                            <div className="mm-cmp-card">
-                              <div className="mm-cmp-h"><span className="tag amber">新值 · 对端记录</span><span className="mono">{selectedConflict.new_id}</span><span className="mm-cmp-conf">置信度 {selectedConflict.new_confidence.toFixed(2)}</span></div>
-                              <div className="mm-cmp-body">{selectedConflict.new_content || '内容为空（账本真实为空）'}</div>
-                            </div>
-                          </div>
-                          <div className="p0-note mm-cmp-note">端别说明：内核只提供 old/new，不提供「本端/镜像」字段；这里按定稿顺序展示为旧值/新值，不对同步端别做断言。</div>
-                        </div>
-                      </div>
-
-                      <div className="p0-card">
-                        <div className="p0-card-h"><b>四模式裁决</b><span className="p0-right p0-tag mono">write=coreResolveConflict</span></div>
-                        <div className="p0-card-b">
-                          <div className="mm-modes" role="radiogroup" aria-label="裁决模式">
-                            {VERDICTS.map((v) => (
-                              <button
-                                key={v.key}
-                                type="button"
-                                role="radio"
-                                aria-checked={verdictMode === v.key}
-                                data-testid={`mm-verdict-${v.key}`}
-                                className={`mm-mode ${verdictMode === v.key ? 'active' : ''}`}
-                                onClick={() => setVerdictMode(v.key)}
-                                disabled={verdictBusy}
-                              >
-                                <span className="mm-mode-title">{v.label}<code>{v.key}</code></span>
-                                <span className="mm-mode-desc">{v.desc}</span>
-                              </button>
-                            ))}
-                          </div>
-                          <div className="mm-verdict-actions">
-                            <button
-                              type="button"
-                              className="mm-btn primary"
-                              data-testid="mm-verdict-run"
-                              onClick={() => void runVerdict()}
-                              disabled={!verdictMode || verdictBusy}
-                            >
-                              <Glyph name="check" />{verdictBusy ? '内核裁决中…' : '执行内核裁决'}
-                            </button>
-                            <span className="p0-note">动作只在点按后调用内核；不预置 request_id、不乐观置成功。user_confirm / hold 内核会记录但保持待处理。</span>
-                          </div>
-                        </div>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="p0-empty dashed">请选择左侧冲突。</div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        ) : null}
       </div>
 
-      {selectedRecord && (tab === 'all' || tab === 'layers') ? (
+      {/* 批次57：常驻右键详情菜单（点外部/滚动不关闭；Esc 或 × 关闭；右键另一行切换内容） */}
+      {ctxDetail ? (() => {
+        const rec = ctxDetail.rec;
+        const top = Math.min(ctxDetail.y, Math.max(8, window.innerHeight - 90));
+        const left = Math.min(ctxDetail.x, Math.max(8, window.innerWidth - 364));
+        return (
+          <div
+            className="mm-ctx-detail"
+            role="dialog"
+            aria-label="记忆详情（右键常驻）"
+            data-testid="mm-ctx-menu"
+            style={{ left, top, maxHeight: `calc(100vh - ${top + 8}px)` }}
+          >
+            <div className="mm-ctx-head">
+              <b>记忆详情</b>
+              <span className="mm-spacer" />
+              <span className="mm-ctx-hint">常驻 · 点外部不关闭</span>
+              <button type="button" className="mm-icon-btn" onClick={() => setCtxDetail(null)} aria-label="关闭详情" data-testid="mm-ctx-close"><Glyph name="x" /></button>
+            </div>
+            <div className="mm-drawer-sub">
+              <span className="tag gray">{TYPE_LABEL[rec.type] ?? rec.type}</span>
+              <span className="tag blue">{layerOf(rec)}</span>
+              <span>{statusView(rec).label}</span>
+              {rec.locked ? <span className="tag red">locked</span> : null}
+            </div>
+            <dl className="mm-detail-list">
+              <div><dt>ID</dt><dd className="mono">{rec.id}</dd></div>
+              <div><dt>层级</dt><dd>{layerOf(rec)}</dd></div>
+              <div><dt>温度</dt><dd>{rec.decay_class ?? '未记录'}</dd></div>
+              <div><dt>重要度</dt><dd>{fmtImportance(rec.importance)}</dd></div>
+              <div><dt>置信度</dt><dd>{rec.confidence.toFixed(2)}</dd></div>
+              <div><dt>访问 / 强化</dt><dd>{rec.access_count} / {rec.reinforce_count}</dd></div>
+              <div><dt>创建</dt><dd>{fmtWhen(rec.created_at)}</dd></div>
+              <div><dt>最近更新</dt><dd>{fmtWhen(rec.updated_at)}</dd></div>
+              <div><dt>半衰期</dt><dd>{rec.halfLifeDays} 天</dd></div>
+              <div><dt>来源</dt><dd>{rec.source_agent ?? '手动写入'}</dd></div>
+              <div><dt>版本</dt><dd>{rec.version ?? '未记录'}</dd></div>
+              <div><dt>同步</dt><dd>{syncView(rec).label}</dd></div>
+              <div><dt>冲突 ID</dt><dd className="mono">{rec.conflict_id ?? '无记录'}</dd></div>
+              <div><dt>合并谱系</dt><dd className="mono">{rec.merged_from?.join(' , ') ?? rec.merged_into ?? '无记录'}</dd></div>
+            </dl>
+            {drawerEdit && drawerEdit.id === rec.id ? (
+              <textarea
+                className="mm-drawer-edit"
+                value={drawerEdit.text}
+                disabled={drawerEdit.busy}
+                onChange={(e) => setDrawerEdit({ ...drawerEdit, text: e.target.value })}
+                aria-label="编辑记忆正文"
+                data-testid="mm-edit-input"
+              />
+            ) : (
+              <div className="mm-drawer-content">{rec.content}</div>
+            )}
+            <div className="mm-drawer-actions">
+              {drawerEdit && drawerEdit.id === rec.id ? (
+                <>
+                  <button type="button" className="mm-btn primary" disabled={drawerEdit.busy} onClick={() => void saveDrawerEdit()} data-testid="mm-edit-save">
+                    {drawerEdit.busy ? '保存中…' : '保存'}
+                  </button>
+                  <button type="button" className="mm-btn" disabled={drawerEdit.busy} onClick={() => setDrawerEdit(null)}>取消</button>
+                </>
+              ) : (
+                <>
+                  <button type="button" className="mm-btn" disabled={rec.locked} title={rec.locked ? 'locked：内核拒绝改写' : '编辑正文并写回原条目'} onClick={() => startDrawerEdit(rec)} data-testid="mm-edit-btn">
+                    编辑
+                  </button>
+                  <button type="button" className="mm-btn" disabled={!canOpenFile} title={canOpenFile ? '在系统中打开记忆文件' : '浏览器模式无法打开记忆文件'} onClick={() => void openFile(rec)}>
+                    <Glyph name="open" />打开记忆文件
+                  </button>
+                  <button type="button" className="mm-btn" onClick={() => setCtxDetail(null)}>关闭</button>
+                </>
+              )}
+            </div>
+          </div>
+        );
+      })() : null}
+
+      {selectedRecord ? (
         <aside className="mm-drawer" aria-label="记忆详情">
           <div className="mm-drawer-head">
             <b>记忆详情</b>

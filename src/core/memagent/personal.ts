@@ -24,10 +24,13 @@ import {
   type PersonalState, type PersonalSyncStage,
 } from './personalStore.ts';
 
+/** 单条个人记忆正文上限（quick_add / import / edit 同一口径；页面计数与内核校验一致） */
+export const PERSONAL_MAX_CHARS = 4000;
+
 /** 与 coreFeedback（17.4）同一口径 */
 export const PERSONAL_CONFIDENCE_DELTA = { confirm: 0.1, reject: -0.05 } as const;
 
-export type PersonalOp = 'quick_add' | 'confirm' | 'reject' | 'revoke' | 'delete' | 'import_from_agent' | 'reject_from_agent';
+export type PersonalOp = 'quick_add' | 'edit' | 'confirm' | 'reject' | 'revoke' | 'delete' | 'import_from_agent' | 'reject_from_agent';
 export type PersonalSyncOp = 'push_team' | 'retry_sync';
 
 /** 「从 agent 记忆归入个人」动作输入：来自真实账本某条 agent 记忆（coreListMemories） */
@@ -113,6 +116,8 @@ export interface PersonalApi {
   /** owner 口径解析结果（页面如实展示绑定状态） */
   readonly ownerResolution: PersonalOwnerResolution;
   quickAdd(content: string): Promise<PersonalReceipt>;
+  /** 覆盖编辑已保存条目（pm:<id> 不变；hash/version/vclock 更新并落审计）；空内容/超长/非已确认拒绝 */
+  edit(id: string, content: string): Promise<PersonalReceipt>;
   list(): Promise<PersonalSnapshot>;
   /** 从 agent 记忆归入个人（source=agent、source_agent、origin_ref_id；delivered_at 取原始创建时间） */
   importFromAgent(input: PersonalImportInput): Promise<PersonalReceipt>;
@@ -458,6 +463,54 @@ export async function personalDelete(
   }), () => ({ tombstone: true, confidence_delta: 0 }));
 }
 
+// ─── 记事本式编辑（2026-11-21 用户追加）：覆盖原条目，不新增重复 ──────────────────
+
+/**
+ * 编辑已保存（confirmed 且未删除）条目：
+ * - 原 pm:<id> 不变（不产生副本），content / content_hash / sha256 / version / vclock 真实更新；
+ * - 落 personal_memory 审计（op=edit，含 prev 指纹），可追溯；
+ * - 空内容、超长、非已确认/已删除条目一律拒绝，绝不静默吞掉；
+ * - 若条目曾经显式上行过（team_shared），内容已与团队副本分叉 → 如实标 pending_sync，不谎称仍同步。
+ */
+export async function personalEdit(
+  ctx: PersonalApiContext,
+  id: string,
+  content: string,
+): Promise<PersonalReceipt> {
+  const s = requireStore(ctx.store);
+  const entryId = assertId(id);
+  const text = typeof content === 'string' ? content.trim() : '';
+  if (!text) throw new Error('内容为空：未更新（不会把已保存条目改成空）');
+  if (text.length > PERSONAL_MAX_CHARS) {
+    throw new Error(`单条内容超过 ${PERSONAL_MAX_CHARS} 字：请拆分后再更新`);
+  }
+  const cur = await s.get(ctx.owner, entryId);
+  if (!cur) throw new Error(`个人记忆不存在或已删除：${entryId}`);
+  if (cur.state !== 'confirmed' || cur.deleted) {
+    throw new Error(`只有已保存（已确认且未删除）条目可编辑：${entryId} 当前为 ${cur.state}${cur.deleted ? '（墓碑）' : ''}`);
+  }
+  const request_id = newRequestId();
+  const next: PersonalEntry = {
+    ...cur,
+    content: text,
+    content_hash: personalContentHash(text),
+    sha256: sha256hex(text),
+    version: cur.version + 1,
+    vclock: vcTick(cur.vclock, ctx.form),
+    ...(cur.team_shared
+      ? { sync_state: 'pending_sync' as const, sync_result: null, sync_error: null }
+      : {}),
+  };
+  await s.put(next);
+  await writeAudit(ctx, request_id, 'edit', next, cur.state, {
+    edited: true,
+    prev_content_hash: cur.content_hash,
+    prev_sha256: cur.sha256,
+    team_diverged: cur.team_shared,
+  });
+  return { ok: true, request_id, action: 'edit', entry: next };
+}
+
 // ─── 第二轮：显式授权上行到团队中枢（真实 PgSyncHub，失败如实报 stage + code） ──────
 
 /** 中枢采纳口径 → 个人同步结论：只有 applied / dedup / lww 算「已同步」 */
@@ -634,6 +687,7 @@ export function createPersonalApi(ctx: PersonalApiContext): PersonalApi {
     owner: resolution.owner,
     ownerResolution: resolution,
     quickAdd: (content) => personalQuickAdd(scoped, content),
+    edit: (id, content) => personalEdit(scoped, id, content),
     list: () => personalList(scoped.store, resolution.owner, resolution),
     importFromAgent: (input) => personalImportFromAgent(scoped, input),
     rejectFromAgent: (input) => personalRejectFromAgent(scoped, input),
@@ -670,20 +724,22 @@ export function personalRecallScore(content: string, query: string): number {
 }
 
 /**
- * 召回候选：owner 的 confirmed 条目按关键词重合度排序，最多 limit 条；分数 0 的不进。
+ * 个人记忆召回准入（2026-11-21 用户拍板：强制召回，不做转存）。
  * pending / rejected / 墓碑一律不可见 —— 这是「未确认不得被 agent 使用」的唯一判据。
+ *
+ * 已确认且未删除的个人记忆**全部**返回：不按关键词打分过滤、不截条数——
+ * 是否相关由用户在「确认是我的」时决定，召回侧不再用相似度二次筛选。
+ * score 仅作为审计/回显排序依据保留（与 query 无关时为 0），不参与准入。
+ * 待确认（pending）/ 已剔除（rejected）/ 已删除（墓碑）一律不进。
  */
 export async function selectPersonalRecall(
   store: PersonalMemoryStore,
   owner: string,
   query: string,
-  limit = 3,
 ): Promise<{ entry: PersonalEntry; score: number }[]> {
   const all = await store.list(owner);
   return all
     .filter((e) => e.state === 'confirmed' && !e.deleted)
     .map((entry) => ({ entry, score: personalRecallScore(entry.content, query) }))
-    .filter((x) => x.score > 0)
-    .sort((a, b) => (b.score - a.score) || ((b.entry.confirmed_at ?? 0) - (a.entry.confirmed_at ?? 0)))
-    .slice(0, limit);
+    .sort((a, b) => (b.score - a.score) || ((b.entry.confirmed_at ?? 0) - (a.entry.confirmed_at ?? 0)));
 }

@@ -153,4 +153,16 @@ describe('MemoryLayeredPage 内核加载三态（批次25 P0-7）', () => {
     await waitFor(() => expect(screen.getByTestId('memory-empty')).toBeInTheDocument());
     expect(screen.queryByTestId('kernel-error')).not.toBeInTheDocument();
   });
+
+  it('跟随壳层深色主题：挂载即设置 html[data-theme="dark"]', () => {
+    // 批次55：深色主题适配正向断言
+    localStorage.setItem('memdesk.shell.theme.v1', 'dark');
+    try {
+      render(<MemoryLayeredPage />);
+      expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+    } finally {
+      localStorage.setItem('memdesk.shell.theme.v1', 'light');
+      document.documentElement.removeAttribute('data-theme');
+    }
+  });
 });

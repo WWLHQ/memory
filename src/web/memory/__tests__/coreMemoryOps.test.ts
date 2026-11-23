@@ -1,6 +1,6 @@
 // 批次10：手动编辑旁路收口——编辑内容与写入共用同一道 L0→L1 质量门（噪声/脱敏/指纹/向量）。
 import { beforeEach, describe, expect, it } from 'vitest';
-import { coreUpdateContent, getStorage, splitAgentIngest, toRecord } from '../coreMemoryOps.ts';
+import { coreListMemories, coreUpdateContent, getStorage, splitAgentIngest, toRecord } from '../coreMemoryOps.ts';
 import { resetKernelForTests } from '../../kernel.ts';
 import { sha256hex } from '../../../core/memagent/sync.ts';
 import type { Memory } from '../../../core/memagent/types.ts';
@@ -18,6 +18,26 @@ function mem(over: Partial<Memory> & Pick<Memory, 'mem_id' | 'content'>): Memory
 
 beforeEach(() => {
   resetKernelForTests();
+});
+
+describe('记忆列表过滤内部配置快照（2026-11-22 params_01M74… 真实取证）', () => {
+  it('params:/growth: 快照不进记忆列表，真实记忆照常列出', async () => {
+    const s = getStorage();
+    await s.putMemory(mem({ mem_id: 'params_x', user_id: 'system', category: 'preference', content: 'params:v1:{"cfg":{}}', pinned: true }));
+    await s.putMemory(mem({ mem_id: 'growth_x', user_id: 'system', category: 'preference', content: 'growth:v1:{"weights":{}}' }));
+    await s.putMemory(mem({ mem_id: 'growth_h_x', user_id: 'system', category: 'preference', content: 'growth:v1:history:01ABC' }));
+    await s.putMemory(mem({ mem_id: 'real', content: 'Redis 连接池需要预热后再放量' }));
+
+    const list = await coreListMemories();
+    expect(list.map((r) => r.id)).toEqual(['real']);
+  });
+
+  it('系统用户的普通记忆不被误伤（只按内部快照前缀过滤）', async () => {
+    const s = getStorage();
+    await s.putMemory(mem({ mem_id: 'sys_real', user_id: 'system', content: '系统级偏好：深色主题' }));
+    const list = await coreListMemories();
+    expect(list.map((r) => r.id)).toEqual(['sys_real']);
+  });
 });
 
 describe('coreUpdateContent：手动编辑过 L0→L1 质量门', () => {

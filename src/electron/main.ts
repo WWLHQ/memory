@@ -1050,6 +1050,7 @@ function registerPersonalIpc(opts: {
       switch (op) {
         case 'list': return { ok: true, data: await api.list() };
         case 'quick_add': return { ok: true, data: await api.quickAdd(String(p.content ?? '')) };
+        case 'edit': return { ok: true, data: await api.edit(id, String(p.content ?? '')) };
         case 'import_from_agent': return {
           ok: true,
           data: await api.importFromAgent({

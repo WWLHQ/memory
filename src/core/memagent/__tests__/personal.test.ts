@@ -145,6 +145,52 @@ describe('个人记忆内核 API：状态机 + 审计 + 回执', () => {
     expect(snap.pending).toHaveLength(0);
   });
 
+  it('edit 覆盖原条目：pm:<id> 不变、version+1、hash 更新、不留重复，落 edit 审计（不复制正文）', async () => {
+    const { ctx, audits } = makeCtx();
+    const api = createPersonalApi(ctx);
+    const a = await api.quickAdd('旧内容：每天早上看一次告警');
+    await api.confirm(a.entry.id);
+    const before = (await api.list()).confirmed[0];
+    const beforeHash = before.content_hash;
+
+    const edited = await api.edit(a.entry.id, '新内容：先看夜间告警\n第二行保留换行');
+    expect(edited.ok).toBe(true);
+    expect(edited.entry.id).toBe(a.entry.id); // 原 id，不新增 pm:xxx
+    expect(edited.entry.version).toBe(before.version + 1);
+    expect(edited.entry.content_hash).not.toBe(beforeHash);
+    expect(edited.entry.content).toContain('\n第二行保留换行');
+    expect(edited.entry.state).toBe('confirmed');
+
+    const snap = await api.list();
+    expect(snap.confirmed).toHaveLength(1); // 覆盖而非追加
+    expect(snap.confirmed[0].id).toBe(a.entry.id);
+    expect(snap.confirmed[0].content).toContain('夜间告警');
+
+    const auditList = audits as { action: string; detail: Record<string, unknown> }[];
+    const editAudit = auditList.find((x) => x.detail.op === 'edit');
+    expect(editAudit?.action).toBe('personal_memory');
+    expect(editAudit?.detail.prev_content_hash).toBe(beforeHash);
+    expect(editAudit?.detail.edited).toBe(true);
+    expect(JSON.stringify(auditList)).not.toContain('夜间告警'); // 审计不复制正文
+  });
+
+  it('edit 拒绝空内容 / 超长 / 非已确认 / 已删除，拒绝时零变更', async () => {
+    const { ctx, audits } = makeCtx();
+    const api = createPersonalApi(ctx);
+    const a = await api.quickAdd('待编辑条目');
+    await expect(api.edit(a.entry.id, '还不允许')).rejects.toThrow(/只有已保存/);
+    await api.confirm(a.entry.id);
+    await expect(api.edit(a.entry.id, '   ')).rejects.toThrow(/内容为空/);
+    await expect(api.edit(a.entry.id, 'z'.repeat(4001))).rejects.toThrow(/超过 4000/);
+    expect((await api.list()).confirmed[0].content).toBe('待编辑条目');
+
+    await api.remove(a.entry.id, true);
+    await expect(api.edit(a.entry.id, '删除后编辑')).rejects.toThrow(/不存在或已删除/);
+    expect((await api.list()).confirmed).toHaveLength(0);
+    // quick_add + confirm + delete 三条审计；两次失败编辑不落审计
+    expect((audits as unknown[]).length).toBe(3);
+  });
+
   it('非法流转被拒（不写审计、不改状态）', async () => {
     const { ctx, audits } = makeCtx();
     const api = createPersonalApi(ctx);
@@ -236,7 +282,7 @@ describe('从 agent 记忆归入 / 判定（import_from_agent / reject_from_agen
   });
 });
 
-describe('召回准入：只有 confirmed 进召回', () => {
+describe('召回准入：confirmed 强制召回；pending / rejected / 墓碑不进', () => {
   function agentWith(store: InMemoryPersonalStore) {
     return createMemAgent({
       form: 'web', account: ACCOUNT,
@@ -244,6 +290,55 @@ describe('召回准入：只有 confirmed 进召回', () => {
       storage: new InMemoryStorage(), personal: store,
     });
   }
+
+  it('已确认个人记忆不受相似度阈值与 top_k 条数上限约束：零关键词重合也每次进 hits', async () => {
+    const store = new InMemoryPersonalStore();
+    const ma = agentWith(store);
+    const keep = await ma.personal.quickAdd('咖啡偏好：美式，不加糖');
+    await ma.personal.confirm(keep.entry.id);
+    // 项目记忆 4 条，top_k=1 只留最高分一条；个人条目与 query 零重合，仍必须注入
+    for (let i = 0; i < 4; i += 1) {
+      await ma._seedMemory({ content: `项目部署 回滚 方案 ${i}`, category: 'fact', project_id: 'P1', decay_class: 'hot' });
+    }
+    const r = await ma.recall({ query: '项目部署 回滚', project_id: 'P1', top_k: 1 });
+    expect(r.hits.filter((h) => !h.mem_id.startsWith('pm:'))).toHaveLength(1);
+    const pm = r.hits.find((h) => h.mem_id === `pm:${keep.entry.id}`);
+    expect(pm).toBeTruthy();
+    expect(pm?.score).toBe(0);
+    expect(pm?.evidence_ref).toBe(`personal:${keep.entry.id}`);
+  });
+
+  it('已确认条目全部召回（不再只取前 3 条）', async () => {
+    const store = new InMemoryPersonalStore();
+    const ma = agentWith(store);
+    const ids: string[] = [];
+    for (let i = 0; i < 5; i += 1) {
+      const added = await ma.personal.quickAdd(`个人约定 ${i}：发布前先跑完整回归`);
+      await ma.personal.confirm(added.entry.id);
+      ids.push(added.entry.id);
+    }
+    const r = await ma.recall({ query: '完全无关的问题', project_id: 'P1' });
+    const personal = r.hits.filter((h) => h.mem_id.startsWith('pm:')).map((h) => h.mem_id.slice(3));
+    expect(personal).toHaveLength(5);
+    for (const id of ids) expect(personal).toContain(id);
+  });
+
+  it('个人记忆与 3000t 硬顶冲突：先丢项目记忆；个人条目全保留（超长截短正文）', async () => {
+    const store = new InMemoryPersonalStore();
+    const ma = agentWith(store);
+    const a = await ma.personal.quickAdd('甲'.repeat(4000)); // 2000t
+    await ma.personal.confirm(a.entry.id);
+    const b = await ma.personal.quickAdd('乙'.repeat(4000)); // 2000t
+    await ma.personal.confirm(b.entry.id);
+    const proj = await ma._seedMemory({ content: '项目部署 回滚 方案', category: 'fact', project_id: 'P1', decay_class: 'hot' });
+
+    const r = await ma.recall({ query: '项目部署 回滚', project_id: 'P1' });
+    const ids = r.hits.map((h) => h.mem_id);
+    expect(ids).toContain(`pm:${a.entry.id}`);
+    expect(ids).toContain(`pm:${b.entry.id}`);
+    expect(ids).not.toContain(proj.mem_id);
+    expect(r.payload_tokens).toBeLessThanOrEqual(3000);
+  });
 
   it('confirmed 进 hits；pending / rejected / 墓碑不进', async () => {
     const store = new InMemoryPersonalStore();

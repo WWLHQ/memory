@@ -10,17 +10,26 @@
 // N8 回退改良（用户 2026-11-10 确认，全页 + 壳层常驻面板共用本组件）：
 // - 样式自包含：本文件直接 import personalMemoryPane.css（pmp- 前缀变量，不覆盖宿主全局），
 //   因此记忆库全页与壳层常驻面板都自动带上样式，不再依赖宿主是否引入 memoryManagement.css；
-// - 改良 ① 「快速记一条 + 记一条」从右窗收件箱头部移到整个面板最上方通栏；
 // - 改良 ② 所有卡片 / 分区框 / 空态框 / 搜索框 / 下拉 / 按钮 / 徽标统一圆角（9–12px）。
+// - 2026-11-21 用户定制：删掉顶部快速记录通栏；左「已确认显示窗」只剩自由输入 textarea +「保存」，
+//   保存走真实 quick_add → confirm（已确认语义，参与召回）；召回归属移到页头右侧。
+// - 2026-11-21 第二轮：左窗内的搜索框 / 时间范围 / 已确认列表 / 空态 / 统计行全部移除（用户图2 红框），
+//   计数并入左窗标题。
+// - 2026-11-21 第三轮（用户拍板）：左卡下半部恢复「已保存」常驻列表（保存即出现、刷新仍在、不折叠）；
+//   已确认条目逐条标注「每次会话强制召回」。个人记忆不再做「转存到记忆库」：删除上行/重试入口，
+//   内核改为 confirmed 全量强制注入（见 agent.ts / personal.ts），页面只保留本机确认与剔除。
+// - 2026-11-22 第四轮（用户定稿「就是一张记事本」）：顶部只留一个「保存」；已确认正文常驻显示在编辑框内，
+//   用户直接在框内改，点保存写回原条目（不新增重复）。去掉已保存下拉、删除、字数计数与取消编辑。
 import './personalMemoryPane.css';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { kernelErrorText } from '../shared/kernelLoad.tsx';
-import {
-  getPersonalPort, pushPersonalToTeam, retryPersonalSync, type PersonalPort,
-} from '../shared/personalPort.ts';
+import { getPersonalPort, type PersonalPort } from '../shared/personalPort.ts';
 import type { PersonalEntry } from '../../core/memagent/personalStore.ts';
-import type { PersonalSnapshot, PersonalSyncReceipt } from '../../core/memagent/personal.ts';
+import type { PersonalReceipt, PersonalSnapshot } from '../../core/memagent/personal.ts';
 import { publishNavCount } from '../shared/navCountChannel.ts';
+
+/** 与内核 PERSONAL_MAX_CHARS 同一上限（textarea maxLength / 计数 / 守卫） */
+const MAX_NOTE = 4000;
 
 export interface PersonalPaneProps {
   phase: 'loading' | 'ok' | 'error';
@@ -32,10 +41,6 @@ export interface PersonalPaneProps {
   /** 窄容器（壳层常驻面板）：双窗改上下堆叠 */
   narrow?: boolean;
 }
-
-type RangeKey = 'all' | '7d' | '30d';
-const RANGE_LABEL: Record<RangeKey, string> = { all: '全部时间', '7d': '近 7 天', '30d': '近 30 天' };
-const RANGE_MS: Record<RangeKey, number> = { all: 0, '7d': 7 * 86_400_000, '30d': 30 * 86_400_000 };
 
 function p2(n: number): string {
   return String(n).padStart(2, '0');
@@ -49,29 +54,7 @@ function fmtWhen(ts: number | null): string {
 }
 
 function sourceText(e: PersonalEntry): string {
-  return e.source === 'agent' ? `来源 agent · ${e.source_agent ?? '未记名'}` : '来源 本机快速记';
-}
-
-/** 条目级同步状态文案（失败必带阶段 + 错误码；成功才允许出现「已同步」） */
-function syncBadge(e: PersonalEntry): { tone: 'ok' | 'warn' | 'err' | 'quiet'; text: string; title?: string } {
-  switch (e.sync_state) {
-    case 'synced':
-      return {
-        tone: 'ok',
-        text: `已同步（团队）· ${e.sync_result ?? 'applied'} · sha256 ${e.sha256.slice(0, 8)}`,
-        title: '已真实写入团队中枢（PgSyncHub），重复上行按 sha256 幂等',
-      };
-    case 'pending_sync':
-      return { tone: 'warn', text: '待上行（尚未送达团队中枢）', title: '已显式授权，等待写入团队中枢' };
-    case 'failed':
-      return {
-        tone: 'err',
-        text: `同步失败 · 阶段 ${e.sync_error?.stage ?? '未知'} · ${e.sync_error?.code ?? 'E_UNKNOWN'}`,
-        title: e.sync_error?.message ?? '上行失败，本机条目保留',
-      };
-    default:
-      return { tone: 'quiet', text: '仅本机 · 本人', title: '个人记忆默认仅本机+本人；上行到团队需显式授权' };
-  }
+  return e.source === 'agent' ? `来源 agent · ${e.source_agent ?? '未记名'}` : '来源 本机录入';
 }
 
 export function PersonalMemoryPane({ phase, data, error, onRetry, onChanged, narrow }: PersonalPaneProps) {
@@ -79,13 +62,34 @@ export function PersonalMemoryPane({ phase, data, error, onRetry, onChanged, nar
   if (!portRef.current) portRef.current = getPersonalPort();
   const port = portRef.current;
 
-  const [query, setQuery] = useState('');
-  const [range, setRange] = useState<RangeKey>('all');
-  const [quickText, setQuickText] = useState('');
+  const [noteText, setNoteText] = useState('');
+  const noteRef = useRef<HTMLTextAreaElement | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ kind: 'ok' | 'warn' | 'err'; text: string } | null>(null);
-  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
-  const [pendingUplink, setPendingUplink] = useState<string | null>(null);
+
+  const confirmed = data?.confirmed ?? [];
+  /** 记事本正文 = 已确认条目按存储顺序拼接（单条即原文；多条用空行分隔，保存时逐段写回） */
+  const notebookText = confirmed.map((e) => e.content).join('\n\n');
+  const baselineRef = useRef<string | null>(null);
+  const noteTextRef = useRef(noteText);
+  noteTextRef.current = noteText;
+  const confirmedRef = useRef(confirmed);
+  confirmedRef.current = confirmed;
+
+  // 用户有未保存改动（正文 ≠ 基线）时不覆盖输入；空闲时跟随真实快照刷新。
+  useEffect(() => {
+    if (baselineRef.current !== null && noteTextRef.current !== baselineRef.current) return;
+    if (baselineRef.current === notebookText && noteTextRef.current === notebookText) return;
+    baselineRef.current = notebookText;
+    setNoteText(notebookText);
+  }, [notebookText]);
+
+  /** 保存/重读后把基线同步到真实快照，避免刚写完又被误判成外部变更 */
+  const applySnapshotText = useCallback((next: PersonalSnapshot) => {
+    const text = next.confirmed.map((e) => e.content).join('\n\n');
+    baselineRef.current = text;
+    setNoteText(text);
+  }, []);
 
   // 页签/左侧导航的真实待确认计数（未登录或读失败时清 0，不显示假数字）
   useEffect(() => {
@@ -103,16 +107,13 @@ export function PersonalMemoryPane({ phase, data, error, onRetry, onChanged, nar
     }
   }, [onChanged, port]);
 
-  const act = useCallback(async (op: 'confirm' | 'reject' | 'revoke' | 'delete', entry: PersonalEntry) => {
+  const act = useCallback(async (op: 'confirm' | 'reject' | 'revoke', entry: PersonalEntry) => {
     setBusy(entry.id);
     setMsg(null);
     try {
-      const payload: Record<string, unknown> = { id: entry.id };
-      if (op === 'delete') payload.confirm = true;
-      const receipt = await port.invoke<{ request_id: string }>(op, payload);
+      const receipt = await port.invoke<{ request_id: string }>(op, { id: entry.id });
       await refresh();
-      setMsg({ kind: 'ok', text: `${op === 'confirm' ? '已确认是我的' : op === 'reject' ? '已剔除（只移出本机视图，账本保留）' : op === 'revoke' ? '已撤销，回到待确认' : '已删除（墓碑保留）'} · request_id ${receipt.request_id}` });
-      setPendingDelete(null);
+      setMsg({ kind: 'ok', text: `${op === 'confirm' ? '已确认是我的' : op === 'reject' ? '已剔除（只移出本机视图，账本保留）' : '已撤销，回到待确认'} · request_id ${receipt.request_id}` });
     } catch (e: unknown) {
       setMsg({ kind: 'err', text: `动作未生效：${kernelErrorText(e)}` });
     } finally {
@@ -120,69 +121,89 @@ export function PersonalMemoryPane({ phase, data, error, onRetry, onChanged, nar
     }
   }, [port, refresh]);
 
-  // 显式授权上行 / 重试：失败如实显示阶段 + 错误码，绝不显示「已同步」
-  const uplink = useCallback(async (entry: PersonalEntry, retry: boolean) => {
-    setBusy(entry.id);
-    setMsg(null);
-    try {
-      const receipt: PersonalSyncReceipt = retry
-        ? await retryPersonalSync(entry.id, port)
-        : await pushPersonalToTeam(entry.id, port);
-      await refresh();
-      if (receipt.sync.outcome === 'synced') {
-        setMsg({
-          kind: 'ok',
-          text: `已上行到团队中枢（${receipt.sync.result ?? 'applied'}）· sha256 ${entry.sha256.slice(0, 8)} · request_id ${receipt.request_id}`,
-        });
-      } else {
-        setMsg({
-          kind: 'err',
-          text: `上行失败：阶段 ${receipt.sync.stage ?? '未知'} · 错误码 ${receipt.sync.code ?? 'E_UNKNOWN'} · ${receipt.sync.message ?? '未送达团队'}（本机条目保留，未显示已同步）`,
-        });
-      }
-      setPendingUplink(null);
-    } catch (e: unknown) {
-      setMsg({ kind: 'err', text: `上行未生效：${kernelErrorText(e)}` });
-    } finally {
-      setBusy(null);
-    }
-  }, [port, refresh]);
-
-  const submitQuick = useCallback(async () => {
-    const text = quickText.trim();
+  // 记事本「保存」：框内正文就是已确认内容。
+  // 0 条 → quick_add + confirm 新建；1 条 → edit 覆盖原 pm:<id>；多条 → 按空行分段逐条写回原条目。
+  // 全部走真实数据面并落 personal_memory 审计；绝不追加重复条目。
+  const saveNote = useCallback(async () => {
+    const text = noteText.trim();
     if (!text) {
-      setMsg({ kind: 'warn', text: '内容为空：未提交（不会把空条目写进个人记忆）' });
+      setMsg({ kind: 'warn', text: '内容为空：未保存（不会把空条目写进个人记忆）' });
       return;
     }
-    setBusy('__quick__');
+    if (text.length > MAX_NOTE) {
+      setMsg({ kind: 'warn', text: `内容超过 ${MAX_NOTE} 字：请拆分后再保存` });
+      return;
+    }
+    const entries = confirmedRef.current;
+    setBusy('__note__');
     setMsg(null);
     try {
-      const receipt = await port.invoke<{ request_id: string }>('quick_add', { content: text });
-      setQuickText('');
-      await refresh();
-      setMsg({ kind: 'ok', text: `已记入本机收件箱（待确认）· request_id ${receipt.request_id}` });
+      if (entries.length === 0) {
+        const added = await port.invoke<PersonalReceipt>('quick_add', { content: text });
+        try {
+          const confirmedR = await port.invoke<PersonalReceipt>('confirm', { id: added.entry.id });
+          const next = await refresh();
+          if (next) applySnapshotText(next);
+          setMsg({ kind: 'ok', text: `已保存并确认（参与召回）· request_id ${confirmedR.request_id}` });
+        } catch (e: unknown) {
+          const next = await refresh();
+          if (next) applySnapshotText(next);
+          setMsg({
+            kind: 'warn',
+            text: `已写入个人记忆，但确认失败（仍在待确认）：${kernelErrorText(e)}。可在右窗收件箱再确认一次。`,
+          });
+        }
+        return;
+      }
+      if (entries.length === 1) {
+        if (text === entries[0].content) {
+          setMsg({ kind: 'ok', text: '已保存：内容未变化（未新增重复）' });
+          return;
+        }
+        const receipt = await port.invoke<PersonalReceipt>('edit', { id: entries[0].id, content: text });
+        const next = await refresh();
+        if (next) applySnapshotText(next);
+        setMsg({
+          kind: 'ok',
+          text: `已保存：写回原条目 ${entries[0].id}（未新增重复 · v${receipt.entry.version}）· request_id ${receipt.request_id}`,
+        });
+        return;
+      }
+      // 多条已确认：正文按空行分段，逐条写回，条目数与顺序不变
+      const parts = text.split(/\n{2,}/).map((s) => s.trim()).filter(Boolean);
+      if (parts.length !== entries.length) {
+        setMsg({
+          kind: 'warn',
+          text: `当前有 ${entries.length} 条已确认记忆：正文需用空行分成 ${entries.length} 段再保存（不新增、不丢条目）`,
+        });
+        return;
+      }
+      let lastRid = '';
+      let changed = 0;
+      for (let i = 0; i < entries.length; i += 1) {
+        if (parts[i] === entries[i].content) continue;
+        const r = await port.invoke<PersonalReceipt>('edit', { id: entries[i].id, content: parts[i] });
+        lastRid = r.request_id;
+        changed += 1;
+      }
+      const next = await refresh();
+      if (next) applySnapshotText(next);
+      setMsg({
+        kind: 'ok',
+        text: changed === 0
+          ? '已保存：内容未变化'
+          : `已保存：逐条写回 ${changed} 条原条目（未新增重复）· request_id ${lastRid}`,
+      });
     } catch (e: unknown) {
-      setMsg({ kind: 'err', text: `未记入：${kernelErrorText(e)}` });
+      setMsg({ kind: 'err', text: `未保存：${kernelErrorText(e)}` });
     } finally {
       setBusy(null);
     }
-  }, [port, quickText, refresh]);
-
-  const confirmed = useMemo(() => {
-    const list = data?.confirmed ?? [];
-    const q = query.trim().toLowerCase();
-    const since = range === 'all' ? 0 : Date.now() - RANGE_MS[range];
-    return list.filter((e) => {
-      if (q && !e.content.toLowerCase().includes(q)) return false;
-      if (since && (e.confirmed_at ?? 0) < since) return false;
-      return true;
-    });
-  }, [data?.confirmed, query, range]);
+  }, [port, noteText, refresh, applySnapshotText]);
 
   const pendingQuick = data?.pending.filter((e) => e.source === 'quick_note') ?? [];
   const pendingAgent = data?.pending.filter((e) => e.source === 'agent') ?? [];
   const rejected = data?.rejected ?? [];
-  const syncQueue = data?.sync_queue ?? [];
   const binding = data?.owner_binding;
 
   const rootClass = `mm-personal-pane${narrow ? ' pmp-narrow' : ''}`;
@@ -211,169 +232,74 @@ export function PersonalMemoryPane({ phase, data, error, onRetry, onChanged, nar
       <div className="pmp-hd">
         <h3>个人记忆</h3>
         {/* 计数与标题同行（2026-11-10：删掉「左/右/数据面」说明行，计数并入标题行并调整宽度） */}
-        <span className="pmp-tag mono" data-testid="pm-counts">已确认 {data?.counts.confirmed ?? 0} · 待确认 {data?.counts.pending ?? 0} · 已剔除 {data?.counts.rejected ?? 0} · 待上行 {data?.counts.pending_sync ?? 0} · 同步失败 {data?.counts.sync_failed ?? 0}</span>
+        <span className="pmp-tag mono" data-testid="pm-counts">已确认 {data?.counts.confirmed ?? 0} · 待确认 {data?.counts.pending ?? 0} · 已剔除 {data?.counts.rejected ?? 0}</span>
+        {/* 召回归属移到页头右侧（用户 2026-11-21 图2 红框）；信息仍来自真实 owner_binding */}
+        {binding ? (
+          <span className={`pmp-owner-inline ${binding.bound ? 'ok' : 'warn'}`} data-testid="pm-owner-binding">
+            召回归属：内核账号 <b className="mono">{binding.kernel_user_id}</b> · 登录账号 <b className="mono">{binding.login_account}</b> ·{' '}
+            {binding.bound
+              ? (binding.via === 'same_name' ? '同名直通' : binding.via === 'binding' ? '已按显式绑定映射' : '无内核身份配置，按登录账号口径')
+              : '未绑定内核账号 → 本机可用，agent 暂不可召回（不会静默并号）'}
+          </span>
+        ) : null}
       </div>
-
-      {/* 改良 ① 快速记一条：置顶通栏（原在右窗收件箱头部） */}
-      <div className="pmp-quick" data-testid="pm-quick-top">
-        <textarea
-          value={quickText}
-          onChange={(e) => setQuickText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submitQuick(); }
-          }}
-          placeholder="快速记一条：Enter 提交，Shift+Enter 换行"
-          aria-label="快速记一条个人记忆"
-          data-testid="pm-quick-input"
-          rows={2}
-          disabled={busy === '__quick__'}
-        />
-        <button type="button" className="pmp-btn primary" disabled={busy === '__quick__'} onClick={() => void submitQuick()} data-testid="pm-quick-submit">
-          {busy === '__quick__' ? '提交中…' : '记一条'}
-        </button>
-      </div>
-
-      {binding ? (
-        <div className={`pmp-ownerbar ${binding.bound ? 'ok' : 'warn'}`} data-testid="pm-owner-binding">
-          召回归属：内核账号 <b className="mono">{binding.kernel_user_id}</b> · 登录账号 <b className="mono">{binding.login_account}</b> ·{' '}
-          {binding.bound
-            ? (binding.via === 'same_name' ? '同名直通' : binding.via === 'binding' ? '已按显式绑定映射' : '无内核身份配置，按登录账号口径')
-            : '未绑定内核账号 → 本机可用，agent 暂不可召回（不会静默并号）'}
-        </div>
-      ) : null}
 
       {msg ? (
         <div className={`pmp-msg ${msg.kind}`} data-testid="pm-msg">{msg.text}</div>
       ) : null}
 
       <div className="pmp-wrap">
-        {/* ── 左：已确认显示窗 ─────────────────────────────────────────────── */}
-        <div className="pmp-col" data-testid="pm-confirmed">
-          <div className="pmp-head">
+        {/* ── 左：整卡即输入区（用户图2 蓝框：卡片撑满可用宽高，保存移到右上角；红框小输入框已取消） ── */}
+        <div className="pmp-col pmp-note-col" data-testid="pm-confirmed">
+          <div className="pmp-head pmp-head-note">
             <div className="pmp-title">
-              已确认显示窗<span className="n" data-testid="pm-confirmed-count">{data?.counts.confirmed ?? 0}</span>
-              <span className="pmp-pin" title="已确认条目常驻本窗，不因搜索/时间范围被隐藏出账">pin · 常驻</span>
+              已确认显示窗
+              <span className="n" data-testid="pm-confirmed-count">{data?.counts.confirmed ?? 0}</span>
             </div>
-            <div className="pmp-tools">
-              <label className="pmp-search">
-                <input
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  placeholder="搜索已确认内容"
-                  aria-label="搜索已确认个人记忆"
-                  data-testid="pm-search"
-                />
-              </label>
-              <select
-                className="pmp-select"
-                value={range}
-                aria-label="确认时间范围"
-                data-testid="pm-range"
-                onChange={(e) => setRange(e.target.value as RangeKey)}
-              >
-                {(Object.keys(RANGE_LABEL) as RangeKey[]).map((k) => <option key={k} value={k}>{RANGE_LABEL[k]}</option>)}
-              </select>
-            </div>
+            {/* 2026-11-22 用户定稿：顶部只留一个「保存」；正文常驻框内，直接改后点保存写回原条目。 */}
+            <button
+              type="button"
+              className="pmp-btn primary pmp-note-save-top"
+              disabled={busy === '__note__'}
+              onClick={() => void saveNote()}
+              data-testid="pm-note-save"
+            >{busy === '__note__' ? '保存中…' : '保存'}</button>
           </div>
-          <div className="pmp-body" data-testid="pm-confirmed-list">
-            {confirmed.length === 0 ? (
-              <div className="pmp-empty" data-testid="pm-confirmed-empty">
-                <b>{data?.counts.confirmed ? '当前筛选没有匹配条目' : '还没有已确认的个人记忆'}</b>
-                <div>{data?.counts.confirmed ? '清空搜索或切换时间范围；总数仍显示在窗口标题。' : '在右侧收件箱点「是我的」后，条目会进入这里并参与召回。'}</div>
-              </div>
-            ) : confirmed.map((e) => {
-              const badge = syncBadge(e);
-              const retryable = e.sync_state === 'pending_sync' || e.sync_state === 'failed';
-              return (
-                <div className="pmp-item" key={e.id} data-testid={`pm-confirmed-${e.id}`}>
-                  <div className="pmp-item-top">
-                    <span className="pmp-src">{sourceText(e)}</span>
-                    <span className={`pmp-badge ${badge.tone}`} title={badge.title} data-testid={`pm-sync-badge-${e.id}`}>{badge.text}</span>
-                    <span className="pmp-time mono">确认于 {fmtWhen(e.confirmed_at)}</span>
-                  </div>
-                  <div className="pmp-item-body">{e.content}</div>
-                  <div className="pmp-item-actions">
-                    <span className="pmp-meta">v{e.version} · {e.layer} · sha256 {e.sha256.slice(0, 8)} · 时钟 {Object.entries(e.vclock).map(([k, v]) => `${k}:${v}`).join(' ')}</span>
-                    {e.sync_state === 'synced' ? null : pendingUplink === e.id ? (
-                      <>
-                        <button type="button" className="pmp-btn danger" disabled={busy === e.id} data-testid={`pm-uplink-confirm-${e.id}`} onClick={() => void uplink(e, retryable)}>确认上行（团队可见）</button>
-                        <button type="button" className="pmp-btn" onClick={() => setPendingUplink(null)}>取消</button>
-                      </>
-                    ) : (
-                      <button
-                        type="button"
-                        className="pmp-btn"
-                        disabled={busy === e.id}
-                        data-testid={`pm-uplink-${e.id}`}
-                        onClick={() => {
-                          setPendingUplink(e.id);
-                          setMsg({ kind: 'warn', text: '上行会让本条在团队中枢可见：需再次点击「确认上行」才算显式授权（个人确认不会自动提权）' });
-                        }}
-                      >{retryable ? '重试上行' : '上行到团队'}</button>
-                    )}
-                    <button type="button" className="pmp-btn" disabled={busy === e.id} data-testid={`pm-unconfirm-${e.id}`} onClick={() => act('revoke', e)}>取消确认</button>
-                    {pendingDelete === e.id ? (
-                      <>
-                        <button type="button" className="pmp-btn danger" disabled={busy === e.id} data-testid={`pm-delete-confirm-${e.id}`} onClick={() => act('delete', e)}>确认删除</button>
-                        <button type="button" className="pmp-btn" onClick={() => setPendingDelete(null)}>取消</button>
-                      </>
-                    ) : (
-                      <button type="button" className="pmp-btn" disabled={busy === e.id} data-testid={`pm-delete-${e.id}`} onClick={() => { setPendingDelete(e.id); setMsg({ kind: 'warn', text: '删除需二次确认：再次点击「确认删除」才会写墓碑（账本记录保留）' }); }}>删除</button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          <div className="pmp-foot" data-testid="pm-confirmed-foot">
-            共 {data?.counts.confirmed ?? 0} 条 · 本窗显示 {confirmed.length} 条 · 来源 {new Set((data?.confirmed ?? []).map((e) => e.source_agent ?? e.source)).size} 类
+          <div className="pmp-body pmp-note-body" data-testid="pm-confirmed-list">
+            {/* 2026-11-22 记事本形态：已确认正文常驻显示（刷新/重启后仍是真实内容），
+                用户直接在框内改，点右上角「保存」写回原条目，不新增重复。 */}
+            <textarea
+              ref={noteRef}
+              className="pmp-note-area"
+              value={noteText}
+              onChange={(e) => setNoteText(e.target.value)}
+              maxLength={MAX_NOTE}
+              placeholder="在这里写下要记住的个人内容…（支持多行；保存即生效）"
+              aria-label="写入个人记忆"
+              data-testid="pm-note-input"
+              disabled={busy === '__note__'}
+            />
           </div>
         </div>
 
         <div className="pmp-div" />
 
         {/* ── 右：收件箱（快速记一条已移到顶部通栏） ─────────────────────── */}
-        <div className="pmp-col" data-testid="pm-inbox">
+        <div className="pmp-col pmp-inbox-col" data-testid="pm-inbox">
           <div className="pmp-head">
             <div className="pmp-title">
               收件箱<span className="n" data-testid="pm-pending-count">{data?.counts.pending ?? 0}</span>
             </div>
           </div>
           <div className="pmp-body" data-testid="pm-inbox-list">
-            <section className="pmp-sect" data-testid="pm-sect-sync">
-              <h4>本机待上行 <span className="pmp-sect-n" data-testid="pm-sync-queue-count">{syncQueue.length}</span></h4>
-              {syncQueue.length === 0 ? <div className="pmp-none">没有已授权但未送达团队中枢的条目</div> : syncQueue.map((e) => {
-                const badge = syncBadge(e);
-                return (
-                  <div className="pmp-item" key={e.id} data-testid={`pm-sync-${e.id}`}>
-                    <div className="pmp-item-top">
-                      <span className="pmp-src">{sourceText(e)}</span>
-                      <span className={`pmp-badge ${badge.tone}`} title={badge.title} data-testid={`pm-sync-state-${e.id}`}>{badge.text}</span>
-                      <span className="pmp-time mono">目标团队 {e.team_id ?? '未记录'}</span>
-                    </div>
-                    <div className="pmp-item-body">{e.content}</div>
-                    {e.sync_error ? (
-                      <div className="pmp-syncerr mono" data-testid={`pm-sync-err-${e.id}`}>
-                        阶段 {e.sync_error.stage} · 错误码 {e.sync_error.code} · {e.sync_error.message}
-                      </div>
-                    ) : null}
-                    <div className="pmp-item-actions">
-                      <span className="pmp-meta">sha256 {e.sha256.slice(0, 8)} · 时钟 {Object.entries(e.vclock).map(([k, v]) => `${k}:${v}`).join(' ')}</span>
-                      <button type="button" className="pmp-btn primary" disabled={busy === e.id} data-testid={`pm-retry-${e.id}`} onClick={() => void uplink(e, true)}>重试上行</button>
-                    </div>
-                  </div>
-                );
-              })}
-            </section>
-
             <section className="pmp-sect" data-testid="pm-sect-quick">
-              <h4>本机待确认 · 不会自动上行 <span className="pmp-sect-n">{pendingQuick.length}</span></h4>
-              {pendingQuick.length === 0 ? <div className="pmp-none">没有本机快速记录待确认</div> : pendingQuick.map((e) => (
+              <h4>本机待确认 · 不进召回 <span className="pmp-sect-n">{pendingQuick.length}</span></h4>
+              {pendingQuick.length === 0 ? <div className="pmp-none">没有本机录入待确认</div> : pendingQuick.map((e) => (
                 <div className="pmp-item" key={e.id} data-testid={`pm-pending-${e.id}`}>
                   <div className="pmp-item-top">
                     <span className="pmp-src">{sourceText(e)}</span>
                     <span className="pmp-time mono">{fmtWhen(e.delivered_at)}</span>
-                    {e.team_shared ? <span className="pmp-badge warn" data-testid={`pm-teamcopy-${e.id}`}>团队副本已存在（不回撤）</span> : null}
+                    <span className="pmp-badge warn" data-testid={`pm-pending-state-${e.id}`}>待确认 · 不进召回</span>
                   </div>
                   <div className="pmp-item-body">{e.content}</div>
                   <div className="pmp-item-actions">
@@ -391,7 +317,7 @@ export function PersonalMemoryPane({ phase, data, error, onRetry, onChanged, nar
                   <div className="pmp-item-top">
                     <span className="pmp-src">{sourceText(e)}</span>
                     <span className="pmp-time mono">{fmtWhen(e.delivered_at)}</span>
-                    {e.team_shared ? <span className="pmp-badge warn" data-testid={`pm-teamcopy-${e.id}`}>团队副本已存在（不回撤）</span> : null}
+                    <span className="pmp-badge warn" data-testid={`pm-pending-state-${e.id}`}>待确认 · 不进召回</span>
                   </div>
                   <div className="pmp-item-body">{e.content}</div>
                   <div className="pmp-item-actions">
@@ -409,7 +335,7 @@ export function PersonalMemoryPane({ phase, data, error, onRetry, onChanged, nar
                   <div className="pmp-item-top">
                     <span className="pmp-src">{sourceText(e)}</span>
                     <span className="pmp-time mono">剔除于 {fmtWhen(e.rejected_at)}</span>
-                    {e.team_shared ? <span className="pmp-badge warn" data-testid={`pm-teamcopy-${e.id}`}>团队副本已存在（不回撤）</span> : null}
+                    <span className="pmp-badge quiet" data-testid={`pm-rejected-state-${e.id}`}>已剔除 · 不进召回</span>
                   </div>
                   <div className="pmp-item-body">{e.content}</div>
                   <div className="pmp-item-actions">
@@ -422,19 +348,18 @@ export function PersonalMemoryPane({ phase, data, error, onRetry, onChanged, nar
             <section className="pmp-rules" data-testid="pm-rules">
               <h4>判定口径</h4>
               <ul>
-                <li>只有「已确认」条目参与 agent 召回；待确认与已剔除不进召回。</li>
+                <li>只有「已确认且未删除」条目参与召回，且是<strong>每次会话强制召回</strong>：不按相似度阈值过滤、不占 top_k 名额、不受条数上限截断；待确认 / 已剔除 / 已删除不进召回。</li>
+                <li>强制召回在内核召回装配层保证：候选集组装完成后直接并入注入列表（pm: 前缀受保护）；项目记忆按分数裁剪时不会挤掉个人记忆。</li>
+                <li>注入配额：个人记忆优先占用单次注入预算（3000t），项目记忆让位；个人总量自身超顶时保留全部条目、截短单条正文，条目不会消失。</li>
+                <li>个人记忆不做「转存到记忆库 / 团队」：本页不提供上行、重试或晋级入口，条目默认仅本机 + 本人。</li>
                 <li>「不是我的」只把条目移出本机视图，不删账本；撤销后回到待确认。</li>
                 <li>删除需二次确认，只写墓碑（记录保留），不复用记忆主表。</li>
-                <li>个人确认只属于本人：默认仅本机+本人，确认不会自动提权为团队可见。</li>
-                <li>上行团队必须在条目上二次确认（显式授权），走真实 PgSyncHub；失败如实显示阶段+错误码，不写「已同步」。</li>
-                <li>取消确认 / 删除只影响本机账本，不回撤已写入的团队副本（本轮未实现撤回）。</li>
-                <li>内容指纹 sha256 相同视为同一内容：重复上行不会在团队中枢产生重复条目。</li>
                 <li>L0 原始密文不进收件箱：这里只处理已有可读内容（L1）。</li>
               </ul>
             </section>
           </div>
           <div className="pmp-foot" data-testid="pm-inbox-foot">
-            待确认 {data?.counts.pending ?? 0} · 已剔除 {data?.counts.rejected ?? 0} · 本机待确认 {data?.counts.pending_quick ?? 0} · 待上行 {data?.counts.pending_sync ?? 0} · 同步失败 {data?.counts.sync_failed ?? 0}
+            待确认 {data?.counts.pending ?? 0} · 已剔除 {data?.counts.rejected ?? 0} · 本机待确认 {data?.counts.pending_quick ?? 0} · 已确认每次会话强制召回 {data?.counts.confirmed ?? 0}
           </div>
         </div>
       </div>

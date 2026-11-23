@@ -1,0 +1,150 @@
+/* 层级管理页（2026-11-22 按真实使用场景重排）
+   版式对齐概览页：顶部摘要读数条 + af-panel 三列网格（宽项跨列）。
+   令牌沿用 shared/p0.css（--surface/--ink/--muted/--line/--ok/--bad/--mono），不新增主题变量。 */
+
+.layered-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+/* .p0-page 自带 height:100% + overflow:auto；避免子卡被 flex 压缩 */
+.layered-page > * { flex: 0 0 auto; }
+
+/* ── 页头（同概览 af-head） ── */
+.layered-page .af-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.layered-page .af-head h1 { font-size: 18px; font-weight: 600; margin: 0; }
+.layered-page .af-head .sub { color: var(--muted); font-size: 12px; }
+.layered-page .af-head .right { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* ── 面板骨架 ── */
+.layered-page .af-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  min-width: 0;
+}
+.layered-page .af-ph {
+  display: flex; align-items: center; gap: 9px;
+  padding: 10px 14px; border-bottom: 1px solid var(--line); flex-wrap: wrap;
+}
+.layered-page .af-ph h3 { margin: 0; font-size: 13px; font-weight: 600; color: var(--ink); }
+.layered-page .af-ph .hint { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.layered-page .af-pb { padding: 12px 14px; }
+.layered-page .af-note { font-size: 11px; color: var(--muted); line-height: 1.6; margin: 8px 0 0; }
+.layered-page .af-note.bad { color: var(--bad); }
+.layered-page .af-q { margin: 0 0 8px; font-size: 11.5px; color: var(--ink2); line-height: 1.55; }
+
+/* ── 摘要四卡 / 分组三列 ── */
+.layered-page .af-g4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.layered-page .af-g4 > * { min-width: 0; }
+.layered-page .af-g3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; align-items: start; }
+.layered-page .af-g3 > * { min-width: 0; }
+.layered-page .af-span2 { grid-column: span 2; }
+
+.layered-page .af-stat { padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface2); }
+.layered-page .af-stat .k { font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.layered-page .af-stat .k span { font-family: var(--mono); font-size: 10px; color: var(--faint); }
+.layered-page .af-stat .v {
+  font-family: var(--mono); font-size: 24px; font-weight: 600; color: var(--ink);
+  letter-spacing: -.02em; margin-top: 3px; line-height: 1.2; font-variant-numeric: tabular-nums;
+}
+.layered-page .af-stat .v em { font-style: normal; font-size: 12px; color: var(--muted); font-weight: 400; margin-left: 1px; }
+.layered-page .af-stat .d { font-size: 11px; margin-top: 2px; color: var(--ok); line-height: 1.5; }
+.layered-page .af-stat .d.mut { color: var(--muted); }
+
+/* ── 每层语义卡 ── */
+.layered-page .layer-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.layered-page .layer-mini {
+  display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0 0 8px;
+  font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums;
+}
+.layered-page .layer-mini b { font-family: var(--mono); color: var(--ink); font-weight: 600; }
+.layered-page .layer-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.layered-page .layer-actions .btn { font-size: 11px; padding: 2px 9px; text-decoration: none; }
+/* 2026-11-22：L1–L6 六张卡长宽一致（固定卡高 + 卡内滚动），文字长短不撑高卡片 */
+.layered-page .layer-sem { height: 206px; display: flex; flex-direction: column; }
+.layered-page .layer-sem .af-pb { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.layered-page a.btn { display: inline-flex; align-items: center; }
+
+/* ── 层间流动 ── */
+.layered-page .layer-flow { display: flex; flex-direction: column; gap: 6px; }
+.layered-page .flow-row {
+  display: grid; grid-template-columns: 30px 76px minmax(0, 1fr) 40px;
+  align-items: center; gap: 8px; font-size: 11px;
+}
+.layered-page .flow-id { font-family: var(--mono); font-weight: 700; }
+.layered-page .flow-name { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.layered-page .flow-bar { height: 6px; border-radius: 3px; background: var(--surface3); overflow: hidden; }
+.layered-page .flow-bar i { display: block; height: 100%; border-radius: 3px; min-width: 0; transition: width .2s; }
+.layered-page .flow-n { font-family: var(--mono); text-align: right; color: var(--ink); font-variant-numeric: tabular-nums; }
+
+/* ── 异常层处理 ── */
+.layered-page .layer-anomalies { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.layered-page .layer-anomalies li {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px;
+  padding: 7px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface2);
+  font-size: 11px;
+}
+.layered-page .layer-anomalies b { font-size: 11.5px; color: var(--ink); }
+.layered-page .layer-anomalies span { grid-column: 1; color: var(--muted); line-height: 1.5; overflow-wrap: anywhere; }
+.layered-page .layer-anomalies .btn { grid-row: 1 / span 2; grid-column: 2; align-self: center; font-size: 11px; padding: 2px 8px; }
+
+/* ── 规则与边界 ── */
+.layered-page .layer-rules-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 20px; }
+.layered-page .layer-rules-grid b { font-size: 11.5px; color: var(--ink); }
+.layered-page .layer-rules-grid p { margin: 4px 0 0; font-size: 11px; line-height: 1.6; color: var(--muted); }
+.layered-page .layer-rules-grid code { font-family: var(--mono); font-size: 10.5px; }
+
+/* ── 查阅工作台：保留原有层卡 / 明细结构，只换外框 ── */
+.layered-page .layered-workbench-body { padding: 10px 12px; }
+.layered-page .layer-toolbar {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 4px;
+  padding: 6px 8px; margin-bottom: 8px;
+  border: 1px solid var(--line); border-radius: 7px; background: var(--surface2);
+}
+
+/* 2026-11-22：选中/置顶行改用主题自适应底色（原固定深蓝在浅色主题下正文不可读） */
+.layered-page .layer-table tbody tr.lrow.sel {
+  background: color-mix(in srgb, var(--accent) 18%, var(--win));
+  outline: 1px solid var(--accent);
+}
+.layered-page .layer-table tbody tr.lrow.sel td { color: var(--text); }
+.layered-page .layer-table tbody tr.lrow.sel .ldim { color: var(--muted); }
+.layered-page .layer-table tbody tr.lrow.pinned { background: color-mix(in srgb, var(--warn) 12%, var(--win)); }
+
+/* 明细卡不再吸附视口，长内容随页面滚到末尾，底部不被裁切 */
+.layered-page .detail { position: static; top: auto; }
+.layered-page .layered-workbench-body { overflow: visible; }
+/* 工作台内容本身不设高度上限，页面滚动容器负责滚到底 */
+.layered-page .cols { align-items: start; }
+/* 2026-11-22 用户反馈：默认窗口宽度点选后右侧详情看不见（左列表 min-content 把 360px 右列挤出视口）。
+   左列允许收缩、层表格在自己的容器内横向滚动；窄窗口改为悬浮抽屉（点选即见，内容可滚到末尾）。 */
+.layered-page .cols { grid-template-columns: minmax(0, 1fr) 360px; }
+.layered-page .left-col { min-width: 0; }
+.layered-page .layer-body { overflow-x: auto; }
+@media (max-width: 1180px) {
+  .layered-page .cols { grid-template-columns: minmax(0, 1fr); }
+  .layered-page .detail.detail-open {
+    position: fixed; top: 10px; right: 10px; bottom: 10px; left: auto;
+    width: min(440px, calc(100vw - 20px)); height: auto; max-height: none;
+    overflow: auto; z-index: 80;
+    background: var(--surface);
+    border: 1px solid var(--line); border-radius: 10px;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, .28);
+  }
+}
+
+@media (max-width: 1180px) {
+  .layered-page .af-g3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .layered-page .af-span2 { grid-column: span 2; }
+}
+@media (max-width: 820px) {
+  .layered-page .af-g4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .layered-page .af-g3 { grid-template-columns: 1fr; }
+  .layered-page .af-span2 { grid-column: span 1; }
+  .layered-page .layer-rules-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 520px) {
+  .layered-page .af-g4 { grid-template-columns: 1fr; }
+}

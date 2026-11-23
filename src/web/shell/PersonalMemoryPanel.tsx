@@ -1,4 +1,4 @@
-// 个人记忆壳层常驻面板（N8）：点击「记忆管理 / 个人记忆」或状态栏快捷按钮展开，全局常驻，
+// 个人记忆壳层常驻面板（N8）：点击状态栏快捷按钮展开，全局常驻，
 // 切换中心标签不丢状态；收起只是不渲染。
 //
 // 界面（用户 2026-11-10 定稿）：**回到原「左已确认 / 右收件箱」双窗界面**，与记忆库全页
@@ -191,7 +191,7 @@ export function PersonalMemoryPanel({ open, onClose, onOpenFull }: PersonalMemor
           className="pm-sp-openfull"
           onClick={onOpenFull}
           data-testid="pm-panel-open-full"
-        >在记忆库中打开个人记忆页 →</button>
+        >在记忆库中打开个人记忆 →</button>
       ) : null}
 
       {/* 进库分流口径（用户 2026-11-10 定稿）：会话信息直接放行；agent 提取的记忆进发件箱等判定 */}

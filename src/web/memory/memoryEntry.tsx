@@ -2,6 +2,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../shared/actionLog.ts';
+import '../shared/p0.css';
 import { MemoryManagementPage } from './MemoryManagementPage.tsx';
 import './memoryManagement.css';
 

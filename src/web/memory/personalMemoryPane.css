@@ -9,30 +9,32 @@
    变量全部自带前缀 pmp-，浅/深色各自定义，绝不覆盖宿主 :root / body / 全局标签样式，
    因此可以安全地同时存在于「整页 CSS 已加载」与「壳层只引 theme.css」两种环境。 */
 .mm-personal-pane {
-  --pmp-line: #d7dce2;
-  --pmp-line2: #e5e9ee;
-  --pmp-text: #27313b;
-  --pmp-muted: #6d7885;
-  --pmp-faint: #9aa4af;
-  --pmp-chip: #f7f9fb;
+  --pmp-line: #dce3ea;
+  --pmp-line2: #e9eef3;
+  --pmp-text: #0e1926;
+  --pmp-muted: #4d5e72;
+  --pmp-faint: #5f7085;
+  --pmp-chip: #edf1f5;
   --pmp-win: #ffffff;
-  --pmp-accent: #0f6cbd;
-  --pmp-accent-weak: #e8f1fb;
-  --pmp-ok: #2f7d32;
-  --pmp-warn: #a86b12;
-  --pmp-err: #b33b31;
-  --pmp-sans: "Segoe UI", "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+  --pmp-accent: #0e7490;
+  --pmp-accent-weak: #e5f3f6;
+  --pmp-ok: #15803d;
+  --pmp-warn: #b45309;
+  --pmp-err: #b42318;
+  --pmp-sans: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
   --pmp-mono: ui-monospace, Consolas, "Cascadia Mono", monospace;
-  --pmp-r-lg: 12px;
-  --pmp-r-md: 10px;
-  --pmp-r-sm: 9px;
+  --pmp-r-lg: 8px;
+  --pmp-r-md: 8px;
+  --pmp-r-sm: 6px;
 
   flex: 1 1 auto;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
   overflow: auto;
   padding: 8px 10px 14px;
   color: var(--pmp-text);
-  font: 11.5px/1.45 var(--pmp-sans);
+  font: 13px/1.5 var(--pmp-sans);
   box-sizing: border-box;
 }
 html[data-theme="dark"] .mm-personal-pane {
@@ -67,23 +69,37 @@ html[data-theme="dark"] .mm-personal-pane {
   display: inline-block; border: 1px solid var(--pmp-line); border-radius: var(--pmp-r-sm);
   padding: 0 6px; line-height: 18px; background: var(--pmp-chip); color: var(--pmp-muted); font-size: 10.5px;
 }
+/* 召回归属：页头最右（图2 红框位置），保持真实绑定来源文案；换行时整条落到下一行 */
+.mm-personal-pane .pmp-owner-inline {
+  margin-left: auto; flex: 0 1 auto; min-width: 0; max-width: 62%;
+  font-size: 10.5px; line-height: 1.5; color: var(--pmp-muted);
+  text-align: right; overflow-wrap: anywhere;
+}
+.mm-personal-pane .pmp-owner-inline.warn { color: var(--pmp-warn); }
 
-/* 改良 ① 快速记一条：置顶通栏 */
-.mm-personal-pane .pmp-quick {
-  display: flex; gap: 8px; align-items: stretch;
-  padding: 9px 10px; margin-bottom: 9px;
-  border: 1px solid var(--pmp-line); border-radius: var(--pmp-r-lg);
-  background: var(--pmp-chip);
+/* 左窗整卡输入区（2026-11-22 用户要求：照 Windows 记事本）。
+   - 纯文本编辑区铺满卡片剩余高度：无内层框线、无说明墙、光标直接可写；
+   - 顶部只有一行（标题 + 计数 + 保存/更新 + 取消编辑）；
+   - 已保存条目收成卡片内紧凑条带（滚动），保存即出现、不折叠、不隐藏。 */
+/* 说明：用双类提高特异性，确保覆盖文件后部同名的 .pmp-head / .pmp-body 基础规则 */
+.mm-personal-pane .pmp-head.pmp-head-note {
+  flex-direction: row; align-items: center; justify-content: space-between; gap: 8px;
+  min-height: 38px; padding: 5px 10px;
 }
-.mm-personal-pane .pmp-quick textarea {
-  flex: 1 1 auto; min-width: 0; resize: vertical; min-height: 40px; max-height: 120px;
-  border: 1px solid var(--pmp-line); border-radius: var(--pmp-r-md);
+.mm-personal-pane .pmp-head.pmp-head-note .pmp-title { margin-right: auto; }
+.mm-personal-pane .pmp-note-save-top { flex: 0 0 auto; min-width: 68px; }
+/* 2026-11-22 定稿：记事本顶部只留一个「保存」，下拉/删除/取消/字数计数均已移除 */
+/* 左卡纵向：记事本占满剩余高度（flex:1），已保存条带已移除 */
+.mm-personal-pane .pmp-body.pmp-note-body { padding: 0; overflow: hidden; gap: 0; }
+.mm-personal-pane .pmp-note-area {
+  flex: 1 1 auto; width: 100%; min-width: 0; height: auto; min-height: 200px;
+  resize: none; border: 0; outline: 0; border-radius: 0;
   background: var(--pmp-win); color: var(--pmp-text);
-  font: 11.5px/1.5 var(--pmp-sans); padding: 8px 9px;
+  font: 13px/1.7 var(--pmp-sans); padding: 12px 14px;
 }
-.mm-personal-pane .pmp-quick textarea:focus { outline: none; border-color: var(--pmp-accent); }
-.mm-personal-pane .pmp-quick textarea::placeholder { color: var(--pmp-faint); }
-.mm-personal-pane .pmp-quick textarea:disabled { opacity: 0.6; }
+.mm-personal-pane .pmp-note-area:focus { outline: none; }
+.mm-personal-pane .pmp-note-area::placeholder { color: var(--pmp-faint); }
+.mm-personal-pane .pmp-note-area:disabled { opacity: 0.6; }
 
 /* 通用按钮（自带，不依赖整页 .mm-btn） */
 .mm-personal-pane .pmp-btn {
@@ -98,7 +114,6 @@ html[data-theme="dark"] .mm-personal-pane {
 .mm-personal-pane .pmp-btn.primary { background: var(--pmp-accent); border-color: var(--pmp-accent); color: #fff; font-weight: 600; }
 .mm-personal-pane .pmp-btn.primary:hover:not(:disabled) { filter: brightness(1.06); background: var(--pmp-accent); }
 .mm-personal-pane .pmp-btn.danger { border-color: var(--pmp-err); color: var(--pmp-err); }
-.mm-personal-pane .pmp-quick > .pmp-btn { flex: 0 0 auto; align-self: stretch; min-width: 68px; }
 
 /* 状态条 / 回执 / 归属条 */
 .mm-personal-pane .pmp-banner {
@@ -116,20 +131,28 @@ html[data-theme="dark"] .mm-personal-pane {
 .mm-personal-pane .pmp-msg.ok { border-left: 3px solid var(--pmp-ok); }
 .mm-personal-pane .pmp-msg.warn { border-left: 3px solid var(--pmp-warn); }
 .mm-personal-pane .pmp-msg.err { border-left: 3px solid var(--pmp-err); }
-.mm-personal-pane .pmp-ownerbar {
-  margin: 0 0 9px; padding: 6px 10px; border: 1px solid var(--pmp-line); border-radius: var(--pmp-r-md);
-  font-size: 10.5px; line-height: 1.5; background: var(--pmp-chip); color: var(--pmp-muted);
-}
-.mm-personal-pane .pmp-ownerbar.ok { border-left: 3px solid var(--pmp-ok); }
-.mm-personal-pane .pmp-ownerbar.warn { border-left: 3px solid var(--pmp-warn); }
 
-/* 双窗容器 */
+
+/* 双窗容器：卡片撑满宿主可用高度与宽度（用户图2 蓝框） */
 .mm-personal-pane .pmp-wrap {
-  display: flex; gap: 0; height: clamp(380px, 58vh, 620px); min-height: 350px;
+  display: flex; gap: 0; flex: 1 1 auto; height: auto; min-height: 380px;
   border: 1px solid var(--pmp-line); border-radius: var(--pmp-r-lg);
   overflow: hidden; background: var(--pmp-win);
 }
 .mm-personal-pane .pmp-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+/* 2026-11-22：收件箱缩到原来的 1/2 宽（左:右 = 2:1），省出的宽度给记事本区 */
+.mm-personal-pane .pmp-note-col { flex: 2 1 0; }
+.mm-personal-pane .pmp-inbox-col { flex: 1 1 0; }
+/* 窄宽收件箱：四段与判定口径保留，文字换行不挤压、可滚动 */
+.mm-personal-pane .pmp-inbox-col .pmp-body { padding: 9px; gap: 9px; }
+.mm-personal-pane .pmp-inbox-col .pmp-item { padding: 7px 8px; }
+.mm-personal-pane .pmp-inbox-col .pmp-item-top { gap: 4px 6px; }
+.mm-personal-pane .pmp-inbox-col .pmp-item-body {
+  font-size: 11.5px; overflow-wrap: anywhere; word-break: break-word;
+}
+.mm-personal-pane .pmp-inbox-col .pmp-sect h4 { font-size: 10.5px; flex-wrap: wrap; }
+.mm-personal-pane .pmp-inbox-col .pmp-rules { padding: 8px 9px; }
+.mm-personal-pane .pmp-inbox-col .pmp-rules ul { padding-left: 14px; font-size: 10.5px; }
 .mm-personal-pane .pmp-div { width: 1px; background: var(--pmp-line); flex: 0 0 auto; }
 .mm-personal-pane .pmp-head {
   min-height: 48px; flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px;
@@ -140,18 +163,6 @@ html[data-theme="dark"] .mm-personal-pane {
   font-weight: 400; font-size: 10.5px; color: var(--pmp-faint);
   border: 1px solid var(--pmp-line); border-radius: var(--pmp-r-sm); padding: 0 5px;
 }
-.mm-personal-pane .pmp-pin {
-  margin-left: auto; font: 500 10px/1 var(--pmp-sans); color: var(--pmp-muted);
-  border: 1px dashed var(--pmp-line2); border-radius: var(--pmp-r-sm); padding: 2px 5px;
-}
-.mm-personal-pane .pmp-tools { display: flex; gap: 6px; align-items: center; }
-.mm-personal-pane .pmp-search { flex: 1 1 auto; min-width: 0; }
-.mm-personal-pane .pmp-search input, .mm-personal-pane .pmp-select {
-  width: 100%; height: 26px; border: 1px solid var(--pmp-line); border-radius: var(--pmp-r-sm);
-  background: var(--pmp-win); color: var(--pmp-text); font: 11.5px var(--pmp-sans); padding: 0 7px;
-}
-.mm-personal-pane .pmp-search input:focus, .mm-personal-pane .pmp-select:focus { outline: none; border-color: var(--pmp-accent); }
-.mm-personal-pane .pmp-select { width: auto; flex: 0 0 auto; }
 .mm-personal-pane .pmp-body {
   flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 10px;
   padding: 12px; overflow: auto;
@@ -202,7 +213,6 @@ html[data-theme="dark"] .mm-personal-pane {
 }
 .mm-personal-pane .pmp-item-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .mm-personal-pane .pmp-item-actions .pmp-btn { height: 24px; min-height: 24px; }
-.mm-personal-pane .pmp-meta { margin-right: auto; font-size: 10px; color: var(--pmp-faint); font-family: var(--pmp-mono); }
 .mm-personal-pane .pmp-foot {
   flex: 0 0 auto; border-top: 1px solid var(--pmp-line); background: var(--pmp-chip);
   padding: 6px 10px; font-size: 10.5px; color: var(--pmp-muted); font-variant-numeric: tabular-nums;
@@ -214,7 +224,15 @@ html[data-theme="dark"] .mm-personal-pane {
 .mm-personal-pane .pmp-rules ul { margin: 0; padding-left: 16px; color: var(--pmp-muted); font-size: 11px; line-height: 1.65; }
 
 /* 窄容器（壳层常驻面板）双窗改上下堆叠，保证来源/日期/剔除都可见 */
-.mm-personal-pane.pmp-narrow .pmp-wrap { flex-direction: column; height: auto; max-height: none; }
+.mm-personal-pane.pmp-narrow { overflow-y: auto; }
+.mm-personal-pane.pmp-narrow .pmp-wrap {
+  flex: 0 0 auto; flex-direction: column; height: auto; min-height: 0; max-height: none;
+}
 .mm-personal-pane.pmp-narrow .pmp-col { width: 100%; flex: 0 0 auto; }
 .mm-personal-pane.pmp-narrow .pmp-div { width: auto; height: 1px; }
 .mm-personal-pane.pmp-narrow .pmp-body { overflow: visible; }
+/* 窄面板没有整页高度可撑，给记事本一个稳定的可输入高度（仍随卡片宽度铺满、无内层边框） */
+.mm-personal-pane.pmp-narrow .pmp-note-body { min-height: 240px; }
+.mm-personal-pane.pmp-narrow .pmp-note-area { height: 180px; min-height: 180px; flex: 0 0 auto; }
+.mm-personal-pane.pmp-narrow .pmp-note-col,
+.mm-personal-pane.pmp-narrow .pmp-inbox-col { flex: 0 0 auto; width: 100%; }

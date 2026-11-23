@@ -10,7 +10,7 @@ import { currentSessionId } from './session.ts';
 import type { PersonalImportInput, PersonalReceipt, PersonalSnapshot, PersonalSyncReceipt } from '../../core/memagent/personal.ts';
 
 export type PersonalOpName =
-  | 'list' | 'quick_add' | 'confirm' | 'reject' | 'revoke' | 'delete'
+  | 'list' | 'quick_add' | 'edit' | 'confirm' | 'reject' | 'revoke' | 'delete'
   // 从 agent 记忆归入个人（读取会话拉取 / agent 主动投递 / 手动拉取兜底）
   | 'import_from_agent'
   // 把 agent 记忆判定为「不是我的 / 进共享」：落 rejected 个人条目，共享账本记忆原样保留
