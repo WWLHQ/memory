@@ -9,6 +9,7 @@
  * 收口优先 rename，遇到 Windows 目录句柄导致的持续 EPERM 则退化为复制+删除（批次21 实测该环境 rename 恒失败）。
  * 构建失败时若固定目录已被腾空，则把旧目录改回 release/installer，优先保住可回退产物。
  * 清理失败只警告，绝不影响本次打包结果。
+ * --publish never：CI 环境变量（如 Trae 注入 CI=true）会让 electron-builder 触发隐式发布并因缺 GH_TOKEN 失败（2026-11-21 实测）。
  */
 const { spawnSync } = require('child_process');
 const fs = require('fs');
@@ -171,7 +172,7 @@ function cleanupOldOutputs(keepPath) {
 
 const res = spawnSync(
   process.execPath,
-  [path.join(root, 'node_modules/electron-builder/cli.js'), '--config', 'electron-builder.config.cjs', '--win'],
+  [path.join(root, 'node_modules/electron-builder/cli.js'), '--config', 'electron-builder.config.cjs', '--win', '--publish', 'never'],
   {
     cwd: root,
     stdio: 'inherit',

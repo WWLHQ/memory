@@ -68,7 +68,9 @@ const RULES = [
   { id: 'B04-fake-dedup-action', re: /dedup_action\s*===\s*['"]merge['"]|三模式按钮/, why: '阶段5-E 已删的假查重动作' },
   { id: 'B05-sync-wired', re: /wired:\s*true/, why: '阶段4-H / 5-E 锁定的「同步未接线」边界' },
   { id: 'C01-safe-noop', re: /safe-noop|home server 暂无/, why: '阶段5-C 已清的伪 safe-noop 声明' },
-  { id: 'C02-token-bill', re: /\/百万 token|真实 token 节省估算|账本无真实延迟采样|💰 本次 /, why: '阶段5-F 已清的旧金额/token 口径' },
+  // 2026-11-21 用户口径变更（按截图重设计回显）：摘要行重新给出「💰 本次 ¥… ｜ 今日 … ｜ 全部 …」三段金额，
+  // 故本判据不再拦 `💰 本次 `；仍拦「/百万 token」等把预算单位 t 冒充真实 token 的旧口径。
+  { id: 'C02-token-bill', re: /\/百万 token|真实 token 节省估算|账本无真实延迟采样/, why: '阶段5-F 已清的旧金额/token 口径（金额三段已于 2026-11-21 按用户口径放回摘要行）' },
   { id: 'C03-stale-doc', re: /耗时账本未采样/, why: '阶段5-F 已清的过时声明' },
   // 全站页面判据 P1–P5（2026-11-09）：范围 = `src/web/` 全部生产页面（含工作台壳层），
   // 不只看壳层。注释行不作为 UI 读数（skipComments），其余一律零容忍。
