@@ -1,0 +1,114 @@
+/* 生命周期页（2026-11-22 按真实使用场景重排）
+   版式对齐概览页：顶部摘要读数条 + af-panel 三列网格（宽项跨列）。
+   令牌沿用 shared/p0.css（--surface/--ink/--muted/--line/--ok/--bad/--mono）；表格/状态沿用 shared/theme.css。 */
+
+.lifecycle-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.lifecycle-page > * { flex: 0 0 auto; }
+
+/* ── 页头（同概览 af-head） ── */
+.lifecycle-page .af-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.lifecycle-page .af-head h1 { font-size: 18px; font-weight: 600; margin: 0; }
+.lifecycle-page .af-head .sub { color: var(--muted); font-size: 12px; }
+.lifecycle-page .af-head .right { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* ── 面板骨架 ── */
+.lifecycle-page .af-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  min-width: 0;
+}
+.lifecycle-page .af-ph {
+  display: flex; align-items: center; gap: 9px;
+  padding: 10px 14px; border-bottom: 1px solid var(--line); flex-wrap: wrap;
+}
+.lifecycle-page .af-ph h3 { margin: 0; font-size: 13px; font-weight: 600; color: var(--ink); }
+.lifecycle-page .af-ph .hint { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.lifecycle-page .af-pb { padding: 12px 14px; }
+.lifecycle-page .af-note { font-size: 11px; color: var(--muted); line-height: 1.6; margin: 8px 0 0; }
+.lifecycle-page .af-q { margin: 0 0 8px; font-size: 11.5px; color: var(--ink2); line-height: 1.55; }
+
+/* ── 摘要四卡 / 分组网格 ── */
+/* 2026-11-22：摘要行与阶段行同宽同列——摘要网格取消 af-pb 左右内缩，四卡外沿与阶段卡对齐；
+   两行都改为 stretch，同行卡片等高（长宽一致），不再因内容长短参差。 */
+.lifecycle-page .af-g4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; align-items: stretch; }
+.lifecycle-page .af-g3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; align-items: start; }
+.lifecycle-page .af-g4 > *,
+.lifecycle-page .af-g3 > * { min-width: 0; }
+.lifecycle-page .af-span2 { grid-column: span 2; }
+.lifecycle-page [data-testid="lifecycle-summary"] .af-pb { padding-left: 0; padding-right: 0; }
+.lifecycle-page [data-testid="lifecycle-summary"] .af-pb > .af-g4 { padding: 0; }
+.lifecycle-page [data-testid="lifecycle-summary"] .af-pb > .af-note { margin: 10px 14px 0; }
+.lifecycle-page .af-stat { display: flex; flex-direction: column; height: 100%; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface2); }
+.lifecycle-page .af-stat .k { font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.lifecycle-page .af-stat .k span { font-family: var(--mono); font-size: 10px; color: var(--faint); }
+.lifecycle-page .af-stat .v {
+  font-family: var(--mono); font-size: 24px; font-weight: 600; color: var(--ink);
+  letter-spacing: -.02em; margin-top: 3px; line-height: 1.2; font-variant-numeric: tabular-nums;
+}
+.lifecycle-page .af-stat .d { font-size: 11px; margin-top: 2px; color: var(--ok); line-height: 1.5; }
+.lifecycle-page .af-stat .d.mut { color: var(--muted); }
+
+/* ── 阶段卡 ── */
+.lifecycle-page .lc-mini {
+  display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0 0 6px;
+  font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums;
+}
+.lifecycle-page .lc-mini b { font-family: var(--mono); color: var(--ink); font-weight: 600; }
+.lifecycle-page .lc-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.lifecycle-page .lc-actions .btn { font-size: 11px; padding: 2px 9px; }
+
+/* ── 流转规则 ── */
+.lifecycle-page .lc-flow { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.lifecycle-page .lc-flow li {
+  display: grid; grid-template-columns: 96px 18px minmax(0, 1fr);
+  align-items: center; gap: 6px; font-size: 11px;
+}
+.lifecycle-page .lc-flow .status { justify-self: start; }
+.lifecycle-page .lc-arrow { color: var(--faint); text-align: center; }
+.lifecycle-page .lc-next { color: var(--muted); font-family: var(--mono); font-size: 10.5px; overflow-wrap: anywhere; }
+
+/* ── 待处理项 ── */
+.lifecycle-page .lc-pending { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.lifecycle-page .lc-pending li {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 4px 7px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface2); font-size: 11px;
+}
+.lifecycle-page .lc-pending .mono { font-family: var(--mono); color: var(--ink); }
+
+/* ── 明细表 / 分页 ── */
+.lifecycle-page .lc-pager {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  margin-top: 10px; font-size: 12px; color: var(--muted);
+}
+.lifecycle-page .lc-pager select { margin: 0 4px; padding: 4px 6px; background: var(--surface2); border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font-size: 12px; }
+.lifecycle-page .lc-pager .btn { padding: 3px 10px; font-size: 12px; }
+.lifecycle-page .lc-pager input[type="number"] { width: 40px; padding: 2px 4px; background: var(--surface2); border: 1px solid var(--line); border-radius: 4px; color: var(--ink); font-size: 12px; text-align: center; }
+
+/* ── 选中项处理 ── */
+.lifecycle-page .lc-selected-body { display: flex; flex-direction: column; gap: 10px; }
+.lifecycle-page .lc-cell { display: flex; min-width: 0; }
+.lifecycle-page .lc-cell > * { flex: 1 1 auto; min-width: 0; }
+
+/* ── 批量迁移 ── */
+.lifecycle-page .lc-batch-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.lifecycle-page .lc-batch-row label { font-size: 12px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
+.lifecycle-page .lc-batch-row select { padding: 4px 6px; background: var(--surface2); border: 1px solid var(--line); border-radius: 6px; color: var(--ink); font-size: 12px; }
+
+@media (max-width: 1180px) {
+  .lifecycle-page .af-g3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .lifecycle-page .af-span2 { grid-column: span 2; }
+}
+@media (max-width: 860px) {
+  .lifecycle-page .af-g4 { grid-template-columns: 1fr; }
+  .lifecycle-page .af-g3 { grid-template-columns: 1fr; }
+  .lifecycle-page .af-span2 { grid-column: span 1; }
+}
+@media (max-width: 520px) {
+  .lifecycle-page .af-g4 { grid-template-columns: 1fr; }
+}

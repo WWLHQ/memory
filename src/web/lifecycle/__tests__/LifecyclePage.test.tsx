@@ -102,4 +102,16 @@ describe('LifecyclePage 集成（T5）', () => {
     await waitFor(() => expect(screen.getByTestId('toast')).toHaveTextContent('已锁定（G4）：仅可解锁'));
     expect(screen.getByTestId('toast')).not.toHaveTextContent('已迁移');
   });
+
+  it('跟随壳层深色主题：挂载即设置 html[data-theme="dark"]', () => {
+    // 批次55：深色主题适配正向断言
+    localStorage.setItem('memdesk.shell.theme.v1', 'dark');
+    try {
+      render(<LifecyclePage />);
+      expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+    } finally {
+      localStorage.setItem('memdesk.shell.theme.v1', 'light');
+      document.documentElement.removeAttribute('data-theme');
+    }
+  });
 });

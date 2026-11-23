@@ -6,6 +6,7 @@ import type { MemAgent, Memory } from '../../core/memagent/types.ts';
 import type { StorageBackend } from '../../core/memagent/types.ts';
 import { getKernel, getKernelStorage } from '../kernel.ts';
 import { policyFor } from '../../core/memagent/forgetting.ts';
+import { isInternalPrefRow } from '../../core/memagent/paramsSnapshot.ts';
 import { canMigrate } from './logic.ts';
 import type { LifeOp, LifecycleRecord, MemoryStatus, OpResult } from './types.ts';
 
@@ -64,7 +65,8 @@ export function toLifecycleRecord(m: Memory): LifecycleRecord {
 export async function coreListLifecycle(): Promise<LifecycleRecord[]> {
   const storage = getStorage();
   const mems = await storage.listMemories({});
-  return mems.map(toLifecycleRecord);
+  // 内部配置快照不是用户记忆，不进生命周期列表
+  return mems.filter((m) => !isInternalPrefRow(m)).map(toLifecycleRecord);
 }
 
 /** 内核 Memory → 页面 LifecycleRecord：温度/参数回填，六态由迁移目标回填 */
