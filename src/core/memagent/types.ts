@@ -1041,6 +1041,12 @@ export interface MemAgent {
    * l0_unlocked / writeDek_present（写密钥是否在内存，同一判据双命名）/ pending_count（解锁时顺带重放）
    */
   getWriteStatus(): Promise<{ l0_unlocked: boolean; writeDek_present: boolean; pending_count: number }>;
+  /**
+   * 是否真的有 L0 通道（桌面端口或管理端口）。
+   * 纯浏览器没有通道时 getWriteStatus 只能一路退到 false —— 那是「读不到」，不是「未解锁」；
+   * 页面据此区分，避免把「没有通道」误报成写密钥告警。可选：老测试/AI 模拟内核不实现时按有通道处理。
+   */
+  hasL0Channel?(): boolean;
   // ---- 批次44-D5-2：MCP 治理工具正式入口（与下方测试钩子同源，均转发 coreMemoryOp / coreFeedback） ----
   /** 单记忆操作（17.3/P4）：端壳状态变更统一走内核（G4 约束 + 钳制 + 版本 + 审计） */
   memoryOp(mem_id: string, op: MemOp, patch?: MemOpPatch): Promise<MemOpResult>;

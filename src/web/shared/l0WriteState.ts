@@ -30,12 +30,18 @@ const errText = (e: unknown): string => String((e as Error)?.message ?? e);
 
 /**
  * 读写锁真实状态。
- * 不在这里判 hostCapability：纯浏览器下内核端口缺失会自己报错，统一落到 unavailable，
- * 这样「为什么读不到」的 detail 来自真实错误而不是猜的分支。
+ * 先判「有没有宿主 L0 通道」：没有 → 直接 unavailable（读不到 ≠ 未解锁）；
+ * 有 → 走内核真值，内核报错也如实落 unavailable，不猜分支。
  */
 export async function readL0WriteState(): Promise<L0WriteState> {
   try {
-    const r = await getKernel().getWriteStatus();
+    const kernel = getKernel();
+    // 内核明确说「没有 L0 通道」（纯浏览器 / iframe 无桥）时，getWriteStatus 的 false
+    // 只是「读不到」而不是「未解锁」——必须在这里分清，否则会误报成写密钥告警。
+    if (kernel.hasL0Channel && !kernel.hasL0Channel()) {
+      return { unlocked: null, pending: null, source: 'unavailable', detail: '非桌面壳：无 L0 通道（浏览器 / 宿主桥未就绪）' };
+    }
+    const r = await kernel.getWriteStatus();
     return { unlocked: r.l0_unlocked === true, pending: r.pending_count, source: 'kernel', detail: null };
   } catch (e) {
     return { unlocked: null, pending: null, source: 'unavailable', detail: errText(e) };

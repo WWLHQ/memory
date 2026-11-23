@@ -36,7 +36,7 @@ describe('DedupCard（批次25 P0-3 诚实化）', () => {
 
   it('未命中 → 不高亮', () => {
     render(<DedupCard result={make({ is_duplicate: false, score: 0.2 })} />);
-    expect(screen.getByTestId('dedup-card').className).toBe('wf-card wf-dedup');
+    expect(screen.getByTestId('dedup-card').className).toBe('af-panel');
     expect(screen.getByTestId('dedup-verdict')).toHaveTextContent('预览未见重复');
   });
 
@@ -65,7 +65,7 @@ describe('DedupCard（批次25 P0-3 诚实化）', () => {
     expect(screen.queryByTestId('dedup-score')).not.toBeInTheDocument();
     expect(screen.queryByTestId('dedup-bar')).not.toBeInTheDocument();
     expect(screen.queryByTestId('dedup-verdict')).not.toBeInTheDocument();
-    expect(screen.getByTestId('dedup-card').className).toBe('wf-card wf-dedup');
+    expect(screen.getByTestId('dedup-card').className).toBe('af-panel');
     expect(screen.getByTestId('dedup-note').textContent).not.toContain('低于阈值');
     expect(screen.getByTestId('dedup-note')).toHaveTextContent('四维');
   });

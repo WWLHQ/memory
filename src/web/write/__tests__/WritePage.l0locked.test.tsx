@@ -55,7 +55,9 @@ describe('WritePage · 批次41-W L0 写密钥锁定', () => {
     fireEvent.click(screen.getByTestId('l0-unlock-submit'));
     await waitFor(() => expect(screen.getByTestId('receipt')).toBeInTheDocument());
     expect(screen.getByTestId('receipt-id')).toHaveTextContent(/^mem_/);
-    expect(screen.getByTestId('l0-unlock-done')).toBeInTheDocument(); // 解锁成功后卡转已解锁态
+    // 解锁成功后解锁卡按设计稿收起（已解锁不渲染解锁卡），被挡 alert 也消失
+    expect(screen.queryByTestId('l0-unlock-password')).toBeNull();
+    expect(screen.queryByTestId('l0-unlock-alert')).toBeNull();
     // 修复轮4：解锁成功广播写锁变化信号 → 首页红条/壳层状态栏的 storage 监听会立刻重读真实锁状态
     expect(localStorage.getItem(L0_WRITE_LOCK_SIGNAL_KEY)).toBeTruthy();
   });
@@ -93,7 +95,9 @@ describe('WritePage · 批次41-W L0 写密钥锁定', () => {
     fireEvent.click(screen.getByTestId('l0-unlock-submit'));
     await waitFor(() => expect(screen.getByTestId('receipt')).toBeInTheDocument());
     expect(screen.getByTestId('receipt-id')).toHaveTextContent(/^mem_/);
-    expect(screen.getByTestId('l0-unlock-done')).toBeInTheDocument();
+    // 解锁成功后解锁卡按设计稿收起（已解锁不渲染解锁卡），被挡 alert 也消失
+    expect(screen.queryByTestId('l0-unlock-password')).toBeNull();
+    expect(screen.queryByTestId('l0-unlock-alert')).toBeNull();
     expect(localStorage.getItem(L0_WRITE_LOCK_SIGNAL_KEY)).toBeTruthy();
   });
 
@@ -115,18 +119,19 @@ describe('WritePage · 批次41-W L0 写密钥锁定', () => {
 
   // 2026-11-12 用户报障：「账号安全密钥锁已解锁，但是写入页密钥锁提示还未解锁」。
   // 写入页原先把写密钥状态只在 receipt/refusal/sid 变化时重读，别的页面解锁后本页停在旧值。
-  it('在别处解锁写密钥（广播写锁信号）→ 本页 masthead 立刻重读成「已解锁」', async () => {
+  // 批次47 STRATUM 重建：页头状态徽标取消，锁状态由解锁卡承载——锁定时渲染、解锁后收起。
+  it('在别处解锁写密钥（广播写锁信号）→ 本页解锁卡立刻收起（已解锁不渲染解锁卡）', async () => {
     const vault = await unlockedVault();
     await vault.lockWrite({ admin_user_id: TEST_ADMIN_ID });
     render(<WritePage />);
-    // 初始：内核真实锁定 → 如实显示未解锁
-    await waitFor(() => expect(screen.getByTestId('write-key-status').textContent).toContain('未解锁'));
+    // 初始：内核真实锁定 → 解锁卡如实渲染
+    await waitFor(() => expect(screen.getByTestId('l0-unlock-card')).toBeInTheDocument());
     // 模拟「安全页 → 本账号写密钥」卡里解锁（不经过本页 UI），随后广播信号
     await vault.unlockWrite({ password: TEST_ADMIN_PW, admin_user_id: TEST_ADMIN_ID });
     await act(async () => {
       window.dispatchEvent(new StorageEvent('storage', { key: L0_WRITE_LOCK_SIGNAL_KEY }));
     });
-    await waitFor(() => expect(screen.getByTestId('write-key-status').textContent).toContain('已解锁'));
-    expect(screen.getByTestId('write-key-status').textContent).not.toContain('未解锁');
+    // 重读真实锁状态后：解锁卡收起，不再停留在「未解锁」
+    await waitFor(() => expect(screen.queryByTestId('l0-unlock-card')).toBeNull());
   });
 });

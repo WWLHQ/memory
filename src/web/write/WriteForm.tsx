@@ -1,10 +1,11 @@
-// 写入页（REQ-006 / P2）表单 · 批次58 定稿版式（只改写入表单 tab）
-// 版式照用户确认的效果图：内容 → token/质量门提示 → 类别/来源 agent/标签联想 →
-// session_id 只读（页面生成）；project_id 用户可修改（修复轮3），空值仍被校验拦下。字段语义与内核契约不变。
-// 提示行全部实算：estimateTokens + 内核 checkL0ToL1Quality（v3 单一真源），不抄效果图样值。
+// 写入页表单（STRATUM 1:1 复刻 · 设计真源 stratum-a-full.html pg-write 写入表单面板）：
+// af-panel(af-ph h3 写入表单 + hint 实算 token) → af-pb：内容 textarea 88px → af-formgrid
+// （类别/来源 Agent/session_id 只读/project_id 可修改）→ 标签联想 pill → 写入行（af-btn pri + 快路径 note）。
+// 字段语义与内核契约不变；提示行全部实算（estimateTokens + checkL0ToL1Quality v3 单一真源），不抄设计稿样值。
+// ⚠ 禁止注入演示数据：内容框为空、无预置标签。
 import type { MemoryCategory, MemoryDraft, SourceKind } from './types.ts';
 import { estimateTokens, needsRefine, suggestTagsFromContent, validateDraft } from './logic.ts';
-import { QUALITY_GATE_VERSION, checkL0ToL1Quality } from '../../core/memagent/qualityGate.ts';
+import { checkL0ToL1Quality } from '../../core/memagent/qualityGate.ts';
 import { MIN_MEANINGFUL_WITHOUT_FACTS, meaningfulLength } from '../../core/memagent/layerRules.ts';
 
 const CATEGORIES: MemoryCategory[] = ['decision', 'pitfall', 'preference', 'fact', 'project', 'feedback'];
@@ -38,8 +39,9 @@ export function WriteForm({
   const removeTag = (t: string) => onChange({ ...draft, tags: draft.tags.filter((x) => x !== t) });
   const suggestions = suggestTagsFromContent(draft.content, draft.tags);
 
+  // hint 口径对齐设计稿「≈38 tokens · 有效字 ≥30 或含硬事实/技术证据」，数字全部实算
   const gateHint = draft.content.trim().length === 0
-    ? '等待输入 · 质量门预判随内容实算'
+    ? `有效字 ≥${MIN_MEANINGFUL_WITHOUT_FACTS} 或含硬事实/技术证据`
     : gate.ok
       ? meaningful < MIN_MEANINGFUL_WITHOUT_FACTS
         ? '含硬事实/具体技术信息 · 豁免字数门槛'
@@ -47,32 +49,29 @@ export function WriteForm({
       : `将被质量门拦截 · ${gate.code}`;
 
   return (
-    <div className="wf-card" data-testid="write-form">
-      <div className="wf-hd">
-        <span className="wf-zh">写入表单</span>
-        <span className="wf-meta">L0+L1 质量门 v{QUALITY_GATE_VERSION} · 有效字 &lt;{MIN_MEANINGFUL_WITHOUT_FACTS} 且无硬事实即拦</span>
+    <section className="af-panel" data-testid="write-form">
+      <div className="af-ph">
+        <h3>写入表单</h3>
+        <span className="hint">≈{estimateTokens(draft.content)} tokens · {gateHint}</span>
       </div>
-      <div className="wf-bd">
-        <label className="wf-lbl" htmlFor="wf-content">内容 (L0 原文 · 封存后脱敏生成 L1)</label>
-        <textarea
-          id="wf-content"
-          className="wf-ta"
-          data-testid="f-content"
-          value={draft.content}
-          placeholder="写入要记忆的内容…"
-          onChange={(e) => onChange({ ...draft, content: e.target.value })}
-        />
-        <div className="wf-hint">
-          约 {estimateTokens(draft.content)} token · {gateHint}
-          {refine && <span data-testid="refine-hint"> 将清洗脱敏为 L1；未接入 LLM 时 L2–L6 暂不生成。</span>}
+      <div className="af-pb af-stack" style={{ gap: 12 }}>
+        <div className="af-field">
+          内容
+          <textarea
+            className="af-textarea af-ta88"
+            data-testid="f-content"
+            value={draft.content}
+            placeholder="写入要记忆的内容…"
+            onChange={(e) => onChange({ ...draft, content: e.target.value })}
+          />
+          {refine && <span className="af-note" data-testid="refine-hint">将清洗脱敏为 L1；未接入 LLM 时 L2–L6 暂不生成。</span>}
         </div>
 
-        <div className="wf-row3">
-          <div>
-            <label className="wf-lbl" htmlFor="wf-category">类别</label>
+        <div className="af-formgrid">
+          <div className="af-field">
+            类别
             <select
-              id="wf-category"
-              className="wf-in"
+              className="af-select"
               data-testid="f-category"
               value={draft.category}
               onChange={(e) => onChange({ ...draft, category: e.target.value as MemoryCategory })}
@@ -80,11 +79,10 @@ export function WriteForm({
               {CATEGORIES.map((c) => <option key={c} value={c}>{CATEGORY_LABEL[c]}（{c}）</option>)}
             </select>
           </div>
-          <div>
-            <label className="wf-lbl" htmlFor="wf-source">来源 agent</label>
+          <div className="af-field">
+            来源 Agent
             <select
-              id="wf-source"
-              className="wf-in"
+              className="af-select"
               data-testid="f-source"
               value={draft.source}
               onChange={(e) => onChange({ ...draft, source: e.target.value as SourceKind })}
@@ -92,34 +90,14 @@ export function WriteForm({
               {SOURCES.map((s) => <option key={s} value={s}>{SOURCE_LABEL[s]}（{s}）</option>)}
             </select>
           </div>
-          <div className="wf-tags">
-            <span className="wf-lbl">标签联想</span>
-            <div className="wf-chips">
-              {draft.tags.map((t) => (
-                <button type="button" className="wf-chip on" key={t} title="点击移除" onClick={() => removeTag(t)}>{t}</button>
-              ))}
-              {suggestions.map((t) => (
-                <button type="button" className="wf-chip" key={t} data-testid={`suggest-${t}`} onClick={() => addTag(t)}>{t}</button>
-              ))}
-            </div>
-            {suggestions.length === 0 && draft.tags.length === 0 && (
-              <div className="wf-note" data-testid="tags-empty">
-                输入包含技术名词的内容后，候选标签会按出现顺序出现在这里（本地提取 · 需点击确认）。
-              </div>
-            )}
+          <div className="af-field">
+            session_id（必填 · 只读）
+            <input className="af-input af-mono" data-testid="f-session" value={draft.session_id} readOnly />
           </div>
-        </div>
-
-        <div className="wf-row2">
-          <div>
-            <label className="wf-lbl" htmlFor="wf-session">session_id (必填 · 只读)</label>
-            <input id="wf-session" className="wf-in" data-testid="f-session" value={draft.session_id} readOnly />
-          </div>
-          <div>
-            <label className="wf-lbl" htmlFor="wf-project">project_id (必填 · 可修改)</label>
+          <div className="af-field">
+            project_id（必填 · 可修改）
             <input
-              id="wf-project"
-              className="wf-in"
+              className="af-input"
               data-testid="f-project"
               value={draft.project_id}
               placeholder="如 P1"
@@ -128,23 +106,43 @@ export function WriteForm({
           </div>
         </div>
 
+        <div className="af-field">
+          标签联想
+          <div className="af-row">
+            {draft.tags.map((t) => (
+              <button type="button" className="af-pill" key={t} title="点击移除" onClick={() => removeTag(t)}>{t}</button>
+            ))}
+            {suggestions.map((t) => (
+              <button type="button" className="af-pill" key={t} data-testid={`suggest-${t}`} onClick={() => addTag(t)}>{t}</button>
+            ))}
+            {(draft.tags.length > 0 || suggestions.length > 0) && (
+              <span className="af-note">点击采纳 · 脱敏在 L1 自动执行</span>
+            )}
+          </div>
+          {suggestions.length === 0 && draft.tags.length === 0 && (
+            <div className="af-note" data-testid="tags-empty">
+              输入包含技术名词的内容后，候选标签会按出现顺序出现在这里（本地提取 · 需点击确认）。
+            </div>
+          )}
+        </div>
+
         {v.errors.length > 0 && (
-          <div className="wf-err" data-testid="form-errors">{v.errors.join('；')}</div>
+          <div className="af-red" data-testid="form-errors">{v.errors.join('；')}</div>
         )}
 
-        <div className="wf-actions">
+        <div className="af-row">
           <button
             type="button"
-            className="wf-btn"
+            className="af-btn pri"
             data-testid="submit"
             disabled={!v.ok}
             onClick={onSubmit}
           >
             写入记忆
           </button>
-          <span className="wf-hint">写入必须快 · 不同步调 LLM</span>
+          <span className="af-note">写入快路径：L0 封存 + 脱敏 L1 落库即返回，深层后台炼</span>
         </div>
       </div>
-    </div>
+    </section>
   );
 }

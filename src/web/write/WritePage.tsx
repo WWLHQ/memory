@@ -1,49 +1,32 @@
-// 写入页（REQ-006 / P2）· 定稿三标签：写入表单 / 最近回执 / 查重与 L0 规则
-// 批次58：写入表单 tab 改定稿版式（masthead + 左栏 表单/回执 + 右栏 查重/L0 解锁 + 底部 最近写入）；
-// 修复轮3：masthead 上移到 tab 栏上方常驻、写密钥状态并入 masthead 右侧，卡片英文缀标全部取消。
-// 最近回执 / 查重与 L0 规则两 tab 保持 p0 版式不动。
-// 表单 → Jaccard 查重预判 → 内核 ma.write → L1–L6 回执。
+// 写入页（STRATUM 1:1 复刻 · 设计真源 stratum-a-full.html pg-write，批次47 重建）：
+// af-head（写入记忆 + sub）→ af-cols(1fr 320px)：左=写入表单面板 + L0 锁定 warn alert + 就地解锁卡（warn 边框）
+// + 回执面板；右=查重预览面板；底部=最近写入通栏表。设计稿无 tab、无页头右侧按钮区，v5/p0 版式清零。
+// 数据全部真实：表单 → Jaccard 查重预判 → 内核 ma.write → 四类回执（create/graft/keep/filtered）。
 // 回执必须是内核真实返回：被拒时只显示原因与内核 request_id（未签发就写未签发），不做乐观成功。
-// ⚠ 禁止注入演示/种子数据：查重候选与最近回执全部读真实账本（空库即无候选 / 无回执）。
+// ⚠ 禁止注入演示/种子数据：查重候选与最近写入全部读真实账本（空库即无候选 / 空表）。
 import { useEffect, useRef, useState } from 'react';
 import { WriteForm } from './WriteForm.tsx';
 import { DedupCard } from './DedupCard.tsx';
-import { WriteReceiptCard, WriteReceiptTable, WriteRecentWritesCard, WriteRefusalCard } from './WriteReceiptCard.tsx';
+import { WriteReceiptCard, WriteRecentWritesCard, WriteRefusalCard } from './WriteReceiptCard.tsx';
 import { WriteL0UnlockCard, type L0UnlockStatus } from './WriteL0UnlockCard.tsx';
 import { useToast } from './useToast.tsx';
 import { useWriteMirror } from './useWriteMirror.ts';
-import { composeReceipt, scoreDedup, validateDraft, L1_CHAR_LIMIT } from './logic.ts';
+import { composeReceipt, scoreDedup, validateDraft } from './logic.ts';
 import { coreWrite, coreListExisting, coreWriteStatus, coreWriteReceipts, requestIdOfError } from './coreWrite.ts';
 import { kernelErrorText, useKernelLoad } from '../shared/kernelLoad.tsx';
-import { L0WriteUnlock } from '../shared/L0WriteUnlock.tsx';
 import { useHostTheme } from '../shared/hostTheme.ts';
 import { useSessionContext } from '../shared/session.ts';
 import { onL0WriteLockChanged } from '../shared/l0WriteLockSignal.ts';
 import { isL0LockedError } from '../../core/memagent/errors.ts';
 import { DEFAULT_PROJECT_ID, listProjectIds } from '../shared/kernelProjects.ts';
 import { newRequestId } from '../kernel.ts';
-import { LAYER_SPECS } from '../../core/memagent/layerRules.ts';
+import { QUALITY_GATE_VERSION } from '../../core/memagent/qualityGate.ts';
 import type {
   ExistingMemory, MemoryDraft, WriteReceipt, WriteReceiptHistoryRow, WriteRefusal,
 } from './types.ts';
 
-type WriteTab = 'form' | 'receipts' | 'rules';
-const TABS: { id: WriteTab; label: string }[] = [
-  { id: 'form', label: '写入表单' },
-  { id: 'receipts', label: '最近回执' },
-  { id: 'rules', label: '查重与 L0 规则' },
-];
-
-const RECEIPT_RULES = [
-  { k: 'create', label: 'create · 新建', body: 'L1 与账本最相近记忆的词面分低于 L1 阈值（0.70）→ 新建条目并签发 L1–L6。' },
-  { k: 'graft', label: 'graft · 分支嫁接', body: '与既有记忆达 L1 阈值 → 内核新建并嫁接到最近分支；回执给新条目的真实 memory_id。' },
-  { k: 'keep', label: 'keep · 保留原记忆', body: '内核返回 duplicated 时不新建层，保留原记忆；当前写路径只在重复判定命中该分支时产出。' },
-  { k: 'filtered', label: 'filtered · 质量门拦截', body: 'L0→L1 质量门判定无信息量 / 过短 / 无用内容 → 不入库，回执如实写 filtered。' },
-];
-
 export function WritePage({ load = coreListExisting }: { load?: () => Promise<ExistingMemory[]> } = {}) {
   useHostTheme();
-  const [tab, setTab] = useState<WriteTab>('form');
   // session_id 由页面生成真实唯一值；真实环境可由租户上下文覆盖（R2）
   const [sessionId] = useState(() => newRequestId('sess'));
   const [draft, setDraft] = useState<MemoryDraft>({
@@ -52,9 +35,10 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
   });
   const [receipt, setReceipt] = useState<WriteReceipt | null>(null);
   const [refusal, setRefusal] = useState<WriteRefusal | null>(null);
-  // L0 写密钥锁定挡下的提交：原地给解锁入口，解锁后自动重放（不把用户赶去别的页面）
+  // L0 写密钥锁定挡下的提交：就地给解锁入口（warn alert + 解锁卡），解锁后自动重放（不把用户赶去别的页面）
   const [l0Locked, setL0Locked] = useState(false);
-  const [showUnlock, setShowUnlock] = useState(false);
+  // 解锁成功即时收起解锁卡（不等异步状态刷新，设计稿：已解锁不渲染解锁卡）
+  const [unlockedLocal, setUnlockedLocal] = useState(false);
   const [l0Status, setL0Status] = useState<L0UnlockStatus>({ phase: 'loading' });
   const [history, setHistory] = useState<{ phase: 'loading' | 'ready' | 'error'; rows: WriteReceiptHistoryRow[]; error?: string }>({
     phase: 'ready', rows: [],
@@ -91,7 +75,7 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
       .catch((e: unknown) => setHistory({ phase: 'error', rows: [], error: kernelErrorText(e) }));
   };
 
-  // 批次58：最近写入通栏挂载即载；写入成功后也总是刷新（form tab 直接可见）
+  // 最近写入通栏挂载即载；写入成功后也总是刷新（设计稿单页无 tab，通栏直接可见）
   useEffect(loadHistory, []);
 
   // 登录态实时跟随：壳层登录/登出写 localStorage（另一文档）→ 本 iframe 收到 storage 事件
@@ -109,15 +93,9 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
   }, [sid]);
 
   // 写密钥在**别的页面/卡片**里被解锁或锁定（安全页「本账号写密钥」卡、壳层状态栏）时，
-  // 主进程 IPC 改了锁状态但不写 localStorage → 本页 masthead 会停在旧值，
-  // 表现为「安全页明明已解锁，写入页还说未解锁」。信号只提示「该重读了」，
-  // 真值仍由 coreWriteStatus() 从内核重取。
+  // 主进程 IPC 改了锁状态但不写 localStorage → 本页解锁卡会停在旧值。
+  // 信号只提示「该重读了」，真值仍由 coreWriteStatus() 从内核重取。
   useEffect(() => onL0WriteLockChanged(() => loadL0Status()), []);
-
-  useEffect(() => {
-    if (tab === 'receipts') loadHistory();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab]);
 
   // 词面预览随内容实时计算（纯函数，候选来自真实账本；未接大模型时内核只查 L1）
   const result = scoreDedup(draft.content, existing);
@@ -141,7 +119,6 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
         });
         const createdAt = new Date().toISOString();
         setL0Locked(false);
-        setShowUnlock(false);
         setRefusal(null);
         // 四类回执全部照内核真实返回展示（filtered 也出回执，但明确未入库）
         setReceipt(composeReceipt(draft.content, cw.dedup_action, {
@@ -156,7 +133,7 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
         loadHistory();
         mirror.audit(`memory_${cw.dedup_action}`);
         toast.show(
-          // 内核写路径真实产出：create / graft / keep / filtered（keep 仅在 duplicated 时出现）
+          // 内核写路径真实产出：create / graft / keep / filtered（keep 仅在重复判定命中该分支时出现）
           cw.dedup_action === 'create'
             ? '已写入记忆。'
             : cw.dedup_action === 'graft'
@@ -186,174 +163,103 @@ export function WritePage({ load = coreListExisting }: { load?: () => Promise<Ex
     })();
   }
 
-  // 解锁成功：刷新写密钥状态；确实有被挡条目才自动重放（没挡过就不替用户提交）
+  // 解锁成功：即时收起解锁卡 + 刷新写密钥状态；确实有被挡条目才自动重放（没挡过就不替用户提交）
   const handleUnlocked = () => {
+    setUnlockedLocal(true);
     loadL0Status();
     if (l0Locked) void doWrite();
   };
 
-  const statusText = l0Status.phase === 'loading'
-    ? '写密钥：读取中'
-    : l0Status.phase === 'error'
-      ? `写密钥：状态不可读（${l0Status.error}）`
-      : l0Status.unlocked ? '写密钥：已解锁' : '写密钥：未解锁';
+  const showUnlockCard = !unlockedLocal
+    && (l0Status.phase === 'error' || (l0Status.phase === 'ready' && !l0Status.unlocked));
 
   return (
-    <div className="p0-page" data-testid="write-page">
-      {/* 修复轮3：写入记忆行上移到 tab 栏上方常驻；非 form tab 的「写入记忆 · ma.write」头部行取消，
-          写密钥状态与解锁入口并入 masthead 右侧（各 tab 都可见）。 */}
-      <div className="wf-masthead">
-        <h2 className="wf-mast-title">写入记忆</h2>
-        <span className="wf-mast-meta">写入只落 L0 密文 + 脱敏 L1 · 深层交后台补炼</span>
-        <span className="wf-mast-right">
-          <span className={`p0-tag ${l0Status.unlocked ? 'ok' : l0Status.phase === 'error' ? 'err' : 'warn'}`} data-testid="write-key-status">
-            {statusText}
-          </span>
-          {!l0Status.unlocked && (
-            <button type="button" className="p0-btn" data-testid="unlock-btn" onClick={() => setShowUnlock((v) => !v)}>
-              解锁写密钥
-            </button>
+    <div className="wr-page" data-testid="write-page">
+      <div className="wr-scroll">
+        <div className="wr-main af-stack">
+          {/* 页头：设计稿 pg-write 无右侧按钮区，写密钥状态由锁定 alert / 解锁卡如实承载 */}
+          <div className="af-head" data-testid="write-head">
+            <h1>写入记忆</h1>
+            <span className="sub">只落 L0 密文 + 脱敏 L1 · 深层交后台补炼 · L0→L1 质量门 v{QUALITY_GATE_VERSION} 无旁路</span>
+          </div>
+
+          {l0Status.phase === 'error' && (
+            <div className="af-alert bad" data-testid="l0-status-error">
+              <span className="tag">L0</span>
+              写密钥状态不可读（{l0Status.error}）—— 不猜已解锁，解锁入口不可用。
+            </div>
           )}
-        </span>
-      </div>
 
-      <div className="p0-tabs" role="tablist" aria-label="写入页标签">
-        {TABS.map((t) => (
-          <button
-            type="button"
-            key={t.id}
-            role="tab"
-            aria-selected={tab === t.id}
-            className={`p0-tab${tab === t.id ? ' active' : ''}`}
-            data-testid={`write-tab-${t.id}`}
-            onClick={() => setTab(t.id)}
-          >
-            {t.label}
-            {t.id === 'receipts' && history.rows.length > 0 ? <span className="p0-tabnum">{history.rows.length}</span> : null}
-          </button>
-        ))}
-      </div>
+          {/* E_L0_LOCKED warn alert：只有真被挡过一条写入才出现（设计稿口径），解锁后自动重放 */}
+          {l0Locked && (
+            <div className="af-alert warn" data-testid="l0-unlock-alert">
+              <span className="tag">L0</span>
+              写密钥未解锁，本次写入被挡（E_L0_LOCKED）——解锁后自动重放这条，不必再点写入。
+            </div>
+          )}
 
-      {showUnlock && (
-        <L0WriteUnlock scene="写入页" onUnlocked={() => { setShowUnlock(false); void doWrite(); }} />
-      )}
-
-      {tab === 'form' && (
-        <div className="wf-page">
-          <div className="wf-cols">
-            <div className="wf-col">
+          <div className="af-cols wr-cols">
+            <div className="af-stack">
               <WriteForm draft={draft} onChange={setDraft} onSubmit={handleSubmit} />
+
+              {/* 就地解锁卡：写密钥锁定或状态不可读时出现（已解锁按设计稿不渲染） */}
+              {showUnlockCard && (
+                <WriteL0UnlockCard status={l0Status} triggered={l0Locked} onUnlocked={handleUnlocked} />
+              )}
 
               {receipt && <WriteReceiptCard receipt={receipt} />}
               {refusal && <WriteRefusalCard refusal={refusal} source={draft.source} />}
               {!receipt && !refusal && (
-                <div className="wf-card" data-testid="receipt-placeholder">
-                  <div className="wf-hd">
-                    <span className="wf-zh">写入回执</span>
-                    <span className="wf-meta">等待真实提交</span>
+                <section className="af-panel" data-testid="receipt-placeholder">
+                  <div className="af-ph">
+                    <h3>回执 · 待生成</h3>
+                    <span className="hint">本次写入未入库，不出成功回执</span>
                   </div>
-                  <div className="wf-bd">
-                    <div className="wf-empty dashed">
-                      <b>等待真实提交</b>
-                      <div>提交后这里展示内核返回的 request_id / memory_id 与四类结果；被拒则展示拒绝原因，不会先显示成功。</div>
+                  <div className="af-pb">
+                    <div className="af-empty">
+                      等待真实提交 · 提交后这里出示内核返回的 request_id / memory_id 与四类结果（create / graft / keep / filtered）；
+                      被拒则展示拒绝原因，不会先显示成功。
                     </div>
                   </div>
-                </div>
+                </section>
               )}
             </div>
 
-            <div className="wf-col wf-side">
-              {/* 查重卡常驻；候选读取失败时仍在 DEDUP 卡框架内如实报错（不冒充「无候选」，不画预览分） */}
+            <div className="af-stack">
+              {/* 查重卡常驻右栏；候选读取失败时如实报错（不冒充「无候选」，不画预览分） */}
               {phase === 'error' ? (
-                <div className="wf-card wf-dedup" data-testid="dedup-card-error">
-                  <div className="wf-hd">
-                    <span className="wf-zh">查重预览</span>
-                    <span className="wf-meta">候选读取失败</span>
+                <section className="af-panel" data-testid="dedup-card-error">
+                  <div className="af-ph">
+                    <h3>查重预览</h3>
+                    <span className="hint">候选读取失败</span>
                   </div>
-                  <div className="wf-bd">
-                    <div className="wf-status bad" data-testid="kernel-error">
+                  <div className="af-pb">
+                    <div data-testid="kernel-error">
                       <b data-testid="kernel-error-title">读取查重候选失败：内核数据没读到</b>
                       <div data-testid="kernel-error-reason">原因：{dedupError ?? '未知错误'}</div>
-                      <div className="wf-note">
+                      <p className="af-note">
                         这不是「账本为空」——真的没有候选时会明确写「空」。请确认桌面端正在运行
                         （或主进程未繁忙/库未被锁），然后重试。
-                      </div>
-                      <button type="button" className="btn" data-testid="kernel-retry" onClick={retryDedup}>重试</button>
+                      </p>
+                      <button type="button" className="af-btn sm" data-testid="kernel-retry" onClick={retryDedup}>重试</button>
                     </div>
                   </div>
-                </div>
+                </section>
               ) : (
                 <DedupCard result={result} hasContent={draft.content.trim().length > 0} />
               )}
-              <WriteL0UnlockCard status={l0Status} triggered={l0Locked} onUnlocked={handleUnlocked} />
             </div>
           </div>
 
           <WriteRecentWritesCard
             // 修复轮4 口径：最近写入只统计真实落库行（create/graft/keep）；
             // 质量门拦截（filter_code 在）不是写入——mem_id 未写入、层未产生，不计入
-            rows={history.rows.filter((r) => r.filter_code === null).slice(0, 3)}
+            rows={history.rows.filter((r) => r.filter_code === null)}
             phase={history.phase}
             error={history.error}
           />
         </div>
-      )}
-
-      {tab === 'receipts' && (
-        <WriteReceiptTable
-          rows={history.rows}
-          phase={history.phase}
-          error={history.error}
-          onRetry={loadHistory}
-        />
-      )}
-
-      {tab === 'rules' && (
-        <div className="wf-grid3">
-          <div className="wf-card">
-            <div className="wf-hd"><span className="wf-zh">四类回执</span><span className="wf-meta">结果由内核写路径自动裁决</span></div>
-            <div className="wf-bd">
-              {RECEIPT_RULES.map((r) => (
-                <div className="wf-kv" key={r.k}>
-                  <span className="wf-k mono">{r.label}</span>
-                  <span className="wf-v">{r.body}</span>
-                </div>
-              ))}
-            </div>
-            <div className="wf-note">不提供用户可选的「合并/覆盖/保留」按钮：结果由内核写路径自动裁决。</div>
-          </div>
-
-          <div className="wf-card">
-            <div className="wf-hd"><span className="wf-zh">L1–L6 上限（内核 LAYER_SPECS）</span></div>
-            <table className="wf-rt">
-              <thead><tr><th>层</th><th>名称</th><th>上限</th><th>下限</th></tr></thead>
-              <tbody>
-                {LAYER_SPECS.map((s) => (
-                  <tr key={s.id}>
-                    <td className="mono">{s.id}</td>
-                    <td>{s.name}</td>
-                    <td className="num">{s.maxChars === null ? '不限' : `${s.maxChars} 字`}</td>
-                    <td className="num">{s.minChars === null ? '未取数' : `${s.minChars} 字`}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <div className="wf-note">正文计数按定稿 300 字提示；内核 L1 当前不限长，L2 摘要按 300 字生成。</div>
-          </div>
-
-          <div className="wf-card">
-            <div className="wf-hd"><span className="wf-zh">失败与诚实态</span></div>
-            <ul className="wf-bullets">
-              <li>写密钥未解锁：原文无法封成密文 → 内核拒绝，界面显示拒绝原因与 request_id（未签发则如实写「未签发」），并把本条放入 pendingWrites 待重放。</li>
-              <li>L0→L1 质量门拦截：不伪造 success，回执明确 filtered 且 memory_id 为空。</li>
-              <li>内核不可达：查重候选读取失败如实报错，不冒充「无候选」，不画预览分。</li>
-              <li>回执只读：不可编辑、不提供重放按钮；最近回执取账本 action=write 审计行。</li>
-            </ul>
-            <div className="wf-note">正文上限提示 = {L1_CHAR_LIMIT} 字；超出不拦截，以内核真实写入为准。</div>
-          </div>
-        </div>
-      )}
-
+      </div>
       {toast.node}
     </div>
   );

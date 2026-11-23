@@ -23,14 +23,14 @@ test.describe('写入页', () => {
     await page.goto(APP);
     await expect(page.locator('[data-testid="write-page"]')).toBeVisible();
     await expect(page.locator('[data-testid="write-form"]')).toBeVisible();
-    // 修复轮3 版式：masthead 在 tab 栏上方（无英文缀标，写密钥状态并入右侧）
-    const masthead = page.locator('.wf-masthead');
-    await expect(masthead).toContainText('写入记忆');
-    await expect(masthead).not.toContainText('WRITE');
-    await expect(masthead).not.toContainText('INGEST');
-    await expect(masthead.locator('[data-testid="write-key-status"]')).toBeVisible();
-    await expect(page.locator('[data-testid="recent-writes-empty"]')).toContainText('真实 0 条');
-    await expect(page.locator('.wf-unlock')).toBeVisible();
+    // 现行版式：页头是 af-head（无英文缀标）；写密钥状态由锁定 alert / 就地解锁卡承载
+    const head = page.locator('[data-testid="write-head"]');
+    await expect(head).toContainText('写入记忆');
+    await expect(head).not.toContainText('WRITE');
+    await expect(head).not.toContainText('INGEST');
+    // 浏览器无宿主 L0 通道：如实提示「写密钥状态不可读，不猜已解锁」，并出就地解锁卡
+    await expect(page.locator('[data-testid="l0-status-error"]')).toContainText('不猜已解锁');
+    await expect(page.locator('[data-testid="l0-unlock-card"]')).toBeVisible();
     // 修复轮3：project_id 用户可修改（不再是 readonly）
     await expect(page.locator('[data-testid="f-project"]')).not.toHaveAttribute('readonly');
     expect(errors).toEqual([]);

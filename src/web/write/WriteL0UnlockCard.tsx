@@ -1,7 +1,7 @@
-// 批次58：写入页右栏常驻「L0 UNLOCK」卡（定稿版式）。
-// 与共享 L0WriteUnlock 的分工：共享版是条件渲染的拦截提示（其他页面在用，不动）；
-// 本卡常驻右栏，真实读 loadL0Status().write_unlocked，锁着时给管理员就地解锁入口。
-// 密码边界与共享版一致：只进 l0UnlockWrite 一次调用，成功/失败立刻清空，不落任何痕迹。
+// 写入页「就地解锁 L0 写密钥」面板（STRATUM 1:1 复刻 · 设计真源 stratum-a-full.html pg-write）：
+// af-panel warn 边框（af-ph h3 就地解锁 L0 写密钥 + hint 按角色）→ af-pb：密码框 + 「解锁并自动重放」同行（nowrap）。
+// 仅在写密钥锁定 / 状态不可读时渲染（已解锁按设计稿不出现解锁卡）。
+// 密码边界：只进 l0UnlockWrite / l0UnlockWriteForMember 一次调用，成功/失败立刻清空，不落任何痕迹（§4.4.4-B 成员自解锁）。
 import { useState } from 'react';
 import { getKernel } from '../kernel.ts';
 import { useSessionContext } from '../shared/session.ts';
@@ -30,15 +30,15 @@ export function WriteL0UnlockCard({
 
   const done = status.phase === 'ready' && (status.unlocked === true || unlocked);
 
-  const meta = done
-    ? '写密钥已解锁'
-    : status.phase === 'loading'
-      ? '读取中'
-      : status.phase === 'error'
-        ? '不可读'
-        : triggered
-          ? 'E_L0_LOCKED 触发'
-          : '写密钥未解锁';
+  const hint = status.phase === 'loading'
+    ? '读取中'
+    : status.phase === 'error'
+      ? '状态不可读'
+      : triggered
+        ? 'E_L0_LOCKED · 解锁后自动重放'
+        : role === 'member' && context?.user_id
+          ? '写解锁口令 · 只进这一次调用'
+          : '仅管理员 · 密码只进这一次调用';
 
   function submit() {
     if (busy) return;
@@ -58,7 +58,7 @@ export function WriteL0UnlockCard({
         }
         setPassword('');
         setUnlocked(true);
-        // 广播写锁变化信号：首页红条与壳层状态栏监听 storage 后立刻重读真实锁状态
+        // 广播写锁变化信号：首页红条与壳层状态栏监听后立刻重读真实锁状态
         signalL0WriteLockChanged();
         onUnlocked?.();
       } catch (e) {
@@ -71,87 +71,89 @@ export function WriteL0UnlockCard({
   }
 
   return (
-    <div className="wf-card wf-unlock">
-      <div className="wf-hd">
-        <span className="wf-zh">就地解锁</span>
-        <span className="wf-meta">{meta}</span>
+    <section className="af-panel af-unlock" data-testid="l0-unlock-card">
+      <div className="af-ph">
+        <h3>就地解锁 L0 写密钥</h3>
+        <span className="hint">{hint}</span>
       </div>
-      <div className="wf-bd">
+      <div className="af-pb af-stack" style={{ gap: 8 }}>
         {status.phase === 'loading' && (
-          <div className="wf-empty" data-testid="l0-unlock-loading">正在读取写密钥状态…</div>
+          <div className="af-empty" data-testid="l0-unlock-loading">正在读取写密钥状态…</div>
         )}
         {status.phase === 'error' && (
-          <div className="wf-status bad" data-testid="l0-unlock-status-error">
-            <b>写密钥状态读取失败</b> · {status.error ?? '原因未知'}
-          </div>
-        )}
-        {done && (
-          <div className="wf-status ok" data-testid="l0-unlock-done">
-            <b>写密钥已解锁</b> · L0 写入恢复可用（只加密，不能解密查阅）
-          </div>
+          <p className="af-note bad" data-testid="l0-unlock-status-error">
+            写密钥状态读取失败 · {status.error ?? '原因未知'} —— 不猜已解锁，解锁入口不可用。
+          </p>
         )}
         {status.phase === 'ready' && !done && (
           <>
-            <div className="wf-status bad" data-testid="l0-unlock-alert">
-              {triggered
-                ? <><b>写密钥未解锁</b> · 这条写入被挡（E_L0_LOCKED）</>
-                : <><b>写密钥未解锁</b> · 写入将被挡（E_L0_LOCKED）</>}
-            </div>
             {role === 'admin' ? (
               <>
-                <label className="wf-lbl" htmlFor="l0-unlock-password">L0 管理密码（仅管理员 · 成功失败都立刻清空）</label>
-                <input
-                  id="l0-unlock-password"
-                  className="wf-in"
-                  type="password"
-                  data-testid="l0-unlock-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
-                  placeholder="L0 管理密码"
-                  disabled={busy}
-                  autoComplete="off"
-                />
-                <button type="button" className="wf-btn" data-testid="l0-unlock-submit" disabled={busy} onClick={submit}>
-                  {busy ? '解锁中…' : '解锁并自动重放'}
-                </button>
-                <div className="wf-note">
-                  解锁成功后自动重放被挡那条，无需再点写入 · 密码只用于本次解锁，不显示、不落盘、不进日志。
+                <div className="af-row" style={{ flexWrap: 'nowrap' }}>
+                  <input
+                    className="af-input"
+                    type="password"
+                    data-testid="l0-unlock-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
+                    placeholder="L0 管理密码"
+                    disabled={busy}
+                    autoComplete="off"
+                    style={{ flex: 1, minWidth: 0 }}
+                  />
+                  <button
+                    type="button"
+                    className="af-btn pri"
+                    data-testid="l0-unlock-submit"
+                    disabled={busy}
+                    onClick={submit}
+                    style={{ flex: 'none' }}
+                  >
+                    {busy ? '解锁中…' : '解锁并自动重放'}
+                  </button>
                 </div>
+                <span className="af-note">成功/失败都立刻清空密码，绝不进日志与审计。普通成员请找管理员在安全页解锁。</span>
               </>
             ) : role === 'member' && context?.user_id ? (
               <>
-                <label className="wf-lbl" htmlFor="l0-unlock-password">你的写解锁口令（§4.4.4-B · 与管理密码互不替代）</label>
-                <input
-                  id="l0-unlock-password"
-                  className="wf-in"
-                  type="password"
-                  data-testid="l0-unlock-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
-                  placeholder="你的写解锁口令"
-                  disabled={busy}
-                  autoComplete="off"
-                />
-                <button type="button" className="wf-btn" data-testid="l0-unlock-submit" disabled={busy} onClick={submit}>
-                  {busy ? '解锁中…' : '解锁并自动重放'}
-                </button>
-                <div className="wf-note">
-                  用管理员发给你的写解锁口令自解锁（与管理密码互不替代）· 解锁成功后自动重放被挡那条，无需再点写入 · 密码只用于本次解锁，不显示、不落盘、不进日志。
+                <div className="af-row" style={{ flexWrap: 'nowrap' }}>
+                  <input
+                    className="af-input"
+                    type="password"
+                    data-testid="l0-unlock-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
+                    placeholder="你的写解锁口令"
+                    disabled={busy}
+                    autoComplete="off"
+                    style={{ flex: 1, minWidth: 0 }}
+                  />
+                  <button
+                    type="button"
+                    className="af-btn pri"
+                    data-testid="l0-unlock-submit"
+                    disabled={busy}
+                    onClick={submit}
+                    style={{ flex: 'none' }}
+                  >
+                    {busy ? '解锁中…' : '解锁并自动重放'}
+                  </button>
                 </div>
+                <span className="af-note">用管理员发给你的写解锁口令自解锁（§4.4.4-B · 与管理密码互不替代）。成功/失败都立刻清空口令，绝不进日志与审计。</span>
               </>
             ) : (
-              <div className="wf-note" data-testid="l0-unlock-need-admin">
+              <p className="af-note" data-testid="l0-unlock-need-admin">
                 {role === null
                   ? '未登录：解锁写密钥需要会话。请先登录后由管理员输入管理密码解锁，或成员用写解锁口令解锁。'
                   : '当前账号不是管理员：不给点了必然失败的按钮，请管理员到「安全页 → L0 管理 → 写密钥」解锁后再试。'}
-              </div>
+              </p>
             )}
-            {error && <div className="wf-err" data-testid="l0-unlock-error">解锁失败：{error}</div>}
+            {error && <p className="af-note bad" data-testid="l0-unlock-error">解锁失败：{error}</p>}
           </>
         )}
       </div>
-    </div>
+    </section>
   );
 }

@@ -44,32 +44,29 @@ describe('WritePage 集成（T5）', () => {
     expect(screen.getByTestId('recent-writes-empty').textContent).toContain('质量门拦截不是写入，不计入');
   });
 
-  it('修复轮4：查重与 L0 规则 / 最近回执两 tab 与写入表单同版式（wf-card）', async () => {
-    render(<WritePage />);
-    fireEvent.change(screen.getByTestId('f-content'), { target: { value: '两 tab 版式对齐验证：写入一条真实记忆' } });
-    fireEvent.click(screen.getByTestId('submit'));
-    await waitFor(() => expect(screen.getByTestId('receipt')).toBeInTheDocument());
-    fireEvent.click(screen.getByTestId('write-tab-receipts'));
-    await waitFor(() => expect(document.querySelector('.wf-card .wf-rt')).not.toBeNull());
-    fireEvent.click(screen.getByTestId('write-tab-rules'));
-    expect(document.querySelectorAll('.wf-grid3 > .wf-card').length).toBe(3);
-  });
-
-  it('修复轮3：masthead 在 tab 栏上方常驻；回执/规则 tab 不再出现「写入记忆 · ma.write」头部行', () => {
+  it('批次47 STRATUM 1:1：af-head 页头（h1+sub 实算质量门版本）+ 单页无 tab（p0/wf 版式清零）', () => {
     render(<WritePage />);
     const page = screen.getByTestId('write-page');
-    const masthead = page.querySelector('.wf-masthead')!;
-    const tabs = page.querySelector('.p0-tabs')!;
-    expect(masthead.textContent).toContain('写入记忆');
-    // DOM 顺序：masthead 先于 tab 栏（写在 tab 栏前面）
-    expect(masthead.compareDocumentPosition(tabs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByTestId('write-key-status')).toBeInTheDocument();
-    // 切到最近回执 / 查重与 L0 规则：masthead 仍在，旧头部行取消
-    fireEvent.click(screen.getByTestId('write-tab-receipts'));
-    expect(page.querySelector('.wf-masthead')!.textContent).toContain('写入记忆');
-    expect(page.textContent).not.toContain('写入记忆 · ma.write');
-    fireEvent.click(screen.getByTestId('write-tab-rules'));
-    expect(page.textContent).not.toContain('写入记忆 · ma.write');
+    const head = page.querySelector('[data-testid="write-head"]')!;
+    expect(head.className).toBe('af-head');
+    expect(head.querySelector('h1')!.textContent).toBe('写入记忆');
+    expect(head.querySelector('.sub')!.textContent).toContain('只落 L0 密文 + 脱敏 L1');
+    expect(head.querySelector('.sub')!.textContent).toContain('质量门 v');
+    // 设计稿无 tab：旧 tab 栏与 p0 页头不再渲染
+    expect(page.querySelector('.p0-tabs')).toBeNull();
+    expect(screen.queryByTestId('write-tab-form')).toBeNull();
+    expect(page.querySelector('.p0-pagehead')).toBeNull();
+    // 设计稿双栏 1fr 320px；回执待生成卡在无提交时出现
+    expect(page.querySelector('.af-cols.wr-cols')).not.toBeNull();
+    expect(screen.getByTestId('receipt-placeholder')).toBeInTheDocument();
+  });
+
+  it('批次47 STRATUM 1:1：回执占位卡为 af-panel（回执 · 待生成 + 诚实空态文案）', () => {
+    render(<WritePage />);
+    const ph = screen.getByTestId('receipt-placeholder');
+    expect(ph.className).toBe('af-panel');
+    expect(ph.textContent).toContain('回执 · 待生成');
+    expect(ph.textContent).toContain('本次写入未入库，不出成功回执');
   });
 
   it('修复轮3：卡片英文缀标全部取消（WRITE/INGEST/FORM/RECEIPT/DEDUP/RECENT WRITES/L0 UNLOCK）', () => {
