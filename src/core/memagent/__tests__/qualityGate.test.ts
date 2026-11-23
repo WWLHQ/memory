@@ -212,8 +212,8 @@ describe('批次40 短且无信号门（short_low_signal）', () => {
     expect(checkL0ToL1Quality('你是谁？').code).not.toBe('short_low_signal');
   });
 
-  it('质量门版本已升到 4（改判定口径必须 +1）', () => {
-    expect(QUALITY_GATE_VERSION).toBe(4);
+  it('质量门版本已升到 5（批次64 新增终端/附件门，改判定口径必须 +1）', () => {
+    expect(QUALITY_GATE_VERSION).toBe(5);
   });
 });
 
@@ -303,6 +303,44 @@ describe('批次63：模型/工具运行失败日志（有失败无正常对话 
     const d = filteredAuditDetail('● 本轮运行失败 Rate limit: exceeded 10 req/min    RATE_LIMIT', gate);
     expect(d.filter_code).toBe('run_failure');
     expect(d.gate_version).toBe(QUALITY_GATE_VERSION);
+  });
+});
+
+describe('批次64：终端/探针输出与纯附件占位（2026-11-22 实机账本取证原文）', () => {
+  // 下列四条均为本机真实账本 data.memories 中 collector 写入的 L1 行（用户实机反馈「毫无意义」）。
+  // 逐字回放钉住：这些行以后必须被质量门拦下，不能再进 L1 列表。
+  it.each([
+    ['纯附件占位（4 张截图 + 简短确认）', '@image#1:Clipboard_Screenshot.png @image#2:Clipboard_Screenshot-1.png @image#3:Clipboard_Screenshot-2.png @image#4:Clipboard_Screenshot-3.png 刚测试完，请确认', 'attachment_only'],
+    ['探针自检输出（IMG:error / entries / hit）', '第二轮探针结果：IMG:error | entries=1 | hit=dur=0ms size=0', 'tool_output'],
+    ['探针失败输出（A/B/C:FAIL）', '探针结果：A:FAIL Failed to fetch | B:FAIL Failed to fetch | C:FAIL Failed to fetch', 'tool_output'],
+    ['终端会话记录（git status / log / remote）', 'S D:\\LHQ\\WorkBuddy\\GitHub\\shenji> git status\nOn branch main\nUntracked files:\n(use "git add <file>..." to include in what will be committed)\nREADME.md\n\nnothing added to commit but untracked files present (use "git add" to track)\nPS D:\\LHQ\\WorkBuddy\\GitHub\\shenji> git log --oneline\n14b1ee1 (HEAD -> main) Initial commit\nPS D:\\LHQ\\WorkBuddy\\GitHub\\shenji> git remote -v\norigin  [服务地址] (fetch)\norigin  [服务地址] (push)', 'tool_output'],
+  ])('拦截：%s → %s', (_name, text, code) => {
+    const r = checkL0ToL1Quality(text);
+    expect(r.ok, text).toBe(false);
+    expect(r.code, text).toBe(code);
+  });
+
+  // 放行边界：贴日志追问 / 附件旁的真实描述，是用户真正想沉淀的内容，绝不能误伤
+  it('终端日志后面带提问 → 放行（有正常对话就不拦）', () => {
+    const text = 'PS D:\\proj> git status\nOn branch main\nPS D:\\proj> git log\n为什么少了昨天的提交？';
+    expect(checkL0ToL1Quality(text).ok, text).toBe(true);
+  });
+
+  it('截图 + 实质技术描述 → 放行（附件不是正文，但正文确实存在）', () => {
+    const text = '@image#1:Clipboard_Screenshot.png 这张图里 nginx 502 的原因是 upstream 超时，需要把 proxy_read_timeout 从 60s 改成 120s';
+    expect(checkL0ToL1Quality(text).ok, text).toBe(true);
+  });
+
+  it('只是讨论探针/终端的真实问题 → 放行（不是输出记录）', () => {
+    expect(checkL0ToL1Quality('探针为什么会返回 error？请帮我查一下日志').ok).toBe(true);
+    expect(checkL0ToL1Quality('终端里执行 npm run build 时报 TS2304，为什么会这样？').ok).toBe(true);
+  });
+
+  it('无附件引用 / 无探针行的普通短内容仍按原口径判定（不被新门抢走）', () => {
+    // 新门不得把「短但带硬事实」的老放行口径吃掉
+    expect(checkL0ToL1Quality('编译成功，0 错误 0 警告').ok).toBe(true);
+    // 纯附件占位必须发自己的码，而不是被 short_low_signal 兜走
+    expect(checkL0ToL1Quality('@image#1:a.png 看这个').code).toBe('attachment_only');
   });
 });
 

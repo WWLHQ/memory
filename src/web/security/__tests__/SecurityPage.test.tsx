@@ -348,4 +348,104 @@ describe('SecurityPage (P12-T4 编排)', () => {
     const admin = screen.getByTestId('l0-admin-card');
     expect(within(admin).queryByTestId('l0-migrate-form')).toBeNull();
   });
+
+  it('「N 项需处理」可点开：计数与清单一一对应，逐条有原因/身份/处理后状态；封存成功后计数实时下降', async () => {
+    localStorage.setItem(SESSION_KEY, 's_real');
+    let sealed = 0;
+    let legacy = 2;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const method = (init?.method ?? 'GET').toUpperCase();
+      if (url.includes('/api/mirror/audit/reseal')) {
+        sealed += legacy;
+        legacy = 0;
+        return jsonResponse({
+          ok: true, resealed: 2, backup_path: 'C:/tmp/home-mirror.json.bak-1',
+          integrity: { ok: true, sealed, legacy_unsealed: legacy, algorithm: 'HMAC-SHA256(chain)' },
+        });
+      }
+      if (url.includes('/api/mirror/audit')) {
+        return jsonResponse({ ok: true, total: sealed + legacy, integrity: { ok: true, sealed, legacy_unsealed: legacy } });
+      }
+      if (url.includes('/api/policy')) return jsonResponse({ ok: true, policy: { min_len: 8 } });
+      if (url.includes('/api/keys')) return jsonResponse({ ok: true, items: [] });
+      if (url.includes('/api/accounts')) return jsonResponse({ ok: true, items: ACCOUNTS });
+      if (url.includes('/api/me')) return jsonResponse({ context: { user_id: 'admin', role: 'admin', team_id: 'T0', enterprise_id: 'E1' } });
+      if (method === 'POST') return jsonResponse({ ok: true });
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    render(<SecurityPage />);
+    await waitFor(() => expect(screen.getByTestId('chk-chain')).toHaveTextContent('未签名旧段 2'));
+    const chip = screen.getByTestId('security-issue-chip');
+    await waitFor(() => expect(chip.textContent).toMatch(/\d+ 项需处理/));
+    const count = Number((chip.textContent ?? '').match(/(\d+) 项需处理/)?.[1] ?? '0');
+    expect(count).toBeGreaterThan(0);
+    expect(chip.getAttribute('aria-expanded')).toBe('false');
+
+    fireEvent.click(chip);
+    expect(chip.getAttribute('aria-expanded')).toBe('true');
+    const list = screen.getByTestId('sec-issue-list');
+    // 计数与条目一一对应（同一 warn/err 数组）
+    expect(list.querySelectorAll('[data-testid^="sec-issue-"]')).toHaveLength(count);
+
+    const chainIssue = screen.getByTestId('sec-issue-chk-chain');
+    expect(chainIssue.textContent).toContain('为什么');
+    expect(chainIssue.textContent).toContain('需要');
+    expect(chainIssue.textContent).toContain('处理后');
+    expect(screen.getByTestId('sec-fix-chain')).not.toBeDisabled();
+
+    fireEvent.click(screen.getByTestId('sec-fix-chain'));
+    await waitFor(() => expect(screen.getByTestId('sec-issue-msg')).toHaveTextContent(/已封存 2 条/));
+    // 真实检查刷新后：审计链转为通过，计数实时 -1（或归零显示全部通过）
+    await waitFor(() => {
+      const text = chip.textContent ?? '';
+      if (count - 1 === 0) expect(text).toBe('全部检查通过');
+      else expect(text).toContain(`${count - 1} 项需处理`);
+    });
+    await waitFor(() => expect(screen.getByTestId('chk-chain')).toHaveTextContent(/sealed 2/));
+  });
+
+  it('需处理项：管理员角色缺失时给出可执行入口（跳账号与密钥），不伪造通过', async () => {
+    session.role = 'member';
+    render(<SecurityPage />);
+    const chip = screen.getByTestId('security-issue-chip');
+    await waitFor(() => expect(chip.textContent).toMatch(/项需处理/));
+    fireEvent.click(chip);
+    const roleIssue = screen.getByTestId('sec-issue-chk-role');
+    expect(roleIssue.textContent).toContain('普通成员');
+    expect(roleIssue.textContent).toContain('管理员');
+    fireEvent.click(screen.getByTestId('sec-fix-role'));
+    expect(screen.getByTestId('admin-accounts-card')).toBeInTheDocument();
+  });
+
+  it('跟随壳层深色主题：挂载即设置 html[data-theme="dark"]', () => {
+    // 批次55：深色主题适配正向断言
+    localStorage.setItem('memdesk.shell.theme.v1', 'dark');
+    try {
+      render(<SecurityPage />);
+      expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+    } finally {
+      localStorage.setItem('memdesk.shell.theme.v1', 'light');
+      document.documentElement.removeAttribute('data-theme');
+    }
+  });
+
+  it('新增：顶部安全摘要读数条 + 四个场景分组（真实检查失败如实标注）', async () => {
+    localStorage.setItem(SESSION_KEY, 's_test');
+    mockHomeBackend();
+    render(<SecurityPage />);
+    const readout = screen.getByTestId('security-readout');
+    expect(readout).toHaveTextContent('账号与角色');
+    expect(readout).toHaveTextContent('L0 密钥环');
+    expect(readout).toHaveTextContent('审计链完整性');
+    for (const id of ['account', 'session', 'l0', 'chain']) {
+      expect(screen.getByTestId(`security-group-${id}`)).toBeInTheDocument();
+    }
+    // 未注入 L0 密钥环 → 场景卡如实展示真实错误码，不伪造「已解锁」
+    await waitFor(() => expect(screen.getByTestId('security-group-l0')).toHaveTextContent('错误'));
+    // 场景卡动作真跳转到密码策略面板
+    fireEvent.click(screen.getByTestId('security-jump-policy'));
+    expect(screen.getByTestId('pwd-upper')).toBeInTheDocument();
+  });
 });

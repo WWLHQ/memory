@@ -100,7 +100,7 @@ import { demoteStubLayers, scanStubLayers } from '../core/memagent/legacyLayers.
 import { purgeLedger, scanLedgerForReset } from '../core/memagent/ledgerReset.ts';
 import { purgeWebchatExports, selectWebchatExportMemories } from '../core/memagent/webchatPurge.ts';
 import { rejudgeRows, scanRowsForRejudge } from '../core/memagent/rejudge.ts';
-import { backfillMissingFields, scanRowsForBackfill } from '../core/memagent/fieldBackfill.ts';
+import { backfillMissingFields, scanRowsForBackfill, parseBackfillFields } from '../core/memagent/fieldBackfill.ts';
 import { normalizeTenantFields, scanRowsForTenantNormalize } from '../core/memagent/tenantNormalize.ts';
 import { scanLedgerForSplit, splitLedger } from '../core/memagent/l0Split.ts';
 import { makeL0Reader, rebuildLayersFromL0, scanRowsForRebuild } from '../core/memagent/rebuild.ts';
@@ -4703,17 +4703,21 @@ async function bootstrap(): Promise<void> {
   // 缺向量的行语义召回恒 0 分；缺指纹的行在云端同步的每日全量对账里会被列进 missing（批次42 的前置事实）。
   // **不设逐字口令**：本通道不删行、不改正文、不动层级/version/updated_at，只把两个空字段填上，
   // 与 REJUDGE / RESET / REBUILD（都会删或重造内容）不同类；但批量改写账本前必须先备份这条不变量照守。
-  handleIpc(IPC.ledgerFieldsPreview, async (_e, sessionId?: string) => {
+  handleIpc(IPC.ledgerFieldsPreview, async (_e, sessionId?: string, fieldsIn?: unknown) => {
     const gate = requireSession(sessionId, IPC.ledgerFieldsPreview);
     if (!gate.ok) return { ok: false, error: gate.error };
+    const fields = parseBackfillFields(fieldsIn);
+    if (!fields) return { ok: false, error: '回填字段参数非法（只能选 sha256 / embedding / source_excerpt）' };
     try {
-      return { ok: true, preview: await scanRowsForBackfill(storage) };
+      return { ok: true, preview: await scanRowsForBackfill(storage, {}, fields) };
     } catch (e) { return l0Fail(e); }
   });
 
-  handleIpc(IPC.ledgerFieldsBackfill, async (_e, sessionId?: string) => {
+  handleIpc(IPC.ledgerFieldsBackfill, async (_e, sessionId?: string, fieldsIn?: unknown) => {
     const gate = requireAdmin(sessionId, IPC.ledgerFieldsBackfill);
     if (!gate.ok) return { ok: false, error: gate.error };
+    const fields = parseBackfillFields(fieldsIn);
+    if (!fields) return { ok: false, error: '回填字段参数非法（只能选 sha256 / embedding / source_excerpt）' };
     let backupDir: string;
     try {
       backupDir = await backupBeforeKernelChange('field-backfill', 'ledger:fields-backup');
@@ -4726,13 +4730,15 @@ async function bootstrap(): Promise<void> {
       const now = Date.now();
       const report = await backfillMissingFields({
         storage, vector: collectorVector, admin_user_id: gate.ctx.user_id,
-        request_id: `req_fields_${now}`, now, backup_confirmed: true,
+        request_id: `req_fields_${now}`, now, backup_confirmed: true, fields,
       });
       actionLog('kernel', 'ledger:fields-backfill', {
         total: report.total, fillable_rows: report.fillable_rows,
         sha256_filled: report.sha256_filled, embedding_filled: report.embedding_filled,
+        source_excerpt_filled: report.source_excerpt_filled, fields: [...fields],
         indexed: report.indexed, protected_rows: report.protected_rows,
         unfillable_sha256: report.unfillable_sha256, unfillable_embedding: report.unfillable_embedding,
+        unfillable_source_excerpt: report.unfillable_source_excerpt,
         failed: report.failed, dir: backupDir,
       });
       return { ok: true, report, backup_dir: backupDir };

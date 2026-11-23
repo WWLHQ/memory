@@ -30,9 +30,11 @@ import { useSessionContext } from '../shared/session.ts';
 import { useToast } from './useToast.tsx';
 import {
   fetchAccounts, fetchApiKeys, mintApiKey, revokeApiKey, fetchPwdPolicy, savePwdPolicy,
-  fetchMirrorIntegrity, type AccountView, type ApiKeyRecord, type MirrorIntegrityView,
+  fetchMirrorIntegrity, resealMirrorAudit, type AccountView, type ApiKeyRecord, type MirrorIntegrityView,
 } from './accountsClient.ts';
 import type { ApiKey, PwdPolicy } from './types.ts';
+import { useHostTheme } from '../shared/hostTheme.ts';
+import '../shared/afPage.css';
 
 /** 服务端密钥记录 → 表格视图（masked 只含 label/尾号，绝不含明文） */
 function toKeyView(k: ApiKeyRecord): ApiKey {
@@ -67,7 +69,62 @@ const L0_ACTION_TEXT: Record<string, string> = {
 
 type CheckTone = 'ok' | 'warn' | 'err' | 'info';
 
+interface Remedy {
+  why: string;
+  need: string;
+  after: string;
+  action?: 'l0' | 'role' | 'reseal';
+}
+
+/** 每条「需处理」的真实原因 / 所需身份或密钥 / 处理后的状态（与 checks 的 testid 一一对应） */
+const REMEDY: Record<string, Remedy> = {
+  'chk-session': {
+    why: '当前没有有效登录会话，后端与管理 IPC 一律拒绝（401/403）。',
+    need: '用本机账号重新登录（管理员账号可解锁全部操作）。',
+    after: '该项转为「通过」；依赖会话的检查同步刷新。',
+  },
+  'chk-role': {
+    why: '当前是 member 会话，危险操作卡与管理员接口被主进程/后端强制禁用。',
+    need: '管理员账号登录；或由现有管理员在「账号与密钥」表把该账号角色改为 admin 并保存。',
+    after: '角色变为管理员，危险操作卡启用，该项转为「通过」，计数 -1。',
+    action: 'role',
+  },
+  'chk-policy': {
+    why: '密码策略未能从后端读取（接口失败或会话失效），页面只能显示默认值。',
+    need: '有效登录会话 + 后端 /api/policy 可达；修改策略还需管理员角色。',
+    after: '读取成功后显示后端已生效值，该项转为「通过」。',
+  },
+  'chk-l0': {
+    why: 'L0 密钥环读取失败：主密钥/管理密码包装不可用，或当前会话无权读取。',
+    need: '管理员会话 + L0 管理密码；若密钥环文件损坏，需用「恢复」卡从备份重建。',
+    after: '读取成功后显示包装/写锁/授权实况；写密钥锁定即为通过，计数随之下降。',
+    action: 'l0',
+  },
+  'chk-l0audit': {
+    why: '内核 L0/安全变更审计读不到或为空，无法证明最近的安全操作有留痕。',
+    need: '内核审计账本可读（桌面壳运行中）；空账本需先产生一次真实安全操作。',
+    after: '读到审计条目后该项转为「通过」。',
+  },
+  'chk-chain': {
+    why: '审计链存在旧版未签名段（sealed 与前缀 legacy 混存），或链校验失败/接口不可达。',
+    need: '管理员会话 + 本机 home-mirror.key（0600，与账本同目录）；断链时不可封存。',
+    after: '旧段补签成功后 sealed 增加、未签名归零、追加 mirror_reseal 审计；断链则报 E_MIRROR_CHAIN_BROKEN 并点名 seq。',
+    action: 'reseal',
+  },
+  'chk-ipc': {
+    why: '程序架构事实：所有敏感 IPC 都要求会话并由主进程强制权限。',
+    need: '无需处理；如需变更权限策略请改主进程代码。',
+    after: '该行不会自动转为通过（只读说明行）。',
+  },
+  'chk-up': {
+    why: '上行/裁决依赖登录会话与管理员身份。',
+    need: '登录会话；人工裁决需管理员。',
+    after: '保持只读说明；真实通道状态见同步页。',
+  },
+};
+
 export function SecurityPage() {
+  useHostTheme();
   const [tab, setTab] = useState(0);
   // T3（§14.1）：管理台入口 href '?tab=overview' → 落「检查摘要」页签（壳层管理台复用本页，不新增入口）
   useEffect(() => {
@@ -92,6 +149,11 @@ export function SecurityPage() {
   const [l0Audit, setL0Audit] = useState<L0AuditRow[] | null>(null);
   const [l0AuditErr, setL0AuditErr] = useState<string>('');
   const [chain, setChain] = useState<MirrorIntegrityView | null>(null);
+  // 批次63：「N 项需处理」chip 可点开，逐条给原因/所需身份/处理后状态与可执行动作
+  const [issuesOpen, setIssuesOpen] = useState(false);
+  const [issueMsg, setIssueMsg] = useState('');
+  const [issueErr, setIssueErr] = useState('');
+  const [resealing, setResealing] = useState(false);
 
   const audit = async (msg: string, detail: Record<string, unknown> = {}) => {
     const requestId = newRequestId('req');
@@ -149,26 +211,28 @@ export function SecurityPage() {
   }, [role]);
 
   // 检查摘要的真实数据：L0 密钥环 / L0 审计 / mirror 审计链（互不依赖，各自失败各自报错）
-  useEffect(() => {
-    let alive = true;
-    void (async () => {
-      try {
-        const st = await coreL0Status();
-        if (alive) { setL0(st); setL0Err(''); }
-      } catch (e) {
-        if (alive) { setL0(null); setL0Err(errText(e)); }
-      }
-      try {
-        const rows = await coreLoadL0Audit();
-        if (alive) { setL0Audit(rows); setL0AuditErr(''); }
-      } catch (e) {
-        if (alive) { setL0Audit([]); setL0AuditErr(errText(e)); }
-      }
-      const chainView = await fetchMirrorIntegrity();
-      if (alive) setChain(chainView);
-    })();
-    return () => { alive = false; };
+  const refreshChain = useCallback(async () => {
+    const v = await fetchMirrorIntegrity();
+    setChain(v);
   }, []);
+
+  const refreshChecks = useCallback(async () => {
+    try {
+      const st = await coreL0Status();
+      setL0(st); setL0Err('');
+    } catch (e) {
+      setL0(null); setL0Err(errText(e));
+    }
+    try {
+      const rows = await coreLoadL0Audit();
+      setL0Audit(rows); setL0AuditErr('');
+    } catch (e) {
+      setL0Audit([]); setL0AuditErr(errText(e));
+    }
+    await refreshChain();
+  }, [refreshChain]);
+
+  useEffect(() => { void refreshChecks(); }, [refreshChecks]);
 
   // 卸载时清掉尚未落盘的保存定时器
   useEffect(() => () => { if (saveTimer.current) clearTimeout(saveTimer.current); }, []);
@@ -279,23 +343,264 @@ export function SecurityPage() {
       v: '中枢上下行需登录会话；人工裁决需管理员（见同步页真实通道状态）',
     },
   ];
-  const issueCount = checks.filter((c) => c.tone === 'warn' || c.tone === 'err').length;
+  // 只把 warn/err 计为「需处理」；清单与计数用同一数组，保证一一对应
+  const issues = checks.filter((c) => c.tone === 'warn' || c.tone === 'err');
+  const issueCount = issues.length;
+
+  const jumpToTab = (index: number, testid: string) => {
+    setTab(index);
+    setTimeout(() => {
+      const el = document.querySelector(`[data-testid="${testid}"]`);
+      el?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+    }, 60);
+  };
+
+  const doReseal = async () => {
+    setIssueMsg('');
+    setIssueErr('');
+    if (role !== 'admin') {
+      setIssueErr('[E_ADMIN_REQUIRED] 封存旧审计段需要管理员会话（后端同样强制）');
+      return;
+    }
+    setResealing(true);
+    const r = await resealMirrorAudit();
+    setResealing(false);
+    if (!r.ok) {
+      setIssueErr(`[${r.code ?? 'E_UNKNOWN'}] ${r.error ?? r.reason ?? '封存失败'}${typeof r.broken_at_seq === 'number' ? ` · 断链 seq ${r.broken_at_seq}` : ''}`);
+      await refreshChain(); // 失败也刷新：不把旧读数当成功
+      return;
+    }
+    await refreshChain(); // 成功：sealed/未签名/计数实时更新
+    setIssueMsg(r.resealed && r.resealed > 0
+      ? `已封存 ${r.resealed} 条旧无签名条目；备份 ${r.backup_path ?? '已生成'}；审计已记 mirror_reseal。`
+      : '没有需要封存的旧段（状态未变）。');
+  };
 
   return (
-    <div className="p0-page" data-testid="security-page">
-      <div className="p0-hd">
-        <h2>🔐 安全与账号</h2>
-        <span className="p0-tag">REQ-006 · P12</span>
-        <span className="p0-tag info">真实审计账本</span>
-        <div className="p0-right">
-          <span className={`p0-tag ${issueCount > 0 ? 'warn' : 'ok'}`}>
-            {issueCount > 0 ? `${issueCount} 项需处理` : '全部检查通过'}
-          </span>
+    <div className="p0-page af-page" data-testid="security-page">
+      <div className="af-head" data-testid="security-head">
+        <h1>账号与安全</h1>
+        <span className="sub">
+          账号与角色 · 会话与登录安全 · L0 密钥环 · 审计链完整性 · 真实接口（失败原样报错误码）
+        </span>
+        <span className="right">
+          <span className="p0-tag info">真实审计账本</span>
+          <button
+            type="button"
+            className={`p0-tag ${issueCount > 0 ? 'warn' : 'ok'}`}
+            data-testid="security-issue-chip"
+            aria-expanded={issuesOpen}
+            aria-controls="sec-issue-list"
+            title={issueCount > 0 ? `展开这 ${issueCount} 项分别是什么、怎么处理` : '当前没有需处理项'}
+            style={{ cursor: issueCount > 0 ? 'pointer' : 'default' }}
+            disabled={issueCount === 0}
+            onClick={() => setIssuesOpen((v) => !v)}
+          >
+            {issueCount > 0 ? `${issueCount} 项需处理 ${issuesOpen ? '▴' : '▾'}` : '全部检查通过'}
+          </button>
+        </span>
+      </div>
+
+      {/* ── 摘要读数条（真实接口：/api/me、内核 l0Status、/api/mirror/audit） ── */}
+      <section className="af-panel" data-testid="security-readout">
+        <div className="af-ph"><h3>安全摘要</h3><span className="hint">真实检查 · 不把失败改判为通过</span></div>
+        <div className="af-pb">
+          <div className="af-g4">
+            <div className="af-stat">
+              <div className="k">账号与角色 <span>role</span></div>
+              <div className="v sm">{role ?? '未登录'}</div>
+              <div className={role === 'admin' ? 'd' : 'd mut'}>
+                {role === 'admin' ? `管理员 · 账号表 ${accounts.length} 条` : '危险操作卡与管理员接口被禁用'}
+              </div>
+            </div>
+            <div className="af-stat">
+              <div className="k">登录会话 <span>session</span></div>
+              <div className="v sm">{loading ? '校验中' : context ? context.user_id : sid ? '会话无效' : '未登录'}</div>
+              <div className={context ? 'd mut' : 'd bad'}>
+                {context ? `角色 ${context.role ?? 'member'} · /api/me 已确认` : '无有效会话：敏感接口返回 401/403'}
+              </div>
+            </div>
+            <div className="af-stat">
+              <div className="k">L0 密钥环 <span>l0Status</span></div>
+              <div className={`v sm${l0Err ? ' bad' : ''}`}>
+                {l0Err ? '不可用' : l0 ? (l0.write_unlocked ? '已解锁' : '已锁定') : '读取中'}
+              </div>
+              <div className={l0Err ? 'd bad' : 'd mut'}>
+                {l0Err ? l0Err : l0 ? `管理密码包装 ${l0.has_admin_wrap ? '已设置' : '未设置'} · 活跃授权 ${l0.active_grants}` : '读取内核密钥环状态中'}
+              </div>
+            </div>
+            <div className="af-stat">
+              <div className="k">审计链完整性 <span>mirror integrity</span></div>
+              <div className={`v sm${chain && !chain.ok ? ' bad' : ''}`}>
+                {chain ? (chain.ok ? `sealed ${chain.sealed}` : '不可校验') : '读取中'}
+              </div>
+              <div className={chain && (!chain.ok || chain.legacy_unsealed > 0) ? 'd bad' : 'd mut'}>
+                {chain
+                  ? (chain.ok
+                    ? (chain.legacy_unsealed > 0 ? `未签名旧段 ${chain.legacy_unsealed} 条` : 'HMAC-SHA256 链完整')
+                    : (chain.error ?? chain.reason ?? '接口不可达'))
+                  : '读取 /api/mirror/audit integrity 中'}
+              </div>
+            </div>
+            <div className="af-stat">
+              <div className="k">需处理 <span>warn + err</span></div>
+              <div className={`v${issueCount > 0 ? ' bad' : ''}`}>{issueCount}</div>
+              <div className={issueCount > 0 ? 'd bad' : 'd'}>
+                {issueCount > 0 ? '点右上角计数逐条展开处理路径' : '全部检查通过'}
+              </div>
+            </div>
+          </div>
+          <p className="af-note">
+            数据来源：/api/me（会话与角色）、/api/policy（密码策略）、内核 l0Status（密钥环）、内核审计账本（L0 留痕）、
+            /api/mirror/audit integrity（签名链）。每一项都是真实读取；失败写真实错误码，不用默认值冒充通过。
+          </p>
         </div>
+      </section>
+
+      {/* ── 场景分组：账号/会话/L0/审计链各一张，动作直达真实面板 ── */}
+      <div className="af-g2" data-testid="security-groups">
+        <section className="af-panel" data-testid="security-group-account">
+          <div className="af-ph"><h3>账号与角色</h3><span className="hint">/api/accounts · /api/me</span></div>
+          <div className="af-pb">
+            <p className="af-q">有哪些账号、谁是管理员、谁能改危险设置？</p>
+            <div className="af-mini">
+              <span>当前角色 <b>{role ?? '未登录'}</b></span>
+              <span>账号表 <b>{role === 'admin' ? `${accounts.length} 条` : '需管理员'}</b></span>
+              <span>密钥 <b>{role === 'admin' ? `${rawKeys.length} 条` : '需管理员'}</b></span>
+            </div>
+            <p className="af-note">来源：真实后端 /api/accounts · /api/keys（成员会话不返回）。</p>
+            <div className="af-actions">
+              <button type="button" className="btn" data-testid="security-jump-accounts" onClick={() => jumpToTab(2, 'admin-accounts-card')}>打开账号与密钥</button>
+              {role !== 'admin' && <span className="dim" style={{ fontSize: 11 }}>需管理员会话才能改角色</span>}
+            </div>
+          </div>
+        </section>
+
+        <section className="af-panel" data-testid="security-group-session">
+          <div className="af-ph"><h3>会话与登录安全</h3><span className="hint">/api/me · /api/policy</span></div>
+          <div className="af-pb">
+            <p className="af-q">登录是否有效，密码策略与传输/脱敏是否真生效？</p>
+            <div className="af-mini">
+              <span>会话 <b>{context ? '有效' : sid ? '无效' : '未登录'}</b></span>
+              <span>最小长度 <b>{policy.min_len}</b></span>
+              <span>TLS <b>{tlsOn ? 'https' : proto}</b></span>
+              <span>L1 脱敏 <b>{desensOn ? '已启用' : '未生效'}</b></span>
+            </div>
+            <p className="af-note">来源：/api/me 会话校验、后端 home-policy.json、运行时 sanitizeL1 探针与当前协议。</p>
+            <div className="af-actions">
+              <button type="button" className="btn" data-testid="security-jump-policy" onClick={() => jumpToTab(1, 'pwd-upper')}>打开密码策略</button>
+            </div>
+          </div>
+        </section>
+
+        <section className="af-panel" data-testid="security-group-l0">
+          <div className="af-ph"><h3>L0 密钥环</h3><span className="hint">内核 l0Status</span></div>
+          <div className="af-pb">
+            <p className="af-q">L0 加密密钥能不能用，写密钥是否已解锁？</p>
+            <div className="af-mini">
+              <span>状态 <b>{l0Err ? '不可用' : l0 ? (l0.write_unlocked ? '写密钥已解锁' : '写密钥锁定') : '读取中'}</b></span>
+              <span>管理密码包装 <b>{l0 ? (l0.has_admin_wrap ? '已设置' : '未设置') : '读取中'}</b></span>
+              <span className={l0Err ? 'bad' : ''}>错误 <b className={l0Err ? 'bad' : ''}>{l0Err || '无'}</b></span>
+            </div>
+            <p className="af-note">来源：内核 L0 密钥环真实状态；锁定态下写 L0 会被内核拒绝，不在页面伪造解锁。</p>
+            <div className="af-actions">
+              <button type="button" className="btn" data-testid="security-jump-l0" onClick={() => jumpToTab(1, 'l0-admin-card')}>去解锁 / 管理 L0</button>
+              <button type="button" className="btn" data-testid="security-refresh-l0" onClick={() => void refreshChecks()}>重新读取</button>
+            </div>
+          </div>
+        </section>
+
+        <section className="af-panel" data-testid="security-group-chain">
+          <div className="af-ph"><h3>审计链完整性</h3><span className="hint">HMAC-SHA256</span></div>
+          <div className="af-pb">
+            <p className="af-q">审计账本是否被改过，未签名旧段能否补签封存？</p>
+            <div className="af-mini">
+              <span>结论 <b>{chain ? (chain.ok ? '链完整' : '校验失败 / 不可达') : '读取中'}</b></span>
+              <span>sealed <b>{chain?.sealed ?? '未读取'}</b></span>
+              <span>未签名旧段 <b className={chain && chain.legacy_unsealed > 0 ? 'bad' : ''}>{chain ? chain.legacy_unsealed : '未读取'}</b></span>
+              <span>错误 <b>{chain && !chain.ok ? (chain.error ?? chain.reason ?? 'unknown') : '无'}</b></span>
+            </div>
+            <p className="af-note">
+              来源：/api/mirror/audit integrity + 本机 home-mirror.key；封存只补签名不改内容，链断时禁止封存。
+            </p>
+            <div className="af-actions">
+              <button
+                type="button" className="btn primary" data-testid="security-chain-reseal"
+                disabled={resealing || !chain?.ok || (chain?.legacy_unsealed ?? 0) === 0 || role !== 'admin'}
+                onClick={() => void doReseal()}
+              >
+                {resealing ? '封存中…' : `封存未签名旧段${chain ? `（${chain.legacy_unsealed} 条）` : ''}`}
+              </button>
+              <a className="btn" data-testid="security-jump-audit" href="../audit.html">打开审计日志</a>
+              <span className="dim" style={{ fontSize: 11 }}>
+                {!chain?.ok ? '链校验未通过：按钮禁用' : role !== 'admin' ? '需管理员会话' : ''}
+              </span>
+            </div>
+          </div>
+        </section>
       </div>
-      <div className="sub">
-        4.1 加密 · 4.2 密码策略 · 3.2 角色矩阵 · 18.2-A 用户团队 · L0 危险操作（12 卡）· 审计落内核 security_change
-      </div>
+
+      {/* 「N 项需处理」逐条展开：计数与下表同一数组，一条不多一条不少 */}
+      {issuesOpen && issueCount > 0 && (
+        <div className="card" id="sec-issue-list" data-testid="sec-issue-list">
+          <b>需处理 {issueCount} 项（与下方「安全检查摘要」逐条对应）</b>
+          <div className="note">每条都来自真实检查；按钮只做真实操作（后端/内核/主进程），失败原样报错误码，不把失败改判为通过。</div>
+          {issues.map((c) => {
+            const r = REMEDY[c.testid];
+            return (
+              <div
+                key={c.testid}
+                data-testid={`sec-issue-${c.testid}`}
+                style={{ borderTop: '1px solid var(--line)', padding: '10px 0', fontSize: 12, lineHeight: 1.7 }}
+              >
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <b>{c.k}</b>
+                  <span className={`p0-tag ${c.tone === 'err' ? 'warn' : 'info'}`}>{c.tone === 'err' ? '失败' : '需处理'}</span>
+                  <span className="dim">{c.v}</span>
+                </div>
+                <div className="note">为什么：{r?.why ?? '该检查未通过，原因见上方状态。'}</div>
+                <div className="note">需要：{r?.need ?? '管理员/运维确认。'}</div>
+                <div className="note">处理后：{r?.after ?? '修复后该项实时转为通过，计数随之下降。'}</div>
+                <div className="row" style={{ marginTop: 4, gap: 8 }}>
+                  {r?.action === 'reseal' && (
+                    <>
+                      <button
+                        type="button" className="btn primary" data-testid="sec-fix-chain"
+                        disabled={resealing || !chain?.ok || (chain?.legacy_unsealed ?? 0) === 0}
+                        onClick={() => void doReseal()}
+                      >
+                        {resealing ? '封存中…' : `封存未签名旧段${chain ? `（${chain.legacy_unsealed} 条）` : ''}`}
+                      </button>
+                      <span className="dim">
+                        {chain && !chain.ok
+                          ? '链校验失败：禁止封存（避免把破坏签名合法化）'
+                          : role !== 'admin'
+                            ? '需管理员会话（当前会话会被后端拒绝）'
+                            : '仅补签名，不改内容；迁移前强制备份'}
+                      </span>
+                    </>
+                  )}
+                  {r?.action === 'l0' && (
+                    <button
+                      type="button" className="btn" data-testid="sec-fix-l0"
+                      onClick={() => jumpToTab(1, 'l0-admin-card')}
+                    >去解锁 L0 密钥环</button>
+                  )}
+                  {r?.action === 'role' && (
+                    <button
+                      type="button" className="btn" data-testid="sec-fix-role"
+                      onClick={() => jumpToTab(2, 'admin-accounts-card')}
+                    >去「账号与密钥」改角色</button>
+                  )}
+                  {!r?.action && <span className="dim">需人工按上述步骤处理（无可用的一键接口）</span>}
+                </div>
+              </div>
+            );
+          })}
+          {issueMsg && <div className="note" data-testid="sec-issue-msg" style={{ color: 'var(--ok)' }}>{issueMsg}</div>}
+          {issueErr && <div className="note" data-testid="sec-issue-err" style={{ color: 'var(--err)' }}>{issueErr}</div>}
+        </div>
+      )}
 
       <div className="p0-tabs" role="tablist" data-testid="security-tabs">
         {['检查摘要', '危险操作卡', '账号与密钥', 'L0 审计'].map((label, i) => (
@@ -310,63 +615,75 @@ export function SecurityPage() {
 
       {/* ── 1. 检查摘要 ── */}
       <div hidden={tab !== 0} data-testid="security-summary">
-        <div className="p0-sec">
-          <div className="p0-sec-hd">
-            <h3>安全检查摘要</h3>
-            <span className="p0-tag">实时读取 · 失败如实</span>
-            <button className="btn" type="button" onClick={() => setTab(1)}>查看操作卡</button>
-          </div>
-          <div className="p0-banner info" data-testid="summary-banner">
-            只读检查不会修改任何状态；破坏性卡一律「管理员口令 → 强制备份 → 逐字口令」，账号/密码策略卡走真实后端接口并需管理员。
-          </div>
-          <div className="card">
-            <b>8 项检查（有真实接口的按实况显示，无接口的明确标注程序事实）</b>
-            <table className="ltable" data-testid="security-checks">
-              <thead>
-                <tr><th style={{ width: 120 }}>检查项</th><th>状态</th><th>说明</th></tr>
-              </thead>
-              <tbody>
-                {checks.map((c) => (
-                  <tr key={c.k} data-testid={c.testid}>
-                    <td>{c.k}</td>
-                    <td style={{
-                      fontWeight: 700,
-                      color: c.tone === 'ok' ? 'var(--ok)' : c.tone === 'warn' ? 'var(--warn)'
-                        : c.tone === 'err' ? 'var(--err)' : 'var(--accent)',
-                    }}>
-                      {c.tone === 'ok' ? '通过' : c.tone === 'warn' ? '需处理' : c.tone === 'err' ? '失败' : '只读'}
-                    </td>
-                    <td>{c.v}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <div className="note">
-              「IPC 会话校验 / 上行鉴权」是程序架构事实（主进程 handler 与后端强制），非页面推断；
-              其余各项来自真实接口：/api/me、/api/policy、内核 l0Status、内核审计账本、/api/mirror/audit integrity。
+        <div className="af-stack">
+          <section className="af-panel">
+            <div className="af-ph">
+              <h3>安全检查摘要</h3>
+              <span className="hint">实时读取 · 失败如实</span>
+              <button className="btn" type="button" onClick={() => setTab(1)}>查看操作卡</button>
             </div>
-          </div>
+            <div className="af-pb">
+              <p className="af-q" data-testid="summary-banner">
+                只读检查不改状态；破坏性动作一律「管理员口令 → 强制备份 → 逐字口令」，账号/密码走真实后端。
+              </p>
+              <table className="ltable" data-testid="security-checks">
+                <thead>
+                  <tr><th style={{ width: 120 }}>检查项</th><th>状态</th><th>说明</th></tr>
+                </thead>
+                <tbody>
+                  {checks.map((c) => (
+                    <tr key={c.k} data-testid={c.testid}>
+                      <td>{c.k}</td>
+                      <td style={{
+                        fontWeight: 700,
+                        color: c.tone === 'ok' ? 'var(--ok)' : c.tone === 'warn' ? 'var(--warn)'
+                          : c.tone === 'err' ? 'var(--err)' : 'var(--accent)',
+                      }}>
+                        {c.tone === 'ok' ? '通过' : c.tone === 'warn' ? '需处理' : c.tone === 'err' ? '失败' : '只读'}
+                      </td>
+                      <td>{c.v}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="af-note">来源：/api/me、/api/policy、内核 l0Status、审计账本、/api/mirror/audit integrity；IPC/上行鉴权为程序架构事实。</p>
+            </div>
+          </section>
 
-          <div className="card" data-testid="danger-overview">
-            <b>13 张危险操作卡（按权限前置分组；T4 新增「本机租户身份」、OB 新增「个人记忆账号绑定」）</b>
-            <div className="note" style={{ lineHeight: 1.9 }}>
-              L0 相关 6 张：密钥环 / SPLIT / 遗留迁移 / 恢复 / 遗留账本清理 / 从 L0 重建；<br />
-              账本相关 3 张：RESET / REJUDGE / 字段回填；账号相关 3 张：管理员账号 / 密码策略 / 本机租户身份；身份相关 1 张：个人记忆账号绑定。<br />
-              破坏性卡执行条件：管理员角色 + 强制备份 + 逐字口令，缺一不可；账号/密码策略卡需管理员角色并调用真实后端接口；无接口时卡内标「程序无该接口」。
-            </div>
-          </div>
+          <div className="af-g2">
+            <section className="af-panel" data-testid="danger-overview">
+              <div className="af-ph"><h3>危险操作卡</h3><span className="hint">13 张 · 按权限前置分组</span></div>
+              <div className="af-pb">
+                <div className="af-mini">
+                  <span>L0 相关 <b>6</b></span>
+                  <span>账本相关 <b>3</b></span>
+                  <span>账号相关 <b>3</b></span>
+                  <span>身份相关 <b>1</b></span>
+                </div>
+                <p className="af-note">破坏性卡需管理员 + 强制备份 + 逐字口令；无接口时卡内标「程序无该接口」。</p>
+                <div className="af-actions">
+                  <button type="button" className="btn" data-testid="security-jump-danger" onClick={() => setTab(1)}>打开操作卡</button>
+                </div>
+              </div>
+            </section>
 
-          <div className="card" data-testid="encrypt-card">
-            <b>加密状态（4.1，只读 · 按真实状态）</b>
-            <div className="row">
-              <span className={desensOn ? 'status active' : 'status deprecated'} data-testid="tls-desens">
-                L1 脱敏{desensOn ? `已启用（运行时探针实测：${desensOut.slice(0, 24)}…）` : '未生效（探针原文未变化）'}
-              </span>
-              {tlsOn
-                ? <span className="status active">TLS 已启用（当前 https）</span>
-                : <span className="status stale">TLS 未启用（当前为 {proto} 本机回环）</span>}
-              <span className="status stale">L0 AES-256-GCM：以密钥环实况为准（见检查摘要 / L0 管理卡）</span>
-            </div>
+            <section className="af-panel" data-testid="encrypt-card">
+              <div className="af-ph"><h3>加密状态</h3><span className="hint">4.1 · 只读</span></div>
+              <div className="af-pb">
+                <div className="af-mini">
+                  <span className={desensOn ? '' : 'bad'}>L1 脱敏 <b>{desensOn ? '已启用' : '未生效'}</b></span>
+                  <span>TLS <b>{tlsOn ? '开（https）' : `未启用（${proto}）`}</b></span>
+                  <span>L0 <b>AES-256-GCM</b></span>
+                </div>
+                <p className="af-note" data-testid="tls-desens">
+                  {desensOn ? `运行时探针实测：${desensOut.slice(0, 24)}…` : '运行时探针原文未变化，L1 脱敏未生效'}
+                  ；L0 加解密以密钥环实况为准。
+                </p>
+                <div className="af-actions">
+                  <button type="button" className="btn" data-testid="security-refresh-checks" onClick={() => void refreshChecks()}>重新读取</button>
+                </div>
+              </div>
+            </section>
           </div>
         </div>
       </div>
@@ -379,8 +696,7 @@ export function SecurityPage() {
             <span className="p0-tag warn">13 张 · 破坏性卡三段确认</span>
           </div>
           <div className="note" data-testid="danger-note" style={{ marginBottom: 8 }}>
-            每张卡调用真实接口（主进程 IPC / 内核 L0 端口），成功后显示真实回执与 request_id；
-            因环境缺少接口而无法执行时，卡内明确写「程序无该接口」，不使用「演示执行」类口径。
+            每张卡调用真实接口（主进程 IPC / 内核 L0），成功给回执与 request_id；缺接口时卡内明确写「程序无该接口」。
           </div>
           <div className="p0-grid2" data-testid="danger-cards">
             <div data-testid="danger-card-01"><AdminAccountCard /></div>
@@ -435,8 +751,10 @@ export function SecurityPage() {
             <h3>账号与密钥</h3>
             <span className="p0-tag">真实后端 /api/accounts · /api/keys</span>
           </div>
-          <RoleMatrixCard />
-          <MyWriteWrapCard />
+          <div className="af-g2">
+            <RoleMatrixCard />
+            <MyWriteWrapCard />
+          </div>
           <MemberTable accounts={accounts} error={accErr} />
           <KeyTable
             keys={rawKeys.map(toKeyView)}
@@ -455,36 +773,36 @@ export function SecurityPage() {
             <h3>L0 审计</h3>
             <span className="p0-tag">内核账本 · 只读</span>
           </div>
-          <div className="card">
-            <b>L0 相关审计（l0_* + security_change/l0*，最近 30 条）</b>
-            {l0AuditErr && <div className="p0-banner err" data-testid="l0-audit-error">{l0AuditErr}</div>}
-            {!l0AuditErr && l0Audit && l0Audit.length === 0 && (
-              <div className="p0-empty dashed" data-testid="l0-audit-empty">
-                暂无 L0 审计记录（账本中无 l0_* / l0 安全变更）；执行 L0 管理或查看动作后在此如实出现。
-              </div>
-            )}
-            {!l0AuditErr && l0Audit && l0Audit.length > 0 && (
-              <table className="ltable" data-testid="l0-audit-table">
-                <thead>
-                  <tr><th style={{ width: 180 }}>时间</th><th>动作</th><th>说明</th><th>request_id</th></tr>
-                </thead>
-                <tbody>
-                  {l0Audit.map((a) => (
-                    <tr key={`${a.request_id}-${a.ts}`}>
-                      <td>{fmtTime(a.ts)}</td>
-                      <td>{L0_ACTION_TEXT[a.action] ?? a.action}</td>
-                      <td>{a.op || '无'}</td>
-                      <td className="mid">{a.request_id}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-            {!l0AuditErr && !l0Audit && <div className="note">读取内核审计账本中…</div>}
-            <div className="note">
-              本表只读内核真实审计；不展示 L0 明文或密钥材料。未解锁会话不提供 L0 条数接口——程序无该接口。
+          <section className="af-panel" data-testid="l0-audit-panel-inner">
+            <div className="af-ph"><h3>L0 相关审计</h3><span className="hint">l0_* + security_change/l0* · 最近 30 条</span></div>
+            <div className="af-pb">
+              {l0AuditErr && <div className="p0-banner err" data-testid="l0-audit-error">{l0AuditErr}</div>}
+              {!l0AuditErr && l0Audit && l0Audit.length === 0 && (
+                <div className="p0-empty dashed" data-testid="l0-audit-empty">
+                  暂无 L0 审计记录（账本中无 l0_* / l0 安全变更）；执行 L0 管理或查看动作后在此如实出现。
+                </div>
+              )}
+              {!l0AuditErr && l0Audit && l0Audit.length > 0 && (
+                <table className="ltable" data-testid="l0-audit-table">
+                  <thead>
+                    <tr><th style={{ width: 180 }}>时间</th><th>动作</th><th>说明</th><th>request_id</th></tr>
+                  </thead>
+                  <tbody>
+                    {l0Audit.map((a) => (
+                      <tr key={`${a.request_id}-${a.ts}`}>
+                        <td>{fmtTime(a.ts)}</td>
+                        <td>{L0_ACTION_TEXT[a.action] ?? a.action}</td>
+                        <td>{a.op || '无'}</td>
+                        <td className="mid">{a.request_id}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {!l0AuditErr && !l0Audit && <div className="af-note">读取内核审计账本中…</div>}
+              <p className="af-note">只读内核真实审计；不展示 L0 明文或密钥材料，未解锁会话不提供 L0 条数接口。</p>
             </div>
-          </div>
+          </section>
         </div>
       </div>
 

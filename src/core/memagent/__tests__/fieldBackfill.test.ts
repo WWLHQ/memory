@@ -6,6 +6,7 @@ import { backfillMissingFields, scanRowsForBackfill } from '../fieldBackfill.ts'
 import { InMemoryStorage } from '../storage.ts';
 import { JsVectorBackend, embedSync, DEFAULT_VECTOR_DIM } from '../vector.ts';
 import { sha256hex } from '../sync.ts';
+import { buildSourceExcerpt } from '../memories.ts';
 import type { Memory } from '../types.ts';
 
 const NOW = 1_800_000_000_000;
@@ -186,5 +187,75 @@ describe('backfillMissingFields 执行', () => {
     await backfillMissingFields({ storage, ...ok });
     const json = JSON.stringify(await storage.queryAudit({}));
     expect(json).toContain('"vector_injected":false');
+  });
+});
+
+// REQ-014 C6-B 存量回填：source_excerpt 为 opt-in 字段，默认不碰（守恒），显式列入才补。
+describe('source_excerpt 存量回填（REQ-014 C6-B）', () => {
+  const EXCERPT_FIELDS = ['source_excerpt'] as const;
+  const SENSITIVE = '网关 https://gw.internal:8443/v1 ，Authorization: Bearer sk-abcdefghijklmnop 已轮换';
+
+  it('守恒：默认 fields 不含 source_excerpt 时，缺摘录的行不写盘、计数恒 0', async () => {
+    const storage = await seeded([mem({ source_excerpt: undefined })]);
+    const p = await scanRowsForBackfill(storage);
+    expect(p.missing_source_excerpt).toBe(0);
+    expect(p.unfillable_source_excerpt).toBe(0);
+    const report = await backfillMissingFields({ storage, ...ok });
+    expect(report.source_excerpt_filled).toBe(0);
+    expect((await storage.getMemory('mem_bf_1'))?.source_excerpt).toBeUndefined();
+  });
+
+  it('显式启用后从 content_l1 派生摘录，与写入侧 buildSourceExcerpt 同源', async () => {
+    const storage = await seeded([mem({ content_l1: DEEP_TEXT, source_excerpt: undefined })]);
+    const p = await scanRowsForBackfill(storage, {}, EXCERPT_FIELDS);
+    expect(p.missing_source_excerpt).toBe(1);
+    expect(p.fillable_rows).toBeGreaterThan(0);
+    const report = await backfillMissingFields({ storage, ...ok, fields: EXCERPT_FIELDS });
+    expect(report.source_excerpt_filled).toBe(1);
+    const m = await storage.getMemory('mem_bf_1');
+    expect(m?.source_excerpt).toBe(buildSourceExcerpt(DEEP_TEXT));
+  });
+
+  it('安全红线：键值/内网地址被脱敏，L0 密文字段永不作为摘录来源', async () => {
+    const storage = await seeded([mem({
+      content_l1: SENSITIVE,
+      content: '摘要版',
+      content_l0_enc: { v: 2, nonce: 'xx', ct: 'sk-PLAINTEXT-LEAK-SENTINEL' } as never,
+      source_excerpt: undefined,
+    })]);
+    await backfillMissingFields({ storage, ...ok, fields: EXCERPT_FIELDS });
+    const excerpt = (await storage.getMemory('mem_bf_1'))?.source_excerpt ?? '';
+    expect(excerpt).not.toContain('sk-abcdefghijklmnop');
+    expect(excerpt).not.toContain('gw.internal');
+    expect(excerpt).not.toContain('sk-PLAINTEXT-LEAK-SENTINEL'); // L0 密文 sentinel 绝不出现
+  });
+
+  it('算不出不猜：无 content_l1 时记 no_excerpt/no_l1，不写空串', async () => {
+    const storage = await seeded([mem({ content_l1: undefined, source_excerpt: undefined })]);
+    const p = await scanRowsForBackfill(storage, {}, EXCERPT_FIELDS);
+    expect(p.unfillable_source_excerpt).toBe(1);
+    const report = await backfillMissingFields({ storage, ...ok, fields: EXCERPT_FIELDS });
+    expect(report.source_excerpt_filled).toBe(0);
+    expect((await storage.getMemory('mem_bf_1'))?.source_excerpt).toBeUndefined();
+  });
+
+  it('幂等：第二次运行 source_excerpt_filled=0，不再写行', async () => {
+    const storage = await seeded([mem({ content_l1: DEEP_TEXT, source_excerpt: undefined })]);
+    const first = await backfillMissingFields({ storage, ...ok, fields: EXCERPT_FIELDS });
+    expect(first.source_excerpt_filled).toBe(1);
+    const second = await backfillMissingFields({
+      storage, admin_user_id: 'admin', request_id: 'req_bf_3', now: NOW + 1, backup_confirmed: true, fields: EXCERPT_FIELDS,
+    });
+    expect(second.fillable_rows).toBe(0);
+    expect(second.source_excerpt_filled).toBe(0);
+  });
+
+  it('审计只记字段名与长度，摘录正文不进账本', async () => {
+    const storage = await seeded([mem({ content_l1: DEEP_TEXT, source_excerpt: undefined })]);
+    await backfillMissingFields({ storage, ...ok, fields: EXCERPT_FIELDS });
+    const json = JSON.stringify(await storage.queryAudit({}));
+    expect(json).toContain('source_excerpt');
+    expect(json).not.toContain(DEEP_TEXT);
+    expect(json).toContain('"fields":["source_excerpt"]');
   });
 });

@@ -16,24 +16,24 @@ import type { BackfillPreview, BackfillReport } from '../../../core/memagent/fie
 const w = window as unknown as { __ELECTRON__?: boolean; api?: unknown };
 
 const PREVIEW: BackfillPreview = {
-  total: 1532, tombstones: 0, missing_sha256: 533, missing_embedding: 1,
-  fillable_rows: 533, protected_rows: 1, unfillable_sha256: 0, unfillable_embedding: 0,
+  total: 1532, tombstones: 0, missing_sha256: 533, missing_embedding: 1, missing_source_excerpt: 0,
+  fillable_rows: 533, protected_rows: 1, unfillable_sha256: 0, unfillable_embedding: 0, unfillable_source_excerpt: 0,
   already_complete: 999, by_layer: { L1: 533 },
   sample: [
     {
       mem_id: 'mem_h1', layer: 'L1', need_sha256: true, need_embedding: false,
-      fill_sha256: true, fill_embedding: false, protected: false,
+      need_source_excerpt: false, fill_sha256: true, fill_embedding: false, fill_source_excerpt: false, protected: false,
       sha_matches_content: null, codes: [],
     },
     {
       mem_id: 'mem_h2', layer: 'L1', need_sha256: true, need_embedding: true,
-      fill_sha256: true, fill_embedding: true, protected: true,
+      need_source_excerpt: false, fill_sha256: true, fill_embedding: true, fill_source_excerpt: false, protected: true,
       sha_matches_content: null, codes: [],
     },
   ],
 };
 const REPORT: BackfillReport = {
-  ...PREVIEW, sha256_filled: 533, embedding_filled: 1, indexed: 1, failed: 0, failed_ids: [],
+  ...PREVIEW, sha256_filled: 533, embedding_filled: 1, source_excerpt_filled: 0, indexed: 1, failed: 0, failed_ids: [],
 };
 
 /** 装上桌面壳：window.api.ledgerFields.{preview,run} */
@@ -72,6 +72,46 @@ describe('FieldBackfillCard（批次41-T 存量字段回填）', () => {
     expect(screen.getByTestId('fields-backfill-need-admin')).toBeInTheDocument();
     expect(screen.queryByTestId('fields-backfill-run')).toBeNull();
     expect(previewFn).not.toHaveBeenCalled();
+  });
+
+  it('缺省守恒：预览/执行只传历史两字段，不擅自补 source_excerpt', async () => {
+    const { previewFn, runFn } = mockHost();
+    render(<FieldBackfillCard enabled />);
+    await waitFor(() => expect(previewFn).toHaveBeenCalledTimes(1));
+    expect(previewFn.mock.calls[0]).toEqual(['s_test', ['sha256', 'embedding']]);
+    fireEvent.click(screen.getByTestId('fields-backfill-run'));
+    await waitFor(() => expect(runFn).toHaveBeenCalledTimes(1));
+    expect(runFn.mock.calls[0]).toEqual(['s_test', ['sha256', 'embedding']]);
+  });
+
+  it('REQ-014 C6-B 勾选原文摘录：预览/执行都带 source_excerpt，缺口与补齐数按真值展示', async () => {
+    const excerptPreview: BackfillPreview = {
+      ...PREVIEW, missing_source_excerpt: 3764, unfillable_source_excerpt: 3,
+      fillable_rows: 1800, by_layer: { L1: 1800 },
+    };
+    const excerptReport: BackfillReport = {
+      ...excerptPreview, sha256_filled: 0, embedding_filled: 0,
+      source_excerpt_filled: 1797, indexed: 0, failed: 0, failed_ids: [],
+    };
+    const { previewFn, runFn } = mockHost({
+      preview: { ok: true, preview: excerptPreview },
+      run: { ok: true, report: excerptReport, backup_dir: 'D:\\backups\\excerpt-x' },
+    });
+    render(<FieldBackfillCard enabled />);
+    await waitFor(() => expect(previewFn).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByTestId('fields-backfill-excerpt-toggle').querySelector('input')!);
+    // 勾选触发带 fields 的重新预览
+    await waitFor(() => expect(previewFn).toHaveBeenCalledTimes(2));
+    expect(previewFn.mock.calls[1]).toEqual(['s_test', ['sha256', 'embedding', 'source_excerpt']]);
+    const box = screen.getByTestId('fields-backfill-preview-report');
+    expect(box).toHaveTextContent('缺原文摘录 3764 条');
+    expect(box).toHaveTextContent('3 条 L1 脱敏后为空');
+    fireEvent.click(screen.getByTestId('fields-backfill-run'));
+    await waitFor(() => expect(runFn).toHaveBeenCalledTimes(1));
+    expect(runFn.mock.calls[0]).toEqual(['s_test', ['sha256', 'embedding', 'source_excerpt']]);
+    const report = screen.getByTestId('fields-backfill-report');
+    expect(report).toHaveTextContent('sha256 / embedding / source_excerpt');
+    expect(report).toHaveTextContent('已补原文摘录 1797 条');
   });
 
   it('管理员挂载即只读预览：缺口按字段分列、可补行数与层级分布都按主进程真值展示', async () => {

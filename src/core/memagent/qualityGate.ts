@@ -25,7 +25,7 @@ import { sanitizeL1, meaningfulLength, MIN_MEANINGFUL_CHARS, MIN_MEANINGFUL_WITH
  * 「这行是被哪一版规则放进来的」。历史行没有这个字段 → 按 v1（批次35 以前的口径）处理，
  * 绝不猜它是最新版。
  */
-export const QUALITY_GATE_VERSION = 4;
+export const QUALITY_GATE_VERSION = 5;
 
 /**
  * 拦截原因码（批次36-A）：跨版本**稳定**的英文码，专供回放器与重判统计用。
@@ -39,7 +39,11 @@ export type QualityBlockCode =
   /** 批次40-B：短**且**无硬事实（两个条件同时成立才拦，见 `MIN_MEANINGFUL_WITHOUT_FACTS`） */
   | 'short_low_signal'
   /** 批次63：模型/工具运行失败日志，剔除失败行后无正常对话（用户 2026-11-19 拍板） */
-  | 'run_failure';
+  | 'run_failure'
+  /** 批次64：只有截图/附件占位与简短确认语，无可用正文（用户 2026-11-22 账本取证） */
+  | 'attachment_only'
+  /** 批次64：终端命令会话 / 探针自检输出，剔除后无正常对话（用户 2026-11-22 账本取证） */
+  | 'tool_output';
 
 export interface QualityCheckResult {
   /** 是否通过质量门（true = 可进 L1；false = 拦截） */
@@ -599,12 +603,74 @@ function runFailureReason(text: string): { code: QualityBlockCode; reason: strin
   return null;
 }
 
+/* ---------- 批次64：附件占位 / 终端与探针输出（用户 2026-11-22 实机账本取证） ---------- */
+
+/** 客户端粘贴截图时的内联附件引用（@image#1:xxx.png） */
+const ATTACH_REF_RE = /@image#\d+:[^\s@]+/gi;
+
+/**
+ * 纯附件占位判定：只贴了截图引用 + 简短确认语（“刚测试完，请确认”）。
+ * 去掉附件引用后若没有实质正文 → 拦截；引用之外还有真实描述则放行。
+ */
+function attachmentOnlyReason(text: string): { code: QualityBlockCode; reason: string } | null {
+  if (!/@image#\d+:/i.test(text)) return null;
+  const rest = stripDecoration(text.replace(ATTACH_REF_RE, ' '));
+  if (!rest.trim()) return { code: 'attachment_only', reason: '仅有截图/附件占位，无可用正文' };
+  if (meaningfulLength(rest) < MIN_MEANINGFUL_WITHOUT_FACTS
+    && !hasHardFacts(rest) && !hasTechEvidence(rest)) {
+    return { code: 'attachment_only', reason: '仅有截图/附件占位与简短确认语，无可用正文' };
+  }
+  return null;
+}
+
+/** 终端提示符行（`PS D:\dir> git status` / `C:\dir>npm run`） */
+const SHELL_PROMPT_LINE_RE = /^\s*(?:PS\s+)?[A-Za-z]:[\\/][^\n>]*>\s*\S/;
+/** git 状态输出行（贴进来的终端回显，不是用户知识） */
+const GIT_STATUS_LINE_RE =
+  /^\s*(?:On branch\s+\S+|Your branch is|Changes to be committed:|Changes not staged for commit:|Untracked files:|nothing to commit|nothing added to commit|no changes added to commit|Initial commit$|Author:)/;
+/** 探针/自检结果行（账本实测：第二轮探针结果 / 探针结果：A:FAIL / IMG:error / entries=1 / hit=0ms） */
+const PROBE_LOG_LINE_RE =
+  /探针(?:结果|测试)|probe\s+(?:result|test)|\bIMG:(?:ok|error)\b|\bentries\s*=\s*\d+|\bhit\s*=\s*\d+/i;
+
+/**
+ * 终端命令会话 / 探针输出判定：
+ * · 连续 ≥2 条终端提示符 → 整段是终端会话记录；
+ * · 或出现探针/自检输出行；
+ * 若剔除输出行后仍有真实提问（以问号结尾的非输出行）→ 放行，不误伤“贴日志追问”。
+ */
+function toolOutputReason(text: string): { code: QualityBlockCode; reason: string } | null {
+  const lines = text.split(/[\r\n]+/);
+  const promptCount = lines.filter((l) => SHELL_PROMPT_LINE_RE.test(l)).length;
+  const probeHit = lines.some((l) => PROBE_LOG_LINE_RE.test(l));
+  if (promptCount < 2 && !probeHit) return null;
+
+  const asksQuestion = lines.some((l) => {
+    const t = l.trim();
+    if (!t) return false;
+    if (SHELL_PROMPT_LINE_RE.test(t) || GIT_STATUS_LINE_RE.test(t) || PROBE_LOG_LINE_RE.test(t)) return false;
+    return /[?？]\s*$/.test(t);
+  });
+  if (asksQuestion) return null;
+
+  if (promptCount >= 2) return { code: 'tool_output', reason: '终端命令会话记录，无正常对话内容' };
+
+  const rest = lines.filter((l) => !PROBE_LOG_LINE_RE.test(l)).join('\n');
+  const plainRest = stripDecoration(rest);
+  if (!plainRest.trim()) return { code: 'tool_output', reason: '探针/自检运行输出，无正常对话内容' };
+  if (meaningfulLength(plainRest) < MIN_MEANINGFUL_WITHOUT_FACTS
+    && !hasHardFacts(plainRest) && !hasTechEvidence(plainRest)) {
+    return { code: 'tool_output', reason: '探针/自检运行输出，无正常对话内容' };
+  }
+  return null;
+}
+
 /**
  * L0→L1 质量门（§2.1 清洗红线）：
  * 1. 清洗（sanitizeL1）后的有效字符 < MIN_MEANINGFUL_CHARS → 拦截（标点/占位符不计）
  * 2. 噪声规则对**脱敏后文本**匹配，任一命中 → 拦截
  * 3. 元信息噪声（问候/身份询问/助手自述与能力清单）→ 拦截
- * 4. 通过 → 返回清洗后内容（L1 脱敏产物）
+ * 4. 批次64：终端命令会话 / 探针自检输出 / 纯附件占位 → 拦截
+ * 5. 通过 → 返回清洗后内容（L1 脱敏产物）
  * 调用方（coreWrite / 手动编辑 / 自动摘要）：ok=false 时跳过入库 + 写审计，绝不静默丢弃。
  */
 export function checkL0ToL1Quality(raw: string): QualityCheckResult {
@@ -634,6 +700,12 @@ export function checkL0ToL1Quality(raw: string): QualityCheckResult {
   // 放在具体元信息码之后、short_low_signal 之前，保证失败日志记 run_failure 而非短门码。
   const runFailure = runFailureReason(sanitized);
   if (runFailure) return { ok: false, code: runFailure.code, reason: runFailure.reason };
+
+  // 批次64：终端会话 / 探针自检输出 / 纯附件占位（账本实测 4 条无意义记忆的根因）
+  const toolOutput = toolOutputReason(sanitized);
+  if (toolOutput) return { ok: false, code: toolOutput.code, reason: toolOutput.reason };
+  const attachmentOnly = attachmentOnlyReason(sanitized);
+  if (attachmentOnly) return { ok: false, code: attachmentOnly.code, reason: attachmentOnly.reason };
 
   // 批次40-B：短且无硬事实 → 拦。放在所有具体码之后，保证噪声/元对话仍记它们自己的码。
   // 「短」单独不构成理由：实测 30–49 字带有 36% 含硬事实（「C# 7.3 不支持 dynamic」），那是最该留的短记忆。

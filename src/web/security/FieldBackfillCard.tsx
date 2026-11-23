@@ -4,10 +4,10 @@
 // 恒 0 分，缺指纹的行在云端同步对账里会被列进 missing。本卡只填这两个空字段——
 // 正文、层级、version、updated_at、质量门戳、L0 一概不动，所以**不设逐字口令**（与 REJUDGE/RESET/REBUILD 不同类）。
 // 执行仍走主进程：仅管理员 + 强制先备份数据根，备份失败一律拒绝改写；填不出的行跳过并如实计数，绝不猜。
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { hostCall, hostCapability } from '../../desktop/hostBridge.ts';
 import { currentSessionId } from '../shared/session.ts';
-import type { BackfillDecision, BackfillPreview, BackfillReport } from '../../core/memagent/fieldBackfill.ts';
+import type { BackfillDecision, BackfillField, BackfillPreview, BackfillReport } from '../../core/memagent/fieldBackfill.ts';
 
 const errText = (e: unknown): string => String((e as Error)?.message ?? e);
 
@@ -25,6 +25,7 @@ function gapOf(d: BackfillDecision): string {
   const parts: string[] = [];
   if (d.need_sha256) parts.push('sha256');
   if (d.need_embedding) parts.push('embedding');
+  if (d.need_source_excerpt) parts.push('source_excerpt');
   return parts.length > 0 ? `缺 ${parts.join(' + ')}` : '字段齐全';
 }
 
@@ -34,14 +35,20 @@ export function FieldBackfillCard({ enabled }: { enabled: boolean }) {
   const [backup, setBackup] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // REQ-014 C6-B：默认 false，fields 恒为历史两字段（既有调用逐字守恒）；勾选才 opt-in 补 source_excerpt。
+  const [includeExcerpt, setIncludeExcerpt] = useState(false);
   const hostReady = hostCapability() !== 'none';
+  const fields = useMemo<readonly BackfillField[]>(
+    () => includeExcerpt ? ['sha256', 'embedding', 'source_excerpt'] : ['sha256', 'embedding'],
+    [includeExcerpt],
+  );
 
   const refresh = useCallback(async () => {
     if (!hostReady) return;
     setBusy(true);
     try {
       const res = await hostCall<{ ok: boolean; preview?: BackfillPreview; error?: string }>(
-        'ledger:fieldsPreview', [currentSessionId()],
+        'ledger:fieldsPreview', [currentSessionId(), fields],
       );
       if (res?.ok) { setPreview(res.preview ?? null); setErr(null); }
       else setErr(res?.error ?? '预览失败（主进程未返回结果）');
@@ -51,7 +58,7 @@ export function FieldBackfillCard({ enabled }: { enabled: boolean }) {
     } finally {
       setBusy(false);
     }
-  }, [hostReady]);
+  }, [hostReady, fields]);
 
   useEffect(() => {
     if (enabled && hostReady) void refresh();
@@ -62,7 +69,7 @@ export function FieldBackfillCard({ enabled }: { enabled: boolean }) {
     setErr(null);
     try {
       const res = await hostCall<{ ok: boolean; report?: BackfillReport; backup_dir?: string; error?: string }>(
-        'ledger:fieldsBackfill', [currentSessionId()],
+        'ledger:fieldsBackfill', [currentSessionId(), fields],
       );
       if (res?.ok) {
         setReport(res.report ?? null);
@@ -102,6 +109,18 @@ export function FieldBackfillCard({ enabled }: { enabled: boolean }) {
             </button>
             <span className="dim">只读：逐行看缺哪个字段、能不能从行上正文算出来，不改任何数据</span>
           </div>
+          <label className="row" data-testid="fields-backfill-excerpt-toggle" style={{ cursor: busy ? 'not-allowed' : 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={includeExcerpt}
+              disabled={busy}
+              onChange={(e) => setIncludeExcerpt(e.target.checked)}
+            />
+            <span>
+              同时补齐原文摘录 <code>source_excerpt</code>（REQ-014 C6-B：只从 L1 明文经脱敏派生、≤200 字；
+              L0 密文不参与，算不出的原样留着。默认不勾选，不影响原有指纹/向量回填）
+            </span>
+          </label>
           {preview && (
             <div className="note" data-testid="fields-backfill-preview-report">
               库内 <b>{preview.total}</b> 条（墓碑 {preview.tombstones} · 两字段齐全 {preview.already_complete}）
@@ -110,6 +129,13 @@ export function FieldBackfillCard({ enabled }: { enabled: boolean }) {
                 {preview.unfillable_sha256 > 0 && <>（其中 <b>{preview.unfillable_sha256}</b> 条行上没正文，算不出——不猜，原样留着）</>}
                 · 缺 embedding <b>{preview.missing_embedding}</b> 条
                 {preview.unfillable_embedding > 0 && <>（其中 <b>{preview.unfillable_embedding}</b> 条缺 content_l1，向量只源自 L1、不从别的层凑）</>}
+                {includeExcerpt && (
+                  <>
+                    <br />
+                    缺原文摘录 <b>{preview.missing_source_excerpt}</b> 条
+                    {preview.unfillable_source_excerpt > 0 && <>（其中 <b>{preview.unfillable_source_excerpt}</b> 条 L1 脱敏后为空，不写空串、不伪造保真）</>}
+                  </>
+                )}
               </div>
               <div>
                 本轮会写盘 <b>{preview.fillable_rows}</b> 条
@@ -149,9 +175,13 @@ export function FieldBackfillCard({ enabled }: { enabled: boolean }) {
           )}
           {report && (
             <div className="note" data-testid="fields-backfill-report">
-              已补 sha256 <b>{report.sha256_filled}</b> 条 · 已补 embedding <b>{report.embedding_filled}</b> 条 ·
-              进向量索引 <b>{report.indexed}</b> 条 · 受保护行 <b>{report.protected_rows}</b> 条 ·
-              算不出跳过 <b>{report.unfillable_sha256 + report.unfillable_embedding}</b> 项 · 写盘失败 <b>{report.failed}</b> 条
+              已补字段：<code>{fields.join(' / ')}</code>
+              <div>
+                已补 sha256 <b>{report.sha256_filled}</b> 条 · 已补 embedding <b>{report.embedding_filled}</b> 条 ·
+                已补原文摘录 <b>{report.source_excerpt_filled}</b> 条 ·
+                进向量索引 <b>{report.indexed}</b> 条 · 受保护行 <b>{report.protected_rows}</b> 条 ·
+                算不出跳过 <b>{report.unfillable_sha256 + report.unfillable_embedding + report.unfillable_source_excerpt}</b> 项 · 写盘失败 <b>{report.failed}</b> 条
+              </div>
               {report.failed_ids.length > 0 && (
                 <div className="dim">失败样本：<code>{report.failed_ids.join(' ')}</code></div>
               )}
@@ -171,6 +201,8 @@ export function FieldBackfillCard({ enabled }: { enabled: boolean }) {
         它<b>不改</b>的是：正文、层级 <code>layer</code>、<code>version</code>、<code>updated_at</code>、质量门戳与 L0；
         已删除行（墓碑）与算不出的行一律不碰。幂等：第二次预览「本轮会写盘」必为 0。
         缺 content_l1 的行<b>不会</b>被从别的层凑出向量——宁可这行继续召不回，也不给它一个来路不明的向量。
+        勾选「原文摘录」时，摘录取 <code>buildSourceExcerpt(content_l1)</code>（复用写入侧同一函数：<code>sanitizeL1</code> 脱敏 + ≤200 字），
+        与指纹 / 向量同口径、不另立判据；L0 密文与别的层正文<b>一概不参与</b>。
       </div>
     </div>
   );

@@ -196,6 +196,59 @@ export async function fetchMirrorIntegrity(): Promise<MirrorIntegrityView> {
   }
 }
 
+/** 封存链首旧无签名审计段（仅管理员；后端先校验链完整，断链/备份失败一律拒绝） */
+export interface ResealOutcome {
+  ok: boolean;
+  resealed?: number;
+  backup_path?: string | null;
+  integrity?: MirrorIntegrityView;
+  code?: string;
+  error?: string;
+  reason?: string;
+  broken_at_seq?: number;
+}
+
+export async function resealMirrorAudit(): Promise<ResealOutcome> {
+  const headers = sessionHeaders();
+  if (!headers) return { ok: false, code: 'E_NO_SESSION', error: '未登录' };
+  try {
+    const res = await fetch(`${homeBaseUrl()}/api/mirror/audit/reseal`, { method: 'POST', headers });
+    const body = (await res.json().catch(() => ({}))) as {
+      ok?: boolean; resealed?: number; backup_path?: string | null; code?: string; error?: string; reason?: string;
+      broken_at_seq?: number;
+      integrity?: { ok?: boolean; sealed?: number; legacy_unsealed?: number; reason?: string; algorithm?: string };
+    };
+    if (!res.ok || body.ok !== true) {
+      return {
+        ok: false,
+        code: body.code ?? (res.status === 403 ? 'E_ADMIN_REQUIRED' : res.status === 401 ? 'E_NO_SESSION' : `E_HTTP_${res.status}`),
+        error: body.error ?? failReason(res, body),
+        ...(body.reason ? { reason: body.reason } : {}),
+        ...(typeof body.broken_at_seq === 'number' ? { broken_at_seq: body.broken_at_seq } : {}),
+      };
+    }
+    const it = body.integrity;
+    return {
+      ok: true,
+      resealed: body.resealed ?? 0,
+      backup_path: body.backup_path ?? null,
+      ...(it
+        ? {
+          integrity: {
+            ok: it.ok === true,
+            sealed: it.sealed ?? 0,
+            legacy_unsealed: it.legacy_unsealed ?? 0,
+            ...(it.reason ? { reason: it.reason } : {}),
+            ...(it.algorithm ? { algorithm: it.algorithm } : {}),
+          },
+        }
+        : {}),
+    };
+  } catch {
+    return { ok: false, code: 'E_BACKEND_UNREACHABLE', error: '登录后端不可达' };
+  }
+}
+
 /** 读取已持久化的密码策略（任意登录会话；后端 home-policy.json） */
 export async function fetchPwdPolicy(): Promise<ApiResult<{ policy: PwdPolicy }>> {
   const headers = sessionHeaders();
