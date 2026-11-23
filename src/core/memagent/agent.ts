@@ -15,6 +15,9 @@ import {
   selectRecallBackground,
 } from './recallInsight.ts';
 import { cosine, embedSync, tokenize, DEFAULT_VECTOR_DIM } from './vector.ts';
+// P1-8′：正文 tokenSet 缓存——把 5686 条候选的 tokenize+Set 从每次召回的热路径移走。
+// 失效绑正文原文相等（不是有损哈希），命中与分数逐条不变；详见 docTokenSet.ts。
+import { docTokenSet } from './docTokenSet.ts';
 import { matchedTerms } from './hitHighlight.ts';
 import { buildSupersedeHit, mergeSupersededHits, probeSupersededTargets } from './recallSupersede.ts';
 import { isConcreteMode, modeSpec, modeWeights, normalizeScene, resolveMode, type LayerKey } from './recallModes.ts';
@@ -245,7 +248,7 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
         const cos = m.embedding ? cosine(qvec, m.embedding) : 0;
         // REQ-013 / C3：覆盖率用加权版（标识符权重 3、普通词 1）；无标识符时与 tokenCoverage 逐字一致。
         const relevance = qTokens
-          ? fuseRelevance(cos, tokenCoverageWeighted(qTokens, new Set(tokenize(m.content))), RELEVANCE_FUSION_LAMBDA)
+          ? fuseRelevance(cos, tokenCoverageWeighted(qTokens, docTokenSet(m.mem_id, m.content)), RELEVANCE_FUSION_LAMBDA)
           : cos;
         let score = scoreMemory(m, relevance, now, recallWeights);
         // REQ-013 / C1：仅当 query 检测到时间意图且记忆命中时间窗时温和加权（乘性，不破坏排序单调性）。
