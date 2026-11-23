@@ -273,6 +273,18 @@ describe('SetupPage（批次37-B 首启强制向导）', () => {
     expect(screen.getByTestId('setup-error').textContent).toContain('主进程未就绪');
     expect(screen.getByTestId('setup-step-dirs').textContent).toContain('读取中');
   });
+
+  it('跟随壳层深色主题：挂载即设置 html[data-theme="dark"]', () => {
+    // 批次55：深色主题适配正向断言
+    localStorage.setItem('memdesk.shell.theme.v1', 'dark');
+    try {
+      render(<SetupPage />);
+      expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+    } finally {
+      localStorage.setItem('memdesk.shell.theme.v1', 'light');
+      document.documentElement.removeAttribute('data-theme');
+    }
+  });
 });
 
 // 批次58：两个可选步骤（备份路径 / 精炼大模型）。

@@ -469,4 +469,119 @@ test.describe('首启向导 · 主进程拒绝即不放行（页面闸门不是�
     await expect(page.locator('[data-testid="setup-error"]')).toContainText(ERR_PERSIST_POINTER);
     await expect(page).toHaveURL(/setup\.html/);
   });
+
+  test('必办条是内容流末尾的普通节点：不在页面底部常驻，滚到底才到页尾（1024×560）', async ({ page }) => {
+    await page.addInitScript(installSetupStub, READY_TO_FINISH);
+    // 小窗口：内容必然超出一屏，才能验证「未滚动时必办条在可视区之外」
+    await page.setViewportSize({ width: 1024, height: 560 });
+    await page.goto(WIZARD);
+
+    const foot = page.locator('[data-testid="setup-step-finish"]');
+    const status = page.locator('.sw-status');
+    const scroller = page.locator('[data-testid="setup-scroll"]');
+    await expect(foot).toHaveCount(1);
+    await expect(status).toHaveCount(1);
+
+    // ① 必办条与数据路径行都是滚动内容的后代，普通流（非 fixed/sticky）
+    const layers = await page.evaluate(() => {
+      const s = document.querySelector('[data-testid="setup-scroll"]') as HTMLElement;
+      const f = document.querySelector('[data-testid="setup-step-finish"]') as HTMLElement;
+      const st = document.querySelector('.sw-status') as HTMLElement;
+      const p = document.querySelector('[data-testid="setup-page"]') as HTMLElement;
+      return {
+        footInScroll: s.contains(f),
+        statusInScroll: s.contains(st),
+        footPos: getComputedStyle(f).position,
+        statusPos: getComputedStyle(st).position,
+        max: s.scrollHeight - s.clientHeight,
+        pageH: p.getBoundingClientRect().height,
+        vh: window.innerHeight,
+        docScroll: document.documentElement.scrollHeight - window.innerHeight,
+      };
+    });
+    expect(layers.footInScroll).toBe(true);
+    expect(layers.statusInScroll).toBe(true);
+    expect(['static', 'relative']).toContain(layers.footPos);
+    expect(['static', 'relative']).toContain(layers.statusPos);
+    expect(layers.max).toBeGreaterThan(0);
+    expect(Math.abs(layers.pageH - layers.vh)).toBeLessThan(1.5);
+    expect(layers.docScroll).toBeLessThanOrEqual(0);
+
+    // ② 未滚动时：必办条在可视区之下 —— 页面底部没有常驻占位
+    const scrollerBox = (await scroller.boundingBox())!;
+    const before = (await foot.boundingBox())!;
+    expect(before.y).toBeGreaterThanOrEqual(scrollerBox.y + scrollerBox.height - 1);
+
+    // ③ 滚到底：必办条底边 = 内容底边（不是被钉在视口底），最后一张卡不被遮挡
+    await scroller.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+    await page.waitForTimeout(80);
+    const geom = await page.evaluate(() => {
+      const s = document.querySelector('[data-testid="setup-scroll"]') as HTMLElement;
+      const f = document.querySelector('[data-testid="setup-step-finish"]') as HTMLElement;
+      const st = document.querySelector('.sw-status') as HTMLElement;
+      const cards = document.querySelectorAll('[data-testid="setup-scroll"] .sw-card');
+      const last = cards[cards.length - 1] as HTMLElement;
+      const sr = s.getBoundingClientRect();
+      const fr = f.getBoundingClientRect();
+      return {
+        contentBottom: sr.top + s.scrollHeight - s.scrollTop,
+        footTop: fr.top,
+        footBottom: fr.bottom,
+        statusBottom: st.getBoundingClientRect().bottom,
+        lastCardBottom: last.getBoundingClientRect().bottom,
+        remaining: s.scrollHeight - s.scrollTop - s.clientHeight,
+        vh: window.innerHeight,
+      };
+    });
+    expect(Math.abs(geom.remaining)).toBeLessThan(1.5);
+    expect(Math.abs(geom.footBottom - geom.contentBottom)).toBeLessThan(1.5);
+    expect(geom.statusBottom).toBeLessThanOrEqual(geom.footTop + 1);
+    expect(geom.lastCardBottom).toBeLessThanOrEqual(geom.footTop + 1);
+    expect(geom.footBottom).toBeLessThanOrEqual(geom.vh + 1);
+  });
+
+  test('最大化窗口同样成立：必办条仍是内容流末尾节点，最后一张卡不被遮挡', async ({ page }) => {
+    await page.addInitScript(installSetupStub, READY_TO_FINISH);
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await page.goto(WIZARD);
+
+    const foot = page.locator('[data-testid="setup-step-finish"]');
+    const status = page.locator('.sw-status');
+    const scroller = page.locator('[data-testid="setup-scroll"]');
+    await expect(foot).toHaveCount(1);
+    await expect(status).toHaveCount(1);
+
+    await scroller.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+    await page.waitForTimeout(80);
+    const geom = await page.evaluate(() => {
+      const s = document.querySelector('[data-testid="setup-scroll"]') as HTMLElement;
+      const f = document.querySelector('[data-testid="setup-step-finish"]') as HTMLElement;
+      const st = document.querySelector('.sw-status') as HTMLElement;
+      const p = document.querySelector('[data-testid="setup-page"]') as HTMLElement;
+      const cards = document.querySelectorAll('[data-testid="setup-scroll"] .sw-card');
+      const last = cards[cards.length - 1] as HTMLElement;
+      const sr = s.getBoundingClientRect();
+      const fr = f.getBoundingClientRect();
+      const sb = st.getBoundingClientRect();
+      return {
+        footInScroll: s.contains(f),
+        statusInScroll: s.contains(st),
+        contentBottom: sr.top + s.scrollHeight - s.scrollTop,
+        footTop: fr.top, footBottom: fr.bottom,
+        statusTop: sb.top, statusBottom: sb.bottom,
+        lastCardBottom: last.getBoundingClientRect().bottom,
+        pageH: p.getBoundingClientRect().height,
+        vh: window.innerHeight,
+        docScroll: document.documentElement.scrollHeight - window.innerHeight,
+      };
+    });
+    expect(geom.footInScroll).toBe(true);
+    expect(geom.statusInScroll).toBe(true);
+    // 滚到底后：必办条底边 = 内容底边；最后一张卡在必办条之上
+    expect(Math.abs(geom.footBottom - geom.contentBottom)).toBeLessThan(1.5);
+    expect(geom.statusBottom).toBeLessThanOrEqual(geom.footTop + 1);
+    expect(geom.lastCardBottom).toBeLessThanOrEqual(geom.footTop + 1);
+    expect(Math.abs(geom.pageH - geom.vh)).toBeLessThan(1.5);
+    expect(geom.docScroll).toBeLessThanOrEqual(0);
+  });
 });

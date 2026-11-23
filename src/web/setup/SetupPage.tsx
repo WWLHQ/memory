@@ -1,6 +1,6 @@
 // 首启向导（批次37-B 建；批次58 按定稿图逐字重做版式）。
 // 【版式红线】严格照定稿图：标题条 + setupDone 胶囊 + 三步绿框进度 + 三张白卡（①两库位置 ②L0 管理密码 ③恢复卡预览）
-// + 底部固定条 + 三段状态栏。不自创进度 chip、不加彩色状态块、不改两列字段布局、不改按钮形态。
+// + 内容流末尾的必办条与三段状态栏。不自创进度 chip、不加彩色状态块、不改两列字段布局、不改按钮形态。
 // 图中示例值（D:\MemoryData / a3f9-c21e / 11,958 行）一律换成主进程真回读，绝不拿假数冒充真实读数。
 //
 // 用户上一条明确要求保留的两项，以**图中同款控件**落位，不引入新视觉语言：
@@ -254,7 +254,7 @@ export function SetupPage({ onNavigate }: { onNavigate?: (url: string) => void }
 
   if (!hostReady) {
     return (
-      <div className="sw-page">
+      <div className="sw-page sw-page-solo">
         <div className="sw-card" data-testid="setup-unavailable">
           当前是纯浏览器模式，没有桌面主进程：库位置、L0 管理密码与恢复卡都要靠主进程的真文件与真密钥环，
           这里做不了，也不会假装设置成功。请打开桌面应用完成首启设置。
@@ -301,6 +301,9 @@ export function SetupPage({ onNavigate }: { onNavigate?: (url: string) => void }
 
   return (
     <div className="sw-page" data-testid="setup-page">
+      {/* 内容区独立滚动：必办条与状态栏是内容流的最后两个节点（普通流，非 fixed/sticky），
+          滚到页尾才出现，不在页面底部常驻占位，也不会遮挡最后一张卡。 */}
+      <div className="sw-scroll" data-testid="setup-scroll">
       {/* ── 标题条（图中：左标题 / 右上胶囊） ───────────────────── */}
       <header className="sw-head">
         <h1>首启强制向导</h1>
@@ -537,7 +540,16 @@ export function SetupPage({ onNavigate }: { onNavigate?: (url: string) => void }
         {llmMsg && <div className="sw-note" data-testid="setup-llm-msg">{llmMsg}</div>}
       </section>
 
-      {/* ── 底部固定条（图中：三个 ✓ + 说明 + 进入应用） ───────── */}
+      {/* ── 状态栏（图中三段；示例假数换成主进程真回读） ─────────
+          2026-11-21 用户拍板（B 方案）：数据路径行与必办条都是普通内容节点，
+          放在滚动内容流末尾，滚到页尾才出现；页面底部不再常驻占位。 */}
+      <div className="sw-status" data-testid="setup-statusbar">
+        <span>数据根 · 记忆库 <code className="sw-mono">{state?.ledger_file.path ?? '读取中…'}</code> · 原数据库 <code className="sw-mono">{state?.l0_file.path ?? '读取中…'}</code> · 备份 {state?.backup?.ledger_dir || state?.backup?.l0_dir ? `${state.backup.ledger_dir || '未设'} | ${state.backup.l0_dir || '未设'}` : '未设置'}</span>
+        <span>全部读数来自主进程 setup:state 回读</span>
+        <span>MultiAgent Memory v0.1.0 · 首启强制向导</span>
+      </div>
+
+      {/* ── 底部必办条（内容流最后一个节点：三个 ✓ + 说明 + 进入应用） ── */}
       <footer className="sw-foot" data-testid="setup-step-finish">
         <div className="sw-foot-l">
           <span className="sw-dots">
@@ -557,11 +569,6 @@ export function SetupPage({ onNavigate }: { onNavigate?: (url: string) => void }
         </div>
       </footer>
 
-      {/* ── 状态栏（图中三段；示例假数换成主进程真回读） ───────── */}
-      <div className="sw-status" data-testid="setup-statusbar">
-        <span>数据根 · 记忆库 <code className="sw-mono">{state?.ledger_file.path ?? '读取中…'}</code> · 原数据库 <code className="sw-mono">{state?.l0_file.path ?? '读取中…'}</code> · 备份 {state?.backup?.ledger_dir || state?.backup?.l0_dir ? `${state.backup.ledger_dir || '未设'} | ${state.backup.l0_dir || '未设'}` : '未设置'}</span>
-        <span>全部读数来自主进程 setup:state 回读</span>
-        <span>MultiAgent Memory v0.1.0 · 首启强制向导</span>
       </div>
 
       {/* ── 跳过确认：同款白卡，不引入新控件语言 ───────────────── */}
