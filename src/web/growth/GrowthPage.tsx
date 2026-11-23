@@ -42,6 +42,8 @@ import {
 import { EvolutionSettingsCard } from './EvolutionSettingsCard.tsx';
 import { EvolutionTimelineCard } from './EvolutionTimelineCard.tsx';
 import { useToast } from './useToast.tsx';
+import { useHostTheme } from '../shared/hostTheme.ts';
+import '../shared/afPage.css';
 
 const EMPTY_METRICS: GrowthMetrics = {
   hit_rate: 0, confirmed: 0, rejected: 0, low_quality_ratio: 0, level_stats_L6: 0, latency_ms: 0, latency_samples: 0,
@@ -53,7 +55,16 @@ const EMPTY_METRICS: GrowthMetrics = {
  */
 const errText = (e: unknown): string => String((e as Error)?.message ?? e);
 
+/** 回归四态 → 人话（与 RegressionTable / DeltaPanel 同一份真实审计口径） */
+const REGRESSION_LABEL: Record<string, string> = {
+  never_run: '未到运行时间',
+  insufficient_samples: '样本不足（积累中）',
+  not_adopted: '已评估未达门槛',
+  adopted: '已采纳',
+};
+
 export function GrowthPage() {
+  useHostTheme();
   const [weights, setWeights] = useState<DimWeights>({ ...DEFAULT_WEIGHTS });
   const [thresholds, setThresholds] = useState<LayerThresholds>({ ...DEFAULT_THRESHOLDS });
   // 批次61 GAP-1/GAP-2：召回权重与反馈策略也从 growth:v1 读写（默认值 = 历史常量 / 策略关闭）
@@ -76,6 +87,21 @@ export function GrowthPage() {
   const [evoReceipt, setEvoReceipt] = useState<string | null>(null);
   const { node: toast, show } = useToast();
   const reportMirror = useGrowthMirror();
+
+  // 深链：?tab=0..2 与页签一一对应（红线自检已并入判重页签；无参数 = 判重与嫁接）
+  useEffect(() => {
+    const t = typeof location !== 'undefined' ? new URLSearchParams(location.search).get('tab') : null;
+    const n = t === null ? NaN : Number(t);
+    if (Number.isInteger(n) && n >= 0 && n <= 2) setTab(n);
+  }, []);
+
+  /** 场景卡动作：切页签并滚到真实面板（按钮本身只做导航，不改任何业务状态） */
+  const jumpTo = (index: number, testid: string) => {
+    setTab(index);
+    setTimeout(() => {
+      document.querySelector(`[data-testid="${testid}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 60);
+  };
 
   // 挂载：加载真实账本（记忆表 + 全量审计 + growth_op 历史）+ 已保存的生长配置（权重/阈值/调度）
   useEffect(() => {
@@ -114,6 +140,32 @@ export function GrowthPage() {
   const samples = real?.samples ?? [];
   const series: DeltaPoint[] = real?.deltaSeries ?? [];
   const empty = real ? !real.available : true;
+
+  // ── 摘要 / 场景卡的真实读数（全部由 real + growth:v1 派生；取不到就写未采样） ──
+  const regressionKind = real?.regression.kind ?? 'never_run';
+  const regressionText = REGRESSION_LABEL[regressionKind] ?? regressionKind;
+  const enabledSchedules = schedule.filter((s) => s.enabled).length;
+  const hitRateText = metrics.hit_rate > 0 ? `${(metrics.hit_rate * 100).toFixed(1)}%` : '未采样';
+  const dedupCostText = dedupStats.avg_cost_samples > 0 ? `${Math.round(dedupStats.avg_cost_ms)}ms` : '未采样';
+  const lastAudit = audit[0] ?? null;
+
+  /** 重新读真实账本 + growth:v1（只读刷新，不写审计、不改配置） */
+  async function reloadAll() {
+    try {
+      const [fresh, cfg] = await Promise.all([loadRealGrowthData(), coreLoadGrowthConfig()]);
+      setReal(fresh);
+      setAudit(fresh.growthAudit.slice().reverse());
+      setWeights(cfg.weights);
+      setThresholds(cfg.thresholds);
+      setRecallWeights(cfg.recall_weights);
+      setFeedbackPolicy(cfg.feedback_policy);
+      setEvolution(cfg.evolution);
+      setScheduleExprs(cfg.schedule_exprs);
+      show(`已重新读取真实账本：记忆 ${fresh.memCount} 条 / 审计 ${fresh.auditCount} 条`);
+    } catch (e) {
+      show(`刷新失败：${errText(e)}`);
+    }
+  }
 
   const sample = samples.length > 0 ? samples[sampleIdx % samples.length] : null;
   const opts = useMemo(() => evaluateOptimizations(metrics), [metrics]);
@@ -347,10 +399,10 @@ export function GrowthPage() {
 
   if (loading) {
     return (
-      <div className="p0-page" data-testid="growth-page">
-        <div className="p0-hd">
-          <h2>🌱 生长与自进化</h2>
-          <span className="p0-tag">REQ-009 · P14</span>
+      <div className="p0-page af-page" data-testid="growth-page">
+        <div className="af-head" data-testid="growth-head">
+          <h1>净化生长</h1>
+          <span className="sub">正在读取真实账本…</span>
         </div>
         <div className="note">加载真实账本中…</div>
       </div>
@@ -358,20 +410,130 @@ export function GrowthPage() {
   }
 
   return (
-    <div className="p0-page" data-testid="growth-page">
-      <div className="p0-hd">
-        <h2>🌱 生长与自进化</h2>
-        <span className="p0-tag">REQ-009 · P14</span>
-        <span className="p0-tag info">真实 growth:v1</span>
-        <div className="p0-right">
+    <div className="p0-page af-page" data-testid="growth-page">
+      <div className="af-head" data-testid="growth-head">
+        <h1>净化生长</h1>
+        <span className="sub">
+          真实账本 · 记忆 {real?.memCount ?? 0} 条 / 审计 {real?.auditCount ?? 0} 条 · 自净化（五维判重 + 短路嫁接）+ 自生长（回归 / 调度 / 进化）
+        </span>
+        <span className="right">
+          <span className="p0-tag info">growth:v1 真实配置</span>
           <label style={{ fontSize: 11.5 }}>
             <input type="checkbox" data-testid="dev-mode" checked={devMode} onChange={(e) => setDevMode(e.target.checked)} /> 开发者模式（G7）
           </label>
-        </div>
+        </span>
       </div>
-      <div className="sub">
-        自净化（6.1 五维：仅展示有可信测量的维度 + 6.2 短路嫁接）+ 自生长（7.1 指标 / 7.2 Δ / 13.3 调度 真实账本实算）·
-        账本规模：记忆 {real?.memCount ?? 0} 条 / 审计 {real?.auditCount ?? 0} 条
+
+      {/* ── 摘要读数条（真实账本 / growth:v1，取不到写未采样） ── */}
+      <section className="af-panel" data-testid="growth-summary">
+        <div className="af-ph"><h3>生长摘要</h3><span className="hint">核心账本 + growth:v1 · 非示例数据</span></div>
+        <div className="af-pb">
+          <div className="af-g4">
+            <div className="af-stat">
+              <div className="k">账本记忆 <span>memCount</span></div>
+              <div className="v">{real?.memCount ?? 0}</div>
+              <div className="d mut">判重样本实际取自其中最近 {samples.length} 条</div>
+            </div>
+            <div className="af-stat" data-testid="growth-stat-hitrate">
+              <div className="k">检索命中率 <span>hit_rate</span></div>
+              <div className={`v${metrics.hit_rate > 0 ? '' : ' sm'}`}>{hitRateText}</div>
+              <div className={metrics.hit_rate > 0 ? 'd' : 'd mut'}>
+                {metrics.hit_rate > 0 ? `召回审计实算 · L6 命中 ${metrics.level_stats_L6}` : '账本暂无召回审计，不写 0 冒充读数'}
+              </div>
+            </div>
+            <div className="af-stat">
+              <div className="k">最近回归 <span>dedup_regression</span></div>
+              <div className="v sm">{regressionText}</div>
+              <div className={regressionKind === 'adopted' ? 'd' : 'd mut'}>
+                {real?.regression.ts ? `真实审计时间 ${new Date(real.regression.ts).toLocaleString('zh-CN', { hour12: false })}` : '尚无回归审计记录'}
+              </div>
+            </div>
+            <div className="af-stat">
+              <div className="k">growth 审计 <span>growth_op</span></div>
+              <div className="v">{audit.length}</div>
+              <div className="d mut">
+                {lastAudit ? `最近 ${lastAudit.event} · ${new Date(lastAudit.at).toLocaleTimeString('zh-CN', { hour12: false })}` : '本页尚无 growth_op 记录'}
+              </div>
+            </div>
+          </div>
+          <p className="af-note">
+            数据来源：内核账本（桌面 = 主进程 FileStorage 持久库，浏览器 = 进程内账本）+ growth:v1 配置。
+            空账本时读数为真实 0；无审计支撑的指标写「未采样」，页面不生成演示数据。
+          </p>
+        </div>
+      </section>
+
+      {/* ── 场景分组：2×2 等宽等高，回答/来源压成一行，读数与动作优先 ── */}
+      <div className="af-g2" data-testid="growth-groups">
+        <section className="af-panel" data-testid="growth-group-dedup">
+          <div className="af-ph"><h3>净化 / 去重候选与处置</h3><span className="hint">6.1/6.2 · 记忆表+merge审计</span></div>
+          <div className="af-pb">
+            <p className="af-q">这次写入会不会被判重、能否短路嫁接？</p>
+            <div className="af-mini">
+              <span>判重样本 <b>{samples.length}</b></span>
+              <span>24h 合并 <b>{dedupStats.merged}</b></span>
+              <span>短路命中 <b>{dedupStats.short_circuit_hits}</b></span>
+              <span>平均耗时 <b>{dedupCostText}</b></span>
+            </div>
+            <div className="af-actions">
+              <button type="button" className="btn" data-testid="growth-jump-dedup" onClick={() => jumpTo(0, 'dedup-card')}>查看五维判重</button>
+              <button type="button" className="btn" data-testid="growth-group-resample" onClick={() => handleResample()}>换一条样本</button>
+            </div>
+          </div>
+        </section>
+
+        <section className="af-panel" data-testid="growth-group-metrics">
+          <div className="af-ph"><h3>生长指标与回归结果</h3><span className="hint">7.1–7.3 · 召回+回归审计</span></div>
+          <div className="af-pb">
+            <p className="af-q">召回质量在变好还是变差，回归是否被采纳？</p>
+            <div className="af-mini">
+              <span>命中率 <b>{hitRateText}</b></span>
+              <span>确认 <b>{metrics.confirmed}</b></span>
+              <span>拒绝 <b>{metrics.rejected}</b></span>
+              <span>状态 <b>{regressionText}</b></span>
+            </div>
+            <div className="af-actions">
+              <button type="button" className="btn primary" data-testid="growth-group-regress" onClick={() => void handleManualTrigger()}>触发一轮真实回归</button>
+              <button type="button" className="btn" data-testid="growth-jump-metrics" onClick={() => jumpTo(1, 'growth-cards')}>查看指标</button>
+            </div>
+          </div>
+        </section>
+
+        <section className="af-panel" data-testid="growth-group-params">
+          <div className="af-ph"><h3>参数与生效范围</h3><span className="hint">growth:v1 · param_save</span></div>
+          <div className="af-pb">
+            <p className="af-q">现在生效的权重 / 阈值 / 调度 / 进化模式是什么？</p>
+            <div className="af-mini">
+              <span>权重和 <b>{wCheck.sum.toFixed(3)}</b> {wCheck.ok ? '' : <b className="bad">R1 不合格</b>}</span>
+              <span>调度启用 <b>{enabledSchedules}</b> / {schedule.length}</span>
+              <span>进化 <b>{evolution.mode}</b></span>
+              <span>阈值 L1 <b>{thresholds.L1.toFixed(2)}</b> · L6 <b>{thresholds.L6.toFixed(2)}</b></span>
+            </div>
+            <div className="af-actions">
+              <button
+                type="button" className="btn" data-testid="growth-jump-tune"
+                onClick={() => { setDevMode(true); jumpTo(0, 'dev-tune-panel'); }}
+              >打开调参</button>
+              <button type="button" className="btn" data-testid="growth-jump-schedule" onClick={() => jumpTo(2, 'schedule-timeline')}>打开调度</button>
+            </div>
+          </div>
+        </section>
+
+        <section className="af-panel" data-testid="growth-group-audit">
+          <div className="af-ph"><h3>审计留痕</h3><span className="hint">growth_op · 只读</span></div>
+          <div className="af-pb">
+            <p className="af-q">每次自净化 / 自生长动作，能不能追到人与时间？</p>
+            <div className="af-mini">
+              <span>growth_op 条目 <b>{audit.length}</b></span>
+              <span>最近事件 <b>{lastAudit ? lastAudit.event : '暂无'}</b></span>
+              <span>最近时间 <b>{lastAudit ? new Date(lastAudit.at).toLocaleString('zh-CN', { hour12: false }) : '无记录'}</b></span>
+            </div>
+            <div className="af-actions">
+              <a className="btn" data-testid="growth-jump-audit" href="../audit.html">打开审计日志</a>
+              <button type="button" className="btn" data-testid="growth-reload" onClick={() => void reloadAll()}>重新读取真实账本</button>
+            </div>
+          </div>
+        </section>
       </div>
 
       {(devMode && (!wCheck.ok || !tCheck.ok)) && (
@@ -381,7 +543,7 @@ export function GrowthPage() {
       )}
 
       <div className="p0-tabs" role="tablist" data-testid="growth-tabs">
-        {['判重与嫁接', '回归评估', '调度', '红线自检'].map((label, i) => (
+        {['判重与嫁接', '回归评估', '调度'].map((label, i) => (
           <button
             key={label} type="button" role="tab" aria-selected={tab === i}
             className={`p0-tab${tab === i ? ' active' : ''}`}
@@ -397,12 +559,26 @@ export function GrowthPage() {
           <h3>判重与嫁接</h3>
           <span className="p0-tag">6.1 五维判重 · 6.2 多层短路</span>
         </div>
-        <DedupCard sample={sample} weights={weights} thresholds={thresholds} onResample={handleResample} />
-        <ShortCircuitFlow steps={steps} stats={dedupStats} />
-        <DevTunePanel
-          devMode={devMode} weights={weights} thresholds={thresholds}
-          onWeights={patchWeights} onThresholds={patchThresholds} onSave={handleSaveConfig}
-        />
+        <div className="gt-grid">
+          <div className="gt-cell"><DedupCard sample={sample} weights={weights} thresholds={thresholds} onResample={handleResample} /></div>
+          <div className="gt-cell"><ShortCircuitFlow steps={steps} stats={dedupStats} /></div>
+          <div className="gt-cell gt-span2">
+            <DevTunePanel
+              devMode={devMode} weights={weights} thresholds={thresholds}
+              onWeights={patchWeights} onThresholds={patchThresholds} onSave={handleSaveConfig}
+            />
+          </div>
+          {/* 2026-11-22 用户要求：「红线自检」卡从独立页签移入判重与嫁接页签 */}
+          <div className="gt-cell gt-span2">
+            <div className="card" data-testid="growth-sec-check">
+              <b>红线自检</b>
+              <div className="note" data-testid="redline-status">
+                R1 权重和={wCheck.sum.toFixed(3)} {wCheck.ok ? '✓' : '✗'} · 阈值单调 {tCheck.ok ? '✓' : '✗'} ·
+                R2 优化全记真实审计 ✓ · R3 Δ 取自真实反馈 ✓ · R5 调度 {sCheck.ok ? '合法 ✓' : sCheck.msg}
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
       )}
 
@@ -412,37 +588,44 @@ export function GrowthPage() {
           <h3>回归评估</h3>
           <span className="p0-tag">7.1 指标 · 7.2 Δ · 7.3 回归</span>
         </div>
-        <GrowthCards m={metrics} empty={empty} />
-        <OptimizationList opts={opts} />
-        {/* 批次61 GAP-3：Agent 侧使用（与上面指标读同一份审计快照，口径见卡片 note） */}
-        <AgentUsageCard usage={agentUsage} />
-        {/* 批次61 GAP-1/GAP-2：把「建议→采纳」「策略→启用」两个落地开关接上，并展示反馈信号 */}
-        <RecallWeightCard
-          current={recallWeights}
-          suggestion={real?.recallSuggestion ?? null}
-          onApply={handleApplyRecallWeights}
-        />
-        <FeedbackLoopCard
-          policy={feedbackPolicy}
-          signal={real?.feedbackSignal ?? null}
-          onSave={handleSaveFeedbackPolicy}
-        />
-        <RegressionTable records={real?.regressionRecords ?? []} />
-        <EvolutionEffectCard records={real?.regressionRecords ?? []} />
-        {/* M4：进化轮时间线（growth_op 扁平事件逐条）+ 召回权重漂移仪表（当前 vs 出厂基准） */}
-        <EvolutionTimelineCard
-          entries={real?.evolutionTimeline ?? []}
-          current={recallWeights}
-          onRun={handleRunEvolution}
-          running={evoRunning}
-          lastRun={evoReceipt ?? undefined}
-        />
-        <DeltaPanel
-          series={series} delta={delta} deltaMetric={deltaMetric} currentHitRate={metrics.hit_rate}
-          audit={audit} onManualTrigger={handleManualTrigger}
-          regression={real?.regression ?? { kind: 'never_run', ts: null }}
-          receipt={receipt}
-        />
+        <div className="gt-grid">
+          <div className="gt-cell"><GrowthCards m={metrics} empty={empty} /></div>
+          <div className="gt-cell"><OptimizationList opts={opts} /></div>
+          <div className="gt-cell"><AgentUsageCard usage={agentUsage} /></div>
+          <div className="gt-cell">
+            <RecallWeightCard
+              current={recallWeights}
+              suggestion={real?.recallSuggestion ?? null}
+              onApply={handleApplyRecallWeights}
+            />
+          </div>
+          <div className="gt-cell">
+            <FeedbackLoopCard
+              policy={feedbackPolicy}
+              signal={real?.feedbackSignal ?? null}
+              onSave={handleSaveFeedbackPolicy}
+            />
+          </div>
+          <div className="gt-cell"><EvolutionEffectCard records={real?.regressionRecords ?? []} /></div>
+          <div className="gt-cell gt-span2"><RegressionTable records={real?.regressionRecords ?? []} /></div>
+          <div className="gt-cell gt-span2">
+            <EvolutionTimelineCard
+              entries={real?.evolutionTimeline ?? []}
+              current={recallWeights}
+              onRun={handleRunEvolution}
+              running={evoRunning}
+              lastRun={evoReceipt ?? undefined}
+            />
+          </div>
+          <div className="gt-cell gt-span2">
+            <DeltaPanel
+              series={series} delta={delta} deltaMetric={deltaMetric} currentHitRate={metrics.hit_rate}
+              audit={audit} onManualTrigger={handleManualTrigger}
+              regression={real?.regression ?? { kind: 'never_run', ts: null }}
+              receipt={receipt}
+            />
+          </div>
+        </div>
       </div>
       )}
 
@@ -452,31 +635,20 @@ export function GrowthPage() {
           <h3>调度</h3>
           <span className="p0-tag">13.3 周期任务</span>
         </div>
-        <ScheduleTimeline schedule={schedule} onToggle={handleToggle} hostKind={hostCapability()} />
-        <EvolutionSettingsCard
-          evolution={evolution}
-          scheduleExprs={scheduleExprs}
-          audit={real?.sampleAudits ?? []}
-          onSave={handleSaveEvolution}
-        />
-      </div>
-      )}
-
-      {tab === 3 && (
-      <div className="p0-sec" data-testid="growth-sec-check">
-        <div className="p0-sec-hd">
-          <h3>红线自检</h3>
-          <span className="p0-tag">R1–R10</span>
-        </div>
-        <div className="card">
-          <b>红线自检</b>
-          <div className="note" data-testid="redline-status">
-            R1 权重和={wCheck.sum.toFixed(3)} {wCheck.ok ? '✓' : '✗'} · 阈值单调 {tCheck.ok ? '✓' : '✗'} ·
-            R2 优化全记真实审计 ✓ · R3 Δ 取自真实反馈 ✓ · R5 调度 {sCheck.ok ? '合法 ✓' : sCheck.msg}
+        <div className="gt-grid">
+          <div className="gt-cell"><ScheduleTimeline schedule={schedule} onToggle={handleToggle} hostKind={hostCapability()} /></div>
+          <div className="gt-cell">
+            <EvolutionSettingsCard
+              evolution={evolution}
+              scheduleExprs={scheduleExprs}
+              audit={real?.sampleAudits ?? []}
+              onSave={handleSaveEvolution}
+            />
           </div>
         </div>
       </div>
       )}
+
       {toast}
     </div>
   );

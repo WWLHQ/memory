@@ -58,7 +58,7 @@ export function DedupCard({
           data-testid="dedup-verdict"
           style={{ fontWeight: 700, color: dup ? 'var(--danger,#ff5d5d)' : 'var(--ok,#5dd39e)' }}
         >
-          {dup ? '🔁 is_duplicate=true → 合并' : '✨ 未命中 → 走短路嫁接'}
+          {dup ? 'is_duplicate=true → 合并' : '未命中 → 走短路嫁接'}
         </span>
       </div>
     </div>

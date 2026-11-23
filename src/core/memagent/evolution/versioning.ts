@@ -35,7 +35,8 @@ export async function saveConfigWithHistory(
       mem_id: `growth_h_${ulid(now)}`,
       project_id: 'P_SYSTEM', user_id: 'system',
       enterprise_id: opts.enterpriseId ?? '', team_id: opts.teamId ?? '',
-      category: 'preference', layer: 'L2',
+      // 历史配置同属内部快照：只落 L1 原文，避免被误标层清理反复降级（2026-11-22）
+      category: 'preference', layer: 'L1',
       content: `${GROWTH_HISTORY_PREFIX}${json}`,
       decay_class: 'hot', pinned: true, locked: false,
       version: 1, created_at: now, updated_at: now,

@@ -1,7 +1,8 @@
 // E2E 测试：自我净化与生长页（REQ-009 / P14）自包含（系统分配端口）
 // 数据真相 = 内核账本（浏览器空账本）：指标/判重/Δ 空态诚实展示；
 // 手动触发/调度开关 = 真实写 growth_op 审计（同页内可观察到账本变化）。
-// 现行结构：4 个页签（gtab-0 判重与嫁接 / gtab-1 回归评估 / gtab-2 调度 / gtab-3 红线自检），只渲染当前页签；
+// 现行结构：3 个页签（gtab-0 判重与嫁接 / gtab-1 回归评估 / gtab-2 调度），只渲染当前页签；
+//   「红线自检」卡已并入判重与嫁接页签（2026-11-22 用户要求），不再有独立页签；
 //   「开发者模式」开关与校验错误横幅在页头，任何页签都可见。
 import { test, expect, disconnectBrowser, collectErrors } from './harness.ts';
 import { startStatic, type StaticServer } from './servers.ts';
@@ -20,8 +21,8 @@ test.afterAll(async () => {
   await disconnectBrowser();
 });
 
-/** 切到指定页签（0 判重与嫁接 / 1 回归评估 / 2 调度 / 3 红线自检） */
-async function gtab(page: Page, i: 0 | 1 | 2 | 3): Promise<void> {
+/** 切到指定页签（0 判重与嫁接 / 1 回归评估 / 2 调度） */
+async function gtab(page: Page, i: 0 | 1 | 2): Promise<void> {
   await page.locator(`[data-testid="gtab-${i}"]`).click();
   await expect(page.locator(`[data-testid="gtab-${i}"]`)).toHaveAttribute('aria-selected', 'true');
 }
@@ -73,7 +74,8 @@ test.describe('自我净化与生长页 · 真实账本', () => {
   test('C4/R3：Δ 空态 + 无触发点（真实 7 日反馈为 0）', async ({ page }) => {
     await page.goto(APP);
     await gtab(page, 1);
-    await expect(page.locator('[data-testid="delta-value"]')).toContainText('+0.000');
+    // 2026-11-14 假改善修复后：无基线写「Δ 无基线」，不再用 +0.000 冒充真实变化
+    await expect(page.locator('[data-testid="delta-value"]')).toContainText('无基线');
     await expect(page.locator('[data-testid="delta-panel"]')).toContainText('取自真实 7 日反馈');
     await expect(page.locator('[data-testid="delta-empty"]')).toBeVisible();
     await expect(page.locator('[data-testid="delta-chart"]')).toHaveCount(0);
@@ -129,8 +131,132 @@ test.describe('自我净化与生长页 · 真实账本', () => {
     await expect(page.locator('[data-testid="sched-check-decay"]')).toBeDisabled();
     await page.locator('[data-testid="sched-check-archive"]').uncheck();
     await expect(page.locator('[data-testid="toast"]')).toContainText('schedule_changed');
-    // 红线自检页签
-    await gtab(page, 3);
+    // 红线自检卡已并入「判重与嫁接」页签（不再有独立页签）
+    await gtab(page, 0);
+    await expect(page.locator('[data-testid="growth-sec-check"]')).toBeVisible();
     await expect(page.locator('[data-testid="redline-status"]')).toContainText('合法 ✓');
+  });
+
+  test('结构：红线自检卡在「判重与嫁接」页签内，且不存在第 4 个页签', async ({ page }) => {
+    await page.goto(APP);
+    // 只有 3 个页签
+    await expect(page.locator('[data-testid^="gtab-"]')).toHaveCount(3);
+    await expect(page.locator('[data-testid="gtab-3"]')).toHaveCount(0);
+    // 判重与嫁接页签内可见红线自检卡（真值来自 wCheck/tCheck/sCheck 校验）
+    await gtab(page, 0);
+    await expect(page.locator('[data-testid="growth-sec-check"]')).toBeVisible();
+    await expect(page.locator('[data-testid="growth-sec-check"]')).toContainText('红线自检');
+    await expect(page.locator('[data-testid="redline-status"]')).toContainText('合法 ✓');
+    // 切到其它页签时该卡不挂载（不是重复渲染到每个页签）
+    await gtab(page, 1);
+    await expect(page.locator('[data-testid="growth-sec-check"]')).toHaveCount(0);
+    await gtab(page, 2);
+    await expect(page.locator('[data-testid="growth-sec-check"]')).toHaveCount(0);
+  });
+
+  test('新增：顶部摘要读数条 + 四个真实场景分组（空账本诚实，无审计写未采样）', async ({ page }) => {
+    await page.goto(APP);
+    // 摘要条：账本规模 / 命中率 / 回归 / growth 审计 四项读数
+    const summary = page.locator('[data-testid="growth-summary"]');
+    await expect(summary).toBeVisible();
+    await expect(summary).toContainText('账本记忆');
+    await expect(summary).toContainText('最近回归');
+    await expect(summary).toContainText('未到运行时间');
+    // 空账本无召回审计 → 命中率卡必须写「未采样」，不许写 0 冒充读数
+    await expect(page.locator('[data-testid="growth-stat-hitrate"]')).toContainText('未采样');
+    // 四个场景分组：净化处置 / 指标回归 / 参数范围 / 审计留痕
+    for (const id of ['dedup', 'metrics', 'params', 'audit']) {
+      await expect(page.locator(`[data-testid="growth-group-${id}"]`)).toBeVisible();
+    }
+    await expect(page.locator('[data-testid="growth-group-dedup"]')).toContainText('判重样本');
+    await expect(page.locator('[data-testid="growth-group-params"]')).toContainText('权重和');
+    await expect(page.locator('[data-testid="growth-group-audit"]')).toContainText('growth_op 条目');
+    // 场景卡动作真跳转到原面板（能力未丢）
+    await page.locator('[data-testid="growth-jump-dedup"]').click();
+    await expect(page.locator('[data-testid="dedup-card"]')).toBeVisible();
+    await page.locator('[data-testid="growth-jump-metrics"]').click();
+    await expect(page.locator('[data-testid="growth-cards"]')).toBeVisible();
+  });
+
+  test('几何：四组卡 2×2 同宽同排等高；页签卡片两列等高、无空网格', async ({ page }) => {
+    await page.goto(APP);
+    // 等四组卡渲染完成再量几何（否则 evaluate 取到 null）
+    for (const id of ['dedup', 'metrics', 'params', 'audit']) {
+      await expect(page.locator(`[data-testid="growth-group-${id}"]`)).toBeVisible();
+    }
+    const g = await page.evaluate(() => {
+      const r = (sel: string) => {
+        const el = document.querySelector(sel);
+        if (!el) return null;
+        const b = el.getBoundingClientRect();
+        return { x: b.x, y: b.y, w: b.width, h: b.height, bottom: b.bottom };
+      };
+      return {
+        dedup: r('[data-testid="growth-group-dedup"]'),
+        metrics: r('[data-testid="growth-group-metrics"]'),
+        params: r('[data-testid="growth-group-params"]'),
+        audit: r('[data-testid="growth-group-audit"]'),
+      };
+    });
+    for (const k of ['dedup', 'metrics', 'params', 'audit'] as const) expect(g[k]).not.toBeNull();
+    // 2×2：同排左边界一致，宽度相等
+    expect(Math.abs(g.dedup!.x - g.params!.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(g.metrics!.x - g.audit!.x)).toBeLessThanOrEqual(1);
+    for (const k of ['metrics', 'params', 'audit'] as const) {
+      expect(Math.abs(g[k]!.w - g.dedup!.w)).toBeLessThanOrEqual(1);
+    }
+    // 同一行等高
+    expect(Math.abs(g.dedup!.h - g.metrics!.h)).toBeLessThanOrEqual(1);
+    expect(Math.abs(g.params!.h - g.audit!.h)).toBeLessThanOrEqual(1);
+
+    // 判重页签：两列卡片同排等高，调参卡跨两列填满，不留空网格
+    await gtab(page, 0);
+    // 调参面板仅在开发者模式开启后渲染（真实行为），这里显式打开再量几何
+    await page.locator('[data-testid="dev-mode"]').check();
+    await expect(page.locator('[data-testid="dev-tune-panel"]')).toBeVisible();
+    const t = await page.evaluate(() => {
+      // 量外层网格单元（卡片内部各自有标题/padding，直接量内层会得到不同 y）
+      const cell = (sel: string) => {
+        const el = document.querySelector(sel);
+        const c = el ? el.closest('.gt-cell') : null;
+        if (!c) return null;
+        const b = c.getBoundingClientRect();
+        return { x: b.x, y: b.y, w: b.width, h: b.height };
+      };
+      return {
+        dedup: cell('[data-testid="dedup-card"]'),
+        flow: cell('[data-testid="sc-flow"]'),
+        tune: cell('[data-testid="dev-tune-panel"]'),
+      };
+    });
+    expect(t.dedup).not.toBeNull();
+    expect(t.flow).not.toBeNull();
+    expect(t.tune).not.toBeNull();
+    expect(Math.abs(t.dedup!.y - t.flow!.y)).toBeLessThanOrEqual(1);
+    expect(Math.abs(t.dedup!.w - t.flow!.w)).toBeLessThanOrEqual(1);
+    expect(Math.abs(t.dedup!.h - t.flow!.h)).toBeLessThanOrEqual(1);
+    // 调参卡占满两列（宽度 ≈ 两张卡 + 间距），且换行在下一排
+    expect(t.tune!.w).toBeGreaterThan(t.dedup!.w * 1.8);
+    expect(t.tune!.y).toBeGreaterThanOrEqual(t.dedup!.y + t.dedup!.h - 1);
+  });
+
+  test('白底：三个页签内的卡片底色 = --surface（浅色 #FFFFFF / 深色 #0C1424）', async ({ page }) => {
+    await page.goto(APP);
+    const readBg = () => page.evaluate(() => {
+      const cards = Array.from(document.querySelectorAll('.af-page .card'))
+        .filter((el) => (el as HTMLElement).offsetParent !== null);
+      return cards.map((el) => getComputedStyle(el as HTMLElement).backgroundColor);
+    });
+    for (const i of [0, 1, 2] as const) {
+      await gtab(page, i);
+      const bgs = await readBg();
+      expect(bgs.length).toBeGreaterThan(0);
+      for (const bg of bgs) expect(bg).toBe('rgb(255, 255, 255)');
+    }
+    // 深色主题：同一批卡切到对应深色 surface（#0C1424），不是写死白底
+    await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
+    const dark = await readBg();
+    expect(dark.length).toBeGreaterThan(0);
+    for (const bg of dark) expect(bg).toBe('rgb(12, 20, 36)');
   });
 });

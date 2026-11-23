@@ -93,6 +93,33 @@ describe('GrowthPage × 内核审计账本', () => {
     expect(row).toHaveTextContent('12.5ms');
     expect(row).toHaveTextContent('真实采样 4 条写入');
   });
+
+  it('跟随壳层深色主题：挂载即设置 html[data-theme="dark"]', () => {
+    // 批次55：深色主题适配正向断言
+    localStorage.setItem('memdesk.shell.theme.v1', 'dark');
+    try {
+      render(<GrowthPage />);
+      expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+    } finally {
+      localStorage.setItem('memdesk.shell.theme.v1', 'light');
+      document.documentElement.removeAttribute('data-theme');
+    }
+  });
+
+  it('新增：顶部摘要读数条 + 四个场景分组（空账本写未采样，不伪造命中率）', async () => {
+    render(<GrowthPage />);
+    await waitFor(() => expect(screen.getByTestId('growth-summary')).toBeInTheDocument());
+    const summary = screen.getByTestId('growth-summary');
+    expect(summary).toHaveTextContent('账本记忆');
+    // 空账本无召回审计 → 命中率卡必须写「未采样」（定位到该卡，不能靠别处的同词蒙混）
+    expect(screen.getByTestId('growth-stat-hitrate')).toHaveTextContent('未采样');
+    for (const id of ['dedup', 'metrics', 'params', 'audit']) {
+      expect(screen.getByTestId(`growth-group-${id}`)).toBeInTheDocument();
+    }
+    // 场景卡动作真跳转到原面板
+    fireEvent.click(screen.getByTestId('growth-jump-dedup'));
+    await waitFor(() => expect(screen.getByTestId('dedup-card')).toBeInTheDocument());
+  });
 });
 
 /** 批次48 A23.4：调度时间轴三件事必须可见（宿主 / 最近 schedule_run / 下次到期），

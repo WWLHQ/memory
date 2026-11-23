@@ -342,7 +342,7 @@ export function DeltaPanel({
           {verdictLabel}
         </span>
         <span className="dim">{metricLabel}</span>
-        <button className="btn" data-testid="manual-trigger" onClick={onManualTrigger}>⚡ 手动触发一次自生长</button>
+        <button className="btn" data-testid="manual-trigger" onClick={onManualTrigger}>手动触发一次自生长</button>
       </div>
       {series.length === 0 ? (
         <div data-testid="delta-empty" className="note" style={{ padding: 16, textAlign: 'center', color: 'var(--muted)' }}>
