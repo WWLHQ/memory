@@ -276,6 +276,65 @@ describe('mirror 审计上抛端点（REQ-006 G6 持久账本）', () => {
     expect(q.integrity).toMatchObject({ ok: false, broken_at_seq: 1, reason: '条目内容与 hash 不符（被改写）' });
   });
 
+  it('批次63 reseal：管理员封存旧无签名段（只补签名、内容不变、落 mirror_reseal 审计），member 403', async () => {
+    // 模拟历史账本：链首两条旧式无签名条目
+    await close(server);
+    writeFileSync(join(tmp, 'home-mirror.json'), JSON.stringify([
+      { seq: 1, source: 'audit', action: 'audit_query', request_id: 'old_1', payload: { q: 'a' }, ts: 1 },
+      { seq: 2, source: 'audit', action: 'audit_query', request_id: 'old_2', payload: { q: 'b' }, ts: 2 },
+    ]));
+    server = createServer({ port: 0, dataFile });
+    base = await listen(server);
+
+    const memberSid = await loginAs(base, ACCOUNT, 'pw');
+    const denied = await fetch(`${base}/api/mirror/audit/reseal`, { method: 'POST', headers: { 'x-session-id': memberSid } });
+    expect(denied.status).toBe(403);
+    expect(((await denied.json()) as { code: string }).code).toBe('E_ADMIN_REQUIRED');
+
+    const adminSid = await loginAs(base, ADMIN_ACCOUNT, DEFAULT_ADMIN_PASSWORD);
+    const r = await fetch(`${base}/api/mirror/audit/reseal`, { method: 'POST', headers: { 'x-session-id': adminSid } });
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as {
+      ok: boolean; resealed: number; backup_path: string;
+      integrity: { ok: boolean; sealed: number; legacy_unsealed: number };
+    };
+    expect(body.ok).toBe(true);
+    expect(body.resealed).toBe(2);
+    expect(body.integrity).toMatchObject({ ok: true, sealed: 3, legacy_unsealed: 0 }); // 2 旧段 + 1 条 mirror_reseal
+    // 迁移前原始账本已备份（仍是未签名原文）
+    const backup = JSON.parse(readFileSync(body.backup_path, 'utf8')) as Array<{ hash?: string; payload?: unknown }>;
+    expect(backup).toHaveLength(2);
+    expect(backup[0].hash).toBeUndefined();
+    expect(backup[0].payload).toEqual({ q: 'a' });
+
+    const q = (await (await fetch(`${base}/api/mirror/audit`, { headers: { 'x-session-id': adminSid } })).json()) as {
+      items: Array<{ action: string; payload?: unknown; hash?: string }>;
+      integrity: { ok: boolean; legacy_unsealed: number };
+    };
+    expect(q.integrity).toMatchObject({ ok: true, legacy_unsealed: 0 });
+    expect(q.items[0]).toMatchObject({ action: 'audit_query', payload: { q: 'a' } }); // 内容字段逐字不变
+    expect(q.items[0].hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(q.items.at(-1)?.action).toBe('mirror_reseal');
+  });
+
+  it('批次63 reseal：断链时 409 拒绝封存（不把破坏签名合法化）', async () => {
+    await loginAs(base, ACCOUNT, 'pw');
+    await close(server);
+    writeFileSync(join(tmp, 'home-mirror.json'), JSON.stringify([
+      { seq: 1, source: 'audit', action: 'audit_query', prev_hash: GENESIS_HASH, hash: '0'.repeat(64), sig: '0'.repeat(64), ts: 1 },
+    ]));
+    server = createServer({ port: 0, dataFile });
+    base = await listen(server);
+
+    const adminSid = await loginAs(base, ADMIN_ACCOUNT, DEFAULT_ADMIN_PASSWORD);
+    const r = await fetch(`${base}/api/mirror/audit/reseal`, { method: 'POST', headers: { 'x-session-id': adminSid } });
+    expect(r.status).toBe(409);
+    const body = (await r.json()) as { ok: boolean; code: string; reason?: string; broken_at_seq?: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe('E_MIRROR_CHAIN_BROKEN');
+    expect(body.broken_at_seq).toBe(1);
+  });
+
   it('A8 账本不可读：POST 503 拒收（fail-closed），GET 如实报告 ledger_unreadable', async () => {
     await loginAs(base, ACCOUNT, 'pw');
     await close(server);

@@ -4,8 +4,8 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync, statSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  GENESIS_HASH, MIRROR_KEY_FILE, canonicalJson, loadOrCreateMirrorKey, sealMirrorEntry, verifyMirrorChain,
-  type MirrorAuditEntry,
+  GENESIS_HASH, MIRROR_KEY_FILE, canonicalJson, loadOrCreateMirrorKey, resealLegacyEntries, sealMirrorEntry,
+  verifyMirrorChain, type MirrorAuditEntry,
 } from '../mirrorLedger.ts';
 
 const KEY = Buffer.from('a'.repeat(64), 'hex');
@@ -60,6 +60,31 @@ describe('链式签名与校验', () => {
     const e3 = sealMirrorEntry({ ...base(3), source: 'audit' }, GENESIS_HASH, KEY);
     expect(verifyMirrorChain([legacy1, legacy2, e3], KEY)).toMatchObject({ ok: true, sealed: 1, legacy_unsealed: 2 });
     expect(verifyMirrorChain([e3, legacy1], KEY)).toMatchObject({ ok: false, broken_at_seq: 1, reason: '签名链中途出现未签名条目（疑似删除/插入）' });
+  });
+  it('批次63 reseal：旧无签名前缀补签后可校验，只动签名不动内容（含后续已签名条目重锚）', () => {
+    const legacy1: MirrorAuditEntry = { seq: 1, source: 'audit', action: 'audit_query', ts: 1, payload: { q: 'a' } };
+    const legacy2: MirrorAuditEntry = { seq: 2, source: 'audit', action: 'audit_query', ts: 2, payload: { q: 'b' } };
+    const e3 = sealMirrorEntry({ ...base(3), source: 'audit' }, GENESIS_HASH, KEY);
+    const before = verifyMirrorChain([legacy1, legacy2, e3], KEY);
+    expect(before).toMatchObject({ ok: true, sealed: 1, legacy_unsealed: 2 });
+
+    const { entries, resealed } = resealLegacyEntries([legacy1, legacy2, e3], KEY);
+    expect(resealed).toBe(2);
+    // 内容字段逐字不变，只多了 prev_hash/hash/sig
+    expect(entries[0]).toMatchObject({ seq: 1, source: 'audit', action: 'audit_query', ts: 1, payload: { q: 'a' } });
+    expect(entries[1]).toMatchObject({ seq: 2, source: 'audit', action: 'audit_query', ts: 2, payload: { q: 'b' } });
+    const after = verifyMirrorChain(entries, KEY);
+    expect(after).toMatchObject({ ok: true, sealed: 3, legacy_unsealed: 0 });
+    expect(entries[2].prev_hash).toBe(entries[1].hash); // 后续签名条目已重锚到新链
+  });
+
+  it('批次63 reseal：整链已签名时 resealed=0 且校验结果不变（幂等）', () => {
+    const e1 = sealMirrorEntry(base(1), GENESIS_HASH, KEY);
+    const e2 = sealMirrorEntry(base(2), e1.hash!, KEY);
+    const { entries, resealed } = resealLegacyEntries([e1, e2], KEY);
+    expect(resealed).toBe(0);
+    expect(entries.map((x) => x.payload)).toEqual([e1.payload, e2.payload]);
+    expect(verifyMirrorChain(entries, KEY)).toMatchObject({ ok: true, sealed: 2, legacy_unsealed: 0 });
   });
 });
 

@@ -5,6 +5,7 @@ import '../shared/actionLog.ts';
 import { SyncPage } from './SyncPage.tsx';
 import '../shared/p0.css';
 import '../shared/p0Legacy.css';
+import './theme.css';
 
 const el = document.getElementById('root');
 if (el) createRoot(el).render(<StrictMode><SyncPage /></StrictMode>);

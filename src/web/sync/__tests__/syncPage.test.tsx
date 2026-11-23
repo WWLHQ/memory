@@ -151,6 +151,32 @@ describe('SyncPage（组件层）', () => {
     unmount();
   });
 
+  it('批次54：去页签堆叠分区——sync-tabs 不存在，同步/对账/L0 各分区同屏渲染', async () => {
+    mockCore({});
+    const { unmount } = await mountPage();
+    expect(screen.queryByTestId('sync-tabs')).toBeNull();
+    // 「立即同步」同时出现：面板标题 + 按钮（同屏堆叠的证据）
+    expect(screen.getAllByText('立即同步').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText('L0 排除')).toBeInTheDocument();
+    expect(screen.getByTestId('btnSyncNow')).toBeInTheDocument();
+    unmount();
+  });
+
+  it('批次63 对齐设计稿：去冲突裁决链接指向 ../dispute.html；页头 implemented 徽标；未取数 stat 卡诚实显示 —', async () => {
+    mockCore({});
+    const { unmount } = await mountPage();
+    const link = screen.getByTestId('goto-dispute');
+    expect(link).toHaveAttribute('href', '../dispute.html');
+    expect(link).toHaveTextContent('去冲突裁决');
+    expect(screen.getByText('implemented: true')).toBeInTheDocument();
+    // run 未取数：stat 卡显示「未取数」并写原因，不伪造 0
+    expect(screen.getByTestId('pushed')).toHaveTextContent('未取数');
+    expect(screen.getByTestId('pulled')).toHaveTextContent('未取数');
+    // 设计稿「形态」说明条存在
+    expect(screen.getByText(/衍生可重建数据 · 真源在各端本地账本/)).toBeInTheDocument();
+    unmount();
+  });
+
   it('裁决队列：列出冲突 + 保留本端按钮触发 resolve + 成功 toast；空队列诚实空态', async () => {
     const conflict = {
       conflict_id: 'cf_x', mem_id: 'm1', team_id: 't1', project_id: 'P1',
@@ -191,5 +217,19 @@ describe('SyncPage（组件层）', () => {
     await waitFor(() => expect(screen.getByTestId('syncToast')).toHaveTextContent('裁决失败'));
     expect(screen.getByTestId('syncToast')).toHaveTextContent('403');
     unmount();
+  });
+
+  it('跟随壳层深色主题：挂载即设置 html[data-theme="dark"]', async () => {
+    // 批次55：深色主题适配正向断言
+    localStorage.setItem('memdesk.shell.theme.v1', 'dark');
+    try {
+      mockCore({});
+      const { unmount } = await mountPage();
+      expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+      unmount();
+    } finally {
+      localStorage.setItem('memdesk.shell.theme.v1', 'light');
+      document.documentElement.removeAttribute('data-theme');
+    }
   });
 });

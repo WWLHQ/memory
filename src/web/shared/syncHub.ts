@@ -1,4 +1,4 @@
-﻿// 渲染层同步中枢代理（批次42-B）：把内核 AnySyncHub 接口转发到主进程 PgSyncHub。
+// 渲染层同步中枢代理（批次42-B）：把内核 AnySyncHub 接口转发到主进程 PgSyncHub。
 // 桌面壳内经 IPC；纯浏览器或宿主桥不可用 → kernel 不注入 hub，sync() 如实报 E_NOT_IMPLEMENTED。
 // 方法签名与 PgSyncHub 结构同构（引擎 syncUp/syncDown/reconcile 双兼容），IB 语义在中枢侧（§2）。
 import type { ErrorCode, Form, Memory } from '../../core/memagent/types.ts';

@@ -5,6 +5,7 @@ import { getKernel, getKernelStorage, getTenant, type KernelOverrides } from '..
 import { HostSyncHub } from '../shared/syncHub.ts';
 import type { MemAgent, Memory, SyncReport } from '../../core/memagent/types.ts';
 import type { SyncAudit, SyncConflict } from '../../core/memagent/sync.ts';
+import { isInternalPrefRow } from '../../core/memagent/paramsSnapshot.ts';
 
 /** 页面依赖的中枢最小面（结构化）：内存 SyncHub（同步返回）/ HostSyncHub 代理（异步）双兼容 */
 export interface SyncPageHub {
@@ -103,7 +104,7 @@ export async function hubOverview(ctx: SyncPageCtx = {}): Promise<HubOverviewVie
   let local_audits: number | null = null;
   try {
     const storage = getKernelStorage();
-    local_memories = (await storage.listMemories({})).length;
+    local_memories = (await storage.listMemories({})).filter((m) => !isInternalPrefRow(m)).length;
     local_audits = (await storage.queryAudit({})).length;
   } catch {
     local_memories = null;

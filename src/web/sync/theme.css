@@ -1,17 +1,142 @@
 /*
- * 同步与裁决页样式（批次42-C）—— 复用审计页暗色设计系统，仅补本页专属类。
+ * 同步中枢页样式（批次53-R · 与冲突裁决页同版式语言：密集表格流，按用户截图 1:1）。
+ * 特征：窄行高、小字号（基准 12px / 表头 11px）、chip 体系、细分隔线表格。
+ * 令牌内嵌 .sy-page；深色由 html[data-theme="dark"] .sy-page 重定义。
+ * 依赖 p0.css 的 html/body/#root 高度骨架（syncEntry 仍先载它）。
  */
-h2 { font-size:15px; margin:0 0 6px; }
-.report { margin-top:10px; font-size:13px; line-height:1.7; }
-.report b { color:var(--accent); }
-.err { color:var(--err); font-size:12.5px; margin-top:8px; }
+.sy-page {
+  --bg: #F3F5F8; --surface: #FFFFFF; --surface2: #EEF2F7;
+  --ink: #0B1526; --muted: #5A6B82; --line: #DCE4EE; --line2: #E6ECF3;
+  --accent: #0088CC; --accent-ink: #FFFFFF; --accent-soft: rgba(0, 136, 204, .10);
+  --ok: #0E9F6E; --warn: #B45309; --bad: #DC2626;
+  --ok-soft: rgba(14, 159, 110, .10); --warn-soft: rgba(180, 83, 9, .10); --bad-soft: rgba(220, 38, 38, .10);
+  --sans: "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
 
-/* 冲突裁决表 */
-.tbl { width:100%; border-collapse:collapse; font-size:12.5px; margin-top:10px; }
-.tbl th, .tbl td { padding:8px 10px; text-align:left; border-bottom:1px solid var(--line); vertical-align:top; }
-.tbl th { color:var(--muted); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.4px; }
-.tbl tr:hover { background:var(--panel2); }
-.tbl .btn { margin-right:6px; }
+  height: 100%; display: flex; flex-direction: column; min-height: 0;
+  background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 12px; line-height: 1.5;
+}
+html[data-theme="dark"] .sy-page {
+  --bg: #060B16; --surface: #0C1424; --surface2: #101B30;
+  --ink: #E4EDF8; --muted: #8296B0; --line: #1B2A45; --line2: #16233B;
+  --accent: #22D3EE; --accent-ink: #04222B; --accent-soft: rgba(34, 211, 238, .12);
+  --ok: #34D399; --warn: #FBBF24; --bad: #F87171;
+  --ok-soft: rgba(52, 211, 153, .12); --warn-soft: rgba(251, 191, 36, .12); --bad-soft: rgba(248, 113, 113, .12);
+}
 
-.toast.ok { border-color:var(--ok); color:var(--ok); }
-.toast.err { border-color:var(--err); color:var(--err); }
+.sy-scroll { flex: 1; min-height: 0; overflow: auto; }
+.sy-main { padding: 14px 18px 26px; min-width: 0; }
+.af-stack { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+
+/* ── 页头：标题 + 灰注 + 右侧徽标 ── */
+.af-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.af-head h1 { font-size: 15px; font-weight: 700; margin: 0; }
+.af-head .sub { color: var(--muted); font-size: 11px; }
+.af-head .af-badge { margin-left: auto; }
+.af-badge {
+  display: inline-block; font-size: 11px; font-family: var(--mono); border-radius: 4px;
+  border: 1px solid var(--line); padding: 0 7px; line-height: 18px; color: var(--muted); white-space: nowrap;
+}
+.af-badge.acc { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+
+/* ── 面板骨架 ── */
+.af-panel { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.af-ph { display: flex; align-items: center; gap: 9px; padding: 7px 12px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.af-ph h3 { margin: 0; font-size: 12.5px; font-weight: 600; color: var(--ink); }
+.af-ph .hint { margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+.af-pb { padding: 8px 12px; }
+
+/* ── 按钮 ── */
+/* 2026-11-22：主次按钮独占一行（统一 8px 间距），说明文字另起一行，避免与按钮挤在一起 */
+.sy-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 4px 0 0; }
+.sy-actions .btn.primary { min-width: 104px; }
+.sy-actions-note { display: block; margin: 4px 0 0; font-size: 11px; color: var(--muted); line-height: 1.6; }
+.sy-page .btn {
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  border-radius: 6px; padding: 4px 12px; font: inherit; font-size: 12px; font-weight: 500; cursor: pointer; white-space: nowrap;
+}
+.sy-page .btn:hover { border-color: var(--accent); color: var(--accent); }
+.sy-page .btn:disabled { opacity: .45; cursor: not-allowed; }
+.sy-page .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.sy-page .btn.primary:hover { color: var(--accent-ink); opacity: .92; }
+
+/* 行内 chip 小按钮（裁决列 保留本端/保留镜像） */
+.chip-btn {
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink); font: inherit; font-size: 11px;
+  padding: 1px 10px; line-height: 18px; border-radius: 4px; cursor: pointer; white-space: nowrap; margin-left: 4px;
+}
+.chip-btn:first-child { margin-left: 0; }
+.chip-btn:hover { border-color: var(--accent); color: var(--accent); }
+.chip-btn:disabled { opacity: .45; cursor: not-allowed; }
+
+/* ── chip 徽标 ── */
+.chip { font-style: normal; font-size: 10.5px; padding: 0 7px; line-height: 17px; border-radius: 4px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.chip.ok, .chip.acc { color: var(--ok); border-color: var(--ok); background: var(--ok-soft); }
+.chip.acc { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.chip.warn { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+.chip.bad { color: var(--bad); border-color: var(--bad); background: var(--bad-soft); }
+
+/* ── 密集表格 ── */
+.ltable { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 4px; }
+.ltable th, .ltable td { padding: 4px 8px; text-align: center; border-bottom: 1px solid var(--line2); vertical-align: top; }
+.ltable th { color: var(--muted); font-weight: 500; font-size: 11px; white-space: nowrap; }
+.ltable tr:last-child td { border-bottom: 0; }
+.ltable tbody tr:hover { background: var(--surface2); }
+.ltable .left { text-align: left; }
+.ltable .mid { font-family: var(--mono); font-size: 11px; color: var(--accent); }
+
+/* ── 报告 / 注 / 弱化 ── */
+.report { margin-top: 6px; font-size: 12px; line-height: 1.7; }
+.report b { color: var(--accent); font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.note { font-size: 11px; color: var(--muted); line-height: 1.7; }
+.sy-list { margin: 4px 0; padding-left: 16px; }
+.dim { color: var(--muted); font-size: 12px; margin: 4px 0; }
+.banner { border-radius: 6px; padding: 5px 10px; font-size: 11.5px; margin: 6px 0; }
+.banner.err { color: var(--bad); background: var(--bad-soft); border: 1px solid color-mix(in srgb, var(--bad) 45%, var(--line)); }
+
+/* ── 对齐设计稿 pg-sync（批次63）：双列网格 / 徽标变体 / stat 卡 / 链接按钮 / 形态条 ── */
+.af-g2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: start; }
+.af-g2 > * { min-width: 0; }
+/* 2026-11-22：「立即同步」与「中枢对账」两卡同宽同高（内容不足由卡内留白补足，不用 start 让高度参差） */
+.sy-pair { align-items: stretch; }
+.sy-pair > .af-panel { height: 100%; }
+.af-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; min-width: 0; }
+.af-note { font-size: 11px; color: var(--muted); line-height: 1.6; }
+.af-badge.ok { color: var(--ok); border-color: var(--ok); background: var(--ok-soft); }
+.af-badge.warn { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+.af-badge.bad { color: var(--bad); border-color: var(--bad); background: var(--bad-soft); }
+/* stat 卡（设计稿 .af-stat 形态：上 label / 中大数字 / 下小注） */
+.sy-stat { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; min-width: 0; }
+.sy-stat .k { font-size: 11px; color: var(--muted); }
+.sy-stat .v { font-family: var(--mono); font-size: 22px; font-weight: 600; margin-top: 2px; letter-spacing: -.02em; color: var(--ink); }
+.sy-stat .d { font-size: 10.5px; margin-top: 2px; color: var(--muted); line-height: 1.5; }
+/* 面板头右侧链接按钮（设计稿「去冲突裁决 →」） */
+.sy-link {
+  display: inline-block; border: 1px solid var(--line); background: var(--surface); color: var(--accent);
+  border-radius: 6px; padding: 1px 10px; font-size: 11px; line-height: 18px; text-decoration: none; white-space: nowrap;
+}
+.sy-link:hover { border-color: var(--accent); background: var(--accent-soft); }
+/* 形态说明条（设计稿 af-alert：细边浅底 + tag） */
+.sy-alert {
+  display: flex; gap: 9px; align-items: center; flex-wrap: wrap;
+  background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 8px;
+  padding: 8px 13px; font-size: 12px; color: var(--ink);
+}
+.sy-alert .tag {
+  font-family: var(--mono); font-size: 11px; background: var(--accent); color: var(--accent-ink);
+  border-radius: 4px; padding: 1px 6px; flex: none;
+}
+
+/* ── toast ── */
+.toast {
+  position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+  background: var(--surface2); border: 1px solid var(--line); border-radius: 8px;
+  color: var(--ink); padding: 8px 16px; font-size: 12px; z-index: 80; max-width: 80vw;
+}
+.toast.ok { border-color: var(--ok); color: var(--ok); }
+.toast.err { border-color: var(--bad); color: var(--bad); }
+
+@media (max-width: 900px) {
+  .sy-main { padding: 12px 14px 20px; }
+  .af-g2 { grid-template-columns: 1fr; }
+}

@@ -33,7 +33,7 @@ import { createPersonalApi } from '../core/memagent/personal.ts';
 
 // 端壳 mirror 上抛条目（G6）类型与链式签名实现统一放在 mirrorLedger.ts（批次48 A8）
 import {
-  GENESIS_HASH, MIRROR_INTEGRITY_NOTE, loadOrCreateMirrorKey, sealMirrorEntry, verifyMirrorChain,
+  GENESIS_HASH, MIRROR_INTEGRITY_NOTE, loadOrCreateMirrorKey, resealLegacyEntries, sealMirrorEntry, verifyMirrorChain,
   type MirrorIntegrity,
 } from './mirrorLedger.ts';
 export type { MirrorAuditEntry } from './mirrorLedger.ts';
@@ -677,6 +677,7 @@ export function createServer(opts: ServerOptions): HomeServer {
             switch (op) {
               case 'list': send(res, 200, { ok: true, result: await api.list() }); return;
               case 'quick_add': send(res, 200, { ok: true, result: await api.quickAdd(String(payload.content ?? '')) }); return;
+              case 'edit': send(res, 200, { ok: true, result: await api.edit(id, String(payload.content ?? '')) }); return;
               case 'import_from_agent': send(res, 200, {
                 ok: true,
                 result: await api.importFromAgent({
@@ -921,6 +922,70 @@ export function createServer(opts: ServerOptions): HomeServer {
           mirrorAudit.push(entry);
           persistMirror();
           send(res, 200, { ok: true, seq: entry.seq, hash: entry.hash });
+          return;
+        }
+
+        // 批次63：封存链首旧无签名段（仅管理员；断链/密钥不可用一律拒绝，绝不"为了好看"改判）
+        // 语义：只补 prev_hash/hash/sig，不改任何内容字段；迁移前强制备份；成功后追加 mirror_reseal 审计。
+        if (req.method === 'POST' && path === '/api/mirror/audit/reseal') {
+          const s = getSession(sessionIdOf(req));
+          if (!s) { send(res, 401, { ok: false, code: 'E_NO_SESSION', reason: 'no_session' }); return; }
+          if (s.context.role !== 'admin') {
+            send(res, 403, { ok: false, code: 'E_ADMIN_REQUIRED', reason: 'forbidden' });
+            return;
+          }
+          if (mirrorLoadError) {
+            send(res, 503, { ok: false, code: 'E_MIRROR_LEDGER_UNREADABLE', reason: 'mirror_ledger_unreadable', error: mirrorLoadError });
+            return;
+          }
+          if (!mirrorKey) {
+            send(res, 503, { ok: false, code: 'E_MIRROR_KEY_UNAVAILABLE', reason: 'mirror_key_unavailable', error: mirrorKeyError ?? undefined });
+            return;
+          }
+          const before = verifyMirrorChain(mirrorAudit, mirrorKey);
+          if (!before.ok) {
+            // 断链/被改写：封存会把破坏一起"签名合法化"，必须拒绝并点名 broken_at_seq
+            send(res, 409, {
+              ok: false, code: 'E_MIRROR_CHAIN_BROKEN', reason: before.reason,
+              broken_at_seq: before.broken_at_seq, sealed: before.sealed, legacy_unsealed: before.legacy_unsealed,
+            });
+            return;
+          }
+          if (before.legacy_unsealed === 0) {
+            send(res, 200, {
+              ok: true, resealed: 0, backup_path: null,
+              integrity: { ...before, algorithm: 'HMAC-SHA256(chain)', note: MIRROR_INTEGRITY_NOTE },
+            });
+            return;
+          }
+          // 强制备份：迁移前的原始账本原样落盘（0600），失败即中止
+          const backupPath = `${mirrorFile}.bak-${Date.now()}`;
+          try {
+            writeFileSync(backupPath, JSON.stringify(mirrorAudit, null, 2), { mode: 0o600 });
+          } catch (e) {
+            send(res, 500, { ok: false, code: 'E_BACKUP_FAILED', error: String((e as Error)?.message ?? e) });
+            return;
+          }
+          const { entries, resealed } = resealLegacyEntries(mirrorAudit, mirrorKey);
+          mirrorAudit = entries;
+          const prevHash = mirrorAudit.length > 0 && mirrorAudit[mirrorAudit.length - 1].hash
+            ? mirrorAudit[mirrorAudit.length - 1].hash!
+            : GENESIS_HASH;
+          mirrorAudit.push(sealMirrorEntry({
+            seq: mirrorAudit.length + 1,
+            source: 'security',
+            action: 'mirror_reseal',
+            request_id: `reseal_${Date.now()}`,
+            payload: { resealed, backup: backupPath },
+            ts: Date.now(),
+          }, prevHash, mirrorKey));
+          persistMirror();
+          const after = verifyMirrorChain(mirrorAudit, mirrorKey);
+          log('home', 'mirror_reseal', { by: s.context.user_id, resealed, ok: after.ok });
+          send(res, 200, {
+            ok: true, resealed, backup_path: backupPath,
+            integrity: { ...after, algorithm: 'HMAC-SHA256(chain)', note: MIRROR_INTEGRITY_NOTE },
+          });
           return;
         }
 

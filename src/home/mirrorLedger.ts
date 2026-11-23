@@ -146,6 +146,29 @@ export function verifyMirrorChain(entries: readonly MirrorAuditEntry[], key: Buf
   return { ok: true, sealed, legacy_unsealed: legacy };
 }
 
+/**
+ * 批次63：把链首成段的旧无签名条目接入签名链。
+ * 只重算 prev_hash/hash/sig，绝不改 seq/source/action/request_id/payload/ts（= 内容不变）；
+ * 因为旧段加入链后会改变后续条目的 prev 锚点，所以整条签名链必须按序重算（内容字段保持逐字不变）。
+ * 调用方必须先 verifyMirrorChain 确认链未断，否则拒绝（断链封存 = 把破坏签名合法化）。
+ * 返回 resealed = 原本无签名的条目数（用于如实汇报"补签了几条"）。
+ */
+export function resealLegacyEntries(
+  entries: readonly MirrorAuditEntry[], key: Buffer,
+): { entries: MirrorAuditEntry[]; resealed: number } {
+  let prev = GENESIS_HASH;
+  let resealed = 0;
+  const out: MirrorAuditEntry[] = entries.map((e) => {
+    const wasUnsigned = !e.hash || !e.sig || !e.prev_hash;
+    if (wasUnsigned) resealed += 1;
+    const prevHash = prev;
+    const hash = hashOf(projection({ ...e, prev_hash: prevHash }));
+    prev = hash;
+    return { ...e, prev_hash: prevHash, hash, sig: sign(key, hash) };
+  });
+  return { entries: out, resealed };
+}
+
 /** 对外如实说明（GET /api/mirror/audit 的 integrity.note 用同一句，禁止页面/文档改写成“防篡改”） */
 export const MIRROR_INTEGRITY_NOTE =
   'HMAC-SHA256 链式签名；密钥与本账本同机同目录（home-mirror.key，0600）。能读本机文件者可重算签名——此链用于发现账本被改写，不抵御本机管理员。';
