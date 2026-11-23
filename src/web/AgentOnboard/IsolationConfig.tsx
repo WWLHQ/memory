@@ -9,11 +9,12 @@ interface Props {
 
 export function IsolationConfig({ iso, onChange }: Props) {
   return (
-    <div className="row">
-      <span style={{ fontSize: 11, color: 'var(--muted)' }}>隔离粒度（19.4）：</span>
+    <div className="af-row">
+      <span className="dim">隔离粒度（19.4）：</span>
       <label className="sw">
         <input
           type="checkbox"
+          className="af-switch"
           data-iso="projShare"
           checked={iso.projShare}
           onChange={(e) => onChange('projShare', e.target.checked)}
@@ -23,6 +24,7 @@ export function IsolationConfig({ iso, onChange }: Props) {
       <label className="sw">
         <input
           type="checkbox"
+          className="af-switch"
           data-iso="prefCross"
           checked={iso.prefCross}
           onChange={(e) => onChange('prefCross', e.target.checked)}

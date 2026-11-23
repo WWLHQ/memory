@@ -1,7 +1,7 @@
-// Agent 接入配置页容器（REQ-003 接原型）
-// ⚠ 硬性约定：页面结构、class、文案、交互严格对齐 design/ui/Agent接入页_原型.html。
+// Agent 接入页容器（REQ-003 · 批次48 起 1:1 对齐设计真源 stratum-a-full.html pg-agent 段）：
+// 单页版式 af-head → 一键接入流水线（三步）→ 扫描明细 → Agent 卡区(af-g3) → MCP 客户端面板 → 网页版对话接入。
 // 业务内核复用 src/agentOnboard/*（状态机/校验/服务），此处只做"原型逻辑 → React state"的翻译。
-// 批次16：登录自动接入结果经 storage 事件即时恢复；失败提示「🔍 手动检测」；卡片接真实统计/熔断/延迟/租户。
+// 批次16：登录自动接入结果经 storage 事件即时恢复；卡片接真实统计/熔断/延迟/租户。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AgentRealStats, DiscoveredAgent, InstalledAgent, UiAgentCard,
@@ -10,7 +10,6 @@ import { hasActiveSession } from '../Home/crossTabAuth.ts';
 import { AgentCard, toolRef } from './AgentCard.tsx';
 import type { TestEvidence } from './TestPanel.tsx';
 import { OneClickOnboard } from './OneClickOnboard.tsx';
-import { WebChatExportCard } from './WebChatExportCard.tsx';
 import { restoreCards, restoreDiscovered, makeCard, specOf } from './cards.ts';
 import { addAgentCard } from './store.ts';
 import {
@@ -30,7 +29,7 @@ import {
 import { hostCapability } from '../../desktop/hostBridge.ts';
 import { useHostTheme } from '../shared/hostTheme.ts';
 import { useSessionContext } from '../shared/session.ts';
-import { McpClientsPanel } from './McpClientsPanel.tsx';
+import { requestShellView } from '../shared/shellNavigate.ts';
 import './theme.css';
 
 // 19.10 运行时检测当前端（实现已抽到 shared/detectForm.ts：壳层启动自动接入也要用同一份）。
@@ -144,13 +143,9 @@ export function AgentOnboardPage() {
     return '待扫描';
   });
   const [toastMsg, setToastMsg] = useState('');
-  /** 定稿 4 页签：接入概览 / MCP 客户端 / 探针结果 / 接入配置 */
-  const [tab, setTab] = useState(0);
-  /** MCP 客户端页签计数 = 主进程真扫出的已安装客户端数（未知时不显示，不拿定稿的 6 充数） */
-  const [mcpCount, setMcpCount] = useState<number | null>(null);
-  const onMcpCount = useCallback((n: number) => {
-    setMcpCount((prev) => (prev === n ? prev : n));
-  }, []);
+  /** 流水线最近一次触发方式（设计稿 hint：trigger=login|manual|discover） */
+  const [lastTrigger, setLastTrigger] = useState<string>(() => (initial ? 'login' : '未触发'));
+  /** MCP 客户端计数随面板迁到「MCP 接入」页，本页不再读取（避免重复扫描） */
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const stageTimers = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   /** 指标刷新重试定时器（接入写入与审计读取有毫秒级竞态，幂等重拉两次） */
@@ -238,6 +233,7 @@ export function AgentOnboardPage() {
     setAutoOnboarded(true);
     setFailure('');
     setStageIndex(3);
+    setLastTrigger('login');
     setScanState(`完成 · 发现并绑定 ${st.agentNames.length} 个 · 宿主真扫`);
     refreshStats();
   }, [refreshStats]);
@@ -382,6 +378,7 @@ export function AgentOnboardPage() {
     setRunning(true);
     setInstalledBusy(true);
     setFailure('');
+    setLastTrigger(mode === 'auto' ? 'login' : mode);
     clearStageTimers();
     if (mode === 'discover') {
       setStageIndex(-1);
@@ -416,7 +413,7 @@ export function AgentOnboardPage() {
             const reason = out.reason ?? '未知原因';
             setFailure(reason);
             setScanState(`自动接入失败 · ${reason}`);
-            toast(`自动接入失败：${reason}（可点「🔍 手动检测」重试）`);
+            toast(`自动接入失败：${reason}（可点「手动检测」重试）`);
             return;
           }
           if (out.state) applyStoredState(out.state);
@@ -526,13 +523,13 @@ export function AgentOnboardPage() {
   // 登录门禁：未登录 → 提示并阻止
   if (!hasActiveSession()) {
     return (
-      <div className="wrap">
-        <div className="auth-gate">
-          <div className="gate-card">
+      <div className="aob-page" data-testid="agent-onboard-page">
+        <div className="aob-gate">
+          <div className="aob-gate-card">
             <h2>请先登录</h2>
-            <p>登录后可访问 Agent 接入配置页（REQ-003）。点击确定跳转至首页登录后重试。</p>
+            <p>登录后可访问 Agent 接入页（REQ-003）。点击确定跳转至首页登录后重试。</p>
             <button
-              className="btn primary"
+              className="af-btn pri"
               id="btnGotoLoginFromAgent"
               type="button"
               onClick={() => {
@@ -560,206 +557,170 @@ export function AgentOnboardPage() {
       ].filter(Boolean).join(' · ')
     : '';
   const failureNode = failure ? (
-    <div className="warn show" data-testid="onboard-failure" style={{ marginBottom: 10 }}>
-      ⚠ 自动接入未完成：{failure}
-      <span style={{ marginLeft: 8 }}>请点击上方「🔍 手动检测」重试（逐路读取本机安装痕迹）。</span>
+    <div className="af-alert warn" data-testid="onboard-failure">
+      <span className="tag">WARN</span>
+      <span>⚠ 自动接入未完成：{failure} —— 请点「🔍 手动检测」重试（逐路读取本机安装痕迹）。</span>
     </div>
   ) : null;
 
-  const STATE_TEXT: Record<UiAgentCard['state'], string> = {
-    connected: '已连通',
-    degraded: '降级（仅补偿）',
-    onboard: '未配置',
-  };
-  const fmtTime = (ts?: number): string =>
-    ts ? new Date(ts).toLocaleString('zh-CN', { hour12: false }) : '未取数';
-
-  /** 探针结论只认真实样本：有失败原因 → 未通过；有样本且通过 → 通过；否则如实说无样本 */
-  const probeOf = (a: UiAgentCard): { verdict: string; cls: string } => {
-    const s = statsForAgent(stats, a.name);
-    if (failureReasons[normalizeAgentKey(a.name)]) return { verdict: '未通过', cls: 'err' };
-    if (!s || s.tests === 0) return { verdict: '无探针样本', cls: 'muted' };
-    if (s.passed > 0) return { verdict: '通过', cls: 'ok' };
-    return { verdict: '未通过', cls: 'err' };
-  };
-
-  const tabs = [
-    '接入概览',
-    `MCP 客户端${mcpCount === null ? '' : ` ${mcpCount}`}`,
-    '探针结果',
-    '接入配置',
+  // 设计稿三步流水线：①扫描 ②绑定 ③拨测；真实数据注 note，不抄演示值。
+  // 步骤态：完成=stageIndex≥k；进行中=running 且前一步已完成；其余=未到（pend 灰圈数字）。
+  const boundCount = discovered.filter((d) => d.bound).length;
+  const pipelineSteps = [
+    {
+      k: 1, title: '扫描',
+      note: `hostScan + hostAgentDetect · 命中 ${discovered.length} Agent；MCP 客户端计数见「MCP 接入」页`,
+    },
+    { k: 2, title: '绑定', note: `auto_bind 审计 ×${boundCount} · 卡片 rev 递增 · expectedRev 并发校验` },
+    { k: 3, title: '拨测', note: 'agent_test 真实写审计 · 成功率/延时来自 /audit' },
   ];
 
   return (
-    <div className="wrap" data-testid="agent-onboard-page">
-      <h1>Agent 接入配置页 · 可交互原型</h1>
-      <div className="sub">
-        按《Agent 接入页字段级交互规格》实现 · MVP 两家起步（deepseek harness P0 + Claude Code P1）· 一键接入 · 双通道降级 · 隔离开关 · 密钥脱敏 · 效果证据
-      </div>
-
-      <div className="p0-tabs" role="tablist" data-testid="agent-tabs">
-        {tabs.map((label, i) => (
-          <button
-            key={label} type="button" role="tab" aria-selected={tab === i}
-            className={`p0-tab${tab === i ? ' active' : ''}`}
-            data-testid={`agent-tab-${i}`} data-tab={i}
-            onClick={() => setTab(i)}
-          >{label}</button>
-        ))}
-      </div>
-
-      {/* ── 1. 接入概览：一键接入 + 真实发现行 + 接入摘要 ── */}
-      <div hidden={tab !== 0} data-testid="agent-panel-0">
-        <div className="section-title">⚡ 一键接入本机 Agent（19.9）· 自动发现 + 默认绑定，不用逐个设置</div>
-        {failureNode}
-        <OneClickOnboard
-          form={form}
-          discovered={discovered}
-          running={running}
-          stageIndex={stageIndex}
-          scanState={scanState}
-          onDiscover={onDiscover}
-          onUnbind={onUnbind}
-          onSignalChange={() => { /* 信号源仅影响发现范围，原型默认全开即全部展示 */ }}
-          autoOnboarded={autoOnboarded}
-          onRebindAll={onRebindAll}
-          installedAgents={installed}
-          installedProbes={installedProbes}
-          installedSource={installedSource}
-          installedReason={failure || undefined}
-          installedBusy={installedBusy}
-          onManualDetect={onManualDetect}
-          onAddCardForInstalled={onAddCardForInstalled}
-        />
-
-        {/* 网页版对话接入引导（用户 2026-11-16 新增需求，非原型既有卡片；沿用本页 section/card 风格） */}
-        <div className="section-title">网页版对话接入 · 浏览器插件导出后由采集器自动入库</div>
-        <WebChatExportCard />
-
-        <div className="section-title">接入摘要 · 状态来自后端真实回填与内核账本</div>
-        {agents.length === 0 ? (
-          <div className="card" data-testid="overview-empty">
-            尚无接入卡片：点上方「自动发现并接入本机 Agent」真扫本机后建卡；空名单不伪造 Agent 行。
+    <div className="aob-page" data-testid="agent-onboard-page">
+      <div className="aob-scroll">
+        <div className="aob-main af-stack">
+          <div className="af-head" data-testid="agent-head">
+            <h1>Agent 接入</h1>
+            <span className="sub">登录即自动接入 · 三路真扫 · 状态由内核账本重建（sync_scope=local-only）</span>
+            <div className="right">
+              <button
+                className="af-btn" type="button" data-testid="head-manual-detect"
+                disabled={installedBusy || running} onClick={onManualDetect}
+              >
+                🔍 手动检测
+              </button>
+              <button className="af-btn" type="button" data-testid="head-rebind-all" onClick={onRebindAll}>
+                撤销并重接
+              </button>
+            </div>
           </div>
-        ) : (
-          <div className="card">
-            <table className="ltable" data-testid="overview-table">
-              <thead>
-                <tr>
-                  <th>Agent</th><th>状态</th><th>连通成功率</th><th>平均延时</th>
-                  <th>最近探针</th><th>熔断</th><th>双通道</th>
-                </tr>
-              </thead>
-              <tbody>
-                {agents.map((a) => {
-                  const s = statsForAgent(stats, a.name);
-                  const rate = s && s.tests > 0 ? `${Math.round((s.passed / s.tests) * 100)}%` : '未取数';
+
+          {failureNode}
+
+          <section className="af-panel">
+            <div className="af-ph">
+              <h3>一键接入流水线</h3>
+              <span className="hint" data-testid="pipeline-hint">
+                trigger={lastTrigger} · sid 记账去重 · {running ? '本轮进行中' : stageIndex >= 3 ? '本轮已完成' : '待触发'}
+              </span>
+            </div>
+            <div className="af-pb">
+              <div className="af-steps" data-testid="pipeline-steps">
+                {pipelineSteps.map((s) => {
+                  const done = stageIndex >= s.k;
+                  const cur = running && !done && (s.k === 1 || stageIndex >= s.k - 1);
                   return (
-                    <tr key={a.name} data-testid={`overview-row-${a.name}`}>
-                      <td>{a.name}</td>
-                      <td>{STATE_TEXT[a.state]}</td>
-                      <td>{rate}{s && s.tests > 0 ? `（${s.passed}/${s.tests}）` : ''}</td>
-                      <td>{s?.avgRtt !== undefined ? `${s.avgRtt}ms` : '未取数'}</td>
-                      <td className="mid">{fmtTime(s?.lastTestAt)}</td>
-                      <td>{a.circuit}</td>
-                      <td>{a.chan.webhook && a.chan.api ? 'webhook + API' : a.chan.webhook ? 'webhook' : a.chan.api ? 'API' : '全关'}</td>
-                    </tr>
+                    <div
+                      key={s.k}
+                      className={`af-step${cur ? ' cur' : ''}${!done && !cur ? ' pend' : ''}`}
+                      data-step={s.k}
+                      data-state={done ? 'done' : cur ? 'cur' : 'pend'}
+                    >
+                      <span className="no">{done ? '✓' : s.k}</span>
+                      <span>
+                        <b>{s.title}</b>
+                        <br />
+                        <span className="af-note">{s.note}</span>
+                      </span>
+                    </div>
                   );
                 })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+              </div>
+            </div>
+          </section>
 
-      {/* ── 2. MCP 客户端：七态 + 真实本机配置 ── */}
-      <div hidden={tab !== 1} data-testid="agent-panel-1">
-        {mcpText && (
-          <div className="note" data-testid="mcp-wire-summary" style={{ marginBottom: 10 }}>
-            🧠 MCP 接入（自动写入已连通 Agent）：{mcpText} · 端点 {mcpSummary?.endpoint}；
-            未列出的客户端在下方客户端列表可查看真实状态与手工说明。
-          </div>
-        )}
-        <McpClientsPanel onInstalledCount={onMcpCount} />
-      </div>
+          {/* 扫描明细（信号源 / 发现行 / 已安装行 / 原理），动作与流水线共用同一状态机 */}
+          <OneClickOnboard
+            form={form}
+            discovered={discovered}
+            running={running}
+            stageIndex={stageIndex}
+            scanState={scanState}
+            onDiscover={onDiscover}
+            onUnbind={onUnbind}
+            onSignalChange={() => { /* 信号源仅影响发现范围，原型默认全开即全部展示 */ }}
+            autoOnboarded={autoOnboarded}
+            onRebindAll={onRebindAll}
+            installedAgents={installed}
+            installedProbes={installedProbes}
+            installedSource={installedSource}
+            installedReason={failure || undefined}
+            installedBusy={installedBusy}
+            onManualDetect={onManualDetect}
+            onAddCardForInstalled={onAddCardForInstalled}
+          />
 
-      {/* ── 3. 探针结果：只展示真实拨测回执，无样本不显示 200 ── */}
-      <div hidden={tab !== 2} data-testid="agent-panel-2">
-        <div className="section-title">探针结果 · 真实请求与回执（200 / 401 / 超时按真实结果展示）</div>
-        <div className="note" data-testid="probe-note" style={{ margin: '0 0 8px' }}>
-          探针结论与耗时来自接入后端 /agents 的 lastTest 与 /audit 审计样本；后端不可达时显示「无探针样本」，
-          不把「未知」标成「通过」。
+          {/* Agent 卡区（设计稿 af-g3 三列）：状态/指标全部实算实读，空名单不伪造 */}
+          {agents.length === 0 ? (
+            <section className="af-panel">
+              <div className="af-empty" data-testid="cards-empty">
+                <b>尚无接入卡片</b>
+                点上方「⚡ 自动发现并接入本机 Agent」真扫本机后建卡；未接入的 Agent 不展示配置表单。
+              </div>
+            </section>
+          ) : (
+            <div className="af-g3" id="cards">
+              {agents.map((a, i) => {
+                // 吊销按钮只在发现名单里有对应行时出现（诚实化：没有绑定关系的卡不给假吊销）
+                const di = discovered.findIndex((d) => d.name === a.name);
+                return (
+                  <AgentCard
+                    key={a.name}
+                    agent={a}
+                    error={errors[a.name] ?? ''}
+                    testDisabled={a.circuit === 'OPEN'}
+                    saveDisabled={!!errors[a.name]}
+                    injectVisible={!!injectShown[a.name]}
+                    testEvidence={evidence[a.name]}
+                    failureReason={failureReasons[normalizeAgentKey(a.name)]}
+                    stats={statsForAgent(stats, a.name)}
+                    tenantOverride={tenantLabel}
+                    onToolChange={(t, c) => onToolChange(i, t, c)}
+                    onIsoChange={(k, c) => onIsoChange(i, k, c)}
+                    onChanChange={(ch, c) => onChanChange(i, ch, c)}
+                    onAct={(act) => onAct(i, act)}
+                    onRidClick={onRidClick}
+                    onRevoke={di >= 0 ? () => onUnbind(di) : undefined}
+                  />
+                );
+              })}
+            </div>
+          )}
+
+          {mcpText && (
+            <p className="af-note" data-testid="mcp-wire-summary">
+              MCP 接入（自动写入已连通 Agent）：{mcpText} · 端点 {mcpSummary?.endpoint}；
+              各客户端的真实接入状态与手工说明见「MCP 接入」页。
+            </p>
+          )}
+
+          {/* MCP 客户端接入状态整块已迁到「MCP 接入」页（2026-11-21）：此处只留入口，不重复展示 */}
+          <div className="af-panel" data-testid="mcp-moved-entry">
+            <div className="af-ph">
+              <span className="af-mark">🧩</span>
+              <b>MCP 客户端接入</b>
+              <span className="af-badge ok">已迁出本页</span>
+              <span className="af-spring" />
+              <span className="af-hint">客户端清单 / 安装痕迹 / 连通实测 / 一键写入 / 手动指引</span>
+            </div>
+            <p className="af-note">
+              MCP 客户端接入状态已独立为「MCP 接入」页（壳层导航：连接 → MCP 接入），
+              本页不再重复展示；此入口只是跳转，不改变任何数据口径。
+            </p>
+            <button
+              className="af-btn"
+              type="button"
+              data-testid="mcp-moved-open"
+              onClick={() => {
+                if (window.parent && window.parent !== window) requestShellView('mcp-clients');
+                else window.location.href = 'mcp.html';
+              }}
+            >
+              打开 MCP 接入 →
+            </button>
+          </div>
+
         </div>
-        {agents.length === 0 ? (
-          <div className="card" data-testid="probe-empty">
-            暂无真实探针样本：先完成一键接入，或在「接入配置」页逐张点「测试接入」。
-          </div>
-        ) : (
-          <div className="card">
-            <table className="ltable" data-testid="probe-table">
-              <thead>
-                <tr>
-                  <th>Agent</th><th>探针结论</th><th>最近探针</th><th>延时</th>
-                  <th>request_id</th><th>失败原因 / 证据</th>
-                </tr>
-              </thead>
-              <tbody>
-                {agents.map((a) => {
-                  const s = statsForAgent(stats, a.name);
-                  const p = probeOf(a);
-                  const ev = evidence[a.name];
-                  const reason = failureReasons[normalizeAgentKey(a.name)] ?? ev?.reason ?? '';
-                  return (
-                    <tr key={a.name} data-testid={`probe-row-${a.name}`}>
-                      <td>{a.name}</td>
-                      <td><span className={`status ${p.cls === 'ok' ? 'active' : p.cls === 'err' ? 'deprecated' : ''}`}>{p.verdict}</span></td>
-                      <td className="mid">{fmtTime(s?.lastTestAt)}</td>
-                      <td>{s?.lastRtt !== undefined ? `${s.lastRtt}ms` : '未取数'}</td>
-                      <td className="mid">{ev?.rid ?? '账本无链路'}</td>
-                      <td>{reason || '无'}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* ── 4. 接入配置：逐张卡片开关 + 密钥 + 通道 ── */}
-      <div hidden={tab !== 3} data-testid="agent-panel-3">
-        <div className="section-title">宿主 Agent 接入卡片（19.2 / 19.3 / 5.2）</div>
-        <div className="note" data-testid="card-metric-note" style={{ margin: '0 0 8px' }}>
-          连通成功率与平均延时只统计真实拨测样本（登录自动接入的 auto_bind + 手动「测试接入」），
-          不需要逐张点击测试；手动测试用于复查与排障，不点不影响接入和指标。
-        </div>
-        {agents.length === 0 ? (
-          <div className="card" data-testid="cards-empty">
-            当前没有接入卡片：先在「接入概览」完成一键接入；未接入的 Agent 不展示配置表单。
-          </div>
-        ) : (
-          <div id="cards">
-            {agents.map((a, i) => (
-              <AgentCard
-                key={a.name}
-                agent={a}
-                error={errors[a.name] ?? ''}
-                testDisabled={a.circuit === 'OPEN'}
-                saveDisabled={!!errors[a.name]}
-                injectVisible={!!injectShown[a.name]}
-                testEvidence={evidence[a.name]}
-                failureReason={failureReasons[normalizeAgentKey(a.name)]}
-                stats={statsForAgent(stats, a.name)}
-                tenantOverride={tenantLabel}
-                onToolChange={(t, c) => onToolChange(i, t, c)}
-                onIsoChange={(k, c) => onIsoChange(i, k, c)}
-                onChanChange={(ch, c) => onChanChange(i, ch, c)}
-                onAct={(act) => onAct(i, act)}
-                onRidClick={onRidClick}
-              />
-            ))}
-          </div>
-        )}
       </div>
 
       <div className="toast" id="toast" style={toastMsg ? { display: 'block' } : { display: 'none' }}>

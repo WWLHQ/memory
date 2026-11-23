@@ -30,49 +30,48 @@ function setup(over: Partial<UiAgentCard> = {}, props: Over = {}) {
   return { agent, onToolChange, ...utils };
 }
 
-test('渲染徽标/状态点/四项指标（AC-003.1/AC-003.3）', () => {
+test('渲染徽标/指标kv（批次48 af 契约：af-ph 徽标 + af-kv 四行）', () => {
   setup();
-  expect(screen.getByText('MVP·P0')).toBeInTheDocument();
   expect(screen.getByText('deepseek harness')).toBeInTheDocument();
-  expect(document.querySelector('.statusdot.st-connected')).toBeTruthy();
-  expect(screen.getByText('已连通')).toBeInTheDocument();
-  expect(screen.getByText('99.2%')).toBeInTheDocument();
-  expect(screen.getByText('CLOSED')).toBeInTheDocument();
-  expect(screen.getByText('ent_001 / team_001')).toBeInTheDocument();
+  expect(screen.getByText('CONNECTED')).toBeInTheDocument();
+  expect(screen.getByText(/^99(\.\d)?%/)).toBeInTheDocument();
+  expect(document.querySelector('[data-testid="agent-kv-deepseek harness"]')).toBeTruthy();
+  expect(screen.getByText(/ent_001 \/ team_001/)).toBeInTheDocument();
 });
 
 test('tenantOverride：真实租户覆盖种子 tenant 字段', () => {
   setup({}, { tenantOverride: 'ent_999 / team_42' });
-  expect(screen.getByText('ent_999 / team_42')).toBeInTheDocument();
-  expect(screen.queryByText('ent_001 / team_001')).not.toBeInTheDocument();
+  expect(screen.getByText(/ent_999 \/ team_42/)).toBeInTheDocument();
+  expect(screen.queryByText(/ent_001 \/ team_001/)).not.toBeInTheDocument();
 });
 
 test('tenantOverride 缺省：回退种子 tenant', () => {
   setup();
-  expect(screen.getByText('ent_001 / team_001')).toBeInTheDocument();
+  expect(screen.getByText(/ent_001 \/ team_001/)).toBeInTheDocument();
 });
 
 test('密钥恒脱敏不回显明文（R5）', () => {
   setup();
-  expect(screen.getByText('[API_KEY:harness]')).toBeInTheDocument();
+  // 批次48：脱敏值同时出现在 af-kv 密钥行与 KeyMgmt 徽标，两处都必须是脱敏尾
+  expect(screen.getAllByText(/\[API_KEY:harness\]/).length).toBeGreaterThanOrEqual(1);
   expect(document.body.textContent).not.toContain('sk-');
 });
 
-test('熔断 OPEN：卡片加 degraded + 显示降级告警 + 禁测试（R6/5.4）', () => {
+test('熔断 OPEN：徽标熔断中 + 降级告警 + 禁测试（R6/5.4）', () => {
   setup({ circuit: 'OPEN', state: 'degraded' });
-  expect(document.querySelector('.card.degraded')).toBeTruthy();
-  expect(document.querySelector('.warn.show')).toBeTruthy();
-  expect(screen.getByRole('button', { name: /测试接入/ })).toBeDisabled();
+  expect(screen.getByText('熔断中')).toBeInTheDocument();
+  expect(document.querySelector('.af-alert.warn')).toBeTruthy();
+  expect(screen.getByRole('button', { name: '测试' })).toBeDisabled();
 });
 
 test('连通率<95% / 延迟>5s 告警态', () => {
   setup({ conn: 90, latency: 6 });
-  expect(document.querySelectorAll('.metric .v.warn').length).toBeGreaterThanOrEqual(1);
+  expect(document.querySelectorAll('.af-kv dd.warn').length).toBeGreaterThanOrEqual(1);
 });
 
-test('超 90 天未轮换显示 gold 告警（真实 lastRotateAt 口径）', () => {
+test('超 90 天未轮换显示告警（真实 lastRotateAt 口径）', () => {
   setup({}, { stats: { tests: 0, passed: 0, lastRotateAt: Date.now() - 92 * 86_400_000 } });
-  expect(document.querySelector('.pill.gold')).toBeTruthy();
+  expect(document.querySelector('.af-badge.warn')).toBeTruthy();
 });
 
 test('工具/隔离/通道开关均带原型 data-* 属性', () => {
@@ -125,5 +124,5 @@ test('Codex 原样渲染：pref=false 未勾选且不抛错', () => {
   );
   const pref = document.querySelector('input[data-tool="pref"]') as HTMLInputElement;
   expect(pref.checked).toBe(false);
-  expect(screen.getByText('降级（仅补偿）')).toBeInTheDocument();
+  expect(screen.getByText('⚠ 降级')).toBeInTheDocument();
 });

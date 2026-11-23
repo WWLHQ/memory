@@ -110,11 +110,12 @@ describe('AgentOnboardPage', () => {
     seedOnboard();
     render(<AgentOnboardPage />);
     await waitFor(() => {
-      expect(document.querySelectorAll('#cards > .card')).toHaveLength(3);
+      expect(document.querySelectorAll('#cards > .af-panel')).toHaveLength(3);
     });
     expect(document.querySelector('#gains')).toBeNull();
     expect(document.querySelectorAll('#found > .found')).toHaveLength(3);
-    expect(document.querySelectorAll('#stages .stage')).toHaveLength(4);
+    // 批次48：设计稿三步流水线（af-steps），不再有旧四段进度条
+    expect(document.querySelectorAll('[data-testid="pipeline-steps"] .af-step')).toHaveLength(3);
     expect(document.querySelector('#formBadge')?.textContent).toContain('当前端');
     expect(screen.getAllByText('deepseek harness').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Codex').length).toBeGreaterThan(0);
@@ -143,25 +144,25 @@ describe('AgentOnboardPage', () => {
     await waitFor(() => {
       expect(screen.getByText('✅ 已自动接入 · 切页/重载保持')).toBeInTheDocument();
       expect(document.querySelector('#scanState')?.textContent).toContain('完成 · 发现并绑定 1 个');
-      expect(document.querySelectorAll('#cards > .card')).toHaveLength(1);
+      expect(document.querySelectorAll('#cards > .af-panel')).toHaveLength(1);
       expect(document.querySelectorAll('#found > .found')).toHaveLength(1);
     });
   });
 
-  it('真实租户：卡片 tenant 字段来自内核登录身份（bindTenant 落盘）', async () => {
+  it('真实租户：卡片 metric 注记含内核登录身份租户（bindTenant 落盘）', async () => {
     seedOnboard();
     render(<AgentOnboardPage />);
     await waitFor(() => {
-      expect(document.querySelectorAll('#cards > .card')).toHaveLength(3);
+      expect(document.querySelectorAll('#cards > .af-panel')).toHaveLength(3);
     });
-    expect(screen.getAllByText('ent_42 / team_99')).toHaveLength(3);
-    expect(screen.queryByText('ent_001 / team_001')).not.toBeInTheDocument();
+    expect(screen.getAllByText(/ent_42 \/ team_99/)).toHaveLength(3);
+    expect(screen.queryByText(/ent_001 \/ team_001/)).not.toBeInTheDocument();
   });
 
   it('R4：双通道全关 → 报错并禁保存；恢复一路即解除', async () => {
     seedOnboard();
     render(<AgentOnboardPage />);
-    const card = document.querySelectorAll('#cards > .card')[0] as HTMLElement;
+    const card = document.querySelectorAll('#cards > .af-panel')[0] as HTMLElement;
     const save = card.querySelector('[data-act="save"]') as HTMLButtonElement;
 
     await userEvent.click(card.querySelector('input[data-chan="webhook"]') as HTMLInputElement);
@@ -174,7 +175,7 @@ describe('AgentOnboardPage', () => {
 
     await userEvent.click(card.querySelector('input[data-chan="webhook"]') as HTMLInputElement);
     await waitFor(() => {
-      expect(card.querySelector('[data-err]')?.textContent).toBe('');
+      expect(card.querySelector('[data-err]')).toBeNull();
     });
     expect(save.disabled).toBe(false);
   });
@@ -182,7 +183,7 @@ describe('AgentOnboardPage', () => {
   it('R2：关共享且开写 → 保存时提示须带 project_id', async () => {
     seedOnboard();
     render(<AgentOnboardPage />);
-    const card = document.querySelectorAll('#cards > .card')[0] as HTMLElement;
+    const card = document.querySelectorAll('#cards > .af-panel')[0] as HTMLElement;
     await userEvent.click(card.querySelector('input[data-iso="projShare"]') as HTMLInputElement);
     await userEvent.click(card.querySelector('[data-act="save"]') as HTMLButtonElement);
     await waitFor(() => {
@@ -205,7 +206,7 @@ describe('AgentOnboardPage', () => {
     });
     seedOnboard();
     render(<AgentOnboardPage />);
-    const card = document.querySelectorAll('#cards > .card')[0] as HTMLElement;
+    const card = document.querySelectorAll('#cards > .af-panel')[0] as HTMLElement;
     const inject = card.querySelector('[data-inject]') as HTMLElement;
     expect(inject.style.display).toBe('none');
 
@@ -213,7 +214,7 @@ describe('AgentOnboardPage', () => {
     await waitFor(() => expect(screen.getByText(/测试通过：deepseek harness · req_mock_pass/)).toBeInTheDocument());
     expect(inject.style.display).not.toBe('none');
     expect(inject.textContent).toContain('账本暂无可注入记忆');
-    await waitFor(() => expect(card.querySelector('.statusdot.st-connected')).not.toBeNull());
+    await waitFor(() => expect(card.textContent).toContain('CONNECTED'));
 
     await userEvent.click(card.querySelector('[data-act="rotate"]') as HTMLButtonElement);
     await waitFor(() => expect(screen.getByText(/已轮换，旧 Key 24h 内有效/)).toBeInTheDocument());
@@ -232,14 +233,13 @@ describe('AgentOnboardPage', () => {
     });
     seedOnboard();
     render(<AgentOnboardPage />);
-    const card = document.querySelectorAll('#cards > .card')[0] as HTMLElement;
+    const card = document.querySelectorAll('#cards > .af-panel')[0] as HTMLElement;
 
     await userEvent.click(card.querySelector('[data-act="test"]') as HTMLButtonElement);
     await waitFor(() => expect(screen.getByText(new RegExp(`测试未通过：deepseek harness —— .*未检测到`))).toBeInTheDocument());
-    await waitFor(() => expect(card.querySelector('.statusdot.st-degraded')).not.toBeNull());
-    expect(card.querySelector('.statusdot.st-connected')).toBeNull();
-    expect(card.textContent).toContain('降级（仅补偿）');
-    expect(card.querySelector('.warn.show')?.textContent).toContain('最近一次真实拨测未通过');
+    await waitFor(() => expect(card.textContent).toContain('降级'));
+    expect(card.textContent).not.toContain('CONNECTED');
+    expect(card.querySelector('.af-alert.warn')?.textContent).toContain('最近一次真实拨测未通过');
     expect(card.textContent).toContain(reason);
   });
 
@@ -250,7 +250,7 @@ describe('AgentOnboardPage', () => {
     });
     seedOnboard();
     render(<AgentOnboardPage />);
-    const card = document.querySelectorAll('#cards > .card')[0] as HTMLElement;
+    const card = document.querySelectorAll('#cards > .af-panel')[0] as HTMLElement;
 
     await userEvent.click(card.querySelector('[data-act="rotate"]') as HTMLButtonElement);
     await waitFor(() => expect(screen.getByText(/轮换失败：deepseek harness —— no-card/)).toBeInTheDocument());
@@ -265,12 +265,12 @@ describe('AgentOnboardPage', () => {
       { name: 'Codex', badge: 'p2', label: '兜底·P2', source: 'codex.exe', signal: 'proc' },
     ]);
     render(<AgentOnboardPage />);
-    expect(document.querySelectorAll('#cards > .card')).toHaveLength(0); // 未接入过 → 无卡
+    expect(document.querySelectorAll('#cards > .af-panel')).toHaveLength(0); // 未接入过 → 无卡
 
-    await userEvent.click(screen.getByRole('button', { name: /自动发现并接入本机 Agent/ }));
+    await userEvent.click(screen.getByRole('button', { name: /⚡ 自动发现并接入本机 Agent/ }));
 
     await waitFor(() => {
-      expect(document.querySelectorAll('#stages .stage.done')).toHaveLength(4);
+      expect(document.querySelectorAll('[data-testid="pipeline-steps"] .af-step[data-state="done"]')).toHaveLength(3);
     }, { timeout: 4000 });
     await waitFor(() => {
       expect(screen.getByText(/完成 · 发现并绑定 3 个 · 宿主真扫/)).toBeInTheDocument();
@@ -278,7 +278,7 @@ describe('AgentOnboardPage', () => {
     await waitFor(() => {
       expect(screen.getByText(/一键接入完成：自动发现 3 个 Agent 并绑定/)).toBeInTheDocument();
     });
-    await waitFor(() => expect(document.querySelectorAll('#cards > .card')).toHaveLength(3));
+    await waitFor(() => expect(document.querySelectorAll('#cards > .af-panel')).toHaveLength(3));
     expect(document.querySelectorAll('#found > .found')).toHaveLength(3);
     // 持久化生效：再次进入可直接恢复
     expect(localStorage.getItem('agentOnboardState')).toContain('deepseek harness');
@@ -296,8 +296,8 @@ describe('AgentOnboardPage', () => {
     );
     seedOnboard();
     render(<AgentOnboardPage />);
-    const card = document.querySelectorAll('#cards > .card')[0] as HTMLElement;
-    await waitFor(() => expect(card.querySelector('.statusdot.st-connected')).not.toBeNull());
+    const card = document.querySelectorAll('#cards > .af-panel')[0] as HTMLElement;
+    await waitFor(() => expect(card.textContent).toContain('CONNECTED'));
 
     await userEvent.click(document.querySelector('[data-unbind="0"]') as HTMLButtonElement);
     await waitFor(() => {
@@ -313,9 +313,9 @@ describe('AgentOnboardPage', () => {
       : { ok: false, reason: 'unexpected' }));
     seedOnboard();
     render(<AgentOnboardPage />);
-    const card = document.querySelectorAll('#cards > .card')[0] as HTMLElement;
+    const card = document.querySelectorAll('#cards > .af-panel')[0] as HTMLElement;
     // 未测试 → 如实显示「尚未测试」，不伪造 request_id，点击不跳转
-    expect(card.querySelector('[data-rid]')?.textContent).toBe('尚未测试 · 点「▶ 测试接入」');
+    expect(card.querySelector('[data-rid]')?.textContent).toBe('尚未测试 · 点「测试接入」');
     await userEvent.click(card.querySelector('[data-rid]') as HTMLElement);
     expect(screen.queryByText(/定位 deepseek harness 的 request_id 链路/)).toBeNull();
 
@@ -387,7 +387,7 @@ describe('AgentOnboardPage', () => {
     }, { timeout: 4000 });
     // 两路命中同一 Agent → 合并为一行（不重复建卡/建行）
     expect(document.querySelectorAll('#found > .found')).toHaveLength(2);
-    expect(document.querySelectorAll('#cards > .card')).toHaveLength(2);
+    expect(document.querySelectorAll('#cards > .af-panel')).toHaveLength(2);
     const claudeRow = document.querySelector('[data-disc="1"]') as HTMLElement;
     expect(claudeRow.textContent).toContain('安装痕迹（config）');
     expect(claudeRow.textContent).toContain('proc · claude.exe');
@@ -407,7 +407,7 @@ describe('AgentOnboardPage', () => {
     }, { timeout: 4000 });
     expect(screen.getByTestId('onboard-failure').textContent).toContain('手动检测');
     expect(screen.getByTestId('manual-detect')).toBeInTheDocument();
-    expect(document.querySelectorAll('#cards > .card')).toHaveLength(0); // 无宿主信号 → 不伪造卡片
+    expect(document.querySelectorAll('#cards > .af-panel')).toHaveLength(0); // 无宿主信号 → 不伪造卡片
   });
 
   it('页面启动补扫：有会话 + 无历史状态 → 自动扫描并接入（无需点击）', async () => {
@@ -437,7 +437,7 @@ describe('AgentOnboardPage', () => {
     render(<AgentOnboardPage />);
 
     await waitFor(() => {
-      expect(document.querySelectorAll('#cards > .card')).toHaveLength(1);
+      expect(document.querySelectorAll('#cards > .af-panel')).toHaveLength(1);
     }, { timeout: 4000 });
     expect(document.querySelector('#scanState')?.textContent).toContain('完成 · 发现并绑定 1 个');
     expect(document.querySelectorAll('#found > .found')).toHaveLength(1);
@@ -568,16 +568,17 @@ describe('AgentOnboardPage', () => {
     }) as typeof fetch;
     seedOnboard();
     render(<AgentOnboardPage />);
-    const card = document.querySelectorAll('#cards > .card')[0] as HTMLElement;
+    const card = document.querySelectorAll('#cards > .af-panel')[0] as HTMLElement;
     await waitFor(() => {
-      expect(card.querySelector('.statusdot.st-degraded')).not.toBeNull();
+      expect(card.textContent).toContain('降级');
     });
     await waitFor(() => {
-      const metrics = [...card.querySelectorAll('.metric .v')].map((n) => n.textContent);
-      expect(metrics[0]).toBe('50%'); // 1 次通过 / 2 次连通尝试
-      expect(metrics[1]).toBe('OPEN'); // 真实熔断状态
-      expect(metrics[2]).toBe('200ms'); // (100 + 300) / 2
-      expect(metrics[3]).toBe('ent_42 / team_99'); // 真实租户（内核登录身份）
+      // 批次48 af 契约：指标在 af-kv 四行 dd 里（成功率/延时/密钥/拨测或熔断原因），租户在 metric 注记
+      const dds = [...card.querySelectorAll('.af-kv dd')].map((n) => n.textContent);
+      expect(dds[0]).toBe('50%（1/2）'); // 1 次通过 / 2 次连通尝试
+      expect(dds[1]).toBe('200ms'); // (100 + 300) / 2
+      expect(card.textContent).toContain('ent_42 / team_99'); // 真实租户（内核登录身份）
+      expect(card.textContent).toContain('熔断原因'); // OPEN → 第 4 行为熔断原因
     });
     expect((card.querySelector('[data-act="test"]') as HTMLButtonElement).disabled).toBe(true);
     expect(card.textContent).toContain('主通道 Webhook 熔断 OPEN');

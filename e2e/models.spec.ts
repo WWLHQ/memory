@@ -46,6 +46,15 @@ test.describe('大模型配置页', () => {
     expect(errors).toEqual([]);
   });
 
+  test('LLM 精炼引擎整块在「引擎」页签（与向量卡同段），其它页签不挂载', async ({ page }) => {
+    await page.goto(APP);
+    await expect(page.locator('[data-testid="models-sec-engine"] [data-testid="llm-engine-card"]')).toHaveCount(1);
+    await gotoTab(page, 1);
+    await expect(page.locator('[data-testid="llm-engine-card"]')).toHaveCount(0);
+    await gotoTab(page, 2);
+    await expect(page.locator('[data-testid="llm-engine-card"]')).toHaveCount(0);
+  });
+
   test('C2/R4 judge 温度锁灰恒 0，其他用途可编辑', async ({ page }) => {
     await page.goto(APP);
     await gotoTab(page, 1);
@@ -138,5 +147,110 @@ test.describe('大模型配置页', () => {
     await page.locator('[data-testid="usage-write-net"]').uncheck();
     await page.locator('[data-testid="save-config"]').click();
     await expect(page.locator('[data-testid="toast"]')).toContainText('已保存 model_config');
+  });
+
+  test('新增：顶部模型摘要读数条 + 四个场景分组（路由 / 单价配额 / 精炼引擎 / 连接测试）', async ({ page }) => {
+    await page.goto(APP);
+    const readout = page.locator('[data-testid="models-readout"]');
+    await expect(readout).toBeVisible();
+    await expect(readout).toContainText('向量模型');
+    await expect(readout).toContainText('384 维');
+    await expect(readout).toContainText('网关状态');
+    // 浏览器静态环境无宿主网关 → 未配置，不伪造「可用」
+    await expect(readout).toContainText('未配置');
+    for (const id of ['route', 'billing', 'refine', 'conn']) {
+      await expect(page.locator(`[data-testid="models-group-${id}"]`)).toBeVisible();
+    }
+    // LLM 精炼引擎归属：卡里明确指向本页引擎页签，不在全局参数页重复
+    await expect(page.locator('[data-testid="models-group-refine"]')).toContainText('已迁入');
+    // 真实动作：dry-run 模拟给出回执；跳精炼引擎真切到引擎页签
+    await page.locator('[data-testid="models-dry-run"]').click();
+    await expect(page.locator('[data-testid="toast"]')).toContainText('dry-run');
+    await page.locator('[data-testid="models-jump-refine"]').click();
+    await expect(page.locator('[data-testid="llm-engine-card"]')).toBeVisible();
+  });
+
+  test('几何：连接测试卡与 LLM 精炼引擎卡同宽并排（精炼在左、连接测试在右）', async ({ page }) => {
+    await page.goto(APP);
+    const m = await page.evaluate(() => {
+      const r = (sel: string) => {
+        const el = document.querySelector(sel);
+        if (!el) return null;
+        const b = el.getBoundingClientRect();
+        return { x: b.x, y: b.y, w: b.width, h: b.height };
+      };
+      return {
+        route: r('[data-testid="models-group-route"]'),
+        billing: r('[data-testid="models-group-billing"]'),
+        refine: r('[data-testid="models-group-refine"]'),
+        conn: r('[data-testid="models-group-conn"]'),
+      };
+    });
+    expect(m.refine).not.toBeNull();
+    expect(m.conn).not.toBeNull();
+    // 同宽
+    expect(Math.abs(m.conn!.w - m.refine!.w)).toBeLessThanOrEqual(1);
+    // 同一排、连接测试在精炼引擎右侧
+    expect(Math.abs(m.conn!.y - m.refine!.y)).toBeLessThanOrEqual(1);
+    expect(m.conn!.x).toBeGreaterThan(m.refine!.x);
+    // 四组构成 2×2，同排等宽；无 2/3 + 1/3 参差
+    expect(Math.abs(m.route!.w - m.billing!.w)).toBeLessThanOrEqual(1);
+    expect(Math.abs(m.route!.w - m.refine!.w)).toBeLessThanOrEqual(1);
+  });
+
+  test('回退：引擎/计费页签内容恢复整宽纵向排列（不再页签内两列）', async ({ page }) => {
+    await page.goto(APP);
+    // 引擎页签：向量模型在上、LLM 精炼引擎在下，同左边界同宽
+    const t0 = await page.evaluate(() => {
+      const r = (sel: string) => {
+        const el = document.querySelector(sel) as HTMLElement | null;
+        return el ? { x: el.getBoundingClientRect().x, y: el.getBoundingClientRect().y, w: el.getBoundingClientRect().width, h: el.getBoundingClientRect().height } : null;
+      };
+      return { vector: r('[data-testid="vector-card"]'), engine: r('[data-testid="llm-engine-card"]') };
+    });
+    expect(t0.vector).not.toBeNull();
+    expect(t0.engine).not.toBeNull();
+    expect(Math.abs(t0.engine!.x - t0.vector!.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(t0.engine!.w - t0.vector!.w)).toBeLessThanOrEqual(1);
+    expect(t0.engine!.y).toBeGreaterThanOrEqual(t0.vector!.y + t0.vector!.h - 1);
+    // 计费页签：审计回显在上、保存卡在下，同宽纵向
+    await gotoTab(page, 1);
+    const t1 = await page.evaluate(() => {
+      const r = (sel: string) => {
+        const el = document.querySelector(sel) as HTMLElement | null;
+        return el ? { x: el.getBoundingClientRect().x, y: el.getBoundingClientRect().y, w: el.getBoundingClientRect().width, h: el.getBoundingClientRect().height } : null;
+      };
+      const audit = document.querySelector('[data-testid="audit-echo"]') as HTMLElement | null;
+      const save = audit?.nextElementSibling as HTMLElement | null;
+      return { audit: r('[data-testid="audit-echo"]'), save: save ? { x: save.getBoundingClientRect().x, y: save.getBoundingClientRect().y, w: save.getBoundingClientRect().width } : null };
+    });
+    expect(t1.audit).not.toBeNull();
+    expect(t1.save).not.toBeNull();
+    expect(Math.abs(t1.save!.x - t1.audit!.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(t1.save!.w - t1.audit!.w)).toBeLessThanOrEqual(1);
+    expect(t1.save!.y).toBeGreaterThanOrEqual(t1.audit!.y + t1.audit!.h - 1);
+  });
+
+  test('白底：引擎/计费/反向代理三个页签内的卡片底色 = --surface（浅色 #FFFFFF / 深色 #0C1424）', async ({ page }) => {
+    await page.goto(APP);
+    const readBg = () => page.evaluate(() => {
+      const cards = Array.from(document.querySelectorAll('[data-testid="models-page"] .card'))
+        .filter((el) => (el as HTMLElement).offsetParent !== null);
+      return cards.map((el) => getComputedStyle(el as HTMLElement).backgroundColor);
+    });
+    for (const i of [0, 1, 2] as const) {
+      await gotoTab(page, i);
+      const bgs = await readBg();
+      expect(bgs.length).toBeGreaterThan(0);
+      for (const bg of bgs) expect(bg).toBe('rgb(255, 255, 255)');
+    }
+    // 深色主题：同一批卡切到对应深色 surface（#0C1424），不是写死白底
+    await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
+    for (const i of [0, 1, 2] as const) {
+      await gotoTab(page, i);
+      const bgs = await readBg();
+      expect(bgs.length).toBeGreaterThan(0);
+      for (const bg of bgs) expect(bg).toBe('rgb(12, 20, 36)');
+    }
   });
 });

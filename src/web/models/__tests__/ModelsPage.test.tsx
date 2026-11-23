@@ -35,6 +35,16 @@ describe('ModelsPage（Phase C3 接真）', () => {
     await waitFor(() => expect(screen.getByTestId('models-page')).toBeInTheDocument());
   });
 
+  it('LLM 精炼引擎整块挂在「引擎」页签内（与向量模型同段），不在其它页签', async () => {
+    render(<ModelsPage />);
+    await waitFor(() => expect(document.querySelector('[data-testid="llm-engine-card"]')).not.toBeNull());
+    expect(screen.getByTestId('models-sec-engine').contains(screen.getByTestId('llm-engine-card'))).toBe(true);
+    openTab(1);
+    expect(screen.queryByTestId('llm-engine-card')).toBeNull();
+    openTab(2);
+    expect(screen.queryByTestId('llm-engine-card')).toBeNull();
+  });
+
   it('模拟为 dry-run：不写审计、不扣额度，toast 明确标注未写账本', async () => {
     render(<ModelsPage />);
     openTab(2);
@@ -67,6 +77,31 @@ describe('ModelsPage（Phase C3 接真）', () => {
     const audits = await getKernelStorage().queryAudit({ action: 'param_save' });
     expect(audits).toHaveLength(1);
     await waitFor(() => expect(screen.getByTestId('audit-entry-0')).toHaveTextContent('model_config'));
+  });
+
+  it('跟随壳层深色主题：挂载即设置 html[data-theme="dark"]', () => {
+    // 批次55：深色主题适配正向断言
+    localStorage.setItem('memdesk.shell.theme.v1', 'dark');
+    try {
+      render(<ModelsPage />);
+      expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+    } finally {
+      localStorage.setItem('memdesk.shell.theme.v1', 'light');
+      document.documentElement.removeAttribute('data-theme');
+    }
+  });
+
+  it('新增：顶部模型摘要读数条 + 四个场景分组（无网关如实标注未配置）', async () => {
+    render(<ModelsPage />);
+    await waitFor(() => expect(screen.getByTestId('models-readout')).toBeInTheDocument());
+    const readout = screen.getByTestId('models-readout');
+    expect(readout).toHaveTextContent('向量模型');
+    expect(readout).toHaveTextContent('384 维');
+    expect(readout).toHaveTextContent('未配置');
+    for (const id of ['route', 'billing', 'refine', 'conn']) {
+      expect(screen.getByTestId(`models-group-${id}`)).toBeInTheDocument();
+    }
+    expect(screen.getByTestId('models-group-refine')).toHaveTextContent('已迁入');
   });
 });
 

@@ -35,11 +35,7 @@ export function FormBadge({ form }: Props) {
       }`
     : FORM_LABEL[form];
   return (
-    <span
-      className={`pill${cap !== 'none' ? ' on' : ''}`}
-      id="formBadge"
-      style={cap === 'none' ? { background: 'var(--warn, #b8860b)' } : undefined}
-    >
+    <span className={`af-badge${cap !== 'none' ? ' ok' : ' warn'}`} id="formBadge">
       {label}
     </span>
   );

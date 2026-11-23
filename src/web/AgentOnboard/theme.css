@@ -1,136 +1,244 @@
 /*
- * Agent 接入页样式 —— 逐条抄自 design/ui/Agent接入页_原型.html 的 <style>。
- * ⚠ 硬性约定：UI 严格对齐原型，本文件是原型的唯一 CSS 来源，禁止擅自增删改样式。
- * 偏离原型须用户显式批准。
+ * Agent 接入页样式（STRATUM 1:1 复刻 · 设计真源 stratum-a-full.html pg-agent 段）。
+ * af 基元度量抄自设计稿 CSS：af-head/af-btn/af-alert/af-panel/af-ph/af-pb/af-steps/af-step/
+ * af-g3/af-row/af-kv/af-badge/af-pill/af-table/af-scrollx/af-det/af-switch/af-check/af-li/af-empty。
+ * 本 iframe 独立加载，令牌内嵌 .aob-page；深色由 html[data-theme="dark"] .aob-page 重定义。
+ * 批次48 起 p0-*、card/btn/pill/metrics/stages/errbox 等旧版式类清零；
+ * found/sw/dim/test 为布局辅助类（非版式类），按 af 度量在本文件重定义。
+ * 注意：CSS 块注释内不得出现「* /」连排字样。
  */
-:root {
-  --bg:#0f1419; --panel:#1a212b; --panel2:#202833; --line:#2b3441;
-  --txt:#e6edf3; --muted:#8b98a7; --dim:#5b6675; --accent:#4d9fff;
-  --ok:#3ecf8e; --warn:#ffd166; --err:#ff5c5c;
+
+.aob-page {
+  --bg: #F3F5F8; --surface: #FFFFFF; --surface2: #EDF1F6;
+  --ink: #0B1526; --muted: #5A6B82; --line: #DCE4EE;
+  --accent: #0088CC; --accent-ink: #FFFFFF; --accent-soft: rgba(0, 136, 204, .10);
+  --ok: #0E9F6E; --warn: #B45309; --bad: #DC2626;
+  --ok-soft: rgba(14, 159, 110, .10); --warn-soft: rgba(180, 83, 9, .10); --bad-soft: rgba(220, 38, 38, .10);
+  --r: 10px;
+  --sans: "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
 }
-* { box-sizing:border-box; }
+html[data-theme="dark"] .aob-page {
+  --bg: #060B16; --surface: #0C1424; --surface2: #101B30;
+  --ink: #E4EDF8; --muted: #8296B0; --line: #1B2A45;
+  --accent: #22D3EE; --accent-ink: #04222B; --accent-soft: rgba(34, 211, 238, .12);
+  --ok: #34D399; --warn: #FBBF24; --bad: #F87171;
+  --ok-soft: rgba(52, 211, 153, .12); --warn-soft: rgba(251, 191, 36, .12); --bad-soft: rgba(248, 113, 113, .12);
+}
+
+html, body, #root { height: 100%; }
 body {
-  margin:0; background:var(--bg); color:var(--txt);
-  font:14px/1.55 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
+  margin: 0; background: #F3F5F8; color: #0B1526;
+  font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+  font-size: 13px; -webkit-font-smoothing: antialiased;
 }
-.wrap { max-width:1180px; margin:0 auto; padding:18px; }
-h1 { font-size:18px; margin:0 0 2px; }
-.sub { color:var(--muted); font-size:12px; margin-bottom:14px; }
-.section-title {
-  font-size:13px; color:var(--muted); font-weight:600;
-  margin:18px 0 8px; text-transform:uppercase; letter-spacing:.5px;
+html[data-theme="dark"] body { background: #060B16; color: #E4EDF8; }
+
+* { box-sizing: border-box; }
+.aob-page {
+  height: 100%; display: flex; flex-direction: column; min-height: 0;
+  background: var(--bg); color: var(--ink); font-family: var(--sans); font-size: 13px; line-height: 1.5;
 }
-.card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:14px; }
-.card.degraded { border-color:#6b5a1e; }
-.card.failed { border-color:#6b2e2e; }
-.top { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
-.badge {
-  font-size:10px; font-weight:700; padding:2px 8px;
-  border-radius:6px; border:1px solid var(--line);
+.aob-scroll { flex: 1; min-height: 0; overflow: auto; }
+.aob-main { padding: 18px 20px 30px; min-width: 0; }
+.page > .af-stack, .aob-main > .af-stack { display: flex; flex-direction: column; gap: 14px; }
+.af-stack { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.af-mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.af-red { color: var(--bad); font-size: 11px; font-weight: 500; }
+.dim { color: var(--muted); font-size: 11px; }
+
+/* ── 页头（af-head：h1 18px/600 + sub 12px muted + right 右侧按钮区） ── */
+.af-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.af-head h1 { font-size: 18px; font-weight: 600; margin: 0; }
+.af-head .sub { color: var(--muted); font-size: 12px; }
+.af-head .right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+/* ── 按钮（af-btn：8px 圆角 6px 13px 12px/500；.sm=3px 9px 11px 6px 圆角） ── */
+.af-btn {
+  display: inline-block; border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  border-radius: 8px; padding: 6px 13px; font: inherit; font-size: 12px; font-weight: 500;
+  cursor: pointer; font-family: var(--sans); white-space: nowrap;
 }
-.badge.p0 { background:#12324a; color:#8cc7ff; }
-.badge.p1 { background:#1a3320; color:#7fe0a0; }
-.badge.p2 { background:#3a2f10; color:#ffd166; }
-.badge.p3 { background:var(--panel2); color:var(--muted); }
-.agent-name { font-weight:700; font-size:15px; }
-.method { font-size:11px; color:var(--muted); }
-.statusdot { width:9px; height:9px; border-radius:50%; display:inline-block; margin-right:5px; }
-.st-connected { background:var(--ok); }
-.st-degraded { background:var(--warn); }
-.st-onboard { background:var(--dim); }
-.metrics { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin:10px 0; }
-@media(max-width:700px) { .metrics { grid-template-columns:repeat(2,1fr); } }
-.metric { background:var(--panel2); border-radius:8px; padding:8px 10px; }
-.metric .k { font-size:11px; color:var(--muted); }
-.metric .v { font-size:16px; font-weight:700; margin-top:2px; font-family:monospace; }
-.metric .v.warn { color:var(--warn); }
-.metric .v.err { color:var(--err); }
-/* 批次21：指标样本来源（审计次数/最近时间 或 暂无样本提示），让「—」可解释 */
-.metric-src { font-size:10px; color:var(--dim); margin:-4px 0 8px; line-height:1.5; }
-.row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:8px 0; }
-.pill {
-  font-size:11px; padding:3px 9px; border-radius:6px;
-  background:var(--panel2); border:1px solid var(--line); color:var(--muted);
+.af-btn:hover { border-color: var(--accent); color: var(--accent); }
+.af-btn.pri { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.af-btn.pri:hover { color: var(--accent-ink); opacity: .9; }
+.af-btn.danger { color: var(--bad); border-color: var(--bad); }
+.af-btn.danger:hover { color: var(--bad); opacity: .9; }
+.af-btn:disabled, .af-btn.off { opacity: .45; cursor: not-allowed; }
+.af-btn.sm { padding: 3px 9px; font-size: 11px; border-radius: 6px; }
+
+/* ── 提示条（af-alert：soft 底同色边 10px 圆角；.tag mono 11px 同色底 4px 圆角） ── */
+.af-alert {
+  display: flex; gap: 9px; align-items: center; background: var(--accent-soft);
+  border: 1px solid var(--accent); border-radius: var(--r); padding: 8px 13px; font-size: 12px; color: var(--ink);
 }
-.pill.on { color:var(--txt); border-color:var(--accent); }
-.pill.red { color:#ffb0b0; border-color:#6b2e2e; background:#3a1616; }
-.pill.gold { color:#ffe6a8; border-color:#6b5a1e; background:#3a2f10; }
-.sw { display:flex; align-items:center; gap:7px; font-size:12px; cursor:pointer; user-select:none; }
-.sw input { width:auto; cursor:pointer; }
-.btns { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
-.btn {
-  background:var(--panel2); border:1px solid var(--line); color:var(--txt);
-  border-radius:8px; padding:7px 12px; cursor:pointer; font-size:12px;
+.af-alert.warn { background: var(--warn-soft); border-color: var(--warn); }
+.af-alert.bad { background: var(--bad-soft); border-color: var(--bad); }
+.af-alert .tag {
+  flex: none; font-family: var(--mono); font-size: 11px; background: var(--accent);
+  color: var(--accent-ink); border-radius: 4px; padding: 1px 6px;
 }
-.btn.primary { background:var(--accent); color:#04121f; border-color:var(--accent); font-weight:600; }
-.btn:disabled { opacity:.45; cursor:not-allowed; }
-.err-msg { font-size:12px; color:var(--warn); margin-top:8px; display:none; }
-.err-msg.show { display:block; }
-.test { background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:10px; margin-top:10px; font-size:12px; }
-.test .rid { font-family:monospace; color:var(--accent); cursor:pointer; }
-/* 批次21：无真实回执时不显示成可点击链接（未测试/后端不可达/失败） */
-.test .rid.rid-muted { color:var(--muted); cursor:default; font-family:inherit; }
-.test .test-reason { margin-top:6px; color:var(--warn); font-size:11px; line-height:1.5; }
-/* 批次22：说明「测试接入」的真实用途与“不必逐张手点”，不点不影响自动接入/指标 */
-.test .test-hint { margin-top:6px; color:var(--dim); font-size:10px; line-height:1.5; }
-.inject {
-  background:#12283a; border:1px solid #2a4a66; border-radius:6px;
-  padding:7px; margin-top:7px; color:#8cc7ff; font-size:11px;
+.af-alert.warn .tag { background: var(--warn); color: #fff; }
+.af-alert.bad .tag { background: var(--bad); color: #fff; }
+
+/* ── 面板骨架（af-panel 10px 圆角；af-ph 10px 14px 底边线 h3 13px/600 hint mono 11px 右侧；
+   af-pb 12px 14px；af-row flex 10px；af-note 11px muted） ── */
+.af-panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+.af-ph { display: flex; align-items: center; gap: 9px; padding: 10px 14px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.af-ph h3 { margin: 0; font-size: 13px; font-weight: 600; color: var(--ink); }
+.af-ph .hint { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.af-pb { padding: 12px 14px; }
+.af-note { font-size: 11px; color: var(--muted); line-height: 1.6; margin: 0; }
+.af-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; min-width: 0; }
+
+/* ── 三列卡区（af-g3：repeat(3,1fr) gap 14px） ── */
+.af-g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; align-items: start; }
+.af-g3 > * { min-width: 0; }
+
+/* ── 徽标 / pill / kv（af-badge mono 11px 4px 圆角 1px 7px 同色系；af-pill accent 20px 圆角；
+   af-kv dt muted 11px dd mono 11px） ── */
+.af-badge {
+  display: inline-block; font-size: 11px; font-family: var(--mono); border-radius: 4px;
+  border: 1px solid var(--line); padding: 1px 7px; color: var(--muted); white-space: nowrap;
 }
-.warn {
-  background:#3a2f10; border:1px solid #6b5a1e; border-radius:8px;
-  padding:9px 11px; margin-top:10px; font-size:12px; color:#ffe6a8; display:none;
+.af-badge.ok { color: var(--ok); border-color: var(--ok); background: var(--ok-soft); }
+.af-badge.warn { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+.af-badge.bad { color: var(--bad); border-color: var(--bad); background: var(--bad-soft); }
+.af-badge.acc { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.af-pill {
+  display: inline-block; font-size: 11px; border: 1px solid var(--accent); color: var(--accent);
+  background: var(--accent-soft); border-radius: 20px; padding: 1px 9px; font-family: var(--mono);
+  white-space: nowrap;
 }
-.warn.show { display:block; }
-.errbox {
-  background:#3a1616; border:1px solid #6b2e2e; border-radius:8px;
-  padding:9px 11px; margin-top:10px; font-size:12px; color:#ffb0b0; display:none;
+.af-kv { display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; font-size: 12px; margin: 0; }
+.af-kv dt { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.af-kv dd { font-family: var(--mono); font-size: 11px; word-break: break-all; margin: 0; color: var(--ink); }
+
+/* ── 表格（af-table 12px；th 11px muted surface2 底 nowrap；.num mono nowrap；af-scrollx 横滚） ── */
+.af-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.af-table th {
+  font-size: 11px; font-weight: 500; color: var(--muted); text-align: left; padding: 7px 9px;
+  border-bottom: 1px solid var(--line); background: var(--surface2); white-space: nowrap;
 }
-.errbox.show { display:block; }
-.toast {
-  position:fixed; bottom:18px; left:50%; transform:translateX(-50%);
-  background:var(--panel2); border:1px solid var(--line); border-radius:8px;
-  padding:9px 16px; font-size:13px; z-index:80; display:none;
+.af-table td { padding: 7px 9px; border-bottom: 1px solid var(--line); vertical-align: top; color: var(--ink); }
+.af-table tr:last-child td { border-bottom: 0; }
+.af-table .num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.af-scrollx { overflow-x: auto; }
+/* 2026-11-22：展开的「详情 · 触发规则」行与下方「操作说明」卡同宽同边距（视觉成一列） */
+.aob-detail-row > td { padding: 0 0 9px; }
+/* 2026-11-22 用户反馈：最后一条详情行与「操作说明」之间的空隙偏大——去掉行底留白，
+   只保留栈内统一的 8px 间距，与页内其它卡间距一致。 */
+.aob-detail-row:last-child > td { padding-bottom: 0; }
+
+/* ── 表单基元（af-field / af-input / af-select / af-textarea / af-formgrid） ── */
+.af-field { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--muted); min-width: 0; }
+.af-input, .af-select, .af-textarea {
+  background: var(--surface2); border: 1px solid var(--line); border-radius: 7px;
+  color: var(--ink); font-family: var(--sans); font-size: 12px; padding: 6px 10px; width: 100%;
 }
-/* 19.9 一键接入 */
-.stages { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin:10px 0; }
-@media(max-width:700px) { .stages { grid-template-columns:repeat(2,1fr); } }
-.stage {
-  background:var(--panel2); border:1px solid var(--line); border-radius:8px;
-  padding:8px; font-size:11px; color:var(--muted); text-align:center; transition:.25s;
+.af-input:focus, .af-select:focus, .af-textarea:focus { outline: 1px solid var(--accent); }
+.af-textarea { min-height: 72px; resize: vertical; line-height: 1.6; }
+.af-formgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+/* ── 开关 / 勾选（af-switch 34x19 10px 圆角 15px 滑块；af-check 13px accent） ── */
+.af-switch {
+  appearance: none; -webkit-appearance: none; width: 34px; height: 19px; border-radius: 10px;
+  background: var(--line); position: relative; cursor: pointer; flex: none; border: none;
 }
-.stage b { display:block; font-size:12px; color:var(--txt); margin-bottom:2px; }
-.stage.done { border-color:var(--accent); background:#14263a; color:var(--txt); }
+.af-switch::before {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 15px; height: 15px;
+  border-radius: 50%; background: var(--surface);
+}
+.af-switch:checked { background: var(--accent); }
+.af-switch:checked::before { left: 17px; }
+.af-check { accent-color: var(--accent); width: 13px; height: 13px; }
+
+/* ── 步骤条（af-steps flex 10px；af-step surface2 底 8px 圆角 9px 12px；
+   .no 22px 圆 ok 底；.cur accent 边+soft 底；.pend 未到步灰圈数字） ── */
+.af-steps { display: flex; gap: 10px; }
+.af-step {
+  flex: 1; display: flex; align-items: center; gap: 9px; border: 1px solid var(--line);
+  border-radius: 8px; padding: 9px 12px; background: var(--surface2); font-size: 12px; min-width: 0;
+}
+.af-step .no {
+  width: 22px; height: 22px; border-radius: 50%; background: var(--ok); color: var(--accent-ink);
+  display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; flex: none;
+}
+.af-step.cur { border-color: var(--accent); background: var(--accent-soft); }
+.af-step.cur .no { background: var(--accent); }
+.af-step.pend { opacity: .55; }
+.af-step.pend .no { background: var(--line); color: var(--muted); }
+
+/* ── 折叠 / 代码块（af-det 7px 圆角 1px 边；summary 7px 10px 12px/500；
+   det-b 8px 10px 顶部线；af-pre mono surface2 底） ── */
+.af-det { border: 1px solid var(--line); border-radius: 7px; margin-top: 6px; background: var(--surface); }
+.af-det summary { padding: 7px 10px; font-size: 12px; cursor: pointer; font-weight: 500; list-style-position: inside; color: var(--ink); }
+.af-det .det-b { padding: 8px 10px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+.af-pre {
+  font-family: var(--mono); font-size: 12px; background: var(--surface2); border: 1px solid var(--line);
+  border-radius: 7px; padding: 10px 12px; white-space: pre-wrap; color: var(--ink);
+  margin: 0; overflow: auto; max-height: 220px;
+}
+
+/* ── 列表行（af-li：7px 14px 12px；.st 7px 圆点；.nm 500；.ds muted 11px；.rt mono 右侧） ── */
+.af-li { display: flex; align-items: center; gap: 9px; padding: 7px 14px; font-size: 12px; }
+.af-li + .af-li { border-top: 1px solid var(--line); }
+.af-li .st { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.af-li .nm { font-weight: 500; }
+.af-li .ds { color: var(--muted); font-size: 11px; }
+.af-li .rt { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: nowrap; }
+
+/* ── 空态（af-empty：22px 14px 居中 muted） ── */
+.af-empty { padding: 22px 14px; text-align: center; color: var(--muted); font-size: 12px; }
+.af-empty b { color: var(--ink); display: block; margin-bottom: 4px; }
+
+/* ── 布局辅助（发现卡 / 开关行 / 测试面板：非版式类，度量按 af 基元取值） ── */
 .found {
-  display:flex; gap:10px; align-items:center; flex-wrap:wrap;
-  background:var(--panel2); border:1px solid var(--line); border-radius:8px;
-  padding:9px 11px; margin:6px 0; font-size:12px;
+  display: flex; flex-direction: column; align-items: stretch; gap: 6px;
+  background: var(--surface2); border: 1px solid var(--line); border-radius: 7px;
+  padding: 9px 11px; font-size: 12px; margin: 6px 0;
 }
-.found.unbound { opacity:.6; border-style:dashed; }
-/* 批次19（用户确认的统一格式）：发现卡片与已安装卡片同构 ——
- * 首行 badge + 名称 + 右侧状态/操作（与 MVP·P1 行平齐），次行信号/来源元信息。
- * 仅作用于 .found-card，MCP 客户端行（#mcp-client-rows .found）保持原单行布局。 */
-.found-card { flex-direction:column; align-items:stretch; gap:6px; }
-.found-head { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-.found-actions { margin-left:auto; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-.found-meta { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-/* 批次22（用户显式要求「每个配置卡片大小要统一」）：
- * MCP 客户端卡片改为等宽网格 + 等高卡片，操作按钮贴底；窄屏自动单列。 */
-#mcp-client-rows {
-  display:grid;
-  grid-template-columns:repeat(auto-fill,minmax(340px,1fr));
-  gap:10px;
-  margin:10px 0 4px;
-  align-items:stretch;
+.found.unbound { opacity: .6; border-style: dashed; }
+.found-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.found-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.found-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sw { display: flex; align-items: center; gap: 7px; font-size: 12px; cursor: pointer; user-select: none; color: var(--ink); }
+.sw input { cursor: pointer; }
+.test {
+  background: var(--surface2); border: 1px solid var(--line); border-radius: 7px;
+  padding: 10px; font-size: 12px; color: var(--ink);
 }
-#mcp-client-rows .found {
-  flex-direction:column;
-  align-items:stretch;
-  gap:6px;
-  margin:0;
-  min-height:172px;
+.test .rid { font-family: var(--mono); color: var(--accent); cursor: pointer; }
+.test .rid.rid-muted { color: var(--muted); cursor: default; font-family: inherit; }
+.test .test-reason { margin-top: 6px; color: var(--warn); font-size: 11px; line-height: 1.5; }
+.test .test-hint { margin-top: 6px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.inject {
+  background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 6px;
+  padding: 7px; margin-top: 7px; color: var(--accent); font-size: 11px;
 }
-#mcp-client-rows .found .btns { margin-top:auto; }
-#mcp-client-rows .found .inject { max-height:160px; }
-.mcp-path { margin-left:auto; text-align:right; word-break:break-all; }
-.note { font-size:11px; color:var(--dim); margin-top:14px; line-height:1.6; }
+
+/* ── 登录门禁卡（未登录唯一可见元素） ── */
+.aob-gate { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.aob-gate-card {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
+  padding: 22px 24px; max-width: 420px; width: 100%;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.aob-gate-card h2 { margin: 0; font-size: 16px; font-weight: 600; color: var(--ink); }
+.aob-gate-card p { margin: 0; font-size: 12px; color: var(--muted); line-height: 1.6; }
+
+/* ── toast（轻提示，保持原位原样） ── */
+.toast {
+  position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+  background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+  padding: 7px 14px; font-size: 12px; z-index: 80; color: var(--ink);
+  box-shadow: 0 1px 2px rgba(16, 32, 48, .06);
+}
+
+/* ── 响应式：≤900 三列卡区→单列、表单两列→一列（布局适配，非版式偏差） ── */
+@media (max-width: 900px) {
+  .af-g3 { grid-template-columns: 1fr; }
+  .af-formgrid { grid-template-columns: 1fr; }
+  .af-steps { flex-direction: column; }
+  .aob-main { padding: 14px 16px 20px; }
+}

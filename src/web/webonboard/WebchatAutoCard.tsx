@@ -21,6 +21,25 @@ const errText = (e: unknown): string => String((e as Error)?.message ?? e);
 
 const stCls = (s: AutoSiteStatus): string => (s === 'exported' ? 'rh-st on' : s === 'no_new' ? 'rh-st idle' : 'rh-st idle');
 
+/** 页面摘要条只读这些真值（全部来自主进程回执；缺值 = null，不用 0 冒充） */
+export interface WebchatAutoSummary {
+  available: boolean;
+  enabled: boolean;
+  intervalMinutes: number | null;
+  perRound: number | null;
+  sites: number;
+  lastAt: number | null;
+  exported: number;
+  skipped: number;
+  missing: number;
+  needRelogin: number;
+  failed: number;
+  dir: string | null;
+  dirError: string | null;
+  error: string | null;
+  running: boolean;
+}
+
 /** 时间统一走这里；没有值就写人话（不许用破折号冒充读数，见 tools/check-no-demo.mjs · P02） */
 function fmtTime(ts: number | null, empty: string): string {
   if (!ts) return empty;
@@ -29,7 +48,7 @@ function fmtTime(ts: number | null, empty: string): string {
   return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-export function WebchatAutoCard() {
+export function WebchatAutoCard({ onSummary }: { onSummary?: (s: WebchatAutoSummary) => void } = {}) {
   const [state, setState] = useState<AutoStateView | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -58,6 +77,28 @@ export function WebchatAutoCard() {
   }, [available]);
 
   useEffect(() => { void load(); void loadDir(); }, [load, loadDir]);
+
+  // 摘要上报：只报真实状态（主进程没返回的字段为 null / 0，父页面按诚实空态展示）
+  useEffect(() => {
+    const results = state?.lastRound?.results ?? [];
+    onSummary?.({
+      available,
+      enabled: state?.config?.enabled ?? false,
+      intervalMinutes: state?.config?.intervalMinutes ?? null,
+      perRound: state?.config?.perRound ?? null,
+      sites: state?.sites?.length ?? 0,
+      lastAt: state?.lastRound?.at ?? null,
+      exported: results.reduce((n, r) => n + r.exported, 0),
+      skipped: results.reduce((n, r) => n + (r.skipped ?? 0), 0),
+      missing: results.reduce((n, r) => n + (r.missing ?? 0), 0),
+      needRelogin: results.filter((r) => r.status === 'need_relogin').length,
+      failed: results.filter((r) => r.status === 'error' || r.status === 'dom_changed').length,
+      dir,
+      dirError: dirErr,
+      error: err,
+      running: running || state?.running === true,
+    });
+  }, [onSummary, state, dir, dirErr, err, running, available]);
 
   const apply = async (patch: { enabled?: boolean; intervalMinutes?: number; perRound?: number; sites?: string[] }) => {
     if (busy) return;
@@ -123,10 +164,15 @@ export function WebchatAutoCard() {
 
   if (!available) {
     return (
-      <div className="card rh-card" data-testid="webchat-auto-card">
-        <div className="rh-h">网页会话自动采集<span className="rh-ref">无头浏览器 · 定时巡检</span></div>
-        <div className="note" data-testid="webchat-auto-unavailable">
-          当前不是桌面宿主环境：自动采集要起隐藏浏览器、访问站点并经本机接收端落盘，浏览器模式没有它。
+      <div className="af-panel webchat-auto" data-testid="webchat-auto-card">
+        <div className="af-ph">
+          <h3>网页会话自动采集</h3>
+          <span className="hint">无头浏览器 · 定时巡检</span>
+        </div>
+        <div className="af-pb">
+          <p className="af-note" data-testid="webchat-auto-unavailable">
+            当前不是桌面宿主环境：自动采集要起隐藏浏览器并经本机接收端落盘，浏览器模式没有它。
+          </p>
         </div>
       </div>
     );
@@ -138,22 +184,23 @@ export function WebchatAutoCard() {
   const sitesOf = new Set(st?.config?.sites ?? []);
 
   return (
-    <div className="card rh-card" data-testid="webchat-auto-card">
-      <div className="rh-h">
-        网页会话自动采集
-        <span className="rh-ref">隐藏浏览器定时巡检 · 不依赖插件</span>
+    <div className="af-panel webchat-auto" data-testid="webchat-auto-card">
+      <div className="af-ph">
+        <h3>网页会话自动采集</h3>
+        <span className="hint">
+          {st?.config ? (st.config.enabled ? `已启用 · 每 ${st.config.intervalMinutes} 分钟` : '已停用 · 可手动采') : '读取中'}
+          {st?.lastRound?.at ? ` · 上次 ${fmtTime(st.lastRound.at, '')}` : ''}
+        </span>
       </div>
-      <div className="note">
-        关掉浏览器也能采：应用自己起一个隐藏浏览器，按周期打开站点、只导新增会话。
-        首次需要在弹窗里登录一次（登录态存在本机，之后不用再登）。
-      </div>
+      <div className="af-pb">
+        <p className="af-q">关掉浏览器也能采：应用自起隐藏浏览器，按周期只导新增会话；首次需在弹窗登录一次。</p>
 
-      {!st && !err && <div className="note" data-testid="webchat-auto-loading">正在读取本机真实状态…</div>}
-      {err && <div className="rh-err" data-testid="webchat-auto-err">{err}</div>}
-      {st?.blocked && <div className="rh-warn" data-testid="webchat-auto-blocked">{st.blocked}</div>}
+        {!st && !err && <div className="af-note" data-testid="webchat-auto-loading">正在读取本机真实状态…</div>}
+        {err && <div className="rh-err" data-testid="webchat-auto-err">{err}</div>}
+        {st?.blocked && <div className="rh-warn" data-testid="webchat-auto-blocked">{st.blocked}</div>}
 
-      {st?.config && (
-        <>
+        {st?.config && (
+          <div className="wa-grid">
           <div className="rh-layer" data-testid="wa-enable">
             <div className="rh-head">
               <span className="rh-name">定时自动采集</span>
@@ -161,9 +208,7 @@ export function WebchatAutoCard() {
                 {st.config.enabled ? '已启用' : '已停用'}
               </span>
             </div>
-            <div className="rh-desc">
-              关掉后定时器不再跑，但仍可随时点「立即采一轮」。关窗不退出的常驻设置见上方「后台常驻」。
-            </div>
+            <div className="rh-desc">关掉定时器仍可手动采集；常驻设置见全局参数页「后台常驻」。</div>
             <div className="rh-foot">
               <span className="rh-pick" role="radiogroup" aria-label="定时自动采集" data-testid="wa-enable-pick">
                 <button type="button" className={`rh-choice${st.config.enabled ? ' active' : ''}`}
@@ -184,7 +229,7 @@ export function WebchatAutoCard() {
               <span className="rh-name">采集周期</span>
               <span className="rh-st idle" data-testid="wa-interval-st">{st.config.intervalMinutes} 分钟</span>
             </div>
-            <div className="rh-desc">越短越容易被站点风控盯上；默认 60 分钟。</div>
+            <div className="rh-desc">越短越容易被风控；默认 60 分钟。</div>
             <div className="rh-foot">
               <span className="rh-pick" role="radiogroup" aria-label="采集周期" data-testid="wa-interval-pick">
                 {INTERVALS.map((m) => (
@@ -202,7 +247,7 @@ export function WebchatAutoCard() {
               <span className="rh-name">每轮导出条数</span>
               <span className="rh-st idle" data-testid="wa-per-round-st">{st.config.perRound ?? 3} 条</span>
             </div>
-            <div className="rh-desc">定时轮每轮最多导这么多条「新的」；已采过的会跳过不占名额。选大点能更快追上新增，但单轮耗时更长。</div>
+            <div className="rh-desc">只导新的；已采过的会跳过不占名额。</div>
             <div className="rh-foot">
               <span className="rh-pick" role="radiogroup" aria-label="每轮导出条数" data-testid="wa-per-round-pick">
                 {PER_ROUNDS.map((m) => (
@@ -217,7 +262,7 @@ export function WebchatAutoCard() {
 
           <div className="rh-layer" data-testid="wa-sites">
             <div className="rh-head"><span className="rh-name">采集站点</span></div>
-            <div className="rh-desc">本期只实测过 DeepSeek；其余站点已接好入口，但选择器可能随改版失效，启用后请先点「立即采一轮」看结果。</div>
+            <div className="rh-desc">仅 DeepSeek 实测；其余站点启用后先点「立即采一轮」验证。</div>
             <div className="rh-foot">
               {st.sites.map((s) => {
                 const on = sitesOf.has(s.key);
@@ -240,9 +285,7 @@ export function WebchatAutoCard() {
                 {st.loginWindows.length ? `已打开 ${st.loginWindows.length} 个` : '未打开'}
               </span>
             </div>
-            <div className="rh-desc">
-              随时点开对应站点的登录窗去登录或看会话；登录态存在本机，登一次之后不用再登。窗口开着或关掉都不影响后台采集。
-            </div>
+            <div className="rh-desc">登录态存在本机，登一次即可；窗口开关不影响后台采集。</div>
             <div className="rh-foot">
               {st.sites.map((s) => {
                 const opened = st.loginWindows.includes(s.key);
@@ -265,9 +308,7 @@ export function WebchatAutoCard() {
             <div className="rh-head">
               <span className="rh-name">导出文件保存目录</span>
             </div>
-            <div className="rh-desc">
-              采集到的对话写成 Markdown 存在这里；点「打开目录」看文件，点「更改路径」换位置（采集每轮现取，改完立即生效）。
-            </div>
+            <div className="rh-desc">对话写成 Markdown 存在这里，改完路径立即生效。</div>
             <div className="rh-foot" style={{ wordBreak: 'break-all' }}>
               {dir ? (
                 <>
@@ -284,7 +325,7 @@ export function WebchatAutoCard() {
             {dirErr && dir && <div className="rh-err" data-testid="wa-export-dir-err">{dirErr}</div>}
           </div>
 
-          <div className="rh-layer" data-testid="wa-run">
+          <div className="rh-layer wa-span2" data-testid="wa-run">
             <div className="rh-head">
               <span className="rh-name">立即采一轮</span>
               <span className={`rh-st ${st.running || running ? 'on' : 'idle'}`} data-testid="wa-run-st">
@@ -310,7 +351,7 @@ export function WebchatAutoCard() {
               )}
             </div>
             <div className="rh-desc" data-testid="wa-sweep-hint">
-              按会话 ID 全量对账：每批都从侧栏顶部发现会话，导出目录里已有同名文件的跳过，只补还没采过的；每站最多 10 批、每批最多 30 条新的。删掉某个 md 文件再点它，那条会重新采回来。
+              按会话 ID 对账：只补还没采过的；删掉 md 后可重新采回。
             </div>
             {needRelogin.length > 0 && (
               <div className="rh-warn" data-testid="wa-need-relogin">
@@ -340,8 +381,9 @@ export function WebchatAutoCard() {
               </table>
             )}
           </div>
-        </>
-      )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

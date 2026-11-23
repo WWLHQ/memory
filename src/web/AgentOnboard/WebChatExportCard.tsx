@@ -353,8 +353,12 @@ export function WebChatExportCard() {
   const dirMissing = Boolean(dir) && !dirExists;
 
   return (
-    <div className="card" data-testid="webchat-export-card">
-      <h3 style={{ margin: '0 0 6px 0' }}>自带插件导出</h3>
+    <section className="af-panel" data-testid="webchat-export-card">
+      <div className="af-ph">
+        <h3>自带插件导出（网页版对话接入）</h3>
+        <span className="hint">插件自动导 → 采集器每 5 分钟入库 · 重复内容自动去重</span>
+      </div>
+      <div className="af-pb af-stack" style={{ gap: 12 }}>
       <p className="dim" style={{ margin: '0 0 14px 0' }}>
         内置插件安装好后它会自动读取当前网页已显示的对话（含你的提问与 AI 回答），
         直接写进下面的「导出和同步目录」；记忆采集器每 5 分钟自动扫描入库，重复内容自动去重。
@@ -371,7 +375,7 @@ export function WebChatExportCard() {
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           <button
             type="button"
-            className="btn primary"
+            className="af-btn pri"
             data-testid="webchat-ext-open-edge"
             disabled={opening !== null}
             onClick={() => void openBrowserExtensions('edge')}
@@ -380,17 +384,17 @@ export function WebChatExportCard() {
           </button>
           <button
             type="button"
-            className="btn"
+            className="af-btn"
             data-testid="webchat-ext-open-qq"
             disabled={opening !== null}
             onClick={() => void openBrowserExtensions('qq')}
           >
             {opening === 'qq' ? '正在打开 QQ 浏览器…' : '一键打开 QQ 浏览器扩展页'}
           </button>
-          <button type="button" className="btn" data-testid="webchat-ext-open-folder" onClick={() => void openExtensionFolder()}>
+          <button type="button" className="af-btn" data-testid="webchat-ext-open-folder" onClick={() => void openExtensionFolder()}>
             一键打开插件目录
           </button>
-          <button type="button" className="btn" data-testid="webchat-ext-copy-path" onClick={() => void copyExtPath()}>
+          <button type="button" className="af-btn" data-testid="webchat-ext-copy-path" onClick={() => void copyExtPath()}>
             {extCopied ? '已复制' : '复制插件路径'}
           </button>
         </div>
@@ -455,7 +459,7 @@ export function WebChatExportCard() {
         <div data-testid="webchat-audit" style={{ marginTop: 10 }}>
           <button
             type="button"
-            className="btn"
+            className="af-btn"
             data-testid="webchat-audit-run"
             disabled={auditing}
             onClick={() => void runAudit()}
@@ -515,13 +519,13 @@ export function WebChatExportCard() {
           {dir ? (
             <>
               <code data-testid="webchat-export-dir-path">{dir}</code>{' '}
-              <button type="button" className="btn" data-testid="webchat-copy-dir" onClick={() => void copyDir()}>
+              <button type="button" className="af-btn" data-testid="webchat-copy-dir" onClick={() => void copyDir()}>
                 {copied ? '已复制' : '复制路径'}
               </button>{' '}
-              <button type="button" className="btn" data-testid="webchat-open-dir" onClick={() => void openDir()}>
+              <button type="button" className="af-btn" data-testid="webchat-open-dir" onClick={() => void openDir()}>
                 打开目录
               </button>{' '}
-              <button type="button" className="btn" data-testid="webchat-change-dir" onClick={() => void changeDir()}>
+              <button type="button" className="af-btn" data-testid="webchat-change-dir" onClick={() => void changeDir()}>
                 更改路径
               </button>
             </>
@@ -540,7 +544,7 @@ export function WebChatExportCard() {
               {pluginDir ? '点下面的按钮直接对齐到本机插件实际写入的位置。' : '点「更改路径」重新选一个目录。'}
             </div>
             {pluginDir && (
-              <button type="button" className="btn primary" data-testid="webchat-dir-follow-missing" onClick={() => void followPluginDir()}>
+              <button type="button" className="af-btn pri" data-testid="webchat-dir-follow-missing" onClick={() => void followPluginDir()}>
                 跟随插件位置
               </button>
             )}
@@ -556,7 +560,7 @@ export function WebChatExportCard() {
             <div className="dim" style={{ marginTop: 4 }}>
               和应用采集的位置不一致，现在点「立即采集」会是 0 条。
             </div>
-            <button type="button" className="btn primary" data-testid="webchat-dir-follow" onClick={() => void followPluginDir()}>
+            <button type="button" className="af-btn pri" data-testid="webchat-dir-follow" onClick={() => void followPluginDir()}>
               跟随插件位置
             </button>
           </div>
@@ -578,14 +582,14 @@ export function WebChatExportCard() {
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           <button
             type="button"
-            className="btn primary"
+            className="af-btn pri"
             data-testid="webchat-trigger-now"
             disabled={triggering}
             onClick={() => void triggerNow()}
           >
             {triggering ? '采集中…' : '立即采集'}
           </button>
-          <button type="button" className="btn" data-testid="webchat-verify-link" onClick={() => requestShellView('layered')}>
+          <button type="button" className="af-btn" data-testid="webchat-verify-link" onClick={() => requestShellView('layered')}>
             去记忆层级页验收
           </button>
         </div>
@@ -645,7 +649,7 @@ export function WebChatExportCard() {
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
           <button
             type="button"
-            className="btn"
+            className="af-btn"
             data-testid="webchat-purge-preview-btn"
             disabled={purgeBusy !== null}
             onClick={() => void loadPurgePreview()}
@@ -654,6 +658,7 @@ export function WebChatExportCard() {
           </button>
           <input
             type="text"
+            className="af-input"
             data-testid="webchat-purge-confirm"
             placeholder="输入 PURGE 确认"
             aria-label="清理确认口令"
@@ -663,7 +668,7 @@ export function WebChatExportCard() {
           />
           <button
             type="button"
-            className="btn danger"
+            className="af-btn danger"
             data-testid="webchat-purge-run"
             disabled={purgeBusy !== null || purgeConfirm.trim().toUpperCase() !== 'PURGE'}
             onClick={() => void runPurge()}
@@ -731,6 +736,7 @@ export function WebChatExportCard() {
           </div>
         )}
       </div>
-    </div>
+      </div>
+    </section>
   );
 }

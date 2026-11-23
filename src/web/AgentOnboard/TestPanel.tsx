@@ -33,7 +33,7 @@ export function TestPanel({ agent, injectVisible, evidence, onRidClick }: Props)
   const reason = evidence?.reason ?? '';
   // 三态：未测试 / 有真实回执 / 未生成回执（后端不可达或失败），后两种不显示可点击的假 rid
   const label = !evidence
-    ? '尚未测试 · 点「▶ 测试接入」'
+    ? '尚未测试 · 点「测试接入」'
     : rid
       ? rid
       : evidence.local

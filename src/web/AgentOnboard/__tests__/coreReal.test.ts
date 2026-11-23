@@ -18,32 +18,49 @@ function audit(action: AuditRecord['action'], detail: Record<string, unknown>, t
 }
 
 describe('getOnboardGains（效果证据四卡真实聚合）', () => {
-  test('空账本 → 全部「未取数」+ 诚实说明，绝不示例数字', async () => {
+  test('空账本 → Token 未采样、其余未取数 + 诚实说明，绝不示例数字', async () => {
     const g = await getOnboardGains(new InMemoryStorage());
     expect(g).toHaveLength(4);
-    for (const card of g) {
+    expect(g[0].big).toBe('未采样');
+    expect(g[0].desc).toContain('暂无');
+    for (const card of g.slice(1)) {
       expect(card.big).toBe('未取数');
       expect(card.desc).toContain('暂无');
     }
   });
 
-  test('emptyOnboardGains 占位与空账本口径一致', () => {
+  test('emptyOnboardGains 占位与空账本口径一致（Token 未采样，其余未取数）', () => {
     const g = emptyOnboardGains();
     expect(g).toHaveLength(4);
-    expect(g.every((x) => x.big === '未取数')).toBe(true);
+    expect(g[0].big).toBe('未采样');
+    expect(g.slice(1).every((x) => x.big === '未取数')).toBe(true);
   });
 
-  test('Token 节省：recall payload_tokens vs 1500 预算 → 真实百分比', async () => {
+  test('Token 节省：真实口径 = 省量 ÷（省量 + 注入），不再拿固定预算硬套', async () => {
     const s = new InMemoryStorage();
-    await s.appendAudit(audit('recall', { query: 'q1', hits: 3, payload_tokens: 750, mems: ['m1', 'm2', 'm3'] }));
-    await s.appendAudit(audit('recall', { query: 'q2', hits: 1, payload_tokens: 750, mems: ['m1'] }));
+    await s.appendAudit(audit('recall', {
+      query: 'q1', hits: 3, payload_tokens: 300, injected_tokens: 300, saved_tokens: 700, corpus_tokens: 1000,
+    }));
+    await s.appendAudit(audit('recall', {
+      query: 'q2', hits: 1, payload_tokens: 300, injected_tokens: 300, saved_tokens: 300, corpus_tokens: 1000,
+    }));
     const g = await getOnboardGains(s);
-    // avg payload = 750 / 1500 → -50%
-    expect(g[0].big).toBe('-50%');
+    // 省量 1000t /（省量 1000t + 注入 600t）= 62.5% → 63%
+    expect(g[0].big).toBe('-63%');
     expect(g[0].desc).toContain('2 次召回');
     // 2026-11-16：解释区改说人话，不再渲染「750/1500」这种参数算式，只留真实读数
-    expect(g[0].desc).toContain('750t');
+    expect(g[0].desc).toContain('1,000t');
+    expect(g[0].desc).toContain('600t');
     expect(g[0].desc).not.toContain('/1500');
+  });
+
+  test('Token 节省：旧账无省量字段 → 未采样（不把缺字段算成 0%）', async () => {
+    const s = new InMemoryStorage();
+    await s.appendAudit(audit('recall', { query: 'q1', hits: 3, payload_tokens: 750, mems: ['m1', 'm2', 'm3'] }));
+    const g = await getOnboardGains(s);
+    expect(g[0].big).toBe('未采样');
+    expect(g[0].desc).toContain('旧账');
+    expect(g[1].big).toBe('3 次命中'); // 效率提升仍照常统计
   });
 
   test('效率提升：跨会话召回次数与累计命中', async () => {
@@ -119,9 +136,11 @@ describe('getOnboardGains（效果证据四卡真实聚合）', () => {
   });
 
   test('Token 节省为 0 时显示 0%，不显示「-0%」', async () => {
-    // 负零是计算痕迹：avg 已超过全量预算 → 省额被 clamp 到 0，读起来应是「0%」
+    // 负零是计算痕迹：真实省量为 0（有采样、有注入）→ 比例 0% 照实显示，不写成「-0%」
     const s = new InMemoryStorage();
-    await s.appendAudit(audit('recall', { query: 'q', hits: 1, payload_tokens: 2000, mems: ['m1'] }));
+    await s.appendAudit(audit('recall', {
+      query: 'q', hits: 1, payload_tokens: 2000, injected_tokens: 2000, saved_tokens: 0, corpus_tokens: 2000,
+    }));
     const g = await getOnboardGains(s);
     expect(g[0].big).toBe('0%');
   });

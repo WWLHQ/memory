@@ -26,23 +26,23 @@ test('一键接入：四段进度 + 3 发现项（Cursor 演示行已移除）+ 
       onSignalChange={() => {}}
     />,
   );
-  expect(document.querySelectorAll('.stage')).toHaveLength(4);
+  // 批次48：四段进度动画移到容器层的「一键接入流水线」（af-steps 三步制），本卡只留扫描明细
   expect(document.querySelector('#btnDiscover')).toBeTruthy();
   expect(document.querySelectorAll('#found .found')).toHaveLength(3);
   expect(document.querySelectorAll('#found .found.unbound')).toHaveLength(0); // 无 Cursor 演示行
   expect(screen.getAllByText('自动发现 · 已绑定 ✓').length).toBe(2);
   expect(screen.getAllByText('自动发现 · 已绑定 ⚠ 待手动补').length).toBe(1); // Codex 未通
   expect(document.querySelectorAll('[data-unbind]')).toHaveLength(3); // 仅已绑定项可撤销
-  // 批次19 统一格式：状态 pill 与撤销按钮在首行（与 badge/名称平齐），信号在次行
-  const heads = document.querySelectorAll('#found .found-card .found-head');
+  // 批次48 af 契约：af-badge 状态与撤销按钮在首行（与 af-badge/名称平齐），信号在次行
+  const heads = document.querySelectorAll('#found .found .found-head');
   expect(heads).toHaveLength(3);
   heads.forEach((h) => {
-    expect(h.querySelector('.badge')).not.toBeNull();
-    expect(h.querySelector('.agent-name')).not.toBeNull();
-    expect(h.querySelector('.found-actions .pill')).not.toBeNull();
+    expect(h.querySelector('.af-badge')).not.toBeNull();
+    expect(h.querySelector('b')).not.toBeNull();
+    expect(h.querySelector('.found-actions .af-badge')).not.toBeNull();
   });
   expect(document.querySelectorAll('#found .found-head [data-unbind]')).toHaveLength(3);
-  expect(document.querySelectorAll('#found .found-card .found-meta .method')).toHaveLength(3);
+  expect(document.querySelectorAll('#found .found .found-meta .dim')).toHaveLength(3);
 });
 
 test('已安装 Agent 卡片：与发现卡片同构（首行 badge/名称/右侧操作 + 次行元信息）', () => {
@@ -62,10 +62,10 @@ test('已安装 Agent 卡片：与发现卡片同构（首行 badge/名称/右�
       onAddCardForInstalled={() => {}}
     />,
   );
-  const card = document.querySelector('#installedAgents .found-card') as HTMLElement;
+  const card = document.querySelector('#installedAgents .found') as HTMLElement;
   expect(card).not.toBeNull();
-  expect(card.querySelector('.found-head .badge')?.textContent).toBe('扩展·P3');
-  expect(card.querySelector('.found-head .agent-name')?.textContent).toBe('Cursor');
+  expect(card.querySelector('.found-head .af-badge')?.textContent).toBe('扩展·P3');
+  expect(card.querySelector('.found-head b')?.textContent).toBe('Cursor');
   expect(card.querySelector('.found-head .found-actions button')?.textContent).toContain('新增接入卡片');
   expect(card.querySelector('.found-meta')?.textContent).toContain('桌面端已装');
   expect(card.querySelector('.found-meta')?.textContent).toContain('v0.42.0');
@@ -119,8 +119,9 @@ test('一键接入：点按钮触发 onDiscover，running 时禁用', async () =
       onDiscover={() => { hit += 1; }} onUnbind={() => {}} onSignalChange={() => {}} />,
   );
   expect(screen.getByRole('button', { name: /自动发现并接入本机 Agent/ })).toBeDisabled();
-  expect(document.querySelectorAll('.stage.done')).toHaveLength(3); // 0,1,2 已完成
-  expect(screen.getAllByText('按默认值绑定中…').length).toBeGreaterThan(0);
+  // 批次48：进度条在容器层流水线渲染；本卡如实回显 scanState 与禁用态
+  expect(screen.getByText('按默认值绑定中…').textContent).toBe('按默认值绑定中…');
+  expect(document.querySelector('#scanState')?.textContent).toBe('按默认值绑定中…');
 });
 
 test('一键接入：撤销按钮回调正确下标（R9）', async () => {
@@ -214,7 +215,7 @@ test('TestPanel：未测试/未验证不伪造 request_id，真实回执才可�
   const { rerender } = render(
     <TestPanel agent={SEED_AGENTS[0]} injectVisible={false} onRidClick={(n) => { clicked = n; }} />,
   );
-  expect(screen.getByText('尚未测试 · 点「▶ 测试接入」')).toBeInTheDocument();
+  expect(screen.getByText('尚未测试 · 点「测试接入」')).toBeInTheDocument();
   const inject = document.querySelector('[data-inject]') as HTMLElement;
   expect(inject.style.display).toBe('none');
   // 未测试 → 点击不得跳转（没有可定位的回执）
@@ -255,7 +256,9 @@ test('Gains：四张证据卡 + 大字指标（真实聚合口径）', () => {
   // 真实化后页面用 getOnboardGains/emptyOnboardGains；此处验证 Gains 组件渲染契约
   render(<Gains gains={emptyOnboardGains()} />);
   expect(document.querySelectorAll('.gain')).toHaveLength(4);
-  expect(screen.getAllByText('未取数').length).toBe(4);
+  // Token 节省卡走真实采样口径：无召回 → 「未采样」；其余三卡「未取数」
+  expect(screen.getAllByText('未取数').length).toBe(3);
+  expect(screen.getAllByText('未采样').length).toBe(1);
   // 标题含 emoji，文本被拆分 -> 用 matcher
   expect(screen.getByText(/Token 节省/)).toBeInTheDocument();
 });

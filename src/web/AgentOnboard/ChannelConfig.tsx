@@ -9,11 +9,12 @@ interface Props {
 
 export function ChannelConfig({ chan, onChange }: Props) {
   return (
-    <div className="row">
-      <span style={{ fontSize: 11, color: 'var(--muted)' }}>采集通道（19.3）：</span>
+    <div className="af-row">
+      <span className="dim">采集通道（19.3）：</span>
       <label className="sw">
         <input
           type="checkbox"
+          className="af-switch"
           data-chan="webhook"
           checked={chan.webhook}
           onChange={(e) => onChange('webhook', e.target.checked)}
@@ -23,14 +24,15 @@ export function ChannelConfig({ chan, onChange }: Props) {
       <label className="sw">
         <input
           type="checkbox"
+          className="af-switch"
           data-chan="api"
           checked={chan.api}
           onChange={(e) => onChange('api', e.target.checked)}
         />
         补偿 API 拉取
       </label>
-      <span className="pill">对账 {chan.recon}</span>
-      <span className="pill on">SHA-256 幂等（不可关）</span>
+      <span className="af-badge">对账 {chan.recon}</span>
+      <span className="af-badge ok">SHA-256 幂等（不可关）</span>
     </div>
   );
 }

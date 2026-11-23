@@ -11,11 +11,11 @@ interface Props {
 
 export function KeyMgmt({ apiKey, staleDays }: Props) {
   return (
-    <div className="row">
-      <span style={{ fontSize: 11, color: 'var(--muted)' }}>密钥（4.1 脱敏）：</span>
-      <span className="pill on" data-mask>{apiKey.mask}{apiKey.rotated ? '（新）' : ''}</span>
-      <span className="pill">轮换宽限 {apiKey.grace}h · 上次 {apiKey.last}</span>
-      {typeof staleDays === 'number' && staleDays > 90 ? <span className="pill gold">⚠ 超 90 天未轮换</span> : null}
+    <div className="af-row">
+      <span className="dim">密钥（4.1 脱敏）：</span>
+      <span className="af-badge acc" data-mask>{apiKey.mask}{apiKey.rotated ? '（新）' : ''}</span>
+      <span className="af-badge">轮换宽限 {apiKey.grace}h · 上次 {apiKey.last}</span>
+      {typeof staleDays === 'number' && staleDays > 90 ? <span className="af-badge warn">⚠ 超 90 天未轮换</span> : null}
     </div>
   );
 }

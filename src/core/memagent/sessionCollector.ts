@@ -511,7 +511,9 @@ async function listFiles(dir: string, pattern: RegExp, recursive: boolean, maxDe
       return;
     }
     for (const e of entries) {
-      if (e === 'node_modules' || e === '.git' || e === '.playwright' || e === '.chrome') continue; // 避开深坑
+      // 避开深坑；`_dedup_backup` 是网页导出/去重时留下的备份副本，重新采集会把已去重内容再次入库
+      // （2026-11-22 账本取证：mem_01M7WPV3… 来自 webchat-export 的 `_dedup_backup/*.md`）
+      if (e === 'node_modules' || e === '.git' || e === '.playwright' || e === '.chrome' || e === '_dedup_backup') continue;
       const full = join(d, e);
       let isDir: boolean;
       try {
