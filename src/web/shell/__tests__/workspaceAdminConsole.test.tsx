@@ -138,7 +138,7 @@ async function renderShell() {
 }
 
 describe('T3 管理台默认视图（AC-9）', () => {
-  it('管理员登录后默认落「管理台」：激活标签为管理台、iframe 指向 security.html?tab=overview，顶栏出现留痕标识与「回到工作台」', async () => {
+  it('管理员登录后默认落「管理台」：激活标签为管理台、iframe 指向 security.html?tab=overview，顶栏角色为管理员且有「回到工作台」', async () => {
     localStorage.setItem(SESSION_STORAGE_KEY, 'sid_admin_console');
     m.ctx = ADMIN_CTX;
     const { container } = await renderShell();
@@ -147,7 +147,8 @@ describe('T3 管理台默认视图（AC-9）', () => {
       const frame = container.querySelector('.page-pane.active iframe.page-frame') as HTMLIFrameElement | null;
       expect(frame?.getAttribute('src')).toContain('/security.html?tab=overview');
     });
-    expect(screen.getByTestId('shell-admin-badge').textContent).toContain('管理员视图·操作留痕');
+    // STRATUM 标题栏：管理员标识改为头像 + 「admin · 管理员」角色文案（原留痕徽标已并入角色说明）
+    expect(screen.getByTestId('shell-role').textContent).toContain('admin · 管理员');
     const back = screen.getByTestId('shell-back-workbench');
     expect(back.textContent).toContain('回到工作台');
   });
@@ -174,7 +175,9 @@ describe('T3 管理台默认视图（AC-9）', () => {
       expect(frame?.getAttribute('src')).toContain('/index.html');
     });
     expect(container.textContent).not.toContain('管理台');
-    expect(screen.queryByTestId('shell-admin-badge')).toBeNull();
+    // STRATUM 标题栏：成员角色文案为「member · 成员」，不得出现管理员标识
+    expect(screen.getByTestId('shell-role').textContent).toContain('member · 成员');
+    expect(screen.getByTestId('shell-role').textContent).not.toContain('管理员');
     expect(screen.queryByTestId('shell-back-workbench')).toBeNull();
   });
 

@@ -1,8 +1,9 @@
-// 工作台壳层（批次48 S1）：Ribbon + 导航树 + 标签条 + 属性检查器 + 任务窗 + 底部五标签 + 状态栏。
+﻿// 工作台壳层（批次48 S1 建；v5 重设计改造）：36px 标题栏 + 44px 上下文命令条 + 导航树 + 标签条
+// + 属性检查器 + 任务窗 + 底部四标签 + 26px 状态栏；原菜单栏/Ribbon 全量命令收进 Ctrl+K 命令面板。
 //
-// 设计边界（与定稿 D1 一致）：
+// 设计边界（与定稿 D1 一致，设计真源 design-mockups/记忆工作台-界面重设计-v5.html）：
 // - 壳只提供「导航与布局」，中心区用同源 iframe 承载已真实落地的页面；
-// - 壳内任何数字都必须能追到真实来源：S1 阶段尚未接线的部位一律写「未接入」并给出原因，
+// - 壳内任何数字都必须能追到真实来源：尚未接线的部位一律写「未接入」并给出原因，
 //   绝不显示编造读数、假计数或「—」冒充真实值；
 // - overview.html（演示通览）不进入主导航。
 
@@ -13,20 +14,21 @@ import { fetchSessionContext } from '../shared/session.ts';
 import type { TenantContext } from '../../types/home.ts';
 import { Icon } from './Icons.tsx';
 import { ContextMenu, type ContextMenuItem, type ContextMenuState } from './ContextMenu.tsx';
-import { logoutCurrentSession, ShellLoginDialog } from './ShellLoginDialog.tsx';
-import { PersonalMemoryPanel } from './PersonalMemoryPanel.tsx';
+import { ShellLoginDialog } from './ShellLoginDialog.tsx';
+import { CommandPalette } from './CommandPalette.tsx';
 import { loadOverview, type OverviewSnapshot } from './overview.ts';
 import { emptyLayerGraph } from '../Home/layerGraph.ts';
 import { loadPendingWrites, type PendingWritesResult } from './taskpane.ts';
 import {
-  BOTTOM_TABS, NAV, PAGES, RIBBON, findNav, flattenNav,
-  type BottomTabId, type IconName, type NavEntry, type NavItem, type PageKey,
-  type RibbonItem, type ShellAction,
+  BOTTOM_TABS, CMDS, NAV, PAGES, QUICK_VIEWS, findNav, flattenNav,
+  type BottomTabId, type CmdItem, type IconName, type NavItem, type PageKey,
+  type PaletteItem, type ShellAction,
 } from './views.ts';
 import {
-  loadAuditForMemory, loadOutputLog, loadScheduleRuns, problemsFromLog,
+  countActionableProblems, loadAuditForMemory, loadOutputLog, loadScheduleRuns, problemsFromLog,
   type AuditRow, type DockResult, type OutputLogView, type ScheduleRun,
 } from './dock.ts';
+import { humanActionLabel, humanizeLogLine, problemsIntro } from './humanLog.ts';
 import { loadStatusbar, shortLocation, type StatusSnapshot } from './statusbar.ts';
 import { loadLayerPanel, type LayerPanelView } from './layers.ts';
 import { strataViewFromOverview, type StrataScaleView } from './strataScale.ts';
@@ -50,9 +52,13 @@ const IS_ELECTRON = typeof window !== 'undefined' && Boolean((window as unknown 
 /** 功能导航折叠后的窄图标栏宽度（px）：只显示图标，悬停出名称 */
 const NAV_COLLAPSED_W = 44;
 /** 窗口按钮覆盖层主题同步通道（浏览器模式无此桥） */
+export type ShellShortcutAction =
+  | 'refresh' | 'search' | 'help' | 'security'
+  | 'dock' | 'nav' | 'inspector' | 'quick1' | 'quick2' | 'quick3' | 'quick4'
+  | 'quick5' | 'quick6' | 'quick7' | 'quick8';
 interface ShellWindowBridge {
   setTitleBarTheme?: (theme: 'light' | 'dark') => Promise<{ ok: boolean }>;
-  onShortcut?: (cb: (action: 'refresh' | 'search' | 'help' | 'security') => void) => () => void;
+  onShortcut?: (cb: (action: ShellShortcutAction) => void) => () => void;
 }
 function shellWindowBridge(): ShellWindowBridge | undefined {
   return (window as unknown as { api?: { shell?: ShellWindowBridge } }).api?.shell;
@@ -68,39 +74,6 @@ interface OpenTab {
   /** D4 页面初值：`?status=archived` / `#l0bar` */
   href?: string;
   unavailable?: string;
-}
-
-/** 菜单栏同行最右侧的快速访问工具条（定稿 12 个位置；无对应能力的置灰并写明原因） */
-interface QaSpec {
-  id?: string;
-  sep?: boolean;
-  icon?: IconName;
-  title?: string;
-  /** 可见文字标签：纯图标按钮在 15 个同形图标里不可辨认，登录态入口必须带字 */
-  text?: string;
-  /** 开关态（记忆助手）：true 时按钮高亮并写 aria-pressed */
-  active?: boolean;
-  disabled?: boolean;
-  run?: () => void;
-}
-
-/** 顶部第 2 段自建中文菜单：命令行与 Ribbon 命令同源，无能力项置灰并带原因 */
-interface MenuRowSpec {
-  head?: string;
-  sep?: boolean;
-  label?: string;
-  icon?: IconName;
-  kbd?: string;
-  checked?: boolean;
-  disabled?: boolean;
-  reason?: string;
-  run?: () => void;
-}
-
-interface MenuSpec {
-  id: string;
-  label: string;
-  rows: MenuRowSpec[];
 }
 
 /**
@@ -148,34 +121,16 @@ function systemPrefersDark(): boolean {
   }
 }
 
-/** 导航过滤：父项自身或任一子项命中即保留，子项自身再按关键词过滤 */
-function filterEntries(entries: NavEntry[], q: string): NavEntry[] {
-  if (!q) return entries;
-  const hit = (n: NavItem) => n.label.toLowerCase().includes(q);
-  const out: NavEntry[] = [];
-  for (const e of entries) {
-    if (e.kind === 'group') {
-      out.push(e);
-      continue;
-    }
-    const kids = e.children?.filter(hit);
-    if (hit(e) || (kids && kids.length)) out.push({ ...e, children: kids ?? e.children });
-  }
-  // 去掉没有任何命中项的孤立分组
-  return out.filter((e, i, all) => e.kind !== 'group' || (i + 1 < all.length && all[i + 1].kind === 'item'));
-}
-
 export function Workspace() {
   const [activeId, setActiveId] = useState<string>('home');
   const [openTabs, setOpenTabs] = useState<OpenTab[]>([
     { id: 'home', label: '首页', page: 'home' },
   ]);
   const [openParents, setOpenParents] = useState<Record<string, boolean>>({});
-  const [navQuery, setNavQuery] = useState('');
-  const [ribbonTab, setRibbonTab] = useState<string>('start');
-  const [ribbonFolded, setRibbonFolded] = useState(false);
-  /** 第 2 段中文菜单当前展开项（null = 全部收起） */
-  const [menuOpen, setMenuOpen] = useState<string | null>(null);
+  /** Ctrl+K 命令面板（v5）：原菜单 + Ribbon 全量命令的常驻入口 */
+  const [palOpen, setPalOpen] = useState(false);
+  /** 快捷键帮助浮层（F1 / ?） */
+  const [keysOpen, setKeysOpen] = useState(false);
   const [navCollapsed, setNavCollapsed] = useState(false);
   // 用户 2026-11-16 要求：属性检查器默认收起，需要时由 QAT / 右侧竖条 / 右键菜单显式展开
   const [inspCollapsed, setInspCollapsed] = useState(true);
@@ -194,7 +149,7 @@ export function Workspace() {
     const n = Number(readStore(STORE_ZOOM, '100'));
     return Number.isFinite(n) && n >= 80 && n <= 125 ? n : 100;
   });
-  const [navWidth, setNavWidth] = useState(250);
+  const [navWidth, setNavWidth] = useState(196);
   const [inspWidth, setInspWidth] = useState(318);
   const [dockHeight, setDockHeight] = useState(190);
   const [reloadNonce, setReloadNonce] = useState(0);
@@ -215,11 +170,8 @@ export function Workspace() {
   const [identity, setIdentity] = useState<TenantContext | null>(null);
   /** 身份是否已核对过一轮（区分「还没查」与「查了但没有会话」——启动自动接入要等这一步） */
   const [identityChecked, setIdentityChecked] = useState(false);
-  /** 壳层登录弹窗（菜单栏 / QAT / 登录状态处三处入口共用同一实例） */
+  /** 壳层登录弹窗（菜单栏 / 登录状态处两处入口共用同一实例） */
   const [loginOpen, setLoginOpen] = useState(false);
-  /** 个人记忆常驻面板（N8）：开闭状态同样挂在壳层，切换中心标签不丢状态；收起只是不渲染 */
-  const [personalOpen, setPersonalOpen] = useState(false);
-  const closePersonal = useCallback(() => setPersonalOpen(false), []);
   /** 右键菜单（导航树 / 标签条 / 检查器 / 中心页表格行共用同一渲染器） */
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null);
   const [overview, setOverview] = useState<OverviewSnapshot | null>(null);
@@ -237,7 +189,8 @@ export function Workspace() {
   const [dockAudit, setDockAudit] = useState<DockResult<AuditRow[]> | null>(null);
   const [dockAuditBusy, setDockAuditBusy] = useState(false);
   /** S7：状态栏真实读数（账本位置 / L0 保险库 / 采集器后台） */
-  const [status, setStatus] = useState<StatusSnapshot | null>(null);
+  // 分格就绪：四路状态各自先到先显示，不等最慢的一路（2026-11-22 启动提速）
+  const [status, setStatus] = useState<Partial<StatusSnapshot>>({});
   /** S7：分层 L1–L6 / L0 面板（仅在中心页为分层或 L0 时读取） */
   const [layerPanel, setLayerPanel] = useState<DockResult<LayerPanelView> | null>(null);
   const pendingBusyRef = useRef(false);
@@ -248,8 +201,6 @@ export function Workspace() {
   /** 已挂右键监听的 iframe 文档（避免重复挂载） */
   const bridgedDocs = useRef<WeakSet<Document>>(new WeakSet());
   const activePageRef = useRef<PageKey | undefined>(undefined);
-  /** 顶部自绘标题栏里的查找框（Ctrl+F / Ctrl+K / Ribbon「在库中查找」共用同一个焦点目标） */
-  const navSearchRef = useRef<HTMLInputElement | null>(null);
 
   const refreshOverview = useCallback(() => {
     setOverviewBusy(true);
@@ -327,7 +278,7 @@ export function Workspace() {
   const selectionId = selection?.fields.find((f) => f.k === 'ID')?.v ?? null;
 
   useEffect(() => {
-    if (!dockOpen || dockTab === 'term' || dockTab === 'tasks' || dockTab === 'audit') return;
+    if (!dockOpen || dockTab === 'tasks' || dockTab === 'audit') return;
     if (dockLog) return;
     void refreshDockLog();
   }, [dockOpen, dockTab, dockLog, refreshDockLog]);
@@ -348,7 +299,9 @@ export function Workspace() {
 
   // S7：状态栏读数（挂载 + 登录态变化时读一次；F5/刷新动作也会清空重读）
   const refreshStatus = useCallback(async () => {
-    setStatus(await loadStatusbar());
+    setStatus({});
+    const snap = await loadStatusbar((part) => setStatus((prev) => ({ ...prev, ...part })));
+    setStatus(snap);
   }, []);
 
   useEffect(() => { void refreshStatus(); }, [refreshStatus, sessionActive]);
@@ -445,7 +398,7 @@ export function Workspace() {
   }, []);
 
   const active = useMemo(() => openTabs.find((t) => t.id === activeId) ?? openTabs[0], [activeId, openTabs]);
-  /** Ribbon 深链会派生 id（如 memory-bank?tab=layers），按 page + href 兜底回查 NAV，属性检查器不丢标题。 */
+  /** 命令深链会派生 id（如 memory-bank?tab=layers），按 page + href 兜底回查 NAV，属性检查器不丢标题。 */
   const activeNav = useMemo(() => {
     if (!active) return undefined;
     const direct = findNav(active.id);
@@ -594,13 +547,19 @@ export function Workspace() {
     });
   }, [activeId]);
 
-  const runShellAction = useCallback((action: ShellAction, label: string) => {
+  const runShellAction = useCallback((action: ShellAction, _label: string) => {
     switch (action) {
       case 'toggleTaskPane':
         setTaskOpen((v) => !v);
         break;
-      case 'foldRibbon':
-        setRibbonFolded((v) => !v);
+      case 'toggleNav':
+        setNavCollapsed((v) => !v);
+        break;
+      case 'openPalette':
+        setPalOpen(true);
+        break;
+      case 'theme':
+        setTheme((t) => (t === 'system' ? 'light' : t === 'light' ? 'dark' : 'system'));
         break;
       case 'toggleDock':
         setDockOpen((v) => !v);
@@ -618,22 +577,16 @@ export function Workspace() {
         setNavWidth(250); setInspWidth(318); setDockHeight(190);
         // 重置布局 = 回到默认：属性检查器默认收起（2026-11-16）
         setNavCollapsed(false); setInspCollapsed(true); setTaskOpen(false); setDockOpen(true);
-        setRibbonFolded(false); setZoom(100); setDensity('comfortable'); setStatusVisible(true);
+        setZoom(100); setDensity('comfortable'); setStatusVisible(true);
         break;
       case 'refresh':
         setReloadNonce((n) => n + 1);
         // 底部面板、状态栏、导航角标同样重读；层级刻度与概览页共用同一份真实账本快照
         setDockLog(null); setDockTasks(null); setDockAudit(null);
-        setStatus(null); setLayerPanel(null);
+        setStatus({}); setLayerPanel(null);
         refreshOverview();
         setRealNavCounts({}); setNavCountsSeq((n) => n + 1);
         setMessage('已刷新全部打开的真实页面（整页重挂）、概览账本/层级刻度、底部面板/状态栏与导航角标读数。');
-        break;
-      case 'focusFilter':
-        // 顶部自绘标题栏的查找框只过滤左侧功能导航；它不跨页检索记忆，因此不产出任何伪造结果。
-        navSearchRef.current?.focus();
-        navSearchRef.current?.select();
-        setMessage(`已聚焦顶部查找框（${label}）：按名称过滤左侧功能导航。`);
         break;
       default:
         break;
@@ -651,7 +604,7 @@ export function Workspace() {
   const openCtxMenu = useCallback((x: number, y: number, title: string, testId: string, items: ContextMenuItem[]) => {
     const scale = zoomRef.current / 100;
     setCtxMenu({ x: x / scale, y: y / scale, title, testId, items });
-    setMenuOpen(null);
+    setPalOpen(false);
   }, []);
 
   const openNavContext = useCallback((item: NavItem, e: ReactMouseEvent) => {
@@ -747,8 +700,8 @@ export function Workspace() {
   }, [openCtxMenu, selectionId, selection, active?.page, copyText, inspCollapsed]);
 
   /**
-   * 全域右键兜底：标题栏 / 菜单栏 / QAT / Ribbon / 导航搜索框 / 状态栏 / 底部面板 / 中心空白
-   * 命中的区域决定标题，动作全部是壳层真实能力（刷新、回概览、聚焦查找、复制、切主题、登录会话）。
+   * 全域右键兜底：标题栏 / 命令条 / 导航树 / 状态栏 / 底部面板 / 中心空白
+   * 命中的区域决定标题，动作全部是壳层真实能力（刷新、回概览、命令面板、复制、切主题、登录会话）。
    * 这样壳层可视范围内不存在「右键没反应」或漏原生菜单的位置。
    */
   const openDefaultContext = useCallback((x: number, y: number, target: HTMLElement | null) => {
@@ -757,11 +710,9 @@ export function Workspace() {
         : target?.closest('.bottom-panel') ? '底部面板'
           : target?.closest('.inspector-pane') ? '属性检查器'
             : target?.closest('.center-pane') ? '中心区'
-              : target?.closest('.ribbon-body, .ribbon-tabs') ? '功能区'
-                : target?.closest('.qa') ? '快速访问工具条'
-                  : target?.closest('.menubar') ? '菜单栏'
-                    : target?.closest('.titlebar') ? '标题栏'
-                      : '工作台';
+              : target?.closest('.cmdbar') ? '命令条'
+                : target?.closest('.titlebar') ? '标题栏'
+                  : '工作台';
     // 输入框的选区不走 DOM Selection，单独取 selectionStart/End
     const field = target?.closest('input, textarea') as HTMLInputElement | HTMLTextAreaElement | null;
     const selected = field && typeof field.selectionStart === 'number'
@@ -769,19 +720,17 @@ export function Workspace() {
       : (window.getSelection()?.toString() ?? '');
     const selectedText = selected.trim();
     // 批次50：右键不补登录入口 —— 只有该区域本身已有登录入口才出现「登录 / 会话」
-    // 批次51：QAT 移进菜单栏后，不能让 QAT 空白区借 .menubar 白捡一个登录入口；
-    // 菜单项区域仍算自带「文件 → 登录 / 会话」，QAT 登录按钮与两处会话格按 testid 精确命中。
-    const inQa = !!target?.closest('.qa');
+    // 批次51：登录入口集中在标题栏头像与状态栏会话格，按 testid 精确命中。
     const hasLoginEntry = !!target?.closest(
-      '[data-testid="qa-login"], [data-testid="shell-session-btn"], [data-testid="sb-session"]',
-    ) || (!inQa && !!target?.closest('.menubar'));
+      '[data-testid="shell-avatar"], [data-testid="sb-session"]',
+    );
     const items: ContextMenuItem[] = [
       { id: 'refresh', icon: 'refresh', label: '刷新全部页面与底部/状态栏读数（F5）', run: () => runShellAction('refresh', '刷新') },
       {
         id: 'home', icon: 'spark', label: '回到首页',
         run: () => { const home = findNav('home'); if (home) openView(home); },
       },
-      { id: 'find', icon: 'search', label: '聚焦导航查找框（Ctrl+F）', run: () => runShellAction('focusFilter', '查找') },
+      { id: 'palette', icon: 'search', label: '打开命令面板（Ctrl+K）', run: () => setPalOpen(true) },
       { id: 'sep1', sep: true },
       {
         id: 'copySel', icon: 'copy', label: `复制选中文本（${selectedText.length} 字）`,
@@ -861,7 +810,6 @@ export function Workspace() {
       testId: 'rowmenu',
       items,
     });
-    setMenuOpen(null);
   }, [copyText, refreshDockAudit]);
 
   /** 中心页 iframe 内的非表格行右键：同样由壳层接管，给页面级真实动作，不漏原生菜单 */
@@ -901,10 +849,10 @@ export function Workspace() {
         },
       ],
     });
-    setMenuOpen(null);
   }, [active?.page, copyText, runShellAction, openView]);
 
-  /** 给同源 iframe 文档挂一次 contextmenu：全域接管（行→行菜单，其余→页面菜单），不留原生菜单 */
+  /** 给同源 iframe 文档挂一次 contextmenu：全域接管（行→行菜单，其余→页面菜单），不留原生菜单；
+   *  批次57：页面已自行 preventDefault 的右键（如记忆库行右键常驻详情菜单）壳层不再接管。 */
   const attachFrameContextMenu = useCallback((frame: HTMLIFrameElement) => {
     let doc: Document | null = null;
     try {
@@ -918,14 +866,15 @@ export function Workspace() {
       const target = ev.target as HTMLElement | null;
       // 先拦：iframe 内任何位置都不允许漏出原生菜单
       ev.preventDefault();
+      // 批次57：页面已 preventDefault 的右键按页面自己的菜单走，壳层不再叠加
+      if (ev.defaultPrevented && target?.closest?.('[data-testid^="memory-row-"]')) return;
       const row = target?.closest?.('tr[data-testid^="row-"]') as HTMLElement | null;
       if (row) openRowContext(frame, row, ev as MouseEvent);
       else openPageContext(frame, ev as MouseEvent);
     });
   }, [openRowContext, openPageContext]);
 
-  const onRibbonItem = useCallback((item: RibbonItem) => {
-    if (item.unavailable) return;
+  const onCmdItem = useCallback((item: CmdItem) => {
     if (item.go) {
       const target = NAV.find((e): e is NavItem => e.kind === 'item' && (e.page === item.go || Boolean(e.children?.some((c) => c.page === item.go))));
       const base = target?.page === item.go ? target : target?.children?.find((c) => c.page === item.go) ?? {
@@ -945,16 +894,27 @@ export function Workspace() {
   // 顶部默认应用菜单已删除：快捷键动作由壳层执行（复制/粘贴/全选仍走 Chromium 原生编辑命令）。
   // 桌面端按键由主进程 before-input-event 捕获后发来（焦点在中心区 iframe 里也能生效）；
   // 浏览器模式没有这道桥，则由壳层自己监听 keydown。两条路径互斥，避免同一按键执行两次。
-  const runShellShortcut = useCallback((action: 'refresh' | 'search' | 'help' | 'security') => {
+  const runShellShortcut = useCallback((action: ShellShortcutAction) => {
     if (action === 'refresh') { runShellAction('refresh', '刷新'); return; }
-    if (action === 'search') { navSearchRef.current?.focus(); navSearchRef.current?.select(); return; }
+    if (action === 'search') { setPalOpen(true); return; }
+    if (action === 'dock') { runShellAction('toggleDock', '底部面板'); return; }
+    if (action === 'nav') { runShellAction('toggleNav', '功能导航'); return; }
+    // v5-BC：Ctrl+Shift+I 折叠/展开属性检查器（与 QAT 按钮、右键菜单同一状态）
+    if (action === 'inspector') { setInspCollapsed((v) => !v); return; }
+    if (action.startsWith('quick')) {
+      const idx = Number(action.slice(5)) - 1;
+      const navId = QUICK_VIEWS[idx];
+      const target = navId ? findNav(navId) : undefined;
+      if (target) openView(target);
+      return;
+    }
     if (action === 'security') {
       const sec = NAV.find((n): n is NavItem => n.kind === 'item' && n.id === 'security');
       if (sec) openView(sec);
       return;
     }
-    setMessage('快捷键：F5 刷新 · F9 打开「安全与账号」· Ctrl+F / Ctrl+K 聚焦顶部查找框 · F1 本说明；复制/粘贴/全选由系统编辑命令处理。');
-  }, [openView, runShellAction, setMessage]);
+    setKeysOpen(true);
+  }, [openView, runShellAction]);
 
   useEffect(() => {
     const off = shellWindowBridge()?.onShortcut?.(runShellShortcut);
@@ -964,49 +924,49 @@ export function Workspace() {
   useEffect(() => {
     if (IS_ELECTRON || typeof window === 'undefined') return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.altKey || e.shiftKey) return;
+      // 命令面板 / 快捷键帮助开着时：Esc 关闭，其余按键交给面板自身的键盘导航
+      if (palOpen || keysOpen) {
+        if (e.key === 'Escape') { e.preventDefault(); setPalOpen(false); setKeysOpen(false); }
+        return;
+      }
       const mod = e.ctrlKey || e.metaKey;
       const key = e.key.toLowerCase();
+      if (e.key === '?' || (e.shiftKey && key === '/')) { e.preventDefault(); setKeysOpen(true); return; }
+      if (e.altKey) return;
       if (key === 'f5') { e.preventDefault(); runShellShortcut('refresh'); return; }
       if (key === 'f9') { e.preventDefault(); runShellShortcut('security'); return; }
       if (key === 'f1') { e.preventDefault(); runShellShortcut('help'); return; }
-      if (mod && (key === 'f' || key === 'k')) { e.preventDefault(); runShellShortcut('search'); }
+      if (mod && (key === 'f' || key === 'k')) { e.preventDefault(); runShellShortcut('search'); return; }
+      if (mod && key === 'b') { e.preventDefault(); runShellShortcut('nav'); return; }
+      if (mod && (key === '`' || key === '~')) { e.preventDefault(); runShellShortcut('dock'); return; }
+      // v5-BC：浏览器模式同样支持 Ctrl+Shift+I 检查器（桌面端该键由主进程捕获，不走这里）
+      if (mod && e.shiftKey && key === 'i') { e.preventDefault(); runShellShortcut('inspector'); return; }
+      if (mod && key >= '1' && key <= '8') { e.preventDefault(); runShellShortcut(`quick${key}` as ShellShortcutAction); }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [runShellShortcut]);
+  }, [runShellShortcut, palOpen, keysOpen]);
 
   const navEntries = useMemo(() => {
-    const base = filterEntries(NAV, navQuery.trim().toLowerCase());
     // T3（§14.1）：「管理台」仅管理员可见；身份未确认（null）前同样不显示，避免成员登录前闪现。
-    // 剔除后若治理组变孤立分组则一并清理（与 filterEntries 同口径）。
+    // 剔除后若治理组变孤立分组则一并清理。
     if (identity?.role !== 'admin') {
-      return base
+      return NAV
         .filter((e) => e.kind !== 'item' || e.id !== 'admin-console')
         .filter((e, i, all) => e.kind !== 'group' || (i + 1 < all.length && all[i + 1].kind === 'item'));
     }
-    return base;
-  }, [navQuery, identity]);
-
-  // 菜单收起：点菜单栏以外或按 Esc。只做收起，不吞其它按键。
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onPointerDown = (e: PointerEvent) => {
-      if ((e.target as HTMLElement | null)?.closest('.menubar')) return;
-      setMenuOpen(null);
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMenuOpen(null);
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [menuOpen]);
-
-  const activeRibbon = RIBBON.find((r) => r.id === ribbonTab) ?? RIBBON[0];
+    return NAV;
+  }, [identity]);
+  // v5 命令条面包屑：当前标签所属的导航分组名（按 NAV 顺序扫描，未命中时显示「工作台」）
+  const activeNavGroup = useMemo(() => {
+    let group = '';
+    for (const e of navEntries) {
+      if (e.kind === 'group') { group = e.label; continue; }
+      if (e.id === activeId || e.page === active?.page
+        || e.children?.some((c) => c.id === activeId || c.page === active?.page)) return group;
+    }
+    return '';
+  }, [navEntries, activeId, active?.page]);
 
   /** 底部标签角标：只在真实读到数据后显示计数；未读/不可用一律不显示，绝不用 0 冒充 */
   const dockCounts: Record<BottomTabId, number | null> = {
@@ -1014,19 +974,18 @@ export function Workspace() {
     problems: dockLog?.status === 'ok' ? problemsFromLog(dockLog.view).length : null,
     audit: selectionId && dockAudit?.status === 'ok' ? dockAudit.view.length : null,
     tasks: dockTasks?.status === 'ok' ? dockTasks.view.length : null,
-    term: null,
   };
 
   // S7：状态栏各单元格的真实文案与可追溯 title
-  const locView = status?.location.status === 'ok' ? shortLocation(status.location.view) : null;
-  const locText = !status ? '读取中' : locView ? locView.text : '未知';
-  const locTitle = status?.location.status === 'ok' ? locView?.title ?? '' : status ? status.location.detail : '尚未读取';
+  const locView = status?.location?.status === 'ok' ? shortLocation(status.location.view) : null;
+  const locText = !status?.location ? '读取中' : locView ? locView.text : '未知';
+  const locTitle = status?.location?.status === 'ok' ? locView?.title ?? '' : status?.location ? status.location.detail : '尚未读取';
 
   const collector = status?.collector;
-  const collectorText = !status ? '读取中'
-    : collector?.status === 'ok' ? (collector.view.running ? '运行中' : '空闲')
-    : collector?.status === 'unavailable' ? '不可用' : '异常';
-  const collectorTitle = !status ? '尚未读取'
+  const collectorText = !collector ? '读取中'
+    : collector.status === 'ok' ? (collector.view.running ? '运行中' : '空闲')
+    : collector.status === 'unavailable' ? '不可用' : '异常';
+  const collectorTitle = !collector ? '尚未读取'
     : collector?.status === 'ok'
       ? `采集器${collector.view.running ? '正在跑' : '空闲'}${collector.view.intervalMs ? ` · 间隔 ${collector.view.intervalMs} ms` : ''}${collector.view.lastAt ? ` · 最近一轮 ${new Date(collector.view.lastAt).toLocaleString('zh-CN')}` : ' · 暂无已完成轮次'}${collector.view.lastCollected != null ? ` · 上轮采集 ${collector.view.lastCollected} 条` : ''}${collector.view.autoRetryStopped ? ` · 自动重试已停（连续失败 ${collector.view.consecutiveFails ?? '?'} 轮）` : ''}`
       : collector ? collector.detail : '尚未读取';
@@ -1039,11 +998,13 @@ export function Workspace() {
   // 口径一（2026-11-17 用户拍板）：解锁写密钥后本人可免审批直读自己的 L0 ——
   // 所以成员读不到查阅锁全貌时，只要写密钥已解锁就显示「本人可直读」，不对成员谎报「不可用」。
   const selfReadable = l0?.status !== 'ok' && l0w?.status === 'ok' && l0w.view.unlocked;
-  const l0Text = !status ? '读取中'
-    : `查阅${l0?.status === 'ok'
-      ? (l0.view.active_sessions > 0 ? `${l0.view.active_sessions}会话` : '锁')
-      : selfReadable ? '本人可直读' : '不可用'} · 写${l0w?.status === 'ok' ? (l0w.view.unlocked ? '已解' : '锁') : '不可用'}`;
-  const l0Title = !status ? '尚未读取'
+  const l0Text = !l0 && !l0w ? '读取中'
+    : `查阅${!l0 ? '读取中'
+      : l0.status === 'ok'
+        ? (l0.view.active_sessions > 0 ? `${l0.view.active_sessions}会话` : '锁')
+        : selfReadable ? '本人可直读' : '不可用'} · 写${!l0w ? '读取中'
+      : l0w.status === 'ok' ? (l0w.view.unlocked ? '已解' : '锁') : '不可用'}`;
+  const l0Title = !l0 && !l0w ? '尚未读取'
     : `L0 保险库：查阅锁（解密查阅会话）${l0?.status === 'ok'
       ? (l0.view.active_sessions > 0 ? `已开 ${l0.view.active_sessions} 个会话` : '锁定（无活跃查阅会话）')
       : selfReadable
@@ -1054,16 +1015,6 @@ export function Workspace() {
       ? ` · 有效授权 ${l0.view.active_grants} · 管理密钥${l0.view.has_admin_wrap ? '已设置' : '未设置'}`
       : ''}（两把锁互不替代，只读，不含任何密钥材料）`;
 
-  // 第 1 段「当前库/文档」：只放真实的账本文件名（定稿里的 mem-prod-cn — 记忆库.mem 是演示名）。
-  const docLabel = locView ? locView.text : (status ? '库位置未知' : '库读取中');
-  const docTitle = `当前库：${locText}（${locTitle}） · 当前视图：${active?.label ?? '未选择'}`;
-
-  // ── 菜单栏右端：快速访问工具条（12 个位置照定稿保留；无能力项置灰并写明原因）──
-  const themeIcon: IconName = theme === 'system' ? 'system' : theme === 'light' ? 'sun' : 'moon';
-  const themeTip = theme === 'system'
-    ? '主题：跟随系统（点击切到浅色）'
-    : theme === 'light' ? '主题：浅色（点击切到深色）' : '主题：深色（点击切回跟随系统）';
-  const cycleTheme = () => setTheme((t) => (t === 'system' ? 'light' : t === 'light' ? 'dark' : 'system'));
   const openNav = (id: string) => {
     const target = findNav(id);
     if (target) openView(target);
@@ -1073,161 +1024,88 @@ export function Workspace() {
     const base = findNav('memory-bank');
     if (base) openView({ ...base, id: `memory-bank${href}`, href, label });
   };
-  const demoOnly = '定稿演示命令：本程序概览未提供该动作，不伪造执行结果';
-  const qaSpecs: QaSpec[] = [
-    { id: 'save', icon: 'save', title: '保存（只读）：本程序无文档编辑，保存不适用', disabled: true },
-    { id: 'undo', icon: 'undo', title: '撤销（无历史）：壳层不保存编辑历史', disabled: true },
-    { id: 'refresh', icon: 'refresh', title: '刷新全部打开的页面与底部/状态栏读数（F5）', run: () => runShellAction('refresh', '刷新') },
-    { id: 'find', icon: 'search', title: '查找左侧功能导航（Ctrl+F / Ctrl+K）', run: () => runShellAction('focusFilter', '查找') },
-    {
-      id: 'login', icon: 'user',
-      // 可见文字：未登录写「登录」，已确认会话写账号（纯图标用户找不到入口）
-      text: sessionActive && identity ? identity.user_id : '登录',
-      title: sessionActive
-        ? '登录 / 会话：查看当前账号、团队、角色或登出（真实 /api/me）'
-        : '登录 / 会话：打开登录弹窗（真实 POST /api/login）',
-      run: () => setLoginOpen(true),
-    },
-    {
-      id: 'logout', icon: 'x',
-      text: '登出',
-      title: sessionActive
-        ? '登出：清除本机会话并通知后端（其它视图回到只读）'
-        : '未登录，无需登出（需要先登录才可用）',
-      disabled: !sessionActive,
-      run: () => {
-        void (async () => {
-          const { backendAccepted } = await logoutCurrentSession();
-          onLoginSession(null);
-          setMessage(backendAccepted
-            ? '已登出：后端已受理，本机会话已清除。'
-            : '已清除本机会话；后端未确认登出（可能不可达）。');
-        })();
-      },
-    },
-    { sep: true },
-    { id: 'syncCheck', icon: 'sync', title: '同步检查：程序未提供独立指令；请在「同步」视图查看通道状态', disabled: true },
-    { id: 'balance', icon: 'scale', title: '余额探测：程序未提供独立指令；请在「模型与成本」视图查看计费状态', disabled: true },
-    { sep: true },
-    { id: 'theme', icon: themeIcon, title: themeTip, run: cycleTheme },
-    { sep: true },
-    {
-      id: 'assistant', icon: 'spark', text: '记忆助手', active: activeId === 'assistant',
-      title: '记忆助手（整页）：问账本（成本/异常/冲突/同步/记忆条数）。点击打开整页；页面内「重读」只重取数据，F5 刷新全站',
-      run: () => {
-        const target = findNav('assistant');
-        if (target) openView(target);
-      },
-    },
-    {
-      id: 'inspector', icon: 'panel', text: '属性检查器', active: !inspCollapsed,
-      title: inspCollapsed
-        ? '展开属性检查器：查看中心页回传的真实字段、复制记忆 ID、按选中记忆查审计'
-        : '收起属性检查器：把右侧空间让给中心页（选中与审计联动保留）',
-      run: () => setInspCollapsed((v) => !v),
-    },
-    {
-      id: 'personal', icon: 'user', text: '个人记忆', active: personalOpen,
-      title: '个人记忆常驻面板：快速记一条 / 发件箱归并 agent 记忆（会话信息已直接放行）。'
-        + '点击展开/收起；切换中心标签不丢状态。完整管理请点左侧导航「记忆管理 / 个人记忆」',
-      run: () => setPersonalOpen((v) => !v),
-    },
-    { id: 'metrics', icon: 'chart', title: `指标明细（概览）：${demoOnly}`, disabled: true },
-    { id: 'pending', icon: 'archive', title: '待处理（概览）：定稿演示命令；待重放写入请在「任务窗格」只读查看', disabled: true },
-    { id: 'exportCsv', icon: 'export', title: `导出概览 CSV（概览）：${demoOnly}`, disabled: true },
-    { id: 'more', icon: 'more', title: '更多命令：暂无；命令入口以菜单栏为准', disabled: true },
-  ];
-
-  // ── 第 2 段：自建中文菜单（命令与 Ribbon 同源；无能力项置灰并写原因）──
-  const menuSpecs: MenuSpec[] = [
-    {
-      id: 'file', label: '文件', rows: [
-        { label: '新建记忆', icon: 'plus', kbd: 'Ctrl+N', run: () => openNav('write') },
-        { label: '打开记忆库…', icon: 'folder', kbd: 'Ctrl+O', disabled: true, reason: '程序未提供库切换指令；数据根位置在「参数」页查看' },
-        { head: '最近打开' },
-        { label: `当前库：${locView ? locView.text : '未选择'}`, icon: 'db', disabled: true, reason: '仅展示当前账本文件；切换库需改数据根并重启' },
-        { label: '登录 / 会话…', icon: 'user', run: () => setLoginOpen(true) },
-        { sep: true },
-        { label: '打印回执…', icon: 'receipt', kbd: 'Ctrl+P', disabled: true, reason: '程序未提供打印通道' },
-        { label: '关闭当前视图', icon: 'x', run: () => closeTab(activeId) },
-        { sep: true },
-        { label: '退出', icon: 'x', disabled: true, reason: '请使用窗口右上角关闭按钮（系统覆盖层）' },
-      ],
-    },
-    {
-      id: 'edit', label: '编辑', rows: [
-        { label: '撤销', icon: 'undo', kbd: 'Ctrl+Z', disabled: true, reason: '壳层不保存编辑历史' },
-        {
-          label: '复制记忆 ID', icon: 'copy',
-          disabled: !selectionId,
-          reason: '中心页未选中记忆；先在列表选中一条记录',
-          run: () => {
-            if (!selectionId) return;
-            const copy = navigator.clipboard?.writeText(selectionId);
-            if (!copy) { setMessage('复制失败：剪贴板不可用。'); return; }
-            copy.then(() => setMessage(`已复制记忆 ID：${selectionId}`))
-              .catch(() => setMessage('复制失败：剪贴板未授权。'));
-          },
-        },
-        { label: '全选', icon: 'check', kbd: 'Ctrl+A', disabled: true, reason: '请在输入框内使用 Ctrl+A（系统编辑命令）' },
-        { sep: true },
-        { label: '查找', icon: 'search', kbd: 'Ctrl+F', run: () => runShellAction('focusFilter', '查找') },
-        { label: '冲突裁决', icon: 'warn', run: () => openNav('dispute') },
-        { label: '首选项…', icon: 'gear', run: () => openNav('params') },
-      ],
-    },
-    {
-      id: 'view', label: '视图', rows: [
-        { label: '任务窗格', icon: 'panel', checked: taskOpen, run: () => runShellAction('toggleTaskPane', '任务窗格') },
-        { label: '折叠功能区', icon: 'fold', kbd: 'Ctrl+F1', checked: ribbonFolded, run: () => runShellAction('foldRibbon', '折叠功能区') },
-        { label: '属性检查器', icon: 'panel', checked: !inspCollapsed, run: () => setInspCollapsed((v) => !v) },
-        { label: '层级管理', icon: 'layers', run: () => openNav('layered') },
-        { label: '折叠功能导航', icon: 'chev', kbd: 'Ctrl+B', checked: navCollapsed, run: () => setNavCollapsed((v) => !v) },
-        { sep: true },
-        { label: '重置布局', icon: 'refresh', run: () => runShellAction('resetLayout', '重置布局') },
-        { label: '刷新', icon: 'refresh', kbd: 'F5', run: () => runShellAction('refresh', '刷新') },
-        { sep: true },
-        { label: '显示 L0 密文', icon: 'lock', run: () => openMemoryTab('?tab=l0', 'L0 密文（需解锁）') },
-        { label: '显示底部面板', icon: 'panel', checked: dockOpen, run: () => runShellAction('toggleDock', '底部面板') },
-        { label: '显示状态栏', icon: 'info', checked: statusVisible, run: () => runShellAction('toggleStatus', '状态栏') },
-        { label: '紧凑密度', icon: 'panel', checked: density === 'compact', run: () => runShellAction('density', '紧凑密度') },
-        { sep: true },
-        { label: '主题：跟随系统', icon: 'system', checked: theme === 'system', run: () => setTheme('system') },
-        { label: '主题：浅色', icon: 'sun', checked: theme === 'light', run: () => setTheme('light') },
-        { label: '主题：深色', icon: 'moon', checked: theme === 'dark', run: () => setTheme('dark') },
-      ],
-    },
-    {
-      id: 'tools', label: '工具', rows: [
-        { label: '运行检索（只读）', icon: 'search', kbd: 'F6', run: () => openNav('retrieval') },
-        { label: '安全体检', icon: 'shield', kbd: 'F9', run: () => openNav('security') },
-        { label: '生长调度状态', icon: 'layers', run: () => openNav('growth') },
-        { label: 'Agent 通道探针', icon: 'agent', run: () => openNav('agent') },
-        { label: '查看写入回执', icon: 'receipt', kbd: 'Ctrl+R', run: () => openNav('write') },
-        { label: '打开诊断日志', icon: 'list', kbd: 'Ctrl+L', run: () => openNav('logs') },
-        { sep: true },
-        { label: '余额探测', icon: 'scale', kbd: 'F7', disabled: true, reason: '探测在「模型与成本」页内执行' },
-        { label: '同步检查', icon: 'sync', kbd: 'F8', disabled: true, reason: '同步检查在「同步」视图执行' },
-        { label: '写入预检', icon: 'check', disabled: true, reason: '程序未提供独立预检指令；在写入页内执行' },
-        { label: '去重策略', icon: 'filter', disabled: true, reason: '程序未提供独立去重策略命令' },
-      ],
-    },
-    {
-      id: 'help', label: '帮助', rows: [
-        { label: '快捷键参考', icon: 'help', kbd: 'F1', run: () => runShellShortcut('help') },
-        { label: '产品能力与限制', icon: 'info', run: () => setMessage('壳层只提供导航与布局；中心区为本机真实页面。未接线的部位会明确标注原因，不显示推测值。') },
-        { label: '命令清单', icon: 'list', run: () => setMessage('菜单命令与 Ribbon 项同源；无对应能力的项已置灰并在提示中写明原因。') },
-        { sep: true },
-        { label: '演示数据声明', icon: 'check', run: () => setMessage('本程序全站零演示数据：读数来自本机真实链路，缺失或不可用一律如实标注。') },
-        { label: '检查更新', icon: 'refresh', disabled: true, reason: '程序未提供更新检查通道' },
-        { label: '关于 MemoryDesk 记忆工作台', icon: 'spark', run: () => setMessage('MemoryDesk 记忆工作台（多Agent记忆助手）。') },
-      ],
-    },
-  ];
-
-  // 第 2 段右侧范围读数：库位置与会话态取真实值；总条数壳层未接线，按既有口径显示「—」。
-  const scopeText = `库：${locView ? locView.text : (status ? '未知' : '读取中')} · — 条 · 会话 ${sessionActive ? '已登录' : '只读'}`;
-  const scopeTitle = `${locTitle} · 条数：壳层未读取总条数，按既有口径显示「—」 · 会话：${sessionActive ? '已登录' : '只读（未登录）'}`;
+  // ── Ctrl+K 命令面板条目（v5）：原「文件/编辑/视图/工具/帮助」菜单 + Ribbon 全量命令收进面板；
+  //    分组顺序见 views.ts PALETTE_GROUPS；无对应能力的命令置灰并写原因，绝不伪造执行结果。
+  const paletteItems: PaletteItem[] = useMemo(() => {
+    // 「转到页面」：全量导航项（含管理台按当前身份过滤后的口径），前 8 个快捷视图带 Ctrl+N 提示
+    const goItems: PaletteItem[] = navEntries
+      .filter((e): e is NavItem => e.kind === 'item')
+      .map((n) => ({
+        id: `nav-${n.id}`,
+        group: '转到页面',
+        label: n.label,
+        icon: n.icon,
+        desc: n.page ? PAGES[n.page].label : undefined,
+        kbd: QUICK_VIEWS.includes(n.id) ? `Ctrl+${QUICK_VIEWS.indexOf(n.id) + 1}` : undefined,
+        disabled: Boolean(n.unavailable),
+        reason: n.unavailable,
+        run: () => openView(n),
+      }));
+    const copyId = () => {
+      if (!selectionId) return;
+      const write = navigator.clipboard?.writeText(selectionId);
+      if (!write) { setMessage('复制失败：剪贴板不可用。'); return; }
+      write.then(() => setMessage(`已复制记忆 ID：${selectionId}`))
+        .catch(() => setMessage('复制失败：剪贴板未授权。'));
+    };
+    const themeItems: PaletteItem[] = [
+      { id: 'theme-system', group: '视图 · 布局', label: '主题：跟随系统', icon: 'system', disabled: theme === 'system', reason: '当前已是跟随系统', run: () => setTheme('system') },
+      { id: 'theme-light', group: '视图 · 布局', label: '主题：浅色', icon: 'sun', disabled: theme === 'light', reason: '当前已是浅色', run: () => setTheme('light') },
+      { id: 'theme-dark', group: '视图 · 布局', label: '主题：深色', icon: 'moon', disabled: theme === 'dark', reason: '当前已是深色', run: () => setTheme('dark') },
+    ];
+    return [
+      ...goItems,
+      // 原「文件」菜单
+      { id: 'new-memory', group: '执行', label: '新建记忆', icon: 'plus', kbd: 'Ctrl+1 后选写入', run: () => openNav('write') },
+      { id: 'open-library', group: '执行', label: '打开记忆库…', icon: 'folder', disabled: true, reason: '程序未提供库切换指令；数据根位置在「全局参数」页查看' },
+      { id: 'login-session', group: '执行', label: '登录 / 会话…', icon: 'user', run: () => setLoginOpen(true) },
+      { id: 'close-view', group: '执行', label: '关闭当前视图', icon: 'x', disabled: openTabs.length <= 1, reason: openTabs.length <= 1 ? '至少保留一个标签（概览）' : undefined, run: () => closeTab(activeId) },
+      { id: 'quit', group: '执行', label: '退出', icon: 'x', disabled: true, reason: '请使用窗口右上角关闭按钮（系统覆盖层）' },
+      // 原「编辑」菜单
+      { id: 'undo', group: '执行', label: '撤销', icon: 'undo', kbd: 'Ctrl+Z', disabled: true, reason: '壳层不保存编辑历史' },
+      { id: 'copy-id', group: '执行', label: '复制记忆 ID', icon: 'copy', disabled: !selectionId, reason: selectionId ? undefined : '中心页未选中记忆；先在列表选中一条记录', run: copyId },
+      { id: 'select-all', group: '执行', label: '全选', icon: 'check', kbd: 'Ctrl+A', disabled: true, reason: '请在输入框内使用 Ctrl+A（系统编辑命令）' },
+      { id: 'find', group: '执行', label: '查找（命令面板）', icon: 'search', kbd: 'Ctrl+F', run: () => setPalOpen(true) },
+      { id: 'dispute', group: '工具 · 诊断直达', label: '冲突裁决', icon: 'warn', run: () => openNav('dispute') },
+      { id: 'prefs', group: '工具 · 诊断直达', label: '首选项…', icon: 'gear', run: () => openNav('params') },
+      // 布局动作（原「视图」菜单）
+      { id: 'taskpane', group: '执行', label: taskOpen ? '隐藏任务窗格' : '显示任务窗格', icon: 'panel', run: () => runShellAction('toggleTaskPane', '任务窗格') },
+      { id: 'inspector', group: '执行', label: inspCollapsed ? '显示属性检查器' : '隐藏属性检查器', icon: 'panel', kbd: 'Ctrl+Shift+I', run: () => setInspCollapsed((v) => !v) },
+      { id: 'fold-nav', group: '执行', label: navCollapsed ? '展开功能导航' : '折叠功能导航', icon: 'chev', kbd: 'Ctrl+B', run: () => runShellAction('toggleNav', '功能导航') },
+      { id: 'reset-layout', group: '执行', label: '重置布局', icon: 'refresh', run: () => runShellAction('resetLayout', '重置布局') },
+      { id: 'refresh', group: '执行', label: '刷新', icon: 'refresh', kbd: 'F5', run: () => runShellAction('refresh', '刷新') },
+      { id: 'dock', group: '执行', label: dockOpen ? '隐藏底部面板' : '显示底部面板', icon: 'panel', kbd: 'Ctrl+`', run: () => runShellAction('toggleDock', '底部面板') },
+      { id: 'status', group: '执行', label: statusVisible ? '隐藏状态栏' : '显示状态栏', icon: 'info', run: () => runShellAction('toggleStatus', '状态栏') },
+      { id: 'density', group: '执行', label: '紧凑密度', icon: 'table', run: () => runShellAction('density', '紧凑密度') },
+      { id: 'zoom', group: '执行', label: '缩放（80%–125% 循环）', icon: 'gear', run: () => runShellAction('zoom', '缩放') },
+      ...themeItems,
+      { id: 'fold-ribbon', group: '视图 · 布局', label: '折叠功能区', icon: 'fold', kbd: 'Ctrl+F1', disabled: true, reason: '功能区已重构为 44px 上下文命令条，该命令不再需要' },
+      // 原「工具」菜单
+      { id: 'retrieval', group: '工具 · 诊断直达', label: '运行检索（只读）', icon: 'search', kbd: 'F6', run: () => openNav('retrieval') },
+      { id: 'security-check', group: '工具 · 诊断直达', label: '安全体检', icon: 'shield', kbd: 'F9', run: () => openNav('security') },
+      { id: 'growth-status', group: '工具 · 诊断直达', label: '生长调度状态', icon: 'layers', run: () => openNav('growth') },
+      { id: 'agent-probe', group: '工具 · 诊断直达', label: 'Agent 通道探针', icon: 'agent', run: () => openNav('agent') },
+      { id: 'write-receipt', group: '工具 · 诊断直达', label: '查看写入回执', icon: 'receipt', kbd: 'Ctrl+R', run: () => openNav('write') },
+      { id: 'diag-logs', group: '工具 · 诊断直达', label: '打开诊断日志', icon: 'list', kbd: 'Ctrl+L', run: () => openNav('logs') },
+      { id: 'balance-probe', group: '工具 · 诊断直达', label: '余额探测', icon: 'scale', kbd: 'F7', disabled: true, reason: '探测在「大模型配置」页内执行' },
+      { id: 'sync-check', group: '工具 · 诊断直达', label: '同步检查', icon: 'sync', kbd: 'F8', disabled: true, reason: '同步检查在「同步中枢」视图执行' },
+      { id: 'write-precheck', group: '工具 · 诊断直达', label: '写入预检', icon: 'check', disabled: true, reason: '程序未提供独立预检指令；在写入页内执行' },
+      { id: 'dedup', group: '工具 · 诊断直达', label: '去重策略', icon: 'filter', disabled: true, reason: '程序未提供独立去重策略命令' },
+      // 原「视图」菜单的深链
+      { id: 'l0-cipher', group: '视图 · 布局', label: '显示 L0 密文', icon: 'lock', run: () => openMemoryTab('?tab=l0', 'L0 密文（需解锁）') },
+      { id: 'layers-view', group: '视图 · 布局', label: '分层内容', icon: 'layers', run: () => openMemoryTab('?tab=layers', '分层内容') },
+      { id: 'locked-rows', group: '视图 · 布局', label: '记忆列表（全部）', icon: 'list', run: () => openMemoryTab('?tab=all', '记忆库 · 全部') },
+      { id: 'archived', group: '视图 · 布局', label: '归档（需登录）', icon: 'archive', disabled: !sessionActive, reason: sessionActive ? undefined : '未登录（会话 401）：该动作需要登录后才能执行', run: () => openMemoryTab('?tab=all&status=archived', '已归档') },
+      // 原「帮助」菜单
+      { id: 'keys-help', group: '帮助', label: '快捷键参考', icon: 'help', kbd: 'F1', run: () => setKeysOpen(true) },
+      { id: 'caps', group: '帮助', label: '产品能力与限制', icon: 'info', run: () => setMessage('壳层只提供导航与布局；中心区为本机真实页面。未接线的部位会明确标注原因，不显示推测值。') },
+      { id: 'cmd-list', group: '帮助', label: '命令清单', icon: 'list', run: () => setMessage('原菜单与功能区命令已全量收进命令面板（Ctrl+K）；无对应能力的项已置灰并在提示中写明原因。') },
+      { id: 'demo-declare', group: '帮助', label: '演示数据声明', icon: 'check', run: () => setMessage('本程序全站零演示数据：读数来自本机真实链路，缺失或不可用一律如实标注。') },
+      { id: 'check-update', group: '帮助', label: '检查更新', icon: 'refresh', disabled: true, reason: '程序未提供更新检查通道' },
+      { id: 'about', group: '帮助', label: '关于 MemoryDesk 记忆工作台', icon: 'spark', run: () => setMessage('MemoryDesk 记忆工作台（多Agent记忆助手）。') },
+    ];
+  }, [navEntries, openView, selectionId, theme, taskOpen, inspCollapsed, navCollapsed, dockOpen,
+    statusVisible, sessionActive, openTabs.length, activeId, closeTab, openNav, setMessage, runShellAction]);
 
   return (
     <div
@@ -1242,187 +1120,135 @@ export function Workspace() {
         '--shell-zoom': String(zoom / 100),
       } as CSSProperties}
     >
-      <div className="ribbon">
-        {/* 顶部四段（批次52 布局校正）：
-            ① 32px 标题行（品牌与真实库文档名 / 会话状态整组居中 / 系统三按钮覆盖层）
-            ② 26px 自建中文菜单行（菜单项 → 紧随其后的快速访问工具条 → 右端范围信息）
-            ③ 94px 功能区（命令分组）
-            ④ 31px Ribbon 标签行（8 标签 + 查找框 + 折叠，整行下移到功能区下方） */}
-        <div className="titlebar" data-testid="shell-titlebar" data-brand-align="center">
-          <div className="tb-left">
-            <span className="app-mark"><Icon name="layers" size={11} /></span>
-            <span className="app-name">MemoryDesk 记忆工作台</span>
-            <span className="tb-sep" />
-            <span className="tb-doc" title={docTitle}>{docLabel}</span>
-            {/* T3（§14.1）：管理员视图标识 + 一键切回工作台（不改变任何数据权限） */}
-            {identity?.role === 'admin' && (
-              <>
-                <span className="tb-sep" />
-                <span className="tb-tag ro" data-testid="shell-admin-badge" title="管理员视图：所有敏感操作均由主进程门禁并留痕到审计账本">管理员视图·操作留痕</span>
-                {activeId !== 'home' && (
-                  <button
-                    type="button"
-                    className="tb-tag ok"
-                    data-testid="shell-back-workbench"
-                    title="回到工作台首页（不改变数据可用性与权限）"
-                    onClick={() => {
-                      const homeNav = NAV.find((n): n is NavItem => n.kind === 'item' && n.id === 'home');
-                      if (homeNav) openView(homeNav);
-                    }}
-                  >回到工作台</button>
-                )}
-              </>
-            )}
+      {/* 顶部两段（STRATUM 1:1）：
+          ① 46px 标题栏（strata 徽标 + 应用名 + 「层析 STRATUM」 / 中央命令框 Ctrl K /
+             右侧三联主题 + ⚙ 首启向导 + 头像·角色 + 系统三按钮覆盖层；批次51 起工具簇整簇取消，
+             登录/登出入口集中在头像弹窗与首页页头）
+          ② 44px 上下文命令条（导航折叠 + 面包屑 + 当前视图高频命令；批次53 命令面板按钮取消）
+          原菜单与 Ribbon 的全量命令收进 Ctrl+K 命令面板 */}
+      <div className="titlebar" data-testid="shell-titlebar">
+        <div className="tb-left">
+          <span className="strata-logo" aria-hidden="true"><i /><i /><i /><i /><i /><i /></span>
+          <span className="app-name">MultiAgent Memory</span>
+          <span className="tb-sub">层析 STRATUM</span>
+          {/* T3（§14.1）：管理员登录后非首页给一键切回工作台（不改变任何数据权限） */}
+          {identity?.role === 'admin' && activeId !== 'home' && (
             <button
               type="button"
-              className={`tb-tag${sessionActive ? ' ok' : ' ro'}`}
-              data-testid="shell-session-btn"
-              title={identity
-                ? `账号 ${identity.user_id} · 团队 ${identity.team_id} · 角色 ${identity.role === 'admin' ? '管理员' : '成员'}（点击查看 / 登出）`
-                : sessionActive
-                  ? '本机会话标记存在（localStorage），身份尚未经 /api/me 确认（点击打开登录 / 会话弹窗）'
-                  : '未登录：点击打开登录弹窗（真实 POST /api/login）'}
-              onClick={() => setLoginOpen(true)}
-            >{identity ? identity.user_id : (sessionActive ? '已登录' : '只读会话')}</button>
-          </div>
-          {/* 右端留给系统三按钮覆盖层：这里只占位，不重复造窗口按钮 */}
-          <div className="win-space" aria-hidden="true" />
+              className="tb-tag ok"
+              data-testid="shell-back-workbench"
+              title="回到工作台首页（不改变数据可用性与权限）"
+              onClick={() => {
+                const homeNav = NAV.find((n): n is NavItem => n.kind === 'item' && n.id === 'home');
+                if (homeNav) openView(homeNav);
+              }}
+            >回到工作台</button>
+          )}
         </div>
-
-        <div className="menubar" data-testid="shell-menubar" role="menubar" aria-label="主菜单">
-          {menuSpecs.map((m) => (
-            <div className="menu-wrap" key={m.id}>
+        <button
+          type="button"
+          className="cmd-entry"
+          data-testid="shell-cmd-entry"
+          title="搜索页面或命令（Ctrl+K）：原菜单与功能区全量命令入口"
+          aria-label="打开命令面板"
+          onClick={() => setPalOpen(true)}
+        >
+          <Icon name="search" size={12} />
+          <span>搜索页面或命令…</span>
+          <span className="ce-hint">Ctrl K</span>
+        </button>
+        <div className="tb-right">
+          {/* STRATUM：右侧三联主题切换（浅色/深色/随系统，选中项 accent 底 accent-ink 字） */}
+          <span className="tb-themes" role="group" aria-label="主题" data-testid="shell-themes">
+            {(['light', 'dark', 'system'] as ThemeMode[]).map((m) => (
               <button
-                className={`menu-item${menuOpen === m.id ? ' open' : ''}`}
+                key={m}
+                className="tb-tbtn"
+                aria-pressed={theme === m}
+                aria-label={m === 'system' ? '随系统' : m === 'light' ? '浅色' : '深色'}
+                title={m === 'system' ? '随系统（跟随系统深浅色）' : m === 'light' ? '浅色主题' : '深色主题'}
+                onClick={() => setTheme(m)}
                 type="button"
-                aria-haspopup="menu"
-                aria-expanded={menuOpen === m.id}
-                onClick={() => setMenuOpen((v) => (v === m.id ? null : m.id))}
-              >{m.label}</button>
-              {menuOpen === m.id && (
-                <div className="menu-pop" role="menu" aria-label={`${m.label}菜单`}>
-                  {m.rows.map((row, i) => {
-                    if (row.sep) return <div className="menu-sep" key={`sep-${i}`} aria-hidden="true" />;
-                    if (row.head) return <div className="menu-row head" key={`head-${i}`}>{row.head}</div>;
-                    const showCheck = row.checked && !row.disabled;
-                    return (
-                      <button
-                        key={`row-${i}`}
-                        className={`menu-row${row.disabled ? ' disabled' : ''}`}
-                        type="button"
-                        role="menuitem"
-                        aria-disabled={row.disabled || undefined}
-                        title={row.reason ?? row.label}
-                        onClick={() => {
-                          if (row.disabled) return;
-                          row.run?.();
-                          setMenuOpen(null);
-                        }}
-                      >
-                        <span className="mi-ic">
-                          <Icon name={showCheck ? 'check' : (row.icon ?? 'dot')} size={12} />
-                        </span>
-                        <span>{row.label}</span>
-                        {row.kbd && <span className="mi-kbd">{row.kbd}</span>}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          ))}
-          {/* 批次52：快速访问工具条紧跟菜单项之后；右端范围信息由弹簧顶到最右 */}
-          <div className="qa" aria-label="快速访问工具条">
-            {qaSpecs.map((q, i) => q.sep ? (
-              <span className="qa-sep" key={`qa-sep-${i}`} aria-hidden="true" />
-            ) : (
-              <span className="qa-slot" key={q.id}>
-                <button
-                  className={`qa-btn${q.disabled ? ' off' : ''}${q.text ? ' labeled' : ''}${q.active ? ' on' : ''}`}
-                  type="button"
-                  data-testid={`qa-${q.id}`}
-                  aria-label={q.title}
-                  aria-pressed={q.active}
-                  aria-disabled={q.disabled || undefined}
-                  title={q.title}
-                  onClick={q.disabled ? undefined : q.run}
-                ><Icon name={q.icon ?? 'dot'} size={15} />{q.text ? <span className="qa-label">{q.text}</span> : null}</button>
-                {/* 记忆助手已改为整页（assistant.html），不再在此渲染壳层浮层面板 */}
-                {/* 个人记忆常驻面板（N8）：收起只是不渲染，状态保留在壳层不丢。
-                    内嵌与记忆库全页共用的原双窗 Pane（自带样式）。 */}
-                {q.id === 'personal' && (
-                  <PersonalMemoryPanel
-                    open={personalOpen}
-                    onClose={closePersonal}
-                    onOpenFull={() => {
-                      const bank = findNav('memory-bank');
-                      if (bank) openView({ ...bank, id: 'personal', label: '个人记忆', href: '?tab=personal' });
-                      setPersonalOpen(false);
-                    }}
-                  />
-                )}
-              </span>
+              >{m === 'system' ? '随系统' : m === 'light' ? '浅色' : '深色'}</button>
             ))}
-          </div>
-          <span className="rib-spring" />
-          <span className="menu-scope" title={scopeTitle}>{scopeText}</span>
+          </span>
+          {/* STRATUM：⚙ 首启向导入口直达 setup */}
+          <button
+            type="button"
+            className="tb-wizard"
+            data-testid="shell-wizard"
+            title="打开首启向导（setup）：两库位置 / L0 管理密码 / 恢复卡"
+            onClick={() => { const w = findNav('setup'); if (w) openView(w); }}
+          >⚙ 首启向导</button>
+          {/* STRATUM：头像 24px 圆（accent 底白字）+ 「admin · 管理员」；点击打开登录 / 会话弹窗 */}
+          <button
+            type="button"
+            className="tb-avatar"
+            data-testid="shell-avatar"
+            aria-label={identity
+              ? `账号 ${identity.user_id} · 团队 ${identity.team_id} · 角色 ${identity.role === 'admin' ? '管理员' : '成员'}`
+              : sessionActive ? '本机会话标记存在，身份尚未经 /api/me 确认' : '未登录'}
+            title={identity
+              ? `账号 ${identity.user_id} · 团队 ${identity.team_id} · 角色 ${identity.role === 'admin' ? '管理员' : '成员'}（点击查看 / 登出）`
+              : sessionActive
+                ? '本机会话标记存在（localStorage），身份尚未经 /api/me 确认（点击打开登录 / 会话弹窗）'
+                : '未登录：点击打开登录弹窗（真实 POST /api/login）'}
+            onClick={() => setLoginOpen(true)}
+          >{(identity?.user_id || (sessionActive ? 'U' : '?')).slice(0, 1).toUpperCase()}</button>
+          <span
+            className="tb-role"
+            data-testid="shell-role"
+            title={identity ? `账号 ${identity.user_id} · 团队 ${identity.team_id}` : '未确认身份'}
+          >{identity
+            ? `${identity.role === 'admin' ? 'admin · 管理员' : 'member · 成员'}`
+            : (sessionActive ? '已登录 · 待确认' : '只读会话')}</span>
         </div>
+        {/* 右端留给系统三按钮覆盖层：这里只占位，不重复造窗口按钮 */}
+        <div className="win-space" aria-hidden="true" />
+      </div>
 
-        {!ribbonFolded && (
-          <div className="ribbon-body">
-            {activeRibbon.groups.map((g) => (
-              <RibbonGroupView
-                key={g.label}
-                group={!sessionActive
-                  ? {
-                      ...g,
-                      items: g.items.map((it) => (it.label.includes('需登录')
-                        ? { ...it, unavailable: '未登录（会话 401）：该动作需要登录后才能执行' }
-                        : it)),
-                    }
-                  : g}
-                onItem={onRibbonItem}
-              />
-            ))}
-          </div>
-        )}
-
-        <div className="ribbon-tabs">
-          <div className="rib-tabs">
-            {RIBBON.map((tab) => (
-              <button
-                key={tab.id}
-                className={`rib-tab${tab.id === activeRibbon.id ? ' active' : ''}`}
-                onClick={() => setRibbonTab(tab.id)}
-                onDoubleClick={() => setRibbonFolded((v) => !v)}
-                type="button"
-              >{tab.label}</button>
-            ))}
-          </div>
-          <span className="rib-spring" />
-          <label className="rib-search" title="按名称过滤左侧功能导航（Ctrl+F / Ctrl+K）">
-            <Icon name="search" size={11} />
-            <input
-              ref={navSearchRef}
-              value={navQuery}
-              onChange={(e) => setNavQuery(e.target.value)}
-              placeholder="在当前视图查找（Ctrl+F）"
-              spellCheck={false}
-              aria-label="查找功能导航"
-            />
-          </label>
-          <button className="rib-fold" onClick={() => setRibbonFolded((v) => !v)} title="折叠功能区" type="button">
-            <Icon name="fold" size={12} />
+      {/* 44px 上下文命令条：只放当前视图的高频命令（壳层真实能力：跳转 / 壳层动作），不伪造业务结果 */}
+      <div className="cmdbar" data-testid="shell-cmdbar" aria-label="上下文命令条">
+        <button
+          type="button"
+          className="cb-icon"
+          data-testid="cmdbar-nav-toggle"
+          title={navCollapsed ? '展开功能导航（Ctrl+B）' : '折叠功能导航（Ctrl+B）'}
+          aria-label={navCollapsed ? '展开功能导航' : '折叠功能导航'}
+          onClick={() => setNavCollapsed((v) => !v)}
+        ><Icon name={navCollapsed ? 'chev' : 'fold'} size={13} /></button>
+        <div className="cb-crumbs">
+          <span className="cb-crumb">{activeNavGroup || '工作台'}</span>
+          <span className="cb-crumb-sep" aria-hidden="true">/</span>
+          <span className="cb-crumb cur">{active?.label ?? '首页'}</span>
+        </div>
+        <span className="cb-div" aria-hidden="true" />
+        {(active?.page ? CMDS[active.page] ?? [] : []).map((c) => (
+          <button
+            key={c.label}
+            type="button"
+            className={`cb-cmd${c.primary ? ' primary' : ''}`}
+            data-testid={`cb-cmd-${c.label}`}
+            title={c.go ? `打开「${PAGES[c.go].label}」` : `${c.label}${c.kbd ? `（${c.kbd}）` : ''} · 壳层动作`}
+            onClick={() => onCmdItem(c)}
+          >
+            <Icon name={c.icon} size={13} />
+            {c.label}
+            {c.kbd && <span className="cb-kbd">{c.kbd}</span>}
           </button>
-        </div>
+        ))}
+        {/* 批次53：命令条右侧「命令 Ctrl K」按钮已取消（用户 2026-11-21）；命令面板仍由 Ctrl+K 与标题栏搜索框打开 */}
       </div>
 
       <div className={`workspace${dockOpen ? '' : ' dock-closed'}`}>
         <aside className={`nav-pane${navCollapsed ? ' collapsed' : ''}`} aria-label="功能导航">
           <div className="pane-head">
-            <span className="ph-ic"><Icon name="folder" /></span>
             功能导航
             <span className="ph-tools">
+              {/* v5 设计稿：头部工具 = 新建记忆 + 折叠（无前置图标） */}
+              <button className="ph-btn" onClick={() => openNav('write')} title="新建记忆（打开写入页）" type="button" data-testid="nav-new-memory">
+                <Icon name="plus" size={14} />
+              </button>
               <button className="ph-btn" onClick={() => setNavCollapsed((v) => !v)} title="折叠导航窗格" type="button" data-testid="nav-collapse-toggle">
                 <Icon name="chev" size={12} />
               </button>
@@ -1664,7 +1490,7 @@ export function Workspace() {
                   data-testid="qa-inspector-collapse"
                   aria-label="收起属性检查器"
                   onClick={() => setInspCollapsed(true)}
-                  title="收起属性检查器：把右侧空间让给中心页（选中与审计联动保留）"
+                  title="收起属性检查器（Ctrl+Shift+I）：把右侧空间让给中心页（选中与审计联动保留）"
                   type="button"
                 >
                   <Icon name="chev" size={12} />
@@ -1728,9 +1554,8 @@ export function Workspace() {
           {BOTTOM_TABS.map((t) => (
             <button
               key={t.id}
-              className={`bp-tab${dockTab === t.id ? ' active' : ''}${t.id === 'term' ? ' unavailable' : ''}`}
+              className={`bp-tab${dockTab === t.id ? ' active' : ''}`}
               onClick={() => { setDockTab(t.id); setDockOpen(true); }}
-              title={t.unavailable}
               type="button"
             >
               <Icon name={t.icon} size={12} />{t.label}
@@ -1785,40 +1610,51 @@ export function Workspace() {
           <span className="sb-cell">{zoom}%</span>
           <span className="sb-cell click" onClick={() => setDockOpen((v) => !v)} title="折叠 / 展开底部面板">面板 <b>{dockOpen ? '开' : '收'}</b></span>
           <span className="sb-cell click" onClick={() => setTaskOpen((v) => !v)} title="任务窗格">任务窗 <b>{taskOpen ? '开' : '收'}</b></span>
-          <span className="sb-theme" role="group" aria-label="主题">
-            {(['system', 'light', 'dark'] as ThemeMode[]).map((m) => (
-              <button
-                key={m}
-                className="sb-tbtn"
-                aria-pressed={theme === m}
-                aria-label={m === 'system' ? '跟随系统' : m === 'light' ? '浅色' : '深色'}
-                title={m === 'system' ? '跟随系统' : m === 'light' ? '浅色' : '深色'}
-                onClick={() => setTheme(m)}
-                type="button"
-              ><Icon name={m === 'system' ? 'system' : m === 'light' ? 'sun' : 'moon'} size={11} /></button>
-            ))}
-          </span>
         </div>
       )}
 
-      {/* 登录改弹窗：菜单栏 / QAT / 登录状态处三处入口共用这一个实例 */}
+      {/* 登录改弹窗：标题栏工具簇 / 登录状态处两处入口共用这一个实例 */}
       <ShellLoginDialog open={loginOpen} onClose={() => setLoginOpen(false)} onSession={onLoginSession} />
+      {/* v5：Ctrl+K 命令面板 —— 原菜单栏 + Ribbon 全量命令的常驻入口 */}
+      <CommandPalette open={palOpen} items={paletteItems} onClose={() => setPalOpen(false)} />
+      {/* v5：快捷键帮助浮层（F1 / ?） */}
+      {keysOpen && (
+        <div className="keys-mask" data-testid="shell-keys" onPointerDown={(e) => { if (e.target === e.currentTarget) setKeysOpen(false); }}>
+          <div className="keys-box" role="dialog" aria-label="快捷键参考">
+            <div className="keys-head">
+              <Icon name="help" size={14} />
+              快捷键参考
+              <span className="pal-esc" style={{ marginLeft: 'auto' }}>Esc 关闭</span>
+            </div>
+            <div className="keys-body">
+              {([
+                ['Ctrl K', '命令面板：搜索页面或命令（原菜单 + Ribbon 全量入口）'],
+                ['Ctrl 1..8', '切换前 8 个视图：首页 / 记忆库 / 写入 / 检索 / 大模型配置 / 账号与安全 / 审计日志 / 日志记录'],
+                ['Ctrl B', '折叠 / 展开左侧功能导航'],
+                ['Ctrl `', '显示 / 隐藏底部面板'],
+                ['Ctrl Shift I', '折叠 / 展开右侧属性检查器'],
+                ['F5', '刷新全部页面与读数'],
+                ['F6', '打开「检索」视图（只读检索）'],
+                ['F9', '打开「账号与安全」视图'],
+                ['F1 或 ?', '本快捷键参考'],
+                ['Esc', '关闭面板 / 浮层 / 弹窗'],
+              ] as const).map(([k, d]) => (
+                <div className="keys-row" key={k}>
+                  <span className="kkbd">{k}</span>
+                  <span>{d}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
       {/* 右键菜单：导航树 / 标签条 / 检查器 / 中心页表格行共用同一个渲染器 */}
       <ContextMenu state={ctxMenu} onClose={() => setCtxMenu(null)} />
     </div>
   );
 
-  /** S6：底部面板正文（五标签，只渲染真实读取结果；不可用就说原因，不补数字） */
+  /** S6：底部面板正文（四标签，只渲染真实读取结果；不可用就说原因，不补数字） */
   function renderDockBody() {
-    const tab = BOTTOM_TABS.find((t) => t.id === dockTab);
-    if (dockTab === 'term') {
-      return (
-        <div className="bp-empty" data-testid="dock-term-unavailable">
-          <Icon name="terminal" size={20} />
-          <div>{tab?.unavailable}</div>
-        </div>
-      );
-    }
     if (dockTab === 'output' || dockTab === 'problems') return renderLogTab(dockTab === 'problems');
     if (dockTab === 'tasks') return renderTasksTab();
     return renderAuditTab();
@@ -1831,8 +1667,8 @@ export function Workspace() {
         <div className="bp-note">
           <Icon name={isProblems ? 'warn' : 'receipt'} size={11} />
           {isProblems
-            ? '校验与错误告警 · 由最近的动作日志派生（不是独立问题库）；0 条表示这段时间的日志里确实没有错误/警告'
-            : `程序动作日志 actions.log · 最近 ${data?.status === 'ok' ? data.view.scanLines : 50} 条 · 只读尾读`}
+            ? '最近运行中发生的事：先看发生了什么、对你有什么影响、要不要处理；原始技术字段收在「技术详情」里'
+            : `最近 ${data?.status === 'ok' ? data.view.scanLines : 50} 条运行记录 · 只读，不修改任何数据`}
           <span className="bp-spring" />
           <button className="bp-tool" type="button" onClick={() => { void refreshDockLog(); }} disabled={dockLogBusy}>
             <Icon name="refresh" size={11} />{dockLogBusy ? '读取中' : '刷新'}
@@ -1855,21 +1691,37 @@ export function Workspace() {
       return (
         <div className="bp-empty" data-testid="dock-problems-empty">
           <Icon name="check" size={20} />
-          <div>最近 {view.lines.length} 条程序日志里没有错误或警告（真实结果，不是隐藏）。</div>
+          <div>{problemsIntro(0, 0)}</div>
         </div>
       );
     }
+    const actionable = countActionableProblems(rows);
     return (
       <>
-        {rows.map((r, i) => (
-          <div className={`bp-row lv-${r.level}`} data-testid="dock-problem-row" key={`${r.ts ?? i}-${i}`}>
-            <span className="bpr-time">{formatLogClock(r.ts)}</span>
-            <span className={`bpr-lv ${r.level}`}>{r.level === 'error' ? '错误' : '警告'}</span>
-            <span className="bpr-tag">{r.scope ? `${r.scope}:${r.action}` : '未解析行'}</span>
-            <span className="bpr-msg">{r.message}</span>
-          </div>
-        ))}
-        <div className="bp-foot">统计口径：最近 {view.lines.length} 条真实日志中的 warn/error 行；只展示，不提供批量忽略（程序无该动作）。</div>
+        <div className="bp-note" data-testid="dock-problems-intro">
+          <Icon name="warn" size={11} />
+          {problemsIntro(rows.length, actionable)}
+        </div>
+        {rows.map((r, i) => {
+          const h = humanizeLogLine(r);
+          return (
+            <div className={`bp-row hb sev-${h.severity} lv-${r.level}`} data-testid="dock-problem-row" key={`${r.ts ?? i}-${i}`}>
+              <span className="bpr-time">{formatLogClock(r.ts)}</span>
+              <span className={`bpr-lv ${h.severity}`}>{h.severity === 'action' ? '需处理' : '提醒'}</span>
+              <span className="bpr-body">
+                <span className="bpr-title" data-testid="dock-problem-title">{h.title}</span>
+                <span className="bpr-sub">影响：{h.effect} · 处理：{h.todo}</span>
+                {h.hasTech && (
+                  <details className="bpr-tech" data-testid="dock-tech-details">
+                    <summary>技术详情</summary>
+                    <code>{h.tech}</code>
+                  </details>
+                )}
+              </span>
+            </div>
+          );
+        })}
+        <div className="bp-foot">以上来自最近 {view.lines.length} 条真实运行记录；只是提醒的条目不会影响数据，也不需要你操作。</div>
       </>
     );
   }
@@ -1879,22 +1731,35 @@ export function Workspace() {
       return (
         <div className="bp-empty" data-testid="dock-log-empty">
           <Icon name="receipt" size={20} />
-          <div>日志为空：主进程尚无动作记录（有操作后自动留痕）。</div>
+          <div>最近还没有运行记录（有操作后会自动留痕）。</div>
         </div>
       );
     }
     return (
       <>
-        {view.lines.map((l, i) => (
-          <div className={`bp-row lv-${l.level}`} data-testid="dock-log-row" key={`${l.ts ?? i}-${i}`} title={l.raw}>
-            <span className="bpr-time">{formatLogClock(l.ts)}</span>
-            <span className={`bpr-lv ${l.level}`}>{l.level === 'unknown' ? 'LOG' : l.level.toUpperCase()}</span>
-            <span className="bpr-tag">{l.scope ? `${l.scope}:${l.action}` : '未解析行'}</span>
-            <span className="bpr-msg">{l.message}</span>
-          </div>
-        ))}
+        {view.lines.map((l, i) => {
+          // 技术详情保留原始行；若解析行的 raw 不含 message（单测/异常解析），补上真实 message
+          const tech = l.message && !l.raw.includes(l.message) ? `${l.raw} · ${l.message}` : l.raw;
+          return (
+            <div className={`bp-row hb out lv-${l.level}`} data-testid="dock-log-row" key={`${l.ts ?? i}-${i}`}>
+              <span className="bpr-time">{formatLogClock(l.ts)}</span>
+              <span className={`bpr-lv ${l.level}`}>{l.level === 'unknown' ? '记录' : l.level === 'error' ? '异常' : l.level === 'warn' ? '提醒' : '正常'}</span>
+              <span className="bpr-title" data-testid="dock-log-title">{humanActionLabel(l.scope, l.action)}</span>
+              <details className="bpr-tech inline" data-testid="dock-tech-details">
+                <summary>技术详情</summary>
+                <code>{tech}</code>
+              </details>
+            </div>
+          );
+        })}
         <div className="bp-foot">
-          日志文件：{view.path ?? '未初始化（主进程尚未写日志）'} · 读取于 {new Date(view.capturedAt).toLocaleTimeString('zh-CN')}
+          共 {view.lines.length} 条 · 读取于 {new Date(view.capturedAt).toLocaleTimeString('zh-CN')} · 展开「技术详情」可看原始记录
+          {view.path && (
+            <details className="bpr-tech inline">
+              <summary>日志文件</summary>
+              <code>{view.path}</code>
+            </details>
+          )}
         </div>
       </>
     );
@@ -2016,49 +1881,19 @@ function Prop({ k, v, mono }: { k: string; v: string; mono?: boolean }) {
   return <div className="prop-row"><span className="prop-k">{k}</span><span className={`prop-v${mono ? ' mono' : ''}`}>{v}</span></div>;
 }
 
-function RibbonGroupView({ group, onItem }: { group: { label: string; items: RibbonItem[] }; onItem: (i: RibbonItem) => void }) {
-  const bigs = group.items.filter((i) => i.big);
-  const smalls = group.items.filter((i) => !i.big);
-  // 批次55：用户要求功能区命令由 3 行收成 2 行，单列最多 2 个小按钮；命令数量不变，只改排布。
-  const chunks: RibbonItem[][] = [];
-  for (let i = 0; i < smalls.length; i += 2) chunks.push(smalls.slice(i, i + 2));
-  return (
-    <div className="rgroup">
-      <div className="rgroup-main">
-        {bigs.map((it) => <RibbonButton key={it.label} item={it} onItem={onItem} />)}
-        {chunks.map((c, i) => (
-          <div className="rcol" key={`c-${i}`}>
-            {c.map((it) => <RibbonButton key={it.label} item={it} onItem={onItem} />)}
-          </div>
-        ))}
-      </div>
-      <div className="rgroup-label">{group.label}</div>
-    </div>
-  );
-}
-
-function RibbonButton({ item, onItem }: { item: RibbonItem; onItem: (i: RibbonItem) => void }) {
-  const tip = `${item.label}${item.kbd ? ` (${item.kbd})` : ''}${item.unavailable ? ` · 不可用：${item.unavailable}` : ''}`;
-  return (
-    <button
-      className={item.big ? 'rbig' : 'rsmall'}
-      onClick={() => onItem(item)}
-      disabled={Boolean(item.unavailable)}
-      title={tip}
-      type="button"
-    >
-      <Icon name={item.icon} size={item.big ? 18 : 13} />
-      <span>{item.label}</span>
-      {!item.big && item.kbd ? <span className="rsk">{item.kbd}</span> : null}
-    </button>
-  );
-}
-
 /** 批次54：角标只显示真实读数，title 写清来源，避免被误认成参考图里的示例数字。 */
 const NAV_COUNT_TITLES: Record<string, string> = {
   'memory-bank': '真实账本记忆条数（coreListMemories，非参考图示例数）',
   dispute: '内核真实 pending 冲突队列长度（coreConflicts）',
   agent: '接入后端真实 Agent 卡片数（GET /agents）',
+};
+
+/** 徽标变体（对齐 v5 设计稿 .badge.hot/.warn/.soft）：hot=待裁决、warn=告警类、soft=软计数，其余默认灰底。 */
+const NAV_COUNT_VARIANTS: Record<string, 'hot' | 'warn' | 'soft'> = {
+  dispute: 'hot',
+  monitor: 'warn',
+  sync: 'warn',
+  personal: 'soft',
 };
 
 function NavTreeItem({ item, activeId, open, counts, collapsed, onToggle, onSelect, onMenu }: {
@@ -2090,11 +1925,15 @@ function NavTreeItem({ item, activeId, open, counts, collapsed, onToggle, onSele
             <Icon name={open ? 'caret' : 'chev'} size={9} />
           </span>
         ) : <span className="tw" />}
-        <span className="tico"><Icon name={item.icon} size={item.child ? 12 : 14} /></span>
+        <span className="tico">{item.emoji
+          ? <span className="tico-emoji" aria-hidden="true">{item.emoji}</span>
+          : <Icon name={item.icon} size={item.child ? 12 : 16} />}</span>
         <span className="tlabel">{item.label}</span>
         {item.unavailable ? <span className="tcount">不可用</span> : null}
         {count > 0 ? (
-          <span className="tcount" data-testid={`nav-count-${item.id}`}
+          <span
+            className={`tcount${NAV_COUNT_VARIANTS[item.id] ? ` ${NAV_COUNT_VARIANTS[item.id]}` : ''}`}
+            data-testid={`nav-count-${item.id}`}
             title={NAV_COUNT_TITLES[item.id] ?? '页面同源回传的真实计数'}>{count}</span>
         ) : null}
       </div>
@@ -2104,3 +1943,5 @@ function NavTreeItem({ item, activeId, open, counts, collapsed, onToggle, onSele
     </>
   );
 }
+
+

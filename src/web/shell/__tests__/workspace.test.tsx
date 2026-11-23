@@ -192,7 +192,7 @@ describe('工作台壳层', () => {
     expect((container.querySelector('iframe.page-frame') as HTMLIFrameElement).getAttribute('src')).toContain('/index.html');
   });
 
-  it('DOM 为五组 22 项（新增「MCP 接入」「个人记忆库」；管理台未登录不渲染），角标只显示真实读数，不出现参考图示例数', async () => {
+  it('DOM 为五组 22 项（新增「MCP 接入」「个人记忆」；管理台未登录不渲染），角标只显示真实读数，不出现参考图示例数', async () => {
     vi.mocked(loadNavCounts).mockResolvedValue({ 'memory-bank': 7, dispute: 2, agent: 3 });
     const { container } = await renderShell();
     const groups = Array.from(container.querySelectorAll('.tree .tree-group')).map((e) => e.textContent);
@@ -588,7 +588,7 @@ describe('工作台壳层', () => {
     expect(screen.queryByText(/通览/)).toBeNull();
   });
 
-  it('记忆管理组：记忆库平铺入口打开 memory.html?tab=all；个人记忆库为独立导航项并直达 personal.html（只一项，不重复）', async () => {
+  it('记忆管理组：记忆库平铺入口打开 memory.html?tab=all；个人记忆为独立导航项并直达 personal.html（只一项，不重复）', async () => {
     const { container } = await renderShell();
     fireEvent.click(screen.getByRole('treeitem', { name: /^记忆库$/ }));
     const frame = container.querySelector('.page-pane.active iframe.page-frame');
@@ -596,13 +596,13 @@ describe('工作台壳层', () => {
     expect(src).toContain('/memory.html');
     expect(src).toContain('tab=all');
     expect(container.querySelectorAll('iframe.page-frame').length).toBeGreaterThan(1);
-    // 个人记忆库：唯一导航项，落在记忆管理组内，直达真实整页 personal.html
-    const personalItems = screen.getAllByRole('treeitem', { name: /^个人记忆库/ });
+    // 个人记忆：唯一导航项，落在记忆管理组内，直达真实整页 personal.html
+    const personalItems = screen.getAllByRole('treeitem', { name: /^个人记忆/ });
     expect(personalItems).toHaveLength(1);
     // 组内位置：紧跟「记忆库」、在「层级管理」之前（确属记忆管理组）
     const labels = Array.from(container.querySelectorAll('.tree .tree-row')).map((e) => e.textContent ?? '');
     const iBank = labels.findIndex((t) => t.includes('记忆库'));
-    const iPersonal = labels.findIndex((t) => t.includes('个人记忆库'));
+    const iPersonal = labels.findIndex((t) => t.includes('个人记忆'));
     const iLayered = labels.findIndex((t) => t.includes('层级管理'));
     expect(iPersonal).toBe(iBank + 1);
     expect(iLayered).toBe(iPersonal + 1);
@@ -633,10 +633,11 @@ describe('工作台壳层', () => {
     expect(screen.getByText('Ctrl 1..8')).toBeInTheDocument();
   });
 
-  it('底部终端标签如实说明不可用', async () => {
-    await renderShell();
-    fireEvent.click(screen.getByRole('button', { name: /终端/ }));
-    expect(screen.getByText(/程序未提供终端命令通道/)).toBeInTheDocument();
+  it('底部终端页签已取消：页签里不再出现「终端」，也没有不可用占位容器', async () => {
+    const { container } = await renderShell();
+    expect(screen.queryByRole('button', { name: /终端/ })).toBeNull();
+    expect(container.querySelector('[data-testid="dock-term-unavailable"]')).toBeNull();
+    expect(screen.queryByText(/程序未提供终端命令通道/)).toBeNull();
   });
 
   it('状态栏接真实读数：库/L0/后台/已选/行高可追溯，且无「—」占位', async () => {
@@ -993,7 +994,7 @@ describe('S5 任务窗「待重放写入」：只读，不可用就说原因', (
   });
 });
 
-describe('S6 底部五标签：只渲染真实数据，不可用就给原因', () => {
+describe('S6 底部四标签：只渲染真实数据，不可用就给原因', () => {
   const RUN = {
     requestId: 'req_sched_1',
     taskKey: 'decay',
@@ -1065,7 +1066,9 @@ describe('S6 底部五标签：只渲染真实数据，不可用就给原因', (
     await act(async () => { fireEvent.click(tabButton(container, '问题')); });
     expect((await screen.findAllByTestId('dock-problem-row')).length).toBe(2);
     expect(badge(container, '问题')).toBe('2');
-    expect(screen.getByText(/由最近的动作日志派生（不是独立问题库）/)).toBeInTheDocument();
+    // 2026-11-22 用户要求说人话：说明改成「发生了什么/影响/处理」，不再出现「派生」等内部术语
+    expect(screen.getByText(/最近共 2 条，其中 1 条需要你处理/)).toBeInTheDocument();
+    expect(screen.queryByText(/由最近的动作日志派生（不是独立问题库）/)).toBeNull();
   });
 
   it('问题：真实日志没有 warn/error → 明确说没有，而不是不可用', async () => {
@@ -1157,11 +1160,11 @@ describe('S6 底部五标签：只渲染真实数据，不可用就给原因', (
     expect(screen.getByTestId('sb-selected').textContent).toContain('1 条');
   });
 
-  it('终端仍为不可用（程序确实没有命令通道）', async () => {
+  it('终端页签已删除（不再留不可用占位，也不再有死分支）', async () => {
     const { container } = await renderShell();
-    await act(async () => { fireEvent.click(tabButton(container, '终端')); });
-    expect(await screen.findByTestId('dock-term-unavailable')).toBeInTheDocument();
-    expect(screen.getByText(/程序未提供终端命令通道/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /终端/ })).toBeNull();
+    expect(container.querySelector('[data-testid="dock-term-unavailable"]')).toBeNull();
+    expect(screen.queryByText(/程序未提供终端命令通道/)).toBeNull();
   });
 });
 

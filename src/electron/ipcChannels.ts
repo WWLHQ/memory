@@ -236,12 +236,17 @@ export const IPC = {
 } as const;
 
 /**
- * 主进程 → 壳层的快捷键事件通道（批次48 S10）。
+ * 主进程 → 壳层的快捷键事件通道（批次48 S10 建；v5 重设计扩展）。
  * 默认应用菜单删除后，快捷键可能在焦点位于 iframe 页面时按下，壳层 window 收不到 keydown；
  * 因此由主进程 before-input-event 统一捕获，再交给壳层渲染层执行动作。
+ * v5 新增：dock（Ctrl+`）/ nav（Ctrl+B）/ quick1..quick8（Ctrl+1..8 切换前 8 个视图）。
+ * v5-BC 新增：inspector（Ctrl+Shift+I 折叠/展开右侧属性检查器）。
  */
 export const SHELL_SHORTCUT_CHANNEL = 'shell:shortcut';
-export type ShellShortcut = 'refresh' | 'search' | 'help' | 'security';
+export type ShellShortcut =
+  | 'refresh' | 'search' | 'help' | 'security'
+  | 'dock' | 'nav' | 'inspector' | 'quick1' | 'quick2' | 'quick3' | 'quick4'
+  | 'quick5' | 'quick6' | 'quick7' | 'quick8';
 
 /** preload 实际暴露的全部 channel（自检基线） */
 export const PRELOAD_CHANNELS: readonly string[] = Object.values(IPC);

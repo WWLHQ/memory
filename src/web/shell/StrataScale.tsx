@@ -16,7 +16,7 @@ interface Props {
 export function StrataScale({ data, onRefresh }: Props) {
   return (
     <div className="strata-scale" data-testid="strata-scale" role="group" aria-label="层级刻度">
-      <div className="tree-group">层级刻度</div>
+      <div className="tree-group">层级刻度 · STRATA</div>
       {!data ? (
         <div className="strata-note">读取中…</div>
       ) : data.status !== 'ok' ? (

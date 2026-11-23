@@ -14,6 +14,7 @@ import { parseProgramLogLine, type ProgramLogLine } from '../Home/programLog.ts'
 import { getKernelStorage } from '../kernel.ts';
 import { currentSessionId } from '../shared/session.ts';
 import { humanErrorText } from '../shared/kernelLoad.tsx';
+import { humanizeLogLine } from './humanLog.ts';
 
 export type DockResult<T> =
   | { status: 'ok'; view: T }
@@ -67,6 +68,11 @@ export function problemsFromLog(view: OutputLogView): ProblemRow[] {
   return view.lines
     .filter((l): l is ProgramLogLine & { level: 'warn' | 'error' } => l.level === 'warn' || l.level === 'error')
     .map((l) => ({ ts: l.ts, level: l.level, scope: l.scope, action: l.action, message: l.message }));
+}
+
+/** 真正需要用户动手的条数（只是提醒的不算）；与面板逐行判定共用同一份人话规则 */
+export function countActionableProblems(rows: ProblemRow[]): number {
+  return rows.filter((r) => humanizeLogLine(r).severity === 'action').length;
 }
 
 /* ── 任务：账本 schedule_run 执行记录 ─────────────────── */

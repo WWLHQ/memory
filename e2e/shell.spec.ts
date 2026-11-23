@@ -134,9 +134,16 @@ test.describe('壳层 · 登录弹窗与右键菜单（真实后端）', () => {
 
   test('未登录时需登录动作禁用并写「未登录（会话 401）」', async ({ page }) => {
     await openShell(page);
+    // 需登录动作（归档）现收在命令面板：打开面板搜「归档」，禁用原因写在该行 title 上
+    await page.locator('[data-testid="shell-cmd-entry"]').click();
+    const palette = page.locator('[data-testid="shell-palette"]');
+    await expect(palette).toBeVisible();
+    await palette.locator('input[aria-label="搜索命令"]').fill('归档');
     const gated = page.locator('[title*="未登录（会话 401）"]');
     await expect(gated.first()).toBeVisible();
     await expect(gated.first()).toHaveAttribute('title', /未登录（会话 401）/);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('[data-testid="shell-palette"]')).toHaveCount(0);
     // 未登录时不发任何登录请求：状态区仍是只读会话
     await expect(page.locator('[data-testid="sb-session"]')).toContainText('只读');
   });
@@ -181,7 +188,12 @@ test.describe('壳层 · 登录弹窗与右键菜单（真实后端）', () => {
 
   test('右键属性检查器：无选中时复制项禁用并写原因，折叠是真实动作', async ({ page }) => {
     await openShell(page);
-    await page.locator('[data-testid="shell-inspector"]').click({ button: 'right' });
+    // 属性检查器默认收起（批次50+ 省空间）：先展开，再验证右键菜单与折叠动作
+    const inspector = page.locator('[data-testid="shell-inspector"]');
+    await expect(inspector).toHaveClass(/collapsed/);
+    await page.locator('[data-testid="qa-inspector-expand"]').click();
+    await expect(inspector).not.toHaveClass(/collapsed/);
+    await inspector.click({ button: 'right' });
     await expect(page.locator('[data-testid="ctx-inspmenu"]')).toBeVisible();
     const copyId = page.locator('[data-testid="ctx-inspmenu-copyId"]');
     await expect(copyId).toBeDisabled();
@@ -298,16 +310,16 @@ test.describe('壳层 · 登录弹窗与右键菜单（真实后端）', () => {
     expect(prevented).toBe(true);
   });
 
-  test('导航归属：MCP 接入进连接组、个人记忆库进记忆管理组并直达真实整页', async ({ page }) => {
+  test('导航归属：MCP 接入进连接组、个人记忆进记忆管理组并直达真实整页', async ({ page }) => {
     const errors = collectErrors(page);
     await openShell(page);
-    // 个人记忆库：唯一项，打开后中心区是 personal.html 真实整页（非记忆库 Tab 别名）
-    const personal = page.getByRole('treeitem', { name: /^个人记忆库/ });
+    // 个人记忆：唯一项，打开后中心区是 personal.html 真实整页（非记忆库 Tab 别名）
+    const personal = page.getByRole('treeitem', { name: /^个人记忆/ });
     await expect(personal).toHaveCount(1);
     await personal.click();
     const personalFrame = page.frameLocator('iframe.page-frame[title*="personal.html"]');
     await expect(personalFrame.locator('body')).toBeVisible();
-    await expect(page.locator('[data-testid^="shell-tab-"]').filter({ hasText: '个人记忆库' })).toBeVisible();
+    await expect(page.locator('[data-testid^="shell-tab-"]').filter({ hasText: '个人记忆' })).toBeVisible();
 
     // MCP 接入：连接组新页。壳层 iframe 走父窗口桥，但浏览器态的顶层没有原生宿主能力
     // → 面板如实降级为「读取本机配置失败」，绝不列出客户端、绝不写「已接入」。
@@ -348,5 +360,140 @@ test.describe('壳层 · 登录弹窗与右键菜单（真实后端）', () => {
     await expect(frame.locator('[data-testid="verdict-panel"]')).toHaveCount(0);
     await expect(frame.locator('[data-testid="audit-log"]')).toHaveCount(0);
     expect(errors).toEqual([]);
+  });
+
+  test('底部只有四个标签：终端页签已取消，默认视图落在「输出」', async ({ page }) => {
+    const errors = collectErrors(page);
+    await openShell(page);
+    const tabs = page.locator('.bp-tab');
+    await expect(tabs).toHaveCount(4);
+    await expect(tabs.nth(0)).toContainText('输出');
+    await expect(tabs.nth(1)).toContainText('问题');
+    await expect(tabs.nth(2)).toContainText('审计');
+    await expect(tabs.nth(3)).toContainText('任务');
+    // 终端页签整项不存在（含渲染分支/图标）；也没有旧的「不可用」灰态占位
+    await expect(page.getByRole('button', { name: /终端/ })).toHaveCount(0);
+    await expect(page.locator('.bp-tab.unavailable')).toHaveCount(0);
+
+    // 打开底部面板：默认落在「输出」的真实日志视图（浏览器态无主进程 → 如实不可用）
+    await tabs.nth(0).click();
+    await expect(page.locator('.bp-body')).toHaveCount(1);
+    await expect(page.locator('.bp-body')).not.toContainText('程序未提供终端命令通道');
+    await expect(page.locator('[data-testid="dock-log-unavailable"], [data-testid="dock-log-empty"], [data-testid="dock-log-row"]').first()).toBeVisible({ timeout: 15_000 });
+    expect(errors).toEqual([]);
+  });
+
+  test('2026-11-22 页签条高度降 1/4：展开/收起都只占 24px，把纵向空间还给正文', async ({ page }) => {
+    await openShell(page);
+    const panel = page.locator('.bottom-panel');
+    const head = page.locator('.bp-head');
+    // 默认收起：整块 24px（原来 31px），页签行 24px（原来 32px）
+    await expect(panel).toHaveClass(/collapsed/);
+    expect(await panel.evaluate((el) => getComputedStyle(el).height)).toBe('24px');
+    expect(await head.evaluate((el) => getComputedStyle(el).height)).toBe('24px');
+    // 展开后页签行仍是 24px，且正文可见（高度让给正文）
+    await page.locator('.bp-tab').nth(0).click();
+    await expect(panel).not.toHaveClass(/collapsed/);
+    await expect(page.locator('.bp-body')).toBeVisible();
+    expect(await head.evaluate((el) => getComputedStyle(el).height)).toBe('24px');
+    // 再收起：恢复 24px
+    await page.locator('.bp-tool[title="折叠 / 展开底部面板"]').click();
+    await expect(panel).toHaveClass(/collapsed/);
+    expect(await panel.evaluate((el) => getComputedStyle(el).height)).toBe('24px');
+  });
+
+  test('2026-11-22 输出/问题说人话：主位不出现 ipc:/no_session，原始字段只在「技术详情」里', async ({ page }) => {
+    // 真实 Electron 才有的动作日志：这里只给 log:tail 一个桩，喂两条真实格式的内网字段，验证渲染层人话转换
+    await page.addInitScript(() => {
+      const lines = [
+        '[2026-11-22T13:00:00.000Z] [warn] [ipc:refine:state] {"denied":"no_session"}',
+        '[2026-11-22T13:00:01.000Z] [error] [ui:backend_param_rejected] {"param":"backend"}',
+      ];
+      const w = window as unknown as { __ELECTRON__?: boolean; api?: unknown };
+      w.__ELECTRON__ = true;
+      w.api = { log: { tail: async () => ({ ok: true, path: 'C:\\logs\\actions.log', lines }), write: () => {} } };
+    });
+    await page.reload();
+    await expect(page.locator('[data-testid="shell-titlebar"]')).toBeVisible();
+
+    // 输出页：每行主位只给中文动作名，技术详情默认收起
+    await page.locator('.bp-tab').nth(0).click();
+    const rows = page.locator('[data-testid="dock-log-row"]');
+    await expect(rows).toHaveCount(2);
+    const titles = await page.locator('[data-testid="dock-log-title"]').allInnerTexts();
+    const joined = titles.join(' ');
+    expect(joined).not.toMatch(/ipc:|no_session|refine:state|backend_param_rejected|\{/);
+    const tech = rows.first().locator('[data-testid="dock-tech-details"]');
+    await expect(tech).not.toHaveAttribute('open', /.*/);
+    await tech.locator('summary').click();
+    await expect(tech.locator('code')).toContainText('ipc:refine:state');
+
+    // 问题页：说明与标题都是人话；两条都只是提醒，明确「不需要你处理」；每行给出影响/处理
+    await page.locator('.bp-tab').nth(1).click();
+    const intro = page.locator('[data-testid="dock-problems-intro"]');
+    await expect(intro).toBeVisible();
+    await expect(intro).toContainText('不需要你处理');
+    expect(await intro.innerText()).not.toMatch(/ipc:|no_session|json|派生/);
+    const problemTitles = (await page.locator('[data-testid="dock-problem-title"]').allInnerTexts()).join(' ');
+    expect(problemTitles).not.toMatch(/ipc:|no_session|refine:state|\{"|派生/);
+    const firstProblem = page.locator('[data-testid="dock-problem-row"]').first();
+    await expect(firstProblem).toContainText('影响：');
+    await expect(firstProblem).toContainText('处理：');
+    await expect(firstProblem.locator('[data-testid="dock-tech-details"]')).not.toHaveAttribute('open', /.*/);
+  });
+
+  test('2026-11-22 功能导航字号增大一号：12/13px，行高不破、不折行，1024 宽度下文案完整', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await openShell(page);
+    const pane = page.locator('.nav-pane');
+    await expect(pane).toBeVisible();
+    const groupFont = await pane.locator('.tree-group').first().evaluate((el) => getComputedStyle(el).fontSize);
+    expect(groupFont).toBe('12px');
+    const rows = pane.locator('.tree-row');
+    await expect(rows.first()).toBeVisible();
+    const info = await rows.first().evaluate((el) => {
+      const s = getComputedStyle(el);
+      const label = el.querySelector('.tlabel') as HTMLElement | null;
+      return {
+        fontSize: s.fontSize,
+        whiteSpace: s.whiteSpace,
+        height: Math.round(el.getBoundingClientRect().height),
+        labelClips: label ? label.scrollWidth > label.clientWidth + 1 : false,
+      };
+    });
+    expect(info.fontSize).toBe('13px');
+    expect(info.whiteSpace).toBe('nowrap');
+    expect(info.height).toBe(28);
+    // 1024 宽度下全部导航文案完整可见（没有被 ellipsis 截断）；子项行高 26 不被字号撑破
+    const all = await rows.evaluateAll((els) => els.map((el) => {
+      const label = el.querySelector('.tlabel') as HTMLElement | null;
+      return {
+        text: (el.textContent ?? '').trim(),
+        h: Math.round(el.getBoundingClientRect().height),
+        child: el.classList.contains('child'),
+        clips: label ? label.scrollWidth > label.clientWidth + 1 : false,
+      };
+    }));
+    expect(all.filter((r) => r.clips)).toEqual([]);
+    expect(all.filter((r) => r.child).every((r) => r.h === 26)).toBe(true);
+  });
+
+  test('2026-11-22 启动提速：首屏账本/L0 读数不再互相等待（渲染侧首读 < 1500ms）', async ({ page }) => {
+    // 对照：优化前实测「进程启动 → 状态栏首次读数」2118ms（21:03 日志基线），
+    // 其中 mcp 探活/tasklist 同步约 0.5–3.6s 会把四格一起拖在「读取中」。
+    // 这里按渲染侧 performance.now() 量首读（浏览器模式无原生宿主，取最快真实值），确认单格先到先显示。
+    const ms = await page.waitForFunction(() => {
+      const storage = document.querySelector('[data-testid="sb-storage"]');
+      const l0 = document.querySelector('[data-testid="sb-l0"]');
+      if (!storage || !l0) return false;
+      if ((storage.textContent ?? '').includes('读取中')) return false;
+      if ((l0.textContent ?? '').includes('读取中')) return false;
+      return Math.round(performance.now());
+    }, null, { timeout: 15_000 }).then((h) => h.jsonValue() as Promise<number>);
+    expect(ms).toBeLessThan(1500);
+    // 四格各自有真实结论（有值或明确不可用），不出现空转省略
+    await expect(page.locator('[data-testid="sb-storage"]')).not.toContainText('读取中');
+    await expect(page.locator('[data-testid="sb-bg"]')).not.toContainText('读取中');
+    await expect(page.locator('[data-testid="sb-l0"]')).not.toContainText('读取中');
   });
 });

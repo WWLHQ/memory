@@ -5243,16 +5243,23 @@ async function bootstrap(): Promise<void> {
   });
 
   // 顶部默认菜单删除后：应用内快捷键由主进程统一捕获，再交给壳层渲染层执行动作。
-  // 这样焦点落在中心区 iframe 页面里时，F5/F9/F1/Ctrl+F/Ctrl+K 也不会因壳层收不到 keydown 而失效。
+  // 这样焦点落在中心区 iframe 页面里时，F5/F9/F1/Ctrl+F/K/B/`/1..8 也不会因壳层收不到 keydown 而失效。
   // 复制/粘贴/全选不在此拦截，仍由 Chromium 原生编辑命令处理。
   win.webContents.on('before-input-event', (event, input) => {
-    if (input.type !== 'keyDown' || input.alt || input.shift) return;
+    if (input.type !== 'keyDown' || input.alt) return;
     const key = input.key.toLowerCase();
     let action: ShellShortcut | null = null;
-    if (key === 'f5') action = 'refresh';
+    // v5-BC：Ctrl+Shift+I 折叠/展开属性检查器（唯一放行的 Shift 组合；其余带 Shift 的按键不拦截）
+    if ((input.control || input.meta) && input.shift && key === 'i') action = 'inspector';
+    else if (input.shift) return;
+    else if (key === 'f5') action = 'refresh';
     else if (key === 'f9') action = 'security';
     else if (key === 'f1') action = 'help';
     else if ((input.control || input.meta) && (key === 'f' || key === 'k')) action = 'search';
+    // v5 快捷键表：Ctrl+` 底部面板 / Ctrl+B 功能导航 / Ctrl+1..8 快速切换视图
+    else if ((input.control || input.meta) && (key === '`' || key === '~')) action = 'dock';
+    else if ((input.control || input.meta) && key === 'b') action = 'nav';
+    else if ((input.control || input.meta) && key >= '1' && key <= '8') action = `quick${key}` as ShellShortcut;
     if (!action) return;
     event.preventDefault();
     win?.webContents.send(SHELL_SHORTCUT_CHANNEL, action);

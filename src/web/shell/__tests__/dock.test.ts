@@ -5,9 +5,10 @@ import type { AuditRecord } from '../../../core/memagent/types.ts';
 import { currentSessionId } from '../../shared/session.ts';
 import { getKernelStorage } from '../../kernel.ts';
 import {
-  auditMentions, loadAuditForMemory, loadOutputLog, loadScheduleRuns, problemsFromLog,
+  auditMentions, countActionableProblems, loadAuditForMemory, loadOutputLog, loadScheduleRuns, problemsFromLog,
   type OutputLogView,
 } from '../dock.ts';
+import { humanActionLabel, humanizeLogLine, problemsIntro } from '../humanLog.ts';
 
 vi.mock('../../../desktop/hostBridge.ts', () => ({ hostCapability: vi.fn(), hostCall: vi.fn() }));
 vi.mock('../../kernel.ts', () => ({ getKernelStorage: vi.fn() }));
@@ -80,6 +81,69 @@ describe('problemsFromLog', () => {
       ],
     };
     expect(problemsFromLog(view).map((r) => r.level)).toEqual(['warn', 'error']);
+  });
+});
+
+describe('底部面板说人话（humanLog）', () => {
+  const rawFieldFree = (s: string) => {
+    expect(s).not.toMatch(/\bipc:/);
+    expect(s).not.toMatch(/no_session/);
+    expect(s).not.toMatch(/refine:state/);
+    expect(s).not.toContain('{"');
+  };
+
+  it('未登录的 refine:state 不再写内部字段，只当提醒并给出影响/处理', () => {
+    const h = humanizeLogLine({ level: 'warn', scope: 'ipc', action: 'refine:state', message: '{"denied":"no_session"}' });
+    expect(h.severity).toBe('notice');
+    rawFieldFree(h.title);
+    expect(h.effect).toContain('不受影响');
+    expect(h.todo).toContain('不用处理');
+    // 原始字段只进技术详情
+    expect(h.tech).toContain('ipc:refine:state');
+    expect(h.tech).toContain('no_session');
+  });
+
+  it('启动地址参数错误：说明已自动兜底、无需处理', () => {
+    const h = humanizeLogLine({
+      level: 'error', scope: 'ui', action: 'backend_param_rejected',
+      message: '{"param":"backend","host":"http://127.0.0.1:64991:8201"}',
+    });
+    expect(h.severity).toBe('notice');
+    expect(h.title).toContain('已自动改用本机地址');
+    rawFieldFree(h.title);
+  });
+
+  it('未知动作也不泄漏 scope:action，只给中文类别名', () => {
+    const h = humanizeLogLine({ level: 'error', scope: 'gateway', action: 'rotate_hook', message: '{"code":"E_X"}' });
+    expect(h.title).toContain('大模型调用');
+    expect(h.title).not.toMatch(/[a-z]+:[a-z]/);
+    expect(h.title).not.toContain('rotate_hook');
+    expect(h.severity).toBe('action');
+  });
+
+  it('写密钥读不到 → 需要处理，并指向「去解锁」', () => {
+    const h = humanizeLogLine({ level: 'error', scope: 'l0', action: 'writeUnlocked', message: 'E_AUTH_L0' });
+    expect(h.severity).toBe('action');
+    expect(h.todo).toContain('去解锁');
+  });
+
+  it('可处理条数只统计 action 级，提醒不算问题', () => {
+    const rows = [
+      { level: 'warn' as const, scope: 'ipc', action: 'refine:state', message: '{"denied":"no_session"}', ts: '2026-11-22T13:00:00.000Z' },
+      { level: 'error' as const, scope: 'l0', action: 'writeUnlocked', message: 'E_AUTH_L0', ts: '2026-11-22T13:00:01.000Z' },
+    ];
+    expect(countActionableProblems(rows)).toBe(1);
+  });
+
+  it('面板说明按「总数 / 需处理」给两种人话', () => {
+    expect(problemsIntro(0, 0)).toContain('没有发现问题');
+    expect(problemsIntro(4, 0)).toContain('都不需要你处理');
+    expect(problemsIntro(4, 1)).toContain('1 条需要你处理');
+  });
+
+  it('输出页动作名是中文，未知也只给类别名', () => {
+    expect(humanActionLabel('ipc', 'mcp:clients')).toBe('检查本机 AI 客户端');
+    expect(humanActionLabel('weird', 'x')).toBe('后台动作');
   });
 });
 

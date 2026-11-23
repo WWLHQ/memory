@@ -18,7 +18,7 @@ export const PAGES: Record<PageKey, { file: string; label: string; source: strin
   // login.html 为可直达兜底页（不进主导航）；主流程入口是壳层登录弹窗
   login: { file: 'login.html', label: '登录与会话页', source: 'POST /api/login · /api/me · session:realpage' },
   memory: { file: 'memory.html', label: '记忆管理六页签页', source: '账本清单 + 分层策略 + 冲突队列读数（批次57 精简六页签）' },
-  personal: { file: 'personal.html', label: '个人记忆页', source: 'personal:snapshot 个人记忆真实快照（内核账本）' },
+  personal: { file: 'personal.html', label: '个人记忆', source: 'personal:snapshot 个人记忆真实快照（内核账本）' },
   write: { file: 'write.html', label: '写入页', source: 'ma.write 表单与回执' },
   retrieval: { file: 'retrieval.html', label: '检索页', source: '透明化召回' },
   lifecycle: { file: 'lifecycle.html', label: '生命周期页', source: '六态机 + 调参' },
@@ -70,7 +70,7 @@ export type NavEntry = NavGroup | NavItem;
 /** 功能导航树：批次54 按用户参考图重排、批次52 起「记忆管理」组去掉活跃/蛰伏休眠/已归档/个人记忆四子项（状态筛选留在记忆页内），每项映射到真实 HTML，角标一律动态读真账本，不写死示例数。
  *  - 登录仍走壳层弹窗（login.html 只作深链兜底，不占主导航）；
  *  - 首启设置由 Electron 向导直接打开（setup.html），不在主导航露面；
- *  - 个人记忆库作为记忆管理组独立入口进主导航，直达真实整页 personal.html；记忆库 Tab 与状态栏常驻面板保留；
+ *  - 个人记忆作为记忆管理组独立入口进主导航，直达真实整页 personal.html；记忆库 Tab 与状态栏常驻面板保留；
  */
 export const NAV: NavEntry[] = [
   { kind: 'group', label: '工作台' },
@@ -82,7 +82,7 @@ export const NAV: NavEntry[] = [
   { kind: 'item', id: 'monitor', label: '监控', icon: 'play', emoji: '📡', page: 'monitor' },
   { kind: 'group', label: '记忆管理' },
   { kind: 'item', id: 'memory-bank', label: '记忆库', icon: 'db', emoji: '🗄', page: 'memory', href: '?tab=all' },
-  { kind: 'item', id: 'personal-memory', label: '个人记忆库', icon: 'user', emoji: '👤', page: 'personal' },
+  { kind: 'item', id: 'personal-memory', label: '个人记忆', icon: 'user', emoji: '👤', page: 'personal' },
   { kind: 'item', id: 'layered', label: '层级管理', icon: 'layers', emoji: '🧬', page: 'layered' },
   { kind: 'item', id: 'lifecycle', label: '生命周期', icon: 'clock', emoji: '♻️', page: 'lifecycle' },
   { kind: 'item', id: 'growth', label: '净化生长', icon: 'layers', emoji: '🌱', page: 'growth' },
@@ -128,7 +128,7 @@ export type IconName =
   | 'search' | 'clock' | 'book' | 'list' | 'shield' | 'chart' | 'play' | 'sync'
   | 'gear' | 'agent' | 'plus' | 'refresh' | 'export' | 'filter' | 'panel' | 'fold'
   | 'copy' | 'archive' | 'key' | 'check' | 'scale' | 'play2' | 'info' | 'help'
-  | 'unlock' | 'eye' | 'eye-off' | 'broken' | 'ring' | 'system' | 'sun' | 'moon' | 'terminal'
+  | 'unlock' | 'eye' | 'eye-off' | 'broken' | 'ring' | 'system' | 'sun' | 'moon'
   | 'chev' | 'caret' | 'x' | 'folder' | 'link' | 'dot' | 'save' | 'undo' | 'more' | 'pen';
 
 /** 壳层自己就能完成的动作（真实改变界面状态，不伪造业务结果） */
@@ -217,26 +217,24 @@ export interface PaletteItem {
   run?: () => void;
 }
 
-export type BottomTabId = 'output' | 'problems' | 'audit' | 'tasks' | 'term';
+export type BottomTabId = 'output' | 'problems' | 'audit' | 'tasks';
 
 export interface BottomTab {
   id: BottomTabId;
   label: string;
   icon: IconName;
-  /** 程序暂无该数据源时的诚实说明 */
-  unavailable?: string;
 }
 
 /**
- * 底部五标签（S6）：输出/问题/审计/任务接真实数据源（见 dock.ts），
- * 终端仍为不可用（程序确实没有命令通道）。运行期不可用（如浏览器模式）由面板正文给原因，不预置假数字。
+ * 底部四标签（S6）：输出/问题/审计/任务接真实数据源（见 dock.ts）。
+ * 2026-11-21 用户要求取消「终端」页签：程序确实没有命令通道，原页签只是不可用占位，
+ * 已连同渲染分支、图标与状态一起删除；运行期不可用（如浏览器模式）由面板正文给原因。
  */
 export const BOTTOM_TABS: BottomTab[] = [
   { id: 'output', label: '输出', icon: 'receipt' },
   { id: 'problems', label: '问题', icon: 'warn' },
   { id: 'audit', label: '审计', icon: 'book' },
   { id: 'tasks', label: '任务', icon: 'clock' },
-  { id: 'term', label: '终端', icon: 'terminal', unavailable: '程序未提供终端命令通道，本标签不可用。' },
 ];
 
 /** 判断某页是否在导航中可达（供测试与 D3 校验） */
