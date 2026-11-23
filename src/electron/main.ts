@@ -70,6 +70,8 @@ import { runMcpHttpServer } from '../core/memagent/mcpHttp.ts';
 import { HOOK_STATUS_FILE } from '../core/memagent/recallHook.ts';
 import { RecallHardController } from './recallHard.ts';
 import { ensureStableHookScript } from './recallHookScript.ts';
+// 原子任务24B：宿主钩子自动注入（默认关闭，配置 host_hook_autoinject 显式开启）
+import { runHostHookAutoInject } from './runHostHookAutoInject.ts';
 // stdio 桥接脚本（2026-11-18）：写到引导指针同目录，客户端配置只留启动命令 → 令牌轮换零维护
 import { ensureMcpBridgeScript } from './mcpBridgeScript.ts';
 // 端点常量与客户端配方同一真源（stdio 启动命令里的端点不许另写字面量）
@@ -3700,6 +3702,24 @@ async function bootstrap(): Promise<void> {
     actionLog('kernel', 'recall-hard:init-error', { error: String((e as Error)?.message ?? e).slice(0, 160) }, { level: 'error' });
   });
   registerRecallHardIpc();
+  // 原子任务24B：宿主钩子自动注入。默认关闭（host_hook_autoinject=false），只有管理员显式开启才
+  // 探测已确认宿主并把五个钩子幂等写入其 settings.json；失败只记日志、绝不阻断启动。
+  // 必须在 recallHard.init() 之后（配置已加载）、MCP HTTP 启动之前完成（C 门禁不受影响）。
+  if (recallHard.hostAutoInjectEnabled()) {
+    const injectSummary = await runHostHookAutoInject({
+      dataDir: USER_DATA,
+      dirname: __dirname,
+      log: (action, detail) => {
+        void mlog(action, detail);
+        actionLog('kernel', action, detail);
+      },
+    });
+    void mlog('bootstrap:host-hook-autoinject', {
+      confirmed: injectSummary.confirmedHosts,
+      results: injectSummary.results,
+      error: injectSummary.error,
+    });
+  }
   // LLM 精炼网关（批次31）：配置/密钥就绪后内核写路径才能产出 L2–L6；未配置时保持 stub 口径
   llmGateway = loadLlmGateway(USER_DATA);
   await refreshProxyAccounting();

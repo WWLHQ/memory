@@ -13,6 +13,12 @@ export interface RecallHardConfig {
   b_port: number;
   /** C：MCP 严格首步召回门禁是否开启 */
   c_strict_gate: boolean;
+  /**
+   * D：宿主钩子自动注入（原子任务24B）——启动时探测已确认宿主并把注册表钩子幂等写入其 settings.json。
+   * 默认 false：改写宿主配置是高风险动作（hooks 不热加载、需重启宿主），只管理员显式开启，
+   * 不进 UI 成员可编辑字段（MEMBER_EDITABLE_KEYS 保持不变），避免权限扩散。
+   */
+  host_hook_autoinject: boolean;
 }
 
 export const RECALL_HARD_CONFIG_FILE = 'recall-hard-config.json';
@@ -24,6 +30,7 @@ export const DEFAULT_RECALL_HARD_CONFIG: Readonly<RecallHardConfig> = Object.fre
   b_upstream: '',
   b_port: 8300,
   c_strict_gate: true,
+  host_hook_autoinject: false,
 });
 
 export const RECALL_HARD_DEFAULT_PORT = 8300;
@@ -60,6 +67,7 @@ export function normalizeRecallHardConfig(raw: unknown): RecallHardConfig {
   }
   if (validRecallHardPort(o.b_port)) base.b_port = o.b_port;
   if (typeof o.c_strict_gate === 'boolean') base.c_strict_gate = o.c_strict_gate;
+  if (typeof o.host_hook_autoinject === 'boolean') base.host_hook_autoinject = o.host_hook_autoinject;
   return base;
 }
 

@@ -16,7 +16,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-/** 稳定副本在数据根下的相对位置。 */
+/** 稳定副本在数据根下的相对位置（召回钩子默认名；其它钩子见 hostHookInject.ts 的注册表）。 */
 export const STABLE_HOOK_REL = join('recall-hard', 'force_recall.mjs');
 
 export interface StableHookScriptResult {
@@ -37,19 +37,21 @@ export interface StableHookScriptDeps {
   ensureDir?: (p: string) => void;
 }
 
-/** 稳定副本的绝对路径（唯一口径，别在别处再拼一次）。 */
-export function stableHookScriptPath(dataDir: string): string {
-  return join(dataDir, STABLE_HOOK_REL);
+/** 稳定副本的绝对路径（唯一口径，别在别处再拼一次）。scriptName 省略=召回钩子，其它钩子传注册文件名。 */
+export function stableHookScriptPath(dataDir: string, scriptName = 'force_recall.mjs'): string {
+  return join(dataDir, 'recall-hard', scriptName);
 }
 
 /**
  * 确保数据根下有一份与源内容一致的钩子脚本，并返回应当写进宿主配置的路径。
  * 任何失败都降级为「用源路径」，绝不因为复制失败就让 A 层直接不可用（fail-open）。
+ * scriptName 省略=召回钩子（保持既有行为）；批量注入其它钩子时传注册文件名。
  */
 export function ensureStableHookScript(
   source: string,
   dataDir: string,
   deps: StableHookScriptDeps = {},
+  scriptName = 'force_recall.mjs',
 ): StableHookScriptResult {
   const exists = deps.exists ?? ((p: string) => existsSync(p));
   const readText = deps.readText ?? ((p: string) => readFileSync(p, 'utf8'));
@@ -59,7 +61,7 @@ export function ensureStableHookScript(
   if (!exists(source)) {
     return { path: source, copied: false, degraded: true, note: `钩子源脚本不存在：${source}` };
   }
-  const target = stableHookScriptPath(dataDir);
+  const target = stableHookScriptPath(dataDir, scriptName);
   let content: string;
   try {
     content = readText(source);

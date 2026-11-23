@@ -171,6 +171,9 @@ export class RecallHardController {
 
   cStrict = (): boolean => this.cEffective;
 
+  /** 原子任务24B：宿主钩子自动注入是否开启（只读已加载配置，不写盘）。 */
+  hostAutoInjectEnabled = (): boolean => this.config.host_hook_autoinject === true;
+
   private hookCommand(): string {
     return `node "${this.opts.hookScript.replace(/\\/g, '/')}"`;
   }

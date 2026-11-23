@@ -72,3 +72,22 @@ buildSync({
   logLevel: 'warning',
 });
 console.log('recall-hard/force_recall.mjs built OK（自包含 ESM，宿主直接 node 执行）');
+
+/**
+ * 原子任务 24a：四个「非召回钩子」脚本纳入安装包。
+ * 它们是自包含 ESM（无外部 import），直接字节复制到 dist-electron/recall-hard/ 即可，
+ * 不需要 esbuild。主机启动时由 hostHookInject.ts 从这里 stage 到数据根再注入宿主。
+ * 源在 src/electron/host-hooks/（2026-11-23 从数据根回纳入库，字节一致）。
+ */
+const HOST_HOOKS_DIR = path.join(root, 'src/electron/host-hooks');
+const HOOK_STAGE_DIR = path.join(root, 'dist-electron/recall-hard');
+const NON_RECALL_HOOKS = [
+  'session_review.mjs', 'session_review_patch.mjs', 'auto_feedback.mjs', 'fold_card_check.mjs',
+];
+fs.mkdirSync(HOOK_STAGE_DIR, { recursive: true });
+for (const name of NON_RECALL_HOOKS) {
+  const src = path.join(HOST_HOOKS_DIR, name);
+  if (!fs.existsSync(src)) throw new Error(`缺少宿主钩子源脚本：${src}`);
+  fs.copyFileSync(src, path.join(HOOK_STAGE_DIR, name));
+}
+console.log(`recall-hard/ 四个非召回钩子 copy OK（${NON_RECALL_HOOKS.length} 个，随包安装）`);

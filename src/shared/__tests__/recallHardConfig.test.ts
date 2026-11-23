@@ -9,10 +9,20 @@ import {
 } from '../recallHardConfig.ts';
 
 describe('批次62 · recallHardConfig 配置真源', () => {
-  test('默认值：A 开 / B 关（需上游）/ C 开，端口 8300', () => {
+  test('默认值：A 开 / B 关（需上游）/ C 开 / D 宿主自动注入关，端口 8300', () => {
     expect(DEFAULT_RECALL_HARD_CONFIG).toEqual({
       a_hook: true, b_gateway: false, b_upstream: '', b_port: 8300, c_strict_gate: true,
+      host_hook_autoinject: false, // 24B：改写宿主配置高风险，默认关，仅管理员显式开启
     });
+  });
+
+  test('host_hook_autoinject：normalize 可读回布尔，但不接受 UI patch（权限不扩散）', () => {
+    expect(normalizeRecallHardConfig({ host_hook_autoinject: true }).host_hook_autoinject).toBe(true);
+    expect(normalizeRecallHardConfig({ host_hook_autoinject: 'yes' }).host_hook_autoinject).toBe(false);
+    // parseRecallHardPatch 只处理 A/B/C 字段，D 即使传了也不进 patch
+    const parsed = parseRecallHardPatch({ host_hook_autoinject: true });
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.patch).not.toHaveProperty('host_hook_autoinject');
   });
 
   test('坏结构一律回默认，不抛错', () => {
