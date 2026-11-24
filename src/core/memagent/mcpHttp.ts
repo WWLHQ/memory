@@ -528,6 +528,29 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
     }
   }
 
+  /**
+   * P1-9 延迟分段埋点（MCP 侧）：内核 recall 的 latency_ms 只覆盖「纯管线」，而聊天里感受到的是
+   * 端到端——还包含门禁读盘、工具分发、JSON 序列化、回显拼装。两段对不上时无法归因（隔离 A/B
+   * 416.8→38.3ms vs 审计 p95 1983ms 就是这种情形），所以这里单独落一条 mcp_timing。
+   * 只在 recall_memory 落，避免给 write/治理类调用制造审计噪音；失败吞掉不影响主流程。
+   */
+  async function emitTimingAudit(result: unknown, timing: Record<string, number>, client: string, acct: McpAccount): Promise<void> {
+    try {
+      const rid = (result as { request_id?: unknown }).request_id;
+      const record: AuditRecord = {
+        request_id: typeof rid === 'string' && rid ? rid : ulid(),
+        action: 'mcp_timing',
+        agent: client,
+        user_id: acct.user_id,
+        ts: Date.now(),
+        detail: { ...timing },
+      };
+      await storage.appendAudit(record);
+    } catch {
+      /* 埋点失败绝不影响召回 */
+    }
+  }
+
   /** 处理一个 JSON-RPC 请求对象（MCP 单请求/单响应；不支持批量）
    *  @param incomingSid 本请求携带的 Mcp-Session-Id（空串 = 不带会话头，按 UA 兜底/不可靠处理）
    *  @param renderFold 本请求是否声明了折叠渲染能力（`X-Memagent-Render: fold`，T8）；只影响 recall 档位 */
@@ -559,6 +582,8 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
         // C 方案：严格门禁开启时，非 recall 工具描述追加「会被硬拦」声明；默认关闭 → 与原清单逐字相同。
         return { ...base, result: { tools: withRecallFirstNotes(strictGate) } };
       case 'tools/call': {
+        // P1-9：端到端分段起点（门禁 → 工具执行 → 序列化/回显拼装）
+        const tCallStart = Date.now();
         const name = String(params.name ?? '');
         const args = (params.arguments && typeof params.arguments === 'object' ? params.arguments : {}) as Record<string, unknown>;
         // 批次47（L2）：会话门禁。可靠会话（带 Mcp-Session-Id，服务端 initialize 签发并关联）尚未召回即调用
@@ -583,6 +608,8 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
           recallAt: recallAt ?? null,
         });
         if (reliable) calledBySession.set(incomingSid, true);
+        // P1-9：门禁段结束——含 currentRoundAt() 读钩子账本 + emitMcpCallAudit 落盘，二者都在内核之外
+        const tGateDone = Date.now();
         // C 方案：严格门禁开启时覆盖**所有**非 recall 工具（含原本只软提醒的读类）；
         // recall_memory 自身永远放行，否则会话永远无法解锁（死锁）。默认关闭时判定与批次47 逐字相同。
         if (reliable && !recalled && name !== 'recall_memory'
@@ -605,6 +632,8 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
         }
         try {
           const out = await callTool(name, args, client, acct, renderFold);
+          // P1-9：工具段结束——recall_memory 时它 ≈ 内核 latency_ms（差值即 runRecallTool 的包装开销）
+          const tToolDone = Date.now();
           // recall 首块 = 提示行（兼容纯文本客户端），随后完整 JSON、折叠明细（批次13）；同时给 structuredContent。
           // 批次12：模型常忽略 initialize.instructions → 结果末块再给一次展示方式硬约束（Qoder 实测必需）。
           const markdown = (out.result as { display?: { markdown?: string } }).display?.markdown;
@@ -621,6 +650,16 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
           // 可靠会话召回后 recalled 变 true 即不再提醒；不可靠会话无法确认召回，常驻软提醒（推动其带会话头）。
           if (!recalled && name !== 'recall_memory') {
             content.push({ type: 'text', text: RECALL_FIRST_REMINDER });
+          }
+          // P1-9：序列化/回显拼装段结束（结构化 JSON + markdown + 回显约束三块文本都在这里生成）
+          const tRenderDone = Date.now();
+          if (name === 'recall_memory') {
+            await emitTimingAudit(out.result, {
+              gate_ms: tGateDone - tCallStart,
+              tool_ms: tToolDone - tGateDone,
+              render_ms: tRenderDone - tToolDone,
+              total_ms: tRenderDone - tCallStart,
+            }, client, acct);
           }
           return {
             ...base,

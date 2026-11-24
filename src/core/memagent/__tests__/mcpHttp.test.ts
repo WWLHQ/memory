@@ -1343,8 +1343,11 @@ describe('批次44-D5-4：recall_memory(scope=session)（HTTP 8204 端到端）'
     expect(sc.scanned_memories).toBe(3);
     expect(sc.background.candidates).toBe(0);
     const audits = await storage.queryAudit({ request_id: (out.result.structuredContent as { request_id: string }).request_id });
-    expect(audits).toHaveLength(1);
-    expect(audits[0].detail).toMatchObject({ scope: 'session', session_id: 'S-HTTP', hits: 2 });
+    // P1-9：同一 request_id 现在有两条——会话召回审计 + MCP 侧分段耗时埋点。
+    // 后者只带 gate/tool/render/total 四个数字，不参与业务语义；断言按 action 区分而不是只数条数。
+    expect(audits.map((a) => a.action).sort()).toEqual(['mcp_timing', 'recall']);
+    const sessionAudit = audits.find((a) => a.action !== 'mcp_timing');
+    expect(sessionAudit?.detail).toMatchObject({ scope: 'session', session_id: 'S-HTTP', hits: 2 });
     expect((await storage.queryAudit({ action: 'recall' })).length).toBe(before + 1);
   });
 

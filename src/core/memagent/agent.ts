@@ -178,6 +178,17 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
   async function recall(req: RecallReq): Promise<RecallResult> {
     const request_id = newRequestId();
     const now = Date.now();
+    // P1-9 延迟分段埋点（2026-11-23）：只加计时，**不改任何业务分支与取值**。
+    // 动因：audit 的 latency_ms 是端到端一段数字（p95 1983ms），无法回答「哪一段吃掉了时间」——
+    // 而 P1-8′ 的隔离 A/B（416.8→38.3ms）又只覆盖纯管线，二者对不上时必须能分段看。
+    // stage_ms 落 recall 审计 detail；各段之和 ≈ latency_ms（tail 兜住未单独命名的收尾开销）。
+    const stage: Record<string, number> = {};
+    let stageAt = now;
+    const mark = (k: string): void => {
+      const t = Date.now();
+      stage[k] = t - stageAt;
+      stageAt = t;
+    };
     // 批次44-D5-4：会话视图走独立非向量分支，项目召回路径一行不改
     if (req.scope === 'session') return sessionRecall(req, request_id, now);
     const topK = req.top_k ?? 5;
@@ -200,7 +211,9 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
     const autoMinimal = resolved.mode === 'minimal' && !isConcreteMode(req.mode);
     const mode = autoMinimal ? 'auto' : resolved.mode;
     const [qvec] = await vector.embed([req.query]);
+    mark('embed');
     const all = await storage.listMemories({ project_id: req.project_id });
+    mark('list');
     const minimal = mode === 'minimal';
     // A4（召回模式接线）：分层取用只对手动模式生效——auto 档的候选集与裁剪顺序保持改造前口径。
     // 模式一旦确定，就带着三张表：selectPriority（谁先被取用）/ trimOrder（超预算先删谁）/ disabledLayers（压根不取）。
@@ -218,6 +231,7 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
     const growthCfg = growthConfigFromLedger(
       await storage.listMemories({ project_id: 'P_SYSTEM' }),
     );
+    mark('growth');
     if (manualMw) {
       recallWeights = { w_f: manualMw.f, w_i: manualMw.i, w_c: manualMw.c, w_a: manualMw.a };
       weightsSource = 'manual';
@@ -257,6 +271,7 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
       })
       .sort((a, b) => b.score - a.score)
       .slice(0, topK);
+    mark('score');
 
     // M1-2：per-hit 分量埋点。把 topK 候选的 [mem_id, relevance, f, imp, conf, boost] 落审计，
     // 让 M2 的离线 NDCG 重算能复用「同一批召回的同一组分量」（禁止重跑向量检索）。
@@ -314,6 +329,7 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
         }
       }
     }
+    mark('probe');
 
     // 2.4.1/R9：超硬熔断 3000t → 按分数从低到高丢弃直到预算内。
     // 初始命中与冷回填后都必须走同一裁剪，payload_tokens 必须按最终 hits 重算。
@@ -396,6 +412,7 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
         payload_tokens = capped.payload;
       }
     }
+    mark('backfill');
 
     // 个人记忆强制召回（2026-11-21 用户拍板）：已确认且未删除的条目**全部**注入每次召回，
     // 不受关键词阈值、top_k 条数上限影响，也不因分数低被过滤（pending / rejected / 墓碑不进）。
@@ -423,6 +440,7 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
         personalHits = hits.filter((h) => h.mem_id.startsWith('pm:')).map((h) => h.mem_id.slice(3));
       }
     }
+    mark('personal');
 
     // A5（召回模式接线）：次模式降级注入——只作独立 hint 下发，不混进 hits、不计入 payload。
     // 理由：若偷偷把 200t 塞进 payload，硬熔断与省量口径会同时失真；hint 是「还能参考什么」，不是「已经注入了什么」。
@@ -471,6 +489,7 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
       maxTokens: Math.min(BACKGROUND_MAX_TOKENS, Math.max(0, BUDGET.hard - payload_tokens)),
     });
     const savings = computeRecallSavings({ memories: all, hits, background, preCapTokens });
+    mark('bg');
 
     // 17.4：召回命中计数（不含 confirm/reinforce）
     for (const h of hits) {
@@ -481,6 +500,8 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
       try { await storage.putMemory({ ...m, access_count: (m.access_count ?? 0) + 1, last_access_time: now }); }
       catch (e) { console.warn('[recall:access-count-backfill] putMemory 失败，不阻断召回', { mem_id: h.mem_id, error: String((e as Error)?.message ?? e) }); }
     }
+    // 命中计数回写 = 每条 hit 两次存储 IO（getMemory + putMemory）——端到端 p95 的头号嫌疑段
+    mark('writeback');
 
     const budgetStatus = payload_tokens >= BUDGET.hard ? 'fused' : payload_tokens >= BUDGET.warn ? 'warn' : 'ok';
     // A6（回显贯通）：分流事实只构造**一次**，同时喂给返回体和 mode_dispatch 审计。
@@ -512,9 +533,11 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
     //  · latency_ms：本次召回的真实墙钟耗时（业务侧，含 embed/扫描/打分/裁剪，不含审计写入本身）；
     //  · pipeline_llm_tokens：RecallResult 的诚实值（当前恒 0 —— 召回管线不调用 LLM，网关真实 usage 未接入）；
     //    监控页不得拿这些 0 算 p95 冒充「已接通」，见 useMonitorReal.ts 的未采集说明。
+    mark('tail');
     const latency_ms = Date.now() - now;
     // A2：分流审计（§4.3）——与 recall 审计同 request_id，可按 request_id 关联出「为什么是这个模式」。
     // 手动/自动都记，理由写在 reason 里；会话视图不分流，不写这条。
+    const auditAt = Date.now();
     await audit(request_id, 'mode_dispatch', {
       mode: dispatch.suggested,     // 分流结论（可能是「建议极简」）
       applied_mode: dispatch.applied, // 实际执行模式（自动极简观测档会与 mode 不同）
@@ -529,10 +552,15 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
       via_fallback: resolved.viaFallback ?? false,
       ...(req.client ? { client: req.client } : {}),
     }, { project_id: req.project_id, user_id: req.user_id });
+    // P1-9：mode_dispatch 审计写入耗时也算进分段——它在 latency_ms 之外，却是端到端的真实成本。
+    stage.audit_mode_dispatch = Date.now() - auditAt;
     await audit(request_id, 'recall', {
       query: req.query, hits: hits.length, payload_tokens, scene, mode: result.mode,
       evidence_thin: evidence_thin ?? false,
       latency_ms,
+      // P1-9 延迟分段埋点：各段 ms（embed/list/growth/score/probe/backfill/personal/bg/writeback/tail/
+      // audit_mode_dispatch）。只读字段，历史行无此字段时评估侧跳过；口径 = 冷热都真实计时，不做平滑。
+      stage_ms: stage,
       pipeline_llm_tokens: result.pipeline_llm_tokens,
       // 批次15：区分是哪个 Agent 真的调用了召回（未识别时不写，避免伪归属）
       ...(req.client ? { client: req.client } : {}),

@@ -678,7 +678,10 @@ export type AuditAction =
   // 第一轮个人记忆本机闭环：quick_add / confirm / reject / revoke / delete 各写一条
   | 'personal_memory'
   // 批次47（L3）：MCP(HTTP 8204) 每次工具调用写一条，供算「首调合规率」（本会话首个 tools/call 是否为 recall_memory）
-  | 'mcp_call';
+  | 'mcp_call'
+  // P1-9 延迟分段埋点（MCP 侧）：仅 recall_memory 落一条，detail = { gate_ms, tool_ms, render_ms, total_ms }。
+  // 与内核 recall 审计的 stage_ms 分开：前者是端到端（含门禁/序列化），后者是纯管线。
+  | 'mcp_timing';
 
 export interface AuditRef {
   request_id: string;
