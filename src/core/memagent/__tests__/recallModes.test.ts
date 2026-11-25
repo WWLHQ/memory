@@ -11,12 +11,11 @@ describe('recallModes — 模式配置表（§2.4.3）', () => {
     expect(ids.sort()).toEqual(['event_replay', 'fact_first', 'minimal', 'pattern_reasoning', 'top_insight']);
   });
 
-  it('权重向量与规格书 §2.4.3 字面一致（含已知缺陷：pattern_reasoning 求和 0.90 ≠ 1.0）', () => {
-    // 忠实于规格书，不擅自归一化；0.90 与 §2.4.3「权重和=1.0」声明矛盾，已在设计文档标注。
+  it('权重向量满足规格书 §2.4.3「权重和 = 1.0」（pattern_reasoning 已修订）', () => {
+    // P1-6：a(access_boost 骨架层) 由 0.40 修订为 0.50，使和为 1.0，与规格书字面一致。
     const w = modeWeights('pattern_reasoning');
     const sum = w.f + w.i + w.c + w.a;
-    expect(sum).toBeCloseTo(0.9, 6);
-    expect(sum).not.toBeCloseTo(1, 6); // 显式锁定缺陷，待规格书修订
+    expect(sum).toBeCloseTo(1, 6);
   });
 
   it('极简禁用 L2/L5 且 isMinimal=true', () => {
@@ -33,7 +32,7 @@ describe('recallModes — 模式配置表（§2.4.3）', () => {
     expect(modeWeights('top_insight')).toEqual({ f: 0.20, i: 0.40, c: 0.10, a: 0.30 });
     expect(modeWeights('fact_first')).toEqual({ f: 0.10, i: 0.20, c: 0.40, a: 0.30 });
     expect(modeWeights('event_replay')).toEqual({ f: 0.40, i: 0.15, c: 0.15, a: 0.30 });
-    expect(modeWeights('pattern_reasoning')).toEqual({ f: 0.15, i: 0.25, c: 0.10, a: 0.40 });
+    expect(modeWeights('pattern_reasoning')).toEqual({ f: 0.15, i: 0.25, c: 0.10, a: 0.50 });
     expect(modeWeights('minimal')).toEqual({ f: 0.10, i: 0.20, c: 0.35, a: 0.35 });
   });
 });

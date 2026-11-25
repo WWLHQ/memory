@@ -613,10 +613,13 @@ export function buildRecallMarkdown(
     markup: 'markdown', readingHint: '加粗「」= 与本次提问重合的片段；🎯 = 命中的词',
   });
   const echoBody = buildRecallEchoBody(result, hint, markup, clip);
+  // P1-5：次模式参考内容进 detail / html 档（compact 单行契约不变，不放这里）。
+  const secondaryLine = secondaryDisplayLine(result, clip);
+  const secondaryBlock = secondaryLine ? `\n\n**↳ 次模式参考（未并入命中）**\n\n${secondaryLine}` : '';
   const sectionBlock = sections
     .map((s) => `**${s.title}**\n\n${s.lines.map((l) => `- ${l}`).join('\n')}`)
     .join('\n\n');
-  return `**${hint.line}**\n\n${echoBody}\n\n${sectionBlock}`;
+  return `**${hint.line}**\n\n${echoBody}${secondaryBlock}\n\n${sectionBlock}`;
 }
 
 /**
@@ -638,6 +641,19 @@ export const RECALL_CARD_HINT = '点击查阅详细内容';
 
 /** 批次 A2：每条命中的反馈入口提示（宿主逐条渲染，N 替换为该条 [n] 编号） */
 export const RECALL_FEEDBACK_HINT = '回复「N 有用」或「N 没用」反馈本条';
+
+/**
+ * P1-5（2026-11-25）：次模式「参考了什么」的人话行，三档回显唯一真源。
+ * 只陈述内核真实下发的 Hint（mode / content / note），不重算、不虚构；无 Hint 返回 null，宿主不得渲染空行。
+ * content 已经由内核裁到 ≤200t，这里只做展示截断，不参与 payload / 省量口径。
+ */
+export function secondaryDisplayLine(result: RecallResult, clip = (s: string, n: number) => plainClip(s, n)): string | null {
+  const sec = result.secondary_mode_hint;
+  if (!sec) return null;
+  const name = RECALL_MODE_SPECS[sec.mode].name;
+  const note = sec.note ? `${sec.note}：` : '次模式参考摘要：';
+  return `↳ 次模式 ${name} · ${note}${clip(sec.content, 160)}`;
+}
 
 /** 卡片里的一条命中/依据（index 即回答里就地标注的 [n]，1-based） */
 export interface RecallCardHit {
@@ -671,6 +687,12 @@ export interface RecallCardData {
   titleLine2: string;
   /** 展开提示小字（固定 RECALL_CARD_HINT） */
   hint: string;
+  /**
+   * 本次召回模式（2026-11-24）：展开区顶部单独一行展示，取自 buildRecallModeLine 单一真源。
+   * 标题第一行只有模式简称（如「⚙ 自动」），展开后需要看到完整分流依据（如「自动（分流建议极简 · 本轮按默认口径执行）」）。
+   * dispatch=null（会话视图）时为 null，宿主不要渲染这一行。
+   */
+  mode: string | null;
   /** 统计汇总（label/value 成对，宿主按序渲染 4–5 行） */
   summary: Array<{ label: string; value: string }>;
   /** 项目背景（逐条独立） */
@@ -681,6 +703,11 @@ export interface RecallCardData {
   basis: RecallCardHit[];
   /** 告警短版（正常轮次为空数组） */
   warnings: string[];
+  /**
+   * P1-5：次模式参考了哪条内容（人话一行，取自内核 secondary_mode_hint）。
+   * 无次模式时为 null，宿主不渲染；不进 summary 四行契约，保持统计汇总口径不变。
+   */
+  secondary: string | null;
 }
 
 /**
@@ -757,6 +784,8 @@ export function buildRecallCardData(
     titleLine1,
     titleLine2,
     hint: RECALL_CARD_HINT,
+    // 复用 buildRecallModeLine（与 display.markdown / 明细页同一真源），不另立模式文案
+    mode: buildRecallModeLine(result),
     summary,
     background: result.background.items.map((it) => ({
       category: it.category,
@@ -766,6 +795,7 @@ export function buildRecallCardData(
     hits,
     basis: hits,
     warnings: recallWarnings(result, r, unitPriceCnyPerMTok),
+    secondary: secondaryDisplayLine(result),
   };
 }
 
@@ -847,6 +877,10 @@ export function buildRecallDetailPage(
   const summaryLines = [echo.headline, echo.stats, ...(echo.mode_line ? [echo.mode_line] : [])]
     .map((l) => `<p class="sum">${htmlEscape(l)}</p>`)
     .join('\n');
+  // P1-5：次模式参考内容在明细页可见（与 detail markdown / 卡片同源同一函数，无次模式则无此行）
+  const secondaryHtml = secondaryDisplayLine(result)
+    ? `<p class="supnote">${htmlEscape(secondaryDisplayLine(result)!)}</p>`
+    : '';
   const ttlMin = Math.max(1, Math.round((meta.expiresAt - meta.issuedAt) / 60_000));
   // 顶部状态条：命中数 / 省量% / 预算 / 生成时间 / 有效期，一行可扫读（明细页的「我在看什么」）
   const statusBar = `命中 ${result.hits.length} 条 · 省 ${recallSavingRatio(result)}（${fmtInt(result.savings.saved_tokens)}t）`
@@ -945,6 +979,7 @@ mark { background: #ffe58f; color: #1f2328; padding: 0 1px; border-radius: 3px; 
 <h1>🧠 本次召回明细</h1>
 <p class="statusbar">${htmlEscape(statusBar)}</p>
 ${summaryLines}
+${secondaryHtml}
 <p class="meta">项目 <code>${htmlEscape(meta.project_id)}</code> ｜ 查询「${htmlEscape(plainClip(meta.query, 80))}」${meta.client ? ` ｜ 调用方 <code>${htmlEscape(meta.client)}</code>` : ''}
 <br>本链接 ${ttlMin} 分钟内有效（过期后请在聊天里让助手用 detail=true 再取一次）</p>
 <h2>📊 本次召回统计汇总</h2>

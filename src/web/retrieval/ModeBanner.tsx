@@ -31,7 +31,7 @@ export function ModeBanner({ data, onRequestId, onFactRetry }: Props) {
     <div className={`ret-scenebar scene-${data.scene}`} data-testid="mode-banner">
       <span className="ret-scene-badge" data-testid="banner-scene">{sceneName(data.scene)}</span>
       <span className="ret-scene-text">
-        {rerank} · 预算 {table.budget} tokens · 命中不足如实返回，不编造
+        {rerank} · 前端注入上限 {table.budget} tokens（内核硬熔断另计）· 命中不足如实返回，不编造
       </span>
 
       <span className="ret-scene-right">

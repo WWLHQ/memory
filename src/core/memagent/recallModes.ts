@@ -81,7 +81,7 @@ export const RECALL_MODE_SPECS: Record<ConcreteMode, RecallModeSpec> = {
     trimOrder: ['L5', 'L2', 'L3', 'L4'],
     preload: null,
     conflictRule: '通用模式优先：L4 跨事件规律作骨架，L3 个案作为「模式下的特例」并列呈现，不得用高 trust 的 L4 压过 L3 反例。',
-    weights: { f: 0.15, i: 0.25, c: 0.10, a: 0.40 },
+    weights: { f: 0.15, i: 0.25, c: 0.10, a: 0.50 },
     bestFor: '同类问题批量处理、标准化流程、举一反三预判问题',
     disabledLayers: [], isMinimal: false,
   },

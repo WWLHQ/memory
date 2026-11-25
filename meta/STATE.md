@@ -130,10 +130,11 @@
   - A9：`buildRecallModeLine()` 消费 `dispatch.reason`（16.5 降级不再伪称「用户指定」）；观测档 banner 写「自动」与回显同口径（不新增原型外 UI 行）；`mode_dispatch` 审计落 `source`。
   - A10：`normalizeScene()` 内核唯一真源（非法/空 scene 回落 default + reason 如实标注）；`scoreMode()` 大小写归一化；`default.candidates` 扩到 5 套；`viaFallback` 真实化；`top_k` 整数校验；`dispatch.secondary` 与 `secondary_mode_hint.mode` 恒一致。
   - A11（纯内核子集）：A5 取材池复用 `hardFilter`；次模式块前移，hint 优先取材、`backgroundExcludeIds` 让位，杜绝重复注入。
-- **三处报告误判已纠正并写入报告 §5.1**：① 原型 `syncSceneMode()` 本就有「critical 禁极简→改回自动+toast」，**不删 QueryBar 改写**（删了反而偏离原型）；② 中文名「顶层洞察」vs「顶层洞察优先」不动，待补原型/批准；③ `pattern_reasoning.weights` 0.90 是**规格书 §2.4.3 自身矛盾**（方案第 30 行），`specs/` 才是 SSOT，**不改代码**。
+- **三处报告误判已纠正并写入报告 §5.1**：① 原型 `syncSceneMode()` 本就有「critical 禁极简→改回自动+toast」，**不删 QueryBar 改写**（删了反而偏离原型）；② 中文名「顶层洞察」vs「顶层洞察优先」不动，待补原型/批准；③ `pattern_reasoning.weights` 0.90 原是**规格书 §2.4.3 自身矛盾**（方案第 30 行）——**2026-11-25 已按用户拍板修订**：a 0.40→0.50 使和为 1.0，`recallModes.ts` + 规格书表格/配置块 + `recallModes.test.ts` 同步（P1-6）。
 - **闸门**：TDD 先红 11 条（逐条精确）→ 四件套 64/64 绿；`test:gate` **252 文件 / 3028 例 / 0 失败 / 0 重试**；typecheck / oxlint(688 文件 0 错) / check:no-demo / validate(0 失败) / generate --check 全绿；索引重建 380 源码 / 142 文档后 check 通过。变异 6 处精确打红 6 条，二进制还原后四文件 SHA256 一致、复绿。
 - **关键结论**：`default.candidates` 扩到 5 套**不改变 auto 档打分**（A3 权重透传只对手动生效，auto 继续 `growth:v1`），故既有回归零打红。
-- **未做（下一批）**：次模式内容进回显（要再动 A8 契约）、`conflictRule` / 热更词表 / `config` 接线、`critical` 最低深度、方案 §3 全套 UI（原型无对应控件，须先补原型或显式批准）、中文名统一、规格书权重和修订。
+- **未做（下一批）**：`conflictRule` / 热更词表 / `config` 接线、`critical` 最低深度、方案 §3 全套 UI（原型无对应控件，须先补原型或显式批准）、中文名统一。
+- **2026-11-25 完成（P1）**：P1-5 次模式内容进回显（card/detail markdown/明细页，compact 不变）；P1-6 规格书权重和修订（a 0.40→0.50）；P1-7 前端注入上限 vs 内核硬熔断口径分离。三道闸门全绿。
 - **运行态**：8204 仍跑并行会话 23:49 的包；真机取证 `display.markdown` 有 `⚙ 模式`、`display.line`/`content[3]` 无 → **不含 A8 及之后任何改动**。重新打包会覆盖该包，须用户拍板。
 - **在途改动**：`recallHard.ts` / `recallHard.test.ts` / `RecallHardCard.tsx` / `params/recallHard.ts` 属并行会话，未碰 / 未还原 / 未提交；`specs/code-index.generated.md` 为本轮索引重建产物；另有并行会话新产生的未跟踪 `specs/reports/dsh-hindsight-local-调研报告-2026-11-14.md`。**禁 `git add .`**。
 - **纪律**：【停·等用户实测】→【停·等用户明确确认】→ 才 commit / push。

@@ -34,7 +34,13 @@ export function modeLabel(m: string): string {
   return m in MODE_NAMES ? modeName(m as Mode) : m === '无' ? m : `${m}（未知模式）`;
 }
 
-/** §1.1 scene 联动表（2.4.1 场景化预算 + 2.4.4 候选集） */
+/**
+ * §1.1 scene 联动表（2.4.1 场景化预算 + 2.4.4 候选集）。
+ * 口径边界（2026-11-25）：这里 budget 800/1200/2000/2500 是**检索页前端注入上限**，
+ * 只用于 coreEngine 对本次注入集的真实裁剪；**不下传内核**。
+ * 内核自己的 BUDGET（soft 1500 / warn 2000 / hard 3000，见 agent.ts）是 3000t 硬熔断，
+ * 两者不是同一数字、也不互相覆盖——UI 文案必须显式区分，避免「800t vs 3000t」认知冲突。
+ */
 const SCENE_TABLE: Record<Scene, SceneBudget> = {
   default: { budget: 800, defaultMode: 'minimal', backfillDepth: 'L3+L4', rerank: false, modes: ['top_insight', 'fact_first', 'event_replay', 'pattern_reasoning', 'minimal'] },
   task_start: { budget: 1200, defaultMode: 'top_insight', backfillDepth: '项目记忆+L5×1', rerank: false, modes: ['top_insight', 'fact_first', 'event_replay', 'pattern_reasoning', 'minimal'] },

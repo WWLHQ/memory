@@ -458,7 +458,7 @@ export function RetrievalPage() {
                 })}
               </tbody>
             </table>
-            <div className="ret-note">预算输入单位 × 1000 tokens；≤1500 ok / ≤2000 trim / ≤3000 warn / &gt;3000 内核硬熔断。</div>
+            <div className="ret-note">上表「场景预算」= 检索页前端注入上限（×1000 tokens，只裁剪本地注入集、不下传内核）；≤1500 ok / ≤2000 trim / ≤3000 warn / &gt;3000 是内核自己的硬熔断，两者口径不同。</div>
           </div>
 
           <div className="ret-card">

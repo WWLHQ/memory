@@ -922,7 +922,7 @@ status: draft
 | System Prompt 模板（5 套 + 冲突约束 + auto 如何选用） | `specs/召回模式SystemPrompt模板.md` | 人工核对 |
 | **待接线（下一步，尚未改行为）** | `src/core/memagent/agent.ts` `recall()` 顶部用 `resolveMode` 替换手搓 `minimal` 分支；`selectRecallBackground`/`scoreMemory` 接入 `resolved.mode`（权重/层级/裁剪）；`RecallResult` 增 `secondary_mode_hint`/`hit_keywords`；审计 `mode_dispatch` | 接线后补 `agent.ts` 回归用例，跑 `npm run verify` |
 
-> 本批发现的规格书缺陷（已锁定，待修订）：① §2.4.3 `pattern_reasoning` 权重 `(0.15,0.25,0.10,0.40)` 求和 **0.90 ≠ 声明「权重和=1.0」**，`recallModes.ts` 保留字面值未擅自归一化，测试显式锁定；② 用户粘贴文档的「层级单条 Token 上限 400/200/100/50、total 800」在规格书与代码（`layerRules.ts` 字符上限 300/200/120/60）均不存在，模板文档已按规格书权重框架修正。
+> 本批发现的规格书缺陷：① §2.4.3 `pattern_reasoning` 权重原为 `(0.15,0.25,0.10,0.40)` 求和 **0.90 ≠ 声明「权重和=1.0」**——**2026-11-25 按用户拍板修订（P1-6）**：a 0.40→0.50 使和为 1.0，`recallModes.ts` + 规格书 + 测试同步，原「锁定缺陷」测试改为断言和为 1.0；② 用户粘贴文档的「层级单条 Token 上限 400/200/100/50、total 800」在规格书与代码（`layerRules.ts` 字符上限 300/200/120/60）均不存在，模板文档已按规格书权重框架修正。
 > 索引：`npm run code:index -- --write` 已更新 `specs/code-index.generated.md`（313 文件）。
 
 ### 批次43：文档对齐（双向吸收 + 反向补回，2026-11-05）

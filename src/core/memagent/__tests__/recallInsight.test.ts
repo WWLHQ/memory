@@ -4,9 +4,10 @@ import type { AuditRecord, Hit, Memory, RecallResult } from '../types.ts';
 import {
   BACKGROUND_MAX_ITEMS, BACKGROUND_MAX_TOKENS, buildRecallCardData, buildRecallCompactMarkdown, buildRecallDetailExpiredPage,
   RECALL_FEEDBACK_HINT,
-  buildRecallDetailPage, buildRecallEchoSummary, buildRecallHint, buildRecallMarkdown,
+  buildRecallDetailPage, buildRecallEchoSummary, buildRecallHint, buildRecallMarkdown, buildRecallModeLine,
   buildRecallSections, buildRecallStatLines, computeRecallSavings, corpusTokens, formatCny, htmlEscape,
   localDayStart, normalizeUnitPrice, RECALL_CARD_HINT, recallSavingRatio, rollupRecalls, selectRecallBackground,
+  secondaryDisplayLine,
 } from '../recallInsight.ts';
 import { createMemAgent } from '../agent.ts';
 import { clientSupportsHtmlDetails, recallDisplayMode } from '../mcpRecall.ts';
@@ -1154,6 +1155,28 @@ describe('buildRecallCardData（2026-11-21 富媒体宿主专用卡片数据结�
     for (const s of card.summary) expect(s.value.length).toBeGreaterThan(0);
   });
 
+  it('2026-11-24 展开区召回模式：mode 与 buildRecallModeLine 同源，独立字段不塞进 summary 四行', () => {
+    const withDispatch = recallResult({
+      dispatch: {
+        source: 'manual', suggested: 'fact_first', applied: 'fact_first', secondary: null,
+        reason: '手动指定 事实优先', weights_source: 'manual',
+      },
+    });
+    const h2 = buildRecallHint(withDispatch, rollupRecalls([], issuedAt), null);
+    const card2 = buildRecallCardData(withDispatch, h2, null);
+    // 与 display.markdown / 明细页同一真源，不另立模式文案
+    expect(card2.mode).toBe(buildRecallModeLine(withDispatch));
+    expect(card2.mode).toContain('事实优先');
+    expect(card2.mode).toContain('用户指定');
+    // 不污染统计汇总四行契约（mode 是独立字段，展开区第一行单独渲染）
+    expect(card2.summary.map((s) => s.label)).toEqual(['Token', '费用', '今日', '全部']);
+
+    // 会话视图 dispatch=null → mode 为 null，宿主据此不渲染这一行
+    const plain = recallResult();
+    const h1 = buildRecallHint(plain, rollupRecalls([], issuedAt), null);
+    expect(buildRecallCardData(plain, h1, null).mode).toBeNull();
+  });
+
   it('hits 与 basis 同源同序，index 从 1 开始对应 [n]；背景逐条独立', () => {
     const r = recallResult();
     const hint = buildRecallHint(r, rollupRecalls([], issuedAt), null);
@@ -1224,5 +1247,55 @@ describe('buildRecallCardData（2026-11-21 富媒体宿主专用卡片数据结�
     expect(card.hits[1].supersede_note).toBe('以最新为准');
     expect(card.hits[2].supersede_note).toBeUndefined();
     expect(card.basis).toEqual(card.hits); // basis 同源带出合并提示
+  });
+});
+
+// P1-5（2026-11-25）：次模式「参考了什么」进回显——卡片/detail markdown/明细页同源，compact 单行不变。
+describe('P1-5 次模式内容进回显', () => {
+  const issuedAt = Date.UTC(2026, 10, 1, 1, 33, 0);
+  const meta = (): Parameters<typeof buildRecallDetailPage>[3] => ({
+    project_id: 'P1', query: '缓存 TTL', client: 'test',
+    issuedAt, expiresAt: issuedAt + 30 * 60_000,
+  });
+  const secResult = () => recallResult({
+    secondary_mode_hint: {
+      mode: 'fact_first',
+      content: '缓存 TTL 生产默认 300s，灰度 600s 的核对记录',
+      note: '次模式「事实优先」参考摘要（≤200t，未并入命中、不计入 payload）',
+    },
+  });
+
+  it('secondaryDisplayLine：有 Hint 给人话行，无 Hint 返回 null', () => {
+    expect(secondaryDisplayLine(secResult())).toContain('缓存 TTL 生产默认 300s');
+    expect(secondaryDisplayLine(secResult())).toContain('事实优先');
+    expect(secondaryDisplayLine(recallResult())).toBeNull();
+  });
+
+  it('卡片新增 secondary 字段；无次模式为 null，不进 summary 四行', () => {
+    const r = secResult();
+    const hint = buildRecallHint(r, rollupRecalls([], issuedAt), null);
+    const card = buildRecallCardData(r, hint, null);
+    expect(card.secondary).toContain('缓存 TTL');
+    expect(card.summary.map((s) => s.label)).toEqual(['Token', '费用', '今日', '全部']);
+    expect(buildRecallCardData(recallResult(), hint, null).secondary).toBeNull();
+  });
+
+  it('detail markdown 含次模式参考段；compact 单行仍只有一行、不含次模式内容', () => {
+    const r = secResult();
+    const hint = buildRecallHint(r, rollupRecalls([], issuedAt), null);
+    const md = buildRecallMarkdown(r, hint, null);
+    expect(md).toContain('**↳ 次模式参考（未并入命中）**');
+    expect(md).toContain('缓存 TTL 生产默认 300s');
+    const compact = buildRecallCompactMarkdown(hint);
+    expect(compact).not.toContain('\n');
+    expect(compact).not.toContain('次模式');
+  });
+
+  it('明细页 HTML 出现次模式 supnote，且转义正文（不注入原始 HTML）', () => {
+    const r = recallResult({ secondary_mode_hint: { mode: 'fact_first', content: '<script>bad</script> 参考' } });
+    const html = buildRecallDetailPage(r, buildRecallHint(r, rollupRecalls([], issuedAt), null), null, meta());
+    expect(html).toContain('class="supnote"');
+    expect(html).not.toContain('<script>bad</script>');
+    expect(html).toContain('&lt;script&gt;bad&lt;/script&gt;');
   });
 });
