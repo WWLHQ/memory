@@ -191,7 +191,9 @@ export async function coreEngine(
         }
       : null,
     dispatch: disp,
-    request_id: r?.request_id ?? _requestId,
+    // 多项目合并：banner 的 dispatch / hit_keywords / 次模式都取自 primary，
+    // request_id 必须同源，否则点「按 id 查审计」回放的是另一条链路，展示与审计对不上。
+    request_id: primary?.request_id ?? r?.request_id ?? _requestId,
     evidence_thin,
     cold_recall: evidence_thin === 'backfill_hit',
   };

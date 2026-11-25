@@ -15,7 +15,8 @@ import { listProjectIds } from '../shared/kernelProjects.ts';
 import { AuditTrailCard } from './AuditTrailCard.tsx';
 import { useToast } from './useToast.tsx';
 import { useHostTheme } from '../shared/hostTheme.ts';
-import { resolveSceneBudget } from './logic.ts';
+import { sceneName, modeName, sceneLabel, modeLabel, resolveSceneBudget } from './logic.ts';
+import type { Scene, Mode } from './types.ts';
 import type { BudgetData, RecallHistoryRow, RecentRecallRow } from './types.ts';
 
 type RetTab = 'work' | 'history' | 'rules';
@@ -335,7 +336,7 @@ export function RetrievalPage() {
                       按 id 查审计 →
                     </button>
                     <span className="ret-trail-facts">
-                      场景 {result.banner.scene} · 模式 {result.banner.mode} · 命中 {displayHits.length} 条 ·
+                      场景 {sceneName(result.banner.scene as Scene)} · 模式 {modeName(result.banner.mode as Mode)} · 命中 {displayHits.length} 条 ·
                       payload {result.budget.payload_tokens}t · 耗时 {result.latency_ms} ms · 深度 {result.depth}
                     </span>
                   </div>
@@ -349,7 +350,7 @@ export function RetrievalPage() {
               {result ? (
                 <TokenBudgetCard
                   data={budgetView}
-                  sourceNote={`本次召回 · ${result.banner.scene} / ${result.banner.mode}`}
+                  sourceNote={`本次召回 · ${sceneName(result.banner.scene as Scene)} / ${modeName(result.banner.mode as Mode)}`}
                   onOpenSource={() => {
                     window.location.href = `/audit.html?request_id=${encodeURIComponent(result.banner.request_id)}`;
                   }}
@@ -421,7 +422,7 @@ export function RetrievalPage() {
                     <tr key={r.request_id}>
                       <td className="mono">{r.request_id}</td>
                       <td>{r.query}</td>
-                      <td className="mono">{r.scene} · {r.mode}</td>
+                      <td className="mono">{sceneLabel(r.scene)} · {modeLabel(r.mode)}</td>
                       <td className="num">{r.hits}</td>
                       <td className="num">{r.payload_tokens}</td>
                       <td className="num">{r.latency_ms === null ? '未采集' : `${r.latency_ms} ms`}</td>

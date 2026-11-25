@@ -3,6 +3,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { coreEngine } from '../coreEngine.ts';
 import { getKernelWithSeed, resetKernelForTests } from '../../kernel.ts';
+import { getKernelStorage } from '../../kernel.ts';
 
 const HIT = { content: '架构选型记录：内核缓存分层', category: 'fact', project_id: 'P-a' } as const;
 
@@ -33,6 +34,17 @@ describe('A6 · banner 读内核分流事实', () => {
     // 旧实现把 history_query 降级成 default，该查询会走「零命中 + 短查询」→ minimal/auto
     expect(r.banner.mode).toBe('event_replay');
     expect(r.banner.dispatch?.suggested).toBe('event_replay');
+  });
+
+  it('多项目合并：banner.request_id 与 dispatch 同源（首个带 dispatch 的项目），审计可按 id 回放', async () => {
+    await getKernelWithSeed()._seedMemory(HIT);
+    await getKernelWithSeed()._seedMemory({ content: '缓存分层：P-b 灰度配置', category: 'fact', project_id: 'P-b' });
+    const r = await coreEngine('架构选型怎么定', 'task_start', null, 'req_multi_rid');
+    expect(r.banner.dispatch).not.toBeNull();
+    const audits = await getKernelStorage().queryAudit({ request_id: r.banner.request_id, action: 'mode_dispatch' });
+    expect(audits).toHaveLength(1);
+    // primary = 首个带 dispatch 的 recall（P-a 先于 P-b 建账本）；旧实现取末条 P-b → 这里会红。
+    expect(audits[0].project_id).toBe('P-a');
   });
 
   it('次模式提示取内核真值；内核没有次模式时为 null（不再硬编码「极简 200t」）', async () => {

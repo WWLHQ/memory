@@ -20,6 +20,20 @@ export function sceneName(s: Scene): string {
   return { default: '默认', task_start: '任务启动', history_query: '历史查询', critical: '合规关键' }[s];
 }
 
+/**
+ * 审计历史行的 scene / mode 是裸字符串（可能含未知值或「无」），不保证在枚举内。
+ * UI 铁律：不把原始枚举值打到界面上；但未知值也不能伪造中文，原样保留并标注，诚实优先。
+ */
+export function sceneLabel(s: string): string {
+  return s === 'default' || s === 'task_start' || s === 'history_query' || s === 'critical'
+    ? sceneName(s)
+    : s === '无' ? s : `${s}（未知场景）`;
+}
+
+export function modeLabel(m: string): string {
+  return m in MODE_NAMES ? modeName(m as Mode) : m === '无' ? m : `${m}（未知模式）`;
+}
+
 /** §1.1 scene 联动表（2.4.1 场景化预算 + 2.4.4 候选集） */
 const SCENE_TABLE: Record<Scene, SceneBudget> = {
   default: { budget: 800, defaultMode: 'minimal', backfillDepth: 'L3+L4', rerank: false, modes: ['top_insight', 'fact_first', 'event_replay', 'pattern_reasoning', 'minimal'] },
@@ -66,10 +80,13 @@ export function resolveModeLinkage(scene: Scene, mode: ModeSel): { mode: ModeSel
  */
 export function isMinimalCandidate(query: string): boolean {
   const q = query.trim();
-  const zhChars = q.replace(/[，。！？、；：""''（）\s]/g, '').length;
-  const hasCJK = /[\u4e00-\u9fff]/.test(q);
-  if (hasCJK) return zhChars < 30;
-  return q.split(/\s+/).filter(Boolean).length < 12;
+  const cjk = (q.match(/[\u4e00-\u9fff]/g) ?? []).length;
+  const latinWords = (q.match(/[A-Za-z]+/g) ?? []).length;
+  // 与内核 recallModes.measureQuery 同口径：纯中文按字、纯英文按词，混排不触发极简。
+  // 用户已批准此偏离原型（原型 isShort 把混排按中文算，会给出误导性提示）。
+  if (cjk > 0 && latinWords === 0) return cjk < 30;
+  if (latinWords > 0 && cjk === 0) return latinWords < 12;
+  return false;
 }
 
 /** §3 排序：pinned 置顶（R3）→ score 降序 → confidence 次级降序 */

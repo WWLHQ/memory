@@ -2,9 +2,11 @@ import { describe, it, expect } from 'vitest';
 import {
   normalizeScene, normalizeMode, resolveSceneBudget, resolveModeLinkage,
   isMinimalCandidate, sortHits, freshness, decayClass,
-  budgetLevel, validateQuery, modeName, sceneName,
+  budgetLevel, validateQuery, modeName, sceneName, sceneLabel, modeLabel,
 } from '../logic.ts';
 import type { RetrievalHit } from '../types.ts';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 const hit = (over: Partial<RetrievalHit>): RetrievalHit => ({
   memory_id: 'm', content: 'c', l2_only: false, decay_class: 'hot', pinned: false,
@@ -61,6 +63,14 @@ describe('isMinimalCandidate（§7.2）', () => {
   });
   it('英文 <12 词 → true', () => {
     expect(isMinimalCandidate('fix the null pointer bug in login flow')).toBe(true);
+  });
+  it('中英混排 → false（与内核 measureQuery 同口径；用户已批准偏离原型）', () => {
+    expect(isMinimalCandidate('修一下这个空指针 FastAPI')).toBe(false);
+    expect(isMinimalCandidate('FastAPI 连接池怎么配')).toBe(false);
+    expect(validateQuery('修一下空指针 bug').minimalHint).toBe(false);
+  });
+  it('纯标点 / 空 → false', () => {
+    expect(isMinimalCandidate('，。！？')).toBe(false);
   });
 });
 
@@ -122,5 +132,23 @@ describe('名称映射', () => {
   it('mode/scene 中文名', () => {
     expect(modeName('fact_first')).toBe('事实优先');
     expect(sceneName('critical')).toBe('合规关键');
+  });
+  it('审计历史行的裸字符串：已知值译中文，未知值保留并标注', () => {
+    expect(sceneLabel('critical')).toBe('合规关键');
+    expect(modeLabel('fact_first')).toBe('事实优先');
+    expect(sceneLabel('无')).toBe('无');
+    expect(modeLabel('无')).toBe('无');
+    expect(sceneLabel('weird_scene')).toBe('weird_scene（未知场景）');
+    expect(modeLabel('weird_mode')).toBe('weird_mode（未知模式）');
+  });
+  it('RetrievalPage 不把 scene/mode 裸枚举打到界面上（UI 铁律）', () => {
+    const src = readFileSync(resolve(process.cwd(), 'src/web/retrieval/RetrievalPage.tsx'), 'utf8');
+    expect(src).not.toMatch(/场景 \{result\.banner\.scene\}/);
+    expect(src).not.toMatch(/模式 \{result\.banner\.mode\}/);
+    expect(src).not.toMatch(/\{r\.scene\} · \{r\.mode\}/);
+    expect(src).toContain('sceneName(result.banner.scene');
+    expect(src).toContain('modeName(result.banner.mode');
+    expect(src).toContain('sceneLabel(r.scene)');
+    expect(src).toContain('modeLabel(r.mode)');
   });
 });
