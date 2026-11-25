@@ -59,8 +59,9 @@ describe('growthConfig 单一真源', () => {
       feedback_policy: { enabled: true, window_days: 14, reject_downgrade_threshold: 4 },
     };
     // M0：新增 evolution / schedule_exprs 两块必填字段，未显式给出时取默认（默认即改造前行为）
+    // P2-9-③：mode_dispatch 为可选命名空间，未给出 = null（旧账本口径，不伪造词表）
     expect(normalizeGrowthConfig(custom)).toEqual({
-      ...custom, evolution: DEFAULT_EVOLUTION, schedule_exprs: DEFAULT_SCHEDULE_EXPRS,
+      ...custom, evolution: DEFAULT_EVOLUTION, schedule_exprs: DEFAULT_SCHEDULE_EXPRS, mode_dispatch: null,
     });
   });
 

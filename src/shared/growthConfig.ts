@@ -343,6 +343,62 @@ export function resolveScheduleExpr(key: ScheduleKey, exprs?: Partial<ScheduleEx
   return typeof v === 'string' && parseCron(v) !== null ? v : DEFAULT_SCHEDULE_EXPRS[key];
 }
 
+/**
+ * P2-9-③：召回模式分流热更块，统一放 growth:v1 的 mode_dispatch 命名空间。
+ * 与 core/recallModes.ts 的类型逐字段映射（shared 不反向依赖 core），校验在 shared 完成，
+ * 任一字段非法 → 整块 null（调用方回退内核基线），绝不部分生效。
+ */
+export const MODE_DISPATCH_MODES = ['top_insight', 'fact_first', 'event_replay', 'pattern_reasoning', 'minimal'] as const;
+export type ModeDispatchMode = (typeof MODE_DISPATCH_MODES)[number];
+
+export interface ModeDispatchFeatureWords { words: string[]; high_conf: string[] }
+export interface ModeDispatchWeight { w_f: number; w_i: number; w_c: number; w_a: number }
+export interface ModeDispatchSnapshot {
+  min_len_zh: number;
+  min_len_en: number;
+  hit_threshold: number;
+  feature_words: Record<ModeDispatchMode, ModeDispatchFeatureWords>;
+  mode_weights: Record<ModeDispatchMode, ModeDispatchWeight>;
+}
+
+const isStringArray = (v: unknown): v is string[] =>
+  Array.isArray(v) && v.every((x) => typeof x === 'string' && x.length > 0 && x.length <= 40);
+const validModeWeight = (v: unknown): v is ModeDispatchWeight => {
+  if (!v || typeof v !== 'object') return false;
+  const r = v as Record<string, unknown>;
+  const ks = ['w_f', 'w_i', 'w_c', 'w_a'] as const;
+  let sum = 0;
+  for (const k of ks) { if (!isUnit(r[k])) return false; sum += r[k] as number; }
+  return Math.abs(sum - 1) <= 1e-6;
+};
+
+/** 整块校验：词表/阈值/权重任一非法 → null；不按比例修正、不静默用部分值。 */
+export function normalizeModeDispatch(v: unknown): ModeDispatchSnapshot | null {
+  if (!v || typeof v !== 'object') return null;
+  const r = v as Record<string, unknown>;
+  if (!isIntIn(r.min_len_zh, 5, 200) || !isIntIn(r.min_len_en, 2, 60) || !isIntIn(r.hit_threshold, 1, 5)) return null;
+  const fwRaw = r.feature_words;
+  const mwRaw = r.mode_weights;
+  if (!fwRaw || typeof fwRaw !== 'object' || !mwRaw || typeof mwRaw !== 'object') return null;
+  const fw = fwRaw as Record<string, unknown>;
+  const mw = mwRaw as Record<string, unknown>;
+  const words = {} as Record<ModeDispatchMode, ModeDispatchFeatureWords>;
+  const weights = {} as Record<ModeDispatchMode, ModeDispatchWeight>;
+  for (const m of MODE_DISPATCH_MODES) {
+    const w = fw[m];
+    if (!w || typeof w !== 'object') return null;
+    const wObj = w as Record<string, unknown>;
+    if (!isStringArray(wObj.words) || !isStringArray(wObj.high_conf)) return null;
+    if (!validModeWeight(mw[m])) return null;
+    words[m] = { words: [...wObj.words], high_conf: [...wObj.high_conf] };
+    weights[m] = { ...(mw[m] as ModeDispatchWeight) };
+  }
+  return {
+    min_len_zh: r.min_len_zh, min_len_en: r.min_len_en, hit_threshold: r.hit_threshold,
+    feature_words: words, mode_weights: weights,
+  };
+}
+
 export interface GrowthConfig {
   weights: DimWeights;
   thresholds: LayerThresholds;
@@ -367,6 +423,8 @@ export interface GrowthConfig {
    * 主进程调度与页面展示共用；改它即改实际执行节奏。
    */
   schedule_exprs: ScheduleExprs;
+  /** P2-9-③：模式分流热更块；缺省/非法 → null（回退内核基线），不新立独立快照。 */
+  mode_dispatch?: ModeDispatchSnapshot | null;
 }
 
 const isUnit = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1;
@@ -429,5 +487,6 @@ export function normalizeGrowthConfig(raw: unknown): GrowthConfig {
     feedback_policy: validFeedbackPolicy(r.feedback_policy) ? { ...r.feedback_policy } : { ...DEFAULT_FEEDBACK_POLICY },
     evolution: normalizeEvolutionConfig(r.evolution),
     schedule_exprs: normalizeScheduleExprs(r.schedule_exprs),
+    mode_dispatch: normalizeModeDispatch(r.mode_dispatch),
   };
 }

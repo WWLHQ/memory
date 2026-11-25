@@ -7,7 +7,8 @@ import { MemoryPendingStore, PendingWrites, type WriteKnobs } from './pendingWri
 import {
   buildMemsDetail, fuseRelevance, hardFilter, scoreMemory, tokenCoverageWeighted, RELEVANCE_FUSION_LAMBDA,
 } from './forgetting.ts';
-import { findParamsSnapshot, growthConfigFromLedger, proxyCapsFromSnapshot } from './paramsSnapshot.ts';
+import { findParamsSnapshot, growthConfigFromLedger, modeDispatchFromLedger, proxyCapsFromSnapshot } from './paramsSnapshot.ts';
+import { applyDepthGuard, buildConflictNotes } from './recallModeKernel.ts';
 import { proxyCostToday } from '../../shared/proxyAccounting.ts';
 import { extractQueryTimestamp, hitTimeWindow, TIME_WINDOW_MARGIN_MS, TIME_WINDOW_BONUS } from '../../shared/timeWindow.ts';
 import {
@@ -20,7 +21,7 @@ import { cosine, embedSync, tokenize, DEFAULT_VECTOR_DIM } from './vector.ts';
 import { docTokenSet } from './docTokenSet.ts';
 import { matchedTerms } from './hitHighlight.ts';
 import { buildSupersedeHit, mergeSupersededHits, probeSupersededTargets } from './recallSupersede.ts';
-import { isConcreteMode, modeSpec, modeWeights, normalizeScene, resolveMode, type LayerKey } from './recallModes.ts';
+import { isConcreteMode, modeSpec, modeWeights, normalizeScene, resolveMode, type LayerKey, type ModeDispatchConfig } from './recallModes.ts';
 import type { RecallWeights } from '../../shared/growthConfig.ts';
 import type { L0BlobStore } from './l0Store.ts';
 import { ulid } from './ulid.ts';
@@ -204,7 +205,20 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
     if (req.mode !== undefined && req.mode !== null && req.mode !== 'auto' && !isConcreteMode(req.mode)) {
       throw new MemAgentError('E_VECTOR', `非法的 mode：${String(req.mode)}（只能是 auto 或 5 个具体模式之一）`);
     }
-    const resolved = resolveMode({ query: req.query, scene, explicitMode: req.mode });
+    // P2-9-③：热更配置由调用方从 growth:v1.mode_dispatch 派生后注入，resolveMode 保持纯函数。
+    // 无快照/快照非法 → 不传 config，逐字走内核基线（与改造前行为一致）。
+    const pSystemMems = await storage.listMemories({ project_id: 'P_SYSTEM' });
+    const growthCfg = growthConfigFromLedger(pSystemMems);
+    const dispatchState = modeDispatchFromLedger(pSystemMems);
+    mark('growth');
+    const snapshot = dispatchState.snapshot;
+    const dispatchConfig: ModeDispatchConfig | undefined = snapshot ? {
+      minLenZh: snapshot.min_len_zh, minLenEn: snapshot.min_len_en, hitThreshold: snapshot.hit_threshold,
+      // 整块已由 shared/normalizeModeDispatch 校验为五模式齐全，这里的强转只是把 Record<string,…> 收窄回枚举键。
+      featureWords: Object.fromEntries(Object.entries(snapshot.feature_words).map(([m, w]) => [m, { words: w.words, highConf: w.high_conf }])) as ModeDispatchConfig['featureWords'],
+      weights: Object.fromEntries(Object.entries(snapshot.mode_weights).map(([m, w]) => [m, { f: w.w_f, i: w.w_i, c: w.w_c, a: w.w_a }])) as ModeDispatchConfig['weights'],
+    } : undefined;
+    const resolved = resolveMode({ query: req.query, scene, explicitMode: req.mode, config: dispatchConfig });
     // A2 只做「分流观测」：自动分流到「极简」暂不生效。极简会关掉项目背景与冷层补查，
     // 属 A4 分层改造范围；在分层取用接上之前强行生效，会让存量短查询召回静默变差（A 闸门：既有行为逐条不变）。
     // 显式 minimal 不受影响——它一直是真执行的。分流建议与实际执行的差异，审计里用 mode / applied_mode 各记一份。
@@ -223,15 +237,12 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
     // A3（召回模式接线）：手动模式改用该模式的权重向量；auto 档继续走 growth:v1——
     // 默认档是绝大多数调用，不拿一次模式改动推翻自生长出来的召回参数。
     // 字段名不同：recallModes 用 {f,i,c,a}，growthConfig 用 {w_f,w_i,w_c,w_a}，必须显式映射（展开会得 undefined）。
-    const manualMw = isConcreteMode(req.mode) ? modeWeights(resolved.mode) : null;
+    const hotMw = dispatchConfig?.weights?.[resolved.mode];
+    const manualMw = isConcreteMode(req.mode) ? (hotMw ?? modeWeights(resolved.mode)) : null;
     let recallWeights: RecallWeights;
     let weightsSource: 'manual' | 'growth:v1';
     // M1-2：同一份增长配置——既取召回权重（auto 档），也取 evolution.sample_top_n 用于 per-hit 埋点截断。
     // 只读 P_SYSTEM 下的 preference 记录，不做全库扫描（recall 本身已在 p95 1.3s 量级）。
-    const growthCfg = growthConfigFromLedger(
-      await storage.listMemories({ project_id: 'P_SYSTEM' }),
-    );
-    mark('growth');
     if (manualMw) {
       recallWeights = { w_f: manualMw.f, w_i: manualMw.i, w_c: manualMw.c, w_a: manualMw.a };
       weightsSource = 'manual';
@@ -442,6 +453,31 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
     }
     mark('personal');
 
+    // P2-9-② critical 硬下限守卫：裁剪后 L3/L4/L2 有候选的层至少各留 1 条。
+    // 候选池取已通过硬过滤/打分的 topK（不是全库），避免把从未进入召回的层强行塞进 prompt。
+    const guardCandidates: Hit[] = scored.map(({ m, score }) => ({
+      mem_id: m.mem_id, content: m.content, layer: m.layer, decay_class: m.decay_class,
+      pinned: m.pinned, locked: m.locked, score, evidence_ref: `l0:${m.mem_id}`,
+    }));
+    const guarded = applyDepthGuard(hits, guardCandidates, scene, BUDGET.hard, estTokens);
+    hits = guarded.hits;
+    payload_tokens = hits.reduce((a, h) => a + estTokens(h.content), 0);
+    const depthGuard = guarded.guard;
+
+    // P2-9-① 显式冲突对仲裁：只仲裁账本冲突_id 成对且双方都在本次命中里的条目。
+    let conflictNotes = isConcreteMode(mode) ? buildConflictNotes(hits, all, mode) : [];
+    let noteTokens = conflictNotes.reduce((a, n) => a + estTokens(n.text), 0);
+    if (payload_tokens + noteTokens > BUDGET.hard) {
+      // 说明行与 winner 一起裁剪：预算不足时整块不注入，不挤掉真实命中条目。
+      noteTokens = 0;
+      conflictNotes = [];
+    } else {
+      // 把说明挂到 winner 命中上，宿主钩子注入 prompt 时同一行进入上下文（单一真源）。
+      const byWinner = new Map(conflictNotes.map((n) => [n.winner, n.text] as const));
+      hits = hits.map((h) => byWinner.has(h.mem_id) ? { ...h, conflict_note: byWinner.get(h.mem_id) } : h);
+    }
+    payload_tokens += noteTokens;
+
     // A5（召回模式接线）：次模式降级注入——只作独立 hint 下发，不混进 hits、不计入 payload。
     // 理由：若偷偷把 200t 塞进 payload，硬熔断与省量口径会同时失真；hint 是「还能参考什么」，不是「已经注入了什么」。
     // 极简主模式无次模式（§2.4.3）；手动模式即定论，resolveMode 不会给 secondary。
@@ -527,6 +563,9 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
       scanned_memories: all.length,
       background,
       savings,
+      ...(conflictNotes.length ? { conflict_notes: conflictNotes } : {}),
+      depth_guard: depthGuard,
+      dispatch_config_source: snapshot ? 'growth:v1.mode_dispatch' : 'baseline',
     };
     // 阶段4-I / B8：把真实可采的监控字段写进审计 detail（监控页与审计页据此实算，历史缺字段的行不计入）。
     //  · evidence_thin：2.4.3 逃生阀的真实结果（undefined = 未触发，落 false，不拿「无字段」冒充 false 之外的语义）；
@@ -538,6 +577,36 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
     // A2：分流审计（§4.3）——与 recall 审计同 request_id，可按 request_id 关联出「为什么是这个模式」。
     // 手动/自动都记，理由写在 reason 里；会话视图不分流，不写这条。
     const auditAt = Date.now();
+    // P2-9-③：热更生效/回退审计（与 mode_dispatch 同 request_id；absent = 旧账本，不写噪音审计）
+    if (dispatchState.status !== 'absent') {
+      await audit(
+        request_id,
+        dispatchState.status === 'applied' ? 'dispatch_config_applied' : 'dispatch_config_fallback',
+        {
+          source: 'growth:v1.mode_dispatch',
+          status: dispatchState.status,
+          ...(dispatchState.reason ? { reason: dispatchState.reason } : {}),
+          min_len_zh: snapshot?.min_len_zh ?? null,
+          min_len_en: snapshot?.min_len_en ?? null,
+          hit_threshold: snapshot?.hit_threshold ?? null,
+        },
+        { project_id: req.project_id, user_id: req.user_id },
+      );
+    }
+    // P2-9-②：守卫触发才写审计（非 critical / 无缺层不写噪音）
+    if (depthGuard.triggered) {
+      await audit(request_id, 'depth_guard', {
+        scene, required: depthGuard.required, missing: depthGuard.missing,
+        restored: depthGuard.restored, ...(depthGuard.reason ? { reason: depthGuard.reason } : {}),
+      }, { project_id: req.project_id, user_id: req.user_id });
+    }
+    // P2-9-①：有显式冲突对才写仲裁审计（rationale 与回显同源）
+    if (conflictNotes.length > 0) {
+      await audit(request_id, 'conflict_arbitrated', {
+        mode, count: conflictNotes.length,
+        notes: conflictNotes.map((n) => ({ a: n.a, b: n.b, winner: n.winner, loser: n.loser, loser_role: n.loser_role, rationale: n.rationale })),
+      }, { project_id: req.project_id, user_id: req.user_id });
+    }
     await audit(request_id, 'mode_dispatch', {
       mode: dispatch.suggested,     // 分流结论（可能是「建议极简」）
       applied_mode: dispatch.applied, // 实际执行模式（自动极简观测档会与 mode 不同）

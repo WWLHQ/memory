@@ -7,7 +7,7 @@ export const ACTION_LABEL: Record<string, string> = {
   l0_auth_grant: 'L0授权发放', l0_auth_deny: 'L0申请拒绝', l0_auth_revoke: 'L0授权撤销',
   l0_auth_expire: 'L0授权过期', security_change: '安全变更', memory_op: '记忆操作',
   login: '登录', team_assign: '团队分配',
-  mode_dispatch: '模式分流', rerank_fallback: '重排回退', audit_delete: '审计删除',
+  mode_dispatch: '模式分流', mode_feedback: '模式反馈', dispatch_config_applied: '分流配置已生效', dispatch_config_fallback: '分流配置已回退', depth_guard: '深度守卫', conflict_arbitrated: '冲突仲裁', rerank_fallback: '重排回退', audit_delete: '审计删除',
   // P1-9：MCP 侧分段耗时埋点（技术账本）。日志页若收录也必须出中文，不得露出英文动作名。
   mcp_timing: '召回分段耗时',
 };

@@ -5,6 +5,7 @@
 import { useEffect, useState } from 'react';
 import { QueryBar, type QueryBarValue } from './QueryBar.tsx';
 import { ModeBanner } from './ModeBanner.tsx';
+import { ModeFeedbackCard } from './ModeFeedbackCard.tsx';
 import { TokenBudgetCard, FunnelCard, TrimCard } from './BudgetPanel.tsx';
 import { ContextPanel } from './ContextPanel.tsx';
 import { ResultRow } from './ResultRow.tsx';
@@ -233,11 +234,15 @@ export function RetrievalPage() {
           />
 
           {phase === 'RESULT' && result && (
-            <ModeBanner
-              data={result.banner}
-              onRequestId={(id) => { window.location.href = `/audit.html?request_id=${encodeURIComponent(id)}`; }}
-              onFactRetry={() => { setQv({ ...qv, mode: 'fact_first' }); doSearch(); }}
-            />
+            <>
+              <ModeBanner
+                data={result.banner}
+                onRequestId={(id) => { window.location.href = `/audit.html?request_id=${encodeURIComponent(id)}`; }}
+                onFactRetry={() => { setQv({ ...qv, mode: 'fact_first' }); doSearch(); }}
+              />
+              {/* §3.4 模式反馈：只有正常结果路径展示，硬熔断/空结果不诱导反馈 */}
+              <ModeFeedbackCard data={result.banner} onToast={flash} />
+            </>
           )}
 
           {phase === 'ERROR' && (

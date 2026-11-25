@@ -9,7 +9,7 @@ import {
   UNSET_PROXY_ACCOUNTING, UNSET_PROXY_CAPS, normalizeAccountingPrice, normalizeAccountingQuota,
   normalizeProxyCap, type ProxyAccounting, type ProxyCaps,
 } from '../../shared/proxyAccounting.ts';
-import { normalizeGrowthConfig, type GrowthConfig } from '../../shared/growthConfig.ts';
+import { normalizeGrowthConfig, normalizeModeDispatch, type GrowthConfig, type ModeDispatchSnapshot } from '../../shared/growthConfig.ts';
 
 export const PARAMS_PREF_PREFIX = 'params:v1:';
 /**
@@ -198,6 +198,34 @@ export function growthConfigFromLedger(mems: Memory[]): GrowthConfig {
   } catch {
     return normalizeGrowthConfig(null);
   }
+}
+
+/**
+ * P2-9-③：growth:v1.mode_dispatch 的读取态。
+ * applied = 快照存在且整块合法；fallback = 快照存在但整块非法（回退内核基线）；
+ * absent = 旧账本无该命名空间（行为逐字不变）。审计据此写 applied/fallback。
+ */
+export interface ModeDispatchLedgerState {
+  status: 'applied' | 'fallback' | 'absent';
+  snapshot: ModeDispatchSnapshot | null;
+  reason?: string;
+}
+export function modeDispatchFromLedger(mems: Memory[]): ModeDispatchLedgerState {
+  const m = findGrowthMemory(mems);
+  if (!m) return { status: 'absent', snapshot: null };
+  let raw: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(m.content.slice(GROWTH_PREF_PREFIX.length));
+    if (!parsed || typeof parsed !== 'object') return { status: 'absent', snapshot: null };
+    raw = parsed as Record<string, unknown>;
+  } catch {
+    return { status: 'fallback', snapshot: null, reason: 'growth:v1 快照解析失败' };
+  }
+  if (!Object.prototype.hasOwnProperty.call(raw, 'mode_dispatch')) return { status: 'absent', snapshot: null };
+  const snapshot = normalizeModeDispatch(raw.mode_dispatch);
+  return snapshot
+    ? { status: 'applied', snapshot }
+    : { status: 'fallback', snapshot: null, reason: 'mode_dispatch 整块校验失败（词表/阈值/权重和/类型）' };
 }
 
 export interface GrowthConfigSaveOptions {

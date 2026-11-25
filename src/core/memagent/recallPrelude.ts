@@ -102,9 +102,10 @@ export function buildRecallPrelude(hits: RecallHit[]): string | null {
       ? hit.source_excerpt.trim().slice(0, MAX_EXCERPT_CHARS)
       : '';
     const n = lines.length + 1;
+    const note = typeof hit.conflict_note === 'string' ? hit.conflict_note.trim().slice(0, 400) : '';
     lines.push(excerpt && excerpt !== body
-      ? `[${n}] ${body}\n    原文摘录：${excerpt}`
-      : `[${n}] ${body}`);
+      ? `[${n}] ${body}${note ? `\n    仲裁：${note}` : ''}\n    原文摘录：${excerpt}`
+      : `[${n}] ${body}${note ? `\n    仲裁：${note}` : ''}`);
   }
   if (lines.length === 0) return RECALL_EMPTY_HINT;
   const block = [

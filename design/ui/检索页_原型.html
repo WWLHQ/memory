@@ -106,6 +106,38 @@
   .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--panel2);
     border:1px solid var(--line);border-radius:8px;padding:9px 16px;font-size:13px;z-index:80;display:none}
   .legend{font-size:11px;color:var(--dim);margin-top:8px}
+  /* §3.1 二元分段控件（自动 / 手动） */
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .seg button{background:var(--panel2);border:none;color:var(--muted);padding:7px 14px;
+    cursor:pointer;font-size:13px;font-weight:600}
+  .seg button+button{border-left:1px solid var(--line)}
+  .seg button.active{background:var(--accent);color:#04121f}
+  /* §3.1 自动说明行 / 手动展开面板 */
+  .modeauto{font-size:12px;color:var(--muted);margin-top:6px}
+  .modepanel{margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);display:none}
+  .modepanel.show{display:block}
+  .modepanel .opts{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+  .modepanel .opt{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+    border-radius:7px;padding:5px 10px;cursor:pointer;font-size:12px}
+  .modepanel .opt.active{border-color:var(--accent);color:var(--accent)}
+  .modepanel .opt:disabled{opacity:.4;cursor:not-allowed}
+  /* §3.3 设为默认 / 重置为自动 */
+  .persist{display:flex;gap:8px;align-items:center;margin-top:8px;font-size:12px;color:var(--muted)}
+  .persist button{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+    border-radius:6px;padding:4px 9px;cursor:pointer;font-size:12px}
+  .persist .def-tag{color:var(--ok)}
+  /* §3.2 history_query 倾向预览 */
+  .tendency{font-size:12px;color:#ffe6a8;background:#3a2f10;border:1px solid #6b5a1e;
+    border-radius:6px;padding:5px 9px;margin-top:6px;display:none}
+  .tendency.show{display:block}
+  /* §3.4 模式反馈 👍/👎 + 👎 原因 */
+  .modefb{margin-top:12px;padding:10px 12px;background:var(--panel);border:1px solid var(--line);
+    border-radius:10px;font-size:12px;color:var(--muted)}
+  .modefb .fbrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .modefb button{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+    border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px}
+  .modefb button.picked{border-color:var(--accent);color:var(--accent)}
+  .modefb select{width:auto;font-size:12px;padding:4px 8px}
 </style>
 </head>
 <body>
@@ -142,10 +174,31 @@
       </select>
     </div>
     <div>
-      <label>mode（默认自动）</label>
-      <select id="mode">
+      <label>mode（§3.1 二元分段 · 默认自动）</label>
+      <div class="seg" id="modeseg">
+        <button type="button" class="active" data-seg="auto">自动（默认）</button>
+        <button type="button" data-seg="manual">手动</button>
+      </div>
+      <div class="modeauto" id="modeauto">由系统按场景与关键词自动判断模式。</div>
+      <div class="modepanel" id="modepanel">
+        <div class="opts" id="modeopts">
+          <button type="button" class="opt" data-mode="top_insight">顶层洞察优先</button>
+          <button type="button" class="opt" data-mode="fact_first">事实优先</button>
+          <button type="button" class="opt" data-mode="event_replay">事件复盘</button>
+          <button type="button" class="opt" data-mode="pattern_reasoning">模式推理</button>
+          <button type="button" class="opt" data-mode="minimal">极简轻量</button>
+        </div>
+        <div class="persist">
+          <button type="button" id="setdefault">设为该项目默认</button>
+          <button type="button" id="resetauto">重置为自动</button>
+          <span id="defmode"></span>
+        </div>
+      </div>
+      <div class="tendency" id="tendency">本次倾向：事件复盘（history_query 自动分流预览）</div>
+      <!-- 兼容既有 JS 的读写锚点：$("mode").value 恒等于当前生效 mode；不直接展示 -->
+      <select id="mode" style="display:none">
         <option value="">自动（null）</option>
-        <option value="top_insight">顶层洞察</option>
+        <option value="top_insight">顶层洞察优先</option>
         <option value="fact_first">事实优先</option>
         <option value="event_replay">事件复盘</option>
         <option value="pattern_reasoning">模式推理</option>
@@ -156,7 +209,7 @@
       <button class="btn" id="go">检索</button>
     </div>
   </div>
-  <div class="legend">联动规则：scene=critical 禁用「极简」（16.5）；query <30 字(中)/<12 词(英) 提示将触发极简（2.4.4）。</div>
+  <div class="legend">联动规则：scene=critical 禁用「极简」（16.5）；query <30 字(中)/<12 词(英) 提示将触发极简（2.4.4）。§3.1 手动档未选具体模式时点「检索」触发必填校验。§3.4 结果页带「这次模式选对了吗？」反馈。</div>
 
   <!-- 结果区 -->
   <div id="stage"></div>
@@ -293,6 +346,8 @@ function loadCase(id){
   const c=Object.assign({},CASES[id]);
   curCase=c;
   $("query").value=c.query; $("scene").value=c.scene; $("mode").value=c.mode||"";
+  // §3.1：用例带具体 mode → 手动档；否则自动档（与隐藏 #mode 同步）
+  setModeSeg(c.mode?"manual":"auto");
   syncSceneMode(); syncQueryHint();
   runRecall(c);
 }
@@ -416,6 +471,7 @@ function renderResult(c){
   </div>`;
 
   $("stage").innerHTML=html;
+  renderModeFeedback(c);   // §3.4 这次模式选对了吗？👍/👎（仅正常结果路径；硬熔断已在上方 return）
 }
 
 function ctxDefault(){return `<h3>上下文面板</h3><div class="kv">点选左侧任一记忆查看完整内容 / 关联 / 命中定位</div>`;}
@@ -464,14 +520,102 @@ function openAudit(rid){
 }
 $("audit").addEventListener("click",e=>{if(e.target===$("audit"))$("audit").classList.remove("show");});
 
+/* ============ §3 模式切换交互（3.1–3.4）============ */
+let modeSeg="auto";            // §3.1 当前分段：auto / manual
+let projectDefault="";         // §3.3 项目默认模式（全局默认恒为自动）
+let sessionManual="";          // §3.3 会话级记忆（连续手动选择记忆到会话结束）
+
+/* 分段切换：自动 ↔ 手动 */
+function setModeSeg(seg){
+  modeSeg=seg;
+  document.querySelectorAll("#modeseg button").forEach(b=>b.classList.toggle("active",b.dataset.seg===seg));
+  $("modeauto").style.display=seg==="auto"?"block":"none";
+  $("modepanel").classList.toggle("show",seg==="manual");
+  if(seg==="auto"){
+    $("mode").value="";              // 回自动 → mode=null
+    document.querySelectorAll("#modeopts .opt").forEach(o=>o.classList.remove("active"));
+  }else{
+    // 手动档：会话记忆优先，其次项目默认（critical 下极简会被 syncSceneMode 灰显）
+    const pick=sessionManual||projectDefault||"";
+    if(pick){$("mode").value=pick;syncOptActive();}
+  }
+  syncTendency();
+}
+/* 手动选具体模式 */
+function pickMode(m){
+  const opt=document.querySelector(`#modeopts .opt[data-mode="${m}"]`);
+  if(!opt||opt.disabled)return;
+  sessionManual=m;
+  $("mode").value=m;
+  syncOptActive();
+  syncSceneMode();              // critical 下选极简会被拦回自动
+  syncTendency();
+}
+function syncOptActive(){
+  document.querySelectorAll("#modeopts .opt").forEach(o=>o.classList.toggle("active",o.dataset.mode===$("mode").value));
+}
+/* §3.2 history_query 自动档倾向预览 */
+function syncTendency(){
+  const t=$("tendency");
+  if(modeSeg==="auto"&&$("scene").value==="history_query")t.classList.add("show");
+  else t.classList.remove("show");
+}
+/* §3.3 设为项目默认 / 重置为自动 */
+function setDefault(){
+  if(modeSeg!=="manual"||!$("mode").value){toast("需先在手动档选定具体模式");return;}
+  projectDefault=$("mode").value;
+  $("defmode").innerHTML=`项目默认：<span class="def-tag">${modeName(projectDefault)}</span>`;
+  toast(`已设为该项目默认：${modeName(projectDefault)}（全局默认恒为自动）`);
+}
+function resetAuto(){
+  projectDefault="";sessionManual="";
+  $("defmode").innerHTML="";
+  setModeSeg("auto");
+  toast("已重置为自动（全局默认）");
+}
+/* 中文名（与内核 RECALL_MODE_SPECS 同名，原型内只读展示） */
+function modeName(m){return MODES[m]?MODES[m].name:m||"自动";}
+
+/* §3.4 这次模式选对了吗？👍/👎（追加到 banner 下方） */
+function renderModeFeedback(c){
+  const eff=c.effMode||"auto";
+  const by=c.mode?`用户指定：${modeName(c.mode)}`:`自动分流：${c.effModeReason||"按场景与关键词"}`;
+  const div=document.createElement("div");
+  div.className="modefb";
+  div.innerHTML=`<div class="fbrow">
+    <span>这次模式选对了吗？（生效：${modeName(eff)} · ${by}）</span>
+    <button type="button" data-fb="up">👍 对</button>
+    <button type="button" data-fb="down">👎 不对</button>
+    <select id="fbReason" style="display:none" aria-label="不对的原因">
+      <option value="召回内容不对">召回内容不对</option>
+      <option value="模式选错">模式选错</option>
+      <option value="其它">其它</option>
+    </select>
+  </div>`;
+  const host=$("stage");host.insertBefore(div,host.firstChild);
+  div.querySelectorAll("button[data-fb]").forEach(b=>b.addEventListener("click",()=>{
+    const yes=b.dataset.fb==="up";
+    div.querySelectorAll("button[data-fb]").forEach(x=>x.classList.toggle("picked",x===b));
+    if(yes){$("fbReason").style.display="none";toast("已记「模式选对」（confirm 弱信号，进 7.2 样本池）");}
+    else{$("fbReason").style.display="inline-block";toast("👎：选择原因后记入 7.2 分流错误样本");}
+  }));
+}
+
 /* ============ 事件绑定 ============ */
 $("query").addEventListener("input",syncQueryHint);
-$("scene").addEventListener("change",syncSceneMode);
-$("mode").addEventListener("change",()=>{if($("mode").value==="minimal"&&SCENES[$("scene").value].noMinimal){$("mode").value="";toast("critical 禁用极简（16.5）");}});
+$("scene").addEventListener("change",()=>{syncSceneMode();syncTendency();});
+$("mode").addEventListener("change",()=>{
+  if($("mode").value==="minimal"&&SCENES[$("scene").value].noMinimal){$("mode").value="";toast("critical 禁用极简（16.5）");syncOptActive();}
+});
+document.querySelectorAll("#modeseg button").forEach(b=>b.addEventListener("click",()=>setModeSeg(b.dataset.seg)));
+document.querySelectorAll("#modeopts .opt").forEach(o=>o.addEventListener("click",()=>pickMode(o.dataset.mode)));
+$("setdefault").addEventListener("click",setDefault);
+$("resetauto").addEventListener("click",resetAuto);
 $("go").addEventListener("click",()=>{
   const q=$("query").value.trim();if(!q){toast("query 必填");return;}
+  if(modeSeg==="manual"&&!$("mode").value){toast("手动模式需指定具体模式（§3.1）");return;}
   let c={query:q,scene:$("scene").value,mode:$("mode").value,
-    effMode:$("mode").value||SCENES[$("scene").value].def,effModeReason:"auto",kws:[],secondary:null,
+    effMode:$("mode").value||SCENES[$("scene").value].def,effModeReason:$("mode").value?"用户指定":"auto",kws:[],secondary:null,
     hits:["mem_001"],payload:400,stage1:4,stage2:1,rerank:SCENES[$("scene").value].rerank,breach:false,
     breachDetail:[],evidenceThin:false,coldRecall:false,fallback:false};
   runRecall(c);

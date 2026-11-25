@@ -340,6 +340,11 @@ export function recallWarnings(
 ): string[] {
   const warnings: string[] = [];
   if (result.evidence_thin) warnings.push('⚠ 证据不足：未命中权威来源，建议事实优先重试');
+  // P2-9-②：深度守卫触发与证据不足并列为可观测告警（回显/折叠卡同源）
+  if (result.depth_guard?.triggered) {
+    const g = result.depth_guard;
+    warnings.push(`⚠ 深度守卫：缺失层 ${g.missing.join('、') || '无'}，已补 ${g.restored.join('、') || '无'}${g.reason ? ` · ${g.reason}` : ''}`);
+  }
   if (result.budget.status === 'fused') {
     warnings.push(`⚠ 预算熔断：已裁剪 ${fmtInt(result.savings.budget_trimmed_tokens)}t`);
   }

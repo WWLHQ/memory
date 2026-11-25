@@ -119,6 +119,8 @@ export interface Hit {
    * 让 Agent 同时拿到「摘要」与「原文片段」。L0 密文永不进入此字段。
    */
   source_excerpt?: string;
+  /** P2-9-①：本条作为显式冲突对 winner 时附带的仲裁说明（与 prompt 内置行同源） */
+  conflict_note?: string;
 }
 
 export interface Budget {
@@ -208,6 +210,12 @@ export interface RecallResult {
   background: RecallBackground;
   /** 省量核算（真实账本口径） */
   savings: RecallSavings;
+  /** P2-9-① 显式冲突对仲裁说明（与 prompt 内置行同源；无冲突对时为空数组） */
+  conflict_notes?: import('./recallModeKernel.ts').ConflictNote[];
+  /** P2-9-② critical 深度下限守卫结果（非 critical 场景 triggered=false） */
+  depth_guard?: import('./recallModeKernel.ts').DepthGuardInfo;
+  /** P2-9-③ 本次分流配置来源：内核基线 / growth:v1.mode_dispatch */
+  dispatch_config_source?: 'baseline' | 'growth:v1.mode_dispatch';
 }
 
 /** ---------- 写入（§2.2 / 2.2 / 6.1） ---------- */
@@ -673,7 +681,7 @@ export type AuditAction =
   // 会话生命周期
   | 'login' | 'login_fail' | 'logout'
   // 页面真实动作（4.3 全动作可查：日志页/审计页按动作回放，不允许账本里出现未知动作）
-  | 'mode_dispatch' | 'sync_up' | 'sync_down' | 'sync_reconcile' | 'rerank_fallback'
+  | 'mode_dispatch' | 'mode_feedback' | 'dispatch_config_applied' | 'dispatch_config_fallback' | 'depth_guard' | 'conflict_arbitrated' | 'sync_up' | 'sync_down' | 'sync_reconcile' | 'rerank_fallback'
   | 'team_assign' | 'audit_delete' | 'archive' | 'l0_auth_fail'
   // 第一轮个人记忆本机闭环：quick_add / confirm / reject / revoke / delete 各写一条
   | 'personal_memory'

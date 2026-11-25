@@ -115,6 +115,10 @@ export interface ModeDispatchConfig {
   minLenEn: number;
   /** 特征词命中阈值（≥ 此值算命中该模式） */
   hitThreshold: number;
+  /** P2-9-③：热更特征词表；由调用方从 growth:v1.mode_dispatch 派生，缺省用内核基线 */
+  featureWords?: Record<ConcreteMode, { words: string[]; highConf: string[] }>;
+  /** P2-9-③：热更五模式权重（和=1），仅对手动模式生效；缺省用内核基线 */
+  weights?: Record<ConcreteMode, ModeWeights>;
 }
 
 export const DEFAULT_DISPATCH_CONFIG: ModeDispatchConfig = { minLenZh: 30, minLenEn: 12, hitThreshold: 2 };
@@ -206,7 +210,7 @@ function measureQuery(query: string, cfg: ModeDispatchConfig): QueryLen {
 }
 
 function scoreMode(mode: ConcreteMode, query: string, cfg: ModeDispatchConfig): { score: number; hits: string[] } {
-  const fw = MODE_FEATURE_WORDS[mode];
+  const fw = cfg.featureWords?.[mode] ?? MODE_FEATURE_WORDS[mode];
   // A10：英文日志类查询（Exception / TRACE）原先因大小写不匹配全部漏命中。
   // 词表本身是小写基线，统一把 query 与特征词都归一化到小写再比较；中文不受影响。
   const q = query.toLowerCase();
