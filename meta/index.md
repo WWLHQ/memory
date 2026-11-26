@@ -28,7 +28,9 @@
 - 审查报告（Agent 侧记忆库 × 净化生长是否打通）：[specs/reports/审查-Agent侧记忆库与净化生长打通-2026-11-12.md](specs/reports/审查-Agent侧记忆库与净化生长打通-2026-11-12.md)
 - 三个独立缺口任务（GAP-1 召回权重 / GAP-2 反馈回灌 / GAP-3 双向可观测）：[specs/tasks/GROWTH-AGENT-EVOLUTION.md](specs/tasks/GROWTH-AGENT-EVOLUTION.md)
 - 自我进化 · 可验证的自动生长（M0 可感知与可配 / M1 埋点归因 / M2 离线评估 / M3 自动采纳回滚 / M4 时间线与漂移仪表 / M5 手动验证·回诊三态·判重族版本化 · **已全落地**）：[specs/tasks/SELF-EVOLUTION.md](specs/tasks/SELF-EVOLUTION.md)
-- 7.2 样本池读取侧接线（mode_feedback → 分流词表/权重回归 · **立项未开工**）：[specs/tasks/MODE-DISPATCH-EVOLUTION.md](specs/tasks/MODE-DISPATCH-EVOLUTION.md)
+- 7.2 样本池读取侧接线（mode_feedback → 分流词表/权重回归 · **读取+采纳+UI 两键已通**）：[specs/tasks/MODE-DISPATCH-EVOLUTION.md](specs/tasks/MODE-DISPATCH-EVOLUTION.md)
+- mode_feedback 增「应该是什么模式」字段 → 解锁 add_words / weight_step（**已实施**）：[specs/tasks/MODE-FEEDBACK-TARGET-FIELD.md](specs/tasks/MODE-FEEDBACK-TARGET-FIELD.md)
+- mode_dispatch 采纳后回诊 · 分流命中率基线与回滚判据（**已实施**）：[specs/tasks/MODE-DISPATCH-ROLLBACK.md](specs/tasks/MODE-DISPATCH-ROLLBACK.md)
 - 项目需求规格（导入，待结构化）：
   - [需求规格书.md](specs/需求规格书.md)
   - [需求规格书_Agent接入页字段级交互规格.md](specs/需求规格书_Agent接入页字段级交互规格.md)

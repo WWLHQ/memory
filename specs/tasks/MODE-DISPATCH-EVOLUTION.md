@@ -1,7 +1,7 @@
 ---
 title: 7.2 样本池读取侧接线（mode_feedback → 分流词表/权重回归）
 date: 2026-11-25
-status: approved（口径已定：30 天 / 10 条有效标注 · 单模式单变量；未开工）
+status: implementing（读取+建议+auto/手动采纳+UI 两键已通；add_words / weight_step 暂不产）
 scope: 消费 mode_feedback / mode_dispatch 审计 → 产「分流修正建议」→ 经 growth_evolve adopt 才生效
 depends: P2-8（写入侧 mode_feedback）、P2-9（growth:v1.mode_dispatch 命名空间 + 整块回退）
 ---
@@ -73,3 +73,35 @@ depends: P2-8（写入侧 mode_feedback）、P2-9（growth:v1.mode_dispatch 命�
 
 - **样本量**：当前 `mode_feedback` 条数可能远低于 10 条，首轮大概率只出 `insufficient_samples`——这是正确行为，不得为了让建议出现而调阈值。
 - **口径一致性**：词表热更后 `mode_dispatch` 审计里的 `hit_keywords` 会随新词表变化，回归比较必须同口径（同一快照版本内比较）。
+
+## 7. 实现进度（2026-11-25）
+
+| 环节 | 状态 | 落点 |
+|---|---|---|
+| 配置两键（`dispatch_days` / `dispatch_tagged`） | 已通 | `shared/growthConfig.ts`（旧账本缺键取默认，其余字段不被拖回默认） |
+| 参数族注册 | 已通 | `evolution/registry.ts` 的 `Family` / `EVOLUTION_FAMILIES` |
+| 样本构建（窗口/语义/关联/去重） | 已通 | `evolution/modeDispatchRegression.ts#buildDispatchSamples` |
+| 产建议（单模式单变量） | 已通（仅 `remove_words`） | 同上 `#proposeModeDispatch` |
+| 进化轮接线（insufficient / suggest / guarded / adopted） | 已通 | `evolution/loop.ts`（`_dp` 后缀审计，request_id 过同源形状闸门） |
+| 手动采纳入口 | 已通 | `evolution/loop.ts#adoptSuggestedModeDispatch` + `mcpGrowthTools.ts` 的 `adopt` 按 `family` 分派（缺省 `recall_weights`，行为不变） |
+| 生长页 UI 两键 | 已通 | `web/growth/EvolutionSettingsCard.tsx`（`window-dispatch-days` 1–365 / `min-dispatch-tagged` 1–100） |
+| 分流基线来源 | 已通 | `modeDispatchRegression.ts#dispatchBaseline`：账本有快照用账本，没有就以内核基线物化（`source` 记入审计） |
+| 测试 | 已通 | `__tests__/modeDispatchRegression.test.ts`（15 例）+ `mcpGrowthTools.test.ts` 新增 1 例 + `evolutionSettingsCard.test.tsx` 新增 1 例；`evolutionLoop` 既有用例零改动 |
+
+### 7.1 「账本无快照」的处置（2026-11-25 补定）
+
+原实现遇到 `growth:v1.mode_dispatch` 缺失时直接拒绝，并提示「请先在生长页写入基线」——而生长页从来没有这个入口，等于采纳通道永远走不通。
+
+现改为：**以内核基线物化一份快照**再落盘。三个来源全是内核真源（`DEFAULT_DISPATCH_CONFIG` 的 30/12/2、`MODE_FEATURE_WORDS` 五模式词表、`modeWeights()` 的 §2.4.3 权重向量且和=1），物化结果与运行态逐字等价，采纳后只差「被删掉的那一个词」，因此不是猜一个基线，而是把当前实际生效的配置显式写进热更命名空间。审计用 `baseline_source: 'ledger' | 'kernel'` 如实区分改动相对谁；auto 与手动两条路径共用 `dispatchBaseline` + `applyDispatchProposal`，不写第二套。
+
+副作用（已知并接受）：一旦落库，`dispatch_config_source` 就从 `baseline` 变成 `growth:v1.mode_dispatch`，此后内核基线再改词表也不会自动生效——这是热更命名空间的固有语义（与 `recall_weights` 同），回退靠 `growth:v1:history` + 生长页回滚。
+
+**两条诚实限制（不是遗漏，是当前信号不足）**：
+
+1. `add_words` 需要「用户认为应该分到哪个模式」，`mode_feedback` 目前只有 verdict + 三选一原因，没有目标模式字段。硬编「由模型猜目标模式」等于伪造证据，故不产该类建议；要开需要先扩反馈字段（UI 加「应该是什么模式」）。
+2. `weight_step` 属**同模式内排序**问题（正确条目进了候选但没排第一），模式反馈给不出该信号；强行把「模式选错」映射成调权重会改错东西。
+
+**未做**：
+
+- `add_words` / `weight_step` 两类建议（依赖扩 `mode_feedback` 字段，见上）。
+- 分流族的自动回诊（采纳后 `guard.cooldown_days` 内不再提，但尚无「采纳后 N 天回看命中率是否变差则回滚」的 `mode_dispatch` 回诊计划；当前回诊只覆盖 recall_weights 与 dedup）。

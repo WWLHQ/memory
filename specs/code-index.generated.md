@@ -3,7 +3,7 @@
 > 由 `npm run code:index` 生成，请勿手改；改代码/文档后重跑即可。
 > 用法：先在本表定位文件与导出符号，再只读该文件的局部区间（省 token、少误改）。
 
-共 458 个源码文件、177 个文档。
+共 461 个源码文件、172 个文档。
 
 ## e2e
 
@@ -50,11 +50,13 @@
 | [src/core/memagent/dedup.ts](src/core/memagent/dedup.ts) | 236 | 五维查重（§6.1）：语义 35% / 关键词 20% / 实体 15% / 结构 10% / LLM 仲裁 20%。 | layerText(fn), keywordSet(fn), entitySet(fn), structuralSimilarity(fn), baseDimensionScores(fn), weightedDedupScore(fn), fourDimScore(fn), fiveDimScore(fn), findDuplicate(fn), DEDUP_EVAL_SCHEMA_V(const), DEFAULT_DEDUP_POLICY(const), JUDGE_TOP_N(const), DimensionScores(type), DedupEvaluation(type), DedupOutcome(type), DedupPolicy(type), DedupOptions(type) |
 | [src/core/memagent/docTokenSet.ts](src/core/memagent/docTokenSet.ts) | 52 | P1-8′（2026-11-23）：召回热路径的正文 tokenSet 进程内缓存。 | docTokenSet(fn), clearDocTokenCache(fn), docTokenCacheSize(fn) |
 | [src/core/memagent/errors.ts](src/core/memagent/errors.ts) | 32 | memagent-core 错误码（§6，各端统一处理） | isL0LockedError(fn), isL0LockedText(fn), MemAgentError(class) |
-| [src/core/memagent/evolution/loop.ts](src/core/memagent/evolution/loop.ts) | 454 | M3：统一进化轮 + 回诊回滚。 | runEvolutionRound(fn), adoptSuggestedRecallWeights(fn), runDedupRollbackCheck(fn), runRollbackCheck(fn), LoopOptions(type), FamilyDecision(type), LoopResult(type), RollbackCheckOptions(type), AdoptResult(type), RollbackCheckResult(type), DedupRollbackResult(type), LoopStatus(type), RollbackStatus(type) |
+| [src/core/memagent/evolution/loop.ts](src/core/memagent/evolution/loop.ts) | 858 | M3：统一进化轮 + 回诊回滚。 | runEvolutionRound(fn), adoptSuggestedRecallWeights(fn), adoptSuggestedModeDispatch(fn), runDedupRollbackCheck(fn), runRollbackCheck(fn), runDispatchRollbackCheck(fn), validWeightStepProposal(fn), adoptSuggestedWeightStep(fn), LoopOptions(type), FamilyDecision(type), LoopResult(type), RollbackCheckOptions(type), AdoptResult(type), DispatchAdoptResult(type), RollbackCheckResult(type), DedupRollbackResult(type), DispatchRollbackResult(type), WeightStepAdoptResult(type), LoopStatus(type), RollbackStatus(type), DispatchRollbackStatus(type) |
+| [src/core/memagent/evolution/modeDispatchRegression.ts](src/core/memagent/evolution/modeDispatchRegression.ts) | 383 | 7.2 读取侧（P2-11）：把 mode_feedback + mode_dispatch + recall 账本行变成「分流修正建议」。 | buildDispatchSamples(fn), knownWordPool(fn), proposeModeDispatch(fn), dispatchBaseline(fn), applyDispatchProposal(fn), validDispatchProposal(fn), dispatchHitRate(fn), computeDispatchRollbackPlan(fn), computeDispatchBackfill(fn), DispatchSample(type), DispatchMetrics(type), DispatchProposal(type), DispatchRollbackPlan(type), DispatchBackfillStatus(type) |
+| [src/core/memagent/evolution/rankWeightStep.ts](src/core/memagent/evolution/rankWeightStep.ts) | 139 | weight_step 建议（2026-11-26，方案 MODE-FEEDBACK-TARGET-FIELD.md §2.2）： | buildRankSamples(fn), proposeWeightStep(fn), WeightStepProposal(type), RankSample(type) |
 | [src/core/memagent/evolution/recallEval.ts](src/core/memagent/evolution/recallEval.ts) | 275 | M2（可验证的自动进化）· 召回权重离线评估引擎。 | rescoreRow(fn), rankIds(fn), ndcgAtK(fn), signTestP(fn), guardCheck(fn), decideOutcome(fn), evaluateRecallWeights(fn), isMemDetailRow(fn), samplesFromAudits(fn), MIN_NDCG_GAIN(const), MAX_GUARD_RISE(const), SIGN_TEST_P(const), DEFAULT_EVAL_K(const), EvalDecision(type), EvalSample(type), EvalInput(type), RecallEvalResult(type), EvalStatus(type) |
 | [src/core/memagent/evolution/registry.ts](src/core/memagent/evolution/registry.ts) | 121 | M3：参数族注册。每族提供「提议（propose）/ 护栏（guard）/ 应用（apply 由 loop 执行）」。 | proposeRecallWeights(fn), guardRecallWeights(fn), computeRollbackPlan(fn), isRollbackDue(fn), rollbackDropExceeded(fn), EVOLUTION_FAMILIES(const), Proposal(type), GuardOutcome(type), RollbackPlan(type), Family(type) |
 | [src/core/memagent/evolution/sceneProfile.ts](src/core/memagent/evolution/sceneProfile.ts) | 80 | 批次 D：场景画像（只读派生，不落库）。 | buildSceneProfile(fn), SceneProfileRow(type), SceneProfile(type) |
-| [src/core/memagent/evolution/versioning.ts](src/core/memagent/evolution/versioning.ts) | 96 | M3：生长配置版本化与回滚。 | saveConfigWithHistory(fn), historyMemories(fn), latestHistory(fn), configFromHistoryMem(fn), rollbackGrowthConfig(fn), HistoryWriteOptions(type), RollbackResult(type) |
+| [src/core/memagent/evolution/versioning.ts](src/core/memagent/evolution/versioning.ts) | 109 | M3：生长配置版本化与回滚。 | saveConfigWithHistory(fn), historyMemories(fn), latestHistory(fn), configFromHistoryMem(fn), rollbackGrowthConfig(fn), HistoryWriteOptions(type), RollbackResult(type), RollbackOptions(type) |
 | [src/core/memagent/feedbackSignal.ts](src/core/memagent/feedbackSignal.ts) | 203 | 批次61 GAP-2：反馈信号回灌净化因果链。 | isLiveForConflict(fn), downgradeClass(fn), feedbackPolicyFromLedger(fn), countRejects(fn), tallyRejects(fn), findConflictCounterpart(fn), summarizeFeedbackSignals(fn), readFeedbackSignals(fn), CONFLICT_PAIR_MIN_SIM(const), RejectTally(type), ConflictCounterpart(type), ConflictPairing(type), FeedbackSignalSummary(type), FeedbackSignalRead(type) |
 | [src/core/memagent/fieldBackfill.ts](src/core/memagent/fieldBackfill.ts) | 299 | 存量「补齐缺失的 sha256 与向量」（批次41-T）：批次41-B 之后新写的每一行都带这两个字段， | parseBackfillFields(fn), scanRowsForBackfill(fn), backfillMissingFields(fn), DEFAULT_BACKFILL_FIELDS(const), BackfillDecision(type), BackfillPreview(type), BackfillReport(type), BackfillCtx(type), BackfillSkipCode(type), BackfillField(type) |
 | [src/core/memagent/fileStorage.ts](src/core/memagent/fileStorage.ts) | 578 | FileStorage（§5.3）：桌面/CLI 本地库 = P0 主源（零依赖，纯文件系统，无 node:sqlite）。 | StorageCorruptError(class), StorageLockedError(class), FileStorage(class), CorruptionNotice(type), FileStorageOptions(type) |
@@ -71,14 +73,14 @@
 | [src/core/memagent/mcp.ts](src/core/memagent/mcp.ts) | 437 | MCP Server（§19.5）：JSON-RPC 2.0 over TCP，暴露记忆工具，供 Agent 调用记忆助手。 | runMcpServer(fn), McpOptions(type), McpServerHandle(type) |
 | [src/core/memagent/mcpAuth.ts](src/core/memagent/mcpAuth.ts) | 113 | MCP 鉴权：MCP 端口只对持有本机令牌的 Agent 开放。 | isAdmin(fn), scopeHasWildcard(fn), classifyProject(fn), projectInScope(fn), tokenEquals(fn), tokenFromHeaders(fn), assertMcpToken(fn), MCP_TOKEN_HEADER(const), DEFAULT_MCP_ACCOUNT(const), McpAccount(type), ScopeAccount(type), ProjectPool(type) |
 | [src/core/memagent/mcpGcTools.ts](src/core/memagent/mcpGcTools.ts) | 176 | MCP 遗忘引擎报告编排（批次44-D5-3 → 批次46-4）：gc_report。 | runGcReportTool(fn), GC_REPORT_NOTE(const), GcReportToolResult(type), GcReportDeps(type) |
-| [src/core/memagent/mcpGrowthTools.ts](src/core/memagent/mcpGrowthTools.ts) | 191 | MCP 自进化工具编排（批次 B/C/D）：growth_evolve = status \| adopt \| profile \| policy。 | countRejectDowngrades(fn), growthCardSummary(fn), runGrowthEvolveTool(fn), GrowthEvolveResult(type) |
+| [src/core/memagent/mcpGrowthTools.ts](src/core/memagent/mcpGrowthTools.ts) | 248 | MCP 自进化工具编排（批次 B/C/D）：growth_evolve = status \| adopt \| profile \| policy。 | countRejectDowngrades(fn), growthCardSummary(fn), runGrowthEvolveTool(fn), GrowthEvolveResult(type) |
 | [src/core/memagent/mcpHookTools.ts](src/core/memagent/mcpHookTools.ts) | 179 | MCP 钩子健康度自检（第 13 个工具 `recall_hook_status`）。 | hookReasonZh(fn), runHookStatusTool(fn), HOOK_STATUS_STALE_MS(const), HOOK_STATUS_FILENAME(const), HookStatusReport(type), HookStatusDeps(type), HookVerdict(type) |
 | [src/core/memagent/mcpHttp.ts](src/core/memagent/mcpHttp.ts) | 833 | 标准 MCP（Model Context Protocol）streamable-http 服务器 | normalizeClientLabel(fn), clientFromInitialize(fn), clientFromUserAgent(fn), isIdentifiableUserAgent(fn), isTrustedClientSelfName(fn), clientFromExplicitHeader(fn), clientDeclaresFold(fn), clientDeclaresStrictGate(fn), recallEchoNote(fn), runMcpHttpServer(fn), MCP_CLIENT_HEADER(const), MCP_RENDER_HEADER(const), MCP_STRICT_GATE_HEADER(const), McpHttpOptions(type), McpHttpHandle(type) |
 | [src/core/memagent/mcpManageTools.ts](src/core/memagent/mcpManageTools.ts) | 324 | MCP 治理工具编排（批次44-D5-2）：feedback / manage_memory。 | deleteAllowed(fn), runFeedbackTool(fn), runManageMemoryTool(fn), ManageToolOpts(type), FeedbackToolResult(type), ManageToolResult(type) |
 | [src/core/memagent/mcpProjectTools.ts](src/core/memagent/mcpProjectTools.ts) | 166 | MCP 管理工具编排（D6-5 / 子方案 §3.3）：create_project / mint_token。 | runCreateProjectTool(fn), runMintTokenTool(fn), CreateProjectToolResult(type), MintTokenToolResult(type) |
 | [src/core/memagent/mcpReadTools.ts](src/core/memagent/mcpReadTools.ts) | 160 | MCP 读工具编排（批次44-D5-1）：list_memories / get_memory。 | toMemoryView(fn), runListMemoriesTool(fn), runGetMemoryTool(fn), MemoryView(type), ListMemoriesResult(type), GetMemoryResult(type) |
 | [src/core/memagent/mcpRecall.ts](src/core/memagent/mcpRecall.ts) | 365 | MCP 召回工具编排（批次11/13/29/32/33）：项目自动定位 / 列表 / 提示行与明细组装 / 按客户端能力选档位。 | clientIsRichCardHost(fn), extraHtmlDetailsClients(fn), clientSupportsHtmlDetails(fn), projectInfosFromMemories(fn), resolveProjectId(fn), runRecallTool(fn), recallDisplayMode(fn), runListProjectsTool(fn), ensureSharedProject(fn), McpToolError(class), ProjectInfo(type), ResolvedProject(type), RecallToolPayload(type), RecallDetailTicketsPort(type), RecallToolDetailOpts(type), RecallToolOutput(type), RecallDisplayMode(type) |
-| [src/core/memagent/mcpSchema.ts](src/core/memagent/mcpSchema.ts) | 296 | MCP 工具清单与初始化指令（批次11/12/13）：HTTP(8204) 与 TCP(8202) 共用同一份 schema/instructions， | mcpInstructions(fn), withRecallFirstNotes(fn), RECALL_FIRST_SELF_NOTE(const), RECALL_FIRST_TOOL_NOTE(const), RECALL_FIRST_REMINDER(const), RECALL_FIRST_GATE_MSG(const), RECALL_FIRST_STRICT_GATE_MSG(const), RECALL_ROUND_GATE_MSG(const), RECALL_GATE_STRICT_INSTRUCTIONS(const), RECALL_GATE_STRICT_TOOL_NOTE(const), RECALL_SOURCE_BOUNDARY(const), RECALL_FEEDBACK_FAST_NOTE(const), MCP_INSTRUCTIONS(const), MCP_TOOLS(const) |
+| [src/core/memagent/mcpSchema.ts](src/core/memagent/mcpSchema.ts) | 298 | MCP 工具清单与初始化指令（批次11/12/13）：HTTP(8204) 与 TCP(8202) 共用同一份 schema/instructions， | mcpInstructions(fn), withRecallFirstNotes(fn), RECALL_FIRST_SELF_NOTE(const), RECALL_FIRST_TOOL_NOTE(const), RECALL_FIRST_REMINDER(const), RECALL_FIRST_GATE_MSG(const), RECALL_FIRST_STRICT_GATE_MSG(const), RECALL_ROUND_GATE_MSG(const), RECALL_GATE_STRICT_INSTRUCTIONS(const), RECALL_GATE_STRICT_TOOL_NOTE(const), RECALL_SOURCE_BOUNDARY(const), RECALL_FEEDBACK_FAST_NOTE(const), MCP_INSTRUCTIONS(const), MCP_TOOLS(const) |
 | [src/core/memagent/memberStore.ts](src/core/memagent/memberStore.ts) | 370 | 成员 / API 密钥内核域模型（批次45-B1，ROADMAP §二 45-B1）： | resolveApiKeyAccount(fn), InMemoryMemberStore(class), FileMemberStore(class), MemberRecord(type), CreateMemberInput(type), ApiKeyRecord(type), MintApiKeyInput(type), MintedApiKey(type), MemberStorePort(type), MemberRole(type), MemberStatus(type) |
 | [src/core/memagent/memories.ts](src/core/memagent/memories.ts) | 1032 | 内核记忆业务（§3 schema + 行为红线）：write 逐层生成/查重/分支嫁接 / browse L0 授权 / gc 衰减 / memoryOp 17.3 操作 | buildSourceExcerpt(fn), layerSpecsFrom(fn), buildL6Input(fn), makeLayerGenerator(fn), parseWriteKnobs(fn), coreWrite(fn), coreBrowse(fn), coreGc(fn), coreGcFull(fn), coreMemoryOp(fn), coreFeedback(fn), SOURCE_EXCERPT_MAX_CHARS(const), GC_FULL_NOTE(const), WriteInput(type), WriteCtx(type) |
 | [src/core/memagent/paramsSnapshot.ts](src/core/memagent/paramsSnapshot.ts) | 268 | 全局参数快照（params:v1: preference 记忆）的共享读取口。 | isInternalPrefRow(fn), isInternalPrefContent(fn), parseParamsSnapshot(fn), findParamsSnapshot(fn), autoOrganizeEnabled(fn), forgettingPrefsFromSnapshot(fn), proxyAccountingFromSnapshot(fn), proxyCapsFromSnapshot(fn), saveProxyCapsToLedger(fn), findGrowthMemory(fn), growthConfigFromLedger(fn), modeDispatchFromLedger(fn), saveGrowthConfigToLedger(fn), PARAMS_PREF_PREFIX(const), GROWTH_PREF_PREFIX(const), GROWTH_HISTORY_PREFIX(const), ParamsSnapshot(type), ForgettingPrefs(type), ProxyCapsSaveOptions(type), ModeDispatchLedgerState(type), GrowthConfigSaveOptions(type) |
@@ -139,8 +141,8 @@
 | [src/electron/dataRoot.ts](src/electron/dataRoot.ts) | 564 | 数据根目录（批次6）：记忆库、采集游标、日志、MCP 令牌、备份配置等全部持久数据 | defaultDataRoot(fn), dataRootPointerPath(fn), readDataRootPointer(fn), writeDataRootPointer(fn), clearDataRootMigrateFrom(fn), isLegacyLibraryDir(fn), migrateLegacyLibraryDir(fn), resolveLibraryPaths(fn), isSetupComplete(fn), wizardRequired(fn), hasLibraryDirs(fn), libraryFileState(fn), validateDataRootPath(fn), samePath(fn), ensureDirWritable(fn), hasAnyData(fn), summarizeDataDir(fn), detectDataRoots(fn), migrateDataRoot(fn), adoptLibraryDirIntoPlace(fn), DATA_ROOT_DIR_NAME(const), DATA_ROOT_POINTER_NAME(const), DATA_ROOT_POINTER_VERSION(const), DEFAULT_DATA_ROOT_DRIVE(const), DATA_ROOT_MIGRATE_FILES(const), DATA_ROOT_MIGRATE_DIRS(const), LEDGER_FILE_NAME(const), L0_FILE_NAME(const), L0_KEYRING_FILE_NAME(const), DataRootPointer(type), DataRootSummary(type), DataRootMigration(type), LibraryPaths(type), LegacyLibraryMigrateReport(type), DataRootPointerRead(type) |
 | [src/electron/dataUseGate.ts](src/electron/dataUseGate.ts) | 39 | T1 数据使用门禁（管理员与成员权限设计 §2）：会话有效即放行，管理员额外打审计标。 | checkDataUse(fn), DataUseGateDeps(type), DataUseGateResult(type) |
 | [src/electron/host-hooks/auto_feedback.mjs](src/electron/host-hooks/auto_feedback.mjs) | 353 | Stop 钩子：自动反馈采集——每轮回答结束后，检测正文 [n] 引用，提交 implicit=true 正向弱信号。 | — |
-| [src/electron/host-hooks/fold_card_check.mjs](src/electron/host-hooks/fold_card_check.mjs) | 328 | Stop 钩子：召回回显合规性检查（2026-11-23 重写 P0） | pickBlockingIssues(fn), sliceCurrentTurn(fn), isFeedbackTurn(fn), findTextAfterCard(fn), validateEcho(fn) |
-| [src/electron/host-hooks/session_review.mjs](src/electron/host-hooks/session_review.mjs) | 211 | Stop 钩子：每轮回答收尾前的「复盘 + 沉淀结论」双闸门。 | — |
+| [src/electron/host-hooks/fold_card_check.mjs](src/electron/host-hooks/fold_card_check.mjs) | 227 | Stop 钩子：召回回显合规性检查（2026-11-23 重写 P0） | findTextAfterCard(fn), validateEcho(fn) |
+| [src/electron/host-hooks/session_review.mjs](src/electron/host-hooks/session_review.mjs) | 184 | Stop 钩子：每轮回答收尾前的「复盘 + 沉淀结论」双闸门。 | — |
 | [src/electron/host-hooks/session_review_patch.mjs](src/electron/host-hooks/session_review_patch.mjs) | 175 | UserPromptSubmit 补漏钩子：检查上一条 assistant 回答是否含「复盘 + 沉淀结论」， | — |
 | [src/electron/hostHookInject.ts](src/electron/hostHookInject.ts) | 362 | 宿主钩子自动注入框架（2026-11-23 · 原子任务 24a） | probeHookHosts(fn), extractTagPath(fn), mergeAllHostHooks(fn), installedHookTags(fn), stageAllHookScripts(fn), injectHooksIntoHost(fn), HOST_HOOK_REGISTRY(const), HostHookSpec(type), HookCapableHost(type), HostProbeDeps(type), MergeResult(type), StageResult(type), InjectResult(type), HookEvent(type) |
 | [src/electron/hostScan.ts](src/electron/hostScan.ts) | 163 | 宿主真扫 · node IO 层（仅 Electron 主进程使用）： | parseTasklistCsv(fn), parseWmicJson(fn), listProcessNames(fn), detectMcpEntries(fn), detectConfigFiles(fn), scanHost(fn) |
@@ -150,7 +152,7 @@
 | [src/electron/llmGateway.ts](src/electron/llmGateway.ts) | 577 | 批次32：LLM 精炼网关（主进程唯一真源）——通用 OpenAI 兼容**多引擎**，路由口径「哪个能用、哪个快用哪个」。 | defaultLlmConfig(fn), loadLlmConfig(fn), saveLlmConfig(fn), loadLlmKeys(fn), saveLlmKey(fn), keyExists(fn), buildLayerPrompt(fn), chatEndpoint(fn), applyProxyAccounting(fn), testEngine(fn), applyProbeResult(fn), loadLlmGateway(fn), llmEngineViews(fn), mergeLlmConfig(fn), LLM_CONFIG_FILE(const), LLM_KEYS_FILE(const), LEGACY_DEEPSEEK_KEY_FILE(const), LLM_PRESETS(const), LlmGatewayProvider(class), LlmEngineConfig(type), LlmGatewayConfig(type), LlmPreset(type), EngineTestResult(type), LlmGatewayView(type), LlmEnginePatch(type), LlmAddEngine(type), LlmConfigPatch(type), LlmEngineView(type) |
 | [src/electron/main.ts](src/electron/main.ts) | 5595 | Electron 主进程入口： | — |
 | [src/electron/mcpBridgeScript.ts](src/electron/mcpBridgeScript.ts) | 139 | stdio 桥接脚本（2026-11-18，用户要求「客户端配置改成 stdio launcher 现读令牌，轮换零维护」）。 | ensureMcpBridgeScript(fn), MCP_BRIDGE_SCRIPT(const) |
-| [src/electron/mcpClients.ts](src/electron/mcpClients.ts) | 474 | MCP 客户端配置读写 · node 层（批次15，仅 Electron 主进程使用）。 | expandHome(fn), applyRecallEvidence(fn), scanMcpClients(fn), snippetForClient(fn), readStoredToken(fn), wireMcpClient(fn), enableMcpClient(fn), McpClientStatus(type), McpClientsScan(type), McpWireResult(type), McpRecallEvidence(type) |
+| [src/electron/mcpClients.ts](src/electron/mcpClients.ts) | 468 | MCP 客户端配置读写 · node 层（批次15，仅 Electron 主进程使用）。 | expandHome(fn), applyRecallEvidence(fn), scanMcpClients(fn), snippetForClient(fn), readStoredToken(fn), wireMcpClient(fn), enableMcpClient(fn), McpClientStatus(type), McpClientsScan(type), McpWireResult(type), McpRecallEvidence(type) |
 | [src/electron/mcpProbe.ts](src/electron/mcpProbe.ts) | 174 | MCP 端点实测探活（2026-11-18，用户要求「实测连通」列 + 循环检测）。 | parseToolsCount(fn), probeMcpEndpoint(fn), attachLiveProbe(fn), McpLiveProbe(type), ProbeOptions(type), LiveProbeFields(type), LiveProbeTarget(type) |
 | [src/electron/ownerBindings.ts](src/electron/ownerBindings.ts) | 104 | 个人记忆账号绑定真源（OB-1）：数据根级 personal-owner-bindings.json（0600），与 tenant.json 同级同规格。 | loadOwnerBindings(fn), normalizeOwnerBindingsInput(fn), writeOwnerBindings(fn), OWNER_BINDINGS_FILE_NAME(const), OWNER_BINDINGS_SCHEMA(const), WriteOwnerBindingsResult(type) |
 | [src/electron/preload.ts](src/electron/preload.ts) | 499 | Electron preload：contextIsolation 开启下，经 contextBridge 向渲染进程暴露存储桥接面与运行标识。 | — |
@@ -160,8 +162,8 @@
 | [src/electron/runHostHookAutoInject.ts](src/electron/runHostHookAutoInject.ts) | 85 | 原子任务24B · 启动时宿主钩子自动注入的编排层（main.ts bootstrap 调用）。 | resolveHostHookSourceDir(fn), runHostHookAutoInject(fn), AutoInjectDeps(type), AutoInjectSummary(type) |
 | [src/electron/storageIpc.ts](src/electron/storageIpc.ts) | 62 | 批次47 P0-3：存储数据面四条「读写/审计」通道统一走登录会话闸门。 | createStorageReadWriteHandlers(fn), StorageIpcDeps(type), StorageReadWriteHandlers(type) |
 | [src/electron/tenantSource.ts](src/electron/tenantSource.ts) | 94 | 批次45-A1 单一租户真源：数据根级 tenant.json（0600），类比 dataRoot 指针 / mcp-token.txt 的启动期指针文件。 | loadOrCreateTenant(fn), readTenantFile(fn), writeTenant(fn), TENANT_FILE_NAME(const), TENANT_SCHEMA(const), WriteTenantResult(type) |
-| [src/electron/webchatAutoCollect.ts](src/electron/webchatAutoCollect.ts) | 407 | 阶段 B：网页会话无头自动采集器（Electron 侧接线）。 | createWebchatAutoCollector(fn), AUTO_FALLBACK_CONFIG(const), AutoCollectorDeps(type), AutoStateView(type), WebchatAutoCollector(type) |
-| [src/electron/webchatAutoConfig.ts](src/electron/webchatAutoConfig.ts) | 953 | 阶段 B（无头自动采集）的纯逻辑层：配置、采集账、去重判据、页内驱动脚本。 | normalizeAutoConfig(fn), parseAutoPatch(fn), autoDir(fn), autoConfigPath(fn), autoStatePath(fn), autoLedgerPath(fn), readAutoConfig(fn), writeAutoConfig(fn), normalizeAutoState(fn), readAutoState(fn), writeAutoState(fn), appendLedger(fn), buildDriverScript(fn), parseDriverResult(fn), formatDiag(fn), summarizeSteps(fn), pickNewChats(fn), judgeSite(fn), AUTO_DIR_NAME(const), AUTO_CONFIG_FILE(const), AUTO_STATE_FILE(const), AUTO_LEDGER_FILE(const), AUTO_MIN_INTERVAL(const), AUTO_MAX_INTERVAL(const), AUTO_DEFAULT_INTERVAL(const), AUTO_MAX_CHATS_PER_ROUND(const), AUTO_MAX_CHATS_MANUAL(const), AUTO_MAX_ATTEMPTS_ROUND(const), AUTO_MAX_ATTEMPTS_MANUAL(const), AUTO_MAX_CHATS_SWEEP(const), AUTO_MAX_ATTEMPTS_SWEEP(const), AUTO_SWEEP_MAX_BATCHES(const), AUTO_MIN_PER_ROUND(const), AUTO_MAX_PER_ROUND(const), DEFAULT_AUTO_CONFIG(const), SITE_ENTRY_URL(const), DEFAULT_AUTO_STATE(const), WebchatAutoConfig(type), SiteRoundResult(type), RoundSummary(type), AutoState(type), DriverChat(type), SidebarDiag(type), DriverStep(type), DriverResult(type), PageSnapshot(type), AutoPatch(type), SiteStatus(type) |
+| [src/electron/webchatAutoCollect.ts](src/electron/webchatAutoCollect.ts) | 402 | 阶段 B：网页会话无头自动采集器（Electron 侧接线）。 | createWebchatAutoCollector(fn), AUTO_FALLBACK_CONFIG(const), AutoCollectorDeps(type), AutoStateView(type), WebchatAutoCollector(type) |
+| [src/electron/webchatAutoConfig.ts](src/electron/webchatAutoConfig.ts) | 941 | 阶段 B（无头自动采集）的纯逻辑层：配置、采集账、去重判据、页内驱动脚本。 | normalizeAutoConfig(fn), parseAutoPatch(fn), autoDir(fn), autoConfigPath(fn), autoStatePath(fn), autoLedgerPath(fn), readAutoConfig(fn), writeAutoConfig(fn), normalizeAutoState(fn), readAutoState(fn), writeAutoState(fn), appendLedger(fn), buildDriverScript(fn), parseDriverResult(fn), formatDiag(fn), summarizeSteps(fn), pickNewChats(fn), judgeSite(fn), AUTO_DIR_NAME(const), AUTO_CONFIG_FILE(const), AUTO_STATE_FILE(const), AUTO_LEDGER_FILE(const), AUTO_MIN_INTERVAL(const), AUTO_MAX_INTERVAL(const), AUTO_DEFAULT_INTERVAL(const), AUTO_MAX_CHATS_PER_ROUND(const), AUTO_MAX_CHATS_MANUAL(const), AUTO_MAX_ATTEMPTS_ROUND(const), AUTO_MAX_ATTEMPTS_MANUAL(const), AUTO_MAX_CHATS_SWEEP(const), AUTO_MAX_ATTEMPTS_SWEEP(const), AUTO_SWEEP_MAX_BATCHES(const), AUTO_MIN_PER_ROUND(const), AUTO_MAX_PER_ROUND(const), DEFAULT_AUTO_CONFIG(const), SITE_ENTRY_URL(const), DEFAULT_AUTO_STATE(const), WebchatAutoConfig(type), SiteRoundResult(type), RoundSummary(type), AutoState(type), DriverChat(type), SidebarDiag(type), DriverStep(type), DriverResult(type), PageSnapshot(type), AutoPatch(type), SiteStatus(type) |
 | [src/electron/webchatAutoUa.ts](src/electron/webchatAutoUa.ts) | 24 | 内嵌浏览器 UA 的最小去标记处理（2026-11-19）。 | stripElectronUa(fn), applyCleanUserAgent(fn), UaWebContents(type) |
 | [src/electron/webchatExtensionCopy.ts](src/electron/webchatExtensionCopy.ts) | 111 | 把随包下发的插件复制到数据根下的**稳定目录**，再让用户到浏览器里「加载已解压的扩展程序」指向它。 | ensureStableExtensionDir(fn), WEBCHAT_EXTENSION_FILES(const), EnsureStableExtensionOptions(type), EnsureStableExtensionResult(type) |
 | [src/electron/webchatExtensionPath.ts](src/electron/webchatExtensionPath.ts) | 21 | 自研网页对话导出插件的目录解析（纯函数，便于单测）。 | resolveWebchatExtensionDir(fn), WebchatExtensionPathOptions(type) |
@@ -187,7 +189,7 @@
 | [src/shared/billing.ts](src/shared/billing.ts) | 147 | 批次48 A31：余额/配额/单价的公共口径（electron 主进程与 web 模型页共用，纯函数、无 IO）。 | normalizeManualBilling(fn), manualBillingSet(fn), billingHHmm(fn), billingMinutesAgo(fn), billingProvenanceText(fn), billingAmountText(fn), estimateCallCostCny(fn), UNSET_MANUAL_BILLING(const), BillingEngineView(type), ManualBilling(type), ProvenanceInput(type), BillingProvenance(type), BillingFetchStatus(type) |
 | [src/shared/cron.ts](src/shared/cron.ts) | 148 | 确定性 cron 计算（批次48 A23.2）：5 段表达式 + **固定时区偏移**，纯函数、无 I/O。 | parseCron(fn), nextDue(fn), CronSpec(type) |
 | [src/shared/dataLayout.ts](src/shared/dataLayout.ts) | 123 | 数据根内的子目录归类布局（2026-11-18 用户约定「每个数据及配置按实际情况分文件夹归类」）。 | isChromiumReservedSubdir(fn), subdirForFile(fn), subdirForDir(fn), classifiedPath(fn), classifiedDir(fn), libraryDir(fn), DATA_SUBDIRS(const), LEGACY_LIBRARY_SUBDIR(const), DataSubdir(type) |
-| [src/shared/growthConfig.ts](src/shared/growthConfig.ts) | 493 | 生长配置单一真源（批次48 A23）：五维查重权重 / 逐层阈值 / 调度开关。 | validFeedbackPolicy(fn), validEvolutionConfig(fn), cloneDefaultEvolution(fn), normalizeEvolutionConfig(fn), minIntervalMinutes(fn), validateScheduleExpr(fn), normalizeScheduleExprs(fn), resolveScheduleExpr(fn), normalizeModeDispatch(fn), validWeights(fn), validRecallWeights(fn), validThresholds(fn), normalizeScheduleFlags(fn), normalizeGrowthConfig(fn), DIM_KEYS(const), RECALL_KEYS(const), LAYERS(const), SCHEDULE_KEYS(const), DEFAULT_WEIGHTS(const), DEFAULT_FEEDBACK_POLICY(const), DEFAULT_RECALL_WEIGHTS(const), DEFAULT_THRESHOLDS(const), DEFAULT_SCHEDULE_FLAGS(const), SCHEDULE_TASKS(const), EVOLUTION_MODES(const), DEFAULT_EVOLUTION(const), DEFAULT_SCHEDULE_EXPRS(const), SCHEDULE_MIN_INTERVAL_MIN(const), MODE_DISPATCH_MODES(const), FeedbackPolicy(type), ScheduleTaskSpec(type), EvolutionWindow(type), EvolutionMinSamples(type), EvolutionRollback(type), EvolutionGuard(type), EvolutionConfig(type), ScheduleExprCheck(type), ModeDispatchFeatureWords(type), ModeDispatchWeight(type), ModeDispatchSnapshot(type), GrowthConfig(type), DimKey(type), DimWeights(type), RecallKey(type), RecallWeights(type), Layer(type), LayerThresholds(type), ScheduleKey(type), ScheduleFlags(type), EvolutionMode(type), ScheduleExprs(type), ModeDispatchMode(type) |
+| [src/shared/growthConfig.ts](src/shared/growthConfig.ts) | 520 | 生长配置单一真源（批次48 A23）：五维查重权重 / 逐层阈值 / 调度开关。 | validFeedbackPolicy(fn), validEvolutionConfig(fn), cloneDefaultEvolution(fn), normalizeEvolutionConfig(fn), minIntervalMinutes(fn), validateScheduleExpr(fn), normalizeScheduleExprs(fn), resolveScheduleExpr(fn), normalizeModeDispatch(fn), validWeights(fn), validRecallWeights(fn), validThresholds(fn), normalizeScheduleFlags(fn), normalizeGrowthConfig(fn), DIM_KEYS(const), RECALL_KEYS(const), LAYERS(const), SCHEDULE_KEYS(const), DEFAULT_WEIGHTS(const), DEFAULT_FEEDBACK_POLICY(const), DEFAULT_RECALL_WEIGHTS(const), DEFAULT_THRESHOLDS(const), DEFAULT_SCHEDULE_FLAGS(const), SCHEDULE_TASKS(const), EVOLUTION_MODES(const), DEFAULT_EVOLUTION(const), DEFAULT_SCHEDULE_EXPRS(const), SCHEDULE_MIN_INTERVAL_MIN(const), MODE_DISPATCH_MODES(const), FeedbackPolicy(type), ScheduleTaskSpec(type), EvolutionWindow(type), EvolutionMinSamples(type), EvolutionRollback(type), EvolutionGuard(type), EvolutionConfig(type), ScheduleExprCheck(type), ModeDispatchFeatureWords(type), ModeDispatchWeight(type), ModeDispatchSnapshot(type), GrowthConfig(type), DimKey(type), DimWeights(type), RecallKey(type), RecallWeights(type), Layer(type), LayerThresholds(type), ScheduleKey(type), ScheduleFlags(type), EvolutionMode(type), ScheduleExprs(type), ModeDispatchMode(type) |
 | [src/shared/growthSchedule.ts](src/shared/growthSchedule.ts) | 58 | 调度计划纯函数（M0）：把「当前配置的表达式」与「历史 schedule_run 审计」合并成确定的下次到期。 | isAuditPlanStale(fn), planNextDue(fn), advanceNextDue(fn), SCHEDULE_FALLBACK_MS(const), SchedulePlanInput(type) |
 | [src/shared/localOrigin.ts](src/shared/localOrigin.ts) | 93 | 本机 HTTP 服务的跨源闸门：只信任明确放行的页面来源。 | createOriginPolicy(fn), rejectUntrustedOrigin(fn), applyCorsHeaders(fn), rejectUntrustedHost(fn), DEV_ORIGINS(const), OriginPolicy(type), OriginPolicyOptions(type) |
 | [src/shared/memoryOwnership.ts](src/shared/memoryOwnership.ts) | 90 | 批次48 A7：putMemory 归属校验（浏览器 HTTP 数据面 + Electron IPC 数据面共用同一判据）。 | checkMemoryWriteOwnership(fn), findExistingMemoryRow(fn), SessionTenant(type), OwnershipVerdict(type) |
@@ -219,7 +221,7 @@
 | [src/web/AgentOnboard/Gains.tsx](src/web/AgentOnboard/Gains.tsx) | 25 | 效果证据 · 用户可感知的「省」与「快」（19.1 / 9.x / 2.4.x / 19.8 反代理） | Gains(fn) |
 | [src/web/AgentOnboard/IsolationConfig.tsx](src/web/AgentOnboard/IsolationConfig.tsx) | 36 | 隔离粒度配置行（规格 19.4 · R1 project_id 共享 / user_id 偏好跨项目） | IsolationConfig(fn) |
 | [src/web/AgentOnboard/KeyMgmt.tsx](src/web/AgentOnboard/KeyMgmt.tsx) | 21 | 密钥管理行（规格 T7 / §4 · R5 恒脱敏不回显 / R6 轮换宽限 24h / 超 90 天告警） | KeyMgmt(fn) |
-| [src/web/AgentOnboard/McpClientsPanel.tsx](src/web/AgentOnboard/McpClientsPanel.tsx) | 868 | MCP 客户端接入面板（批次15 建 / 批次21 交互收敛 / 批次23 一键适配全部 + 逐客户端接通指引； | McpClientsPanel(fn), McpSummary(type) |
+| [src/web/AgentOnboard/McpClientsPanel.tsx](src/web/AgentOnboard/McpClientsPanel.tsx) | 851 | MCP 客户端接入面板（批次15 建 / 批次21 交互收敛 / 批次23 一键适配全部 + 逐客户端接通指引； | McpClientsPanel(fn), McpSummary(type) |
 | [src/web/AgentOnboard/McpToolConfig.tsx](src/web/AgentOnboard/McpToolConfig.tsx) | 64 | MCP 工具配置行（规格 T5 / 19.5 · 须带 project_id） | toolRef(fn), McpToolConfig(fn) |
 | [src/web/AgentOnboard/OneClickOnboard.tsx](src/web/AgentOnboard/OneClickOnboard.tsx) | 235 | 扫描明细卡（规格 T4 / AC-003.4 / 19.9 · 批次48 起 1:1 对齐设计真源 stratum-a-full.html 的 af-panel/af-det 版式） | OneClickOnboard(fn) |
 | [src/web/AgentOnboard/TestPanel.tsx](src/web/AgentOnboard/TestPanel.tsx) | 70 | 接入测试面板（规格 T8 / AC-003.8 · R7 必记 request_id · 注入预览） | TestPanel(fn), TestEvidence(type) |
@@ -282,15 +284,15 @@
 | [src/web/feedback/useFeedbackMirror.ts](src/web/feedback/useFeedbackMirror.ts) | 21 | 用户反馈页后端镜像（阶段5-C 口径统一）：真接 home server POST /api/mirror/audit。 | useFeedbackMirror(fn), FeedbackMirror(type) |
 | [src/web/feedback/useToast.tsx](src/web/feedback/useToast.tsx) | 13 | — | useToast(fn) |
 | [src/web/growth/DedupCards.tsx](src/web/growth/DedupCards.tsx) | 160 | P14-T3 自净化侧组件：五维评分卡 + 短路嫁接流程 + 24h 统计 + 开发者调参（6.1/6.2，G7） | DedupCard(fn), ShortCircuitFlow(fn), DevTunePanel(fn) |
-| [src/web/growth/EvolutionSettingsCard.tsx](src/web/growth/EvolutionSettingsCard.tsx) | 197 | M0-5：自生长进化设置卡 —— 频率可改（周期/时间）+ 参数可配 + 可行性预测。 | EvolutionSettingsCard(fn) |
+| [src/web/growth/EvolutionSettingsCard.tsx](src/web/growth/EvolutionSettingsCard.tsx) | 200 | M0-5：自生长进化设置卡 —— 频率可改（周期/时间）+ 参数可配 + 可行性预测。 | EvolutionSettingsCard(fn) |
 | [src/web/growth/EvolutionTimelineCard.tsx](src/web/growth/EvolutionTimelineCard.tsx) | 213 | M4：进化时间线 + 参数漂移仪表（展示层，只渲染真实审计投影）。 | EvolutionTimelineCard(fn) |
 | [src/web/growth/GrowthPage.tsx](src/web/growth/GrowthPage.tsx) | 666 | 自我净化与生长页（REQ-009 / P14）· 真实数据接真版 | GrowthPage(fn) |
 | [src/web/growth/GrowthPanels.tsx](src/web/growth/GrowthPanels.tsx) | 856 | P14-T3 自生长侧组件：指标卡 + 五项优化 + Δ 收益曲线 + 调度时间轴（7.1/7.2/13.3） | GrowthCards(fn), OptimizationList(fn), regressionStatusText(fn), RegressionTable(fn), DeltaPanel(fn), EvolutionEffectCard(fn), ScheduleTimeline(fn), AgentUsageCard(fn), RecallWeightCard(fn), FeedbackLoopCard(fn) |
-| [src/web/growth/coreGrowth.ts](src/web/growth/coreGrowth.ts) | 145 | 自我净化与生长页（REQ-009 / P14）接真内核：优化/调度动作审计真写 storage 账本 | coreGrowthAudit(fn), coreLoadGrowthAudit(fn), coreLoadGrowthConfig(fn), coreSaveGrowthConfig(fn), coreRunGrowthRegression(fn), coreRunEvolution(fn), RegressionReceipt(type), EvolutionRunReceipt(type) |
+| [src/web/growth/coreGrowth.ts](src/web/growth/coreGrowth.ts) | 148 | 自我净化与生长页（REQ-009 / P14）接真内核：优化/调度动作审计真写 storage 账本 | coreGrowthAudit(fn), coreLoadGrowthAudit(fn), coreLoadGrowthConfig(fn), coreSaveGrowthConfig(fn), coreRunGrowthRegression(fn), coreRunEvolution(fn), RegressionReceipt(type), EvolutionRunReceipt(type) |
 | [src/web/growth/evolutionTimeline.ts](src/web/growth/evolutionTimeline.ts) | 243 | M4（收尾）：进化时间线 + 参数漂移仪表 的纯数据层。 | evolutionTimelineFromLedger(fn), rollbackStateOf(fn), driftRows(fn), recallDrift(fn), dedupDrift(fn), thresholdDrift(fn), RECALL_LABELS(const), DEDUP_LABELS(const), THRESHOLD_LABELS(const), EvolutionTimelineEntry(type), RollbackStateView(type), DriftRow(type), TimelineDecision(type), RollbackState(type) |
 | [src/web/growth/growthEntry.tsx](src/web/growth/growthEntry.tsx) | 11 | 自我净化与生长页（REQ-009 / P14）入口 | — |
 | [src/web/growth/logic.ts](src/web/growth/logic.ts) | 139 | P14 纯逻辑（T2）：五维加权 / 逐层阈值 / 短路嫁接 / 优化评估 / Δ 收益 / 调度校验 / 审计 | weightedScore(fn), layerThresholdOf(fn), isDuplicate(fn), validateWeights(fn), validateThresholds(fn), shortCircuitPath(fn), evaluateOptimizations(fn), growthDelta(fn), appendTunedPoint(fn), validateSchedule(fn), auditOptimization(fn) |
-| [src/web/growth/recallLabels.ts](src/web/growth/recallLabels.ts) | 253 | 全站 UI「人话名」唯一真源（2026-11-14 用户硬性要求：UI 不出原始字段名 / JSON / 英文枚举）。 | fmtRecallWeights(fn), monitorText(fn), monitorGroupText(fn), monitorValueText(fn), monitorMetricKeys(fn), RECALL_KEY_LABEL(const), MONITOR_METRIC_TEXT(const), MONITOR_GROUP_TEXT(const), MonitorText(type) |
+| [src/web/growth/recallLabels.ts](src/web/growth/recallLabels.ts) | 238 | 全站 UI「人话名」唯一真源（2026-11-14 用户硬性要求：UI 不出原始字段名 / JSON / 英文枚举）。 | fmtRecallWeights(fn), monitorText(fn), monitorGroupText(fn), monitorValueText(fn), monitorMetricKeys(fn), RECALL_KEY_LABEL(const), MONITOR_METRIC_TEXT(const), MONITOR_GROUP_TEXT(const), MonitorText(type) |
 | [src/web/growth/spec.ts](src/web/growth/spec.ts) | 41 | 自我净化与生长页规格常量（非演示数据）：五维默认权重 / 逐层阈值 / 标签 / 调度。 | DEFAULT_WEIGHTS(const), DEFAULT_THRESHOLDS(const), DIM_LABELS(const), LAYERS(const), OPT_CONDITIONS(const), DEFAULT_SCHEDULE(const) |
 | [src/web/growth/types.ts](src/web/growth/types.ts) | 187 | P14 自我净化与生长页（REQ-009 6.1/6.2/7.1/7.2/13.3）数据模型 | DedupSample(type), ShortCircuitStep(type), GrowthMetrics(type), OptimizationItem(type), ScheduleItem(type), ScheduleRunInfo(type), RegressionOutcome(type), RegressionRecord(type), GrowthReceipt(type), DeltaPoint(type), RecallSuggestionView(type), FeedbackSignalView(type), GrowthAuditEntry(type), OptState(type), DeltaMetric(type) |
 | [src/web/growth/useGrowthMirror.ts](src/web/growth/useGrowthMirror.ts) | 11 | 自我净化与生长页后端镜像：growth_op 动作审计上抛（G6 fire-and-forget）。 | useGrowthMirror(fn) |
@@ -300,7 +302,7 @@
 | [src/web/httpStorage.ts](src/web/httpStorage.ts) | 116 | 批次28-A：浏览器内核数据面 —— StorageBackend 的 HTTP 透传实现。 | fetchKernelInfo(fn), KernelUnavailableError(class), HttpStorageBackend(class), HttpStorageOptions(type), KernelInfo(type) |
 | [src/web/kernel.ts](src/web/kernel.ts) | 250 | 统一内核接入口：全部页面共用同一份账本（唯一真相源）。 | getTenant(fn), bindTenant(fn), syncTenantFromHost(fn), kernelAccount(fn), setKernelStorageForTests(fn), getKernelStorage(fn), rebuildKernelForDataPlane(fn), setKernelL0ForTests(fn), getKernelWithSeed(fn), getKernel(fn), createKernelOnSameStorage(fn), rebuildKernelFromModelConfig(fn), resetKernelForTests(fn), newRequestId(fn), KERNEL_FORM(const), KernelTenant(type), KernelOverrides(type) |
 | [src/web/lifecycle/LifecycleCard.tsx](src/web/lifecycle/LifecycleCard.tsx) | 51 | 生命周期页（REQ-006 / P4）状态查看器（T3） | LifecycleCard(fn) |
-| [src/web/lifecycle/LifecyclePage.tsx](src/web/lifecycle/LifecyclePage.tsx) | 491 | 生命周期页（REQ-006 / P4）· 2026-11-22 按真实使用场景重排 | LifecyclePage(fn) |
+| [src/web/lifecycle/LifecyclePage.tsx](src/web/lifecycle/LifecyclePage.tsx) | 490 | 生命周期页（REQ-006 / P4）· 2026-11-22 按真实使用场景重排 | LifecyclePage(fn) |
 | [src/web/lifecycle/ParamPanel.tsx](src/web/lifecycle/ParamPanel.tsx) | 75 | 生命周期页（REQ-006 / P4）调参面板（T4） | ParamPanel(fn) |
 | [src/web/lifecycle/constants.ts](src/web/lifecycle/constants.ts) | 4 | 生命周期阈值常量（9.10.1）。列表数据真相 = 内核账本，无演示记忆。 | N_DAYS(const), M_DAYS(const) |
 | [src/web/lifecycle/coreLifecycle.ts](src/web/lifecycle/coreLifecycle.ts) | 143 | 生命周期页（REQ-006 / P4）接真内核：迁移/调参/批量统一走 ma._memoryOp | toLifecycleRecord(fn), coreListLifecycle(fn), coreLifeOp(fn), DECAY_TO_STATUS(const), STATUS_TO_DECAY(const) |
@@ -369,7 +371,7 @@
 | [src/web/monitor/options.ts](src/web/monitor/options.ts) | 28 | 监控页宿主 Agent 筛选选项（批次48 A25：只由真实账本派生，不内置占位 agent 名）。 | agentOptionsFromLedger(fn), ALL_AGENTS_OPTION(const) |
 | [src/web/monitor/types.ts](src/web/monitor/types.ts) | 38 | 监控仪表盘（REQ-006 / P6）数据模型 | MetricCard(type), AlertItem(type), MonitorFilter(type), AlertLevel(type) |
 | [src/web/monitor/useMonitorMirror.ts](src/web/monitor/useMonitorMirror.ts) | 13 | 监控仪表盘后端镜像：挂载视图上抛（G6 fire-and-forget，monitor_view）。 | useMonitorMirror(fn) |
-| [src/web/monitor/useMonitorReal.ts](src/web/monitor/useMonitorReal.ts) | 482 | 监控仪表盘（REQ-006 / P6）· 真实数据接真层 | percentile(fn), applyMonitorStats(fn), applyMonitorOps(fn), metricsFromLedger(fn), summaryFromLedger(fn), realLoadAlerts(fn), loadRealMonitorData(fn), MONITOR_REAL_DATA_SOURCE(const), MonitorStats(type), MonitorOps(type), SummaryStat(type), RealMonitor(type), RealStorage(type) |
+| [src/web/monitor/useMonitorReal.ts](src/web/monitor/useMonitorReal.ts) | 464 | 监控仪表盘（REQ-006 / P6）· 真实数据接真层 | percentile(fn), applyMonitorStats(fn), applyMonitorOps(fn), metricsFromLedger(fn), summaryFromLedger(fn), realLoadAlerts(fn), loadRealMonitorData(fn), MONITOR_REAL_DATA_SOURCE(const), MonitorStats(type), MonitorOps(type), SummaryStat(type), RealMonitor(type), RealStorage(type) |
 | [src/web/monitor/useToast.tsx](src/web/monitor/useToast.tsx) | 13 | — | useToast(fn) |
 | [src/web/overview/McpSwitchAlert.tsx](src/web/overview/McpSwitchAlert.tsx) | 65 | 首页「客户端 MCP 开关」提示条（T3 展示层 · 落点①）。 | McpSwitchAlert(fn), McpSwitchAlertProps(type) |
 | [src/web/overview/Overview.tsx](src/web/overview/Overview.tsx) | 136 | REQ-003 + REQ-005 配合展示（通览演示页） | Overview(fn) |
@@ -401,14 +403,15 @@
 | [src/web/retrieval/BudgetPanel.tsx](src/web/retrieval/BudgetPanel.tsx) | 153 | REQ-012 T5 右侧栏三块：Token 预算（R9 三档 + 分段量表）· 召回漏斗 · 裁剪明细。 | TokenBudgetCard(fn), FunnelCard(fn), TrimCard(fn), BudgetPanel(fn) |
 | [src/web/retrieval/ContextPanel.tsx](src/web/retrieval/ContextPanel.tsx) | 61 | REQ-012 T5 命中上下文（§4）：片段 → 关联记忆 → 参数（只读）→ 跳转。 | ContextPanel(fn) |
 | [src/web/retrieval/ModeBanner.tsx](src/web/retrieval/ModeBanner.tsx) | 76 | REQ-012 T5 生效横幅（§2）：一条蓝色场景带 —— 场景徽标 + 该场景的硬口径（重排/预算/纪律）， | ModeBanner(fn) |
-| [src/web/retrieval/ModeFeedbackCard.tsx](src/web/retrieval/ModeFeedbackCard.tsx) | 86 | P2-8 §3.4：结果页「这次模式选对了吗？」👍/👎，👎 需选原因后提交。 | ModeFeedbackCard(fn) |
+| [src/web/retrieval/ModeFeedbackCard.tsx](src/web/retrieval/ModeFeedbackCard.tsx) | 108 | P2-8 §3.4：结果页「这次模式选对了吗？」👍/👎，👎 需选原因后提交。 | ModeFeedbackCard(fn) |
 | [src/web/retrieval/QueryBar.tsx](src/web/retrieval/QueryBar.tsx) | 246 | REQ-012 T3 查询条（定稿）：查询行「输入 + 场景 + 项目 + 检索」+ 模式行（§3.1 自动/手动二元分段） | QueryBar(fn), DEPTH_OPTIONS(const), QueryBarValue(type) |
 | [src/web/retrieval/RecentRecallsCard.tsx](src/web/retrieval/RecentRecallsCard.tsx) | 77 | 检索页右侧栏「最近召回」：直接读账本 recall 审计行（时间 / query 摘要 / 命中 / 注入 t）， | fmtClock(fn), RecentRecallsCard(fn), RecentPhase(type) |
 | [src/web/retrieval/ResultList.tsx](src/web/retrieval/ResultList.tsx) | 61 | REQ-012 T4 结果列表（定稿结果行）：分数 + 正文/元信息 + 行内操作；Top 5 默认，加载更多至 10。 | ResultList(fn) |
-| [src/web/retrieval/ResultRow.tsx](src/web/retrieval/ResultRow.tsx) | 77 | REQ-012 T4 结果行（定稿·紧凑版）：分数徽标 + 命中正文（默认一行）+ 元信息（id · 温度 · 新鲜/重要/置信） | ResultRow(fn) |
-| [src/web/retrieval/RetrievalPage.tsx](src/web/retrieval/RetrievalPage.tsx) | 497 | 检索页（REQ-012）· 定稿三标签：检索工作台 / 历史查询 / 规则 | RetrievalPage(fn) |
+| [src/web/retrieval/ResultRow.tsx](src/web/retrieval/ResultRow.tsx) | 81 | REQ-012 T4 结果行（定稿·紧凑版）：分数徽标 + 命中正文（默认一行）+ 元信息（id · 温度 · 新鲜/重要/置信） | ResultRow(fn) |
+| [src/web/retrieval/RetrievalPage.tsx](src/web/retrieval/RetrievalPage.tsx) | 507 | 检索页（REQ-012）· 定稿三标签：检索工作台 / 历史查询 / 规则 | RetrievalPage(fn) |
 | [src/web/retrieval/coreEngine.ts](src/web/retrieval/coreEngine.ts) | 338 | REQ-012 接真内核引擎（T7）：与 fakeEngine 同签名（async），内部走 memagent-core ma.recall | coreReorderMemory(fn), coreEngine(fn), coreLastRecall(fn), coreRecentRecalls(fn), beijingDayStart(fn), coreRecallHistory(fn), ALL_PROJECTS_SCOPE(const), EngineResult(type), EngineOptions(type), LastRecallSnapshot(type) |
-| [src/web/retrieval/coreModeFeedback.ts](src/web/retrieval/coreModeFeedback.ts) | 47 | P2-8 §3.4 模式反馈真实落盘：写内核审计 action=mode_feedback。 | coreSubmitModeFeedback(fn), MODE_FEEDBACK_REASONS(const), ModeFeedbackInput(type), ModeFeedbackVerdict(type), ModeFeedbackReason(type), ModeFeedbackOutcome(type) |
+| [src/web/retrieval/coreModeFeedback.ts](src/web/retrieval/coreModeFeedback.ts) | 74 | P2-8 §3.4 模式反馈真实落盘：写内核审计 action=mode_feedback。 | normalizeExpectedMode(fn), coreSubmitModeFeedback(fn), MODE_FEEDBACK_REASONS(const), EXPECTED_MODES(const), ModeFeedbackInput(type), ModeFeedbackVerdict(type), ModeFeedbackReason(type), ModeFeedbackOutcome(type) |
+| [src/web/retrieval/coreRankFeedback.ts](src/web/retrieval/coreRankFeedback.ts) | 33 | 排序反馈（2026-11-26，方案 MODE-FEEDBACK-TARGET-FIELD.md §2.2）： | coreSubmitRankFeedback(fn), RankFeedbackInput(type), RankFeedbackOutcome(type) |
 | [src/web/retrieval/logic.ts](src/web/retrieval/logic.ts) | 142 | 检索页（REQ-012）纯逻辑层 | modeName(fn), sceneName(fn), sceneLabel(fn), modeLabel(fn), normalizeScene(fn), normalizeMode(fn), resolveSceneBudget(fn), resolveModeLinkage(fn), isMinimalCandidate(fn), sortHits(fn), freshness(fn), decayClass(fn), budgetLevel(fn), approxTokens(fn), validateQuery(fn) |
 | [src/web/retrieval/retrievalEntry.tsx](src/web/retrieval/retrievalEntry.tsx) | 12 | 检索页（REQ-012）入口 | — |
 | [src/web/retrieval/types.ts](src/web/retrieval/types.ts) | 120 | 检索页（REQ-012）数据模型 | RetrievalHit(type), SceneBudget(type), ModeBannerData(type), BudgetData(type), RecallHistoryRow(type), RecentRecallRow(type), Scene(type), Mode(type), ModeSel(type), PageState(type), DecayClass(type), BudgetLevel(type) |
@@ -430,7 +433,7 @@
 | [src/web/security/RebuildFromL0Card.tsx](src/web/security/RebuildFromL0Card.tsx) | 271 | 安全页 · 按 L0 原文重建 L1–L6 卡（批次37-E） | RebuildFromL0Card(fn) |
 | [src/web/security/RulesRejudgeCard.tsx](src/web/security/RulesRejudgeCard.tsx) | 189 | 安全页 · 规则重判存量卡（批次36-C） | RulesRejudgeCard(fn) |
 | [src/web/security/SecurityCards.tsx](src/web/security/SecurityCards.tsx) | 121 | P12-T3 角色矩阵（只读）+ 成员表（真实账号，只读）+ 密钥表（真实 /api/keys：轮换/吊销） | RoleMatrixCard(fn), MemberTable(fn), KeyTable(fn) |
-| [src/web/security/SecurityPage.tsx](src/web/security/SecurityPage.tsx) | 826 | 账号与安全页（REQ-006 / P12）T4 编排 | SecurityPage(fn) |
+| [src/web/security/SecurityPage.tsx](src/web/security/SecurityPage.tsx) | 813 | 账号与安全页（REQ-006 / P12）T4 编排 | SecurityPage(fn) |
 | [src/web/security/TenantIdentityCard.tsx](src/web/security/TenantIdentityCard.tsx) | 197 | 安全页 · 「本机租户身份」卡（管理员与成员权限设计 §14.2，2026-11-15 用户确认新增； | TenantIdentityCard(fn) |
 | [src/web/security/accountsClient.ts](src/web/security/accountsClient.ts) | 308 | 账号管理 API client（批次7）：走 home server 的管理员接口，权限由后端强制。 | fetchMyContext(fn), fetchAccounts(fn), updateAccount(fn), fetchApiKeys(fn), mintApiKey(fn), revokeApiKey(fn), fetchMirrorIntegrity(fn), resealMirrorAudit(fn), fetchPwdPolicy(fn), savePwdPolicy(fn), changeOwnPassword(fn), AccountView(type), ApiKeyRecord(type), MirrorIntegrityView(type), ResealOutcome(type), ApiResult(type) |
 | [src/web/security/coreSecurity.ts](src/web/security/coreSecurity.ts) | 130 | 账号与安全页（REQ-006 / P12）接真内核：安全操作真写 storage 审计账本 | coreSecurityAudit(fn), coreLoadSecurityAudit(fn), coreLoadL0Audit(fn), coreL0Status(fn), coreL0SetupAdminPassword(fn), coreL0ChangeAdminPassword(fn), coreL0ListRequests(fn), coreL0ListGrants(fn), coreL0Grant(fn), coreL0Deny(fn), coreL0Revoke(fn), coreL0UnlockWrite(fn), coreL0UnlockWriteForMember(fn), coreL0AddMemberWriteWrap(fn), coreL0RemoveMemberWriteWrap(fn), coreL0MyWriteWrap(fn), coreL0LockWrite(fn), coreL0Migrate(fn), L0AuditRow(type) |
@@ -445,7 +448,7 @@
 | [src/web/setup/SetupPage.tsx](src/web/setup/SetupPage.tsx) | 596 | 首启向导（批次37-B 建；批次58 按定稿图逐字重做版式）。 | SetupPage(fn) |
 | [src/web/setup/setupEntry.tsx](src/web/setup/setupEntry.tsx) | 12 | 首启向导入口（批次37-B） | — |
 | [src/web/shared/DemoBadge.tsx](src/web/shared/DemoBadge.tsx) | 51 | 批次48 A30：演示页强制标识。inline 演示页（inlineattribution.html）与悬浮覆盖层（floatattribution.html） | DemoBadge(fn), DemoBadgeProps(type) |
-| [src/web/shared/L0WriteUnlock.tsx](src/web/shared/L0WriteUnlock.tsx) | 162 | 批次41-W：L0 写密钥未解锁 → 就地提示 + 就地解锁入口。 | L0WriteUnlock(fn), L0WriteUnlockProps(type) |
+| [src/web/shared/L0WriteUnlock.tsx](src/web/shared/L0WriteUnlock.tsx) | 124 | 批次41-W：L0 写密钥未解锁 → 就地提示 + 就地解锁入口。 | L0WriteUnlock(fn), L0WriteUnlockProps(type) |
 | [src/web/shared/PageNav.tsx](src/web/shared/PageNav.tsx) | 73 | 分页导航条（批次24 建，批次 E 起 v5 统一形态）：紧凑数字窗口（‹ 1 … 4 5 6 … 257 ›）+「第 x / y 页」。 | PageNav(fn), PageNavProps(type) |
 | [src/web/shared/actionLog.ts](src/web/shared/actionLog.ts) | 106 | 渲染层动作日志（批次7）：任何页面 import 本模块即自动安装全局捕获。 | uiLog(fn), installUiActionLog(fn) |
 | [src/web/shared/detectForm.ts](src/web/shared/detectForm.ts) | 16 | 端形态识别（19.10）：真实端壳注入，这里用 UA 粗判。 | detectForm(fn) |
@@ -462,7 +465,7 @@
 | [src/web/shared/mirrorFailureEvent.ts](src/web/shared/mirrorFailureEvent.ts) | 10 | 阶段5-C：mirror 上抛失败事件与载荷（零依赖共享，避免 mirrorClient ↔ actionLog 循环 import）。 | MIRROR_FAILURE_EVENT(const), MirrorFailure(type) |
 | [src/web/shared/mirrorFailureNotice.ts](src/web/shared/mirrorFailureNotice.ts) | 81 | 阶段5-C：镜像上抛失败的全局可见提示。 | installMirrorFailureNotice(fn), resetMirrorFailureNoticeForTests(fn) |
 | [src/web/shared/navCountChannel.ts](src/web/shared/navCountChannel.ts) | 34 | 导航计数回传通道（第一轮个人记忆）：中心区页面把「真实待确认数」回传给壳层左侧导航。 | parseNavCount(fn), publishNavCount(fn), NAV_COUNT_MSG(const), NavCountPayload(type) |
-| [src/web/shared/navStatusChannel.ts](src/web/shared/navStatusChannel.ts) | 178 | REQ-014 / T6（C8）：侧栏真实状态回传通道。 | parseNavStatus(fn), publishNavStatus(fn), buildNavStatus(fn), NAV_STATUS_MSG(const), NavStatusItem(type), NavStatusPayload(type), NavStatusWindowLike(type), NavStatusSource(type), NavStatusTone(type) |
+| [src/web/shared/navStatusChannel.ts](src/web/shared/navStatusChannel.ts) | 143 | REQ-014 / T6（C8）：侧栏真实状态回传通道。 | parseNavStatus(fn), publishNavStatus(fn), buildNavStatus(fn), NAV_STATUS_MSG(const), NavStatusItem(type), NavStatusPayload(type), NavStatusWindowLike(type), NavStatusSource(type), NavStatusTone(type) |
 | [src/web/shared/pagerWindow.ts](src/web/shared/pagerWindow.ts) | 23 | v5 pager 数字窗口（批次 B）：把「当前页 / 总页数」折叠成 ‹ 1 … 4 5 6 … 257 › 的按钮序列。 | pagerWindow(fn), PagerCell(type) |
 | [src/web/shared/paginate.ts](src/web/shared/paginate.ts) | 49 | 列表分页纯函数（批次24）：记忆库 / 日志记录 / 审计日志共用同一口径。 | autoPageSize(fn), paginate(fn), PAGE_SIZES(const), DEFAULT_PAGE_SIZE(const), MIN_AUTO_PAGE_SIZE(const), PageParams(type), Paged(type) |
 | [src/web/shared/personalPort.ts](src/web/shared/personalPort.ts) | 152 | 个人记忆数据面端口（第一轮本机闭环）：桌面壳 → 主进程 IPC；纯浏览器 → 登录后端 HTTP。 | createHostPersonalPort(fn), createHttpPersonalPort(fn), getPersonalPort(fn), loadPersonalSnapshot(fn), quickAddPersonal(fn), confirmPersonal(fn), rejectPersonal(fn), revokePersonal(fn), removePersonal(fn), importPersonalFromAgent(fn), rejectPersonalFromAgent(fn), pushPersonalToTeam(fn), retryPersonalSync(fn), PersonalPort(type), PersonalOpName(type) |
@@ -477,15 +480,15 @@
 | [src/web/shell/Icons.tsx](src/web/shell/Icons.tsx) | 76 | 壳层图标：定稿里的线性图标集，按需内联渲染（不引入外部图标库、不依赖网络）。 | Icon(fn) |
 | [src/web/shell/PersonalMemoryPanel.tsx](src/web/shell/PersonalMemoryPanel.tsx) | 268 | 个人记忆壳层常驻面板（N8）：点击状态栏快捷按钮展开，全局常驻， | PersonalMemoryPanel(fn), PersonalMemoryPanelProps(type) |
 | [src/web/shell/ShellLoginDialog.tsx](src/web/shell/ShellLoginDialog.tsx) | 289 | 壳层登录弹窗（批次49）：菜单栏 / 快速访问工具条 / 登录状态处三处入口共用同一个实例。 | logoutCurrentSession(fn), ShellLoginDialog(fn), ShellLoginDialogProps(type) |
-| [src/web/shell/ShellStatusCard.tsx](src/web/shell/ShellStatusCard.tsx) | 154 | REQ-014 / T7（C8）：系统状态条（批次58 起常驻命令条右端，原侧栏卡位已移除）。 | ShellStatusCard(fn), EndpointBrief(type) |
+| [src/web/shell/ShellStatusCard.tsx](src/web/shell/ShellStatusCard.tsx) | 104 | REQ-014 / T7（C8）：侧栏真实状态卡。 | ShellStatusCard(fn) |
 | [src/web/shell/StrataScale.tsx](src/web/shell/StrataScale.tsx) | 52 | 功能导航栏底部的「层级刻度」（批次53）：L0–L6 七档真实计数。 | StrataScale(fn) |
-| [src/web/shell/Workspace.tsx](src/web/shell/Workspace.tsx) | 1953 | 工作台壳层（批次48 S1 建；v5 重设计改造）：36px 标题栏 + 44px 上下文命令条 + 导航树 + 标签条 | Workspace(fn), ShellShortcutAction(type) |
+| [src/web/shell/Workspace.tsx](src/web/shell/Workspace.tsx) | 1948 | 工作台壳层（批次48 S1 建；v5 重设计改造）：36px 标题栏 + 44px 上下文命令条 + 导航树 + 标签条 | Workspace(fn), ShellShortcutAction(type) |
 | [src/web/shell/dock.ts](src/web/shell/dock.ts) | 177 | 底部面板真实数据源（S6）：输出=程序动作日志尾读；问题=该日志派生的错误/警告； | loadOutputLog(fn), problemsFromLog(fn), countActionableProblems(fn), loadScheduleRuns(fn), auditMentions(fn), loadAuditForMemory(fn), OutputLogView(type), ProblemRow(type), ScheduleRun(type), AuditRow(type), DockResult(type) |
 | [src/web/shell/humanLog.ts](src/web/shell/humanLog.ts) | 164 | 底部「输出 / 问题」面板的人话翻译层（2026-11-22）： | humanActionLabel(fn), humanizeLogLine(fn), problemsIntro(fn), HumanLogLine(type), HumanSeverity(type) |
 | [src/web/shell/layers.ts](src/web/shell/layers.ts) | 79 | L1–L6 / L0 面板真实数据（S7）：只在中心页为「分层 L1–L6」或「L0 密文」时显示的壳层条。 | loadLayerPanel(fn), PANEL_LAYERS(const), LayerCount(type), LayerPanelView(type), PanelLayer(type) |
 | [src/web/shell/navCounts.ts](src/web/shell/navCounts.ts) | 45 | 批次54：功能导航角标的真实数据加载器。 | loadNavCounts(fn), NavCountId(type), NavCounts(type) |
 | [src/web/shell/overview.ts](src/web/shell/overview.ts) | 530 | 壳层「概览」数据条（批次48 S2）：只从真实链路取值，逐项标明来源与失败原因。 | loadMcpPanel(fn), loadOverview(fn), OverviewHealth(type), OverviewBilling(type), OverviewAuditRow(type), OverviewRecentAudits(type), OverviewTodayPanel(type), OverviewTokenPanel(type), OverviewRefinePanel(type), OverviewMcpRow(type), OverviewMcpPanel(type), OverviewEngineRow(type), OverviewEnginePanel(type), OverviewDataRoot(type), OverviewL0Write(type), OverviewSnapshot(type) |
-| [src/web/shell/shellStatus.ts](src/web/shell/shellStatus.ts) | 198 | REQ-014 / T7（C8）：侧栏状态卡的真实数据加载器。 | loadPendingCount(fn), loadRefineBrief(fn), loadMcpSwitchBrief(fn), loadWebIssueBrief(fn), loadShellStatus(fn), toNavStatusSource(fn), SHELL_STATUS_POLL_MS(const), RefineBrief(type), McpSwitchBrief(type), WebIssueBrief(type), ShellStatusSnapshot(type) |
+| [src/web/shell/shellStatus.ts](src/web/shell/shellStatus.ts) | 144 | REQ-014 / T7（C8）：侧栏状态卡的真实数据加载器。 | loadPendingCount(fn), loadRefineBrief(fn), loadMcpSwitchBrief(fn), loadShellStatus(fn), toNavStatusSource(fn), SHELL_STATUS_POLL_MS(const), RefineBrief(type), McpSwitchBrief(type), ShellStatusSnapshot(type) |
 | [src/web/shell/statusbar.ts](src/web/shell/statusbar.ts) | 137 | 状态栏真实数据（S7）：账本位置 / L0 保险库状态 / 采集器后台状态。 | loadL0Write(fn), loadL0Status(fn), loadCollectorStatus(fn), loadStatusbar(fn), shortLocation(fn), StoragePlaceView(type), CollectorView(type), StatusSnapshot(type), L0WriteView(type), StatusbarPart(type) |
 | [src/web/shell/strataScale.ts](src/web/shell/strataScale.ts) | 92 | 功能导航栏底部的「层级刻度」（批次53 定义 / 批次55 改数据源）：L0–L6 七档的真实计数。 | strataViewFromOverview(fn), STRATA_LAYERS(const), StrataLayerSpec(type), StrataRowView(type), StrataScaleView(type), StrataSnapshotLike(type), StrataLayerId(type) |
 | [src/web/shell/taskpane.ts](src/web/shell/taskpane.ts) | 41 | 任务窗「待重放写入」只读视图（S5 / D6）：经 hostBridge 读 l0:pendingWrites。 | loadPendingWrites(fn), PendingWritesResult(type) |
@@ -497,9 +500,9 @@
 | [src/web/test-setup.ts](src/web/test-setup.ts) | 1 | — | — |
 | [src/web/vite-env.d.ts](src/web/vite-env.d.ts) | 2 | Vite 侧效应导入（CSS）的类型声明 | — |
 | [src/web/webonboard/WebOnboardPage.tsx](src/web/webonboard/WebOnboardPage.tsx) | 175 | 网页端接入页（2026-11-19 新增；2026-11-22 按真实使用场景重排） | WebOnboardPage(fn) |
-| [src/web/webonboard/WebchatAutoCard.tsx](src/web/webonboard/WebchatAutoCard.tsx) | 412 | 网页端接入页 ·「网页会话自动采集」卡（2026-11-19 自参数页迁入）。 | pendingRelogin(fn), WebchatAutoCard(fn), WebchatAutoSummary(type) |
+| [src/web/webonboard/WebchatAutoCard.tsx](src/web/webonboard/WebchatAutoCard.tsx) | 390 | 网页端接入页 ·「网页会话自动采集」卡（2026-11-19 自参数页迁入）。 | WebchatAutoCard(fn), WebchatAutoSummary(type) |
 | [src/web/webonboard/webOnboardEntry.tsx](src/web/webonboard/webOnboardEntry.tsx) | 13 | 网页端接入页入口（2026-11-19 新增） | — |
-| [src/web/webonboard/webchatAuto.ts](src/web/webonboard/webchatAuto.ts) | 161 | 网页端接入页 ·「网页会话自动采集」卡的渲染层桥（2026-11-19 自参数页迁入）。 | webchatAutoAvailable(fn), webchatAutoLogin(fn), webchatExportDir(fn), webchatExportOpen(fn), webchatExportSet(fn), AUTO_STATUS_LABEL(const), webchatAutoState(const), webchatAutoSet(const), webchatAutoRun(const), webchatAutoSweep(const), AutoConfigView(type), AutoSiteResult(type), AutoRoundView(type), AutoStateView(type), AutoResult(type), AutoPatch(type), ExportDirView(type), AutoSiteStatus(type) |
+| [src/web/webonboard/webchatAuto.ts](src/web/webonboard/webchatAuto.ts) | 159 | 网页端接入页 ·「网页会话自动采集」卡的渲染层桥（2026-11-19 自参数页迁入）。 | webchatAutoAvailable(fn), webchatAutoLogin(fn), webchatExportDir(fn), webchatExportOpen(fn), webchatExportSet(fn), AUTO_STATUS_LABEL(const), webchatAutoState(const), webchatAutoSet(const), webchatAutoRun(const), webchatAutoSweep(const), AutoConfigView(type), AutoSiteResult(type), AutoRoundView(type), AutoStateView(type), AutoResult(type), AutoPatch(type), ExportDirView(type), AutoSiteStatus(type) |
 | [src/web/write/DedupCard.tsx](src/web/write/DedupCard.tsx) | 59 | 写入页右栏「查重预览」面板（STRATUM 1:1 复刻 · 设计真源 stratum-a-full.html pg-write 右栏）： | DedupCard(fn) |
 | [src/web/write/WriteForm.tsx](src/web/write/WriteForm.tsx) | 149 | 写入页表单（STRATUM 1:1 复刻 · 设计真源 stratum-a-full.html pg-write 写入表单面板）： | WriteForm(fn) |
 | [src/web/write/WriteL0UnlockCard.tsx](src/web/write/WriteL0UnlockCard.tsx) | 160 | 写入页「就地解锁 L0 写密钥」面板（STRATUM 1:1 复刻 · 设计真源 stratum-a-full.html pg-write）： | WriteL0UnlockCard(fn), L0UnlockStatus(type) |
@@ -608,17 +611,10 @@
 | [specs/reports/RECALL-WEEK-PLAN.md](specs/reports/RECALL-WEEK-PLAN.md) | 120 | 召回 A 方案 · 一周真实数据观察计划（2026-11-12 ~ 2026-11-19） |
 | [specs/reports/T4-存量明文盘点-2026-11-12.md](specs/reports/T4-存量明文盘点-2026-11-12.md) | 51 | title: T4 存量明文盘点与不变量守卫 |
 | [specs/reports/WEBCHAT-ID-RECONCILE-PLAN.md](specs/reports/WEBCHAT-ID-RECONCILE-PLAN.md) | 145 | 网页会话采集：无状态 ID 对账改造 · 详细执行方案 |
-| [specs/reports/auto-mode-weights-eval-2026-11-25.md](specs/reports/auto-mode-weights-eval-2026-11-25.md) | 64 | auto 模式专属权重 vs growth:v1 固定权重 —— 离线 A/B 评估（2026-11-25，北京时间） |
 | [specs/reports/dsh-hindsight-local-对比与借鉴-2026-11-14.md](specs/reports/dsh-hindsight-local-对比与借鉴-2026-11-14.md) | 115 | dsh-hindsight-local 与 MultiAgent Memory 对比与借鉴建议 |
 | [specs/reports/dsh-hindsight-local-调研报告-2026-11-14.md](specs/reports/dsh-hindsight-local-调研报告-2026-11-14.md) | 266 | dsh-hindsight-local 仓库调研报告 |
-| [specs/reports/hindsight-comparison-2026-11-24.md](specs/reports/hindsight-comparison-2026-11-24.md) | 131 | MultiAgent Memory vs Hindsight — 重新对比（2026-11-24） |
-| [specs/reports/hindsight-comparison-and-roadmap-2026-11-21.md](specs/reports/hindsight-comparison-and-roadmap-2026-11-21.md) | 291 | MultiAgent Memory vs Hindsight 对比分析与追赶方案 |
-| [specs/reports/hindsight-追赶实施方案-2026-11-22.md](specs/reports/hindsight-追赶实施方案-2026-11-22.md) | 173 | MultiAgent Memory vs Hindsight — 对比点汇总与追赶实施方案 |
-| [specs/reports/p1-5-bm25-feasibility-2026-11-22.md](specs/reports/p1-5-bm25-feasibility-2026-11-22.md) | 74 | P1-5 BM25 长度归一化可行性评估（2026-11-22 北京时间） |
 | [specs/reports/p1-6-7-8-reevaluation-2026-11-23.md](specs/reports/p1-6-7-8-reevaluation-2026-11-23.md) | 133 | P1-6 / P1-7 / P1-8 重新评估（摆上台面） |
 | [specs/reports/p1-6-offline-eval-2026-11-23.md](specs/reports/p1-6-offline-eval-2026-11-23.md) | 108 | P1-6 离线深度评估：multilingual-e5-small 384 维 vs 现役 64 维 hash bag |
-| [specs/reports/recall-quality-progress-2026-11-21.md](specs/reports/recall-quality-progress-2026-11-21.md) | 235 | 召回质量增强任务进度报告 |
-| [specs/reports/recall-weights-offline-eval-2026-11-22.md](specs/reports/recall-weights-offline-eval-2026-11-22.md) | 73 | P0-3 召回权重离线评估报告（2026-11-22 北京时间） |
 | [specs/reports/召回模式全程序审查报告-2026-11-13.md](specs/reports/召回模式全程序审查报告-2026-11-13.md) | 160 | title: 召回模式全程序审查报告 |
 | [specs/reports/审查-Agent侧记忆库与净化生长打通-2026-11-12.md](specs/reports/审查-Agent侧记忆库与净化生长打通-2026-11-12.md) | 111 | title: 审查报告 — Agent 侧记忆库使用与净化生长数据是否打通 |
 | [specs/requirements.md](specs/requirements.md) | 75 | title: 需求规格 |
@@ -636,7 +632,9 @@
 | [specs/tasks/LLM-CONFIG.md](specs/tasks/LLM-CONFIG.md) | 29 | P13 大模型配置页 任务拆分（REQ-009 / 13.2 / 19.8） |
 | [specs/tasks/LOGS.md](specs/tasks/LOGS.md) | 29 | REQ-011 日志记录页（P15）任务拆分 |
 | [specs/tasks/MEMORY-MANAGE.md](specs/tasks/MEMORY-MANAGE.md) | 95 | REQ-006 / P8 记忆管理页 — 任务拆分（原子任务 · 供 Agent 执行） |
-| [specs/tasks/MODE-DISPATCH-EVOLUTION.md](specs/tasks/MODE-DISPATCH-EVOLUTION.md) | 76 | title: 7.2 样本池读取侧接线（mode_feedback → 分流词表/权重回归） |
+| [specs/tasks/MODE-DISPATCH-EVOLUTION.md](specs/tasks/MODE-DISPATCH-EVOLUTION.md) | 108 | title: 7.2 样本池读取侧接线（mode_feedback → 分流词表/权重回归） |
+| [specs/tasks/MODE-DISPATCH-ROLLBACK.md](specs/tasks/MODE-DISPATCH-ROLLBACK.md) | 156 | title: mode_dispatch 采纳后回诊计划 —— 分流命中率基线与回滚判据（方案） |
+| [specs/tasks/MODE-FEEDBACK-TARGET-FIELD.md](specs/tasks/MODE-FEEDBACK-TARGET-FIELD.md) | 123 | title: mode_feedback 增「应该是什么模式」字段 → 解锁 add_words / weight_step |
 | [specs/tasks/MONITOR.md](specs/tasks/MONITOR.md) | 26 | P6 监控仪表盘 任务拆分（REQ-006 / 12.1 / 12.2） |
 | [specs/tasks/RECALL-ECHO-RAG.md](specs/tasks/RECALL-ECHO-RAG.md) | 321 | title: 回显重设计 — RAG 引用锚点 + 气泡内折叠统计汇总 |
 | [specs/tasks/RECALL-HIGHLIGHT.md](specs/tasks/RECALL-HIGHLIGHT.md) | 115 | REQ-004 → 回显命中片段高亮（方案 C）· AC/TC |
@@ -699,626 +697,624 @@
 
 任一源码/文档文件内容变化都会让 --check 失败（单行改动也不例外）。
 
-e2e/dev-server.ts d44072ee6d80
-e2e/global-setup.mjs ac6a4df65136
-e2e/global-teardown.mjs 517d14f4d985
-e2e/harness.ts 89419d99cd6f
-e2e/run.mjs 3a472110f3e2
+e2e/dev-server.ts dc2a1e9efe28
+e2e/global-setup.mjs d1e2da23abf4
+e2e/global-teardown.mjs f006f7392c90
+e2e/harness.ts 6bbae8ea8e9c
+e2e/run.mjs f5b143e6ded9
 e2e/servers.ts 0b132b70df16
-src/agentOnboard/client.ts 88721ad65301
-src/agentOnboard/formMatrix.ts e7dd02db5873
-src/agentOnboard/mcpClients.ts 0b6f39f3b712
-src/agentOnboard/probe.ts b1d3392a8393
-src/agentOnboard/server.ts e810cc4647d3
-src/agentOnboard/service.ts f3d8f7217738
-src/agentOnboard/stateMachine.ts 8959634e14b2
-src/agentOnboard/validators.ts a7372fc705a7
-src/auth/hash.ts 3919b27befef
-src/auth/loginService.ts a0cc1ede21f9
-src/auth/memberSync.ts dd7d2d4ed60e
+src/agentOnboard/client.ts 84bb9d747028
+src/agentOnboard/formMatrix.ts f0b4675d1eb0
+src/agentOnboard/mcpClients.ts ddd4692923ff
+src/agentOnboard/probe.ts f6971b0dfa1f
+src/agentOnboard/server.ts ad7ef837d4a3
+src/agentOnboard/service.ts 0322273d831a
+src/agentOnboard/stateMachine.ts 61774ad05d67
+src/agentOnboard/validators.ts 3b50affbd720
+src/auth/hash.ts c4e2d3f685d6
+src/auth/loginService.ts 4f6adb67173e
+src/auth/memberSync.ts 239d0ef1c5ab
 src/core/memagent/agent.ts 1b1791ad8cb4
 src/core/memagent/agentUsage.ts 3a88178c29f8
-src/core/memagent/auditLog.ts 041c6c71e76e
-src/core/memagent/collectDaemon.ts 1c66b6cd74c0
-src/core/memagent/conflict.ts e537b2588f67
-src/core/memagent/crypto.ts 6e5f2f4845bb
-src/core/memagent/dedup.ts ba546f64836b
-src/core/memagent/docTokenSet.ts 4d8f2800119f
-src/core/memagent/errors.ts 4f68fde40b23
-src/core/memagent/evolution/loop.ts 45b1a26f8e12
-src/core/memagent/evolution/recallEval.ts f67978352345
-src/core/memagent/evolution/registry.ts af061bbd234e
-src/core/memagent/evolution/sceneProfile.ts df834140db47
-src/core/memagent/evolution/versioning.ts b45a4d885cec
+src/core/memagent/auditLog.ts 30e3500ead79
+src/core/memagent/collectDaemon.ts e1179412224b
+src/core/memagent/conflict.ts cb1bf70095b3
+src/core/memagent/crypto.ts 1e51a33b941e
+src/core/memagent/dedup.ts 64527d95a7cc
+src/core/memagent/docTokenSet.ts 39bd53bffa09
+src/core/memagent/errors.ts 5d8e0f6b5388
+src/core/memagent/evolution/loop.ts 432d4ebbdfa7
+src/core/memagent/evolution/modeDispatchRegression.ts 7380d5a9d2c3
+src/core/memagent/evolution/rankWeightStep.ts a766b52dc6c5
+src/core/memagent/evolution/recallEval.ts 377e3bf12ee5
+src/core/memagent/evolution/registry.ts 311c5901792c
+src/core/memagent/evolution/sceneProfile.ts 931afbba1025
+src/core/memagent/evolution/versioning.ts 653df788643e
 src/core/memagent/feedbackSignal.ts 17a4faceba0a
 src/core/memagent/fieldBackfill.ts bf726e2b5d5b
-src/core/memagent/fileStorage.ts d2f5862253b1
-src/core/memagent/forgetting.ts 3ea475927107
-src/core/memagent/hitHighlight.ts cb393dd329f3
-src/core/memagent/l0Recovery.ts c76af3edf9b2
-src/core/memagent/l0Split.ts 3ebd7be1d93f
-src/core/memagent/l0Store.ts b8a003776bbf
-src/core/memagent/l0vault.ts a028bd5a53f9
-src/core/memagent/layerRules.ts 2bbfbe0c578f
-src/core/memagent/ledgerReset.ts 02fddcaebf0b
-src/core/memagent/legacyLayers.ts 8f912218cef5
-src/core/memagent/llm.ts 89651995229a
+src/core/memagent/fileStorage.ts e1e2a506c773
+src/core/memagent/forgetting.ts cdf82a39ae78
+src/core/memagent/hitHighlight.ts 466f8f7a556d
+src/core/memagent/l0Recovery.ts 34bae9dd35e5
+src/core/memagent/l0Split.ts a30287cc9328
+src/core/memagent/l0Store.ts 6e0a9f67ddb1
+src/core/memagent/l0vault.ts a7f7d93ce21c
+src/core/memagent/layerRules.ts 9b913f0ee77d
+src/core/memagent/ledgerReset.ts 2e7644552384
+src/core/memagent/legacyLayers.ts 36eea5e4d29a
+src/core/memagent/llm.ts 6812a740f8be
 src/core/memagent/mcp.ts 254f31d9601c
-src/core/memagent/mcpAuth.ts c916f8e72e4a
+src/core/memagent/mcpAuth.ts 93a5d4f7c186
 src/core/memagent/mcpGcTools.ts ee67d3c47c47
-src/core/memagent/mcpGrowthTools.ts c8bc63e8593f
+src/core/memagent/mcpGrowthTools.ts f929cede3658
 src/core/memagent/mcpHookTools.ts e707647b9eca
 src/core/memagent/mcpHttp.ts fb7aaf48246f
-src/core/memagent/mcpManageTools.ts 937bfab33cc9
-src/core/memagent/mcpProjectTools.ts 465a286c11df
-src/core/memagent/mcpReadTools.ts 43f033b6dacc
+src/core/memagent/mcpManageTools.ts 92d8ab4e37d9
+src/core/memagent/mcpProjectTools.ts de72ef5d8881
+src/core/memagent/mcpReadTools.ts 940fe1bded61
 src/core/memagent/mcpRecall.ts f13d8f75d775
-src/core/memagent/mcpSchema.ts eca8a144051d
-src/core/memagent/memberStore.ts 7e32317d359b
-src/core/memagent/memories.ts 2f81cf66c180
+src/core/memagent/mcpSchema.ts 78600616a543
+src/core/memagent/memberStore.ts 55d56ab28c75
+src/core/memagent/memories.ts 128c3ef727c2
 src/core/memagent/paramsSnapshot.ts 26394df33f1a
-src/core/memagent/pendingStoreFile.ts 67a02b1b7648
-src/core/memagent/pendingWrites.ts ac57f2d79ffb
+src/core/memagent/pendingStoreFile.ts 3a013d81ed6e
+src/core/memagent/pendingWrites.ts 9c525d0d5f00
 src/core/memagent/personal.ts 931da2fdf1ef
-src/core/memagent/personalStore.ts 97caf77bf9a2
-src/core/memagent/personalStoreFile.ts 776412fdd9d6
-src/core/memagent/pgSyncHub.ts ba4374a89cc1
-src/core/memagent/pointerRoot.ts 66750ad31b63
+src/core/memagent/personalStore.ts 7503221fa170
+src/core/memagent/personalStoreFile.ts 85d4bf754797
+src/core/memagent/pgSyncHub.ts 635c70eb94d2
+src/core/memagent/pointerRoot.ts c7942bdc6895
 src/core/memagent/qualityGate.ts adc8639ee61c
-src/core/memagent/rebuild.ts 0157d9372c16
-src/core/memagent/recallDetailTickets.ts d7553f2a2f3a
+src/core/memagent/rebuild.ts bf35d532cd80
+src/core/memagent/recallDetailTickets.ts 1fa55c6dc317
 src/core/memagent/recallHook.ts c8e9f4b2c794
-src/core/memagent/recallHookCli.ts b81496ec718c
-src/core/memagent/recallInsight.ts aa85fd84941d
-src/core/memagent/recallModeKernel.ts 63b1b36b2fa4
-src/core/memagent/recallModes.ts 21b7834418bb
+src/core/memagent/recallHookCli.ts db3be0063625
+src/core/memagent/recallInsight.ts 93af0da951ee
+src/core/memagent/recallModeKernel.ts c67ea196a3ae
+src/core/memagent/recallModes.ts 00a8ff2e50ea
 src/core/memagent/recallPrelude.ts 15207f442d78
-src/core/memagent/recallSupersede.ts 05474d039dbe
-src/core/memagent/refineQueue.ts 8a4b9204d51d
+src/core/memagent/recallSupersede.ts 466109e6bb10
+src/core/memagent/refineQueue.ts bba7bce1e48b
 src/core/memagent/regression.ts 99084341cca4
-src/core/memagent/rejudge.ts fbbb37ee97b1
+src/core/memagent/rejudge.ts 8ee6ed0afed9
 src/core/memagent/sessionCollector.ts feb7886539a5
-src/core/memagent/sqliteStorage.ts a39293991388
-src/core/memagent/storage.ts eec1bee4ec33
-src/core/memagent/sync.ts 137bbd6b4a46
-src/core/memagent/tenantNormalize.ts 3cbf77699400
-src/core/memagent/tokenStore.ts f91acfd671b5
+src/core/memagent/sqliteStorage.ts 7d8d4c99217c
+src/core/memagent/storage.ts 79a525ee5f81
+src/core/memagent/sync.ts 5b269095a05c
+src/core/memagent/tenantNormalize.ts 6e77b1043383
+src/core/memagent/tokenStore.ts ba5f9126d0e2
 src/core/memagent/types.ts e43582616a57
-src/core/memagent/ulid.ts 634c99f1962a
-src/core/memagent/vector.ts fac22ffc234b
-src/core/memagent/webchatAudit.ts d81d76202825
-src/core/memagent/webchatAuditStore.ts e3c4a0a6445e
-src/core/memagent/webchatPurge.ts c03228de79fa
-src/core/memagent/webhook.ts deae36bbc0ca
+src/core/memagent/ulid.ts 68999e6c4804
+src/core/memagent/vector.ts 24cb0c3909c6
+src/core/memagent/webchatAudit.ts daf671c1c952
+src/core/memagent/webchatAuditStore.ts 40d8c816960e
+src/core/memagent/webchatPurge.ts 57a6e652581a
+src/core/memagent/webhook.ts 23a9a7f401b4
 src/desktop/hostBridge.ts 8a87ce68cf8c
-src/desktop/hostScan.ts 0559ae3ef556
-src/desktop/ipcStorage.ts 064dc1cf7381
-src/electron/actionLog.ts 4f0d6d2ad7da
-src/electron/agentDetect.ts 3c31af9a1ae7
-src/electron/agentProbe.ts 5e887368b4c3
-src/electron/appShell.ts 41ae53dc8011
-src/electron/backupFiles.ts edc4d8fb358f
+src/desktop/hostScan.ts b2c406671033
+src/desktop/ipcStorage.ts 52fe46008591
+src/electron/actionLog.ts d51dc3eeeb61
+src/electron/agentDetect.ts 4f895fb2cf27
+src/electron/agentProbe.ts 669b762bfb25
+src/electron/appShell.ts ce7b0e1102ed
+src/electron/backupFiles.ts a951f8407080
 src/electron/browserLaunch.ts de33c2651ca8
-src/electron/chatExportsLocations.ts 99f8a335b775
-src/electron/clientProcess.ts 783830f8c67f
-src/electron/dataRoot.ts dc31dbbe93f3
-src/electron/dataUseGate.ts 83c5c74e205a
-src/electron/host-hooks/auto_feedback.mjs f53dd7a62625
-src/electron/host-hooks/fold_card_check.mjs 530bc2d166b4
-src/electron/host-hooks/session_review.mjs c98f24dd4fcc
-src/electron/host-hooks/session_review_patch.mjs d46e2774e1bf
-src/electron/hostHookInject.ts 62cca5672b79
-src/electron/hostScan.ts 694d58d7048c
+src/electron/chatExportsLocations.ts 3dd3dffa14fa
+src/electron/clientProcess.ts 5f6e26adccc9
+src/electron/dataRoot.ts 205404361d15
+src/electron/dataUseGate.ts f8fec71ba045
+src/electron/host-hooks/auto_feedback.mjs c61eeb5a71b4
+src/electron/host-hooks/fold_card_check.mjs 01e001bdc3a6
+src/electron/host-hooks/session_review.mjs 97df4dac2f30
+src/electron/host-hooks/session_review_patch.mjs 63d48f76a34c
+src/electron/hostHookInject.ts 3cc5c7fb8f4d
+src/electron/hostScan.ts f02cb03e4445
 src/electron/ipcChannels.ts e99817a01a18
-src/electron/l0KeyringStore.ts b900f5d523d5
-src/electron/llmBilling.ts d595849943b0
-src/electron/llmGateway.ts 0dfcbf3c5612
+src/electron/l0KeyringStore.ts 50133afb3033
+src/electron/llmBilling.ts 15d226c5aa5a
+src/electron/llmGateway.ts 6f96ed30c463
 src/electron/main.ts 444ae5b5f9bc
-src/electron/mcpBridgeScript.ts 506265c204e7
-src/electron/mcpClients.ts 8db9cdc1acf8
-src/electron/mcpProbe.ts 5fb06a238c0b
-src/electron/ownerBindings.ts eedb9bf6c881
+src/electron/mcpBridgeScript.ts ef8fe043e825
+src/electron/mcpClients.ts 8b753e8dc089
+src/electron/mcpProbe.ts 6fff96760b49
+src/electron/ownerBindings.ts f85239818a47
 src/electron/preload.ts d693f01dba97
-src/electron/recallGateway.ts 73955c936ed4
+src/electron/recallGateway.ts 2f729d07f947
 src/electron/recallHard.ts 1877162a9fff
 src/electron/recallHookScript.ts 7e784cefc324
-src/electron/runHostHookAutoInject.ts ce3f4305cf54
-src/electron/storageIpc.ts 9edb5f55187a
-src/electron/tenantSource.ts 87de24ab1084
-src/electron/webchatAutoCollect.ts 9dea505d95f9
-src/electron/webchatAutoConfig.ts 1fd81c73e287
-src/electron/webchatAutoUa.ts ab336c80f96d
-src/electron/webchatExtensionCopy.ts 9883df1f4215
+src/electron/runHostHookAutoInject.ts 29260ea71cd4
+src/electron/storageIpc.ts df3cb3ddff2e
+src/electron/tenantSource.ts d1b29661d4dd
+src/electron/webchatAutoCollect.ts 6f838fe309e2
+src/electron/webchatAutoConfig.ts 57ad29c83c50
+src/electron/webchatAutoUa.ts 03f1b612d754
+src/electron/webchatExtensionCopy.ts 8f1587a6690b
 src/electron/webchatExtensionPath.ts 71aba5a6fe3a
-src/electron/webchatIdReconcile.ts c59dec54d461
-src/electron/webchatIngest.ts 7e48aa26ba9c
-src/electron/webchatWindow.ts e17a7abfe59b
-src/electron/webhookServer.ts 62157c0b1e21
-src/home/dashboard.ts f973b667da77
+src/electron/webchatIdReconcile.ts 7d69d9a16e35
+src/electron/webchatIngest.ts 370905b93d2a
+src/electron/webchatWindow.ts 78aad26ff398
+src/electron/webhookServer.ts 3aea2c672d8d
+src/home/dashboard.ts 8f05ab0cf006
 src/home/mirrorLedger.ts 83e75baca8b1
 src/home/server.ts 372d3d99a1a5
-src/shared/actionLog.ts 4183f74a0f21
-src/shared/auditShape.ts 5d37cae8c5f0
-src/shared/billing.ts facfb1675b7a
-src/shared/cron.ts 8cd43de3e89c
-src/shared/dataLayout.ts 1aa79e3a4b99
-src/shared/growthConfig.ts 86c79bb1aa73
-src/shared/growthSchedule.ts 7e5a8f5bc20e
-src/shared/localOrigin.ts 26f99e4f1928
-src/shared/memoryOwnership.ts b21d67b37ebd
-src/shared/normalParams.ts b76252aaf3e9
-src/shared/passwordPolicy.ts b1a87dd48d23
-src/shared/pendingWritesView.ts ae69b7effb0a
-src/shared/proxyAccounting.ts 5af6f44a262f
+src/shared/actionLog.ts 397f4837ef3d
+src/shared/auditShape.ts 27d45dfbd19c
+src/shared/billing.ts 367364c5b411
+src/shared/cron.ts 228b39580264
+src/shared/dataLayout.ts d16871c7dfc4
+src/shared/growthConfig.ts 89c6369839fb
+src/shared/growthSchedule.ts 1f6866a159e1
+src/shared/localOrigin.ts d5bc71579c1f
+src/shared/memoryOwnership.ts 993cdd9a3537
+src/shared/normalParams.ts 056f9fe1db8c
+src/shared/passwordPolicy.ts 3eb141357a6e
+src/shared/pendingWritesView.ts d1181d172f63
+src/shared/proxyAccounting.ts f28b697b3005
 src/shared/recallHardConfig.ts 5e9e6963bd81
-src/shared/sessionKey.ts ab2fa7617802
-src/shared/tenantDefaults.ts 881e1ff9c969
-src/shared/timeWindow.ts a3da99f12d96
-src/shared/webchatSites.ts c3c69f88cd38
-src/types/agentOnboard.ts d4d887c55e8a
-src/types/home.ts 15302ed61695
+src/shared/sessionKey.ts d8e6ced93c04
+src/shared/tenantDefaults.ts e2d1da60adc5
+src/shared/timeWindow.ts b2e2b7015f39
+src/shared/webchatSites.ts 7b71badd748a
+src/types/agentOnboard.ts 2bea4db2de7a
+src/types/home.ts 6be7a7756484
 src/web/AgentOnboard/AgentCard.tsx df404ea03e97
 src/web/AgentOnboard/AgentOnboardPage.tsx 99b823d0782d
 src/web/AgentOnboard/ChannelConfig.tsx 9b111c1c1fdf
 src/web/AgentOnboard/FormBadge.tsx 644f3afe087e
-src/web/AgentOnboard/Gains.tsx 5dd221d1770f
+src/web/AgentOnboard/Gains.tsx 3c6922593223
 src/web/AgentOnboard/IsolationConfig.tsx 2a3edf27b907
 src/web/AgentOnboard/KeyMgmt.tsx c8c13f8fd862
-src/web/AgentOnboard/McpClientsPanel.tsx 03a71d81a585
+src/web/AgentOnboard/McpClientsPanel.tsx 96a6d891e332
 src/web/AgentOnboard/McpToolConfig.tsx cef6b07e12d8
 src/web/AgentOnboard/OneClickOnboard.tsx a305419930bd
 src/web/AgentOnboard/TestPanel.tsx b1393f12c729
 src/web/AgentOnboard/WebChatExportCard.tsx 1f101a4c0682
-src/web/AgentOnboard/agentOnboardEntry.tsx 84134b804309
-src/web/AgentOnboard/autoDiscovery.ts 6de3dc6af7b7
-src/web/AgentOnboard/autoOnboard.ts 2e2bbfc5bec8
-src/web/AgentOnboard/cards.ts 3dc5d5885b15
-src/web/AgentOnboard/coreOnboard.ts 7da3db6225e5
-src/web/AgentOnboard/ledger.ts ea78efccf395
-src/web/AgentOnboard/onboardState.ts 3b1368aac6d8
-src/web/AgentOnboard/startupAutoOnboard.ts 5c3242001170
+src/web/AgentOnboard/agentOnboardEntry.tsx fcb2b6e9eec1
+src/web/AgentOnboard/autoDiscovery.ts 3c5ffae24ccf
+src/web/AgentOnboard/autoOnboard.ts d196b8c8c465
+src/web/AgentOnboard/cards.ts 599268e5c643
+src/web/AgentOnboard/coreOnboard.ts 264dfb9bf518
+src/web/AgentOnboard/ledger.ts a12c2fb6f6a4
+src/web/AgentOnboard/onboardState.ts a32c85c49320
+src/web/AgentOnboard/startupAutoOnboard.ts 362f50ec865f
 src/web/AgentOnboard/store.ts 0e28d5609de5
 src/web/AgentOnboard/useBackendMirror.ts 80448ad1330f
-src/web/Home/Dashboard.tsx cca3228b5b3b
+src/web/Home/Dashboard.tsx ff9c8804492d
 src/web/Home/HomePage.tsx 4e072431b79a
 src/web/Home/LayerGraphPanel.tsx e09decb483a2
-src/web/Home/LoginModal.tsx c9224c5e3622
-src/web/Home/ProgramLogPanel.tsx 248e99020536
-src/web/Home/TopBar.tsx 5a0e8315bc3a
-src/web/Home/coreHome.ts 34b44411c9af
-src/web/Home/crossTabAuth.ts d85780df575e
+src/web/Home/LoginModal.tsx a06a5f78249d
+src/web/Home/ProgramLogPanel.tsx edf73d3ebcfd
+src/web/Home/TopBar.tsx f2ccd263b00d
+src/web/Home/coreHome.ts 1de7c641cc44
+src/web/Home/crossTabAuth.ts 6ebadfe554e1
 src/web/Home/layerGraph.ts febed7958dbd
-src/web/Home/layerGraphLayout.ts 8215d57492af
-src/web/Home/programLog.ts 4dd7748fe50e
-src/web/Home/programLogLabels.ts 18fbabdfd8a3
-src/web/Home/tenantContext.tsx b156eb584b46
-src/web/Home/useLoginMirror.ts 117ba2379474
+src/web/Home/layerGraphLayout.ts 1abb372a084b
+src/web/Home/programLog.ts 615cc3979a99
+src/web/Home/programLogLabels.ts d7e66a7f43e9
+src/web/Home/tenantContext.tsx bc2022edfbf2
+src/web/Home/useLoginMirror.ts a61be66ced89
 src/web/assistant/AssistantPage.tsx bdfdfe108b64
-src/web/assistant/assistantEntry.tsx baba7df9f187
+src/web/assistant/assistantEntry.tsx 57de586e593c
 src/web/audit/AuditPage.tsx ce1badf638b6
-src/web/audit/AuditTable.tsx d48ead17238b
-src/web/audit/ChainView.tsx 2e3cf25031ce
-src/web/audit/FilterBar.tsx 0d3a04459dec
-src/web/audit/auditEntry.tsx c6055389d0fa
-src/web/audit/auditLink.ts c202a89c574b
+src/web/audit/AuditTable.tsx 511b4e621588
+src/web/audit/ChainView.tsx 90816ba725fb
+src/web/audit/FilterBar.tsx ecf87c3a495a
+src/web/audit/auditEntry.tsx ec8aaf7e7c37
+src/web/audit/auditLink.ts 66279ea4b514
 src/web/audit/coreAudit.ts 232bdb8cf17a
-src/web/audit/logic.ts a1ebebc2d23d
-src/web/audit/types.ts 2fa00d830f79
-src/web/audit/useAuditMirror.ts 34865de958b6
-src/web/audit/useToast.tsx 85cd09d2e1f5
-src/web/backend.ts 8fdc10aa241d
-src/web/dispute/DisputePage.tsx 92d6b42cc0b6
-src/web/dispute/DisputeQueue.tsx caf114a20325
-src/web/dispute/DisputeVerdict.tsx ef4c2d7c89dc
-src/web/dispute/coreDispute.ts 9c83acf7ad55
-src/web/dispute/disputeEntry.tsx 2a5b7885df73
-src/web/dispute/labels.ts c6d8f1dcee8f
-src/web/dispute/logic.ts 922708539fd5
-src/web/dispute/types.ts 34294be31812
-src/web/dispute/useDisputeMirror.ts a2f4cf373f8e
-src/web/dispute/useToast.tsx c650d8662672
+src/web/audit/logic.ts 532584a245c2
+src/web/audit/types.ts 04c6c5fcdca7
+src/web/audit/useAuditMirror.ts e226baca0be9
+src/web/audit/useToast.tsx a45cebab0b92
+src/web/backend.ts 05808ea2c7b2
+src/web/dispute/DisputePage.tsx 5ef1748c7674
+src/web/dispute/DisputeQueue.tsx 59db1f7ec023
+src/web/dispute/DisputeVerdict.tsx 7709444acbc3
+src/web/dispute/coreDispute.ts bec78021e3fc
+src/web/dispute/disputeEntry.tsx c8e7aa8cf036
+src/web/dispute/labels.ts 8b44a878435c
+src/web/dispute/logic.ts d75cc8095b52
+src/web/dispute/types.ts f45dcc0c9397
+src/web/dispute/useDisputeMirror.ts 10fe999c554e
+src/web/dispute/useToast.tsx bb52e06b32b8
 src/web/feedback/FeedbackForm.tsx eb7968b39821
 src/web/feedback/FeedbackPage.tsx b7f9394afb5e
-src/web/feedback/StatCards.tsx 826d2fdad9f4
+src/web/feedback/StatCards.tsx e41a8c00b1f6
 src/web/feedback/coreFeedback.ts 560324173433
-src/web/feedback/feedbackEntry.tsx 8e909b081887
-src/web/feedback/logic.ts 176b33a17311
-src/web/feedback/types.ts 938ae560ed3e
-src/web/feedback/useFeedbackMirror.ts 6bd1d844d78c
-src/web/feedback/useToast.tsx 85cd09d2e1f5
+src/web/feedback/feedbackEntry.tsx dee7a395893d
+src/web/feedback/logic.ts 854675d90b40
+src/web/feedback/types.ts e5e23d3f3e68
+src/web/feedback/useFeedbackMirror.ts 52f2ca0f6614
+src/web/feedback/useToast.tsx a45cebab0b92
 src/web/growth/DedupCards.tsx 0c5a269cd031
-src/web/growth/EvolutionSettingsCard.tsx ad64cb528d62
-src/web/growth/EvolutionTimelineCard.tsx 088fb106cd4d
-src/web/growth/GrowthPage.tsx 5cdcff9a06f0
+src/web/growth/EvolutionSettingsCard.tsx a223a3fc4af6
+src/web/growth/EvolutionTimelineCard.tsx 83ddedbb127f
+src/web/growth/GrowthPage.tsx 31e7bfd26c99
 src/web/growth/GrowthPanels.tsx df58608587b0
-src/web/growth/coreGrowth.ts 57c4391b3953
-src/web/growth/evolutionTimeline.ts 1b59c5b24459
-src/web/growth/growthEntry.tsx 5b43a02238b6
-src/web/growth/logic.ts 53b37d83d095
-src/web/growth/recallLabels.ts 9f010c2413f0
-src/web/growth/spec.ts b0d713d66185
-src/web/growth/types.ts cd1bd54d375f
-src/web/growth/useGrowthMirror.ts f485e5b5dae2
+src/web/growth/coreGrowth.ts dc097d4bc817
+src/web/growth/evolutionTimeline.ts e80654f4038d
+src/web/growth/growthEntry.tsx 619aa0852c3f
+src/web/growth/logic.ts 64bcdf79226c
+src/web/growth/recallLabels.ts 5c9893bbf415
+src/web/growth/spec.ts a2da9de63fd8
+src/web/growth/types.ts 1f2e104ab0ec
+src/web/growth/useGrowthMirror.ts 891b164a177c
 src/web/growth/useGrowthReal.ts d92ea73cb5f5
-src/web/growth/useToast.tsx 85cd09d2e1f5
-src/web/hostLlm.ts 6b12c99be4b7
-src/web/httpStorage.ts d08876fec3ca
-src/web/kernel.ts 41e2a5d2c068
-src/web/lifecycle/LifecycleCard.tsx c115dc841539
-src/web/lifecycle/LifecyclePage.tsx 4e18d5cdec04
-src/web/lifecycle/ParamPanel.tsx 5858a0c4c600
-src/web/lifecycle/constants.ts 4bbab102ec8b
+src/web/growth/useToast.tsx a45cebab0b92
+src/web/hostLlm.ts dd954fc9d31c
+src/web/httpStorage.ts c89c51463780
+src/web/kernel.ts ba45600f6c73
+src/web/lifecycle/LifecycleCard.tsx e083825a58d5
+src/web/lifecycle/LifecyclePage.tsx fcd5c2c0196a
+src/web/lifecycle/ParamPanel.tsx e40f49f75e17
+src/web/lifecycle/constants.ts df5ebd844447
 src/web/lifecycle/coreLifecycle.ts 7c3cb28673de
-src/web/lifecycle/lifecycleEntry.tsx 0ccca9e21d58
-src/web/lifecycle/lifecycleFilter.ts 1f8538e5fdb8
-src/web/lifecycle/logic.ts 7574f2b0fe12
-src/web/lifecycle/types.ts b96b0c4d96c0
-src/web/lifecycle/useLifecycleMirror.ts 99f7105a6f07
-src/web/lifecycle/useToast.tsx 85cd09d2e1f5
-src/web/login/LoginPage.tsx ab7ef832b9a9
-src/web/login/loginEntry.tsx 9855ac21b42f
-src/web/logs/LogCards.tsx e3dba55283de
-src/web/logs/LogFilterBar.tsx b492a3d50ea4
+src/web/lifecycle/lifecycleEntry.tsx 97da70751e2d
+src/web/lifecycle/lifecycleFilter.ts 0c5a892a5dab
+src/web/lifecycle/logic.ts 9019aad1887b
+src/web/lifecycle/types.ts 52fbd063a5ec
+src/web/lifecycle/useLifecycleMirror.ts f40d17197c12
+src/web/lifecycle/useToast.tsx a45cebab0b92
+src/web/login/LoginPage.tsx 669d0b8767d9
+src/web/login/loginEntry.tsx 336867d5076e
+src/web/logs/LogCards.tsx b76cc81bea4d
+src/web/logs/LogFilterBar.tsx 7bf172adc531
 src/web/logs/LogsPage.tsx 4c1da31d25bc
-src/web/logs/coreLogs.ts 84d97af9ba74
-src/web/logs/labels.ts cf69f26b66ba
-src/web/logs/logic.ts 7ca2470ef6ff
-src/web/logs/logsEntry.tsx e9e70ec7c1d4
-src/web/logs/types.ts c57557c7576e
-src/web/logs/useToast.tsx 85cd09d2e1f5
-src/web/main.tsx c3a2e36cac32
+src/web/logs/coreLogs.ts 9e293e43b686
+src/web/logs/labels.ts 3e59e09fd114
+src/web/logs/logic.ts 830c6fcf8f2b
+src/web/logs/logsEntry.tsx 1e37a3bc8cb4
+src/web/logs/types.ts 23425d9bb2e1
+src/web/logs/useToast.tsx a45cebab0b92
+src/web/main.tsx c83678ff8c2e
 src/web/mcp/McpPage.tsx c8af6da0982b
-src/web/mcp/mcpEntry.tsx 94cd27be0cf2
+src/web/mcp/mcpEntry.tsx 193cd18092c8
 src/web/memory/LayerFilterBar.tsx 6b31c2ec98dc
-src/web/memory/LayerMemoryTable.tsx 351b89d07ecf
-src/web/memory/MemoryActions.tsx 9983e64102b0
-src/web/memory/MemoryDrawer.tsx 7c124fc0ce30
-src/web/memory/MemoryLayeredPage.tsx 44dfb97062d3
+src/web/memory/LayerMemoryTable.tsx 24cedaadbdef
+src/web/memory/MemoryActions.tsx dc970673f4c1
+src/web/memory/MemoryDrawer.tsx 3a7f1f7afaba
+src/web/memory/MemoryLayeredPage.tsx 7a3bed239530
 src/web/memory/MemoryManagementPage.tsx 7b85d77d6d65
-src/web/memory/MemoryPage.tsx f85d97504af7
-src/web/memory/MemoryRow.tsx c9e3667cfed7
-src/web/memory/MemoryTable.tsx d0e26f9d929e
+src/web/memory/MemoryPage.tsx 22d21efb159d
+src/web/memory/MemoryRow.tsx ff0bbb8c22f7
+src/web/memory/MemoryTable.tsx 97d56c9ee770
 src/web/memory/PersonalMemoryPane.tsx 3b007c3de088
 src/web/memory/backup.ts 30b82c06df00
 src/web/memory/coreMemoryOps.ts 103a913bf502
-src/web/memory/dataRoot.ts 6a1b94c2d4d7
-src/web/memory/layerFilter.ts 1940d5a207df
-src/web/memory/logic.ts da69f12783ea
+src/web/memory/dataRoot.ts 4f9ffb16f25f
+src/web/memory/layerFilter.ts 3dc257df31b7
+src/web/memory/logic.ts 4d2226ca6958
 src/web/memory/memoryEntry.tsx 2107074b22d3
-src/web/memory/memoryFilter.ts e2b9121687e5
+src/web/memory/memoryFilter.ts 81b5df54ebc6
 src/web/memory/memoryLayeredEntry.tsx b4051dc9ce5a
-src/web/memory/personalEntry.tsx e98f600923fd
-src/web/memory/types.ts 51eb8e91195f
-src/web/memory/useMemoryMirror.ts 50fcdb730ba3
-src/web/memory/useToast.tsx c650d8662672
-src/web/mirrorClient.ts f097d285d960
-src/web/models/BillingPanel.tsx 0653b59b0646
+src/web/memory/personalEntry.tsx d0d38d7339c2
+src/web/memory/types.ts 9fda4b9c503e
+src/web/memory/useMemoryMirror.ts c7590e003f15
+src/web/memory/useToast.tsx bb52e06b32b8
+src/web/mirrorClient.ts 3c84dea3a39a
+src/web/models/BillingPanel.tsx 723cdf48ea6f
 src/web/models/LlmUsageTable.tsx 9002f88cf3f1
 src/web/models/ModelsPage.tsx 334efc29b401
-src/web/models/ProxyPanel.tsx 702e3e775f9b
+src/web/models/ProxyPanel.tsx 1bac8d776c88
 src/web/models/VectorCard.tsx f9951358d9c0
-src/web/models/catalog.ts 79a4992557bf
-src/web/models/coreModels.ts 7dd6087867a7
+src/web/models/catalog.ts 535c60b6be27
+src/web/models/coreModels.ts 802ef42a6ef8
 src/web/models/logic.ts 873eb0d7c213
-src/web/models/modelConfig.ts 929edda56559
-src/web/models/modelsEntry.tsx 3ddbadcf3a9e
-src/web/models/types.ts 973af42c99c1
-src/web/models/useToast.tsx 85cd09d2e1f5
+src/web/models/modelConfig.ts 84ba805671de
+src/web/models/modelsEntry.tsx 9188b0a6e199
+src/web/models/types.ts e62489c3845d
+src/web/models/useToast.tsx a45cebab0b92
 src/web/monitor/AlertTimeline.tsx 80cd26596f27
-src/web/monitor/MetricGrid.tsx 6787dcb57a78
+src/web/monitor/MetricGrid.tsx c7e23cb91cb3
 src/web/monitor/MonitorPage.tsx dcae6485d7aa
-src/web/monitor/coreMonitor.ts 6b0c29922b63
-src/web/monitor/logic.ts 047ec4b39ad1
+src/web/monitor/coreMonitor.ts 68d4847ae2bb
+src/web/monitor/logic.ts 01a27f644bef
 src/web/monitor/monitorEntry.tsx 2638a6e28a30
-src/web/monitor/operationState.ts e7185e07928b
-src/web/monitor/options.ts 59d853ad7cd4
-src/web/monitor/types.ts d685ccc9f522
-src/web/monitor/useMonitorMirror.ts 9e87dd8cc071
-src/web/monitor/useMonitorReal.ts 410375263793
-src/web/monitor/useToast.tsx 85cd09d2e1f5
-src/web/overview/McpSwitchAlert.tsx a2936cd108fa
+src/web/monitor/operationState.ts a23fc2a2ee73
+src/web/monitor/options.ts c0b59135fff2
+src/web/monitor/types.ts 2d36d530be58
+src/web/monitor/useMonitorMirror.ts 09fcbcaa1f39
+src/web/monitor/useMonitorReal.ts c20e3d8e2e2a
+src/web/monitor/useToast.tsx a45cebab0b92
+src/web/overview/McpSwitchAlert.tsx 6ff45e83daca
 src/web/overview/Overview.tsx 65ea4893c6fb
-src/web/overview/OverviewPage.tsx 6aefd60121a1
-src/web/overview/overviewEntry.tsx 5f4488678cc7
-src/web/overview/overviewPageData.ts c848c75900dc
-src/web/params/AppShellCard.tsx e362c323daf5
-src/web/params/DevPanel.tsx 58ca53015c5a
+src/web/overview/OverviewPage.tsx 674a87644bbe
+src/web/overview/overviewEntry.tsx 874776844f22
+src/web/overview/overviewPageData.ts 834bd9870b0c
+src/web/params/AppShellCard.tsx b79017cb998c
+src/web/params/DevPanel.tsx e2c6334721eb
 src/web/params/KbManagementCard.tsx a8c0b581a8c2
-src/web/params/KbPolicyTable.tsx c39b52ed1039
-src/web/params/LlmEngineCard.tsx 4c938ef647cb
+src/web/params/KbPolicyTable.tsx 9f93b17957b2
+src/web/params/LlmEngineCard.tsx 6b135d3cda96
 src/web/params/NormalConfigCard.tsx f74ba365da82
 src/web/params/ParamsPage.tsx 6fd082062446
 src/web/params/RecallHardCard.tsx b6f0e097dec2
-src/web/params/RefineQueueCard.tsx 704d8988fed9
-src/web/params/SyncTeamCard.tsx 81dbd4fbda8b
-src/web/params/appShell.ts d319152b4c42
+src/web/params/RefineQueueCard.tsx d924716dcc8b
+src/web/params/SyncTeamCard.tsx 010890d85dfc
+src/web/params/appShell.ts 30ea0c73b128
 src/web/params/coreParams.ts eb68c0358860
-src/web/params/defaults.ts 6dd5728ef0ec
-src/web/params/llmEngine.ts bd46b6e725ef
-src/web/params/logic.ts 1e5af0361e3b
-src/web/params/paramsEntry.tsx b515fd3e8d65
+src/web/params/defaults.ts 28580e52dbd3
+src/web/params/llmEngine.ts 132967baf963
+src/web/params/logic.ts f7b3afac6605
+src/web/params/paramsEntry.tsx b4b23e34a6a2
 src/web/params/recallHard.ts 00698201ab5e
-src/web/params/refineQueue.ts 00f06b45c16c
-src/web/params/types.ts 9840a32c5e5d
-src/web/params/useParamsMirror.ts 5529b48cfccc
-src/web/params/useToast.tsx 85cd09d2e1f5
-src/web/retrieval/AuditTrailCard.tsx 0b7d40ddc359
-src/web/retrieval/BudgetPanel.tsx 903af44940e8
-src/web/retrieval/ContextPanel.tsx 61fc5aa1874b
-src/web/retrieval/ModeBanner.tsx 98448e08ff36
-src/web/retrieval/ModeFeedbackCard.tsx 9d0763a8c0a9
-src/web/retrieval/QueryBar.tsx c6cc854cd44d
-src/web/retrieval/RecentRecallsCard.tsx 1fe75e7b60b5
-src/web/retrieval/ResultList.tsx 828b3e116759
-src/web/retrieval/ResultRow.tsx abbc0777107d
-src/web/retrieval/RetrievalPage.tsx e8d3b8b68bfd
+src/web/params/refineQueue.ts 5a4d47d3e728
+src/web/params/types.ts 33ddb5171cac
+src/web/params/useParamsMirror.ts fb04ed2ade06
+src/web/params/useToast.tsx a45cebab0b92
+src/web/retrieval/AuditTrailCard.tsx 118087eaff20
+src/web/retrieval/BudgetPanel.tsx 09badaccb8c2
+src/web/retrieval/ContextPanel.tsx 745479ef9d19
+src/web/retrieval/ModeBanner.tsx 61b9ebdeb3ae
+src/web/retrieval/ModeFeedbackCard.tsx abf78415ad6d
+src/web/retrieval/QueryBar.tsx 153dee28be18
+src/web/retrieval/RecentRecallsCard.tsx 7b4c68710099
+src/web/retrieval/ResultList.tsx 79b6643cc5b6
+src/web/retrieval/ResultRow.tsx f0f387ff2a68
+src/web/retrieval/RetrievalPage.tsx 601fadd38bde
 src/web/retrieval/coreEngine.ts e648fecae92d
-src/web/retrieval/coreModeFeedback.ts 6ae41fb51fc0
-src/web/retrieval/logic.ts e45203afb2a1
-src/web/retrieval/retrievalEntry.tsx a366c3b7e155
-src/web/retrieval/types.ts adefaf6846de
-src/web/retrieval/useRetrieval.ts 48cee0abfa58
-src/web/retrieval/useToast.tsx 85cd09d2e1f5
-src/web/security/AccountAdminCard.tsx 23692c9117df
+src/web/retrieval/coreModeFeedback.ts 085c3e3d414f
+src/web/retrieval/coreRankFeedback.ts 6b536a25aa82
+src/web/retrieval/logic.ts 292b60ced478
+src/web/retrieval/retrievalEntry.tsx bfc99e4047ba
+src/web/retrieval/types.ts 75b473492909
+src/web/retrieval/useRetrieval.ts d790fce066f8
+src/web/retrieval/useToast.tsx a45cebab0b92
+src/web/security/AccountAdminCard.tsx a35b2153ddff
 src/web/security/FieldBackfillCard.tsx 69f6eb2d2c4e
 src/web/security/L0AdminCard.tsx 953d3c1577a3
-src/web/security/L0FilteredCard.tsx e5dc0b626d02
-src/web/security/L0MigrateCard.tsx 5697922c5b40
-src/web/security/L0OwnerBackfillCard.tsx 2be8af4cc9c7
-src/web/security/L0RecoveryCard.tsx a40305a2fe9a
-src/web/security/L0SplitCard.tsx f563aab06852
-src/web/security/LedgerResetCard.tsx f3ddf342303b
-src/web/security/LegacyLedgerCard.tsx c1251636ef98
+src/web/security/L0FilteredCard.tsx afc91b12addb
+src/web/security/L0MigrateCard.tsx 7e039c55e180
+src/web/security/L0OwnerBackfillCard.tsx 8cf9d64dd623
+src/web/security/L0RecoveryCard.tsx 4fb4018307a8
+src/web/security/L0SplitCard.tsx 32e7f8b40423
+src/web/security/LedgerResetCard.tsx a3d3e6d9e525
+src/web/security/LegacyLedgerCard.tsx f65b2bdc4412
 src/web/security/MyWriteWrapCard.tsx 8c35ae6e9ebd
-src/web/security/OwnerBindingsCard.tsx acbdb640afe9
-src/web/security/PwdPolicyCard.tsx ad12fb5ffafb
-src/web/security/RebuildFromL0Card.tsx d95cb49f94fb
-src/web/security/RulesRejudgeCard.tsx 85c96b3a0bb5
-src/web/security/SecurityCards.tsx 30ab0c49a8a4
-src/web/security/SecurityPage.tsx 877fa5bb81f8
-src/web/security/TenantIdentityCard.tsx dd3e743a7c63
+src/web/security/OwnerBindingsCard.tsx 0a34e68a72b3
+src/web/security/PwdPolicyCard.tsx 724ca919229e
+src/web/security/RebuildFromL0Card.tsx 9c27335e2d62
+src/web/security/RulesRejudgeCard.tsx 8b848cd11ac4
+src/web/security/SecurityCards.tsx 7f00dddc8be9
+src/web/security/SecurityPage.tsx b0e1b076e3f8
+src/web/security/TenantIdentityCard.tsx 864f20815438
 src/web/security/accountsClient.ts eb1bb2f85768
-src/web/security/coreSecurity.ts 66cce020b7e0
-src/web/security/defaults.ts e5b4b56b9629
-src/web/security/logic.ts 8b9c8e8ce379
-src/web/security/ownerBindingLabels.ts 34b45cbb4187
-src/web/security/securityEntry.tsx 2e5268781ae1
-src/web/security/tenantLabels.ts fa5d04b2399c
-src/web/security/types.ts 7a4d935eaa18
-src/web/security/useSecurityMirror.ts 26ac38844bbb
-src/web/security/useToast.tsx 85cd09d2e1f5
+src/web/security/coreSecurity.ts 427a17caf5f0
+src/web/security/defaults.ts a735ad9a2ee7
+src/web/security/logic.ts 3db0483a188f
+src/web/security/ownerBindingLabels.ts 731654dd6816
+src/web/security/securityEntry.tsx 44800ab6ba9c
+src/web/security/tenantLabels.ts c92278cf89e9
+src/web/security/types.ts 9f1bb799b7be
+src/web/security/useSecurityMirror.ts befa12adafb7
+src/web/security/useToast.tsx a45cebab0b92
 src/web/setup/SetupPage.tsx 0ac37b3ac4fd
-src/web/setup/setupEntry.tsx 4da0cba9fe95
-src/web/shared/DemoBadge.tsx 29e08265f189
-src/web/shared/L0WriteUnlock.tsx 38d5120b2f19
+src/web/setup/setupEntry.tsx 639fc56ef8e2
+src/web/shared/DemoBadge.tsx 4502a1aad537
+src/web/shared/L0WriteUnlock.tsx bf5e1df7fefc
 src/web/shared/PageNav.tsx d5949856df04
-src/web/shared/actionLog.ts f21305492f55
-src/web/shared/detectForm.ts 9e5c1e8c8423
-src/web/shared/hostTheme.ts a9c462fce846
-src/web/shared/kernelLoad.tsx 0cdf4dcbbe61
-src/web/shared/kernelProjects.ts e204655f0df7
-src/web/shared/l0BlobStore.ts a7ae63e8ff9b
+src/web/shared/actionLog.ts d4064095258d
+src/web/shared/detectForm.ts 7e6eccbda83c
+src/web/shared/hostTheme.ts e97e39422382
+src/web/shared/kernelLoad.tsx 7524a3d9fc85
+src/web/shared/kernelProjects.ts 6345d9687224
+src/web/shared/l0BlobStore.ts 93516b5708c8
 src/web/shared/l0Port.ts edca14aaacd2
-src/web/shared/l0WriteLockSignal.ts 57f703202bc8
+src/web/shared/l0WriteLockSignal.ts c8c551ce9681
 src/web/shared/l0WriteState.ts 5b64d9917e88
-src/web/shared/layerTime.ts 6c21b4d94211
-src/web/shared/mcpPending.ts 34a40dcaa3b7
-src/web/shared/mcpSwitch.ts 480a931c5a0b
-src/web/shared/mirrorFailureEvent.ts b3b97ae09cd1
-src/web/shared/mirrorFailureNotice.ts 3b984898459c
-src/web/shared/navCountChannel.ts 2ff74d708920
-src/web/shared/navStatusChannel.ts 50e6cef23752
-src/web/shared/pagerWindow.ts 7a7f654d9236
-src/web/shared/paginate.ts 2d638d875228
+src/web/shared/layerTime.ts 66f00e1cb5bf
+src/web/shared/mcpPending.ts 9e4a041f4f48
+src/web/shared/mcpSwitch.ts 3d002c0443cd
+src/web/shared/mirrorFailureEvent.ts daee6a99f4a0
+src/web/shared/mirrorFailureNotice.ts 228ac7dfad3f
+src/web/shared/navCountChannel.ts 467758c91d79
+src/web/shared/navStatusChannel.ts 34713193fb93
+src/web/shared/pagerWindow.ts 584050390f75
+src/web/shared/paginate.ts 63823bd49f96
 src/web/shared/personalPort.ts 382404bb7f39
-src/web/shared/selectionChannel.ts e826341f42e1
-src/web/shared/session.ts 2f12ae76e21f
-src/web/shared/shellNavigate.ts b8b75188302d
+src/web/shared/selectionChannel.ts 36dee57ef5af
+src/web/shared/session.ts 710284ffa052
+src/web/shared/shellNavigate.ts 957f0982ed91
 src/web/shared/syncHub.ts 349bcf10add9
-src/web/shared/useColWidths.tsx a6e14931a82b
-src/web/shared/useL0Session.ts c917a61c99d9
-src/web/shell/CommandPalette.tsx 2c96d2eb4d53
-src/web/shell/ContextMenu.tsx e2dcb1ea4ce9
+src/web/shared/useColWidths.tsx 185fd1e380ae
+src/web/shared/useL0Session.ts 43463fd7cc58
+src/web/shell/CommandPalette.tsx 76ca2e8a9389
+src/web/shell/ContextMenu.tsx 1d492377cedd
 src/web/shell/Icons.tsx 5de5760aebcd
 src/web/shell/PersonalMemoryPanel.tsx 503039e2151c
-src/web/shell/ShellLoginDialog.tsx eab40cd6a2f5
-src/web/shell/ShellStatusCard.tsx 7d32fed1101d
+src/web/shell/ShellLoginDialog.tsx f7dadc12e991
+src/web/shell/ShellStatusCard.tsx 5e08f7e7636c
 src/web/shell/StrataScale.tsx e01e72a67aca
-src/web/shell/Workspace.tsx da7d437f4229
-src/web/shell/dock.ts ef9dface9fb6
-src/web/shell/humanLog.ts 961e90e0e45a
+src/web/shell/Workspace.tsx b54a07a63e17
+src/web/shell/dock.ts d0a74f0e2f47
+src/web/shell/humanLog.ts 6b870751f9be
 src/web/shell/layers.ts ee5f32438ab6
-src/web/shell/navCounts.ts 29d436b7129f
+src/web/shell/navCounts.ts 42a586d67a0b
 src/web/shell/overview.ts 93cff1c56339
-src/web/shell/shellStatus.ts 228e63b93b1b
+src/web/shell/shellStatus.ts 94e078e5fa26
 src/web/shell/statusbar.ts 80aacde4f035
-src/web/shell/strataScale.ts 1f27d6bde9d4
-src/web/shell/taskpane.ts e1a473006974
+src/web/shell/strataScale.ts af9b0fa73518
+src/web/shell/taskpane.ts dc79661e11c3
 src/web/shell/views.ts 89c5b9407dfe
-src/web/shell/workspaceEntry.tsx d81475dafbfc
+src/web/shell/workspaceEntry.tsx dcf3904f25c8
 src/web/sync/SyncPage.tsx df8c504e7199
 src/web/sync/coreSyncPage.ts 39e067006bd4
 src/web/sync/syncEntry.tsx 171d7d65e1ef
 src/web/test-setup.ts 3a2ad06d2218
-src/web/vite-env.d.ts 191b7a12f3de
+src/web/vite-env.d.ts fd9831637517
 src/web/webonboard/WebOnboardPage.tsx e9ce3ef1dc62
-src/web/webonboard/WebchatAutoCard.tsx 02aa83ce9b8d
-src/web/webonboard/webOnboardEntry.tsx e25174eac855
-src/web/webonboard/webchatAuto.ts c970dfeeb985
+src/web/webonboard/WebchatAutoCard.tsx b20b59ec1a2f
+src/web/webonboard/webOnboardEntry.tsx aeedc7ed8b05
+src/web/webonboard/webchatAuto.ts 611c36e20229
 src/web/write/DedupCard.tsx 8011ea804b0a
 src/web/write/WriteForm.tsx 7306202d4d31
 src/web/write/WriteL0UnlockCard.tsx d70605533523
 src/web/write/WritePage.tsx 71cfa0513c23
 src/web/write/WriteReceiptCard.tsx 75ad8c192155
 src/web/write/coreWrite.ts 6b8ecfa21216
-src/web/write/logic.ts a9e234e05f27
-src/web/write/spec.ts 005b81ee6d61
-src/web/write/types.ts 0e992abab5f0
-src/web/write/useToast.tsx c650d8662672
-src/web/write/useWriteMirror.ts 699df53d6c7c
-src/web/write/writeEntry.tsx a1f5c6bd7227
-README.md aa2f62fda68e
-specs/A31-BILLING-MATRIX.md adf99c88971d
-specs/AUDIT-FULL-REVIEW-2026-10-31.md 9b268c1a3db7
-specs/DECISION-2026-11-12-方案对比与融合自发现架构.md eab4f0c03c80
-specs/MANUAL-TEST-BATCH-57B.md 5f53fa04493b
-specs/MANUAL-TEST-BATCH-57C.md 6244ef645fb7
-specs/MANUAL-TEST-BATCH-57D.md 99d361d7397f
-specs/MANUAL-TEST-BATCH-58.md 221b531b7b8b
-specs/MANUAL-TEST-BATCH.md c5b9d5e11090
-specs/MANUAL-TEST-FIX-BATCH-1.md 3ca0e503a7c8
-specs/MANUAL-TEST-FIX-BATCH-10.md 732e0ba3e5ef
-specs/MANUAL-TEST-FIX-BATCH-11.md b5b379760c89
-specs/MANUAL-TEST-FIX-BATCH-12.md 693eb203323a
-specs/MANUAL-TEST-FIX-BATCH-13.md a5b9803ccdb4
-specs/MANUAL-TEST-FIX-BATCH-14.md a8997589569e
-specs/MANUAL-TEST-FIX-BATCH-15.md ced4f05fd684
-specs/MANUAL-TEST-FIX-BATCH-16.md 8aca9af34a09
-specs/MANUAL-TEST-FIX-BATCH-17.md 127b9a39b75a
-specs/MANUAL-TEST-FIX-BATCH-18.md d6d3ec740f55
-specs/MANUAL-TEST-FIX-BATCH-19.md 24b180f5bc30
-specs/MANUAL-TEST-FIX-BATCH-2.md f45a00ea96d8
-specs/MANUAL-TEST-FIX-BATCH-20.md 9239bf954d03
-specs/MANUAL-TEST-FIX-BATCH-21.md 26076c8a9d12
-specs/MANUAL-TEST-FIX-BATCH-22.md 50fb0613fe6b
-specs/MANUAL-TEST-FIX-BATCH-23.md 767ed17c6c8f
-specs/MANUAL-TEST-FIX-BATCH-24.md 1f96cdd40d00
-specs/MANUAL-TEST-FIX-BATCH-25.md 8bd6f9ec8f79
-specs/MANUAL-TEST-FIX-BATCH-26A.md cb245dc919d5
-specs/MANUAL-TEST-FIX-BATCH-26B.md 115044019eb8
-specs/MANUAL-TEST-FIX-BATCH-27.md 4efe12417a3e
-specs/MANUAL-TEST-FIX-BATCH-28.md e58374122ea6
-specs/MANUAL-TEST-FIX-BATCH-29.md 1bcd9a770476
-specs/MANUAL-TEST-FIX-BATCH-3.md 573b2a46ac68
-specs/MANUAL-TEST-FIX-BATCH-30.md 1a738fe7ff44
-specs/MANUAL-TEST-FIX-BATCH-31.md 514c24dde81c
-specs/MANUAL-TEST-FIX-BATCH-32.md ab363a88a15f
-specs/MANUAL-TEST-FIX-BATCH-33.md 22e822a48607
-specs/MANUAL-TEST-FIX-BATCH-34.md 9d39a2dda854
-specs/MANUAL-TEST-FIX-BATCH-35.md bc952f6ab346
-specs/MANUAL-TEST-FIX-BATCH-36.md 1f94a0619368
-specs/MANUAL-TEST-FIX-BATCH-37.md 43e129a6d272
-specs/MANUAL-TEST-FIX-BATCH-38.md 0ac0217b0860
-specs/MANUAL-TEST-FIX-BATCH-39.md b9c1ca54f67a
-specs/MANUAL-TEST-FIX-BATCH-4.md 1faff2c94003
-specs/MANUAL-TEST-FIX-BATCH-40.md 1112c8867cc2
-specs/MANUAL-TEST-FIX-BATCH-41.md c6f643fb39e4
-specs/MANUAL-TEST-FIX-BATCH-42.md a18f57451cf9
-specs/MANUAL-TEST-FIX-BATCH-43.md 2dedbd589804
-specs/MANUAL-TEST-FIX-BATCH-44.md 0489c4609c36
-specs/MANUAL-TEST-FIX-BATCH-45.md 73811ac13df3
-specs/MANUAL-TEST-FIX-BATCH-46.md 38b448c7148f
-specs/MANUAL-TEST-FIX-BATCH-47.md 48d33e1a2de5
-specs/MANUAL-TEST-FIX-BATCH-48.md 01807e7b7faf
-specs/MANUAL-TEST-FIX-BATCH-49.md ac995c6fffda
-specs/MANUAL-TEST-FIX-BATCH-5.md 7620dff494e4
-specs/MANUAL-TEST-FIX-BATCH-50.md 1a50a72bcc39
-specs/MANUAL-TEST-FIX-BATCH-51.md 01f3f853d0ff
-specs/MANUAL-TEST-FIX-BATCH-52.md ad9982e829ad
-specs/MANUAL-TEST-FIX-BATCH-53.md aeb6849babfa
-specs/MANUAL-TEST-FIX-BATCH-54.md 4c6f55df0afa
-specs/MANUAL-TEST-FIX-BATCH-55.md 4b2bce6a3069
-specs/MANUAL-TEST-FIX-BATCH-56.md d8d8e5827554
-specs/MANUAL-TEST-FIX-BATCH-57.md 0b5ef1fa5210
-specs/MANUAL-TEST-FIX-BATCH-6.md c54de515c35c
-specs/MANUAL-TEST-FIX-BATCH-7.md ae151c45c321
-specs/MANUAL-TEST-FIX-BATCH-8.md 486d92ec3ba0
-specs/MANUAL-TEST-FIX-BATCH-9.md 447ad4b41a67
-specs/MANUAL-TEST-PHASE-A.md 0bf20313dd75
-specs/MANUAL-TEST-PHASE-B.md 9134fcd5168d
-specs/MANUAL-TEST-PHASE-C.md 9de54526de41
-specs/MANUAL-TEST-PHASE-D.md 0393a1f055b1
-specs/MANUAL-TEST-PHASE-E.md b4da1f2f1a2e
-specs/MANUAL-TEST.md 4d755324cafe
-specs/MCP运维与多Agent写入规范.md 752368c085eb
-specs/POSTMORTEM-2026-11-11-静默失效与双通路自发现方案.md 4578ad1a2c7a
+src/web/write/logic.ts cbb5285d8ca8
+src/web/write/spec.ts e0475b137c9c
+src/web/write/types.ts 3a2c5b6b063f
+src/web/write/useToast.tsx bb52e06b32b8
+src/web/write/useWriteMirror.ts 59fa37a0f421
+src/web/write/writeEntry.tsx 350f1b2ae9ba
+README.md 2005f716dac9
+specs/A31-BILLING-MATRIX.md eb56c915986c
+specs/AUDIT-FULL-REVIEW-2026-10-31.md 9b3b539fedc0
+specs/DECISION-2026-11-12-方案对比与融合自发现架构.md 26efff794e3f
+specs/MANUAL-TEST-BATCH-57B.md 6c548e523579
+specs/MANUAL-TEST-BATCH-57C.md 6cc67908a577
+specs/MANUAL-TEST-BATCH-57D.md 02eabaa386a5
+specs/MANUAL-TEST-BATCH-58.md a21aa7e3a5bf
+specs/MANUAL-TEST-BATCH.md d4552704c06e
+specs/MANUAL-TEST-FIX-BATCH-1.md ceec9f807f01
+specs/MANUAL-TEST-FIX-BATCH-10.md df52ed31f1bc
+specs/MANUAL-TEST-FIX-BATCH-11.md e73bc1180cdd
+specs/MANUAL-TEST-FIX-BATCH-12.md ee5b45eb288d
+specs/MANUAL-TEST-FIX-BATCH-13.md 047a56566347
+specs/MANUAL-TEST-FIX-BATCH-14.md ac0bcef4eee0
+specs/MANUAL-TEST-FIX-BATCH-15.md c2a291be9ef5
+specs/MANUAL-TEST-FIX-BATCH-16.md 7af170723c5b
+specs/MANUAL-TEST-FIX-BATCH-17.md 6ca6d9060e24
+specs/MANUAL-TEST-FIX-BATCH-18.md b26d1a06ad4c
+specs/MANUAL-TEST-FIX-BATCH-19.md b178b1ecad06
+specs/MANUAL-TEST-FIX-BATCH-2.md f4eb8890a866
+specs/MANUAL-TEST-FIX-BATCH-20.md 1bf897954842
+specs/MANUAL-TEST-FIX-BATCH-21.md 6c3e01009c9f
+specs/MANUAL-TEST-FIX-BATCH-22.md 4d85fa770ede
+specs/MANUAL-TEST-FIX-BATCH-23.md 574b84f590f5
+specs/MANUAL-TEST-FIX-BATCH-24.md b624c68cedce
+specs/MANUAL-TEST-FIX-BATCH-25.md 21f2cc64b4cb
+specs/MANUAL-TEST-FIX-BATCH-26A.md f2a07e17e8a8
+specs/MANUAL-TEST-FIX-BATCH-26B.md 68323efffb68
+specs/MANUAL-TEST-FIX-BATCH-27.md 9c9354107b71
+specs/MANUAL-TEST-FIX-BATCH-28.md 88b6c7a5ce20
+specs/MANUAL-TEST-FIX-BATCH-29.md b02d321aa47f
+specs/MANUAL-TEST-FIX-BATCH-3.md 3c918d6cbf6e
+specs/MANUAL-TEST-FIX-BATCH-30.md ed752598eaf4
+specs/MANUAL-TEST-FIX-BATCH-31.md b6c0b348fb66
+specs/MANUAL-TEST-FIX-BATCH-32.md 5a9c8d962399
+specs/MANUAL-TEST-FIX-BATCH-33.md 086de9f2405c
+specs/MANUAL-TEST-FIX-BATCH-34.md 9844f8ada397
+specs/MANUAL-TEST-FIX-BATCH-35.md 62e88887749f
+specs/MANUAL-TEST-FIX-BATCH-36.md e4c2f9a6bad2
+specs/MANUAL-TEST-FIX-BATCH-37.md 9a41c8b5d98a
+specs/MANUAL-TEST-FIX-BATCH-38.md 17892a63540f
+specs/MANUAL-TEST-FIX-BATCH-39.md a78c414ffca9
+specs/MANUAL-TEST-FIX-BATCH-4.md 59d2b4bce97a
+specs/MANUAL-TEST-FIX-BATCH-40.md 2821da745d8f
+specs/MANUAL-TEST-FIX-BATCH-41.md dc6132602c98
+specs/MANUAL-TEST-FIX-BATCH-42.md 49d93288cbcc
+specs/MANUAL-TEST-FIX-BATCH-43.md 86861ef4fe4c
+specs/MANUAL-TEST-FIX-BATCH-44.md 806e1e522461
+specs/MANUAL-TEST-FIX-BATCH-45.md 868fe6404134
+specs/MANUAL-TEST-FIX-BATCH-46.md f620cfe82e31
+specs/MANUAL-TEST-FIX-BATCH-47.md 42b7ddc72c3d
+specs/MANUAL-TEST-FIX-BATCH-48.md b681ed22197a
+specs/MANUAL-TEST-FIX-BATCH-49.md 780bf4582999
+specs/MANUAL-TEST-FIX-BATCH-5.md 0be91f0b1c91
+specs/MANUAL-TEST-FIX-BATCH-50.md c1f8ffe41424
+specs/MANUAL-TEST-FIX-BATCH-51.md 29503d977ac1
+specs/MANUAL-TEST-FIX-BATCH-52.md 4d1bcb0de618
+specs/MANUAL-TEST-FIX-BATCH-53.md fa355b83c996
+specs/MANUAL-TEST-FIX-BATCH-54.md 9670dee79ba9
+specs/MANUAL-TEST-FIX-BATCH-55.md efb7e74f70f6
+specs/MANUAL-TEST-FIX-BATCH-56.md ff0dad5022ac
+specs/MANUAL-TEST-FIX-BATCH-57.md 884d202eff5b
+specs/MANUAL-TEST-FIX-BATCH-6.md 0c6679a27a22
+specs/MANUAL-TEST-FIX-BATCH-7.md dffd1a868bb6
+specs/MANUAL-TEST-FIX-BATCH-8.md e9489c848e7c
+specs/MANUAL-TEST-FIX-BATCH-9.md a1d7aba1f5f5
+specs/MANUAL-TEST-PHASE-A.md d533224d6dc2
+specs/MANUAL-TEST-PHASE-B.md ec655fcf5e08
+specs/MANUAL-TEST-PHASE-C.md 1df9870b3ce3
+specs/MANUAL-TEST-PHASE-D.md d26b954a80cb
+specs/MANUAL-TEST-PHASE-E.md 8cf634818712
+specs/MANUAL-TEST.md a55de73b0d62
+specs/MCP运维与多Agent写入规范.md 5a15f55c0d01
+specs/POSTMORTEM-2026-11-11-静默失效与双通路自发现方案.md 35f8ad3d885d
 specs/RECALL-HARD-PREFIX.md 893d59265843
-specs/ROADMAP-批次42-未接线三件套-方案.md df1a6f9d6ed5
-specs/ROADMAP-批次45-租户归一与成员密钥域模型-方案.md 633abaaaad54
-specs/ROADMAP-批次B类-远端PG与多机硬过滤-方案.md 0c7857454a7d
-specs/STRATUM-设计系统规格.md 375da8d11302
-specs/acceptance.md 22e711c8939c
-specs/code-map.md 5227aa0377cd
-specs/demo-data-baseline.md 1d9af215ac78
-specs/memory-loop-enhancement-plan.md f47ac02bca3d
-specs/project_id配置化_工程化落地方案.md aecc14b503c9
-specs/project_id零配置_详细实施方案.md 688c791a22bb
+specs/ROADMAP-批次42-未接线三件套-方案.md 2024eea6daa9
+specs/ROADMAP-批次45-租户归一与成员密钥域模型-方案.md 824e3179c0d4
+specs/ROADMAP-批次B类-远端PG与多机硬过滤-方案.md f46ad3a331ae
+specs/STRATUM-设计系统规格.md e6624156ca32
+specs/acceptance.md 65965bbcf822
+specs/code-map.md 891ad0454d2b
+specs/demo-data-baseline.md 686d344e4848
+specs/memory-loop-enhancement-plan.md aa5dac3ba914
+specs/project_id配置化_工程化落地方案.md c7e4de887a71
+specs/project_id零配置_详细实施方案.md 01084d7d4a83
 specs/recall-echo-contract.md 3658f5e100b8
-specs/reports/BATCH48-FIX-REPORT.md 7d62836888ad
-specs/reports/RECALL-WEEK-PLAN.md 9747f8a52112
+specs/reports/BATCH48-FIX-REPORT.md bf3b778e740d
+specs/reports/RECALL-WEEK-PLAN.md f366f33c4ed2
 specs/reports/T4-存量明文盘点-2026-11-12.md 6dbc307b0320
-specs/reports/WEBCHAT-ID-RECONCILE-PLAN.md 64327356860c
-specs/reports/auto-mode-weights-eval-2026-11-25.md 645c996432db
-specs/reports/dsh-hindsight-local-对比与借鉴-2026-11-14.md 505ceb6e31e6
-specs/reports/dsh-hindsight-local-调研报告-2026-11-14.md 6a90063ae5da
-specs/reports/hindsight-comparison-2026-11-24.md 977e25f5adb2
-specs/reports/hindsight-comparison-and-roadmap-2026-11-21.md 1742b549d768
-specs/reports/hindsight-追赶实施方案-2026-11-22.md 2e60acc36f91
-specs/reports/p1-5-bm25-feasibility-2026-11-22.md 2512e3d88715
-specs/reports/p1-6-7-8-reevaluation-2026-11-23.md e594da80c4b9
-specs/reports/p1-6-offline-eval-2026-11-23.md bc1714b1260d
-specs/reports/recall-quality-progress-2026-11-21.md de336dc45bf1
-specs/reports/recall-weights-offline-eval-2026-11-22.md 7cb99bd074b3
-specs/reports/召回模式全程序审查报告-2026-11-13.md e91202c37a63
+specs/reports/WEBCHAT-ID-RECONCILE-PLAN.md e0a4247e1938
+specs/reports/dsh-hindsight-local-对比与借鉴-2026-11-14.md 44a25a9ce15d
+specs/reports/dsh-hindsight-local-调研报告-2026-11-14.md b2e2ef33c6ad
+specs/reports/p1-6-7-8-reevaluation-2026-11-23.md 311a888778c7
+specs/reports/p1-6-offline-eval-2026-11-23.md 4c0f480d3b93
+specs/reports/召回模式全程序审查报告-2026-11-13.md df55ae29e54b
 specs/reports/审查-Agent侧记忆库与净化生长打通-2026-11-12.md ab5e7d6e7390
-specs/requirements.md d4f76b0df902
+specs/requirements.md 9d2bb6af72e1
 specs/tasks/AGENT-ONBOARD.md 900d19783798
-specs/tasks/AUDIT-LOG.md b778c455d43d
-specs/tasks/CONFLICT.md c894269434e1
-specs/tasks/CORE-AGENT.md 7987b75fbe3a
-specs/tasks/FEEDBACK.md 31eb401168c3
-specs/tasks/FORGETTING.md ffeae5ece068
-specs/tasks/GLOBAL-PARAMS.md edd78e0bf912
+specs/tasks/AUDIT-LOG.md 13933a1220e8
+specs/tasks/CONFLICT.md 07d3e99766e2
+specs/tasks/CORE-AGENT.md f77859222ff7
+specs/tasks/FEEDBACK.md a8106198546d
+specs/tasks/FORGETTING.md 3b317f2d9f31
+specs/tasks/GLOBAL-PARAMS.md 1cb2b8817902
 specs/tasks/GROWTH-AGENT-EVOLUTION.md 98826ff21587
-specs/tasks/GROWTH.md 658ccf9fc2e8
+specs/tasks/GROWTH.md 00b03a5f8d58
 specs/tasks/HOME-LOGIN.md 835294c0f1ef
-specs/tasks/LIFECYCLE.md 9c03e85fc540
-specs/tasks/LLM-CONFIG.md 40b08d305f08
-specs/tasks/LOGS.md a6eaff19bc00
-specs/tasks/MEMORY-MANAGE.md a586bcf0d38c
-specs/tasks/MODE-DISPATCH-EVOLUTION.md 76292d3b28bb
-specs/tasks/MONITOR.md d37cef8d352e
+specs/tasks/LIFECYCLE.md ac4b62dcac50
+specs/tasks/LLM-CONFIG.md 54d0dc5e122a
+specs/tasks/LOGS.md 61fb45733ea6
+specs/tasks/MEMORY-MANAGE.md cb4cef74455e
+specs/tasks/MODE-DISPATCH-EVOLUTION.md 715e0ab77d0f
+specs/tasks/MODE-DISPATCH-ROLLBACK.md 1257b30b522b
+specs/tasks/MODE-FEEDBACK-TARGET-FIELD.md 9b3703ef01b0
+specs/tasks/MONITOR.md 52505dcc8145
 specs/tasks/RECALL-ECHO-RAG.md 1dfd636c66d8
-specs/tasks/RECALL-HIGHLIGHT.md ed83180a0849
-specs/tasks/RECALL-SCORE-FIX.md 60241239cf8f
-specs/tasks/RECALL-SHAPING-P1.md 95d36635f6b1
-specs/tasks/RECALL-SHAPING.md ea503c66775f
-specs/tasks/RETRIEVAL.md c9a2b6c83a87
-specs/tasks/SECURITY.md 8a4a4441bc8f
-specs/tasks/SELF-EVOLUTION.md 0c8859348583
-specs/tasks/SETUP.md 21f41f4ab238
-specs/tasks/SYNC.md 6271b8a85d1e
-specs/tasks/USER-REGISTER.md 2c4bdb921f96
-specs/tasks/WRITE-PAGE.md 0062573b1e9f
-specs/test-plan.md d478bcfa10a3
-specs/topbar-consolidation-2026-11-08.md 3765d20edef7
-specs/topbar-restore-compare-2026-11-08.md 65bdc9089a21
-specs/working-set/agent-memory-sop.md bb07201d464d
-specs/working-set/draft-tool-inventory.md 1a5a8399465d
-specs/working-set/external-source/multiagent-memory-ops/agent-memory-sop.md a321ec2970eb
-specs/working-set/external-source/multiagent-memory-ops/archive/draft-contract-multiuser.md 3f3f59e02765
-specs/working-set/external-source/multiagent-memory-ops/archive/draft-sop-multiuser.md 11dc8d52dbf7
-specs/working-set/external-source/multiagent-memory-ops/archive/draft-tool-inventory.md 1a5a8399465d
-specs/working-set/external-source/multiagent-memory-ops/mcp-extension-contract.md 3c44fec7f85b
-specs/working-set/external-source/multiagent-memory-ops/multiuser-design-status.md 55c32084c05f
-specs/working-set/mcp-extension-contract.md 3c44fec7f85b
-specs/working-set/multiuser-design-status.md 55c32084c05f
-specs/workspace-view-gap-2026-11-08.md 05e258838ea9
-specs/召回模式SystemPrompt模板.md f4a10a6f2d6c
-specs/召回模式内核增量规格条款-草案.md c819be244e2b
-specs/召回模式设计与实现方案.md 36beb430649c
-specs/多用户三池隔离设计_D1-D25.md d0fc00a9fade
-specs/已知边界台账.md e04d68ece4c7
-specs/开发纪律_三道闸门.md d9f5ee298a8a
-specs/批次44-D5工具面落地子方案.md 01cc6b6cc89d
-specs/批次44-吸收项落地设计.md 2ced9348f942
-specs/批次46-D6多用户三池与create_project子方案.md 17236628021f
-specs/批次46-真正冲突裁决与摘要合并统计_落地方案.md 30403514d0a1
-specs/接入Agent行为规范.md f66474597609
-specs/改哪里-任务到文件速查.md 86efe439fccd
-specs/文档对齐确认需求稿.md 5da42259c355
-specs/记忆库写入分类与溯源规范.md 2fb0f14ebadc
-specs/记忆库工具能力清单.md 5da556d65280
+specs/tasks/RECALL-HIGHLIGHT.md 324420914163
+specs/tasks/RECALL-SCORE-FIX.md 71ddcd151e46
+specs/tasks/RECALL-SHAPING-P1.md d9153e8235e7
+specs/tasks/RECALL-SHAPING.md eb2960e59fdd
+specs/tasks/RETRIEVAL.md a33c3ad2b67f
+specs/tasks/SECURITY.md 547484176715
+specs/tasks/SELF-EVOLUTION.md 80aae067b665
+specs/tasks/SETUP.md c5316e67ebf3
+specs/tasks/SYNC.md 10460a3de118
+specs/tasks/USER-REGISTER.md 873bf807f902
+specs/tasks/WRITE-PAGE.md 9dac59e656a6
+specs/test-plan.md 3a866014b433
+specs/topbar-consolidation-2026-11-08.md ba47ee65f222
+specs/topbar-restore-compare-2026-11-08.md 1e782de3a73e
+specs/working-set/agent-memory-sop.md 87bf75ed47af
+specs/working-set/draft-tool-inventory.md f8d6787fbd04
+specs/working-set/external-source/multiagent-memory-ops/agent-memory-sop.md 5189f30486aa
+specs/working-set/external-source/multiagent-memory-ops/archive/draft-contract-multiuser.md 19729e3ec508
+specs/working-set/external-source/multiagent-memory-ops/archive/draft-sop-multiuser.md 7575fbcc74fb
+specs/working-set/external-source/multiagent-memory-ops/archive/draft-tool-inventory.md f8d6787fbd04
+specs/working-set/external-source/multiagent-memory-ops/mcp-extension-contract.md 00156e32cbcd
+specs/working-set/external-source/multiagent-memory-ops/multiuser-design-status.md d8fece91ee53
+specs/working-set/mcp-extension-contract.md 00156e32cbcd
+specs/working-set/multiuser-design-status.md d8fece91ee53
+specs/workspace-view-gap-2026-11-08.md eeb8a5d8a802
+specs/召回模式SystemPrompt模板.md ca938de4b891
+specs/召回模式内核增量规格条款-草案.md c37d94d24ffa
+specs/召回模式设计与实现方案.md ad145c2da3b4
+specs/多用户三池隔离设计_D1-D25.md ba6260d0c037
+specs/已知边界台账.md 1538488c62b8
+specs/开发纪律_三道闸门.md 11cef87e0641
+specs/批次44-D5工具面落地子方案.md da577f24cef0
+specs/批次44-吸收项落地设计.md 794d7dc9373f
+specs/批次46-D6多用户三池与create_project子方案.md 4995940094db
+specs/批次46-真正冲突裁决与摘要合并统计_落地方案.md 360141726b79
+specs/接入Agent行为规范.md a13476616945
+specs/改哪里-任务到文件速查.md b6e28f3d79d7
+specs/文档对齐确认需求稿.md 656232d90580
+specs/记忆库写入分类与溯源规范.md ae23d58a8807
+specs/记忆库工具能力清单.md 3718f6798f99
 specs/需求规格书.md 7bce82f4a78c
 specs/需求规格书_Agent接入页字段级交互规格.md 5abdf956efd3
 specs/需求规格书_Agent界面内联记忆标识.md 01227d78ce47
@@ -1333,4 +1329,4 @@ specs/需求规格书_新增章节_十八_ID字段整理.md ee6b806565fe
 specs/需求规格书_无头浏览器自动采集详细设计.md dd5fd41a4771
 specs/需求规格书_日志记录页字段级交互规格.md b44afab6b9cb
 specs/需求规格书_检索页字段级交互规格.md e6fa32f907de
-specs/需求规格书_管理员与成员权限设计.md 5a6a81f5f6be
+specs/需求规格书_管理员与成员权限设计.md bf23529cb20f
