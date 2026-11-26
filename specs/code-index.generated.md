@@ -620,7 +620,7 @@
 | [specs/requirements.md](specs/requirements.md) | 75 | title: 需求规格 |
 | [specs/tasks/AGENT-ONBOARD.md](specs/tasks/AGENT-ONBOARD.md) | 208 | 原子任务：Agent 接入配置页（REQ-003） |
 | [specs/tasks/AUDIT-LOG.md](specs/tasks/AUDIT-LOG.md) | 87 | REQ-006 / P11 审计日志页 — 任务拆分（原子任务 · 供 Agent 执行） |
-| [specs/tasks/CODE-INDEX-EOL-FIX.md](specs/tasks/CODE-INDEX-EOL-FIX.md) | 118 | title: code:index:check 在 core.autocrlf 下永久过期 —— EOL 归一化修复（立项） |
+| [specs/tasks/CODE-INDEX-EOL-FIX.md](specs/tasks/CODE-INDEX-EOL-FIX.md) | 137 | title: code:index:check 在 core.autocrlf 下永久过期 —— EOL 归一化修复（立项） |
 | [specs/tasks/CONFLICT.md](specs/tasks/CONFLICT.md) | 61 | REQ-006 / P7 冲突裁决页 — 任务拆分（原子任务 · 供 Agent 执行） |
 | [specs/tasks/CORE-AGENT.md](specs/tasks/CORE-AGENT.md) | 30 | REQ-007 memagent-core 内核 任务拆分（内核API契约 19.10/19.11） |
 | [specs/tasks/FEEDBACK.md](specs/tasks/FEEDBACK.md) | 28 | P9 用户反馈页 任务拆分（REQ-006 / 13.7 / 7.1 / 7.2） |
@@ -1259,7 +1259,7 @@ specs/reports/审查-Agent侧记忆库与净化生长打通-2026-11-12.md 9e5a93
 specs/requirements.md d4f76b0df902
 specs/tasks/AGENT-ONBOARD.md 94b996132239
 specs/tasks/AUDIT-LOG.md b778c455d43d
-specs/tasks/CODE-INDEX-EOL-FIX.md 9be16a3c1088
+specs/tasks/CODE-INDEX-EOL-FIX.md af6282f70e43
 specs/tasks/CONFLICT.md c894269434e1
 specs/tasks/CORE-AGENT.md 7987b75fbe3a
 specs/tasks/FEEDBACK.md 31eb401168c3

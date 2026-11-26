@@ -1,14 +1,14 @@
 ---
 title: code:index:check 在 core.autocrlf 下永久过期 —— EOL 归一化修复（立项）
 date: 2026-11-26
-status: proposed（待用户拍板后实施）
+status: implemented（2026-11-26 实施并过三闸门）
 scope: tools/code-index.mjs 的指纹计算与 --check 比较；不改业务代码、不改 git 配置
 depends: 既有门禁 verify:fast 的 code:index:check 步骤；core.autocrlf=true 的 Windows checkout
 ---
 
 # code-index:check 的 LF/CRLF 永久过期缺陷：立项方案
 
-> 本文只立项，不改代码。结论来自 2026-11-26 的当下复现，不是复述历史日志。
+> 结论来自 2026-11-26 的当下复现，不是复述历史日志；修复已实施，验收记录见 §6。
 
 ## 1. 现象与复现证据
 
@@ -115,3 +115,22 @@ export const canonical = (text) => String(text).replace(/\r\n?/g, '\n');
 - 指纹算法仍是 12 位 sha256 前缀；不追求抗碰撞，只做变更检测。
 - 该缺陷在 LF-only 环境（多数 Linux/macOS CI）不显现，所以「本地绿、Windows CI 红」是预期表现，不是偶发。
 - 实施完成后，本文状态改为 `implemented`，并把 B1 的实测结果写进验收记录。
+
+## 7. 实施验收记录（2026-11-26 实测）
+
+**改动落点**：新增 `tools/code-index-core.mjs`（`canonical` / `fingerprintOf` / `isIndexCurrent` 纯函数）；`code-index.mjs` 两处 hash 与一处比较改走纯函数；`package.json` 增 `test:tools` 并接入 `verify:fast`（`code:index:check` 之前）；新增 `tools/__tests__/code-index-core.test.mjs`（4 组 node:test）。
+
+**A·影响面回归**：主工作区（LF）`--write` 后 `--check` 通过；干净 worktree 新旧索引「表格区 0 行差异、指纹区 0 行差异」（LF 基准下 canonical 不改变指纹）；`verify:fast` 全绿——typecheck / lint / test:tools 4/4 / no-demo / 342 文件 4341 用例 / 覆盖率 statements 82.37%·lines 85.68%；业务源码零改动。
+
+**B·效果验证**：
+1. **B1**：`core.autocrlf=true` 全新 worktree（源码与索引文件均为 CRLF，索引由 LF 环境生成、未重跑 `--write`）→ `node tools/code-index.mjs --check` 退出码 **0**（修复前为 1）。
+2. **B2**：改 `src/shared/growthConfig.ts` 一行 → `--check` 退出码 1；还原 → 0。
+3. **B3**：改 `specs/tasks/CODE-INDEX-EOL-FIX.md` 一行 → `--check` 退出码 1；还原 → 0。
+4. **B4**：`core.autocrlf=false` 全新 checkout → `--check` 退出码 0。
+
+**C·变异验证**（在临时 worktree 副本上进行，不动主工作区）：
+1. `fingerprintOf` 里删 `canonical()` → B1 场景退出码 **1**（红）；
+2. `isIndexCurrent` 里换回原始字符串比较 → B1 场景退出码 **1**（红）；
+3. 两处还原 → B1 退出码 **0**（绿）。两处修复缺一不可，得证。
+
+**结论**：双根因均已消除；EOL 差异不再造成假过期，内容真变更仍被 `--check` 捕获。临时 worktree 均已清理。

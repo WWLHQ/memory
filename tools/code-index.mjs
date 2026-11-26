@@ -19,9 +19,9 @@
 // 只读源码与文档，不修改任何业务文件；索引过期时重跑即可（无需手工维护）。
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { createHash } from 'node:crypto';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { fingerprintOf, isIndexCurrent } from './code-index-core.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SCAN_DIRS = ['src', 'e2e'];
@@ -128,7 +128,8 @@ for (const abs of files) {
     exports: exportsOf(text),
     lines: text.split('\n').length,
     // 批次27 P2-18：内容指纹——符号名/行数不变的单行函数体改动也会让 --check 失败（强制重跑索引）
-    hash: createHash('sha256').update(text).digest('hex').slice(0, 12),
+    // CODE-INDEX-EOL-FIX：走 EOL 归一化指纹，LF/CRLF checkout 同一内容hash一致
+    hash: fingerprintOf(text),
   });
 }
 
@@ -149,7 +150,7 @@ for (const abs of docFiles) {
     file: relative(ROOT, abs).split(sep).join('/'),
     summary: docSummaryOf(text),
     lines: text.split('\n').length,
-    hash: createHash('sha256').update(text).digest('hex').slice(0, 12),
+    hash: fingerprintOf(text),
   });
 }
 
@@ -205,7 +206,8 @@ if (process.argv.includes('--write')) {
   } catch {
     // 索引文件缺失按过期处理
   }
-  if (current !== md) {
+  // CODE-INDEX-EOL-FIX：比较前两侧都归一化换行，CRLF checkout 的索引与 LF 基准等价
+  if (!isIndexCurrent(current, md)) {
     console.error(`代码索引已过期：请运行 npm run code:index -- --write（${relative(ROOT, out)}）`);
     process.exit(1);
   }
