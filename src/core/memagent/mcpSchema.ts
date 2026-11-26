@@ -183,14 +183,16 @@ export const MCP_TOOLS = [
   },
   {
     name: 'growth_evolve',
-    description: '自进化与场景画像（批次 B/C/D）。action=status：查进化状态（模式 off/suggest/auto、当前召回权重、最近一次评估结论、待采纳建议），只读；action=adopt：一键采纳最近一条建议权重——重过护栏（步长/漂移/冷却期）后写 growth:v1（存历史、挂回诊计划），护栏不过或 mode=off 会明确拒绝；action=profile：场景画像（窗口内召回审计按 scene 聚合，只读派生、不落库，window_days 1–365 默认 30；删除对应审计画像即消失；只提示场景偏好，不自动改分流配置）；action=policy：反馈降档策略开关（enabled 必填布尔，可选 window_days 1–365 / reject_downgrade_threshold 1–50；全局真源与参数页同源，只降不升、不推 dormant）。adopt/policy 会真实写配置，必须用户明确说「采纳」「启用/停用降档」才调用，不要替用户决定。',
+    description: '自进化与场景画像（批次 B/C/D + 7.2 分流族）。action=status：查进化状态（模式 off/suggest/auto、当前召回权重、最近一次评估结论、待采纳的召回权重建议与分流建议、分流基线来源），只读；action=adopt：一键采纳最近一条建议——family 省略/recall_weights 采纳召回权重（重过护栏后写 growth:v1，存历史、挂回诊计划）；family=mode_dispatch 采纳分流建议（重过冷却期后以内核快照/内核基线为基底整块重写 growth:v1.mode_dispatch，存历史），护栏不过或 mode=off 会明确拒绝；action=profile：场景画像（窗口内召回审计按 scene 聚合，只读派生、不落库，window_days 1–365 默认 30；删除对应审计画像即消失；只提示场景偏好，不自动改分流配置）；action=policy：反馈降档策略开关（enabled 必填布尔，可选 window_days 1–365 / reject_downgrade_threshold 1–50；全局真源与参数页同源，只降不升、不推 dormant）；action=rollback：分流族回诊（family 必填且仅 mode_dispatch，force 可选布尔=立即回诊；读采纳时写死的回诊计划，到期后用分流命中率=👍/(👍+👎模式选错) 判定，跌幅>max_drop 且负样本净增≥3 才局部回滚 mode_dispatch 块，配置已被后续采纳替换则跳过；快照/样本如实返回 insufficient/kept）。adopt/policy/rollback 会真实写配置，必须用户明确说「采纳」「启用/停用降档」「回诊/回滚」才调用，不要替用户决定。',
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['status', 'adopt', 'profile', 'policy'], description: '操作类型；status/profile 只读，adopt/policy 真实写配置（须用户明确表态）' },
+        action: { type: 'string', enum: ['status', 'adopt', 'profile', 'policy', 'rollback'], description: '操作类型；status/profile 只读，adopt/policy/rollback 真实写配置（须用户明确表态）' },
+        family: { type: 'string', enum: ['recall_weights', 'mode_dispatch'], description: '仅 action=adopt：要采纳哪一族建议，缺省 recall_weights（召回打分权重）；mode_dispatch = 召回模式自动分流词表' },
         enabled: { type: 'boolean', description: '仅 action=policy：反馈降档总开关' },
         window_days: { type: 'integer', description: 'action=profile 时为画像窗口 1–365（默认 30）；action=policy 时为降档统计窗口 1–365' },
         reject_downgrade_threshold: { type: 'integer', description: '仅 action=policy：窗口内累计 reject 降档阈值 1–50' },
+        force: { type: 'boolean', description: '仅 action=rollback：忽略 due_at 立即回诊（仍需满足最小样本门槛）' },
       },
       required: ['action'],
     },

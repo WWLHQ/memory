@@ -238,6 +238,43 @@ describe('批次 B/C/D：runGrowthEvolveTool（MCP 编排）', () => {
     expect(cfg.recall_weights).toEqual(SUGGEST_TO);
   });
 
+  it('adopt family=mode_dispatch：分流建议落库；status 回放建议与基线来源；family 非法 → McpToolError', async () => {
+    const storage = new InMemoryStorage();
+    await seedConfig(storage, LOOSE); // 默认 suggest（可采纳，但不自动写）
+    await storage.appendAudit({
+      request_id: 'sug_dp', action: 'growth_op', ts: NOW - 1000, project_id: 'P_SYSTEM',
+      detail: {
+        phase: 'evolution', event: 'suggest_mode_dispatch', family: 'mode_dispatch',
+        applied: false, status: 'suggested',
+        dispatch: {
+          family: 'mode_dispatch', target_mode: 'fact_first', action: 'remove_words',
+          changed: [{ from: ['报错', '核对', '验证', '是否'], to: ['报错', '验证', '是否'] }],
+          reason: 'fact_first 的 2 条负样本中有 2 条由「核对」触发，建议删该词',
+          sample_request_ids: ['n1', 'n2'],
+        },
+        reason: '只产建议，未写配置',
+      },
+    });
+
+    const st = await runGrowthEvolveTool(storage, { action: 'status' }, { form: 'desktop', now: NOW });
+    expect(st.dispatch_suggestion?.dispatch.target_mode).toBe('fact_first');
+    expect(st.dispatch_baseline).toBe('kernel'); // 账本尚无快照
+
+    const r = await runGrowthEvolveTool(storage, { action: 'adopt', family: 'mode_dispatch' }, { form: 'desktop', now: NOW });
+    expect(r.family).toBe('mode_dispatch');
+    expect(r.applied).toBe(true);
+    expect(r.baseline_source).toBe('kernel');
+    const cfg = growthConfigFromLedger(await storage.listMemories({}));
+    expect(cfg.mode_dispatch?.feature_words.fact_first.words).toEqual(['报错', '验证', '是否']);
+    // 采纳后 status 的基线来源变账本
+    const st2 = await runGrowthEvolveTool(storage, { action: 'status' }, { form: 'desktop', now: NOW });
+    expect(st2.dispatch_baseline).toBe('ledger');
+
+    await expect(
+      runGrowthEvolveTool(storage, { action: 'adopt', family: 'dedup_weights' }, { form: 'desktop', now: NOW }),
+    ).rejects.toThrow();
+  });
+
   it('profile：返回窗口内场景画像（真实审计聚合）', async () => {
     const storage = new InMemoryStorage();
     await storage.appendAudit({
@@ -266,5 +303,20 @@ describe('批次 B/C/D：runGrowthEvolveTool（MCP 编排）', () => {
     const saved = (await storage.queryAudit({ action: 'growth_op' }))
       .filter((a) => (a.detail as { event?: unknown }).event === 'policy_saved');
     expect(saved).toHaveLength(2);
+  });
+
+  it('rollback：family 必填仅 mode_dispatch；无计划 → none（只读不写审计）', async () => {
+    const storage = new InMemoryStorage();
+    await seedConfig(storage, LOOSE);
+    const before = (await storage.queryAudit({})).length;
+    await expect(runGrowthEvolveTool(storage, { action: 'rollback' }, { form: 'desktop', now: NOW }))
+      .rejects.toThrow('仅支持 family=mode_dispatch');
+    await expect(runGrowthEvolveTool(storage, { action: 'rollback', family: 'recall_weights' }, { form: 'desktop', now: NOW }))
+      .rejects.toThrow('仅支持 family=mode_dispatch');
+    await expect(runGrowthEvolveTool(storage, { action: 'rollback', family: 'mode_dispatch', force: 'yes' }, { form: 'desktop', now: NOW }))
+      .rejects.toThrow('force 须为布尔值');
+    const r = await runGrowthEvolveTool(storage, { action: 'rollback', family: 'mode_dispatch', force: true }, { form: 'desktop', now: NOW });
+    expect(r.rollback?.status).toBe('none');
+    expect((await storage.queryAudit({})).length).toBe(before);
   });
 });

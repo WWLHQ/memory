@@ -9,14 +9,19 @@
 //    如实记录（诚实边界，不假装已按项目隔离）。
 import { ulid } from './ulid.ts';
 import { growthConfigFromLedger, saveGrowthConfigToLedger } from './paramsSnapshot.ts';
-import { adoptSuggestedRecallWeights } from './evolution/loop.ts';
+import { adoptSuggestedModeDispatch, adoptSuggestedRecallWeights, runDispatchRollbackCheck, type DispatchRollbackResult } from './evolution/loop.ts';
+import { validDispatchProposal, type DispatchProposal } from './evolution/modeDispatchRegression.ts';
 import { buildSceneProfile, type SceneProfile } from './evolution/sceneProfile.ts';
 import { McpToolError } from './mcpRecall.ts';
 import type { AuditRecord, Form, Memory, StorageBackend } from './types.ts';
-import { validFeedbackPolicy, type FeedbackPolicy, type GrowthConfig } from '../../shared/growthConfig.ts';
+import { validFeedbackPolicy, type FeedbackPolicy, type GrowthConfig, type ModeDispatchSnapshot } from '../../shared/growthConfig.ts';
 
-const ACTIONS = ['status', 'adopt', 'profile', 'policy'] as const;
+const ACTIONS = ['status', 'adopt', 'profile', 'policy', 'rollback'] as const;
 type GrowthAction = (typeof ACTIONS)[number];
+
+/** adopt 可定向的进化族；缺省 recall_weights（与历史行为逐字一致） */
+const ADOPT_FAMILIES = ['recall_weights', 'mode_dispatch'] as const;
+type AdoptFamily = (typeof ADOPT_FAMILIES)[number];
 
 const DAY = 24 * 3600_000;
 
@@ -80,16 +85,27 @@ export interface GrowthEvolveResult {
   weights?: Record<string, number>;
   latest_eval?: { event: string; status?: unknown; reason?: unknown; ts: number } | null;
   suggestion?: { from: Record<string, number>; to: Record<string, number>; ts: number; reason?: unknown } | null;
+  /** status：最近一条分流建议（来自审计，不现算）+ 采纳时的基底来源 */
+  dispatch_suggestion?: { dispatch: DispatchProposal; ts: number } | null;
+  dispatch_baseline?: 'ledger' | 'kernel';
   // adopt
+  family?: AdoptFamily;
   applied?: boolean;
   reason?: string;
   from?: Record<string, number>;
   to?: Record<string, number>;
   history_saved?: boolean;
+  /** adopt(family=mode_dispatch)：被采纳的建议 + 采纳后的整块快照 */
+  dispatch?: DispatchProposal;
+  to_snapshot?: ModeDispatchSnapshot;
+  baseline_source?: 'ledger' | 'kernel';
   // profile
   profile?: SceneProfile;
   // policy
   feedback_policy?: FeedbackPolicy;
+  // rollback
+  force?: boolean;
+  rollback?: DispatchRollbackResult;
 }
 
 /** 用户反馈策略启用/停用（批次 C3；全局真源，与参数页同一份 growth:v1） */
@@ -112,27 +128,68 @@ export async function runGrowthEvolveTool(
     const growthAudits = await storage.queryAudit({ action: 'growth_op' });
     const latest = latestEvolutionEntry(growthAudits);
     let suggestion: GrowthEvolveResult['suggestion'] = null;
+    let dispatchSuggestion: GrowthEvolveResult['dispatch_suggestion'] = null;
     for (const a of growthAudits) {
-      const d = a.detail as { event?: unknown; family?: unknown; from?: unknown; to?: unknown; reason?: unknown } | undefined;
-      if (d?.event !== 'suggest_recall_weights' || d.family !== 'recall_weights') continue;
-      if (d.from && d.to && typeof d.from === 'object' && typeof d.to === 'object') {
-        suggestion = { from: d.from as Record<string, number>, to: d.to as Record<string, number>, ts: a.ts, reason: d.reason };
+      const d = a.detail as { event?: unknown; family?: unknown; from?: unknown; to?: unknown; reason?: unknown; dispatch?: unknown } | undefined;
+      if (d?.family === 'recall_weights' && d.event === 'suggest_recall_weights') {
+        if (d.from && d.to && typeof d.from === 'object' && typeof d.to === 'object') {
+          suggestion = { from: d.from as Record<string, number>, to: d.to as Record<string, number>, ts: a.ts, reason: d.reason };
+        }
+        continue;
+      }
+      // 分流族：只回放审计里真实存在的建议；形状不过就当没有（不猜、不现算）
+      if (d?.family === 'mode_dispatch' && d.event === 'suggest_mode_dispatch' && validDispatchProposal(d.dispatch)) {
+        if (!dispatchSuggestion || a.ts > dispatchSuggestion.ts) {
+          dispatchSuggestion = { dispatch: d.dispatch, ts: a.ts };
+        }
       }
     }
     return {
       action: act, request_id: requestId, mode: cfg.evolution.mode,
       weights: { ...cfg.recall_weights }, latest_eval: latest, suggestion,
+      dispatch_suggestion: dispatchSuggestion,
+      dispatch_baseline: cfg.mode_dispatch ? 'ledger' : 'kernel',
     };
   }
 
   if (act === 'adopt') {
+    const rawFamily = args.family;
+    const family = rawFamily === undefined ? 'recall_weights' : rawFamily;
+    if (typeof family !== 'string' || !ADOPT_FAMILIES.includes(family as AdoptFamily)) {
+      throw new McpToolError(
+        `growth_evolve.family 非法：${String(rawFamily)}（允许：${ADOPT_FAMILIES.join('/')}；省略即 recall_weights）`,
+      );
+    }
+    const fam = family as AdoptFamily;
+    if (fam === 'mode_dispatch') {
+      const r = await adoptSuggestedModeDispatch(storage, loopOpts);
+      return {
+        action: act, request_id: requestId, family: fam, applied: r.applied, reason: r.reason,
+        ...(r.dispatch ? { dispatch: r.dispatch } : {}),
+        ...(r.to ? { to_snapshot: r.to } : {}),
+        ...(r.baseline_source ? { baseline_source: r.baseline_source } : {}),
+        ...(r.history_saved !== undefined ? { history_saved: r.history_saved } : {}),
+      };
+    }
     const r = await adoptSuggestedRecallWeights(storage, loopOpts);
     return {
-      action: act, request_id: requestId, applied: r.applied, reason: r.reason,
+      action: act, request_id: requestId, family: fam, applied: r.applied, reason: r.reason,
       ...(r.from ? { from: r.from as Record<string, number> } : {}),
       ...(r.to ? { to: r.to as Record<string, number> } : {}),
       ...(r.history_saved !== undefined ? { history_saved: r.history_saved } : {}),
     };
+  }
+
+  if (act === 'rollback') {
+    // 只支持 mode_dispatch 族（其它族回诊走既有 runRollbackCheck / runDedupRollbackCheck）
+    if (args.family !== 'mode_dispatch') {
+      throw new McpToolError('growth_evolve(action=rollback) 目前仅支持 family=mode_dispatch；recall_weights/dedup 回诊仍由进化轮自动执行');
+    }
+    if (args.force !== undefined && typeof args.force !== 'boolean') {
+      throw new McpToolError('growth_evolve.force 须为布尔值（action=rollback 时）');
+    }
+    const result = await runDispatchRollbackCheck(storage, { ...loopOpts, force: args.force === true });
+    return { action: act, request_id: requestId, family: 'mode_dispatch', force: args.force === true, rollback: result };
   }
 
   if (act === 'profile') {
