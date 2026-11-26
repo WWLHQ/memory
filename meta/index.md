@@ -31,6 +31,7 @@
 - 7.2 样本池读取侧接线（mode_feedback → 分流词表/权重回归 · **读取+采纳+UI 两键已通**）：[specs/tasks/MODE-DISPATCH-EVOLUTION.md](specs/tasks/MODE-DISPATCH-EVOLUTION.md)
 - mode_feedback 增「应该是什么模式」字段 → 解锁 add_words / weight_step（**已实施**）：[specs/tasks/MODE-FEEDBACK-TARGET-FIELD.md](specs/tasks/MODE-FEEDBACK-TARGET-FIELD.md)
 - mode_dispatch 采纳后回诊 · 分流命中率基线与回滚判据（**已实施**）：[specs/tasks/MODE-DISPATCH-ROLLBACK.md](specs/tasks/MODE-DISPATCH-ROLLBACK.md)
+- code:index:check 在 core.autocrlf 下永久过期 · EOL 归一化修复（**立项待拍板**）：[specs/tasks/CODE-INDEX-EOL-FIX.md](specs/tasks/CODE-INDEX-EOL-FIX.md)
 - 项目需求规格（导入，待结构化）：
   - [需求规格书.md](specs/需求规格书.md)
   - [需求规格书_Agent接入页字段级交互规格.md](specs/需求规格书_Agent接入页字段级交互规格.md)
