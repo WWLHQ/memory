@@ -12,6 +12,7 @@ import { ResultRow } from './ResultRow.tsx';
 import { RecentRecallsCard, fmtClock, type RecentPhase } from './RecentRecallsCard.tsx';
 import { useRetrieval } from './useRetrieval.ts';
 import { ALL_PROJECTS_SCOPE, coreReorderMemory, coreRecallHistory, coreRecentRecalls, coreLastRecall, type LastRecallSnapshot } from './coreEngine.ts';
+import { coreSubmitRankFeedback } from './coreRankFeedback.ts';
 import { listProjectIds } from '../shared/kernelProjects.ts';
 import { AuditTrailCard } from './AuditTrailCard.tsx';
 import { useToast } from './useToast.tsx';
@@ -138,6 +139,14 @@ export function RetrievalPage() {
   };
   // 跳反馈页（真实导航，预填 memory_id）
   const feedback = (id: string) => { window.location.href = `/feedback.html?memory_id=${encodeURIComponent(id)}`; };
+  /** 排序反馈：点某条「应该排第一」→ 真写 recall_feedback（rank_wrong + expected_first_id），供 weight_step 建议消费 */
+  const rankFirst = (id: string) => {
+    const rid = result?.banner.request_id;
+    if (!rid) { flash('本次召回尚无 request_id，无法记录排序反馈。'); return; }
+    void coreSubmitRankFeedback({ request_id: rid, expected_first_id: id }).then((r) => {
+      flash(r.ok ? '已记录：这条应该排第一（排序反馈进审计账本）。' : `排序反馈未能写入：${r.error}`);
+    });
+  };
 
   /** 导出 = 真实召回结果前端 CSV（无后端导出接口，按钮旁已注明） */
   const exportCsv = () => {
@@ -306,6 +315,7 @@ export function RetrievalPage() {
                     onRemember={remember}
                     onForget={forget}
                     onFeedback={feedback}
+                    onRankFirst={rankFirst}
                   />
                 ))}
               </section>

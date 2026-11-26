@@ -115,4 +115,33 @@ describe('EvolutionSettingsCard（M0-5）', () => {
     expect((x as ScheduleExprs).self_growth).toBe(DEFAULT_SCHEDULE_EXPRS.self_growth);
     expect(screen.getByTestId('evolution-saved').textContent).toBe('已保存');
   });
+
+  it('7.2 两键可改：分流窗口(天) 与 分流最小标注 落到 window/min_samples 并随保存回传', () => {
+    const onSave = vi.fn();
+    render(
+      <EvolutionSettingsCard
+        evolution={DEFAULT_EVOLUTION}
+        scheduleExprs={DEFAULT_SCHEDULE_EXPRS}
+        audit={[]}
+        onSave={onSave}
+      />,
+    );
+    // 默认值来自 DEFAULT_EVOLUTION（30 天 / 10 条），不是硬编码另一套
+    const win = screen.getByTestId('window-dispatch-days') as HTMLInputElement;
+    const min = screen.getByTestId('min-dispatch-tagged') as HTMLInputElement;
+    expect(win.value).toBe(String(DEFAULT_EVOLUTION.window.dispatch_days));
+    expect(min.value).toBe(String(DEFAULT_EVOLUTION.min_samples.dispatch_tagged));
+
+    fireEvent.change(win, { target: { value: '45' } });
+    fireEvent.change(min, { target: { value: '20' } });
+    fireEvent.click(screen.getByTestId('evolution-save'));
+
+    const [e] = onSave.mock.calls[0];
+    expect(e.window.dispatch_days).toBe(45);
+    expect(e.min_samples.dispatch_tagged).toBe(20);
+    // 同一次保存不改其他窗口口径（判重/召回/采样逐字保留）
+    expect(e.window.dedup_days).toBe(DEFAULT_EVOLUTION.window.dedup_days);
+    expect(e.window.recall_days).toBe(DEFAULT_EVOLUTION.window.recall_days);
+    expect(e.min_samples.dedup_total).toBe(DEFAULT_EVOLUTION.min_samples.dedup_total);
+  });
 });

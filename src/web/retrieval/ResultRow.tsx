@@ -11,6 +11,7 @@ interface Props {
   onRemember: (id: string) => void;
   onForget: (id: string) => void;
   onFeedback: (id: string) => void;
+  onRankFirst?: (id: string) => void;
 }
 
 /** 温度枚举一律译中文（UI 铁律：不把原始枚举值打到界面上） */
@@ -18,7 +19,7 @@ const DECAY_ZH: Record<RetrievalHit['decay_class'], string> = {
   hot: '热', warm: '温', cold: '冷', archived: '已归档', dormant: '休眠',
 };
 
-export function ResultRow({ hit, index, selected, onView, onRemember, onForget, onFeedback }: Props) {
+export function ResultRow({ hit, index, selected, onView, onRemember, onForget, onFeedback, onRankFirst }: Props) {
   const decay = hit.decay_class;
   const text = hit.l2_only ? `[L2 摘要占位 · ${hit.content}]` : hit.content;
   const toggle = () => onView(hit.memory_id);
@@ -61,6 +62,9 @@ export function ResultRow({ hit, index, selected, onView, onRemember, onForget, 
         <button type="button" className="ret-icon-btn" title="记住：提升这条的权重" data-testid={`remember-${index}`} onClick={() => onRemember(hit.memory_id)}><Icon name="spark" size={13} /></button>
         <button type="button" className="ret-icon-btn" title="忘记：降低这条的权重" data-testid={`forget-${index}`} onClick={() => onForget(hit.memory_id)}><Icon name="x" size={13} /></button>
         <button type="button" className="ret-icon-btn" title="反馈：去反馈页" data-testid={`fb-${index}`} onClick={() => onFeedback(hit.memory_id)}><Icon name="receipt" size={13} /></button>
+        {onRankFirst && index > 0 && (
+          <button type="button" className="ret-icon-btn" title="排序反馈：这条应该排第一" data-testid={`rank-first-${index}`} onClick={() => onRankFirst(hit.memory_id)}><Icon name="spark" size={13} /></button>
+        )}
       </div>
 
       <button

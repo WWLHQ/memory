@@ -159,6 +159,7 @@ export function EvolutionSettingsCard({
       <div className="row" style={{ marginTop: 12, gap: 16, flexWrap: 'wrap' }}>
         <NumField testid="window-dedup-days" label="判重窗口(天)" value={draftE.window.dedup_days} min={1} max={180} onChange={(v) => patchWin({ dedup_days: v })} />
         <NumField testid="window-recall-days" label="召回窗口(天)" value={draftE.window.recall_days} min={1} max={90} onChange={(v) => patchWin({ recall_days: v })} />
+        <NumField testid="window-dispatch-days" label="分流窗口(天)" value={draftE.window.dispatch_days} min={1} max={365} onChange={(v) => patchWin({ dispatch_days: v })} />
         <NumField testid="sample-top-n" label="采样条数" value={draftE.sample_top_n} min={10} max={50} onChange={(v) => patchE({ sample_top_n: v })} />
       </div>
 
@@ -175,6 +176,8 @@ export function EvolutionSettingsCard({
           <NumField testid="min-dedup-neg" label="最小负例" value={draftE.min_samples.dedup_negatives} min={1} max={10000} onChange={(v) => patchMin({ dedup_negatives: v })} />
           <NumField testid="min-recall-count" label="最小召回次数" value={draftE.min_samples.recall_count} min={1} max={10000} onChange={(v) => patchMin({ recall_count: v })} />
           <NumField testid="min-recall-tagged" label="最小带标签" value={draftE.min_samples.recall_tagged} min={1} max={10000} onChange={(v) => patchMin({ recall_tagged: v })} />
+          <NumField testid="min-dispatch-tagged" label="分流最小标注" value={draftE.min_samples.dispatch_tagged} min={1} max={100} onChange={(v) => patchMin({ dispatch_tagged: v })} />
+          <NumField testid="rollback-dispatch-max-drop" label="分流回诊跌幅" value={draftE.rollback.mode_dispatch_max_drop} min={0.05} max={0.30} step={0.01} onChange={(v) => patchRollback({ mode_dispatch_max_drop: v })} />
           <NumField testid="guard-cooldown" label="冷却(天)" value={draftE.guard.cooldown_days} min={1} max={90} onChange={(v) => patchGuard({ cooldown_days: v })} />
           <NumField testid="guard-max-step" label="最大步长" value={draftE.guard.max_step} min={0.01} max={0.20} step={0.01} onChange={(v) => patchGuard({ max_step: v })} />
           <NumField testid="guard-max-drift" label="最大漂移" value={draftE.guard.max_drift} min={0.05} max={0.50} step={0.01} onChange={(v) => patchGuard({ max_drift: v })} />

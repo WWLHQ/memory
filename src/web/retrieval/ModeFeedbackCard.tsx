@@ -3,7 +3,8 @@
 import { useState } from 'react';
 import type { ModeBannerData } from './types.ts';
 import { modeName } from './logic.ts';
-import { coreSubmitModeFeedback, MODE_FEEDBACK_REASONS, type ModeFeedbackReason, type ModeFeedbackVerdict } from './coreModeFeedback.ts';
+import { coreSubmitModeFeedback, EXPECTED_MODES, MODE_FEEDBACK_REASONS, type ModeFeedbackReason, type ModeFeedbackVerdict } from './coreModeFeedback.ts';
+import type { Mode } from './types.ts';
 
 interface Props {
   data: ModeBannerData;
@@ -13,20 +14,26 @@ interface Props {
 export function ModeFeedbackCard({ data, onToast }: Props) {
   const [verdict, setVerdict] = useState<ModeFeedbackVerdict | null>(null);
   const [reason, setReason] = useState<ModeFeedbackReason>(MODE_FEEDBACK_REASONS[0]);
+  const [expected, setExpected] = useState<Mode | ''>('');
   const [saving, setSaving] = useState(false);
 
   const observedAuto = data.dispatch?.applied === 'auto';
   const shownMode = observedAuto ? '自动' : modeName(data.mode);
   const source = data.dispatch?.source === 'manual' ? '用户指定' : '自动分流';
+  const effectiveMode: Mode | 'auto' = observedAuto ? 'auto' : data.mode;
+  // critical 禁极简；中文名唯一真源 = modeName（复用 logic.ts#MODE_NAMES，不建第二套词表）
+  const expectedOptions = EXPECTED_MODES.filter((m) => !(data.scene === 'critical' && m === 'minimal'));
 
   const submit = async (v: ModeFeedbackVerdict, r?: ModeFeedbackReason) => {
     setSaving(true);
     const outcome = await coreSubmitModeFeedback({
       request_id: data.request_id,
-      mode: observedAuto ? 'auto' : data.mode,
+      mode: effectiveMode,
       verdict: v,
       reason: r,
       source: data.dispatch?.source === 'manual' ? 'manual' : 'auto',
+      expected_mode: expected === '' ? null : expected,
+      scene: data.scene,
     });
     setSaving(false);
     if (outcome.ok) {
@@ -68,6 +75,21 @@ export function ModeFeedbackCard({ data, onToast }: Props) {
           >
             {MODE_FEEDBACK_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
           </select>
+          {reason === '模式选错' && (
+            <select
+              data-testid="mode-fb-expected"
+              aria-label="应该分到哪个模式"
+              value={expected}
+              onChange={(e) => setExpected(e.target.value as Mode | '')}
+            >
+              <option value="">不确定就留空</option>
+              {expectedOptions.map((m) => (
+                <option key={m} value={m} disabled={m === effectiveMode}>
+                  {modeName(m)}{m === effectiveMode ? '（本次已选）' : ''}
+                </option>
+              ))}
+            </select>
+          )}
           <button
             type="button"
             className="ret-btn"
@@ -79,7 +101,7 @@ export function ModeFeedbackCard({ data, onToast }: Props) {
           </button>
         </>
       )}
-      <span className="ret-note">反馈写入审计账本；7.2 样本池接线待 P2-9 拍板。</span>
+      <span className="ret-note">反馈写入审计账本；模式选错时可选「应该分到哪个模式」，用于分流词表回归。</span>
     </div>
   );
 }

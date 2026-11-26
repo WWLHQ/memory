@@ -68,6 +68,8 @@ export async function coreSaveGrowthConfig(
   // 批次61 GAP-1/GAP-2：页面保存判重参数时不传这两块 → 一律继承账本现值。
   // 否则「改判重权重」会顺手把召回权重清回默认、还能把用户已启用的反馈策略悄悄关掉。
   // M0：evolution / schedule_exprs 同一规则——只改权阈的保存不得重置进化设置与调度节奏。
+  // 7.2：mode_dispatch 同理——页面根本没有它的输入口（由进化轮/采纳通道写），
+  // 若不在这里继承，用户随手点一次「保存进化设置」就会把刚采纳的分流快照抹掉（静默退回内核基线）。
   const ledger = growthConfigFromLedger(await storage.listMemories({}));
   const merged: GrowthConfig = {
     ...cfg,
@@ -75,6 +77,7 @@ export async function coreSaveGrowthConfig(
     feedback_policy: cfg.feedback_policy ?? ledger.feedback_policy,
     evolution: cfg.evolution ?? ledger.evolution,
     schedule_exprs: cfg.schedule_exprs ?? ledger.schedule_exprs,
+    mode_dispatch: cfg.mode_dispatch ?? ledger.mode_dispatch,
   };
   const saved = await saveGrowthConfigToLedger(storage, merged, {
     requestId, form: 'web', enterpriseId: tenant.enterprise_id, teamId: tenant.team_id,

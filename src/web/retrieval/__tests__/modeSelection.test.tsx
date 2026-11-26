@@ -84,6 +84,27 @@ describe('P2-8 §3.4 模式反馈真实审计', () => {
     const rows = await getKernelStorage().queryAudit({ request_id: banner.request_id, action: 'mode_feedback' });
     expect(rows[0].detail).toMatchObject({ verdict: 'down', reason: '模式选错' });
   });
+  it('👎+模式选错+选目标模式 → expected_mode 真进审计（B 效果）', async () => {
+    getKernelWithSeed();
+    const onToast = vi.fn();
+    render(<ModeFeedbackCard data={{ ...banner, request_id: 'req_expected_test' }} onToast={onToast} />);
+    fireEvent.click(screen.getByTestId('mode-fb-down'));
+    fireEvent.change(screen.getByTestId('mode-fb-reason'), { target: { value: '模式选错' } });
+    const exp = screen.getByTestId('mode-fb-expected');
+    expect(exp).toBeInTheDocument();
+    fireEvent.change(exp, { target: { value: 'event_replay' } });
+    fireEvent.click(screen.getByTestId('mode-fb-submit'));
+    await waitFor(() => expect(onToast).toHaveBeenCalled());
+    const rows = await getKernelStorage().queryAudit({ request_id: 'req_expected_test', action: 'mode_feedback' });
+    expect(rows[0].detail).toMatchObject({ verdict: 'down', reason: '模式选错', expected_mode: 'event_replay' });
+  });
+  it('critical 场景：目标模式下拉不提供极简（对齐手动模式约束）', () => {
+    render(<ModeFeedbackCard data={{ ...banner, scene: 'critical', request_id: 'req_critical' }} onToast={noop} />);
+    fireEvent.click(screen.getByTestId('mode-fb-down'));
+    fireEvent.change(screen.getByTestId('mode-fb-reason'), { target: { value: '模式选错' } });
+    const exp = screen.getByTestId('mode-fb-expected');
+    expect(Array.from(exp.querySelectorAll('option')).some((o) => o.value === 'minimal')).toBe(false);
+  });
   it('审计写失败时如实报错，不显示「已记录」', async () => {
     const storage = getKernelStorage();
     const spy = vi.spyOn(storage, 'appendAudit').mockRejectedValueOnce(new Error('账本不可写'));
