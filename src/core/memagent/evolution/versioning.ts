@@ -75,13 +75,22 @@ export interface RollbackResult {
   to?: RecallWeights;
 }
 
+export interface RollbackOptions extends HistoryWriteOptions {
+  /**
+   * 局部回退目标（2026-11-26 分流回诊）：'mode_dispatch' 只把该块退回历史版本，
+   * 其余配置（recall_weights / feedback_policy / 阈值…）保持现行值不动。
+   * 省略 = 既有整份回退，行为逐字不变。
+   */
+  target?: 'mode_dispatch';
+}
+
 /**
  * 回滚到最近一条历史版本（并消费它）。无历史 / 历史坏块 → 如实 rolledBack:false，不猜。
  * 只用唯一写入口 saveGrowthConfigToLedger，确保 param_save 审计与版本号语义一致。
  */
 export async function rollbackGrowthConfig(
   storage: StorageBackend,
-  opts: HistoryWriteOptions,
+  opts: RollbackOptions,
 ): Promise<RollbackResult> {
   const mems = await storage.listMemories({});
   const h = latestHistory(mems);
@@ -89,7 +98,11 @@ export async function rollbackGrowthConfig(
   const cfg = configFromHistoryMem(h);
   if (!cfg) return { rolledBack: false };
   const cur = growthConfigFromLedger(mems);
-  await saveGrowthConfigToLedger(storage, cfg, opts);
+  // 局部回退：仅用历史里的 mode_dispatch 块替换现行块的其余部分，绝不顺手退回别的族
+  const next = opts.target === 'mode_dispatch'
+    ? { ...cur, mode_dispatch: cfg.mode_dispatch ?? null }
+    : cfg;
+  await saveGrowthConfigToLedger(storage, next, opts);
   await storage.deleteMemory(h.mem_id); // 消费掉，避免反复回滚同一版
   return { rolledBack: true, from: cur.recall_weights, to: cfg.recall_weights };
 }

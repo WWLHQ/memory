@@ -7,9 +7,9 @@ import {
 import type { AuditRecord } from '../types.ts';
 import { suggestRecallWeights, type RecallSuggestionMetrics } from '../regression.ts';
 
-export type Family = 'recall_weights' | 'feedback_policy' | 'dedup_weights' | 'dedup_thresholds';
+export type Family = 'recall_weights' | 'feedback_policy' | 'dedup_weights' | 'dedup_thresholds' | 'mode_dispatch';
 /** 进化轮实际驱动的族（dedup 由既有回归负责，不在此重复采纳） */
-export const EVOLUTION_FAMILIES: Family[] = ['recall_weights', 'feedback_policy'];
+export const EVOLUTION_FAMILIES: Family[] = ['recall_weights', 'feedback_policy', 'mode_dispatch'];
 
 const DAY = 24 * 3600 * 1000;
 const KEYS: Array<keyof RecallWeights> = ['w_f', 'w_i', 'w_c', 'w_a'];
