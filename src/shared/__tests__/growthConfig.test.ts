@@ -183,7 +183,7 @@ describe('M0 evolution 配置（默认值必须等于改造前常量）', () => 
     expect(DEFAULT_EVOLUTION.min_samples.dedup_negatives).toBe(MIN_NEGATIVES);
     expect(DEFAULT_EVOLUTION.min_samples.recall_count).toBe(RECALL_SUGGEST_MIN_RECALLS);
     expect(DEFAULT_EVOLUTION.sample_top_n).toBe(20);
-    expect(DEFAULT_EVOLUTION.rollback).toEqual({ after_days: 7, min_recalls: 20, max_drop: 0.03 });
+    expect(DEFAULT_EVOLUTION.rollback).toEqual({ after_days: 7, min_recalls: 20, max_drop: 0.03, mode_dispatch_max_drop: 0.10 });
     expect(DEFAULT_EVOLUTION.guard).toEqual({ cooldown_days: 7, max_step: 0.05, max_drift: 0.15 });
     expect(validEvolutionConfig(DEFAULT_EVOLUTION)).toBe(true);
   });
@@ -247,9 +247,14 @@ describe('M0 evolution 配置（默认值必须等于改造前常量）', () => 
       evil_extra: 'must-not-leak',
     };
     const got = normalizeEvolutionConfig(custom);
+    // 2026-11-25 新增两键：旧配置缺 dispatch_days / dispatch_tagged → 取默认（30 / 10），其余逐字段保留
     expect(got).toEqual({
-      mode: 'auto', window: custom.window, sample_top_n: 30,
-      min_samples: custom.min_samples, rollback: custom.rollback, guard: custom.guard,
+      mode: 'auto',
+      window: { dedup_days: 60, recall_days: 14, dispatch_days: 30 },
+      sample_top_n: 30,
+      min_samples: { dedup_total: 80, dedup_negatives: 20, recall_count: 60, recall_tagged: 20, dispatch_tagged: 10 },
+      // 2026-11-26 新增 mode_dispatch_max_drop：旧配置缺该键 → 取默认 0.10，其余逐字段保留
+      rollback: { ...custom.rollback, mode_dispatch_max_drop: 0.10 }, guard: custom.guard,
     });
     expect(Object.keys(got)).not.toContain('evil_extra');
   });

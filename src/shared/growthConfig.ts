@@ -44,7 +44,6 @@ export interface FeedbackPolicy {
   /** 窗口内累计 reject 达到该次数才降档 */
   reject_downgrade_threshold: number;
 }
-
 export const DEFAULT_FEEDBACK_POLICY: FeedbackPolicy = {
   enabled: false, window_days: 30, reject_downgrade_threshold: 3,
 };
@@ -113,6 +112,11 @@ export const EVOLUTION_MODES = ['off', 'suggest', 'auto'] as const;
 export interface EvolutionWindow {
   dedup_days: number;
   recall_days: number;
+  /**
+   * 分流样本回看窗口（天）。2026-11-25 用户拍板独立新设：
+   * mode_feedback 靠用户主动点 👍/👎 产生，密度远低于 recall，7 天窗口早期必然 0 样本。
+   */
+  dispatch_days: number;
 }
 
 /** 最小样本：不足即 insufficient，绝不猜 */
@@ -121,6 +125,8 @@ export interface EvolutionMinSamples {
   dedup_negatives: number;
   recall_count: number;
   recall_tagged: number;
+  /** 分流回归的最小「有效标注样本」（👍 + 👎且原因=模式选错），默认 10（对齐 recall_tagged） */
+  dispatch_tagged: number;
 }
 
 /**
@@ -132,6 +138,12 @@ export interface EvolutionRollback {
   min_recalls: number;
   /** 回诊主指标跌破该值 → 自动回滚（仅 auto） */
   max_drop: number;
+  /**
+   * 分流命中率回诊允许跌幅（默认 0.10）。与 max_drop（NDCG，默认 0.03）量纲不同：
+   * 命中率以 10 条样本为门槛，最小分辨率 0.1，共用会让单条反馈就能触发回滚（伪精确）。
+   * 旧账本缺该键取默认，不因新键缺失把整块 evolution 打回默认。
+   */
+  mode_dispatch_max_drop: number;
 }
 
 /** 护栏：单次步长 / 累计漂移 / 冷却期 */
@@ -159,10 +171,10 @@ export interface EvolutionConfig {
  */
 export const DEFAULT_EVOLUTION: EvolutionConfig = {
   mode: 'suggest',
-  window: { dedup_days: 30, recall_days: 7 },
+  window: { dedup_days: 30, recall_days: 7, dispatch_days: 30 },
   sample_top_n: 20,
-  min_samples: { dedup_total: 40, dedup_negatives: 10, recall_count: 30, recall_tagged: 10 },
-  rollback: { after_days: 7, min_recalls: 20, max_drop: 0.03 },
+  min_samples: { dedup_total: 40, dedup_negatives: 10, recall_count: 30, recall_tagged: 10, dispatch_tagged: 10 },
+  rollback: { after_days: 7, min_recalls: 20, max_drop: 0.03, mode_dispatch_max_drop: 0.10 },
   guard: { cooldown_days: 7, max_step: 0.05, max_drift: 0.15 },
 };
 
@@ -177,14 +189,18 @@ function validEvolutionBody(r: Record<string, unknown>): boolean {
   const g = (r.guard && typeof r.guard === 'object' ? r.guard : {}) as Record<string, unknown>;
   return isIntIn(w.dedup_days, 1, 180)
     && isIntIn(w.recall_days, 1, 90)
+    // 2026-11-25 新增：旧账本无这两个键 → 视为合法（取默认），不因新键缺失把整块 evolution 打回默认
+    && (w.dispatch_days === undefined || isIntIn(w.dispatch_days, 1, 365))
     && isIntIn(r.sample_top_n, 10, 50)
     && isIntIn(m.dedup_total, 1, 10000)
     && isIntIn(m.dedup_negatives, 1, 10000)
     && isIntIn(m.recall_count, 1, 10000)
     && isIntIn(m.recall_tagged, 1, 10000)
+    && (m.dispatch_tagged === undefined || isIntIn(m.dispatch_tagged, 1, 100))
     && isIntIn(rb.after_days, 1, 90)
     && isIntIn(rb.min_recalls, 0, 10000)
     && isNumIn(rb.max_drop, 0.01, 0.20)
+    && (rb.mode_dispatch_max_drop === undefined || isNumIn(rb.mode_dispatch_max_drop, 0.05, 0.30))
     && isIntIn(g.cooldown_days, 1, 90)
     && isNumIn(g.max_step, 0.01, 0.20)
     && isNumIn(g.max_drift, 0.05, 0.50);
@@ -225,13 +241,24 @@ export function normalizeEvolutionConfig(raw: unknown): EvolutionConfig {
   const g = r.guard as unknown as EvolutionGuard;
   return {
     mode,
-    window: { dedup_days: w.dedup_days, recall_days: w.recall_days },
+    window: {
+      dedup_days: w.dedup_days,
+      recall_days: w.recall_days,
+      // 旧账本缺该键 → 默认 30 天（不是 0/undefined，避免下游算出「零窗口」）
+      dispatch_days: isIntIn(w.dispatch_days, 1, 365) ? w.dispatch_days : DEFAULT_EVOLUTION.window.dispatch_days,
+    },
     sample_top_n: r.sample_top_n as number,
     min_samples: {
       dedup_total: m.dedup_total, dedup_negatives: m.dedup_negatives,
       recall_count: m.recall_count, recall_tagged: m.recall_tagged,
+      dispatch_tagged: isIntIn(m.dispatch_tagged, 1, 100) ? m.dispatch_tagged : DEFAULT_EVOLUTION.min_samples.dispatch_tagged,
     },
-    rollback: { after_days: rb.after_days, min_recalls: rb.min_recalls, max_drop: rb.max_drop },
+    rollback: {
+      after_days: rb.after_days, min_recalls: rb.min_recalls, max_drop: rb.max_drop,
+      // 旧账本缺键 → 默认 0.10（不与 NDCG 的 0.03 混用）
+      mode_dispatch_max_drop: isNumIn(rb.mode_dispatch_max_drop, 0.05, 0.30)
+        ? rb.mode_dispatch_max_drop : DEFAULT_EVOLUTION.rollback.mode_dispatch_max_drop,
+    },
     guard: { cooldown_days: g.cooldown_days, max_step: g.max_step, max_drift: g.max_drift },
   };
 }
