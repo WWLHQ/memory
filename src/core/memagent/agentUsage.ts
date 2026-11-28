@@ -14,6 +14,7 @@
 //    因此 `verdicts_attributable` 恒为 false，页面必须照此标注，不得把这些数摊到 Agent 头上。
 //  · 缺 `client` 的 recall 审计归入「未标识」，绝不猜成某个 Agent（AC C3）。
 import type { AuditRecord, StorageBackend } from './types.ts';
+import { resolveEvidenceThin } from './evidenceThin.ts';
 
 const DAY = 24 * 3600_000;
 
@@ -95,7 +96,7 @@ export function summarizeAgentUsage(
       const r = row(typeof d?.client === 'string' ? d.client : '');
       r.recalls += 1;
       if (typeof d?.saved_tokens === 'number' && Number.isFinite(d.saved_tokens)) r.saved_tokens += d.saved_tokens;
-      if (d?.evidence_thin === true) r.evidence_thin += 1;
+      if (resolveEvidenceThin(d).thin === true) r.evidence_thin += 1;
       continue;
     }
     if (a.action === 'mcp_call') {

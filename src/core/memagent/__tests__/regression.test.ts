@@ -180,7 +180,7 @@ describe('runGrowthRegression（真实审计落账）', () => {
 function recallAudit(ts: number, o: { thin?: boolean; hits?: number } = {}): AuditRecord {
   return {
     request_id: `req_r_${ts}`, action: 'recall', form: 'desktop', project_id: 'P1', ts,
-    detail: { hits: o.hits ?? 3, evidence_thin: o.thin === true },
+    detail: { hits: o.hits ?? 3, evidence_thin: o.thin === true, evidence_thin_rule: 'relevance' },
   } as AuditRecord;
 }
 

@@ -287,7 +287,7 @@ describe('GAP-3 gc_report × Agent 侧聚合', () => {
     await seed(storage);
     await storage.appendAudit({
       request_id: 'r1', action: 'recall', form: 'desktop', project_id: 'P1', ts: NOW - 1000,
-      detail: { hits: 2, client: 'qoder', saved_tokens: 500, evidence_thin: false },
+      detail: { hits: 2, client: 'qoder', saved_tokens: 500, evidence_thin: false, evidence_thin_rule: 'relevance' },
     } as never);
     const before = (await storage.queryAudit({})).length;
 
@@ -311,7 +311,7 @@ describe('GAP-3 gc_report × Agent 侧聚合', () => {
       request_id: `r_${ts}`, action: 'recall', form: 'desktop', project_id: 'P1', ts, detail,
     } as never);
     await storage.appendAudit(mk(NOW - 1000, { hits: 1, client: 'qoder', saved_tokens: 100 }));
-    await storage.appendAudit(mk(NOW - 2000, { hits: 1, client: 'qoder', saved_tokens: 200, evidence_thin: true }));
+    await storage.appendAudit(mk(NOW - 2000, { hits: 1, client: 'qoder', saved_tokens: 200, evidence_thin: true, evidence_thin_rule: 'relevance' }));
     await storage.appendAudit(mk(NOW - 3000, { hits: 1 }));                 // 无 client
     await storage.appendAudit({ request_id: 'c1', action: 'mcp_call', agent: 'qoder', ts: NOW - 500,
       detail: { reliable: true, first_call: true, recalled_before: false, tool: 'recall_memory' } } as never);

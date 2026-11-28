@@ -3,6 +3,7 @@
 // 审计完全来自真实操作（内核写账本）；空库即空列表。
 import type { AuditAction as CoreAuditAction, AuditRecord, MemAgent } from '../../core/memagent/types.ts';
 import type { StorageBackend } from '../../core/memagent/types.ts';
+import { resolveEvidenceThin } from '../../core/memagent/evidenceThin.ts';
 import { getKernel, getKernelStorage, getTenant } from '../kernel.ts';
 import type { AuditEntry, AuditFilter } from './types.ts';
 
@@ -38,7 +39,8 @@ function toAuditEntry(a: AuditRecord): AuditEntry {
     new_status: d.new_status as string | undefined,
     old_id: d.old_id as string | undefined,
     new_id: d.new_id as string | undefined,
-    evidence_thin: d.evidence_thin as boolean | undefined,
+    // #46：审计页展示按口径归一（corrected → relevance → legacy），不把旧 score 口径假象显示成真实证据质量。
+    evidence_thin: resolveEvidenceThin(d).thin ?? undefined,
     request_id: a.request_id,
     payload_tokens: (d.payload_tokens as number) ?? 0,
     pipeline_llm_tokens: (d.pipeline_llm_tokens as number) ?? 0,

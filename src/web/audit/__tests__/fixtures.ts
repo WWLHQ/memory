@@ -80,6 +80,8 @@ export async function seedAuditLedger(entries: AuditEntry[] = SEED_AUDIT): Promi
         old_id: e.old_id,
         new_id: e.new_id,
         evidence_thin: e.evidence_thin,
+        // #46：新口径行自证，审计页走 resolveEvidenceThin 归一后才显示「证据不足」
+        ...(e.evidence_thin !== undefined ? { evidence_thin_rule: 'relevance' } : {}),
         payload_tokens: e.payload_tokens,
         pipeline_llm_tokens: e.pipeline_llm_tokens,
       },

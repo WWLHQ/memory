@@ -609,8 +609,8 @@ describe('GAP-2 净化侧只读聚合（B4）', () => {
   it('gc 审计带 signal_summary，且每个数字都能与审计逐条对上（不估算）', async () => {
     const s = new InMemoryStorage();
     await s.putMemory(mem({ mem_id: 'a1', decay_class: 'hot', created_at: NOW - 5 * DAY }));
-    await s.appendAudit(audit('recall', NOW - 3000, { hits: 2, evidence_thin: true }));
-    await s.appendAudit(audit('recall', NOW - 2000, { hits: 1, evidence_thin: false }));
+    await s.appendAudit(audit('recall', NOW - 3000, { hits: 2, evidence_thin: true, evidence_thin_rule: 'relevance' }));
+    await s.appendAudit(audit('recall', NOW - 2000, { hits: 1, evidence_thin: false, evidence_thin_rule: 'relevance' }));
     await s.appendAudit(audit('memory_op', NOW - 1000, { op: 'reject', mem_id: 'a1' }));
     await s.appendAudit(audit('memory_op', NOW - 900, { op: 'confirm', mem_id: 'a1' }));
 

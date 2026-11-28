@@ -37,7 +37,7 @@ function opAudit(memId: string, op: string, ts: number): AuditRecord {
 function recallAudit(ts: number, thin = false): AuditRecord {
   return {
     request_id: `req_r_${ts}`, action: 'recall', form: 'desktop', project_id: 'P1', ts,
-    detail: { hits: 2, evidence_thin: thin },
+    detail: { hits: 2, evidence_thin: thin, evidence_thin_rule: 'relevance' },
   } as AuditRecord;
 }
 

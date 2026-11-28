@@ -56,6 +56,8 @@ if (args.help) {
 
 const forgetting = await import(pathToFileURL(resolve('src/core/memagent/forgetting.ts')).href);
 const vector = await import(pathToFileURL(resolve('src/core/memagent/vector.ts')).href);
+// #46：证据不足率口径归一只认内核真源 resolveEvidenceThin，不在工具侧重复解读口径版本。
+const { resolveEvidenceThin } = await import(pathToFileURL(resolve('src/core/memagent/evidenceThin.ts')).href);
 
 /** 数据根：--file 指定 audit.jsonl；--root 指定数据根；否则按引导指针回落默认数据根 */
 function resolveDataDir() {
@@ -120,8 +122,9 @@ const rate = (n, d) => (d ? Number((n / d).toFixed(4)) : null);
 
 const withHits = recalls.filter((r) => typeof r.detail.hits === 'number');
 const zeroHits = withHits.filter((r) => r.detail.hits === 0).length;
-const thinKnown = withHits.filter((r) => typeof r.detail.evidence_thin === 'boolean');
-const thin = thinKnown.filter((r) => r.detail.evidence_thin === true).length;
+const thinResolved = withHits.map((r) => resolveEvidenceThin(r.detail));
+const thinKnown = thinResolved.filter((t) => t.thin !== null);
+const thin = thinKnown.filter((t) => t.thin === true).length;
 const latencies = recalls.map((r) => r.detail.latency_ms).filter((x) => typeof x === 'number');
 
 // top1 覆盖率：命中排第一的那条，正文到底覆盖了提问多少 token（只有回显高亮的覆盖率能力才能算）

@@ -18,6 +18,7 @@
 import { DEFAULT_VECTOR_DIM, cosine, embedSync } from './vector.ts';
 import { growthConfigFromLedger } from './paramsSnapshot.ts';
 import type { AuditRecord, DecayClass, FeedbackKind, Memory, StorageBackend } from './types.ts';
+import { resolveEvidenceThin } from './evidenceThin.ts';
 import { DEFAULT_FEEDBACK_POLICY, type FeedbackPolicy } from '../../shared/growthConfig.ts';
 
 const DAY = 24 * 3600_000;
@@ -163,7 +164,7 @@ export function summarizeFeedbackSignals(
     if (a.ts < since) continue;
     if (a.action === 'recall') {
       recalls += 1;
-      if ((a.detail as { evidence_thin?: unknown } | undefined)?.evidence_thin === true) thin += 1;
+      if (resolveEvidenceThin(a.detail).thin === true) thin += 1;
       continue;
     }
     if (a.action !== 'memory_op') continue;

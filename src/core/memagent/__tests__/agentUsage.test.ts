@@ -18,6 +18,8 @@ function recall(ts: number, o: { client?: string; saved?: number; thin?: boolean
       ...(o.client ? { client: o.client } : {}),
       ...(o.saved !== undefined ? { saved_tokens: o.saved } : {}),
       evidence_thin: o.thin === true,
+      // #46：新口径行自证，消费侧走 resolveEvidenceThin（否则无 rule 的历史行被判 legacy→null）
+      evidence_thin_rule: 'relevance',
     },
   } as AuditRecord;
 }

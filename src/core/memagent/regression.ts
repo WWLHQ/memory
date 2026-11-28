@@ -25,6 +25,7 @@ import { saveConfigWithHistory } from './evolution/versioning.ts';
 import { sha256hex } from './sync.ts';
 import { ulid } from './ulid.ts';
 import type { AuditRecord, Form, StorageBackend } from './types.ts';
+import { resolveEvidenceThin } from './evidenceThin.ts';
 
 export const REGRESSION_WINDOW_DAYS = 30;
 export const MIN_SAMPLES = 40;
@@ -85,7 +86,7 @@ export function suggestRecallWeights(
   let hitsSum = 0;
   for (const a of recalls) {
     const d = a.detail as { evidence_thin?: unknown; hits?: unknown };
-    if (d.evidence_thin === true) thin += 1;
+    if (resolveEvidenceThin(d).thin === true) thin += 1;
     if (typeof d.hits === 'number') hitsSum += d.hits;
   }
   const totalVerdicts = verdicts.confirm + verdicts.reject + verdicts.disputed;

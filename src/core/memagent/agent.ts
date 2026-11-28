@@ -1,4 +1,5 @@
 // createMemAgent（§1 入口）：内核装配 + 9 核心API + 全动作审计（§3.2）
+import { EVIDENCE_THIN_RULE } from './evidenceThin.ts';
 import { MemAgentError } from './errors.ts';
 import { routeProxy } from './llm.ts';
 import { coreBrowse, coreFeedback, coreGc, coreGcFull, coreMemoryOp, coreWrite } from './memories.ts';
@@ -626,6 +627,9 @@ export function createMemAgent(opts: MemAgentOptions): MemAgent & MemAgentSeedHo
     await audit(request_id, 'recall', {
       query: req.query, hits: hits.length, payload_tokens, scene, mode: result.mode,
       evidence_thin: evidence_thin ?? false,
+      // #46：口径自证——新行明确标注 evidence_thin 用的是 relevance<0.3（18a404c 起），
+      // 消费侧走 resolveEvidenceThin 按此字段归一，不再把老口径行误读成真实证据质量。
+      evidence_thin_rule: EVIDENCE_THIN_RULE,
       latency_ms,
       // P1-9 延迟分段埋点：各段 ms（embed/list/growth/score/probe/backfill/personal/bg/writeback/tail/
       // audit_mode_dispatch）。只读字段，历史行无此字段时评估侧跳过；口径 = 冷热都真实计时，不做平滑。
