@@ -5,24 +5,32 @@ import { execSync } from 'node:child_process';
 /** 客户端 id → 具体进程可执行文件名（小写比较）。未列出的客户端不判运行态。
  *  deepseek harness 随宿主 Qoder 运行 → 与 qoder-cn 同一进程。 */
 export const CLIENT_PROCESS_NAMES: Record<string, readonly string[]> = {
-  'qoder-cn': ['qoder.exe'],
-  'claude-code': ['claude.exe'],
-  'codex': ['codex.exe'],
-  'trae-cn': ['trae cn.exe', 'trae.exe'],
-  'cursor': ['cursor.exe'],
-  'workbuddy': ['workbuddy.exe'],
-  'zcode': ['zcode.exe'],
-  'deepseek-harness': ['qoder.exe'],
+  // 2026-11-28 实测纠错：真实可执行文件名与旧白名单不符（本机 tasklist 为 "Qoder CN.exe"
+  // 与 "WorkBuddy-app.exe"），旧白名单按 qoder.exe / workbuddy.exe 精确比对 → 应用明明开着也全报「未启动」。
+  // 现在按「归一化后的完整进程名」比对，两个变体都收，且不是子串匹配（codex-windows-sandbox-service 不算 codex）。
+  'qoder-cn': ['qoder cn', 'qoder'],
+  'claude-code': ['claude'],
+  'codex': ['codex'],
+  'trae-cn': ['trae cn', 'trae'],
+  'cursor': ['cursor'],
+  'workbuddy': ['workbuddy-app', 'workbuddy'],
+  'zcode': ['zcode'],
+  'deepseek-harness': ['qoder cn', 'qoder'],
 };
+
+/** 归一化进程名：去首尾空白、去 .exe 后缀、小写、压缩连续空格（"Qoder CN.exe" → "qoder cn"）。 */
+export function normalizeProcessName(name: string): string {
+  return name.trim().replace(/\.exe$/i, '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
 
 /** 纯函数：给定当前进程名列表，返回各桌面客户端的运行态；未映射的客户端不在结果里。 */
 export function matchRunningClients(processNames: readonly string[]): Record<string, boolean> {
   const set = new Set(
-    processNames.map((n) => n.trim().toLowerCase()).filter((n) => n.length > 0),
+    processNames.map(normalizeProcessName).filter((n) => n.length > 0),
   );
   const out: Record<string, boolean> = {};
   for (const [id, exes] of Object.entries(CLIENT_PROCESS_NAMES)) {
-    out[id] = exes.some((exe) => set.has(exe.toLowerCase()));
+    out[id] = exes.some((exe) => set.has(normalizeProcessName(exe)));
   }
   return out;
 }

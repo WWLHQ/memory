@@ -3,7 +3,7 @@
 import { describe, expect, test } from 'vitest';
 import {
   MCP_BRIDGE_FILE_NAME, MCP_CLIENT_SPECS, MCP_ENDPOINT, buildMcpEntry, buildStdioMcpEntry, isStdioEntry,
-  mergeMcpJsonConfig, mergeMcpTomlConfig,
+  mergeMcpJsonConfig, mergeMcpTomlConfig, normalizeConfigText,
   probeClientConfig, probeJsonConfig, probeTomlConfig, renderMcpSnippet, specOfMcpClient,
 } from '../mcpClients.ts';
 
@@ -489,5 +489,40 @@ describe('stdio 零维护形态（条目 / 探测 / 合并）', () => {
     expect(tomlSnippet).toContain('args = [');
 
     expect(renderMcpSnippet(qoder, EP, TOKEN)).toContain(`Bearer ${TOKEN}`);
+  });
+});
+
+describe('normalizeConfigText · 一键修复配置格式（BOM/注释/尾逗号）', () => {
+  test('UTF-8 BOM：去掉后 JSON.parse 成功，changed=true', () => {
+    const raw = `\uFEFF${JSON.stringify({ mcpServers: { 'MultiAgent Memory': {} } })}`;
+    expect(() => JSON.parse(raw)).toThrow();
+    const fixed = normalizeConfigText(raw);
+    expect(fixed.changed).toBe(true);
+    expect(fixed.text.charCodeAt(0)).not.toBe(0xFEFF);
+    expect(JSON.parse(fixed.text)).toEqual({ mcpServers: { 'MultiAgent Memory': {} } });
+  });
+
+  test('行注释 / 块注释 / 尾逗号：规范化后可解析', () => {
+    const raw = `{\n  // 这是注释\n  "mcpServers": { /* 块注释 */\n    "a": { "url": "http://x", },\n  },\n}`;
+    expect(() => JSON.parse(raw)).toThrow();
+    const fixed = normalizeConfigText(raw);
+    expect(fixed.changed).toBe(true);
+    expect(JSON.parse(fixed.text)).toEqual({ mcpServers: { a: { url: 'http://x' } } });
+  });
+
+  test('字符串里的 //、/*、逗号、转义引号逐字保留（不许误伤 URL 与正文）', () => {
+    const raw = JSON.stringify({ url: 'http://x//y', note: 'a/*b*/c', esc: 'say "hi", ok', arr: [1, 2] });
+    const fixed = normalizeConfigText(raw);
+    expect(fixed.changed).toBe(false);
+    expect(fixed.text).toBe(raw);
+    expect(JSON.parse(fixed.text)).toEqual(JSON.parse(raw));
+  });
+
+  test('真语法错误不改变文本（交 probe 判 invalid，不假装修好）', () => {
+    const raw = '{bad';
+    const fixed = normalizeConfigText(raw);
+    expect(fixed.changed).toBe(false);
+    expect(fixed.text).toBe(raw);
+    expect(() => JSON.parse(fixed.text)).toThrow();
   });
 });

@@ -6,7 +6,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import {
   MCP_CLIENT_HEADER_NAME, MCP_CLIENT_SPECS, MCP_ENDPOINT, mergeMcpJsonConfig, mergeMcpTomlConfig,
-  probeClientConfig, renderMcpSnippet, specOfMcpClient,
+  normalizeConfigText, probeClientConfig, renderMcpSnippet, specOfMcpClient,
   type McpClientSpec, type McpStdioTarget, type McpTransport, type McpWireState,
 } from '../agentOnboard/mcpClients.ts';
 import type { BadgeClass } from '../types/agentOnboard.ts';
@@ -69,6 +69,8 @@ export interface McpClientStatus extends LiveProbeFields {
   /** 展开后的真实路径（local），仅本机展示/写回用 */
   path: string | null;
   installed: boolean;
+  /** 安装依据：config=配置文件真存在；marker=只剩安装痕迹目录（可能已卸载/残留）；none=未安装 */
+  installEvidence: 'config' | 'marker' | 'none';
   state: McpWireState;
   hasAuth: boolean;
   /** 条目承载方式：stdio=配置里只有启动命令（令牌零维护）/ http=令牌抄在配置里（轮换需重写） */
@@ -77,6 +79,9 @@ export interface McpClientStatus extends LiveProbeFields {
    *  `false` = 条目已接入但缺身份头（41-X 之前写入的老配置）→ 可点「补身份头」重新写入；
    *  `undefined` = 无从判定（无稳定配置文件、审计升级来的）。 */
   hasClientId?: boolean;
+  /** 配置文件原本带 BOM/JSONC 注释/尾逗号，读取时无损规范化后才能解析。
+   *  `true` = 一键接入会把规范化结果固化写回（自动备份原文件），用户不用手工改。 */
+  repairable?: boolean;
   /** 客户端应用内把本服务标成已禁用：只有读到显式布尔 true 才为 true。
    *  独立维度，不改 state 七态；UI 必须优先用它判「开关关了」，不能只看 wired。 */
   disabled?: boolean;
@@ -112,6 +117,8 @@ export interface McpWireResult {
   path?: string;
   backupPath?: string;
   state?: McpWireState;
+  /** 一键接入时自动修复了配置格式（BOM/注释/尾逗号）并固化写回 */
+  repaired?: boolean;
   error?: string;
 }
 
@@ -127,10 +134,32 @@ export function expandHome(
   return join(home, rel);
 }
 
-function readConfig(path: string): { text: string | null; error?: string } {
+/**
+ * 读取配置文本，并在严格 JSON.parse 失败时尝试**无损规范化**：
+ * UTF-8 BOM / JSONC 注释 / 尾逗号是客户端与编辑器常见写法，JSON.parse 不接受但语义无损，
+ * 规范化后能解析成功即视为可一键修复（返回 normalized 文本 + 标记，不在此处写盘）。
+ * 真语法错误（如 `{bad`）规范化不会改变文本 → 仍返回原文，probe 如实判 invalid。
+ * TOML 不做此变换（probeTomlConfig 是正则式读取，BOM 不影响段匹配）。
+ */
+function readConfig(path: string, format: McpClientSpec['format']): {
+  text: string | null; error?: string; normalized?: boolean;
+} {
   try {
     const text = readFileSync(path, 'utf8');
     if (Buffer.byteLength(text, 'utf8') > MAX_CONFIG_BYTES) return { text: null, error: '配置文件超过 8 MiB，拒绝读取/写入' };
+    if (format === 'json' && text) {
+      try {
+        JSON.parse(text);
+      } catch {
+        const fixed = normalizeConfigText(text);
+        if (fixed.changed) {
+          try {
+            JSON.parse(fixed.text);
+            return { text: fixed.text, normalized: true };
+          } catch { /* 规范化后仍不合法 → 保持原文，交 probe 判 invalid */ }
+        }
+      }
+    }
     return { text };
   } catch (e) {
     if ((e as { code?: string }).code === 'ENOENT') return { text: null };
@@ -207,15 +236,19 @@ export function scanMcpClients(options: {
   const endpoint = options.endpoint ?? MCP_ENDPOINT;
   const clients: McpClientStatus[] = MCP_CLIENT_SPECS.map((spec) => {
     const path = spec.configPath ? expandHome(spec.configPath, home, appData) : null;
-    const installed = path !== null && existsSync(path)
-      || spec.installMarkers.some((m) => existsSync(expandHome(m, home, appData)));
+    const configExists = path !== null && existsSync(path);
+    const markerExists = spec.installMarkers.some((m) => existsSync(expandHome(m, home, appData)));
+    const installed = configExists || markerExists;
+    // 只有残留目录也算 installed（保留旧口径），但标出依据：UI 据此把「仅痕迹」与「有配置」分组，
+    // 不再让一个没装客户端的残留目录混进「已安装客户端」列表。
+    const installEvidence: McpClientStatus['installEvidence'] = configExists ? 'config' : markerExists ? 'marker' : 'none';
     const base = {
       id: spec.id, name: spec.name, badge: spec.badge, format: spec.format, writable: spec.writable,
-      displayPath: spec.configPath ?? null, path, installed, rulesHint: spec.rulesHint,
+      displayPath: spec.configPath ?? null, path, installed, installEvidence, rulesHint: spec.rulesHint,
       ...(spec.note ? { note: spec.note } : {}),
     };
     if (!path) return { ...base, state: 'manual' as const, hasAuth: false };
-    const read = readConfig(path);
+    const read = readConfig(path, spec.format);
     if (read.error) return { ...base, state: 'invalid' as const, hasAuth: false, error: read.error };
     const probe = probeClientConfig(spec, read.text, endpoint);
     let state = probe.state;
@@ -237,10 +270,15 @@ export function scanMcpClients(options: {
     if (state === 'wired' && probe.transport === 'stdio') {
       note = `${spec.note ? `${spec.note}；` : ''}stdio 零维护形态：配置里只有启动命令，令牌由桥接脚本每次现读——令牌轮换不用重写配置`;
     }
+    if (read.normalized) {
+      state = state === 'invalid' ? 'missing_entry' : state;
+      note = `${note ? `${note}；` : ''}配置含 UTF-8 BOM/JSONC 注释/尾逗号（读取已无损规范化）：点「一键修复并接入」自动写回干净 JSON，无需手工改`;
+    }
     return {
       ...base,
       state,
       hasAuth: probe.hasAuth,
+      ...(read.normalized ? { repairable: true } : {}),
       ...(probe.transport ? { transport: probe.transport } : {}),
       ...(probe.hasClientId !== undefined ? { hasClientId: probe.hasClientId } : {}),
       ...(probe.disabled === true ? { disabled: true } : {}),
@@ -308,7 +346,7 @@ export function readStoredToken(
   const home = options.home ?? homedir();
   const appData = options.appData ?? process.env.APPDATA ?? join(home, 'AppData', 'Roaming');
   const path = expandHome(spec.configPath, home, appData);
-  const read = readConfig(path);
+  const read = readConfig(path, spec.format);
   if (read.error) return null;
   const stored = extractStoredBearer(spec.format, read.text, spec.serverKey);
   return stored && stored.trim() ? stored.trim() : null;
@@ -354,16 +392,18 @@ export function wireMcpClient(
     stdio = { bridgePath: options.bridgePath, pointerPath: options.pointerPath, endpoint };
   }
   const path = expandHome(spec.configPath, home, appData);
-  const read = readConfig(path);
+  const read = readConfig(path, spec.format);
   if (read.error) return { ok: false, error: read.error };
   const probe = probeClientConfig(spec, read.text, endpoint);
   if (probe.state === 'conflict') {
     return { ok: false, state: probe.state, error: `同名条目指向其它端点（${probe.foundUrl ?? '未填写'}），拒绝覆盖` };
   }
+  // 真语法错误（规范化后仍不合法）依旧拒绝，绝不覆盖写坏用户配置；
+  // 仅 BOM/注释/尾逗号这类无损格式问题已在 readConfig 规范化并标 normalized → 继续合并写回。
   if (probe.state === 'invalid') {
     return { ok: false, state: probe.state, error: `配置文件无法解析：${probe.error ?? '格式错误'}` };
   }
-  if (probe.state === 'wired' && probe.hasClientId !== false) {
+  if (probe.state === 'wired' && probe.hasClientId !== false && !read.normalized) {
     if (wantStdio) {
       // 已经是零维护形态 → 无需重写
       if (probe.transport === 'stdio') return { ok: true, changed: false, path, state: probe.state };
@@ -384,13 +424,15 @@ export function wireMcpClient(
   } catch (e) {
     return { ok: false, error: String((e as Error)?.message ?? e) };
   }
-  if (!merged.changed) return { ok: true, changed: false, path, state: probe.state };
+  // 已规范化（BOM/注释/尾逗号）即便条目内容没变也要写回：否则 BOM 留在磁盘上，下次扫描还要再规范化一遍
+  if (!merged.changed && !read.normalized) return { ok: true, changed: false, path, state: probe.state };
 
   const written = writeConfigAtomically(path, merged.text, options.now ?? Date.now());
   if (!written.ok) return { ok: false, path, error: written.error };
   return {
     ok: true, changed: true, path,
     ...(written.backupPath ? { backupPath: written.backupPath } : {}),
+    ...(read.normalized ? { repaired: true } : {}),
     state: 'wired',
   };
 }
@@ -421,7 +463,7 @@ export function enableMcpClient(
   const appData = options.appData ?? process.env.APPDATA ?? join(home, 'AppData', 'Roaming');
   const endpoint = options.endpoint ?? MCP_ENDPOINT;
   const path = expandHome(spec.configPath, home, appData);
-  const read = readConfig(path);
+  const read = readConfig(path, spec.format);
   if (read.error) return { ok: false, path, error: read.error };
   if (read.text === null) return { ok: false, path, error: '配置文件不存在，请先完成接入' };
 
@@ -456,10 +498,11 @@ export function enableMcpClient(
 
   const written = writeConfigAtomically(path, `${JSON.stringify(parsed, null, 2)}\n`, options.now ?? Date.now());
   if (!written.ok) return { ok: false, path, error: written.error };
-  const after = probeClientConfig(spec, readConfig(path).text, endpoint);
+  const after = probeClientConfig(spec, readConfig(path, spec.format).text, endpoint);
   return {
     ok: true, changed: true, path,
     ...(written.backupPath ? { backupPath: written.backupPath } : {}),
+    ...(read.normalized ? { repaired: true } : {}),
     state: after.state,
   };
 }

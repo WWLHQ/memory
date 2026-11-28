@@ -284,6 +284,52 @@ function markDisabled(probe: McpConfigProbe, entry: Record<string, unknown>): Mc
   return entry.disabled === true ? { ...probe, disabled: true } : probe;
 }
 
+/**
+ * 规范化 JSONC 文本：去掉 UTF-8 BOM、行注释（//）、块注释（/…/）、尾逗号。
+ * **纯文本变换**，逐字保留字符串内容（字符串里的 `//`、`/*`、`"`、`,}` 一律不动）。
+ * 调用方必须在严格 `JSON.parse` 失败后才用它，并用 `JSON.parse(normalized)` 复核成功才认；
+ * 本函数不判接入状态、不写盘，浏览器/主进程共用同一份真源。
+ */
+export function normalizeConfigText(text: string): { text: string; changed: boolean } {
+  let out = '';
+  let i = 0;
+  let inString = false;
+  let escaped = false;
+  const n = text.length;
+  while (i < n) {
+    const ch = text[i];
+    if (inString) {
+      out += ch;
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      i += 1;
+      continue;
+    }
+    if (ch === '"') { inString = true; out += ch; i += 1; continue; }
+    if (ch === '/' && text[i + 1] === '/') {
+      while (i < n && text[i] !== '\n' && text[i] !== '\r') i += 1;
+      continue;
+    }
+    if (ch === '/' && text[i + 1] === '*') {
+      i += 2;
+      while (i < n && !(text[i] === '*' && text[i + 1] === '/')) i += 1;
+      i += 2;
+      continue;
+    }
+    if (ch === '}' || ch === ']') {
+      // 非字符串上下文：去掉紧邻的尾逗号（逗号与括号之间只允许空白）
+      let k = out.length - 1;
+      while (k >= 0 && /\s/.test(out[k])) k -= 1;
+      if (k >= 0 && out[k] === ',') out = `${out.slice(0, k)}${out.slice(k + 1)}`;
+    }
+    out += ch;
+    i += 1;
+  }
+  if (out.charCodeAt(0) === 0xFEFF) out = out.slice(1);
+  return { text: out, changed: out !== text };
+}
+
 /** 判断 JSON 配置里本服务的接入状态（不返回令牌） */
 export function probeJsonConfig(text: string | null, spec: McpClientSpec, endpoint: string): McpConfigProbe {
   if (text === null) return { state: 'no_config', hasAuth: false };

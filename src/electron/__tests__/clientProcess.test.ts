@@ -1,6 +1,6 @@
 // T6 · 桌面客户端运行态匹配（纯函数，不依赖真实进程表）
 import { describe, expect, it } from 'vitest';
-import { CLIENT_PROCESS_NAMES, matchRunningClients, probeRunningClients, resetProcessCache } from '../clientProcess.ts';
+import { CLIENT_PROCESS_NAMES, matchRunningClients, normalizeProcessName, probeRunningClients, resetProcessCache } from '../clientProcess.ts';
 
 describe('T6 · matchRunningClients', () => {
   it('进程表里出现 WorkBuddy.exe → workbuddy 已启动、qoder 未启动', () => {
@@ -31,6 +31,27 @@ describe('T6 · matchRunningClients', () => {
     const r = matchRunningClients(['node.exe']);
     expect('gemini-cli' in r).toBe(false);
     expect('qwen-code' in r).toBe(false);
+  });
+
+  // 2026-11-28 真机纠错：本机 tasklist 实测为 "Qoder CN.exe" 与 "WorkBuddy-app.exe"，
+  // 旧白名单按 qoder.exe / workbuddy.exe 精确比对 → 应用开着也全报「未启动」。现按归一化名比对。
+  it('本机真实进程名（Qoder CN.exe / WorkBuddy-app.exe）必须判为已启动', () => {
+    const r = matchRunningClients(['Qoder CN.exe', 'WorkBuddy-app.exe', 'explorer.exe']);
+    expect(r['qoder-cn']).toBe(true);
+    expect(r['deepseek-harness']).toBe(true);
+    expect(r.workbuddy).toBe(true);
+    expect(r['claude-code']).toBe(false);
+  });
+
+  it('归一化不做子串：codex-windows-sandbox-service 不算 codex 在运行（避免误报已启动）', () => {
+    const r = matchRunningClients(['codex-windows-sandbox-service.exe']);
+    expect(r.codex).toBe(false);
+  });
+
+  it('normalizeProcessName：去 .exe / 小写 / 压空格', () => {
+    expect(normalizeProcessName('Qoder CN.exe')).toBe('qoder cn');
+    expect(normalizeProcessName('  WorkBuddy-APP.EXE ')).toBe('workbuddy-app');
+    expect(normalizeProcessName('codex-windows-sandbox-service')).toBe('codex-windows-sandbox-service');
   });
 
   it('映射表包含所有已确认 exe 名的客户端（含 claude-code / codex）', () => {

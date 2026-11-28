@@ -30,6 +30,23 @@ function statusOf(home: string, id: string, opts: { currentToken?: string; recal
 }
 
 describe('scanMcpClients', () => {
+  test('安装依据：有配置文件=config；只有残留目录=marker；什么都没有=none', () => {
+    const home = tempHome();
+    const empty = statusOf(home, 'qoder-cn');
+    expect(empty.installEvidence).toBe('none');
+    expect(empty.installed).toBe(false);
+
+    mkdirSync(join(home, '.qoder-cn'), { recursive: true });
+    const marker = statusOf(home, 'qoder-cn');
+    expect(marker.installed).toBe(true);
+    expect(marker.installEvidence).toBe('marker');
+
+    writeFileSync(join(home, '.qoder-cn', 'settings.json'), '{"mcpServers":{}}', 'utf8');
+    const config = statusOf(home, 'qoder-cn');
+    expect(config.installed).toBe(true);
+    expect(config.installEvidence).toBe('config');
+  });
+
   test('无任何配置：所有客户端如实报告 no_config / manual，且不含令牌', () => {
     const home = tempHome();
     const scan = scanMcpClients({ home, appData: home });
@@ -739,5 +756,63 @@ describe('wireMcpClient mode=stdio（零维护形态）', () => {
     expect(stdio).not.toContain(TOKEN);
     expect(stdio).toContain('mcp-bridge.cjs');
     expect(snippetForClient('workbuddy', TOKEN)).toContain(TOKEN);
+  });
+});
+
+describe('一键修复 · UTF-8 BOM 配置', () => {
+  const BOM = '\uFEFF';
+  const bomConfig = (key: string) => `${BOM}${JSON.stringify({
+    mcpServers: { [key]: { type: 'http', url: MCP_ENDPOINT, headers: { Authorization: `Bearer ${TOKEN}` } } },
+  }, null, 2)}\n`;
+
+  test('扫描：BOM 配置不再误报 invalid，标 repairable 且给出一键修复指引', () => {
+    const home = tempHome();
+    write(home, '.qoder-cn/settings.json', bomConfig('MultiAgent Memory'));
+    const st = statusOf(home, 'qoder-cn');
+    expect(st.state).toBe('wired');
+    expect(st.repairable).toBe(true);
+    expect(st.note).toContain('一键修复并接入');
+    // 规范化后令牌仍能读出供实测
+    expect(st.hasAuth).toBe(true);
+  });
+
+  test('一键接入：BOM 配置自动写回无 BOM 的干净 JSON（保留原条目），备份原文件', () => {
+    const home = tempHome();
+    write(home, '.qoder-cn/settings.json', bomConfig('MultiAgent Memory'));
+    const r = wireMcpClient('qoder-cn', TOKEN, { home, now: Date.UTC(2026, 10, 28, 7, 0, 0) });
+    expect(r.ok).toBe(true);
+    expect(r.repaired).toBe(true);
+    expect(r.backupPath).toBeTruthy();
+    const text = readFileSync(r.path!, 'utf8');
+    expect(text.charCodeAt(0)).not.toBe(0xFEFF);
+    expect(text).not.toContain(BOM);
+    expect(JSON.parse(text).mcpServers['MultiAgent Memory'].url).toBe(MCP_ENDPOINT);
+    expect(statusOf(home, 'qoder-cn').repairable).toBeUndefined();
+  });
+
+  test('真语法错误仍拒绝写入（不覆盖写坏的配置文件）', () => {
+    const home = tempHome();
+    write(home, '.qoder-cn/settings.json', `${BOM}{bad`);
+    const st = statusOf(home, 'qoder-cn');
+    expect(st.state).toBe('invalid');
+    expect(st.repairable).toBeUndefined();
+    const r = wireMcpClient('qoder-cn', TOKEN, { home });
+    expect(r.ok).toBe(false);
+    expect(r.state).toBe('invalid');
+    expect(readFileSync(join(home, '.qoder-cn/settings.json'), 'utf8')).toContain('{bad');
+  });
+
+  test('本机真实坑：serverKey 不匹配（multiagent-memory）的 BOM 配置 → 一键写入补上规范条目', () => {
+    const home = tempHome();
+    write(home, '.qoder-cn/settings.json', bomConfig('multiagent-memory'));
+    const st = statusOf(home, 'qoder-cn');
+    expect(st.repairable).toBe(true);
+    expect(st.state).toBe('missing_entry');
+    const r = wireMcpClient('qoder-cn', TOKEN, { home, currentToken: TOKEN });
+    expect(r.ok).toBe(true);
+    expect(r.repaired).toBe(true);
+    const parsed = JSON.parse(readFileSync(r.path!, 'utf8'));
+    expect(parsed.mcpServers['MultiAgent Memory']).toBeTruthy();
+    expect(statusOf(home, 'qoder-cn').state).toBe('wired');
   });
 });
