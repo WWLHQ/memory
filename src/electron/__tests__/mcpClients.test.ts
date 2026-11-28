@@ -221,9 +221,40 @@ describe('wireMcpClient', () => {
     expect(readFileSync(path, 'utf8')).toBe(original);
   });
 
-  test('无稳定配置路径客户端 → 拒绝自动写入（诚实提示手工；deepseek-harness 宿主继承委托见 28-B 组）', () => {
+  test('2026-11-28：Zcode 有稳定配置文件 → 可代写；补齐令牌并按本客户端 id 重写身份头，其它请求头保留', () => {
     const home = tempHome();
-    expect(wireMcpClient('zcode', TOKEN, { home })).toMatchObject({ ok: false });
+    const path = write(home, '.zcode/mcp.json', JSON.stringify({
+      mcpServers: {
+        'multiagent-memory': {
+          type: 'http',
+          url: MCP_ENDPOINT,
+          headers: {
+            'X-Memagent-Render': 'fold',
+            Authorization: `Bearer ${TOKEN}`,
+            // 现状：身份头被写成了别的客户端 id（服务端会把 Zcode 的调用记到 dsh 名下）
+            'X-Memagent-Client': 'deepseek-harness',
+          },
+        },
+      },
+    }));
+
+    const before = statusOf(home, 'zcode', { currentToken: TOKEN });
+    expect(before.state).toBe('wired');
+    expect(before.hasClientId).toBe(false);
+    expect(before.foundClientId).toBe('deepseek-harness');
+    expect(before.installEvidence).toBe('config');
+
+    const r = wireMcpClient('zcode', TOKEN, { home, currentToken: TOKEN, now: Date.UTC(2026, 10, 28, 12, 0, 0) });
+    expect(r).toMatchObject({ ok: true, changed: true });
+    expect(JSON.stringify(r)).not.toContain(TOKEN);
+
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as {
+      mcpServers: Record<string, { type?: string; url?: string; headers?: Record<string, string> }>;
+    };
+    expect(parsed.mcpServers['multiagent-memory']?.url).toBe(MCP_ENDPOINT);
+    expect(parsed.mcpServers['multiagent-memory']?.headers?.['X-Memagent-Client']).toBe('zcode');
+    expect(parsed.mcpServers['multiagent-memory']?.headers?.['X-Memagent-Render']).toBe('fold');
+    expect(statusOf(home, 'zcode', { currentToken: TOKEN }).hasClientId).toBe(true);
   });
 });
 
@@ -334,45 +365,59 @@ describe('批次28-B/28-D 三客户端再审查', () => {
     expect(conflict.error).toContain('拒绝覆盖');
   });
 
-  test('deepseek harness：宿主 Qoder 已接入 → 如实 wired；宿主未接入 → 指引一键适配宿主', () => {
+  test('deepseek harness：读自己的 cordis.patch.yml（无文件 → 可新建；有插件但缺头 → 可补）', () => {
     const home = tempHome();
-    expect(statusOf(home, 'deepseek-harness').state).toBe('manual');
-    expect(statusOf(home, 'deepseek-harness').note).toContain('尚未接入');
+    // 无配置文件 → 可新建（不再 manual，也不再看宿主脸色）
+    const empty = statusOf(home, 'deepseek-harness');
+    expect(empty.state).toBe('no_config');
+    expect(empty.displayPath).toBe('~/.dsh/profiles/desktop/cordis.patch.yml');
 
+    // 宿主 Qoder 接入与否都不再影响 DSH 自己的判定
     write(home, '.qoder-cn/settings.json', JSON.stringify({
       mcpServers: { 'MultiAgent Memory': { type: 'http', url: MCP_ENDPOINT, headers: { Authorization: `Bearer ${TOKEN}` } } },
     }));
-    const dsh = statusOf(home, 'deepseek-harness', { currentToken: TOKEN });
-    expect(dsh.state).toBe('wired');
-    expect(dsh.hasAuth).toBe(true);
-    expect(dsh.note).toContain('Qoder');
+    expect(statusOf(home, 'deepseek-harness').state).toBe('no_config');
   });
 
-  test('deepseek harness 一键接入 = 委托宿主 qoder-cn 真实写入（备份 + 合并），复扫两者 wired', () => {
+  test('deepseek harness 一键接入：只改自己的 YAML 插件，宿主配置一个字都不动', () => {
     const home = tempHome();
-    write(home, '.qoder-cn/settings.json', JSON.stringify({ theme: 'dark', mcpServers: {} }));
+    const qoderPath = write(home, '.qoder-cn/settings.json', JSON.stringify({ theme: 'dark', mcpServers: {} }));
+    const dshPath = write(home, '.dsh/profiles/desktop/cordis.patch.yml', [
+      '# 其它插件',
+      '- id: session-log-deepseek',
+      '  name: "@deepseek-ai/dsh-session-log-deepseek"',
+      '  config:',
+      '    enabled: false',
+      '',
+    ].join('\n'));
 
-    const r = wireMcpClient('deepseek-harness', TOKEN, { home, appData: home, currentToken: TOKEN, now: Date.UTC(2026, 9, 31, 12, 0, 0) });
+    const r = wireMcpClient('deepseek-harness', TOKEN, { home, appData: home, currentToken: TOKEN, now: Date.UTC(2026, 10, 28, 12, 0, 0) });
     expect(r.ok).toBe(true);
     expect(r.changed).toBe(true);
     expect(r.backupPath).toBeTruthy();
     expect(JSON.stringify(r)).not.toContain(TOKEN);
 
-    const parsed = JSON.parse(readFileSync(join(home, '.qoder-cn', 'settings.json'), 'utf8')) as {
-      theme?: string;
-      mcpServers: Record<string, { url?: string; headers?: Record<string, string> }>;
-    };
-    expect(parsed.theme).toBe('dark'); // 宿主其它配置原样保留
-    expect(parsed.mcpServers['MultiAgent Memory']?.url).toBe(MCP_ENDPOINT);
-    expect(statusOf(home, 'qoder-cn', { currentToken: TOKEN }).state).toBe('wired');
-    expect(statusOf(home, 'deepseek-harness', { currentToken: TOKEN }).state).toBe('wired');
+    const yaml = readFileSync(dshPath, 'utf8');
+    expect(yaml).toContain('# 其它插件');
+    expect(yaml).toContain('- id: session-log-deepseek');
+    expect(yaml).toContain('- id: memagent-mcp');
+    expect(yaml).toContain(`Authorization: Bearer ${TOKEN}`);
+    expect(yaml).toContain('X-Memagent-Client: deepseek-harness');
+    // 宿主配置没被顺手改写
+    expect(readFileSync(qoderPath, 'utf8')).toBe(JSON.stringify({ theme: 'dark', mcpServers: {} }));
+    const after = statusOf(home, 'deepseek-harness', { currentToken: TOKEN });
+    expect(after.state).toBe('wired');
+    expect(after.hasClientId).toBe(true);
   });
 
-  test('Zcode：应用内部存储（表单/JSON）无文件面 → 保持手工（不伪造接入）', () => {
+  test('Zcode：配置在 ~/.zcode/mcp.json（软链接目录也算），有文件即 config 依据', () => {
     const home = tempHome();
     const z = statusOf(home, 'zcode');
-    expect(z.writable).toBe(false);
-    expect(z.state).toBe('manual');
+    expect(z.writable).toBe(true);
+    expect(z.displayPath).toBe('~/.zcode/mcp.json');
+    expect(z.state).toBe('no_config');
+    write(home, '.zcode/mcp.json', JSON.stringify({ mcpServers: {} }));
+    expect(statusOf(home, 'zcode').installEvidence).toBe('config');
   });
 });
 
@@ -409,9 +454,10 @@ describe('批次27 令牌过期检测（防假「已接入」）', () => {
 });
 
 describe('applyRecallEvidence（批次30：审计证据升级）', () => {
-  test('configPath 为 null 的 Zcode：manual + 真实调用审计 → wired（以审计为准）', () => {
+  test('缺条目的 Zcode（有配置文件但没本服务）+ 真实调用审计 → wired（以审计为准）', () => {
     const home = tempHome();
-    mkdirSync(join(home, '.zcode'), { recursive: true });
+    write(home, '.zcode/mcp.json', JSON.stringify({ mcpServers: {} }));
+    expect(statusOf(home, 'zcode').state).toBe('missing_entry');
     const zc = statusOf(home, 'zcode', {
       recallEvidence: [{ ts: Date.now(), client: 'zcode/0.16.9' }],
     });
@@ -423,10 +469,11 @@ describe('applyRecallEvidence（批次30：审计证据升级）', () => {
 
   test('调用方名不匹配（UA 兜底串 / 未知客户端）不升级', () => {
     const home = tempHome();
+    write(home, '.zcode/mcp.json', JSON.stringify({ mcpServers: {} }));
     const zc = statusOf(home, 'zcode', {
       recallEvidence: [{ ts: Date.now(), client: 'Cursor (UA)' }, { ts: Date.now(), client: 'unknown-agent/1.0' }],
     });
-    expect(zc.state).toBe('manual');
+    expect(zc.state).toBe('missing_entry');
   });
 
   test('conflict / invalid：文件真实存在但有错 → 审计不替代修复，保持原状', () => {
@@ -452,8 +499,8 @@ describe('applyRecallEvidence（批次30：审计证据升级）', () => {
 
   test('无证据 / 空数组：完全不影响原判定', () => {
     const home = tempHome();
-    expect(statusOf(home, 'zcode').state).toBe('manual');
-    expect(statusOf(home, 'zcode', { recallEvidence: [] }).state).toBe('manual');
+    expect(statusOf(home, 'zcode').state).toBe('no_config');
+    expect(statusOf(home, 'zcode', { recallEvidence: [] }).state).toBe('no_config');
   });
 });
 
@@ -660,7 +707,10 @@ describe('一键打开客户端开关（T2 一键层 · 真读真写临时 home�
 
     const none = tempHome();
     expect(enableMcpClient('workbuddy', { home: none, appData: none }).error).toContain('配置文件不存在');
-    expect(enableMcpClient('zcode', { home: none, appData: none }).error).toContain('不支持自动写入');
+    // 2026-11-28：Zcode 有了稳定配置文件 → 不再是「不支持自动写入」，而是「文件不存在、先接入」；
+    // YAML 插件式（deepseek harness）不支持这套「删禁用标记」的改写，如实拒绝。
+    expect(enableMcpClient('zcode', { home: none, appData: none }).error).toContain('配置文件不存在');
+    expect(enableMcpClient('deepseek-harness', { home: none, appData: none }).error).toContain('不是 JSON');
     expect(enableMcpClient('not-a-client', { home: none, appData: none }).error).toContain('未知 MCP 客户端');
 
     const toml = tempHome();

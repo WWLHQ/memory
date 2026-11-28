@@ -54,7 +54,7 @@ import {
 } from './browserLaunch.ts';
 import { AUDIT_FILE_NAME } from '../core/memagent/auditLog.ts';
 import { detectLocalAgents, hostAgentConfig } from './agentDetect.ts';
-import { applyRecallEvidence, enableMcpClient, readStoredToken, scanMcpClients, snippetForClient, wireMcpClient } from './mcpClients.ts';
+import { applyRecallEvidence, enableMcpClient, inheritedHostOf, readStoredToken, scanMcpClients, snippetForClient, wireMcpClient } from './mcpClients.ts';
 import { attachLiveProbe } from './mcpProbe.ts';
 import { probeRunningClients } from './clientProcess.ts';
 import {
@@ -1146,9 +1146,29 @@ function registerMcpClientsIpc(token: string): void {
       // stdio 客户端配置里没有令牌可读——但它用的就是**当前令牌**（桥接脚本现读同一份 keys/mcp-token.txt），
       // 所以对它们用现役令牌实测才等价于「它启动后能不能调通」；http 客户端仍只认它自己配置里的那份。
       const stdioIds = new Set(scan.clients.filter((c) => c.transport === 'stdio').map((c) => c.id));
-      const live = await attachLiveProbe(scan.clients, (id) => (stdioIds.has(id) ? token : readStoredToken(id)), {
+      // 2026-11-28 用户要求「不能只显示实测 —，要把工作做完」：
+      // 无稳定配置文件的客户端分两种，都必须给出确定结论（而不是留白）——
+      //  · 宿主继承（deepseek harness ← Qoder）：用宿主配置里的令牌实测，口径 via='host'
+      //  · 纯手工（Zcode，配置存应用内部）：用它要粘贴的那份「现役令牌」实测，口径 via='current'
+      // 有配置文件但读不到令牌的（如缺 Authorization）仍不测，如实说「配置里没有令牌」。
+      const manualIds = new Set(
+        scan.clients.filter((c) => c.displayPath === null && !stdioIds.has(c.id)).map((c) => c.id),
+      );
+      const resolveToken = (id: string): string | null => {
+        if (stdioIds.has(id)) return token;
+        const stored = readStoredToken(id);
+        if (stored) return stored;
+        return manualIds.has(id) ? token : null;
+      };
+      const viaOf = (id: string): 'config' | 'host' | 'current' | undefined => {
+        if (stdioIds.has(id)) return 'current';
+        const stored = readStoredToken(id);
+        if (stored) return inheritedHostOf(id) ? 'host' : 'config';
+        return manualIds.has(id) ? 'current' : undefined;
+      };
+      const live = await attachLiveProbe(scan.clients, resolveToken, {
         endpoint: scan.endpoint, currentToken: token,
-      });
+      }, viaOf);
       scan.live = {
         at: Date.now(), checked: live.checked, failed: live.failed,
         ...(live.server ? { server: live.server } : {}),

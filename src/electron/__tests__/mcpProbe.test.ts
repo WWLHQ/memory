@@ -105,4 +105,31 @@ describe('attachLiveProbe（按客户端挂实测结果）', () => {
     expect(clients[3].live).toBeUndefined();
     await new Promise<void>((res) => server.close(() => res()));
   });
+
+  it('按令牌来源标口径：同令牌复用时各自 via 不互相覆盖（config / host / current）', async () => {
+    const server = createServer((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (c: Buffer) => chunks.push(c));
+      req.on('end', () => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { tools: [{ name: 'recall_memory' }, { name: 'write_memory' }] } }));
+      });
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+    const addr = server.address();
+    const endpoint = `http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}/mcp`;
+
+    const clients = [{ id: 'cfg' }, { id: 'host' }, { id: 'manual' }] as Array<{ id: string; live?: unknown }>;
+    const vias: Record<string, 'config' | 'host' | 'current'> = { cfg: 'config', host: 'host', manual: 'current' };
+    await attachLiveProbe(
+      clients as never,
+      () => 'same-token',
+      { endpoint, currentToken: 'same-token' },
+      (id) => vias[id],
+    );
+    const seen = clients.map((c) => (c.live as { via?: string; tools?: number }));
+    expect(seen.map((l) => l.via)).toEqual(['config', 'host', 'current']);
+    expect(seen.every((l) => l.tools === 2)).toBe(true);
+    await new Promise<void>((res) => server.close(() => res()));
+  });
 });

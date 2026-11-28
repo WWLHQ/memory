@@ -130,7 +130,7 @@ describe('autoWireMcpForAgents（连通后自动写 MCP）', () => {
     expect(s.failed[0].reason).toContain('无登录会话');
   });
 
-  it('冲突配置拒绝覆盖 / 已 wired 直接计入 / TOML 客户端自动写入 / 无稳定配置转手工', async () => {
+  it('冲突配置拒绝覆盖 / 已 wired 直接计入 / TOML 与 Zcode 都自动写入（2026-11-28 起 Zcode 也有稳定配置文件）', async () => {
     const wire = vi.fn(() => Promise.resolve({ ok: true, changed: true }));
     setApi({ mcpClients: { wire } });
     const s = await autoWireMcpForAgents(
@@ -142,17 +142,19 @@ describe('autoWireMcpForAgents（连通后自动写 MCP）', () => {
           { id: 'claude-code', name: 'Claude Code', state: 'conflict', writable: true, format: 'json', installed: true, foundUrl: 'http://other:1234/mcp' },
           { id: 'cursor', name: 'Cursor', state: 'wired', writable: true, format: 'json', installed: true },
           { id: 'codex', name: 'Codex', state: 'missing_entry', writable: true, format: 'toml', installed: true },
+          { id: 'zcode', name: 'Zcode', state: 'missing_auth', writable: true, format: 'json', installed: true },
         ],
       },
       { sid: 'sid_admin', role: 'admin' },
     );
-    expect(wire).toHaveBeenCalledTimes(1);
+    expect(wire).toHaveBeenCalledTimes(2);
     expect(wire).toHaveBeenCalledWith('codex', 'sid_admin');
+    expect(wire).toHaveBeenCalledWith('zcode', 'sid_admin');
     expect(s.failed[0]).toMatchObject({ client: 'Claude Code' });
     expect(s.failed[0].reason).toContain('拒绝覆盖');
-    expect(s.wired).toEqual(['Cursor', 'Codex']);
-    expect(s.changed).toEqual(['Codex']);
-    expect(s.manual).toEqual(['Zcode']); // 应用内部存储无稳定配置文件，只给人手指引
+    expect(s.wired).toEqual(['Cursor', 'Codex', 'Zcode']);
+    expect(s.changed).toEqual(['Codex', 'Zcode']);
+    expect(s.manual).toEqual([]); // 当前配方里没有「无稳定配置文件」的客户端了
   });
 
   it('未收录 MCP 配方的 Agent（如 Zcode 之外的未知名）不计数，不伪造摘要', async () => {

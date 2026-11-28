@@ -28,6 +28,10 @@ module.exports = {
   extraResources: [
     { from: 'browser-extension/webchat-exporter', to: 'webchat-exporter', filter: ['**/*'] },
     { from: 'build-resources/icon.png', to: 'icon.png' },
+    // 批次B（2026-11-27）：DSH 折叠卡插件随安装包分发。一键接入时从
+    // <resources>/dsh-plugins/memagent-recall-card 复制进 ~/.dsh/profiles/<name>，
+    // 别的用户装完应用就自带插件，不需要手工传文件；也避免 link 回仓库（仓库一挪即静默失效）。
+    { from: 'dsh-plugins/memagent-recall-card', to: 'dsh-plugins/memagent-recall-card', filter: ['**/*'] },
   ],
   asarUnpack: ['dist-electron/**/*'],
   npmRebuild: false,

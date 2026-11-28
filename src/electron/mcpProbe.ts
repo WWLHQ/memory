@@ -19,6 +19,14 @@ export interface McpLiveProbe {
   error?: string;
   /** 探测时间（epoch ms） */
   at: number;
+  /**
+   * 用的是哪份令牌（2026-11-28，口径透明）：
+   *  · config  = 该客户端配置里存的令牌（默认）
+   *  · host    = 宿主继承客户端（deepseek harness）读到的宿主令牌
+   *  · current = 无稳定配置文件的客户端，用现役令牌（= 「复制片段」里给的那份）
+   * UI 必须按此说明口径，不能让「片段令牌能通」冒充「它自己的配置能通」。
+   */
+  via?: 'config' | 'host' | 'current';
 }
 
 /** 从 streamable-http 响应体里取工具数量：兼容纯 JSON 与 SSE（`data: {...}` 多行） */
@@ -148,6 +156,11 @@ export async function attachLiveProbe(
   clients: LiveProbeTarget[],
   resolveToken: (id: string) => string | null,
   options: { endpoint: string; currentToken?: string; timeoutMs?: number; now?: () => number } = { endpoint: '' },
+  /**
+   * 令牌来源标注（2026-11-28）：同一份令牌可能被多个客户端复用，命中缓存时也要各自带上自己的口径，
+   * 所以缓存里只存原始结果，挂到行上时再克隆并写 via——绝不共用同一个可变对象。
+   */
+  viaOf?: (id: string) => McpLiveProbe['via'],
 ): Promise<{ checked: number; failed: number; server?: McpLiveProbe }> {
   const cache = new Map<string, McpLiveProbe>();
   let checked = 0;
@@ -162,7 +175,8 @@ export async function attachLiveProbe(
       });
       cache.set(token, live);
     }
-    c.live = live;
+    const via = viaOf?.(c.id);
+    c.live = via ? { ...live, via } : live;
     c.tokenState = live.ok ? 'live' : live.status === 401 ? 'stale' : 'unknown';
     checked += 1;
     if (!live.ok) failed += 1;

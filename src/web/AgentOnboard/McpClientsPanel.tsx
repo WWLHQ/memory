@@ -7,7 +7,7 @@
 // 浏览器模式（无宿主桥）如实降级：只说明无法扫描，绝不伪造「已接入」或客户端列表。
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { hostCall, hostCapability } from '../../desktop/hostBridge.ts';
-import { MCP_CLIENT_HEADER_NAME, MCP_ENDPOINT, specOfMcpClient, type McpWireState } from '../../agentOnboard/mcpClients.ts';
+import { MCP_CLIENT_HEADER_NAME, MCP_ENDPOINT, impliedTransport, specOfMcpClient, type McpWireState } from '../../agentOnboard/mcpClients.ts';
 import type { BadgeClass } from '../../types/agentOnboard.ts';
 import { currentSessionId, useSessionContext } from '../shared/session.ts';
 import { MCP_MANUAL_HINT, MCP_SWITCH_POLL_MS } from '../shared/mcpSwitch.ts';
@@ -27,12 +27,18 @@ interface ClientRow {
   hasAuth: boolean;
   /** 条目承载方式：stdio=配置里只有启动命令（令牌零维护）/ http=令牌抄在配置里（轮换需重写） */
   transport?: 'http' | 'stdio';
-  /** 2026-11-18 实测连通：拿本客户端配置里的令牌真调一次 tools/list 的结果（无文件面时缺省） */
-  live?: { ok: boolean; status: number; tools?: number; error?: string; at: number };
+  /** 2026-11-18 实测连通：真调一次 tools/list 的结果（无令牌可读时缺省 → UI 说「实测 —」并说明原因） */
+  live?: {
+    ok: boolean; status: number; tools?: number; error?: string; at: number;
+    /** 用的是哪份令牌：config=该客户端配置 / host=宿主（继承客户端）/ current=现役令牌（=片段里那份） */
+    via?: 'config' | 'host' | 'current';
+  };
   /** 令牌与当前 mcp-token.txt 的关系；stale=配置里的令牌已失效（401） */
   tokenState?: 'live' | 'stale' | 'unknown';
   /** 批次41-X：配置里是否带显式身份头；false = 已接入但缺身份头（可点「补身份头」） */
   hasClientId?: boolean;
+  /** 条目里实际读到、但与本客户端 id 不符的身份头值（2026-11-28） */
+  foundClientId?: string;
   /** 配置含 BOM/注释/尾逗号，读取已无损规范化；一键接入会写回干净 JSON（无需手工改） */
   repairable?: boolean;
   /** 客户端应用内把本服务标成已禁用（显式 true 才有）；T3 接入页据此显示「客户端已关闭」 */
@@ -121,14 +127,28 @@ function needsClientId(row: ClientRow): boolean {
   return row.state === 'wired' && row.hasClientId === false;
 }
 
-/** 能否切到 stdio（零维护形态）：可写、配置没坏、且还不是 stdio */
+/** 能否切到 stdio（零维护形态）：可写、配置没坏、且还不是 stdio。
+ *  2026-11-28：只对 JSON / TOML 生效——YAML 插件式配置（deepseek harness）的免令牌形态
+ *  取决于该插件自己的字段，本服务不猜着改，UI 给等宽徽标说明，不留空槽。 */
 function canStdio(row: ClientRow): boolean {
-  return row.writable && row.transport !== 'stdio' && row.state !== 'conflict' && row.state !== 'invalid';
+  return row.writable && (row.format === 'json' || row.format === 'toml')
+    && row.transport !== 'stdio' && row.state !== 'conflict' && row.state !== 'invalid';
 }
 
-/** 传输形态徽标：stdio = 配置里没有令牌（轮换零维护）；http = 令牌抄在配置里（轮换要重写） */
-function transportBadge(row: ClientRow): { text: string; cls: string; title: string } | null {
-  if (row.transport === 'stdio') {
+type FormBadge = { text: string; cls: string; title: string };
+
+/** 由规格推导形态（读不到配置文件时的兜底；真源在 agentOnboard/mcpClients 的 impliedTransport） */
+function impliedTransportOf(id: string): 'http' | 'stdio' | undefined {
+  const spec = specOf(id);
+  return spec ? impliedTransport(spec) : undefined;
+}
+
+/** 传输形态徽标：stdio = 配置里没有令牌（轮换零维护）；http = 令牌抄在配置里（轮换要重写）
+ *  2026-11-28 用户要求「把工作做完」：形态恒有确定值——读不到配置就由规格推导，不再一律「形态未定」。 */
+function transportBadge(row: ClientRow): FormBadge | null {
+  const fromConfig = row.transport;
+  const transport = fromConfig ?? impliedTransportOf(row.id);
+  if (transport === 'stdio') {
     return {
       text: 'stdio 免令牌', cls: 'ok',
       title: 'stdio（本地启动方式）= 客户端不直接连服务，而是启动本机的一个小程序，由它代连。'
@@ -136,29 +156,38 @@ function transportBadge(row: ClientRow): { text: string; cls: string; title: str
         + '桥接脚本每次调用现读数据根的 keys/mcp-token.txt：令牌轮换、数据根搬家都不需要改这份配置。',
     };
   }
-  if (row.transport === 'http') {
+  if (transport === 'http') {
     // 2026-11-28 用户要求：HTTP 连接成功也用绿色，别让「通了」看着像「没配好」。
     // 判据只认实测结果（拿该客户端配置里的令牌真调过 tools/list 且成功），不认「配置里写着」。
     const live = row.live?.ok === true;
+    const base = 'HTTP（网络直连方式）= 客户端直接请求本机地址 http://127.0.0.1:8204/mcp。'
+      + '令牌（Bearer）被抄进了这份客户端配置：令牌一轮换它就会 401，必须重写配置。';
+    if (fromConfig) {
+      return {
+        text: 'HTTP 直连', cls: live ? 'ok' : '',
+        title: base + '点「改用免令牌方式」可改成免令牌形态（配置里不再有令牌）。'
+          + (live ? '当前实测已连通（用该客户端配置里的令牌调 tools/list 成功）。' : ''),
+      };
+    }
     return {
       text: 'HTTP 直连', cls: live ? 'ok' : '',
-      title: 'HTTP（网络直连方式）= 客户端直接请求本机地址 http://127.0.0.1:8204/mcp。'
-        + '令牌（Bearer）被抄进了这份客户端配置：令牌一轮换它就会 401，必须重写配置。'
-        + '点「改用免令牌方式」可改成免令牌形态（配置里不再有令牌）。'
-        + (live ? '当前实测已连通（用该客户端配置里的令牌调 tools/list 成功）。' : ''),
+      title: `将以此形态接入：${row.name} 的配置存在客户端应用内部（没有稳定配置文件可读），`
+        + '「复制片段」给出的就是 HTTP 直连条目（mcpServers + url + headers），粘进它的 MCP 设置即为此形态；'
+        + '本系统无法代写，只能复制粘贴。',
     };
   }
   return null;
 }
 
 /**
- * 接入形态徽标（2026-11-28 用户要求「每行统一 = 名称 + 形态」）：三态恒有值。
- * 未接入时如实说「形态未定」，不拿 HTTP 冒充（配置里还没有本服务条目，写进去才定形态）。
+ * 接入形态徽标（2026-11-28 用户要求「每行统一 = 名称 + 形态」）：恒有值。
+ * 顺序 = ① 配置里读到的形态 → ② 由规格推导（无配置文件也能确定：片段就是 HTTP 直连）
+ * → ③ 两者都没有才说「形态未定」（仅 format=unknown 且不继承宿主的客户端可能落到这里）。
  */
-function formBadge(row: ClientRow): { text: string; cls: string; title: string } {
+function formBadge(row: ClientRow): FormBadge {
   return transportBadge(row) ?? {
     text: '形态未定', cls: '',
-    title: '配置里还没有本服务条目（或配置由客户端应用托管），接入前无法判定形态；接入后这里是「HTTP 直连」或「stdio 免令牌」',
+    title: '该客户端既读不到配置、规格里也没有确定的接入格式（format=unknown 且不继承宿主）：只能复制片段按其官方文档手工接入，接入方式确定后这里会显示实际形态',
   };
 }
 
@@ -178,29 +207,40 @@ function runBadge(row: ClientRow): { text: string; cls: string; title: string } 
 
 /**
  * 实测连通徽标（2026-11-18）：只认 HTTP 状态码，不认"配置文件里看着像"。
- * 无文件面的客户端（Zcode/DSH 这类配置存应用内部）如实显示「—」，绝不拿现役令牌冒充它的连通性。
+ * 2026-11-28：无稳定配置文件的客户端不再一律留白「—」，按令牌来源给确定结论并标口径——
+ *  · host    = 用宿主（Qoder）配置里的令牌测，等价于「经宿主下发后能不能调通」
+ *  · current = 用它要粘贴的那份现役令牌测，等价于「粘贴片段后能不能调通」
+ * 口径必须写在徽标里，绝不让「片段令牌能通」冒充「它自己的配置能通」。
  */
 function liveBadge(row: ClientRow): { text: string; cls: string; title: string } {
   const live = row.live;
   if (!live) {
     return {
       text: '实测 —', cls: '',
-      title: '该客户端没有稳定配置文件（或配置由客户端应用托管），读不到它自己的令牌、无法实测；用「复制片段」接入后以客户端日志为准',
+      title: row.displayPath
+        ? '这份配置里没有可用的令牌（缺 Authorization 或值为空），没有令牌可测；点「一键接入/补齐令牌」写入后再刷新'
+        : '该客户端没有稳定配置文件（配置存应用内部），读不到它自己的令牌、无法实测；用「复制片段」接入后以客户端日志为准',
     };
   }
   const when = `${formatClock(live.at)}（UTC+08:00）`;
+  const via = live.via === 'host' ? ' · 经宿主令牌' : live.via === 'current' ? ' · 片段令牌' : '';
+  const viaTitle = live.via === 'host'
+    ? '（用的是宿主 Qoder CN 配置里的令牌：本客户端随宿主下发，流量走同一份配置）'
+    : live.via === 'current'
+      ? '（用的是「复制片段」里给出的现役令牌：粘贴该片段后即可连通）'
+      : '（用的是该客户端配置里存的令牌）';
   if (live.ok) {
     return {
-      text: `实测 ✓ ${live.tools ?? '?'} 工具`, cls: 'ok',
-      title: `用本客户端配置里的令牌调用 tools/list：HTTP ${live.status}，返回 ${live.tools ?? '?'} 个工具 · ${when}`,
+      text: `实测 ✓ ${live.tools ?? '?'} 工具${via}`, cls: 'ok',
+      title: `调用 tools/list：HTTP ${live.status}，返回 ${live.tools ?? '?'} 个工具${viaTitle} · ${when}`,
     };
   }
   const why = live.status === 401
-    ? '令牌已失效（401）：配置里的令牌与当前 mcp-token.txt 不一致'
+    ? '令牌已失效（401）：所用令牌与当前 mcp-token.txt 不一致'
     : live.status === 0
       ? (live.error ?? '连接失败（服务未启动？）')
       : `HTTP ${live.status}${live.error ? `：${live.error}` : ''}`;
-  return { text: `实测 ✗ ${live.status || '不可达'}`, cls: 'bad', title: `${why} · ${when}` };
+  return { text: `实测 ✗ ${live.status || '不可达'}${via}`, cls: 'bad', title: `${why}${viaTitle} · ${when}` };
 }
 
 function specOf(id: string) {
@@ -780,6 +820,16 @@ export function McpClientsPanel({ onInstalledCount, onSummary }: {
                         <td>
                           {row.hasClientId === true ? (
                             <span className="af-badge ok" title={`配置里已带 ${MCP_CLIENT_HEADER_NAME}: ${row.id}`}>✓ {row.id}</span>
+                          ) : row.state === 'wired' && row.foundClientId ? (
+                            /* 2026-11-28：有身份头但值不是本客户端（Zcode 曾被写成 deepseek-harness）——
+                               服务端会把调用记到别的客户端名下，必须显式说出来并可直接重写。 */
+                            <span
+                              className="af-badge warn"
+                              data-testid={`clientid-wrong-${row.id}`}
+                              title={`配置里写的是 ${MCP_CLIENT_HEADER_NAME}: ${row.foundClientId}，与本客户端 id（${row.id}）不符：服务端会把调用归到 ${row.foundClientId} 名下——点本行「补身份头」按正确 id 重写`}
+                            >
+                              不符：{row.foundClientId}
+                            </span>
                           ) : row.state === 'wired' && row.hasClientId === false ? (
                             <span className="af-badge warn" title={`已接入但缺 ${MCP_CLIENT_HEADER_NAME}，服务端只能按 UA 归并调用方`}>缺失</span>
                           ) : (
@@ -792,7 +842,8 @@ export function McpClientsPanel({ onInstalledCount, onSummary }: {
                         <td>
                           <div className="af-row" style={{ gap: 6 }}>
                             <button
-                              className="af-btn sm" type="button" data-act="mcp-copy"
+                              className={row.writable ? 'af-btn sm' : 'af-btn sm pri'}
+                              type="button" data-act="mcp-copy"
                               disabled={!admin || busy !== ''}
                               title={disabledReason || (row.transport === 'stdio'
                                 ? '生成 stdio 启动命令片段（不含令牌，可安全转发）并复制'
@@ -801,6 +852,18 @@ export function McpClientsPanel({ onInstalledCount, onSummary }: {
                             >
                               复制片段
                             </button>
+                            {!row.writable && (
+                              /* 2026-11-28 用户要求「把所有动作跟其他卡片对齐」：不可代写的客户端
+                                 （Zcode 这类配置存应用内部）原来这个槽位是空的（表格里看着像「–」），
+                                 现补一枚等宽徽标说明唯一可行动作，每行的动作列槽位恒定。 */
+                              <span
+                                className="af-badge"
+                                data-testid={`manual-${row.id}`}
+                                title={`${row.name} 的配置存在客户端应用内部（无稳定配置文件）：点左侧「复制片段」把 JSON 粘到它的 MCP 设置里即接通，系统无法代写`}
+                              >
+                                {row.state === 'wired' ? '已手工接入' : '需手工粘贴'}
+                              </span>
+                            )}
                             {row.writable && (
                               <button
                                 className={row.state === 'wired' && !needsClientId(row) && !row.repairable ? 'af-btn sm off' : 'af-btn sm pri'}
@@ -836,6 +899,17 @@ export function McpClientsPanel({ onInstalledCount, onSummary }: {
                               >
                                 {busy === `stdio:${row.id}` ? '改写中…' : '改用免令牌方式'}
                               </button>
+                            )}
+                            {row.writable && row.format !== 'json' && row.format !== 'toml' && (
+                              /* 槽位恒定：YAML 插件式配置（deepseek harness）不支持本服务改写免令牌形态，
+                                 给等宽徽标说明原因，不留空槽——避免同一列上某些行少一个控件。 */
+                              <span
+                                className="af-badge"
+                                data-testid={`stdio-na-${row.id}`}
+                                title={`${row.name} 的配置是插件式 YAML（cordis.patch.yml 里的插件声明）：改写成免令牌形态取决于该插件自己的字段，本服务不猜着改；如需免令牌请按该客户端文档配置，当前形态「HTTP 直连」可正常一键接入`}
+                              >
+                                免令牌不适用
+                              </span>
                             )}
                             {disabledByClient && !switchPending && row.format === 'json' && (
                               <button

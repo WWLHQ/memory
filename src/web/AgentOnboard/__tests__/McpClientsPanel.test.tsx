@@ -201,6 +201,51 @@ describe('McpClientsPanel', () => {
     expect(trace.textContent).toContain('不计入上面「已安装」清单');
   });
 
+  test('Zcode 身份头写错 → 显式「不符：xxx」并可补写；YAML 行用等宽徽标补位，不留空槽', async () => {
+    mockRole('admin');
+    setHost({
+      list: () => Promise.resolve({
+        endpoint: SCAN.endpoint,
+        clients: [
+          // Zcode：有稳定配置文件、已接入，但身份头被写成了 deepseek-harness
+          baseRow({
+            id: 'zcode', name: 'Zcode', badge: 'p3', displayPath: '~/.zcode/mcp.json',
+            state: 'wired', hasAuth: true, hasClientId: false, foundClientId: 'deepseek-harness',
+            transport: 'http',
+          }),
+          // deepseek harness：插件式 YAML 配置，不支持本服务改写免令牌形态
+          baseRow({
+            id: 'deepseek-harness', name: 'deepseek harness', badge: 'p0',
+            displayPath: '~/.dsh/profiles/desktop/cordis.patch.yml',
+            format: 'yaml', writable: true, state: 'wired', hasAuth: true, hasClientId: true,
+            transport: 'http',
+          }),
+        ],
+      }),
+    });
+    render(<McpClientsPanel />);
+    await waitFor(() => expect(screen.getByTestId('state-zcode').textContent).toBe('已接入'));
+
+    // 配置路径列不再出现「无稳定配置路径」，而是真实文件
+    const zcodeRow = document.querySelector('[data-client="zcode"]')!;
+    const dshRow = document.querySelector('[data-client="deepseek-harness"]')!;
+    expect(zcodeRow.textContent).toContain('~/.zcode/mcp.json');
+    expect(dshRow.textContent).toContain('cordis.patch.yml');
+    expect(document.body.textContent).not.toContain('无稳定配置路径');
+
+    // 身份头值不符要显式说出来（不能只显示「缺失」或「—」）
+    expect(screen.getByTestId('clientid-wrong-zcode').textContent).toContain('不符：deepseek-harness');
+    expect(screen.getByTestId('wire-zcode').textContent).toBe('补身份头');
+
+    // YAML 行没有「改用免令牌方式」，但槽位由等宽徽标补上（动作列不留空）
+    expect(screen.queryByTestId('stdio-deepseek-harness')).toBeNull();
+    expect(screen.getByTestId('stdio-na-deepseek-harness').textContent).toBe('免令牌不适用');
+    // 两行的动作列都有「复制片段」，不是一行有按钮一行空着
+    for (const id of ['zcode', 'deepseek-harness']) {
+      expect(document.querySelector(`[data-client="${id}"] [data-act="mcp-copy"]`)).toBeTruthy();
+    }
+  });
+
   test('检出数与清单同口径：无配置文件路径的痕迹客户端（Zcode / deepseek harness）也是真安装，必须进清单', async () => {
     mockRole('admin');
     const scan = {
@@ -525,7 +570,10 @@ describe('McpClientsPanel', () => {
 
     expect(screen.getByTestId('transport-workbuddy').textContent).toBe('HTTP 直连');
     expect(screen.getByTestId('transport-qoder-cn').textContent).toBe('stdio 免令牌');
-    expect(screen.getByTestId('transport-cursor').textContent).toBe('形态未定');
+    // 2026-11-28 用户要求「把工作做完」：未接入也不再留「形态未定」——片段本身就是 HTTP 直连，
+    // 徽标给确定形态，title 说明这是「将以此形态接入」。
+    expect(screen.getByTestId('transport-cursor').textContent).toBe('HTTP 直连');
+    expect(screen.getByTestId('transport-cursor').getAttribute('title')).toContain('将以此形态接入');
     expect(screen.getByTestId('run-workbuddy').textContent).toBe('已启动');
     expect(screen.getByTestId('run-qoder-cn').textContent).toBe('未启动');
     // CLI 无稳定进程面 → 不可测，绝不误报「未启动」
@@ -537,6 +585,55 @@ describe('McpClientsPanel', () => {
     expect(screen.getByTestId('transport-workbuddy').getAttribute('title')).toContain('实测已连通');
     // 没实测过的 HTTP 行不得假装绿色
     expect(screen.getByTestId('transport-claude-code').className).not.toContain('ok');
+  });
+
+  test('无稳定配置文件的客户端也要「把工作做完」：形态确定、实测带口径、操作槽位不缺', async () => {
+    mockRole('admin');
+    setHost({
+      list: () => Promise.resolve({
+        endpoint: SCAN.endpoint,
+        clients: [
+          // Zcode：配置存应用内部（configPath=null），只能复制片段手工粘贴
+          baseRow({
+            id: 'zcode', name: 'Zcode', badge: 'p3', format: 'json', writable: false,
+            displayPath: null, path: null, state: 'manual',
+            live: { ok: true, status: 200, tools: 14, at: Date.UTC(2026, 0, 1, 0, 0, 0), via: 'current' },
+          }),
+          // deepseek harness：无独立配置面、随宿主下发，实测用宿主令牌
+          baseRow({
+            id: 'deepseek-harness', name: 'deepseek harness', badge: 'p0', format: 'unknown',
+            writable: true, displayPath: null, path: null, state: 'wired', transport: 'http',
+            live: { ok: true, status: 200, tools: 14, at: Date.UTC(2026, 0, 1, 0, 0, 0), via: 'host' },
+          }),
+        ],
+      }),
+    });
+    render(<McpClientsPanel />);
+    await waitFor(() => expect(screen.getByTestId('state-deepseek-harness').textContent).toBe('已接入'));
+
+    // ① 形态不再是「形态未定」：由规格推导为 HTTP 直连
+    expect(screen.getByTestId('transport-zcode').textContent).toBe('HTTP 直连');
+    expect(screen.getByTestId('transport-zcode').getAttribute('title')).toContain('将以此形态接入');
+    expect(screen.getByTestId('transport-deepseek-harness').textContent).toBe('HTTP 直连');
+
+    // ② 实测不再是「—」：给确定结果，但必须标清用哪份令牌（不许冒充它自己的配置）
+    expect(screen.getByTestId('live-zcode').textContent).toContain('实测 ✓ 14 工具');
+    expect(screen.getByTestId('live-zcode').textContent).toContain('片段令牌');
+    expect(screen.getByTestId('live-deepseek-harness').textContent).toContain('经宿主令牌');
+    // 实测通过 ⇒ 形态徽标同步转绿（HTTP 连通即绿）
+    expect(screen.getByTestId('transport-zcode').className).toContain('ok');
+
+    // ③ 操作列槽位不缺：不可代写的客户端给「需手工粘贴」，且「复制片段」是主按钮
+    expect(screen.getByTestId('manual-zcode').textContent).toBe('需手工粘贴');
+    const zcodeRow = document.querySelector('[data-client="zcode"]') as HTMLElement;
+    expect((zcodeRow.querySelector('[data-act="mcp-copy"]') as HTMLElement).className).toContain('pri');
+    // 可代写的继承客户端仍走一键接入，不该出现「需手工粘贴」
+    expect(screen.queryByTestId('manual-deepseek-harness')).toBeNull();
+
+    // ④ 三行结构不变（这两类客户端也不许少一行）
+    for (const id of ['zcode', 'deepseek-harness']) {
+      expect(screen.getByTestId(`client-${id}`).querySelectorAll(':scope > div')).toHaveLength(3);
+    }
   });
 
   test('管理员：复制片段 → 展示一次性片段并写剪贴板（含令牌不外泄到日志）', async () => {

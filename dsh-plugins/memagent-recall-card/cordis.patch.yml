@@ -1,0 +1,3 @@
+- insert:
+    - id: memagent-recall-card
+      name: '@local/memagent-recall-card'

@@ -2,9 +2,9 @@
 // 覆盖正常、拒绝（冲突/无法解析/不支持）与边界（大小写头、TOML 子表、未变化不重写）。
 import { describe, expect, test } from 'vitest';
 import {
-  MCP_BRIDGE_FILE_NAME, MCP_CLIENT_SPECS, MCP_ENDPOINT, buildMcpEntry, buildStdioMcpEntry, isStdioEntry,
-  mergeMcpJsonConfig, mergeMcpTomlConfig, normalizeConfigText,
-  probeClientConfig, probeJsonConfig, probeTomlConfig, renderMcpSnippet, specOfMcpClient,
+  MCP_BRIDGE_FILE_NAME, MCP_CLIENT_SPECS, MCP_ENDPOINT, buildMcpEntry, buildStdioMcpEntry, impliedTransport, isStdioEntry,
+  mergeMcpJsonConfig, mergeMcpTomlConfig, mergeMcpYamlConfig, normalizeConfigText,
+  probeClientConfig, probeJsonConfig, probeTomlConfig, probeYamlConfig, renderMcpSnippet, specOfMcpClient,
 } from '../mcpClients.ts';
 
 const TOKEN = 'test-token-abc123';
@@ -24,20 +24,24 @@ describe('配方常量', () => {
     expect(MCP_CLIENT_SPECS.find((s) => s.id === 'codex')?.format).toBe('toml');
   });
 
-  test('批次27：JSON/TOML 已知结构客户端均可一键写入，仅 zcode 仍只给指引', () => {
-    for (const id of ['qoder-cn', 'claude-code', 'cursor', 'gemini-cli', 'qwen-code', 'codex', 'trae-cn', 'workbuddy']) {
+  test('批次27 + 2026-11-28：JSON/TOML/YAML 已知结构客户端均可一键写入（含 Zcode 与 deepseek harness）', () => {
+    for (const id of ['qoder-cn', 'claude-code', 'cursor', 'gemini-cli', 'qwen-code', 'codex', 'trae-cn', 'workbuddy', 'zcode', 'deepseek-harness']) {
       expect(specOfMcpClient(id).writable).toBe(true);
       expect(specOfMcpClient(id).connectHint.length).toBeGreaterThan(0);
     }
-    // 批次28-D：workbuddy 实机确认 ~/.workbuddy/mcp.json（应用内编辑器直显该路径）→ 升级可写；
-    // zcode 配置存应用内部存储（IndexedDB）无稳定文件可合并 → 只读 + 手工指引；
-    // deepseek-harness 宿主继承可写——一键接入委托宿主 qoder-cn 真实写入。
-    expect(specOfMcpClient('zcode').writable).toBe(false);
-    expect(specOfMcpClient('zcode').connectHint.length).toBeGreaterThan(0);
+    // 2026-11-28 实机更正：Zcode 有稳定配置文件 ~/.zcode/mcp.json（mcpServers JSON），可代写 + 自动注入身份头；
+    // serverKey 用文件里既有的 multiagent-memory，避免同一服务被写成两条。
+    const zcode = specOfMcpClient('zcode');
+    expect(zcode.configPath).toBe('~/.zcode/mcp.json');
+    expect(zcode.format).toBe('json');
+    expect(zcode.serverKey).toBe('multiagent-memory');
+    // deepseek harness 也有自己的配置文件（cordis.patch.yml 里的 memagent-mcp 插件），不再靠宿主继承
     const dsh = specOfMcpClient('deepseek-harness');
     expect(dsh.writable).toBe(true);
-    expect(dsh.inheritsFrom).toBe('qoder-cn');
-    expect(dsh.configPath).toBeNull();
+    expect(dsh.inheritsFrom).toBeUndefined();
+    expect(dsh.format).toBe('yaml');
+    expect(dsh.configPath).toBe('~/.dsh/profiles/desktop/cordis.patch.yml');
+    expect(dsh.pluginName).toBe('@deepseek-ai/dsh-mcp-client');
     const wb = specOfMcpClient('workbuddy');
     expect(wb.configPath).toBe('~/.workbuddy/mcp.json');
     expect(wb.format).toBe('json');
@@ -78,16 +82,16 @@ describe('buildMcpEntry / renderMcpSnippet', () => {
     expect(text).toContain(`Authorization = "Bearer ${TOKEN}"`);
   });
 
-  test('Zcode 片段升级为可粘贴 JSON（与 WorkBuddy 同构，批次28-E）；无文件面 → 仍不代写', () => {
+  test('Zcode 片段是 mcpServers JSON（serverKey 用文件里既有的 multiagent-memory）；2026-11-28 起可代写', () => {
     const zcode = specOfMcpClient('zcode');
     const text = renderMcpSnippet(zcode, EP, TOKEN);
     expect(() => JSON.parse(text) as unknown).not.toThrow();
     const parsed = JSON.parse(text) as { mcpServers: Record<string, Record<string, unknown>> };
-    expect(parsed.mcpServers['MultiAgent Memory']).toEqual({
+    expect(parsed.mcpServers['multiagent-memory']).toEqual({
       type: 'http', url: EP, headers: { Authorization: `Bearer ${TOKEN}`, 'X-Memagent-Client': 'zcode' },
     });
-    expect(zcode.writable).toBe(false);
-    expect(zcode.configPath).toBeNull();
+    expect(zcode.writable).toBe(true);
+    expect(zcode.configPath).toBe('~/.zcode/mcp.json');
     // WorkBuddy / Trae 同为 mcpServers 结构
     const wbText = renderMcpSnippet(specOfMcpClient('workbuddy'), EP, TOKEN);
     expect(() => JSON.parse(wbText) as unknown).not.toThrow();
@@ -182,12 +186,11 @@ describe('probeClientConfig', () => {
     // WorkBuddy：configPath=null 但有动态配置面（JSON）→ 按格式探测，不再整体 manual
     expect(probeClientConfig(specOfMcpClient('workbuddy'), null, EP).state).toBe('no_config');
     expect(probeClientConfig(specOfMcpClient('workbuddy'), '{"any":true}', EP).state).toBe('missing_entry');
-    // Zcode 批次28-E 升级 format json（片段与 WorkBuddy 同构）：按格式探测得 no_config；
-    // 「需手工」由 electron 扫描层因 configPath=null 判定（scanMcpClients 无路径一律 manual），探测层不再兜 manual
+    // Zcode 2026-11-28 实机更正：有稳定配置文件 → configPath 非空，探测层按 JSON 正常判
     expect(probeClientConfig(specOfMcpClient('zcode'), null, EP).state).toBe('no_config');
-    expect(specOfMcpClient('zcode').configPath).toBeNull();
-    // deepseek-harness（format unknown）探测层仍 manual；实际状态由宿主继承逻辑覆盖
-    expect(probeClientConfig(specOfMcpClient('deepseek-harness'), null, EP).state).toBe('manual');
+    expect(specOfMcpClient('zcode').configPath).toBe('~/.zcode/mcp.json');
+    // deepseek harness 是 YAML 插件式配置：null → no_config（不再 manual）
+    expect(probeClientConfig(specOfMcpClient('deepseek-harness'), null, EP).state).toBe('no_config');
   });
 });
 
@@ -524,5 +527,116 @@ describe('normalizeConfigText · 一键修复配置格式（BOM/注释/尾逗号
     expect(fixed.changed).toBe(false);
     expect(fixed.text).toBe(raw);
     expect(() => JSON.parse(fixed.text)).toThrow();
+  });
+});
+
+describe('YAML 插件式配置（deepseek harness 的 cordis.patch.yml）', () => {
+  const dsh = specOfMcpClient('deepseek-harness');
+  // 与本机真实文件同构：令牌写成「Bearer 换行 + 缩进」，前面还有别的插件与注释
+  const SAMPLE = [
+    '# 别的注释',
+    '- id: session-log-deepseek',
+    '  name: "@deepseek-ai/dsh-session-log-deepseek"',
+    '  config:',
+    '    enabled: false',
+    '',
+    '# MultiAgent Memory MCP（memagent）：8204 /mcp',
+    '- insert:',
+    '    - id: memagent-mcp',
+    "      name: '@deepseek-ai/dsh-mcp-client'",
+    '      config:',
+    '        serverName: memagent',
+    '        transport: streamable-http',
+    `        url: ${EP}`,
+    '        headers:',
+    '          Authorization: Bearer',
+    `            ${TOKEN}`,
+    '          X-Memagent-Client: deepseek-harness',
+    '        failOnStartupError: false',
+    '- id: plugin-market',
+    '  name: "@deepseek-ai/dsh-plugin-market"',
+    '',
+  ].join('\n');
+
+  test('null → no_config；没有该插件条目 → missing_entry；指向其它端点 → conflict', () => {
+    expect(probeYamlConfig(null, dsh, EP).state).toBe('no_config');
+    expect(probeYamlConfig('# 空\n- id: other\n  name: x\n', dsh, EP).state).toBe('missing_entry');
+    const other = SAMPLE.replace(`url: ${EP}`, 'url: http://127.0.0.1:9999/mcp');
+    const conflict = probeYamlConfig(other, dsh, EP);
+    expect(conflict.state).toBe('conflict');
+    expect(conflict.foundUrl).toBe('http://127.0.0.1:9999/mcp');
+  });
+
+  test('身份头值与本客户端不符 → hasClientId=false 且回传实际值（不冒充已写对）', () => {
+    const wrong = SAMPLE.replace('X-Memagent-Client: deepseek-harness', 'X-Memagent-Client: zcode');
+    const p = probeYamlConfig(wrong, dsh, EP);
+    expect(p.state).toBe('wired');
+    expect(p.hasClientId).toBe(false);
+    expect(p.foundClientId).toBe('zcode');
+    expect(probeYamlConfig(SAMPLE, dsh, EP).hasClientId).toBe(true);
+  });
+
+  test('缺少 Authorization → missing_auth（调用会 401）', () => {
+    const noAuth = SAMPLE.replace('          Authorization: Bearer\n', '').replace(`            ${TOKEN}\n`, '');
+    expect(probeYamlConfig(noAuth, dsh, EP).state).toBe('missing_auth');
+  });
+
+  test('合并：只改 url/令牌/身份头三处，其它插件与注释原样保留；二次执行幂等', () => {
+    const NEW_TOKEN = 'f'.repeat(64);
+    const wrong = SAMPLE.replace('X-Memagent-Client: deepseek-harness', 'X-Memagent-Client: zcode');
+    const out = mergeMcpYamlConfig(wrong, dsh, EP, NEW_TOKEN);
+    expect(out.changed).toBe(true);
+    expect(out.text).toContain('# 别的注释');
+    expect(out.text).toContain('- id: session-log-deepseek');
+    expect(out.text).toContain('- id: plugin-market');
+    expect(out.text).toContain('failOnStartupError: false');
+    // 令牌换成单行；身份头改成本客户端 id；不再有「Bearer 换行 + 缩进令牌」的老写法
+    expect(out.text).toContain(`Authorization: Bearer ${NEW_TOKEN}`);
+    expect(out.text).toContain('X-Memagent-Client: deepseek-harness');
+    expect(out.text).not.toContain(`\n            ${TOKEN}`);
+    const again = mergeMcpYamlConfig(out.text, dsh, EP, NEW_TOKEN);
+    expect(again.changed).toBe(false);
+    expect(again.text).toBe(out.text);
+    // 写完能被探测成完全接通的 wired + 身份头正确
+    const p = probeYamlConfig(out.text, dsh, EP);
+    expect(p.state).toBe('wired');
+    expect(p.hasClientId).toBe(true);
+  });
+
+  test('合并：没有该插件条目 → 追加一条标准声明（name = 插件真名）', () => {
+    const empty = '# 只有注释\n';
+    const out = mergeMcpYamlConfig(empty, dsh, EP, TOKEN);
+    expect(out.changed).toBe(true);
+    expect(out.text).toContain('- insert:');
+    expect(out.text).toContain('- id: memagent-mcp');
+    expect(out.text).toContain("name: '@deepseek-ai/dsh-mcp-client'");
+    expect(out.text).toContain(`url: ${EP}`);
+    expect(probeYamlConfig(out.text, dsh, EP).state).toBe('wired');
+  });
+});
+
+describe('impliedTransport（读不到配置时由规格推导形态，不留「形态未定」）', () => {
+  test('JSON 客户端（Zcode）→ http：写进去的条目就是 url + headers', () => {
+    const zcode = specOfMcpClient('zcode');
+    expect(zcode.format).toBe('json');
+    expect(impliedTransport(zcode)).toBe('http');
+  });
+
+  test('YAML 插件式客户端（deepseek harness）→ http：插件 transport 就是 streamable-http', () => {
+    const dsh = specOfMcpClient('deepseek-harness');
+    expect(dsh.format).toBe('yaml');
+    expect(dsh.inheritsFrom).toBeUndefined();
+    expect(impliedTransport(dsh)).toBe('http');
+  });
+
+  test('TOML 客户端（Codex）同样是 HTTP 直连形态（片段是 url + headers）', () => {
+    expect(codex.format).toBe('toml');
+    expect(impliedTransport(codex)).toBe('http');
+  });
+
+  test('unknown 格式且不继承宿主 → undefined（只有这种情况才允许说「形态未定」）', () => {
+    expect(impliedTransport({
+      ...codex, format: 'unknown', inheritsFrom: undefined,
+    })).toBeUndefined();
   });
 });

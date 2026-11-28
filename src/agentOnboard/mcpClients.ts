@@ -44,7 +44,10 @@ export type McpClientId =
   | 'zcode'
   | 'deepseek-harness';
 
-export type McpConfigFormat = 'json' | 'toml' | 'unknown';
+/** yaml = 插件式 YAML（deepseek harness 的 `~/.dsh/profiles/desktop/cordis.patch.yml`：
+ *  不是一个 mcpServers 表，而是一条 `- insert: - id: memagent-mcp / name: @deepseek-ai/dsh-mcp-client /
+ *  config: {serverName, transport, url, headers}` 的插件声明）。2026-11-28 实机确认该路径存在且可写。 */
+export type McpConfigFormat = 'json' | 'toml' | 'yaml' | 'unknown';
 /** 条目字段风格：type+url（Qoder/Claude）/ url（Cursor）/ httpUrl（Gemini 系） */
 export type McpEntryStyle = 'type+url' | 'url' | 'httpUrl';
 
@@ -73,6 +76,8 @@ export interface McpClientSpec {
   /** 批次30：审计证据匹配用的调用方名（recall 审计 detail.client 的首段）——
    *  默认用 id 本身匹配；客户端自报名与 id 不同时在此显式列出。 */
   auditClientIds?: string[];
+  /** format='yaml' 专用：插件名（写进 `- insert:` 的 `name:`，如 @deepseek-ai/dsh-mcp-client） */
+  pluginName?: string;
   note?: string;
 }
 
@@ -152,25 +157,32 @@ export const MCP_CLIENT_SPECS: McpClientSpec[] = [
   },
   {
     id: 'zcode', name: 'Zcode', badge: 'p3',
-    // format json：片段与 WorkBuddy 同构（mcpServers 可直接粘贴进 Zcode 的 JSON 标签页）；
-    // 无 configPath → 扫描仍 manual，writable false → 仍不代写，只是「复制片段」升级为可粘贴 JSON
-    serverKey: 'MultiAgent Memory', format: 'json', entryStyle: 'type+url',
-    configPath: null, installMarkers: ['~/.zcode'],
+    // 2026-11-28 实机更正：Zcode 有稳定配置文件 `~/.zcode/mcp.json`（本机是指向
+    // D:/Work Folder/Agnet/Zcode/.zcode 的软链接目录），内容是 mcpServers JSON（type+url+headers），
+    // 因此可代写、可自动注入身份头。serverKey 用文件里既有的 `multiagent-memory`，避免同一服务被写成两条。
+    serverKey: 'multiagent-memory', format: 'json', entryStyle: 'type+url',
+    configPath: '~/.zcode/mcp.json', installMarkers: ['~/.zcode'],
     rulesHint: '工作区 AGENTS.md（若客户端支持）',
-    connectHint: 'Zcode → 设置 → MCP 服务器 → 添加/编辑，两种方式任选：① JSON 标签页——把「复制片段」输出的 mcpServers JSON 整段粘贴，保存即接通；② 表单——类型 HTTP、URL 填 http://127.0.0.1:8204/mcp、请求头 {"Authorization": "Bearer <mcp-token>"}（令牌见数据根 mcp-token.txt 或接入页「复制片段」）',
-    writable: false,
-    note: '2026-10-31 用户实测确认应用内「表单 / JSON」两种配置方式；配置存应用内部存储（IndexedDB），无稳定配置文件可合并 → 不代写，「复制片段」为可直接粘贴的 JSON',
+    connectHint: 'Zcode → 设置 → MCP 服务器（或直接改 ~/.zcode/mcp.json 的 mcpServers）',
+    writable: true,
+    note: '2026-11-28 实机确认稳定配置文件 ~/.zcode/mcp.json（mcpServers JSON，type+url+headers）：'
+      + '写前备份、幂等合并、自动补 X-Memagent-Client 身份头；其它条目与其它请求头（如 X-Memagent-Render）原样保留',
   },
   {
     id: 'deepseek-harness', name: 'deepseek harness', badge: 'p0',
-    serverKey: 'multiagent_memory', format: 'unknown', entryStyle: 'type+url',
-    configPath: null, installMarkers: ['~/.dsh'],
+    // 2026-11-28 实机更正：DSH 有独立 MCP 配置文件（不是「随宿主下发」）——
+    // `~/.dsh/profiles/desktop/cordis.patch.yml` 里一条插件声明
+    // `- insert: - id: memagent-mcp / name: @deepseek-ai/dsh-mcp-client / config:{serverName,transport,url,headers}`。
+    // 因此可代写、可自动注入身份头；serverKey 是插件的 serverName。
+    serverKey: 'memagent', format: 'yaml', entryStyle: 'type+url',
+    configPath: '~/.dsh/profiles/desktop/cordis.patch.yml', installMarkers: ['~/.dsh'],
     rulesHint: '工作区 AGENTS.md',
-    connectHint: 'deepseek harness 无独立 MCP 配置文件：随宿主（Qoder Desktop）的 mcpServers 下发，宿主接入即生效；宿主未接入时对本客户端点「一键接入」会自动写入宿主配置',
-    inheritsFrom: 'qoder-cn',
+    connectHint: 'deepseek harness → 编辑 ~/.dsh/profiles/desktop/cordis.patch.yml 的 memagent-mcp 插件条目（一键接入可代写）',
     auditClientIds: ['dsh-mcp-client'],
+    pluginName: '@deepseek-ai/dsh-mcp-client',
     writable: true,
-    note: '批次28-B：宿主继承检测 + 一键接入委托宿主（qoder-cn）真实写入；本机 2026-10-31 实测 recall_memory 经宿主配置走通',
+    note: '2026-11-28 实机确认：DSH 的 MCP 客户端是 cordis.patch.yml 里的 memagent-mcp 插件（transport: streamable-http）；'
+      + '一键接入只改该插件的 url / Authorization / X-Memagent-Client 三处，其余插件与注释原样保留，写前备份',
   },
 ];
 
@@ -192,8 +204,11 @@ export interface McpConfigProbe {
   /** 条目是哪种传输形态：stdio=只写启动命令（令牌由桥接脚本现读）/ http=令牌抄在配置里。
    *  缺省 undefined = 没读到条目（no_config / missing_entry 等），不代表 http。 */
   transport?: McpTransport;
-  /** 批次41-X：条目里是否已带显式身份头 `X-Memagent-Client`（缺≠坏，老配置照常工作，只是身份仍靠归并） */
+  /** 批次41-X：条目里是否已带显式身份头 `X-Memagent-Client`，且值**等于本客户端 id**
+   *  （缺 ≠ 坏，老配置照常工作，只是身份仍靠归并；值不符同样按「缺」处理——服务端会把它记到别的客户端名下） */
   hasClientId?: boolean;
+  /** 条目里实际读到（却没对上）的身份头值，仅用于向用户解释为什么还要补；不含任何凭据 */
+  foundClientId?: string;
   /** 客户端应用内的「已禁用」标记：仅当配置条目显式为布尔 true 时才带此字段。
    *  缺省 = 本次没读到禁用标记，不代表客户端一定已启用（无从判定时 UI 应显示「未知」）。
    *  不改 McpWireState 七态契约：开关是独立维度，配置是否接通过仍然是 state。 */
@@ -205,6 +220,27 @@ export function specOfMcpClient(id: string): McpClientSpec {
   const spec = MCP_CLIENT_SPECS.find((s) => s.id === id);
   if (!spec) throw new Error(`未知 MCP 客户端：${id}`);
   return spec;
+}
+
+/**
+ * 由规格推导「接入形态」（2026-11-28，用户要求「不能只显示形态未定」）。
+ * 只在**读不到配置文件**时兜底：本服务写进任何 JSON 客户端的条目都是 `type/url/httpUrl + headers`
+ * （见 buildMcpEntry），所以「可粘贴的片段就是 HTTP 直连」是确定的，不是猜测。
+ * 宿主继承客户端（deepseek harness ← Qoder）随宿主的形态走。
+ * 无稳定形态（format=unknown 且不继承）才返回 undefined，UI 那时才允许说「形态未定」。
+ */
+export function impliedTransport(spec: McpClientSpec): McpTransport | undefined {
+  // JSON / TOML / YAML 三条写入路径产出的条目都是 url + headers（见 buildMcpEntry / mergeMcpTomlConfig /
+  // mergeMcpYamlConfig），即「HTTP 直连」形态，与配置里读到的 transport 同义。
+  if (spec.format === 'json' || spec.format === 'toml' || spec.format === 'yaml') return 'http';
+  if (spec.inheritsFrom) {
+    try {
+      return impliedTransport(specOfMcpClient(spec.inheritsFrom));
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
 }
 
 /** 批次41-X：显式身份请求头。值固定为本配方的规范 id（`spec.id`），由服务端 8204 逐次读取，
@@ -267,6 +303,22 @@ export function renderMcpSnippet(
     return `启动命令：${MCP_STDIO_COMMAND} ${(entry.args as string[]).join(' ')}\n（stdio 启动型 MCP：配置里不含令牌，令牌由桥接脚本现读，轮换零维护）\n`;
   }
   const pairs = mcpHeaderPairs(spec, token);
+  if (spec.format === 'yaml') {
+    // 插件式 YAML：给出可直接贴进 cordis.patch.yml 的插件声明（与 mergeMcpYamlConfig 新建条目同构）
+    return [
+      '- insert:',
+      `    - id: ${spec.serverKey}-mcp`,
+      `      name: '${spec.pluginName ?? '@deepseek-ai/dsh-mcp-client'}'`,
+      '      config:',
+      `        serverName: ${spec.serverKey}`,
+      '        transport: streamable-http',
+      `        url: ${endpoint}`,
+      '        headers:',
+      ...pairs.map((p) => `          ${p.key}: ${p.value}`),
+      '        failOnStartupError: false',
+      '',
+    ].join('\n');
+  }
   if (spec.format === 'json') {
     return `${JSON.stringify({ mcpServers: { [spec.serverKey]: buildMcpEntry(spec, endpoint, token) } }, null, 2)}\n`;
   }
@@ -365,9 +417,13 @@ export function probeJsonConfig(text: string | null, spec: McpClientSpec, endpoi
   const auth = readHeader('Authorization');
   const hasAuth = typeof auth === 'string' && /^Bearer\s+\S+/i.test(auth.trim());
   const clientId = readHeader(MCP_CLIENT_HEADER_NAME);
-  const hasClientId = typeof clientId === 'string' && clientId.trim().length > 0;
+  const found = typeof clientId === 'string' ? clientId.trim() : '';
+  // 2026-11-28：不只看「有没有这个头」，还要看值是不是本客户端——Zcode 配置里就曾被写成
+  // deepseek-harness，服务端会把 Zcode 的调用记到别的客户端名下（串号），必须能识别出来并提示补写。
+  const hasClientId = found.length > 0 && found === spec.id;
   return markDisabled({
     state: hasAuth ? 'wired' : 'missing_auth', foundUrl: url, hasAuth, hasClientId, transport: 'http',
+    ...(found && !hasClientId ? { foundClientId: found } : {}),
   }, e);
 }
 
@@ -412,9 +468,47 @@ function tomlHeaderRe(key: string): RegExp {
   return new RegExp(`(^|[,{\\s"])${escapeRe(key)}"?(?=\\s*=\\s*")`, 'i');
 }
 
-/** TOML 键：只有非 `[A-Za-z0-9_-]` 才加引号（`X-Memagent-Client` 的短横线本身是合法裸键字符） */
-function tomlKey(key: string): string {
-  return /^[-A-Za-z0-9_]+$/.test(key) ? key : `"${tomlQuote(key)}"`;
+/**
+ * YAML 插件条目（2026-11-28）：deepseek harness 的 MCP 配置不是 mcpServers 表，而是
+ * `~/.dsh/profiles/desktop/cordis.patch.yml` 里一条插件声明：
+ * ```
+ * - insert:
+ *     - id: memagent-mcp
+ *       name: '@deepseek-ai/dsh-mcp-client'
+ *       config: { serverName: memagent, transport: streamable-http, url: …, headers: {…} }
+ * ```
+ * 定位规则：找 `- id: <serverKey>`（或 `<serverKey>-mcp`）这一行，块到下一个顶格 `- ` 之前。
+ * 纯文本定位、不做 YAML 反序列化——避免把用户文件里的注释、锚点、插件顺序整篇重排。
+ */
+function yamlItemLineRange(lines: string[], spec: McpClientSpec): { start: number; end: number } | null {
+  const idRe = new RegExp(`^\\s*-\\s+id:\\s*${escapeRe(spec.serverKey)}(?:-mcp)?\\s*$`);
+  const start = lines.findIndex((l) => idRe.test(l));
+  if (start < 0) return null;
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (/^-(?:\s|$)/.test(lines[i])) { end = i; break; }
+  }
+  return { start, end };
+}
+
+/** 判断 YAML 插件条目里本服务的接入状态（只读；不返回令牌） */
+export function probeYamlConfig(text: string | null, spec: McpClientSpec, endpoint: string): McpConfigProbe {
+  if (text === null) return { state: 'no_config', hasAuth: false };
+  const lines = text.split(/\r?\n/);
+  const range = yamlItemLineRange(lines, spec);
+  if (!range) return { state: 'missing_entry', hasAuth: false };
+  const block = lines.slice(range.start, range.end).join('\n');
+  const url = /^\s*url:\s*(\S+)\s*$/m.exec(block)?.[1];
+  if (url !== endpoint) return { state: 'conflict', foundUrl: url, hasAuth: false, transport: 'http' };
+  // 令牌既可能写在 `Authorization: Bearer xxx` 同一行，也可能是 `Bearer` 换行 + 缩进令牌（本机现状）
+  const auth = /Authorization:\s*Bearer\s+([^\s#]+)/.exec(block)?.[1];
+  const hasAuth = typeof auth === 'string' && auth.length > 0;
+  const found = (/X-Memagent-Client:\s*(\S+)/.exec(block)?.[1] ?? '').replace(/^['"]|['"]$/g, '');
+  const hasClientId = found.length > 0 && found === spec.id;
+  return {
+    state: hasAuth ? 'wired' : 'missing_auth', foundUrl: url, hasAuth, hasClientId, transport: 'http',
+    ...(found && !hasClientId ? { foundClientId: found } : {}),
+  };
 }
 
 /** 按配置格式探测；manual = 该客户端没有任何可读配置面（批次28-B：动态配置面 configPath=null 但有 glob，按格式正常探测） */
@@ -423,7 +517,78 @@ export function probeClientConfig(
 ): McpConfigProbe {
   if (spec.format === 'unknown') return { state: 'manual', hasAuth: false };
   if (spec.format === 'toml') return probeTomlConfig(text, spec, endpoint);
+  if (spec.format === 'yaml') return probeYamlConfig(text, spec, endpoint);
   return probeJsonConfig(text, spec, endpoint);
+}
+
+/**
+ * 把本服务的 url / 令牌 / 身份头写进 YAML 插件条目（2026-11-28）。
+ * 只做三处行级改动：url 行、Authorization 行（含「Bearer 换行 + 缩进令牌」的老写法）、
+ * X-Memagent-Client 行（缺则补在 Authorization 之后）。**其它插件、注释、字段、缩进一律不动**。
+ * 条目不存在时追加一条标准插件声明；没有 url 字段的条目拒绝猜写（抛错→上层如实报错）。
+ */
+export function mergeMcpYamlConfig(
+  text: string | null, spec: McpClientSpec, endpoint: string, token: string,
+): { text: string; changed: boolean } {
+  if (spec.format !== 'yaml' || !spec.writable) throw new Error(`E_UNSUPPORTED_CLIENT: ${spec.id}`);
+  const source = text ?? '';
+  const eol = source.includes('\r\n') ? '\r\n' : '\n';
+  const lines = source === '' ? [] : source.split(/\r?\n/);
+  const range = yamlItemLineRange(lines, spec);
+  if (!range) {
+    const plugin = spec.pluginName ?? '@deepseek-ai/dsh-mcp-client';
+    const block = [
+      '- insert:',
+      `    - id: ${spec.serverKey}-mcp`,
+      `      name: '${plugin}'`,
+      '      config:',
+      `        serverName: ${spec.serverKey}`,
+      '        transport: streamable-http',
+      `        url: ${endpoint}`,
+      '        headers:',
+      `          Authorization: Bearer ${token}`,
+      `          ${MCP_CLIENT_HEADER_NAME}: ${spec.id}`,
+      '        failOnStartupError: false',
+    ].join(eol);
+    const base = source.replace(/\s+$/, '');
+    return { text: `${base.length > 0 ? `${base}${eol}${eol}` : ''}${block}${eol}`, changed: true };
+  }
+  const block = lines.slice(range.start, range.end);
+  const urlIdx = block.findIndex((l) => /^\s*url:/.test(l));
+  if (urlIdx < 0) throw new Error('E_CONFIG_INVALID: 该插件条目没有 url 字段，拒绝猜测改写');
+  const urlIndent = /^(\s*)/.exec(block[urlIdx])?.[1] ?? '';
+  block[urlIdx] = `${urlIndent}url: ${endpoint}`;
+  const authIdx = block.findIndex((l) => /^\s*Authorization:/.test(l));
+  if (authIdx >= 0) {
+    const indent = /^(\s*)/.exec(block[authIdx])?.[1] ?? '';
+    const inlineValue = /^\s*Authorization:\s*Bearer\s*(\S*)\s*$/.exec(block[authIdx])?.[1] ?? '';
+    const nextLine = block[authIdx + 1] ?? '';
+    const tokenOnNextLine = inlineValue === '' && /^\s+\S+\s*$/.test(nextLine) && !/^\s*[\w-]+:/.test(nextLine);
+    block[authIdx] = `${indent}Authorization: Bearer ${token}`;
+    if (tokenOnNextLine) block.splice(authIdx + 1, 1);
+    const cidIdx = block.findIndex((l) => /^\s*X-Memagent-Client:/.test(l));
+    if (cidIdx >= 0) {
+      const cidIndent = /^(\s*)/.exec(block[cidIdx])?.[1] ?? '';
+      block[cidIdx] = `${cidIndent}${MCP_CLIENT_HEADER_NAME}: ${spec.id}`;
+    } else {
+      block.splice(authIdx + 1, 0, `${indent}${MCP_CLIENT_HEADER_NAME}: ${spec.id}`);
+    }
+  } else {
+    const indent = `${urlIndent}  `;
+    block.splice(
+      urlIdx + 1, 0,
+      `${urlIndent}headers:`,
+      `${indent}Authorization: Bearer ${token}`,
+      `${indent}${MCP_CLIENT_HEADER_NAME}: ${spec.id}`,
+    );
+  }
+  const next = [...lines.slice(0, range.start), ...block, ...lines.slice(range.end)].join(eol);
+  return { text: next, changed: next !== source };
+}
+
+/** TOML 键：只有非 `[A-Za-z0-9_-]` 才加引号（`X-Memagent-Client` 的短横线本身是合法裸键字符） */
+function tomlKey(key: string): string {
+  return /^[-A-Za-z0-9_]+$/.test(key) ? key : `"${tomlQuote(key)}"`;
 }
 
 /**

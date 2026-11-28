@@ -6,6 +6,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import {
   MCP_CLIENT_HEADER_NAME, MCP_CLIENT_SPECS, MCP_ENDPOINT, mergeMcpJsonConfig, mergeMcpTomlConfig,
+  mergeMcpYamlConfig,
   normalizeConfigText, probeClientConfig, renderMcpSnippet, specOfMcpClient,
   type McpClientSpec, type McpStdioTarget, type McpTransport, type McpWireState,
 } from '../agentOnboard/mcpClients.ts';
@@ -79,6 +80,9 @@ export interface McpClientStatus extends LiveProbeFields {
    *  `false` = 条目已接入但缺身份头（41-X 之前写入的老配置）→ 可点「补身份头」重新写入；
    *  `undefined` = 无从判定（无稳定配置文件、审计升级来的）。 */
   hasClientId?: boolean;
+  /** 条目里实际读到、但与本客户端 id 不符的身份头值（2026-11-28：Zcode 配置里曾写成 deepseek-harness，
+   *  服务端会把调用记到别的客户端名下）——UI 据此显示「不符」而不是笼统的「缺失」。不含凭据。 */
+  foundClientId?: string;
   /** 配置文件原本带 BOM/JSONC 注释/尾逗号，读取时无损规范化后才能解析。
    *  `true` = 一键接入会把规范化结果固化写回（自动备份原文件），用户不用手工改。 */
   repairable?: boolean;
@@ -185,6 +189,12 @@ function extractStoredBearer(format: McpClientSpec['format'], text: string | nul
     const sec = new RegExp(`\\[mcp_servers\\.${esc}\\]([\\s\\S]*?)(?=\\n\\[|$)`).exec(text)?.[1] ?? '';
     return /Authorization\s*=\s*"Bearer\s+([^"]+)"/i.exec(sec)?.[1]?.trim() ?? null;
   }
+  if (format === 'yaml') {
+    // 插件式 YAML（deepseek harness）：令牌可能写成 `Authorization: Bearer <token>`，也可能是
+    // `Bearer` 换行 + 缩进令牌——两种都认，取到即返回（只用于与当前令牌比对，不外传）
+    const m = /Authorization:\s*Bearer\s+([^\s#]+)/.exec(text);
+    return m?.[1]?.trim() ?? null;
+  }
   return null;
 }
 
@@ -264,7 +274,10 @@ export function scanMcpClients(options: {
     // initialize 自报名」归并识别调用方，通用 UA（Node/Electron 都是 `node`）下会跨客户端串号。
     // 状态仍是 wired（不骗「未接入」），只补一条可修复的说明。
     if (state === 'wired' && probe.hasClientId === false) {
-      note = `${spec.note ? `${spec.note}；` : ''}缺显式身份头 ${MCP_CLIENT_HEADER_NAME}：能调用但身份按 UA 归并（多客户端共用通用 UA 时会串号）——点「补身份头」写入`;
+      const wrong = probe.foundClientId
+        ? `配置里写的是 ${MCP_CLIENT_HEADER_NAME}: ${probe.foundClientId}（不是本客户端 id，服务端会把调用记到别的客户端名下）`
+        : `缺显式身份头 ${MCP_CLIENT_HEADER_NAME}`;
+      note = `${spec.note ? `${spec.note}；` : ''}${wrong}——点「补身份头」按本客户端 id 重写`;
     }
     // stdio 零维护形态：令牌不在配置里，轮换后无需重写（这类客户端没有「令牌过期」这一说）
     if (state === 'wired' && probe.transport === 'stdio') {
@@ -281,6 +294,7 @@ export function scanMcpClients(options: {
       ...(read.normalized ? { repairable: true } : {}),
       ...(probe.transport ? { transport: probe.transport } : {}),
       ...(probe.hasClientId !== undefined ? { hasClientId: probe.hasClientId } : {}),
+      ...(probe.foundClientId ? { foundClientId: probe.foundClientId } : {}),
       ...(probe.disabled === true ? { disabled: true } : {}),
       ...(note !== undefined ? { note } : {}),
       ...(probe.foundUrl ? { foundUrl: probe.foundUrl } : {}),
@@ -328,10 +342,22 @@ export function snippetForClient(
   return renderMcpSnippet(spec, endpoint, token, stdio);
 }
 
+/** 宿主继承关系（无独立配置面、随宿主下发，如 deepseek harness ← Qoder CN）；未知 id 返回 undefined。
+ *  main.ts 用它给「实测连通」标口径（宿主的令牌 ⇒ via='host'）。 */
+export function inheritedHostOf(id: string): string | undefined {
+  try {
+    return specOfMcpClient(id).inheritsFrom;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * 读某客户端配置里存的令牌（2026-11-18，实测连通列用）。
  * **仅主进程内部使用**：令牌只用来打一次 tools/list，绝不进 IPC 返回值、绝不落日志。
- * 无稳定配置文件（configPath=null，如 Zcode/DSH）→ null，UI 如实显示「—」而不是拿现役令牌冒充。
+ * 无稳定配置文件（configPath=null）→ 宿主继承客户端返回宿主的令牌（deepseek harness ← Qoder，
+ * 用它实测才等价于「经宿主下发后能不能调通」）；纯手工客户端（Zcode）仍返回 null，
+ * UI 那时用现役令牌实测并在口径上标「片段令牌」，不冒充它自己的配置。
  */
 export function readStoredToken(
   id: string, options: { home?: string; appData?: string } = {},
@@ -342,7 +368,11 @@ export function readStoredToken(
   } catch {
     return null;
   }
-  if (!spec.configPath) return null;
+  // 无稳定配置文件：宿主继承客户端（deepseek harness ← Qoder）的令牌就是宿主的令牌，
+  // 用它实测才等价于「本客户端经宿主下发后能不能调通」；纯手工客户端（Zcode）仍无令牌可读。
+  if (!spec.configPath) {
+    return spec.inheritsFrom ? readStoredToken(spec.inheritsFrom, options) : null;
+  }
   const home = options.home ?? homedir();
   const appData = options.appData ?? process.env.APPDATA ?? join(home, 'AppData', 'Roaming');
   const path = expandHome(spec.configPath, home, appData);
@@ -420,7 +450,9 @@ export function wireMcpClient(
   try {
     merged = spec.format === 'toml'
       ? mergeMcpTomlConfig(read.text, spec, endpoint, token, stdio)
-      : mergeMcpJsonConfig(read.text, spec, endpoint, token, stdio);
+      : spec.format === 'yaml'
+        ? mergeMcpYamlConfig(read.text, spec, endpoint, token)
+        : mergeMcpJsonConfig(read.text, spec, endpoint, token, stdio);
   } catch (e) {
     return { ok: false, error: String((e as Error)?.message ?? e) };
   }

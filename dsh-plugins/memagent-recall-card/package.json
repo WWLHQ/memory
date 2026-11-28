@@ -1,0 +1,21 @@
+{
+  "name": "@local/memagent-recall-card",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "DSH 会话里把 MultiAgent Memory 的 recall_memory 结果渲染成一张默认收起的折叠卡（React 组件，绕开 Markdown 不能渲染 HTML 的限制）。",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./icon": "./icon.svg"
+  },
+  "files": ["index.js", "client.js", "cordis.patch.yml", "icon.svg"],
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": []
+    }
+  }
+}
