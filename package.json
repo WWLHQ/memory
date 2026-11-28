@@ -30,8 +30,9 @@
     "code:index": "node tools/code-index.mjs",
     "code:index:check": "node tools/code-index.mjs --check",
     "check:no-demo": "node tools/check-no-demo.mjs",
+    "check:test-noise": "node tools/check-test-noise.mjs",
     "rejudge": "node tools/rejudge-dry.mjs",
-    "verify:fast": "npm run typecheck && npm run lint && npm run test:tools && npm run code:index:check && npm run check:no-demo && npm run test:coverage",
+    "verify:fast": "npm run typecheck && npm run lint && npm run test:tools && npm run code:index:check && npm run check:no-demo && npm run check:test-noise && npm run test:coverage",
     "verify": "npm run verify:fast && npm run build:electron && npm run test:e2e"
   },
   "devDependencies": {
