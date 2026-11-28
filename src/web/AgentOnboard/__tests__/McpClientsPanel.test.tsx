@@ -179,6 +179,73 @@ describe('McpClientsPanel', () => {
     expect(screen.queryByText('Cursor')).toBeNull();
   });
 
+  test('仅残留目录的客户端不进已安装清单，单列为「仅发现残留目录」', async () => {
+    mockRole('admin');
+    const scan = {
+      ...SCAN,
+      clients: [
+        ...SCAN.clients.slice(0, 1),
+        baseRow({
+          id: 'cursor', name: 'Cursor', badge: 'p3', displayPath: '~/.cursor/mcp.json',
+          installed: true, installEvidence: 'marker', state: 'missing_entry',
+        }),
+      ],
+    };
+    setHost({ list: () => Promise.resolve(scan) });
+    render(<McpClientsPanel />);
+    await waitFor(() => expect(screen.getByTestId('state-qoder-cn').textContent).toBe('已接入'));
+    expect(document.querySelectorAll('#mcp-client-rows tr[data-client]')).toHaveLength(1);
+    expect(document.querySelector('[data-client="cursor"]')).toBeNull();
+    const trace = screen.getByTestId('mcp-trace-only');
+    expect(trace.textContent).toContain('Cursor');
+    expect(trace.textContent).toContain('不计入上面「已安装」清单');
+  });
+
+  test('检出数与清单同口径：无配置文件路径的痕迹客户端（Zcode / deepseek harness）也是真安装，必须进清单', async () => {
+    mockRole('admin');
+    const scan = {
+      endpoint: SCAN.endpoint,
+      scannedAt: Date.UTC(2026, 0, 1, 0, 0, 0),
+      clients: [
+        ...SCAN.clients.filter((c) => c.installed !== false),
+        // 无稳定配置文件（configPath=null）→ 只能是 marker；但客户端确实装了，必须进清单按「需手工」呈现
+        baseRow({
+          id: 'zcode', name: 'Zcode', badge: 'p3', displayPath: null, path: null,
+          writable: false, installEvidence: 'marker', state: 'manual',
+        }),
+        baseRow({
+          id: 'deepseek-harness', name: 'deepseek harness', badge: 'p0', displayPath: null, path: null,
+          writable: false, installEvidence: 'marker', state: 'manual',
+        }),
+        // 本该有配置文件却读不到 → 这才是「仅痕迹 · 可能已卸载」，不进清单
+        baseRow({
+          id: 'cursor', name: 'Cursor', badge: 'p3', displayPath: '~/.cursor/mcp.json',
+          installEvidence: 'marker', state: 'missing_entry',
+        }),
+      ],
+    };
+    setHost({ list: () => Promise.resolve(scan) });
+    render(<McpClientsPanel />);
+    await waitFor(() => expect(screen.getByTestId('state-qoder-cn').textContent).toBe('已接入'));
+
+    // 清单 6 行（含两个无配置文件路径的），用户说的「本来就有 8 个」不再被吃掉 2 个
+    expect(document.querySelectorAll('#mcp-client-rows tr[data-client]')).toHaveLength(6);
+    expect(document.querySelector('[data-client="zcode"]')).toBeTruthy();
+    expect(document.querySelector('[data-client="deepseek-harness"]')).toBeTruthy();
+    // 真·残留目录只出现在弱提示里
+    expect(document.querySelector('[data-client="cursor"]')).toBeNull();
+    const trace = screen.getByTestId('mcp-trace-only');
+    expect(trace.textContent).toContain('Cursor');
+    expect(trace.textContent).not.toContain('Zcode');
+    expect(trace.textContent).toContain('不计入上面「已安装」清单');
+
+    // 回执数字与清单一致：6，并把 1 个真残留单独交代
+    await userEvent.click(screen.getByRole('button', { name: '刷新状态' }));
+    await waitFor(() => expect(screen.getByTestId('mcp-message').textContent)
+      .toContain('已重新扫描：检出 6 个已安装客户端'));
+    expect(screen.getByTestId('mcp-message').textContent).toContain('另有 1 个仅安装痕迹、配置缺失，不计入清单');
+  });
+
   test('扫描成功但未检出任何客户端 → 诚实空态（不列未安装客户端）', async () => {
     mockRole('admin');
     setHost({ list: () => Promise.resolve({ endpoint: SCAN.endpoint, clients: [] }) });
@@ -354,6 +421,31 @@ describe('McpClientsPanel', () => {
     expect(cursorBtn.disabled).toBe(true);
   });
 
+  test('无法解析：状态旁给「怎么处理」按钮，点开显示路径、真实错误与修复步骤', async () => {
+    mockRole('admin');
+    setHost({
+      list: () => Promise.resolve({
+        endpoint: SCAN.endpoint,
+        clients: [baseRow({
+          id: 'cursor', name: 'Cursor', badge: 'p3', displayPath: '~/.cursor/mcp.json',
+          state: 'invalid', error: "Unexpected token '1', '1m'... is not valid JSON",
+        })],
+      }),
+    });
+    render(<McpClientsPanel />);
+    await waitFor(() => expect(screen.getByTestId('state-cursor').textContent).toContain('无法解析'));
+    expect(screen.queryByTestId('fix-hint-cursor')).toBeNull();
+
+    await userEvent.click(screen.getByTestId('fix-hint-btn-cursor'));
+    const hint = screen.getByTestId('fix-hint-cursor').textContent ?? '';
+    expect(hint).toContain('怎么处理');
+    expect(hint).toContain('~/.cursor/mcp.json');
+    expect(hint).toContain('JSON 语法');
+    expect(hint).toContain("Unexpected token '1'");
+    expect(hint).toContain('刷新状态');
+    expect(hint).toContain('一键接入');
+  });
+
   test('普通成员：复制/写入均禁用并提示需管理员', async () => {
     mockRole('member');
     setHost({ list: () => Promise.resolve(SCAN) });
@@ -391,24 +483,60 @@ describe('McpClientsPanel', () => {
     expect((document.querySelector('[data-act="mcp-wire"]') as HTMLButtonElement).disabled).toBe(true);
   });
 
-  test('桌面客户端卡片显示运行态：已启动 / 未启动；CLI 无进程面不显示', async () => {
+  test('客户端第一列统一三行：名称 / 形态+启动态（未启动紧跟 HTTP）/ 实测；CLI 无进程面如实说「不可测」', async () => {
     mockRole('admin');
     setHost({
       list: () => Promise.resolve({
         endpoint: SCAN.endpoint,
         clients: [
-          baseRow({ id: 'workbuddy', name: 'WorkBuddy', badge: 'p0', displayPath: '~/.workbuddy/mcp.json', state: 'wired', hasAuth: true, running: true }),
-          baseRow({ id: 'qoder-cn', name: 'Qoder CN', badge: 'p3', displayPath: '~/.qoder-cn/settings.json', state: 'wired', hasAuth: true, running: false }),
-          baseRow({ id: 'claude-code', name: 'Claude Code', badge: 'p1', displayPath: '~/.claude.json', state: 'wired', hasAuth: true }),
+          baseRow({ id: 'workbuddy', name: 'WorkBuddy', badge: 'p0', displayPath: '~/.workbuddy/mcp.json', state: 'wired', hasAuth: true, transport: 'http', running: true, live: { ok: true, status: 200, tools: 14, at: Date.UTC(2026, 0, 1, 0, 0, 0) } }),
+          baseRow({ id: 'qoder-cn', name: 'Qoder CN', badge: 'p3', displayPath: '~/.qoder-cn/settings.json', state: 'wired', hasAuth: true, transport: 'stdio', running: false }),
+          baseRow({ id: 'claude-code', name: 'Claude Code', badge: 'p1', displayPath: '~/.claude.json', state: 'wired', hasAuth: true, transport: 'http' }),
+          // 未接入：形态未定，也要占住三个槽位，保证每行格式一致
+          baseRow({ id: 'cursor', name: 'Cursor', badge: 'p3', displayPath: '~/.cursor/mcp.json', state: 'missing_entry' }),
         ],
       }),
     });
     render(<McpClientsPanel />);
     await waitFor(() => expect(screen.getByTestId('state-workbuddy').textContent).toBe('已接入'));
-    await waitFor(() => expect(screen.getByTestId('run-workbuddy').textContent).toBe('已启动'));
+
+    // 每个客户端都必须是同一个三行结构（不允许某些行少一行、也不允许名称把徽标挤到同一行）
+    for (const id of ['workbuddy', 'qoder-cn', 'claude-code', 'cursor']) {
+      const cell = screen.getByTestId(`client-${id}`);
+      expect(cell.className).toContain('af-client');
+      const rows = cell.querySelectorAll(':scope > div');
+      expect(rows).toHaveLength(3);
+      expect(rows[0].className).toContain('af-client-name');
+      expect(rows[1].className).toContain('af-client-form');
+      expect(rows[2].className).toContain('af-client-meta');
+      // 2026-11-28 用户要求（按截图对齐）：第一行只放名称；第二行 = 形态 + 启动态；第三行 = 实测
+      expect(rows[0].querySelector('b')?.textContent).toBeTruthy();
+      expect(rows[0].querySelector(`[data-testid="transport-${id}"]`)).toBeNull();
+      expect(rows[0].querySelector(`[data-testid="run-${id}"]`)).toBeNull();
+      expect(rows[1].querySelector(`[data-testid="transport-${id}"]`)).toBeTruthy();
+      expect(rows[1].querySelector(`[data-testid="run-${id}"]`)).toBeTruthy();
+      // 2026-11-28 用户要求：启动态排在形态之前（「已启动」在「HTTP 直连」上面）
+      const formKids = Array.from(rows[1].children) as HTMLElement[];
+      expect(formKids[0].getAttribute('data-testid')).toBe(`run-${id}`);
+      expect(formKids[1].getAttribute('data-testid')).toBe(`transport-${id}`);
+      expect(rows[2].querySelector(`[data-testid="live-${id}"]`)).toBeTruthy();
+      expect(rows[2].querySelector(`[data-testid="run-${id}"]`)).toBeNull();
+    }
+
+    expect(screen.getByTestId('transport-workbuddy').textContent).toBe('HTTP 直连');
+    expect(screen.getByTestId('transport-qoder-cn').textContent).toBe('stdio 免令牌');
+    expect(screen.getByTestId('transport-cursor').textContent).toBe('形态未定');
+    expect(screen.getByTestId('run-workbuddy').textContent).toBe('已启动');
     expect(screen.getByTestId('run-qoder-cn').textContent).toBe('未启动');
-    // CLI 无稳定进程面 → 不显示运行态，绝不误报「未启动」
-    expect(screen.queryByTestId('run-claude-code')).toBeNull();
+    // CLI 无稳定进程面 → 不可测，绝不误报「未启动」
+    expect(screen.getByTestId('run-claude-code').textContent).toBe('不可测');
+    expect(screen.getByTestId('run-claude-code').getAttribute('title')).toContain('不臆测');
+
+    // 2026-11-28 用户要求：HTTP 连接成功也要绿色（判据只认实测 tools/list 成功）
+    expect(screen.getByTestId('transport-workbuddy').className).toContain('ok');
+    expect(screen.getByTestId('transport-workbuddy').getAttribute('title')).toContain('实测已连通');
+    // 没实测过的 HTTP 行不得假装绿色
+    expect(screen.getByTestId('transport-claude-code').className).not.toContain('ok');
   });
 
   test('管理员：复制片段 → 展示一次性片段并写剪贴板（含令牌不外泄到日志）', async () => {
@@ -533,8 +661,8 @@ describe('批次41-X 显式身份头（面板补写口径）', () => {
       }),
     });
     render(<McpClientsPanel />);
-    await waitFor(() => expect(screen.getByTestId('transport-qoder-cn').textContent).toBe('stdio 零维护'));
-    expect(screen.getByTestId('transport-claude-code').textContent).toBe('HTTP');
+    await waitFor(() => expect(screen.getByTestId('transport-qoder-cn').textContent).toBe('stdio 免令牌'));
+    expect(screen.getByTestId('transport-claude-code').textContent).toBe('HTTP 直连');
     // stdio 行的指引要说清「令牌轮换/数据根搬家都不用改配置」，而不是笼统「无需操作」
     expect(screen.getByTestId('guide-qoder-cn').textContent).toContain('零维护');
   });
@@ -565,7 +693,7 @@ describe('批次41-X 显式身份头（面板补写口径）', () => {
       }),
     });
     render(<McpClientsPanel />);
-    await waitFor(() => expect(screen.getByTestId('transport-qoder-cn').textContent).toBe('stdio 零维护'));
+    await waitFor(() => expect(screen.getByTestId('transport-qoder-cn').textContent).toBe('stdio 免令牌'));
     expect(screen.queryByTestId('stdio-qoder-cn')).toBeNull();
     expect(screen.queryByTestId('stdio-cursor')).toBeNull();
     expect(screen.queryByTestId('stdio-gemini-cli')).toBeNull();
@@ -579,12 +707,69 @@ describe('批次41-X 显式身份头（面板补写口径）', () => {
     await waitFor(() => expect(screen.getByTestId('state-qoder-cn').textContent).toBe('已接入'));
     // SCAN 里可写的三个（qoder-cn / claude-code / codex）都是 HTTP 形态 → 全部计入
     const all = screen.getByTestId('mcp-stdio-all') as HTMLButtonElement;
-    expect(all.textContent).toContain('全改 stdio（3）');
+    expect(all.textContent).toContain('全部改用免令牌（3）');
     await userEvent.click(all);
     await waitFor(() => expect(wire).toHaveBeenCalledTimes(3));
     for (const id of ['qoder-cn', 'claude-code', 'codex']) {
       expect(wire).toHaveBeenCalledWith(id, 'sid_test', 'stdio');
     }
-    await waitFor(() => expect(screen.getByTestId('mcp-message').textContent).toContain('改用 stdio 完成'));
+    await waitFor(() => expect(screen.getByTestId('mcp-message').textContent).toContain('全部改用免令牌完成'));
+  });
+});
+
+describe('McpClientsPanel · 一键修复配置格式（BOM/注释/尾逗号）', () => {
+  test('可修复行：显示「格式可一键修复」徽标 + 「一键修复并接入」按钮，点击走写入并回显修复结果', async () => {
+    mockRole('admin');
+    const wire = vi.fn(async () => ({ ok: true, changed: true, repaired: true, backupPath: '~/.cursor/mcp.json.bak-1' }));
+    setHost({
+      list: () => Promise.resolve({
+        endpoint: SCAN.endpoint,
+        clients: [baseRow({
+          id: 'cursor', name: 'Cursor', badge: 'p3', displayPath: '~/.cursor/mcp.json',
+          state: 'missing_entry', repairable: true,
+        })],
+      }),
+      wire,
+    });
+    render(<McpClientsPanel />);
+    await waitFor(() => expect(screen.getByTestId('repairable-cursor')).toBeInTheDocument());
+    expect(screen.getByTestId('repairable-cursor').textContent).toContain('格式可一键修复');
+
+    const guide = screen.getByTestId('guide-cursor').textContent ?? '';
+    expect(guide).toContain('一键修复并接入');
+    expect(guide).toContain('无需手工改文件');
+
+    const row = document.querySelector('[data-client="cursor"]') as HTMLElement;
+    const btn = row.querySelector('[data-act="mcp-wire"]') as HTMLButtonElement;
+    expect(btn.disabled).toBe(false);
+    expect(btn.textContent).toContain('一键修复并接入');
+    expect(btn.title).toContain('BOM');
+
+    await userEvent.click(btn);
+    await waitFor(() => expect(wire).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByTestId('mcp-message').textContent).toContain('修复配置格式'));
+  });
+});
+
+describe('McpClientsPanel · 已接入但需修格式（wired + repairable）', () => {
+  test('按钮必须是可点的主按钮：disabled=false 且不用 .off 灰样式（否则用户以为选不了）', async () => {
+    mockRole('admin');
+    setHost({
+      list: () => Promise.resolve({
+        endpoint: SCAN.endpoint,
+        clients: [baseRow({
+          id: 'qoder-cn', name: 'Qoder CN', badge: 'p3', displayPath: '~/.qoder-cn/settings.json',
+          state: 'wired', hasAuth: true, repairable: true,
+        })],
+      }),
+    });
+    render(<McpClientsPanel />);
+    await waitFor(() => expect(screen.getByTestId('repairable-qoder-cn')).toBeInTheDocument());
+    const btn = screen.getByTestId('wire-qoder-cn') as HTMLButtonElement;
+    expect(btn.textContent).toContain('一键修复并接入');
+    expect(btn.disabled).toBe(false);
+    expect(btn.className).toContain('pri');
+    expect(btn.className).not.toContain('off');
+    expect(btn.title).toContain('BOM');
   });
 });

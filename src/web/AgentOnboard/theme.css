@@ -124,6 +124,16 @@ html[data-theme="dark"] body { background: #060B16; color: #E4EDF8; }
 .af-table tr:last-child td { border-bottom: 0; }
 .af-table .num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .af-scrollx { overflow-x: auto; }
+/* 客户端单元格（2026-11-28 用户要求：所有接入 Agent 统一成固定两行）
+   第一行 = 名称 + 接入形态（HTTP / stdio 零维护 / 形态未定）；第二行 = 实测连通 + 启动态。
+   列宽窄时整块换行，不把两行挤成一行。 */
+.af-client { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; min-width: 0; }
+/* 2026-11-28：统一成固定三行——名称独占一行、形态+启动态一行、实测一行，
+   行与行在同一列上对齐（名称长短不同也不会把徽标挤到不同高度） */
+.af-client .af-client-name { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; row-gap: 4px; }
+.af-client .af-client-form { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; row-gap: 4px; }
+.af-client .af-client-meta { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.af-client b { font-weight: 600; }
 /* 2026-11-22：展开的「详情 · 触发规则」行与下方「操作说明」卡同宽同边距（视觉成一列） */
 .aob-detail-row > td { padding: 0 0 9px; }
 /* 2026-11-22 用户反馈：最后一条详情行与「操作说明」之间的空隙偏大——去掉行底留白，

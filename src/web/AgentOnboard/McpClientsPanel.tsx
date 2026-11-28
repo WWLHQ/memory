@@ -21,6 +21,8 @@ interface ClientRow {
   writable: boolean;
   displayPath: string | null;
   installed: boolean;
+  /** config=配置文件真存在；marker=只剩安装痕迹目录（可能已卸载/残留） */
+  installEvidence?: 'config' | 'marker' | 'none';
   state: McpWireState;
   hasAuth: boolean;
   /** 条目承载方式：stdio=配置里只有启动命令（令牌零维护）/ http=令牌抄在配置里（轮换需重写） */
@@ -31,6 +33,8 @@ interface ClientRow {
   tokenState?: 'live' | 'stale' | 'unknown';
   /** 批次41-X：配置里是否带显式身份头；false = 已接入但缺身份头（可点「补身份头」） */
   hasClientId?: boolean;
+  /** 配置含 BOM/注释/尾逗号，读取已无损规范化；一键接入会写回干净 JSON（无需手工改） */
+  repairable?: boolean;
   /** 客户端应用内把本服务标成已禁用（显式 true 才有）；T3 接入页据此显示「客户端已关闭」 */
   disabled?: boolean;
   /** 客户端软件当前是否在运行（T6）；仅桌面客户端有值，CLI 无值 → 不显示 */
@@ -58,6 +62,8 @@ interface WireReply {
   changed?: boolean;
   path?: string;
   backupPath?: string;
+  /** 一键接入时自动修复了配置格式（BOM/注释/尾逗号）并固化写回 */
+  repaired?: boolean;
   error?: string;
 }
 
@@ -124,18 +130,50 @@ function canStdio(row: ClientRow): boolean {
 function transportBadge(row: ClientRow): { text: string; cls: string; title: string } | null {
   if (row.transport === 'stdio') {
     return {
-      text: 'stdio 零维护', cls: 'ok',
-      title: '配置里只有启动命令（node <桥接脚本> <引导指针> <端点> <客户端id>），没有任何令牌。'
+      text: 'stdio 免令牌', cls: 'ok',
+      title: 'stdio（本地启动方式）= 客户端不直接连服务，而是启动本机的一个小程序，由它代连。'
+        + '配置里只有启动命令（node <桥接脚本> <引导指针> <端点> <客户端id>），没有任何令牌；'
         + '桥接脚本每次调用现读数据根的 keys/mcp-token.txt：令牌轮换、数据根搬家都不需要改这份配置。',
     };
   }
   if (row.transport === 'http') {
+    // 2026-11-28 用户要求：HTTP 连接成功也用绿色，别让「通了」看着像「没配好」。
+    // 判据只认实测结果（拿该客户端配置里的令牌真调过 tools/list 且成功），不认「配置里写着」。
+    const live = row.live?.ok === true;
     return {
-      text: 'HTTP', cls: '',
-      title: '令牌（Bearer）被抄进了这份客户端配置：令牌一轮换它就会 401，必须重写配置。点「改用 stdio」可改成零维护形态。',
+      text: 'HTTP 直连', cls: live ? 'ok' : '',
+      title: 'HTTP（网络直连方式）= 客户端直接请求本机地址 http://127.0.0.1:8204/mcp。'
+        + '令牌（Bearer）被抄进了这份客户端配置：令牌一轮换它就会 401，必须重写配置。'
+        + '点「改用免令牌方式」可改成免令牌形态（配置里不再有令牌）。'
+        + (live ? '当前实测已连通（用该客户端配置里的令牌调 tools/list 成功）。' : ''),
     };
   }
   return null;
+}
+
+/**
+ * 接入形态徽标（2026-11-28 用户要求「每行统一 = 名称 + 形态」）：三态恒有值。
+ * 未接入时如实说「形态未定」，不拿 HTTP 冒充（配置里还没有本服务条目，写进去才定形态）。
+ */
+function formBadge(row: ClientRow): { text: string; cls: string; title: string } {
+  return transportBadge(row) ?? {
+    text: '形态未定', cls: '',
+    title: '配置里还没有本服务条目（或配置由客户端应用托管），接入前无法判定形态；接入后这里是「HTTP 直连」或「stdio 免令牌」',
+  };
+}
+
+/** 客户端软件运行态徽标（2026-11-28 统一格式）：无可信桌面进程名的客户端如实说「不可测」，绝不用「未启动」冒充。 */
+function runBadge(row: ClientRow): { text: string; cls: string; title: string } {
+  if (row.running === true) {
+    return { text: '已启动', cls: 'ok', title: '客户端软件当前在运行（按真实进程名判定）' };
+  }
+  if (row.running === false) {
+    return { text: '未启动', cls: 'bad', title: '客户端软件当前没有在运行（按真实进程名判定）；不启动它，改了配置也不会生效' };
+  }
+  return {
+    text: '不可测', cls: '',
+    title: '该客户端没有可信的桌面进程名（CLI / 由宿主托管），不臆测成「未启动」；改动后按客户端自己的加载时机生效',
+  };
 }
 
 /**
@@ -173,6 +211,11 @@ function specOf(id: string) {
   }
 }
 
+/** 异常行的「怎么处理」：步骤来自 guideFor（同一真源），不另写一套文案 */
+function needsFixHint(row: ClientRow): boolean {
+  return row.state === 'invalid' || row.state === 'conflict';
+}
+
 /**
  * 逐客户端接通指引（批次23）：给出具体位置（设置菜单/配置文件）、条目名、端点与修复步骤。
  * 不自动写入的客户端也必须告诉用户在哪个设置里填什么，而不是只显示「需配置」。
@@ -184,6 +227,9 @@ function guideFor(row: ClientRow, endpoint: string): string {
   const key = spec?.serverKey ?? 'MultiAgent Memory';
   switch (row.state) {
     case 'wired':
+      if (row.repairable) {
+        return `配置含 BOM/注释/尾逗号（读取已无损规范化）：点本行「一键修复并接入」自动备份后写回干净 JSON，无需手工改文件；重启该客户端后生效`;
+      }
       if (row.transport === 'stdio') {
         return '已用 stdio 零维护形态接入：配置里只有启动命令（令牌不在其中），桥接脚本每次调用现读令牌——令牌轮换、数据根搬家都不用改这份配置，重启客户端即生效';
       }
@@ -202,14 +248,21 @@ function guideFor(row: ClientRow, endpoint: string): string {
         : `打开 ${where}，在 ${key} 条目补请求头 Authorization: Bearer <令牌> 与 ${MCP_CLIENT_HEADER_NAME}: ${row.id}（点「复制片段」获取）`;
     case 'missing_entry':
     case 'no_config':
+      if (row.repairable && row.writable) {
+        return `配置含 BOM/注释/尾逗号（读取已无损规范化）：点本行「一键修复并接入」自动备份后写回干净 JSON 并写入 ${key} 条目，`
+          + `端点 ${endpoint}，请求头含身份头 ${MCP_CLIENT_HEADER_NAME}: ${row.id}——无需手工改文件`;
+      }
       return row.writable
         ? `点本行「一键接入」或顶部「⚡ 一键适配全部」：自动备份后写入 ${where}（条目 ${key}，端点 ${endpoint}，请求头含身份头 ${MCP_CLIENT_HEADER_NAME}: ${row.id}）`
         : `打开 ${where}，新增 HTTP MCP 服务器：名称 ${key}，URL ${endpoint}，请求头 Authorization: Bearer <令牌> 与 ${MCP_CLIENT_HEADER_NAME}: ${row.id}（点「复制片段」或「一键适配全部」生成）`;
     case 'conflict':
       return `打开 ${path}，把 ${key} 条的 URL 从 ${row.foundUrl ?? '其它端点'} 改成 ${endpoint}（或删除该条目），保存后点「刷新状态」，再点「一键接入」`;
     case 'invalid': {
+      // 真语法错误（规范化后仍解析失败）才需要人工；BOM/注释/尾逗号在扫描时已标 repairable，
+      // 那种情况 state 会被降级为 missing_entry，走「一键修复并接入」分支，不会落到这里。
       const kind = spec?.format === 'toml' ? 'TOML' : spec?.format === 'json' ? 'JSON' : '配置文件';
-      return `打开 ${where} 修复 ${kind} 语法${row.error ? `（${row.error}）` : ''}，保存后点「刷新状态」；修复前系统拒绝写入，避免改坏配置`;
+      return `打开 ${where} 修复 ${kind} 语法${row.error ? `（${row.error}）` : ''}，保存后点「刷新状态」再点本行「一键接入」；`
+        + '这类是真正损坏的语法（不是 BOM/注释/尾逗号），系统不会自动覆盖，避免改坏配置';
     }
     case 'manual':
     default:
@@ -240,6 +293,8 @@ export function McpClientsPanel({ onInstalledCount, onSummary }: {
   const [pendingList, setPendingList] = useState<string[]>(() => listMcpPending());
   /** 手动打开提示的行内展开（提示就显示在该客户端按钮旁，不甩到页面最底部） */
   const [manualHintId, setManualHintId] = useState('');
+  /** 配置异常的手工修复步骤行内展开（无法解析/冲突不能自动覆盖，必须让下一步看得见） */
+  const [fixHintId, setFixHintId] = useState('');
   /** 循环检测：上一轮的实测失败数，用于"由好变坏"时提示一次（不至于每 12 秒刷屏） */
   const lastFailedRef = useRef(0);
 
@@ -252,9 +307,15 @@ export function McpClientsPanel({ onInstalledCount, onSummary }: {
         setScan(r);
         setScanError('');
         if (opts.announce) {
-          const n = r.clients.filter((c) => c.installed).length;
+          // 2026-11-28 用户反馈「检出 8 个为什么只列 6 个」：口径必须与清单一致——
+          // 与 rows 用同一个判据（无配置文件路径的痕迹客户端也算真安装），只把「本该有配置却没有」
+          // 的残留目录排除在外并单独说明。
+          const listed = r.clients.filter((c) => c.installed && (c.installEvidence !== 'marker' || !c.displayPath)).length;
+          const traces = r.clients.filter((c) => c.installed && c.installEvidence === 'marker' && !!c.displayPath).length;
           const at = typeof r.scannedAt === 'number' ? formatClock(r.scannedAt) : formatClock(Date.now());
-          setMessage(`已重新扫描：检出 ${n} 个已安装客户端 · ${at}（UTC+08:00）`);
+          setMessage(`已重新扫描：检出 ${listed} 个已安装客户端`
+            + (traces > 0 ? `（另有 ${traces} 个仅安装痕迹、配置缺失，不计入清单）` : '')
+            + ` · ${at}（UTC+08:00）`);
         }
         // 循环检测：实测失败数「由 0 变正」→ 主动提示（令牌轮换/服务未起都会走到这里；
         // 只有真调过 tools/list 才算数，state=已接入但 401 的历史坑就是靠这条暴露的）。
@@ -290,13 +351,29 @@ export function McpClientsPanel({ onInstalledCount, onSummary }: {
   // ①其它落点改了待生效信号 → 本页立刻跟上
   useEffect(() => subscribeMcpPending(() => setPendingList(listMcpPending())), []);
 
-  /** 只展示本机真实检出（配置文件存在或安装痕迹命中）的客户端 */
+  /**
+   * 分组（2026-11-28 口径修正）：
+   * ① 有配置文件 → 真安装，进清单，可自动写入；
+   * ② 没有配置文件路径（configPath=null，如 Zcode / deepseek harness：配置存在应用内部存储）
+   *    但安装痕迹存在 → **同样是真安装**，进清单、按「需手工」呈现，只能复制片段手工粘贴；
+   * ③ 本该有配置文件路径、但文件不存在、只剩目录 → 才是「仅痕迹 · 可能已卸载」，单列弱提示。
+   * 用户反馈「本来就有 8 个客户端却只列 6 个」的根因就是 ② 被当成 ③ 一起排除了。
+   * 兼容旧回执（无 installEvidence）：installed 仍按已安装展示，避免升级窗口期清单突然空掉。
+   */
   const rows = useMemo<ClientRow[]>(
-    () => (scan ? scan.clients.filter((r) => r.installed) : []),
+    () => (scan
+      ? scan.clients.filter((r) => r.installed && (r.installEvidence !== 'marker' || !r.displayPath))
+      : []),
+    [scan],
+  );
+  const traceOnly = useMemo<ClientRow[]>(
+    () => (scan
+      ? scan.clients.filter((r) => r.installed && r.installEvidence === 'marker' && !!r.displayPath)
+      : []),
     [scan],
   );
 
-  /** 计数回调 = 本机真实检出的已安装客户端数（未知/浏览器模式为 0，不冒充定稿的 6） */
+  /** 计数回调 = 本机真实检出的已安装客户端数（与清单同口径，痕迹不计入） */
   useEffect(() => { onInstalledCount?.(rows.length); }, [rows.length, onInstalledCount]);
 
   /** 七态总览：把 McpWireState 的七个真实状态全部列出（未出现的状态如实显示 0） */
@@ -339,9 +416,10 @@ export function McpClientsPanel({ onInstalledCount, onSummary }: {
     hostCall<WireReply>('mcp:clientWire', [row.id, session.sid])
       .then((r) => {
         if (!r.ok) { setMessage(`写入失败：${r.error ?? '未知原因'}`); return; }
-        const headerOnly = row.state === 'wired';
+        const headerOnly = row.state === 'wired' && !row.repairable;
         setMessage(r.changed
-          ? `${headerOnly ? `已为 ${row.name} 补写身份头 ${MCP_CLIENT_HEADER_NAME}` : `已写入 ${row.name}`}${r.backupPath ? `（原文件已备份：${r.backupPath}）` : ''}；请重启该客户端后验证提示行`
+          ? `${headerOnly ? `已为 ${row.name} 补写身份头 ${MCP_CLIENT_HEADER_NAME}` : `已${r.repaired ? '修复配置格式（BOM/注释/尾逗号）并' : ''}写入 ${row.name}`}`
+            + `${r.backupPath ? `（原文件已备份：${r.backupPath}）` : ''}；请重启该客户端后验证提示行`
           : `${row.name} 已是最新，未改动`);
         return refresh();
       })
@@ -359,14 +437,14 @@ export function McpClientsPanel({ onInstalledCount, onSummary }: {
     setBusy(`stdio:${row.id}`);
     try {
       const r = await hostCall<WireReply>('mcp:clientWire', [row.id, session.sid, 'stdio']);
-      if (!r.ok) { setMessage(`改用 stdio 失败：${r.error ?? '未知原因'}`); return; }
+      if (!r.ok) { setMessage(`改用免令牌方式失败：${r.error ?? '未知原因'}`); return; }
       setMessage(r.changed
         ? `${row.name} 已改用 stdio 零维护形态${r.backupPath ? `（原配置已备份：${r.backupPath}）` : ''}：`
           + '配置里不再有令牌，令牌轮换/数据根搬家都不用重写；请重启该客户端后验证提示行'
         : `${row.name} 已是 stdio 形态，未改动`);
       await refresh();
     } catch (e) {
-      setMessage(`改用 stdio 失败：${String((e as Error)?.message ?? e)}`);
+      setMessage(`改用免令牌方式失败：${String((e as Error)?.message ?? e)}`);
     } finally {
       setBusy('');
     }
@@ -383,7 +461,7 @@ export function McpClientsPanel({ onInstalledCount, onSummary }: {
     let unchanged = 0;
     for (let i = 0; i < targets.length; i += 1) {
       const row = targets[i];
-      setMessage(`⇄ 正在改用 stdio：${i + 1}/${targets.length} · ${row.name}…`);
+      setMessage(`⇄ 正在改用免令牌方式：${i + 1}/${targets.length} · ${row.name}…`);
       try {
         const r = await hostCall<WireReply>('mcp:clientWire', [row.id, session.sid, 'stdio']);
         if (!r.ok) failed.push(`${row.name}（${r.error ?? '未知原因'}）`);
@@ -394,7 +472,7 @@ export function McpClientsPanel({ onInstalledCount, onSummary }: {
       }
     }
     setMessage(
-      `⇄ 改用 stdio 完成：改写 ${changed} 个 · 已是 stdio ${unchanged} 个`
+      `⇄ 全部改用免令牌完成：改写 ${changed} 个 · 已是免令牌 ${unchanged} 个`
       + (failed.length > 0 ? ` · 失败 ${failed.length} 个：${failed.join('；')}` : '')
       + '。请重启对应客户端后验证；此后令牌轮换无需再动任何客户端配置。',
     );
@@ -406,7 +484,7 @@ export function McpClientsPanel({ onInstalledCount, onSummary }: {
     row.writable
     && row.state !== 'conflict'
     && row.state !== 'invalid'
-    && (row.state !== 'wired' || needsClientId(row));
+    && (row.state !== 'wired' || needsClientId(row) || row.repairable === true);
 
   /**
    * 批次23：一键适配全部 —— 所有已安装客户端一次处理：
@@ -566,7 +644,7 @@ export function McpClientsPanel({ onInstalledCount, onSummary }: {
                   + '桥接脚本每次现读数据根的 keys/mcp-token.txt —— 此后令牌轮换 / 数据根搬家都不用重写配置（逐行备份原文件）')}
           onClick={() => { void toStdioAll(); }}
         >
-          {busy === 'stdio-all' ? '改写中…' : `⇄ 全改 stdio（${stdioTargets.length}）`}
+          {busy === 'stdio-all' ? '改写中…' : `⇄ 全部改用免令牌（${stdioTargets.length}）`}
         </button>
       </div>
 
@@ -644,7 +722,8 @@ export function McpClientsPanel({ onInstalledCount, onSummary }: {
                       ? { text: '客户端已关闭', cls: 'bad', title: '该客户端在应用内把本服务标成已禁用' }
                       : { text: STATE_BADGE[row.state], cls: STATE_LABEL[row.state].cls, title: STATE_LABEL[row.state].text };
                   const lv = liveBadge(row);
-                  const tb = transportBadge(row);
+                  const tb = formBadge(row);
+                  const rb = runBadge(row);
                   const snippet = snippets[row.id];
                   return (
                     <Fragment key={row.id}>
@@ -654,18 +733,22 @@ export function McpClientsPanel({ onInstalledCount, onSummary }: {
                         data-switch={switchPending ? 'pending' : disabledByClient ? 'off' : undefined}
                       >
                         <td>
-                          <b>{row.name}</b>
-                          {tb && <span className={`af-badge ${tb.cls}`} data-testid={`transport-${row.id}`} title={tb.title}>{tb.text}</span>}
-                          <span className={`af-badge ${lv.cls}`} data-testid={`live-${row.id}`} title={lv.title}>{lv.text}</span>
-                          {row.running !== undefined && (
-                            <span
-                              className={row.running ? 'af-badge ok' : 'af-badge bad'}
-                              data-testid={`run-${row.id}`}
-                              title="客户端软件当前是否在运行（仅桌面客户端可判定）"
-                            >
-                              {row.running ? '已启动' : '未启动'}
-                            </span>
-                          )}
+                          {/* 2026-11-28 用户要求：所有接入 Agent 统一成固定三行（与截图一致）——
+                              第一行「名称」、第二行「形态 + 启动态」（未启动紧跟 HTTP 后面）、第三行「实测工具数」。
+                              名称独占一行是为了行与行在同一列上对齐：名称长短不同也不会把徽标挤到不同高度。 */}
+                          <div className="af-client" data-testid={`client-${row.id}`}>
+                            <div className="af-client-name">
+                              <b>{row.name}</b>
+                            </div>
+                            <div className="af-client-form">
+                              {/* 2026-11-28 用户要求：启动态在前、形态在后（「已启动」在「HTTP 直连」上面） */}
+                              <span className={`af-badge ${rb.cls}`} data-testid={`run-${row.id}`} title={rb.title}>{rb.text}</span>
+                              <span className={`af-badge ${tb.cls}`} data-testid={`transport-${row.id}`} title={tb.title}>{tb.text}</span>
+                            </div>
+                            <div className="af-client-meta">
+                              <span className={`af-badge ${lv.cls}`} data-testid={`live-${row.id}`} title={lv.title}>{lv.text}</span>
+                            </div>
+                          </div>
                         </td>
                         <td className="num" title={row.displayPath ?? '无稳定配置路径'}>
                           {row.displayPath ?? '无稳定配置路径'}
@@ -674,6 +757,25 @@ export function McpClientsPanel({ onInstalledCount, onSummary }: {
                           <span className={`af-badge ${badge.cls}`} data-testid={`state-${row.id}`} title={badge.title}>
                             {badge.text}
                           </span>
+                          {row.repairable && (
+                            <span
+                              className="af-badge warn"
+                              data-testid={`repairable-${row.id}`}
+                              title="配置含 UTF-8 BOM/JSONC 注释/尾逗号，读取已无损规范化；点「一键修复并接入」自动写回干净 JSON，无需手工改文件"
+                            >
+                              格式可一键修复
+                            </span>
+                          )}
+                          {needsFixHint(row) && (
+                            <button
+                              className="af-btn sm" type="button" data-act="mcp-fix-hint"
+                              data-testid={`fix-hint-btn-${row.id}`}
+                              title="展开该客户端的具体修复位置与步骤（修复前系统拒绝写入，避免改坏配置）"
+                              onClick={() => setFixHintId(fixHintId === row.id ? '' : row.id)}
+                            >
+                              {fixHintId === row.id ? '收起处理办法' : '怎么处理'}
+                            </button>
+                          )}
                         </td>
                         <td>
                           {row.hasClientId === true ? (
@@ -701,22 +803,25 @@ export function McpClientsPanel({ onInstalledCount, onSummary }: {
                             </button>
                             {row.writable && (
                               <button
-                                className={row.state === 'wired' && !needsClientId(row) ? 'af-btn sm off' : 'af-btn sm pri'}
-                                type="button" data-act="mcp-wire"
+                                className={row.state === 'wired' && !needsClientId(row) && !row.repairable ? 'af-btn sm off' : 'af-btn sm pri'}
+                                type="button" data-act="mcp-wire" data-testid={`wire-${row.id}`}
                                 disabled={!admin || busy !== '' || !canWire(row)}
                                 title={disabledReason
-                                  || (row.state === 'wired'
-                                    ? needsClientId(row)
-                                      ? `已接入但缺显式身份头 ${MCP_CLIENT_HEADER_NAME}：备份原文件后补写该头（服务端据此识别调用方，避免多客户端串号）`
-                                      : '已接入，无需重复写入'
-                                    : row.state === 'conflict' || row.state === 'invalid'
-                                      ? '配置冲突/无法解析：请先手工修正，系统不覆盖'
-                                      : '备份原文件后合并写入本服务条目（含身份头）')}
+                                  || (row.repairable
+                                    ? '配置含 UTF-8 BOM/JSONC 注释/尾逗号：自动备份原文件后写回干净 JSON 并合并本服务条目，无需手工改配置'
+                                    : row.state === 'wired'
+                                      ? needsClientId(row)
+                                        ? `已接入但缺显式身份头 ${MCP_CLIENT_HEADER_NAME}：备份原文件后补写该头（服务端据此识别调用方，避免多客户端串号）`
+                                        : '已接入，无需重复写入'
+                                      : row.state === 'conflict' || row.state === 'invalid'
+                                        ? '配置冲突/真语法错误：系统不自动覆盖，避免改坏配置'
+                                        : '备份原文件后合并写入本服务条目（含身份头）')}
                                 onClick={() => wire(row)}
                               >
-                                {row.state === 'wired'
-                                  ? needsClientId(row) ? '补身份头' : '已接入'
-                                  : row.state === 'missing_auth' ? '补齐令牌' : '一键接入'}
+                                {row.repairable ? '一键修复并接入'
+                                  : row.state === 'wired'
+                                    ? needsClientId(row) ? '补身份头' : '已接入'
+                                    : row.state === 'missing_auth' ? '补齐令牌' : '一键接入'}
                               </button>
                             )}
                             {canStdio(row) && (
@@ -729,7 +834,7 @@ export function McpClientsPanel({ onInstalledCount, onSummary }: {
                                     + '此后令牌轮换 / 数据根搬家都不用重写这份配置（写前备份原文件）'}
                                 onClick={() => { void toStdio(row); }}
                               >
-                                {busy === `stdio:${row.id}` ? '改写中…' : '改用 stdio'}
+                                {busy === `stdio:${row.id}` ? '改写中…' : '改用免令牌方式'}
                               </button>
                             )}
                             {disabledByClient && !switchPending && row.format === 'json' && (
@@ -752,10 +857,23 @@ export function McpClientsPanel({ onInstalledCount, onSummary }: {
                               </button>
                             )}
                           </div>
+                          {disabledReason !== '' && (
+                            <div className="af-note" data-testid={`wire-block-${row.id}`}>
+                              {disabledReason === '需管理员' ? '需管理员登录后才能写入配置' : disabledReason}
+                            </div>
+                          )}
                         </td>
                       </tr>
                       <tr className="aob-detail-row">
                         <td colSpan={6}>
+                          {fixHintId === row.id && needsFixHint(row) && (
+                            <div className="af-alert warn" data-testid={`fix-hint-${row.id}`}>
+                              <b>怎么处理（{row.name}）：</b>
+                              <div>{guideFor(row, endpoint)}</div>
+                              {row.error && <div>解析错误：{row.error}</div>}
+                              <div>修复后点右上「刷新状态」复核；状态恢复为可写后再点本行「一键接入」。</div>
+                            </div>
+                          )}
                           <details className="af-det" data-testid={`detail-${row.id}`}>
                             <summary>详情 · 触发规则 / 完整指引 / 配置片段</summary>
                             <div className="det-b af-stack" style={{ gap: 6 }}>
@@ -807,6 +925,14 @@ export function McpClientsPanel({ onInstalledCount, onSummary }: {
           </div>
         )}
 
+        {traceOnly.length > 0 && (
+          <div className="af-note" data-testid="mcp-trace-only" style={{ marginTop: 10 }}>
+            <b>仅安装痕迹（{traceOnly.length}）：</b>
+            {traceOnly.map((r) => r.name).join('、')}
+            —— 这本该有配置文件却读不到（只剩目录），可能已卸载或配置被删；不计入上面「已安装」清单，也不参与接入状态计数。
+          </div>
+        )}
+
         <details className="af-det" data-testid="mcp-actions-help">
           <summary>操作说明与实测连通口径</summary>
           <div className="det-b">
@@ -822,7 +948,7 @@ export function McpClientsPanel({ onInstalledCount, onSummary }: {
               <b>一键接入</b>：管理员专用，先备份再合并写入，支持 JSON（Qoder / Claude Code / Cursor / Gemini / Qwen）与 TOML（Codex）；
               <b>一键适配全部</b>：一次处理所有已安装客户端——可写的自动备份写入，无法自动写入的自动生成片段并给出具体接通位置与步骤；
               配置冲突/无法解析时拒绝覆盖。
-              <b>改用 stdio / ⇄ 全改 stdio</b>（2026-11-18）：把客户端配置改成「只写启动命令」
+              <b>改用免令牌方式 / ⇄ 全部改用免令牌</b>（2026-11-18）：把客户端配置从「HTTP 直连 + 令牌抄在配置里」改成「只写启动命令」
               node &lt;桥接脚本&gt; &lt;引导指针&gt; &lt;端点&gt; &lt;客户端id&gt;——
               配置里<b>不再有令牌</b>，桥接脚本每次调用现读数据根的 keys/mcp-token.txt，
               所以<b>令牌轮换、数据根搬家都不用重写任何客户端配置</b>（脚本落在引导指针同目录，路径本身也不随数据根漂移）。
