@@ -5,14 +5,14 @@ import { findParamsSnapshot } from './paramsSnapshot.ts';
 import { projectInScope, DEFAULT_MCP_ACCOUNT, type McpAccount } from './mcpAuth.ts';
 import { RECALL_DETAIL_TTL_MS } from './recallDetailTickets.ts';
 import {
-  buildRecallCardData, buildRecallCompactMarkdown, buildRecallDetailPage, buildRecallHint, buildRecallMarkdown,
+  buildRecallBubbleMarkdown, buildRecallCardData, buildRecallCompactMarkdown, buildRecallDetailPage, buildRecallHint, buildRecallMarkdown,
   normalizeUnitPrice, rollupRecalls,
   type RecallCardData, type RecallMoney, type RecallRollup,
 } from './recallInsight.ts';
 import { growthCardSummary } from './mcpGrowthTools.ts';
 
 /** 批次32-C：聊天窗口明细档位（HTML 折叠 / 纯 Markdown 四小节 / 短摘要 + 按需展开） */
-export type RecallDisplayMode = 'html-details' | 'markdown-full' | 'markdown-compact';
+export type RecallDisplayMode = 'bubble-details' | 'html-details' | 'markdown-full' | 'markdown-compact';
 
 /**
  * 2026-11-21：富媒体宿主判定——只有这些能渲染组件卡片的宿主才下发 display.card 结构化数据。
@@ -158,7 +158,7 @@ export interface RecallToolPayload extends RecallResult {
  * TTL 单一真源 = RECALL_DETAIL_TTL_MS：服务端须用默认 TTL 构造票据表，页面里写的「多少分钟内有效」才与实际一致。
  */
 export interface RecallDetailTicketsPort {
-  issue(payload: string, now?: number): { id: string; expiresAt: number };
+  issue(payload: import('./recallDetailTickets.ts').RecallDetailPayload, now?: number): { id: string; expiresAt: number };
 }
 
 export interface RecallToolDetailOpts {
@@ -253,6 +253,9 @@ export async function runRecallTool(
   let markdown: string;
   if (mode === 'html-details') {
     markdown = buildRecallMarkdown(recall, hint, price, { htmlDetails: true });
+  } else if (mode === 'bubble-details') {
+    // 2026-11-26 气泡档（实机测试）：真 <details> 折叠块，默认收起；只给显式声明 X-Memagent-Render: fold 的客户端。
+    markdown = buildRecallBubbleMarkdown(recall, hint, price);
   } else if (mode === 'markdown-full') {
     markdown = buildRecallMarkdown(recall, hint, price, { htmlDetails: false });
   } else if (detail) {
@@ -265,7 +268,10 @@ export async function runRecallTool(
       issuedAt: stamp,
       expiresAt: stamp + RECALL_DETAIL_TTL_MS,
     });
-    const ticket = detail.tickets.issue(page, stamp);
+    const ticket = detail.tickets.issue({
+      html: page,
+      memIds: recall.hits.map((h) => h.mem_id),
+    }, stamp);
     detailUrl = `${detail.base}/recall/${ticket.id}`;
     markdown = buildRecallCompactMarkdown(hint, detailUrl);
   } else {
@@ -297,14 +303,20 @@ function detailRequested(args: Record<string, unknown>): boolean {
 }
 
 /**
- * 档位判定（批次32-C，用户拍板「DSH 里记忆库信息要折叠，点开才看明细」）：
- * 实测能渲染 <details> 的客户端仍给 HTML 折叠版（点开即看，无需二次调用）；
- * 其余客户端（DSH 只渲染 Markdown，没有可点击折叠控件）默认一行摘要，明细靠 detail=true 再取。
- * 2026-11-12（T8）：`renderFold` = 客户端**自己声明**能渲染折叠（请求头 X-Memagent-Render: fold），
- * 声明优先于名字判定 —— 「其他 agent 也按 Qoder 的折叠效果」靠这条通道落地，不必逐个实测/硬编码。
+ * 档位判定（批次32-C 建，2026-11-26 扩为四档）：
+ * ① bubble-details —— 客户端**自己声明**能渲染折叠（请求头 X-Memagent-Render: fold，如 DSH 桌面端）
+ *    拿**真** <details>/<summary> 折叠块；声明优先于名字判定，不必逐个实测/硬编码（2026-11-12 T8 通道）。
+ * ② html-details —— 白名单客户端（qoder 系）拿纯 Markdown 摘要 + 统计汇总 + [n] 依据 + 四段平铺
+ *    （2026-11-21 用户拍板「禁止用 HTML」后本档已零 HTML 标签，折叠交给客户端气泡卡）。
+ * ③ markdown-full —— detail=true 时的纯 Markdown 四小节明细。
+ * ④ markdown-compact —— 其余客户端默认只给一整行摘要，明细靠 detail=true 再取。
+ * 只有 bubble-details 含 HTML 折叠标签；其余三档一律零 HTML（见 recallInsight.test.ts 的反向断言）。
  */
 export function recallDisplayMode(client: string | undefined, detail: boolean, renderFold = false): RecallDisplayMode {
-  if (renderFold || clientSupportsHtmlDetails(client)) return 'html-details';
+  // 2026-11-26 气泡档（实机测试）：显式声明「能渲染折叠」的客户端拿**真** <details> 折叠块。
+  // 与白名单客户端的 html-details（2026-11-21 起已改为零 HTML 纯 Markdown）分开，避免连锁改动既有契约。
+  if (renderFold) return 'bubble-details';
+  if (clientSupportsHtmlDetails(client)) return 'html-details';
   return detail ? 'markdown-full' : 'markdown-compact';
 }
 

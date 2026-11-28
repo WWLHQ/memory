@@ -373,6 +373,53 @@ describe('MCP HTTP（批次2 信任边界）', () => {
     expect(code).toBe(403);
   });
 
+  it('建议①：明细页就地反馈 POST 真写入（票据 + mem_id 白名单 + 同源 Origin 闸门）', async () => {
+    // 先召回拿票据与命中 mem_id
+    const r = await call(
+      { jsonrpc: '2.0', id: 960, method: 'tools/call', params: { name: 'recall_memory', arguments: { query: 'MCP HTTP 写入测试' } } },
+      { Authorization: `Bearer ${TOKEN}` },
+    );
+    const body = (await r.json()) as { result: { structuredContent: { display: { detail_url: string | null }; hits: Array<{ mem_id: string }> } } };
+    const ticketId = body.result.structuredContent.display.detail_url?.match(/\/recall\/([A-Za-z0-9_-]{16,32})/)?.[1] ?? '';
+    expect(ticketId).not.toBe('');
+    const memId = body.result.structuredContent.hits?.[0]?.mem_id ?? '';
+    expect(memId).not.toBe('');
+
+    const feedbackUrl = `http://${hostHeader}/recall/${ticketId}/feedback`;
+    const origin = `http://${hostHeader}`;
+    const post = (url: string, o: string, payload: unknown) => fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', Origin: o },
+      body: JSON.stringify(payload),
+    });
+
+    // 合法写入：confirm → 真落库（memory_op 审计增加 + 回执 ok:true）
+    const auditsBefore = (await storage.queryAudit({ action: 'memory_op' })).length;
+    const ok = await post(feedbackUrl, origin, { mem_id: memId, verdict: 'confirm' });
+    expect(ok.status).toBe(200);
+    const okBody = (await ok.json()) as { ok: boolean; mem_id: string; verdict: string };
+    expect(okBody.ok).toBe(true);
+    expect(okBody.mem_id).toBe(memId);
+    expect(okBody.verdict).toBe('confirm');
+    expect((await storage.queryAudit({ action: 'memory_op' })).length).toBeGreaterThan(auditsBefore);
+
+    // 非法 verdict → 400（不写库）
+    const badVerdict = await post(feedbackUrl, origin, { mem_id: memId, verdict: 'bogus' });
+    expect(badVerdict.status).toBe(400);
+
+    // 非法 mem_id（不在本次召回白名单）→ 400（防持票者给任意记忆写反馈）
+    const badMem = await post(feedbackUrl, origin, { mem_id: 'mem_not_in_this_recall_ticket', verdict: 'confirm' });
+    expect(badMem.status).toBe(400);
+
+    // 跨 Origin → 403（顶层放行到本分支后，分支内严格校验同源）
+    const evil = await post(feedbackUrl, 'http://evil.example', { mem_id: memId, verdict: 'confirm' });
+    expect(evil.status).toBe(403);
+
+    // 票据不存在/已过期 → 404
+    const ghost = await post(`http://${hostHeader}/recall/${'z'.repeat(22)}/feedback`, origin, { mem_id: memId, verdict: 'confirm' });
+    expect(ghost.status).toBe(404);
+  });
+
   it('recall 置 detail=true → 纯 Markdown 四小节明细（零 HTML 标签，数字与摘要同源）', async () => {
     const r = await call(
       {
@@ -723,16 +770,25 @@ describe('MCP HTTP（批次2 信任边界）', () => {
   });
 
   // ── 2026-11-12（T8）：能力声明头 X-Memagent-Render: fold ────────────────────
-  it('T8：不在白名单的客户端声明 X-Memagent-Render: fold 就拿到折叠档；不声明仍是 compact', async () => {
+  it('T8：不在白名单的客户端声明 X-Memagent-Render: fold 就拿到气泡折叠档（真 <details>）；不声明仍是 compact', async () => {
     const base = { Authorization: `Bearer ${TOKEN}`, 'User-Agent': 'node', 'X-Memagent-Client': 'claude-code' };
     const recall = (id: number) => ({
       jsonrpc: '2.0', id, method: 'tools/call',
       params: { name: 'recall_memory', arguments: { project_id: 'P1', query: 'T8 能力声明折叠' } },
     });
     const withFold = await call(recall(180), { ...base, [MCP_RENDER_HEADER]: 'fold' });
-    const bf = (await withFold.json()) as { result: { structuredContent: { display: { mode: string } } } };
-    // claude-code 本身不在白名单 → 唯一让它是 html-details 的原因就是那个头
-    expect(bf.result.structuredContent.display.mode).toBe('html-details');
+    const bf = (await withFold.json()) as {
+      result: { structuredContent: { display: { mode: string; markdown: string } } };
+    };
+    // claude-code 本身不在白名单 → 唯一让它是气泡折叠档的原因就是那个头
+    expect(bf.result.structuredContent.display.mode).toBe('bubble-details');
+    // 闸门 B：气泡档必须真的下发 <details>/<summary>（此前 html-details 已改成零 HTML 纯 Markdown）
+    expect(bf.result.structuredContent.display.markdown).toContain('<details>');
+    expect(bf.result.structuredContent.display.markdown).toContain('<summary>');
+    expect(bf.result.structuredContent.display.markdown).toContain('📊 本次召回统计汇总');
+    // 闸门 B：气泡正文必须是 HTML——marked 不解析原始 HTML 块内的 Markdown，残留 **…** 会露成字面星号
+    expect(bf.result.structuredContent.display.markdown).not.toMatch(/\*\*[^*]+\*\*/);
+    expect(bf.result.structuredContent.display.markdown).toContain('<p>');
 
     const plain = await call(recall(181), base);
     const bp = (await plain.json()) as { result: { structuredContent: { display: { mode: string } } } };
@@ -1749,6 +1805,20 @@ describe('批次 RAG · C 组：展示要求三处与实际 display.markdown 逐
     expect(htmlNote).toContain('⚙ 模式');
   });
 
+  it('C1-e bubble-details：要求原样保留 <details>/<summary>、禁转义与代码围栏，且不得要求 show_widget', () => {
+    const note = recallEchoNote('bubble-details');
+    expect(note).toContain('<details>');
+    expect(note).toContain('<summary>');
+    expect(note).toContain('原样输出');
+    expect(note).toContain('不得删除、改写或转义');
+    expect(note).toContain('代码围栏');
+    expect(note).toContain('就地标注 [n]');
+    expect(note).toContain('不得编造编号');
+    expect(note).toContain('【信息来源边界】');
+    // DSH 不是富媒体宿主：气泡档绝不能要求调 show_widget（DSH 没有该工具）
+    expect(note).not.toContain('show_widget');
+  });
+
   it('C2 instructions / 工具描述 / detail 参数三处同步 RAG 就地引用与新段名', () => {
     expect(MCP_INSTRUCTIONS).toContain('就地标注 [n]');
     expect(MCP_INSTRUCTIONS).toContain('不得编造编号');
@@ -1829,6 +1899,10 @@ describe('批次 RAG · C 组：展示要求三处与实际 display.markdown 逐
     // 展开后要能查到「汇总 + 明细」，不只是汇总
     expect(compact).toContain('展开后必须能同时查到汇总与明细');
     expect(compact).toContain('正文片段');
+    // 2026-11-24 展开区第一行召回模式（display.card.mode 单一真源，null 时不渲染）
+    expect(compact).toContain('display.card.mode');
+    expect(compact).toContain('展开区最顶部先放一行召回模式');
+    expect(MCP_INSTRUCTIONS).toContain('display.card.mode');
     // 2026-11-12 用户拍板：明细固定顺序 背景 → 命中 → 依据 → 证据不足（最后）
     // 段名 emoji：背景用 📎（用户 2026-11-21 最终拍板，曾短暂改 🔑 后改回）、命中记忆 💠（旧 🧠→💠）
     expect(compact).toMatch(/📎 项目背景[\s\S]*💠 命中记忆[\s\S]*🎯 本次用上的依据[\s\S]*⚠ 证据不足/);
@@ -1844,6 +1918,25 @@ describe('批次 RAG · C 组：展示要求三处与实际 display.markdown 逐
     const tool = MCP_TOOLS.find((t) => t.name === 'recall_memory');
     expect(tool!.description).toContain('卡片即回显');
     expect(tool!.description).toContain('不要写 HTML 标签');
+  });
+
+  // 2026-11-24：富媒体出卡口径收敛——写明 show_widget + 最高优先级覆盖旧文本行要求，杜绝文本行/卡片二套口径
+  it('C5 富媒体宿主必须且只调 show_widget 出卡，旧「输出文本摘要行」要求被限定为非富媒体宿主', () => {
+    const compact = recallEchoNote('markdown-compact');
+    const html = recallEchoNote('html-details');
+    const full = recallEchoNote('markdown-full');
+    for (const note of [compact, html, full]) {
+      expect(note).toContain('show_widget');
+      expect(note).toContain('必须且只调用 show_widget');
+      expect(note).toContain('最高优先级');
+    }
+    expect(compact).toContain('一律不适用，不得与卡片并存');
+    expect(html).toContain('【仅非富媒体宿主适用】');
+    expect(full).toContain('【仅非富媒体宿主适用】');
+    expect(MCP_INSTRUCTIONS).toContain('show_widget');
+    expect(MCP_INSTRUCTIONS).toContain('仅非富媒体宿主');
+    const tool = MCP_TOOLS.find((t) => t.name === 'recall_memory')!;
+    expect(tool.description).toContain('show_widget');
   });
 
   // 2026-11-22 方案一：卡片按钮反馈快捷通道——单一真源常量三处引用，纯反馈短句才触发，先轻量召回过门禁、只回一句确认

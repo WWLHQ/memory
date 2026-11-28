@@ -160,7 +160,7 @@ describe('闸门C · 变异验证：判据被改坏必须失败', () => {
   test('若路径归一被改坏（大小写敏感）→ 幂等失效（此例钉住小写归一）', () => {
     const first = mergeAllHostHooks({}, {}, pathFor);
     // 手工把路径改成大写盘符，仍应识别为已装（normPath 小写）
-    const upper = JSON.parse(JSON.stringify(first.config).replace(/D:\//g, 'D:\//').replace(pathFor('force_recall.mjs'), pathFor('force_recall.mjs').toUpperCase())) as Record<string, unknown>;
+    const upper = JSON.parse(JSON.stringify(first.config).replace(/D:\//g, 'D://').replace(pathFor('force_recall.mjs'), pathFor('force_recall.mjs').toUpperCase())) as Record<string, unknown>;
     const second = mergeAllHostHooks(upper, {}, pathFor);
     expect(second.changedTags).not.toContain('force_recall.mjs');
   });

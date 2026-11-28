@@ -59,19 +59,60 @@ function patch(reason, tag) {
     },
   }));
 }
-function readLastAssistantText(tp) {
-  const lines = readFileSync(tp, 'utf8').split('\n');
-  const from = Math.max(0, lines.length - 200);
+/**
+ * 【2026-11-26 根治复盘重复】取文口径与 fold_card_check / session_review 完全对齐。
+ * 老实现取「最后一条 assistant 正文」，会被出卡后补的确认话覆盖 → 卡前已写复盘却误判缺复盘
+ * → 在下一轮开头注入【复盘补漏】→ 模型补写第二段 → 又成卡后正文，互搏循环。
+ * 新实现：有 show_widget 卡时取「卡前最后一条实质正文」；无卡才取最后一条。
+ */
+function assistantText(obj) {
+  if (obj?.type !== 'message' || obj.role !== 'assistant' || !Array.isArray(obj.content)) return '';
+  return obj.content
+    .filter((c) => c?.type === 'output_text' || c?.type === 'text')
+    .map((c) => c.text || '')
+    .join('\n');
+}
+function lastCardLine(lines, from) {
   for (let i = lines.length - 1; i >= from; i -= 1) {
     const line = lines[i].trim();
     if (!line) continue;
     let obj;
     try { obj = JSON.parse(line); } catch { continue; }
-    if (obj.type === 'message' && obj.role === 'assistant' && Array.isArray(obj.content)) {
-      return obj.content.map((c) => (typeof c?.text === 'string' ? c.text : '')).join('\n');
-    }
+    if ((obj.type === 'function_call' || obj.type === 'tool_use') && obj.name === 'show_widget') return i;
+  }
+  return -1;
+}
+function readLastAssistantText(tp) {
+  const lines = readFileSync(tp, 'utf8').split('\n');
+  const from = Math.max(0, lines.length - 300);
+  const cardLine = lastCardLine(lines, from);
+  const start = cardLine >= from ? cardLine - 1 : lines.length - 1;
+  for (let i = start; i >= from; i -= 1) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    let obj;
+    try { obj = JSON.parse(line); } catch { continue; }
+    const t = assistantText(obj);
+    if (t.trim()) return t;
   }
   return '';
+}
+/** Stop 回灌轮放行：与另两个钩子同判据，避免对同一条违规末条反复补漏 */
+function isFeedbackTurn(tp) {
+  const lines = readFileSync(tp, 'utf8').split('\n');
+  for (let i = lines.length - 1; i >= Math.max(0, lines.length - 200); i -= 1) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    let obj;
+    try { obj = JSON.parse(line); } catch { continue; }
+    if (obj.role === 'user' || obj.type === 'user') {
+      const c = obj.content;
+      const txt = (Array.isArray(c) ? c.map((x) => (typeof x?.text === 'string' ? x.text : '')).join('')
+        : typeof c === 'string' ? c : '').toLowerCase();
+      return txt.includes('stop hook feedback');
+    }
+  }
+  return false;
 }
 function tokenFile() {
   if (process.env.MEMAGENT_MCP_TOKEN_FILE) return process.env.MEMAGENT_MCP_TOKEN_FILE;
@@ -152,6 +193,7 @@ async function main() {
   try { evt = JSON.parse(raw); } catch { pass('pass:bad-event'); return; }
   const tp = evt?.transcript_path;
   if (typeof tp !== 'string' || !tp) { pass('pass:no-transcript'); return; }
+  try { if (isFeedbackTurn(tp)) { pass('pass:feedback-turn'); return; } } catch { /* fail-open */ }
   let tail;
   try { tail = readLastAssistantText(tp); } catch { pass('pass:read-error'); return; }
   if (!tail) { pass('pass:empty-tail'); return; }

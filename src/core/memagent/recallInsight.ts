@@ -475,7 +475,12 @@ function plainClip(s: string, maxChars: number): string {
 }
 
 export interface RecallMarkdownOpts {
-  /** true（默认）= 批次13 <details> 折叠版，仅实测支持 HTML 的客户端（Qoder）；false = 纯 Markdown 四小节（批次29，DSH 实测只渲染 Markdown） */
+  /**
+   * @deprecated 2026-11-21 用户拍板「禁止用 HTML」后，`buildRecallMarkdown` 恒为零 HTML 纯 Markdown
+   * （html-details / markdown-full / markdown-compact 三档统一），本参数只为兼容旧调用方保留、
+   * 已不再改变输出形态。真 HTML 折叠块（`<details>`/`<summary>`）改由 `buildRecallBubbleMarkdown`
+   * 在 bubble-details 档单独生成（2026-11-26）。
+   */
   htmlDetails?: boolean;
 }
 
@@ -625,6 +630,51 @@ export function buildRecallMarkdown(
     .map((s) => `**${s.title}**\n\n${s.lines.map((l) => `- ${l}`).join('\n')}`)
     .join('\n\n');
   return `**${hint.line}**\n\n${echoBody}${secondaryBlock}\n\n${sectionBlock}`;
+}
+
+/**
+ * 2026-11-26 气泡档（实机测试）：给声明能渲染折叠的宿主（DSH 桌面端）下发真 `<details>`。
+ * 外层 summary = 提示行（默认收起），展开后是统计汇总 + [n] 依据 + 四段二级折叠。
+ * 数字全部来自 buildRecallEchoBody / buildRecallSections 同一口径，逐字不变；
+ * 与 markdown 档的唯一差别是「HTML 折叠外壳 + HTML 转义」，正文语义一致。
+ */
+export function buildRecallBubbleMarkdown(
+  result: RecallResult,
+  hint: RecallHint,
+  unitPriceCnyPerMTok: number | null,
+): string {
+  // HTML 上下文必须转义：命中正文来自账本，可能含 <script>/& 等，不能原样塞进标签。
+  const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  // marked 等渲染器**不解析原始 HTML 块内部的 Markdown**：直接塞 `**加粗**` / `- 列表` 会在气泡里
+  // 露成字面星号与短横。这里把行内加粗转 <strong>、列表行转 <li>，正文全部产出 HTML。
+  const inline = (s: string): string => esc(s).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  const listHtml = (lines: string[]): string => `<ul>${lines.map((l) => `<li>${inline(l)}</li>`).join('')}</ul>`;
+  /** 逐行分块：连续 `- ` 行并成一个 <ul>，其余每行一个 <p>；空行只作分隔、不产生空标签。 */
+  const textHtml = (text: string): string => {
+    const out: string[] = [];
+    let buf: string[] = [];
+    const flush = () => { if (buf.length) { out.push(`<ul>${buf.join('')}</ul>`); buf = []; } };
+    for (const raw of text.split('\n')) {
+      const line = raw.trim();
+      if (!line) { flush(); continue; }
+      if (line.startsWith('- ')) buf.push(`<li>${inline(line.slice(2))}</li>`);
+      else { flush(); out.push(`<p>${inline(line)}</p>`); }
+    }
+    flush();
+    return out.join('\n');
+  };
+  const clip = plainClip;
+  const echoHtml = textHtml(buildRecallEchoBody(result, hint, 'markdown', clip));
+  const secondaryLine = secondaryDisplayLine(result, clip);
+  const secondaryBlock = secondaryLine
+    ? `\n<p><strong>↳ 次模式参考（未并入命中）</strong></p>\n<p>${inline(secondaryLine)}</p>`
+    : '';
+  const sections = buildRecallSections(result, hint, unitPriceCnyPerMTok, clip, 120, { markup: 'markdown' });
+  const sectionBlock = sections
+    .map((s) => `<details>\n<summary>${inline(s.title)}</summary>\n${listHtml(s.lines)}\n</details>`)
+    .join('\n');
+  // 整段不留空行：让 marked 把外层 <details> 当作一个完整 HTML 块渲染，不出现半截 Markdown 解析。
+  return `<details>\n<summary>${inline(hint.line)}</summary>\n${echoHtml}${secondaryBlock}\n${sectionBlock}\n</details>`;
 }
 
 /**
@@ -1004,7 +1054,7 @@ ${otherFolds}
 <b>以最新为准</b>：标有「最新版」的条目是同一事项合并后的当前口径；同一事项出现多个版本时，以「最新版」或创建时间更晚的一条为准。
 金额按全局参数页单价换算，非厂商账单。
 编号 <code>[n]</code> 与聊天正文里的引用脚标一一对应，也可用 <code>/recall/&lt;id&gt;#hit-n</code> 直达单条依据。
-「这条有用 / 没用」只生成本机可粘贴的 <code>feedback</code> 指令文本，本页不含令牌，<b>不会自动生效</b>。
+「这条有用 / 没用」就地写入本机记忆库（同源 POST，票据 30 分钟有效 + mem_id 白名单）；写入失败时回退为可粘贴的 <code>feedback</code> 指令文本。本页不含 MCP 令牌。
 折叠状态只写本机 <code>localStorage</code>，不上传、不落账本。
 链接由一次性随机 id 保护（30 分钟过期、不落盘），MCP 令牌不出现在 URL 与本页任何位置；服务只监听 127.0.0.1。
 </footer>
@@ -1040,9 +1090,28 @@ ${otherFolds}
     var box = btn.parentNode.querySelector('.fbtxt');
     if (!box) return;
     var cmd = '请调用 MCP 工具 feedback：feedback(verdict="' + verdict + '", mem_id="' + id + '")';
-    box.hidden = false;
-    box.textContent = cmd + '（本页不含 MCP 令牌，不会自动生效；把这一行粘到聊天里让助手执行）';
-    window.mmCopy(cmd, btn);
+    // 就地反馈：同源 POST 到本页票据的 /feedback（票据 + mem_id 白名单 + Origin/Host 闸门）。
+    // 成功显示「已记录 ✓」；失败（过期/端口不通/被拒）如实回退成可粘贴文本，绝不假装已生效。
+    fetch(location.pathname + '/feedback', {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mem_id: id, verdict: verdict })
+    }).then(function (r) {
+      return r.json().then(function (j) { return { ok: r.ok && j.ok, j: j }; });
+    }).then(function (x) {
+      if (x.ok) {
+        box.hidden = false;
+        box.textContent = '已记录 ✓';
+      } else {
+        box.hidden = false;
+        box.textContent = cmd + '（就地写入未生效：' + (x.j.error || '请求被拒') + '；可把这一行粘到聊天里让助手执行）';
+        window.mmCopy(cmd, btn);
+      }
+    }).catch(function () {
+      box.hidden = false;
+      box.textContent = cmd + '（就地写入不可用：本页链接可能已过期或服务未启动；把这一行粘到聊天里让助手执行）';
+      window.mmCopy(cmd, btn);
+    });
   };
 })();
 </script>

@@ -8,13 +8,20 @@ import { randomBytes } from 'node:crypto';
 export const RECALL_DETAIL_TTL_MS = 30 * 60 * 1000;
 export const RECALL_DETAIL_MAX_TICKETS = 200;
 
+/** 明细页票据负载：已渲染 HTML + 可就地反馈的命中白名单（进程内、不落盘、不进 URL） */
+export interface RecallDetailPayload {
+  html: string;
+  /** 本次召回允许反馈的 mem_id 白名单——防止持票者给任意记忆写反馈 */
+  memIds: string[];
+}
+
 export interface RecallDetailTicket<T> {
   payload: T;
   expiresAt: number;
 }
 
 /** 进程内票据表（不落盘：明细正文不进数据根，过期即随内存释放） */
-export class RecallDetailTickets<T = string> {
+export class RecallDetailTickets<T = RecallDetailPayload> {
   private readonly map = new Map<string, RecallDetailTicket<T>>();
 
   constructor(

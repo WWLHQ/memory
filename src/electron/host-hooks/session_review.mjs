@@ -62,7 +62,54 @@ function block(reason, tag = 'block') {
   process.stdout.write(JSON.stringify({ continue: false, reason, suppressOutput: true }));
 }
 
+/**
+ * 【2026-11-26 根治复盘重复】取文口径与 fold_card_check.mjs 完全对齐。
+ * 老实现取「全文最后一条 assistant 正文」，会被「出卡后补的那句确认话」覆盖 →
+ *   卡前已写复盘却误判缺复盘 → 逼补第二段 → 与 fold_card_check「删卡后文字」互搏 → 循环。
+ * 新实现：有 show_widget 卡时，取「卡前最后一条实质 assistant 正文」；无卡才取最后一条。
+ * 两张卡/多次正文也只认最近一张卡之前那条，与 fold_card_check#extractBodyBeforeCard 同口径。
+ */
+function assistantText(obj) {
+  if (obj?.type !== 'message' || obj.role !== 'assistant' || !Array.isArray(obj.content)) return '';
+  return obj.content
+    .filter((c) => c?.type === 'output_text' || c?.type === 'text')
+    .map((c) => c.text || '')
+    .join('\n');
+}
+function lastCardLine(lines, from) {
+  for (let i = lines.length - 1; i >= from; i -= 1) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    let obj;
+    try { obj = JSON.parse(line); } catch { continue; }
+    if ((obj.type === 'function_call' || obj.type === 'tool_use') && obj.name === 'show_widget') return i;
+  }
+  return -1;
+}
 function readLastAssistantText(tp) {
+  const lines = readFileSync(tp, 'utf8').split('\n');
+  const from = Math.max(0, lines.length - 300);
+  const cardLine = lastCardLine(lines, from);
+  const start = cardLine >= from ? cardLine - 1 : lines.length - 1;
+  for (let i = start; i >= from; i -= 1) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    let obj;
+    try { obj = JSON.parse(line); } catch { continue; }
+    const t = assistantText(obj);
+    if (t.trim()) return t;
+  }
+  return '';
+}
+
+/**
+ * 【2026-11-24 根治 30 次死循环】识别 Stop hook 回灌轮：最后一条 user 消息是钩子反馈注入。
+ * 与 fold_card_check 同判据。两个 Stop 钩子对同一条违规末条同时触发时：
+ *   fold_card_check 说「删卡后文字」↔ 本钩子说「补复盘」→ 指令矛盾 → 补复盘又成卡后正文 → 循环。
+ * 回灌轮的 assistant 输出只是为了响应某一钩子的反馈，不该被另一钩子再判一次「缺复盘」。
+ * 放行后只对真实提问轮把关，打破互搏。
+ */
+function isFeedbackTurn(tp) {
   const lines = readFileSync(tp, 'utf8').split('\n');
   const from = Math.max(0, lines.length - 200);
   for (let i = lines.length - 1; i >= from; i -= 1) {
@@ -70,11 +117,14 @@ function readLastAssistantText(tp) {
     if (!line) continue;
     let obj;
     try { obj = JSON.parse(line); } catch { continue; }
-    if (obj.type === 'message' && obj.role === 'assistant' && Array.isArray(obj.content)) {
-      return obj.content.map((c) => (typeof c?.text === 'string' ? c.text : '')).join('\n');
+    if (obj.role === 'user' || obj.type === 'user') {
+      const c = obj.content;
+      const txt = (Array.isArray(c) ? c.map((x) => (typeof x?.text === 'string' ? x.text : '')).join('')
+        : typeof c === 'string' ? c : '').toLowerCase();
+      return txt.includes('stop hook feedback');
     }
   }
-  return '';
+  return false;
 }
 
 function tokenFile() {
@@ -159,6 +209,8 @@ async function main() {
   if (evt.stop_hook_active === true) { pass('pass:active'); return; }
   const tp = evt.transcript_path;
   if (typeof tp !== 'string' || !tp) { pass('pass:no-transcript'); return; }
+  // 根治 30 次互搏：Stop 回灌轮放行，不再要求补复盘（fold_card_check 正在要求删卡后文字）
+  try { if (isFeedbackTurn(tp)) { pass('pass:feedback-turn'); return; } } catch { /* fail-open */ }
   let tail;
   try { tail = readLastAssistantText(tp); } catch { pass('pass:read-error'); return; }
   if (!tail) { pass('pass:empty-tail'); return; }

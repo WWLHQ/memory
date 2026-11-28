@@ -23,7 +23,7 @@ import {
 } from './mcpSchema.ts';
 import { readLatestHookRoundAt } from './recallHook.ts';
 import { runListProjectsTool, runRecallTool, type RecallDisplayMode } from './mcpRecall.ts';
-import { RecallDetailTickets } from './recallDetailTickets.ts';
+import { RecallDetailTickets, type RecallDetailPayload } from './recallDetailTickets.ts';
 import { buildRecallDetailExpiredPage } from './recallInsight.ts';
 import { rejectUntrustedHost } from '../../shared/localOrigin.ts';
 import type { StorageBackend, Pref, L0Port, MemReq, WriteResult, AuditRecord } from './types.ts';
@@ -268,6 +268,14 @@ export function recallEchoNote(mode: RecallDisplayMode): string {
     + '宿主没有卡片/折叠面板能力时忽略本条，按纯文本方式输出即可。';
   const citeFull = '正文里采用某条命中记忆作为事实依据时，就地标注 [n]：编号必须与「🎯 本次用上的依据」段一一对应，不得编造编号，hits=0 时不得标注；';
   const citeCompact = '本次摘要行不含 [n] 编号，正文里不要凭空标注编号；要带编号引用就让用户说「看明细」，用同一 query 再调用一次并置 detail=true，按那次返回的「🎯 本次用上的依据」编号就地标注 [n]，不得编造编号；';
+  if (mode === 'bubble-details') {
+    // 2026-11-26 气泡档：markdown 里是真 <details>/<summary>，模型必须原样保留，不得转义或包进代码块。
+    return '【展示要求·气泡折叠档】本次服务端下发的是**真 HTML 折叠块**（<details>/<summary>）：'
+      + '把上一条 display.markdown 整段原样输出到最终回答末尾，**不得删除、改写或转义其中的 <details>/<summary> 标签**——'
+      + '它们就是折叠气泡本身，客户端会渲染成默认收起、点击展开的气泡；也不要加 ```html 代码围栏把标签变成纯文本。'
+      + '气泡内（summary 之外）是「📊 本次召回统计汇总」+「🎯 本次用上的依据」[n] + 四段二级折叠。'
+      + citeFull + keep + RECALL_SOURCE_BOUNDARY;
+  }
   if (mode === 'html-details') {
     return '【展示要求】本次是可折叠档：把上一条 display.markdown 整段原样输出到最终回答末尾。'
       + `摘要行以黑三角 ▶ 开头（${summaryShape}），`
@@ -357,7 +365,7 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
    * 批次33-C：默认收起档的一次性明细页票据（id → 已渲染 HTML）。
    * 只在内存里，30 分钟过期、上限 200 条；不落数据根、不进审计，明细正文不外泄到 URL。
    */
-  const detailTickets = new RecallDetailTickets<string>();
+  const detailTickets = new RecallDetailTickets<RecallDetailPayload>();
   /** 实际监听端口（port:0 时由系统分配）——明细页基址与 Host 校验都以它为准 */
   let servedPort = port;
   const detailBase = () => `http://${host}:${servedPort}`;
@@ -687,14 +695,17 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
   }
 
   const server = httpCreateServer((req: IncomingMessage, res: ServerResponse) => {
-    // MCP 是机器对机器协议：带 Origin 的请求来自浏览器上下文，一律拒绝（防任意网页驱动记忆库）
-    if (req.headers.origin !== undefined) {
+    // 精确路径（`/mcpanything` 不命中）；path 需在 Origin 闸门之前算，
+    // 因为明细页就地反馈是唯一放行的浏览器 POST（它自己严格校验 Origin/Host）。
+    const path = (req.url ?? '/').split('?')[0];
+    const isDetailFeedback = req.method === 'POST' && /^\/recall\/[A-Za-z0-9_-]{16,32}\/feedback$/.test(path);
+    // MCP 是机器对机器协议：带 Origin 的请求来自浏览器上下文，一律拒绝（防任意网页驱动记忆库）。
+    // 唯一例外 = 上面的明细页就地反馈同源 POST（票据 + mem_id 白名单 + Origin/Host 三重闸门）。
+    if (req.headers.origin !== undefined && !isDetailFeedback) {
       res.writeHead(403, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32001, message: 'origin_not_allowed' } }));
       return;
     }
-    // 只处理 POST /mcp（精确路径，`/mcpanything` 不再命中）
-    const path = (req.url ?? '/').split('?')[0];
 
     // 批次33-C：GET /recall/<id> = 聊天里「▶ 展开本次召回明细」链接指向的一次性明细页。
     // 为什么可以不带令牌：MCP 令牌是机器级凭据，绝不下进聊天窗口/URL；此处改由 22 字符随机 id + 30 分钟过期把守，
@@ -702,17 +713,75 @@ export function runMcpHttpServer(opts: McpHttpOptions): McpHttpHandle {
     if (req.method === 'GET' && (path === '/recall' || path.startsWith('/recall/'))) {
       if (rejectUntrustedHost(req, res, [servedPort])) return;
       const id = path.slice('/recall/'.length);
-      const html = /^[A-Za-z0-9_-]{16,32}$/.test(id) ? detailTickets.take(id) : null;
+      const ticket = /^[A-Za-z0-9_-]{16,32}$/.test(id) ? detailTickets.take(id) : null;
+      const html = ticket ? ticket.html : null;
       res.writeHead(html ? 200 : 404, {
         'Content-Type': 'text/html; charset=utf-8',
         'Cache-Control': 'no-store',
         'X-Content-Type-Options': 'nosniff',
         'Referrer-Policy': 'no-referrer',
         'Content-Security-Policy':
-          "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src 'none'; connect-src 'none'; frame-ancestors 'none'; form-action 'none'",
+          "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src 'none'; connect-src 'self'; frame-ancestors 'none'; form-action 'none'",
       });
       res.end(html ?? buildRecallDetailExpiredPage());
       if (opts.onViewDetail) opts.onViewDetail(html ? 'ok' : 'miss');
+      return;
+    }
+
+    // 建议①：明细页「有用/没用」真写入。票据即能力（30 分钟过期、随机不可枚举）+ mem_id 白名单；
+    // 同源 POST 会带 Origin，这里单独严格校验 Origin/Host，不放宽其它任何浏览器请求。
+    if (isDetailFeedback) {
+      if (rejectUntrustedHost(req, res, [servedPort])) return;
+      const origin = req.headers.origin;
+      const allowed = new Set([`http://127.0.0.1:${servedPort}`, `http://localhost:${servedPort}`, `http://[::1]:${servedPort}`]);
+      if (typeof origin !== 'string' || !allowed.has(origin.trim().replace(/\/+$/, ''))) {
+        res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: 'origin_not_allowed' }));
+        return;
+      }
+      const id = path.slice('/recall/'.length, -'/feedback'.length);
+      const ticket = detailTickets.take(id);
+      if (!ticket) {
+        res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ ok: false, error: 'ticket_expired' }));
+        return;
+      }
+      let raw = '';
+      let size = 0;
+      let bad = false;
+      req.on('data', (c: Buffer) => {
+        if (bad) return;
+        size += c.length;
+        if (size > 4096) {
+          bad = true;
+          res.writeHead(413, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ ok: false, error: 'payload_too_large' }));
+          return;
+        }
+        raw += c.toString('utf8');
+      });
+      req.on('end', () => {
+        if (bad) return;
+        void (async () => {
+          try {
+            const p = JSON.parse(raw) as Record<string, unknown>;
+            const memId = p.mem_id;
+            const verdict = p.verdict;
+            if (typeof memId !== 'string' || !ticket.memIds.includes(memId)) {
+              throw new Error('mem_id 不在本次召回白名单内');
+            }
+            if (verdict !== 'confirm' && verdict !== 'reject' && verdict !== 'disputed') {
+              throw new Error('verdict 非法');
+            }
+            const out = await runFeedbackTool(ma, storage, { mem_id: memId, verdict }, DEFAULT_MCP_ACCOUNT);
+            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: out.ok, mem_id: memId, verdict, trust_delta: out.trust_delta }));
+          } catch (e) {
+            res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: false, error: String((e as Error)?.message ?? e) }));
+          }
+        })();
+      });
       return;
     }
 

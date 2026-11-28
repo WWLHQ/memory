@@ -343,6 +343,24 @@ compact 档整段**只输出一整行摘要**、没有链接行与提示语、�
 - WorkBuddy 恒走 ② 档（`markdown-compact`）+ 气泡折叠卡，**不适用**本节的 HTML 折叠（§7.1 优先）。
 - 反向锁：没声明、不在白名单 → 仍是 compact；`workbuddy` / `dsh-mcp-client` / `zcode` / `unknown` 无声明时断言必须为 `false`。
 
+### 7.3 DSH 桌面端：本地插件把折叠卡渲染到对话末尾（2026-11-27/28 实机验证）
+
+DSH 的 `MarkdownText` 把原始 HTML 当字符串转义（`case"html": return omitHtml ? null : e.value`），服务端气泡档（`bubble-details`）在 DSH 上只会露出尖括号 → **DSH 恒走 `markdown-compact`，不加 `X-Memagent-Render: fold`**（结论见 §7.2 与 AGENTS.md §1.1）。改为 DSH 本地插件 `@local/memagent-recall-card` 经官方扩展点渲染 React 折叠卡，形态沿用 §7.1 验收版。
+
+| 项 | 口径 |
+|---|---|
+| 卡位 | **对话末尾**：注册 `conversation.chat.turnTail`；工具行 `tool.call.toolview`（key = `mcp__memagent__recall_memory`，兼容裸 `recall_memory`）只留一行指针，避免同一份数据出现两遍 |
+| 数据来源 | 工具结果 `content` 里「一行摘要 + payload JSON + 回显说明」三段拼接，按**括号配对**截 JSON（不能从第一个 `{` 取到结尾，说明段会让 `JSON.parse` 抛错）；首字符是 ▶ 而非 `{` |
+| 反馈 | 卡片每条命中「N 有用 ↗ / N 没用 ↗」→ 宿主命令 `/memagent-feedback` → Host 侧插件（同包 `index.js`）现读 data-root 指针与 `<root>/keys/mcp-token.txt` 调 MCP `feedback`；令牌不落配置。无按钮宿主可从卡片文字提示「回复 1 有用 / 1 没用」走反馈快捷通道 |
+| 形态 | §7.1 七条 + §7.1.1 字段全部沿用：两行标题、放大 ▸/▾、默认收起、灰色小字「点击查阅详细内容」、展开六段（汇总/依据/背景/命中/用量/费用） |
+
+**DSH 槽位三坑（实机逐条踩出，勿回退）**：
+1. `tool.call.toolview` 组件收到的 props 是**一组选择器 hook**（`useContextMenu` / `useSessions` / `useRemoteAccess` / …），不是扁平 `{phase, block}`；`phase` 在 `props.call.phase`、结果块在 `props.block`（兜底 `call.block` / `result` / `output`）。
+2. **`useEffect` 不保证执行**（实机 `rows=2` 但 `ok/fail` 恒 0）→ 解析与发布必须在**渲染期**做，按 `request_id` 幂等去重；发布通知走 `queueMicrotask`，避免跨组件 setState 告警。
+3. `turnTail` 的 `props.turn` 是**对象**不是数字；且**不能用 `seq/shownSeq` 做「是否已展示」去重**（发布时已推进序号，末尾再判 `seq > shownSeq` 必然 false，卡片被自己判掉，实机 `seq=2 shown=2 rows=2/2ok`）——拿到 payload 就渲染，只让挂载顺序最新的末尾节点出卡。
+
+**测试锁**：`tools/__tests__/dshRecallCardParse.test.mjs` 直接加载真实 `client.js`（挂 `globalThis.__memagentRecallCard` 接缝）跑解析：摘要+JSON+说明、纯 JSON、说明里假花括号在前、JSON 被剪断降级、结果挂别的字段、两行标题拆分、session store 隔离发布。**实机**：重启 DSH 后卡片正常出现在对话末尾（用户目视确认）。
+
 ## 8. Agent 侧禁止事项（服务端硬约束，逐条对应回显文案）
 
 1. 不得改写、省略、补全任何 token 数字与金额；`display.money === null` 时不得猜金额。

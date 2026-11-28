@@ -617,12 +617,14 @@ describe('批次 RAG T4：明细页统计汇总 + #hit-n 锚点 + 就地反馈',
     expect(html).toContain('本页不编造条目');
   });
 
-  it('T4-4 就地反馈只生成 feedback 指令文本，明示「不会自动生效」；mem_id 非安全字符则隐藏按钮', () => {
+  it('T4-4 就地反馈：同源 POST 真写入 + 失败回退可粘贴文本；mem_id 非安全字符则隐藏按钮', () => {
     const html = page(recallResult({ hits: [hit('mem_ok_1', '可反馈')] }));
     expect(html).toContain(`mmFeedback('mem_ok_1','confirm',this)`);
     expect(html).toContain(`mmFeedback('mem_ok_1','reject',this)`);
-    expect(html).toContain('feedback(verdict='); // 脚本里生成的可粘贴指令
-    expect(html).toContain('不会自动生效');
+    expect(html).toContain('feedback(verdict='); // 失败时回退的可粘贴指令
+    expect(html).toContain('fetch(location.pathname + \'/feedback\''); // 就地写入通道
+    expect(html).toContain('本机记忆库'); // 就地写入成功文案
+    expect(html).toContain('就地写入未生效'); // 失败回退文案（诚实，不假装成功）
     expect(html).toContain('本页不含 MCP 令牌');
     const bad = page(recallResult({ hits: [hit("mem' onclick='alert(1)", '注入尝试')] }));
     expect(bad).not.toContain('mmFeedback(');
@@ -900,11 +902,11 @@ describe('T8 折叠能力的三条通道（派生名 / 自证头 / 运行时白�
     }
   });
 
-  it('自证头等价物 renderFold：声明就是折叠档，且优先于 detail 档；不声明时行为与历史完全一致', () => {
-    // 声明 → 折叠档（即便客户端不在白名单、即便 detail=true）
-    expect(recallDisplayMode('claude-code', false, true)).toBe('html-details');
-    expect(recallDisplayMode('dsh-mcp-client/0.0.1', true, true)).toBe('html-details');
-    expect(recallDisplayMode(undefined, false, true)).toBe('html-details');
+  it('自证头等价物 renderFold：声明就是气泡折叠档（2026-11-26 起真 <details>），且优先于 detail 档；不声明时行为与历史完全一致', () => {
+    // 声明 → 气泡折叠档（即便客户端不在白名单、即便 detail=true）；与白名单客户端的 html-details 分档
+    expect(recallDisplayMode('claude-code', false, true)).toBe('bubble-details');
+    expect(recallDisplayMode('dsh-mcp-client/0.0.1', true, true)).toBe('bubble-details');
+    expect(recallDisplayMode(undefined, false, true)).toBe('bubble-details');
     // 不声明 → 完全走原判据
     expect(recallDisplayMode('claude-code', false)).toBe('markdown-compact');
     expect(recallDisplayMode('claude-code', true)).toBe('markdown-full');
@@ -1115,7 +1117,7 @@ describe('REQ-014 T4 · 明细页 footer 保真声明', () => {
     expect(html).toContain('保真口径');
     expect(html).toContain('不补写、不推测、不合并改写');
     expect(html).toContain('以最新为准');
-    expect(html).toContain('本页不含令牌');
+    expect(html).toContain('本页不含 MCP 令牌');
   });
 
   it('回显 display.markdown 不含任何免责/保真声明（铁律：不替用户改写输出）', () => {
