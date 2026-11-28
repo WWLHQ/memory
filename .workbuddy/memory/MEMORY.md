@@ -60,6 +60,7 @@
 - `RecallResult.dispatch` 与 `mode_dispatch` 审计是同一份对象；`⚙ 模式：…` 由 `recallInsight.buildRecallModeLine()` 出，落 compact/full/html/明细页四处。
 - 手动模式才启用 权重(A3)/分层(A4)/次模式(A5)；`auto` 口径逐条不变。自动分流到极简仍是**只观测**（`mode='minimal'` / `applied_mode='auto'`），别当成已执行。`scope=session` 的 `dispatch` 恒 `null`。
 - 回显判档：自证头 `X-Memagent-Render: fold` > qoder 白名单 > detail。`workbuddy` 恒 `markdown-compact`（`<details>` 无折叠交互）；compact 只接 hint 不接 result。
+- **回显格式 2026-11-21 定稿（按用户截图重设计）**：摘要恒为**一整行**——行首 `⚙ 模式：…` → `💠 Memory ｜ 命中 N 条 (Nt) ｜ 🔑 背景 N 条 (Nt) ｜ ⚡ 本次省 … ｜ 💰 本次 ¥…（省 ¥…） ｜ 今日 … ｜ 全部 …` → 告警内联行尾；`shortLine === line`。折叠档 `<summary>` 即该行，点开是 `📊 统计汇总`+`🎯 依据 [n]`+四段**加粗标题平铺**（二级 `<details>` 已删）。compact 档**摘要行不含 [n]**。旧 `buildRecallFoldSummary`（「▶ 展开本次召回汇总」）已删。改回显必须同步 5 处：`recallInsight.ts` 三函数 / `mcpHttp.ts#recallEchoNote` / `mcpSchema.ts` 三处指令。连带：`tools/check-no-demo.mjs` 的 C02 已解除对 `💰 本次 ` 的拦截。 **同日追加硬约束**：摘要行首挂黑三角 `▶`（`▶ ⚙ 模式：…`），三档 markdown 一律零 HTML 标签（无 `<details>/<summary>/<mark>`）；`html-details` 只保留判档名、载体改纯 Markdown 平铺；高亮统一 `**「…」**`，`<mark>` 只留本机明细页；展开看细节只靠客户端气泡折叠卡。
 - 批次61：GAP-1 召回权重真源 `shared/growthConfig.ts`（0.35/0.30/0.15/0.20），`forgetting.ts` 的 `SCORE_WEIGHTS` 仅转发；回归只出建议不写 `growth:v1`；`hardFilter` 先排 `deleted`/`merged_into`。REQ-003 落地纯 ESM JS（`src/agentOnboard/*`），追溯以 `specs/code-map.md` 为准。
 
 ## 10. 壳层 / 页面

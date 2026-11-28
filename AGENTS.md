@@ -56,7 +56,7 @@ C = **至少一次代码级变异**（临时把关键判定改错 → 指定测�
 
 ## 1. 项目是什么
 
-MultiAgent Memory：Electron 45 + React 19 + Vite 的本地优先「多 Agent 记忆」桌面应用（22 个 HTML 入口，含批次37-B 的首启强制向导 `setup.html`）。
+MultiAgent Memory：Electron 45 + React 19 + Vite 的本地优先「多 Agent 记忆」桌面应用（23 个 HTML 入口，含批次37-B 的首启强制向导 `setup.html` 与批次57 的个人记忆独立页 `personal.html`）。
 数据与审计全部落本机，无云依赖；未接线的能力会显式报错，绝不伪造数据。
 **批次37 起数据分两个库文件**：`memories.db.json`（L1–L6 可检索正文）与 `memories.l0.json`（L0 原文，只存 v2/v1 密文信封），密钥环 `l0-keyring.json` 与 L0 库同目录；两个目录由首启向导让用户各自选定（可同可不同）。**批次41-A 起内核审计另成第三份文件** `audit.jsonl`（追加式 JSONL，跟 `memories.db.json` 同目录，轮转出的旧档进同目录 `audit-archive/`）——审计不再参与整库序列化，记忆库体积不随审计增长。
 
@@ -65,7 +65,7 @@ MultiAgent Memory：Electron 45 + React 19 + Vite 的本地优先「多 Agent �
 | 记忆内核 | `src/core/memagent/` | 存储（FileStorage/PGlite）、L0 原数据库（`l0Store`）与拆分/重建/恢复（`l0Split`/`rebuild`/`l0Recovery`）、召回、合并、遗忘、审计、MCP、webhook、sync |
 | 桌面主进程 | `src/electron/` | bootstrap、静态服务、数据根与两库位置、双库备份、IPC、悬浮窗、动作日志 |
 | 本机后端 | `src/home/`、`src/agentOnboard/`、`src/auth/` | 登录/会话/账号角色/审计镜像、Agent 接入、密码哈希与锁定 |
-| 渲染页面 | `src/web/` | 22 个页面（Setup/Home/Overview/Memory/Write/Audit/…/Security/Params） |
+| 渲染页面 | `src/web/` | 23 个页面（Setup/Home/Overview/Memory/Personal/Write/Audit/…/Security/Params） |
 | 渲染基座 | `src/desktop/`、`src/shared/` | 宿主桥（iframe 代理）、IPC 存储适配、跨端日志格式 |
 | 端壳/验收 | `src/electron/`、`e2e/` | Playwright 点击级 E2E（真构建产物 + 真后端） |
 
@@ -80,7 +80,8 @@ MultiAgent Memory：Electron 45 + React 19 + Vite 的本地优先「多 Agent �
 - **客户端接入推广（批次15）**：同一份提示/折叠明细对所有客户端生效（服务端返回），差异只在客户端注册与触发规则。Agent 接入配置页新增「MCP 客户端接入状态」面板：真实读取 `~/.qoder-cn/settings.json`、`~/.claude.json`、`~/.codex/config.toml`、`~/.cursor/mcp.json` 等，按内容判定「已接入 / 缺令牌 / 未配置 / 冲突 / 无配置 / 需手工」；含令牌片段与一键写入仅管理员，写入前备份原文件，冲突/无法解析一律拒绝。Claude Code 另有根目录 `CLAUDE.md`（`@AGENTS.md` + 本触发规则）。
 - **富媒体客户端（WorkBuddy）禁用 HTML 档（2026-11-12 用户拍板）**：`workbuddy` 仍不在白名单、恒走 `markdown-compact`；**文本通道零 HTML 标签**（不出 `<details>`/`<mark>`，否则客户端会露裸标签），折叠改由**客户端气泡内折叠卡片**承载——默认收起、卡片标题用首行原文、卡内只放「📊 汇总 / 依据 `[n]`」，两行摘要与明细链接照常输出、URL 逐字保留。服务端只在 `recallEchoNote('markdown-compact')` 末尾以**可选**措辞授权（做不到富媒体的客户端忽略），**不新增档位、不改 `display` 契约、不动白名单**；反向断言见 `mcpHttp.test.ts` C4。
 - **回显逻辑与格式统计表**：[`specs/recall-echo-contract.md`](specs/recall-echo-contract.md) —— 三档判档链、三档+明细页精确模板、档位矩阵、Agent 侧禁止事项、影响面文件清单；改动回显前先读它，不必重读 7 个源码文件。**重设计来源**：[`specs/tasks/RECALL-ECHO-RAG.md`](specs/tasks/RECALL-ECHO-RAG.md)（T1–T8）。
-- **折叠档怎么吃到（T8，2026-11-12 Qoder 真机验证通过）**：判档优先级 `X-Memagent-Render: fold` 自证头 > 白名单（`qoder` / `qoder-cn` / `qoder-desktop-mcp-host` / `qoder-*` 派生名 / `MEMAGENT_HTML_DETAILS_CLIENTS`）> `detail`。**任何客户端想按 Qoder 那种气泡折叠卡渲染，就在接入配置 `headers` 加一行 `X-Memagent-Render: fold`**；渲染不了折叠的客户端（CLI 纯文本）不要加，否则 `<details>` 会露成文本。WorkBuddy 恒禁 HTML——**2026-11-12 手机端 + 桌面端双端实测：它能解析 `<details>` 但不提供折叠交互（summary 与内容直接平铺、没有三角）**，加白名单只会让明细默认全铺、比两行摘要更差；折叠只在「点明细页链接」与「Agent 富媒体卡片」两处成立，其中**富媒体折叠卡形态已由用户验收**（默认收起、标题=首行摘要、点开看「📊 汇总 + 🎯 依据 [n]」）→ 有卡片能力的宿主**必须**输出该卡，不是可选。
+- **折叠档怎么吃到（T8，2026-11-12 Qoder 真机验证通过）**：判档优先级 `X-Memagent-Render: fold` 自证头 > 白名单（`qoder` / `qoder-cn` / `qoder-desktop-mcp-host` / `qoder-*` 派生名 / `MEMAGENT_HTML_DETAILS_CLIENTS`）> `detail`。**任何客户端想按 Qoder 那种气泡折叠卡渲染，就在接入配置 `headers` 加一行 `X-Memagent-Render: fold`**；渲染不了折叠的客户端（CLI 纯文本）不要加，否则 `<details>` 会露成文本。
+  > **⚠️ DSH 桌面端（deepseek-harness）不能加 fold 头（2026-11-26 代码级定论，勿再试）**：声明 fold 会拿到新增的 `bubble-details` 档（真 `<details>`/`<summary>` + `<p>`/`<ul>` HTML 正文，服务端 `buildRecallBubbleMarkdown` 生成），但 DSH 的 Markdown 渲染器 `MarkdownText`（`dsh-web-frontend` 壳包内 `Bp` → `fK`/`pK`）对 `html` 节点走 `case"html": return r.omitHtml ? null : e.value`——把原始 HTML 当**字符串子节点**交给 React，React 转义后显示成**字面尖括号文本**；全包 15 处 `dangerouslySetInnerHTML` 均为 React 内部/SVG 图标/代码高亮，**没有一处用于 Markdown HTML**，且所有 UI 调用方传 `omitHtml` 的次数为 0（默认 false，即"露出文本"而非"吞掉"）。因此 DSH 恒走 `markdown-compact`（单行摘要）才是最优，`~/.dsh/profiles/desktop/cordis.patch.yml` 的 memagent 条目**不得**再写 `X-Memagent-Render: fold`。真要在 DSH 内做折叠，只能走 DSH 侧插件（工具卡自定义渲染器），MCP 文本通道做不到。**〔2026-11-27/28 实机落地并验证通过〕** DSH 侧插件 `@local/memagent-recall-card` 已实现：经 `conversation.chat.turnTail` 槽位把折叠卡渲染到**对话末尾**（工具行 `tool.call.toolview` 只留一行指针），形态沿用 §7.1 验收版，带「N 有用/没用」反馈按钮（经宿主命令 `/memagent-feedback` → Host 插件调 MCP `feedback`，令牌现读不落配置）。三处槽位坑实机踩出并锁定（详见 `specs/recall-echo-contract.md` §7.3）：① `tool.call.toolview` 的 props 是一组选择器 hook，`phase` 在 `props.call.phase`、结果块在 `props.block`；② `useEffect` 不保证执行，解析/发布必须在渲染期做并按 `request_id` 幂等去重；③ `turnTail` 的 `props.turn` 是对象非数字，且不能用 `seq/shownSeq` 去重（发布已推进序号会把卡片自己判掉）——拿到 payload 就渲染。WorkBuddy 恒禁 HTML——**2026-11-12 手机端 + 桌面端双端实测：它能解析 `<details>` 但不提供折叠交互（summary 与内容直接平铺、没有三角）**，加白名单只会让明细默认全铺、比两行摘要更差；折叠只在「点明细页链接」与「Agent 富媒体卡片」两处成立，其中**富媒体折叠卡形态已由用户验收**（默认收起、标题=首行摘要、点开看「📊 汇总 + 🎯 依据 [n]」）→ 有卡片能力的宿主**必须**输出该卡，不是可选。
 - **`[n]` 引用锚点（批次 RAG，按 RAG 标准做法）**：`hits[i]` → `[1]…[N]`（1-based，按返回顺序，不是 `mem_id`）。回答里采用某条命中记忆作为事实依据时**就地标注 `[n]`**，编号必须存在于本次回显的依据段（`html-details` / `markdown-full` 见「🎯 本次用上的依据」；`markdown-compact` 只有首行的 `[1][2][3]`），**不得编造编号**，`hits=0` 不标；依据段与明细页 `#hit-n` 一一对应。`scope=session` 的命中须说成「会话工作记忆」，不伪装成语义相关命中。
 
 ## 2. 常用命令
