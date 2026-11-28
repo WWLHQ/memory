@@ -215,9 +215,15 @@ export interface AutoState {
   cursors: Record<string, number>;
   /** 上次一轮的结果（UI 直接显示，不用去翻账本） */
   lastRound: RoundSummary | null;
+  /**
+   * 站点 → 用户最近一次点「重新登录」的时间（2026-11-24）。
+   * lastRound 是历史快照，登录动作不会重跑采集；用本表把「登录时间晚于该轮」的 need_relogin
+   * 视为已被用户处理（计数剔除），下一轮采集结果出来后自然由新快照接管。不伪造成功状态。
+   */
+  relogins: Record<string, number>;
 }
 
-export const DEFAULT_AUTO_STATE: AutoState = { doneKeys: {}, cursors: {}, lastRound: null };
+export const DEFAULT_AUTO_STATE: AutoState = { doneKeys: {}, cursors: {}, lastRound: null, relogins: {} };
 
 export function normalizeAutoState(raw: unknown): AutoState {
   const src = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
@@ -240,16 +246,22 @@ export function normalizeAutoState(raw: unknown): AutoState {
       }
     }
   }
-  return { doneKeys: keys, cursors, lastRound };
+  const relogins: Record<string, number> = {};
+  if (src.relogins && typeof src.relogins === 'object') {
+    for (const [k, v] of Object.entries(src.relogins as Record<string, unknown>)) {
+      if (typeof k === 'string' && k && typeof v === 'number' && Number.isFinite(v) && v > 0) relogins[k] = v;
+    }
+  }
+  return { doneKeys: keys, cursors, lastRound, relogins };
 }
 
 export function readAutoState(root: string): AutoState {
   try {
     const f = autoStatePath(root);
-    if (!existsSync(f)) return { ...DEFAULT_AUTO_STATE, doneKeys: {}, cursors: {} };
+    if (!existsSync(f)) return { ...DEFAULT_AUTO_STATE, doneKeys: {}, cursors: {}, relogins: {} };
     return normalizeAutoState(JSON.parse(readFileSync(f, 'utf8')));
   } catch {
-    return { ...DEFAULT_AUTO_STATE, doneKeys: {}, cursors: {} };
+    return { ...DEFAULT_AUTO_STATE, doneKeys: {}, cursors: {}, relogins: {} };
   }
 }
 

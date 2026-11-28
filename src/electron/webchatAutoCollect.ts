@@ -49,6 +49,8 @@ export interface AutoStateView {
   sites: Array<{ key: string; label: string }>;
   /** 本轮不可用的原因（接收端未就绪等），空串=正常 */
   blocked: string;
+  /** 站点最近一次重新登录的时间；晚于 lastRound.at 的 need_relogin 已被用户处理，计数剔除 */
+  relogins: Record<string, number>;
 }
 
 export interface WebchatAutoCollector {
@@ -344,6 +346,7 @@ export function createWebchatAutoCollector(deps: AutoCollectorDeps): WebchatAuto
       loginWindows: [...loginWins.keys()],
       sites: WEBCHAT_SITES.map((s) => ({ key: s.key, label: s.label })),
       blocked: blockedReason(),
+      relogins: state.relogins,
     };
   }
 
@@ -385,6 +388,8 @@ export function createWebchatAutoCollector(deps: AutoCollectorDeps): WebchatAuto
       } catch (e) {
         return { ok: false, error: `打开登录窗口失败：${String((e as Error)?.message ?? e)}` };
       }
+      // 记下重新登录动作：计数端用它剔除「登录晚于该轮快照」的过期 need_relogin（不伪造采集成功）
+      state = writeAutoState(deps.root(), { ...state, relogins: { ...state.relogins, [site]: Date.now() } });
       return { ok: true };
     },
     stop(): void {

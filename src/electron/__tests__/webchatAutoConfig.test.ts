@@ -187,8 +187,15 @@ describe('站点入口页', () => {
 describe('采集账状态', () => {
   test('非对象输入 → 空账', () => {
     for (const raw of [null, undefined, 0, 'x', []]) {
-      expect(normalizeAutoState(raw)).toEqual({ doneKeys: {}, cursors: {}, lastRound: null });
+      expect(normalizeAutoState(raw)).toEqual({ doneKeys: {}, cursors: {}, lastRound: null, relogins: {} });
     }
+  });
+
+  test('relogins 只收「字符串键 → 正有限数字」，脏数据整条丢弃（登录回写快照）', () => {
+    const s = normalizeAutoState({
+      relogins: { deepseek: 1700000000000, bad: 'yesterday', '': 1, zero: 0, nan: Number.NaN },
+    });
+    expect(s.relogins).toEqual({ deepseek: 1700000000000 });
   });
 
   test('doneKeys 只收「字符串键 → 有限数字值」，脏数据整条丢弃', () => {
@@ -207,11 +214,11 @@ describe('采集账状态', () => {
 
   test('落盘往返；坏 JSON → 空账不抛', () => {
     const d = tempDir('st');
-    expect(readAutoState(d)).toEqual({ doneKeys: {}, cursors: {}, lastRound: null });
-    const next = writeAutoState(d, { doneKeys: { 'deepseek:k1': 111 }, cursors: {}, lastRound: null });
+    expect(readAutoState(d)).toEqual({ doneKeys: {}, cursors: {}, lastRound: null, relogins: {} });
+    const next = writeAutoState(d, { doneKeys: { 'deepseek:k1': 111 }, cursors: {}, lastRound: null, relogins: {} });
     expect(readAutoState(d)).toEqual(next);
     writeFileSync(join(d, AUTO_DIR_NAME, 'state.json'), 'nope', 'utf8');
-    expect(readAutoState(d)).toEqual({ doneKeys: {}, cursors: {}, lastRound: null });
+    expect(readAutoState(d)).toEqual({ doneKeys: {}, cursors: {}, lastRound: null, relogins: {} });
   });
 
   test('账本是追加，不是覆盖（要能回看一轮轮的结果）', () => {
