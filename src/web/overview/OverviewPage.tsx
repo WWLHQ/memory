@@ -832,7 +832,7 @@ export function OverviewPage() {
                   <b>解锁 L0 写密钥</b>
                   <button className="af-link" type="button" data-testid="home-unlock-close" onClick={() => setUnlockOpen(false)}>关闭</button>
                 </div>
-                <L0WriteUnlock scene="首页" onUnlocked={() => { setUnlockOpen(false); void reload(); }} />
+                <L0WriteUnlock scene="首页" compact onUnlocked={() => { setUnlockOpen(false); void reload(); }} />
               </div>
             </div>
           )}

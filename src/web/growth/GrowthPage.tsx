@@ -466,71 +466,71 @@ export function GrowthPage() {
       {/* ── 场景分组：2×2 等宽等高，回答/来源压成一行，读数与动作优先 ── */}
       <div className="af-g2" data-testid="growth-groups">
         <section className="af-panel" data-testid="growth-group-dedup">
-          <div className="af-ph"><h3>净化 / 去重候选与处置</h3><span className="hint">6.1/6.2 · 记忆表+merge审计</span></div>
+          <div className="af-ph"><h3>重复内容清理</h3><span className="hint">写入时自动判断</span></div>
           <div className="af-pb">
-            <p className="af-q">这次写入会不会被判重、能否短路嫁接？</p>
+            <p className="af-q">新记忆写进来时，系统自动判断它和旧的是不是重复，重复就合并，不重复才新建。</p>
             <div className="af-mini">
-              <span>判重样本 <b>{samples.length}</b></span>
-              <span>24h 合并 <b>{dedupStats.merged}</b></span>
-              <span>短路命中 <b>{dedupStats.short_circuit_hits}</b></span>
+              <span>待看样本 <b>{samples.length}</b> 条</span>
+              <span>近 24 小时合并 <b>{dedupStats.merged}</b> 条</span>
+              <span>直接复用旧的 <b>{dedupStats.short_circuit_hits}</b> 次</span>
               <span>平均耗时 <b>{dedupCostText}</b></span>
             </div>
             <div className="af-actions">
-              <button type="button" className="btn" data-testid="growth-jump-dedup" onClick={() => jumpTo(0, 'dedup-card')}>查看五维判重</button>
-              <button type="button" className="btn" data-testid="growth-group-resample" onClick={() => handleResample()}>换一条样本</button>
+              <button type="button" className="btn" data-testid="growth-jump-dedup" onClick={() => jumpTo(0, 'dedup-card')}>看它是怎么判断的</button>
+              <button type="button" className="btn" data-testid="growth-group-resample" onClick={() => handleResample()}>换一条样本看看</button>
             </div>
           </div>
         </section>
 
         <section className="af-panel" data-testid="growth-group-metrics">
-          <div className="af-ph"><h3>生长指标与回归结果</h3><span className="hint">7.1–7.3 · 召回+回归审计</span></div>
+          <div className="af-ph"><h3>记忆质量</h3><span className="hint">来自真实召回</span></div>
           <div className="af-pb">
-            <p className="af-q">召回质量在变好还是变差，回归是否被采纳？</p>
+            <p className="af-q">看看记忆到底有没有变好用：召回准不准、哪些被你确认有用、哪些被判没用。</p>
             <div className="af-mini">
               <span>命中率 <b>{hitRateText}</b></span>
-              <span>确认 <b>{metrics.confirmed}</b></span>
-              <span>拒绝 <b>{metrics.rejected}</b></span>
-              <span>状态 <b>{regressionText}</b></span>
+              <span>你说有用 <b>{metrics.confirmed}</b> 次</span>
+              <span>你说没用 <b>{metrics.rejected}</b> 次</span>
+              <span>回归状态 <b>{regressionText}</b></span>
             </div>
             <div className="af-actions">
-              <button type="button" className="btn primary" data-testid="growth-group-regress" onClick={() => void handleManualTrigger()}>触发一轮真实回归</button>
-              <button type="button" className="btn" data-testid="growth-jump-metrics" onClick={() => jumpTo(1, 'growth-cards')}>查看指标</button>
+              <button type="button" className="btn primary" data-testid="growth-group-regress" onClick={() => void handleManualTrigger()}>现在测一轮</button>
+              <button type="button" className="btn" data-testid="growth-jump-metrics" onClick={() => jumpTo(1, 'growth-cards')}>看详细指标</button>
             </div>
           </div>
         </section>
 
         <section className="af-panel" data-testid="growth-group-params">
-          <div className="af-ph"><h3>参数与生效范围</h3><span className="hint">growth:v1 · param_save</span></div>
+          <div className="af-ph"><h3>当前设置</h3><span className="hint">改动立即生效</span></div>
           <div className="af-pb">
-            <p className="af-q">现在生效的权重 / 阈值 / 调度 / 进化模式是什么？</p>
+            <p className="af-q">现在用的是哪套参数——权重、触发门槛、自动任务、进化方式都在这里，可以自己调。</p>
             <div className="af-mini">
-              <span>权重和 <b>{wCheck.sum.toFixed(3)}</b> {wCheck.ok ? '' : <b className="bad">R1 不合格</b>}</span>
-              <span>调度启用 <b>{enabledSchedules}</b> / {schedule.length}</span>
-              <span>进化 <b>{evolution.mode}</b></span>
-              <span>阈值 L1 <b>{thresholds.L1.toFixed(2)}</b> · L6 <b>{thresholds.L6.toFixed(2)}</b></span>
+              <span>权重合计 <b>{wCheck.sum.toFixed(3)}</b> {wCheck.ok ? '' : <b className="bad">不合理</b>}</span>
+              <span>自动任务开启 <b>{enabledSchedules}</b> / {schedule.length}</span>
+              <span>进化模式 <b>{evolution.mode}</b></span>
+              <span>门槛 原文 <b>{thresholds.L1.toFixed(2)}</b> · 索引 <b>{thresholds.L6.toFixed(2)}</b></span>
             </div>
             <div className="af-actions">
               <button
                 type="button" className="btn" data-testid="growth-jump-tune"
                 onClick={() => { setDevMode(true); jumpTo(0, 'dev-tune-panel'); }}
-              >打开调参</button>
-              <button type="button" className="btn" data-testid="growth-jump-schedule" onClick={() => jumpTo(2, 'schedule-timeline')}>打开调度</button>
+              >调整参数</button>
+              <button type="button" className="btn" data-testid="growth-jump-schedule" onClick={() => jumpTo(2, 'schedule-timeline')}>管理自动任务</button>
             </div>
           </div>
         </section>
 
         <section className="af-panel" data-testid="growth-group-audit">
-          <div className="af-ph"><h3>审计留痕</h3><span className="hint">growth_op · 只读</span></div>
+          <div className="af-ph"><h3>操作记录</h3><span className="hint">只读</span></div>
           <div className="af-pb">
-            <p className="af-q">每次自净化 / 自生长动作，能不能追到人与时间？</p>
+            <p className="af-q">每一次自动整理或调整都记了账——谁、什么时候、做了什么，都能查到。</p>
             <div className="af-mini">
-              <span>growth_op 条目 <b>{audit.length}</b></span>
-              <span>最近事件 <b>{lastAudit ? lastAudit.event : '暂无'}</b></span>
+              <span>记录 <b>{audit.length}</b> 条</span>
+              <span>最近动作 <b>{lastAudit ? lastAudit.event : '暂无'}</b></span>
               <span>最近时间 <b>{lastAudit ? new Date(lastAudit.at).toLocaleString('zh-CN', { hour12: false }) : '无记录'}</b></span>
             </div>
             <div className="af-actions">
-              <a className="btn" data-testid="growth-jump-audit" href="../audit.html">打开审计日志</a>
-              <button type="button" className="btn" data-testid="growth-reload" onClick={() => void reloadAll()}>重新读取真实账本</button>
+              <a className="btn" data-testid="growth-jump-audit" href="../audit.html">打开操作记录</a>
+              <button type="button" className="btn" data-testid="growth-reload" onClick={() => void reloadAll()}>刷新真实数据</button>
             </div>
           </div>
         </section>

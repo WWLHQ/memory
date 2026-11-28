@@ -152,9 +152,10 @@ button:disabled { cursor: not-allowed; }
 }
 
 /* ── 顶部两段（STRATUM 1:1）─────────────────────
-   ① 46px 标题栏：surface 底 + 底边 line。全部内容靠左（2026-11-21 用户要求）：strata 徽标 + 应用名 +
+   ① 36px 标题栏：surface 底 + 底边 line。全部内容靠左（2026-11-21 用户要求）：strata 徽标 + 应用名 +
       「层析 STRATUM」+ 命令框（⌕ 前缀 + Ctrl K）+ 三联主题切换 + ⚙ 首启向导 + 头像/角色；右侧只留系统三按钮覆盖层
-   ② 44px 上下文命令条：导航折叠 + 面包屑 + 当前视图高频命令 + 范围 + 命令按钮
+   ② 32px 上下文命令条：导航折叠 + 面包屑 + 当前视图高频命令 + 范围 + 命令按钮
+   （2026-11-24 用户要求顶部红框区总高减少 1/4：46+44=90px → 36+32=68px）
    原菜单与 Ribbon 的全量命令收进 Ctrl+K 命令面板，不再占常驻高度 */
 .titlebar {
   position: relative;
@@ -162,7 +163,7 @@ button:disabled { cursor: not-allowed; }
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 46px;
+  height: 36px;
   padding: 0 6px 0 12px;
   background: var(--surface);
   border-bottom: 1px solid var(--line);
@@ -336,23 +337,23 @@ button:disabled { cursor: not-allowed; }
 .pm-shell-body > .mm-personal-pane { flex: 1 1 auto; min-width: 0; }
 
 
-/* ── 44px 上下文命令条（v5）────────────────────────────── */
+/* ── 32px 上下文命令条（v5）────────────────────────────── */
 .cmdbar {
   flex: none;
   display: flex;
   align-items: center;
   gap: 2px;
-  /* 批次58：端点串允许在窄窗口换行，命令条按内容长高但仍保持 44px 基准高度（不裁切、不省略） */
-  min-height: 44px;
+  /* 批次58：端点串允许在窄窗口换行，命令条按内容长高但仍保持 32px 基准高度（不裁切、不省略） */
+  min-height: 32px;
   height: auto;
-  padding: 4px 8px;
+  padding: 2px 8px;
   background: var(--surface);
   border-bottom: 1px solid var(--line);
   user-select: none;
 }
 .cb-icon {
-  width: 30px;
-  height: 30px;
+  width: 26px;
+  height: 26px;
   flex: none;
   display: inline-flex;
   align-items: center;
@@ -370,7 +371,7 @@ button:disabled { cursor: not-allowed; }
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  height: 28px;
+  height: 26px;
   padding: 0 9px;
   border-radius: 6px;
   color: var(--tx2);
@@ -929,46 +930,115 @@ html[data-theme='dark'] .app-mark {
   background: transparent;
   user-select: none;
 }
-/* REQ-014 / T7：侧栏真实状态卡（只在真有进行中/需关注状态时出现，空闲整块不渲染） */
+/* REQ-014 / T7 + 批次58：系统状态常驻命令条右端（原侧栏卡位已移除，水平紧凑条形态）。
+   常驻「在线/离线」pill：绿=内核通道真实应答（collector:status ok），红=读不到（读不到就如实说，不冒充在线）；
+   进行中/需关注条目同条展示；MCP 开关操作弹层挂在条下（.ss-pop）。 */
 .shell-status {
-  flex: none;
-  border-top: 1px solid var(--line2);
-  padding: 2px 0 6px;
-  background: var(--panel2);
+  position: relative;
+  margin-left: auto;
+  /* 批次58：端点串是全应用唯一一份，窄窗口优先占用命令条剩余宽度并换行，绝不右端截断 */
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-height: 28px;
+  padding: 0 6px;
+  background: transparent;
   user-select: none;
 }
-.shell-status .tree-group { padding: 7px 12px 3px; }
-.shell-status-item {
-  display: flex;
+.shell-status .tree-group { display: none; }
+.ss-pill {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   height: 20px;
-  padding: 0 10px 0 24px;
+  padding: 0 9px;
+  border-radius: 10px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+/* 在线=绿（真实应答），离线=红（读不到），首轮检测中=灰（不冒充任何一档） */
+.ss-pill.online { color: var(--ok); background: var(--ok-soft); }
+.ss-pill.offline { color: var(--bad); background: var(--bad-soft); }
+.ss-pill.unknown { color: var(--tx2); }
+.ss-pill.online .dot.ok { box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }
+.ss-pill.offline .dot.err { box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 25%, transparent); }
+/* 完整端点串（用户 2026-11-21 图2）：整条一个 pill，允许折行、高度自适应，
+   任何窗口宽度都不 ellipsis / 不裁切；● 圆点与状态词保留颜色 + 文字双标识。 */
+.ss-pill.shell-endpoint {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  height: auto;
+  min-height: 20px;
+  padding: 1px 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  column-gap: 6px;
+  row-gap: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+  text-align: right;
+}
+.ss-pill.shell-endpoint .dot { flex: none; align-self: center; }
+.ss-pill.shell-endpoint .ss-ep-sep { color: var(--faint); }
+.ss-pill.unknown.shell-endpoint { background: var(--surface2); }
+/* 状态词：颜色 + 文字双标识（在线绿 / 离线红 / 未知灰） */
+.shell-endpoint.online .ss-ep-state { color: var(--ok); font-weight: 600; }
+.shell-endpoint.offline .ss-ep-state { color: var(--bad); font-weight: 600; }
+.shell-endpoint.unknown .ss-ep-state { color: var(--tx2); font-weight: 600; }
+.shell-status-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 20px;
+  padding: 0 9px;
+  border-radius: 10px;
   color: var(--tx2);
-  font-size: 11.5px;
+  font-size: 11px;
   white-space: nowrap;
   overflow: hidden;
+  max-width: 240px;
 }
 .shell-status-item .ss-label { overflow: hidden; text-overflow: ellipsis; }
-.shell-status-item.warn { color: var(--warn, #b8860b); }
-/* T3：客户端 MCP 开关一键打开（对齐 design/ui/客户端MCP开关状态_原型.html ③） */
-.shell-status-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 5px 10px 4px 24px; }
+.shell-status-item.warn { color: var(--warn); background: var(--warn-soft); }
+/* MCP 开关操作弹层：挂在命令条状态区正下方，不再往 44px 命令条里竖排 */
+.ss-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 340px;
+  padding: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.14);
+}
+.ss-pop-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .shell-status-btn {
-  background: var(--panel, transparent); color: var(--tx2); border: 1px solid var(--line2);
+  background: transparent; color: var(--tx2); border: 1px solid var(--line);
   border-radius: 5px; padding: 2px 8px; font-size: 11px; cursor: pointer;
 }
-.shell-status-btn.primary { border-color: var(--accent, #4d9fff); color: var(--accent, #4d9fff); }
+.shell-status-btn.primary { border-color: var(--rail-active); color: var(--rail-active); }
 .shell-status-btn:disabled { opacity: .5; cursor: default; }
 .shell-status-err, .shell-status-hint {
-  padding: 2px 10px 4px 24px; font-size: 11px; line-height: 1.5; color: var(--tx2);
+  font-size: 11px; line-height: 1.5; color: var(--tx2);
 }
 /* 用户 2026-11-15 实机反馈：手动打开提示要有块面感，不能只是一行灰字（否则像没反应） */
 .shell-status-hint {
-  margin: 2px 10px 6px 24px; padding: 5px 8px; border-radius: 5px;
-  background: var(--panel2, rgba(127,127,127,.12)); border-left: 2px solid var(--warn, #b8860b);
+  padding: 5px 8px; border-radius: 5px;
+  background: var(--warn-soft); border-left: 2px solid var(--warn);
 }
-.shell-status-hint b { color: var(--tx, inherit); }
-.shell-status-err { color: var(--err, #d44); }
+.shell-status-hint b { color: var(--tx); }
+.shell-status-err { color: var(--bad); }
 .strata-scale .tree-group { margin: 0; padding: 7px 12px 3px; }
 /* 列位与导航树严格对齐：色块占「图标列」x=24..36，层号从「文字列」x=44 起
    （.tree-row padding-left 6 + .tw 12 + gap 6 = 24；再 + 图标 12 + gap 8 = 44）。 */
@@ -1126,22 +1196,7 @@ html[data-theme='dark'] .app-mark {
   background: var(--surface2);
 }
 
-.center-foot {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 23px;
-  padding: 0 9px;
-  border-top: 1px solid var(--line2);
-  background: var(--panel2);
-  color: var(--mu);
-  font-size: 10.5px;
-  white-space: nowrap;
-  overflow: hidden;
-}
-.cf-strong { color: var(--green); font-weight: 600; }
-.cf-right { margin-left: auto; overflow: hidden; text-overflow: ellipsis; }
+/* 2026-11-28 用户要求：中心区底部状态条（同源真实页面 + 页面文件名）整块取消，样式一并移除 */
 
 /* 不可用 / 空态：写明原因，不显示任何编造读数 */
 .shell-empty {
@@ -1518,6 +1573,12 @@ html[data-theme='dark'] .app-mark {
 }
 .sb-cell.warn b { color: var(--amber); }
 .sb-cell.ok b { color: var(--green); }
+/* 健康/登录/端口串：全应用唯一实例，固定在状态栏最右；颜色随真实健康检查，
+   同时保留 ● 图标与「在线/离线/未知」文字，两套主题下都可辨（不只靠颜色）。 */
+.sb-cell.sb-endpoint { border-right: 0; }
+.sb-endpoint.online { color: var(--ok); }
+.sb-endpoint.offline { color: var(--bad); }
+.sb-endpoint.unknown { color: var(--mu); }
 
 /* S7：分层 L1–L6 / L0 面板条（数据与中心层级页同源） */
 .layer-strip {

@@ -27,8 +27,10 @@ export const SEED_METRICS: MetricCard[] = [
   // 人工审核
   { group: '人工审核', metric: '待裁决', value: 25, threshold: '>20 ⚠️', level: 'warn', jump: 'P7' },
   { group: '人工审核', metric: '超期 7d', value: 2, threshold: '>0 ⚠️', level: 'warn', jump: 'P7' },
-  // 后台任务（精炼队列 + 定时任务失败；2026-11-15 用户要求置底）
-  { group: '队列', metric: '精炼队列', value: 1240, parts: { ok: 2247, failed: 1273, waiting: 1240, skipped: 265 }, threshold: '>1000 ⚠️', level: 'warn', jump: 'P10(5.3)' },
+  // 后台任务（精炼成功/失败/等待三卡 + 定时任务失败；2026-11-15 用户要求置底、11-24 拆三卡）
+  { group: '队列', metric: '精炼成功', value: 2247, unit: '条', parts: { ok: 2247, failed: 1273, waiting: 1240, skipped: 265 }, threshold: '累计完成，不设告警', level: 'ok', jump: 'P10(5.3)' },
+  { group: '队列', metric: '精炼失败', value: 1273, unit: '条', threshold: '>0 ⚠️', level: 'crit', jump: 'P10(5.3)' },
+  { group: '队列', metric: '精炼等待', value: 1240, unit: '条', threshold: '>1000 ⚠️', level: 'warn', jump: 'P10(5.3)' },
   { group: '队列', metric: '定时任务失败(24h)', value: 0, unit: '次', threshold: '>0 ⚠️', level: 'ok', jump: 'P9' },
 ];
 

@@ -16,9 +16,15 @@ export interface L0WriteUnlockProps {
   scene: string;
   /** 解锁成功后回调（写入页用它把刚被挡住的那条重新提交） */
   onUnlocked?: () => void;
+  /**
+   * 精简版（首页「去解锁」弹窗专用，2026-11-24）：只留口令输入框 + 解锁按钮 + 错误反馈，
+   * 去掉长篇说明。首页横幅已把「为什么锁 / 不落明文」说清，弹窗里再重复一次是噪音。
+   * 写入页 / 安全页不传此项，保持完整说明不变。
+   */
+  compact?: boolean;
 }
 
-export function L0WriteUnlock({ scene, onUnlocked }: L0WriteUnlockProps) {
+export function L0WriteUnlock({ scene, onUnlocked, compact = false }: L0WriteUnlockProps) {
   const { role, context } = useSessionContext();
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -61,6 +67,38 @@ export function L0WriteUnlock({ scene, onUnlocked }: L0WriteUnlockProps) {
       <div className="card" data-testid="l0-unlock-done">
         <b>写密钥已解锁</b>
         <div className="note">L0 写入恢复可用（只加密，不能解密查阅）。{scene}可以再试一次了。</div>
+      </div>
+    );
+  }
+
+  // 精简版：只留「输入框 + 解锁按钮 + 错误反馈」，标题与说明由外层（首页横幅/弹窗头）承担
+  if (compact) {
+    return (
+      <div data-testid="l0-write-unlock" className="ov-unlock-compact">
+        {role === 'admin' || (role === 'member' && context?.user_id) ? (
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+            <input
+              type="password"
+              data-testid="l0-unlock-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
+              placeholder={role === 'admin' ? 'L0 管理密码' : '你的写解锁口令'}
+              disabled={busy}
+              autoComplete="off"
+            />
+            <button type="button" className="btn primary" data-testid="l0-unlock-submit" disabled={busy} onClick={submit}>
+              {busy ? '解锁中…' : '解锁写密钥'}
+            </button>
+          </div>
+        ) : (
+          <div className="note" data-testid="l0-unlock-need-admin">
+            {role === null
+              ? '未登录：请先登录后由管理员输入管理密码解锁，或成员用写解锁口令解锁。'
+              : '当前账号不是管理员：请管理员在安全页解锁写密钥后再试。'}
+          </div>
+        )}
+        {error && <div className="err" data-testid="l0-unlock-error">解锁失败：{error}</div>}
       </div>
     );
   }

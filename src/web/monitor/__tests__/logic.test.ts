@@ -38,15 +38,15 @@ describe('filterAlerts（12.2 三维 AND）', () => {
 });
 
 describe('groupMetrics', () => {
-  it('20 卡分 8 组（批次64 新增 7 卡），检索性能置顶 / 后台任务置底', () => {
+  it('22 卡分 8 组（2026-11-24 精炼队列拆三卡），检索性能置顶 / 后台任务置底', () => {
     const g = groupMetrics(SEED_METRICS);
-    expect(SEED_METRICS.length).toBe(20);
+    expect(SEED_METRICS.length).toBe(22);
     expect(g.length).toBe(8);
     // 2026-11-15 用户要求：检索表现置顶、精炼队列（现「后台任务」组）置底
     expect(g[0][0]).toBe('检索性能(1h)');
     expect(g[g.length - 1][0]).toBe('队列');
     expect(SEED_METRICS.some((m) => m.metric === '死信消息(24h)')).toBe(false);
-    expect(SEED_METRICS.some((m) => m.metric === '精炼队列')).toBe(true);
+    expect(SEED_METRICS.some((m) => m.metric === '精炼等待')).toBe(true);
   });
 });
 

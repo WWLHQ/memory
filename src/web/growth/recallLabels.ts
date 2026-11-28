@@ -60,13 +60,6 @@ export const MONITOR_METRIC_TEXT: Record<string, MonitorText> = {
     threshold: '超过 5 秒提醒',
     basis: '拨测记录',
   },
-  '精炼队列': {
-    label: '精炼队列',
-    hint: '原始记忆排队整理成可检索内容的进度：成功、失败、等待各多少条。',
-    unit: '',
-    threshold: '等待超 1000 提醒',
-    basis: '补炼队列',
-  },
   '写入成功率': {
     label: '写入率',
     hint: '写记忆时真正成功落盘的比例。',
@@ -179,6 +172,28 @@ export const MONITOR_METRIC_TEXT: Record<string, MonitorText> = {
     unit: '次',
     threshold: '出现 1 次就提醒',
     basis: '任务记录',
+  },
+  // 2026-11-24 用户要求：原「精炼队列」单卡拆成成功/失败/等待三张独立卡
+  '精炼成功': {
+    label: '精炼成功',
+    hint: '已经补炼完成并入层的记忆条数；因内容太少被跳过的另算，不算失败。',
+    unit: '条',
+    threshold: '累计完成，不设告警',
+    basis: '补炼回执',
+  },
+  '精炼失败': {
+    label: '精炼失败',
+    hint: '补炼时真正跑失败的条数；内容太短被跳过的不计入这里。',
+    unit: '条',
+    threshold: '出现 1 条就提醒',
+    basis: '补炼回执',
+  },
+  '精炼等待': {
+    label: '精炼等待',
+    hint: '还在队列里等着补炼的记忆条数；超过一千条提醒积压。',
+    unit: '条',
+    threshold: '>1000 ⚠️',
+    basis: '补炼回执',
   },
 };
 

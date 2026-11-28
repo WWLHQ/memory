@@ -88,7 +88,7 @@ describe('监控指标时间窗口与真实字段（阶段4-I / B8 变异杀手�
 
   it('空账本 + 无 monitor：依赖主进程的 7 卡保持「未取数」，账本可算卡显示真实值（0 / 无极简）', () => {
     const cards = metricsFromLedger([], [], NOW);
-    expect(cards).toHaveLength(20);
+    expect(cards).toHaveLength(22);
     const vals = Object.fromEntries(cards.map((c) => [c.metric, c.value]));
     // 主进程拨测相关（无 monitor 数据）：诚实空态
     for (const k of ['连通成功率(5min)', '熔断状态', '平均延迟', '写入成功率', '哈希校验失败(24h)']) {
@@ -113,7 +113,9 @@ describe('监控指标时间窗口与真实字段（阶段4-I / B8 变异杀手�
     expect(vals['命中率']).toBe('未取数');
     expect(vals['payload_tokens p95']).toBe('未取数');
     expect(vals['延迟 p99']).toBe('未取数');
-    expect(vals['精炼队列']).toBe('未取数');
+    expect(vals['精炼成功']).toBe('未取数');
+    expect(vals['精炼失败']).toBe('未取数');
+    expect(vals['精炼等待']).toBe('未取数');
   });
 
   it('历史审计缺 detail 字段 → 不计入分母，不拿 0 冒充已采集', () => {
@@ -155,14 +157,14 @@ describe('监控指标时间窗口与真实字段（阶段4-I / B8 变异杀手�
   it('MetricGrid：无样本卡标「暂无数据」、有真实值卡（含真实 0 / 无极简）不标', () => {
     const empty = metricsFromLedger([], [], NOW);
     const first = render(<MetricGrid cards={empty} />);
-    // 12 张无样本（检索性能 3 + 首查率 + Agent 健康 3 + 采集器/最近备份 + 冷存储 2 + 精炼队列）；其余 8 张显示真实值
-    expect(first.container.querySelectorAll('.mval.empty')).toHaveLength(12);
+    // 14 张无样本（检索性能 3 + 首查率 + Agent 健康 3 + 采集器/最近备份 + 冷存储 2 + 精炼成功/失败/等待 3）；其余 8 张显示真实值
+    expect(first.container.querySelectorAll('.mval.empty')).toHaveLength(14);
     expect(first.container.textContent).toContain('暂无数据');
     expect(first.container.textContent).toContain('近 1 天没有极简检索');
     first.unmount();
     // 第 0 张（命中率）设值后不再 empty
     const second = render(<MetricGrid cards={empty.map((c, i) => (i === 0 ? { ...c, value: 42 } : c))} />);
-    expect(second.container.querySelectorAll('.mval.empty')).toHaveLength(11);
+    expect(second.container.querySelectorAll('.mval.empty')).toHaveLength(13);
   });
 
   it('源码声明契约：旧全量分母 / 假分位数 / 缺接线不得回流', () => {
@@ -180,10 +182,10 @@ describe('监控指标时间窗口与真实字段（阶段4-I / B8 变异杀手�
 });
 
 describe('监控页人话契约（2026-11-15 用户拍板：短名 ≤5 字 + 一句白话）', () => {
-  it('20 张指标卡全部有中文短名，且短名 / 依据 ≤5 字', () => {
-    expect(monitorMetricKeys()).toHaveLength(20);
+  it('22 张指标卡全部有中文短名，且短名 / 依据 ≤5 字', () => {
+    expect(monitorMetricKeys()).toHaveLength(22);
     const cards = metricsFromLedger([], [], NOW);
-    expect(cards).toHaveLength(20);
+    expect(cards).toHaveLength(22);
     for (const c of cards) {
       const t = monitorText(c.metric);
       expect(t.label.length).toBeLessThanOrEqual(5);
@@ -198,7 +200,9 @@ describe('监控页人话契约（2026-11-15 用户拍板：短名 ≤5 字 + �
     expect(monitorText('payload_tokens p95').label).toBe('注入量');
     expect(monitorText('pipeline_llm_tokens p95').label).toBe('链路开销');
     expect(monitorText('延迟 p99').label).toBe('尾延迟');
-    expect(monitorText('精炼队列').label).toBe('精炼队列');
+    expect(monitorText('精炼成功').label).toBe('精炼成功');
+    expect(monitorText('精炼失败').label).toBe('精炼失败');
+    expect(monitorText('精炼等待').label).toBe('精炼等待');
   });
 
   it('渲染层不出原始字段名 / 英文枚举 / 规格编号', () => {
@@ -209,7 +213,9 @@ describe('监控页人话契约（2026-11-15 用户拍板：短名 ≤5 字 + �
     }
     expect(text).toContain('注入量');
     expect(text).toContain('尾延迟');
-    expect(text).toContain('精炼队列');
+    expect(text).toContain('精炼成功');
+    expect(text).toContain('精炼失败');
+    expect(text).toContain('精炼等待');
     expect(text).toContain('暂无数据');
   });
 
@@ -222,7 +228,7 @@ describe('监控页人话契约（2026-11-15 用户拍板：短名 ≤5 字 + �
     expect(monitorValueText(2858)).toBe('2858');
   });
 
-  it('精炼队列有真回执 → 值位显示成功/失败/等待三项；无回执 → 整卡暂无数据', () => {
+  it('精炼队列拆三卡：成功/失败/等待各自独立读数；无回执 → 三卡均暂无数据', () => {
     const summary = {
       enabled: true, pending: 0, done: 2247, failed: 1273, skipped: 265,
       day: '2026-11-15', day_rows: 9, cap_enabled: false, cap_rows: 500,
@@ -230,17 +236,30 @@ describe('监控页人话契约（2026-11-15 用户拍板：短名 ≤5 字 + �
       stop_codes: {}, updated_at: NOW, queue_path: 'refine-queue.json',
     };
     const withRefine = metricsFromLedger([], [], NOW, summary);
-    const queue = withRefine.find((c) => c.metric === '精炼队列');
-    expect(queue?.parts).toEqual({ ok: 2247, failed: 1273, waiting: 0, skipped: 265 });
+    const ok = withRefine.find((c) => c.metric === '精炼成功');
+    const failed = withRefine.find((c) => c.metric === '精炼失败');
+    const waiting = withRefine.find((c) => c.metric === '精炼等待');
+    expect(ok?.value).toBe(2247);
+    expect(failed?.value).toBe(1273);
+    expect(waiting?.value).toBe(0);
+    expect(withRefine.some((c) => c.metric === '精炼队列')).toBe(false);
+    expect(ok?.parts).toEqual({ ok: 2247, failed: 1273, waiting: 0, skipped: 265 });
     const { container } = render(<MetricGrid cards={withRefine} />);
-    const text = container.querySelector('[data-testid="metric-精炼队列"]')?.textContent ?? '';
-    expect(text).toContain('成功 2247');
-    expect(text).toContain('失败 1273');
-    expect(text).toContain('等待 0');
-    expect(text).toContain('另有 265 条因内容太少跳过');
-    const without = metricsFromLedger([], [], NOW, null).find((c) => c.metric === '精炼队列');
-    expect(without?.value).toBe('未取数');
-    expect(without?.parts).toBeUndefined();
+    const okText = container.querySelector('[data-testid="metric-精炼成功"]')?.textContent ?? '';
+    const failedText = container.querySelector('[data-testid="metric-精炼失败"]')?.textContent ?? '';
+    const waitingText = container.querySelector('[data-testid="metric-精炼等待"]')?.textContent ?? '';
+    expect(okText).toContain('2247');
+    expect(okText).toContain('另有 265 条因内容太少跳过');
+    expect(failedText).toContain('1273');
+    expect(waitingText).toContain('0');
+    // 「另有 N 条因内容太少跳过」的计数说明只在成功卡出现，不污染失败/等待卡
+    expect(failedText).not.toContain('另有 265 条');
+    expect(waitingText).not.toContain('另有 265 条');
+    const without = metricsFromLedger([], [], NOW, null);
+    for (const m of ['精炼成功', '精炼失败', '精炼等待']) {
+      const c = without.find((x) => x.metric === m);
+      expect(c?.value).toBe('未取数');
+    }
   });
 
   it('死信卡已删：20 张卡里不存在该指标', () => {

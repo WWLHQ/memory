@@ -21,6 +21,7 @@ type View = {
   loginWindows: string[];
   sites: Array<{ key: string; label: string }>;
   blocked: string;
+  relogins?: Record<string, number>;
 };
 
 const SITES = [
@@ -234,6 +235,24 @@ describe('WebchatAutoCard · 登录失效', () => {
     expect(login.mock.calls[0][0]).toBe('deepseek');
   });
 
+  test('重新登录晚于该轮快照：旧 need_relogin 不再计入需处理，改显示待下轮确认', async () => {
+    const roundAt = 1_700_000_000_000;
+    setHost({
+      state: async () => base({
+        relogins: { deepseek: roundAt + 60_000 },
+        lastRound: {
+          at: roundAt, trigger: 'timer',
+          results: [{ site: 'deepseek', status: 'need_relogin', scanned: 0, exported: 0, reason: '侧栏未识别到会话' }],
+        },
+      }),
+    });
+    render(<WebchatAutoCard />);
+    await waitFor(() => expect(screen.getByTestId('wa-relogin-awaiting')).toBeTruthy());
+    expect(screen.getByTestId('wa-relogin-awaiting').textContent).toContain('已重新登录');
+    expect(screen.queryByTestId('wa-need-relogin')).toBeNull();
+    expect(screen.queryByTestId('wa-relogin-btn')).toBeNull();
+  });
+
   test('没有 need_relogin 时不出现告警与按钮（不许常驻干扰）', async () => {
     setHost({
       state: async () => base({
@@ -295,6 +314,70 @@ describe('WebchatAutoCard · 本轮结果表', () => {
     render(<WebchatAutoCard />);
     await waitFor(() => expect(screen.getByTestId('wa-run-btn')).toBeTruthy());
     expect(screen.queryByTestId('wa-results')).toBeNull();
+  });
+});
+
+describe('WebchatAutoCard · 失败原因与处理办法', () => {
+  test('失败 2 站：逐站给出中文状态 / 主进程原因 / 下一步，按钮能重试与重登', async () => {
+    const failedView = base({
+      lastRound: {
+        at: Date.now(), trigger: 'timer',
+        results: [
+          { site: 'deepseek', status: 'dom_changed', scanned: 3, exported: 0, reason: '识别到 3 条会话但一条正文都没抽到' },
+          { site: 'kimi', status: 'error', scanned: 0, exported: 0, reason: '本机接收端未就绪' },
+        ],
+      },
+    });
+    const run = vi.fn(async () => ({ ok: true, state: failedView }));
+    const login = vi.fn(async (site: string) => ({ ok: true, echo: site }));
+    setHost({
+      state: async () => failedView,
+      run, login,
+    });
+    render(<WebchatAutoCard />);
+    await waitFor(() => expect(screen.getByTestId('wa-failure-guide')).toBeTruthy());
+    expect(screen.getByTestId('wa-failure-guide').textContent).toContain('失败 2 站');
+    const ds = screen.getByTestId('wa-failure-deepseek').textContent ?? '';
+    expect(ds).toContain('页面结构变了');
+    expect(ds).toContain('一条正文都没抽到');
+    expect(ds).toContain('重新登录');
+    const km = screen.getByTestId('wa-failure-kimi').textContent ?? '';
+    expect(km).toContain('失败');
+    expect(km).toContain('接收端未就绪');
+    expect(km).toContain('确认桌面端仍在运行');
+
+    await userEvent.click(screen.getByTestId('wa-failure-retry'));
+    await waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+    await userEvent.click(screen.getByTestId('wa-failure-login'));
+    await waitFor(() => expect(login).toHaveBeenCalledTimes(1));
+    expect(login.mock.calls[0][0]).toBe('deepseek');
+  });
+
+  test('真实失败原因给出针对性步骤：页面没切换 / WebFrame 提前销毁', async () => {
+    setHost({
+      state: async () => base({
+        lastRound: {
+          at: Date.now(), trigger: 'timer',
+          results: [
+            { site: 'qianwen', status: 'dom_changed', scanned: 12, exported: 0, reason: '识别到 12 条会话，点了 12 条，地址都没变' },
+            { site: 'yiyan', status: 'error', scanned: 0, exported: 0, reason: '页面执行失败：WebFrame was removed before script could run' },
+          ],
+        },
+      }),
+    });
+    render(<WebchatAutoCard />);
+    await waitFor(() => expect(screen.getByTestId('wa-failure-guide')).toBeTruthy());
+    expect(screen.getByTestId('wa-failure-qianwen').textContent).toContain('地址都没变');
+    expect(screen.getByTestId('wa-failure-qianwen').textContent).toContain('取消勾选');
+    expect(screen.getByTestId('wa-failure-yiyan').textContent).toContain('WebFrame');
+    expect(screen.getByTestId('wa-failure-yiyan').textContent).toContain('脚本执行前被关闭');
+  });
+
+  test('没有失败站时不渲染失败指引（不许常驻吓人）', async () => {
+    setHost({ state: async () => base({ lastRound: { at: Date.now(), trigger: 'timer', results: [{ site: 'deepseek', status: 'no_new', scanned: 3, exported: 0 }] } }) });
+    render(<WebchatAutoCard />);
+    await waitFor(() => expect(screen.getByTestId('wa-run-btn')).toBeTruthy());
+    expect(screen.queryByTestId('wa-failure-guide')).toBeNull();
   });
 });
 

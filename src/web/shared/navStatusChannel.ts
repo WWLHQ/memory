@@ -92,6 +92,10 @@ export interface NavStatusSource {
   sync?: { active?: boolean; lastError?: string | null } | null;
   /** T3：只有真实读到客户端把本服务标成已禁用、或共享信号里的待生效时才带（读不到一律不产出条目） */
   mcpSwitch?: { name?: string; pending?: boolean } | null;
+  /** 2026-11-24：MCP 接入配置面异常（冲突 / 解析失败）。状态栏走 fast 扫描，实测探活没读 → 不带 failed，绝不虚构 0 */
+  mcpIssue?: { conflict?: number; invalid?: number } | null;
+  /** 2026-11-24：网页接入异常（需重新登录 / 采集失败），只有真读到计数才带；0 不报 */
+  webIssue?: { needRelogin?: number; failed?: number } | null;
 }
 
 export function buildNavStatus(src: NavStatusSource): NavStatusItem[] {
@@ -135,6 +139,37 @@ export function buildNavStatus(src: NavStatusSource): NavStatusItem[] {
       items.push({ key: 'mcp-switch', label: `${src.mcpSwitch.name} MCP 已清除，待生效`, tone: 'warn' });
     } else {
       items.push({ key: 'mcp-switch', label: `${src.mcpSwitch.name} MCP 开关已关闭`, tone: 'warn' });
+    }
+  }
+
+  // 6) MCP 接入配置面异常：冲突 / 配置解析失败，任一项 >0 才报（0 是真实健康，不产出条目）。
+  //    状态栏走 fast 扫描，不含实测探活 → 不显示「实测失败」，更不虚构 0。
+  const mi = src.mcpIssue;
+  if (mi) {
+    const conflict = typeof mi.conflict === 'number' ? mi.conflict : 0;
+    const invalid = typeof mi.invalid === 'number' ? mi.invalid : 0;
+    const total = conflict + invalid;
+    if (total > 0) {
+      items.push({
+        key: 'mcp-issue',
+        label: `MCP 接入 ${total} 项配置异常（冲突 ${conflict} · 配置错误 ${invalid}）`,
+        tone: 'warn', count: total,
+      });
+    }
+  }
+
+  // 7) 网页接入异常：需重新登录 / 采集失败，任一项 >0 才报
+  const wi = src.webIssue;
+  if (wi) {
+    const relogin = typeof wi.needRelogin === 'number' ? wi.needRelogin : 0;
+    const failed = typeof wi.failed === 'number' ? wi.failed : 0;
+    const total = relogin + failed;
+    if (total > 0) {
+      items.push({
+        key: 'web-issue',
+        label: `网页接入 ${total} 站需处理（重新登录 ${relogin} · 失败 ${failed}）`,
+        tone: 'warn', count: total,
+      });
     }
   }
 

@@ -27,6 +27,8 @@ import { L0OwnerBackfillCard } from './L0OwnerBackfillCard.tsx';
 import { TenantIdentityCard } from './TenantIdentityCard.tsx';
 import { OwnerBindingsCard } from './OwnerBindingsCard.tsx';
 import { useSessionContext } from '../shared/session.ts';
+import { logoutCurrentSession } from '../shell/ShellLoginDialog.tsx';
+import { requestShellView } from '../shared/shellNavigate.ts';
 import { useToast } from './useToast.tsx';
 import {
   fetchAccounts, fetchApiKeys, mintApiKey, revokeApiKey, fetchPwdPolicy, savePwdPolicy,
@@ -73,7 +75,7 @@ interface Remedy {
   why: string;
   need: string;
   after: string;
-  action?: 'l0' | 'role' | 'reseal';
+  action?: 'l0' | 'role' | 'reseal' | 'admin-login';
 }
 
 /** 每条「需处理」的真实原因 / 所需身份或密钥 / 处理后的状态（与 checks 的 testid 一一对应） */
@@ -84,10 +86,10 @@ const REMEDY: Record<string, Remedy> = {
     after: '该项转为「通过」；依赖会话的检查同步刷新。',
   },
   'chk-role': {
-    why: '当前是 member 会话，危险操作卡与管理员接口被主进程/后端强制禁用。',
-    need: '管理员账号登录；或由现有管理员在「账号与密钥」表把该账号角色改为 admin 并保存。',
-    after: '角色变为管理员，危险操作卡启用，该项转为「通过」，计数 -1。',
-    action: 'role',
+    why: '你现在用的是普通成员账号，所以危险设置和管理接口都被锁住了——这是权限设计，不是出了故障。',
+    need: '用管理员账号重新登录。你自己没法把当前成员账号改成管理员：改角色这一步本身就需要管理员（系统不允许自己给自己提权）。若这个成员账号确实要永久升为管理员，请让另一位管理员在「账号与密钥」里改，改完该账号的旧会话会失效，仍要重新登录。',
+    after: '换成管理员账号登录后会全面部检查通过，危险设置解锁，这项自动消失。',
+    action: 'admin-login',
   },
   'chk-policy': {
     why: '密码策略未能从后端读取（接口失败或会话失效），页面只能显示默认值。',
@@ -95,10 +97,10 @@ const REMEDY: Record<string, Remedy> = {
     after: '读取成功后显示后端已生效值，该项转为「通过」。',
   },
   'chk-l0': {
-    why: 'L0 密钥环读取失败：主密钥/管理密码包装不可用，或当前会话无权读取。',
-    need: '管理员会话 + L0 管理密码；若密钥环文件损坏，需用「恢复」卡从备份重建。',
-    after: '读取成功后显示包装/写锁/授权实况；写密钥锁定即为通过，计数随之下降。',
-    action: 'l0',
+    why: '这里显示「读取失败 E_AUTH_L0」是因为完整密钥环状态只有管理员能看——普通成员一查就被拒绝，并不代表密钥环真的坏了。你的日常读写不受影响。',
+    need: '用管理员账号重新登录就能看到完整状态。注意：成员会话下仍能读到「写密钥是否已解锁」这个你真正关心的结果（见下方 L0 卡），只是看不到完整的管理细节。',
+    after: '换成管理员账号登录后，这项会显示真实的管理密码包装、写锁和授权状态，自动转为正常。',
+    action: 'admin-login',
   },
   'chk-l0audit': {
     why: '内核 L0/安全变更审计读不到或为空，无法证明最近的安全操作有留痕。',
@@ -355,6 +357,20 @@ export function SecurityPage() {
     }, 60);
   };
 
+  // 成员会话下管理员/L0 两项无法在本账号内处理：退出现有会话 → 弹登录框换管理员账号。
+  // 这是唯一真正可执行的路径；旧版按钮跳到对成员禁用的卡片，是"看得见点不动"的死路。
+  const switchToAdmin = async () => {
+    setIssueMsg('');
+    setIssueErr('');
+    try {
+      await logoutCurrentSession();
+      requestShellView('login');
+      setIssueMsg('已退出当前账号。请在弹出的登录框里用管理员账号登录；登录成功后这些项会自动消失。');
+    } catch {
+      setIssueErr('退出当前账号失败，请手动点击应用顶部的账号入口切换为管理员账号后重试。');
+    }
+  };
+
   const doReseal = async () => {
     setIssueMsg('');
     setIssueErr('');
@@ -580,17 +596,14 @@ export function SecurityPage() {
                       </span>
                     </>
                   )}
-                  {r?.action === 'l0' && (
-                    <button
-                      type="button" className="btn" data-testid="sec-fix-l0"
-                      onClick={() => jumpToTab(1, 'l0-admin-card')}
-                    >去解锁 L0 密钥环</button>
-                  )}
-                  {r?.action === 'role' && (
-                    <button
-                      type="button" className="btn" data-testid="sec-fix-role"
-                      onClick={() => jumpToTab(2, 'admin-accounts-card')}
-                    >去「账号与密钥」改角色</button>
+                  {r?.action === 'admin-login' && (
+                    <>
+                      <button
+                        type="button" className="btn primary" data-testid="sec-fix-admin-login"
+                        onClick={() => void switchToAdmin()}
+                      >退出，用管理员账号重新登录</button>
+                      <span className="dim">当前是成员账号，这两项只有管理员能处理；换账号是唯一可行的办法。</span>
+                    </>
                   )}
                   {!r?.action && <span className="dim">需人工按上述步骤处理（无可用的一键接口）</span>}
                 </div>

@@ -137,30 +137,31 @@ export function LifecyclePage() {
   const deprecatedN = countOf('deprecated');
   const pendingRecords = records.filter((r) => r.status === 'stale' || r.status === 'dormant' || r.locked);
 
-  const STAGES: { key: string; target: MemoryStatus; title: string; q: string; rule: string; window: string; count: number }[] = [
+  // 人机交互：plain=这档是什么意思（大白话），rule=系统判定规则，按钮说清"点了会发生什么"
+  const STAGES: { key: string; target: MemoryStatus; title: string; plain: string; rule: string; window: string; count: number }[] = [
     {
-      key: 'active', target: 'active', title: '产生与活跃', count: activeN,
-      q: '新写入/被强化的记忆在哪一档，还能不能继续参与召回。',
-      rule: '写入即 active；访问/强化提升重要度与温度。',
-      window: '无时间门槛',
+      key: 'active', target: 'active', title: '正在使用', count: activeN,
+      plain: '刚记下、或者最近还在用的记忆——它们照常参与回答。',
+      rule: '新写入就进这一档，用过会让它更"热"。',
+      window: '没有时间限制',
     },
     {
-      key: 'cooling', target: 'hibernating', title: '降温与休眠', count: coolingN,
-      q: '多久没用会降温、休眠后还能不能读。',
-      rule: 'age ≥ N 天进入 hibernating；stale/dormant 为账本真实标记态。',
-      window: `≥ ${N_DAYS} 天`,
+      key: 'cooling', target: 'hibernating', title: '慢慢休眠', count: coolingN,
+      plain: `超过 ${N_DAYS} 天没用的记忆先收起来，需要时仍然能查到。`,
+      rule: '放久了自动降温；这只是标记，没有删掉内容。',
+      window: `超过 ${N_DAYS} 天`,
     },
     {
-      key: 'archived', target: 'archived', title: '归档', count: archivedN,
-      q: '长期不用的记忆收到哪里，是否等于删除。',
-      rule: 'age ≥ M 天进入 archived；仍可读、可恢复 active，不是删除。',
-      window: `≥ ${M_DAYS} 天`,
+      key: 'archived', target: 'archived', title: '已归档', count: archivedN,
+      plain: `超过 ${M_DAYS} 天没动过的记忆存进这里，不是删除，随时能取回。`,
+      rule: '长期不用的自动归档，仍能读、能恢复。',
+      window: `超过 ${M_DAYS} 天`,
     },
     {
-      key: 'deprecated', target: 'deprecated', title: '弃用', count: deprecatedN,
-      q: '被替代/作废的记忆如何保留可追溯。',
-      rule: '由合并/替代触发（replaced_by）；仍可恢复 active，账本不物理删除。',
-      window: '由替代关系触发',
+      key: 'deprecated', target: 'deprecated', title: '已弃用', count: deprecatedN,
+      plain: '被更新的记忆替代后，旧的那条留在这里备查。',
+      rule: '合并或替换时触发，内容留痕，不会物理删除。',
+      window: '有新内容替代它时',
     },
   ];
 
@@ -231,22 +232,22 @@ export function LifecyclePage() {
           <section className="af-panel lc-stage" key={s.key} data-testid={`stage-card-${s.key}`}>
             <div className="af-ph"><h3>{s.title}</h3><span className="hint">{s.count} 条</span></div>
             <div className="af-pb">
-              <p className="af-q">回答：{s.q}</p>
+              <p className="af-q">{s.plain}</p>
               <div className="lc-mini">
-                <span>当前 <b>{s.count}</b> 条</span>
-                <span>时间窗口 <b>{s.window}</b></span>
+                <span>现在有 <b>{s.count}</b> 条</span>
+                <span>{s.window}</span>
               </div>
-              <p className="af-note">流转规则：{s.rule}</p>
+              <p className="af-note">{s.rule}</p>
               <div className="lc-actions">
                 <button
                   type="button"
                   className="btn"
                   data-testid={`stage-migrate-${s.target}`}
                   disabled={!selected}
-                  title={selected ? `把当前选中项 ${selected.id} 迁移到 ${s.target}` : '先在下方明细选中一条记忆'}
+                  title={selected ? `把选中的「${selected.content}」改成「${s.title}」，内容不会丢` : '先在下面的列表里选一条记忆'}
                   onClick={() => void handleMigrate(s.target)}
                 >
-                  把选中项迁到 {s.target}
+                  {selected ? `把这 1 条改成「${s.title}」` : `把选中的改成「${s.title}」`}
                 </button>
               </div>
             </div>

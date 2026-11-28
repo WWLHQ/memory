@@ -12,12 +12,12 @@ describe('MonitorPage (P6-T5 编排·真实账本接真版)', () => {
   beforeEach(() => resetKernelForTests());
   afterEach(() => vi.restoreAllMocks());
 
-  it('空账本（jsdom 内存态）→ 20 张卡诚实空态：无真值标「暂无数据」，真实 0 / 无极简如实显示 + 无告警诚信空态（不伪造演示数字）', async () => {
+  it('空账本（jsdom 内存态）→ 22 张卡诚实空态：无真值标「暂无数据」，真实 0 / 无极简如实显示 + 无告警诚信空态（不伪造演示数字）', async () => {
     render(<MonitorPage />);
     await waitFor(() => expect(screen.getByTestId('metric-grid')).toBeInTheDocument());
     const cards = [...document.querySelectorAll('[data-testid^="metric-"]')]
       .filter((el) => el.getAttribute('data-testid') !== 'metric-grid');
-    expect(cards).toHaveLength(20);
+    expect(cards).toHaveLength(22);
     // 2026-11-15 用户要求：检索表现置顶、精炼队列（后台任务组）置底。
     // 顺序由 useMonitorReal.metricsFromLedger 的返回数组决定（groupMetrics 用 Map 保插入序），
     // 所以必须锁生产输出，锁夹具（SEED_METRICS）抓不住生产重排。
@@ -33,9 +33,9 @@ describe('MonitorPage (P6-T5 编排·真实账本接真版)', () => {
     //   · 极简证据不足率 = 「近 1 天没有极简检索」（分母为 0 不说假 0%）。
     // 值位含单位（来自 recallLabels 人话文案），断言需带单位。
     const vals = [...document.querySelectorAll('.mval')].map((el) => el.textContent?.trim() ?? '');
-    expect(vals).toHaveLength(20);
+    expect(vals).toHaveLength(22);
     const counts = vals.reduce<Record<string, number>>((m, v) => { m[v] = (m[v] ?? 0) + 1; return m; }, {});
-    expect(counts['暂无数据']).toBe(12);
+    expect(counts['暂无数据']).toBe(14);
     expect(counts['0条']).toBe(3);
     expect(counts['0次']).toBe(3);
     expect(counts['0字']).toBe(1);

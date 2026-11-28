@@ -1,6 +1,7 @@
 // STRATUM 1:1 复刻后的静态版式契约（原 v5 版式已被 STRATUM 取代）。
 // jsdom 不加载外链 CSS，因此这里直接钉住 theme.css 的关键高度与结构，防止回退到旧四段顶部。
-// 设计真源：specs/STRATUM-设计系统规格.md（提取自 stratum-a-full.html：46px 标题栏 + 44px 命令条 + 26px 状态栏）。
+// 设计真源：specs/STRATUM-设计系统规格.md（提取自 stratum-a-full.html）。
+// 2026-11-24 用户明确要求顶部红框区减高 1/4：46+44=90px → 36+32=68px；状态栏 26px 不变。
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
@@ -8,9 +9,9 @@ const css = readFileSync(`${process.cwd()}/src/web/shell/theme.css`, 'utf8');
 const workspace = readFileSync(`${process.cwd()}/src/web/shell/Workspace.tsx`, 'utf8');
 
 describe('STRATUM 壳层版式契约', () => {
-  it('标题栏 46px；命令条 44px；状态栏 26px', () => {
-    expect(css).toMatch(/\.titlebar\s*\{[\s\S]*?height:\s*46px/);
-    expect(css).toMatch(/\.cmdbar\s*\{[\s\S]*?height:\s*44px/);
+  it('标题栏 36px；命令条 32px；状态栏 26px（2026-11-24 顶部区减 1/4）', () => {
+    expect(css).toMatch(/\.titlebar\s*\{[\s\S]*?height:\s*36px/);
+    expect(css).toMatch(/\.cmdbar\s*\{[\s\S]*?min-height:\s*32px/);
     expect(css).toMatch(/\.statusbar\s*\{[\s\S]*?height:\s*26px/);
   });
 
@@ -28,7 +29,7 @@ describe('STRATUM 壳层版式契约', () => {
     expect(workspace).not.toContain('cmdbar-palette');
   });
 
-  it('标题栏结构：46px 单行，strata 徽标 + 应用名 + 命令框全部靠左（批次53）+ 主题/向导/头像（批次51：QAT 工具簇整簇取消）', () => {
+  it('标题栏结构：36px 单行，strata 徽标 + 应用名 + 命令框全部靠左（批次53）+ 主题/向导/头像（批次51：QAT 工具簇整簇取消）', () => {
     expect(workspace).toContain('data-testid="shell-cmd-entry"');
     expect(workspace).not.toContain('className="qa"');
     expect(workspace).not.toContain('qaSpecs');

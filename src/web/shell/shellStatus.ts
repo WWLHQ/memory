@@ -32,6 +32,15 @@ export interface McpSwitchBrief {
   disabled: boolean;
   /** ①三处一致：一键已清标记、但客户端尚未重开 → 待生效（与首页/接入页同源） */
   pending?: boolean;
+  /** 2026-11-24：配置面异常计数（fast 扫描可读；实测失败要完整探活，状态栏不读，故不含） */
+  conflict: number;
+  invalid: number;
+}
+
+/** 2026-11-24：网页接入异常摘要（需重新登录 / 采集失败），来自 webchatAuto:state 真回执 */
+export interface WebIssueBrief {
+  needRelogin: number;
+  failed: number;
 }
 
 export interface ShellStatusSnapshot {
@@ -39,6 +48,7 @@ export interface ShellStatusSnapshot {
   refine: DockResult<RefineBrief>;
   collector: DockResult<CollectorView>;
   mcpSwitch: DockResult<McpSwitchBrief>;
+  webIssue: DockResult<WebIssueBrief>;
 }
 
 const errText = (e: unknown): string => String((e as Error)?.message ?? e);
@@ -83,34 +93,71 @@ export async function loadMcpSwitchBrief(): Promise<DockResult<McpSwitchBrief>> 
   }
   try {
     const r = await hostCall<{
-      clients?: Array<{ id: string; name?: string; disabled?: boolean }>;
+      clients?: Array<{ id: string; name?: string; disabled?: boolean; state?: string }>;
     }>('mcp:clients', [currentSessionId(), { fast: true }]);
     if (!Array.isArray(r?.clients)) {
       return { status: 'error', detail: '主进程未返回客户端列表（开关状态不可读）' };
     }
+    // 2026-11-24：顺带统计配置面异常（conflict / invalid），与接入页「错误码/异常」同源。
+    // fast 扫描跳过实测探活 → failed（实测失败）这里读不到，不虚构，文案也不提。
+    const conflict = r.clients.filter((c) => c.state === 'conflict').length;
+    const invalid = r.clients.filter((c) => c.state === 'invalid').length;
+    const issues = { conflict, invalid };
     const hit = r.clients.find((c) => c.disabled === true);
-    if (hit) return { status: 'ok', view: { id: hit.id, name: hit.name ?? hit.id, disabled: true } };
+    if (hit) return { status: 'ok', view: { id: hit.id, name: hit.name ?? hit.id, disabled: true, ...issues } };
     // ①三处一致：真禁用的已清掉，但共享信号记录着「待生效」→ 壳层也保持提醒，不退回正常
     const pendingIds = listMcpPending();
     if (pendingIds.length > 0) {
       const pid = pendingIds[0];
       const pc = r.clients.find((c) => c.id === pid);
-      return { status: 'ok', view: { id: pid, name: pc?.name ?? pid, disabled: false, pending: true } };
+      return { status: 'ok', view: { id: pid, name: pc?.name ?? pid, disabled: false, pending: true, ...issues } };
     }
-    return { status: 'ok', view: { id: '', name: '', disabled: false } };
+    return { status: 'ok', view: { id: '', name: '', disabled: false, ...issues } };
+  } catch (e) {
+    return { status: 'error', detail: errText(e) };
+  }
+}
+
+/** 网页接入异常：复用 webchatAuto:state，按页面同源口径从 lastRound.results 派生（需会话；无会话如实 unavailable） */
+export async function loadWebIssueBrief(): Promise<DockResult<WebIssueBrief>> {
+  if (hostCapability() === 'none') {
+    return { status: 'unavailable', detail: '浏览器模式：读不到本机网页采集状态。' };
+  }
+  try {
+    const r = await hostCall<{
+      ok?: boolean; error?: string;
+      lastRound?: { at?: number; results?: Array<{ site?: string; status?: string }> } | null;
+      relogins?: Record<string, number>;
+    }>('webchatAuto:state', [currentSessionId()]);
+    if (!r?.ok) return { status: 'error', detail: r?.error ?? '主进程未返回网页采集状态' };
+    const results = r.lastRound?.results ?? [];
+    const roundAt = r.lastRound?.at ?? 0;
+    const relogins = r.relogins ?? {};
+    // 与网页端接入页同一口径：重新登录晚于该轮快照的 need_relogin 视为已处理，计数剔除
+    const needRelogin = results.filter(
+      (x) => x.status === 'need_relogin' && !(x.site && relogins[x.site] && relogins[x.site] > roundAt),
+    ).length;
+    return {
+      status: 'ok',
+      view: {
+        needRelogin,
+        failed: results.filter((x) => x.status === 'error' || x.status === 'dom_changed').length,
+      },
+    };
   } catch (e) {
     return { status: 'error', detail: errText(e) };
   }
 }
 
 export async function loadShellStatus(): Promise<ShellStatusSnapshot> {
-  const [pendingWrites, refine, collector, mcpSwitch] = await Promise.all([
+  const [pendingWrites, refine, collector, mcpSwitch, webIssue] = await Promise.all([
     loadPendingCount(),
     loadRefineBrief(),
     loadCollectorStatus(),
     loadMcpSwitchBrief(),
+    loadWebIssueBrief(),
   ]);
-  return { pendingWrites, refine, collector, mcpSwitch };
+  return { pendingWrites, refine, collector, mcpSwitch, webIssue };
 }
 
 /**
@@ -136,6 +183,13 @@ export function toNavStatusSource(snap: ShellStatusSnapshot): NavStatusSource {
       : snap.mcpSwitch.status === 'ok' && snap.mcpSwitch.view.pending
         ? { name: snap.mcpSwitch.view.name, pending: true }
         : undefined,
+    // 2026-11-24：MCP 配置面异常（冲突/解析失败）与网页接入异常（重新登录/失败）
+    mcpIssue: snap.mcpSwitch.status === 'ok'
+      ? { conflict: snap.mcpSwitch.view.conflict, invalid: snap.mcpSwitch.view.invalid }
+      : undefined,
+    webIssue: snap.webIssue.status === 'ok'
+      ? { needRelogin: snap.webIssue.view.needRelogin, failed: snap.webIssue.view.failed }
+      : undefined,
   };
 }
 

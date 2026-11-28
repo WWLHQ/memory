@@ -22,7 +22,8 @@ function snap(p: Partial<ShellStatusSnapshot> = {}): ShellStatusSnapshot {
     pendingWrites: { status: 'ok', view: 0 },
     refine: { status: 'ok', view: { pending: 0, failed: 0, enabled: true } },
     collector: collectorOk(),
-    mcpSwitch: { status: 'ok', view: { id: '', name: '', disabled: false } },
+    mcpSwitch: { status: 'ok', view: { id: '', name: '', disabled: false, conflict: 0, invalid: 0 } },
+    webIssue: { status: 'ok', view: { needRelogin: 0, failed: 0 } },
     ...p,
   };
 }
@@ -69,7 +70,7 @@ describe('REQ-014 T7 · toNavStatusSource（读不到就不进状态源）', () 
 
   it('T3：客户端确实被禁用 → 产出需要关注的 mcp-switch 条目', () => {
     const src = toNavStatusSource(snap({
-      mcpSwitch: { status: 'ok', view: { id: 'workbuddy', name: 'WorkBuddy', disabled: true } },
+      mcpSwitch: { status: 'ok', view: { id: 'workbuddy', name: 'WorkBuddy', disabled: true, conflict: 0, invalid: 0 } },
     }));
     expect(src.mcpSwitch).toEqual({ name: 'WorkBuddy' });
     expect(buildNavStatus(src)).toEqual([
@@ -80,9 +81,41 @@ describe('REQ-014 T7 · toNavStatusSource（读不到就不进状态源）', () 
   it('T3：客户端配置读不到 / 没禁用 → 不产出条目（不冒充状态）', () => {
     const unread = toNavStatusSource(snap({ mcpSwitch: { status: 'unavailable', detail: '浏览器模式' } }));
     expect(unread.mcpSwitch).toBeUndefined();
+    expect(unread.mcpIssue).toBeUndefined();  // 读不到异常也不报
     expect(buildNavStatus(unread)).toEqual([]);
     const ok = toNavStatusSource(snap());
     expect(ok.mcpSwitch).toBeUndefined();
     expect(buildNavStatus(ok)).toEqual([]);
+  });
+
+  it('2026-11-24：MCP 配置异常（冲突/解析失败）穿透到 mcp-issue 条目', () => {
+    const src = toNavStatusSource(snap({
+      mcpSwitch: { status: 'ok', view: { id: '', name: '', disabled: false, conflict: 1, invalid: 2 } },
+    }));
+    expect(src.mcpIssue).toEqual({ conflict: 1, invalid: 2 });
+    const items = buildNavStatus(src);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toEqual({
+      key: 'mcp-issue',
+      label: 'MCP 接入 3 项配置异常（冲突 1 · 配置错误 2）',
+      tone: 'warn', count: 3,
+    });
+  });
+
+  it('2026-11-24：网页接入异常（需重新登录/失败）穿透到 web-issue 条目', () => {
+    const src = toNavStatusSource(snap({
+      webIssue: { status: 'ok', view: { needRelogin: 2, failed: 3 } },
+    }));
+    expect(src.webIssue).toEqual({ needRelogin: 2, failed: 3 });
+    expect(buildNavStatus(src)).toEqual([
+      { key: 'web-issue', label: '网页接入 5 站需处理（重新登录 2 · 失败 3）', tone: 'warn', count: 5 },
+    ]);
+  });
+
+  it('2026-11-24：网页状态读不到 → 不产出条目；真实 0 → 也不产出', () => {
+    const unread = toNavStatusSource(snap({ webIssue: { status: 'error', detail: '无会话' } }));
+    expect(unread.webIssue).toBeUndefined();
+    expect(buildNavStatus(unread)).toEqual([]);
+    expect(buildNavStatus(toNavStatusSource(snap()))).toEqual([]);
   });
 });

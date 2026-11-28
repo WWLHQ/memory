@@ -362,6 +362,112 @@ test.describe('壳层 · 登录弹窗与右键菜单（真实后端）', () => {
     expect(errors).toEqual([]);
   });
 
+  test('⑰ 命令条右端：完整端点串（HTTP/登录/四端口）全应用唯一一份，不截断不省略，颜色随真实检查', async ({ page }) => {
+    const errors = collectErrors(page);
+    await openShell(page);
+    // 真实登录：端口串里的登录态取自真实会话（不是写死文案）
+    await openLoginByAvatar(page);
+    await page.locator('[data-testid="slm-account"]').fill(ACCOUNT);
+    await page.locator('[data-testid="slm-password"]').fill(PWD);
+    await page.locator('[data-testid="slm-submit"]').click();
+    await expect(page.locator('[data-testid="slm-session"]')).toBeVisible();
+    await page.locator('[data-testid="slm-close"]').click();
+
+    const bar = page.locator('[data-testid="shell-cmdbar"]');
+    const status = page.locator('[data-testid="shell-status"]');
+    const ep = page.locator('[data-testid="shell-status-net"]');
+    await expect(ep).toBeVisible({ timeout: 15_000 });
+    await expect(ep).toHaveAttribute('data-health', 'online');
+    await expect(ep).toContainText('在线');
+    await expect(ep).not.toContainText('系统在线');
+    await expect(ep).toContainText('HTTP 200');
+    await expect(ep).toContainText('已登录');
+    await expect(ep).toContainText('home :');
+    await expect(ep).toContainText('onboard :');
+    await expect(ep).toContainText('mcp :8202/:8204');
+    await expect(ep).toContainText('webhook :8203');
+
+    // 唯一一份：全页只有这一个实例；旧的状态栏副本已删除；中心页 iframe 里也没有第二份
+    await expect(page.locator('[data-testid="shell-status-net"]')).toHaveCount(1);
+    await expect(page.locator('[data-testid="sb-endpoints"]')).toHaveCount(0);
+    expect(await page.locator('.statusbar').innerText()).not.toMatch(/webhook :8203/);
+    const frame = page.frameLocator('iframe.page-frame').first();
+    await expect(frame.locator('[data-testid="overview-page"]')).toBeVisible({ timeout: 15_000 });
+    await expect(frame.locator('[data-testid="overview-health"]')).toHaveCount(0);
+    expect(await frame.locator('body').innerText()).not.toMatch(/home :\d+/);
+
+    // 不截断 / 不省略：没有 ellipsis，内容宽度不超过自身盒宽（换行而不是裁切）
+    const noClip = await ep.evaluate((el) => {
+      const s = getComputedStyle(el);
+      return {
+        textOverflow: s.textOverflow,
+        scrollW: el.scrollWidth,
+        clientW: el.clientWidth,
+        scrollH: el.scrollHeight,
+        clientH: el.clientHeight,
+      };
+    });
+    expect(noClip.textOverflow).not.toBe('ellipsis');
+    expect(noClip.scrollW).toBeLessThanOrEqual(noClip.clientW + 1);
+    expect(noClip.scrollH).toBeLessThanOrEqual(noClip.clientH + 1);
+
+    // 贴命令条右端（状态区最后一份，右边缘贴住命令条右边缘）
+    expect(await bar.evaluate((el) => el.lastElementChild?.getAttribute('data-testid'))).toBe('shell-status');
+    const [bb, sb] = await Promise.all([bar.boundingBox(), status.boundingBox()]);
+    expect(bb && sb).toBeTruthy();
+    expect(Math.abs((sb!.x + sb!.width) - (bb!.x + bb!.width))).toBeLessThan(10);
+
+    // 在线 = --ok 令牌颜色，且与离线色不同
+    const onlineTint = await page.evaluate(() => {
+      const h = document.querySelector('[data-testid="shell-status-net"]') as HTMLElement;
+      const probe = document.createElement('span');
+      document.body.appendChild(probe);
+      probe.style.color = 'var(--ok)';
+      const ok = getComputedStyle(probe).color;
+      probe.style.color = 'var(--bad)';
+      const bad = getComputedStyle(probe).color;
+      const actual = getComputedStyle(h).color;
+      probe.remove();
+      return { actual, ok, bad };
+    });
+    expect(onlineTint.actual).toBe(onlineTint.ok);
+    expect(onlineTint.ok).not.toBe(onlineTint.bad);
+
+    // 窄窗口：完整串仍可见、不截断、不省略成 webhook…
+    await page.setViewportSize({ width: 1024, height: 700 });
+    await expect(ep).toBeVisible();
+    await expect(ep).toContainText('webhook :8203');
+    const narrow = await ep.evaluate((el) => ({ scrollW: el.scrollWidth, clientW: el.clientWidth, textOverflow: getComputedStyle(el).textOverflow }));
+    expect(narrow.textOverflow).not.toBe('ellipsis');
+    expect(narrow.scrollW).toBeLessThanOrEqual(narrow.clientW + 1);
+    const cmdbarRight = await page.evaluate(() => {
+      const cb = document.querySelector('[data-testid="shell-cmdbar"]')!.getBoundingClientRect();
+      const p = document.querySelector('[data-testid="shell-status-net"]')!.getBoundingClientRect();
+      return { cbRight: cb.right, pillRight: p.right };
+    });
+    expect(cmdbarRight.pillRight).toBeLessThanOrEqual(cmdbarRight.cbRight + 1);
+
+    // 真实健康检查失败（503）→ 刷新后离线红 + HTTP 503，仍带文字/图标，不只靠颜色
+    await page.route('**/api/health', (r) => r.fulfill({ status: 503, contentType: 'application/json', body: '{"ok":false}' }));
+    await page.reload();
+    await expect(page.locator('[data-testid="shell-titlebar"]')).toBeVisible();
+    await expect(ep).toHaveAttribute('data-health', 'offline', { timeout: 15_000 });
+    await expect(ep).toContainText('离线');
+    await expect(ep).toContainText('HTTP 503');
+    const offlineTint = await page.evaluate(() => {
+      const h = document.querySelector('[data-testid="shell-status-net"]') as HTMLElement;
+      const probe = document.createElement('span');
+      document.body.appendChild(probe);
+      probe.style.color = 'var(--bad)';
+      const bad = getComputedStyle(probe).color;
+      const actual = getComputedStyle(h).color;
+      probe.remove();
+      return { actual, bad };
+    });
+    expect(offlineTint.actual).toBe(offlineTint.bad);
+    expect(errors).toEqual([]);
+  });
+
   test('底部只有四个标签：终端页签已取消，默认视图落在「输出」', async ({ page }) => {
     const errors = collectErrors(page);
     await openShell(page);

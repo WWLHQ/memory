@@ -199,11 +199,18 @@ describe('工作台壳层', () => {
     expect(groups).toEqual(['工作台', '记忆管理', '连接', '治理', '智能']);
     expect(container.querySelectorAll('.tree .tree-row')).toHaveLength(22);
 
-    expect((await screen.findByTestId('nav-count-memory-bank')).textContent).toBe('7');
+    // 2026-11-28 用户要求：取消「记忆库」「Agent 接入」后面的数字角标（条数/卡片数不是待办信号）
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.queryByTestId('nav-count-memory-bank')).toBeNull();
+    expect(screen.queryByTestId('nav-count-agent')).toBeNull();
+    // 待裁决这类真待办角标仍照常显示
     expect(screen.getByTestId('nav-count-dispute').textContent).toBe('2');
-    expect(screen.getByTestId('nav-count-agent').textContent).toBe('3');
-    expect(screen.getByTestId('nav-count-memory-bank').getAttribute('title')).toContain('coreListMemories');
+    expect(screen.getByTestId('nav-count-dispute').getAttribute('title')).toContain('coreConflicts');
     expect(container.textContent).not.toContain('1467');
+    // 2026-11-28 用户要求：中心区底部的解释性状态条整块取消（「同源真实页面 + 页面文件名」都不留）
+    expect(container.textContent).not.toContain('数据来源：');
+    expect(container.textContent).not.toContain('同源真实页面');
+    expect(container.querySelector('.center-foot')).toBeNull();
   });
 
   it('批次54：角标读数为 0 或读不到时不渲染徽标', async () => {

@@ -8,6 +8,7 @@
 import { useState } from 'react';
 import { useHostTheme } from '../shared/hostTheme.ts';
 import { WebchatAutoCard, type WebchatAutoSummary } from './WebchatAutoCard.tsx';
+import { AUTO_STATUS_LABEL } from './webchatAuto.ts';
 import { WebChatExportCard } from '../AgentOnboard/WebChatExportCard.tsx';
 import '../shared/afPage.css';
 
@@ -74,9 +75,15 @@ export function WebOnboardPage() {
               </div>
               <div className={s && (s.needRelogin > 0 || s.failed > 0) ? 'd bad' : 'd mut'}>
                 {s && (s.needRelogin > 0 || s.failed > 0)
-                  ? `需重新登录 ${s.needRelogin} · 失败 ${s.failed}`
+                  ? `需重新登录 ${s.needRelogin} · 失败 ${s.failed}${s?.failures.length ? `（${s.failures.map((f) => f.label).join('、')}）` : ''}`
                   : '没有登录失效或失败站点'}
               </div>
+              {!!s?.failures.length && (
+                <div className="af-actions">
+                  <button type="button" className="btn" data-testid="webonboard-failure-help"
+                    onClick={() => scrollTo('wa-failure-guide')}>看失败原因与处理办法</button>
+                </div>
+              )}
             </div>
           </div>
           {s?.error && <p className="af-note bad" data-testid="webonboard-err">主进程错误：{s.error}</p>}
@@ -121,6 +128,11 @@ export function WebOnboardPage() {
               <span className={s && s.missing > 0 ? 'bad' : ''}>缺失 <b className={s && s.missing > 0 ? 'bad' : ''}>{s?.missing ?? 0}</b></span>
               <span className={s && s.failed > 0 ? 'bad' : ''}>失败 <b className={s && s.failed > 0 ? 'bad' : ''}>{s?.failed ?? 0}</b></span>
             </div>
+            {!!s?.failures.length && (
+              <div className="af-note bad" data-testid="webonboard-failure-detail">
+                {s.failures.map((f) => `${f.label}（${AUTO_STATUS_LABEL[f.status]}）：${f.reason} → ${f.advice}`).join('；')}
+              </div>
+            )}
             <p className="af-note">来源：lastRound.results；去重 = 导出目录已有同名会话跳过。</p>
             <div className="af-actions">
               <button type="button" className="btn" data-testid="webonboard-sweep" disabled={!s?.available || s?.running} onClick={() => clickIn('wa-sweep-btn')}>补齐历史会话</button>

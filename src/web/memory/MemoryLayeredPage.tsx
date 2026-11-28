@@ -27,14 +27,15 @@ import './layeredPage.css';
 export type LayerId = 'L6' | 'L5' | 'L4' | 'L3' | 'L2' | 'L1' | 'L0';
 // 层色板（批次 E）：与首页层级刻度 STRATA_LAYERS（shell/strataScale.ts）同源——
 // L0 #8fa3bc / L1 #22d3ee / L2 #38bdf8 / L3 #818cf8 / L4 #c084fc / L5 #f472b6 / L6 #fbbf24。
-const LAYERS: { id: LayerId; name: string; color: string; desc: string; thr: string }[] = [
-  { id: 'L6', name: '投影索引', color: '#fbbf24', thr: DEDUP_THRESHOLDS.L6.toFixed(2), desc: '关键字 ≤30 词 + relevance' },
-  { id: 'L5', name: '洞察提炼', color: '#f472b6', thr: DEDUP_THRESHOLDS.L5.toFixed(2), desc: '本质洞察 ≤60 字' },
-  { id: 'L4', name: '模式归纳', color: '#c084fc', thr: DEDUP_THRESHOLDS.L4.toFixed(2), desc: '规律提炼 ≤120 字' },
-  { id: 'L3', name: '得失分析', color: '#818cf8', thr: DEDUP_THRESHOLDS.L3.toFixed(2), desc: '总结得失 ≤200 字' },
-  { id: 'L2', name: '会话摘要', color: '#38bdf8', thr: DEDUP_THRESHOLDS.L2.toFixed(2), desc: '情景摘要 ≤300 字' },
-  { id: 'L1', name: '清洗脱敏', color: '#22d3ee', thr: DEDUP_THRESHOLDS.L1.toFixed(2), desc: '唯一可进 prompt 的原始形态' },
-  { id: 'L0', name: '原始对话', color: '#8fa3bc', thr: '不适用', desc: 'AES-256 加密，仅授权+密码' },
+// 人机交互：name=这层是什么（大白话），plain=它替你做了什么，desc=内部生成规则（仅 technical 提示，不进卡片正文）
+const LAYERS: { id: LayerId; name: string; plain: string; color: string; desc: string; thr: string }[] = [
+  { id: 'L6', name: '快速索引', plain: '把每条记忆压成几个关键词，找东西时先看这里，最快命中。', color: '#fbbf24', thr: DEDUP_THRESHOLDS.L6.toFixed(2), desc: '关键字 ≤30 词 + relevance' },
+  { id: 'L5', name: '一句话要点', plain: '一句话说清一条记忆到底讲了什么。', color: '#f472b6', thr: DEDUP_THRESHOLDS.L5.toFixed(2), desc: '本质洞察 ≤60 字' },
+  { id: 'L4', name: '规律总结', plain: '把几条相关记忆合起来，看出反复出现的规律。', color: '#c084fc', thr: DEDUP_THRESHOLDS.L4.toFixed(2), desc: '规律提炼 ≤120 字' },
+  { id: 'L3', name: '经验得失', plain: '从经历里提炼出哪些做法有用、哪些没用。', color: '#818cf8', thr: DEDUP_THRESHOLDS.L3.toFixed(2), desc: '总结得失 ≤200 字' },
+  { id: 'L2', name: '对话摘要', plain: '把一大段对话浓缩成几句话，省得重读原文。', color: '#38bdf8', thr: DEDUP_THRESHOLDS.L2.toFixed(2), desc: '情景摘要 ≤300 字' },
+  { id: 'L1', name: '清洗后的原文', plain: '去掉敏感信息后的记忆原文——真正喂给回答的就是这一层。', color: '#22d3ee', thr: DEDUP_THRESHOLDS.L1.toFixed(2), desc: '唯一可进 prompt 的原始形态' },
+  { id: 'L0', name: '原始对话', plain: '最初写进来的完整记录，加密保存，平时不参与检索。', color: '#8fa3bc', thr: '不适用', desc: 'AES-256 加密，仅授权+密码' },
 ];
 
 /** layerContent[layer][memId] = content string | null（null 表示该层暂无内容） */
@@ -472,27 +473,26 @@ export function MemoryLayeredPage({ load = coreListMemories }: { load?: () => Pr
         {LAYERS.filter((l) => l.id !== 'L0').map((L) => {
           const filled = layerFilled(L.id);
           const own = layerOwn(L.id);
-          const editableHint = L.id === 'L1'
-            ? 'L1 是写入入口：记忆自身最深层为 L1 时可在这里改写主内容'
-            : `派生层：仅当记忆自身最深层就是 ${L.id} 时可编辑（当前 ${own} 条），其余只读`;
+          const canEdit = L.id === 'L1' || own > 0;
           return (
             <section className="af-panel layer-sem" key={L.id} data-testid={`layer-card-${L.id}`} data-layer={L.id}>
               <div className="af-ph">
                 <span className="layer-dot" style={{ background: L.color }} />
                 <h3 style={{ color: L.color }}>{L.id} · {L.name}</h3>
-                <span className="hint">阈值 {L.thr}</span>
               </div>
               <div className="af-pb">
-                <p className="af-q">回答：{L.desc}，这一层现在有多少条、最近什么时候写过、能不能改。</p>
+                <p className="af-q">{L.plain}</p>
                 <div className="layer-mini">
-                  <span>有内容 <b>{filled}</b> 条</span>
-                  <span>自身层级 <b>{own}</b> 条</span>
-                  <span>最近写入 <b>{fmtWhen(layerLastWrite(L.id))}</b></span>
+                  <span>已有内容 <b>{filled}</b> 条</span>
+                  <span>最近更新 <b>{fmtWhen(layerLastWrite(L.id))}</b></span>
                 </div>
-                <p className="af-note">{editableHint}。数据来源：coreBrowse('{L.id}')，读不到会点名而不是当作空层。</p>
+                <p className="af-note">
+                  {canEdit ? '这一层可以直接改。' : '这一层由系统自动生成，这里只能查看。'}
+                  数字来自真实账本，读不到会明确告诉你，不会当空层。
+                </p>
                 <div className="layer-actions">
                   <button type="button" className="btn" data-testid={`layered-jump-${L.id}`} onClick={() => jumpTo(L.id)}>
-                    定位到 {L.id} 明细
+                    查看这层的 {filled} 条内容
                   </button>
                 </div>
               </div>

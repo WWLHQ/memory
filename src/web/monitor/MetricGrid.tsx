@@ -37,7 +37,7 @@ export function MetricGrid({ cards }: { cards: MetricCard[] }) {
                         ) : <>{monitorValueText(c.value)}{c.unit ?? t.unit}</>}
                     </div>
                     <div className="af-note mon-mhint">
-                      {t.hint}{c.parts ? ` 另有 ${c.parts.skipped} 条因内容太少跳过，不算失败。` : ''}
+                      {t.hint}{c.metric === '精炼成功' && c.parts ? ` 另有 ${c.parts.skipped} 条因内容太少跳过，不算失败。` : ''}
                     </div>
                     <div className="mon-mfoot">
                       <span className="af-note">{t.threshold} · 依据 {t.basis}</span>

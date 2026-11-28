@@ -214,6 +214,14 @@ describe('首页解锁：点一次「去解锁」直接弹出可输入的解锁�
     fireEvent.click(screen.getByTestId('home-l0-unlock-open'));
     expect(screen.getByTestId('home-unlock-mask')).toBeInTheDocument();
     expect(screen.getByTestId('l0-unlock-password')).toBeInTheDocument();
+    expect(screen.getByTestId('l0-unlock-submit')).toBeInTheDocument();
+
+    // 精简版：弹窗内只有输入框 + 解锁按钮，不再重复横幅里那套长说明（2026-11-24）
+    const compact = screen.getByTestId('l0-write-unlock');
+    expect(compact.className).toContain('ov-unlock-compact');
+    expect(compact.textContent).not.toContain('写入被挡下');
+    expect(compact.textContent).not.toContain('封成 L0 密文');
+    expect(compact.textContent).not.toContain('不落盘');
 
     fireEvent.click(screen.getByTestId('home-unlock-close'));
     expect(screen.queryByTestId('home-unlock-mask')).toBeNull();

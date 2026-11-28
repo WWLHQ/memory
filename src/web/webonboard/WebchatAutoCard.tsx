@@ -9,15 +9,27 @@
 //   ③ 立即采一轮会跑几十秒，按钮期间必须禁用并显示「正在采集」，不能让人重复点。
 import { useCallback, useEffect, useState } from 'react';
 import {
-  AUTO_STATUS_LABEL, webchatAutoAvailable, webchatAutoLogin, webchatAutoRun, webchatAutoSet,
+  AUTO_STATUS_LABEL, failureAdvice, webchatAutoAvailable, webchatAutoLogin, webchatAutoRun, webchatAutoSet,
   webchatAutoState, webchatAutoSweep, webchatExportDir, webchatExportOpen, webchatExportSet,
-  type AutoStateView, type AutoSiteStatus,
+  type AutoStateView, type AutoSiteStatus, type AutoSiteResult, type AutoFailureBrief,
 } from './webchatAuto.ts';
 import '../params/recallHard.css';
 
 const INTERVALS = [15, 30, 60, 120];
 const PER_ROUNDS = [3, 5, 10, 20, 50];
 const errText = (e: unknown): string => String((e as Error)?.message ?? e);
+
+/**
+ * 上次采集报 need_relogin、但用户在该轮之后又点过「重新登录」的站点，视为已处理：
+ * 旧快照不再计入「需处理」。不伪造采集成功——下一轮结果会覆盖，期间提示「待下轮确认」。
+ */
+export function pendingRelogin(state: AutoStateView | null): AutoSiteResult[] {
+  const roundAt = state?.lastRound?.at ?? 0;
+  const relogins = state?.relogins ?? {};
+  return (state?.lastRound?.results ?? []).filter(
+    (r) => r.status === 'need_relogin' && !(relogins[r.site] && relogins[r.site] > roundAt),
+  );
+}
 
 const stCls = (s: AutoSiteStatus): string => (s === 'exported' ? 'rh-st on' : s === 'no_new' ? 'rh-st idle' : 'rh-st idle');
 
@@ -34,6 +46,8 @@ export interface WebchatAutoSummary {
   missing: number;
   needRelogin: number;
   failed: number;
+  /** 失败站点的逐条真值：站点名 + 状态 + 主进程原因 + 中文处理建议 */
+  failures: AutoFailureBrief[];
   dir: string | null;
   dirError: string | null;
   error: string | null;
@@ -81,6 +95,19 @@ export function WebchatAutoCard({ onSummary }: { onSummary?: (s: WebchatAutoSumm
   // 摘要上报：只报真实状态（主进程没返回的字段为 null / 0，父页面按诚实空态展示）
   useEffect(() => {
     const results = state?.lastRound?.results ?? [];
+    const outstanding = pendingRelogin(state);
+    const failures: AutoFailureBrief[] = results
+      .filter((r) => r.status === 'error' || r.status === 'dom_changed')
+      .map((r) => {
+        const reason = r.reason ?? '主进程未给出原因';
+        return {
+          site: r.site,
+          label: state?.sites?.find((s) => s.key === r.site)?.label ?? r.site,
+          status: r.status,
+          reason,
+          advice: failureAdvice(r.status, reason),
+        };
+      });
     onSummary?.({
       available,
       enabled: state?.config?.enabled ?? false,
@@ -91,8 +118,9 @@ export function WebchatAutoCard({ onSummary }: { onSummary?: (s: WebchatAutoSumm
       exported: results.reduce((n, r) => n + r.exported, 0),
       skipped: results.reduce((n, r) => n + (r.skipped ?? 0), 0),
       missing: results.reduce((n, r) => n + (r.missing ?? 0), 0),
-      needRelogin: results.filter((r) => r.status === 'need_relogin').length,
-      failed: results.filter((r) => r.status === 'error' || r.status === 'dom_changed').length,
+      needRelogin: outstanding.length,
+      failed: failures.length,
+      failures,
       dir,
       dirError: dirErr,
       error: err,
@@ -179,9 +207,26 @@ export function WebchatAutoCard({ onSummary }: { onSummary?: (s: WebchatAutoSumm
   }
 
   const st = state;
-  const needRelogin = (st?.lastRound?.results ?? []).filter((r) => r.status === 'need_relogin');
+  const needRelogin = pendingRelogin(st);
+  /** 已重新登录、但新采集还没跑的站点：旧快照不再计入需处理，如实提示待确认 */
+  const awaitingRound = (st?.lastRound?.results ?? []).filter(
+    (r) => r.status === 'need_relogin' && (st?.relogins?.[r.site] ?? 0) > (st?.lastRound?.at ?? 0),
+  );
   // config 理论上必填，但主进程失败回执可能只带 ok/error：这里再兜一层，宁可少显示也不整页崩
   const sitesOf = new Set(st?.config?.sites ?? []);
+  /** 失败明细：摘要里的「失败 N」必须能追到站点、原因与下一步，不让用户只看到计数 */
+  const failures: AutoFailureBrief[] = (st?.lastRound?.results ?? [])
+    .filter((r) => r.status === 'error' || r.status === 'dom_changed')
+    .map((r) => {
+      const reason = r.reason ?? '主进程未给出原因';
+      return {
+        site: r.site,
+        label: st?.sites?.find((s) => s.key === r.site)?.label ?? r.site,
+        status: r.status,
+        reason,
+        advice: failureAdvice(r.status, reason),
+      };
+    });
 
   return (
     <div className="af-panel webchat-auto" data-testid="webchat-auto-card">
@@ -356,6 +401,29 @@ export function WebchatAutoCard({ onSummary }: { onSummary?: (s: WebchatAutoSumm
             {needRelogin.length > 0 && (
               <div className="rh-warn" data-testid="wa-need-relogin">
                 登录已失效：这些站点不会自动入库，点上面「重新登录」或「登录窗口」里的站点按钮，在弹窗里登一次即可恢复。
+              </div>
+            )}
+            {awaitingRound.length > 0 && (
+              <div className="rh-note" data-testid="wa-relogin-awaiting">
+                {awaitingRound.map((r) => r.site).join('、')} 已重新登录，正在等下一轮采集确认；旧快照不再计入需处理。
+              </div>
+            )}
+
+            {failures.length > 0 && (
+              <div className="rh-warn" data-testid="wa-failure-guide">
+                <b>失败 {failures.length} 站（是什么 / 怎么办）：</b>
+                {failures.map((f) => (
+                  <div key={f.site} data-testid={`wa-failure-${f.site}`} style={{ marginTop: 4 }}>
+                    {f.label} · {AUTO_STATUS_LABEL[f.status]}：{f.reason}。→ {f.advice}
+                  </div>
+                ))}
+                <div style={{ marginTop: 6 }}>
+                  <button type="button" className="btn" data-testid="wa-failure-retry"
+                    disabled={running || st.running} onClick={() => void runOnce()}>按处理办法重试一轮</button>
+                  {' '}
+                  <button type="button" className="btn" data-testid="wa-failure-login"
+                    disabled={busy} onClick={() => void relogin(failures[0].site)}>重新登录 {failures[0].label}</button>
+                </div>
               </div>
             )}
 

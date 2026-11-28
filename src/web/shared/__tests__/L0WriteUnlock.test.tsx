@@ -112,4 +112,20 @@ describe('L0WriteUnlock（批次41-W + §4.4.4-B 成员自解锁）', () => {
     render(<L0WriteUnlock scene="后台采集" />);
     expect(screen.getByTestId('l0-write-unlock').textContent).toContain('后台采集');
   });
+
+  it('精简版 compact：只留输入框 + 解锁按钮，去掉长说明，提交仍走真实内核', async () => {
+    session.role = 'admin';
+    l0UnlockWrite.mockResolvedValue(undefined);
+    const onUnlocked = vi.fn();
+    render(<L0WriteUnlock scene="首页" compact onUnlocked={onUnlocked} />);
+    const box = screen.getByTestId('l0-write-unlock');
+    expect(box.className).toContain('ov-unlock-compact');
+    expect(box.textContent).not.toContain('写入被挡下');
+    expect(box.textContent).not.toContain('封成 L0 密文');
+    expect(box.textContent).not.toContain('不落盘');
+    expect(screen.getByTestId('l0-unlock-password')).toBeInTheDocument();
+    unlockWith(SECRET);
+    await waitFor(() => expect(l0UnlockWrite).toHaveBeenCalledWith(SECRET));
+    expect(onUnlocked).toHaveBeenCalledTimes(1);
+  });
 });

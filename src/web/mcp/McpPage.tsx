@@ -163,6 +163,12 @@ export function McpPage() {
             </div>
             <p className="af-note">来源：主进程回执原样展示；401 = 配置里的令牌与当前 mcp-token.txt 不一致，不是服务端故障。</p>
             <div className="af-actions">
+              {!!s?.invalid && (
+                <button type="button" className="btn" data-testid="mcp-page-fix-invalid" onClick={() => {
+                  scrollTo('mcp-table');
+                  document.querySelector<HTMLButtonElement>('[data-act="mcp-fix-hint"]')?.click();
+                }}>看解析失败处理办法</button>
+              )}
               <button type="button" className="btn" data-testid="mcp-jump-actions" onClick={() => scrollTo('mcp-actions-help')}>看动作说明</button>
             </div>
           </div>

@@ -144,4 +144,33 @@ describe('REQ-014 T6 · buildNavStatus（真实状态 → 条目）', () => {
     });
     expect(items.map((i) => i.key)).toEqual(['l0-pending', 'refine', 'collector', 'mcp-switch']);
   });
+
+  // 2026-11-24 新增：MCP / 网页接入异常
+  it('2026-11-24 · MCP 配置异常：任一项 >0 才产出，计数汇总、文案只列读到的两类', () => {
+    const items = buildNavStatus({ mcpIssue: { conflict: 0, invalid: 3 } });
+    expect(items).toContainEqual({
+      key: 'mcp-issue', label: 'MCP 接入 3 项配置异常（冲突 0 · 配置错误 3）', tone: 'warn', count: 3,
+    });
+    expect(buildNavStatus({ mcpIssue: { conflict: 0, invalid: 0 } })).toEqual([]);
+    expect(buildNavStatus({ mcpIssue: {} })).toEqual([]);
+    expect(buildNavStatus({ mcpIssue: null })).toEqual([]);
+  });
+
+  it('2026-11-24 · 网页异常：重新登录/失败合计，0 与读不到都不产出', () => {
+    const items = buildNavStatus({ webIssue: { needRelogin: 2, failed: 3 } });
+    expect(items).toContainEqual({
+      key: 'web-issue', label: '网页接入 5 站需处理（重新登录 2 · 失败 3）', tone: 'warn', count: 5,
+    });
+    expect(buildNavStatus({ webIssue: { needRelogin: 0, failed: 0 } })).toEqual([]);
+    expect(buildNavStatus({ webIssue: null })).toEqual([]);
+  });
+
+  it('2026-11-24 · 两类接入异常与 mcp-switch 可共存，顺序为 mcp-switch → mcp-issue → web-issue', () => {
+    const items = buildNavStatus({
+      mcpSwitch: { name: 'Trae', pending: true },
+      mcpIssue: { conflict: 1, invalid: 0 },
+      webIssue: { needRelogin: 1, failed: 0 },
+    });
+    expect(items.map((i) => i.key)).toEqual(['mcp-switch', 'mcp-issue', 'web-issue']);
+  });
 });

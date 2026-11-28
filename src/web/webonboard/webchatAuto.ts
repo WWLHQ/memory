@@ -53,6 +53,42 @@ export interface AutoStateView {
   loginWindows: string[];
   sites: Array<{ key: string; label: string }>;
   blocked: string;
+  /** 站点最近一次重新登录时间；晚于 lastRound.at 的 need_relogin 已被处理，计数剔除 */
+  relogins: Record<string, number>;
+}
+
+/** 失败站点摘要（页面摘要卡与卡片明细共用；只带主进程真值，不推断原因） */
+export interface AutoFailureBrief {
+  site: string;
+  label: string;
+  status: AutoSiteStatus;
+  reason: string;
+  advice: string;
+}
+
+/**
+ * 失败态的中文处理建议（唯一真源；页面与卡片共用）。
+ * 只按主进程已经给出的 reason 归类，不编造未给出的原因；所有动作都在本页有真实按钮。
+ */
+export function failureAdvice(status: AutoSiteStatus, reason: string): string {
+  if (status === 'dom_changed') {
+    return reason.includes('地址都没变')
+      ? '页面结构变了：点过会话但页面没切换（侧栏条目可能不是会话链接）。先点「打开登录窗」确认登录态，再点「立即采一轮」；仍失败在「采集站点」取消勾选该站点，等适配后再启用。'
+      : '页面结构变了：先点该站点「打开登录窗」重新登录，再点「立即采一轮」；仍失败看下方本轮明细的诊断。';
+  }
+  if (reason.includes('页面执行失败') || reason.includes('WebFrame')) {
+    return '隐藏页面在脚本执行前被关闭：点「立即采一轮」重试；仍失败在「采集站点」取消勾选该站点，等适配后再启用。';
+  }
+  if (reason.includes('接收端未就绪')) {
+    return '本机接收端未就绪：确认桌面端仍在运行、导出目录可写，再点「立即采一轮」。';
+  }
+  if (reason.includes('入口地址')) {
+    return '该站点没有配置入口地址：在上方「采集站点」里取消勾选它。';
+  }
+  if (reason.includes('导出失败')) {
+    return '导出落盘失败：检查导出目录权限与剩余空间，再点「补齐历史会话」。';
+  }
+  return '按上面的原因处理后点「立即采一轮」；连续失败看下方本轮明细与动作日志。';
 }
 
 export interface AutoResult {

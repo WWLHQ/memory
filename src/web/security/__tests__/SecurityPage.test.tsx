@@ -406,17 +406,23 @@ describe('SecurityPage (P12-T4 编排)', () => {
     await waitFor(() => expect(screen.getByTestId('chk-chain')).toHaveTextContent(/sealed 2/));
   });
 
-  it('需处理项：管理员角色缺失时给出可执行入口（跳账号与密钥），不伪造通过', async () => {
+  it('需处理项：成员会话下管理员/L0 不再给死路按钮，改为「退出换管理员登录」的可执行入口', async () => {
     session.role = 'member';
     render(<SecurityPage />);
     const chip = screen.getByTestId('security-issue-chip');
     await waitFor(() => expect(chip.textContent).toMatch(/项需处理/));
     fireEvent.click(chip);
     const roleIssue = screen.getByTestId('sec-issue-chk-role');
-    expect(roleIssue.textContent).toContain('普通成员');
-    expect(roleIssue.textContent).toContain('管理员');
-    fireEvent.click(screen.getByTestId('sec-fix-role'));
-    expect(screen.getByTestId('admin-accounts-card')).toBeInTheDocument();
+    // 人话：讲清是权限设计不是故障，且点名"自己没法提权"
+    expect(roleIssue.textContent).toContain('普通成员账号');
+    expect(roleIssue.textContent).toContain('不是出了故障');
+    expect(roleIssue.textContent).toContain('不允许自己给自己提权');
+    // 按钮是真正可执行的方向（换管理员账号），不再跳到对成员禁用的账号表/L0 卡
+    const fixBtn = screen.getAllByTestId('sec-fix-admin-login');
+    expect(fixBtn.length).toBeGreaterThan(0);
+    expect(fixBtn[0].textContent).toContain('管理员账号重新登录');
+    expect(screen.queryByTestId('sec-fix-role')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('sec-fix-l0')).not.toBeInTheDocument();
   });
 
   it('跟随壳层深色主题：挂载即设置 html[data-theme="dark"]', () => {

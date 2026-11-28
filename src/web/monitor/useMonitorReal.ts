@@ -272,12 +272,27 @@ export function metricsFromLedger(
     // 人工审核（真实账本实算；真实 0 显示 0，不冒充空态）
     { group: '人工审核', metric: '待裁决', value: pendingReview, threshold: '>20 ⚠️', level: levelOf(pendingReview, (n) => n > 20, (n) => n > 50), jump: 'P7' },
     { group: '人工审核', metric: '超期 7d', value: overdue7d, threshold: '>0 ⚠️', level: levelOf(overdue7d, (n) => n > 0, () => false), jump: 'P7' },
-    // 精炼队列：四项计数来自主进程 refine:state 真回执；无宿主 / 无回执 → 整卡「未取数」，不猜数字。
-    // 2026-11-15 用户要求：精炼队列置底（组内第一张，组整体仍是最末一组）。
+    // 精炼队列：2026-11-24 用户要求拆成「成功 / 失败 / 等待」三张独立卡。
+    // 四项计数来自主进程 refine:state 真回执；无宿主 / 无回执 → 三张卡各「未取数」，不猜数字。
+    // skipped 是「条件不满足主动跳过」，不算失败，单列在成功卡说明里，不混进三张读数。
     {
-      group: '队列', metric: '精炼队列',
-      value: refine ? refine.pending : '未取数',
+      group: '队列', metric: '精炼成功',
+      value: refine ? refine.done : '未取数', unit: '条',
       parts: refine ? { ok: refine.done, failed: refine.failed, waiting: refine.pending, skipped: refine.skipped } : undefined,
+      threshold: '累计完成，不设告警',
+      level: 'ok',
+      jump: 'P10(5.3)',
+    },
+    {
+      group: '队列', metric: '精炼失败',
+      value: refine ? refine.failed : '未取数', unit: '条',
+      threshold: '>0 ⚠️',
+      level: levelOf(refine?.failed ?? null, (n) => n > 0, () => false),
+      jump: 'P10(5.3)',
+    },
+    {
+      group: '队列', metric: '精炼等待',
+      value: refine ? refine.pending : '未取数', unit: '条',
       threshold: '>1000 ⚠️',
       level: levelOf(refine?.pending ?? null, (n) => n > 1000, () => false),
       jump: 'P10(5.3)',
@@ -319,7 +334,10 @@ export function summaryFromLedger(
   const of = (metric: string) => cards.find((c) => c.metric === metric);
   const conn = of('连通成功率(5min)');
   const circuit = of('熔断状态');
-  const refine = of('精炼队列');
+  // 2026-11-24：原「精炼队列」拆三卡，汇总卡取「精炼等待」作为 pending 主值，
+  // 说明行改从「精炼成功」卡的 parts 读成功/失败，读不到就留空，不冒充 0。
+  const refine = of('精炼等待');
+  const refineOk = of('精炼成功');
   const review = of('待裁决');
   const overdue = of('超期 7d');
 
@@ -340,7 +358,7 @@ export function summaryFromLedger(
     ? {
         k: '补炼队列', sub: 'pending',
         v: String(refine.value),
-        d: refine.parts ? `成功 ${refine.parts.ok} · 失败 ${refine.parts.failed}` : '',
+        d: refineOk?.parts ? `成功 ${refineOk.parts.ok} · 失败 ${refineOk.parts.failed}` : '',
         mut: false,
       }
     : { k: '补炼队列', sub: 'pending', v: NO_SAMPLE, d: '无主进程队列回执', mut: true };

@@ -164,7 +164,7 @@ export function Workspace() {
   const adminDefaultAppliedRef = useRef(false);
   /** T3：用户是否已主动切换过视图（openView 的所有入口都算，含 Ribbon / 快捷键）。 */
   const userNavigatedRef = useRef(false);
-  const [message, setMessage] = useState('工作台已就绪：中心区为同源真实页面，壳层尚未接线的部位会明确标注原因。');
+  const [message, setMessage] = useState('工作台已就绪：壳层尚未接线的部位会明确标注原因。');
   const [sessionActive, setSessionActive] = useState(() => hasActiveSession());
   /** 当前会话真实身份（/api/me 确认；null = 未确认，绝不按 localStorage 冒充身份） */
   const [identity, setIdentity] = useState<TenantContext | null>(null);
@@ -1015,6 +1015,12 @@ export function Workspace() {
       ? ` · 有效授权 ${l0.view.active_grants} · 管理密钥${l0.view.has_admin_wrap ? '已设置' : '未设置'}`
       : ''}（两把锁互不替代，只读，不含任何密钥材料）`;
 
+  // 健康 / 登录 / 端口串的**唯一实例**（用户 2026-11-21 图2）：原来「系统在线」chip 位置直接显示完整串，
+  // 数据来自壳层真实 loadOverview（/api/health + 真实会话），未知时如实显示「未知」。
+  const healthTone = !overview ? 'unknown' : overview.health.status === 'ok' ? 'online' : 'offline';
+  const healthDetail = overview ? overview.health.detail : '健康检查未读取';
+  const sessionWord = !overview ? '登录未知' : overview.session ? '已登录' : '未登录';
+
   const openNav = (id: string) => {
     const target = findNav(id);
     if (target) openView(target);
@@ -1238,6 +1244,8 @@ export function Workspace() {
           </button>
         ))}
         {/* 批次53：命令条右侧「命令 Ctrl K」按钮已取消（用户 2026-11-21）；命令面板仍由 Ctrl+K 与标题栏搜索框打开 */}
+        {/* 批次58：系统状态常驻命令条右端（用户 2026-11-21：原「系统在线」位置直接显示完整端点串） */}
+        <ShellStatusCard endpoint={{ tone: healthTone, detail: healthDetail, session: sessionWord }} />
       </div>
 
       <div className={`workspace${dockOpen ? '' : ' dock-closed'}`}>
@@ -1276,10 +1284,7 @@ export function Workspace() {
             {navEntries.length === 0 && <div className="tree-note">没有匹配的功能项。</div>}
           </div>
           {/* 批次53：层级刻度固定在功能导航栏最下面，不随导航树滚动 */}
-          {/* REQ-014 / T7：真实状态卡（写入兜底 / 补炼队列 / 采集），空闲时整块不渲染 */}
-          {!navCollapsed && (
-            <ShellStatusCard />
-          )}
+          {/* 批次58：原侧栏「系统状态」卡已整体移到命令条右端（ShellStatusCard） */}
           {!navCollapsed && (
             <StrataScale data={strataScale} onRefresh={refreshOverview} />
           )}
@@ -1392,11 +1397,7 @@ export function Workspace() {
             })}
           </div>
 
-          <div className="center-foot">
-            <span className="cf-strong">同源真实页面</span>
-            <span>{active?.page ? PAGES[active.page].file : `${active?.label ?? '未选择'} · 不可用`}</span>
-            <span className="cf-right">数据来源：{active?.page ? PAGES[active.page].source : '程序暂无该数据模型'}</span>
-          </div>
+          {/* 2026-11-28 用户要求：底部解释性文字（同源真实页面 + 页面文件名）整块取消，中心区只留页面本体 */}
         </main>
 
         {inspCollapsed && (
@@ -1896,6 +1897,13 @@ const NAV_COUNT_VARIANTS: Record<string, 'hot' | 'warn' | 'soft'> = {
   personal: 'soft',
 };
 
+/**
+ * 2026-11-28 用户要求：取消「记忆库」后面的大数（例如 5279）与「Agent 接入」后面的数（例如 9）。
+ * 这两个数不是待办信号（记忆条数、已接入卡片数），常驻显示只会被误读成「待处理 N 条」；
+ * 真实条数在记忆库页与接入页内仍照常展示，这里只取消导航角标。
+ */
+const HIDDEN_NAV_COUNTS: ReadonlySet<string> = new Set(['memory-bank', 'agent']);
+
 function NavTreeItem({ item, activeId, open, counts, collapsed, onToggle, onSelect, onMenu }: {
   item: NavItem;
   activeId: string;
@@ -1930,7 +1938,7 @@ function NavTreeItem({ item, activeId, open, counts, collapsed, onToggle, onSele
           : <Icon name={item.icon} size={item.child ? 12 : 16} />}</span>
         <span className="tlabel">{item.label}</span>
         {item.unavailable ? <span className="tcount">不可用</span> : null}
-        {count > 0 ? (
+        {count > 0 && !HIDDEN_NAV_COUNTS.has(item.id) ? (
           <span
             className={`tcount${NAV_COUNT_VARIANTS[item.id] ? ` ${NAV_COUNT_VARIANTS[item.id]}` : ''}`}
             data-testid={`nav-count-${item.id}`}
